@@ -8,6 +8,7 @@
 //! - [`styles`] — color/weight resolution tables and SGR layer state
 //! - [`render`] — the [`Renderable`](crate::components::renderable::Renderable) impl
 
+mod markdown;
 #[allow(clippy::module_inception)]
 mod prose;
 mod render;
@@ -528,6 +529,43 @@ mod tests {
         let prose = Prose::new("hello\\nworld");
         let result = prose.render_optimistic(None);
         assert_eq!(result, "hello\\nworld");
+    }
+
+    // ── Markdown-syntax escape handling (Phase 1 of prose-plus) ─────────
+
+    #[test]
+    fn test_escaped_asterisk() {
+        let prose = Prose::new("\\*literal\\*");
+        let result = prose.render_optimistic(None);
+        assert_eq!(result, "*literal*");
+    }
+
+    #[test]
+    fn test_escaped_underscore() {
+        let prose = Prose::new("\\_literal\\_");
+        let result = prose.render_optimistic(None);
+        assert_eq!(result, "_literal_");
+    }
+
+    #[test]
+    fn test_escaped_open_bracket() {
+        let prose = Prose::new("\\[not a link\\]");
+        let result = prose.render_optimistic(None);
+        assert_eq!(result, "[not a link]");
+    }
+
+    #[test]
+    fn test_escaped_open_paren() {
+        let prose = Prose::new("\\(not a url\\)");
+        let result = prose.render_optimistic(None);
+        assert_eq!(result, "(not a url)");
+    }
+
+    #[test]
+    fn test_escaped_double_backslash_still_single() {
+        let prose = Prose::new("a\\\\b");
+        let result = prose.render_optimistic(None);
+        assert_eq!(result, "a\\b");
     }
 
     // ── Capability-aware degradation (Apple Terminal etc.) ───────────

@@ -11,16 +11,20 @@
 //! 5. **Interpolation** - Expand `{{variable}}` expressions in body content
 //! 6. **Shell Expansion** - Execute `::shell` directives with security controls
 //! 7. **Shell Blocks** - Execute `::shell-block` directives with security controls
+//! 8. **Link Resolve** - Resolve local links to absolute paths
 //!
 //! **Transclusion** (concurrent execution after serial preparation):
-//! 8. **Block Transclusion** - Include `::file`/`::url` referenced documents
-//! 9. **Frontmatter Transclusion** - Prepend/append `prologue`/`epilogue` documents
-//! 10. **Code Transclusion** - Include `::code` file content as fenced blocks
-//! 11. **TOC Linking** - Expand `::toc-linking` directives into heading link lists
+//! 9. **Block Transclusion** - Include `::file`/`::url` referenced documents
+//! 10. **Frontmatter Transclusion** - Prepend/append `prologue`/`epilogue` documents
+//! 11. **Code Transclusion** - Include `::code` file content as fenced blocks
+//! 12. **TOC Linking** - Expand `::toc-linking` directives into heading link lists
 //!
 //! **Inline Post** (serial):
-//! 12. **Cleanup** - Normalize markdown formatting
-//! 13. **Normalization** - Adjust heading levels
+//! 13. **Cleanup** - Normalize markdown formatting
+//! 14. **Normalization** - Adjust heading levels
+//!
+//! **Finalization** (root-only serial):
+//! 15. **Link Normalization** - Convert absolute paths back to portable forms
 //!
 //! ## Examples
 //!
@@ -54,6 +58,8 @@ mod types;
 pub mod block_pairs;
 pub mod expression;
 pub mod interpolation;
+pub(crate) mod link_normalization;
+pub(crate) mod link_resolve;
 pub mod page_blocks;
 pub mod replacement;
 pub mod shell_blocks;
@@ -118,7 +124,7 @@ fn abbreviate_path(path: &Path) -> String {
 
 /// Walk up from `start` (or its parent if it's a file) looking for a `.git`
 /// directory, returning the repo root if found.
-fn find_git_root_from(start: &Path) -> Option<PathBuf> {
+pub(crate) fn find_git_root_from(start: &Path) -> Option<PathBuf> {
     let mut dir = if start.is_dir() {
         start.to_path_buf()
     } else {
@@ -131,6 +137,126 @@ fn find_git_root_from(start: &Path) -> Option<PathBuf> {
         if !dir.pop() {
             return None;
         }
+    }
+}
+
+/// Helper to find target range within content.
+pub(crate) fn find_target_range(
+    content: &str,
+    record: &crate::markdown::reference::ReferenceRecord,
+    raw_target: &str,
+) -> Option<(usize, usize)> {
+    let span = &record.origin.span;
+    if span.end > content.len() {
+        trace!(
+            "find_target_range: span.end {} > content.len {}",
+            span.end,
+            content.len()
+        );
+        return None;
+    }
+    let outer_text = &content[span.clone()];
+
+    // Try attribute-aware search for HTML syntax first
+    if let Some(attr_name) = get_attribute_name_for_syntax(&record.origin.syntax) {
+        // Try searching for attr="target" or attr = "target" (with optional whitespace)
+        let patterns = [
+            format!(r#"{}="{}""#, attr_name, raw_target),
+            format!("{}='{}'", attr_name, raw_target),
+        ];
+        for pattern in &patterns {
+            if let Some(idx) = outer_text.find(pattern) {
+                let mut actual_idx = idx + attr_name.len() + 1; // skip past attr_name=
+                // Skip optional whitespace after =
+                while actual_idx < outer_text.len() && outer_text[actual_idx..].starts_with(' ') {
+                    actual_idx += 1;
+                }
+                let start = span.start + actual_idx + 1; // skip past quote
+                let end = start + raw_target.len();
+                trace!(
+                    "find_target_range: attribute-aware match for '{}' in {:?} at {}",
+                    raw_target, record.origin.syntax, start
+                );
+                return Some((start, end));
+            }
+        }
+
+        // Try HTML-encoded form (for entities like &amp;)
+        let encoded = html_escape::encode_quoted_attribute(raw_target);
+        if encoded != raw_target {
+            let patterns = [
+                format!(r#"{}="{}""#, attr_name, encoded),
+                format!("{}='{}'", attr_name, encoded),
+            ];
+            for pattern in &patterns {
+                if let Some(idx) = outer_text.find(pattern.as_str()) {
+                    let actual_idx = idx + attr_name.len() + 1;
+                    // Skip optional whitespace after =
+                    let mut quote_start = actual_idx;
+                    while quote_start < outer_text.len()
+                        && outer_text[quote_start..].starts_with(' ')
+                    {
+                        quote_start += 1;
+                    }
+                    let start = span.start + quote_start + 1; // skip past quote
+                    let end = start + encoded.len();
+                    trace!(
+                        "find_target_range: HTML-encoded match for '{}' in {:?} at {}",
+                        raw_target, record.origin.syntax, start
+                    );
+                    return Some((start, end));
+                }
+            }
+        }
+    }
+
+    // Fallback: search for raw target string with context check
+    let mut start_idx = 0;
+    while let Some(idx) = outer_text[start_idx..].find(raw_target) {
+        let actual_idx = start_idx + idx;
+
+        if actual_idx > 0 {
+            let prev_char = outer_text[..actual_idx].chars().next_back();
+            trace!(
+                "find_target_range: found '{}' at {}, prev_char: {:?}",
+                raw_target, actual_idx, prev_char
+            );
+            if matches!(prev_char, Some('(' | '=' | '"' | '\'' | '<')) {
+                let start = span.start + actual_idx;
+                let end = start + raw_target.len();
+                return Some((start, end));
+            }
+        } else {
+            trace!("find_target_range: found '{}' at 0", raw_target);
+            // Edge case: if raw_target is the exact span, match it.
+            let start = span.start + actual_idx;
+            let end = start + raw_target.len();
+            return Some((start, end));
+        }
+
+        start_idx = actual_idx + 1;
+    }
+    trace!(
+        "find_target_range: failed to find '{}' in '{}'",
+        raw_target, outer_text
+    );
+    None
+}
+
+/// Maps a ReferenceSyntax to its target attribute name for HTML-aware matching.
+fn get_attribute_name_for_syntax(
+    syntax: &crate::markdown::reference::ReferenceSyntax,
+) -> Option<&'static str> {
+    use crate::markdown::reference::ReferenceSyntax;
+    match syntax {
+        ReferenceSyntax::HtmlAnchor | ReferenceSyntax::HtmlLinkTag => Some("href"),
+        ReferenceSyntax::HtmlImage
+        | ReferenceSyntax::HtmlVideoTag
+        | ReferenceSyntax::HtmlAudioTag
+        | ReferenceSyntax::HtmlSourceTag
+        | ReferenceSyntax::HtmlIframeTag
+        | ReferenceSyntax::HtmlScriptTag => Some("src"),
+        _ => None,
     }
 }
 
@@ -487,25 +613,34 @@ impl Markdown {
                         if let Some(start) = op_start {
                             let kind = match operation {
                                 ComposeOperation::FrontmatterInterpolation => {
-                                    perf::PerfMetricKind::FrontmatterInterpolation
+                                    Some(perf::PerfMetricKind::FrontmatterInterpolation)
                                 }
                                 ComposeOperation::FrontmatterShellExpansion => {
-                                    perf::PerfMetricKind::FrontmatterShellExpansion
+                                    Some(perf::PerfMetricKind::FrontmatterShellExpansion)
                                 }
                                 ComposeOperation::TextReplacement => {
-                                    perf::PerfMetricKind::TextReplacement
+                                    Some(perf::PerfMetricKind::TextReplacement)
                                 }
-                                ComposeOperation::PageBlocks => perf::PerfMetricKind::PageBlocks,
+                                ComposeOperation::PageBlocks => {
+                                    Some(perf::PerfMetricKind::PageBlocks)
+                                }
                                 ComposeOperation::Interpolation => {
-                                    perf::PerfMetricKind::Interpolation
+                                    Some(perf::PerfMetricKind::Interpolation)
                                 }
                                 ComposeOperation::ShellExpansion => {
-                                    perf::PerfMetricKind::ShellExpansion
+                                    Some(perf::PerfMetricKind::ShellExpansion)
                                 }
-                                ComposeOperation::ShellBlocks => perf::PerfMetricKind::ShellBlocks,
+                                ComposeOperation::ShellBlocks => {
+                                    Some(perf::PerfMetricKind::ShellBlocks)
+                                }
+                                ComposeOperation::LinkResolve => {
+                                    Some(perf::PerfMetricKind::LinkResolve)
+                                }
                                 _ => unreachable!(),
                             };
-                            perf.record(kind, start.elapsed());
+                            if let Some(kind) = kind {
+                                perf.record(kind, start.elapsed());
+                            }
                         }
                     }
                     ComposePhase::Transclusion => {
@@ -543,6 +678,21 @@ impl Markdown {
                                 _ => unreachable!(),
                             };
                             perf.record(kind, start.elapsed());
+                        }
+                    }
+                    ComposePhase::Finalization => {
+                        if runtime.transclusion.depth() <= 1 {
+                            let op_start = perf.is_enabled().then(std::time::Instant::now);
+                            self.run_finalization_operation(*operation, &options, &mut report)?;
+                            if let Some(start) = op_start {
+                                let kind = match operation {
+                                    ComposeOperation::LinkNormalization => {
+                                        perf::PerfMetricKind::LinkNormalization
+                                    }
+                                    _ => unreachable!(),
+                                };
+                                perf.record(kind, start.elapsed());
+                            }
                         }
                     }
                 }
@@ -593,6 +743,7 @@ impl Markdown {
                 &mut runtime.shell,
                 report,
             ),
+            ComposeOperation::LinkResolve => link_resolve::link_resolve(self, options, report),
             _ => Ok(()),
         }
     }
@@ -643,6 +794,20 @@ impl Markdown {
                     e
                 ))),
             },
+            _ => Ok(()),
+        }
+    }
+
+    fn run_finalization_operation(
+        &mut self,
+        operation: ComposeOperation,
+        options: &ComposeOptions,
+        report: &mut ComposeReport,
+    ) -> MarkdownResult<()> {
+        match operation {
+            ComposeOperation::LinkNormalization => {
+                link_normalization::normalize_links(self, options, report)
+            }
             _ => Ok(()),
         }
     }

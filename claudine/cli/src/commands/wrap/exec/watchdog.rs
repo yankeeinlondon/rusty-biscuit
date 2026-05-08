@@ -463,17 +463,25 @@ pub(crate) fn evaluate_timeout_tick(
     // If any item is stuck, the silence rule is allowed to fire so hung
     // work does not block termination indefinitely.
     if let Some(budget) = config.step_timeout {
-                let (last_event_at, stuck_tools, stuck_subagents, any_active, any_stuck) =
+        let (last_event_at, stuck_tools, stuck_subagents, any_active, any_stuck) =
             match live_metrics.lock() {
                 Ok(g) => {
                     let stuck_tools: Vec<claudine::stream::progress::InFlightTool> =
                         g.stuck_tools(now, budget).into_iter().cloned().collect();
-                    let stuck_subagents: Vec<claudine::stream::progress::InFlightSubagent> =
-                        g.stuck_subagents(now, budget).into_iter().cloned().collect();
+                    let stuck_subagents: Vec<claudine::stream::progress::InFlightSubagent> = g
+                        .stuck_subagents(now, budget)
+                        .into_iter()
+                        .cloned()
+                        .collect();
                     let any_stuck = !stuck_tools.is_empty() || !stuck_subagents.is_empty();
-                    let any_active =
-                        !g.in_flight.is_empty() || !g.in_flight_subagents.is_empty();
-                    (g.last_event_at, stuck_tools, stuck_subagents, any_active, any_stuck)
+                    let any_active = !g.in_flight.is_empty() || !g.in_flight_subagents.is_empty();
+                    (
+                        g.last_event_at,
+                        stuck_tools,
+                        stuck_subagents,
+                        any_active,
+                        any_stuck,
+                    )
                 }
                 Err(_) => return WatchdogTickResult::Ok,
             };
@@ -528,17 +536,15 @@ pub(crate) fn format_step_timeout_breach_message(
         return format!("no stream activity for {silence_text}; terminating due to step_timeout");
     }
 
-    let mut lines = format!(
-        "no stream activity for {silence_text}. The wrapped process was terminated."
-    );
+    let mut lines =
+        format!("no stream activity for {silence_text}. The wrapped process was terminated.");
 
     if !stuck_tools.is_empty() {
         let count = stuck_tools.len();
         let plural = if count == 1 { "tool" } else { "tools" };
-        lines.push_str(
-            &format!(
-                " {count} {plural} were stuck when the timeout fired:\n"
-            ));
+        lines.push_str(&format!(
+            " {count} {plural} were stuck when the timeout fired:\n"
+        ));
         for tool in stuck_tools {
             let name = tool.name.as_deref().unwrap_or("(unnamed)");
             lines.push_str(&format!("  • \"{name}\"\n"));
@@ -548,10 +554,9 @@ pub(crate) fn format_step_timeout_breach_message(
     if !stuck_subagents.is_empty() {
         let count = stuck_subagents.len();
         let plural = if count == 1 { "subagent" } else { "subagents" };
-        lines.push_str(
-            &format!(
-                " {count} {plural} were stuck when the timeout fired:\n"
-            ));
+        lines.push_str(&format!(
+            " {count} {plural} were stuck when the timeout fired:\n"
+        ));
         for subagent in stuck_subagents {
             let name = subagent.name.as_deref().unwrap_or("(unnamed)");
             lines.push_str(&format!("  • \"{name}\"\n"));
@@ -561,10 +566,9 @@ pub(crate) fn format_step_timeout_breach_message(
     if !outstanding.is_empty() {
         let count = outstanding.len();
         let plural = if count == 1 { "subagent" } else { "subagents" };
-        lines.push_str(
-            &format!(
-                " {count} {plural} were still outstanding when the timeout fired:\n"
-            ));
+        lines.push_str(&format!(
+            " {count} {plural} were still outstanding when the timeout fired:\n"
+        ));
         for snap in outstanding {
             let idle = format_duration(snap.elapsed_since_progress);
             let name = snap.name.as_deref().unwrap_or("(unnamed)");
@@ -854,7 +858,11 @@ mod tests {
         match result {
             WatchdogTickResult::Breach(ref w) => {
                 assert_eq!(w.reason, WatchdogTerminationReason::StepTimeout);
-                assert!(w.message.contains("Task"), "stuck tool should be named: {}", w.message);
+                assert!(
+                    w.message.contains("Task"),
+                    "stuck tool should be named: {}",
+                    w.message
+                );
             }
             other => panic!("expected StepTimeout breach for stuck tool, got: {other:?}"),
         }
@@ -892,9 +900,7 @@ mod tests {
             WatchdogTickResult::Breach(ref w) => {
                 assert_eq!(w.reason, WatchdogTerminationReason::StepTimeout);
             }
-            other => panic!(
-                "expected StepTimeout breach for stuck subagent, got: {other:?}"
-            ),
+            other => panic!("expected StepTimeout breach for stuck subagent, got: {other:?}"),
         }
         assert!(fired.load(Ordering::SeqCst));
     }
@@ -974,7 +980,11 @@ mod tests {
         }
 
         let result = evaluate_timeout_tick(&config, Instant::now(), t0, &state, &metrics, &fired);
-        assert_eq!(result, WatchdogTickResult::Ok, "active tool must suppress step_timeout");
+        assert_eq!(
+            result,
+            WatchdogTickResult::Ok,
+            "active tool must suppress step_timeout"
+        );
         assert!(!fired.load(Ordering::SeqCst));
     }
 
@@ -1005,7 +1015,11 @@ mod tests {
         }
 
         let result = evaluate_timeout_tick(&config, Instant::now(), t0, &state, &metrics, &fired);
-        assert_eq!(result, WatchdogTickResult::Ok, "active subagent must suppress step_timeout");
+        assert_eq!(
+            result,
+            WatchdogTickResult::Ok,
+            "active subagent must suppress step_timeout"
+        );
         assert!(!fired.load(Ordering::SeqCst));
     }
 
@@ -1121,9 +1135,9 @@ mod tests {
                 assert_eq!(w.reason, WatchdogTerminationReason::StepTimeout);
                 assert!(w.message.contains("StuckTask"));
             }
-            other => panic!(
-                "expected StepTimeout breach when mix of active and stuck, got: {other:?}"
-            ),
+            other => {
+                panic!("expected StepTimeout breach when mix of active and stuck, got: {other:?}")
+            }
         }
         assert!(fired.load(Ordering::SeqCst));
     }

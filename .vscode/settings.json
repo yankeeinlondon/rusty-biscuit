@@ -253,10 +253,12 @@
         "Nousresearch",
         "nsstr",
         "nsstring",
+        "nvfp",
         "objc",
         "oextended",
         "OKLCH",
         "olmo",
+        "omlx",
         "oneline",
         "onnx",
         "openapiv",
@@ -427,6 +429,9 @@
     "editor.tabSize": 4,
     "editor.detectIndentation": false,
     "extensions.verifySignature": false,
+    "git.autoRepositoryDetection": false,
+    "git.scanRepositories": [],
+    "git.repositoryScanMaxDepth": 0,
     "[markdown]": {
         "editor.unicodeHighlight.ambiguousCharacters": false,
         "editor.unicodeHighlight.invisibleCharacters": false,
@@ -446,5 +451,5 @@
         "cSpell.advanced.feature.useReferenceProviderRemove": "/^#+\\s/",
         "editor.wordWrapColumn": 300,
         "editor.wordWrap": "bounded"
-    },
+    }
 }

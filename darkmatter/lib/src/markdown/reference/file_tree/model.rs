@@ -97,6 +97,8 @@ pub enum FileTreeReferenceGroupKind {
     RemoteHyperlinks,
     LocalHyperlinks,
     Images,
+    Media,
+    Iframes,
     CssImports,
     ScriptImports,
     FontImports,
@@ -110,10 +112,12 @@ impl FileTreeReferenceGroupKind {
             Self::RemoteHyperlinks => 0,
             Self::LocalHyperlinks => 1,
             Self::Images => 2,
-            Self::CssImports => 3,
-            Self::ScriptImports => 4,
-            Self::FontImports => 5,
-            Self::OtherLocalDependencies => 6,
+            Self::Media => 3,
+            Self::Iframes => 4,
+            Self::CssImports => 5,
+            Self::ScriptImports => 6,
+            Self::FontImports => 7,
+            Self::OtherLocalDependencies => 8,
         }
     }
 }
@@ -404,6 +408,10 @@ fn classify_reference_group(record: &ReferenceRecord) -> Option<FileTreeReferenc
             _ => None,
         },
         ReferenceKind::Image => Some(FileTreeReferenceGroupKind::Images),
+        ReferenceKind::HtmlVideo | ReferenceKind::HtmlAudio | ReferenceKind::HtmlSource => {
+            Some(FileTreeReferenceGroupKind::Media)
+        }
+        ReferenceKind::HtmlIframe => Some(FileTreeReferenceGroupKind::Iframes),
         ReferenceKind::CssImport => Some(FileTreeReferenceGroupKind::CssImports),
         ReferenceKind::ScriptImport => Some(FileTreeReferenceGroupKind::ScriptImports),
         ReferenceKind::FontImport => Some(FileTreeReferenceGroupKind::FontImports),

@@ -252,11 +252,7 @@ impl LiveMetricsState {
 
     /// Returns all in-flight tools whose `last_progress_at` is at least
     /// `threshold` older than `now`.
-    pub fn stuck_tools(
-        &self,
-        now: Instant,
-        threshold: Duration,
-    ) -> Vec<&InFlightTool> {
+    pub fn stuck_tools(&self, now: Instant, threshold: Duration) -> Vec<&InFlightTool> {
         self.in_flight
             .values()
             .filter(|tool| now.saturating_duration_since(tool.last_progress_at) >= threshold)
@@ -265,11 +261,7 @@ impl LiveMetricsState {
 
     /// Returns all in-flight subagents whose `last_progress_at` is at least
     /// `threshold` older than `now`.
-    pub fn stuck_subagents(
-        &self,
-        now: Instant,
-        threshold: Duration,
-    ) -> Vec<&InFlightSubagent> {
+    pub fn stuck_subagents(&self, now: Instant, threshold: Duration) -> Vec<&InFlightSubagent> {
         self.in_flight_subagents
             .values()
             .filter(|subagent| {

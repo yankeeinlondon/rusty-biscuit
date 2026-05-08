@@ -4,6 +4,7 @@ pub mod recent_commits;
 pub mod remote_refresh;
 pub mod status;
 pub mod types;
+pub mod worktree;
 
 pub use discovery::{
     DeltaKind, detect_git, detect_git_with_request, get_commit_by_sha, get_commit_files,
@@ -21,3 +22,4 @@ pub use types::{
     RefDecoration, RefKind, RemoteInfo, RemoteTrackingStatus, RepoStatus, UntrackedFile,
     WorktreeInfo,
 };
+pub use worktree::get_current_worktree_name;

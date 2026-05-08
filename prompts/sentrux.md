@@ -10,6 +10,8 @@ success:
     say: "The Sentrux review in {{area}} completed successfully"
 ---
 
+::block when="ctx.current_package_area"
+
 Evaluate the package area "{{area}}" of the Rusty Biscuit monorepo (directory: "{{root}}/{{area}}") using the **Sentrux** MCP tools to evaluate the quality of the following metrics and provide a list of suggestions on how to improve on the score:
 
 1. Modularity - _do edges cluster into modules?_ -- from **Newman 2004**
@@ -51,3 +53,8 @@ To complete the task:
 - add a `suggestions_critical` frontmatter property to the review file which is the number of suggestions which are marked as being "critical"
 - add a `suggestions_urgent` frontmatter property to the review file which is the number of suggestions which are marked as being "urgent"
 - once the suggestions are saved to the Markdown body of the review file and the frontmatter properties above are saved too then you are done with the review
+
+::end-block
+::block when="!ctx.current_package_area"
+Evaluate the full monorepo of Rusty Biscuit.
+::end-block

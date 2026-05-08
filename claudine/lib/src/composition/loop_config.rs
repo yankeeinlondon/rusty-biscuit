@@ -14,9 +14,7 @@ pub fn resolve_fail_fast_from_env() -> Option<bool> {
     if let Ok(value) = std::env::var("FAIL_FAST") {
         static WARN_ONCE: std::sync::Once = std::sync::Once::new();
         WARN_ONCE.call_once(|| {
-            tracing::warn!(
-                "The FAIL_FAST env var is deprecated. Use CLAUDINE_FAIL_FAST instead."
-            );
+            tracing::warn!("The FAIL_FAST env var is deprecated. Use CLAUDINE_FAIL_FAST instead.");
         });
         return value.parse().ok();
     }
@@ -547,10 +545,7 @@ mod tests {
 
     #[test]
     fn max_must_be_positive_integer() {
-        let source = make_source(&[(
-            "loop",
-            json!({"while": "true", "max": "five"}),
-        )]);
+        let source = make_source(&[("loop", json!({"while": "true", "max": "five"}))]);
         let err = resolve_loop_config(&source).unwrap_err();
         assert!(
             matches!(err, CompositionError::LoopInvalid(msg) if msg.contains("loop.max") && msg.contains("positive integer"))
@@ -559,10 +554,7 @@ mod tests {
 
     #[test]
     fn actions_must_be_string_object_or_list() {
-        let source = make_source(&[(
-            "loop",
-            json!({"while": "true", "actions": 42}),
-        )]);
+        let source = make_source(&[("loop", json!({"while": "true", "actions": 42}))]);
         let err = resolve_loop_config(&source).unwrap_err();
         assert!(
             matches!(err, CompositionError::LoopInvalid(msg) if msg.contains("loop.actions") && msg.contains("string, object, or list"))
@@ -584,10 +576,7 @@ mod tests {
 
     #[test]
     fn invalid_dsl_action_unknown_op() {
-        let source = make_source(&[(
-            "loop",
-            json!({"while": "true", "actions": "unknown(prop)"}),
-        )]);
+        let source = make_source(&[("loop", json!({"while": "true", "actions": "unknown(prop)"}))]);
         let err = resolve_loop_config(&source).unwrap_err();
         assert!(
             matches!(err, CompositionError::LoopInvalid(ref msg) if msg.contains("unknown loop action op")),
@@ -597,10 +586,7 @@ mod tests {
 
     #[test]
     fn invalid_dsl_action_wrong_arg_count() {
-        let source = make_source(&[(
-            "loop",
-            json!({"while": "true", "actions": "increment()"}),
-        )]);
+        let source = make_source(&[("loop", json!({"while": "true", "actions": "increment()"}))]);
         let err = resolve_loop_config(&source).unwrap_err();
         assert!(
             matches!(err, CompositionError::LoopInvalid(ref msg) if msg.contains("expects 1 argument")),
@@ -615,9 +601,7 @@ mod tests {
             json!({"while": "true", "actions": {"prop": "counter"}}),
         )]);
         let err = resolve_loop_config(&source).unwrap_err();
-        assert!(
-            matches!(err, CompositionError::LoopInvalid(msg) if msg.contains("missing `op`"))
-        );
+        assert!(matches!(err, CompositionError::LoopInvalid(msg) if msg.contains("missing `op`")));
     }
 
     #[test]

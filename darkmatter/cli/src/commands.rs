@@ -1422,6 +1422,10 @@ fn reference_kind_category_label(
     match kind {
         ReferenceKind::Hyperlink => "Invalid Hyperlink(s)",
         ReferenceKind::Image => "Invalid Image Reference(s)",
+        ReferenceKind::HtmlVideo | ReferenceKind::HtmlAudio | ReferenceKind::HtmlSource => {
+            "Invalid Media Reference(s)"
+        }
+        ReferenceKind::HtmlIframe => "Invalid Iframe(s)",
         ReferenceKind::Transclusion => "Invalid Transclusion Target(s)",
         ReferenceKind::CssImport | ReferenceKind::InlineCss => "Invalid CSS Import(s)",
         ReferenceKind::ScriptImport | ReferenceKind::InlineScript => "Invalid Script Import(s)",
@@ -1467,10 +1471,12 @@ fn format_validation_issues(
             ReferenceKind::Transclusion => 0,
             ReferenceKind::Hyperlink => 1,
             ReferenceKind::Image => 2,
-            ReferenceKind::CssImport | ReferenceKind::InlineCss => 3,
-            ReferenceKind::ScriptImport | ReferenceKind::InlineScript => 4,
-            ReferenceKind::FontImport => 5,
-            ReferenceKind::MetaTag => 6,
+            ReferenceKind::HtmlVideo | ReferenceKind::HtmlAudio | ReferenceKind::HtmlSource => 3,
+            ReferenceKind::HtmlIframe => 4,
+            ReferenceKind::CssImport | ReferenceKind::InlineCss => 5,
+            ReferenceKind::ScriptImport | ReferenceKind::InlineScript => 6,
+            ReferenceKind::FontImport => 7,
+            ReferenceKind::MetaTag => 8,
         }
     };
 
@@ -1558,6 +1564,10 @@ fn kind_to_json(kind: darkmatter::markdown::reference::types::ReferenceKind) -> 
     match kind {
         ReferenceKind::Hyperlink => "hyperlink",
         ReferenceKind::Image => "image",
+        ReferenceKind::HtmlVideo => "html_video",
+        ReferenceKind::HtmlAudio => "html_audio",
+        ReferenceKind::HtmlSource => "html_source",
+        ReferenceKind::HtmlIframe => "html_iframe",
         ReferenceKind::Transclusion => "transclusion",
         ReferenceKind::CssImport => "css_import",
         ReferenceKind::InlineCss => "inline_css",
@@ -1603,6 +1613,10 @@ fn syntax_to_json(syntax: darkmatter::markdown::reference::types::ReferenceSynta
         ReferenceSyntax::HtmlAnchor => "html_anchor",
         ReferenceSyntax::MarkdownImage => "markdown_image",
         ReferenceSyntax::HtmlImage => "html_image",
+        ReferenceSyntax::HtmlVideoTag => "html_video_tag",
+        ReferenceSyntax::HtmlAudioTag => "html_audio_tag",
+        ReferenceSyntax::HtmlSourceTag => "html_source_tag",
+        ReferenceSyntax::HtmlIframeTag => "html_iframe_tag",
         ReferenceSyntax::DirectiveFile => "directive_file",
         ReferenceSyntax::DirectiveUrl => "directive_url",
         ReferenceSyntax::DirectiveCode => "directive_code",

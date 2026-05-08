@@ -127,14 +127,14 @@ impl AgentStatus {
         let mut available = Vec::new();
 
         // Check Claude Code
-        let claude_installed = ai_clients.claude();
+        let claude_installed = ai_clients.is_installed(sniff::programs::AiCli::Claude);
         installed.insert(AgenticStatusPlatform::ClaudeCode, claude_installed);
         if claude_installed {
             available.push(AgenticStatusPlatform::ClaudeCode);
         }
 
         // Check Codex
-        let codex_installed = ai_clients.codex();
+        let codex_installed = ai_clients.is_installed(sniff::programs::AiCli::Codex);
         installed.insert(AgenticStatusPlatform::Codex, codex_installed);
         if codex_installed {
             available.push(AgenticStatusPlatform::Codex);

@@ -543,10 +543,7 @@ mod tests {
 
         let detected = detect_step_timeout(&metrics, now, Duration::from_secs(5));
 
-        assert!(
-            detected.is_none(),
-            "active tool must suppress step_timeout"
-        );
+        assert!(detected.is_none(), "active tool must suppress step_timeout");
     }
 
     #[test]
@@ -569,10 +566,7 @@ mod tests {
         let detected = detect_step_timeout(&metrics, now, Duration::from_secs(5));
 
         assert!(
-            matches!(
-                detected,
-                Some(EarlyTermination::StepTimeout { .. })
-            ),
+            matches!(detected, Some(EarlyTermination::StepTimeout { .. })),
             "stuck subagent should trigger step_timeout, got: {detected:?}"
         );
     }

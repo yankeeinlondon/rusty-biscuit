@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 use biscuit_file::toml_crate;
 use tracing::debug;
 
-use super::detection::{canonicalize_path, create_package, normalize_path};
+use super::detection::{create_package, normalize_path};
 use super::types::{MonorepoTool, Package, PackageDiscoverySource};
 
 /// Resolved versions from Cargo.lock.
@@ -95,56 +95,90 @@ pub(crate) struct ManifestIndex {
 impl ManifestIndex {
     /// Build manifest index by walking the directory tree once.
     pub(crate) fn build(root: &Path) -> Self {
-        let mut grouped: HashMap<PathBuf, HashSet<ManifestKind>> = HashMap::new();
+        use crate::filesystem::file_types::should_skip_directory_name;
+        use ignore::{WalkBuilder, WalkState};
+        use std::sync::{Arc, Mutex};
 
-        let walker = walkdir::WalkDir::new(root)
-            .follow_links(false)
-            .into_iter()
-            .filter_entry(|entry| {
-                if !entry.file_type().is_dir() {
-                    return true;
-                }
-
-                let name = entry.file_name().to_string_lossy();
-                name != ".git"
-                    && name != "node_modules"
-                    && name != "target"
-                    && name != ".turbo"
-                    && name != "dist"
-                    && name != "build"
-            });
-
-        for entry in walker.filter_map(|e| e.ok()) {
-            if !entry.file_type().is_file() {
-                continue;
-            }
-
-            let file_name = entry.file_name().to_string_lossy();
-            let kind = match file_name.as_ref() {
-                "Cargo.toml" => ManifestKind::Cargo,
-                "package.json" => ManifestKind::Node,
-                "pyproject.toml" => ManifestKind::Python,
-                "go.mod" => ManifestKind::Go,
-                _ => continue,
-            };
-
-            if is_generated_manifest(entry.path()) {
-                continue;
-            }
-            if is_fixture_manifest(entry.path()) {
-                continue;
-            }
-
-            let Some(parent) = entry.path().parent() else {
-                continue;
-            };
-
-            grouped
-                .entry(parent.to_path_buf())
-                .or_default()
-                .insert(kind);
+        struct ManifestWorker {
+            shared: Arc<Mutex<Vec<(PathBuf, ManifestKind)>>>,
+            local: Vec<(PathBuf, ManifestKind)>,
         }
 
+        impl Drop for ManifestWorker {
+            fn drop(&mut self) {
+                if self.local.is_empty() {
+                    return;
+                }
+                let mut shared = self
+                    .shared
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner());
+                shared.append(&mut self.local);
+            }
+        }
+
+        let shared: Arc<Mutex<Vec<(PathBuf, ManifestKind)>>> = Arc::new(Mutex::new(Vec::new()));
+
+        WalkBuilder::new(root)
+            .hidden(false)
+            .git_ignore(true)
+            .git_global(true)
+            .git_exclude(true)
+            .filter_entry(|entry| {
+                if !entry.file_type().is_some_and(|ft| ft.is_dir()) {
+                    return true;
+                }
+                !entry
+                    .file_name()
+                    .to_str()
+                    .is_some_and(should_skip_directory_name)
+            })
+            .build_parallel()
+            .run(|| {
+                let mut worker = ManifestWorker {
+                    shared: Arc::clone(&shared),
+                    local: Vec::new(),
+                };
+                Box::new(move |result| {
+                    let Ok(entry) = result else {
+                        return WalkState::Continue;
+                    };
+                    if !entry.file_type().is_some_and(|ft| ft.is_file()) {
+                        return WalkState::Continue;
+                    }
+
+                    let file_name = entry.file_name().to_string_lossy();
+                    let kind = match file_name.as_ref() {
+                        "Cargo.toml" => ManifestKind::Cargo,
+                        "package.json" => ManifestKind::Node,
+                        "pyproject.toml" => ManifestKind::Python,
+                        "go.mod" => ManifestKind::Go,
+                        _ => return WalkState::Continue,
+                    };
+
+                    if is_generated_manifest(entry.path()) {
+                        return WalkState::Continue;
+                    }
+                    if is_fixture_manifest(entry.path()) {
+                        return WalkState::Continue;
+                    }
+
+                    let Some(parent) = entry.path().parent() else {
+                        return WalkState::Continue;
+                    };
+
+                    worker.local.push((parent.to_path_buf(), kind));
+                    WalkState::Continue
+                })
+            });
+
+        let mut accumulated = shared
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut grouped: HashMap<PathBuf, HashSet<ManifestKind>> = HashMap::new();
+        for (path, kind) in accumulated.drain(..) {
+            grouped.entry(path).or_default().insert(kind);
+        }
         Self::from_grouped(grouped)
     }
 
@@ -181,7 +215,7 @@ impl ManifestIndex {
         let entries = grouped
             .into_iter()
             .map(|(original, kinds)| {
-                let canonical = canonicalize_path(&original);
+                let canonical = normalize_path(&original);
                 ManifestEntry {
                     original,
                     canonical,

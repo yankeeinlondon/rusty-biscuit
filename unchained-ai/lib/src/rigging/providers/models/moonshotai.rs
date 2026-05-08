@@ -1,6 +1,6 @@
 //! Auto-generated provider model enum
 //!
-//! Generated: 2026-01-11T20:35:18.776822+00:00
+//! Generated: 2026-05-07T02:07:03.873992+00:00
 //! Generator: gen-models v0.1.0
 //! Provider: MoonshotAi
 //!
@@ -16,18 +16,10 @@ use model_id::ModelId;
     returns = "crate::models::model_metadata::ModelMetadata"
 )]
 pub enum ProviderModelMoonshotAi {
-    /// Model: `kimi-k2-0711-preview`
-    Kimi__K2__0711__Preview,
-    /// Model: `kimi-k2-0905-preview`
-    Kimi__K2__0905__Preview,
-    /// Model: `kimi-k2-thinking`
-    Kimi__K2__Thinking,
-    /// Model: `kimi-k2-thinking-turbo`
-    Kimi__K2__Thinking__Turbo,
-    /// Model: `kimi-k2-turbo-preview`
-    Kimi__K2__Turbo__Preview,
-    /// Model: `kimi-latest`
-    Kimi__Latest,
+    /// Model: `kimi-k2.5`
+    Kimi__K2_5,
+    /// Model: `kimi-k2.6`
+    Kimi__K2_6,
     /// Model: `moonshot-v1-128k`
     Moonshot__V1__128k,
     /// Model: `moonshot-v1-128k-vision-preview`

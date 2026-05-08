@@ -64,6 +64,7 @@
 pub mod asyncapi_import;
 pub mod cargo_gen;
 pub mod codegen;
+pub mod commands;
 pub mod errors;
 pub mod export;
 pub mod import_pipeline;
@@ -72,13 +73,15 @@ pub mod model_gen;
 pub mod openapi_output;
 pub mod output;
 pub mod parser;
+pub mod pipeline;
 pub mod postman_output;
 pub mod validation;
 pub mod ws_codegen;
 
 pub use inference::infer_module_path;
 
-pub use openapi_output::{write_openapi, write_openapi_grouped};
+pub use export::openapi::{write_openapi, write_openapi_grouped};
+pub use export::postman::{write_postman, write_postman_grouped};
 
 pub use validation::validate_api;
 

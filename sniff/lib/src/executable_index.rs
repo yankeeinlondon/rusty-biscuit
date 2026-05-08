@@ -7,10 +7,16 @@
 use std::collections::HashMap;
 use std::ffi::{OsStr, OsString};
 use std::path::PathBuf;
+use std::sync::OnceLock;
 use tracing::{debug, instrument};
 use which::which;
 
 use crate::programs::contract::ExecutableSource;
+
+static EAGER_PATH_CACHE: OnceLock<HashMap<OsString, PathBuf>> = OnceLock::new();
+
+#[cfg(target_os = "macos")]
+static BUNDLE_INDEX_CACHE: OnceLock<HashMap<String, PathBuf>> = OnceLock::new();
 
 /// Lazy lookup index for executables on PATH, macOS app bundles, and Windows
 /// fallback layers.
@@ -83,13 +89,22 @@ impl ExecutableIndex {
     /// scans. Single-shot callers should prefer [`Self::build`] (lazy `which`).
     #[instrument(skip_all)]
     pub fn build_eager_path() -> Self {
-        let mut index = Self::build_with_bundles(true);
-        index.eager_path = Some(scan_path_executables());
-        debug!(
-            entries = index.eager_path.as_ref().map(|m| m.len()).unwrap_or(0),
-            "eager PATH index built"
-        );
-        index
+        let path_dir_count = std::env::var_os("PATH")
+            .map(|p| std::env::split_paths(&p).count())
+            .unwrap_or(0);
+
+        let eager_path = EAGER_PATH_CACHE.get_or_init(scan_path_executables).clone();
+
+        debug!(entries = eager_path.len(), "eager PATH index built");
+
+        Self {
+            path_dir_count,
+            eager_path: Some(eager_path),
+            #[cfg(target_os = "macos")]
+            bundle_executables: BUNDLE_INDEX_CACHE.get_or_init(build_bundle_index).clone(),
+            #[cfg(target_os = "windows")]
+            windows_index: crate::programs::windows_apps::build_windows_index(),
+        }
     }
 
     fn build_with_bundles(include_bundles: bool) -> Self {
@@ -124,11 +139,11 @@ impl ExecutableIndex {
     ///
     /// Returns `None` if no eager index has been built or the program is not
     /// present in the cached map.
-    fn eager_lookup(&self, program: &str) -> Option<PathBuf> {
+    fn eager_lookup(&self, program: &str) -> Option<&PathBuf> {
         let map = self.eager_path.as_ref()?;
         // Direct match first (Unix executables have no extension).
         if let Some(path) = map.get(OsStr::new(program)) {
-            return Some(path.clone());
+            return Some(path);
         }
         // On Windows, PATHEXT-based filenames (e.g. `git.exe`) are stored;
         // probe the bare name plus each PATHEXT extension.
@@ -138,7 +153,7 @@ impl ExecutableIndex {
                 let mut candidate = OsString::from(program);
                 candidate.push(&ext);
                 if let Some(path) = map.get(candidate.as_os_str()) {
-                    return Some(path.clone());
+                    return Some(path);
                 }
             }
         }
@@ -158,7 +173,7 @@ impl ExecutableIndex {
         // Layer 1: PATH (authoritative).
         // Use the eager PATH index when present; fall back to `which`.
         if let Some(path) = self.eager_lookup(program) {
-            return Some((path, ExecutableSource::Path));
+            return Some((path.clone(), ExecutableSource::Path));
         }
         if let Ok(path) = which(program) {
             return Some((path, ExecutableSource::Path));
@@ -196,13 +211,41 @@ impl ExecutableIndex {
     /// - `None` - Program not found in PATH
     pub fn find(&self, program: &str) -> Option<PathBuf> {
         if let Some(path) = self.eager_lookup(program) {
-            return Some(path);
+            return Some(path.clone());
         }
         which(program).ok()
     }
 
     pub fn path_dir_count(&self) -> usize {
         self.path_dir_count
+    }
+
+    /// Bulk lookup of multiple programs, choosing the optimal strategy.
+    ///
+    /// When an eager PATH index is present, lookups are sequential (each
+    /// is ~50 ns — thread-pool overhead would dominate).  When PATH must
+    /// be traversed lazily via `which`, the work is dispatched across the
+    /// Rayon thread-pool so the per-program I/O overlaps.
+    pub fn find_programs_with_source(
+        &self,
+        programs: &[&str],
+    ) -> HashMap<String, Option<(PathBuf, ExecutableSource)>> {
+        if self.eager_path.is_some() {
+            // Eager path: O(1) HashMap hits — keep it sequential to avoid
+            // parallel task overhead.
+            let mut results = HashMap::with_capacity(programs.len());
+            for &prog in programs {
+                results.insert(prog.to_string(), self.find_with_source(prog));
+            }
+            results
+        } else {
+            // Lazy path: each lookup may walk PATH on disk — parallelise.
+            use rayon::prelude::*;
+            programs
+                .par_iter()
+                .map(|&prog| (prog.to_string(), self.find_with_source(prog)))
+                .collect()
+        }
     }
 }
 
@@ -418,10 +461,7 @@ pub fn find_programs_with_source_from_index(
     index: &ExecutableIndex,
     programs: &[&str],
 ) -> HashMap<String, Option<(PathBuf, ExecutableSource)>> {
-    programs
-        .iter()
-        .map(|&prog| (prog.to_string(), index.find_with_source(prog)))
-        .collect()
+    index.find_programs_with_source(programs)
 }
 
 #[cfg(test)]
@@ -520,7 +560,17 @@ mod tests {
         new_path.push(&original_path);
         env.set_os("PATH", &new_path);
 
-        let index = ExecutableIndex::build_eager_path();
+        let eager_path = scan_path_executables();
+        let index = ExecutableIndex {
+            path_dir_count: std::env::var_os("PATH")
+                .map(|p| std::env::split_paths(&p).count())
+                .unwrap_or(0),
+            eager_path: Some(eager_path),
+            #[cfg(target_os = "macos")]
+            bundle_executables: HashMap::new(),
+            #[cfg(target_os = "windows")]
+            windows_index: crate::programs::windows_apps::WindowsIndex::default(),
+        };
 
         #[cfg(unix)]
         {
@@ -578,7 +628,15 @@ mod tests {
         new_path.push(dir_second.path());
         env.set_os("PATH", &new_path);
 
-        let index = ExecutableIndex::build_eager_path();
+        let eager_path = scan_path_executables();
+        let index = ExecutableIndex {
+            path_dir_count: 2,
+            eager_path: Some(eager_path),
+            #[cfg(target_os = "macos")]
+            bundle_executables: HashMap::new(),
+            #[cfg(target_os = "windows")]
+            windows_index: crate::programs::windows_apps::WindowsIndex::default(),
+        };
 
         #[cfg(unix)]
         {
@@ -613,7 +671,17 @@ mod tests {
         new_path.push(std::env::var_os("PATH").unwrap_or_default());
         env.set_os("PATH", &new_path);
 
-        let index = ExecutableIndex::build_eager_path();
+        let eager_path = scan_path_executables();
+        let index = ExecutableIndex {
+            path_dir_count: std::env::var_os("PATH")
+                .map(|p| std::env::split_paths(&p).count())
+                .unwrap_or(0),
+            eager_path: Some(eager_path),
+            #[cfg(target_os = "macos")]
+            bundle_executables: HashMap::new(),
+            #[cfg(target_os = "windows")]
+            windows_index: crate::programs::windows_apps::WindowsIndex::default(),
+        };
 
         #[cfg(unix)]
         {
@@ -641,5 +709,28 @@ mod tests {
             index.eager_path.is_some(),
             "Eager index should have a PATH map"
         );
+    }
+
+    #[test]
+    fn test_build_eager_path_returns_consistent_results() {
+        let first = ExecutableIndex::build_eager_path();
+        let second = ExecutableIndex::build_eager_path();
+
+        let first_len = first.eager_path.as_ref().map(|m| m.len());
+        let second_len = second.eager_path.as_ref().map(|m| m.len());
+        assert_eq!(
+            first_len, second_len,
+            "Cached build_eager_path should return consistent entry counts"
+        );
+
+        if let (Some(map1), Some(map2)) = (&first.eager_path, &second.eager_path) {
+            for key in map1.keys() {
+                assert!(
+                    map2.contains_key(key),
+                    "Key {:?} missing from second call",
+                    key
+                );
+            }
+        }
     }
 }

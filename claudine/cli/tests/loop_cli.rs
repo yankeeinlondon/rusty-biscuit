@@ -61,11 +61,7 @@ exit 0
         .success();
 
     let calls = fs::read_to_string(&count_path).unwrap();
-    assert_eq!(
-        calls.trim(),
-        "3",
-        "loop should run 3 iterations"
-    );
+    assert_eq!(calls.trim(), "3", "loop should run 3 iterations");
 }
 
 #[cfg(unix)]
@@ -117,11 +113,7 @@ exit 0
         .success();
 
     let calls = fs::read_to_string(&count_path).unwrap();
-    assert_eq!(
-        calls.trim(),
-        "2",
-        "inline loop should run 2 iterations"
-    );
+    assert_eq!(calls.trim(), "2", "inline loop should run 2 iterations");
 }
 
 // ============================================================================
@@ -181,11 +173,7 @@ exit 0
         .failure();
 
     let calls = fs::read_to_string(&count_path).unwrap();
-    assert_eq!(
-        calls.trim(),
-        "2",
-        "--max-iterations should cap at 2"
-    );
+    assert_eq!(calls.trim(), "2", "--max-iterations should cap at 2");
 }
 
 #[cfg(unix)]
@@ -236,11 +224,7 @@ exit 0
         .failure();
 
     let calls = fs::read_to_string(&count_path).unwrap();
-    assert_eq!(
-        calls.trim(),
-        "2",
-        "CLAUDINE_MAX_ITERATIONS should cap at 2"
-    );
+    assert_eq!(calls.trim(), "2", "CLAUDINE_MAX_ITERATIONS should cap at 2");
 }
 
 // ============================================================================
@@ -298,7 +282,9 @@ exit 0
     let stderr = String::from_utf8_lossy(&assert.get_output().stderr);
     let plain = strip_ansi(&stderr);
     assert!(
-        plain.contains("deprecated") || plain.contains("FAIL_FAST") || plain.contains("CLAUDINE_FAIL_FAST"),
+        plain.contains("deprecated")
+            || plain.contains("FAIL_FAST")
+            || plain.contains("CLAUDINE_FAIL_FAST"),
         "should emit deprecation warning for FAIL_FAST; stderr: {plain}"
     );
 }

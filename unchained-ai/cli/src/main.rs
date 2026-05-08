@@ -1,15 +1,20 @@
 use clap::{CommandFactory, Parser, Subcommand};
 use clap_complete::Shell;
 use color_eyre::eyre::Result;
+use unchained_ai::rigging::providers::models::ProviderModel;
 
 mod commands;
 
 /// AI pipeline tools and agent status monitoring
+fn model_value_parser() -> clap::builder::PossibleValuesParser {
+    clap::builder::PossibleValuesParser::new(ProviderModel::all_wire_ids())
+}
+
 #[derive(Parser)]
 #[command(
     name = "unchained",
     version,
-    about,
+    about = "AI pipeline tools and agent status monitoring",
     after_help = "Use 'unchained <command> --help' for more information about a command."
 )]
 struct Cli {
@@ -43,6 +48,12 @@ enum Commands {
         #[arg(short, long)]
         provider: Option<String>,
     },
+    /// Show detailed metadata for a specific model
+    Model {
+        /// Model identifier in provider/model-id format (e.g. openai/o3)
+        #[arg(value_parser = model_value_parser())]
+        model: String,
+    },
 }
 
 #[tokio::main]
@@ -75,6 +86,9 @@ async fn main() -> Result<()> {
         }
         Some(Commands::Models { provider }) => {
             commands::models::run(provider, cli.json, cli.verbose > 0).await?;
+        }
+        Some(Commands::Model { model }) => {
+            commands::model::run(model, cli.json).await?;
         }
         None => {
             Cli::command().print_help()?;

@@ -105,10 +105,7 @@ pub(crate) fn build_language_summary(
 
     let mut languages: Vec<ProgrammingLanguageStats> = language_map
         .into_iter()
-        .map(|(language, mut entry)| {
-            entry.direct_files.sort();
-            entry.framework_files.sort();
-
+        .map(|(language, entry)| {
             let direct_file_count = entry.direct_files.len();
             let framework_file_count = entry.framework_files.len();
             let total_file_count = direct_file_count + framework_file_count;
@@ -152,16 +149,13 @@ pub(crate) fn build_language_summary(
 
     let mut frameworks: Vec<FrameworkStats> = framework_map
         .into_iter()
-        .map(|(framework, mut entry)| {
-            entry.files.sort();
-            FrameworkStats {
-                framework,
-                file_count: entry.files.len(),
-                explicit_file_count: entry.explicit_file_count,
-                inferred_file_count: entry.inferred_file_count,
-                related_languages: entry.related_languages.into_iter().collect(),
-                files: entry.files,
-            }
+        .map(|(framework, entry)| FrameworkStats {
+            framework,
+            file_count: entry.files.len(),
+            explicit_file_count: entry.explicit_file_count,
+            inferred_file_count: entry.inferred_file_count,
+            related_languages: entry.related_languages.into_iter().collect(),
+            files: entry.files,
         })
         .collect();
 
@@ -202,8 +196,7 @@ pub(crate) fn build_association_breakdown(
 ) -> Vec<FileAssociationStats> {
     let mut stats: Vec<FileAssociationStats> = associations
         .into_iter()
-        .map(|(association, mut files)| {
-            files.sort();
+        .map(|(association, files)| {
             let file_count = files.len();
             FileAssociationStats {
                 association,

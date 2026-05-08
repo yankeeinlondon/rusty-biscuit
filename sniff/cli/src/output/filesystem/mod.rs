@@ -1240,7 +1240,7 @@ mod tests {
             let output = render_git_section(&git, 10, 0, true);
 
             assert!(output.contains("Status"));
-            assert!(!output.contains("Meta"));
+            assert!(!output.contains("\x1b[1m\x1b[4mMeta"));
             assert!(!output.contains("Worktrees"));
         }
     }

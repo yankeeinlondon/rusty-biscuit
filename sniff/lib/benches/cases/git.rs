@@ -12,7 +12,7 @@
 //! variable so day-to-day runs stay fast on developer hardware while CI
 //! and dedicated profiling can still exercise the high-N case.
 
-use criterion::{BenchmarkId, Criterion, black_box};
+use criterion::{BenchmarkId, Criterion, Throughput, black_box};
 use sniff::filesystem::detect_git_with_request;
 use sniff::request::GitRequest;
 
@@ -41,24 +41,35 @@ pub fn register(c: &mut Criterion) {
         let fixture = fixtures::git_repo_with_dirty_files(count);
 
         let full_req = GitRequest::full();
-        group.bench_with_input(BenchmarkId::new("git_full", count), &count, |b, _| {
-            b.iter(|| {
-                let info = detect_git_with_request(black_box(fixture.path()), black_box(&full_req))
-                    .unwrap();
-                black_box(info);
-            });
-        });
+        group.throughput(Throughput::Elements(count as u64));
+        group.bench_with_input(
+            BenchmarkId::new("git_full_with_file_stats", count),
+            &count,
+            |b, _| {
+                b.iter(|| {
+                    let info =
+                        detect_git_with_request(black_box(fixture.path()), black_box(&full_req))
+                            .unwrap();
+                    black_box(info);
+                });
+            },
+        );
 
         // `deep()` enables full unified diff emission, which is the
         // worst-case path through the batched diff aggregator.
         let deep_req = GitRequest::deep();
-        group.bench_with_input(BenchmarkId::new("git_deep", count), &count, |b, _| {
-            b.iter(|| {
-                let info = detect_git_with_request(black_box(fixture.path()), black_box(&deep_req))
-                    .unwrap();
-                black_box(info);
-            });
-        });
+        group.bench_with_input(
+            BenchmarkId::new("git_deep_with_unified_diffs", count),
+            &count,
+            |b, _| {
+                b.iter(|| {
+                    let info =
+                        detect_git_with_request(black_box(fixture.path()), black_box(&deep_req))
+                            .unwrap();
+                    black_box(info);
+                });
+            },
+        );
     }
 
     group.finish();
@@ -72,8 +83,9 @@ pub fn register(c: &mut Criterion) {
         let fixture = fixtures::git_repo_with_fake_remotes(20, remote_count);
         let deep_req = GitRequest::deep().commit_count(10);
 
+        deep_group.throughput(Throughput::Elements(remote_count as u64));
         deep_group.bench_with_input(
-            BenchmarkId::new("git_deep_remotes", remote_count),
+            BenchmarkId::new("git_deep_remote_containment_check", remote_count),
             &remote_count,
             |b, _| {
                 b.iter(|| {

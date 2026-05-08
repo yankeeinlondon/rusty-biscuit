@@ -40,4 +40,4 @@ There are few Frontmatter properties which are _excluded_ from propagation:
 
 ## Finalization
 
-We propagate frontmatter through the the graph of Markdown documents referenced in transclusion or otherwise. 
+The **finalization** stage runs only on the root document after all other composition and transclusion has completed. Operations in this stage (like [Link Normalization](../operations/link-normalization.md)) see the fully-composed body but are still driven by the root document's configuration.

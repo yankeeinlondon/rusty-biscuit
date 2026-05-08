@@ -338,7 +338,14 @@ fn passthrough_root_help_renders_custom_help_screen() {
 /// `ArgAction::Help` arg on every non-wrapper subcommand to compensate.
 #[test]
 fn non_composition_subcommands_accept_help_flag() {
-    for sub in ["completions", "hooks", "skills", "sync", "providers", "agents"] {
+    for sub in [
+        "completions",
+        "hooks",
+        "skills",
+        "sync",
+        "providers",
+        "agents",
+    ] {
         let output = cargo_bin_cmd!("claudine")
             .env("NO_COLOR", "1")
             .args([sub, "--help"])

@@ -108,7 +108,7 @@ fn resolve_language_context<'a>(
 }
 
 fn render_language_table_for_package(pkg: &Package, verbose: u8, term: &Terminal) -> String {
-    use biscuit_terminal::components::table::table::{Table, TableCellContent, TableColumn};
+    use biscuit_terminal::components::table::{Table, TableCellContent, TableColumn};
     use biscuit_terminal::utils::layout::{Alignment, Margin};
 
     let mut out = String::new();
@@ -206,7 +206,7 @@ pub fn render_language_section(
     verbose: u8,
     base_dir: Option<&Path>,
 ) -> String {
-    use biscuit_terminal::components::table::table::{Table, TableCellContent, TableColumn};
+    use biscuit_terminal::components::table::{Table, TableCellContent, TableColumn};
     use biscuit_terminal::utils::layout::{Alignment, Margin};
 
     let mut out = String::new();

@@ -692,7 +692,12 @@ mod tests {
 
         assert!(result.error.is_none());
         assert_eq!(result.iteration_count, 3);
-        let log = result.final_frontmatter.get("log").unwrap().as_str().unwrap();
+        let log = result
+            .final_frontmatter
+            .get("log")
+            .unwrap()
+            .as_str()
+            .unwrap();
         assert_eq!(log.matches("tick").count(), 3);
     }
 
@@ -749,7 +754,11 @@ mod tests {
             |ctx| {
                 exit_codes.borrow_mut().push(ctx.ambient.last_exit_code);
                 if ctx.iteration == 2 {
-                    Ok(LoopIterationOutput::failure("bad", 7, CompositionError::LoopInvalid("boom".into())))
+                    Ok(LoopIterationOutput::failure(
+                        "bad",
+                        7,
+                        CompositionError::LoopInvalid("boom".into()),
+                    ))
                 } else {
                     Ok(LoopIterationOutput::success("ok"))
                 }
@@ -764,5 +773,4 @@ mod tests {
         let seen = exit_codes.borrow();
         assert_eq!(&*seen, &[0, 0, 7]);
     }
-
 }

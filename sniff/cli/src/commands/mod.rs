@@ -515,6 +515,29 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 }
                 std::process::exit(1);
             }
+            crate::args::RepoAction::Worktree { no_error, on_error } => {
+                let dir = base_dir
+                    .as_deref()
+                    .unwrap_or_else(|| std::path::Path::new("."));
+                let name = sniff::filesystem::git::get_current_worktree_name(dir)?;
+                if let Some(name) = name {
+                    if cli.json {
+                        let outcome = output::repo_json::worktree_outcome(Some(&name), *no_error);
+                        output::print_json_value(outcome.value, perf.build_report().as_ref());
+                        return Ok(());
+                    }
+                    println!("{name}");
+                    perf.emit_stderr(None);
+                    return Ok(());
+                }
+                // Not in a worktree (or not in a repo)
+                if cli.json {
+                    let outcome = output::repo_json::worktree_outcome(None, *no_error);
+                    output::print_json_value(outcome.value, perf.build_report().as_ref());
+                    std::process::exit(if *no_error { 0 } else { 1 });
+                }
+                return handle_no_results(*no_error, on_error, cli.plain, &perf);
+            }
             crate::args::RepoAction::RecentCommits { .. }
             | crate::args::RepoAction::SourceCodeChanges { .. }
             | crate::args::RepoAction::DocumentationChanges { .. } => {

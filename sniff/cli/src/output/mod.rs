@@ -322,6 +322,9 @@ pub fn render_text(
                 Some(RepoAction::PackageArea { .. }) => {
                     unreachable!("PackageArea is handled as an early return in commands.rs")
                 }
+                Some(RepoAction::Worktree { .. }) => {
+                    unreachable!("Worktree is handled as an early return in commands.rs")
+                }
                 Some(RepoAction::Packages { .. }) => {
                     unreachable!("Packages is handled as an early return in commands.rs")
                 }

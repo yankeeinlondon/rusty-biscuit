@@ -91,7 +91,10 @@ fn evaluate_when(when: Option<&str>, meta: &EventMeta) -> WhenOutcome {
 ///
 /// This keeps the parse/evaluate plumbing but reuses the cached context groups,
 /// avoiding repeated `ctx.*` captures across multiple actions in the same binding.
-fn evaluate_when_with_lookup(when: Option<&str>, lookup: &EventMetaConditionLookup<'_>) -> WhenOutcome {
+fn evaluate_when_with_lookup(
+    when: Option<&str>,
+    lookup: &EventMetaConditionLookup<'_>,
+) -> WhenOutcome {
     let Some(expr) = when else {
         return WhenOutcome::Run;
     };

@@ -8505,16 +8505,19 @@ flowchart LR
         let mut options = test_options();
         options.max_width = Some(80);
         let output = for_terminal(&md, options).unwrap();
-        
+
         // Check that blockquote words use soft reset
         let soft_reset = "\x1b[22;23;24;25;27;28;29;39m";
         let hard_reset = "\x1b[0m";
-        
+
         println!("Output: {:?}", output);
         println!("Soft reset count: {}", output.matches(soft_reset).count());
         println!("Hard reset count: {}", output.matches(hard_reset).count());
-        
+
         // The blockquote words should use soft reset
-        assert!(output.contains(soft_reset), "Should use soft reset for blockquote words");
+        assert!(
+            output.contains(soft_reset),
+            "Should use soft reset for blockquote words"
+        );
     }
 }
