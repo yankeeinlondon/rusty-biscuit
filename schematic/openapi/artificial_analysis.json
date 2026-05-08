@@ -1,0 +1,733 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "artificial_analysis",
+    "description": "Artificial Analysis free data API: LLM and media-model benchmark catalogs.",
+    "version": "0.1.0"
+  },
+  "servers": [
+    {
+      "url": "https://artificialanalysis.ai/api/v2",
+      "description": "ArtificialAnalysisData API Server"
+    }
+  ],
+  "paths": {
+    "/data/llms/models": {
+      "get": {
+        "summary": "Returns primary metrics from independent LLM benchmarks: intelligence, speed, and pricing.",
+        "description": "Returns primary metrics from independent LLM benchmarks: intelligence, speed, and pricing.",
+        "operationId": "ListLlmModels",
+        "responses": {
+          "200": {
+            "description": "Successful JSON response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LlmModelsResponse"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "response": {
+            "Json": {
+              "module_path": null,
+              "type_name": "LlmModelsResponse"
+            }
+          }
+        }
+      }
+    },
+    "/data/media/text-to-image": {
+      "get": {
+        "summary": "Returns Elo ratings for text-to-image models.",
+        "description": "Returns Elo ratings for text-to-image models.",
+        "operationId": "ListTextToImageModels",
+        "responses": {
+          "200": {
+            "description": "Successful JSON response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MediaModelsResponse"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "response": {
+            "Json": {
+              "module_path": null,
+              "type_name": "MediaModelsResponse"
+            }
+          }
+        }
+      }
+    },
+    "/data/media/image-editing": {
+      "get": {
+        "summary": "Returns Elo ratings for image-editing models.",
+        "description": "Returns Elo ratings for image-editing models.",
+        "operationId": "ListImageEditingModels",
+        "responses": {
+          "200": {
+            "description": "Successful JSON response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MediaModelsResponse"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "response": {
+            "Json": {
+              "module_path": null,
+              "type_name": "MediaModelsResponse"
+            }
+          }
+        }
+      }
+    },
+    "/data/media/text-to-speech": {
+      "get": {
+        "summary": "Returns Elo ratings for text-to-speech models.",
+        "description": "Returns Elo ratings for text-to-speech models.",
+        "operationId": "ListTextToSpeechModels",
+        "responses": {
+          "200": {
+            "description": "Successful JSON response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MediaModelsResponse"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "response": {
+            "Json": {
+              "module_path": null,
+              "type_name": "MediaModelsResponse"
+            }
+          }
+        }
+      }
+    },
+    "/data/media/text-to-video": {
+      "get": {
+        "summary": "Returns Elo ratings for text-to-video models.",
+        "description": "Returns Elo ratings for text-to-video models.",
+        "operationId": "ListTextToVideoModels",
+        "responses": {
+          "200": {
+            "description": "Successful JSON response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MediaModelsResponse"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "response": {
+            "Json": {
+              "module_path": null,
+              "type_name": "MediaModelsResponse"
+            }
+          }
+        }
+      }
+    },
+    "/data/media/image-to-video": {
+      "get": {
+        "summary": "Returns Elo ratings for image-to-video models.",
+        "description": "Returns Elo ratings for image-to-video models.",
+        "operationId": "ListImageToVideoModels",
+        "responses": {
+          "200": {
+            "description": "Successful JSON response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MediaModelsResponse"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "response": {
+            "Json": {
+              "module_path": null,
+              "type_name": "MediaModelsResponse"
+            }
+          }
+        }
+      }
+    },
+    "/critpt/evaluate": {
+      "post": {
+        "summary": "Submit a batch of code-generation submissions for evaluation against the CritPt benchmark.",
+        "description": "Submit a batch of code-generation submissions for evaluation against the CritPt benchmark.",
+        "operationId": "EvaluateCritPt",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CritPtEvaluateBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful JSON response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CritPtEvaluateResponse"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "request": {
+            "Json": {
+              "module_path": null,
+              "type_name": "CritPtEvaluateBody"
+            }
+          },
+          "response": {
+            "Json": {
+              "module_path": null,
+              "type_name": "CritPtEvaluateResponse"
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "ModelCreator": {
+        "title": "ModelCreator",
+        "description": "A model creator (lab, company, or organization) referenced by the API.",
+        "type": "object",
+        "properties": {
+          "id": {
+            "description": "Stable identifier for the creator.",
+            "type": "string"
+          },
+          "name": {
+            "description": "Human-readable display name.",
+            "type": "string"
+          },
+          "slug": {
+            "description": "URL-safe slug (may change over time — prefer `id`).",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "slug"
+        ]
+      },
+      "CategoryBreakdown": {
+        "title": "CategoryBreakdown",
+        "description": "A per-category breakdown of Elo ratings for a media model.\n\nReturned only when `include_categories=true` is passed to a media endpoint\nthat supports it.",
+        "type": "object",
+        "properties": {
+          "appearances": {
+            "description": "Number of appearances in this category.",
+            "type": "integer",
+            "format": "int32"
+          },
+          "ci95": {
+            "description": "95% confidence interval.",
+            "type": "string"
+          },
+          "elo": {
+            "description": "Elo rating for this category.",
+            "type": "integer",
+            "format": "int32"
+          },
+          "format_category": {
+            "description": "The format category name, if applicable.",
+            "type": "string"
+          },
+          "style_category": {
+            "description": "The style category name.",
+            "type": "string"
+          },
+          "subject_matter_category": {
+            "description": "The subject matter category name.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "style_category",
+          "subject_matter_category",
+          "elo",
+          "ci95",
+          "appearances"
+        ]
+      },
+      "LlmEvaluations": {
+        "title": "LlmEvaluations",
+        "description": "Benchmark scores for a single LLM model.",
+        "type": "object",
+        "properties": {
+          "aime": {
+            "description": "AIME score.",
+            "type": "number",
+            "format": "double"
+          },
+          "artificial_analysis_coding_index": {
+            "description": "Coding benchmark index.",
+            "type": "number",
+            "format": "double"
+          },
+          "artificial_analysis_intelligence_index": {
+            "description": "Overall intelligence index.",
+            "type": "number",
+            "format": "double"
+          },
+          "artificial_analysis_math_index": {
+            "description": "Math benchmark index.",
+            "type": "number",
+            "format": "double"
+          },
+          "gpqa": {
+            "description": "GPQA score.",
+            "type": "number",
+            "format": "double"
+          },
+          "hle": {
+            "description": "HLE score.",
+            "type": "number",
+            "format": "double"
+          },
+          "livecodebench": {
+            "description": "LiveCodeBench score.",
+            "type": "number",
+            "format": "double"
+          },
+          "math_500": {
+            "description": "MATH-500 score.",
+            "type": "number",
+            "format": "double"
+          },
+          "mmlu_pro": {
+            "description": "MMLU-Pro score.",
+            "type": "number",
+            "format": "double"
+          },
+          "scicode": {
+            "description": "SciCode score.",
+            "type": "number",
+            "format": "double"
+          }
+        },
+        "required": [
+          "artificial_analysis_intelligence_index",
+          "artificial_analysis_coding_index",
+          "artificial_analysis_math_index",
+          "mmlu_pro",
+          "gpqa",
+          "hle",
+          "livecodebench",
+          "scicode",
+          "math_500",
+          "aime"
+        ]
+      },
+      "LlmPricing": {
+        "title": "LlmPricing",
+        "description": "Pricing for an LLM model in USD per 1M tokens.",
+        "type": "object",
+        "properties": {
+          "price_1m_blended_3_to_1": {
+            "description": "Blended price (3:1 input/output ratio) per 1M tokens.",
+            "type": "number",
+            "format": "double"
+          },
+          "price_1m_input_tokens": {
+            "description": "Input token price per 1M tokens.",
+            "type": "number",
+            "format": "double"
+          },
+          "price_1m_output_tokens": {
+            "description": "Output token price per 1M tokens.",
+            "type": "number",
+            "format": "double"
+          }
+        },
+        "required": [
+          "price_1m_blended_3_to_1",
+          "price_1m_input_tokens",
+          "price_1m_output_tokens"
+        ]
+      },
+      "LlmModel": {
+        "title": "LlmModel",
+        "description": "A single LLM model entry returned by `ListLlmModels`.",
+        "type": "object",
+        "properties": {
+          "evaluations": {
+            "description": "Benchmark evaluation scores."
+          },
+          "id": {
+            "description": "Stable identifier for the model.",
+            "type": "string"
+          },
+          "median_output_tokens_per_second": {
+            "description": "Median output tokens per second.",
+            "type": "number",
+            "format": "double"
+          },
+          "median_time_to_first_token_seconds": {
+            "description": "Median time to first token in seconds.",
+            "type": "number",
+            "format": "double"
+          },
+          "model_creator": {
+            "description": "The creator of this model."
+          },
+          "name": {
+            "description": "Human-readable display name.",
+            "type": "string"
+          },
+          "pricing": {
+            "description": "Pricing information."
+          },
+          "slug": {
+            "description": "URL-safe slug (may change over time — prefer `id`).",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "slug",
+          "model_creator",
+          "evaluations",
+          "pricing",
+          "median_output_tokens_per_second",
+          "median_time_to_first_token_seconds"
+        ]
+      },
+      "PromptOptions": {
+        "title": "PromptOptions",
+        "description": "Configuration metadata describing how the LLM benchmarks were collected.",
+        "type": "object",
+        "properties": {
+          "parallel_queries": {
+            "description": "Number of parallel queries used during benchmarking.",
+            "type": "integer",
+            "format": "int32"
+          },
+          "prompt_length": {
+            "description": "Length of prompts used (`\"short\"`, `\"medium\"`, etc.).",
+            "type": "string"
+          }
+        },
+        "required": [
+          "parallel_queries",
+          "prompt_length"
+        ]
+      },
+      "LlmModelsResponse": {
+        "title": "LlmModelsResponse",
+        "description": "Response body for the `ListLlmModels` endpoint.",
+        "type": "object",
+        "properties": {
+          "data": {
+            "description": "List of LLM models with their benchmarks.",
+            "type": "array",
+            "items": {
+              "allOf": [
+                {
+                  "$ref": "#/components/schemas/LlmModel"
+                }
+              ]
+            }
+          },
+          "prompt_options": {
+            "description": "Prompt configuration used for the benchmark."
+          },
+          "status": {
+            "description": "HTTP status code echoed by the API.",
+            "type": "integer",
+            "format": "int32"
+          }
+        },
+        "required": [
+          "status",
+          "prompt_options",
+          "data"
+        ]
+      },
+      "MediaModel": {
+        "title": "MediaModel",
+        "description": "A single media-generation model entry. Used by all `/data/media/*` endpoints.",
+        "type": "object",
+        "properties": {
+          "appearances": {
+            "description": "Number of appearances.",
+            "type": "integer",
+            "format": "int32"
+          },
+          "categories": {
+            "description": "Per-category breakdown, when requested.",
+            "type": "array",
+            "items": {
+              "allOf": [
+                {
+                  "$ref": "#/components/schemas/CategoryBreakdown"
+                }
+              ]
+            }
+          },
+          "ci95": {
+            "description": "95% confidence interval.",
+            "type": "string"
+          },
+          "elo": {
+            "description": "Elo rating.",
+            "type": "integer",
+            "format": "int32"
+          },
+          "id": {
+            "description": "Stable identifier for the model.",
+            "type": "string"
+          },
+          "model_creator": {
+            "description": "The creator of this model."
+          },
+          "name": {
+            "description": "Human-readable display name.",
+            "type": "string"
+          },
+          "rank": {
+            "description": "Rank position.",
+            "type": "integer",
+            "format": "int32"
+          },
+          "release_date": {
+            "description": "Release date, if available.",
+            "type": "string"
+          },
+          "slug": {
+            "description": "URL-safe slug (may change over time — prefer `id`).",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "slug",
+          "model_creator",
+          "elo",
+          "rank",
+          "ci95",
+          "appearances"
+        ]
+      },
+      "MediaModelsResponse": {
+        "title": "MediaModelsResponse",
+        "description": "Shared response shape for all `/data/media/*` endpoints.",
+        "type": "object",
+        "properties": {
+          "data": {
+            "description": "List of media models with their Elo ratings.",
+            "type": "array",
+            "items": {
+              "allOf": [
+                {
+                  "$ref": "#/components/schemas/MediaModel"
+                }
+              ]
+            }
+          },
+          "include_categories": {
+            "description": "Whether category breakdown was included.",
+            "type": "boolean"
+          },
+          "status": {
+            "description": "HTTP status code echoed by the API.",
+            "type": "integer",
+            "format": "int32"
+          }
+        },
+        "required": [
+          "status",
+          "data"
+        ]
+      },
+      "CritPtMessage": {
+        "title": "CritPtMessage",
+        "description": "A single message in the prompt history sent to the model under test.",
+        "type": "object",
+        "properties": {
+          "content": {
+            "description": "Message content.",
+            "type": "string"
+          },
+          "role": {
+            "description": "Role of the message sender (e.g., `\"user\"`, `\"assistant\"`).",
+            "type": "string"
+          }
+        },
+        "required": [
+          "role",
+          "content"
+        ]
+      },
+      "CritPtSubmission": {
+        "title": "CritPtSubmission",
+        "description": "One submission in a CritPt evaluation batch.\n\n`generation_config` is an arbitrary JSON object describing the sampler\nconfiguration used to produce `generated_code`. Its shape is intentionally\nopen-ended.",
+        "type": "object",
+        "properties": {
+          "generated_code": {
+            "description": "The generated code submission.",
+            "type": "string"
+          },
+          "generation_config": {
+            "description": "Sampler/generation configuration as an arbitrary JSON object."
+          },
+          "messages": {
+            "description": "Optional prompt history.",
+            "type": "array",
+            "items": {
+              "allOf": [
+                {
+                  "$ref": "#/components/schemas/CritPtMessage"
+                }
+              ]
+            }
+          },
+          "model": {
+            "description": "Name of the model used.",
+            "type": "string"
+          },
+          "problem_id": {
+            "description": "Identifier of the problem being evaluated.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "problem_id",
+          "generated_code",
+          "model",
+          "generation_config"
+        ]
+      },
+      "CritPtEvaluateBody": {
+        "title": "CritPtEvaluateBody",
+        "description": "Request body for the `EvaluateCritPt` endpoint.\n\n`batch_metadata` is an arbitrary JSON object that callers may populate with\nrun identifiers, environment info, or be left as `{}`. It is skipped during\nserialization when null so an empty object on the wire is also valid.",
+        "type": "object",
+        "properties": {
+          "batch_metadata": {
+            "description": "Optional metadata about the evaluation batch."
+          },
+          "submissions": {
+            "description": "List of code-generation submissions to evaluate.",
+            "type": "array",
+            "items": {
+              "allOf": [
+                {
+                  "$ref": "#/components/schemas/CritPtSubmission"
+                }
+              ]
+            }
+          }
+        },
+        "required": [
+          "submissions"
+        ]
+      },
+      "CritPtEvaluateResponse": {
+        "title": "CritPtEvaluateResponse",
+        "description": "Response body for the `EvaluateCritPt` endpoint.",
+        "type": "object",
+        "properties": {
+          "accuracy": {
+            "description": "Overall accuracy score.",
+            "type": "number",
+            "format": "double"
+          },
+          "judge_error_count": {
+            "description": "Number of judge evaluation errors.",
+            "type": "integer",
+            "format": "int32"
+          },
+          "server_timeout_count": {
+            "description": "Number of server-side timeouts.",
+            "type": "integer",
+            "format": "int32"
+          },
+          "timeout_rate": {
+            "description": "Rate of timeout responses.",
+            "type": "number",
+            "format": "double"
+          }
+        },
+        "required": [
+          "accuracy",
+          "timeout_rate",
+          "server_timeout_count",
+          "judge_error_count"
+        ]
+      }
+    },
+    "securitySchemes": {
+      "apiKeyAuth": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "x-api-key",
+        "description": "API Key authentication"
+      }
+    }
+  },
+  "security": [
+    {
+      "apiKeyAuth": []
+    }
+  ],
+  "externalDocs": {
+    "description": "API Documentation",
+    "url": "https://artificialanalysis.ai/api-reference"
+  },
+  "x-schematic": {
+    "env_mapping": {
+      "api_key": {
+        "header": "x-api-key",
+        "names": {
+          "names": [
+            "ARTIFICIAL_ANALYSIS_API_KEY"
+          ]
+        }
+      },
+      "basic_pass": null,
+      "basic_user": null,
+      "bearer_token": null
+    },
+    "module_path": "artificial_analysis"
+  },
+  "x-schematic-grouped-from": [
+    "ArtificialAnalysisData",
+    "ArtificialAnalysisCritPt"
+  ]
+}

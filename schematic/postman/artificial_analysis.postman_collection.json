@@ -1,0 +1,200 @@
+{
+  "info": {
+    "name": "Artificial_analysis",
+    "description": "ArtificialAnalysisData: Artificial Analysis free data API: LLM and media-model benchmark catalogs.\nArtificialAnalysisCritPt: Artificial Analysis CritPt benchmark: submit code-generation results for evaluation.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "https://artificialanalysis.ai/api/v2",
+      "description": "Base URL for ArtificialAnalysisData"
+    },
+    {
+      "key": "apiKey",
+      "value": "",
+      "description": "API key value"
+    }
+  ],
+  "auth": {
+    "type": "apikey",
+    "apikey": [
+      {
+        "key": "key",
+        "value": "x-api-key"
+      },
+      {
+        "key": "value",
+        "value": "{{apiKey}}"
+      },
+      {
+        "key": "in",
+        "value": "header"
+      }
+    ]
+  },
+  "item": [
+    {
+      "name": "Critpt",
+      "item": [
+        {
+          "name": "EvaluateCritPt",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{baseUrl}}/critpt/evaluate",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "critpt",
+                "evaluate"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Submit a batch of code-generation submissions for evaluation against the CritPt benchmark."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Data",
+      "item": [
+        {
+          "name": "ListLlmModels",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/data/llms/models",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "data",
+                "llms",
+                "models"
+              ]
+            },
+            "description": "Returns primary metrics from independent LLM benchmarks: intelligence, speed, and pricing."
+          }
+        },
+        {
+          "name": "ListTextToImageModels",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/data/media/text-to-image",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "data",
+                "media",
+                "text-to-image"
+              ],
+              "query": [
+                {
+                  "key": "include_categories",
+                  "description": "Include a breakdown of Elo scores by category."
+                }
+              ]
+            },
+            "description": "Returns Elo ratings for text-to-image models."
+          }
+        },
+        {
+          "name": "ListImageEditingModels",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/data/media/image-editing",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "data",
+                "media",
+                "image-editing"
+              ]
+            },
+            "description": "Returns Elo ratings for image-editing models."
+          }
+        },
+        {
+          "name": "ListTextToSpeechModels",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/data/media/text-to-speech",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "data",
+                "media",
+                "text-to-speech"
+              ]
+            },
+            "description": "Returns Elo ratings for text-to-speech models."
+          }
+        },
+        {
+          "name": "ListTextToVideoModels",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/data/media/text-to-video",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "data",
+                "media",
+                "text-to-video"
+              ],
+              "query": [
+                {
+                  "key": "include_categories",
+                  "description": "Include a breakdown of Elo scores by category."
+                }
+              ]
+            },
+            "description": "Returns Elo ratings for text-to-video models."
+          }
+        },
+        {
+          "name": "ListImageToVideoModels",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/data/media/image-to-video",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "data",
+                "media",
+                "image-to-video"
+              ],
+              "query": [
+                {
+                  "key": "include_categories",
+                  "description": "Include a breakdown of Elo scores by category."
+                }
+              ]
+            },
+            "description": "Returns Elo ratings for image-to-video models."
+          }
+        }
+      ]
+    }
+  ]
+}

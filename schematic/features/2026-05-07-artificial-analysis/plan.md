@@ -16,8 +16,21 @@ docs_updated_during_phase_2:
   - schematic/definitions/README.md
 docs_created_during_phase_2: []
 skills_files_updated_during_phase_2: []
+source_files_during_phase_3:
+  - schematic/gen/src/codegen/api_struct/mod.rs
+  - schematic/gen/src/pipeline.rs
+  - schematic/schema/src/artificial_analysis.rs
+  - schematic/schema/src/lib.rs
+  - schematic/schema/src/prelude.rs
+  - schematic/openapi/artificial_analysis.json
+  - schematic/postman/artificial_analysis.postman_collection.json
+docs_updated_during_phase_3: []
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3: []
 packages:
   - schematic-definitions
+  - schematic-gen
+  - schematic-schema
 ---
 
 # Artificial Analysis API Definition Execution Plan
