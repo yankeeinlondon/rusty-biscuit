@@ -120,7 +120,7 @@ fn parse_cli_from(argv: &[OsString]) -> Cli {
 /// Subcommand names that must NOT receive an `ArgAction::Help` injection.
 ///
 /// Wrapper subcommands manage their own help via a manual `help: bool` field
-/// + `print_wrapper_help`. Hidden subcommands either declare their own help
+/// plus `print_wrapper_help`. Hidden subcommands either declare their own help
 /// surface or are never invoked interactively by users.
 fn skip_help_injection(name: &str) -> bool {
     argv::WRAPPER_SUBCOMMANDS.contains(&name) || name == "__complete"

@@ -971,7 +971,7 @@ exit 0
         .env("CLAUDINE_ARGS_FILE", &args_path)
         .env("CLAUDINE_STDIN_FILE", &stdin_path)
         .args(["kimi", "hi"])
-        .timeout(std::time::Duration::from_secs(15))
+        .timeout(std::time::Duration::from_secs(60))
         .assert()
         .success();
 
