@@ -2498,10 +2498,7 @@ mod tests {
     fn output_detection_and_application_uses_catalog_not_raw_dispatch() {
         let source = include_str!("mod.rs");
 
-        for fn_signature in [
-            "fn apply_output_format(",
-            "fn apply_entrypoint(",
-        ] {
+        for fn_signature in ["fn apply_output_format(", "fn apply_entrypoint("] {
             let start = source
                 .find(fn_signature)
                 .unwrap_or_else(|| panic!("{fn_signature} default impl should exist in mod.rs"));

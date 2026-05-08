@@ -15,9 +15,7 @@ use serde_json::{Value, json};
 use crate::log;
 use crate::table_utils::base_table;
 
-use super::{
-    ListArgs, auth_summary, current_repo_root, redacted_keys, transport_label,
-};
+use super::{ListArgs, auth_summary, current_repo_root, redacted_keys, transport_label};
 
 pub(super) fn run_list(args: ListArgs, json_output: bool) -> Result<()> {
     let catalog = McpCatalogStore::load()?;

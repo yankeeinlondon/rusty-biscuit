@@ -6,9 +6,9 @@ use biscuit_terminal::terminal::Terminal;
 use claudine::provider::Provider;
 use color_eyre::eyre::Result;
 
+use super::{CompositionExecutionMode, StructuredCodexOutput};
 use crate::commands::wrap::exec;
 use crate::commands::wrap::profile::WrapperProfile;
-use super::{CompositionExecutionMode, StructuredCodexOutput};
 use crate::commands::wrap::subagent_watchdog::TimeoutConfig;
 
 /// Run the legacy (non-structured) branch of [`super::execute_without_harness`].
@@ -68,8 +68,8 @@ pub(crate) fn run_legacy_branch(
                 *agent_perf_out = Some(result.telemetry.into_agent_perf(None));
                 let response = if provider == Provider::Codex {
                     if let Some(output) = structured_codex_output {
-                        let text = std::fs::read_to_string(&output.last_message_path)
-                            .unwrap_or_default();
+                        let text =
+                            std::fs::read_to_string(&output.last_message_path).unwrap_or_default();
                         let _ = std::fs::remove_file(&output.last_message_path);
                         text
                     } else {
@@ -99,8 +99,7 @@ pub(crate) fn run_legacy_branch(
                 let response = profile.parse_captured_output(&capture.data.stdout);
                 if !response.trim().is_empty() {
                     if std::io::stdout().is_terminal() {
-                        let rendered =
-                            crate::output::render_assistant_markdown(&response, term);
+                        let rendered = crate::output::render_assistant_markdown(&response, term);
                         std::io::stdout().write_all(rendered.as_bytes())?;
                         if !rendered.ends_with('\n') {
                             std::io::stdout().write_all(b"\n")?;

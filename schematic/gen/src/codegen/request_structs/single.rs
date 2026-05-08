@@ -9,7 +9,7 @@
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 
-use crate::codegen::request_structs::shared::{to_snake_case, QueryParamInfo};
+use crate::codegen::request_structs::shared::{QueryParamInfo, to_snake_case};
 
 /// Generates `From<&str>` and `From<String>` impls for single-param no-body request structs.
 ///

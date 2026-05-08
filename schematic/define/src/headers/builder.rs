@@ -1,9 +1,9 @@
 #[allow(unused_imports)]
-use super::env::{EnvMapping, EnvList, resolve_env_list};
+use super::ApiKeyEnv;
+#[allow(unused_imports)]
+use super::env::{EnvList, EnvMapping, resolve_env_list};
 use super::error::HeaderError;
 use super::sensitive::SensitiveString;
-#[allow(unused_imports)]
-use super::ApiKeyEnv;
 
 /// HTTP headers builder with support for authentication strategies.
 ///

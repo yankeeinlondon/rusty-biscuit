@@ -530,9 +530,7 @@ pub fn build_cargo_monorepo(root: &Path, package_count: usize) -> Repository {
         let pkg = root.join(format!("crates/pkg{i:03}"));
         write_file(
             &pkg.join("Cargo.toml"),
-            &format!(
-                "[package]\nname = \"pkg{i:03}\"\nversion = \"0.1.0\"\nedition = \"2021\"\n"
-            ),
+            &format!("[package]\nname = \"pkg{i:03}\"\nversion = \"0.1.0\"\nedition = \"2021\"\n"),
         );
         write_file(
             &pkg.join("src/lib.rs"),

@@ -9,8 +9,8 @@ use biscuit_terminal::terminal::Terminal;
 use sniff::filesystem::git::BehindStatus;
 use sniff::filesystem::repo::{DependencyEntry, Package, RepoInfo};
 
-use super::{filter_packages, format_number, relative_path};
 use super::language::render_framework_summary;
+use super::{filter_packages, format_number, relative_path};
 
 fn area_parent(area: &str) -> Option<String> {
     if area == "root" {

@@ -431,15 +431,12 @@ fn check_no_links(exceptions: &mut Vec<SkillException>, name: &str, skill_md: &P
 
 #[cfg(test)]
 mod tests {
-    
 
     use tempfile::TempDir;
 
     use super::*;
-    
-    use crate::linking::skills::test_helpers::{
-        setup_skill, test_paths, test_paths_with_gemini,
-    };
+
+    use crate::linking::skills::test_helpers::{setup_skill, test_paths, test_paths_with_gemini};
     use crate::provider::Provider;
 
     #[test]

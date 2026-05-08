@@ -1,8 +1,8 @@
 use rusqlite::Connection;
 
+use crate::error::Result;
 use crate::reporting::metrics::summarize_metrics;
 use crate::reporting::types::{DateRange, ReportingFilters, ToolsReport};
-use crate::error::Result;
 
 use super::common::{
     load_all_tool_stats, load_recovery_events, load_sessions, load_tool_stats, load_totals,

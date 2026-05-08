@@ -20,8 +20,8 @@
 //! println!("Language manager: {}", lang_mgr);
 //! ```
 
-mod language;
 pub mod dependency;
+mod language;
 mod manager;
 mod network;
 mod os;

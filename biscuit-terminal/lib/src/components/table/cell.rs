@@ -1,7 +1,4 @@
-use crate::utils::{
-    block_constraint::visible_width,
-    layout::Alignment,
-};
+use crate::utils::{block_constraint::visible_width, layout::Alignment};
 
 use super::types::Currency;
 

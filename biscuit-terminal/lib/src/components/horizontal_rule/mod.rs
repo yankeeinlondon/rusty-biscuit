@@ -731,15 +731,15 @@ pub(crate) fn rasterize_svg_to_png(svg_data: &[u8]) -> Result<Vec<u8>, String> {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
+    use super::browser::{MarginToCss, nearest_basic_color, parse_basic_color, parse_hex_color};
     use super::*;
-    use super::browser::{nearest_basic_color, parse_basic_color, parse_hex_color, MarginToCss};
     use crate::components::renderable::BrowserRenderable;
     use crate::discovery::detection::ColorDepth;
     use crate::terminal::Terminal;
     use crate::utils::color::BasicColor;
     use crate::utils::layout::Margin;
     use insta::assert_snapshot;
+    use std::collections::HashMap;
 
     /// RAII guard that overrides `LC_ALL` (and clears `LC_CTYPE` / `LANG`)
     /// for the duration of a single test, then restores the prior values

@@ -11,9 +11,7 @@ pub mod routes;
 pub mod test_connection;
 
 use redaction::MASKED_WEBHOOK_DETAIL;
-use routes::{
-    PROVIDERS, build_messenger_from_fields, is_webhook, messenger_fields_with_name,
-};
+use routes::{PROVIDERS, build_messenger_from_fields, is_webhook, messenger_fields_with_name};
 use test_connection::{build_test_route_from_modal, can_test};
 
 pub fn render(frame: &mut Frame, area: Rect, app: &App) {

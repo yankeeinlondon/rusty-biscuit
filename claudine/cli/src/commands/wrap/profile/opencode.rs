@@ -3,8 +3,8 @@ use claudine::system_prompt::{PreparedSystemPrompt, SystemPromptMode};
 use color_eyre::eyre::{Result, bail};
 use std::path::Path;
 
-use std::io::Write;
 use super::{PromptDelivery, WrapperProfile};
+use std::io::Write;
 
 pub(crate) struct OpencodeWrapper;
 

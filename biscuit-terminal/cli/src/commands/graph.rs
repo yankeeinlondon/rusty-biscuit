@@ -155,15 +155,14 @@ impl Run for GraphExpressionArgs {
 
         if let Some(w) = &self.width {
             use biscuit_terminal::components::terminal_image::parse_width_spec;
-            let image_width = parse_width_spec(&w.to_string())
-                .map_err(|e| color_eyre::eyre::eyre!("{}", e))?;
+            let image_width =
+                parse_width_spec(&w.to_string()).map_err(|e| color_eyre::eyre::eyre!("{}", e))?;
             graph = graph.with_width(image_width);
         }
 
         apply_renderable_layout(&mut graph, &self.layout);
 
-        display_graph(&graph, &source, &self.layout, self.meta,
-        )?;
+        display_graph(&graph, &source, &self.layout, self.meta)?;
 
         if self.example {
             print_example_command(GRAPH_EXPRESSION_EXAMPLE_CMD);

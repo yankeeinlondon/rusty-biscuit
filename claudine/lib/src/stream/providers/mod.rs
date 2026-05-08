@@ -10,24 +10,15 @@ pub mod qwen;
 // resolves to this module, so we mirror the items that previously lived
 // directly in `stream/`.
 pub(crate) use super::{
-    ensure_message_newline,
-    parser,
-    protocol,
-    semantic,
-    summary,
-    token_usage,
-    trace_malformed_line,
-    trace_parser_event,
-    trace_parser_finish,
-    trace_session_metadata,
-    trace_summary_update,
+    ensure_message_newline, parser, protocol, semantic, summary, token_usage, trace_malformed_line,
+    trace_parser_event, trace_parser_finish, trace_session_metadata, trace_summary_update,
     trace_tool_event,
 };
 
-use crate::provider_id::Provider;
-use crate::stream::parser::SemanticStreamParser;
 use crate::provider::BoxedSemanticEventSink;
+use crate::provider_id::Provider;
 use crate::stream::ParserConfig;
+use crate::stream::parser::SemanticStreamParser;
 
 /// Marker trait for semantic stream parsers.
 ///
@@ -48,9 +39,10 @@ pub fn for_provider(
         Provider::Codex => Box::new(codex::CodexSemanticStreamParser::new(sink, config.model)),
         Provider::Gemini => Box::new(gemini::GeminiSemanticStreamParser::new(sink)),
         Provider::KimiCode => Box::new(kimi::KimiSemanticStreamParser::new(sink)),
-        Provider::OpenCode => {
-            Box::new(opencode::OpenCodeSemanticStreamParser::new(sink, config.model))
-        }
+        Provider::OpenCode => Box::new(opencode::OpenCodeSemanticStreamParser::new(
+            sink,
+            config.model,
+        )),
         Provider::QwenCode => Box::new(qwen::QwenSemanticStreamParser::new(sink)),
         _ => Box::new(claude::ClaudeSemanticStreamParser::new(sink)),
     }

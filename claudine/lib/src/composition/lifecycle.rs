@@ -600,9 +600,7 @@ fn normalize_empty_string(field: &mut Option<String>) {
 ///
 /// Returns `(Some("X"), vec!["A", "B", "C"])` on match, or
 /// `(None, LIFECYCLE_NOTIFICATION_FIELDS)` as a fallback.
-fn parse_serde_unknown_field(
-    err: &serde_json::Error,
-) -> (Option<String>, Vec<String>) {
+fn parse_serde_unknown_field(err: &serde_json::Error) -> (Option<String>, Vec<String>) {
     let msg = err.to_string();
 
     // Extract unknown field name between first pair of backticks.
@@ -1171,12 +1169,15 @@ mod tests {
     }
 
     fn test_config() -> LifecycleConfig {
-        parse_lifecycle_config(&json!({
-            "start":   { "stderr": "starting" },
-            "success": { "stderr": "done" },
-            "blocked": { "stderr": "blocked" },
-            "failure": { "stderr": "failed" },
-        }), dummy_path())
+        parse_lifecycle_config(
+            &json!({
+                "start":   { "stderr": "starting" },
+                "success": { "stderr": "done" },
+                "blocked": { "stderr": "blocked" },
+                "failure": { "stderr": "failed" },
+            }),
+            dummy_path(),
+        )
         .unwrap()
     }
 
@@ -1422,15 +1423,18 @@ mod tests {
 
     #[test]
     fn guard_non_audio_before_audio() {
-        let config = parse_lifecycle_config(&json!({
-            "start": {
-                "stderr": "starting",
-                "message": "msg",
-                "notify": "notify-msg",
-                "say": "hello",
-                "effect": "confirmation",
-            }
-        }), dummy_path())
+        let config = parse_lifecycle_config(
+            &json!({
+                "start": {
+                    "stderr": "starting",
+                    "message": "msg",
+                    "notify": "notify-msg",
+                    "say": "hello",
+                    "effect": "confirmation",
+                }
+            }),
+            dummy_path(),
+        )
         .unwrap();
         let (settings, messaging, term) = test_ctx();
         let ctx = LifecycleRuntimeContext {
@@ -1458,12 +1462,15 @@ mod tests {
 
     #[test]
     fn guard_say_first_ordering() {
-        let config = parse_lifecycle_config(&json!({
-            "start": {
-                "say_first": "hello",
-                "effect": "confirmation",
-            }
-        }), dummy_path())
+        let config = parse_lifecycle_config(
+            &json!({
+                "start": {
+                    "say_first": "hello",
+                    "effect": "confirmation",
+                }
+            }),
+            dummy_path(),
+        )
         .unwrap();
         let (settings, messaging, term) = test_ctx();
         let ctx = LifecycleRuntimeContext {
@@ -1544,9 +1551,12 @@ mod tests {
 
     #[test]
     fn notify_emits_without_active_route() {
-        let config = parse_lifecycle_config(&json!({
-            "start": { "notify": "Hello desktop" }
-        }), dummy_path())
+        let config = parse_lifecycle_config(
+            &json!({
+                "start": { "notify": "Hello desktop" }
+            }),
+            dummy_path(),
+        )
         .unwrap();
         let (settings, messaging, term) = test_ctx();
         let ctx = LifecycleRuntimeContext {
@@ -1573,13 +1583,16 @@ mod tests {
 
     #[test]
     fn notify_emits_before_audio_phases() {
-        let config = parse_lifecycle_config(&json!({
-            "start": {
-                "notify": "Desktop first",
-                "say": "hello",
-                "effect": "confirmation",
-            }
-        }), dummy_path())
+        let config = parse_lifecycle_config(
+            &json!({
+                "start": {
+                    "notify": "Desktop first",
+                    "say": "hello",
+                    "effect": "confirmation",
+                }
+            }),
+            dummy_path(),
+        )
         .unwrap();
         let (settings, messaging, term) = test_ctx();
         let ctx = LifecycleRuntimeContext {
@@ -1603,9 +1616,12 @@ mod tests {
 
     #[test]
     fn notify_alone_no_other_outputs() {
-        let config = parse_lifecycle_config(&json!({
-            "success": { "notify": "Only notify" }
-        }), dummy_path())
+        let config = parse_lifecycle_config(
+            &json!({
+                "success": { "notify": "Only notify" }
+            }),
+            dummy_path(),
+        )
         .unwrap();
         let (settings, messaging, term) = test_ctx();
         let ctx = LifecycleRuntimeContext {
@@ -1649,7 +1665,8 @@ mod tests {
             }
         });
 
-        let err = parse_lifecycle_config(&frontmatter, Path::new("prompts/sentrux.md")).unwrap_err();
+        let err =
+            parse_lifecycle_config(&frontmatter, Path::new("prompts/sentrux.md")).unwrap_err();
         let CompositionError::LifecycleInvalid {
             property,
             unknown_field,
@@ -1669,9 +1686,18 @@ mod tests {
         assert!(expected_fields.contains(&"effect".to_string()));
 
         let rendered = strip_escape_codes(err.report_block_error_optimistic(Some(80)));
-        assert!(rendered.contains("success.speak"), "dotted property should appear: {rendered}");
-        assert!(rendered.contains("sentrux.md"), "file name should appear: {rendered}");
-        assert!(rendered.contains("say"), "expected fields should list 'say': {rendered}");
+        assert!(
+            rendered.contains("success.speak"),
+            "dotted property should appear: {rendered}"
+        );
+        assert!(
+            rendered.contains("sentrux.md"),
+            "file name should appear: {rendered}"
+        );
+        assert!(
+            rendered.contains("say"),
+            "expected fields should list 'say': {rendered}"
+        );
     }
 
     #[test]

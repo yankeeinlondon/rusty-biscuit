@@ -17,26 +17,25 @@ use tracing::{Span, info_span};
 
 use std::sync::Mutex;
 
-use biscuit_terminal::components::status::{Status, StatusState};
 use biscuit_terminal::components::renderable::Renderable;
+use biscuit_terminal::components::status::{Status, StatusState};
 
-use super::{
-    ChildIoOptions, ErrorParser, join_with_timeout, join_with_timeout_or, kill_process_group,
-    OutputTextCallback, ProcessResult, ProcessTelemetry, ReasoningCallback,
-    SemanticParserBuilder, stop_timing_ticker, StreamTextRenderer,
-};
+use super::super::section::SectionTracker;
+use super::super::stream_io::StreamOutput;
 use super::exit::exit_code_from_status;
+use super::subagent_watchdog::WatchdogState;
 use super::termination::{
-    apply_early_termination_to_summary, wait_with_signal_and_early_termination,
-    WatchdogTermination,
+    WatchdogTermination, apply_early_termination_to_summary, wait_with_signal_and_early_termination,
 };
-use super::timeouts::{wait_with_timeout, TimeoutConfig};
+use super::timeouts::{TimeoutConfig, wait_with_timeout};
 use super::watchdog::{
     spawn_flush_if_idle_ticker, spawn_prompt_timing_monitor, spawn_timeout_watchdog_ticker,
 };
-use super::subagent_watchdog::WatchdogState;
-use super::super::section::SectionTracker;
-use super::super::stream_io::StreamOutput;
+use super::{
+    ChildIoOptions, ErrorParser, OutputTextCallback, ProcessResult, ProcessTelemetry,
+    ReasoningCallback, SemanticParserBuilder, StreamTextRenderer, join_with_timeout,
+    join_with_timeout_or, kill_process_group, stop_timing_ticker,
+};
 
 /// Spawn the provider child process and return its exit code.
 ///
@@ -738,6 +737,7 @@ pub(crate) fn run_child_stream_semantic(
         .collect();
     let plain = crate::log::is_plain();
     let stderr_term = crate::log::terminal();
+    let termination_term = stderr_term.clone();
     let stderr_span = Span::current();
     let (mut bridge_for_thread, finalize_for_main, early_terminate_rx) = match stderr_bridge {
         Some(StderrBridgeHandle {
@@ -839,8 +839,7 @@ pub(crate) fn run_child_stream_semantic(
     // stderr early-terminate bridge is active. The watchdog is the sole
     // source of timeout-driven termination; the wait loop only consumes
     // signals from channels.
-    let needs_advanced_wait = early_terminate_rx.is_some()
-        || watchdog_enabled;
+    let needs_advanced_wait = early_terminate_rx.is_some() || watchdog_enabled;
     let (exit_code, termination, early_termination) = if needs_advanced_wait {
         // Synthesize a disconnected receiver when no stderr bridge is
         // installed so the wait loop can still receive watchdog signals.
@@ -875,7 +874,7 @@ pub(crate) fn run_child_stream_semantic(
     {
         let rendered = Status::new(message)
             .state(StatusState::Warning)
-            .render(&crate::log::terminal());
+            .render(&termination_term);
         stream_output.emit_stderr_line(&rendered);
     }
 

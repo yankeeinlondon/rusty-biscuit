@@ -6,14 +6,14 @@ pub(crate) mod codex;
 pub(crate) mod gemini;
 pub(crate) mod goose;
 pub(crate) mod kimicode;
-pub mod messaging_block;
 pub mod merge;
+pub mod messaging_block;
 pub mod migration;
 pub(crate) mod opencode;
 pub(crate) mod qwen;
 pub(crate) mod roo;
-pub mod tts;
 mod trait_def;
+pub mod tts;
 
 pub use trait_def::{AgentConfigurator, ProviderHookPlan, RegistrationResult, SkipReason};
 

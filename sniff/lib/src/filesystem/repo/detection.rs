@@ -19,14 +19,12 @@ use super::manifest_index::{
     discover_packages_with_optional_index as mi_discover_packages_with_optional_index,
 };
 use super::npm::{
-    detect_npm_workspace, detect_pnpm_workspace, detect_yarn_workspace,
-    npm_package_name, npm_package_version, package_json_dependencies_from_value,
+    detect_npm_workspace, detect_pnpm_workspace, detect_yarn_workspace, npm_package_name,
+    npm_package_version, package_json_dependencies_from_value,
     parse_package_json_workspace_patterns, parse_pnpm_workspace_patterns,
     resolve_js_package_manager,
 };
-use super::nx_turbo::{
-    detect_lerna, detect_nx, detect_turborepo, parse_lerna_workspace_patterns,
-};
+use super::nx_turbo::{detect_lerna, detect_nx, detect_turborepo, parse_lerna_workspace_patterns};
 use super::python::{
     parse_requirements_txt_dependencies, pyproject_dependencies_from_value, pyproject_package_name,
     pyproject_package_version,

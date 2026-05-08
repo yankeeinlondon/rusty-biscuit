@@ -131,7 +131,11 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
         let items: Vec<String> = ACTION_TYPE_LABELS.iter().map(|s| s.to_string()).collect();
         let title = format!("Add Action to: {}", event.human_name());
         super::super::super::widgets::modal::render_list_modal(
-            frame, area, &title, &items, *highlighted,
+            frame,
+            area,
+            &title,
+            &items,
+            *highlighted,
         );
     }
 
@@ -253,11 +257,10 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
                 let list = List::new(items);
                 frame.render_widget(list, chunks[0]);
 
-                let hotkey_line =
-                    super::super::super::widgets::modal::build_modal_hotkey_line(&[
-                        ("ENTER", "Edit"),
-                        ("ESC", "Done"),
-                    ]);
+                let hotkey_line = super::super::super::widgets::modal::build_modal_hotkey_line(&[
+                    ("ENTER", "Edit"),
+                    ("ESC", "Done"),
+                ]);
                 let hotkey_widget = Paragraph::new(hotkey_line)
                     .alignment(Alignment::Center)
                     .style(Style::default().bg(Color::Indexed(236)));
@@ -296,11 +299,10 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
                 ]);
                 frame.render_widget(Paragraph::new(input_line), chunks[0]);
 
-                let hotkey_line =
-                    super::super::super::widgets::modal::build_modal_hotkey_line(&[
-                        ("ENTER", "Confirm"),
-                        ("ESC", "Cancel"),
-                    ]);
+                let hotkey_line = super::super::super::widgets::modal::build_modal_hotkey_line(&[
+                    ("ENTER", "Confirm"),
+                    ("ESC", "Cancel"),
+                ]);
                 let hotkey_widget = Paragraph::new(hotkey_line)
                     .alignment(Alignment::Center)
                     .style(Style::default().bg(Color::Indexed(236)));
@@ -339,11 +341,10 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
                 ]);
                 frame.render_widget(Paragraph::new(input_line), chunks[0]);
 
-                let hotkey_line =
-                    super::super::super::widgets::modal::build_modal_hotkey_line(&[
-                        ("ENTER", "Confirm"),
-                        ("ESC", "Cancel"),
-                    ]);
+                let hotkey_line = super::super::super::widgets::modal::build_modal_hotkey_line(&[
+                    ("ENTER", "Confirm"),
+                    ("ESC", "Cancel"),
+                ]);
                 let hotkey_widget = Paragraph::new(hotkey_line)
                     .alignment(Alignment::Center)
                     .style(Style::default().bg(Color::Indexed(236)));

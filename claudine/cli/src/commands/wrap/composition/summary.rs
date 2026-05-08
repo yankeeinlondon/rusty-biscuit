@@ -7,7 +7,10 @@ use claudine::stream::stderr::Verbosity;
 use claudine::stream::summary::StreamExecutionSummary;
 
 use crate::commands::wrap::profile::WrapperProfile;
-use crate::commands::wrap::{StreamSummaryContext, StructuredSummaryDetails, emit_stream_summary_with_context, format_summary_prose, format_verbose_summary_details_prose};
+use crate::commands::wrap::{
+    StreamSummaryContext, StructuredSummaryDetails, emit_stream_summary_with_context,
+    format_summary_prose, format_verbose_summary_details_prose,
+};
 
 /// Emit the structured-stream summary trailer for a composition run.
 ///

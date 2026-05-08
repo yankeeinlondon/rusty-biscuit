@@ -52,19 +52,19 @@ impl Run for ErdArgs {
     fn run(self, ctx: &CliContext) -> color_eyre::Result<()> {
         let _ = std::io::stdout().flush();
 
-        let (entities, relationships, eff_title): (Vec<String>, Vec<String>, Option<&str>) = if self.example
-        {
-            (
-                ERD_EXAMPLE_ENTITIES.iter().map(|s| s.to_string()).collect(),
-                ERD_EXAMPLE_RELATIONSHIPS
-                    .iter()
-                    .map(|s| s.to_string())
-                    .collect(),
-                Some("E-Commerce Schema"),
-            )
-        } else {
-            (self.entity, self.relationships, self.title.as_deref())
-        };
+        let (entities, relationships, eff_title): (Vec<String>, Vec<String>, Option<&str>) =
+            if self.example {
+                (
+                    ERD_EXAMPLE_ENTITIES.iter().map(|s| s.to_string()).collect(),
+                    ERD_EXAMPLE_RELATIONSHIPS
+                        .iter()
+                        .map(|s| s.to_string())
+                        .collect(),
+                    Some("E-Commerce Schema"),
+                )
+            } else {
+                (self.entity, self.relationships, self.title.as_deref())
+            };
 
         if relationships.is_empty() && entities.is_empty() {
             return Err(color_eyre::eyre::eyre!(

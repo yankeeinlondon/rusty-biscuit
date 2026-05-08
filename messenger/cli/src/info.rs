@@ -9,9 +9,7 @@ use std::collections::BTreeMap;
 
 use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::components::renderable::Renderable;
-use biscuit_terminal::components::table::{
-    Table as TerminalTable, TableCellContent, TableColumn,
-};
+use biscuit_terminal::components::table::{Table as TerminalTable, TableCellContent, TableColumn};
 use biscuit_terminal::terminal::Terminal;
 use biscuit_terminal::utils::layout::Alignment;
 use color_eyre::eyre::Result;
@@ -550,7 +548,10 @@ mod tests {
         // its `--wait` / `-A` round-trips work end-to-end against dunst.
         let info = linux_helpers_with_daemon("dunst");
         let order = compute_election_order(&info, OsType::Linux, &[]);
-        assert_eq!(order, vec!["dunstify".to_string(), "notify-send".to_string()]);
+        assert_eq!(
+            order,
+            vec!["dunstify".to_string(), "notify-send".to_string()]
+        );
     }
 
     #[test]
@@ -588,7 +589,10 @@ mod tests {
                 ExecutableSource::Path,
             );
         let order = compute_election_order(&info, OsType::Linux, &[]);
-        assert_eq!(order, vec!["notify-send".to_string(), "dunstify".to_string()]);
+        assert_eq!(
+            order,
+            vec!["notify-send".to_string(), "dunstify".to_string()]
+        );
     }
 
     #[test]
@@ -612,7 +616,10 @@ mod tests {
 
         let term = Terminal::builder().is_tty(false).width(80).build();
         let text = render_text(&report, &term);
-        assert!(text.contains("Active daemon:"), "missing daemon row: {text}");
+        assert!(
+            text.contains("Active daemon:"),
+            "missing daemon row: {text}"
+        );
         assert!(text.contains("dunst"), "missing daemon name: {text}");
         assert!(text.contains("knopwob"), "missing vendor: {text}");
         assert!(text.contains("1.9.2"), "missing version: {text}");
@@ -637,7 +644,10 @@ mod tests {
         let term = Terminal::builder().is_tty(false).width(80).build();
         let text = render_text(&report, &term);
         assert!(text.contains("dunstify"), "missing dunstify row: {text}");
-        assert!(text.contains("notify-send"), "missing notify-send row: {text}");
+        assert!(
+            text.contains("notify-send"),
+            "missing notify-send row: {text}"
+        );
         // The numbered prefix proves dunstify ranks ahead of notify-send.
         let dunstify_pos = text.find("dunstify").expect("dunstify present");
         let notify_pos = text.find("notify-send").expect("notify-send present");

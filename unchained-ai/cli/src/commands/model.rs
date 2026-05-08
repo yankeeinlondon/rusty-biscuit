@@ -13,8 +13,7 @@ use unchained_ai::rigging::providers::models::ProviderModel;
 
 /// Run the `model` subcommand.
 pub async fn run(model_str: String, json: bool) -> Result<()> {
-    let model = ProviderModel::parse_wire_id(&model_str)
-        .map_err(|e| eyre!("{e}"))?;
+    let model = ProviderModel::parse_wire_id(&model_str).map_err(|e| eyre!("{e}"))?;
 
     if json {
         render_json(&model)?;
@@ -29,8 +28,14 @@ fn render_json(model: &ProviderModel) -> Result<()> {
     let mut map = Map::new();
 
     map.insert("model".into(), Value::String(model.wire_id()));
-    map.insert("provider".into(), Value::String(model.provider().display_name().to_string()));
-    map.insert("model_id".into(), Value::String(model.model_id().to_string()));
+    map.insert(
+        "provider".into(),
+        Value::String(model.provider().display_name().to_string()),
+    );
+    map.insert(
+        "model_id".into(),
+        Value::String(model.model_id().to_string()),
+    );
 
     if let Some(meta) = model.metadata() {
         map.insert("metadata".into(), metadata_to_json(meta));
@@ -85,7 +90,10 @@ fn metadata_to_json(meta: &ProviderModelMetadata) -> Value {
         );
     }
     if let Some(defaults) = &meta.default_parameters {
-        map.insert("default_parameters".into(), default_parameters_to_json(defaults));
+        map.insert(
+            "default_parameters".into(),
+            default_parameters_to_json(defaults),
+        );
     }
     if let Some(cutoff) = &meta.knowledge_cutoff {
         map.insert("knowledge_cutoff".into(), Value::String(cutoff.clone()));
@@ -287,7 +295,9 @@ fn render_terminal(model: &ProviderModel) {
     // Description section
     if let Some(desc) = &meta.description {
         sections.push(section_header("Description"));
-        sections.push(RenderableContent::Component(Rc::new(Prose::new(desc.clone()))));
+        sections.push(RenderableContent::Component(Rc::new(Prose::new(
+            desc.clone(),
+        ))));
     }
 
     // Render all sections

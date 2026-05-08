@@ -10,6 +10,10 @@ pub mod closure;
 mod error;
 mod guardrails;
 pub mod lifecycle;
+pub mod loop_actions;
+pub mod loop_config;
+pub mod loop_engine;
+pub mod loop_expression;
 pub mod preflight;
 mod prepare;
 mod resolve;
@@ -25,6 +29,14 @@ pub use lifecycle::{
     LifecycleRunGuard, LifecycleRuntimeContext, LifecycleRuntimeState, LifecycleSignal,
     emit_lifecycle_signal, parse_lifecycle_config,
 };
+pub use loop_config::{
+    resolve_fail_fast_from_env, resolve_loop_config, resolve_max_iterations_from_env,
+};
+pub use loop_engine::{
+    DEFAULT_MAX_ITERATIONS, LoopExecutionOptions, LoopExecutionResult, LoopIterationContext,
+    LoopIterationOutput, execute_loop, execute_loop_with_config,
+};
+pub use loop_expression::{LoopAmbient, LoopExpressionLookup, evaluate_condition};
 pub use preflight::{PreFlightResult, resolve_shell_approvals};
 pub use prepare::{
     PrepareOptions, parse_selection_hints_from_frontmatter, prepare_direct, prepare_inline,
@@ -37,11 +49,12 @@ pub use select::{
 };
 pub use sequence::{build_step_overlay, resolve_sequence_plan};
 pub use types::{
-    AgentHint, CompositionClosurePlan, CompositionExecutionRequest, CompositionMode,
-    EffectiveSelectionHints, InlineClosurePlan, InstalledProviderSnapshot, ModelHint,
-    ModelResolutionReason, OutputFormat, PickerInfluence, PreparedComposition,
-    ProviderPickerOption, ProviderPickerPlan, ProviderResolutionReason, ResolutionMode,
-    ResolvedCompositionSource, ResolvedExecutionTarget, SelectedProvider, SelectionReason,
-    SequenceExecutionOptions, SequencePlan, SequenceRunSummary, SequenceSource, SequenceStep,
-    SequenceStepDraft, SequenceStepOverlay, SequenceStepResult, SharedApprovalCache,
+    AgentHint, AmbientVariable, CompositionClosurePlan, CompositionExecutionRequest,
+    CompositionMode, EffectiveSelectionHints, InlineClosurePlan, InstalledProviderSnapshot,
+    LoopAction, LoopCondition, LoopConfig, ModelHint, ModelResolutionReason, OutputFormat,
+    PickerInfluence, PreparedComposition, ProviderPickerOption, ProviderPickerPlan,
+    ProviderResolutionReason, ResolutionMode, ResolvedCompositionSource, ResolvedExecutionTarget,
+    SelectedProvider, SelectionReason, SequenceExecutionOptions, SequencePlan, SequenceRunSummary,
+    SequenceSource, SequenceStep, SequenceStepDraft, SequenceStepOverlay, SequenceStepResult,
+    SharedApprovalCache,
 };

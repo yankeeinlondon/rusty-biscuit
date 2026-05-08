@@ -206,4 +206,3 @@ pub(super) fn cargo_features_from_value(parsed: &toml_crate::Value) -> Vec<Strin
     names.sort();
     names
 }
-

@@ -11,8 +11,8 @@ use serde::{Deserialize, Serialize};
 use crate::actions::HookAction;
 use crate::error::{ClaudineError, Result};
 use crate::events::AgenticEvent;
-use crate::provider::Provider;
 use crate::protect::config::ProtectConfig;
+use crate::provider::Provider;
 
 // Re-exports for backward compatibility
 pub use crate::config::messaging_block::{ClaudineMessengerConfig, MessengerProviderConfig};

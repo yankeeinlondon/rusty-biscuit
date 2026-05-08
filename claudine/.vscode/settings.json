@@ -31,6 +31,7 @@
         "nextest",
         "nilly",
         "nocapture",
+        "omlx",
         "omnisearch",
         "oneline",
         "osascript",
@@ -49,6 +50,7 @@
         "TAVILY",
         "unconfigured",
         "UNPIVOT",
+        "vllm",
         "worktrees",
         "xhigh",
         "ZENMUX"

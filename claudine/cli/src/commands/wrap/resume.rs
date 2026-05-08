@@ -17,7 +17,10 @@ pub(crate) struct NextAttemptPlan {
     pub(crate) clear_prompt_tail: bool,
 }
 
-pub(crate) fn normalize_resume_args(profile: &dyn WrapperProfile, mut args: Vec<String>) -> Vec<String> {
+pub(crate) fn normalize_resume_args(
+    profile: &dyn WrapperProfile,
+    mut args: Vec<String>,
+) -> Vec<String> {
     if args.first().is_some_and(|arg| arg == profile.binary()) {
         args.remove(0);
     }
@@ -60,9 +63,7 @@ pub(crate) fn apply_next_attempt_plan(
         state.original_ref = path.display().to_string();
     }
     if let Some(ref overlay) = plan.set_overlay {
-        super::overlay::merge_frontmatter_overlay(&mut state.overlay,
-            overlay,
-        );
+        super::overlay::merge_frontmatter_overlay(&mut state.overlay, overlay);
     }
     if let Some(ref append) = plan.prompt_append {
         state.prompt_tail.push(append.clone());

@@ -23,6 +23,30 @@
 
 const HREF_PLACEHOLDER_MARK: char = '\u{0001}';
 
+/// Returns `true` when `ch` is an alphanumeric "word" character for the
+/// purposes of flanking rules. Backslash, `<`, whitespace, punctuation,
+/// and end-of-input are all non-word neighbours and therefore form a
+/// boundary at which an emphasis delimiter may open or close.
+fn is_word_neighbour(ch: Option<char>) -> bool {
+    matches!(ch, Some(c) if c.is_alphanumeric())
+}
+
+/// Returns `true` when an emphasis delimiter sits between two word
+/// characters and must therefore be treated as a literal rather than a
+/// delimiter. This is the rule that prevents identifiers like
+/// `OPENCODE_CONFIG_CONTENT` or `foo**bar**baz` from being chewed up by
+/// the bold/italics pre-processor.
+///
+/// We deliberately use a simple "alphanumeric on both sides" predicate
+/// rather than the full CommonMark left/right-flanking rules: terminal
+/// markup is overwhelmingly ASCII identifiers, predictability matters
+/// more than spec parity, and the simpler rule covers every documented
+/// acceptance case in
+/// [`biscuit-terminal/features/2026-05-05-prose-plus/spec.md`].
+fn is_intra_word(prev: Option<char>, next: Option<char>) -> bool {
+    is_word_neighbour(prev) && is_word_neighbour(next)
+}
+
 /// Apply the full Markdown pre-processing pipeline.
 ///
 /// Order: links → bold → italics. The output is fed verbatim into the
@@ -211,18 +235,27 @@ fn convert_bold(input: &str) -> String {
             continue;
         }
 
-        if ch == '*'
-            && i + 1 < chars.len()
-            && chars[i + 1] == '*'
-            && let Some(end) = find_closing_double(&chars, i + 2, '*')
-        {
-            output.push_str("<b>");
-            for c in &chars[i + 2..end] {
-                output.push(*c);
+        if ch == '*' && i + 1 < chars.len() && chars[i + 1] == '*' {
+            // Flanking rule: `**` is a bold opener only when it does NOT sit
+            // between two word characters. This keeps identifiers like
+            // `foo**bar**baz` from triggering bold.
+            let prev = if i > 0 { Some(chars[i - 1]) } else { None };
+            let next = if i + 2 < chars.len() {
+                Some(chars[i + 2])
+            } else {
+                None
+            };
+            if !is_intra_word(prev, next)
+                && let Some(end) = find_closing_double(&chars, i + 2, '*')
+            {
+                output.push_str("<b>");
+                for c in &chars[i + 2..end] {
+                    output.push(*c);
+                }
+                output.push_str("</b>");
+                i = end + 2;
+                continue;
             }
-            output.push_str("</b>");
-            i = end + 2;
-            continue;
         }
 
         output.push(ch);
@@ -269,16 +302,27 @@ fn convert_italics(input: &str) -> String {
             continue;
         }
 
-        if ch == '_'
-            && let Some(end) = find_closing_single(&chars, i + 1, '_')
-        {
-            output.push_str("<i>");
-            for c in &chars[i + 1..end] {
-                output.push(*c);
+        if ch == '_' {
+            // Flanking rule: `_` is an italics opener only when it does NOT
+            // sit between two word characters. This keeps identifiers like
+            // `OPENCODE_CONFIG_CONTENT` from being italicised mid-word.
+            let prev = if i > 0 { Some(chars[i - 1]) } else { None };
+            let next = if i + 1 < chars.len() {
+                Some(chars[i + 1])
+            } else {
+                None
+            };
+            if !is_intra_word(prev, next)
+                && let Some(end) = find_closing_single(&chars, i + 1, '_')
+            {
+                output.push_str("<i>");
+                for c in &chars[i + 1..end] {
+                    output.push(*c);
+                }
+                output.push_str("</i>");
+                i = end + 1;
+                continue;
             }
-            output.push_str("</i>");
-            i = end + 1;
-            continue;
         }
 
         output.push(ch);
@@ -289,9 +333,11 @@ fn convert_italics(input: &str) -> String {
 }
 
 /// Locate a closing `marker`+`marker` pair (e.g. `**`) at or after `start`,
-/// honouring backslash escapes and skipping over `<…>` tag declarations
-/// embedded in the prose. Returns the index of the first marker of the
-/// closing pair, or `None` if no closer is found before EOF.
+/// honouring backslash escapes, skipping over `<…>` tag declarations
+/// embedded in the prose, and applying the same intra-word inhibition as
+/// the opener: a doubled marker that sits between two word characters
+/// cannot close. Returns the index of the first marker of the closing
+/// pair, or `None` if no closer is found before EOF.
 fn find_closing_double(chars: &[char], start: usize, marker: char) -> Option<usize> {
     let mut i = start;
     while i + 1 < chars.len() {
@@ -310,6 +356,18 @@ fn find_closing_double(chars: &[char], start: usize, marker: char) -> Option<usi
             if i == start {
                 return None;
             }
+            let prev = if i > 0 { Some(chars[i - 1]) } else { None };
+            let next = if i + 2 < chars.len() {
+                Some(chars[i + 2])
+            } else {
+                None
+            };
+            if is_intra_word(prev, next) {
+                // Doubled marker is intra-word — keep scanning, this is
+                // not a real closer.
+                i += 2;
+                continue;
+            }
             return Some(i);
         }
         i += 1;
@@ -319,8 +377,10 @@ fn find_closing_double(chars: &[char], start: usize, marker: char) -> Option<usi
 
 /// Locate a closing single-character `marker` at or after `start`,
 /// honouring backslash escapes, skipping over `<…>` tag declarations,
-/// and treating doubled `marker` runs (`__`) as opaque so a single `_`
-/// inside a `__…__` sequence cannot terminate an outer italics run.
+/// treating doubled `marker` runs (`__`) as opaque so a single `_`
+/// inside a `__…__` sequence cannot terminate an outer italics run, and
+/// applying the same intra-word inhibition as the opener: a single
+/// marker that sits between two word characters cannot close.
 /// Returns the index of the closing marker, or `None` if no closer is
 /// found before EOF.
 fn find_closing_single(chars: &[char], start: usize, marker: char) -> Option<usize> {
@@ -344,6 +404,17 @@ fn find_closing_single(chars: &[char], start: usize, marker: char) -> Option<usi
         if ch == marker {
             if i == start {
                 return None;
+            }
+            let prev = if i > 0 { Some(chars[i - 1]) } else { None };
+            let next = if i + 1 < chars.len() {
+                Some(chars[i + 1])
+            } else {
+                None
+            };
+            if is_intra_word(prev, next) {
+                // Intra-word single marker — keep scanning.
+                i += 1;
+                continue;
             }
             return Some(i);
         }
@@ -425,7 +496,10 @@ mod tests {
     fn escaped_brackets_render_as_literal_text() {
         // Both `\[` and `\]` escapes survive pre-processing; downstream
         // tokens.rs converts them to literal `[` and `]`.
-        assert_eq!(preprocess_markdown(r"\[not a link\](url)"), r"\[not a link\](url)");
+        assert_eq!(
+            preprocess_markdown(r"\[not a link\](url)"),
+            r"\[not a link\](url)"
+        );
     }
 
     #[test]
@@ -564,10 +638,7 @@ mod tests {
 
     #[test]
     fn adjacent_bold_runs() {
-        assert_eq!(
-            preprocess_markdown("**a****b**"),
-            "<b>a</b><b>b</b>",
-        );
+        assert_eq!(preprocess_markdown("**a****b**"), "<b>a</b><b>b</b>",);
     }
 
     #[test]
@@ -579,10 +650,7 @@ mod tests {
 
     #[test]
     fn separate_italics_runs_with_text_between() {
-        assert_eq!(
-            preprocess_markdown("_a_ and _b_"),
-            "<i>a</i> and <i>b</i>",
-        );
+        assert_eq!(preprocess_markdown("_a_ and _b_"), "<i>a</i> and <i>b</i>",);
     }
 
     #[test]
@@ -614,5 +682,92 @@ mod tests {
         // still pass through pre-processing untouched.
         assert_eq!(preprocess_markdown(r"\<env\>"), r"\<env\>");
         assert_eq!(preprocess_markdown(r"\\path"), r"\\path");
+    }
+
+    // -- Flanking rules --------------------------------------------------------
+    //
+    // These cases verify the "intra-word inhibition" rule: a `_` or `**`
+    // delimiter sitting between two word characters cannot open or close
+    // emphasis. The rule keeps identifiers like `OPENCODE_CONFIG_CONTENT`
+    // and `foo**bar**baz` from being chewed up by the pre-processor.
+
+    #[test]
+    fn italics_intra_word_underscores_are_literal() {
+        // The canonical regression case: env-var-style identifiers must
+        // pass through pre-processing unchanged. Every `_` here has a
+        // word character on both sides and therefore cannot open or close.
+        assert_eq!(
+            preprocess_markdown("OPENCODE_CONFIG_CONTENT"),
+            "OPENCODE_CONFIG_CONTENT",
+        );
+        assert_eq!(preprocess_markdown("foo_bar"), "foo_bar");
+        assert_eq!(
+            preprocess_markdown("CLAUDINE_SESSION_ID"),
+            "CLAUDINE_SESSION_ID",
+        );
+    }
+
+    #[test]
+    fn italics_outer_marks_capture_inner_word_underscore() {
+        // `_foo_bar_`: outer `_`s are at word boundaries (start/end), the
+        // middle `_` is intra-word. Result: a single italic span over the
+        // full `foo_bar` slice.
+        assert_eq!(preprocess_markdown("_foo_bar_"), "<i>foo_bar</i>");
+    }
+
+    #[test]
+    fn bold_intra_word_double_asterisks_are_literal() {
+        // Same rule for `**` doubled markers: word-on-both-sides means
+        // literal text.
+        assert_eq!(preprocess_markdown("foo**bar**baz"), "foo**bar**baz");
+    }
+
+    #[test]
+    fn bold_outer_marks_capture_inner_word_double_asterisks() {
+        // Outer `**` are flanked by start/end (boundaries); inner `**`
+        // pairs are intra-word and therefore literal. The outer pair
+        // wraps the whole inner slice as bold.
+        assert_eq!(
+            preprocess_markdown("**foo**bar**baz**"),
+            "<b>foo**bar**baz</b>",
+        );
+    }
+
+    #[test]
+    fn italics_punctuation_neighbour_is_a_boundary() {
+        // Non-alphanumeric neighbours (parens, brackets, period, slash,
+        // colon) form boundaries — emphasis still triggers around them.
+        assert_eq!(preprocess_markdown("(_text_)"), "(<i>text</i>)");
+        assert_eq!(preprocess_markdown("hit _Esc_."), "hit <i>Esc</i>.");
+    }
+
+    #[test]
+    fn italics_inside_block_tag_body() {
+        // Inside `<dim>…</dim>` the body is processed normally; the
+        // tag declarations themselves are copied verbatim. The outer
+        // `_` flanks against space and `<`, both non-word.
+        assert_eq!(
+            preprocess_markdown("<dim>one _two_</dim>"),
+            "<dim>one <i>two</i></dim>",
+        );
+    }
+
+    #[test]
+    fn italics_intra_word_cannot_close() {
+        // Opener `_` at start has a word boundary; the inner `_` between
+        // letters is intra-word and must not close. With no further `_`
+        // available, the opener is left as a literal.
+        assert_eq!(preprocess_markdown("_foo_bar"), "_foo_bar");
+    }
+
+    #[test]
+    fn dynamic_interpolation_with_styling_around_identifier() {
+        // The original claudine-output regression: a structural tag
+        // wraps a dynamic value containing intra-word underscores. The
+        // value must render unmodified.
+        assert_eq!(
+            preprocess_markdown("<dim>=OPENCODE_CONFIG_CONTENT</dim>"),
+            "<dim>=OPENCODE_CONFIG_CONTENT</dim>",
+        );
     }
 }

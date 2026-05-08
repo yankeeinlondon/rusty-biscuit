@@ -57,11 +57,17 @@ pub(super) fn parse_font_size_for(app: &TerminalApp, content: &str) -> Option<u3
 
 /// Read the terminal's config file (if available) and run the given parser
 /// against its content. Returns `None` if the path is missing or unreadable.
-pub(super) fn read_and_parse<T>(app: &TerminalApp, parser: fn(&TerminalApp, &str) -> Option<T>) -> Option<T> {
+pub(super) fn read_and_parse<T>(
+    app: &TerminalApp,
+    parser: fn(&TerminalApp, &str) -> Option<T>,
+) -> Option<T> {
     let config_path = get_terminal_config_path(app)?;
 
     if !config_path.exists() {
-        tracing::trace!("read_and_parse(): config file does not exist: {:?}", config_path);
+        tracing::trace!(
+            "read_and_parse(): config file does not exist: {:?}",
+            config_path
+        );
         return None;
     }
 

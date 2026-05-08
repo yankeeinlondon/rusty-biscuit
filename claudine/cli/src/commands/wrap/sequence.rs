@@ -136,8 +136,7 @@ pub(crate) fn execute_sequence(
             .map(|info| info.repo_root)
     });
     let selection_config_path = source_repo_root.clone().unwrap_or_else(|| {
-        std::env::current_dir()
-            .unwrap_or_else(|_| std::path::PathBuf::from("."))
+        std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."))
     });
     let selection_config = super::composition::load_selection_config(&selection_config_path);
     let catalog = match &selection_config {
@@ -177,9 +176,7 @@ pub(crate) fn execute_sequence(
         };
 
         let provider_plan = match claudine::composition::build_picker_plan_with_hints(
-            &raw_hints,
-            &snapshot,
-            favorite,
+            &raw_hints, &snapshot, favorite,
         ) {
             Ok(plan) => plan,
             Err(_) => claudine::composition::ProviderPickerPlan {
@@ -295,7 +292,10 @@ pub(crate) fn execute_sequence(
         let step_set_overrides = overlay.as_set_overrides(user_set_overrides.clone());
 
         let mut env_overrides: BTreeMap<String, String> = BTreeMap::new();
-        env_overrides.insert("FAIL_FAST".to_string(), effective_fail_fast.to_string());
+        env_overrides.insert(
+            "CLAUDINE_FAIL_FAST".to_string(),
+            effective_fail_fast.to_string(),
+        );
         // Inject AGENT for this step using the resolved target so
         // {{env.AGENT}} in the body composes correctly. The mutation of
         // the parent process env happens once below for step 0, then

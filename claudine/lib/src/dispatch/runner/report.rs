@@ -140,7 +140,7 @@ mod tests {
     use crate::events::{AgenticEvent, EnvironmentContext, EventMeta};
     use crate::provider::Provider;
     use chrono::Utc;
-    
+
     use std::collections::HashMap;
 
     fn meta() -> EventMeta {

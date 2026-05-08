@@ -9,11 +9,11 @@ use std::collections::HashMap;
 use std::sync::LazyLock;
 
 #[allow(unused_imports)]
-use crate::models::model_metadata::{ModelMetadata, ModelModalities, Modality};
+use crate::models::model_default_parameters::ModelDefaultParameters;
+#[allow(unused_imports)]
+use crate::models::model_metadata::{Modality, ModelMetadata, ModelModalities};
 #[allow(unused_imports)]
 use crate::models::model_pricing::ModelPricing;
-#[allow(unused_imports)]
-use crate::models::model_default_parameters::ModelDefaultParameters;
 
 /// Static lookup table mapping model IDs to their metadata.
 pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = LazyLock::new(|| {
@@ -2408,195 +2408,222 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
         knowledge_cutoff: None,
         created: Some(1765094847),
     });
-    m.insert("gemini-2.0-flash", ModelMetadata {
-        display_name: Some("Gemini 2.0 Flash".to_string()),
-        family: Some("gemini-2.0-flash".to_string()),
-        context_window: Some(1048576),
-        max_output_tokens: Some(8192),
-        modalities: Some(ModelModalities {
-            input: vec![Modality::Audio, Modality::Image, Modality::Text],
-            output: vec![Modality::Text],
-        }),
-        capabilities: vec![
-            "batch".to_string(),
-            "function_calling".to_string(),
-            "structured_output".to_string(),
-        ],
-        description: None,
-        pricing: None,
-        supported_parameters: None,
-        default_parameters: None,
-        knowledge_cutoff: None,
-        created: None,
-    });
-    m.insert("gemini-2.0-flash-001", ModelMetadata {
-        display_name: Some("Gemini 2.0 Flash".to_string()),
-        family: Some("gemini-2.0-flash".to_string()),
-        context_window: Some(1048576),
-        max_output_tokens: Some(8192),
-        modalities: Some(ModelModalities {
-            input: vec![Modality::Audio, Modality::Image, Modality::Text],
-            output: vec![Modality::Text],
-        }),
-        capabilities: vec![
-            "batch".to_string(),
-            "function_calling".to_string(),
-            "structured_output".to_string(),
-        ],
-        description: None,
-        pricing: None,
-        supported_parameters: None,
-        default_parameters: None,
-        knowledge_cutoff: None,
-        created: None,
-    });
-    m.insert("gemini-2.0-flash-lite", ModelMetadata {
-        display_name: Some("Gemini 2.0 Flash-Lite".to_string()),
-        family: Some("gemini-2.0-flash-lite".to_string()),
-        context_window: Some(1048576),
-        max_output_tokens: Some(8192),
-        modalities: Some(ModelModalities {
-            input: vec![Modality::Audio, Modality::Image, Modality::Text],
-            output: vec![Modality::Text],
-        }),
-        capabilities: vec![
-            "batch".to_string(),
-            "function_calling".to_string(),
-            "structured_output".to_string(),
-        ],
-        description: None,
-        pricing: None,
-        supported_parameters: None,
-        default_parameters: None,
-        knowledge_cutoff: None,
-        created: None,
-    });
-    m.insert("gemini-2.0-flash-lite-001", ModelMetadata {
-        display_name: Some("Gemini 2.0 Flash-Lite".to_string()),
-        family: Some("gemini-2.0-flash-lite".to_string()),
-        context_window: Some(1048576),
-        max_output_tokens: Some(8192),
-        modalities: Some(ModelModalities {
-            input: vec![Modality::Audio, Modality::Image, Modality::Text],
-            output: vec![Modality::Text],
-        }),
-        capabilities: vec![
-            "batch".to_string(),
-            "function_calling".to_string(),
-            "structured_output".to_string(),
-        ],
-        description: None,
-        pricing: None,
-        supported_parameters: None,
-        default_parameters: None,
-        knowledge_cutoff: None,
-        created: None,
-    });
-    m.insert("gemini-2.5-flash", ModelMetadata {
-        display_name: Some("Gemini 2.5 Flash".to_string()),
-        family: Some("gemini-2.5-flash".to_string()),
-        context_window: Some(1048576),
-        max_output_tokens: Some(65536),
-        modalities: Some(ModelModalities {
-            input: vec![Modality::Audio, Modality::Image, Modality::Text],
-            output: vec![Modality::Text],
-        }),
-        capabilities: vec![
-            "batch".to_string(),
-            "function_calling".to_string(),
-            "structured_output".to_string(),
-        ],
-        description: None,
-        pricing: None,
-        supported_parameters: None,
-        default_parameters: None,
-        knowledge_cutoff: None,
-        created: None,
-    });
-    m.insert("gemini-2.5-flash-lite", ModelMetadata {
-        display_name: Some("Gemini 2.5 Flash-Lite".to_string()),
-        family: Some("gemini-2.5-flash-lite".to_string()),
-        context_window: Some(1048576),
-        max_output_tokens: Some(65536),
-        modalities: Some(ModelModalities {
-            input: vec![Modality::Audio, Modality::Image, Modality::Text],
-            output: vec![Modality::Text],
-        }),
-        capabilities: vec![
-            "batch".to_string(),
-            "function_calling".to_string(),
-            "structured_output".to_string(),
-        ],
-        description: None,
-        pricing: None,
-        supported_parameters: None,
-        default_parameters: None,
-        knowledge_cutoff: None,
-        created: None,
-    });
-    m.insert("gemini-2.5-pro", ModelMetadata {
-        display_name: Some("Gemini 2.5 Pro".to_string()),
-        family: Some("gemini-2.5-pro".to_string()),
-        context_window: Some(1048576),
-        max_output_tokens: Some(65536),
-        modalities: Some(ModelModalities {
-            input: vec![Modality::Audio, Modality::Image, Modality::Text],
-            output: vec![Modality::Text],
-        }),
-        capabilities: vec![
-            "batch".to_string(),
-            "function_calling".to_string(),
-            "structured_output".to_string(),
-        ],
-        description: None,
-        pricing: None,
-        supported_parameters: None,
-        default_parameters: None,
-        knowledge_cutoff: None,
-        created: None,
-    });
-    m.insert("gemini-3-flash-preview", ModelMetadata {
-        display_name: Some("Gemini 3 Flash".to_string()),
-        family: Some("gemini-3-flash".to_string()),
-        context_window: Some(1048576),
-        max_output_tokens: Some(65536),
-        modalities: Some(ModelModalities {
-            input: vec![Modality::Audio, Modality::Image, Modality::Text],
-            output: vec![Modality::Text],
-        }),
-        capabilities: vec![
-            "batch".to_string(),
-            "function_calling".to_string(),
-            "structured_output".to_string(),
-        ],
-        description: None,
-        pricing: None,
-        supported_parameters: None,
-        default_parameters: None,
-        knowledge_cutoff: None,
-        created: None,
-    });
-    m.insert("gemini-3-pro-preview", ModelMetadata {
-        display_name: Some("Gemini 3 Pro".to_string()),
-        family: Some("gemini-3-pro".to_string()),
-        context_window: Some(1048576),
-        max_output_tokens: Some(65536),
-        modalities: Some(ModelModalities {
-            input: vec![Modality::Audio, Modality::Image, Modality::Text],
-            output: vec![Modality::Text],
-        }),
-        capabilities: vec![
-            "batch".to_string(),
-            "function_calling".to_string(),
-            "structured_output".to_string(),
-        ],
-        description: None,
-        pricing: None,
-        supported_parameters: None,
-        default_parameters: None,
-        knowledge_cutoff: None,
-        created: None,
-    });
+    m.insert(
+        "gemini-2.0-flash",
+        ModelMetadata {
+            display_name: Some("Gemini 2.0 Flash".to_string()),
+            family: Some("gemini-2.0-flash".to_string()),
+            context_window: Some(1048576),
+            max_output_tokens: Some(8192),
+            modalities: Some(ModelModalities {
+                input: vec![Modality::Audio, Modality::Image, Modality::Text],
+                output: vec![Modality::Text],
+            }),
+            capabilities: vec![
+                "batch".to_string(),
+                "function_calling".to_string(),
+                "structured_output".to_string(),
+            ],
+            description: None,
+            pricing: None,
+            supported_parameters: None,
+            default_parameters: None,
+            knowledge_cutoff: None,
+            created: None,
+        },
+    );
+    m.insert(
+        "gemini-2.0-flash-001",
+        ModelMetadata {
+            display_name: Some("Gemini 2.0 Flash".to_string()),
+            family: Some("gemini-2.0-flash".to_string()),
+            context_window: Some(1048576),
+            max_output_tokens: Some(8192),
+            modalities: Some(ModelModalities {
+                input: vec![Modality::Audio, Modality::Image, Modality::Text],
+                output: vec![Modality::Text],
+            }),
+            capabilities: vec![
+                "batch".to_string(),
+                "function_calling".to_string(),
+                "structured_output".to_string(),
+            ],
+            description: None,
+            pricing: None,
+            supported_parameters: None,
+            default_parameters: None,
+            knowledge_cutoff: None,
+            created: None,
+        },
+    );
+    m.insert(
+        "gemini-2.0-flash-lite",
+        ModelMetadata {
+            display_name: Some("Gemini 2.0 Flash-Lite".to_string()),
+            family: Some("gemini-2.0-flash-lite".to_string()),
+            context_window: Some(1048576),
+            max_output_tokens: Some(8192),
+            modalities: Some(ModelModalities {
+                input: vec![Modality::Audio, Modality::Image, Modality::Text],
+                output: vec![Modality::Text],
+            }),
+            capabilities: vec![
+                "batch".to_string(),
+                "function_calling".to_string(),
+                "structured_output".to_string(),
+            ],
+            description: None,
+            pricing: None,
+            supported_parameters: None,
+            default_parameters: None,
+            knowledge_cutoff: None,
+            created: None,
+        },
+    );
+    m.insert(
+        "gemini-2.0-flash-lite-001",
+        ModelMetadata {
+            display_name: Some("Gemini 2.0 Flash-Lite".to_string()),
+            family: Some("gemini-2.0-flash-lite".to_string()),
+            context_window: Some(1048576),
+            max_output_tokens: Some(8192),
+            modalities: Some(ModelModalities {
+                input: vec![Modality::Audio, Modality::Image, Modality::Text],
+                output: vec![Modality::Text],
+            }),
+            capabilities: vec![
+                "batch".to_string(),
+                "function_calling".to_string(),
+                "structured_output".to_string(),
+            ],
+            description: None,
+            pricing: None,
+            supported_parameters: None,
+            default_parameters: None,
+            knowledge_cutoff: None,
+            created: None,
+        },
+    );
+    m.insert(
+        "gemini-2.5-flash",
+        ModelMetadata {
+            display_name: Some("Gemini 2.5 Flash".to_string()),
+            family: Some("gemini-2.5-flash".to_string()),
+            context_window: Some(1048576),
+            max_output_tokens: Some(65536),
+            modalities: Some(ModelModalities {
+                input: vec![Modality::Audio, Modality::Image, Modality::Text],
+                output: vec![Modality::Text],
+            }),
+            capabilities: vec![
+                "batch".to_string(),
+                "function_calling".to_string(),
+                "structured_output".to_string(),
+            ],
+            description: None,
+            pricing: None,
+            supported_parameters: None,
+            default_parameters: None,
+            knowledge_cutoff: None,
+            created: None,
+        },
+    );
+    m.insert(
+        "gemini-2.5-flash-lite",
+        ModelMetadata {
+            display_name: Some("Gemini 2.5 Flash-Lite".to_string()),
+            family: Some("gemini-2.5-flash-lite".to_string()),
+            context_window: Some(1048576),
+            max_output_tokens: Some(65536),
+            modalities: Some(ModelModalities {
+                input: vec![Modality::Audio, Modality::Image, Modality::Text],
+                output: vec![Modality::Text],
+            }),
+            capabilities: vec![
+                "batch".to_string(),
+                "function_calling".to_string(),
+                "structured_output".to_string(),
+            ],
+            description: None,
+            pricing: None,
+            supported_parameters: None,
+            default_parameters: None,
+            knowledge_cutoff: None,
+            created: None,
+        },
+    );
+    m.insert(
+        "gemini-2.5-pro",
+        ModelMetadata {
+            display_name: Some("Gemini 2.5 Pro".to_string()),
+            family: Some("gemini-2.5-pro".to_string()),
+            context_window: Some(1048576),
+            max_output_tokens: Some(65536),
+            modalities: Some(ModelModalities {
+                input: vec![Modality::Audio, Modality::Image, Modality::Text],
+                output: vec![Modality::Text],
+            }),
+            capabilities: vec![
+                "batch".to_string(),
+                "function_calling".to_string(),
+                "structured_output".to_string(),
+            ],
+            description: None,
+            pricing: None,
+            supported_parameters: None,
+            default_parameters: None,
+            knowledge_cutoff: None,
+            created: None,
+        },
+    );
+    m.insert(
+        "gemini-3-flash-preview",
+        ModelMetadata {
+            display_name: Some("Gemini 3 Flash".to_string()),
+            family: Some("gemini-3-flash".to_string()),
+            context_window: Some(1048576),
+            max_output_tokens: Some(65536),
+            modalities: Some(ModelModalities {
+                input: vec![Modality::Audio, Modality::Image, Modality::Text],
+                output: vec![Modality::Text],
+            }),
+            capabilities: vec![
+                "batch".to_string(),
+                "function_calling".to_string(),
+                "structured_output".to_string(),
+            ],
+            description: None,
+            pricing: None,
+            supported_parameters: None,
+            default_parameters: None,
+            knowledge_cutoff: None,
+            created: None,
+        },
+    );
+    m.insert(
+        "gemini-3-pro-preview",
+        ModelMetadata {
+            display_name: Some("Gemini 3 Pro".to_string()),
+            family: Some("gemini-3-pro".to_string()),
+            context_window: Some(1048576),
+            max_output_tokens: Some(65536),
+            modalities: Some(ModelModalities {
+                input: vec![Modality::Audio, Modality::Image, Modality::Text],
+                output: vec![Modality::Text],
+            }),
+            capabilities: vec![
+                "batch".to_string(),
+                "function_calling".to_string(),
+                "structured_output".to_string(),
+            ],
+            description: None,
+            pricing: None,
+            supported_parameters: None,
+            default_parameters: None,
+            knowledge_cutoff: None,
+            created: None,
+        },
+    );
     m.insert("google/gemini-2.0-flash-001", ModelMetadata {
         display_name: Some("Google: Gemini 2.0 Flash".to_string()),
         family: None,
@@ -3501,86 +3528,96 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
         knowledge_cutoff: None,
         created: Some(1774907286),
     });
-    m.insert("gpt-3.5-turbo", ModelMetadata {
-        display_name: Some("GPT-3.5 Turbo".to_string()),
-        family: Some("gpt-3.5-turbo".to_string()),
-        context_window: Some(16385),
-        max_output_tokens: Some(4096),
-        modalities: Some(ModelModalities {
-            input: vec![Modality::Text],
-            output: vec![Modality::Embeddings, Modality::Text],
-        }),
-        capabilities: vec![
-            "batch".to_string(),
-        ],
-        description: None,
-        pricing: None,
-        supported_parameters: None,
-        default_parameters: None,
-        knowledge_cutoff: None,
-        created: None,
-    });
-    m.insert("gpt-5.1-codex", ModelMetadata {
-        display_name: Some("GPT-5.1 Codex".to_string()),
-        family: Some("gpt-5.1-codex".to_string()),
-        context_window: Some(400000),
-        max_output_tokens: Some(128000),
-        modalities: Some(ModelModalities {
-            input: vec![Modality::Image, Modality::Text],
-            output: vec![Modality::Embeddings, Modality::Text],
-        }),
-        capabilities: vec![
-            "function_calling".to_string(),
-            "structured_output".to_string(),
-        ],
-        description: None,
-        pricing: None,
-        supported_parameters: None,
-        default_parameters: None,
-        knowledge_cutoff: None,
-        created: None,
-    });
-    m.insert("gpt-5.2", ModelMetadata {
-        display_name: Some("GPT-5.2".to_string()),
-        family: Some("gpt-5.2".to_string()),
-        context_window: Some(400000),
-        max_output_tokens: Some(128000),
-        modalities: Some(ModelModalities {
-            input: vec![Modality::Image, Modality::Text],
-            output: vec![Modality::Embeddings, Modality::Text],
-        }),
-        capabilities: vec![
-            "batch".to_string(),
-            "function_calling".to_string(),
-            "structured_output".to_string(),
-        ],
-        description: None,
-        pricing: None,
-        supported_parameters: None,
-        default_parameters: None,
-        knowledge_cutoff: None,
-        created: None,
-    });
-    m.insert("gpt-5.2-chat-latest", ModelMetadata {
-        display_name: Some("GPT-5.2 Chat".to_string()),
-        family: Some("gpt-5.2-chat-latest".to_string()),
-        context_window: Some(128000),
-        max_output_tokens: Some(16384),
-        modalities: Some(ModelModalities {
-            input: vec![Modality::Image, Modality::Text],
-            output: vec![Modality::Embeddings, Modality::Text],
-        }),
-        capabilities: vec![
-            "function_calling".to_string(),
-            "structured_output".to_string(),
-        ],
-        description: None,
-        pricing: None,
-        supported_parameters: None,
-        default_parameters: None,
-        knowledge_cutoff: None,
-        created: None,
-    });
+    m.insert(
+        "gpt-3.5-turbo",
+        ModelMetadata {
+            display_name: Some("GPT-3.5 Turbo".to_string()),
+            family: Some("gpt-3.5-turbo".to_string()),
+            context_window: Some(16385),
+            max_output_tokens: Some(4096),
+            modalities: Some(ModelModalities {
+                input: vec![Modality::Text],
+                output: vec![Modality::Embeddings, Modality::Text],
+            }),
+            capabilities: vec!["batch".to_string()],
+            description: None,
+            pricing: None,
+            supported_parameters: None,
+            default_parameters: None,
+            knowledge_cutoff: None,
+            created: None,
+        },
+    );
+    m.insert(
+        "gpt-5.1-codex",
+        ModelMetadata {
+            display_name: Some("GPT-5.1 Codex".to_string()),
+            family: Some("gpt-5.1-codex".to_string()),
+            context_window: Some(400000),
+            max_output_tokens: Some(128000),
+            modalities: Some(ModelModalities {
+                input: vec![Modality::Image, Modality::Text],
+                output: vec![Modality::Embeddings, Modality::Text],
+            }),
+            capabilities: vec![
+                "function_calling".to_string(),
+                "structured_output".to_string(),
+            ],
+            description: None,
+            pricing: None,
+            supported_parameters: None,
+            default_parameters: None,
+            knowledge_cutoff: None,
+            created: None,
+        },
+    );
+    m.insert(
+        "gpt-5.2",
+        ModelMetadata {
+            display_name: Some("GPT-5.2".to_string()),
+            family: Some("gpt-5.2".to_string()),
+            context_window: Some(400000),
+            max_output_tokens: Some(128000),
+            modalities: Some(ModelModalities {
+                input: vec![Modality::Image, Modality::Text],
+                output: vec![Modality::Embeddings, Modality::Text],
+            }),
+            capabilities: vec![
+                "batch".to_string(),
+                "function_calling".to_string(),
+                "structured_output".to_string(),
+            ],
+            description: None,
+            pricing: None,
+            supported_parameters: None,
+            default_parameters: None,
+            knowledge_cutoff: None,
+            created: None,
+        },
+    );
+    m.insert(
+        "gpt-5.2-chat-latest",
+        ModelMetadata {
+            display_name: Some("GPT-5.2 Chat".to_string()),
+            family: Some("gpt-5.2-chat-latest".to_string()),
+            context_window: Some(128000),
+            max_output_tokens: Some(16384),
+            modalities: Some(ModelModalities {
+                input: vec![Modality::Image, Modality::Text],
+                output: vec![Modality::Embeddings, Modality::Text],
+            }),
+            capabilities: vec![
+                "function_calling".to_string(),
+                "structured_output".to_string(),
+            ],
+            description: None,
+            pricing: None,
+            supported_parameters: None,
+            default_parameters: None,
+            knowledge_cutoff: None,
+            created: None,
+        },
+    );
     m.insert("gryphe/mythomax-l2-13b", ModelMetadata {
         display_name: Some("MythoMax 13B".to_string()),
         family: None,
@@ -6815,90 +6852,102 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
         knowledge_cutoff: Some("2025-03-31".to_string()),
         created: Some(1757106807),
     });
-    m.insert("o3", ModelMetadata {
-        display_name: Some("o3".to_string()),
-        family: Some("o3".to_string()),
-        context_window: Some(200000),
-        max_output_tokens: Some(100000),
-        modalities: Some(ModelModalities {
-            input: vec![Modality::Image, Modality::Text],
-            output: vec![Modality::Embeddings, Modality::Text],
-        }),
-        capabilities: vec![
-            "batch".to_string(),
-            "function_calling".to_string(),
-            "structured_output".to_string(),
-        ],
-        description: None,
-        pricing: None,
-        supported_parameters: None,
-        default_parameters: None,
-        knowledge_cutoff: None,
-        created: None,
-    });
-    m.insert("o3-mini", ModelMetadata {
-        display_name: Some("o3-mini".to_string()),
-        family: Some("o3-mini".to_string()),
-        context_window: Some(200000),
-        max_output_tokens: Some(100000),
-        modalities: Some(ModelModalities {
-            input: vec![Modality::Text],
-            output: vec![Modality::Embeddings, Modality::Text],
-        }),
-        capabilities: vec![
-            "batch".to_string(),
-            "function_calling".to_string(),
-            "structured_output".to_string(),
-        ],
-        description: None,
-        pricing: None,
-        supported_parameters: None,
-        default_parameters: None,
-        knowledge_cutoff: None,
-        created: None,
-    });
-    m.insert("o3-mini-2025-01-31", ModelMetadata {
-        display_name: Some("o3-mini".to_string()),
-        family: Some("o3-mini".to_string()),
-        context_window: Some(200000),
-        max_output_tokens: Some(100000),
-        modalities: Some(ModelModalities {
-            input: vec![Modality::Text],
-            output: vec![Modality::Embeddings, Modality::Text],
-        }),
-        capabilities: vec![
-            "batch".to_string(),
-            "function_calling".to_string(),
-            "structured_output".to_string(),
-        ],
-        description: None,
-        pricing: None,
-        supported_parameters: None,
-        default_parameters: None,
-        knowledge_cutoff: None,
-        created: None,
-    });
-    m.insert("o4-mini", ModelMetadata {
-        display_name: Some("o4-mini".to_string()),
-        family: Some("o4-mini".to_string()),
-        context_window: Some(200000),
-        max_output_tokens: Some(100000),
-        modalities: Some(ModelModalities {
-            input: vec![Modality::Image, Modality::Text],
-            output: vec![Modality::Embeddings, Modality::Text],
-        }),
-        capabilities: vec![
-            "batch".to_string(),
-            "function_calling".to_string(),
-            "structured_output".to_string(),
-        ],
-        description: None,
-        pricing: None,
-        supported_parameters: None,
-        default_parameters: None,
-        knowledge_cutoff: None,
-        created: None,
-    });
+    m.insert(
+        "o3",
+        ModelMetadata {
+            display_name: Some("o3".to_string()),
+            family: Some("o3".to_string()),
+            context_window: Some(200000),
+            max_output_tokens: Some(100000),
+            modalities: Some(ModelModalities {
+                input: vec![Modality::Image, Modality::Text],
+                output: vec![Modality::Embeddings, Modality::Text],
+            }),
+            capabilities: vec![
+                "batch".to_string(),
+                "function_calling".to_string(),
+                "structured_output".to_string(),
+            ],
+            description: None,
+            pricing: None,
+            supported_parameters: None,
+            default_parameters: None,
+            knowledge_cutoff: None,
+            created: None,
+        },
+    );
+    m.insert(
+        "o3-mini",
+        ModelMetadata {
+            display_name: Some("o3-mini".to_string()),
+            family: Some("o3-mini".to_string()),
+            context_window: Some(200000),
+            max_output_tokens: Some(100000),
+            modalities: Some(ModelModalities {
+                input: vec![Modality::Text],
+                output: vec![Modality::Embeddings, Modality::Text],
+            }),
+            capabilities: vec![
+                "batch".to_string(),
+                "function_calling".to_string(),
+                "structured_output".to_string(),
+            ],
+            description: None,
+            pricing: None,
+            supported_parameters: None,
+            default_parameters: None,
+            knowledge_cutoff: None,
+            created: None,
+        },
+    );
+    m.insert(
+        "o3-mini-2025-01-31",
+        ModelMetadata {
+            display_name: Some("o3-mini".to_string()),
+            family: Some("o3-mini".to_string()),
+            context_window: Some(200000),
+            max_output_tokens: Some(100000),
+            modalities: Some(ModelModalities {
+                input: vec![Modality::Text],
+                output: vec![Modality::Embeddings, Modality::Text],
+            }),
+            capabilities: vec![
+                "batch".to_string(),
+                "function_calling".to_string(),
+                "structured_output".to_string(),
+            ],
+            description: None,
+            pricing: None,
+            supported_parameters: None,
+            default_parameters: None,
+            knowledge_cutoff: None,
+            created: None,
+        },
+    );
+    m.insert(
+        "o4-mini",
+        ModelMetadata {
+            display_name: Some("o4-mini".to_string()),
+            family: Some("o4-mini".to_string()),
+            context_window: Some(200000),
+            max_output_tokens: Some(100000),
+            modalities: Some(ModelModalities {
+                input: vec![Modality::Image, Modality::Text],
+                output: vec![Modality::Embeddings, Modality::Text],
+            }),
+            capabilities: vec![
+                "batch".to_string(),
+                "function_calling".to_string(),
+                "structured_output".to_string(),
+            ],
+            description: None,
+            pricing: None,
+            supported_parameters: None,
+            default_parameters: None,
+            knowledge_cutoff: None,
+            created: None,
+        },
+    );
     m.insert("openai/gpt-3.5-turbo", ModelMetadata {
         display_name: Some("OpenAI: GPT-3.5 Turbo".to_string()),
         family: None,
@@ -8036,38 +8085,43 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
         knowledge_cutoff: None,
         created: Some(1764878934),
     });
-    m.insert("openai/gpt-5.1-codex-mini", ModelMetadata {
-        display_name: Some("OpenAI: GPT-5.1-Codex-Mini".to_string()),
-        family: None,
-        context_window: Some(400000),
-        max_output_tokens: Some(128000),
-        modalities: Some(ModelModalities {
-            input: vec![Modality::Image, Modality::Text],
-            output: vec![Modality::Text],
-        }),
-        capabilities: vec![],
-        description: Some("GPT-5.1-Codex-Mini is a smaller and faster version of GPT-5.1-Codex".to_string()),
-        pricing: Some(ModelPricing {
-            prompt_per_token: Some(0.00000025_f64),
-            completion_per_token: Some(0.000002_f64),
-            web_search_per_request: None,
-            input_cache_read_per_token: Some(0.00000003_f64),
-        }),
-        supported_parameters: Some(vec![
-            "include_reasoning".to_string(),
-            "max_completion_tokens".to_string(),
-            "max_tokens".to_string(),
-            "reasoning".to_string(),
-            "response_format".to_string(),
-            "seed".to_string(),
-            "structured_outputs".to_string(),
-            "tool_choice".to_string(),
-            "tools".to_string(),
-        ]),
-        default_parameters: None,
-        knowledge_cutoff: None,
-        created: Some(1763057820),
-    });
+    m.insert(
+        "openai/gpt-5.1-codex-mini",
+        ModelMetadata {
+            display_name: Some("OpenAI: GPT-5.1-Codex-Mini".to_string()),
+            family: None,
+            context_window: Some(400000),
+            max_output_tokens: Some(128000),
+            modalities: Some(ModelModalities {
+                input: vec![Modality::Image, Modality::Text],
+                output: vec![Modality::Text],
+            }),
+            capabilities: vec![],
+            description: Some(
+                "GPT-5.1-Codex-Mini is a smaller and faster version of GPT-5.1-Codex".to_string(),
+            ),
+            pricing: Some(ModelPricing {
+                prompt_per_token: Some(0.00000025_f64),
+                completion_per_token: Some(0.000002_f64),
+                web_search_per_request: None,
+                input_cache_read_per_token: Some(0.00000003_f64),
+            }),
+            supported_parameters: Some(vec![
+                "include_reasoning".to_string(),
+                "max_completion_tokens".to_string(),
+                "max_tokens".to_string(),
+                "reasoning".to_string(),
+                "response_format".to_string(),
+                "seed".to_string(),
+                "structured_outputs".to_string(),
+                "tool_choice".to_string(),
+                "tools".to_string(),
+            ]),
+            default_parameters: None,
+            knowledge_cutoff: None,
+            created: Some(1763057820),
+        },
+    );
     m.insert("openai/gpt-5.2", ModelMetadata {
         display_name: Some("OpenAI: GPT-5.2".to_string()),
         family: None,
@@ -13375,38 +13429,44 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
         knowledge_cutoff: None,
         created: Some(1777318492),
     });
-    m.insert("~anthropic/claude-opus-latest", ModelMetadata {
-        display_name: Some("Anthropic: Claude Opus Latest".to_string()),
-        family: None,
-        context_window: Some(1000000),
-        max_output_tokens: Some(128000),
-        modalities: Some(ModelModalities {
-            input: vec![Modality::Text, Modality::Image],
-            output: vec![Modality::Text],
-        }),
-        capabilities: vec![],
-        description: Some("This model always redirects to the latest model in the Claude Opus family.".to_string()),
-        pricing: Some(ModelPricing {
-            prompt_per_token: Some(0.000005_f64),
-            completion_per_token: Some(0.000025_f64),
-            web_search_per_request: Some(0.01_f64),
-            input_cache_read_per_token: Some(0.0000005_f64),
-        }),
-        supported_parameters: Some(vec![
-            "include_reasoning".to_string(),
-            "max_tokens".to_string(),
-            "reasoning".to_string(),
-            "response_format".to_string(),
-            "stop".to_string(),
-            "structured_outputs".to_string(),
-            "tool_choice".to_string(),
-            "tools".to_string(),
-            "verbosity".to_string(),
-        ]),
-        default_parameters: None,
-        knowledge_cutoff: None,
-        created: Some(1776795361),
-    });
+    m.insert(
+        "~anthropic/claude-opus-latest",
+        ModelMetadata {
+            display_name: Some("Anthropic: Claude Opus Latest".to_string()),
+            family: None,
+            context_window: Some(1000000),
+            max_output_tokens: Some(128000),
+            modalities: Some(ModelModalities {
+                input: vec![Modality::Text, Modality::Image],
+                output: vec![Modality::Text],
+            }),
+            capabilities: vec![],
+            description: Some(
+                "This model always redirects to the latest model in the Claude Opus family."
+                    .to_string(),
+            ),
+            pricing: Some(ModelPricing {
+                prompt_per_token: Some(0.000005_f64),
+                completion_per_token: Some(0.000025_f64),
+                web_search_per_request: Some(0.01_f64),
+                input_cache_read_per_token: Some(0.0000005_f64),
+            }),
+            supported_parameters: Some(vec![
+                "include_reasoning".to_string(),
+                "max_tokens".to_string(),
+                "reasoning".to_string(),
+                "response_format".to_string(),
+                "stop".to_string(),
+                "structured_outputs".to_string(),
+                "tool_choice".to_string(),
+                "tools".to_string(),
+                "verbosity".to_string(),
+            ]),
+            default_parameters: None,
+            knowledge_cutoff: None,
+            created: Some(1776795361),
+        },
+    );
     m.insert("~anthropic/claude-sonnet-latest", ModelMetadata {
         display_name: Some("Anthropic Claude Sonnet Latest".to_string()),
         family: None,
@@ -13477,147 +13537,176 @@ pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = Lazy
         knowledge_cutoff: None,
         created: Some(1777318398),
     });
-    m.insert("~google/gemini-pro-latest", ModelMetadata {
-        display_name: Some("Google Gemini Pro Latest".to_string()),
-        family: None,
-        context_window: Some(1048576),
-        max_output_tokens: Some(65536),
-        modalities: Some(ModelModalities {
-            input: vec![Modality::Audio, Modality::Image, Modality::Text, Modality::Video],
-            output: vec![Modality::Text],
-        }),
-        capabilities: vec![],
-        description: Some("This model always redirects to the latest model in the Google Gemini Pro family.".to_string()),
-        pricing: Some(ModelPricing {
-            prompt_per_token: Some(0.000002_f64),
-            completion_per_token: Some(0.000012_f64),
-            web_search_per_request: Some(0.014_f64),
-            input_cache_read_per_token: Some(0.0000002_f64),
-        }),
-        supported_parameters: Some(vec![
-            "include_reasoning".to_string(),
-            "max_tokens".to_string(),
-            "reasoning".to_string(),
-            "response_format".to_string(),
-            "seed".to_string(),
-            "stop".to_string(),
-            "structured_outputs".to_string(),
-            "temperature".to_string(),
-            "tool_choice".to_string(),
-            "tools".to_string(),
-            "top_p".to_string(),
-        ]),
-        default_parameters: None,
-        knowledge_cutoff: None,
-        created: Some(1777318451),
-    });
-    m.insert("~moonshotai/kimi-latest", ModelMetadata {
-        display_name: Some("MoonshotAI Kimi Latest".to_string()),
-        family: None,
-        context_window: Some(262144),
-        max_output_tokens: Some(16384),
-        modalities: Some(ModelModalities {
-            input: vec![Modality::Text, Modality::Image],
-            output: vec![Modality::Text],
-        }),
-        capabilities: vec![],
-        description: Some("This model always redirects to the latest model in the MoonshotAI Kimi family.".to_string()),
-        pricing: Some(ModelPricing {
-            prompt_per_token: Some(0.00000075_f64),
-            completion_per_token: Some(0.0000035_f64),
-            web_search_per_request: None,
-            input_cache_read_per_token: Some(0.00000015_f64),
-        }),
-        supported_parameters: Some(vec![
-            "frequency_penalty".to_string(),
-            "include_reasoning".to_string(),
-            "logit_bias".to_string(),
-            "logprobs".to_string(),
-            "max_tokens".to_string(),
-            "min_p".to_string(),
-            "parallel_tool_calls".to_string(),
-            "presence_penalty".to_string(),
-            "reasoning".to_string(),
-            "reasoning_effort".to_string(),
-            "repetition_penalty".to_string(),
-            "response_format".to_string(),
-            "seed".to_string(),
-            "stop".to_string(),
-            "structured_outputs".to_string(),
-            "temperature".to_string(),
-            "tool_choice".to_string(),
-            "tools".to_string(),
-            "top_k".to_string(),
-            "top_logprobs".to_string(),
-            "top_p".to_string(),
-        ]),
-        default_parameters: None,
-        knowledge_cutoff: None,
-        created: Some(1777318428),
-    });
-    m.insert("~openai/gpt-latest", ModelMetadata {
-        display_name: Some("OpenAI GPT Latest".to_string()),
-        family: None,
-        context_window: Some(1050000),
-        max_output_tokens: Some(128000),
-        modalities: Some(ModelModalities {
-            input: vec![Modality::Image, Modality::Text],
-            output: vec![Modality::Text],
-        }),
-        capabilities: vec![],
-        description: Some("This model always redirects to the latest model in the OpenAI GPT family.".to_string()),
-        pricing: Some(ModelPricing {
-            prompt_per_token: Some(0.000005_f64),
-            completion_per_token: Some(0.00003_f64),
-            web_search_per_request: Some(0.01_f64),
-            input_cache_read_per_token: Some(0.0000005_f64),
-        }),
-        supported_parameters: Some(vec![
-            "include_reasoning".to_string(),
-            "max_completion_tokens".to_string(),
-            "max_tokens".to_string(),
-            "reasoning".to_string(),
-            "response_format".to_string(),
-            "seed".to_string(),
-            "structured_outputs".to_string(),
-            "tool_choice".to_string(),
-            "tools".to_string(),
-        ]),
-        default_parameters: None,
-        knowledge_cutoff: Some("2025-12-01".to_string()),
-        created: Some(1777318334),
-    });
-    m.insert("~openai/gpt-mini-latest", ModelMetadata {
-        display_name: Some("OpenAI GPT Mini Latest".to_string()),
-        family: None,
-        context_window: Some(400000),
-        max_output_tokens: Some(128000),
-        modalities: Some(ModelModalities {
-            input: vec![Modality::Image, Modality::Text],
-            output: vec![Modality::Text],
-        }),
-        capabilities: vec![],
-        description: Some("This model always redirects to the latest model in the OpenAI GPT Mini family.".to_string()),
-        pricing: Some(ModelPricing {
-            prompt_per_token: Some(0.00000075_f64),
-            completion_per_token: Some(0.0000045_f64),
-            web_search_per_request: Some(0.01_f64),
-            input_cache_read_per_token: Some(0.000000075_f64),
-        }),
-        supported_parameters: Some(vec![
-            "include_reasoning".to_string(),
-            "max_completion_tokens".to_string(),
-            "max_tokens".to_string(),
-            "reasoning".to_string(),
-            "response_format".to_string(),
-            "seed".to_string(),
-            "structured_outputs".to_string(),
-            "tool_choice".to_string(),
-            "tools".to_string(),
-        ]),
-        default_parameters: None,
-        knowledge_cutoff: Some("2025-08-31".to_string()),
-        created: Some(1777318471),
-    });
+    m.insert(
+        "~google/gemini-pro-latest",
+        ModelMetadata {
+            display_name: Some("Google Gemini Pro Latest".to_string()),
+            family: None,
+            context_window: Some(1048576),
+            max_output_tokens: Some(65536),
+            modalities: Some(ModelModalities {
+                input: vec![
+                    Modality::Audio,
+                    Modality::Image,
+                    Modality::Text,
+                    Modality::Video,
+                ],
+                output: vec![Modality::Text],
+            }),
+            capabilities: vec![],
+            description: Some(
+                "This model always redirects to the latest model in the Google Gemini Pro family."
+                    .to_string(),
+            ),
+            pricing: Some(ModelPricing {
+                prompt_per_token: Some(0.000002_f64),
+                completion_per_token: Some(0.000012_f64),
+                web_search_per_request: Some(0.014_f64),
+                input_cache_read_per_token: Some(0.0000002_f64),
+            }),
+            supported_parameters: Some(vec![
+                "include_reasoning".to_string(),
+                "max_tokens".to_string(),
+                "reasoning".to_string(),
+                "response_format".to_string(),
+                "seed".to_string(),
+                "stop".to_string(),
+                "structured_outputs".to_string(),
+                "temperature".to_string(),
+                "tool_choice".to_string(),
+                "tools".to_string(),
+                "top_p".to_string(),
+            ]),
+            default_parameters: None,
+            knowledge_cutoff: None,
+            created: Some(1777318451),
+        },
+    );
+    m.insert(
+        "~moonshotai/kimi-latest",
+        ModelMetadata {
+            display_name: Some("MoonshotAI Kimi Latest".to_string()),
+            family: None,
+            context_window: Some(262144),
+            max_output_tokens: Some(16384),
+            modalities: Some(ModelModalities {
+                input: vec![Modality::Text, Modality::Image],
+                output: vec![Modality::Text],
+            }),
+            capabilities: vec![],
+            description: Some(
+                "This model always redirects to the latest model in the MoonshotAI Kimi family."
+                    .to_string(),
+            ),
+            pricing: Some(ModelPricing {
+                prompt_per_token: Some(0.00000075_f64),
+                completion_per_token: Some(0.0000035_f64),
+                web_search_per_request: None,
+                input_cache_read_per_token: Some(0.00000015_f64),
+            }),
+            supported_parameters: Some(vec![
+                "frequency_penalty".to_string(),
+                "include_reasoning".to_string(),
+                "logit_bias".to_string(),
+                "logprobs".to_string(),
+                "max_tokens".to_string(),
+                "min_p".to_string(),
+                "parallel_tool_calls".to_string(),
+                "presence_penalty".to_string(),
+                "reasoning".to_string(),
+                "reasoning_effort".to_string(),
+                "repetition_penalty".to_string(),
+                "response_format".to_string(),
+                "seed".to_string(),
+                "stop".to_string(),
+                "structured_outputs".to_string(),
+                "temperature".to_string(),
+                "tool_choice".to_string(),
+                "tools".to_string(),
+                "top_k".to_string(),
+                "top_logprobs".to_string(),
+                "top_p".to_string(),
+            ]),
+            default_parameters: None,
+            knowledge_cutoff: None,
+            created: Some(1777318428),
+        },
+    );
+    m.insert(
+        "~openai/gpt-latest",
+        ModelMetadata {
+            display_name: Some("OpenAI GPT Latest".to_string()),
+            family: None,
+            context_window: Some(1050000),
+            max_output_tokens: Some(128000),
+            modalities: Some(ModelModalities {
+                input: vec![Modality::Image, Modality::Text],
+                output: vec![Modality::Text],
+            }),
+            capabilities: vec![],
+            description: Some(
+                "This model always redirects to the latest model in the OpenAI GPT family."
+                    .to_string(),
+            ),
+            pricing: Some(ModelPricing {
+                prompt_per_token: Some(0.000005_f64),
+                completion_per_token: Some(0.00003_f64),
+                web_search_per_request: Some(0.01_f64),
+                input_cache_read_per_token: Some(0.0000005_f64),
+            }),
+            supported_parameters: Some(vec![
+                "include_reasoning".to_string(),
+                "max_completion_tokens".to_string(),
+                "max_tokens".to_string(),
+                "reasoning".to_string(),
+                "response_format".to_string(),
+                "seed".to_string(),
+                "structured_outputs".to_string(),
+                "tool_choice".to_string(),
+                "tools".to_string(),
+            ]),
+            default_parameters: None,
+            knowledge_cutoff: Some("2025-12-01".to_string()),
+            created: Some(1777318334),
+        },
+    );
+    m.insert(
+        "~openai/gpt-mini-latest",
+        ModelMetadata {
+            display_name: Some("OpenAI GPT Mini Latest".to_string()),
+            family: None,
+            context_window: Some(400000),
+            max_output_tokens: Some(128000),
+            modalities: Some(ModelModalities {
+                input: vec![Modality::Image, Modality::Text],
+                output: vec![Modality::Text],
+            }),
+            capabilities: vec![],
+            description: Some(
+                "This model always redirects to the latest model in the OpenAI GPT Mini family."
+                    .to_string(),
+            ),
+            pricing: Some(ModelPricing {
+                prompt_per_token: Some(0.00000075_f64),
+                completion_per_token: Some(0.0000045_f64),
+                web_search_per_request: Some(0.01_f64),
+                input_cache_read_per_token: Some(0.000000075_f64),
+            }),
+            supported_parameters: Some(vec![
+                "include_reasoning".to_string(),
+                "max_completion_tokens".to_string(),
+                "max_tokens".to_string(),
+                "reasoning".to_string(),
+                "response_format".to_string(),
+                "seed".to_string(),
+                "structured_outputs".to_string(),
+                "tool_choice".to_string(),
+                "tools".to_string(),
+            ]),
+            default_parameters: None,
+            knowledge_cutoff: Some("2025-08-31".to_string()),
+            created: Some(1777318471),
+        },
+    );
     m
 });

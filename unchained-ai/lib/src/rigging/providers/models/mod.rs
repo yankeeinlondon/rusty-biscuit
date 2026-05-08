@@ -272,37 +272,77 @@ impl ProviderModel {
         let mut ids = Vec::new();
 
         for model in ProviderModelAnthropic::ALL {
-            ids.push(&*Box::leak(ProviderModel::Anthropic(model.clone()).wire_id().into_boxed_str()));
+            ids.push(&*Box::leak(
+                ProviderModel::Anthropic(model.clone())
+                    .wire_id()
+                    .into_boxed_str(),
+            ));
         }
         for model in ProviderModelDeepseek::ALL {
-            ids.push(&*Box::leak(ProviderModel::Deepseek(model.clone()).wire_id().into_boxed_str()));
+            ids.push(&*Box::leak(
+                ProviderModel::Deepseek(model.clone())
+                    .wire_id()
+                    .into_boxed_str(),
+            ));
         }
         for model in ProviderModelGemini::ALL {
-            ids.push(&*Box::leak(ProviderModel::Gemini(model.clone()).wire_id().into_boxed_str()));
+            ids.push(&*Box::leak(
+                ProviderModel::Gemini(model.clone())
+                    .wire_id()
+                    .into_boxed_str(),
+            ));
         }
         for model in ProviderModelGroq::ALL {
-            ids.push(&*Box::leak(ProviderModel::Groq(model.clone()).wire_id().into_boxed_str()));
+            ids.push(&*Box::leak(
+                ProviderModel::Groq(model.clone())
+                    .wire_id()
+                    .into_boxed_str(),
+            ));
         }
         for model in ProviderModelMistral::ALL {
-            ids.push(&*Box::leak(ProviderModel::Mistral(model.clone()).wire_id().into_boxed_str()));
+            ids.push(&*Box::leak(
+                ProviderModel::Mistral(model.clone())
+                    .wire_id()
+                    .into_boxed_str(),
+            ));
         }
         for model in ProviderModelMoonshotAi::ALL {
-            ids.push(&*Box::leak(ProviderModel::MoonshotAi(model.clone()).wire_id().into_boxed_str()));
+            ids.push(&*Box::leak(
+                ProviderModel::MoonshotAi(model.clone())
+                    .wire_id()
+                    .into_boxed_str(),
+            ));
         }
         for model in ProviderModelOpenAi::ALL {
-            ids.push(&*Box::leak(ProviderModel::OpenAi(model.clone()).wire_id().into_boxed_str()));
+            ids.push(&*Box::leak(
+                ProviderModel::OpenAi(model.clone())
+                    .wire_id()
+                    .into_boxed_str(),
+            ));
         }
         for model in ProviderModelOpenRouter::ALL {
-            ids.push(&*Box::leak(ProviderModel::OpenRouter(model.clone()).wire_id().into_boxed_str()));
+            ids.push(&*Box::leak(
+                ProviderModel::OpenRouter(model.clone())
+                    .wire_id()
+                    .into_boxed_str(),
+            ));
         }
         for model in ProviderModelXai::ALL {
-            ids.push(&*Box::leak(ProviderModel::Xai(model.clone()).wire_id().into_boxed_str()));
+            ids.push(&*Box::leak(
+                ProviderModel::Xai(model.clone()).wire_id().into_boxed_str(),
+            ));
         }
         for model in ProviderModelZai::ALL {
-            ids.push(&*Box::leak(ProviderModel::Zai(model.clone()).wire_id().into_boxed_str()));
+            ids.push(&*Box::leak(
+                ProviderModel::Zai(model.clone()).wire_id().into_boxed_str(),
+            ));
         }
         for model in ProviderModelZenMux::ALL {
-            ids.push(&*Box::leak(ProviderModel::ZenMux(model.clone()).wire_id().into_boxed_str()));
+            ids.push(&*Box::leak(
+                ProviderModel::ZenMux(model.clone())
+                    .wire_id()
+                    .into_boxed_str(),
+            ));
         }
 
         ids

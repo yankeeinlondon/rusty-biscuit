@@ -178,12 +178,17 @@ pub(crate) fn build_with_outcome(
         // `{ "language": null }` when no primary language can be detected).
         // Exit code mirrors the text path: 0 on success, 1 on null, so scripts
         // can branch on `$?` without parsing the JSON body.
-        Some(RepoAction::Worktree { no_error, on_error: _ }) => {
+        Some(RepoAction::Worktree {
+            no_error,
+            on_error: _,
+        }) => {
             // This should not normally be reached because Worktree is handled
             // as an early return in commands.rs, but we handle it here for
             // completeness in the JSON builder.
             let dir = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
-            let name = sniff::filesystem::git::get_current_worktree_name(&dir).ok().flatten();
+            let name = sniff::filesystem::git::get_current_worktree_name(&dir)
+                .ok()
+                .flatten();
             worktree_outcome(name.as_deref(), *no_error)
         }
         Some(RepoAction::Language { breakdown: false }) => {

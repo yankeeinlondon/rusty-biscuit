@@ -491,7 +491,6 @@ impl<V: Clone + PartialEq> StatefulWidget for ChooseOne<V> {
                 Some(&mut state.filter),
                 state.validation_error.as_deref(),
             );
-
         });
 
         if let Some(message) = state.validation_error.as_deref()
@@ -1094,7 +1093,7 @@ mod tests {
         assert!(state.selected_index().is_none());
     }
 
-#[test]
+    #[test]
     fn space_on_disabled_option_is_ignored() {
         let input = ChoiceInput::<String>::new("x", "P").with_options(vec![
             ChoiceOption::new("a", "A", "a"),
@@ -1262,7 +1261,10 @@ mod tests {
         let event = KeyEvent::new(KeyCode::Char(' '), KeyModifiers::CONTROL);
         let outcome = ChooseOne::new().handle_event(&mut state, event);
         assert_eq!(outcome, EventOutcome::Consumed);
-        assert_eq!(state.hotkey_display_sticky(), Some(HotkeyDisplayMode::CtrlHeld));
+        assert_eq!(
+            state.hotkey_display_sticky(),
+            Some(HotkeyDisplayMode::CtrlHeld)
+        );
     }
 
     #[test]
@@ -2373,7 +2375,10 @@ mod tests {
         let mut state = ChooseOneState::new(fixture_input());
         assert_eq!(state.hotkey_display_sticky(), None);
         ChooseOne::new().handle_event(&mut state, space_with_modifier(KeyModifiers::CONTROL));
-        assert_eq!(state.hotkey_display_sticky(), Some(HotkeyDisplayMode::CtrlHeld));
+        assert_eq!(
+            state.hotkey_display_sticky(),
+            Some(HotkeyDisplayMode::CtrlHeld)
+        );
         assert_eq!(
             state.current_hotkey_display(Instant::now()),
             HotkeyDisplayMode::CtrlHeld
@@ -2393,7 +2398,10 @@ mod tests {
         let mut state = ChooseOneState::new(fixture_input());
         let event = KeyEvent::new(KeyCode::Char('\0'), KeyModifiers::CONTROL);
         ChooseOne::new().handle_event(&mut state, event);
-        assert_eq!(state.hotkey_display_sticky(), Some(HotkeyDisplayMode::CtrlHeld));
+        assert_eq!(
+            state.hotkey_display_sticky(),
+            Some(HotkeyDisplayMode::CtrlHeld)
+        );
     }
 
     #[test]
@@ -2422,7 +2430,10 @@ mod tests {
     fn alt_space_toggles_sticky_alt_held() {
         let mut state = ChooseOneState::new(fixture_input());
         ChooseOne::new().handle_event(&mut state, space_with_modifier(KeyModifiers::ALT));
-        assert_eq!(state.hotkey_display_sticky(), Some(HotkeyDisplayMode::AltHeld));
+        assert_eq!(
+            state.hotkey_display_sticky(),
+            Some(HotkeyDisplayMode::AltHeld)
+        );
         assert_eq!(
             state.current_hotkey_display(Instant::now()),
             HotkeyDisplayMode::AltHeld
@@ -2437,7 +2448,10 @@ mod tests {
         // the Ctrl-emphasis state.
         let mut state = ChooseOneState::new(fixture_input());
         ChooseOne::new().handle_event(&mut state, space_with_modifier(KeyModifiers::CONTROL));
-        assert_eq!(state.hotkey_display_sticky(), Some(HotkeyDisplayMode::CtrlHeld));
+        assert_eq!(
+            state.hotkey_display_sticky(),
+            Some(HotkeyDisplayMode::CtrlHeld)
+        );
         let release = KeyEvent {
             code: KeyCode::Char(' '),
             modifiers: KeyModifiers::CONTROL,
@@ -2458,9 +2472,14 @@ mod tests {
         // for Ctrl+Space release (the form a non-kitty terminal would
         // emit if it emitted release events at all).
         let mut state = ChooseOneState::new(fixture_input());
-        ChooseOne::new()
-            .handle_event(&mut state, KeyEvent::new(KeyCode::Char('\0'), KeyModifiers::CONTROL));
-        assert_eq!(state.hotkey_display_sticky(), Some(HotkeyDisplayMode::CtrlHeld));
+        ChooseOne::new().handle_event(
+            &mut state,
+            KeyEvent::new(KeyCode::Char('\0'), KeyModifiers::CONTROL),
+        );
+        assert_eq!(
+            state.hotkey_display_sticky(),
+            Some(HotkeyDisplayMode::CtrlHeld)
+        );
         let release = KeyEvent {
             code: KeyCode::Char('\0'),
             modifiers: KeyModifiers::CONTROL,
@@ -2478,7 +2497,10 @@ mod tests {
         let mut state = ChooseOneState::new(fixture_input());
         ChooseOne::new().handle_event(&mut state, space_with_modifier(KeyModifiers::CONTROL));
         ChooseOne::new().handle_event(&mut state, space_with_modifier(KeyModifiers::ALT));
-        assert_eq!(state.hotkey_display_sticky(), Some(HotkeyDisplayMode::AltHeld));
+        assert_eq!(
+            state.hotkey_display_sticky(),
+            Some(HotkeyDisplayMode::AltHeld)
+        );
     }
 
     #[test]
@@ -2504,12 +2526,13 @@ mod tests {
         // restores hidden state cleanly.
         use crossterm::event::ModifierKeyCode;
         let mut state = ChooseOneState::new(fixture_input());
-        ChooseOne::new()
-            .handle_event(&mut state, modifier_press(ModifierKeyCode::LeftControl));
+        ChooseOne::new().handle_event(&mut state, modifier_press(ModifierKeyCode::LeftControl));
         ChooseOne::new().handle_event(&mut state, space_with_modifier(KeyModifiers::CONTROL));
-        assert_eq!(state.hotkey_display_sticky(), Some(HotkeyDisplayMode::CtrlHeld));
-        ChooseOne::new()
-            .handle_event(&mut state, modifier_release(ModifierKeyCode::LeftControl));
+        assert_eq!(
+            state.hotkey_display_sticky(),
+            Some(HotkeyDisplayMode::CtrlHeld)
+        );
+        ChooseOne::new().handle_event(&mut state, modifier_release(ModifierKeyCode::LeftControl));
         assert_eq!(state.hotkey_display_sticky(), None);
         assert_eq!(
             state.current_hotkey_display(Instant::now()),

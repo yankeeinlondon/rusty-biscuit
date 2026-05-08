@@ -797,8 +797,8 @@ mod tests {
     #[test]
     fn generate_auth_strategy_init_bearer_with_header() {
         let tokens = generate_auth_strategy_init(&AuthStrategy::BearerToken {
-                header: Some("X-Custom".to_string()),
-            });
+            header: Some("X-Custom".to_string()),
+        });
         let code = tokens.to_string();
         assert!(code.contains("AuthStrategy :: BearerToken"));
         assert!(code.contains("X-Custom"));
@@ -807,8 +807,8 @@ mod tests {
     #[test]
     fn generate_auth_strategy_init_api_key() {
         let tokens = generate_auth_strategy_init(&AuthStrategy::ApiKey {
-                header: "X-API-Key".to_string(),
-            });
+            header: "X-API-Key".to_string(),
+        });
         let code = tokens.to_string();
         assert!(code.contains("AuthStrategy :: ApiKey"));
         assert!(code.contains("X-API-Key"));

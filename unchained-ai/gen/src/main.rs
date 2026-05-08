@@ -5,7 +5,9 @@ use clap::Parser;
 use strum::IntoEnumIterator;
 use tracing::{Level, info, warn};
 
-use unchained_ai::api::openai_api::{get_api_keys, get_provider_models_from_api, ProviderModelEntry};
+use unchained_ai::api::openai_api::{
+    ProviderModelEntry, get_api_keys, get_provider_models_from_api,
+};
 use unchained_ai::rigging::providers::Provider;
 
 mod errors;
@@ -124,13 +126,12 @@ async fn process_single_provider(
     output_dir: &std::path::Path,
     dry_run: bool,
 ) -> Result<ProviderResult, GeneratorError> {
-    let entries: Vec<ProviderModelEntry> =
-        get_provider_models_from_api(provider, api_key)
-            .await
-            .map_err(|e| GeneratorError::FetchFailed {
-                provider: format!("{:?}", provider),
-                reason: e.to_string(),
-            })?;
+    let entries: Vec<ProviderModelEntry> = get_provider_models_from_api(provider, api_key)
+        .await
+        .map_err(|e| GeneratorError::FetchFailed {
+            provider: format!("{:?}", provider),
+            reason: e.to_string(),
+        })?;
 
     if entries.is_empty() {
         return Err(GeneratorError::FetchFailed {

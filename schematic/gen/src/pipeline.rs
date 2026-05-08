@@ -216,10 +216,7 @@ pub fn missing_schemas_error(
     api_name: &str,
     missing: &[String],
 ) -> GeneratorError {
-    let first_missing = missing
-        .first()
-        .map(String::as_str)
-        .unwrap_or("MissingType");
+    let first_missing = missing.first().map(String::as_str).unwrap_or("MissingType");
     GeneratorError::ConfigError(format!(
         "OpenAPI registry incomplete for module \"{module}\" (API \"{api}\"): \
          missing schema(s) {missing:?}. \
@@ -605,11 +602,9 @@ pub fn run_generate_all(opts: &GenerateOpts<'_>) -> Result<(), GeneratorError> {
             })?;
 
             for member in module_apis.iter() {
-                registry
-                    .validate_completeness(member)
-                    .map_err(|missing| {
-                        missing_schemas_error(module_name, &member.name, &missing)
-                    })?;
+                registry.validate_completeness(member).map_err(|missing| {
+                    missing_schemas_error(module_name, &member.name, &missing)
+                })?;
             }
 
             let api_refs: Vec<&RestApi> = module_apis.iter().collect();
@@ -639,8 +634,7 @@ pub fn run_generate_all(opts: &GenerateOpts<'_>) -> Result<(), GeneratorError> {
 
         for (module_name, module_apis) in grouped.iter() {
             if module_apis.len() == 1 {
-                let module_name_resolved =
-                    crate::export::resolve_module_name(&module_apis[0]);
+                let module_name_resolved = crate::export::resolve_module_name(&module_apis[0]);
                 postman_files.insert(format!("{}.postman_collection.json", module_name_resolved));
 
                 run_postman_export(&module_apis[0], postman_dir, opts.dry_run, opts.verbose)?;

@@ -149,15 +149,13 @@ pub(crate) fn build_language_summary(
 
     let mut frameworks: Vec<FrameworkStats> = framework_map
         .into_iter()
-        .map(|(framework, entry)| {
-            FrameworkStats {
-                framework,
-                file_count: entry.files.len(),
-                explicit_file_count: entry.explicit_file_count,
-                inferred_file_count: entry.inferred_file_count,
-                related_languages: entry.related_languages.into_iter().collect(),
-                files: entry.files,
-            }
+        .map(|(framework, entry)| FrameworkStats {
+            framework,
+            file_count: entry.files.len(),
+            explicit_file_count: entry.explicit_file_count,
+            inferred_file_count: entry.inferred_file_count,
+            related_languages: entry.related_languages.into_iter().collect(),
+            files: entry.files,
         })
         .collect();
 

@@ -7,7 +7,7 @@ use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 use schematic_define::{ApiRequest, Endpoint};
 
-use crate::codegen::request_structs::shared::{to_snake_case, QueryParamInfo};
+use crate::codegen::request_structs::shared::{QueryParamInfo, to_snake_case};
 
 /// Generates the body field if the endpoint has a request schema.
 pub fn generate_body_field(endpoint: &Endpoint) -> TokenStream {

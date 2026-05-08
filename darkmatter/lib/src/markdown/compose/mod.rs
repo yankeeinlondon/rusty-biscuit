@@ -168,18 +168,14 @@ pub(crate) fn find_target_range(
             if let Some(idx) = outer_text.find(pattern) {
                 let mut actual_idx = idx + attr_name.len() + 1; // skip past attr_name=
                 // Skip optional whitespace after =
-                while actual_idx < outer_text.len()
-                    && outer_text[actual_idx..].starts_with(' ')
-                {
+                while actual_idx < outer_text.len() && outer_text[actual_idx..].starts_with(' ') {
                     actual_idx += 1;
                 }
                 let start = span.start + actual_idx + 1; // skip past quote
                 let end = start + raw_target.len();
                 trace!(
                     "find_target_range: attribute-aware match for '{}' in {:?} at {}",
-                    raw_target,
-                    record.origin.syntax,
-                    start
+                    raw_target, record.origin.syntax, start
                 );
                 return Some((start, end));
             }
@@ -206,9 +202,7 @@ pub(crate) fn find_target_range(
                     let end = start + encoded.len();
                     trace!(
                         "find_target_range: HTML-encoded match for '{}' in {:?} at {}",
-                        raw_target,
-                        record.origin.syntax,
-                        start
+                        raw_target, record.origin.syntax, start
                     );
                     return Some((start, end));
                 }
@@ -250,7 +244,9 @@ pub(crate) fn find_target_range(
 }
 
 /// Maps a ReferenceSyntax to its target attribute name for HTML-aware matching.
-fn get_attribute_name_for_syntax(syntax: &crate::markdown::reference::ReferenceSyntax) -> Option<&'static str> {
+fn get_attribute_name_for_syntax(
+    syntax: &crate::markdown::reference::ReferenceSyntax,
+) -> Option<&'static str> {
     use crate::markdown::reference::ReferenceSyntax;
     match syntax {
         ReferenceSyntax::HtmlAnchor | ReferenceSyntax::HtmlLinkTag => Some("href"),
