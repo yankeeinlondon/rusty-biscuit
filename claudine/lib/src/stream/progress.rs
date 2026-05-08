@@ -30,6 +30,8 @@ pub fn new_live_metrics() -> LiveMetrics {
 pub struct InFlightTool {
     pub name: Option<String>,
     pub started_at: Instant,
+    /// Wall-clock time of the most recent progress event for this tool.
+    pub last_progress_at: Instant,
 }
 
 /// A subagent invocation the parser has started but not yet seen a stop for.
@@ -37,6 +39,8 @@ pub struct InFlightTool {
 pub struct InFlightSubagent {
     pub name: Option<String>,
     pub started_at: Instant,
+    /// Wall-clock time of the most recent progress event for this subagent.
+    pub last_progress_at: Instant,
 }
 
 /// Mutable state the announcer and the heartbeat share.
@@ -104,6 +108,7 @@ impl LiveMetricsState {
             InFlightTool {
                 name,
                 started_at: now,
+                last_progress_at: now,
             },
         );
         self.last_event_at = Some(now);
@@ -120,6 +125,12 @@ impl LiveMetricsState {
     /// suppresses while the provider is actively producing output.
     pub fn record_activity(&mut self, now: Instant) {
         self.last_event_at = Some(now);
+        for tool in self.in_flight.values_mut() {
+            tool.last_progress_at = now;
+        }
+        for subagent in self.in_flight_subagents.values_mut() {
+            subagent.last_progress_at = now;
+        }
     }
 
     pub fn update_token_usage(&mut self, usage: NormalizedTokenUsage) {
@@ -136,6 +147,7 @@ impl LiveMetricsState {
             InFlightSubagent {
                 name,
                 started_at: now,
+                last_progress_at: now,
             },
         );
         self.last_event_at = Some(now);
@@ -175,6 +187,7 @@ impl LiveMetricsState {
                     InFlightTool {
                         name: name.clone(),
                         started_at: now,
+                        last_progress_at: now,
                     },
                 );
             }
@@ -196,6 +209,7 @@ impl LiveMetricsState {
                     InFlightSubagent {
                         name: name.clone(),
                         started_at: now,
+                        last_progress_at: now,
                     },
                 );
             }
@@ -234,6 +248,34 @@ impl LiveMetricsState {
             }
             _ => {}
         }
+    }
+
+    /// Returns all in-flight tools whose `last_progress_at` is at least
+    /// `threshold` older than `now`.
+    pub fn stuck_tools(
+        &self,
+        now: Instant,
+        threshold: Duration,
+    ) -> Vec<&InFlightTool> {
+        self.in_flight
+            .values()
+            .filter(|tool| now.saturating_duration_since(tool.last_progress_at) >= threshold)
+            .collect()
+    }
+
+    /// Returns all in-flight subagents whose `last_progress_at` is at least
+    /// `threshold` older than `now`.
+    pub fn stuck_subagents(
+        &self,
+        now: Instant,
+        threshold: Duration,
+    ) -> Vec<&InFlightSubagent> {
+        self.in_flight_subagents
+            .values()
+            .filter(|subagent| {
+                now.saturating_duration_since(subagent.last_progress_at) >= threshold
+            })
+            .collect()
     }
 }
 
