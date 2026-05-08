@@ -42,6 +42,11 @@ expression: json
       "name": "desktop",
       "provider": "Desktop",
       "is_default": true
+    },
+    {
+      "name": "ops.slack",
+      "provider": "Slack",
+      "is_default": false
     }
   ]
 }

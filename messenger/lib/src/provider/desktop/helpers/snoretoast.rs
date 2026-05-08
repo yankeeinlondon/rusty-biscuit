@@ -11,6 +11,7 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 
 use async_trait::async_trait;
 
@@ -33,12 +34,60 @@ const NOTICE_TIMEOUT_MS: u64 = 5_000;
 pub(crate) struct SnoreToastHelper {
     pub(crate) path: PathBuf,
     pub(crate) app_id: String,
+    app_id_registered: OnceLock<()>,
 }
 
 impl SnoreToastHelper {
     /// Build a helper from sniff detection data and the configured AppID.
     pub(crate) fn new(path: PathBuf, app_id: String) -> Self {
-        Self { path, app_id }
+        Self {
+            path,
+            app_id,
+            app_id_registered: OnceLock::new(),
+        }
+    }
+
+    /// Mark the AppID as registered for the lifetime of this process.
+    ///
+    /// Used by tests to bypass the registration shell-out, and by
+    /// `ensure_app_id_registered` after a successful `-install` call.
+    pub(crate) fn mark_app_id_registered(&self) {
+        let _ = self.app_id_registered.set(());
+    }
+
+    /// Whether the AppID has already been registered in this process.
+    pub(crate) fn app_id_registered(&self) -> bool {
+        self.app_id_registered.get().is_some()
+    }
+
+    /// Materialize the argv SnoreToast expects for AppID registration.
+    pub(crate) fn build_register_args(&self) -> Vec<OsString> {
+        let shortcut = format!("{}.lnk", self.app_id);
+        vec![
+            OsString::from("-appID"),
+            OsString::from(&self.app_id),
+            OsString::from("-install"),
+            OsString::from(shortcut),
+            self.path.clone().into_os_string(),
+            OsString::from(&self.app_id),
+        ]
+    }
+
+    /// Run SnoreToast's idempotent `-install` registration once per helper.
+    async fn ensure_app_id_registered(&self) -> Result<(), HelperError> {
+        if self.app_id_registered.get().is_some() {
+            return Ok(());
+        }
+        let args = self.build_register_args();
+        let output = spawn_helper(&self.path, &args, None, Some(NOTICE_TIMEOUT_MS)).await?;
+        if output.status != 0 {
+            return Err(HelperError::Exited {
+                status: output.status,
+                stderr: super::process::first_line(&output.stderr).to_string(),
+            });
+        }
+        let _ = self.app_id_registered.set(());
+        Ok(())
     }
 
     /// Materialize the argv passed to `snoretoast`.
@@ -198,6 +247,7 @@ impl HelperBackend for SnoreToastHelper {
         &self,
         request: &DesktopNotificationRequest,
     ) -> Result<DesktopNotificationReceipt, HelperError> {
+        self.ensure_app_id_registered().await?;
         let (args, image_dropped) = self.build_args(request);
         let interactive = !request.actions.is_empty();
         let timeout_ms = if interactive {
@@ -214,6 +264,7 @@ impl HelperBackend for SnoreToastHelper {
         id: &str,
         request: &DesktopNotificationRequest,
     ) -> Result<DesktopNotificationReceipt, HelperError> {
+        self.ensure_app_id_registered().await?;
         let mut request = request.clone();
         request.replace_id = Some(id.to_string());
         let (args, image_dropped) = self.build_args(&request);

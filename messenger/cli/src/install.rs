@@ -20,10 +20,10 @@ use biscuit_terminal::terminal::Terminal;
 use color_eyre::eyre::{Result, eyre};
 use inquire::{Confirm, MultiSelect};
 use sniff::os::OsType;
-use sniff::programs::install_plan::{InstallPlan, InstallPlanOption};
-use sniff::programs::installer::InstallOptions;
-use sniff::programs::types::InstallationMethod;
-use sniff::programs::{HostCapabilities, NotificationHelper, ProgramMetadata, build_install_plan};
+use sniff::programs::{
+    HostCapabilities, InstallOptions, InstallPlan, InstallPlanOption, InstallationMethod,
+    NotificationHelper, ProgramMetadata, build_install_plan, get_install_command,
+};
 use strum::IntoEnumIterator;
 
 use crate::config::{Config, parse_helper_name};
@@ -96,7 +96,7 @@ pub fn run(args: InstallArgs) -> Result<()> {
     let config = Config::load().unwrap_or_default();
     let host_helpers = info::config_helpers_for_host(&config, sniff::os::detect_os_type());
     let report = info::build_report(&config, &host_helpers);
-    print!("{}", info::render_text(&report));
+    print!("{}", info::render_text(&report, &term));
 
     Ok(())
 }
@@ -195,14 +195,13 @@ fn print_plan_table(plans: &[(NotificationHelper, InstallPlan)], term: &Terminal
                     option.kind.manager_name(),
                 );
                 println!("{}", Prose::new(summary).render(term));
-                let cmd = sniff::programs::installer::get_install_command(&option.kind)
-                    .unwrap_or_else(|_| {
-                        format!(
-                            "{} {}",
-                            option.kind.manager_name(),
-                            option.kind.package_name()
-                        )
-                    });
+                let cmd = get_install_command(&option.kind).unwrap_or_else(|_| {
+                    format!(
+                        "{} {}",
+                        option.kind.manager_name(),
+                        option.kind.package_name()
+                    )
+                });
                 println!(
                     "{}",
                     Prose::new(format!("    <dim>$</dim> <dim>{}</dim>", cmd)).render(term)

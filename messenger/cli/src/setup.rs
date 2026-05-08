@@ -116,7 +116,8 @@ fn print_desktop_info_section(config: &Config) {
         styled("<dim>Detected notification helpers and election order:</dim>")
     );
     println!();
-    print!("{}", crate::info::render_text(&report));
+    let term = Terminal::default();
+    print!("{}", crate::info::render_text(&report, &term));
 }
 
 fn select_provider() -> Result<RouteProvider> {

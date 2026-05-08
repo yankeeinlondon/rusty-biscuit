@@ -3,8 +3,9 @@
 //! Each `HelperBackend` adapts a CLI like `dunstify`, `notify-send`,
 //! `terminal-notifier`, `alerter`, `snoretoast`, or `BurntToast` into the
 //! same interface that the platform [`DesktopBackend`](super::DesktopBackend)
-//! consumes. Helpers are elected at send time (see [`election`]) and the
-//! native backend remains the universal fallback.
+//! consumes. Installed helpers with `score() > 0` are the primary delivery
+//! path and are elected at send time (see [`election`]); the native backend
+//! remains the universal fallback when no helper can serve the request.
 //!
 //! The trait is intentionally `pub(crate)` — helpers are an implementation
 //! detail of the desktop provider. The shared identifier
