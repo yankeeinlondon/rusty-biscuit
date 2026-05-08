@@ -8,15 +8,10 @@ mod helpers;
 
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
-use schematic_define::{AuthStrategy, RestApi};
+use schematic_define::RestApi;
 
-pub(crate) use auth::{
-    generate_auth_method_init, generate_auth_policy_init, generate_auth_strategy_init,
-    generate_env_auth_strategy_init,
-};
-pub(crate) use helpers::{
-    generate_explicit_auth_helpers, generate_headers_init, generate_headers_init_from_mapping,
-};
+pub(crate) use auth::{generate_auth_policy_init, generate_auth_strategy_init};
+pub(crate) use helpers::{generate_explicit_auth_helpers, generate_headers_init_from_mapping};
 
 /// Generates the API struct for the given API definition.
 ///
@@ -566,6 +561,7 @@ pub fn generate_api_struct(api: &RestApi) -> TokenStream {
 
 #[cfg(test)]
 mod tests {
+    use super::helpers::generate_headers_init;
     use super::*;
     use crate::codegen::request_structs::{format_generated_code, validate_generated_code};
     use schematic_define::AuthStrategy;
