@@ -68,6 +68,163 @@ pub struct ShellDirective {
     pub error_handling: ErrorHandling,
     /// Per-command timeout override. When Some, takes precedence over the global timeout.
     pub timeout_override: Option<std::time::Duration>,
+    /// Parsed pipeline (supports chaining with && and ||).
+    pub pipeline: Option<ShellPipeline>,
+}
+
+impl ShellDirective {
+    /// Returns the first executable in the directive (for backward compatibility).
+    pub fn first_executable(&self) -> &str {
+        if let Some(ref pipeline) = self.pipeline {
+            &pipeline.actions[0].command.executable
+        } else {
+            &self.executable
+        }
+    }
+
+    pub fn first_args(&self) -> &[String] {
+        if let Some(ref pipeline) = self.pipeline {
+            &pipeline.actions[0].command.args
+        } else {
+            &self.args
+        }
+    }
+
+    /// Returns true if this directive contains a chain (multiple actions).
+    pub fn is_chain(&self) -> bool {
+        self.pipeline
+            .as_ref()
+            .is_some_and(|p| p.actions.len() > 1)
+    }
+}
+
+/// A parsed pipeline of commands connected by chain operators.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ShellPipeline {
+    /// Ordered list of actions with their preceding operators.
+    /// The first action always has `ChainOperator::None`.
+    pub actions: Vec<PipelineAction>,
+}
+
+impl ShellPipeline {
+    /// Creates a simple single-command pipeline.
+    pub fn single(executable: String, args: Vec<String>) -> Self {
+        Self {
+            actions: vec![PipelineAction {
+                operator: ChainOperator::None,
+                command: CommandAction {
+                    executable,
+                    args,
+                    redirection: RedirectionConfig::default(),
+                },
+            }],
+        }
+    }
+
+    /// Returns all executables in the pipeline.
+    pub fn executables(&self) -> Vec<&str> {
+        self.actions.iter().map(|a| a.command.executable.as_str()).collect()
+    }
+
+    /// Returns a display string for the whole pipeline including chain
+    /// operators and redirection tokens.
+    pub fn display_string(&self) -> String {
+        let mut parts = Vec::new();
+        for action in &self.actions {
+            let op_str = match action.operator {
+                ChainOperator::None => "",
+                ChainOperator::And => " && ",
+                ChainOperator::Or => " || ",
+            };
+            let mut cmd = action.command.executable.clone();
+            for arg in &action.command.args {
+                if arg.contains(' ') || arg.contains('"') || arg.contains('\'') {
+                    cmd.push_str(&format!(" \"{}\"", arg.replace('"', "\\\"")));
+                } else {
+                    cmd.push_str(&format!(" {arg}"));
+                }
+            }
+            cmd.push_str(&render_redirection(&action.command.redirection));
+            parts.push(format!("{op_str}{cmd}"));
+        }
+        parts.join("")
+    }
+}
+
+/// A single action in a pipeline, with its chain operator.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PipelineAction {
+    /// The chain operator preceding this action (None for the first).
+    pub operator: ChainOperator,
+    /// The command to execute.
+    pub command: CommandAction,
+}
+
+/// Chain operator connecting pipeline actions.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ChainOperator {
+    /// First command in the pipeline (no preceding operator).
+    None,
+    /// `&&` — execute next only if previous succeeded.
+    And,
+    /// `||` — execute next only if previous failed.
+    Or,
+}
+
+/// A single command with its redirection configuration.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CommandAction {
+    pub executable: String,
+    pub args: Vec<String>,
+    pub redirection: RedirectionConfig,
+}
+
+/// Configures stdout/stderr redirection for a command action.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct RedirectionConfig {
+    pub stdout: StdoutTarget,
+    pub stderr: StderrTarget,
+}
+
+/// Where stdout should be directed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum StdoutTarget {
+    /// Capture stdout normally (default).
+    #[default]
+    Capture,
+    /// Discard stdout (`> /dev/null`).
+    Null,
+    /// Route stdout to stderr (`>&2`).
+    ToStderr,
+}
+
+/// Renders a [`RedirectionConfig`] as the trailing redirection tokens that
+/// would appear after a command (with a leading space when non-empty).
+fn render_redirection(redir: &RedirectionConfig) -> String {
+    let mut out = String::new();
+    match redir.stdout {
+        StdoutTarget::Capture => {}
+        StdoutTarget::Null => out.push_str(" > /dev/null"),
+        StdoutTarget::ToStderr => out.push_str(" >&2"),
+    }
+    match redir.stderr {
+        StderrTarget::Capture => {}
+        StderrTarget::Null => out.push_str(" 2> /dev/null"),
+        StderrTarget::ToStdout => out.push_str(" 2>&1"),
+    }
+    out
+}
+
+/// Where stderr should be directed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum StderrTarget {
+    /// Capture stderr normally (default).
+    #[default]
+    Capture,
+    /// Discard stderr (`2> /dev/null`).
+    Null,
+    /// Merge stderr into stdout (`2>&1`).
+    ToStdout,
 }
 
 /// A shell command discovered during document graph analysis.
@@ -298,6 +455,11 @@ pub struct ShellApprovalRequest {
     pub blacklist_path: PathBuf,
     /// If the command was resolved from a shell alias, the original alias name.
     pub alias_name: Option<String>,
+    /// When the request covers a chained command (e.g. `a && b`), this lists
+    /// the unique executables in the chain in the order they first appear.
+    /// For non-chained requests this is empty; the CLI prompt should fall
+    /// back to `executable` in that case.
+    pub chain_executables: Vec<String>,
 }
 
 /// Possible decisions from approval handler.
@@ -576,6 +738,19 @@ pub(crate) struct ShellRuntimeSnapshot {
     pub user_blacklist: ShellRuleSet,
 }
 
+/// Result of attempting to reserve a normalized command for allow-once
+/// approval via [`ShellExpansionRuntime::try_reserve_allow_once`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ReserveOutcome {
+    /// Caller now owns the reservation and must release it via
+    /// `complete_allow_once` once the approval flow resolves.
+    Reserved,
+    /// Command is already in the `allow_once` set; no caller action required.
+    AlreadyAllowed,
+    /// Another thread holds a pending reservation for this exact command.
+    Pending,
+}
+
 impl Default for ShellExpansionRuntime {
     fn default() -> Self {
         Self::new()
@@ -629,15 +804,27 @@ impl ShellExpansionRuntime {
 
     /// Attempts to reserve a command for allow-once approval.
     ///
-    /// Returns `true` if the reservation succeeded (caller should proceed with
-    /// the approval handler), or `false` if the command is already allowed or
-    /// another thread is already handling it.
-    pub(crate) fn try_reserve_allow_once(&mut self, normalized: &str) -> bool {
+    /// ## Returns
+    ///
+    /// - [`ReserveOutcome::Reserved`] when the caller now owns the reservation
+    ///   and must call [`Self::complete_allow_once`] after the approval handler
+    ///   resolves.
+    /// - [`ReserveOutcome::AlreadyAllowed`] when the command is already in the
+    ///   `allow_once` set; the caller need not prompt or release anything for
+    ///   this command.
+    /// - [`ReserveOutcome::Pending`] when another thread is currently approving
+    ///   this exact command. The caller MUST NOT implicitly approve other
+    ///   un-reserved commands in the same chain.
+    pub(crate) fn try_reserve_allow_once(&mut self, normalized: &str) -> ReserveOutcome {
         let mut shared = self.shared.lock().unwrap();
         if shared.allow_once.contains(normalized) {
-            return false;
+            return ReserveOutcome::AlreadyAllowed;
         }
-        shared.pending_allow_once.insert(normalized.to_string())
+        if shared.pending_allow_once.insert(normalized.to_string()) {
+            ReserveOutcome::Reserved
+        } else {
+            ReserveOutcome::Pending
+        }
     }
 
     /// Completes an allow-once reservation.

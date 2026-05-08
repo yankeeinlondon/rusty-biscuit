@@ -51,8 +51,16 @@ pub enum Expr {
     /// Number literal: `42`, `3.14`, `-1`.
     NumberLiteral(f64),
 
+    /// Boolean literal: `true` or `false`.
+    BoolLiteral(bool),
+
     /// Unary not expression: `!expr`.
     UnaryNot(Box<Expr>),
+
+    /// Parenthesized expression: `(expr)`.
+    ///
+    /// Preserves user-provided grouping for display and debugging.
+    Paren(Box<Expr>),
 
     /// Fallback expression: `expr || fallback`.
     ///
@@ -107,7 +115,9 @@ impl fmt::Display for Expr {
                     write!(f, "{}", n)
                 }
             }
+            Expr::BoolLiteral(b) => write!(f, "{}", b),
             Expr::UnaryNot(expr) => write!(f, "!{}", expr),
+            Expr::Paren(expr) => write!(f, "({})", expr),
             Expr::Fallback { primary, fallback } => {
                 write!(f, "{} || {}", primary, fallback)
             }
@@ -161,6 +171,24 @@ mod tests {
     fn display_number_literal_float() {
         let expr = Expr::NumberLiteral(3.15);
         assert_eq!(expr.to_string(), "3.15");
+    }
+
+    #[test]
+    fn display_bool_literal_true() {
+        let expr = Expr::BoolLiteral(true);
+        assert_eq!(expr.to_string(), "true");
+    }
+
+    #[test]
+    fn display_bool_literal_false() {
+        let expr = Expr::BoolLiteral(false);
+        assert_eq!(expr.to_string(), "false");
+    }
+
+    #[test]
+    fn display_paren() {
+        let expr = Expr::Paren(Box::new(Expr::Variable("foo".to_string())));
+        assert_eq!(expr.to_string(), "(foo)");
     }
 
     #[test]

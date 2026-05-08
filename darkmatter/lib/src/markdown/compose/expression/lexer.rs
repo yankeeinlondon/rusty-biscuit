@@ -236,6 +236,9 @@ pub enum Token {
     /// A numeric literal.
     NumberLiteral(f64),
 
+    /// A boolean literal: `true` or `false`.
+    BoolLiteral(bool),
+
     /// A comparison operator.
     CompOp(ComparisonOp),
 
@@ -282,6 +285,7 @@ impl fmt::Display for Token {
             Token::Comma => write!(f, ","),
             Token::StringLiteral(s) => write!(f, "\"{}\"", s),
             Token::NumberLiteral(n) => write!(f, "{}", n),
+            Token::BoolLiteral(b) => write!(f, "{}", b),
             Token::CompOp(op) => write!(f, "{}", op),
             Token::Bang => write!(f, "!"),
             Token::AndAnd => write!(f, "&&"),
@@ -714,7 +718,11 @@ impl<'a> Lexer<'a> {
             }
         }
 
-        Ok(Token::Variable(name))
+        Ok(match name.as_str() {
+            "true" => Token::BoolLiteral(true),
+            "false" => Token::BoolLiteral(false),
+            _ => Token::Variable(name),
+        })
     }
 }
 
@@ -1014,6 +1022,37 @@ After code {{ end }}."#;
             assert!(
                 matches!(&tokens[0], Token::NumberLiteral(n) if (*n - -3.15).abs() < f64::EPSILON)
             );
+        }
+
+        #[test]
+        fn tokenizes_true_literal() {
+            let mut lexer = Lexer::new("true");
+            let tokens = lexer.tokenize_all().unwrap();
+
+            assert_eq!(tokens.len(), 2);
+            assert!(matches!(&tokens[0], Token::BoolLiteral(b) if *b));
+        }
+
+        #[test]
+        fn tokenizes_false_literal() {
+            let mut lexer = Lexer::new("false");
+            let tokens = lexer.tokenize_all().unwrap();
+
+            assert_eq!(tokens.len(), 2);
+            assert!(matches!(&tokens[0], Token::BoolLiteral(b) if !*b));
+        }
+
+        #[test]
+        fn tokenizes_bool_literal_in_expression() {
+            let mut lexer = Lexer::new("enabled ? true : false");
+            let tokens = lexer.tokenize_all().unwrap();
+
+            assert_eq!(tokens.len(), 6);
+            assert!(matches!(&tokens[0], Token::Variable(v) if v == "enabled"));
+            assert!(matches!(&tokens[1], Token::Question));
+            assert!(matches!(&tokens[2], Token::BoolLiteral(b) if *b));
+            assert!(matches!(&tokens[3], Token::Colon));
+            assert!(matches!(&tokens[4], Token::BoolLiteral(b) if !*b));
         }
 
         #[test]
@@ -1354,6 +1393,8 @@ After code {{ end }}."#;
                 "\"hello\""
             );
             assert_eq!(Token::NumberLiteral(42.0).to_string(), "42");
+            assert_eq!(Token::BoolLiteral(true).to_string(), "true");
+            assert_eq!(Token::BoolLiteral(false).to_string(), "false");
         }
 
         #[test]

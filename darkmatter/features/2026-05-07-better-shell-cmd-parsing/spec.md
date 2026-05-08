@@ -23,6 +23,7 @@ The system must support a curated set of redirection patterns by manually config
 - **Constraint:** Redirection to arbitrary files remains disallowed to prevent side effects and simplify security audits.
 
 ### 2.2 Command Chaining
+
 The system must support logical AND (`&&`) and OR (`||`) operators to allow multi-command pipelines.
 - **Orchestration:** Chaining is managed by a Rust-side state machine.
 - **Conditional Logic:** 
@@ -30,6 +31,7 @@ The system must support logical AND (`&&`) and OR (`||`) operators to allow mult
     - `A || B`: Execute `B` only if `A` returns a non-zero exit code.
 
 ### 2.3 Preflight Validation & Approval
+
 Security is maintained by validating the *entire* pipeline before any command is executed.
 - **Policy Engine:** Every command in the chain must be checked against the policy engine.
 - **Block Approval:** If any command in the chain requires user intervention (e.g., is not on the whitelist), the user must be presented with the **entire chain** of commands for upfront approval.

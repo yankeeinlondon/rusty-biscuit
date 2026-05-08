@@ -5,6 +5,7 @@
 //! aliases like `ll`, `la`, etc.
 
 use super::tokenize::tokenize;
+use super::tokenize::ShellToken;
 use std::process::{Command, Stdio};
 
 /// Result of resolving a shell alias.
@@ -67,12 +68,18 @@ pub fn resolve_alias(name: &str) -> Option<ResolvedAlias> {
     let definition = parse_alias_value(&alias_output, name)?;
 
     // Tokenize the alias value using our safe tokenizer (rejects metacharacters)
-    let tokens = tokenize(&definition).ok()?;
+    let shell_tokens = tokenize(&definition).ok()?;
+    let tokens: Vec<String> = shell_tokens
+        .into_iter()
+        .filter_map(|t| match t {
+            ShellToken::Word(w) => Some(w),
+            _ => None,
+        })
+        .collect();
     if tokens.is_empty() {
         return None;
     }
 
-    // Verify the resolved executable actually exists on PATH
     if which::which(&tokens[0]).is_err() {
         return None;
     }

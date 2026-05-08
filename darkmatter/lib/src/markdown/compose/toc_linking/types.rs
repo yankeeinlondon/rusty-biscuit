@@ -254,4 +254,8 @@ pub struct TocLinkingDirective {
     pub span: Range<usize>,
     /// 1-indexed line number.
     pub line: usize,
+    /// Leading whitespace of the directive line.
+    pub indent: String,
+    /// Inferred container indentation when directive is at column 1.
+    pub inferred_indent: Option<String>,
 }

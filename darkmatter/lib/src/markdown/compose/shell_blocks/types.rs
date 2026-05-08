@@ -4,7 +4,9 @@ use std::ops::Range;
 use std::path::PathBuf;
 use std::time::Duration;
 
-use crate::markdown::compose::shell_expansion::types::{ErrorHandling, ShellExpansionError};
+use crate::markdown::compose::shell_expansion::types::{
+    ErrorHandling, ShellExpansionError, ShellPipeline,
+};
 
 /// A discovered shell block region with parsed options.
 #[derive(Debug, Clone)]
@@ -24,6 +26,9 @@ pub(crate) struct ShellBlockCommand {
     pub executable: String,
     /// Tokenized arguments.
     pub args: Vec<String>,
+    /// Parsed command pipeline, including supported chain operators and
+    /// redirections.
+    pub pipeline: ShellPipeline,
     /// Byte span within the block body.
     pub physical_span: Range<usize>,
     /// 1-based line number where this command starts.

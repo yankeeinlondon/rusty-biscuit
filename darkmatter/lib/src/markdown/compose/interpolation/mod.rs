@@ -20,6 +20,7 @@
 //!
 //! Ternary expressions:
 //! - `{{ color ? "known" : "unknown" }}` - Boolean switch
+//! - `{{ show ? has_name ? name : "unnamed" : "hidden" }}` - Nested ternary
 //!
 //! Comparisons:
 //! - `{{ count > 0 ? "has items" : "empty" }}` - Numeric comparison
@@ -57,6 +58,10 @@
 //!
 //! // Parse a ternary with comparison
 //! let expr = parse(r#"count > 0 ? "items" : "empty""#).unwrap();
+//! assert!(matches!(expr, Expr::Ternary { .. }));
+//!
+//! // Parse a nested ternary
+//! let expr = parse(r#"a ? b ? "c" : "d" : "e""#).unwrap();
 //! assert!(matches!(expr, Expr::Ternary { .. }));
 //! ```
 
