@@ -1031,6 +1031,43 @@ name: world
         assert!(err.to_string().contains("denied") || err.to_string().contains("Denied"));
     }
 
+    /// Regression for review-6: a chain whose first action was previously
+    /// approved as allow-once must NOT bypass approval for the remaining
+    /// un-approved actions in the chain. Every command in the chain must be
+    /// presented to the approval handler.
+    #[test]
+    fn pipeline_partial_allow_once_overlap_in_chain_re_prompts() {
+        let temp_dir = TempDir::new().unwrap();
+        let content = "# Test\n\n::shell echo allowed\n\n::shell echo allowed && echo unapproved\n";
+        let md: Markdown = content.into();
+
+        let handler = Arc::new(CountingApprovalHandler::new(
+            ShellApprovalDecision::AllowOnce,
+        ));
+
+        let options = ComposeOptions::new()
+            .only(&[ComposeOperation::ShellExpansion])
+            .with_shell(ShellExpansionOptions {
+                policy_root: Some(temp_dir.path().to_path_buf()),
+                approval_handler: Some(handler.clone()),
+                ..Default::default()
+            });
+
+        let (composed, report) = md.compose_with(options).unwrap();
+
+        // Both directives produced their output.
+        assert!(composed.content().contains("allowed"));
+        assert!(composed.content().contains("unapproved"));
+
+        // The handler must have been called for BOTH directives — once for the
+        // first single-action directive, and once for the second chain because
+        // it contains an un-approved action ("echo unapproved"). Prior to the
+        // fix, the second chain silently approved itself because "echo allowed"
+        // was already in `allow_once`.
+        assert_eq!(handler.approvals(), 2);
+        assert_eq!(report.shell_approvals_used, 2);
+    }
+
     /// AllowCommandPersist on a chain writes a prefix entry for every unique
     /// executable in the chain so later runs do not re-prompt. Regression for
     /// review-3.

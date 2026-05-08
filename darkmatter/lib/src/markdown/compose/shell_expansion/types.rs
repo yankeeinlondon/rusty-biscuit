@@ -738,6 +738,19 @@ pub(crate) struct ShellRuntimeSnapshot {
     pub user_blacklist: ShellRuleSet,
 }
 
+/// Result of attempting to reserve a normalized command for allow-once
+/// approval via [`ShellExpansionRuntime::try_reserve_allow_once`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ReserveOutcome {
+    /// Caller now owns the reservation and must release it via
+    /// `complete_allow_once` once the approval flow resolves.
+    Reserved,
+    /// Command is already in the `allow_once` set; no caller action required.
+    AlreadyAllowed,
+    /// Another thread holds a pending reservation for this exact command.
+    Pending,
+}
+
 impl Default for ShellExpansionRuntime {
     fn default() -> Self {
         Self::new()
@@ -791,15 +804,27 @@ impl ShellExpansionRuntime {
 
     /// Attempts to reserve a command for allow-once approval.
     ///
-    /// Returns `true` if the reservation succeeded (caller should proceed with
-    /// the approval handler), or `false` if the command is already allowed or
-    /// another thread is already handling it.
-    pub(crate) fn try_reserve_allow_once(&mut self, normalized: &str) -> bool {
+    /// ## Returns
+    ///
+    /// - [`ReserveOutcome::Reserved`] when the caller now owns the reservation
+    ///   and must call [`Self::complete_allow_once`] after the approval handler
+    ///   resolves.
+    /// - [`ReserveOutcome::AlreadyAllowed`] when the command is already in the
+    ///   `allow_once` set; the caller need not prompt or release anything for
+    ///   this command.
+    /// - [`ReserveOutcome::Pending`] when another thread is currently approving
+    ///   this exact command. The caller MUST NOT implicitly approve other
+    ///   un-reserved commands in the same chain.
+    pub(crate) fn try_reserve_allow_once(&mut self, normalized: &str) -> ReserveOutcome {
         let mut shared = self.shared.lock().unwrap();
         if shared.allow_once.contains(normalized) {
-            return false;
+            return ReserveOutcome::AlreadyAllowed;
         }
-        shared.pending_allow_once.insert(normalized.to_string())
+        if shared.pending_allow_once.insert(normalized.to_string()) {
+            ReserveOutcome::Reserved
+        } else {
+            ReserveOutcome::Pending
+        }
     }
 
     /// Completes an allow-once reservation.
