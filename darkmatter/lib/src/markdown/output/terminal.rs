@@ -41,9 +41,9 @@ use biscuit_terminal::components::horizontal_rule::HorizontalRule;
 use biscuit_terminal::components::image_options::TerminalImageOptions;
 use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::components::renderable::Renderable;
-use biscuit_terminal::components::table::table::{
-    Table as TerminalTable, TableCellContent, TableColumn,
-};
+use biscuit_terminal::components::table::cell::TableCellContent;
+use biscuit_terminal::components::table::column::TableColumn;
+use biscuit_terminal::components::table::table::Table as TerminalTable;
 use biscuit_terminal::components::table::types::ColumnType;
 use biscuit_terminal::components::terminal_image::{ImageWidth, TerminalImage, parse_width_spec};
 use biscuit_terminal::discovery::detection::ColorDepth as TerminalColorDepth;
@@ -753,6 +753,8 @@ pub struct TerminalOptions {
     pub hyperlink_mode: HyperlinkMode,
 }
 
+static DETECTED_COLOR_MODE: std::sync::OnceLock<ColorMode> = std::sync::OnceLock::new();
+
 impl Default for TerminalOptions {
     fn default() -> Self {
         use crate::markdown::highlighting::{
@@ -761,7 +763,7 @@ impl Default for TerminalOptions {
 
         let prose_theme = detect_prose_theme();
         let code_theme = detect_code_theme(prose_theme);
-        let color_mode = detect_color_mode();
+        let color_mode = *DETECTED_COLOR_MODE.get_or_init(detect_color_mode);
 
         Self {
             code_theme,
@@ -1316,7 +1318,7 @@ pub fn write_terminal<W: std::io::Write>(
                         wrapper.newline();
                     }
                 }
-                
+
                 // For top-level lists inside a blockquote, add a blank line before the list
                 // if there is prior content, to match paragraph spacing behavior.
                 if list_stack.is_empty() && blockquote_depth > 0 && blockquote_has_content {
@@ -2201,7 +2203,9 @@ impl LineWrapper {
         if self.current_col == 0 {
             let mut current_pos = 0;
 
-            if self.blockquote_depth > 0 && let Some(bg) = self.blockquote_bg {
+            if self.blockquote_depth > 0
+                && let Some(bg) = self.blockquote_bg
+            {
                 let prefix = "▐   ".repeat(self.blockquote_depth);
                 let prefix_width = UnicodeWidthStr::width(prefix.as_str());
                 self.output.push_str(&format!(
@@ -8392,7 +8396,8 @@ flowchart LR
                 assert!(
                     line.contains("▐"),
                     "Line missing blockquote prefix:\n{:?}\nPlain: {:?}",
-                    line, plain
+                    line,
+                    plain
                 );
             }
         }
@@ -8445,13 +8450,16 @@ flowchart LR
         let md: Markdown = content.into();
         let options = test_options();
         let output = for_terminal(&md, options).unwrap();
-        
+
         let plain = strip_ansi_codes(&output);
         assert!(!plain.contains("Paragraph one- Item 1"));
-        
+
         // Split into trimmed lines to ignore the padding
         let lines: Vec<&str> = plain.lines().map(|l| l.trim_end()).collect();
-        let p_idx = lines.iter().position(|l| l.contains("Paragraph one")).unwrap();
+        let p_idx = lines
+            .iter()
+            .position(|l| l.contains("Paragraph one"))
+            .unwrap();
         assert_eq!(lines[p_idx + 1], "▐");
         assert_eq!(lines[p_idx + 2], "▐   - Item 1");
     }

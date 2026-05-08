@@ -8,7 +8,8 @@ use crate::components::renderable::Renderable;
 use crate::discovery::detection::{ColorDepth, ColorMode};
 use crate::terminal::Terminal;
 use crate::utils::color::{Color, Tailwind, TailwindColorWrapper};
-use crate::utils::layout::{Layout, RenderableWrapper, WordWrap};
+use crate::utils::layout::{Layout, RenderableWrapper};
+use crate::utils::wrap_policy::WordWrap;
 
 // ── Nerd Font icons ── Circular theme ──────────────────────────────────────
 
@@ -505,7 +506,7 @@ impl Status {
         let should_colorize = self.color_icons && has_color;
 
         let icon = if should_colorize {
-            let tw_color = match (Terminal::color_mode(), icon_def.color_alt) {
+            let tw_color = match (term.color_mode(), icon_def.color_alt) {
                 (ColorMode::Light, Some(alt)) => alt,
                 _ => icon_def.color,
             };

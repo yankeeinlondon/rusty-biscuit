@@ -18,9 +18,11 @@ The companion `FrameChromeConfig` struct is a plain data configuration object us
 |-----------|------|---------|-------------|
 | `border` | `BorderStyle` | `BorderStyle::None` | Which sides and glyph style to draw. |
 | `border_label` | `Option<String>` | `None` | Title rendered in the top-left of the border. |
+| `bottom_label` | `Option<String>` | `None` | Title rendered in the bottom-left of the border. Used by the standalone runner to inline the help-hint footer inside the bottom border so the corner glyphs survive. Silently ignored when the resolved border has no `BOTTOM` segment. |
 | `margin` | `Margin` | `Margin::default()` (all zeros) | Cells of margin on each side outside the border. |
 | `padding` | `Padding` | `Padding::uniform(1)` | Cells of padding on each side inside the border. |
 | `border_style` | `Style` | `Style::default()` | ratatui style applied to the border glyphs. |
+| `show_on_exit` | `bool` | `false` | When `false` (default) the standalone runner clears the inline viewport on exit (fzf-style); when `true` the final frame is preserved and the cursor moves to the row just below the chrome. |
 
 ### BorderStyle Variants
 

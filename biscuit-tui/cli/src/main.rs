@@ -42,6 +42,17 @@ struct Cli {
     #[arg(long, global = true, value_name = "CELLS_OR_PERCENT", value_parser = parse_height_spec)]
     height: Option<HeightSpec>,
 
+    /// Preserve the rendered input on exit instead of clearing it.
+    ///
+    /// Default behaviour (when the flag is absent) is fzf-style: the
+    /// inline viewport is wiped on exit so the terminal reclaims the
+    /// space. With `--show-input-on-exit` set, the final frame stays on
+    /// screen and the cursor moves to the row just below the chrome so
+    /// subsequent shell output follows the rendered border without
+    /// overlapping it. Has no effect on fullscreen prompts.
+    #[arg(long, global = true)]
+    show_input_on_exit: bool,
+
     #[command(subcommand)]
     command: Commands,
 }
@@ -79,13 +90,18 @@ fn main() -> ExitCode {
 }
 
 fn dispatch(cli: Cli) -> std::io::Result<i32> {
+    let show_on_exit = cli.show_input_on_exit;
     match cli.command {
-        Commands::TextInput(args) => run_text_input(args, cli.output, cli.height),
-        Commands::TextAreaInput(args) => run_text_area_input(args, cli.output, cli.height),
-        Commands::BooleanSwitch(args) => run_boolean_switch(args, cli.output, cli.height),
-        Commands::ChooseOne(args) => run_choose_one(args, cli.output, cli.height),
-        Commands::ChooseMany(args) => run_choose_many(args, cli.output, cli.height),
-        Commands::InputTable(args) => run_input_table(args, cli.output, cli.height),
+        Commands::TextInput(args) => run_text_input(args, cli.output, cli.height, show_on_exit),
+        Commands::TextAreaInput(args) => {
+            run_text_area_input(args, cli.output, cli.height, show_on_exit)
+        }
+        Commands::BooleanSwitch(args) => {
+            run_boolean_switch(args, cli.output, cli.height, show_on_exit)
+        }
+        Commands::ChooseOne(args) => run_choose_one(args, cli.output, cli.height, show_on_exit),
+        Commands::ChooseMany(args) => run_choose_many(args, cli.output, cli.height, show_on_exit),
+        Commands::InputTable(args) => run_input_table(args, cli.output, cli.height, show_on_exit),
         Commands::Completions { shell } => {
             let stdout = std::io::stdout();
             let mut lock = stdout.lock();

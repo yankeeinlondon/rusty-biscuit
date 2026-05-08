@@ -18,8 +18,8 @@ use ratatui::widgets::*;
 use biscuit_speaks::detection::get_available_providers as get_available_tts_providers;
 use biscuit_speaks::types::{CloudTtsProvider, HostTtsProvider, TtsProvider};
 use claudine::provider::{PROVIDERS_DISPLAY_ORDER, Provider};
-use claudine::services::protect::catalog::RuleGroup;
-use claudine::services::protect::config::{ProtectRuleToggles, RuleGroupConfig};
+use claudine::protect::catalog::RuleGroup;
+use claudine::protect::config::{ProtectRuleToggles, RuleGroupConfig};
 
 use crate::commands::config_tui::app::{ActionView, App};
 use crate::log;

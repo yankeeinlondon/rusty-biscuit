@@ -52,7 +52,7 @@ pub(super) fn build_windows_index() -> WindowsIndex {
 ///
 /// Two HashMaps keyed by lowercased binary name. Checked in priority order
 /// (`app_paths` before `install_roots`) after PATH by
-/// [`crate::programs::find_program::ExecutableIndex::find_with_source`].
+/// [`crate::executable_index::ExecutableIndex::find_with_source`].
 #[derive(Debug, Default, Clone)]
 pub(super) struct WindowsIndex {
     /// Name → path map built from the App Paths registry key.

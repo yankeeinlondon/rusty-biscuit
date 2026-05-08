@@ -73,7 +73,7 @@ commit agent="opencode" model="" *args="":
     echo -e "{{bold}}{{blue}}Staged Files:{{reset}}"
     sniff repo staged-files || ( echo "No Staged Files! Nothing to do ..." )
     claudine compose --{{agent}} "@prompts/commit.md" --op "commit" --quiet -y ${model} {{args}}
-    just _speak "git commits completed in rusty-biscuit monorepo"
+    just _speak "git commits completed in the $(sniff repo package-area) package area of rusty biscuit"
     sniff repo git-status --compact 2>/dev/null || exit 0
     echo
 
@@ -231,3 +231,6 @@ status subject="":
     matched="$(just util::_fzf_select "Select matching item" "${tmpfile}")"
     eza "${matched}" -lga --hyperlink
 
+# show the directory structure of the given directory
+_structure dir:
+    @eza -lDTL 4 --icons=always --hyperlink {{dir}}

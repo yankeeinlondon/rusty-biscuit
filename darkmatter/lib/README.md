@@ -21,6 +21,7 @@ Markdown parsing, rendering, and Mermaid diagram support for terminal and HTML o
     - **Interpolation:** interpolate frontmatter, ENV vars, and context variables into Markdown body
     - **Frontmatter Shell Expansion:** execute top-level `$(...)` frontmatter values before effective-state construction, storing trimmed `stdout` back into frontmatter
     - **Normalization:** fix heading hierarchy violations, re-level documents
+    - **Link Normalization:** convert absolute paths back to portable forms (relative, `~/`, or `${ENV}`)
     - **TOC Linking:** hyperlink to each of the headings of another page as a strategy for progressive disclosure
     - **Text Replacement:** Dictionary replacement of terms on a page
     - **Conditional Block Rendering:** Conditionally render parts of a Markdown document based on frontmatter, ENV, and context
@@ -61,12 +62,14 @@ Composition is probably the most powerful feature that Darkmatter has to offer. 
 The types of composition each Darkmatter document employs varies considerably but in _all cases_ we run the Markdown through the same well defined Markdown pipeline which will:
 
 - **Inline Pre** prepares the document by mutating the body based on "state" or some external and measurable property
-    - _this includes frontmatter interpolation, frontmatter shell expansion, text replacement, page blocks, interpolation, and body shell expansion_
+    - _this includes frontmatter interpolation, frontmatter shell expansion, text replacement, page blocks, interpolation, body shell expansion, and **link resolve** (absolute path conversion)_
 - Perform **Transclusions**
     - _there are many types of transclusions a document can employ with directives_
     - _however, the key consistency of transclusion operations regardless of the variant employed, is that transclusion is a **recursive** action!_
         - If the base document, transcludes documents A, B, and C then all three documents can in turn transclude their own set of external resources.
 - **Inline Post** normalizes the fully combined markdown
+- **Finalization** performs root-only adjustments
+    - _this includes **link normalization** (converting absolute paths back to portable forms)_
 - and **Render** the combined document parts as a single document
     - by default rendering during the **compose** operation will return regular Markdown as plain text (no ANSI escape codes, no HTML/CSS, minimal to no inline HTML)
     - but of course that plain text Markdown can then be immediately transformed into any of the other output formats by leveraging Darkmatter's 

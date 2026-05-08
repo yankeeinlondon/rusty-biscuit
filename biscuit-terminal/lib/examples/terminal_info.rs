@@ -23,7 +23,7 @@ fn main() {
     println!("TTY:            {}", if term.is_tty { "yes" } else { "no" });
     println!("CI Environment: {}", if term.is_ci { "yes" } else { "no" });
     println!("Color Depth:    {:?}", term.color_depth);
-    println!("Color Mode:     {:?}", Terminal::color_mode());
+    println!("Color Mode:     {:?}", term.color_mode());
     println!(
         "Italics:        {}",
         if term.supports_italic { "yes" } else { "no" }

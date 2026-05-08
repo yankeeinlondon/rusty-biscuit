@@ -5,6 +5,7 @@ use tracing::Level;
 use tracing::instrument;
 
 pub mod error;
+pub mod executable_index;
 pub mod filesystem;
 pub mod hardware;
 pub mod network;

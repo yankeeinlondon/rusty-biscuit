@@ -42,7 +42,6 @@ use crate::linking::capabilities::{
 };
 use crate::provider::EventSupportLevel;
 use crate::provider::event_mapping::WireProxyMode;
-use crate::stream::kimi_semantic::KimiSemanticStreamParser;
 use crate::stream::parser::SemanticStreamParser;
 use crate::stream::{ParserConfig, StreamProtocol};
 
@@ -59,9 +58,9 @@ impl ProviderBehavior for KimiProvider {
     fn create_semantic_parser(
         &self,
         sink: BoxedSemanticEventSink,
-        _config: ParserConfig,
+        config: ParserConfig,
     ) -> Box<dyn SemanticStreamParser> {
-        Box::new(KimiSemanticStreamParser::new(sink))
+        crate::stream::providers::for_provider(Provider::KimiCode, sink, config)
     }
 }
 impl McpBehavior for KimiProvider {
