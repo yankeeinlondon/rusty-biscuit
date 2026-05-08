@@ -4693,3 +4693,364 @@ fn test_repo_worktree_help_mentions_subcommand() {
         .success()
         .stdout(predicate::str::contains("worktree"));
 }
+
+// ============================================================================
+// Phase 5 — `--package` / `--package-area` flag matrix
+//
+// These tests pin the consistency contract for the new flag pair across the
+// `repo` subcommand surface:
+//
+// 1. `--package` returns exactly one package.
+// 2. `--package-area homelab` matches both `homelab` and `homelab/server`
+//    (case-insensitive prefix semantics).
+// 3. `--package` AND `--package-area` overlapping → success.
+// 4. `--package` AND `--package-area` non-overlapping → hard error citing
+//    the package's real area.
+// 5. Unknown `--package` → error names valid package list.
+// 6. Unknown `--package-area` → error names valid area list.
+// 7. Positional `filter` plus `--package` → AND of both.
+// 8. `-p` short flag works on `FileListArgs`-based commands.
+// 9. `git-status -p <area-name>` no longer falls back to area matching —
+//    must hard-error.
+// ============================================================================
+
+/// Build a monorepo with three areas where two share a common prefix
+/// (`homelab` and `homelab/server`) and one is wholly distinct (`sniff`).
+///
+/// Layout:
+///
+/// - `homelab/lib`        → area `homelab`,        name `homelab-lib`
+/// - `homelab/server/srv` → area `homelab/server`, name `homelab-srv`
+/// - `sniff/cli`          → area `sniff`,          name `sniff-cli`
+fn create_cli_monorepo_with_nested_areas() -> (tempfile::TempDir, PathBuf) {
+    let dir = tempfile::tempdir().unwrap();
+    let repo = git2::Repository::init(dir.path()).unwrap();
+
+    let mut config = repo.config().unwrap();
+    config.set_str("user.email", "test@test.com").unwrap();
+    config.set_str("user.name", "Test").unwrap();
+
+    std::fs::write(
+        dir.path().join("Cargo.toml"),
+        r#"[workspace]
+members = ["homelab/lib", "homelab/server/srv", "sniff/cli"]
+"#,
+    )
+    .unwrap();
+
+    let members = [
+        ("homelab/lib", "homelab-lib"),
+        ("homelab/server/srv", "homelab-srv"),
+        ("sniff/cli", "sniff-cli"),
+    ];
+    for (rel, name) in &members {
+        let pkg = dir.path().join(rel);
+        std::fs::create_dir_all(pkg.join("src")).unwrap();
+        std::fs::write(
+            pkg.join("Cargo.toml"),
+            format!(
+                r#"[package]
+name = "{name}"
+version = "0.1.0"
+edition = "2024"
+"#
+            ),
+        )
+        .unwrap();
+        std::fs::write(pkg.join("src/lib.rs"), "pub fn entry() {}").unwrap();
+    }
+
+    let mut index = repo.index().unwrap();
+    index
+        .add_all(["*"].iter(), git2::IndexAddOption::DEFAULT, None)
+        .unwrap();
+    index.write().unwrap();
+    let sig = repo.signature().unwrap();
+    let tree_id = index.write_tree().unwrap();
+    let tree = repo.find_tree(tree_id).unwrap();
+    repo.commit(
+        Some("HEAD"),
+        &sig,
+        &sig,
+        "initial nested-area monorepo",
+        &tree,
+        &[],
+    )
+    .unwrap();
+
+    let path = dir.path().to_path_buf();
+    (dir, path)
+}
+
+/// Spec §6.1 — `--package` returns exactly one package.
+#[test]
+fn test_repo_package_flag_returns_single_package() {
+    let (_dir, path) = create_cli_monorepo_with_nested_areas();
+
+    let assert = cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "repo",
+            "packages",
+            "--package",
+            "sniff-cli",
+            "--list",
+            "--plain",
+        ])
+        .assert()
+        .success();
+
+    let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
+    assert_eq!(stdout.trim(), "sniff-cli");
+}
+
+/// Spec §6.2 — `--package-area homelab` matches both `homelab` and
+/// `homelab/server` packages via prefix semantics.
+#[test]
+fn test_repo_package_area_flag_uses_prefix_semantics() {
+    let (_dir, path) = create_cli_monorepo_with_nested_areas();
+
+    let assert = cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "repo",
+            "packages",
+            "--package-area",
+            "homelab",
+            "--list",
+            "--plain",
+        ])
+        .assert()
+        .success();
+
+    let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
+    let mut names: Vec<&str> = stdout.trim().lines().collect();
+    names.sort();
+    assert_eq!(names, vec!["homelab-lib", "homelab-srv"]);
+}
+
+/// Spec §6.3 — `--package` AND `--package-area` overlap → intersection,
+/// returns the package itself.
+#[test]
+fn test_repo_package_and_area_flags_overlap_succeeds() {
+    let (_dir, path) = create_cli_monorepo_with_nested_areas();
+
+    let assert = cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "repo",
+            "packages",
+            "--package",
+            "homelab-srv",
+            "--package-area",
+            "homelab",
+            "--list",
+            "--plain",
+        ])
+        .assert()
+        .success();
+
+    let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
+    assert_eq!(stdout.trim(), "homelab-srv");
+}
+
+/// Spec §6.4 — `--package` AND `--package-area` non-overlapping → hard error
+/// naming the package's real area and the requested area.
+#[test]
+fn test_repo_package_and_area_flags_non_overlap_errors() {
+    let (_dir, path) = create_cli_monorepo_with_nested_areas();
+
+    let assert = cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "repo",
+            "packages",
+            "--package",
+            "sniff-cli",
+            "--package-area",
+            "homelab",
+        ])
+        .assert()
+        .failure();
+
+    let stderr = String::from_utf8_lossy(&assert.get_output().stderr);
+    assert!(
+        stderr.contains("sniff-cli"),
+        "intersection error must name the package, got:\n{stderr}"
+    );
+    assert!(
+        stderr.contains("sniff"),
+        "intersection error must name the package's real area, got:\n{stderr}"
+    );
+    assert!(
+        stderr.contains("homelab"),
+        "intersection error must name the requested area, got:\n{stderr}"
+    );
+}
+
+/// Spec §6.5 — Unknown `--package` → error lists valid package names.
+#[test]
+fn test_repo_unknown_package_errors_with_valid_list() {
+    let (_dir, path) = create_cli_monorepo_with_nested_areas();
+
+    let assert = cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "repo",
+            "packages",
+            "--package",
+            "no-such-pkg",
+        ])
+        .assert()
+        .failure();
+
+    let stderr = String::from_utf8_lossy(&assert.get_output().stderr);
+    assert!(
+        stderr.contains("no-such-pkg"),
+        "error must name the unknown package, got:\n{stderr}"
+    );
+    assert!(
+        stderr.contains("Valid package names"),
+        "error must mention valid package names, got:\n{stderr}"
+    );
+    assert!(
+        stderr.contains("sniff-cli") && stderr.contains("homelab-lib"),
+        "error must list the actual valid package names, got:\n{stderr}"
+    );
+}
+
+/// Spec §6.6 — Unknown `--package-area` → error lists valid package areas.
+#[test]
+fn test_repo_unknown_package_area_errors_with_valid_list() {
+    let (_dir, path) = create_cli_monorepo_with_nested_areas();
+
+    let assert = cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "repo",
+            "packages",
+            "--package-area",
+            "no-such-area",
+        ])
+        .assert()
+        .failure();
+
+    let stderr = String::from_utf8_lossy(&assert.get_output().stderr);
+    assert!(
+        stderr.contains("no-such-area"),
+        "error must name the unknown area, got:\n{stderr}"
+    );
+    assert!(
+        stderr.contains("Valid package areas"),
+        "error must mention valid package areas, got:\n{stderr}"
+    );
+    assert!(
+        stderr.contains("sniff") && stderr.contains("homelab"),
+        "error must list the actual valid areas, got:\n{stderr}"
+    );
+}
+
+/// Spec §6.7 — Positional `filter` plus `--package` are AND-combined.
+///
+/// `homelab-lib` and `homelab-srv` are both in areas starting with `homelab`,
+/// so the positional `@homelab` filter selects both. The `--package` flag
+/// then narrows to the single named package.
+#[test]
+fn test_repo_positional_filter_and_package_flag_combine() {
+    let (_dir, path) = create_cli_monorepo_with_nested_areas();
+
+    let assert = cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "repo",
+            "packages",
+            "@homelab",
+            "--package",
+            "homelab-lib",
+            "--list",
+            "--plain",
+        ])
+        .assert()
+        .success();
+
+    let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
+    assert_eq!(stdout.trim(), "homelab-lib");
+}
+
+/// Spec §6.8 — `-p` short flag works on a `FileListArgs`-based command.
+///
+/// Stage and modify a file under `sniff/cli` so `dirty-files` has something
+/// to report, then verify `-p sniff-cli` scopes the result to that package.
+#[test]
+fn test_repo_dirty_files_short_p_flag_scopes_to_package() {
+    let (_dir, path) = create_cli_monorepo_with_nested_areas();
+
+    // Mark the sniff-cli source file dirty (untracked modification of an
+    // already-tracked file).
+    std::fs::write(
+        path.join("sniff/cli/src/lib.rs"),
+        "pub fn entry() { let _x = 1; }",
+    )
+    .unwrap();
+
+    let assert = cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "repo",
+            "dirty-files",
+            "-p",
+            "sniff-cli",
+            "--list",
+            "--plain",
+        ])
+        .assert()
+        .success();
+
+    let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
+    assert!(
+        stdout.contains("sniff/cli"),
+        "scoped dirty-files must include the sniff/cli path, got:\n{stdout}"
+    );
+    assert!(
+        !stdout.contains("homelab/"),
+        "scoped dirty-files must not include unrelated areas, got:\n{stdout}"
+    );
+}
+
+/// Spec §6.9 — Regression guard: `git-status -p <area-name>` (a real area
+/// that is **not** a package name) must hard-error rather than fall back to
+/// area matching.
+#[test]
+fn test_repo_git_status_package_with_area_name_errors() {
+    let (_dir, path) = create_cli_monorepo_with_nested_areas();
+
+    let assert = cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "repo",
+            "git-status",
+            "-p",
+            "homelab",
+        ])
+        .assert()
+        .failure();
+
+    let stderr = String::from_utf8_lossy(&assert.get_output().stderr);
+    assert!(
+        stderr.contains("homelab"),
+        "error must name the rejected input, got:\n{stderr}"
+    );
+    assert!(
+        stderr.contains("Valid package names"),
+        "error must list valid package names (not areas), got:\n{stderr}"
+    );
+}
