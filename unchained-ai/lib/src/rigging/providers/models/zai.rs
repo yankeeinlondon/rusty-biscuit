@@ -1,6 +1,6 @@
 //! Auto-generated provider model enum
 //!
-//! Generated: 2026-05-04T04:02:14.478874+00:00
+//! Generated: 2026-05-07T02:07:05.704419+00:00
 //! Generator: gen-models v0.1.0
 //! Provider: Zai
 //!
