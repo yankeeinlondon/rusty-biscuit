@@ -32,6 +32,24 @@ source_files_during_phase_5:
 docs_updated_during_phase_5: []
 docs_created_during_phase_5: []
 skills_files_updated_during_phase_5: []
+source_files_during_phase_6: []
+docs_updated_during_phase_6:
+  - sniff/docs/cli/repo.md
+  - sniff/docs/cli/repo_git-status.md
+  - sniff/docs/cli/repo_unstaged-files.md
+  - sniff/docs/cli/repo_untracked-files.md
+  - sniff/docs/cli/repo_packages.md
+  - sniff/docs/cli/repo_package-areas.md
+  - sniff/docs/cli/repo_structure.md
+  - sniff/docs/cli/repo_deps.md
+  - sniff/docs/cli/repo_dirty-packages.md
+  - sniff/docs/cli/repo_dirty-package-areas.md
+  - sniff/docs/cli/repo_staged-packages.md
+  - sniff/docs/cli/repo_staged-package-areas.md
+  - sniff/docs/cli/repo_unstaged-packages.md
+  - sniff/docs/cli/repo_unstaged-package-areas.md
+docs_created_during_phase_6: []
+skills_files_updated_during_phase_6: []
 packages:
   - sniff-cli
 ---
