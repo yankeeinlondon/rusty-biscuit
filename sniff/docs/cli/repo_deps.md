@@ -83,6 +83,22 @@ The optional positional `filter` argument controls which packages are included. 
 
 When a filter is active, text mode shows all matched packages (including isolated ones). Visual mode only draws edges for packages present in the filtered set — cross-area edges to packages outside the filter are silently dropped.
 
+## Scoping to a Package or Package Area
+
+Two flags layer on top of the positional filter:
+
+| Flag | Match Semantics |
+|------|-----------------|
+| `-p/--package <PKG>` | Exact (case-insensitive) match on `Package.name` |
+| `--package-area <AREA>` | Case-insensitive prefix match on `Package.package_area` |
+
+```bash
+sniff repo deps -p sniff-cli                # Focus on a single package
+sniff repo deps --package-area homelab      # All homelab/* packages
+```
+
+Passing both flags requires the resolved package to live inside the resolved area; otherwise the command fails with an error. Unknown values for either flag fail with an error listing the valid names. Edges referencing packages outside the resolved scope are pruned from both text and `--ui` output.
+
 ## JSON Output
 
 ```

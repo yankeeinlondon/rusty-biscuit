@@ -30,6 +30,8 @@ A package is considered dirty if any file within its directory tree has:
 | Argument | Description |
 |----------|-------------|
 | `[filter...]` | Optional substring filters to narrow the package scope |
+| `-p/--package <PKG>` | Restrict output to a single package (exact match on `Package.name`) |
+| `--package-area <AREA>` | Restrict output to packages in the given area (prefix match on `Package.package_area`) |
 
 ## Exit Codes
 
@@ -48,6 +50,17 @@ sniff repo dirty-packages !test        # Dirty packages excluding "test"
 ```
 
 Filters apply to the full package set before checking dirty status. Use [`sniff repo dirty-package-areas`](./repo_dirty-package-areas.md) to get area-level results instead.
+
+## Scoping to a Package or Package Area
+
+`-p/--package` matches `Package.name` exactly (case-insensitive); `--package-area` matches `Package.package_area` as a case-insensitive prefix. Either can be combined with the positional filter (AND).
+
+```bash
+sniff repo dirty-packages -p sniff-cli           # Just sniff-cli, when dirty
+sniff repo dirty-packages --package-area homelab # All dirty homelab/* packages
+```
+
+Passing both flags requires the resolved package to live inside the resolved area; otherwise the command fails with an explicit error. Unknown values for either flag fail with an error listing the valid names.
 
 ## JSON Output (`--json`)
 
