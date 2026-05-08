@@ -419,7 +419,7 @@ fn build_action(
         });
     }
     let executable = words.remove(0);
-    let args: Vec<String> = words.drain(..).collect();
+    let args: Vec<String> = std::mem::take(words);
     let redir = std::mem::take(redirection);
     Ok(PipelineAction {
         operator,

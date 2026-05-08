@@ -158,21 +158,20 @@ pub(crate) fn execute_command_detailed(
     source: &ComposeSource,
 ) -> Result<CommandExecution, ShellExpansionError> {
     // If there's a pipeline with redirections, use the action-based path
-    if let Some(ref pipeline) = directive.pipeline {
-        if let Some(action) = pipeline.actions.first() {
-            if action.command.redirection != RedirectionConfig::default() {
-                let working_dir = resolve_working_directory(shell_opts, source);
-                let timeout = directive.timeout_override.unwrap_or(shell_opts.timeout);
-                return execute_single_action(
-                    &action.command,
-                    &working_dir,
-                    timeout,
-                    shell_opts,
-                    &directive.raw_command,
-                    &directive.origin,
-                );
-            }
-        }
+    if let Some(ref pipeline) = directive.pipeline
+        && let Some(action) = pipeline.actions.first()
+        && action.command.redirection != RedirectionConfig::default()
+    {
+        let working_dir = resolve_working_directory(shell_opts, source);
+        let timeout = directive.timeout_override.unwrap_or(shell_opts.timeout);
+        return execute_single_action(
+            &action.command,
+            &working_dir,
+            timeout,
+            shell_opts,
+            &directive.raw_command,
+            &directive.origin,
+        );
     }
 
     // Standard single-command path (no redirections)
@@ -318,10 +317,10 @@ pub(crate) fn execute_directive_impl(
     shell_opts: &ShellExpansionOptions,
     source: &ComposeSource,
 ) -> Result<CommandExecution, ShellExpansionError> {
-    if let Some(ref pipeline) = directive.pipeline {
-        if pipeline.actions.len() > 1 {
-            return execute_pipeline_detailed(directive, pipeline, shell_opts, source);
-        }
+    if let Some(ref pipeline) = directive.pipeline
+        && pipeline.actions.len() > 1
+    {
+        return execute_pipeline_detailed(directive, pipeline, shell_opts, source);
     }
     execute_command_detailed(directive, shell_opts, source)
 }
@@ -396,7 +395,10 @@ fn execute_pipeline_detailed(
                     combined_stderr.push_str(&stderr);
                 }
                 // If this is the last action (or no subsequent Or handler), propagate failure
-                let is_last = action as *const _ == &pipeline.actions[pipeline.actions.len() - 1] as *const _;
+                let is_last = std::ptr::eq(
+                    action,
+                    &pipeline.actions[pipeline.actions.len() - 1],
+                );
                 // Check if next action handles failure with ||
                 let next_handles_failure = pipeline.actions.iter().position(|a| std::ptr::eq(a, action))
                     .map(|idx| {

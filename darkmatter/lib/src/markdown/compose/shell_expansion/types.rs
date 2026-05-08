@@ -94,7 +94,7 @@ impl ShellDirective {
     pub fn is_chain(&self) -> bool {
         self.pipeline
             .as_ref()
-            .map_or(false, |p| p.actions.len() > 1)
+            .is_some_and(|p| p.actions.len() > 1)
     }
 }
 

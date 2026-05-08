@@ -194,8 +194,7 @@ fn extract_options_from_tokens(
                     }
 
                     i = j;
-                } else if w.starts_with("::timeout:") {
-                    let value_str = &w[("::timeout:".len())..];
+                } else if let Some(value_str) = w.strip_prefix("::timeout:") {
                     let seconds: u64 = value_str.parse().map_err(|_| {
                         ShellExpansionError::ParseDirective {
                             origin: ShellCommandOrigin::Body { line },

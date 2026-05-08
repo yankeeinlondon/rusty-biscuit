@@ -447,47 +447,46 @@ fn execute_and_handle_errors(
 /// command and merged arguments.
 fn resolve_or_passthrough(directive: &ShellDirective) -> (ShellDirective, Option<String>) {
     // For pipeline chains, resolve each action's executable independently
-    if let Some(ref pipeline) = directive.pipeline {
-        if pipeline.actions.len() > 1
+    if let Some(ref pipeline) = directive.pipeline
+        && (pipeline.actions.len() > 1
             || (pipeline.actions.len() == 1
-                && pipeline.actions[0].command.redirection != types::RedirectionConfig::default())
-        {
-            let mut any_resolved = false;
-            let mut alias_name: Option<String> = None;
-            let mut new_pipeline = pipeline.clone();
+                && pipeline.actions[0].command.redirection != types::RedirectionConfig::default()))
+    {
+        let mut any_resolved = false;
+        let mut alias_name: Option<String> = None;
+        let mut new_pipeline = pipeline.clone();
 
-            for action in &mut new_pipeline.actions {
-                if which::which(&action.command.executable).is_ok() {
-                    continue;
-                }
-                if let Some(resolved) = alias::resolve_alias(&action.command.executable) {
-                    let mut merged_args = resolved.args;
-                    merged_args.extend_from_slice(&action.command.args);
-                    action.command.executable = resolved.executable;
-                    action.command.args = merged_args;
-                    if alias_name.is_none() {
-                        alias_name = Some(resolved.alias_name);
-                    }
-                    any_resolved = true;
-                }
+        for action in &mut new_pipeline.actions {
+            if which::which(&action.command.executable).is_ok() {
+                continue;
             }
+            if let Some(resolved) = alias::resolve_alias(&action.command.executable) {
+                let mut merged_args = resolved.args;
+                merged_args.extend_from_slice(&action.command.args);
+                action.command.executable = resolved.executable;
+                action.command.args = merged_args;
+                if alias_name.is_none() {
+                    alias_name = Some(resolved.alias_name);
+                }
+                any_resolved = true;
+            }
+        }
 
-            if any_resolved || alias_name.is_some() {
-                let raw = new_pipeline.display_string();
-                let exe = new_pipeline.actions[0].command.executable.clone();
-                let args = new_pipeline.actions[0].command.args.clone();
-                let effective = ShellDirective {
-                    raw_command: raw,
-                    executable: exe,
-                    args,
-                    span: directive.span.clone(),
-                    origin: directive.origin.clone(),
-                    error_handling: directive.error_handling.clone(),
-                    timeout_override: directive.timeout_override,
-                    pipeline: Some(new_pipeline),
-                };
-                return (effective, alias_name);
-            }
+        if any_resolved || alias_name.is_some() {
+            let raw = new_pipeline.display_string();
+            let exe = new_pipeline.actions[0].command.executable.clone();
+            let args = new_pipeline.actions[0].command.args.clone();
+            let effective = ShellDirective {
+                raw_command: raw,
+                executable: exe,
+                args,
+                span: directive.span.clone(),
+                origin: directive.origin.clone(),
+                error_handling: directive.error_handling.clone(),
+                timeout_override: directive.timeout_override,
+                pipeline: Some(new_pipeline),
+            };
+            return (effective, alias_name);
         }
     }
 
@@ -594,10 +593,10 @@ fn executables_with_args(directive: &ShellDirective) -> Vec<(String, Vec<String>
 }
 
 fn executable_and_args_at(directive: &ShellDirective, index: usize) -> (String, Vec<String>) {
-    if let Some(ref pipeline) = directive.pipeline {
-        if let Some(action) = pipeline.actions.get(index) {
-            return (action.command.executable.clone(), action.command.args.clone());
-        }
+    if let Some(ref pipeline) = directive.pipeline
+        && let Some(action) = pipeline.actions.get(index)
+    {
+        return (action.command.executable.clone(), action.command.args.clone());
     }
     (directive.executable.clone(), directive.args.clone())
 }
