@@ -404,6 +404,7 @@ mod tests {
                 claudine::stream::progress::InFlightTool {
                     name: Some("task".into()),
                     started_at: now - Duration::from_secs(180),
+                    last_progress_at: now - Duration::from_secs(180),
                 },
             );
         }
@@ -468,6 +469,7 @@ mod tests {
                 claudine::stream::progress::InFlightTool {
                     name: Some("Task".into()),
                     started_at: now - Duration::from_secs(180),
+                    last_progress_at: now - Duration::from_secs(180),
                 },
             );
         }
@@ -492,6 +494,7 @@ mod tests {
                 claudine::stream::progress::InFlightSubagent {
                     name: Some("rust-developer".into()),
                     started_at: now - Duration::from_secs(180),
+                    last_progress_at: now - Duration::from_secs(180),
                 },
             );
         }
@@ -516,6 +519,7 @@ mod tests {
                 claudine::stream::progress::InFlightSubagent {
                     name: Some("rust-developer".into()),
                     started_at: now - Duration::from_secs(180),
+                    last_progress_at: now - Duration::from_secs(180),
                 },
             );
         }
