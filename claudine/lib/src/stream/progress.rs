@@ -394,6 +394,50 @@ mod tests {
         assert_eq!(state.last_event_at, Some(now));
     }
 
+    #[test]
+    fn stuck_tools_returns_empty_when_all_fresh() {
+        let mut state = LiveMetricsState::default();
+        let now = Instant::now();
+        state.record_tool_start("tool-1".into(), Some("Bash".into()), now);
+        state.record_tool_start("tool-2".into(), Some("Read".into()), now);
+        let stuck = state.stuck_tools(now, Duration::from_secs(5));
+        assert!(stuck.is_empty(), "all fresh tools must return empty vec");
+    }
+
+    #[test]
+    fn stuck_tools_returns_stuck_ones() {
+        let mut state = LiveMetricsState::default();
+        let now = Instant::now();
+        let fresh = now;
+        let stale = now - Duration::from_secs(10);
+        state.record_tool_start("tool-1".into(), Some("Bash".into()), stale);
+        state.record_tool_start("tool-2".into(), Some("Read".into()), fresh);
+        // Manually override last_progress_at for the stale tool
+        if let Some(tool) = state.in_flight.get_mut("tool-1") {
+            tool.last_progress_at = stale;
+        }
+        let stuck = state.stuck_tools(now, Duration::from_secs(5));
+        assert_eq!(stuck.len(), 1, "exactly one tool should be stuck");
+        assert_eq!(stuck[0].name.as_deref(), Some("Bash"));
+    }
+
+    #[test]
+    fn stuck_subagents_returns_stuck_ones() {
+        let mut state = LiveMetricsState::default();
+        let now = Instant::now();
+        let fresh = now;
+        let stale = now - Duration::from_secs(10);
+        state.record_subagent_start("sa-1".into(), Some("researcher".into()), stale);
+        state.record_subagent_start("sa-2".into(), Some("coder".into()), fresh);
+        // Manually override last_progress_at for the stale subagent
+        if let Some(subagent) = state.in_flight_subagents.get_mut("sa-1") {
+            subagent.last_progress_at = stale;
+        }
+        let stuck = state.stuck_subagents(now, Duration::from_secs(5));
+        assert_eq!(stuck.len(), 1, "exactly one subagent should be stuck");
+        assert_eq!(stuck[0].name.as_deref(), Some("researcher"));
+    }
+
     mod observe_event_tests {
         use super::*;
         use crate::stream::semantic::SemanticEvent;

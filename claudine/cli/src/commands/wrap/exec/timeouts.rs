@@ -514,12 +514,13 @@ mod tests {
 
         let detected = detect_step_timeout(&metrics, now, Duration::from_secs(5));
 
+        let message = match detected {
+            Some(EarlyTermination::StepTimeout { ref message, .. }) => message.clone(),
+            other => panic!("stuck tool should trigger step_timeout, got: {other:?}"),
+        };
         assert!(
-            matches!(
-                detected,
-                Some(EarlyTermination::StepTimeout { ref message, .. })
-            ) if message.contains("Task"),
-            "stuck tool should trigger step_timeout, got: {detected:?}"
+            message.contains("Task"),
+            "stuck tool message should mention Task, got: {message}"
         );
     }
 
