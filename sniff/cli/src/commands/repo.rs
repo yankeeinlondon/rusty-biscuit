@@ -10,6 +10,7 @@ use crate::perf::{CliPerf, handle_no_results};
 /// Subcommand-specific args for `sniff repo packages`.
 pub(super) struct RepoPackagesArgs<'a> {
     pub(super) filter: &'a [String],
+    pub(super) package: Option<&'a str>,
     pub(super) package_area: Option<&'a str>,
     pub(super) format: PackagesFormat,
 }
@@ -29,6 +30,7 @@ pub(super) fn handle_repo_packages(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let RepoPackagesArgs {
         filter,
+        package,
         package_area,
         format,
     } = args;
@@ -43,12 +45,25 @@ pub(super) fn handle_repo_packages(
             .unwrap_or_else(|| explicit.to_path_buf())
     };
 
-    let info = match detect_repo_structure(&root)? {
+    let mut info = match detect_repo_structure(&root)? {
         Some(info) => info,
         None => {
             return Err("Not inside a recognized repository".into());
         }
     };
+
+    // Resolve `--package` and `--package-area` against the discovered packages.
+    // The intersection error fires here when both flags disagree.
+    let scope_prefix =
+        super::resolve_package_and_area(info.packages.as_deref(), package, package_area)?;
+    if let Some(prefix) = scope_prefix.as_deref()
+        && let Some(ref mut packages) = info.packages
+    {
+        packages.retain(|pkg| {
+            let pkg_path = format!("{}/", pkg.relative);
+            pkg_path.starts_with(prefix)
+        });
+    }
 
     if json {
         let names: Vec<&str> = output::collect_repo_package_names(&info, filter, package_area);
@@ -72,6 +87,7 @@ pub(super) fn handle_repo_packages(
 /// Subcommand-specific args for `sniff repo package-areas`.
 pub(super) struct RepoPackageAreasArgs<'a> {
     pub(super) filter: &'a [String],
+    pub(super) package: Option<&'a str>,
     pub(super) package_area: Option<&'a str>,
     pub(super) format: PackagesFormat,
 }
@@ -90,6 +106,7 @@ pub(super) fn handle_repo_package_areas(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let RepoPackageAreasArgs {
         filter,
+        package,
         package_area,
         format,
     } = args;
@@ -104,12 +121,25 @@ pub(super) fn handle_repo_package_areas(
             .unwrap_or_else(|| explicit.to_path_buf())
     };
 
-    let info = match detect_repo_structure(&root)? {
+    let mut info = match detect_repo_structure(&root)? {
         Some(info) => info,
         None => {
             return Err("Not inside a recognized repository".into());
         }
     };
+
+    // Resolve `--package` and `--package-area` against the discovered packages.
+    // The intersection error fires here when both flags disagree.
+    let scope_prefix =
+        super::resolve_package_and_area(info.packages.as_deref(), package, package_area)?;
+    if let Some(prefix) = scope_prefix.as_deref()
+        && let Some(ref mut packages) = info.packages
+    {
+        packages.retain(|pkg| {
+            let pkg_path = format!("{}/", pkg.relative);
+            pkg_path.starts_with(prefix)
+        });
+    }
 
     if json {
         let names: Vec<&str> = output::collect_repo_package_area_names(&info, filter, package_area);
