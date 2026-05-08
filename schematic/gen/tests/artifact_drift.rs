@@ -206,6 +206,48 @@ fn generated_openapi_no_legacy_per_api_files() {
     );
 }
 
+/// Regression: the Artificial Analysis API terms require that all usage
+/// include attribution to <https://artificialanalysis.ai/>. The generated
+/// rustdoc, OpenAPI grouped document, and Postman grouped collection MUST
+/// surface that attribution so downstream consumers see it. If any artifact
+/// is regenerated in a way that drops the attribution sentence from the
+/// upstream API description, this test fires.
+#[test]
+fn artificial_analysis_attribution_present_in_all_artifacts() {
+    const ATTRIBUTION_URL: &str = "https://artificialanalysis.ai/";
+    let root = schematic_root();
+    let artifacts: [(&str, PathBuf); 3] = [
+        (
+            "schema rustdoc",
+            root.join("schema/src/artificial_analysis.rs"),
+        ),
+        (
+            "OpenAPI grouped doc",
+            root.join("openapi/artificial_analysis.json"),
+        ),
+        (
+            "Postman grouped collection",
+            root.join("postman/artificial_analysis.postman_collection.json"),
+        ),
+    ];
+
+    for (label, path) in artifacts {
+        let contents = fs::read_to_string(&path).unwrap_or_else(|e| {
+            panic!("read {label} at {} failed: {e}", path.display())
+        });
+        assert!(
+            contents.contains(ATTRIBUTION_URL),
+            "{label} ({}) is missing the required Artificial Analysis \
+             attribution ({ATTRIBUTION_URL}). Update the `description` field \
+             on the Artificial Analysis API definitions in \
+             `schematic/definitions/src/artificial_analysis/mod.rs` to embed \
+             the attribution sentence, then regenerate the artifact via \
+             `just -f schematic/justfile generate`.",
+            path.display(),
+        );
+    }
+}
+
 /// Verify the committed `schematic/openapi/` directory contains exactly the
 /// module-named files the generator should produce. Catches both removed
 /// modules (committed file present but no longer generated) and missing

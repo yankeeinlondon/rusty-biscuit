@@ -24,9 +24,29 @@ The **Schematic** packages in the **rusty-biscuit** monorepo are designed to:
 The four packages involved in this process are:
 
 - `schematic-definitions` - this is where we define the API definitions
+
+    For more details on **schematic-definitions** choose from any of the links below:
+
+    ::toc-linking ../definitions/README.md level=h2
+
 - `schematic-define` - this library provides the _primitives_ used to define an API surface
+
+    For more details on the primitives defined in **schematic-define** choose from any of the links below:
+
+    ::toc-linking ../define/README.md level=h2
+
 - `schematic-gen` - once an API has been defined (in `schematic-definitions`) we will use the `schematic-gen` library to generate an API client and deploy it to `schematic-schema`
+
+    For more details on the primitives defined in **schematic-gen** choose from any of the links below:
+    
+    ::toc-linking ../gen/README.md level=h2
+
 - `schematic-schema` is the package that callers will look for API client definitions in
+
+    For more details on the primitives defined in **schematic-schema** choose from any of the links below:
+    
+    ::toc-linking ../schema/README.md level=h2
+
 
 ## More Details on Packages
 
