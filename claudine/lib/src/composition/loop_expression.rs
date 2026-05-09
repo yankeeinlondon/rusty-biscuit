@@ -47,7 +47,8 @@ impl LoopAmbient {
 /// Resolution order:
 ///
 /// 1. `env.NAME`
-/// 2. Ambient variables (`iteration`, `is_first`, `is_last`, `last_output`, `last_exit_code`)
+/// 2. Ambient variables (`_loop_count`, `_loop_is_first`, `_loop_is_last`,
+///    `_loop_last_output`, `_loop_last_exit_code`)
 /// 3. Frontmatter properties, including nested object paths via `.`
 #[derive(Debug, Clone, Copy)]
 pub struct LoopExpressionLookup<'a> {
@@ -126,11 +127,11 @@ fn resolve_env(name: &str) -> Option<Value> {
 
 fn resolve_ambient(path: &str, ambient: &LoopAmbient) -> Option<Value> {
     match path {
-        "iteration" => Some(Value::Number(ambient.iteration.into())),
-        "is_first" => Some(Value::Bool(ambient.is_first)),
-        "is_last" => Some(Value::Bool(ambient.is_last)),
-        "last_output" => Some(Value::String(ambient.last_output.clone())),
-        "last_exit_code" => Some(Value::Number(ambient.last_exit_code.into())),
+        "_loop_count" => Some(Value::Number(ambient.iteration.into())),
+        "_loop_is_first" => Some(Value::Bool(ambient.is_first)),
+        "_loop_is_last" => Some(Value::Bool(ambient.is_last)),
+        "_loop_last_output" => Some(Value::String(ambient.last_output.clone())),
+        "_loop_last_exit_code" => Some(Value::Number(ambient.last_exit_code.into())),
         _ => None,
     }
 }
@@ -184,21 +185,26 @@ mod tests {
         let ambient = LoopAmbient::new(3, false, true, "done", 7);
         let lookup = LoopExpressionLookup::new(&fm, &ambient);
 
-        assert_eq!(lookup.get("iteration"), Some(json!(3)));
-        assert_eq!(lookup.get("is_first"), Some(json!(false)));
-        assert_eq!(lookup.get("is_last"), Some(json!(true)));
-        assert_eq!(lookup.get("last_output"), Some(json!("done")));
-        assert_eq!(lookup.get("last_exit_code"), Some(json!(7)));
+        assert_eq!(lookup.get("_loop_count"), Some(json!(3)));
+        assert_eq!(lookup.get("_loop_is_first"), Some(json!(false)));
+        assert_eq!(lookup.get("_loop_is_last"), Some(json!(true)));
+        assert_eq!(lookup.get("_loop_last_output"), Some(json!("done")));
+        assert_eq!(lookup.get("_loop_last_exit_code"), Some(json!(7)));
     }
 
     #[test]
-    fn ambient_variables_shadow_frontmatter() {
+    fn ambient_variables_do_not_shadow_user_frontmatter() {
+        // Loop ambients live under the `_loop_` namespace, so a user-defined
+        // frontmatter property called `iteration` is fully visible and is
+        // not silently overwritten by the loop counter.
         let fm = map(json!({"iteration": 99, "is_first": false}));
         let ambient = ambient();
         let lookup = LoopExpressionLookup::new(&fm, &ambient);
 
-        assert_eq!(lookup.get("iteration"), Some(json!(1)));
-        assert_eq!(lookup.get("is_first"), Some(json!(true)));
+        assert_eq!(lookup.get("iteration"), Some(json!(99)));
+        assert_eq!(lookup.get("is_first"), Some(json!(false)));
+        assert_eq!(lookup.get("_loop_count"), Some(json!(1)));
+        assert_eq!(lookup.get("_loop_is_first"), Some(json!(true)));
     }
 
     #[test]
@@ -259,10 +265,15 @@ mod tests {
         let lookup = LoopExpressionLookup::new(&fm, &ambient);
 
         assert!(
-            evaluate_condition(&LoopCondition::While("iteration == 1".into()), &lookup).unwrap()
+            evaluate_condition(&LoopCondition::While("_loop_count == 1".into()), &lookup)
+                .unwrap()
         );
         assert!(
-            evaluate_condition(&LoopCondition::While("is_first == true".into()), &lookup).unwrap()
+            evaluate_condition(
+                &LoopCondition::While("_loop_is_first == true".into()),
+                &lookup
+            )
+            .unwrap()
         );
         assert_eq!(
             evaluate_condition(&LoopCondition::While("env.PATH != \"\"".into()), &lookup).unwrap(),

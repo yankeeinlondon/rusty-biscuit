@@ -254,7 +254,20 @@ pub fn execute_loop_with_config(
             continue;
         }
 
-        match apply_actions(config, &frontmatter, iteration) {
+        // Build a post-executor lookup so action-time templates resolve
+        // against the iteration that just ran: ambient `_loop_count`,
+        // `_loop_is_first`, `_loop_is_last` reflect this iteration, while
+        // `_loop_last_output` and `_loop_last_exit_code` reflect what the
+        // executor produced moments ago.
+        let post_ambient = LoopAmbient::new(
+            iteration,
+            iteration == 1,
+            is_last,
+            last_output.clone(),
+            last_exit_code,
+        );
+        let post_lookup = LoopExpressionLookup::new(&frontmatter, &post_ambient);
+        match apply_actions(config, &frontmatter, iteration, Some(&post_lookup)) {
             Ok(next_frontmatter) => frontmatter = next_frontmatter,
             Err(error) => {
                 if fail_fast {
@@ -304,10 +317,11 @@ fn apply_actions(
     config: &LoopConfig,
     frontmatter: &Map<String, Value>,
     iteration: usize,
+    lookup: Option<&dyn darkmatter::markdown::compose::expression::EvaluationLookup>,
 ) -> Result<Map<String, Value>, CompositionError> {
     let mut stage = ActionStaging::new(frontmatter, iteration, config.actions.len());
     for (index, action) in config.actions.iter().enumerate() {
-        stage.apply_action(action, index + 1)?;
+        stage.apply_action(action, index + 1, lookup)?;
     }
     Ok(stage.commit_map())
 }
@@ -325,7 +339,19 @@ fn compute_is_last(
         return Ok(true);
     }
 
-    let Ok(next_frontmatter) = apply_actions(config, frontmatter, iteration) else {
+    // Speculative is_last computation: render templates against the
+    // pre-iteration state. `_loop_last_output` / `_loop_last_exit_code`
+    // here reflect the prior iteration (or the seed values on iteration 1)
+    // because the current iteration has not run yet.
+    let speculative_ambient = LoopAmbient::new(
+        iteration,
+        iteration == 1,
+        iteration == max_iterations,
+        last_output.to_string(),
+        last_exit_code,
+    );
+    let speculative_lookup = LoopExpressionLookup::new(frontmatter, &speculative_ambient);
+    let Ok(next_frontmatter) = apply_actions(config, frontmatter, iteration, Some(&speculative_lookup)) else {
         return Ok(false);
     };
     let next_ambient = LoopAmbient::new(
@@ -361,17 +387,20 @@ fn should_continue_after_cap(
 
 fn insert_ambient_overrides(frontmatter: &mut Map<String, Value>, ambient: &LoopAmbient) {
     frontmatter.insert(
-        "iteration".to_string(),
+        "_loop_count".to_string(),
         Value::Number(ambient.iteration.into()),
     );
-    frontmatter.insert("is_first".to_string(), Value::Bool(ambient.is_first));
-    frontmatter.insert("is_last".to_string(), Value::Bool(ambient.is_last));
     frontmatter.insert(
-        "last_output".to_string(),
+        "_loop_is_first".to_string(),
+        Value::Bool(ambient.is_first),
+    );
+    frontmatter.insert("_loop_is_last".to_string(), Value::Bool(ambient.is_last));
+    frontmatter.insert(
+        "_loop_last_output".to_string(),
         Value::String(ambient.last_output.clone()),
     );
     frontmatter.insert(
-        "last_exit_code".to_string(),
+        "_loop_last_exit_code".to_string(),
         Value::Number(ambient.last_exit_code.into()),
     );
 }
@@ -440,13 +469,17 @@ mod tests {
         assert!(result.error.is_none());
         let seen = seen.borrow();
         assert_eq!(seen[0]["counter"], json!(0));
-        assert_eq!(seen[0]["iteration"], json!(1));
-        assert_eq!(seen[0]["is_first"], json!(true));
-        assert_eq!(seen[0]["last_output"], json!(""));
+        // User frontmatter property `iteration` is preserved verbatim
+        // because loop ambients live under `_loop_*`.
+        assert_eq!(seen[0]["iteration"], json!(99));
+        assert_eq!(seen[0]["_loop_count"], json!(1));
+        assert_eq!(seen[0]["_loop_is_first"], json!(true));
+        assert_eq!(seen[0]["_loop_last_output"], json!(""));
         assert_eq!(seen[1]["counter"], json!(1));
-        assert_eq!(seen[1]["iteration"], json!(2));
-        assert_eq!(seen[1]["is_first"], json!(false));
-        assert_eq!(seen[1]["last_output"], json!("run 1"));
+        assert_eq!(seen[1]["iteration"], json!(99));
+        assert_eq!(seen[1]["_loop_count"], json!(2));
+        assert_eq!(seen[1]["_loop_is_first"], json!(false));
+        assert_eq!(seen[1]["_loop_last_output"], json!("run 1"));
     }
 
     #[test]
@@ -506,7 +539,7 @@ mod tests {
     #[test]
     fn fail_fast_false_continues_after_iteration_failure() {
         let config = LoopConfig {
-            condition: LoopCondition::While("iteration < 4".into()),
+            condition: LoopCondition::While("_loop_count < 4".into()),
             actions: vec![LoopAction::Increment("counter".into())],
             max_iterations: None,
             fail_fast: Some(false),
@@ -570,7 +603,7 @@ mod tests {
     #[test]
     fn fail_fast_false_discards_failed_action_stage() {
         let config = LoopConfig {
-            condition: LoopCondition::While("iteration < 3".into()),
+            condition: LoopCondition::While("_loop_count < 3".into()),
             actions: vec![
                 LoopAction::Increment("counter".into()),
                 LoopAction::Increment("bad".into()),
@@ -591,6 +624,47 @@ mod tests {
         assert_eq!(result.iteration_count, 2);
         assert_eq!(result.final_frontmatter.get("counter"), Some(&json!(0)));
         assert_eq!(result.final_frontmatter.get("bad"), Some(&json!("abc")));
+    }
+
+    #[test]
+    fn set_template_renders_against_post_executor_iteration_state() {
+        // After iteration N runs, `set(stamp, {{_loop_count}})` should land
+        // a typed JSON number reflecting the iteration that just ran (N),
+        // and `set(echo, {{_loop_last_output}})` should reflect the output
+        // the executor produced moments ago.
+        let config = LoopConfig {
+            condition: LoopCondition::While("_loop_count < 3".into()),
+            actions: vec![
+                LoopAction::Set {
+                    prop: "stamp".into(),
+                    value: Value::String("{{_loop_count}}".into()),
+                },
+                LoopAction::Set {
+                    prop: "echo".into(),
+                    value: Value::String("{{_loop_last_output}}".into()),
+                },
+            ],
+            max_iterations: Some(2),
+            fail_fast: None,
+        };
+        let result = execute_loop_with_config(
+            Path::new("loop.md"),
+            &config,
+            Map::new(),
+            LoopExecutionOptions::default(),
+            |ctx| Ok(LoopIterationOutput::success(format!("ran-{}", ctx.iteration))),
+        )
+        .unwrap();
+
+        assert!(result.error.is_none());
+        // After iteration 2 runs and its actions apply, `stamp` should be
+        // the JSON number 2 (typed), and `echo` should be the string output
+        // captured from iteration 2's executor.
+        assert_eq!(result.final_frontmatter.get("stamp"), Some(&json!(2)));
+        assert_eq!(
+            result.final_frontmatter.get("echo"),
+            Some(&json!("ran-2"))
+        );
     }
 
     #[test]
@@ -673,7 +747,7 @@ mod tests {
     #[test]
     fn append_accumulates_log_across_iterations() {
         let config = LoopConfig {
-            condition: LoopCondition::While("iteration < 4".into()),
+            condition: LoopCondition::While("_loop_count < 4".into()),
             actions: vec![LoopAction::Append {
                 prop: "log".into(),
                 value: json!({"event": "tick"}),
@@ -704,7 +778,7 @@ mod tests {
     #[test]
     fn last_output_and_last_exit_code_propagate() {
         let config = LoopConfig {
-            condition: LoopCondition::While("iteration < 4".into()),
+            condition: LoopCondition::While("_loop_count < 4".into()),
             actions: vec![],
             max_iterations: None,
             fail_fast: None,
@@ -740,7 +814,7 @@ mod tests {
     #[test]
     fn last_exit_code_reflects_failure_in_next_iteration() {
         let config = LoopConfig {
-            condition: LoopCondition::While("iteration < 4".into()),
+            condition: LoopCondition::While("_loop_count < 4".into()),
             actions: vec![],
             max_iterations: None,
             fail_fast: Some(false),
