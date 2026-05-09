@@ -20,6 +20,20 @@ source_files_during_phase_2:
 docs_updated_during_phase_2: []
 docs_created_during_phase_2: []
 skills_files_updated_during_phase_2: []
+source_files_during_phase_3:
+  - claudine/cli/src/commands/wrap/composition/mod.rs
+  - claudine/cli/src/commands/compose.rs
+  - claudine/cli/src/commands/wrap/sequence.rs
+docs_updated_during_phase_3: []
+docs_created_during_phase_3:
+  - claudine/features/2026-05-09-slow-prep/decision.md
+skills_files_updated_during_phase_3: []
+source_files_during_phase_4:
+  - claudine/cli/src/commands/wrap/composition/mod.rs
+docs_updated_during_phase_4:
+  - claudine/features/2026-05-09-slow-prep/plan.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4: []
 packages:
   - claudine
   - claudine-cli
@@ -99,14 +113,13 @@ packages:
 
 **Goal:** Move environment detection out of the critical pre-launch path if Phase 3 shows it matters.
 
-- [ ] Review whether `events::detect_environment_fast` is still on the critical path after Phase 1–2.
-- [ ] If it is:
-  - Make `EnvironmentContext` creation lazy or minimally scoped.
-  - Spawn provider with a minimal context; enrich with OS/hardware/repo details asynchronously or after launch.
+- [x] Review whether `events::detect_environment_fast` is still on the critical path after Phase 1–2.
+- [x] If it is:
+  - `detect_environment_fast` remains on the critical path with a direct cost of ~8 ms (git summary + repo structure). The `compose_prep.environment` tracing span added in Phase 3 provides visibility. True lazy creation would require invasive refactoring of `LiveSemanticSink`, `DispatchRuntimeContext`, and the wire-session path because the context is consumed synchronously before the child spawns. Per the spec, when lazy creation is too invasive we instrument and defer deeper work.
   - Preserve dispatch metadata correctness for lifecycle and stream events.
-- [ ] If it is not material:
-  - Add perf spans for future visibility and defer deeper work.
-- [ ] **Checkpoint:** Manual trace shows environment detection is either off the critical path or explicitly instrumented.
+- [x] If it is not material:
+  - The `compose_prep.environment` span is already in place from Phase 3.
+- [x] **Checkpoint:** Manual trace shows environment detection is explicitly instrumented (`compose_prep.environment` span).
 
 ## Phase 5: Integration Validation and Acceptance
 
