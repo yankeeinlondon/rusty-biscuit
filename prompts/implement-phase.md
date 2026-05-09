@@ -9,7 +9,7 @@ failure:
     say: "Ran into problems implementing phase {{phase}} of the plan!"
     message: "❌️ phase {{phase}} (_of {{total_phases}}_) failed in the plan `{{plan}}`"
 loop:
-    until: "{{phase}} > {{total_phases}}"
+    until: "phase > total_phases"
     action: increment(phase)
 ---
 ::block when="total_phases"
