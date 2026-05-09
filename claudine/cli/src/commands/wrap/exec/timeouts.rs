@@ -134,16 +134,54 @@ pub(crate) fn detect_step_timeout(
 ) -> Option<EarlyTermination> {
     let state = metrics.lock().ok()?;
     let last_event_at = state.last_event_at?;
-    if !state.in_flight.is_empty() || !state.in_flight_subagents.is_empty() {
+
+    // Stuck-aware evaluation: only suppress step_timeout when ALL in-flight
+    // items are active (none stuck). If any item is stuck, the silence rule
+    // is allowed to fire so hung work does not block termination indefinitely.
+    let stuck_tools = state.stuck_tools(now, step_timeout);
+    let stuck_subagents = state.stuck_subagents(now, step_timeout);
+    let any_stuck = !stuck_tools.is_empty() || !stuck_subagents.is_empty();
+    let any_active = !state.in_flight.is_empty() || !state.in_flight_subagents.is_empty();
+
+    if any_active && !any_stuck {
         return None;
     }
+
     let silence = now.saturating_duration_since(last_event_at);
     if silence >= step_timeout {
         let silence_text = format_internal_duration(silence.as_secs());
+        let message = if stuck_tools.is_empty() && stuck_subagents.is_empty() {
+            format!("no stream activity for {silence_text}; terminating due to step_timeout")
+        } else {
+            let mut msg = format!(
+                "no stream activity for {silence_text}. The wrapped process was terminated."
+            );
+            if !stuck_tools.is_empty() {
+                let count = stuck_tools.len();
+                let plural = if count == 1 { "tool" } else { "tools" };
+                msg.push_str(&format!(
+                    " {count} {plural} were stuck when the timeout fired:\n"
+                ));
+                for tool in stuck_tools {
+                    let name = tool.name.as_deref().unwrap_or("(unnamed)");
+                    msg.push_str(&format!("  • \"{name}\"\n"));
+                }
+            }
+            if !stuck_subagents.is_empty() {
+                let count = stuck_subagents.len();
+                let plural = if count == 1 { "subagent" } else { "subagents" };
+                msg.push_str(&format!(
+                    " {count} {plural} were stuck when the timeout fired:\n"
+                ));
+                for subagent in stuck_subagents {
+                    let name = subagent.name.as_deref().unwrap_or("(unnamed)");
+                    msg.push_str(&format!("  • \"{name}\"\n"));
+                }
+            }
+            msg
+        };
         Some(EarlyTermination::StepTimeout {
-            message: format!(
-                "no stream activity for {silence_text}; terminating due to step_timeout"
-            ),
+            message,
             outstanding: Vec::new(),
         })
     } else {
@@ -164,16 +202,34 @@ pub(crate) fn detect_opencode_hang_termination(
         return None;
     }
 
-    let silence_text = format_internal_duration(silence.as_secs());
-    if silence >= stop_threshold && state.provider_status.as_deref() == Some("stop") {
-        return Some(EarlyTermination::CompletedButHung {
-            message: format!(
-                "OpenCode reported stop but stayed alive for {silence_text}; terminating hung process"
-            ),
-        });
+    if silence < stop_threshold {
+        return None;
     }
 
-    None
+    // Hang recovery requires that we've observed at least one `step_finish`
+    // boundary (`provider_status` becomes `Some(_)` only after the parser
+    // routes a `step_finish` Info event). Until then, startup latency or a
+    // very slow first model response can plausibly explain the silence.
+    let provider_status = state.provider_status.as_deref()?;
+
+    let silence_text = format_internal_duration(silence.as_secs());
+    let message = match provider_status {
+        "stop" => format!(
+            "OpenCode reported stop but stayed alive for {silence_text}; terminating hung process"
+        ),
+        // Common after parallel `task` tool dispatch: the last observed
+        // `step_finish.reason` is `"tool-calls"`, every dispatched tool has
+        // returned (`in_flight` is empty), and OpenCode never emits a final
+        // synthesis step. Treat this as a hang once the silence threshold
+        // is met. Note that OpenCode's `task` tool is dispatched as an
+        // ordinary tool — its `task_started`/`task_completed` events are
+        // not emitted, so `in_flight_subagents` stays empty for these runs.
+        other => format!(
+            "OpenCode went silent after step_finish reason={other:?} for {silence_text} with no tools or subagents in flight; terminating hung process"
+        ),
+    };
+
+    Some(EarlyTermination::CompletedButHung { message })
 }
 
 /// Format a duration in seconds for internal early-termination messages.
@@ -251,10 +307,7 @@ impl TimeoutConfig {
     /// [`claudine::harness::parse_timeout`] grammar (e.g. `30s`, `5m`,
     /// `2h`). Invalid or missing env values fall back to the built-in
     /// defaults (`10s` and `5s`).
-    pub(crate) fn resolve(
-        timeout: Option<Duration>,
-        step_timeout: Option<Duration>,
-    ) -> Self {
+    pub(crate) fn resolve(timeout: Option<Duration>, step_timeout: Option<Duration>) -> Self {
         let defaults = Self::default();
         let kill_grace = parse_env_duration("CLAUDINE_KILL_GRACE").unwrap_or(defaults.kill_grace);
         let interval =
@@ -309,15 +362,94 @@ mod tests {
             state.provider_status = Some("stop".into());
         }
 
-        let detected = detect_opencode_hang_termination(&metrics,
-            now,
-            Duration::from_secs(120),
-        );
+        let detected = detect_opencode_hang_termination(&metrics, now, Duration::from_secs(120));
 
-        assert!(matches!(
-            detected,
-            Some(EarlyTermination::CompletedButHung { .. })
-        ));
+        let message = match detected {
+            Some(EarlyTermination::CompletedButHung { message }) => message,
+            other => panic!("expected CompletedButHung, got {other:?}"),
+        };
+        assert!(message.contains("reported stop"), "got: {message}");
+    }
+
+    #[test]
+    fn detect_opencode_hang_termination_recovers_after_tool_calls_reason() {
+        // Parallel-Task hang: the last observed `step_finish.reason` is
+        // `"tool-calls"` (the parent dispatched parallel tools), every
+        // dispatched tool has returned (`in_flight` is empty), and OpenCode
+        // never emits a final synthesis step. The wrapper must recover.
+        let metrics = claudine::stream::progress::new_live_metrics();
+        let now = Instant::now();
+        {
+            let mut state = metrics.lock().unwrap();
+            state.last_event_at = Some(now - Duration::from_secs(180));
+            state.provider_status = Some("tool-calls".into());
+        }
+
+        let detected = detect_opencode_hang_termination(&metrics, now, Duration::from_secs(120));
+
+        let message = match detected {
+            Some(EarlyTermination::CompletedButHung { message }) => message,
+            other => panic!("expected CompletedButHung, got {other:?}"),
+        };
+        assert!(message.contains("tool-calls"), "got: {message}");
+    }
+
+    #[test]
+    fn detect_opencode_hang_termination_skips_when_no_step_finish_seen() {
+        // First-step grace: until at least one `step_finish` Info event has
+        // been observed, `provider_status` stays `None`. Slow startup or a
+        // long first model response must not be killed.
+        let metrics = claudine::stream::progress::new_live_metrics();
+        let now = Instant::now();
+        {
+            let mut state = metrics.lock().unwrap();
+            state.last_event_at = Some(now - Duration::from_secs(180));
+        }
+
+        let detected = detect_opencode_hang_termination(&metrics, now, Duration::from_secs(120));
+
+        assert!(
+            detected.is_none(),
+            "must not fire before any step_finish has been observed"
+        );
+    }
+
+    #[test]
+    fn detect_opencode_hang_termination_skips_when_silence_below_threshold() {
+        let metrics = claudine::stream::progress::new_live_metrics();
+        let now = Instant::now();
+        {
+            let mut state = metrics.lock().unwrap();
+            state.last_event_at = Some(now - Duration::from_secs(60));
+            state.provider_status = Some("tool-calls".into());
+        }
+
+        let detected = detect_opencode_hang_termination(&metrics, now, Duration::from_secs(120));
+
+        assert!(detected.is_none());
+    }
+
+    #[test]
+    fn detect_opencode_hang_termination_skips_when_in_flight_tool() {
+        let metrics = claudine::stream::progress::new_live_metrics();
+        let now = Instant::now();
+        {
+            let mut state = metrics.lock().unwrap();
+            state.last_event_at = Some(now - Duration::from_secs(180));
+            state.provider_status = Some("tool-calls".into());
+            state.in_flight.insert(
+                "task-1".into(),
+                claudine::stream::progress::InFlightTool {
+                    name: Some("task".into()),
+                    started_at: now - Duration::from_secs(180),
+                    last_progress_at: now - Duration::from_secs(180),
+                },
+            );
+        }
+
+        let detected = detect_opencode_hang_termination(&metrics, now, Duration::from_secs(120));
+
+        assert!(detected.is_none());
     }
 
     #[test]
@@ -364,7 +496,7 @@ mod tests {
     }
 
     #[test]
-    fn detect_step_timeout_returns_none_when_in_flight_tool_exists() {
+    fn detect_step_timeout_fires_when_in_flight_tool_is_stuck() {
         let metrics = claudine::stream::progress::new_live_metrics();
         let now = Instant::now();
         {
@@ -375,20 +507,47 @@ mod tests {
                 claudine::stream::progress::InFlightTool {
                     name: Some("Task".into()),
                     started_at: now - Duration::from_secs(180),
+                    last_progress_at: now - Duration::from_secs(180),
                 },
             );
         }
 
         let detected = detect_step_timeout(&metrics, now, Duration::from_secs(5));
 
+        let message = match detected {
+            Some(EarlyTermination::StepTimeout { ref message, .. }) => message.clone(),
+            other => panic!("stuck tool should trigger step_timeout, got: {other:?}"),
+        };
         assert!(
-            detected.is_none(),
-            "step_timeout must not fire while a tool call is in-flight"
+            message.contains("Task"),
+            "stuck tool message should mention Task, got: {message}"
         );
     }
 
     #[test]
-    fn detect_step_timeout_returns_none_when_in_flight_subagent_exists() {
+    fn detect_step_timeout_returns_none_when_in_flight_tool_is_active() {
+        let metrics = claudine::stream::progress::new_live_metrics();
+        let now = Instant::now();
+        {
+            let mut state = metrics.lock().unwrap();
+            state.last_event_at = Some(now - Duration::from_secs(180));
+            state.in_flight.insert(
+                "task-1".into(),
+                claudine::stream::progress::InFlightTool {
+                    name: Some("Task".into()),
+                    started_at: now - Duration::from_secs(180),
+                    last_progress_at: now,
+                },
+            );
+        }
+
+        let detected = detect_step_timeout(&metrics, now, Duration::from_secs(5));
+
+        assert!(detected.is_none(), "active tool must suppress step_timeout");
+    }
+
+    #[test]
+    fn detect_step_timeout_fires_when_in_flight_subagent_is_stuck() {
         let metrics = claudine::stream::progress::new_live_metrics();
         let now = Instant::now();
         {
@@ -399,6 +558,32 @@ mod tests {
                 claudine::stream::progress::InFlightSubagent {
                     name: Some("rust-developer".into()),
                     started_at: now - Duration::from_secs(180),
+                    last_progress_at: now - Duration::from_secs(180),
+                },
+            );
+        }
+
+        let detected = detect_step_timeout(&metrics, now, Duration::from_secs(5));
+
+        assert!(
+            matches!(detected, Some(EarlyTermination::StepTimeout { .. })),
+            "stuck subagent should trigger step_timeout, got: {detected:?}"
+        );
+    }
+
+    #[test]
+    fn detect_step_timeout_returns_none_when_in_flight_subagent_is_active() {
+        let metrics = claudine::stream::progress::new_live_metrics();
+        let now = Instant::now();
+        {
+            let mut state = metrics.lock().unwrap();
+            state.last_event_at = Some(now - Duration::from_secs(180));
+            state.in_flight_subagents.insert(
+                "sa-1".into(),
+                claudine::stream::progress::InFlightSubagent {
+                    name: Some("rust-developer".into()),
+                    started_at: now - Duration::from_secs(180),
+                    last_progress_at: now,
                 },
             );
         }
@@ -407,7 +592,7 @@ mod tests {
 
         assert!(
             detected.is_none(),
-            "step_timeout must not fire while a subagent is in-flight"
+            "active subagent must suppress step_timeout"
         );
     }
 
@@ -423,13 +608,14 @@ mod tests {
                 claudine::stream::progress::InFlightSubagent {
                     name: Some("rust-developer".into()),
                     started_at: now - Duration::from_secs(180),
+                    last_progress_at: now,
                 },
             );
         }
 
         assert!(
             detect_step_timeout(&metrics, now, Duration::from_secs(5)).is_none(),
-            "must not fire while subagent is active"
+            "must not fire while active subagent is in-flight"
         );
 
         {
@@ -505,7 +691,10 @@ mod tests {
         let _g4 = TestEnvGuard::clear("CLAUDINE_WATCHDOG_INTERVAL");
 
         let config = TimeoutConfig::resolve(None, None);
-        assert_eq!(config.timeout, None, "resolve must not read CLAUDINE_TIMEOUT");
+        assert_eq!(
+            config.timeout, None,
+            "resolve must not read CLAUDINE_TIMEOUT"
+        );
         assert_eq!(
             config.step_timeout, None,
             "resolve must not read CLAUDINE_STEP_TIMEOUT"

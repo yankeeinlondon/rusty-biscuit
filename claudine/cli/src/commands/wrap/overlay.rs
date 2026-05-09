@@ -1,8 +1,8 @@
 use color_eyre::eyre::{Result, eyre};
 use indexmap::IndexMap;
 use serde_json::Value;
-use std::path::Path;
 use std::fs;
+use std::path::Path;
 
 pub(crate) fn merge_frontmatter_overlay(
     overlay: &mut IndexMap<String, Value>,

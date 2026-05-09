@@ -1,12 +1,12 @@
 use std::path::PathBuf;
 use std::time::Duration;
 
-use darkmatter::markdown::compose::conditions::evaluate_condition_against;
-use serde_json::Value;
+use darkmatter::markdown::compose::expression::{evaluate, is_truthy, parse_condition};
 use tracing::{debug, info_span, warn};
 
 use crate::actions::{CompiledMapper, HookAction, HookDecision, HookResponse};
 use crate::config::claudine_config::{ClaudineConfig, Gender};
+use crate::dispatch::expression::EventMetaConditionLookup;
 use crate::dispatch::template::interpolate;
 use crate::error::Result;
 use crate::events::{AgenticEvent, EventMeta};
@@ -16,15 +16,15 @@ use crate::protect::decision::ProtectDecision;
 mod bash;
 mod decisions;
 mod mappers;
-mod meta_json;
+mod null_strip;
 mod protect;
 mod report;
 mod speak;
 
-use bash::{execute_bash, run_command_blocking, BASH_ACTION_TIMEOUT};
+use bash::{BASH_ACTION_TIMEOUT, execute_bash, run_command_blocking};
 use decisions::{dot_lookup, parse_decision, should_replace_selected};
-use mappers::{apply_mapper, CommandOutput};
-use meta_json::{event_meta_to_json, strip_nulls};
+use mappers::{CommandOutput, apply_mapper};
+use null_strip::strip_nulls;
 use protect::{attach_protect_context, decision_for_short_circuit, should_short_circuit_call};
 use report::execute_report;
 use speak::execute_speak_from_claudine;
@@ -69,31 +69,56 @@ enum WhenOutcome {
 /// Evaluate an action's `when` expression against the live [`EventMeta`].
 ///
 /// `when` is optional: when absent, the action always runs. When present,
-/// the expression is parsed and evaluated through Darkmatter's
-/// [`evaluate_condition_against`] shortcut against the event meta
-/// serialized as JSON. Falsy results yield [`WhenOutcome::SkipFalse`];
+/// the expression is parsed and evaluated through [`EventMetaConditionLookup`]
+/// which layers Darkmatter's lazy `ctx.*` capture on top of
+/// [`EventMetaExpressionLookup`]. Falsy results yield [`WhenOutcome::SkipFalse`];
 /// parse or evaluation errors yield [`WhenOutcome::SkipInvalid`] with a
 /// `tracing::warn!` so operators can spot a broken condition without
 /// breaking the rest of the binding.
-fn evaluate_when(when: Option<&str>, meta: &EventMeta, meta_json: &Value) -> WhenOutcome {
-    let Some(expr) = when else {
-        return WhenOutcome::Run;
-    };
-
+#[allow(dead_code)]
+fn evaluate_when(when: Option<&str>, meta: &EventMeta) -> WhenOutcome {
     let work_dir: PathBuf = meta
         .cwd
         .as_deref()
         .map(PathBuf::from)
         .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
 
-    match evaluate_condition_against(expr, meta_json, work_dir.as_path()) {
-        Ok(true) => WhenOutcome::Run,
-        Ok(false) => WhenOutcome::SkipFalse,
+    let lookup = EventMetaConditionLookup::new(meta, work_dir.as_path());
+    evaluate_when_with_lookup(when, &lookup)
+}
+
+/// Evaluate an action's `when` expression using a pre-built [`EventMetaConditionLookup`].
+///
+/// This keeps the parse/evaluate plumbing but reuses the cached context groups,
+/// avoiding repeated `ctx.*` captures across multiple actions in the same binding.
+fn evaluate_when_with_lookup(
+    when: Option<&str>,
+    lookup: &EventMetaConditionLookup<'_>,
+) -> WhenOutcome {
+    let Some(expr) = when else {
+        return WhenOutcome::Run;
+    };
+
+    let parsed = match parse_condition(expr) {
+        Ok(parsed) => parsed,
         Err(error) => {
             warn!(
                 expression = expr,
                 %error,
-                "Hook action `when` expression failed to parse or evaluate; skipping action",
+                "Hook action `when` failed to parse; skipping action",
+            );
+            return WhenOutcome::SkipInvalid;
+        }
+    };
+
+    match evaluate(&parsed, lookup) {
+        Ok(value) if is_truthy(&value) => WhenOutcome::Run,
+        Ok(_) => WhenOutcome::SkipFalse,
+        Err(error) => {
+            warn!(
+                expression = expr,
+                %error,
+                "Hook action `when` failed to evaluate; skipping action",
             );
             WhenOutcome::SkipInvalid
         }
@@ -113,14 +138,22 @@ pub(crate) async fn execute_actions(
     protect_decision: Option<&ProtectDecision>,
 ) -> Result<Option<HookResponse>> {
     let mut selected_response: Option<HookResponse> = None;
-    let meta_json = event_meta_to_json(meta);
+
+    // Build the composite lookup once so that `ctx.*` captures are cached
+    // across all actions in this binding.
+    let work_dir: PathBuf = meta
+        .cwd
+        .as_deref()
+        .map(PathBuf::from)
+        .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
+    let lookup = EventMetaConditionLookup::new(meta, work_dir.as_path());
 
     for (index, action) in actions.iter().enumerate() {
         // Pre-execution `when` gate. Falsy or invalid conditions skip the
         // action without affecting `selected_response`, which guarantees
         // a skipped `Call` cannot replace a previously selected blocking
         // response.
-        match evaluate_when(action.when(), meta, &meta_json) {
+        match evaluate_when_with_lookup(action.when(), &lookup) {
             WhenOutcome::Run => {}
             WhenOutcome::SkipFalse => {
                 debug!(
@@ -900,8 +933,11 @@ mod tests {
         // though Claudine's EventMeta does not precompute these fields.
         let config = claudine_config_with_tts(TtsValue::Boolean(false));
         let messaging = RuntimeMessagingSettings::default();
-        let actions = vec![HookAction::Report {
-            handler: None,
+        let actions = vec![HookAction::Call {
+            command: "__claudine_missing_when_ctx_weak__".to_string(),
+            args: None,
+            timeout_ms: Some(50),
+            mapper: None,
             when: Some("ctx.today != ''".to_string()),
         }];
 
@@ -911,19 +947,49 @@ mod tests {
             &make_meta_for_when_tests(),
             DispatchConfig::Canonical(&config),
             &messaging,
-            false,
+            true,
             None,
         )
         .await;
 
-        assert!(
-            result.is_ok(),
-            "ctx.* condition should evaluate without erroring the runner",
-        );
+        let response = result
+            .expect("ctx.* condition should evaluate without erroring the runner")
+            .expect("ctx.today != '' should be truthy and let the call fire");
+        assert_eq!(response.decision, Some(HookDecision::Deny));
+    }
+
+    #[tokio::test]
+    async fn when_ctx_today_resolves() {
+        // Regression test: ctx.today should resolve truthy through the
+        // EventMetaConditionLookup composite and allow the action to run.
+        let config = claudine_config_with_tts(TtsValue::Boolean(false));
+        let messaging = RuntimeMessagingSettings::default();
+        let actions = vec![HookAction::Call {
+            command: "__claudine_missing_when_ctx_today__".to_string(),
+            args: None,
+            timeout_ms: Some(50),
+            mapper: None,
+            when: Some("ctx.today != ''".to_string()),
+        }];
+
+        let result = execute_actions(
+            &actions,
+            None,
+            &make_meta_for_when_tests(),
+            DispatchConfig::Canonical(&config),
+            &messaging,
+            true,
+            None,
+        )
+        .await
+        .unwrap()
+        .expect("ctx.today != '' should be truthy and let the call fire");
+
+        assert_eq!(result.decision, Some(HookDecision::Deny));
     }
 
     // =========================================================================
-    // Flattened-alias `when` evaluation tests (review-1, Phase 1)
+    // `when` evaluation tests via EventMetaConditionLookup
     // =========================================================================
 
     #[tokio::test]
@@ -1047,10 +1113,9 @@ mod tests {
 
     #[tokio::test]
     async fn when_nested_tool_input_path() {
-        // Already works via `serde_json::to_value(meta)` because
-        // `tool_input` is a top-level JSON object on EventMeta. This
-        // test guards against regression when alias flattening is
-        // refactored.
+        // `tool_input` is a top-level field on EventMeta and resolves
+        // directly through EventMetaExpressionLookup. This test guards
+        // against regression in the expression evaluation path.
         let config = claudine_config_with_tts(TtsValue::Boolean(false));
         let messaging = RuntimeMessagingSettings::default();
         let mut meta = make_meta_for_when_tests();
@@ -1113,10 +1178,99 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn when_tool_response_path_resolves() {
+        let config = claudine_config_with_tts(TtsValue::Boolean(false));
+        let messaging = RuntimeMessagingSettings::default();
+        let mut meta = make_meta_for_when_tests();
+        meta.tool_response = Some(serde_json::json!({"exit_code": 0}));
+
+        let actions = vec![HookAction::Call {
+            command: "__claudine_missing_when_tool_response__".to_string(),
+            args: None,
+            timeout_ms: Some(50),
+            mapper: None,
+            when: Some("tool_response.exit_code == 0".to_string()),
+        }];
+
+        let result = execute_actions(
+            &actions,
+            None,
+            &meta,
+            DispatchConfig::Canonical(&config),
+            &messaging,
+            true,
+            None,
+        )
+        .await
+        .unwrap()
+        .expect("tool_response.exit_code == 0 should resolve truthy and let the call fire");
+
+        assert_eq!(result.decision, Some(HookDecision::Deny));
+    }
+
+    #[tokio::test]
+    async fn when_env_fallback_syntax_works() {
+        let config = claudine_config_with_tts(TtsValue::Boolean(false));
+        let messaging = RuntimeMessagingSettings::default();
+
+        let actions = vec![HookAction::Call {
+            command: "__claudine_missing_when_fallback__".to_string(),
+            args: None,
+            timeout_ms: Some(50),
+            mapper: None,
+            when: Some("env.CLAUDINE_TEST_MISSING || 'default' == 'default'".to_string()),
+        }];
+
+        let result = execute_actions(
+            &actions,
+            None,
+            &make_meta_for_when_tests(),
+            DispatchConfig::Canonical(&config),
+            &messaging,
+            true,
+            None,
+        )
+        .await
+        .unwrap()
+        .expect("env fallback syntax should evaluate truthy and let the call fire");
+
+        assert_eq!(result.decision, Some(HookDecision::Deny));
+    }
+
+    #[tokio::test]
+    async fn when_ctx_year_resolves() {
+        // Regression test: ctx.year should resolve truthy through the
+        // EventMetaConditionLookup composite and allow the action to run.
+        let config = claudine_config_with_tts(TtsValue::Boolean(false));
+        let messaging = RuntimeMessagingSettings::default();
+        let actions = vec![HookAction::Call {
+            command: "__claudine_missing_when_ctx_year__".to_string(),
+            args: None,
+            timeout_ms: Some(50),
+            mapper: None,
+            when: Some("ctx.year != ''".to_string()),
+        }];
+
+        let result = execute_actions(
+            &actions,
+            None,
+            &make_meta_for_when_tests(),
+            DispatchConfig::Canonical(&config),
+            &messaging,
+            true,
+            None,
+        )
+        .await
+        .unwrap()
+        .expect("ctx.year != '' should be truthy and let the call fire");
+
+        assert_eq!(result.decision, Some(HookDecision::Deny));
+    }
+
+    #[tokio::test]
     async fn when_missing_git_block_is_falsy() {
-        // When `meta.env.git` is None, the `git` alias is omitted from
-        // the JSON payload entirely so `git.branch` resolves to Null
-        // and the condition is falsy.
+        // When `meta.env.git` is None, `git.branch` resolves to Null
+        // through EventMetaExpressionLookup and the condition is falsy.
         let config = claudine_config_with_tts(TtsValue::Boolean(false));
         let messaging = RuntimeMessagingSettings::default();
         let mut meta = make_meta_for_when_tests();

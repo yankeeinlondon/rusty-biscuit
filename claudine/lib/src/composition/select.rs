@@ -705,8 +705,13 @@ mod tests {
         let prepared = make_prepared_composition(None, None);
         // Use the internal testable variant with an empty env lookup to verify
         // the fallback chain when no env vars are set:
-        let (model, reason) =
-            resolve_model_with_env(Provider::Codex, &prepared.selection_hints, None, |_| None, None);
+        let (model, reason) = resolve_model_with_env(
+            Provider::Codex,
+            &prepared.selection_hints,
+            None,
+            |_| None,
+            None,
+        );
         assert_eq!(model, None);
         assert!(matches!(reason, ModelResolutionReason::ProviderDefault));
     }
@@ -714,8 +719,13 @@ mod tests {
     #[test]
     fn model_frontmatter_single_used() {
         let prepared = make_prepared_composition(None, Some(ModelHint::Single("gpt-4o".into())));
-        let (model, reason) =
-            resolve_model_with_env(Provider::Codex, &prepared.selection_hints, None, |_| None, None);
+        let (model, reason) = resolve_model_with_env(
+            Provider::Codex,
+            &prepared.selection_hints,
+            None,
+            |_| None,
+            None,
+        );
         assert_eq!(model, Some("gpt-4o".to_string()));
         assert!(matches!(reason, ModelResolutionReason::FrontmatterSingle));
     }
@@ -726,8 +736,13 @@ mod tests {
             None,
             Some(ModelHint::List(vec!["gpt-4o".into(), "o3-mini".into()])),
         );
-        let (model, reason) =
-            resolve_model_with_env(Provider::Codex, &prepared.selection_hints, None, |_| None, None);
+        let (model, reason) = resolve_model_with_env(
+            Provider::Codex,
+            &prepared.selection_hints,
+            None,
+            |_| None,
+            None,
+        );
         assert_eq!(model, Some("gpt-4o".to_string()));
         assert!(matches!(reason, ModelResolutionReason::FrontmatterList));
     }
@@ -738,8 +753,13 @@ mod tests {
     fn model_catalog_rejects_invalid_single_hint() {
         let prepared = make_prepared_composition(None, Some(ModelHint::Single("not-real".into())));
         let catalog = crate::model_catalog::ModelCatalogService::new();
-        let (model, reason) =
-            resolve_model_with_env(Provider::Codex, &prepared.selection_hints, None, |_| None, Some(&catalog));
+        let (model, reason) = resolve_model_with_env(
+            Provider::Codex,
+            &prepared.selection_hints,
+            None,
+            |_| None,
+            Some(&catalog),
+        );
         // Invalid single hint falls through to provider default
         assert_eq!(model, None);
         assert!(matches!(reason, ModelResolutionReason::ProviderDefault));
@@ -752,8 +772,13 @@ mod tests {
             Some(ModelHint::List(vec!["not-real".into(), "o3-mini".into()])),
         );
         let catalog = crate::model_catalog::ModelCatalogService::new();
-        let (model, reason) =
-            resolve_model_with_env(Provider::Codex, &prepared.selection_hints, None, |_| None, Some(&catalog));
+        let (model, reason) = resolve_model_with_env(
+            Provider::Codex,
+            &prepared.selection_hints,
+            None,
+            |_| None,
+            Some(&catalog),
+        );
         assert_eq!(model, Some("o3-mini".to_string()));
         assert!(matches!(reason, ModelResolutionReason::FrontmatterList));
     }
@@ -765,8 +790,13 @@ mod tests {
             Some(ModelHint::List(vec!["not-real".into(), "also-fake".into()])),
         );
         let catalog = crate::model_catalog::ModelCatalogService::new();
-        let (model, reason) =
-            resolve_model_with_env(Provider::Codex, &prepared.selection_hints, None, |_| None, Some(&catalog));
+        let (model, reason) = resolve_model_with_env(
+            Provider::Codex,
+            &prepared.selection_hints,
+            None,
+            |_| None,
+            Some(&catalog),
+        );
         assert_eq!(model, None);
         assert!(matches!(reason, ModelResolutionReason::ProviderDefault));
     }
@@ -775,8 +805,13 @@ mod tests {
     fn model_catalog_valid_single_hint_accepted() {
         let prepared = make_prepared_composition(None, Some(ModelHint::Single("o3-mini".into())));
         let catalog = crate::model_catalog::ModelCatalogService::new();
-        let (model, reason) =
-            resolve_model_with_env(Provider::Codex, &prepared.selection_hints, None, |_| None, Some(&catalog));
+        let (model, reason) = resolve_model_with_env(
+            Provider::Codex,
+            &prepared.selection_hints,
+            None,
+            |_| None,
+            Some(&catalog),
+        );
         assert_eq!(model, Some("o3-mini".to_string()));
         assert!(matches!(reason, ModelResolutionReason::FrontmatterSingle));
     }

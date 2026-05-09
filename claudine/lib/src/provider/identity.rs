@@ -7,6 +7,4 @@
 
 // Re-export from the new leaf module so existing `use crate::provider::identity::Provider`
 // paths continue to work.
-pub use crate::provider_id::{
-    Provider, PROVIDER_COUNT, PROVIDERS_DISPLAY_ORDER,
-};
+pub use crate::provider_id::{PROVIDER_COUNT, PROVIDERS_DISPLAY_ORDER, Provider};

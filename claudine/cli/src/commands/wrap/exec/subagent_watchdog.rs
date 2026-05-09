@@ -73,12 +73,7 @@ impl WatchdogState {
     /// timestamps that the caller did not provide. This matches the contract
     /// that duplicate starts update metadata without losing timestamps
     /// unexpectedly.
-    pub(crate) fn subagent_started(
-        &mut self,
-        id: SubagentId,
-        name: Option<String>,
-        now: Instant,
-    ) {
+    pub(crate) fn subagent_started(&mut self, id: SubagentId, name: Option<String>, now: Instant) {
         match self.active.get_mut(&id) {
             Some(info) => {
                 if name.is_some() {
@@ -120,8 +115,7 @@ impl WatchdogState {
     ///
     /// Silently ignores unknown ids so callers do not need to gate on
     /// `SubagentStart` having already been seen.
-    pub(crate) fn observe_subagent_progress(&mut self, id: &SubagentId, now: Instant,
-    ) {
+    pub(crate) fn observe_subagent_progress(&mut self, id: &SubagentId, now: Instant) {
         if let Some(info) = self.active.get_mut(id) {
             info.last_progress_at = now;
         }
@@ -231,8 +225,16 @@ mod tests {
 
         let active = state.active_subagents(t0);
         assert_eq!(active.len(), 2);
-        assert!(active.iter().any(|s| s.id == "a" && s.name.as_deref() == Some("Alpha")));
-        assert!(active.iter().any(|s| s.id == "b" && s.name.as_deref() == Some("Beta")));
+        assert!(
+            active
+                .iter()
+                .any(|s| s.id == "a" && s.name.as_deref() == Some("Alpha"))
+        );
+        assert!(
+            active
+                .iter()
+                .any(|s| s.id == "b" && s.name.as_deref() == Some("Beta"))
+        );
 
         state.subagent_stopped(&"a".into(), t0);
         let active = state.active_subagents(t0);

@@ -5,11 +5,11 @@
 #![allow(unused_imports)]
 
 pub(crate) use crate::commands::wrap::exec::wiring::{
-    WIRE_PROTOCOL_VERSION, INITIALIZE_REQUEST_ID, PROMPT_REQUEST_ID, CANCEL_REQUEST_ID,
-    WireClientCapabilities, build_initialize_request, build_prompt_request, build_cancel_request,
-    build_approval_response, build_question_response, build_tool_call_unsupported_error,
-    build_hook_response, HookOutcome, HookDispatchResult, WireWriter, WireRequestDispatch,
-    dispatch_for_request, map_kimi_hook_event, dispatch_hook_request,
-    validate_initialize_response, WireInitError, WireSessionConfig, WireSessionWiring,
-    run_kimi_wire_session, build_synthetic_warning_envelope,
+    CANCEL_REQUEST_ID, HookDispatchResult, HookOutcome, INITIALIZE_REQUEST_ID, PROMPT_REQUEST_ID,
+    WIRE_PROTOCOL_VERSION, WireClientCapabilities, WireInitError, WireRequestDispatch,
+    WireSessionConfig, WireSessionWiring, WireWriter, build_approval_response,
+    build_cancel_request, build_hook_response, build_initialize_request, build_prompt_request,
+    build_question_response, build_synthetic_warning_envelope, build_tool_call_unsupported_error,
+    dispatch_for_request, dispatch_hook_request, map_kimi_hook_event, run_kimi_wire_session,
+    validate_initialize_response,
 };

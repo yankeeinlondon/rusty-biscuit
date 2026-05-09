@@ -1,6 +1,6 @@
-use biscuit_speaks::{TtsConfig, TtsFailoverStrategy};
 #[cfg(test)]
 use biscuit_speaks::SpeedLevel;
+use biscuit_speaks::{TtsConfig, TtsFailoverStrategy};
 use tracing::warn;
 
 use crate::config::claudine_config::ClaudineConfig;

@@ -579,7 +579,10 @@ mod tests {
             } => {
                 assert_eq!(status_code, Some(500));
                 assert_eq!(error_name, "AI_APICallError");
-                assert_eq!(message, "AI_APICallError (500: Internal Server Error): upstream boom");
+                assert_eq!(
+                    message,
+                    "AI_APICallError (500: Internal Server Error): upstream boom"
+                );
             }
             other => panic!("expected ApiFailure, got {other:?}"),
         }
@@ -899,7 +902,10 @@ mod tests {
         };
         match classify(&record) {
             LogClassification::ApiFailure { message, .. } => {
-                assert_eq!(message, "AI_APICallError: something went wrong on the server");
+                assert_eq!(
+                    message,
+                    "AI_APICallError: something went wrong on the server"
+                );
             }
             other => panic!("expected ApiFailure, got {other:?}"),
         }

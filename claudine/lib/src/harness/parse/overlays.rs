@@ -10,7 +10,9 @@ use crate::harness::model::{ApprovedRuntimeCommand, FailureEvent, ValidationEven
 use crate::harness::resolve::{HarnessResolutionContext, resolve_harness_path};
 
 /// Parse an optional `set` overlay from a handler object.
-pub(super) fn parse_set_overlay(obj: &serde_json::Map<String, Value>) -> Option<IndexMap<String, Value>> {
+pub(super) fn parse_set_overlay(
+    obj: &serde_json::Map<String, Value>,
+) -> Option<IndexMap<String, Value>> {
     obj.get("set")
         .and_then(|v| v.as_object())
         .map(|m| m.iter().map(|(k, v)| (k.clone(), v.clone())).collect())
@@ -56,14 +58,13 @@ pub(super) fn tokenize_to_approved_command(
     raw: &str,
     source_path: &Path,
 ) -> Result<ApprovedRuntimeCommand, HarnessError> {
-    let tokens =
-        darkmatter::markdown::compose::shell_expansion::tokenize::tokenize(raw).map_err(|_e| {
-            HarnessError::InvalidFrontmatter {
-                source_path: source_path.to_path_buf(),
-                property: "shell_command".to_string(),
-                detail: format!("invalid command string: \"{raw}\""),
-            }
-        })?;
+    let tokens = crate::harness::shell::tokenize_words_strict(raw).map_err(|_e| {
+        HarnessError::InvalidFrontmatter {
+            source_path: source_path.to_path_buf(),
+            property: "shell_command".to_string(),
+            detail: format!("invalid command string: \"{raw}\""),
+        }
+    })?;
 
     if tokens.is_empty() {
         return Err(HarnessError::InvalidFrontmatter {

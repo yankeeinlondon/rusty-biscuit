@@ -1,6 +1,6 @@
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -79,8 +79,7 @@ pub(crate) fn spawn_flush_if_idle_ticker(
                     let lines = guard.diagnostic_lines(now, SILENCE_WINDOW);
                     drop(guard);
                     for line in lines {
-                        let elapsed_text =
-                            format_duration(line.elapsed_since_start);
+                        let elapsed_text = format_duration(line.elapsed_since_start);
                         let diagnostic = format!(
                             " ⏳ Awaiting subagent: {} ({})",
                             line.display_name, elapsed_text
@@ -456,21 +455,38 @@ pub(crate) fn evaluate_timeout_tick(
 
     // Rule 2: stream silence. Requires that at least one activity event
     // has been observed past initial session start, matching the existing
-    // `last_event_at: Option<Instant>` first-event grace semantics. When
-    // in-flight tools or subagents exist the rule is suppressed: a
-    // long-running Task/subagent call produces parent-stream silence by
-    // design while the child works. The wall-clock `timeout` rule serves as
-    // the backstop for truly stuck tool calls.
+    // `last_event_at: Option<Instant>` first-event grace semantics.
+    //
+    // Stuck-aware evaluation: a tool or subagent is "stuck" when its
+    // `last_progress_at` is older than the step_timeout budget. The rule
+    // is suppressed only when ALL in-flight items are active (none stuck).
+    // If any item is stuck, the silence rule is allowed to fire so hung
+    // work does not block termination indefinitely.
     if let Some(budget) = config.step_timeout {
-        let guarded = match live_metrics.lock() {
-            Ok(g) => {
-                let has_in_flight = !g.in_flight.is_empty() || !g.in_flight_subagents.is_empty();
-                (g.last_event_at, has_in_flight)
-            }
-            Err(_) => return WatchdogTickResult::Ok,
-        };
-        let (last_event_at, has_in_flight) = guarded;
-        if has_in_flight {
+        let (last_event_at, stuck_tools, stuck_subagents, any_active, any_stuck) =
+            match live_metrics.lock() {
+                Ok(g) => {
+                    let stuck_tools: Vec<claudine::stream::progress::InFlightTool> =
+                        g.stuck_tools(now, budget).into_iter().cloned().collect();
+                    let stuck_subagents: Vec<claudine::stream::progress::InFlightSubagent> = g
+                        .stuck_subagents(now, budget)
+                        .into_iter()
+                        .cloned()
+                        .collect();
+                    let any_stuck = !stuck_tools.is_empty() || !stuck_subagents.is_empty();
+                    let any_active = !g.in_flight.is_empty() || !g.in_flight_subagents.is_empty();
+                    (
+                        g.last_event_at,
+                        stuck_tools,
+                        stuck_subagents,
+                        any_active,
+                        any_stuck,
+                    )
+                }
+                Err(_) => return WatchdogTickResult::Ok,
+            };
+        // Suppress step_timeout when all in-flight items are active (none stuck).
+        if any_active && !any_stuck {
             return WatchdogTickResult::Ok;
         }
         if let Some(last) = last_event_at {
@@ -481,7 +497,12 @@ pub(crate) fn evaluate_timeout_tick(
                     Err(_) => Vec::new(),
                 };
                 fired.store(true, Ordering::SeqCst);
-                let message = format_step_timeout_breach_message(silence, &outstanding);
+                let message = format_step_timeout_breach_message(
+                    silence,
+                    &outstanding,
+                    &stuck_tools,
+                    &stuck_subagents,
+                );
                 return WatchdogTickResult::Breach(WatchdogTermination {
                     reason: WatchdogTerminationReason::StepTimeout,
                     message,
@@ -501,25 +522,60 @@ pub(crate) fn evaluate_timeout_tick(
 /// (id, optional name, elapsed since last progress) so the operator
 /// knows which workers stalled. When empty, only the silence duration
 /// is reported.
+///
+/// When `stuck_tools` or `stuck_subagents` is non-empty the message also
+/// enumerates those stuck items.
 pub(crate) fn format_step_timeout_breach_message(
     silence: Duration,
     outstanding: &[super::subagent_watchdog::ActiveSubagentSnapshot],
+    stuck_tools: &[claudine::stream::progress::InFlightTool],
+    stuck_subagents: &[claudine::stream::progress::InFlightSubagent],
 ) -> String {
     let silence_text = format_duration(silence);
-    if outstanding.is_empty() {
+    if outstanding.is_empty() && stuck_tools.is_empty() && stuck_subagents.is_empty() {
         return format!("no stream activity for {silence_text}; terminating due to step_timeout");
     }
 
-    let count = outstanding.len();
-    let plural = if count == 1 { "subagent" } else { "subagents" };
-    let mut lines = format!(
-        "no stream activity for {silence_text}. The wrapped process was terminated. {count} {plural} were still outstanding when the timeout fired:\n"
-    );
-    for snap in outstanding {
-        let idle = format_duration(snap.elapsed_since_progress);
-        let name = snap.name.as_deref().unwrap_or("(unnamed)");
-        lines.push_str(&format!("  • {} \"{name}\" (idle {idle})\n", snap.id));
+    let mut lines =
+        format!("no stream activity for {silence_text}. The wrapped process was terminated.");
+
+    if !stuck_tools.is_empty() {
+        let count = stuck_tools.len();
+        let plural = if count == 1 { "tool" } else { "tools" };
+        lines.push_str(&format!(
+            " {count} {plural} were stuck when the timeout fired:\n"
+        ));
+        for tool in stuck_tools {
+            let name = tool.name.as_deref().unwrap_or("(unnamed)");
+            lines.push_str(&format!("  • \"{name}\"\n"));
+        }
     }
+
+    if !stuck_subagents.is_empty() {
+        let count = stuck_subagents.len();
+        let plural = if count == 1 { "subagent" } else { "subagents" };
+        lines.push_str(&format!(
+            " {count} {plural} were stuck when the timeout fired:\n"
+        ));
+        for subagent in stuck_subagents {
+            let name = subagent.name.as_deref().unwrap_or("(unnamed)");
+            lines.push_str(&format!("  • \"{name}\"\n"));
+        }
+    }
+
+    if !outstanding.is_empty() {
+        let count = outstanding.len();
+        let plural = if count == 1 { "subagent" } else { "subagents" };
+        lines.push_str(&format!(
+            " {count} {plural} were still outstanding when the timeout fired:\n"
+        ));
+        for snap in outstanding {
+            let idle = format_duration(snap.elapsed_since_progress);
+            let name = snap.name.as_deref().unwrap_or("(unnamed)");
+            lines.push_str(&format!("  • {} \"{name}\" (idle {idle})\n", snap.id));
+        }
+    }
+
     lines
 }
 
@@ -616,8 +672,14 @@ mod tests {
         let fired = AtomicBool::new(false);
         let started_at = Instant::now() - Duration::from_secs(10);
 
-        let result =
-            evaluate_timeout_tick(&config, Instant::now(), started_at, &state, &metrics, &fired);
+        let result = evaluate_timeout_tick(
+            &config,
+            Instant::now(),
+            started_at,
+            &state,
+            &metrics,
+            &fired,
+        );
         assert!(
             matches!(result, WatchdogTickResult::Breach(ref w) if w.reason == WatchdogTerminationReason::Timeout),
             "expected wall-clock Timeout breach, got: {result:?}"
@@ -646,8 +708,7 @@ mod tests {
             m.last_event_at = Some(t0);
         }
 
-        let result =
-            evaluate_timeout_tick(&config, Instant::now(), t0, &state, &metrics, &fired);
+        let result = evaluate_timeout_tick(&config, Instant::now(), t0, &state, &metrics, &fired);
         match result {
             WatchdogTickResult::Breach(ref w) => {
                 assert_eq!(w.reason, WatchdogTerminationReason::StepTimeout);
@@ -677,8 +738,7 @@ mod tests {
             m.last_event_at = Some(t0);
         }
 
-        let result =
-            evaluate_timeout_tick(&config, Instant::now(), t0, &state, &metrics, &fired);
+        let result = evaluate_timeout_tick(&config, Instant::now(), t0, &state, &metrics, &fired);
         match result {
             WatchdogTickResult::Breach(ref w) => {
                 assert_eq!(w.reason, WatchdogTerminationReason::StepTimeout);
@@ -733,8 +793,7 @@ mod tests {
             m.last_event_at = Some(t0);
         }
 
-        let result =
-            evaluate_timeout_tick(&config, Instant::now(), t0, &state, &metrics, &fired);
+        let result = evaluate_timeout_tick(&config, Instant::now(), t0, &state, &metrics, &fired);
         assert!(
             matches!(result, WatchdogTickResult::Breach(ref w) if w.reason == WatchdogTerminationReason::Timeout),
             "wall-clock must win; got: {result:?}"
@@ -789,14 +848,25 @@ mod tests {
                 claudine::stream::progress::InFlightTool {
                     name: Some("Task".into()),
                     started_at: t0,
+                    last_progress_at: t0,
                 },
             );
         }
 
-        let result =
-            evaluate_timeout_tick(&config, Instant::now(), t0, &state, &metrics, &fired);
-        assert_eq!(result, WatchdogTickResult::Ok);
-        assert!(!fired.load(Ordering::SeqCst));
+        let result = evaluate_timeout_tick(&config, Instant::now(), t0, &state, &metrics, &fired);
+        // Stuck tool (no progress for 10s >= 5s budget) does NOT suppress step_timeout.
+        match result {
+            WatchdogTickResult::Breach(ref w) => {
+                assert_eq!(w.reason, WatchdogTerminationReason::StepTimeout);
+                assert!(
+                    w.message.contains("Task"),
+                    "stuck tool should be named: {}",
+                    w.message
+                );
+            }
+            other => panic!("expected StepTimeout breach for stuck tool, got: {other:?}"),
+        }
+        assert!(fired.load(Ordering::SeqCst));
     }
 
     #[test]
@@ -819,18 +889,142 @@ mod tests {
                 claudine::stream::progress::InFlightSubagent {
                     name: Some("rust-developer".into()),
                     started_at: t0,
+                    last_progress_at: t0,
                 },
             );
         }
 
-        let result =
-            evaluate_timeout_tick(&config, Instant::now(), t0, &state, &metrics, &fired);
-        assert_eq!(result, WatchdogTickResult::Ok);
-        assert!(!fired.load(Ordering::SeqCst));
+        let result = evaluate_timeout_tick(&config, Instant::now(), t0, &state, &metrics, &fired);
+        // Stuck subagent (no progress for 10s >= 5s budget) does NOT suppress step_timeout.
+        match result {
+            WatchdogTickResult::Breach(ref w) => {
+                assert_eq!(w.reason, WatchdogTerminationReason::StepTimeout);
+            }
+            other => panic!("expected StepTimeout breach for stuck subagent, got: {other:?}"),
+        }
+        assert!(fired.load(Ordering::SeqCst));
     }
 
     #[test]
     fn evaluate_timeout_tick_silence_fires_after_in_flight_cleared() {
+        let config = TimeoutConfig {
+            timeout: None,
+            step_timeout: Some(Duration::from_secs(5)),
+            ..Default::default()
+        };
+        let state = Arc::new(std::sync::Mutex::new(WatchdogState::default()));
+        let metrics = claudine::stream::progress::new_live_metrics();
+        let fired = AtomicBool::new(false);
+        let t0 = Instant::now() - Duration::from_secs(10);
+        let fresh = Instant::now();
+
+        {
+            let mut m = metrics.lock().unwrap();
+            m.last_event_at = Some(t0);
+            m.in_flight.insert(
+                "tool-1".into(),
+                claudine::stream::progress::InFlightTool {
+                    name: Some("Task".into()),
+                    started_at: t0,
+                    last_progress_at: fresh,
+                },
+            );
+        }
+
+        let result = evaluate_timeout_tick(&config, Instant::now(), t0, &state, &metrics, &fired);
+        assert_eq!(
+            result,
+            WatchdogTickResult::Ok,
+            "must not fire while active tool is in-flight"
+        );
+
+        {
+            let mut m = metrics.lock().unwrap();
+            m.in_flight.clear();
+        }
+
+        let result = evaluate_timeout_tick(&config, Instant::now(), t0, &state, &metrics, &fired);
+        match result {
+            WatchdogTickResult::Breach(ref w) => {
+                assert_eq!(w.reason, WatchdogTerminationReason::StepTimeout);
+            }
+            other => panic!("expected StepTimeout breach after in-flight cleared, got: {other:?}"),
+        }
+        assert!(fired.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn evaluate_timeout_tick_silence_suppressed_when_tool_is_active() {
+        let config = TimeoutConfig {
+            timeout: None,
+            step_timeout: Some(Duration::from_secs(5)),
+            ..Default::default()
+        };
+        let state = Arc::new(std::sync::Mutex::new(WatchdogState::default()));
+        let metrics = claudine::stream::progress::new_live_metrics();
+        let fired = AtomicBool::new(false);
+        let t0 = Instant::now() - Duration::from_secs(10);
+        let fresh = Instant::now();
+
+        {
+            let mut m = metrics.lock().unwrap();
+            m.last_event_at = Some(t0);
+            m.in_flight.insert(
+                "tool-1".into(),
+                claudine::stream::progress::InFlightTool {
+                    name: Some("Task".into()),
+                    started_at: t0,
+                    last_progress_at: fresh,
+                },
+            );
+        }
+
+        let result = evaluate_timeout_tick(&config, Instant::now(), t0, &state, &metrics, &fired);
+        assert_eq!(
+            result,
+            WatchdogTickResult::Ok,
+            "active tool must suppress step_timeout"
+        );
+        assert!(!fired.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn evaluate_timeout_tick_silence_suppressed_when_subagent_is_active() {
+        let config = TimeoutConfig {
+            timeout: None,
+            step_timeout: Some(Duration::from_secs(5)),
+            ..Default::default()
+        };
+        let state = Arc::new(std::sync::Mutex::new(WatchdogState::default()));
+        let metrics = claudine::stream::progress::new_live_metrics();
+        let fired = AtomicBool::new(false);
+        let t0 = Instant::now() - Duration::from_secs(10);
+        let fresh = Instant::now();
+
+        {
+            let mut m = metrics.lock().unwrap();
+            m.last_event_at = Some(t0);
+            m.in_flight_subagents.insert(
+                "sa-1".into(),
+                claudine::stream::progress::InFlightSubagent {
+                    name: Some("rust-developer".into()),
+                    started_at: t0,
+                    last_progress_at: fresh,
+                },
+            );
+        }
+
+        let result = evaluate_timeout_tick(&config, Instant::now(), t0, &state, &metrics, &fired);
+        assert_eq!(
+            result,
+            WatchdogTickResult::Ok,
+            "active subagent must suppress step_timeout"
+        );
+        assert!(!fired.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn evaluate_timeout_tick_silence_fires_when_tool_is_stuck() {
         let config = TimeoutConfig {
             timeout: None,
             step_timeout: Some(Duration::from_secs(5)),
@@ -849,36 +1043,112 @@ mod tests {
                 claudine::stream::progress::InFlightTool {
                     name: Some("Task".into()),
                     started_at: t0,
+                    last_progress_at: t0,
                 },
             );
         }
 
-        let result =
-            evaluate_timeout_tick(&config, Instant::now(), t0, &state, &metrics, &fired);
-        assert_eq!(result, WatchdogTickResult::Ok, "must not fire while tool in-flight");
-
-        {
-            let mut m = metrics.lock().unwrap();
-            m.in_flight.clear();
-        }
-
-        let result =
-            evaluate_timeout_tick(&config, Instant::now(), t0, &state, &metrics, &fired);
+        let result = evaluate_timeout_tick(&config, Instant::now(), t0, &state, &metrics, &fired);
         match result {
             WatchdogTickResult::Breach(ref w) => {
                 assert_eq!(w.reason, WatchdogTerminationReason::StepTimeout);
+                assert!(w.message.contains("Task"));
             }
-            other => panic!("expected StepTimeout breach after in-flight cleared, got: {other:?}"),
+            other => panic!("expected StepTimeout breach for stuck tool, got: {other:?}"),
+        }
+        assert!(fired.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn evaluate_timeout_tick_silence_fires_when_subagent_is_stuck() {
+        let config = TimeoutConfig {
+            timeout: None,
+            step_timeout: Some(Duration::from_secs(5)),
+            ..Default::default()
+        };
+        let state = Arc::new(std::sync::Mutex::new(WatchdogState::default()));
+        let metrics = claudine::stream::progress::new_live_metrics();
+        let fired = AtomicBool::new(false);
+        let t0 = Instant::now() - Duration::from_secs(10);
+
+        {
+            let mut m = metrics.lock().unwrap();
+            m.last_event_at = Some(t0);
+            m.in_flight_subagents.insert(
+                "sa-1".into(),
+                claudine::stream::progress::InFlightSubagent {
+                    name: Some("rust-developer".into()),
+                    started_at: t0,
+                    last_progress_at: t0,
+                },
+            );
+        }
+
+        let result = evaluate_timeout_tick(&config, Instant::now(), t0, &state, &metrics, &fired);
+        match result {
+            WatchdogTickResult::Breach(ref w) => {
+                assert_eq!(w.reason, WatchdogTerminationReason::StepTimeout);
+                assert!(w.message.contains("rust-developer"));
+            }
+            other => panic!("expected StepTimeout breach for stuck subagent, got: {other:?}"),
+        }
+        assert!(fired.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn evaluate_timeout_tick_mixed_active_and_stuck_fires() {
+        let config = TimeoutConfig {
+            timeout: None,
+            step_timeout: Some(Duration::from_secs(5)),
+            ..Default::default()
+        };
+        let state = Arc::new(std::sync::Mutex::new(WatchdogState::default()));
+        let metrics = claudine::stream::progress::new_live_metrics();
+        let fired = AtomicBool::new(false);
+        let t0 = Instant::now() - Duration::from_secs(10);
+        let fresh = Instant::now();
+
+        {
+            let mut m = metrics.lock().unwrap();
+            m.last_event_at = Some(t0);
+            m.in_flight.insert(
+                "tool-active".into(),
+                claudine::stream::progress::InFlightTool {
+                    name: Some("ActiveTask".into()),
+                    started_at: t0,
+                    last_progress_at: fresh,
+                },
+            );
+            m.in_flight.insert(
+                "tool-stuck".into(),
+                claudine::stream::progress::InFlightTool {
+                    name: Some("StuckTask".into()),
+                    started_at: t0,
+                    last_progress_at: t0,
+                },
+            );
+        }
+
+        let result = evaluate_timeout_tick(&config, Instant::now(), t0, &state, &metrics, &fired);
+        match result {
+            WatchdogTickResult::Breach(ref w) => {
+                assert_eq!(w.reason, WatchdogTerminationReason::StepTimeout);
+                assert!(w.message.contains("StuckTask"));
+            }
+            other => {
+                panic!("expected StepTimeout breach when mix of active and stuck, got: {other:?}")
+            }
         }
         assert!(fired.load(Ordering::SeqCst));
     }
 
     #[test]
     fn format_step_timeout_breach_message_no_outstanding() {
-        let msg = format_step_timeout_breach_message(Duration::from_secs(180), &[]);
+        let msg = format_step_timeout_breach_message(Duration::from_secs(180), &[], &[], &[]);
         assert!(msg.contains("3m 0s"));
         assert!(msg.contains("step_timeout"));
         assert!(!msg.contains("subagent"));
+        assert!(!msg.contains("tool"));
     }
 
     #[test]
@@ -891,12 +1161,34 @@ mod tests {
             elapsed_since_start: Duration::from_secs(900),
             elapsed_since_progress: Duration::from_secs(900),
         };
-        let msg =
-            format_step_timeout_breach_message(Duration::from_secs(1800), std::slice::from_ref(&snap));
+        let msg = format_step_timeout_breach_message(
+            Duration::from_secs(1800),
+            std::slice::from_ref(&snap),
+            &[],
+            &[],
+        );
         assert!(msg.contains("30m 0s"));
         assert!(msg.contains("1 subagent"));
         assert!(msg.contains("ses_a"));
         assert!(msg.contains("Commit work"));
         assert!(msg.contains("idle 15m 0s"));
+    }
+
+    #[test]
+    fn format_step_timeout_breach_message_lists_stuck_tools() {
+        let tool = claudine::stream::progress::InFlightTool {
+            name: Some("Bash".into()),
+            started_at: Instant::now() - Duration::from_secs(600),
+            last_progress_at: Instant::now() - Duration::from_secs(600),
+        };
+        let msg = format_step_timeout_breach_message(
+            Duration::from_secs(180),
+            &[],
+            std::slice::from_ref(&tool),
+            &[],
+        );
+        assert!(msg.contains("3m 0s"));
+        assert!(msg.contains("1 tool"));
+        assert!(msg.contains("Bash"));
     }
 }

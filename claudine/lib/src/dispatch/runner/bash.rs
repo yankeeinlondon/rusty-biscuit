@@ -158,7 +158,10 @@ pub(super) fn warn_on_silent_token_split(template: &str, rendered: &str, actual:
     }
 }
 
-pub(super) async fn run_command_blocking(command: &str, args: Option<&[String]>) -> Result<super::CommandOutput> {
+pub(super) async fn run_command_blocking(
+    command: &str,
+    args: Option<&[String]>,
+) -> Result<super::CommandOutput> {
     if sniff::programs::find_program(command).is_none() {
         return Err(crate::error::ClaudineError::LinkingError(format!(
             "command not found on PATH: {command}"

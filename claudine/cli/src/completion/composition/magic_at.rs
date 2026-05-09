@@ -10,8 +10,8 @@
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
-use super::{name_stem, Candidate};
 use super::compose::{format_relative_insert, gather_repo_dirs};
+use super::{Candidate, name_stem};
 use crate::completion::frontmatter;
 use crate::completion::fuzzy::{self, DirMatchMode, PartialLen};
 use crate::completion::scopes::{self, ComposeMode, Scope, ScopeContext, ScopeSet};

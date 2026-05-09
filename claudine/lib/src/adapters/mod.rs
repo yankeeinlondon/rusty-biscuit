@@ -11,8 +11,8 @@ use serde_json::Value;
 
 use crate::actions::HookResponse;
 use crate::events::{AgenticEvent, EventMeta};
-use crate::provider::Provider;
 use crate::protect::decision::ProtectDecision;
+use crate::provider::Provider;
 
 /// Adapter-level parse/format errors.
 #[derive(Debug, thiserror::Error)]

@@ -1,11 +1,11 @@
 use rusqlite::types::Value as SqlValue;
 use rusqlite::{Connection, params_from_iter};
 
-use crate::reporting::types::{DateRange, ErrorRecord, ErrorsReport, ReportingFilters};
 use crate::error::Result;
+use crate::reporting::types::{DateRange, ErrorRecord, ErrorsReport, ReportingFilters};
 
 use super::common::{
-    parse_event, parse_json_value, parse_provider, parse_timestamp, validate_range, WhereBuilder,
+    WhereBuilder, parse_event, parse_json_value, parse_provider, parse_timestamp, validate_range,
 };
 
 pub(crate) fn errors(

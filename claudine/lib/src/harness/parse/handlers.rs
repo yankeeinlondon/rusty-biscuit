@@ -10,7 +10,9 @@ use crate::harness::model::{
 };
 use crate::harness::resolve::HarnessResolutionContext;
 
-use super::overlays::{normalize_handler_subject_key, parse_set_overlay, tokenize_to_approved_command};
+use super::overlays::{
+    normalize_handler_subject_key, parse_set_overlay, tokenize_to_approved_command,
+};
 use super::validations::validation_meta;
 
 /// Parse all `handle` and `handle_*` keys from frontmatter.
@@ -83,7 +85,10 @@ pub(super) fn parse_programmatic_handler(
 }
 
 /// Map a `handle_*` suffix to a [`FailureEvent`].
-pub(super) fn parse_failure_event(name: &str, source_path: &Path) -> Result<FailureEvent, HarnessError> {
+pub(super) fn parse_failure_event(
+    name: &str,
+    source_path: &Path,
+) -> Result<FailureEvent, HarnessError> {
     match name {
         "agent_failure" => Ok(FailureEvent::AgentFailure),
         "timeout" => Ok(FailureEvent::Timeout),

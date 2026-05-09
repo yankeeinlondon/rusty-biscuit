@@ -14,17 +14,16 @@
 //! function over the parsed record plus a small raw-text fallback for
 //! fatal exceptions.
 
-pub mod events;
 pub mod errors;
+pub mod events;
 pub mod reasoning;
 
 // Re-export the original public API surface so existing callers don't break.
-pub use events::{
-    AssetType, LogClassification, LogLevel, OpenCodeLogRecord, ParsedOpenCodeStderrLine,
-    parse_line,
-};
 pub use errors::{classify, classify_raw, merge_rate_limit};
+pub use events::{
+    AssetType, LogClassification, LogLevel, OpenCodeLogRecord, ParsedOpenCodeStderrLine, parse_line,
+};
 pub use reasoning::{
-    EarlyTermination, OpenCodeLogBridge, SharedStderrState, StderrIngestOutcome,
-    StuckSubagentInfo, merge_stderr_state_into_summary,
+    EarlyTermination, OpenCodeLogBridge, SharedStderrState, StderrIngestOutcome, StuckSubagentInfo,
+    merge_stderr_state_into_summary,
 };

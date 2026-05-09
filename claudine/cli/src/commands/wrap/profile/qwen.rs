@@ -3,7 +3,10 @@ use claudine::system_prompt::{PreparedSystemPrompt, SystemPromptMode};
 use color_eyre::eyre::{Result, bail};
 use std::path::Path;
 
-use super::{PromptDelivery, WrapperProfile, has_flag, option_value, push_stream_json_flags, prompt_delivery_append_flags};
+use super::{
+    PromptDelivery, WrapperProfile, has_flag, option_value, prompt_delivery_append_flags,
+    push_stream_json_flags,
+};
 
 pub(crate) struct QwenWrapper;
 

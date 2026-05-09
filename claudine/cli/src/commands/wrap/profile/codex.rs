@@ -3,8 +3,8 @@ use claudine::system_prompt::{PreparedSystemPrompt, SystemPromptMode};
 use color_eyre::eyre::Result;
 use std::path::Path;
 
-use std::io::Write;
 use super::{PromptDelivery, WrapperProfile, has_flag};
+use std::io::Write;
 
 pub(crate) struct CodexWrapper;
 
