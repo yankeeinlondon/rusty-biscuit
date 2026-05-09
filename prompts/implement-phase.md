@@ -2,15 +2,22 @@
 phase: 1
 total_phases: ""
 plan: ""
+dir: "$(dirname '{{plan}}')"
+area: "{{ctx.current_package_area}}"
+pass_icon: "_loop_is_last ? '✅' : '☑'"
+start:
+    message: "🎬 starting the implementation of phase #{{phase}} of `{{area}}/{{dir}}`"
 success: 
-    say: "Phase {{phase}} of the plan was implemented"
-    message: "✅ phase **{{phase}}** (_of {{total_phases}}_) of the plan `{{plan}}` successfully completed  in the **{{ctx.current_package_area}}** _package area_."
+    say: "Phase {{phase}} of the plan in the {{area}} package area, was implemented successfully"
+    message: "{{pass_icon}} phase **{{phase}}** (_of {{total_phases}}_) of the plan `{{area}}/{{plan}}` successfully completed"
+blocked:
+    message: "💥 phase **{{phase}}** (_of {{total_phases}}_) was **blocked** because it has shell commands which were not approved!"
 failure:
-    say: "Ran into problems implementing phase {{phase}} of the plan!"
-    message: "❌️ phase {{phase}} (_of {{total_phases}}_) failed in the plan `{{plan}}`"
+    say: "Phase {{phase}} of a plan in the {{area}} package area, ran into problems!"
+    message: "❌️ phase {{phase}} (_of {{total_phases}}_) failed in the plan `{{area}}/{{plan}}`"
 loop:
     until: "phase > total_phases"
-    actions: increment(phase)
+    action: increment(phase)
 ---
 ::block when="total_phases"
 # Implement Phase {{phase}} of {{total_phases}}
@@ -44,7 +51,9 @@ You are done when:
 
 **IMPORTANT:** 
 
-- use the '{{ctx.current_package_area}}' skill during the implementation
+::block when="area"
+- use the '{{area}}' skill during the implementation
+::end-block
 - Do NOT commit or stage files to git, this will be done as a separate process.
 - Report a summary of what you did including all the source files you changed.
 - You do not need to run tests across the entire monorepo as this will take far too long. Only 
