@@ -163,7 +163,7 @@ And then finally the maybe most powerful option/key is `when` which provides _co
 
 The `when` option allows you to express a condition which must evaluate to `true` for the transclusion to be included. When the condition is false, nothing is rendered and the directive is removed.
 
-Transclusion uses Darkmatter's shared [Boolean Conditional Logic](../topics/boolean-conditional-logic.md) evaluator. That same evaluator is also used by page blocks, so `when=` behaves consistently across both features.
+Transclusion uses Darkmatter's shared [Darkmatter Expressions](../topics/darkmatter-expressions.md) evaluator. That same evaluator is also used by page blocks, so `when=` behaves consistently across both features.
 
 Conditions can read from:
 
@@ -190,7 +190,7 @@ in this example:
 - the two environment variables are evaluated to see if they are _truthy_
 - if either one is then the condition result in a `true` outcome and the transclusion is executed
 
-For the full grammar, truthiness rules, supported operators, functions, and edge cases, see [Boolean Conditional Logic](../topics/boolean-conditional-logic.md).
+For the full grammar, truthiness rules, supported operators, functions, and edge cases, see [Darkmatter Expressions](../topics/darkmatter-expressions.md).
 
 ## Non Markdown Local Files
 
