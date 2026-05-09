@@ -636,6 +636,23 @@ pub(crate) fn format_user_interrupt_status() -> String {
         .render(&crate::log::terminal())
 }
 
+/// Process-scoped flag set by the loop's `SIGINT` handler when the user
+/// presses Ctrl+C. Rendering surfaces consult this to relabel any
+/// post-interrupt agent error as a user-action block instead of a red
+/// `Agent Error`.
+static USER_INTERRUPTED: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+/// Mark that a user interrupt was observed in this process.
+pub(crate) fn mark_user_interrupted() {
+    USER_INTERRUPTED.store(true, std::sync::atomic::Ordering::SeqCst);
+}
+
+/// Returns `true` once a Ctrl+C has been observed in this process.
+pub(crate) fn user_interrupt_observed() -> bool {
+    USER_INTERRUPTED.load(std::sync::atomic::Ordering::SeqCst)
+}
+
 /// Format an INFO-only line announcing the working directory used to launch the agent.
 pub(crate) fn format_launch_directory(directory: &Path) -> String {
     Prose::new(format!(

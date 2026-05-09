@@ -44,11 +44,13 @@ use crate::log;
 
 pub(crate) mod inline_guards;
 pub(crate) mod legacy_goose;
+pub(crate) mod prep_context;
 pub(crate) mod structured;
 pub(crate) mod summary;
 
 // Re-export the public API so existing callers don't break.
 pub(crate) use inline_guards::{cleanup_inline_output, split_frontmatter_and_body};
+pub(crate) use prep_context::CompositionPrepContext;
 pub(crate) use structured::run_structured_composition;
 pub(crate) use summary::{emit_composition_summary, emit_minimal_composition_summary};
 
@@ -223,7 +225,7 @@ pub(crate) fn resolve_timeouts(
     super::subagent_watchdog::TimeoutConfig::resolve(timeout, step_timeout)
 }
 
-fn resolve_prompt_display_path(
+pub(crate) fn resolve_prompt_display_path(
     path: &std::path::Path,
     repo_root: Option<&std::path::Path>,
 ) -> String {
@@ -301,34 +303,34 @@ fn composition_dispatch_context(
 /// from raw frontmatter (no compose), so an `agent: "{{...}}"` template
 /// is treated as absent and falls back to the picker / favorite.
 pub(crate) fn eagerly_resolve_target(
+    ctx: &CompositionPrepContext,
     hints: &claudine::composition::EffectiveSelectionHints,
     explicit_provider: Option<Provider>,
-    excluded: &std::collections::BTreeSet<Provider>,
     cli_model: Option<&str>,
-    source_repo_root: Option<&Path>,
 ) -> Result<ResolvedExecutionTarget> {
-    let cwd = std::env::current_dir()?;
-    let clients = InstalledAiClients::new();
-    let installed: Vec<Provider> = PROVIDERS_DISPLAY_ORDER
-        .into_iter()
-        .filter(|p| clients.path(p.sniff_ai_cli()).is_some())
-        .collect();
-    let snapshot = build_installed_snapshot(&installed, excluded);
-
-    let selection_config = load_selection_config(source_repo_root.unwrap_or(&cwd));
-    let catalog = match &selection_config {
+    // Phase 2 (2026-05-09-slow-prep): the installed-provider snapshot and
+    // selection config are pre-built on the shared `CompositionPrepContext`
+    // so this function no longer rediscovers the source repo root, reloads
+    // the claudine config, or re-runs host detection.
+    let snapshot = &ctx.installed_snapshot;
+    let selection_config = ctx.selection_config.as_ref();
+    let catalog = match selection_config {
         Some(cfg) => claudine::model_catalog::ModelCatalogService::with_overrides(
             cfg.model_overrides.clone(),
         ),
         None => claudine::model_catalog::ModelCatalogService::new(),
     };
-    catalog.refresh_blocking();
-    let favorite = selection_config.as_ref().and_then(|c| c.favorite);
+    // Phase 1 (2026-05-09-slow-prep): no global `refresh_blocking()` here.
+    // Catalog refresh is deferred until *after* a provider is selected and
+    // is scoped to that provider only. Provider selection itself never
+    // touches the catalog.
+    let favorite = selection_config.and_then(|c| c.favorite);
 
     let is_tty = std::io::stdin().is_terminal() && std::io::stdout().is_terminal();
 
     if is_tty {
         if let Some(provider) = explicit_provider {
+            refresh_for_model_validation(&catalog, provider, hints, cli_model);
             let (model, model_reason) = claudine::composition::resolve_model_with_hints(
                 provider,
                 hints,
@@ -342,10 +344,11 @@ pub(crate) fn eagerly_resolve_target(
                 model_reason,
             });
         }
-        let plan = claudine::composition::build_picker_plan_with_hints(hints, &snapshot, favorite)
+        let plan = claudine::composition::build_picker_plan_with_hints(hints, snapshot, favorite)
             .map_err(|e| eyre!("{e}"))?;
         let provider = super::selection_ui::prompt_one_shot_provider(plan)
             .map_err(|e| eyre!("provider selection cancelled: {e}"))?;
+        refresh_for_model_validation(&catalog, provider, hints, cli_model);
         let (model, model_reason) = claudine::composition::resolve_model_with_hints(
             provider,
             hints,
@@ -359,16 +362,64 @@ pub(crate) fn eagerly_resolve_target(
             model_reason,
         })
     } else {
+        // Non-TTY: provider resolution doesn't touch the catalog, so we
+        // perform a first pass with `None` to learn the provider, refresh
+        // only that provider's catalog (when needed), and re-resolve so
+        // model validation observes the freshly fetched data.
+        let provider_only = claudine::composition::resolve_target_non_tty_with_hints(
+            explicit_provider,
+            hints,
+            snapshot,
+            favorite,
+            cli_model,
+            None,
+        )
+        .map_err(|e| eyre!("{e}"))?;
+        refresh_for_model_validation(&catalog, provider_only.provider, hints, cli_model);
         claudine::composition::resolve_target_non_tty_with_hints(
             explicit_provider,
             hints,
-            &snapshot,
+            snapshot,
             favorite,
             cli_model,
             Some(&catalog),
         )
         .map_err(|e| eyre!("{e}"))
     }
+}
+
+/// Refresh a single provider's catalog only when frontmatter `model`
+/// hints will actually be validated against it.
+///
+/// CLI `--model` and provider-specific environment variables both win
+/// over the frontmatter `model` hint, so when one of those is supplied
+/// the catalog is never consulted and refresh would be wasted work.
+/// Static-source providers (Claude, Codex) refresh in O(1) with no
+/// subprocess, but we still skip when no validation will occur.
+fn refresh_for_model_validation(
+    catalog: &claudine::model_catalog::ModelCatalogService,
+    provider: Provider,
+    hints: &claudine::composition::EffectiveSelectionHints,
+    cli_model: Option<&str>,
+) {
+    if cli_model.is_some() {
+        return;
+    }
+    if hints.model.is_none() {
+        return;
+    }
+    catalog.refresh_provider_blocking(provider);
+}
+
+/// Same gating as [`refresh_for_model_validation`] but reads the
+/// `model` hint from a fully prepared composition.
+fn refresh_for_prepared_model_validation(
+    catalog: &claudine::model_catalog::ModelCatalogService,
+    provider: Provider,
+    prepared: &claudine::composition::PreparedComposition,
+    cli_model: Option<&str>,
+) {
+    refresh_for_model_validation(catalog, provider, &prepared.selection_hints, cli_model);
 }
 
 /// Inject `AGENT` into both the parent process env and the supplied
@@ -459,7 +510,10 @@ pub(crate) fn execute_composition_request_inner(
         ),
         None => claudine::model_catalog::ModelCatalogService::new(),
     };
-    catalog.refresh_blocking();
+    // Phase 1 (2026-05-09-slow-prep): refresh is provider-scoped and only
+    // runs after we know which provider was selected. The unconditional
+    // global `refresh_blocking()` previously emitted from this point was
+    // the dominant prep-time cost in the trace and has been removed.
     let favorite = selection_config.as_ref().and_then(|c| c.favorite);
 
     // If a target was already resolved upstream (sequence review, non-TTY
@@ -472,6 +526,12 @@ pub(crate) fn execute_composition_request_inner(
         if is_tty {
             // TTY mode: explicit flag wins unconditionally; otherwise show picker.
             if let Some(provider) = request.explicit_provider {
+                refresh_for_prepared_model_validation(
+                    &catalog,
+                    provider,
+                    &request.prepared,
+                    request.model.as_deref(),
+                );
                 let (model, model_reason) = claudine::composition::resolve_model_with_catalog(
                     provider,
                     &request.prepared,
@@ -489,6 +549,12 @@ pub(crate) fn execute_composition_request_inner(
                     .map_err(|e| eyre!("{e}"))?;
                 let provider = super::selection_ui::prompt_one_shot_provider(plan)
                     .map_err(|e| eyre!("provider selection cancelled: {e}"))?;
+                refresh_for_prepared_model_validation(
+                    &catalog,
+                    provider,
+                    &request.prepared,
+                    request.model.as_deref(),
+                );
                 let (model, model_reason) = claudine::composition::resolve_model_with_catalog(
                     provider,
                     &request.prepared,
@@ -504,7 +570,25 @@ pub(crate) fn execute_composition_request_inner(
                 }
             }
         } else {
-            // Non-TTY mode: strict chain resolution, never prompt.
+            // Non-TTY: provider resolution doesn't touch the catalog. First
+            // pass with no catalog to determine the provider, then refresh
+            // only that provider, then re-resolve with the catalog so
+            // model validation observes the freshly fetched data.
+            let provider_only = resolve_target_non_tty_with_catalog(
+                request.explicit_provider,
+                &request.prepared,
+                &snapshot,
+                favorite,
+                request.model.as_deref(),
+                None,
+            )
+            .map_err(|e| eyre!("{e}"))?;
+            refresh_for_prepared_model_validation(
+                &catalog,
+                provider_only.provider,
+                &request.prepared,
+                request.model.as_deref(),
+            );
             resolve_target_non_tty_with_catalog(
                 request.explicit_provider,
                 &request.prepared,
@@ -1496,8 +1580,17 @@ pub(crate) fn load_selection_config(cwd: &Path) -> Option<SelectionConfig> {
         .ok()
         .flatten()
         .map(|info| info.repo_root);
-    let config =
-        claudine::dispatch::loader::load_claudine_config(None, repo_root.as_deref()).ok()?;
+    load_selection_config_for_repo(repo_root.as_deref())
+}
+
+/// Load selection config against a pre-detected repo root.
+///
+/// Skips the internal `sniff::filesystem::git::detect_git` call that
+/// [`load_selection_config`] performs, so callers that already discovered
+/// the source repo root (typically via [`CompositionPrepContext`]) avoid a
+/// redundant filesystem walk on the compose hot path.
+pub(crate) fn load_selection_config_for_repo(repo_root: Option<&Path>) -> Option<SelectionConfig> {
+    let config = claudine::dispatch::loader::load_claudine_config(None, repo_root).ok()?;
     Some(SelectionConfig {
         favorite: config.preferred_agent,
         model_overrides: config.models,
