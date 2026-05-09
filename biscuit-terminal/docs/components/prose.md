@@ -51,7 +51,7 @@ println!("{}", prose.display(&term));
 
 ### Markdown Subset
 
-Three Markdown forms are recognised in addition to the tag and token grammars. They are pre-processed into the equivalent block-tag form before rendering.
+Three Markdown forms are recognized in addition to the tag and token grammars. They are pre-processed into the equivalent block-tag form before rendering.
 
 | Markdown        | Equivalent tag                | Notes                                   |
 |-----------------|-------------------------------|-----------------------------------------|
