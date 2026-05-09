@@ -50,7 +50,7 @@ Conditionals are defined by one of the operators (as a frontmatter property unde
 
 ### Conditional Expressions
 
-The conditional expressions allowed are those defined in Darkmatter in the @darkmatter/docs/topics/boolean-conditional-logic.md document.
+The conditional expressions allowed are those defined in Darkmatter in the @darkmatter/docs/topics/darkmatter-expressions.md document.
 
 > **Note:**
 >
