@@ -3,6 +3,13 @@
 //! This module provides the condition evaluator used by both page blocks
 //! and transclusion `when` clauses. It was promoted from
 //! `transclusion/conditions.rs` to avoid cross-module coupling.
+//!
+//! Conditions parse and evaluate using the shared
+//! [`expression`](super::expression) engine; the same operators, helpers,
+//! truthiness rules, and access semantics are available here as in
+//! `{{ ... }}` interpolation. See the
+//! [Darkmatter Expressions](../../../../docs/topics/darkmatter-expressions.md)
+//! topic for the full grammar.
 
 use super::EffectiveState;
 use super::expression::{CtxLookup, EvaluationLookup, evaluate, is_truthy, parse_condition};
@@ -45,7 +52,7 @@ impl biscuit_terminal::errors::BlockError for ConditionError {
         use biscuit_terminal::components::status_block::StatusBlock;
         use biscuit_terminal::errors::{ErrorHeader, StatusBlockExt};
 
-        let operator_hint = "Operators: <cyan>&&  ||  !  ==  !=  >  >=  <</cyan> | Helpers: <cyan>HasKey, Contains, Length, number, round</cyan>";
+        let operator_hint = "Operators: <cyan>&&  ||  !  ==  !=  >  >=  <  <=  +  -  *  /  %  []  .</cyan> | Helpers: <cyan>HasKey, Contains, Length, number, round, min, max, abs, first, last, IsString, IsNumber, IsArray, IsNull, IsObject, IsEmpty, StartsWith, EndsWith, Lower, Upper, Capitalize, KebabCase, SnakeCase, CamelCase, PascalCase, TitleCase, IsDate, IsDateTime, IsToday, IsYesterday, IsTomorrow, IsThisMonth, IsThisYear</cyan>";
 
         match self {
             ConditionError::Parse {
@@ -840,5 +847,189 @@ mod tests {
             "Repo context should NOT be captured when ternary short-circuits else-branch: captured {:?}",
             captured
         );
+    }
+
+    /// Integration coverage for the operators, access forms, and helpers
+    /// added during the expression-syntax expansion. These tests exercise
+    /// the same parser and evaluator from the `when=` surface to confirm
+    /// behavioral parity with `{{ ... }}` interpolation.
+    mod expression_syntax_integration {
+        use super::*;
+
+        #[test]
+        fn less_than_or_equal_in_when_clause() {
+            let state = test_state(json!({ "count": 3 }));
+            assert!(evaluate_condition("count <= 5", &state, 1).unwrap());
+            assert!(evaluate_condition("count <= 3", &state, 1).unwrap());
+            assert!(!evaluate_condition("count <= 2", &state, 1).unwrap());
+        }
+
+        #[test]
+        fn arithmetic_in_when_clause() {
+            let state = test_state(json!({ "count": 10 }));
+            assert!(evaluate_condition("count + 5 == 15", &state, 1).unwrap());
+            assert!(evaluate_condition("count - 5 == 5", &state, 1).unwrap());
+            assert!(evaluate_condition("count * 2 > 15", &state, 1).unwrap());
+            assert!(evaluate_condition("count % 3 == 1", &state, 1).unwrap());
+        }
+
+        #[test]
+        fn bracket_index_in_when_clause() {
+            let state = test_state(json!({ "items": ["a", "b", "c"] }));
+            assert!(evaluate_condition("items[0] == 'a'", &state, 1).unwrap());
+            assert!(evaluate_condition("items[-1] == 'c'", &state, 1).unwrap());
+            // Out-of-range -> null -> string compare against literal is false
+            assert!(!evaluate_condition("items[99] == 'a'", &state, 1).unwrap());
+        }
+
+        #[test]
+        fn bracket_object_key_in_when_clause() {
+            let state = test_state(json!({ "config": { "theme": "dark" } }));
+            assert!(evaluate_condition(
+                r#"config["theme"] == 'dark'"#, &state, 1
+            ).unwrap());
+        }
+
+        #[test]
+        fn type_predicates_in_when_clause() {
+            let state = test_state(json!({
+                "tags": ["one", "two"], "title": "doc", "missing_field": null
+            }));
+            assert!(evaluate_condition("IsArray(tags)", &state, 1).unwrap());
+            assert!(evaluate_condition("IsString(title)", &state, 1).unwrap());
+            assert!(evaluate_condition("IsNull(missing_field)", &state, 1).unwrap());
+            assert!(evaluate_condition("IsEmpty(missing)", &state, 1).unwrap());
+            assert!(!evaluate_condition("IsEmpty(tags)", &state, 1).unwrap());
+        }
+
+        #[test]
+        fn math_helpers_in_when_clause() {
+            let state = test_state(json!({ "a": 7, "b": 3 }));
+            assert!(evaluate_condition("min(a, b) == 3", &state, 1).unwrap());
+            assert!(evaluate_condition("max(a, b) == 7", &state, 1).unwrap());
+            assert!(evaluate_condition("abs(-4) == 4", &state, 1).unwrap());
+        }
+
+        #[test]
+        fn collection_helpers_in_when_clause() {
+            let state = test_state(json!({ "items": [10, 20, 30] }));
+            assert!(evaluate_condition("first(items) == 10", &state, 1).unwrap());
+            assert!(evaluate_condition("last(items) == 30", &state, 1).unwrap());
+        }
+
+        #[test]
+        fn string_predicates_in_when_clause() {
+            let state = test_state(json!({ "title": "Hello World" }));
+            assert!(evaluate_condition(
+                r#"StartsWith(title, "Hello")"#, &state, 1
+            ).unwrap());
+            assert!(evaluate_condition(
+                r#"EndsWith(title, "World")"#, &state, 1
+            ).unwrap());
+            assert!(!evaluate_condition(
+                r#"StartsWith(title, "world")"#, &state, 1
+            ).unwrap());
+        }
+
+        #[test]
+        fn string_mutations_in_when_clause() {
+            let state = test_state(json!({ "title": "Hello World" }));
+            assert!(evaluate_condition(
+                "Lower(title) == 'hello world'", &state, 1
+            ).unwrap());
+            assert!(evaluate_condition(
+                "KebabCase(title) == 'hello-world'", &state, 1
+            ).unwrap());
+            assert!(evaluate_condition(
+                "Upper(title) == 'HELLO WORLD'", &state, 1
+            ).unwrap());
+        }
+
+        #[test]
+        fn strict_date_validators_in_when_clause() {
+            let state = test_state(json!({
+                "good_date": "2024-06-15",
+                "bad_date": "06-15-2024",
+                "dt": "2024-06-15T12:30:00Z"
+            }));
+            assert!(evaluate_condition("IsDate(good_date)", &state, 1).unwrap());
+            assert!(!evaluate_condition("IsDate(bad_date)", &state, 1).unwrap());
+            assert!(evaluate_condition("IsDateTime(dt)", &state, 1).unwrap());
+            assert!(!evaluate_condition("IsDate(missing)", &state, 1).unwrap());
+        }
+
+        #[test]
+        fn shortcut_arithmetic_and_bracket_access() {
+            let data = json!({
+                "count": 5,
+                "items": ["a", "b", "c"],
+                "config": { "theme": "dark" }
+            });
+            assert!(
+                evaluate_condition_against("count * 2 == 10", &data, std::path::Path::new("."))
+                    .unwrap()
+            );
+            assert!(
+                evaluate_condition_against("items[-1] == 'c'", &data, std::path::Path::new("."))
+                    .unwrap()
+            );
+            assert!(
+                evaluate_condition_against(
+                    r#"config["theme"] == 'dark'"#,
+                    &data,
+                    std::path::Path::new(".")
+                )
+                .unwrap()
+            );
+        }
+
+        #[test]
+        fn shortcut_helpers_in_complex_expression() {
+            let data = json!({ "items": [1, 2, 3], "title": "Important Notes" });
+            assert!(
+                evaluate_condition_against(
+                    "IsArray(items) && Length(items) >= 2",
+                    &data,
+                    std::path::Path::new(".")
+                )
+                .unwrap()
+            );
+            assert!(
+                evaluate_condition_against(
+                    r#"StartsWith(Lower(title), "important")"#,
+                    &data,
+                    std::path::Path::new(".")
+                )
+                .unwrap()
+            );
+        }
+
+        #[test]
+        fn condition_diagnostic_includes_new_operators() {
+            // Force a parse error and confirm the operator hint includes <=,
+            // arithmetic operators, bracket access, and the expanded helper
+            // catalog so users can discover the new syntax from diagnostics.
+            use biscuit_terminal::errors::BlockError;
+            use biscuit_terminal::terminal::Terminal;
+
+            let err = ConditionError::Parse {
+                expr: "&& invalid".to_string(),
+                line: 1,
+                message: "Unexpected token".to_string(),
+                span: 0..1,
+            };
+            let terminal = Terminal::default();
+            let block = err.status_block(&terminal);
+            let rendered = format!("{block:?}");
+            for needle in [
+                "<=", "+", "*", "%", "[]", "min, max, abs", "first, last",
+                "IsString", "StartsWith", "KebabCase", "IsDate",
+            ] {
+                assert!(
+                    rendered.contains(needle),
+                    "operator hint missing {needle:?}: {rendered}"
+                );
+            }
+        }
     }
 }

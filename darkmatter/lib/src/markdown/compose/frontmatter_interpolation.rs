@@ -332,7 +332,10 @@ fn collect_variable_roots(expr: &Expr, refs: &mut Vec<String>) {
             }
         }
         Expr::StringLiteral(_) | Expr::NumberLiteral(_) | Expr::BoolLiteral(_) => {}
-        Expr::UnaryNot(inner) | Expr::Paren(inner) => collect_variable_roots(inner, refs),
+        Expr::UnaryNot(inner)
+        | Expr::UnaryMinus(inner)
+        | Expr::Paren(inner)
+        | Expr::MemberAccess { base: inner, .. } => collect_variable_roots(inner, refs),
         Expr::Fallback { primary, fallback } => {
             collect_variable_roots(primary, refs);
             collect_variable_roots(fallback, refs);
@@ -346,9 +349,14 @@ fn collect_variable_roots(expr: &Expr, refs: &mut Vec<String>) {
             collect_variable_roots(then_branch, refs);
             collect_variable_roots(else_branch, refs);
         }
-        Expr::Comparison { left, right, .. } => {
+        Expr::Comparison { left, right, .. }
+        | Expr::Binary { left, right, .. } => {
             collect_variable_roots(left, refs);
             collect_variable_roots(right, refs);
+        }
+        Expr::Index { base, index } => {
+            collect_variable_roots(base, refs);
+            collect_variable_roots(index, refs);
         }
         Expr::FunctionCall { args, .. } => {
             for arg in args {

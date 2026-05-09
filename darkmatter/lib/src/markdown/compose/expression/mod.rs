@@ -15,28 +15,61 @@
 //!
 //! Variables:
 //! - `foo` - Simple variable
-//! - `user.name` - Nested property access
+//! - `user.name` - Nested property access (dot syntax for named properties)
+//! - `items[0]` - Array index access (negative indexes count from end)
+//! - `config["key"]` - Object key access
 //! - `ctx.today` - Context variable
 //! - `env.HOME` - Environment variable
 //!
-//! Operators:
-//! - `||` - Fallback (interpolation mode) or logical OR (condition mode)
-//! - `&&` - Logical AND (condition mode only)
-//! - `==`, `!=`, `>`, `>=`, `<` - Comparisons
-//! - `!` - Unary NOT
-//! - `? :` - Ternary conditional
+//! Operators (precedence high → low):
+//! 1. Primary / member access (literals, variables, function calls,
+//!    `foo.bar`, `foo[0]`, `(expr)`)
+//! 2. Unary `!`, `-`
+//! 3. Multiplicative `*`, `/`, `%`
+//! 4. Additive `+`, `-` (`+` doubles as string concatenation when either
+//!    operand is a string)
+//! 5. Comparison `==`, `!=`, `>`, `>=`, `<`, `<=`
+//! 6. Logical AND `&&` (condition mode)
+//! 7. Logical OR / Fallback `||`
+//! 8. Ternary `? :` (right-associative; all binary operators are
+//!    left-associative)
 //!
 //! ## Parser Modes
 //!
 //! - **Interpolation** (`ParseMode::Interpolation`) - `||` is fallback operator
 //! - **Condition** (`ParseMode::Condition`) - `||` is logical OR, `&&` is logical AND
+//!
+//! ## Truthiness
+//!
+//! Falsy values: `null`, `false`, `0`, `0.0`, `""`, `[]`, `{}`. Everything
+//! else is truthy.
+//!
+//! ## Null Propagation
+//!
+//! - Dot access on a `null` base or missing path returns `null` (no error).
+//! - Bracket access never errors: out-of-bounds, `null` base, key on non-collection,
+//!   and missing object keys all return `null`.
+//! - Functions added in the expression-syntax expansion (math, collection,
+//!   string predicates / mutations) propagate `null` arguments through to
+//!   `null` results, and return errors for type mismatches.
+//!
+//! ## Arithmetic Errors
+//!
+//! Division by zero (`x / 0`) and remainder by zero (`x % 0`) raise
+//! evaluator errors. Non-numeric operands for `-`, `*`, `/`, `%` (and `+`
+//! when neither side is a string) also raise errors.
+//!
+//! For full grammar, helper catalog, and timezone behavior see the
+//! [Darkmatter Expressions](../../../../docs/topics/darkmatter-expressions.md)
+//! topic.
 
 pub mod ast;
 pub mod ctx;
+pub mod functions;
 pub mod lexer;
 pub mod parser;
 
-pub use ast::Expr;
+pub use ast::{BinaryOp, Expr};
 pub use ctx::CtxLookup;
 pub use lexer::{
     ComparisonOp, ExpressionFinder, ExpressionLocation, Lexer, LexerError, ParseMode, Token,
@@ -44,6 +77,25 @@ pub use lexer::{
 pub use parser::{ParseError, Parser, parse, parse_condition};
 
 use serde_json::Value;
+
+/// Converts an expression value into a number using the same coercion rules
+/// the comparison operators use, returning an error message tagged with the
+/// originating operator when the value cannot be represented as a number.
+fn require_number(value: &Value, op_label: &str) -> Result<f64, String> {
+    to_number(value).ok_or_else(|| format!("{op_label} requires numeric operands"))
+}
+
+fn json_number(value: f64) -> Result<Value, String> {
+    if !value.is_finite() {
+        return Err(format!("Arithmetic produced a non-finite number: {value}"));
+    }
+    if value.fract() == 0.0 && value.abs() < (i64::MAX as f64) {
+        return Ok(Value::Number(serde_json::Number::from(value as i64)));
+    }
+    serde_json::Number::from_f64(value)
+        .map(Value::Number)
+        .ok_or_else(|| format!("Unable to represent number: {value}"))
+}
 
 /// Trait for types that can resolve expression variable lookups.
 ///
@@ -235,6 +287,28 @@ pub fn evaluate<L: EvaluationLookup>(expr: &Expr, lookup: &L) -> Result<Value, S
             let value = evaluate(inner, lookup)?;
             Ok(Value::Bool(!is_truthy(&value)))
         }
+        Expr::UnaryMinus(inner) => {
+            let value = evaluate(inner, lookup)?;
+            if value.is_null() {
+                return Ok(Value::Null);
+            }
+            let num = require_number(&value, "Unary '-'")?;
+            json_number(-num)
+        }
+        Expr::Binary { op, left, right } => {
+            let left = evaluate(left, lookup)?;
+            let right = evaluate(right, lookup)?;
+            evaluate_binary(*op, &left, &right)
+        }
+        Expr::Index { base, index } => {
+            let base = evaluate(base, lookup)?;
+            let index = evaluate(index, lookup)?;
+            Ok(evaluate_index(&base, &index))
+        }
+        Expr::MemberAccess { base, name } => {
+            let base = evaluate(base, lookup)?;
+            Ok(evaluate_member(&base, name))
+        }
         Expr::Fallback { primary, fallback } => {
             let primary = evaluate(primary, lookup)?;
             if is_truthy(&primary) {
@@ -274,11 +348,101 @@ pub fn evaluate<L: EvaluationLookup>(expr: &Expr, lookup: &L) -> Result<Value, S
                     to_number_coerce(&left) >= to_number_coerce(&right)
                 }
                 ComparisonOp::LessThan => to_number_coerce(&left) < to_number_coerce(&right),
+                ComparisonOp::LessThanOrEqual => {
+                    to_number_coerce(&left) <= to_number_coerce(&right)
+                }
             };
             Ok(Value::Bool(outcome))
         }
         Expr::FunctionCall { name, args } => evaluate_function(name, args, lookup),
     }
+}
+
+fn evaluate_binary(op: BinaryOp, left: &Value, right: &Value) -> Result<Value, String> {
+    if op == BinaryOp::Add && (left.is_string() || right.is_string()) {
+        return Ok(Value::String(format!(
+            "{}{}",
+            scalar_string(left),
+            scalar_string(right)
+        )));
+    }
+
+    let label = match op {
+        BinaryOp::Add => "Addition",
+        BinaryOp::Sub => "Subtraction",
+        BinaryOp::Mul => "Multiplication",
+        BinaryOp::Div => "Division",
+        BinaryOp::Mod => "Remainder",
+    };
+    let lhs = require_number(left, label)?;
+    let rhs = require_number(right, label)?;
+
+    let result = match op {
+        BinaryOp::Add => lhs + rhs,
+        BinaryOp::Sub => lhs - rhs,
+        BinaryOp::Mul => lhs * rhs,
+        BinaryOp::Div => {
+            if rhs == 0.0 {
+                return Err("Division by zero".to_string());
+            }
+            lhs / rhs
+        }
+        BinaryOp::Mod => {
+            if rhs == 0.0 {
+                return Err("Remainder by zero".to_string());
+            }
+            // C-style remainder: sign follows dividend (Rust's `%` already does this for f64).
+            lhs % rhs
+        }
+    };
+    json_number(result)
+}
+
+fn evaluate_index(base: &Value, index: &Value) -> Value {
+    match base {
+        Value::Null => Value::Null,
+        Value::Array(items) => {
+            let Some(n) = to_number(index) else {
+                return Value::Null;
+            };
+            if n.fract() != 0.0 {
+                return Value::Null;
+            }
+            let len = items.len() as i64;
+            let idx = n as i64;
+            let resolved = if idx < 0 { len + idx } else { idx };
+            if resolved < 0 || resolved >= len {
+                Value::Null
+            } else {
+                items[resolved as usize].clone()
+            }
+        }
+        Value::Object(map) => {
+            let key = match index {
+                Value::String(s) => s.clone(),
+                Value::Null => return Value::Null,
+                other => scalar_string(other),
+            };
+            map.get(&key).cloned().unwrap_or(Value::Null)
+        }
+        _ => Value::Null,
+    }
+}
+
+fn evaluate_member(base: &Value, name: &str) -> Value {
+    if base.is_null() {
+        return Value::Null;
+    }
+    let mut current = base.clone();
+    for segment in name.split('.') {
+        match current {
+            Value::Object(mut map) => {
+                current = map.remove(segment).unwrap_or(Value::Null);
+            }
+            _ => return Value::Null,
+        }
+    }
+    current
 }
 
 fn evaluate_function<L: EvaluationLookup>(
@@ -383,7 +547,14 @@ fn evaluate_function<L: EvaluationLookup>(
             let number = to_number(&value).unwrap_or(default).round() as i64;
             Ok(Value::Number(serde_json::Number::from(number)))
         }
-        _ => Err(format!("Unknown function: {name}")),
+        other => {
+            let evaluated: Vec<Value> = args
+                .iter()
+                .map(|arg| evaluate(arg, lookup))
+                .collect::<Result<_, _>>()?;
+            functions::dispatch(other, &evaluated)
+                .unwrap_or_else(|| Err(format!("Unknown function: {name}")))
+        }
     }
 }
 
@@ -561,6 +732,391 @@ mod tests {
                 else_branch: Box::new(Expr::StringLiteral("no".to_string())),
             };
             assert_eq!(evaluate(&expr, &state).unwrap(), json!("no"));
+        }
+    }
+
+    mod comparison_operators {
+        use super::*;
+
+        fn cmp(left: Value, op: ComparisonOp, right: Value) -> Result<Value, String> {
+            let state = lookup(json!({}));
+            let expr = Expr::Comparison {
+                left: Box::new(literal(left)),
+                op,
+                right: Box::new(literal(right)),
+            };
+            evaluate(&expr, &state)
+        }
+
+        fn literal(value: Value) -> Expr {
+            match value {
+                Value::String(s) => Expr::StringLiteral(s),
+                Value::Number(n) => Expr::NumberLiteral(n.as_f64().unwrap()),
+                Value::Bool(b) => Expr::BoolLiteral(b),
+                Value::Null => Expr::Variable("__missing__".to_string()),
+                _ => panic!("only scalar literals supported in this helper"),
+            }
+        }
+
+        #[test]
+        fn equal_and_not_equal_numeric() {
+            assert_eq!(cmp(json!(5), ComparisonOp::Equal, json!(5)).unwrap(), json!(true));
+            assert_eq!(cmp(json!(5), ComparisonOp::NotEqual, json!(6)).unwrap(), json!(true));
+        }
+
+        #[test]
+        fn greater_than_and_greater_than_or_equal() {
+            assert_eq!(cmp(json!(6), ComparisonOp::GreaterThan, json!(5)).unwrap(), json!(true));
+            assert_eq!(cmp(json!(5), ComparisonOp::GreaterThan, json!(5)).unwrap(), json!(false));
+            assert_eq!(cmp(json!(5), ComparisonOp::GreaterThanOrEqual, json!(5)).unwrap(), json!(true));
+            assert_eq!(cmp(json!(4), ComparisonOp::GreaterThanOrEqual, json!(5)).unwrap(), json!(false));
+        }
+
+        #[test]
+        fn less_than_and_less_than_or_equal() {
+            assert_eq!(cmp(json!(4), ComparisonOp::LessThan, json!(5)).unwrap(), json!(true));
+            assert_eq!(cmp(json!(5), ComparisonOp::LessThan, json!(5)).unwrap(), json!(false));
+            assert_eq!(cmp(json!(5), ComparisonOp::LessThanOrEqual, json!(5)).unwrap(), json!(true));
+            assert_eq!(cmp(json!(6), ComparisonOp::LessThanOrEqual, json!(5)).unwrap(), json!(false));
+        }
+
+        #[test]
+        fn comparisons_coerce_string_backed_numerics() {
+            assert_eq!(cmp(json!("5"), ComparisonOp::GreaterThan, json!(3)).unwrap(), json!(true));
+            assert_eq!(cmp(json!("5"), ComparisonOp::LessThanOrEqual, json!(5)).unwrap(), json!(true));
+            assert_eq!(cmp(json!(2), ComparisonOp::LessThan, json!("3")).unwrap(), json!(true));
+            assert_eq!(cmp(json!("10"), ComparisonOp::GreaterThanOrEqual, json!("5")).unwrap(), json!(true));
+        }
+    }
+
+    mod arithmetic {
+        use super::*;
+
+        fn binary(op: BinaryOp, left: Value, right: Value) -> Result<Value, String> {
+            let state = lookup(json!({}));
+            let expr = Expr::Binary {
+                op,
+                left: Box::new(literal(left)),
+                right: Box::new(literal(right)),
+            };
+            evaluate(&expr, &state)
+        }
+
+        fn literal(value: Value) -> Expr {
+            match value {
+                Value::String(s) => Expr::StringLiteral(s),
+                Value::Number(n) => Expr::NumberLiteral(n.as_f64().unwrap()),
+                Value::Bool(b) => Expr::BoolLiteral(b),
+                Value::Null => Expr::Variable("__missing__".to_string()),
+                _ => panic!("only scalar literals supported in this helper"),
+            }
+        }
+
+        #[test]
+        fn addition_subtraction_multiplication_division() {
+            assert_eq!(binary(BinaryOp::Add, json!(2), json!(3)).unwrap(), json!(5));
+            assert_eq!(binary(BinaryOp::Sub, json!(7), json!(2)).unwrap(), json!(5));
+            assert_eq!(binary(BinaryOp::Mul, json!(4), json!(3)).unwrap(), json!(12));
+            assert_eq!(binary(BinaryOp::Div, json!(10), json!(2)).unwrap(), json!(5));
+        }
+
+        #[test]
+        fn division_yields_fraction_when_not_integral() {
+            let result = binary(BinaryOp::Div, json!(7), json!(2)).unwrap();
+            assert_eq!(result.as_f64().unwrap(), 3.5);
+        }
+
+        #[test]
+        fn modulus_basic_positive_operands() {
+            assert_eq!(binary(BinaryOp::Mod, json!(7), json!(3)).unwrap(), json!(1));
+            assert_eq!(binary(BinaryOp::Mod, json!(10), json!(5)).unwrap(), json!(0));
+        }
+
+        #[test]
+        fn c_style_remainder_negative_dividend() {
+            // Sign follows the left operand (dividend).
+            assert_eq!(binary(BinaryOp::Mod, json!(-5), json!(3)).unwrap(), json!(-2));
+            assert_eq!(binary(BinaryOp::Mod, json!(-7), json!(3)).unwrap(), json!(-1));
+            assert_eq!(binary(BinaryOp::Mod, json!(5), json!(-3)).unwrap(), json!(2));
+        }
+
+        #[test]
+        fn string_concatenation_when_either_operand_is_string() {
+            assert_eq!(
+                binary(BinaryOp::Add, json!("foo"), json!("bar")).unwrap(),
+                json!("foobar")
+            );
+            assert_eq!(
+                binary(BinaryOp::Add, json!("count: "), json!(5)).unwrap(),
+                json!("count: 5")
+            );
+            assert_eq!(
+                binary(BinaryOp::Add, json!(5), json!(" items")).unwrap(),
+                json!("5 items")
+            );
+        }
+
+        #[test]
+        fn division_by_zero_returns_error() {
+            let err = binary(BinaryOp::Div, json!(10), json!(0)).unwrap_err();
+            assert!(err.contains("Division by zero"), "got: {err}");
+        }
+
+        #[test]
+        fn remainder_by_zero_returns_error() {
+            let err = binary(BinaryOp::Mod, json!(10), json!(0)).unwrap_err();
+            assert!(err.contains("Remainder by zero"), "got: {err}");
+        }
+
+        #[test]
+        fn arithmetic_errors_for_non_numeric_operands() {
+            let state = lookup(json!({"arr": [1, 2, 3]}));
+            // Subtraction on array is invalid
+            let expr = Expr::Binary {
+                op: BinaryOp::Sub,
+                left: Box::new(Expr::Variable("arr".to_string())),
+                right: Box::new(Expr::NumberLiteral(1.0)),
+            };
+            let err = evaluate(&expr, &state).unwrap_err();
+            assert!(err.contains("Subtraction"), "got: {err}");
+
+            // Multiplication on object is invalid
+            let state = lookup(json!({"obj": {"a": 1}}));
+            let expr = Expr::Binary {
+                op: BinaryOp::Mul,
+                left: Box::new(Expr::Variable("obj".to_string())),
+                right: Box::new(Expr::NumberLiteral(2.0)),
+            };
+            let err = evaluate(&expr, &state).unwrap_err();
+            assert!(err.contains("Multiplication"), "got: {err}");
+
+            // Addition with two non-string non-numeric operands is invalid
+            let state = lookup(json!({"arr": [1, 2]}));
+            let expr = Expr::Binary {
+                op: BinaryOp::Add,
+                left: Box::new(Expr::Variable("arr".to_string())),
+                right: Box::new(Expr::Variable("arr".to_string())),
+            };
+            let err = evaluate(&expr, &state).unwrap_err();
+            assert!(err.contains("Addition"), "got: {err}");
+        }
+    }
+
+    mod access_semantics {
+        use super::*;
+
+        #[test]
+        fn missing_member_path_evaluates_to_null() {
+            let state = lookup(json!({"user": {"name": "Alice"}}));
+            let expr = Expr::MemberAccess {
+                base: Box::new(Expr::Variable("user".to_string())),
+                name: "missing".to_string(),
+            };
+            assert_eq!(evaluate(&expr, &state).unwrap(), Value::Null);
+        }
+
+        #[test]
+        fn member_access_on_null_base_returns_null() {
+            let state = lookup(json!({}));
+            let expr = Expr::MemberAccess {
+                base: Box::new(Expr::Variable("missing".to_string())),
+                name: "foo".to_string(),
+            };
+            assert_eq!(evaluate(&expr, &state).unwrap(), Value::Null);
+        }
+
+        #[test]
+        fn member_access_on_non_object_returns_null() {
+            let state = lookup(json!({"name": "Alice"}));
+            let expr = Expr::MemberAccess {
+                base: Box::new(Expr::Variable("name".to_string())),
+                name: "foo".to_string(),
+            };
+            assert_eq!(evaluate(&expr, &state).unwrap(), Value::Null);
+        }
+
+        #[test]
+        fn bracket_index_on_null_base_returns_null() {
+            let state = lookup(json!({}));
+            let expr = Expr::Index {
+                base: Box::new(Expr::Variable("missing".to_string())),
+                index: Box::new(Expr::NumberLiteral(0.0)),
+            };
+            assert_eq!(evaluate(&expr, &state).unwrap(), Value::Null);
+        }
+
+        #[test]
+        fn out_of_bounds_index_returns_null() {
+            let state = lookup(json!({"items": [1, 2, 3]}));
+            let expr = Expr::Index {
+                base: Box::new(Expr::Variable("items".to_string())),
+                index: Box::new(Expr::NumberLiteral(10.0)),
+            };
+            assert_eq!(evaluate(&expr, &state).unwrap(), Value::Null);
+        }
+
+        #[test]
+        fn negative_index_resolves_from_end() {
+            let state = lookup(json!({"items": ["a", "b", "c"]}));
+            let expr = Expr::Index {
+                base: Box::new(Expr::Variable("items".to_string())),
+                index: Box::new(Expr::UnaryMinus(Box::new(Expr::NumberLiteral(1.0)))),
+            };
+            assert_eq!(evaluate(&expr, &state).unwrap(), json!("c"));
+
+            let expr = Expr::Index {
+                base: Box::new(Expr::Variable("items".to_string())),
+                index: Box::new(Expr::UnaryMinus(Box::new(Expr::NumberLiteral(2.0)))),
+            };
+            assert_eq!(evaluate(&expr, &state).unwrap(), json!("b"));
+        }
+
+        #[test]
+        fn negative_index_out_of_range_returns_null() {
+            let state = lookup(json!({"items": [1, 2]}));
+            let expr = Expr::Index {
+                base: Box::new(Expr::Variable("items".to_string())),
+                index: Box::new(Expr::UnaryMinus(Box::new(Expr::NumberLiteral(5.0)))),
+            };
+            assert_eq!(evaluate(&expr, &state).unwrap(), Value::Null);
+        }
+
+        #[test]
+        fn negative_index_on_empty_array_returns_null() {
+            let state = lookup(json!({"items": []}));
+            let expr = Expr::Index {
+                base: Box::new(Expr::Variable("items".to_string())),
+                index: Box::new(Expr::UnaryMinus(Box::new(Expr::NumberLiteral(1.0)))),
+            };
+            assert_eq!(evaluate(&expr, &state).unwrap(), Value::Null);
+        }
+
+        #[test]
+        fn invalid_non_integer_index_returns_null() {
+            let state = lookup(json!({"items": [1, 2, 3]}));
+            let expr = Expr::Index {
+                base: Box::new(Expr::Variable("items".to_string())),
+                index: Box::new(Expr::NumberLiteral(1.5)),
+            };
+            assert_eq!(evaluate(&expr, &state).unwrap(), Value::Null);
+        }
+
+        #[test]
+        fn string_key_access_on_object_returns_value() {
+            let state = lookup(json!({"config": {"key": "value"}}));
+            let expr = Expr::Index {
+                base: Box::new(Expr::Variable("config".to_string())),
+                index: Box::new(Expr::StringLiteral("key".to_string())),
+            };
+            assert_eq!(evaluate(&expr, &state).unwrap(), json!("value"));
+        }
+
+        #[test]
+        fn string_key_access_on_non_collection_returns_null() {
+            let state = lookup(json!({"config": "not-a-collection"}));
+            let expr = Expr::Index {
+                base: Box::new(Expr::Variable("config".to_string())),
+                index: Box::new(Expr::StringLiteral("key".to_string())),
+            };
+            assert_eq!(evaluate(&expr, &state).unwrap(), Value::Null);
+        }
+
+        #[test]
+        fn missing_object_key_returns_null() {
+            let state = lookup(json!({"config": {"a": 1}}));
+            let expr = Expr::Index {
+                base: Box::new(Expr::Variable("config".to_string())),
+                index: Box::new(Expr::StringLiteral("missing".to_string())),
+            };
+            assert_eq!(evaluate(&expr, &state).unwrap(), Value::Null);
+        }
+
+        #[test]
+        fn chained_index_then_member_access() {
+            let state = lookup(json!({"items": [{"name": "first"}, {"name": "second"}]}));
+            // items[-1].name -> "second"
+            let expr = Expr::MemberAccess {
+                base: Box::new(Expr::Index {
+                    base: Box::new(Expr::Variable("items".to_string())),
+                    index: Box::new(Expr::UnaryMinus(Box::new(Expr::NumberLiteral(1.0)))),
+                }),
+                name: "name".to_string(),
+            };
+            assert_eq!(evaluate(&expr, &state).unwrap(), json!("second"));
+        }
+    }
+
+    mod truthiness {
+        use super::*;
+
+        #[test]
+        fn falsy_null() {
+            assert!(!is_truthy(&Value::Null));
+        }
+
+        #[test]
+        fn falsy_false() {
+            assert!(!is_truthy(&json!(false)));
+        }
+
+        #[test]
+        fn falsy_zero_integer() {
+            assert!(!is_truthy(&json!(0)));
+        }
+
+        #[test]
+        fn falsy_zero_float() {
+            assert!(!is_truthy(&json!(0.0)));
+        }
+
+        #[test]
+        fn falsy_empty_string() {
+            assert!(!is_truthy(&json!("")));
+        }
+
+        #[test]
+        fn falsy_empty_array() {
+            assert!(!is_truthy(&json!([])));
+        }
+
+        #[test]
+        fn falsy_empty_object() {
+            assert!(!is_truthy(&json!({})));
+        }
+
+        #[test]
+        fn truthy_true() {
+            assert!(is_truthy(&json!(true)));
+        }
+
+        #[test]
+        fn truthy_non_empty_string() {
+            assert!(is_truthy(&json!("hello")));
+        }
+
+        #[test]
+        fn truthy_non_zero_positive_integer() {
+            assert!(is_truthy(&json!(1)));
+        }
+
+        #[test]
+        fn truthy_non_zero_negative_integer() {
+            assert!(is_truthy(&json!(-1)));
+        }
+
+        #[test]
+        fn truthy_non_zero_float() {
+            assert!(is_truthy(&json!(0.1)));
+        }
+
+        #[test]
+        fn truthy_non_empty_array() {
+            assert!(is_truthy(&json!([0])));
+        }
+
+        #[test]
+        fn truthy_non_empty_object() {
+            assert!(is_truthy(&json!({"a": 1})));
         }
     }
 }
