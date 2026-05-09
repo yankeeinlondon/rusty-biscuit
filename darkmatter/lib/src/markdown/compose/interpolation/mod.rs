@@ -39,9 +39,10 @@
 //!
 //! ## Code Exclusion
 //!
-//! Interpolation placeholders inside code spans or fenced code blocks
-//! are NOT processed. This preserves code examples that might contain
-//! template syntax.
+//! Interpolation placeholders inside fenced or indented code blocks are
+//! NOT processed. Inline code spans (single backticks) ARE processed by
+//! default, since the templating pattern `` `var_{{ phase }}` `` is a
+//! common use case.
 //!
 //! ## Examples
 //!

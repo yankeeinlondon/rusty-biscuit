@@ -77,3 +77,5 @@ Cargo.lock
 **/test-*-timing.jsonl
 
 .opencode/package-lock.json
+**/lint-*timing.jsonl
+**/test-*timing.jsonl
