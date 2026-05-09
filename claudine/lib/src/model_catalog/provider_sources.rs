@@ -104,7 +104,12 @@ fn anthropic_models() -> Vec<String> {
 // Dynamic sources
 // ============================================================================
 
-async fn fetch_opencode_models() -> Result<Vec<String>, CatalogFetchError> {
+/// Fetch the OpenCode model catalog via `opencode models`.
+///
+/// Exposed within the crate so [`super::service::ModelCatalogService`]
+/// can implement in-process deduplication when both `OpenCode` and
+/// `QwenCode` would otherwise fetch the same underlying list.
+pub(super) async fn fetch_opencode_models() -> Result<Vec<String>, CatalogFetchError> {
     let output = Command::new("opencode")
         .arg("models")
         .stdout(Stdio::piped())
