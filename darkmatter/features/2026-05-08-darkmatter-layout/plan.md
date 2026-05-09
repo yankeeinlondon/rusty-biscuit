@@ -2,6 +2,17 @@
 phases: 6
 created: 2026-05-09
 start_phase: 1
+source_files_during_phase_1:
+  - darkmatter/lib/src/lib.rs
+  - darkmatter/lib/src/layout/mod.rs
+  - darkmatter/lib/src/layout/error.rs
+  - darkmatter/lib/src/layout/types.rs
+  - darkmatter/lib/src/layout/page.rs
+docs_updated_during_phase_1: []
+docs_created_during_phase_1: []
+skills_files_updated_during_phase_1: []
+packages:
+  - darkmatter
 ---
 
 # Darkmatter Layout Execution Plan
@@ -10,18 +21,18 @@ Source: `darkmatter/features/2026-05-08-darkmatter-layout/spec.md`
 
 ## Phase 1: Baseline Discovery And API Scaffolding
 
-- [ ] Confirm the current workspace package names with `cargo metadata --no-deps --format-version 1` and identify the exact `darkmatter` lib and CLI package names for targeted test commands.
-- [ ] Read the current terminal render path in `darkmatter/lib/src/markdown/output/terminal.rs`, including `TerminalOptions`, `for_terminal`, `write_terminal`, `LineWrapper`, horizontal-rule rendering, and existing component dispatch points.
-- [ ] Read `darkmatter/lib/src/markdown/output/code_block.rs` and identify how code block width, padding rows, line numbers, and background resets are currently emitted.
-- [ ] Read `darkmatter/lib/src/markdown/output/html.rs` and identify the lowest-risk insertion point for a page-level browser wrapper.
-- [ ] Read `darkmatter/cli/src/args.rs` and `darkmatter/cli/src/output.rs` to map existing render flags into `TerminalOptions`.
-- [ ] [parallelizable] Inspect `biscuit-terminal` `Renderable`, `BrowserRenderable`, `Terminal`, color mode, and layout helper APIs needed by `DarkmatterPage`.
-- [ ] Create `darkmatter/lib/src/layout/` and define the public module boundary without changing existing render behavior.
-- [ ] Add and export the new public layout types: `DarkmatterPage`, `PageMargin`, `PagePadding`, `PageBackground`, `PageComponent`, `PageAlignment`, `PageFill`, `WidthUnit`, and `PageRenderError`.
-- [ ] Implement default values that preserve current behavior: zero margin, zero padding, transparent background, no max width, no line numbers, left component alignment, and full component fill.
-- [ ] Implement builder methods for margin, padding, page background, max width, line numbers, component alignment, component fill, and the documented `TerminalOptions` passthrough methods.
-- [ ] Implement validation helpers for horizontal space, `max_width`, and percent width units, returning the documented `PageRenderError` variants.
-- [ ] Validation checkpoint: run `cargo test -p darkmatter layout --lib` or the closest targeted lib test command and confirm the new module compiles with focused unit tests for defaults and validation helpers.
+- [x] Confirm the current workspace package names with `cargo metadata --no-deps --format-version 1` and identify the exact `darkmatter` lib and CLI package names for targeted test commands.
+- [x] Read the current terminal render path in `darkmatter/lib/src/markdown/output/terminal.rs`, including `TerminalOptions`, `for_terminal`, `write_terminal`, `LineWrapper`, horizontal-rule rendering, and existing component dispatch points.
+- [x] Read `darkmatter/lib/src/markdown/output/code_block.rs` and identify how code block width, padding rows, line numbers, and background resets are currently emitted.
+- [x] Read `darkmatter/lib/src/markdown/output/html.rs` and identify the lowest-risk insertion point for a page-level browser wrapper.
+- [x] Read `darkmatter/cli/src/args.rs` and `darkmatter/cli/src/output.rs` to map existing render flags into `TerminalOptions`.
+- [x] [parallelizable] Inspect `biscuit-terminal` `Renderable`, `BrowserRenderable`, `Terminal`, color mode, and layout helper APIs needed by `DarkmatterPage`.
+- [x] Create `darkmatter/lib/src/layout/` and define the public module boundary without changing existing render behavior.
+- [x] Add and export the new public layout types: `DarkmatterPage`, `PageMargin`, `PagePadding`, `PageBackground`, `PageComponent`, `PageAlignment`, `PageFill`, `WidthUnit`, and `PageRenderError`.
+- [x] Implement default values that preserve current behavior: zero margin, zero padding, transparent background, no max width, no line numbers, left component alignment, and full component fill.
+- [x] Implement builder methods for margin, padding, page background, max width, line numbers, component alignment, component fill, and the documented `TerminalOptions` passthrough methods.
+- [x] Implement validation helpers for horizontal space, `max_width`, and percent width units, returning the documented `PageRenderError` variants.
+- [x] Validation checkpoint: run `cargo test -p darkmatter layout --lib` or the closest targeted lib test command and confirm the new module compiles with focused unit tests for defaults and validation helpers.
 
 ## Phase 2: Terminal Page Rendering Shell
 
