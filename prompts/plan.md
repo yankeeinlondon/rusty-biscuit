@@ -1,7 +1,7 @@
 ---
 area: "{{ctx.current_package_area}}"
 root: "{{ctx.repo_root}}"
-dir: "$(dirname {{ '{{spec}}' || '{{design}}' }})"
+dir: "$(dirname {{ spec || design }})"
 spec: ""
 design: ""
 plan: "plan.md"
