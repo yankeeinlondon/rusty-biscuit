@@ -3,6 +3,18 @@
 > Captured: 2026-05-09
 > Harness: `claudine compose --perf --dry-run <prompt> --claude`
 > Environment: macOS, worktree layout (darkmatter worktree of rusty-biscuit monorepo)
+>
+> **Stale-output disclaimer.** The captured blocks below predate the
+> review-1 fixes to `render_perf_report` (raw-duration totals, microsecond
+> parse correction, dropping double-counted rows from `CLI Overhead`).
+> The literal section TOTAL values shown here — `CLI Overhead TOTAL:
+> 1.38s` and `Composition Report TOTAL: 0µs` — therefore reflect the
+> *broken* renderer that review-1 corrected, not the current behaviour.
+> Use these blocks for the per-row sub-stage timings (which are accurate
+> raw `Instant` deltas) and for the overall sub-stage shape; do not use
+> the TOTAL: lines to validate any current invariant. The new snapshot
+> test at `claudine/cli/src/perf.rs::render_perf_report_snapshot_locks_totals_and_alignment`
+> pins the corrected totals/alignment.
 
 ## Compose Dry-Run (No Provider Spawn)
 
@@ -94,7 +106,7 @@ The wrapper path (`claudine claude --perf --dry-run`) shows **542.1ms** environm
 
 Based on these numbers:
 
-- **W3 (Background model-catalog refresh)**: **Not required** for the tested scenario (`--claude`, static catalog). Still relevant for OpenCode/Qwen with frontmatter `model:`, but not on the critical path for most invocations.
+- **W3 (Background model-catalog refresh)**: **Implemented in review-2 follow-up**. `ModelCatalogService::refresh_provider_async` now returns immediately when an on-disk cache exists for OpenCode/Qwen and falls back to blocking only on a true cold start. Static-source providers (Claude/Codex) still run inline since the catalog is in-process. The escape hatch `CLAUDINE_BACKGROUND_REFRESH=0` restores the legacy blocking path.
 - **W4 (Parallelise CompositionPrepContext::new)**: **Not recommended**. The prep context now takes ~111ms total (shared_sniff 104ms + source_repo_root 1.7µs + selection_config 485µs + installed_clients 6.46ms). Parallelising would save at most ~100ms and introduces threading complexity for marginal gain.
 - **W5 (Disk-cache installed clients)**: **Not recommended**. `installed_clients` is already only 6.46ms. The complexity of cache invalidation outweighs the benefit.
 
