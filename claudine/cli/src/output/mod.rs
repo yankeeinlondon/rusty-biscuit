@@ -644,13 +644,31 @@ static USER_INTERRUPTED: std::sync::atomic::AtomicBool =
     std::sync::atomic::AtomicBool::new(false);
 
 /// Mark that a user interrupt was observed in this process.
+///
+/// Also raises the lib-side flag in [`claudine::interrupt`] so blocking
+/// post-execute work (lifecycle messenger sends, TTS playback, sound
+/// effects) short-circuits on the first Ctrl+C instead of after several.
 pub(crate) fn mark_user_interrupted() {
     USER_INTERRUPTED.store(true, std::sync::atomic::Ordering::SeqCst);
+    claudine::interrupt::mark_interrupted();
 }
 
 /// Returns `true` once a Ctrl+C has been observed in this process.
 pub(crate) fn user_interrupt_observed() -> bool {
     USER_INTERRUPTED.load(std::sync::atomic::Ordering::SeqCst)
+}
+
+/// Reset the user-interrupt flag. Used only by tests that need a clean
+/// observable state across assertions.
+///
+/// Clears both the CLI-local flag set by [`mark_user_interrupted`] **and**
+/// the lib-side flag in [`claudine::interrupt`] so subsequent in-process
+/// tests that observe lifecycle side effects through `claudine::interrupt`
+/// see a clean slate.
+#[cfg(test)]
+pub(crate) fn clear_user_interrupt_for_tests() {
+    USER_INTERRUPTED.store(false, std::sync::atomic::Ordering::SeqCst);
+    claudine::interrupt::clear_for_tests();
 }
 
 /// Format an INFO-only line announcing the working directory used to launch the agent.

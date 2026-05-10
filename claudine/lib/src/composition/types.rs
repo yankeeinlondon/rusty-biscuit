@@ -476,6 +476,23 @@ pub struct CompositionExecutionRequest {
     /// Whether this request is part of a sequence run. When `true`, the
     /// execution header shows a `Sequence` badge.
     pub sequence: bool,
+    /// Pre-computed launch-CWD `LaunchContext`, supplied by callers that
+    /// already ran a shared `sniff::detect_with_plan` scan during prep
+    /// (e.g. `CompositionPrepContext`). When `Some`, the executor reuses
+    /// it instead of calling `LaunchContext::from_cwd` again.
+    pub prep_launch_context: Option<crate::system_prompt::LaunchContext>,
+    /// Pre-computed launch-CWD `EnvironmentContext` derived from the
+    /// same shared sniff scan. When `Some` and the effective env-detect
+    /// root matches the launch CWD, the executor reuses it instead of
+    /// calling `detect_environment_fast` again.
+    pub prep_env_context: Option<crate::events::EnvironmentContext>,
+    /// Captured error message from the shared prep-time sniff scan, if
+    /// it failed. The shared scan defaults to an empty
+    /// [`crate::system_prompt::LaunchContext`] on failure to keep
+    /// best-effort callers happy, so the executor reads this field to
+    /// preserve the legacy hard-fail contract for `--repo`. `None` (or
+    /// no prep context at all) means no failure happened during prep.
+    pub prep_launch_detection_error: Option<String>,
 }
 
 /// Describes where the sequence definition was found.

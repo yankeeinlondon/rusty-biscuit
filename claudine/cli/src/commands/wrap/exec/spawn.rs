@@ -611,7 +611,6 @@ pub(crate) fn run_child_stream_semantic(
         Arc::new(std::sync::Mutex::new(StreamTextRenderer::new()));
 
     let stdout_output = stream_output.clone();
-    let wait_loop_metrics = live_metrics.clone();
 
     // Dedicated 30-second ticker that flushes any buffered markdown the
     // provider has not terminated with a paragraph boundary. Independent
@@ -812,10 +811,6 @@ pub(crate) fn run_child_stream_semantic(
         }
     }
 
-    // OpenCode hang recovery: `opencode_stop_threshold` is the post-"stop"
-    // grace window (120s). It does not drive a user-visible timing line.
-    let opencode_stop_threshold = Duration::from_secs(120);
-
     // Watchdog channel: the ticker sends termination requests; the wait
     // loop receives them and escalates SIGTERM → SIGKILL via the same
     // pathway used for stderr-bridge early termination.
@@ -857,8 +852,6 @@ pub(crate) fn run_child_stream_semantic(
             true,
             rx,
             wd_rx,
-            Some(wait_loop_metrics),
-            opencode_stop_threshold,
             timeout_config.kill_grace,
         )?
     } else {
@@ -867,9 +860,7 @@ pub(crate) fn run_child_stream_semantic(
     };
 
     if let Some(
-        EarlyTermination::CompletedButHung { message }
-        | EarlyTermination::Timeout { message }
-        | EarlyTermination::StepTimeout { message, .. },
+        EarlyTermination::Timeout { message } | EarlyTermination::StepTimeout { message, .. },
     ) = early_termination.as_ref()
     {
         let rendered = Status::new(message)

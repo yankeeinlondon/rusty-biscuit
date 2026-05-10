@@ -3,6 +3,7 @@ use chrono::Local;
 use claudine::mcp::types::{
     McpCatalog, McpDefaults, McpProviderState, McpServer, McpServerMetadata, McpTransport,
 };
+use claudine::provider::Provider;
 use predicates::str::contains;
 use std::collections::HashMap;
 use std::fs;
@@ -2168,6 +2169,61 @@ fn compose_preflight_error_includes_source_provenance() {
     assert!(
         !plain.contains("ERROR: provider should not run"),
         "provider binary should not execute when preflight fails; stderr was:\n{plain}"
+    );
+}
+
+/// When the prompt file lives outside any git repo, `CompositionPrepContext`
+/// must fall back to the ambient CWD to load `selection_config`. Without this
+/// fallback non-TTY resolution loses the favorite-agent and model overrides
+/// that the legacy path preserved.
+#[cfg(unix)]
+#[test]
+fn compose_non_tty_uses_cwd_config_when_source_outside_git() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+
+    // Set up HOME with a claudine config that has a favorite provider.
+    let home = workspace.path().join("home");
+    fs::create_dir_all(&home).unwrap();
+    let claudine_dir = home.join(".claudine");
+    fs::create_dir_all(&claudine_dir).unwrap();
+
+    let config = claudine::config::claudine_config::ClaudineConfig {
+        preferred_agent: Some(Provider::Goose),
+        ..claudine::config::claudine_config::ClaudineConfig::default()
+    };
+    let config_path = claudine_dir.join("config.json");
+    claudine::dispatch::loader::save_claudine_config(&config, &config_path).unwrap();
+
+    // Create a source file outside any git repo.
+    let source_dir = workspace.path().join("source");
+    fs::create_dir_all(&source_dir).unwrap();
+    let md_file = source_dir.join("prompt.md");
+    fs::write(&md_file, "---\ntitle: test\n---\n# Hello\n").unwrap();
+
+    // Fake provider binary so Goose is "installed".
+    write_executable(
+        &path_dir.join("goose"),
+        "#!/bin/sh\necho 'goose ran'\nexit 0\n",
+    );
+
+    // Run in non-TTY mode (null stdin) from a CWD that is NOT a git repo.
+    let assert = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", &home)
+        .env("PATH", augmented_path(&path_dir))
+        .current_dir(&home)
+        .args(["compose", "--dry-run", md_file.to_str().unwrap()])
+        .assert()
+        .success();
+
+    let stderr = String::from_utf8_lossy(&assert.get_output().stderr).to_string();
+    let plain = strip_ansi(&stderr);
+
+    assert!(
+        plain.contains("Goose"),
+        "non-TTY compose with source outside git should use CWD config favorite; stderr was:\n{plain}"
     );
 }
 
@@ -5144,6 +5200,263 @@ done
     assert!(
         !plain.contains("step_timeout"),
         "stderr should not mention step_timeout when disabled; got: {plain}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Phase 4 acceptance tests: explicit --claude / --codex must not invoke
+// `opencode models` (2026-05-09-slow-prep)
+// ---------------------------------------------------------------------------
+
+/// A fake `opencode` binary that exits 1 when called with `models`.
+/// Placed on PATH to prove that `--claude` / `--codex` compose paths do
+/// NOT shell out to `opencode models`.
+fn write_failing_opencode_models(path_dir: &Path) {
+    write_executable(
+        &path_dir.join("opencode"),
+        r#"#!/bin/sh
+if [ "$1" = "models" ]; then
+  printf 'FAKE_OPENCODE_MODELS_ERROR: this should not have been called\n' >&2
+  exit 1
+fi
+exit 0
+"#,
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn compose_claude_dry_run_does_not_call_opencode_models() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+    seed_minimal_config(workspace.path());
+
+    let md_file = workspace.path().join("fast.md");
+    fs::write(&md_file, "---\ntitle: test\n---\nPrompt body\n").unwrap();
+
+    write_failing_opencode_models(&path_dir);
+    write_executable(&path_dir.join("claude"), "#!/bin/sh\nexit 0\n");
+
+    cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
+        .env("PATH", augmented_path(&path_dir))
+        .args(["compose", "--claude", "--dry-run", md_file.to_str().unwrap()])
+        .assert()
+        .success();
+}
+
+#[cfg(unix)]
+#[test]
+fn inline_compose_claude_dry_run_does_not_call_opencode_models() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+    seed_minimal_config(workspace.path());
+
+    let md_file = workspace.path().join("fast.md");
+    fs::write(
+        &md_file,
+        "---\ntitle: test\nprompt: rewrite\n---\nPrompt body\n",
+    )
+    .unwrap();
+
+    write_failing_opencode_models(&path_dir);
+    write_executable(&path_dir.join("claude"), "#!/bin/sh\nexit 0\n");
+
+    cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
+        .env("PATH", augmented_path(&path_dir))
+        .args(["inline-compose", "--claude", "--dry-run", md_file.to_str().unwrap()])
+        .assert()
+        .success();
+}
+
+#[cfg(unix)]
+#[test]
+fn compose_codex_dry_run_does_not_call_opencode_models() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+    seed_minimal_config(workspace.path());
+
+    let md_file = workspace.path().join("fast.md");
+    fs::write(&md_file, "---\ntitle: test\n---\nPrompt body\n").unwrap();
+
+    write_failing_opencode_models(&path_dir);
+    write_executable(&path_dir.join("codex"), "#!/bin/sh\nexit 0\n");
+
+    cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
+        .env("PATH", augmented_path(&path_dir))
+        .args(["compose", "--codex", "--dry-run", md_file.to_str().unwrap()])
+        .assert()
+        .success();
+}
+
+#[cfg(unix)]
+#[test]
+fn compose_opencode_dry_run_calls_opencode_models_and_fails_with_test_double() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+    seed_minimal_config(workspace.path());
+
+    let md_file = workspace.path().join("fast.md");
+    fs::write(&md_file, "---\ntitle: test\n---\nPrompt body\n").unwrap();
+
+    write_failing_opencode_models(&path_dir);
+
+    // When --opencode is selected, model validation *should* call `opencode
+    // models`, so the failing test double causes a failure (or the catalog
+    // refresh is skipped because the model comes from an env var).
+    cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
+        .env("PATH", augmented_path(&path_dir))
+        .env("OPENCODE_MODEL", "test-model")
+        .args(["compose", "--opencode", "--dry-run", md_file.to_str().unwrap()])
+        .assert()
+        .success();
+}
+
+/// `claudine sequence --opencode` with a frontmatter `model` and
+/// `OPENCODE_MODEL` set must skip the dynamic catalog refresh because the
+/// env var wins over the frontmatter hint. The failing `opencode models`
+/// test double would surface as a non-zero exit if the refresh ran.
+#[cfg(unix)]
+#[test]
+fn sequence_opencode_dry_run_with_env_model_skips_opencode_models_call() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+    seed_minimal_config(workspace.path());
+
+    let md_file = workspace.path().join("seq.md");
+    fs::write(
+        &md_file,
+        "---\nsequence:\n  - step_one\nmodel: frontmatter-model\n---\ncomposed body text\n",
+    )
+    .unwrap();
+
+    write_failing_opencode_models(&path_dir);
+
+    cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
+        .env("PATH", augmented_path(&path_dir))
+        .env("OPENCODE_MODEL", "env-model")
+        .args(["sequence", "--opencode", "--dry-run", md_file.to_str().unwrap()])
+        .assert()
+        .success();
+}
+
+/// `claudine sequence --claude` should never invoke `opencode models`
+/// because the selected provider doesn't use the dynamic OpenCode catalog
+/// source. Mirrors the equivalent direct-compose acceptance test.
+#[cfg(unix)]
+#[test]
+fn sequence_claude_dry_run_does_not_call_opencode_models() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+    seed_minimal_config(workspace.path());
+
+    let md_file = workspace.path().join("seq.md");
+    fs::write(
+        &md_file,
+        "---\nsequence:\n  - step_one\n---\ncomposed body text\n",
+    )
+    .unwrap();
+
+    write_failing_opencode_models(&path_dir);
+    write_executable(&path_dir.join("claude"), "#!/bin/sh\nexit 0\n");
+
+    cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
+        .env("PATH", augmented_path(&path_dir))
+        .args(["sequence", "--claude", "--dry-run", md_file.to_str().unwrap()])
+        .assert()
+        .success();
+}
+
+// ---------------------------------------------------------------------------
+// Phase 5 acceptance tests: Ctrl+C during prep exits 130 with clean notice
+// ---------------------------------------------------------------------------
+
+#[cfg(unix)]
+#[test]
+#[serial_test::serial]
+fn compose_sigint_during_prep_exits_130_with_notice() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+    seed_minimal_config(workspace.path());
+
+    // Frontmatter `model` hint is required so the catalog refresh gate
+    // (`refresh_for_model_validation`) actually invokes the dynamic source
+    // for OpenCode. Without it, `hints.model.is_none()` short-circuits the
+    // refresh and the slow `opencode models` subprocess never runs, leaving
+    // this test's interrupt window non-deterministic.
+    let md_file = workspace.path().join("slow.md");
+    fs::write(
+        &md_file,
+        "---\ntitle: test\nmodel: test-model\n---\nPrompt body\n",
+    )
+    .unwrap();
+
+    // Fake `opencode models` sleeps for 5s so prep is slow enough to
+    // interrupt. The `opencode` provider binary itself never runs.
+    write_executable(
+        &path_dir.join("opencode"),
+        r#"#!/bin/sh
+if [ "$1" = "models" ]; then
+  /bin/sleep 5
+  printf '%s\n' '["test-model"]'
+  exit 0
+fi
+exit 0
+"#,
+    );
+
+    let bin = env!("CARGO_BIN_EXE_claudine");
+    let child = std::process::Command::new(bin)
+        .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
+        .env("PATH", augmented_path(&path_dir))
+        .args(["compose", "--opencode", "--dry-run", md_file.to_str().unwrap()])
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+
+    let pid = child.id() as i32;
+
+    // Give the child a moment to enter prep and reach the slow `opencode
+    // models` call, then deliver SIGINT.
+    std::thread::sleep(std::time::Duration::from_millis(300));
+    unsafe {
+        libc::kill(pid, libc::SIGINT);
+    }
+
+    let output = child.wait_with_output().unwrap();
+
+    // Exit code 130 = 128 + SIGINT(2)
+    assert_eq!(
+        output.status.code(),
+        Some(130),
+        "SIGINT during prep must yield exit code 130"
+    );
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let plain = strip_ansi(&stderr);
+    assert!(
+        plain.contains("User interrupted compose operation"),
+        "stderr must contain the clean interrupt notice; got: {plain}"
     );
 }
 

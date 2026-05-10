@@ -4,7 +4,6 @@ use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant};
 
 use claudine::stream::logs::EarlyTermination;
-use claudine::stream::progress::LiveMetrics;
 use claudine::stream::summary::StreamExecutionSummary;
 use color_eyre::eyre::Result;
 use std::sync::mpsc::{Receiver, TryRecvError};
@@ -58,14 +57,11 @@ pub(crate) struct WatchdogTermination {
 /// Isolated to the bridge path so non-OpenCode runs keep the existing
 /// `child.wait()`-based helper.
 #[cfg(unix)]
-#[allow(clippy::too_many_arguments)]
 pub(crate) fn wait_with_signal_and_early_termination(
     child: &mut Child,
     child_in_own_pgroup: bool,
     early_rx: Receiver<EarlyTermination>,
     watchdog_rx: Option<Receiver<WatchdogTermination>>,
-    live_metrics: Option<LiveMetrics>,
-    stop_threshold: Duration,
     kill_grace: Duration,
 ) -> Result<(
     i32,
@@ -179,26 +175,6 @@ pub(crate) fn wait_with_signal_and_early_termination(
             }
         }
 
-        if early_termination.is_none()
-            && let Some(metrics) = live_metrics.as_ref()
-            && let Some(signal) = super::timeouts::detect_opencode_hang_termination(
-                metrics,
-                Instant::now(),
-                stop_threshold,
-            )
-        {
-            let kill_pid = if child_in_own_pgroup {
-                -(child_pid as i32)
-            } else {
-                child_pid as i32
-            };
-            unsafe {
-                libc::kill(kill_pid, libc::SIGTERM);
-            }
-            early_termination = Some(signal);
-            grace_deadline = Some(Instant::now() + grace_period);
-        }
-
         if let Some(deadline) = grace_deadline
             && Instant::now() >= deadline
         {
@@ -222,14 +198,11 @@ pub(crate) fn wait_with_signal_and_early_termination(
 }
 
 #[cfg(not(unix))]
-#[allow(clippy::too_many_arguments)]
 pub(crate) fn wait_with_signal_and_early_termination(
     child: &mut Child,
     _child_in_own_pgroup: bool,
     early_rx: Receiver<EarlyTermination>,
     watchdog_rx: Option<Receiver<WatchdogTermination>>,
-    live_metrics: Option<LiveMetrics>,
-    stop_threshold: Duration,
     kill_grace: Duration,
 ) -> Result<(
     i32,
@@ -278,19 +251,6 @@ pub(crate) fn wait_with_signal_and_early_termination(
             }
         }
 
-        if early_termination.is_none()
-            && let Some(metrics) = live_metrics.as_ref()
-            && let Some(signal) = super::timeouts::detect_opencode_hang_termination(
-                metrics,
-                Instant::now(),
-                stop_threshold,
-            )
-        {
-            let _ = child.kill();
-            early_termination = Some(signal);
-            grace_deadline = Some(Instant::now() + grace_period);
-        }
-
         if let Some(deadline) = grace_deadline
             && Instant::now() >= deadline
         {
@@ -330,12 +290,6 @@ pub(crate) fn apply_early_termination_to_summary(
                 rate_limit.reset_at = Some(*reset);
             }
             summary.rate_limit = Some(rate_limit);
-        }
-        EarlyTermination::CompletedButHung { .. } => {
-            summary.exit_code = 0;
-            summary.is_error = false;
-            summary.error_kind = None;
-            summary.error_message = None;
         }
         EarlyTermination::Timeout { message } => {
             summary.exit_code = 1;
@@ -382,9 +336,6 @@ pub(crate) fn early_termination_process_outcome(
         Some(EarlyTermination::Timeout { .. }) => claudine::harness::ProcessTermination::TimedOut,
         Some(EarlyTermination::StepTimeout { .. }) => {
             claudine::harness::ProcessTermination::TimedOut
-        }
-        Some(EarlyTermination::CompletedButHung { .. }) => {
-            claudine::harness::ProcessTermination::Completed
         }
         Some(EarlyTermination::RateLimit { .. }) => {
             claudine::harness::ProcessTermination::Completed
@@ -471,29 +422,6 @@ mod tests {
         assert_eq!(rl.reset_at, Some(existing_reset));
         // retry_after_ms is untouched.
         assert_eq!(rl.retry_after_ms, Some(5000));
-    }
-
-    #[test]
-    fn apply_early_termination_completed_but_hung_restores_success() {
-        let mut summary = StreamExecutionSummary {
-            exit_code: 143,
-            is_error: true,
-            error_kind: Some("agent_native".into()),
-            error_message: Some("killed".into()),
-            ..Default::default()
-        };
-
-        apply_early_termination_to_summary(
-            &mut summary,
-            &EarlyTermination::CompletedButHung {
-                message: "OpenCode reported stop but stayed alive".into(),
-            },
-        );
-
-        assert_eq!(summary.exit_code, 0);
-        assert!(!summary.is_error);
-        assert!(summary.error_kind.is_none());
-        assert!(summary.error_message.is_none());
     }
 
     #[test]

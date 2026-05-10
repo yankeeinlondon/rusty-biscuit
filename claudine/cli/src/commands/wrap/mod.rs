@@ -199,6 +199,7 @@ fn wrap_terminal_for_mode(non_interactive: bool) -> Terminal {
     }
 }
 
+#[cfg(test)]
 pub(crate) fn resolve_binary_path(
     profile: &dyn WrapperProfile,
     clients: &InstalledAiClients,

@@ -288,14 +288,25 @@ impl<'a> LifecycleRunGuard<'a> {
     }
 
     /// Emit a single lifecycle signal through the injected emitter.
+    ///
+    /// Short-circuits on `crate::interrupt::interrupted()` so a Ctrl+C
+    /// during execution skips all blocking post-execute side effects
+    /// (messenger sends, desktop notifications, TTS playback, sound
+    /// effects). The cheap stderr line still emits so the user sees the
+    /// terminal status before the process exits.
     fn emit_signal(&self, signal: LifecycleSignal) {
         let Some(notification) = self.config.get(signal) else {
             return;
         };
 
+        let interrupted = crate::interrupt::interrupted();
+
         // --- Non-audio fan-out (immediate) ---
         if let Some(stderr_text) = &notification.stderr {
             self.emitter.emit_stderr(signal, stderr_text, self.ctx.term);
+        }
+        if interrupted {
+            return;
         }
         if let Some(message_text) = &notification.message {
             self.emitter.emit_message(
@@ -314,6 +325,9 @@ impl<'a> LifecycleRunGuard<'a> {
         let mut tts_config: Option<TtsConfig> = None;
 
         for phase in phases {
+            if crate::interrupt::interrupted() {
+                return;
+            }
             match phase {
                 AudioPhase::Speak(text) => {
                     let config = tts_config
@@ -1490,6 +1504,102 @@ mod tests {
         // say_first → speech before effect
         assert!(matches!(actions[0], EmittedAction::Speech { .. }));
         assert!(matches!(actions[1], EmittedAction::Effect { .. }));
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn emit_signal_skips_blocking_side_effects_when_interrupted() {
+        // Bug fix (2026-05-09): a Ctrl+C during a long compose run must
+        // skip messenger sends, desktop notifications, TTS, and sound
+        // effects so the process exits promptly. Only the cheap stderr
+        // line is allowed to render so the user sees the terminal status.
+        let config = parse_lifecycle_config(
+            &json!({
+                "failure": {
+                    "stderr": "failed",
+                    "message": "Compose run failed",
+                    "notify": "Compose failed",
+                    "say": "compose failed",
+                    "effect": "confirmation",
+                }
+            }),
+            dummy_path(),
+        )
+        .unwrap();
+        let (settings, messaging, term) = test_ctx();
+        let ctx = LifecycleRuntimeContext {
+            settings: &settings,
+            messaging: &messaging,
+            term: &term,
+            source_path: Path::new("/tmp/test.md"),
+            repo_root: None,
+        };
+        let emitter = RecordingEmitter::new();
+        let mut guard = make_guard(&config, &ctx, &emitter);
+
+        crate::interrupt::clear_for_tests();
+        crate::interrupt::mark_interrupted();
+        guard.emit_terminal(LifecycleSignal::Failure);
+        crate::interrupt::clear_for_tests();
+
+        let actions = emitter.actions();
+        assert_eq!(
+            actions.len(),
+            1,
+            "interrupt must drop messenger/notification/TTS/effect; got: {actions:?}"
+        );
+        assert!(
+            matches!(actions[0], EmittedAction::Stderr { .. }),
+            "stderr line must still render so the user sees the terminal status"
+        );
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn emit_signal_runs_all_side_effects_when_not_interrupted() {
+        // Companion to the interrupt test: when no interrupt is observed,
+        // every configured side effect still fires.
+        let config = parse_lifecycle_config(
+            &json!({
+                "failure": {
+                    "stderr": "failed",
+                    "message": "Compose run failed",
+                    "notify": "Compose failed",
+                }
+            }),
+            dummy_path(),
+        )
+        .unwrap();
+        let (settings, messaging, term) = test_ctx();
+        let ctx = LifecycleRuntimeContext {
+            settings: &settings,
+            messaging: &messaging,
+            term: &term,
+            source_path: Path::new("/tmp/test.md"),
+            repo_root: None,
+        };
+        let emitter = RecordingEmitter::new();
+        let mut guard = make_guard(&config, &ctx, &emitter);
+
+        crate::interrupt::clear_for_tests();
+        guard.emit_terminal(LifecycleSignal::Failure);
+
+        let actions = emitter.actions();
+        assert!(
+            actions
+                .iter()
+                .any(|a| matches!(a, EmittedAction::Stderr { .. }))
+        );
+        assert!(
+            actions
+                .iter()
+                .any(|a| matches!(a, EmittedAction::Message { .. }))
+        );
+        assert!(
+            actions
+                .iter()
+                .any(|a| matches!(a, EmittedAction::Notification { .. }))
+        );
     }
 
     // =====================================================================

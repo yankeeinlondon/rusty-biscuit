@@ -189,13 +189,27 @@ pub(crate) fn execute_sequence(
 
         let provider_for_model = explicit_provider.or(provider_result.as_ref().ok().copied());
         let (model, model_reason) = if let Some(provider) = provider_for_model {
+            // Probe model resolution without catalog so the refresh gate
+            // can observe whether CLI / provider env / generic MODEL would
+            // override the frontmatter `model` hint. Refresh is skipped in
+            // those cases (matches the direct compose path).
+            let (_, probe_reason) = claudine::composition::resolve_model_with_hints(
+                provider,
+                &raw_hints,
+                cli_model,
+                None,
+            );
             // Refresh once per unique provider, and only when the
-            // frontmatter `model` hint will actually be validated.
-            if cli_model.is_none()
-                && raw_hints.model.is_some()
-                && refreshed_providers.insert(provider)
-            {
-                catalog.refresh_provider_blocking(provider);
+            // frontmatter `model` hint will actually be validated against
+            // the catalog.
+            if refreshed_providers.insert(provider) {
+                let _span = tracing::info_span!("compose_prep.model_catalog", provider = %provider.as_slug(), step = step_index).entered();
+                super::composition::refresh_for_model_validation(
+                    &catalog,
+                    provider,
+                    &raw_hints,
+                    Some(&probe_reason),
+                );
             }
             claudine::composition::resolve_model_with_hints(
                 provider,
@@ -481,6 +495,9 @@ pub(crate) fn execute_sequence(
             silent: shared.silent,
             env_overrides: step_ctx.env_overrides.clone(),
             shared_approval_cache: Some(Arc::clone(&shared_approval_cache)),
+            prep_launch_context: Some(prep_context.launch_context.clone()),
+            prep_env_context: Some(prep_context.env_context.clone()),
+            prep_launch_detection_error: prep_context.launch_detection_error.clone(),
         };
 
         let step_result = super::composition::execute_composition_request_inner(
