@@ -331,62 +331,131 @@ pub fn render_text(
                 Some(RepoAction::PackageAreas { .. }) => {
                     unreachable!("PackageAreas is handled as an early return in commands.rs")
                 }
-                Some(RepoAction::DirtyPackages { filter }) => {
-                    let rendered = render_dirty_packages(result, filter);
+                Some(RepoAction::DirtyPackages {
+                    filter,
+                    package,
+                    package_area,
+                }) => {
+                    let rendered = render_dirty_packages(
+                        result,
+                        filter,
+                        package.as_deref(),
+                        package_area.as_deref(),
+                    );
                     if rendered.is_empty() {
                         std::process::exit(1);
                     }
                     out.push_str(&rendered);
                     out.push('\n');
                 }
-                Some(RepoAction::DirtyPackageAreas { filter }) => {
-                    let rendered = render_dirty_package_areas(result, filter);
+                Some(RepoAction::DirtyPackageAreas {
+                    filter,
+                    package,
+                    package_area,
+                }) => {
+                    let rendered = render_dirty_package_areas(
+                        result,
+                        filter,
+                        package.as_deref(),
+                        package_area.as_deref(),
+                    );
                     if rendered.is_empty() {
                         std::process::exit(1);
                     }
                     out.push_str(&rendered);
                     out.push('\n');
                 }
-                Some(RepoAction::StagedPackages { filter }) => {
-                    let rendered = render_staged_packages(result, filter);
+                Some(RepoAction::StagedPackages {
+                    filter,
+                    package,
+                    package_area,
+                }) => {
+                    let rendered = render_staged_packages(
+                        result,
+                        filter,
+                        package.as_deref(),
+                        package_area.as_deref(),
+                    );
                     if rendered.is_empty() {
                         std::process::exit(1);
                     }
                     out.push_str(&rendered);
                     out.push('\n');
                 }
-                Some(RepoAction::StagedPackageAreas { filter }) => {
-                    let rendered = render_staged_package_areas(result, filter);
+                Some(RepoAction::StagedPackageAreas {
+                    filter,
+                    package,
+                    package_area,
+                }) => {
+                    let rendered = render_staged_package_areas(
+                        result,
+                        filter,
+                        package.as_deref(),
+                        package_area.as_deref(),
+                    );
                     if rendered.is_empty() {
                         std::process::exit(1);
                     }
                     out.push_str(&rendered);
                     out.push('\n');
                 }
-                Some(RepoAction::UnstagedPackages { filter }) => {
-                    let rendered = render_unstaged_packages(result, filter);
+                Some(RepoAction::UnstagedPackages {
+                    filter,
+                    package,
+                    package_area,
+                }) => {
+                    let rendered = render_unstaged_packages(
+                        result,
+                        filter,
+                        package.as_deref(),
+                        package_area.as_deref(),
+                    );
                     if rendered.is_empty() {
                         std::process::exit(1);
                     }
                     out.push_str(&rendered);
                     out.push('\n');
                 }
-                Some(RepoAction::UnstagedPackageAreas { filter }) => {
-                    let rendered = render_unstaged_package_areas(result, filter);
+                Some(RepoAction::UnstagedPackageAreas {
+                    filter,
+                    package,
+                    package_area,
+                }) => {
+                    let rendered = render_unstaged_package_areas(
+                        result,
+                        filter,
+                        package.as_deref(),
+                        package_area.as_deref(),
+                    );
                     if rendered.is_empty() {
                         std::process::exit(1);
                     }
                     out.push_str(&rendered);
                     out.push('\n');
                 }
-                Some(RepoAction::Deps { ui, filter }) => {
+                Some(RepoAction::Deps {
+                    ui,
+                    filter,
+                    package,
+                    package_area,
+                }) => {
                     if let Some(ref filesystem) = result.filesystem
                         && let Some(ref repo) = filesystem.repo
                     {
                         if *ui {
-                            out.push_str(&render_repo_deps_visual(repo, filter));
+                            out.push_str(&render_repo_deps_visual(
+                                repo,
+                                filter,
+                                package.as_deref(),
+                                package_area.as_deref(),
+                            ));
                         } else {
-                            out.push_str(&render_repo_deps_text(repo, filter));
+                            out.push_str(&render_repo_deps_text(
+                                repo,
+                                filter,
+                                package.as_deref(),
+                                package_area.as_deref(),
+                            ));
                         }
                     }
                 }
@@ -441,7 +510,12 @@ pub fn render_text(
                     }
                     out.push_str(&rendered);
                 }
-                Some(RepoAction::Structure { filter, .. }) => {
+                Some(RepoAction::Structure {
+                    filter,
+                    package,
+                    package_area,
+                    ..
+                }) => {
                     if let Some(ref filesystem) = result.filesystem
                         && let Some(ref repo) = filesystem.repo
                     {
@@ -450,6 +524,8 @@ pub fn render_text(
                             verbose,
                             repo_root,
                             filter,
+                            package.as_deref(),
+                            package_area.as_deref(),
                             latest_versions_requested,
                         ));
                     }
@@ -463,6 +539,8 @@ pub fn render_text(
                             verbose,
                             repo_root,
                             &[],
+                            None,
+                            None,
                             latest_versions_requested,
                         ));
                     }

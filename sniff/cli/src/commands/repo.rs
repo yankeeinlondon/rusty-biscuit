@@ -10,6 +10,7 @@ use crate::perf::{CliPerf, handle_no_results};
 /// Subcommand-specific args for `sniff repo packages`.
 pub(super) struct RepoPackagesArgs<'a> {
     pub(super) filter: &'a [String],
+    pub(super) package: Option<&'a str>,
     pub(super) package_area: Option<&'a str>,
     pub(super) format: PackagesFormat,
 }
@@ -29,6 +30,7 @@ pub(super) fn handle_repo_packages(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let RepoPackagesArgs {
         filter,
+        package,
         package_area,
         format,
     } = args;
@@ -50,15 +52,27 @@ pub(super) fn handle_repo_packages(
         }
     };
 
+    // Validate that `--package` and `--package-area` resolve and (when both
+    // are passed) overlap. The output functions apply the actual filtering;
+    // this call surfaces the intersection error before render time.
+    super::resolve_package_and_area(info.packages.as_deref(), package, package_area)?;
+
     if json {
-        let names: Vec<&str> = output::collect_repo_package_names(&info, filter, package_area);
+        let names: Vec<&str> =
+            output::collect_repo_package_names(&info, filter, package, package_area);
         println!("{}", serde_json::to_string(&names)?);
         perf.emit_stderr(None);
         return Ok(());
     }
 
-    let rendered =
-        output::render_repo_packages_formatted(&info, filter, package_area, format, verbose);
+    let rendered = output::render_repo_packages_formatted(
+        &info,
+        filter,
+        package,
+        package_area,
+        format,
+        verbose,
+    );
     let with_newline = if rendered.ends_with('\n') {
         rendered
     } else {
@@ -72,6 +86,7 @@ pub(super) fn handle_repo_packages(
 /// Subcommand-specific args for `sniff repo package-areas`.
 pub(super) struct RepoPackageAreasArgs<'a> {
     pub(super) filter: &'a [String],
+    pub(super) package: Option<&'a str>,
     pub(super) package_area: Option<&'a str>,
     pub(super) format: PackagesFormat,
 }
@@ -90,6 +105,7 @@ pub(super) fn handle_repo_package_areas(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let RepoPackageAreasArgs {
         filter,
+        package,
         package_area,
         format,
     } = args;
@@ -111,15 +127,27 @@ pub(super) fn handle_repo_package_areas(
         }
     };
 
+    // Validate that `--package` and `--package-area` resolve and (when both
+    // are passed) overlap. The output functions apply the actual filtering;
+    // this call surfaces the intersection error before render time.
+    super::resolve_package_and_area(info.packages.as_deref(), package, package_area)?;
+
     if json {
-        let names: Vec<&str> = output::collect_repo_package_area_names(&info, filter, package_area);
+        let names: Vec<&str> =
+            output::collect_repo_package_area_names(&info, filter, package, package_area);
         println!("{}", serde_json::to_string(&names)?);
         perf.emit_stderr(None);
         return Ok(());
     }
 
-    let rendered =
-        output::render_repo_package_areas_formatted(&info, filter, package_area, format, verbose);
+    let rendered = output::render_repo_package_areas_formatted(
+        &info,
+        filter,
+        package,
+        package_area,
+        format,
+        verbose,
+    );
     let with_newline = if rendered.ends_with('\n') {
         rendered
     } else {
