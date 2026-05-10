@@ -26,6 +26,7 @@ fn parse_lists_operators_and_helpers() {
             "HasKey",
         ],
     );
+    insta::assert_snapshot!("parse", out);
 }
 
 #[test]
@@ -46,4 +47,5 @@ fn eval_points_at_state() {
             "items not found",
         ],
     );
+    insta::assert_snapshot!("eval", out);
 }

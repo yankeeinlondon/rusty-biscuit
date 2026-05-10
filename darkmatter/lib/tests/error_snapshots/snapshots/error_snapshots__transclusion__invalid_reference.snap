@@ -1,0 +1,10 @@
+---
+source: darkmatter/lib/tests/error_snapshots/transclusion.rs
+expression: out
+---
+⨫ TransclusionError: invalid reference
+┃ Source file: doc.md
+┃ Line: 2
+┃ Directive: ::file
+┃ Reference: //weird
+Use a relative path, absolute path, or https:// URL.

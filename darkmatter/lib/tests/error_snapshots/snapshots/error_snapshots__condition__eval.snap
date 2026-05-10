@@ -1,0 +1,9 @@
+---
+source: darkmatter/lib/tests/error_snapshots/condition.rs
+expression: out
+---
+⨫ ConditionError: evaluation failed
+┃ Expression: length(items) > 0
+┃ Line: 10
+┃ Message: items not found
+Confirm every variable referenced is present in the effective state.

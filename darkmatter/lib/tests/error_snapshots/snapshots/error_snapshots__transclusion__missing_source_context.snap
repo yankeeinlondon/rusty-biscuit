@@ -1,0 +1,8 @@
+---
+source: darkmatter/lib/tests/error_snapshots/transclusion.rs
+expression: out
+---
+⨫ TransclusionError: missing source context
+┃ Reference: ./sibling.md
+┃ Line: 4
+Load the document from a file or URL so relative refs can resolve.

@@ -1,0 +1,8 @@
+---
+source: darkmatter/lib/tests/error_snapshots/transclusion.rs
+expression: out
+---
+⨫ TransclusionError: directive parse failed
+┃ Line: 3
+┃ Message: unexpected token
+Expected syntax: ::file ./path.md | ::code ./file.rs.

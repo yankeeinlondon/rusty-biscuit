@@ -1,0 +1,9 @@
+---
+source: darkmatter/lib/tests/error_snapshots/transclusion.rs
+expression: out
+---
+⨫ TransclusionError: condition evaluation failed
+┃ Expression: length(items) > 0
+┃ Line: 10
+┃ Message: items not found
+Check that every variable referenced is present in the effective state.

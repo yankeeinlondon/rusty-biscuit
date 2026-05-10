@@ -1,0 +1,7 @@
+---
+source: darkmatter/lib/tests/error_snapshots/image_ref.rs
+expression: out
+---
+⨫ ImageRefError: invalid loading
+┃ Value: never
+Accepted values: eager, lazy.

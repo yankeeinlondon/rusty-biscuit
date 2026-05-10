@@ -1,0 +1,7 @@
+---
+source: darkmatter/lib/tests/error_snapshots/page_block.rs
+expression: out
+---
+⨫ PageBlockError: unmatched ::end-block
+┃ Line: 20
+Add a matching ::block directive above this closing line.

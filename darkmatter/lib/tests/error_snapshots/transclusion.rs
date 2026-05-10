@@ -25,6 +25,7 @@ fn parse_directive_has_syntax_hint() {
             "::file",
         ],
     );
+    insta::assert_snapshot!("parse_directive", out);
 }
 
 #[test]
@@ -48,6 +49,7 @@ fn invalid_reference_shows_reference() {
             "::file",
         ],
     );
+    insta::assert_snapshot!("invalid_reference", out);
 }
 
 #[test]
@@ -66,6 +68,7 @@ fn missing_source_context_has_hint() {
             "4",
         ],
     );
+    insta::assert_snapshot!("missing_source_context", out);
 }
 
 #[test]
@@ -82,6 +85,7 @@ fn unsupported_reference_type_shows_value() {
             "ftp://host/file",
         ],
     );
+    insta::assert_snapshot!("unsupported_reference_type", out);
 }
 
 #[test]
@@ -94,6 +98,7 @@ fn unsupported_file_type_shows_path() {
         &out,
         &["TransclusionError", "unsupported file type", "./thing.xyz"],
     );
+    insta::assert_snapshot!("unsupported_file_type", out);
 }
 
 #[test]
@@ -106,6 +111,7 @@ fn non_text_code_source_shows_path() {
         &out,
         &["TransclusionError", "non-text code source", "./binary.bin"],
     );
+    insta::assert_snapshot!("non_text_code_source", out);
 }
 
 #[test]
@@ -129,6 +135,7 @@ fn cycle_detected_lists_chain() {
             ":line 7",
         ],
     );
+    insta::assert_snapshot!("cycle_detected", out);
 }
 
 #[test]
@@ -139,6 +146,7 @@ fn max_depth_exceeded_shows_limit() {
         &out,
         &["TransclusionError", "max recursion depth exceeded", "8"],
     );
+    insta::assert_snapshot!("max_depth_exceeded", out);
 }
 
 #[test]
@@ -159,6 +167,7 @@ fn condition_eval_shows_expr_and_state_hint() {
             "items not found",
         ],
     );
+    insta::assert_snapshot!("condition_eval", out);
 }
 
 #[test]
@@ -180,6 +189,7 @@ fn condition_parse_lists_operators_and_helpers() {
             "HasKey",
         ],
     );
+    insta::assert_snapshot!("condition_parse", out);
 }
 
 #[test]
@@ -194,6 +204,7 @@ fn relevel_shows_message() {
             "would push past H6",
         ],
     );
+    insta::assert_snapshot!("relevel", out);
 }
 
 #[test]
@@ -210,6 +221,7 @@ fn url_execution_disabled_shows_url() {
             "https://example.com/doc.md",
         ],
     );
+    insta::assert_snapshot!("url_execution_disabled", out);
 }
 
 #[test]
@@ -231,6 +243,7 @@ fn invalid_frontmatter_assignment_shows_cta() {
             "--allow-invalid-frontmatter-assignment",
         ],
     );
+    insta::assert_snapshot!("invalid_frontmatter_assignment", out);
 }
 
 #[test]
@@ -250,6 +263,7 @@ fn invalid_reassigned_frontmatter_property_shows_cta() {
             "--allow-reassigned-frontmatter-property",
         ],
     );
+    insta::assert_snapshot!("invalid_reassigned_frontmatter_property", out);
 }
 
 #[test]
@@ -257,6 +271,7 @@ fn io_error_shows_kind() {
     let err = TransclusionError::Io(io::Error::new(io::ErrorKind::NotFound, "file gone"));
     let out = render(&err);
     assert_contains_all(&out, &["TransclusionError", "I/O error", "NotFound"]);
+    insta::assert_snapshot!("io_error", out);
 }
 
 #[test]
@@ -265,6 +280,7 @@ fn url_parse_error_has_scheme_hint() {
     let err = TransclusionError::UrlParse(parse_error);
     let out = render(&err);
     assert_contains_all(&out, &["TransclusionError", "URL parse error", "https://"]);
+    insta::assert_snapshot!("url_parse_error", out);
 }
 
 #[test]
@@ -281,4 +297,5 @@ fn json_error_includes_position() {
             "column",
         ],
     );
+    insta::assert_snapshot!("json_error", out);
 }

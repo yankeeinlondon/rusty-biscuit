@@ -1,0 +1,12 @@
+---
+source: darkmatter/lib/tests/error_snapshots/reference.rs
+expression: out
+---
+⨫ ReferenceError: directive parse failed
+┃ Source: docs/root.md
+┃ Line: 5
+┃ Message: unexpected end
+┃ Directive:
+┃   ::file ./broken.md when=
+┃                             ^
+Expected: ::file ./doc.md, ::code ./file.rs, or ::url https://….

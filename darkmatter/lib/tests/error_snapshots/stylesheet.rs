@@ -19,6 +19,7 @@ fn invalid_declaration_shows_input() {
             "property: value",
         ],
     );
+    insta::assert_snapshot!("invalid_declaration", out);
 }
 
 #[test]
@@ -31,6 +32,7 @@ fn invalid_property_name_shows_name() {
         &out,
         &["StylesheetError", "invalid property name", "-moz@broken"],
     );
+    insta::assert_snapshot!("invalid_property_name", out);
 }
 
 #[test]
@@ -54,6 +56,7 @@ fn property_value_type_mismatch_shows_expected_actual_and_example() {
             "16px",
         ],
     );
+    insta::assert_snapshot!("property_value_type_mismatch", out);
 }
 
 #[test]
@@ -66,6 +69,7 @@ fn invalid_sizing_hints_at_accepted_tokens() {
         &out,
         &["StylesheetError", "invalid sizing value", "abc", "42px"],
     );
+    insta::assert_snapshot!("invalid_sizing", out);
 }
 
 #[test]
@@ -83,6 +87,7 @@ fn invalid_multi_sizing_shows_token_count_hint() {
             "1 to 4",
         ],
     );
+    insta::assert_snapshot!("invalid_multi_sizing", out);
 }
 
 #[test]
@@ -101,6 +106,7 @@ fn invalid_color_lists_accepted_formats() {
             "rgb(",
         ],
     );
+    insta::assert_snapshot!("invalid_color", out);
 }
 
 #[test]
@@ -113,6 +119,7 @@ fn invalid_integer_hints_at_whole_number() {
         &out,
         &["StylesheetError", "invalid integer value", "1.5", "-3"],
     );
+    insta::assert_snapshot!("invalid_integer", out);
 }
 
 #[test]
@@ -122,6 +129,7 @@ fn invalid_raw_value_hints_at_semicolons() {
     };
     let out = render(&err);
     assert_contains_all(&out, &["StylesheetError", "invalid raw value", "1px;"]);
+    insta::assert_snapshot!("invalid_raw_value", out);
 }
 
 #[test]
@@ -132,4 +140,5 @@ fn invalid_custom_property_hints_at_dashes() {
         &out,
         &["StylesheetError", "invalid custom property", "foo", "--"],
     );
+    insta::assert_snapshot!("invalid_custom_property", out);
 }

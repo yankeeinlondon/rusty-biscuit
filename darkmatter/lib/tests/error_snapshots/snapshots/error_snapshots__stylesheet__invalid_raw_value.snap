@@ -1,0 +1,7 @@
+---
+source: darkmatter/lib/tests/error_snapshots/stylesheet.rs
+expression: out
+---
+⨫ StylesheetError: invalid raw value
+┃ Value: 1px;
+Raw CSS values must not be empty and must not contain ;.

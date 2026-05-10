@@ -10,6 +10,7 @@ fn empty_source_has_actionable_hint() {
     let err = ImageRefError::EmptySource;
     let out = render(&err);
     assert_contains_all(&out, &["ImageRefError", "empty source", "ImageRef::new"]);
+    insta::assert_snapshot!("empty_source", out);
 }
 
 #[test]
@@ -17,6 +18,7 @@ fn missing_source_mentions_src_and_srcset() {
     let err = ImageRefError::MissingSource;
     let out = render(&err);
     assert_contains_all(&out, &["ImageRefError", "missing source", "src", "srcset"]);
+    insta::assert_snapshot!("missing_source", out);
 }
 
 #[test]
@@ -24,6 +26,7 @@ fn unrecognized_format_hints_at_markdown_and_html() {
     let err = ImageRefError::UnrecognizedFormat;
     let out = render(&err);
     assert_contains_all(&out, &["ImageRefError", "unrecognized image format"]);
+    insta::assert_snapshot!("unrecognized_format", out);
 }
 
 #[test]
@@ -38,6 +41,7 @@ fn malformed_html_includes_message() {
             "missing end of tag",
         ],
     );
+    insta::assert_snapshot!("malformed_html", out);
 }
 
 #[test]
@@ -57,6 +61,7 @@ fn malformed_markdown_includes_message_input_and_caret() {
         ],
     );
     assert_contains_all(&out, &["![alt] image.png", "^"]);
+    insta::assert_snapshot!("malformed_markdown_with_context", out);
 }
 
 #[test]
@@ -71,6 +76,7 @@ fn malformed_markdown_without_context_still_renders_message() {
             "missing closing bracket",
         ],
     );
+    insta::assert_snapshot!("malformed_markdown_without_context", out);
 }
 
 #[test]
@@ -85,6 +91,7 @@ fn invalid_style_delegates_stylesheet_block() {
         &out,
         &["StylesheetError", "invalid color value", "notacolor"],
     );
+    insta::assert_snapshot!("invalid_style_delegates", out);
 }
 
 #[test]
@@ -104,6 +111,7 @@ fn invalid_decoding_lists_accepted_values() {
             "auto",
         ],
     );
+    insta::assert_snapshot!("invalid_decoding", out);
 }
 
 #[test]
@@ -123,6 +131,7 @@ fn invalid_fetch_priority_lists_accepted_values() {
             "auto",
         ],
     );
+    insta::assert_snapshot!("invalid_fetch_priority", out);
 }
 
 #[test]
@@ -135,6 +144,7 @@ fn invalid_loading_lists_accepted_values() {
         &out,
         &["ImageRefError", "invalid loading", "never", "eager", "lazy"],
     );
+    insta::assert_snapshot!("invalid_loading", out);
 }
 
 #[test]
@@ -153,6 +163,7 @@ fn invalid_referrer_policy_suggests_close_match() {
             "no-referrer",
         ],
     );
+    insta::assert_snapshot!("invalid_referrer_policy_suggests", out);
 }
 
 #[test]
@@ -175,4 +186,5 @@ fn invalid_referrer_policy_lists_all_accepted_values_when_no_match() {
             "expected accepted value `{accepted}` in output; got:\n{out}"
         );
     }
+    insta::assert_snapshot!("invalid_referrer_policy_no_match", out);
 }

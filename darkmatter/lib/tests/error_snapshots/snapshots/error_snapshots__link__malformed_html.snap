@@ -1,0 +1,7 @@
+---
+source: darkmatter/lib/tests/error_snapshots/link.rs
+expression: out
+---
+⨫ LinkError: malformed HTML link
+┃ Message: missing </a>
+Ensure the link opens with &lt;a ...&gt; and closes with &lt;/a&gt; and has an href attribute.

@@ -1,0 +1,8 @@
+---
+source: darkmatter/lib/tests/error_snapshots/transclusion.rs
+expression: out
+---
+⨫ TransclusionError: directive option parse error
+┃ key must be a string at line 1 column 3
+┃ Position: line 1, column 3
+Directive options use JSON5; check braces, quoting, and commas.

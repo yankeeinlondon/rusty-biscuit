@@ -1,0 +1,8 @@
+---
+source: darkmatter/lib/tests/error_snapshots/transclusion.rs
+expression: out
+---
+⨫ TransclusionError: reassigned frontmatter property
+┃ Line: 6
+┃ Property: title
+Run with --allow-reassigned-frontmatter-property to downgrade to a warning.

@@ -1,0 +1,7 @@
+---
+source: darkmatter/lib/tests/error_snapshots/transclusion.rs
+expression: out
+---
+⨫ TransclusionError: unsupported file type
+┃ Path: ./thing.xyz
+Use ::file for markdown or ::code for text/source.

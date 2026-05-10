@@ -1,0 +1,8 @@
+---
+source: darkmatter/lib/tests/error_snapshots/reference.rs
+expression: out
+---
+⨫ ReferenceError: missing source context
+┃ Reference: ./sibling.md
+┃ Line: 3
+Load the document from a path or URL so relative references can resolve.
