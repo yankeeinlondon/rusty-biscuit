@@ -21,6 +21,10 @@ pub struct LaunchContext {
     pub package_area_root: Option<PathBuf>,
     /// Deepest matching workspace package root.
     pub package_root: Option<PathBuf>,
+    /// The provider slug (e.g. "claude", "codex") to inject into
+    /// `{{env.AGENT}}` template references during system-prompt composition.
+    /// When `None`, the wrapper falls back to the process environment.
+    pub agent: Option<String>,
 }
 
 impl LaunchContext {
@@ -82,6 +86,7 @@ impl LaunchContext {
             repo_root: git_root.map(|p| canonical_or_self(&p)),
             package_area_root: package_area_root.map(|p| canonical_or_self(&p)),
             package_root: package_root.map(|p| canonical_or_self(&p)),
+            agent: None,
         }
     }
 
@@ -290,6 +295,7 @@ mod tests {
     fn search_dirs_dedupes() {
         let path = PathBuf::from("/repo");
         let ctx = LaunchContext {
+            agent: None,
             cwd: path.clone(),
             repo_root: Some(path.clone()),
             package_area_root: Some(path.clone()),
@@ -308,6 +314,7 @@ mod tests {
         let repo = PathBuf::from("/repo");
 
         let ctx = LaunchContext {
+            agent: None,
             cwd: pkg.clone(),
             repo_root: Some(repo.clone()),
             package_area_root: Some(area.clone()),
@@ -325,6 +332,7 @@ mod tests {
     fn search_dirs_partial_context() {
         let repo = PathBuf::from("/repo");
         let ctx = LaunchContext {
+            agent: None,
             cwd: repo.clone(),
             repo_root: Some(repo.clone()),
             package_area_root: None,
@@ -339,6 +347,7 @@ mod tests {
     #[test]
     fn search_dirs_empty_context() {
         let ctx = LaunchContext {
+            agent: None,
             cwd: PathBuf::from("/tmp"),
             repo_root: None,
             package_area_root: None,

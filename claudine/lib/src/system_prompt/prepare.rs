@@ -119,7 +119,11 @@ fn build_shared_compose_context(
         std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."))
     };
 
-    ComposeContext::capture_for_content(&base_dir, &combined)
+    let mut ctx = ComposeContext::capture_for_content(&base_dir, &combined);
+    if let Some(ref agent) = launch_context.agent {
+        ctx.env_mut().insert("AGENT".to_string(), agent.clone());
+    }
+    ctx
 }
 
 /// Internal variant of [`prepare_system_prompt`] that accepts a
@@ -536,6 +540,7 @@ mod tests {
 
         let args = SystemPromptArgs::default();
         let context = LaunchContext {
+            agent: None,
             cwd: cwd.clone(),
             repo_root: Some(cwd),
             package_area_root: None,
@@ -586,6 +591,7 @@ mod tests {
 
         let args = SystemPromptArgs::default();
         let context = LaunchContext {
+            agent: None,
             cwd: repo.clone(),
             repo_root: Some(repo.clone()),
             package_area_root: None,
@@ -643,6 +649,7 @@ mod tests {
             ..Default::default()
         };
         let context = LaunchContext {
+            agent: None,
             cwd: repo.clone(),
             repo_root: Some(repo.clone()),
             package_area_root: None,
@@ -688,6 +695,7 @@ mod tests {
 
         let args = SystemPromptArgs::default();
         let context = LaunchContext {
+            agent: None,
             cwd: repo.clone(),
             repo_root: Some(repo.clone()),
             package_area_root: None,
@@ -724,6 +732,7 @@ mod tests {
 
         let args = SystemPromptArgs::default();
         let context = LaunchContext {
+            agent: None,
             cwd: cwd.clone(),
             repo_root: Some(cwd.clone()),
             package_area_root: None,
