@@ -235,6 +235,13 @@ pub(crate) struct TimeoutConfig {
     pub(crate) kill_grace: Duration,
     /// Watchdog ticker cadence.
     pub(crate) interval: Duration,
+    /// Wrapped provider, when known. Threaded through so the silence-rule
+    /// evaluator can apply provider-specific guards (notably the OpenCode
+    /// `provider_status` grace that suppresses `step_timeout` until at
+    /// least one `step_finish` boundary has been observed). `None`
+    /// disables all provider-specific guards; the wall-clock `timeout`
+    /// rule is unaffected.
+    pub(crate) provider: Option<claudine::provider::Provider>,
 }
 
 impl Default for TimeoutConfig {
@@ -244,6 +251,7 @@ impl Default for TimeoutConfig {
             step_timeout: None,
             kill_grace: Duration::from_secs(10),
             interval: Duration::from_secs(5),
+            provider: None,
         }
     }
 }
@@ -273,7 +281,16 @@ impl TimeoutConfig {
             step_timeout,
             kill_grace,
             interval,
+            provider: None,
         }
+    }
+
+    /// Set the wrapped provider so the silence-rule evaluator can apply
+    /// provider-specific guards (notably the OpenCode `provider_status`
+    /// grace).
+    pub(crate) fn with_provider(mut self, provider: claudine::provider::Provider) -> Self {
+        self.provider = Some(provider);
+        self
     }
 
     /// Returns `true` when the wall-clock rule is enabled.

@@ -1583,7 +1583,8 @@ pub(crate) fn execute_composition_request_inner(
             None,
             request.step_timeout.clone(),
             None,
-        );
+        )
+        .with_provider(provider);
 
         let mut child_spawned = false;
         let mut agent_perf: Option<crate::perf::AgentExecutionPerf> = None;

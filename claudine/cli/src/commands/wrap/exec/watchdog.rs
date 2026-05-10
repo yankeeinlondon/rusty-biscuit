@@ -453,9 +453,13 @@ pub(crate) fn evaluate_timeout_tick(
         }
     }
 
-    // Rule 2: stream silence. Requires that at least one activity event
+    // Rule 2: stream silence. Requires that at least one activity signal
     // has been observed past initial session start, matching the existing
-    // `last_event_at: Option<Instant>` first-event grace semantics.
+    // first-event grace semantics. Activity is the more recent of the
+    // structured-event clock (`last_event_at`) and the raw-byte clock
+    // (`last_byte_at`), so providers whose stream is sparse enough that
+    // structured events lag behind real progress (notably OpenCode) still
+    // refresh the silence reference whenever bytes flow.
     //
     // Stuck-aware evaluation: a tool or subagent is "stuck" when its
     // `last_progress_at` is older than the step_timeout budget. The rule
@@ -463,33 +467,55 @@ pub(crate) fn evaluate_timeout_tick(
     // If any item is stuck, the silence rule is allowed to fire so hung
     // work does not block termination indefinitely.
     if let Some(budget) = config.step_timeout {
-        let (last_event_at, stuck_tools, stuck_subagents, any_active, any_stuck) =
-            match live_metrics.lock() {
-                Ok(g) => {
-                    let stuck_tools: Vec<claudine::stream::progress::InFlightTool> =
-                        g.stuck_tools(now, budget).into_iter().cloned().collect();
-                    let stuck_subagents: Vec<claudine::stream::progress::InFlightSubagent> = g
-                        .stuck_subagents(now, budget)
-                        .into_iter()
-                        .cloned()
-                        .collect();
-                    let any_stuck = !stuck_tools.is_empty() || !stuck_subagents.is_empty();
-                    let any_active = !g.in_flight.is_empty() || !g.in_flight_subagents.is_empty();
-                    (
-                        g.last_event_at,
-                        stuck_tools,
-                        stuck_subagents,
-                        any_active,
-                        any_stuck,
-                    )
-                }
-                Err(_) => return WatchdogTickResult::Ok,
-            };
+        let (
+            last_activity_at,
+            stuck_tools,
+            stuck_subagents,
+            any_active,
+            any_stuck,
+            provider_status_seen,
+        ) = match live_metrics.lock() {
+            Ok(g) => {
+                let stuck_tools: Vec<claudine::stream::progress::InFlightTool> =
+                    g.stuck_tools(now, budget).into_iter().cloned().collect();
+                let stuck_subagents: Vec<claudine::stream::progress::InFlightSubagent> = g
+                    .stuck_subagents(now, budget)
+                    .into_iter()
+                    .cloned()
+                    .collect();
+                let any_stuck = !stuck_tools.is_empty() || !stuck_subagents.is_empty();
+                let any_active = !g.in_flight.is_empty() || !g.in_flight_subagents.is_empty();
+                let provider_status_seen = g.provider_status.is_some();
+                (
+                    g.last_activity_at(),
+                    stuck_tools,
+                    stuck_subagents,
+                    any_active,
+                    any_stuck,
+                    provider_status_seen,
+                )
+            }
+            Err(_) => return WatchdogTickResult::Ok,
+        };
+        // OpenCode-specific grace: this provider does not emit
+        // `tool_start` or `task_started` events, so `in_flight` /
+        // `in_flight_subagents` stay empty during legitimate work and
+        // the stuck-aware suppression above has nothing to suppress
+        // against. Until at least one `step_finish` boundary has been
+        // observed (`provider_status.is_some()`), suppress the silence
+        // rule entirely so slow startup and slow first turns cannot
+        // trip a kill. The wall-clock `timeout` rule above remains the
+        // unconditional backstop.
+        if config.provider == Some(claudine::provider::Provider::OpenCode)
+            && !provider_status_seen
+        {
+            return WatchdogTickResult::Ok;
+        }
         // Suppress step_timeout when all in-flight items are active (none stuck).
         if any_active && !any_stuck {
             return WatchdogTickResult::Ok;
         }
-        if let Some(last) = last_event_at {
+        if let Some(last) = last_activity_at {
             let silence = now.saturating_duration_since(last);
             if silence >= budget {
                 let outstanding = match watchdog_state.lock() {
@@ -1143,6 +1169,171 @@ mod tests {
     }
 
     #[test]
+    fn evaluate_timeout_tick_opencode_grace_suppresses_silence_until_step_finish() {
+        // OpenCode + step_timeout + no `step_finish` boundary observed
+        // (provider_status is None) + silence beyond budget → suppressed.
+        // This is the regression guard for the
+        // 2026-05-10-opencode-timeout-regression fix.
+        let config = TimeoutConfig {
+            timeout: None,
+            step_timeout: Some(Duration::from_secs(5)),
+            provider: Some(claudine::provider::Provider::OpenCode),
+            ..Default::default()
+        };
+        let state = Arc::new(std::sync::Mutex::new(WatchdogState::default()));
+        let metrics = claudine::stream::progress::new_live_metrics();
+        let fired = AtomicBool::new(false);
+        let t0 = Instant::now() - Duration::from_secs(10);
+
+        {
+            let mut m = metrics.lock().unwrap();
+            m.last_event_at = Some(t0);
+            // provider_status intentionally left at None.
+        }
+
+        let result = evaluate_timeout_tick(&config, Instant::now(), t0, &state, &metrics, &fired);
+        assert_eq!(
+            result,
+            WatchdogTickResult::Ok,
+            "OpenCode without an observed step_finish must suppress step_timeout"
+        );
+        assert!(!fired.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn evaluate_timeout_tick_opencode_grace_releases_after_step_finish() {
+        // OpenCode + step_timeout + `step_finish` boundary observed
+        // (provider_status is Some) + silence beyond budget → fires.
+        let config = TimeoutConfig {
+            timeout: None,
+            step_timeout: Some(Duration::from_secs(5)),
+            provider: Some(claudine::provider::Provider::OpenCode),
+            ..Default::default()
+        };
+        let state = Arc::new(std::sync::Mutex::new(WatchdogState::default()));
+        let metrics = claudine::stream::progress::new_live_metrics();
+        let fired = AtomicBool::new(false);
+        let t0 = Instant::now() - Duration::from_secs(10);
+
+        {
+            let mut m = metrics.lock().unwrap();
+            m.last_event_at = Some(t0);
+            m.provider_status = Some("stop".into());
+        }
+
+        let result = evaluate_timeout_tick(&config, Instant::now(), t0, &state, &metrics, &fired);
+        match result {
+            WatchdogTickResult::Breach(ref w) => {
+                assert_eq!(w.reason, WatchdogTerminationReason::StepTimeout);
+            }
+            other => panic!(
+                "expected StepTimeout breach once a step_finish boundary has been observed, \
+                 got: {other:?}"
+            ),
+        }
+        assert!(fired.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn evaluate_timeout_tick_opencode_grace_does_not_block_wall_clock() {
+        // OpenCode + wall-clock timeout breach must still fire even when
+        // provider_status is None. The OpenCode grace only suppresses the
+        // step_timeout silence rule, never the wall-clock backstop.
+        let config = TimeoutConfig {
+            timeout: Some(Duration::from_secs(5)),
+            step_timeout: Some(Duration::from_secs(5)),
+            provider: Some(claudine::provider::Provider::OpenCode),
+            ..Default::default()
+        };
+        let state = Arc::new(std::sync::Mutex::new(WatchdogState::default()));
+        let metrics = claudine::stream::progress::new_live_metrics();
+        let fired = AtomicBool::new(false);
+        let started_at = Instant::now() - Duration::from_secs(10);
+
+        {
+            let mut m = metrics.lock().unwrap();
+            m.last_event_at = Some(started_at);
+            // provider_status intentionally left at None.
+        }
+
+        let result = evaluate_timeout_tick(
+            &config,
+            Instant::now(),
+            started_at,
+            &state,
+            &metrics,
+            &fired,
+        );
+        assert!(
+            matches!(result, WatchdogTickResult::Breach(ref w) if w.reason == WatchdogTerminationReason::Timeout),
+            "wall-clock timeout must still fire on OpenCode regardless of provider_status; got: {result:?}"
+        );
+        assert!(fired.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn evaluate_timeout_tick_grace_does_not_apply_to_other_providers() {
+        // Claude (or any non-OpenCode provider) does not get the
+        // provider_status grace: silence beyond budget with no
+        // step_finish observed still fires step_timeout.
+        let config = TimeoutConfig {
+            timeout: None,
+            step_timeout: Some(Duration::from_secs(5)),
+            provider: Some(claudine::provider::Provider::Claude),
+            ..Default::default()
+        };
+        let state = Arc::new(std::sync::Mutex::new(WatchdogState::default()));
+        let metrics = claudine::stream::progress::new_live_metrics();
+        let fired = AtomicBool::new(false);
+        let t0 = Instant::now() - Duration::from_secs(10);
+
+        {
+            let mut m = metrics.lock().unwrap();
+            m.last_event_at = Some(t0);
+            // provider_status intentionally left at None.
+        }
+
+        let result = evaluate_timeout_tick(&config, Instant::now(), t0, &state, &metrics, &fired);
+        match result {
+            WatchdogTickResult::Breach(ref w) => {
+                assert_eq!(w.reason, WatchdogTerminationReason::StepTimeout);
+            }
+            other => panic!(
+                "Claude provider must not get OpenCode-specific grace; expected StepTimeout, got: {other:?}"
+            ),
+        }
+        assert!(fired.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn evaluate_timeout_tick_grace_does_not_apply_when_provider_unset() {
+        // No provider plumbed (None) → no grace; step_timeout fires
+        // normally so wrapper passthrough paths don't accidentally inherit
+        // OpenCode-specific behaviour.
+        let config = TimeoutConfig {
+            timeout: None,
+            step_timeout: Some(Duration::from_secs(5)),
+            provider: None,
+            ..Default::default()
+        };
+        let state = Arc::new(std::sync::Mutex::new(WatchdogState::default()));
+        let metrics = claudine::stream::progress::new_live_metrics();
+        let fired = AtomicBool::new(false);
+        let t0 = Instant::now() - Duration::from_secs(10);
+
+        {
+            let mut m = metrics.lock().unwrap();
+            m.last_event_at = Some(t0);
+        }
+
+        let result = evaluate_timeout_tick(&config, Instant::now(), t0, &state, &metrics, &fired);
+        assert!(
+            matches!(result, WatchdogTickResult::Breach(ref w) if w.reason == WatchdogTerminationReason::StepTimeout),
+            "provider=None must not enable OpenCode grace; got: {result:?}"
+        );
+    }
+
+    #[test]
     fn format_step_timeout_breach_message_no_outstanding() {
         let msg = format_step_timeout_breach_message(Duration::from_secs(180), &[], &[], &[]);
         assert!(msg.contains("3m 0s"));
@@ -1190,5 +1381,197 @@ mod tests {
         assert!(msg.contains("3m 0s"));
         assert!(msg.contains("1 tool"));
         assert!(msg.contains("Bash"));
+    }
+
+    // ---------------------------------------------------------------------
+    // Byte-heartbeat tests (Phase 2 of 2026-05-10-opencode-timeout-regression)
+    // ---------------------------------------------------------------------
+    //
+    // The silence rule reads `LiveMetricsState::last_activity_at()`, which
+    // returns the more recent of `last_event_at` and `last_byte_at`. These
+    // tests pin the contract that raw byte activity protects against false
+    // silence kills on sparse-stream providers, while a true zero-byte hang
+    // still fires.
+
+    #[test]
+    fn evaluate_timeout_tick_silence_suppressed_by_recent_byte_activity() {
+        // Stale `last_event_at`, but `last_byte_at` is fresh — bytes are
+        // still flowing from the child even though the structured parser
+        // has not produced a new SemanticEvent. The silence rule must
+        // pick the byte clock as the activity reference and suppress.
+        let config = TimeoutConfig {
+            timeout: None,
+            step_timeout: Some(Duration::from_secs(5)),
+            ..Default::default()
+        };
+        let state = Arc::new(std::sync::Mutex::new(WatchdogState::default()));
+        let metrics = claudine::stream::progress::new_live_metrics();
+        let fired = AtomicBool::new(false);
+        let now_t = Instant::now();
+        let stale = now_t - Duration::from_secs(10);
+
+        {
+            let mut m = metrics.lock().unwrap();
+            m.last_event_at = Some(stale);
+            m.last_byte_at = Some(now_t); // fresh byte activity
+        }
+
+        let result = evaluate_timeout_tick(&config, now_t, stale, &state, &metrics, &fired);
+        assert_eq!(
+            result,
+            WatchdogTickResult::Ok,
+            "recent byte activity must suppress step_timeout, got: {result:?}"
+        );
+        assert!(!fired.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn evaluate_timeout_tick_silence_fires_when_neither_clock_recent() {
+        // Both `last_event_at` and `last_byte_at` are stale beyond budget,
+        // and no in-flight items — the byte heartbeat must NOT mask a
+        // genuine zero-byte hang.
+        let config = TimeoutConfig {
+            timeout: None,
+            step_timeout: Some(Duration::from_secs(5)),
+            ..Default::default()
+        };
+        let state = Arc::new(std::sync::Mutex::new(WatchdogState::default()));
+        let metrics = claudine::stream::progress::new_live_metrics();
+        let fired = AtomicBool::new(false);
+        let stale = Instant::now() - Duration::from_secs(10);
+
+        {
+            let mut m = metrics.lock().unwrap();
+            m.last_event_at = Some(stale);
+            m.last_byte_at = Some(stale);
+        }
+
+        let result = evaluate_timeout_tick(&config, Instant::now(), stale, &state, &metrics, &fired);
+        assert!(
+            matches!(
+                result,
+                WatchdogTickResult::Breach(ref w) if w.reason == WatchdogTerminationReason::StepTimeout
+            ),
+            "stale byte clock must allow step_timeout to fire; got: {result:?}"
+        );
+        assert!(fired.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn evaluate_timeout_tick_silence_suppressed_when_only_byte_clock_set() {
+        // Defensive case: no structured events ever fired, but bytes are
+        // flowing (a provider that emits only raw text on stdout). The
+        // first-event grace on `last_event_at` is satisfied transitively
+        // by `last_byte_at` via `last_activity_at()`.
+        let config = TimeoutConfig {
+            timeout: None,
+            step_timeout: Some(Duration::from_secs(5)),
+            ..Default::default()
+        };
+        let state = Arc::new(std::sync::Mutex::new(WatchdogState::default()));
+        let metrics = claudine::stream::progress::new_live_metrics();
+        let fired = AtomicBool::new(false);
+        let now_t = Instant::now();
+
+        {
+            let mut m = metrics.lock().unwrap();
+            m.last_event_at = None;
+            m.last_byte_at = Some(now_t);
+        }
+
+        let result = evaluate_timeout_tick(&config, now_t, now_t, &state, &metrics, &fired);
+        assert_eq!(
+            result,
+            WatchdogTickResult::Ok,
+            "byte clock alone must satisfy first-event grace and suppress; got: {result:?}"
+        );
+        assert!(!fired.load(Ordering::SeqCst));
+    }
+
+    // ---------------------------------------------------------------------
+    // Claude-shaped regression guard for the in-flight gate.
+    // ---------------------------------------------------------------------
+    //
+    // The OpenCode `provider_status` grace must not change behaviour on
+    // rich-stream providers. With Provider::Claude, an active in-flight
+    // subagent must continue to suppress the silence rule via the
+    // existing stuck-aware gate (no provider grace required).
+
+    #[test]
+    fn evaluate_timeout_tick_claude_in_flight_gate_still_suppresses() {
+        let config = TimeoutConfig {
+            timeout: None,
+            step_timeout: Some(Duration::from_secs(5)),
+            provider: Some(claudine::provider::Provider::Claude),
+            ..Default::default()
+        };
+        let state = Arc::new(std::sync::Mutex::new(WatchdogState::default()));
+        let metrics = claudine::stream::progress::new_live_metrics();
+        let fired = AtomicBool::new(false);
+        let t0 = Instant::now() - Duration::from_secs(30);
+        let fresh = Instant::now();
+
+        {
+            let mut m = metrics.lock().unwrap();
+            m.last_event_at = Some(t0);
+            m.in_flight_subagents.insert(
+                "sa-1".into(),
+                claudine::stream::progress::InFlightSubagent {
+                    name: Some("rust-developer".into()),
+                    started_at: t0,
+                    last_progress_at: fresh,
+                },
+            );
+        }
+
+        let result = evaluate_timeout_tick(&config, Instant::now(), t0, &state, &metrics, &fired);
+        assert_eq!(
+            result,
+            WatchdogTickResult::Ok,
+            "Claude active subagent must suppress step_timeout via in-flight gate; got: {result:?}"
+        );
+        assert!(!fired.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn evaluate_timeout_tick_claude_in_flight_gate_fires_when_stuck() {
+        // Counter-test for the previous: when a Claude subagent is stuck
+        // (no progress for longer than budget) the in-flight gate releases
+        // and step_timeout fires normally, just as on any other provider.
+        let config = TimeoutConfig {
+            timeout: None,
+            step_timeout: Some(Duration::from_secs(5)),
+            provider: Some(claudine::provider::Provider::Claude),
+            ..Default::default()
+        };
+        let state = Arc::new(std::sync::Mutex::new(WatchdogState::default()));
+        let metrics = claudine::stream::progress::new_live_metrics();
+        let fired = AtomicBool::new(false);
+        let t0 = Instant::now() - Duration::from_secs(30);
+
+        {
+            let mut m = metrics.lock().unwrap();
+            m.last_event_at = Some(t0);
+            m.in_flight_subagents.insert(
+                "sa-1".into(),
+                claudine::stream::progress::InFlightSubagent {
+                    name: Some("rust-developer".into()),
+                    started_at: t0,
+                    last_progress_at: t0,
+                },
+            );
+        }
+
+        let result = evaluate_timeout_tick(&config, Instant::now(), t0, &state, &metrics, &fired);
+        match result {
+            WatchdogTickResult::Breach(ref w) => {
+                assert_eq!(w.reason, WatchdogTerminationReason::StepTimeout);
+                assert!(w.message.contains("rust-developer"));
+            }
+            other => panic!(
+                "Claude stuck subagent must release the in-flight gate; expected StepTimeout, got: {other:?}"
+            ),
+        }
+        assert!(fired.load(Ordering::SeqCst));
     }
 }

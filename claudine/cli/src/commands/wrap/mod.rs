@@ -1216,7 +1216,8 @@ fn run_provider_wrapper_inner(
                 None,
                 cli_step_timeout.clone(),
                 None,
-            );
+            )
+            .with_provider(provider);
             exec::run_child_stream_semantic(
                 binary_path.as_path(),
                 &child_args,

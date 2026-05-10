@@ -65,11 +65,27 @@ pub struct LiveMetricsState {
     /// compares against this to measure silence; a stale value means the
     /// provider has gone quiet.
     pub last_event_at: Option<Instant>,
+    /// Wall-clock time of the most recent non-empty byte chunk read from
+    /// the wrapped child's stdout or stderr — refreshed **before** the bytes
+    /// are handed to the semantic parser. Provider-agnostic activity signal
+    /// that protects against false silence kills on providers whose stream
+    /// is sparse enough that `last_event_at` can lag behind real progress
+    /// (e.g. OpenCode, which emits no `tool_start` and no `task_started`).
+    /// Empty / whitespace-only writes do not refresh this field.
+    pub last_byte_at: Option<Instant>,
     /// Wall-clock time of the most recent stalled-stream warning emission.
     /// Used by [`should_warn_stall`] to dedupe warnings within a single
     /// stall episode — once activity resumes (`last_event_at` advances past
     /// this value), the next stall is allowed to warn again.
     pub last_stall_warning_at: Option<Instant>,
+    /// Last observed provider step-completion status (e.g. OpenCode's
+    /// `step_finish.reason`: `"stop"`, `"tool-calls"`, `"length"`, …).
+    /// Populated from `SemanticEvent::Info` payloads carrying
+    /// `extra.step_phase = "finish"`. Used by the wrapper's silence-rule
+    /// guard for sparse-stream providers (notably OpenCode) so a session
+    /// that has not yet crossed any step boundary cannot trip
+    /// `step_timeout` during slow startup or a slow first turn.
+    pub provider_status: Option<String>,
 }
 
 impl LiveMetricsState {
@@ -112,6 +128,31 @@ impl LiveMetricsState {
         self.done_count += 1;
         self.last_event_at = Some(now);
         removed
+    }
+
+    /// Record raw byte activity from the wrapped child's stdout/stderr.
+    ///
+    /// Called from the wrapper's reader threads **before** the bytes reach
+    /// the semantic parser so that even partially-buffered output (provider
+    /// mid-flush) refreshes the silence clock. `chunk` is inspected to
+    /// suppress empty / whitespace-only writes — a child that flushes blank
+    /// lines must not look infinitely active.
+    pub fn record_byte_activity(&mut self, chunk: &str, now: Instant) {
+        if chunk.chars().any(|c| !c.is_whitespace()) {
+            self.last_byte_at = Some(now);
+        }
+    }
+
+    /// Most recent activity instant from either the structured-event clock
+    /// (`last_event_at`) or the raw-byte clock (`last_byte_at`), whichever
+    /// is newer. `None` when neither has fired yet.
+    pub fn last_activity_at(&self) -> Option<Instant> {
+        match (self.last_event_at, self.last_byte_at) {
+            (Some(a), Some(b)) => Some(a.max(b)),
+            (Some(a), None) => Some(a),
+            (None, Some(b)) => Some(b),
+            (None, None) => None,
+        }
     }
 
     /// Record assistant-text or other non-tool activity so the heartbeat
@@ -215,16 +256,30 @@ impl LiveMetricsState {
                 self.subagent_done_count += 1;
             }
             SemanticEvent::TurnComplete {
+                provider_status,
                 token_usage,
                 cost_usd,
                 ..
             } => {
+                if let Some(status) = provider_status {
+                    self.provider_status = Some(status.clone());
+                }
                 if let Some(usage) = token_usage {
                     self.token_usage = Some(usage.clone());
                 }
                 if let Some(cost) = cost_usd {
                     self.cost_usd = Some(*cost);
                 }
+            }
+            SemanticEvent::Info { extra, .. }
+                if extra.get("step_phase").and_then(|v| v.as_str()) == Some("finish") =>
+            {
+                let reason = extra
+                    .get("reason")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string())
+                    .unwrap_or_else(|| "finish".to_string());
+                self.provider_status = Some(reason);
             }
             _ => {}
         }
@@ -355,6 +410,53 @@ mod tests {
         assert!(
             !should_warn_stall(&state, Instant::now(), Duration::from_secs(60)),
             "must not warn when no activity has been observed at all"
+        );
+    }
+
+    #[test]
+    fn record_byte_activity_updates_last_byte_at_for_non_whitespace() {
+        let mut state = LiveMetricsState::default();
+        let now = Instant::now();
+        state.record_byte_activity("hello", now);
+        assert_eq!(state.last_byte_at, Some(now));
+    }
+
+    #[test]
+    fn record_byte_activity_ignores_whitespace_only() {
+        let mut state = LiveMetricsState::default();
+        let now = Instant::now();
+        state.record_byte_activity("", now);
+        state.record_byte_activity("   \t  ", now);
+        state.record_byte_activity("\n", now);
+        assert_eq!(
+            state.last_byte_at, None,
+            "whitespace-only writes must not refresh the byte clock"
+        );
+    }
+
+    #[test]
+    fn last_activity_at_picks_more_recent_clock() {
+        let mut state = LiveMetricsState::default();
+        assert_eq!(state.last_activity_at(), None);
+
+        let earlier = Instant::now() - Duration::from_secs(10);
+        let later = Instant::now();
+
+        state.last_event_at = Some(earlier);
+        assert_eq!(state.last_activity_at(), Some(earlier));
+
+        state.last_byte_at = Some(later);
+        assert_eq!(
+            state.last_activity_at(),
+            Some(later),
+            "byte clock newer than event clock must win"
+        );
+
+        state.last_event_at = Some(later + Duration::from_millis(1));
+        assert_eq!(
+            state.last_activity_at(),
+            Some(later + Duration::from_millis(1)),
+            "event clock newer than byte clock must win"
         );
     }
 
@@ -598,6 +700,72 @@ mod tests {
             assert_eq!(state.in_flight_subagents.len(), 1);
             let entry = state.in_flight_subagents.get("sa1").unwrap();
             assert_eq!(entry.name.as_deref(), Some("researcher"));
+        }
+
+        #[test]
+        fn turn_complete_records_provider_status() {
+            let mut state = LiveMetricsState::default();
+            let now = Instant::now();
+            state.observe_event(
+                &SemanticEvent::TurnComplete {
+                    provider_status: Some("end_turn".into()),
+                    token_usage: None,
+                    cost_usd: None,
+                    duration_ms: None,
+                    extra: serde_json::json!({}),
+                },
+                now,
+            );
+            assert_eq!(state.provider_status.as_deref(), Some("end_turn"));
+        }
+
+        #[test]
+        fn info_step_finish_records_provider_status_from_reason() {
+            // OpenCode's `step_finish` is parsed into
+            // `SemanticEvent::Info { extra: { step_phase: "finish", reason: ... } }`.
+            // The watchdog OpenCode-grace check keys off `provider_status`,
+            // so the reason must land in that field.
+            let mut state = LiveMetricsState::default();
+            let now = Instant::now();
+            state.observe_event(
+                &SemanticEvent::Info {
+                    message: "step_finish".into(),
+                    extra: serde_json::json!({
+                        "step_phase": "finish",
+                        "reason": "tool-calls",
+                    }),
+                },
+                now,
+            );
+            assert_eq!(state.provider_status.as_deref(), Some("tool-calls"));
+        }
+
+        #[test]
+        fn info_step_start_does_not_set_provider_status() {
+            let mut state = LiveMetricsState::default();
+            let now = Instant::now();
+            state.observe_event(
+                &SemanticEvent::Info {
+                    message: "step_start".into(),
+                    extra: serde_json::json!({"step_phase": "start"}),
+                },
+                now,
+            );
+            assert_eq!(state.provider_status, None);
+        }
+
+        #[test]
+        fn info_step_finish_without_reason_falls_back_to_finish() {
+            let mut state = LiveMetricsState::default();
+            let now = Instant::now();
+            state.observe_event(
+                &SemanticEvent::Info {
+                    message: "step_finish".into(),
+                    extra: serde_json::json!({"step_phase": "finish"}),
+                },
+                now,
+            );
+            assert_eq!(state.provider_status.as_deref(), Some("finish"));
         }
     }
 }

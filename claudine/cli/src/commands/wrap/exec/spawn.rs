@@ -658,6 +658,7 @@ pub(crate) fn run_child_stream_semantic(
     let stdout_renderer = text_renderer.clone();
     let first_semantic_at_clone = Arc::clone(&first_semantic_at);
     let first_raw_stdout_at_clone = Arc::clone(&first_raw_stdout_at);
+    let stdout_byte_metrics = live_metrics.clone();
     let stdout_handle = thread::spawn(move || {
         let _stream_guard = stream_span.enter();
         let _parse_span = info_span!("stream_parse").entered();
@@ -690,11 +691,21 @@ pub(crate) fn run_child_stream_semantic(
         for line in reader.lines() {
             let Ok(line) = line else { break };
 
+            let line_at = Instant::now();
             {
                 let mut g = first_raw_stdout_at_clone.lock().unwrap();
                 if g.is_none() {
-                    *g = Some(Instant::now());
+                    *g = Some(line_at);
                 }
+            }
+
+            // Provider-agnostic activity heartbeat: refresh the byte clock
+            // BEFORE feeding the line to the semantic parser, so even
+            // partially-buffered or post-completion-only providers (notably
+            // OpenCode, which emits no `tool_start` / `task_started`) keep
+            // the silence rule honest. Whitespace-only lines are ignored.
+            if let Ok(mut g) = stdout_byte_metrics.lock() {
+                g.record_byte_activity(&line, line_at);
             }
 
             if fallback_mode {
@@ -749,12 +760,23 @@ pub(crate) fn run_child_stream_semantic(
     let has_bridge = bridge_for_thread.is_some();
     let capture_always = has_bridge;
     let first_stderr_at_clone = Arc::clone(&first_stderr_at);
+    let stderr_byte_metrics = live_metrics.clone();
     let stderr_handle = thread::spawn(move || {
         let _stderr_guard = stderr_span.enter();
         let reader = BufReader::new(pipe);
         let mut captured = String::new();
         for line in reader.lines() {
             let Ok(line) = line else { break };
+
+            // Refresh the byte heartbeat for every non-empty stderr line,
+            // including noise-prefixed and bridge-consumed lines — those are
+            // still bytes flowing from the wrapped child and prove it is
+            // making progress. Done before noise filtering for that reason.
+            let line_at = Instant::now();
+            if let Ok(mut g) = stderr_byte_metrics.lock() {
+                g.record_byte_activity(&line, line_at);
+            }
+
             if prefixes.iter().any(|p| line.starts_with(p.as_str())) {
                 continue;
             }
@@ -762,7 +784,7 @@ pub(crate) fn run_child_stream_semantic(
             {
                 let mut g = first_stderr_at_clone.lock().unwrap();
                 if g.is_none() {
-                    *g = Some(Instant::now());
+                    *g = Some(line_at);
                 }
             }
 

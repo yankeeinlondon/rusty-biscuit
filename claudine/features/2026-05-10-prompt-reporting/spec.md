@@ -98,4 +98,5 @@ In this release our focus will be on how we're going to _change_ how we report t
                 - The summary takes advantage of the 
             - **Partial Prompt**
             - **Full Prompt**
-- 🧠
+- 🧠  
+- 🗣️
