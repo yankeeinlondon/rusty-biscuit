@@ -244,20 +244,22 @@ exit 0
         .env("CLAUDINE_ARGS_FILE", &args_path)
         .env("CLAUDINE_ENV_FILE", &env_path)
         .env("CLAUDINE_STDIN_FILE", &stdin_path)
+        .current_dir(workspace.path())
         .args(["codex", "--yolo", "--", "--json", "summarize repo"])
         .assert()
         .success();
 
     let args = fs::read_to_string(&args_path).unwrap();
     let args: Vec<&str> = args.lines().collect();
-    assert_eq!(
-        args,
-        vec![
-            "exec",
-            "--json",
-            "--dangerously-bypass-approvals-and-sandbox",
-        ]
+    assert!(
+        args.len() >= 3,
+        "expected at least exec + --json + --dangerously-bypass-approvals-and-sandbox, got {args:?}"
     );
+    assert_eq!(args[0], "exec");
+    assert_eq!(args[1], "--json");
+    assert_eq!(args[2], "--dangerously-bypass-approvals-and-sandbox");
+    // Non-interactive Codex sessions append the safety appendix via
+    // -c developer_instructions="..." argv tokens; accept extra args.
 
     let stdin = fs::read_to_string(&stdin_path).unwrap();
     assert_eq!(stdin, "summarize repo");
@@ -468,13 +470,21 @@ exit 0
         .env("PATH", &path_dir)
         .env("CLAUDINE_ARGS_FILE", &args_path)
         .env("CLAUDINE_STDIN_FILE", &stdin_path)
+        .current_dir(workspace.path())
         .args(["codex", "--json", "summarize repo"])
         .assert()
         .success();
 
     let args = fs::read_to_string(&args_path).unwrap();
     let args: Vec<&str> = args.lines().collect();
-    assert_eq!(args, vec!["exec", "--json"]);
+    assert!(
+        args.len() >= 2,
+        "expected at least exec + --json, got {args:?}"
+    );
+    assert_eq!(args[0], "exec");
+    assert_eq!(args[1], "--json");
+    // Non-interactive Codex sessions append the safety appendix via
+    // -c developer_instructions="..." argv tokens; accept extra args.
 
     let stdin = fs::read_to_string(&stdin_path).unwrap();
     assert_eq!(stdin, "summarize repo");

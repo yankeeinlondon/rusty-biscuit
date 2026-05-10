@@ -12,7 +12,6 @@ Environment Variables:
 • AGENT=codex
 • AGENT_PARAMS=["--include","OPENAI_API_KEY","--","--version"]
 • CLAUDINE_SESSION_ID=<redacted>
-• HOME=<redacted>
 • INTERACTIVE=true
 • PACKAGE=claudine-cli
 • PACKAGE_AREA=claudine
