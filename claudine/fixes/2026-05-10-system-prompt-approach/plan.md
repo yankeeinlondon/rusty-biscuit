@@ -1,46 +1,75 @@
 ---
 source_files_during_phase_1:
   - claudine/lib/src/provider/system_prompt.rs
+  - claudine/lib/src/provider/codex.rs
 docs_updated_during_phase_1: []
 docs_created_during_phase_1: []
 skills_files_updated_during_phase_1: []
+packages:
+  - claudine
+  - claudine-cli
 source_files_during_phase_2:
   - claudine/lib/src/provider/gemini.rs
   - claudine/lib/src/provider/codex.rs
   - claudine/lib/src/provider/qwen.rs
+  - claudine/lib/src/provider/tests.rs
 docs_updated_during_phase_2: []
 docs_created_during_phase_2: []
 skills_files_updated_during_phase_2: []
+packages:
+  - claudine
+  - claudine-cli
 source_files_during_phase_3:
   - claudine/cli/src/commands/wrap/system_prompt.rs
+  - claudine/lib/src/provider/qwen.rs
 docs_updated_during_phase_3: []
 docs_created_during_phase_3: []
 skills_files_updated_during_phase_3: []
+packages:
+  - claudine
+  - claudine-cli
 source_files_during_phase_4:
   - claudine/cli/src/commands/wrap/system_prompt.rs
+  - claudine/cli/src/commands/wrap/profile/mod.rs
   - claudine/cli/src/commands/wrap/profile/gemini.rs
   - claudine/cli/src/commands/wrap/profile/codex.rs
   - claudine/cli/src/commands/wrap/profile/qwen.rs
+  - claudine/cli/src/commands/wrap/profile/kimi.rs
+  - claudine/cli/src/commands/wrap/profile/claude.rs
+  - claudine/cli/src/commands/wrap/profile/goose.rs
+  - claudine/cli/src/commands/wrap/profile/opencode.rs
+  - claudine/cli/src/commands/wrap/mod.rs
+  - claudine/cli/src/commands/wrap/composition/mod.rs
 docs_updated_during_phase_4: []
 docs_created_during_phase_4: []
 skills_files_updated_during_phase_4: []
+packages:
+  - claudine
+  - claudine-cli
 source_files_during_phase_5:
   - claudine/cli/src/commands/wrap/mod.rs
   - claudine/cli/src/commands/wrap/sequence.rs
   - claudine/cli/src/commands/wrap/composition/mod.rs
   - claudine/cli/src/commands/wrap/profile/opencode.rs
+  - claudine/lib/src/system_prompt/context.rs
+  - claudine/lib/src/system_prompt/prepare.rs
+  - claudine/lib/src/system_prompt/resolve.rs
+  - claudine/cli/tests/wrap_commands.rs
+  - claudine/cli/tests/snapshots/wrap_commands__wrapper_reports_removed_sensitive_env_names.snap
+  - claudine/cli/tests/system_prompt_perf_bench.rs
 docs_updated_during_phase_5: []
 docs_created_during_phase_5: []
 skills_files_updated_during_phase_5: []
+packages:
+  - claudine
+  - claudine-cli
 source_files_during_phase_6:
-  - claudine/lib/src/provider/system_prompt.rs
   - claudine/cli/src/commands/wrap/system_prompt.rs
-  - claudine/cli/src/commands/wrap/profile/gemini.rs
-  - claudine/cli/src/commands/wrap/profile/codex.rs
-  - claudine/cli/src/commands/wrap/profile/qwen.rs
 docs_updated_during_phase_6: []
 docs_created_during_phase_6: []
 skills_files_updated_during_phase_6: []
+packages:
+  - claudine-cli
 source_files_during_phase_7: []
 docs_updated_during_phase_7:
   - claudine/docs/topics/system-prompt.md

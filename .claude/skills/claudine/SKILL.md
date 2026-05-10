@@ -76,6 +76,10 @@ Argv is pre-parsed before clap on 2026-04-17 (feature: `2026-04-17-cli-pre-proce
 
 System prompt handling is shared across wrapped provider subcommands and the Markdown composition surfaces. The current contract is file-backed only: `--append-system-prompt` / `--asp` and `--replace-system-prompt` / `--rsp`, with standard `system-prompt.md` discovery from the launch CWD hierarchy when neither flag is provided. Direct provider wrappers also support `--edit`, which opens the resolved editor on a temporary `.md` buffer, seeds it from any inline prompt, and aborts cleanly on an empty saved buffer. `compose`, `inline-compose`, and `sequence` all pass through the same `system_prompt` pipeline as the direct provider wrappers.
 
+Delivery is spec-driven: `ProviderInfo::system_prompt` declares a `SystemPromptSpec` with per-mode (`Append`/`Replace`) and per-interactivity (`interactive`/`non_interactive`) `SystemPromptDelivery` variants. The wrap layer dispatches on these variants rather than hard-coding per-provider logic. Supported delivery mechanisms include inline argv flags (`InlineFlag`), file-backed argv flags (`FileFlag`), environment variables pointing to temp files (`EnvVarFile`), config-override inline values (`ConfigKeyInline`), config-override file paths (`ConfigKeyFile`), and the legacy shadow-HOME path (`ShadowHomeFile`).
+
+Transient overlay artifacts are written to a scoped temp directory inside the user's trust boundary: `<repo_root>/.claudine/tmp/` when in a repo, `<launch_cwd>/.claudine-tmp/` otherwise. Files are created via `tempfile::Builder` with `.md` suffix and cleaned up by `Drop` when the wrap call returns. Best-effort `.gitignore` augmentation appends the temp directory entry idempotently.
+
 **Shared Resources**
 
 | Command | Description |

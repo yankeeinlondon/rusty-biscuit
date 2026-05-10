@@ -100,6 +100,8 @@ qwen -p "Review this patch" --append-system-prompt "Focus on concrete findings."
 - `--system-prompt` replaces the built-in main-session prompt (context files like `QWEN.md` are still appended).
 - `--append-system-prompt` adds extra instructions after the built-in prompt and loaded context.
 
+**Claudine integration:** Claudine uses `--append-system-prompt` (append) and `--system-prompt` (replace) as the in-flight mechanisms for system prompt delivery. Both pass the prompt content inline as argv flags, so no temp files or HOME redirect are needed. The persistent provider state directory (`~/.qwen/`) remains fully visible to the child.
+
 ### Output formats for automation
 
 | Flag | Format | Use case |

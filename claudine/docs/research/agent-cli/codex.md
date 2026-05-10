@@ -172,6 +172,8 @@ Additional developer instructions injected into the session context:
 developer_instructions = "Always use TypeScript strict mode. Prefer functional patterns."
 ```
 
+**Claudine integration:** Claudine uses `-c developer_instructions="..."` for append mode (inline, subject to a 64 KB argv cap) and `-c model_instructions_file=<path>` for replace mode (scoped temp file). The persistent provider state directory (`~/.codex/`) remains fully visible to the child; no HOME redirect is used. If append exceeds the argv cap, the wrap fails with a clear message directing the user to `--replace-system-prompt`.
+
 ### Personality
 
 Controls communication style for models that support it:
