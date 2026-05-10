@@ -1,5 +1,5 @@
 use darkmatter::markdown::Markdown;
-use darkmatter::markdown::compose::ComposeOptions;
+use darkmatter::markdown::compose::{ComposeContext, ComposeOptions};
 use tracing::info_span;
 
 use crate::system_prompt::types::*;
@@ -25,9 +25,39 @@ fn mode_for_source(source: &SystemPromptSource) -> SystemPromptMode {
 fn compose_prompt_markdown(
     source: &SystemPromptSource,
     raw_text: &str,
+    shared_ctx: Option<&ComposeContext>,
 ) -> Result<String, crate::error::ClaudineError> {
     let md: Markdown = raw_text.into();
-    let mut options = ComposeOptions::new();
+
+    // Demand-driven runtime-context capture (perf, 2026-05-10).
+    //
+    // The default `ComposeOptions::new()` calls `ComposeContext::capture()`
+    // which runs the full `ContextGroup::all()` pipeline: git, repo, file
+    // changes, languages, document discovery, OS detection, hardware
+    // summary, and a GPU subprocess on macOS. On a representative
+    // worktree this measures ~150 ms per call. The system-prompt path
+    // does this twice (system prompt + non-interactive appendix), turning
+    // a sub-second prep phase into a 300+ ms tax on every compose run.
+    //
+    // System prompts and non-interactive appendices rarely reference
+    // `ctx.*` at all. `ComposeContext::capture_for_content` scans the
+    // raw text for `ctx.*` tokens and only captures the groups whose
+    // variables are referenced — DateTime is free, the rest is skipped
+    // entirely when the file has no `ctx.*` references. When the caller
+    // already has a context covering the union of all relevant content
+    // (e.g. system-prompt + non-interactive appendix), it can pass it
+    // through `shared_ctx` so the per-call capture is skipped.
+    let ctx = match shared_ctx {
+        Some(c) => c.clone(),
+        None => {
+            let base_dir = match source_path(source).and_then(|p| p.parent()) {
+                Some(parent) => parent.to_path_buf(),
+                None => std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")),
+            };
+            ComposeContext::capture_for_content(&base_dir, raw_text)
+        }
+    };
+    let mut options = ComposeOptions::new_with_context(ctx);
     if let Some(path) = source_path(source) {
         options = options.with_source_file(path);
     }
@@ -50,13 +80,78 @@ fn merge_prompt_sections(base: &str, appendix: &str) -> String {
     }
 }
 
-fn prepare_non_interactive_appendix(
-    context: &crate::system_prompt::context::LaunchContext,
-) -> Result<PreparedNonInteractiveAppendix, crate::error::ClaudineError> {
-    for (source, raw_text) in
-        crate::system_prompt::resolve::resolve_non_interactive_candidates(context)?
+/// Capture a single `ComposeContext` covering every text body that the
+/// caller will compose this session.
+///
+/// Scans the union of all bodies for `ctx.*` references via
+/// [`ComposeContext::capture_for_content`] so each runtime-context
+/// group (Repo, OS, Hardware, etc.) is captured at most once even when
+/// the system prompt and the non-interactive appendix together
+/// reference fields from several groups.
+fn build_shared_compose_context(
+    primary: Option<(&SystemPromptSource, &str)>,
+    appendix_candidates: Option<&[(&SystemPromptSource, &str)]>,
+    launch_context: &crate::system_prompt::context::LaunchContext,
+) -> ComposeContext {
+    let mut combined = String::new();
+    if let Some((_, text)) = primary {
+        combined.push_str(text);
+        combined.push('\n');
+    }
+    if let Some(candidates) = appendix_candidates {
+        for (_, text) in candidates {
+            combined.push_str(text);
+            combined.push('\n');
+        }
+    }
+
+    // Anchor the capture to a directory that exists. Prefer the launch
+    // context's CWD because resolution is most often rooted there;
+    // falling back to the source file's parent or the process CWD
+    // mirrors the pre-shared-context behaviour for callers that don't
+    // pass a primary source.
+    let base_dir = if launch_context.cwd.exists() {
+        launch_context.cwd.clone()
+    } else if let Some(parent) = primary.and_then(|(s, _)| source_path(s).and_then(|p| p.parent()))
     {
-        let composed_markdown = compose_prompt_markdown(&source, &raw_text)?;
+        parent.to_path_buf()
+    } else {
+        std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."))
+    };
+
+    ComposeContext::capture_for_content(&base_dir, &combined)
+}
+
+/// Internal variant of [`prepare_system_prompt`] that accepts a
+/// pre-captured shared context. The public entrypoint passes `None`
+/// to preserve its original capture semantics.
+fn prepare_system_prompt_with_ctx(
+    source: SystemPromptSource,
+    raw_text: &str,
+    shared_ctx: Option<&ComposeContext>,
+) -> Result<EffectiveSystemPrompt, crate::error::ClaudineError> {
+    let mode = mode_for_source(&source);
+    let composed_markdown = compose_prompt_markdown(&source, raw_text, shared_ctx)?;
+    if composed_markdown.trim().is_empty() {
+        return Ok(EffectiveSystemPrompt::Disabled { source });
+    }
+    Ok(EffectiveSystemPrompt::Ready(PreparedSystemPrompt {
+        mode,
+        source,
+        raw_text: raw_text.to_string(),
+        composed_markdown,
+        non_interactive_appendix: None,
+    }))
+}
+
+/// Variant of [`prepare_non_interactive_appendix`] that consumes an
+/// already-resolved candidate list and an optional shared context.
+fn prepare_non_interactive_appendix_from(
+    candidates: Vec<(SystemPromptSource, String)>,
+    shared_ctx: Option<&ComposeContext>,
+) -> Result<PreparedNonInteractiveAppendix, crate::error::ClaudineError> {
+    for (source, raw_text) in candidates {
+        let composed_markdown = compose_prompt_markdown(&source, &raw_text, shared_ctx)?;
         let normalized = composed_markdown.trim().to_string();
         if normalized.is_empty() {
             continue;
@@ -67,7 +162,6 @@ fn prepare_non_interactive_appendix(
             composed_markdown: normalized,
         });
     }
-
     unreachable!("non-interactive prompt candidates must include a built-in fallback")
 }
 
@@ -81,7 +175,7 @@ pub fn prepare_system_prompt(
     raw_text: &str,
 ) -> Result<EffectiveSystemPrompt, crate::error::ClaudineError> {
     let mode = mode_for_source(&source);
-    let composed_markdown = compose_prompt_markdown(&source, raw_text)?;
+    let composed_markdown = compose_prompt_markdown(&source, raw_text, None)?;
 
     // Empty-body check
     if composed_markdown.trim().is_empty() {
@@ -118,17 +212,43 @@ pub fn resolve_and_prepare_for_session(
         repo = %context.repo_root.as_ref().map(|p| p.display().to_string()).unwrap_or_default(),
     )
     .entered();
-    let effective =
-        match crate::system_prompt::resolve::resolve_system_prompt_source(args, context)? {
-            Some((source, raw_text)) => prepare_system_prompt(source, &raw_text)?,
-            None => EffectiveSystemPrompt::None,
-        };
+
+    // Resolve sources up front so we can capture the runtime context
+    // once over the union of every text body that will go through
+    // Darkmatter compose. Capturing per-call paid the demand-driven
+    // cost twice (system prompt + appendix); a single pre-capture pays
+    // it once.
+    let primary = crate::system_prompt::resolve::resolve_system_prompt_source(args, context)?;
+    let appendix_candidates = if non_interactive {
+        Some(crate::system_prompt::resolve::resolve_non_interactive_candidates(
+            context,
+        )?)
+    } else {
+        None
+    };
+
+    let shared_ctx = build_shared_compose_context(
+        primary.as_ref().map(|(s, t)| (s, t.as_str())),
+        appendix_candidates
+            .as_ref()
+            .map(|cs| cs.iter().map(|(s, t)| (s, t.as_str())).collect::<Vec<_>>())
+            .as_deref(),
+        context,
+    );
+
+    let effective = match primary {
+        Some((source, raw_text)) => prepare_system_prompt_with_ctx(source, &raw_text, Some(&shared_ctx))?,
+        None => EffectiveSystemPrompt::None,
+    };
 
     if !non_interactive {
         return Ok(effective);
     }
 
-    let appendix = prepare_non_interactive_appendix(context)?;
+    let appendix = prepare_non_interactive_appendix_from(
+        appendix_candidates.unwrap_or_default(),
+        Some(&shared_ctx),
+    )?;
 
     Ok(match effective {
         EffectiveSystemPrompt::Ready(mut prepared) => {
