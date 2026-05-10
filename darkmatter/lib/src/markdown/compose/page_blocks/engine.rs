@@ -114,7 +114,15 @@ mod tests {
     }
 
     fn render(content: &str, state: &EffectiveState) -> (String, ComposeReport) {
-        let regions = parse_page_blocks(content).unwrap();
+        use biscuit_terminal::errors::SourceContext;
+        use std::path::PathBuf;
+        use std::sync::Arc;
+        let source = SourceContext::new(
+            PathBuf::from("/test.md"),
+            PathBuf::from("test.md"),
+            Arc::from(content),
+        );
+        let regions = parse_page_blocks(content, source).unwrap();
         let mut report = ComposeReport::default();
         let output = render_page_blocks(content, &regions, state, &mut report).unwrap();
         (output, report)
@@ -217,7 +225,12 @@ mod tests {
     fn condition_parse_error_propagates() {
         let content = "::block when=\"==\"\nbody\n::end-block\n";
         let state = state_with(json!({}));
-        let regions = parse_page_blocks(content).unwrap();
+        let source = SourceContext::new(
+            std::path::PathBuf::from("/test.md"),
+            std::path::PathBuf::from("test.md"),
+            std::sync::Arc::from(content),
+        );
+        let regions = parse_page_blocks(content, source).unwrap();
         let mut report = ComposeReport::default();
         let result = render_page_blocks(content, &regions, &state, &mut report);
         assert!(result.is_err());

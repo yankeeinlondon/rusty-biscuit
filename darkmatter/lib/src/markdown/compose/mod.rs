@@ -1182,7 +1182,8 @@ impl Markdown {
         report: &mut ComposeReport,
     ) -> MarkdownResult<()> {
         debug!("compose: running page blocks");
-        let regions = page_blocks::parser::parse_page_blocks(&self.content)?;
+        let source = self.source_context_for_errors();
+        let regions = page_blocks::parser::parse_page_blocks(&self.content, source)?;
         if regions.is_empty() {
             return Ok(());
         }

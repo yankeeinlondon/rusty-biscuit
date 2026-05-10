@@ -166,6 +166,28 @@ impl Markdown {
         &self.source
     }
 
+    /// Build a [`SourceContext`] for error rendering from the document's
+    /// source and content.
+    pub fn source_context_for_errors(&self) -> biscuit_terminal::errors::SourceContext {
+        use std::sync::Arc;
+        let content = Arc::from(self.content.as_str());
+        match &self.source {
+            Some(ComposeSource::File(path)) => {
+                let absolute = path.canonicalize().unwrap_or_else(|_| path.clone());
+                biscuit_terminal::errors::SourceContext::new(
+                    absolute,
+                    path.clone(),
+                    content,
+                )
+            }
+            _ => biscuit_terminal::errors::SourceContext::new(
+                std::path::PathBuf::from("unknown"),
+                std::path::PathBuf::from("unknown"),
+                content,
+            ),
+        }
+    }
+
     /// Sets the compose source, returning the modified document.
     pub fn with_source(mut self, source: ComposeSource) -> Self {
         self.source = Some(source);

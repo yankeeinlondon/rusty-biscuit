@@ -204,16 +204,20 @@ mod tests {
 
     #[test]
     fn page_block_unterminated_has_opening_line() {
+        let ctx = biscuit_terminal::errors::SourceContext::new(
+            std::path::PathBuf::from("/test.md"),
+            std::path::PathBuf::from("test.md"),
+            "::block when=\"x\"\nbody\n",
+        );
         let err = PageBlockError::UnterminatedBlock {
-            line: 14,
+            ctx,
+            opening_line: 14,
             opening_text: "::block when=\"x\"".to_string(),
-            file_ends_at_line: 50,
         };
         let out = render(&err);
         assert!(out.contains("unterminated"));
         assert!(out.contains("14"));
         assert!(out.contains("::block when=\"x\""));
-        assert!(out.contains("50"));
         assert!(out.contains("::end-block"));
     }
 
