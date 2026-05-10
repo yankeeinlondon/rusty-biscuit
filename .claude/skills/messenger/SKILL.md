@@ -43,9 +43,9 @@ Providers like Discord render Markdown in chat but generate desktop notification
 CLI equivalents:
 
 ```bash
-messenger send "**rich**" --route discord:channel                        # default
-messenger send "**rich**" --summary "plain" --route discord:channel      # split
-messenger send "**rich**" --strip-markdown --route discord:channel       # stripped
+messenger send "**rich**" --route discord.channel                        # default
+messenger send "**rich**" --summary "plain" --route discord.channel      # split
+messenger send "**rich**" --strip-markdown --route discord.channel       # stripped
 ```
 
 ## Provider Support
