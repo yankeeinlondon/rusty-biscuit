@@ -8,9 +8,7 @@ use clap::{Parser, Subcommand, ValueEnum};
 use colored::Colorize;
 
 use schematic_gen::commands::WsRoleArg;
-use schematic_gen::pipeline::{
-    self, GenerateOpts, OpenApiFormat as PipelineOpenApiFormat,
-};
+use schematic_gen::pipeline::{self, GenerateOpts, OpenApiFormat as PipelineOpenApiFormat};
 
 /// OpenAPI output format for CLI.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, ValueEnum)]

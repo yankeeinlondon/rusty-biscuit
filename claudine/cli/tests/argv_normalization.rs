@@ -332,6 +332,37 @@ fn passthrough_root_help_renders_custom_help_screen() {
     );
 }
 
+/// Non-composition subcommands must accept `--help` and render clap's
+/// per-subcommand help screen. The root `Cli` sets `disable_help_flag = true`,
+/// which clap propagates to subcommands; `parse_cli_from` re-injects an
+/// `ArgAction::Help` arg on every non-wrapper subcommand to compensate.
+#[test]
+fn non_composition_subcommands_accept_help_flag() {
+    for sub in [
+        "completions",
+        "hooks",
+        "skills",
+        "sync",
+        "providers",
+        "agents",
+    ] {
+        let output = cargo_bin_cmd!("claudine")
+            .env("NO_COLOR", "1")
+            .args([sub, "--help"])
+            .assert()
+            .success()
+            .get_output()
+            .clone();
+
+        let stdout = strip_ansi(&String::from_utf8_lossy(&output.stdout));
+        assert!(
+            stdout.contains("Usage:") && stdout.contains("--help"),
+            "`claudine {sub} --help` should render clap's per-subcommand \
+             help screen with a Usage line and a --help entry; got: {stdout}"
+        );
+    }
+}
+
 /// `claudine hooks --describe` exercises a non-composition subcommand
 /// path. Rule 3 is gated on composition subcommands and must not fire
 /// here; Rules 1 and 2 have nothing to rewrite.

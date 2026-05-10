@@ -42,15 +42,15 @@ use super::{
 };
 use crate::log;
 
-pub(crate) mod structured;
-pub(crate) mod summary;
 pub(crate) mod inline_guards;
 pub(crate) mod legacy_goose;
+pub(crate) mod structured;
+pub(crate) mod summary;
 
 // Re-export the public API so existing callers don't break.
+pub(crate) use inline_guards::{cleanup_inline_output, split_frontmatter_and_body};
 pub(crate) use structured::run_structured_composition;
 pub(crate) use summary::{emit_composition_summary, emit_minimal_composition_summary};
-pub(crate) use inline_guards::{cleanup_inline_output, split_frontmatter_and_body};
 
 /// Result of executing a single composition step through the wrapper pipeline.
 pub(crate) struct SingleCompositionOutcome {
@@ -1221,8 +1221,7 @@ pub(crate) fn execute_composition_request_inner(
             detail_requested,
             &env_context,
             &dispatch_context,
-            Some(materialized_harness_prompt_from_prepared(&request.prepared,
-            )),
+            Some(materialized_harness_prompt_from_prepared(&request.prepared)),
             &term,
             lifecycle,
             &lifecycle_ctx,
@@ -1706,7 +1705,10 @@ mod tests {
         // No CLI/frontmatter/env: timeout has no built-in default (None);
         // step_timeout falls back to 30m.
         assert_eq!(cfg.timeout, None);
-        assert_eq!(cfg.step_timeout, Some(std::time::Duration::from_secs(30 * 60)));
+        assert_eq!(
+            cfg.step_timeout,
+            Some(std::time::Duration::from_secs(30 * 60))
+        );
     }
 
     #[test]
@@ -1728,7 +1730,10 @@ mod tests {
 
         let cfg = resolve_timeouts(None, None, None, None);
         assert_eq!(cfg.timeout, None);
-        assert_eq!(cfg.step_timeout, Some(std::time::Duration::from_secs(30 * 60)));
+        assert_eq!(
+            cfg.step_timeout,
+            Some(std::time::Duration::from_secs(30 * 60))
+        );
     }
 
     #[test]
@@ -1737,12 +1742,7 @@ mod tests {
         let _g1 = EnvGuard::clear("CLAUDINE_TIMEOUT");
         let _g2 = EnvGuard::clear("CLAUDINE_STEP_TIMEOUT");
 
-        let cfg = resolve_timeouts(
-            Some("2h".into()),
-            None,
-            Some("5m".into()),
-            None,
-        );
+        let cfg = resolve_timeouts(Some("2h".into()), None, Some("5m".into()), None);
         assert_eq!(cfg.timeout, Some(std::time::Duration::from_secs(7200)));
         assert_eq!(cfg.step_timeout, Some(std::time::Duration::from_secs(300)));
     }
@@ -1755,14 +1755,12 @@ mod tests {
 
         // parse_timeout rejects 0s, so CLI layer falls through to next
         // precedence (which is None here), resulting in built-in defaults.
-        let cfg = resolve_timeouts(
-            Some("0s".into()),
-            None,
-            Some("0s".into()),
-            None,
-        );
+        let cfg = resolve_timeouts(Some("0s".into()), None, Some("0s".into()), None);
         assert_eq!(cfg.timeout, None);
-        assert_eq!(cfg.step_timeout, Some(std::time::Duration::from_secs(30 * 60)));
+        assert_eq!(
+            cfg.step_timeout,
+            Some(std::time::Duration::from_secs(30 * 60))
+        );
     }
 
     #[test]
@@ -1771,12 +1769,7 @@ mod tests {
         let _g1 = EnvGuard::clear("CLAUDINE_TIMEOUT");
         let _g2 = EnvGuard::clear("CLAUDINE_STEP_TIMEOUT");
 
-        let cfg = resolve_timeouts(
-            Some("2h".into()),
-            None,
-            Some("30m".into()),
-            None,
-        );
+        let cfg = resolve_timeouts(Some("2h".into()), None, Some("30m".into()), None);
         assert_eq!(cfg.timeout, Some(std::time::Duration::from_secs(7200)));
         assert_eq!(cfg.step_timeout, Some(std::time::Duration::from_secs(1800)));
     }
@@ -1787,12 +1780,7 @@ mod tests {
         let _g1 = EnvGuard::clear("CLAUDINE_TIMEOUT");
         let _g2 = EnvGuard::clear("CLAUDINE_STEP_TIMEOUT");
 
-        let cfg = resolve_timeouts(
-            Some("2h".into()),
-            None,
-            Some("5m".into()),
-            None,
-        );
+        let cfg = resolve_timeouts(Some("2h".into()), None, Some("5m".into()), None);
         assert_eq!(cfg.timeout, Some(std::time::Duration::from_secs(7200)));
         assert_eq!(cfg.step_timeout, Some(std::time::Duration::from_secs(300)));
     }
@@ -1805,12 +1793,7 @@ mod tests {
 
         // Bare seconds like "60" are rejected by parse_timeout, so CLI
         // falls through to env / frontmatter / built-in.
-        let cfg = resolve_timeouts(
-            Some("60".into()),
-            None,
-            Some("45".into()),
-            None,
-        );
+        let cfg = resolve_timeouts(Some("60".into()), None, Some("45".into()), None);
         assert_eq!(cfg.timeout, Some(std::time::Duration::from_secs(3600)));
         assert_eq!(cfg.step_timeout, Some(std::time::Duration::from_secs(300)));
     }

@@ -125,8 +125,8 @@ fn every_referenced_variable_is_declared_for_all_apis() {
         }
 
         checked_files += 1;
-        let bytes = std::fs::read(&path)
-            .unwrap_or_else(|e| panic!("read {}: {}", path.display(), e));
+        let bytes =
+            std::fs::read(&path).unwrap_or_else(|e| panic!("read {}: {}", path.display(), e));
         let json: Value = serde_json::from_slice(&bytes)
             .unwrap_or_else(|e| panic!("parse {}: {}", path.display(), e));
 

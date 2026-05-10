@@ -97,7 +97,8 @@ impl RuntimeMatcher {
 fn expression_uses_known_features(expr: &Expr) -> bool {
     match expr {
         Expr::Variable(_) => false,
-        Expr::StringLiteral(_) | Expr::NumberLiteral(_) => true,
+        Expr::Paren(inner) => expression_uses_known_features(inner),
+        Expr::StringLiteral(_) | Expr::NumberLiteral(_) | Expr::BoolLiteral(_) => true,
         Expr::UnaryNot(_)
         | Expr::Fallback { .. }
         | Expr::Ternary { .. }

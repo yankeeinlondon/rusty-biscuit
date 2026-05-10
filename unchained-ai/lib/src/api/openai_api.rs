@@ -262,11 +262,7 @@ pub async fn get_provider_models_from_api(
         vec![]
     };
 
-    info!(
-        "Fetched {} models from {}",
-        entries.len(),
-        provider_name
-    );
+    info!("Fetched {} models from {}", entries.len(), provider_name);
 
     Ok(entries)
 }
@@ -285,8 +281,8 @@ pub async fn get_provider_models_from_api(
 /// Returns `ProviderError::NoProvidersAvailable` if no API keys are configured.
 /// Individual provider failures are logged but don't fail the entire operation.
 #[tracing::instrument]
-pub async fn get_all_provider_models(
-) -> Result<HashMap<Provider, Vec<ProviderModelEntry>>, ProviderError> {
+pub async fn get_all_provider_models()
+-> Result<HashMap<Provider, Vec<ProviderModelEntry>>, ProviderError> {
     use std::time::Duration;
 
     let api_keys = get_api_keys();

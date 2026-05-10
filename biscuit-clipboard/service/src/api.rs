@@ -1983,7 +1983,10 @@ mod tests {
             assert_eq!(resp.status(), StatusCode::OK);
         }
 
-        assert!(!dat_path.exists(), "spilled file must be removed on eviction");
+        assert!(
+            !dat_path.exists(),
+            "spilled file must be removed on eviction"
+        );
     }
 
     #[tokio::test]

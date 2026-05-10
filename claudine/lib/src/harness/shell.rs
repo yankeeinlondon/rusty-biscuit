@@ -10,10 +10,10 @@ use std::time::Instant;
 
 use darkmatter::markdown::compose::ComposeSource;
 use darkmatter::markdown::compose::ShellCommandOrigin;
-use darkmatter::markdown::compose::shell_expansion::tokenize::tokenize;
+use darkmatter::markdown::compose::shell_expansion::tokenize::{ShellToken, tokenize};
 use darkmatter::markdown::compose::shell_expansion::{
-    ShellApprovalHandler, ShellExpansionOptions, check_builtin_blacklist, check_user_blacklist,
-    check_whitelist, normalize_command, resolve_policy_paths,
+    ShellApprovalHandler, ShellExpansionError, ShellExpansionOptions, check_builtin_blacklist,
+    check_user_blacklist, check_whitelist, normalize_command, resolve_policy_paths,
 };
 
 use tracing::{debug, info_span};
@@ -51,16 +51,22 @@ impl Default for ShellApprovalOptions {
 
 /// Tokenize a raw command string and validate it against shell policies.
 ///
-/// Returns an `ApprovedRuntimeCommand` if the command passes all checks,
-/// or a `HarnessError` if the command is blacklisted, denied, or malformed.
+/// Single-command contract: chain operators (`&&`, `||`) and redirections
+/// (`> /dev/null`, `2>&1`, etc.) are rejected. Chains are split into
+/// individual commands upstream by Darkmatter's discovery layer before
+/// reaching this validator.
+///
+/// ## Errors
+///
+/// Returns `HarnessError::ShellCommandDenied` if the command fails to
+/// tokenize, is empty, or contains chain operators or redirections.
 pub fn validate_and_approve_command(
     raw: &str,
     options: &ShellApprovalOptions,
 ) -> Result<ApprovedRuntimeCommand, HarnessError> {
     let _span = info_span!("harness_shell_validate", command = %raw).entered();
 
-    // Tokenize
-    let tokens = tokenize(raw).map_err(|_| HarnessError::ShellCommandDenied {
+    let tokens = tokenize_words_strict(raw).map_err(|_| HarnessError::ShellCommandDenied {
         command: raw.to_string(),
     })?;
 
@@ -71,6 +77,30 @@ pub fn validate_and_approve_command(
     }
 
     validate_and_approve_command_parts(&tokens, options, None, None)
+}
+
+/// Tokenize a raw command string into Word-only parts.
+///
+/// Rejects chain operators and redirections so single-command callers
+/// cannot accidentally validate a chain as if it were one command.
+/// Chains are split per-command upstream by Darkmatter's discovery layer.
+pub(crate) fn tokenize_words_strict(raw: &str) -> Result<Vec<String>, ShellExpansionError> {
+    let tokens = tokenize(raw)?;
+    let mut words = Vec::with_capacity(tokens.len());
+    for tok in tokens {
+        match tok {
+            ShellToken::Word(w) => words.push(w),
+            _ => {
+                return Err(ShellExpansionError::ParseDirective {
+                    origin: ShellCommandOrigin::Body { line: 0 },
+                    message: format!(
+                        "chain operators and redirections are not allowed here: {raw}"
+                    ),
+                });
+            }
+        }
+    }
+    Ok(words)
 }
 
 /// Validate an already-tokenized command against shell policies.
@@ -211,6 +241,7 @@ pub fn validate_and_approve_command_parts(
             whitelist_path: policy_paths.whitelist.clone(),
             blacklist_path: policy_paths.blacklist.clone(),
             alias_name: None,
+            chain_executables: Vec::new(),
         };
 
         match handler.approve(request) {
@@ -505,6 +536,25 @@ mod tests {
         let options = ShellApprovalOptions::default();
         let result = validate_and_approve_command("echo hello | cat", &options);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn chain_operators_rejected_at_single_command_slot() {
+        // Chains are split per-command upstream by Darkmatter discovery; a
+        // raw chain reaching this validator means a misuse and must error.
+        let options = ShellApprovalOptions::default();
+        for raw in [
+            "git status && git push",
+            "make build || echo failed",
+            "ls > /dev/null",
+            "cmd 2>&1",
+        ] {
+            let result = validate_and_approve_command(raw, &options);
+            assert!(
+                matches!(result, Err(HarnessError::ShellCommandDenied { .. })),
+                "expected denial for {raw:?}, got {result:?}"
+            );
+        }
     }
 
     #[test]

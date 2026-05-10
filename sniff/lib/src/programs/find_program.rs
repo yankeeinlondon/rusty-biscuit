@@ -34,14 +34,12 @@ pub fn find_program<P: AsRef<OsStr>>(program: P) -> Option<PathBuf> {
 pub fn find_programs_parallel(programs: &[&str]) -> HashMap<String, Option<PathBuf>> {
     programs
         .par_iter()
-        .map(|&prog| {
-            (prog.to_string(), which(prog).ok())
-        })
+        .map(|&prog| (prog.to_string(), which(prog).ok()))
         .collect()
 }
 
-use super::macos_bundle::find_macos_app_bundle;
 use super::contract::ExecutableSource;
+use super::macos_bundle::find_macos_app_bundle;
 
 /// Finds a program and reports its discovery source.
 ///

@@ -2,7 +2,6 @@ use clap::Args;
 use claudine::provider::{OutputFormatSelector, Provider, provider_info};
 use color_eyre::eyre::{Result, eyre};
 
-
 /// Shared wrapper args for provider subcommands.
 ///
 /// Boolean flags like `--yolo`, `--interactive`, `--quiet`, `--silent`,
@@ -293,7 +292,9 @@ fn find_passthrough_dash_boundary_with_raw(
     Some(passthrough.len().saturating_sub(tail_count))
 }
 
-pub(crate) fn extract_wrapper_flags_from_passthrough(args: &mut Vec<String>) -> Result<ExtractedWrapperFlags> {
+pub(crate) fn extract_wrapper_flags_from_passthrough(
+    args: &mut Vec<String>,
+) -> Result<ExtractedWrapperFlags> {
     let boundary = find_passthrough_dash_boundary(args).unwrap_or(args.len());
     extract_wrapper_flags_from_passthrough_with_boundary(args, boundary)
 }

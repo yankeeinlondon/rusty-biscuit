@@ -31,14 +31,13 @@ use crate::errors::GeneratorError;
 pub mod assemble;
 pub mod format;
 pub mod options;
-pub mod ws_modules;
 pub mod write;
+pub mod ws_modules;
 
 pub use assemble::{
     assemble_api_code, assemble_api_module, assemble_api_module_with_options,
-    assemble_combined_api_module, assemble_lib_rs, assemble_lib_rs_with_options,
-    assemble_prelude, assemble_prelude_with_options, assemble_shared_module, get_module_path,
-    get_request_suffix,
+    assemble_combined_api_module, assemble_lib_rs, assemble_lib_rs_with_options, assemble_prelude,
+    assemble_prelude_with_options, assemble_shared_module, get_module_path, get_request_suffix,
 };
 pub use format::{format_code, validate_code};
 pub use options::OutputOptions;
@@ -778,7 +777,11 @@ mod tests {
         let tokens = assemble_lib_rs(&apis);
         let code = tokens.to_string();
         let count = code.matches("pub mod foo").count();
-        assert_eq!(count, 1, "Expected exactly 1 'pub mod foo', found {}", count);
+        assert_eq!(
+            count, 1,
+            "Expected exactly 1 'pub mod foo', found {}",
+            count
+        );
     }
 
     #[test]
@@ -788,14 +791,38 @@ mod tests {
         let tokens = assemble_combined_api_module(&apis);
         let file = validate_code(&tokens).unwrap();
         let code = format_code(&file);
-        assert!(code.contains("pub struct FooNative"), "Missing FooNative struct");
-        assert!(code.contains("pub struct FooCompat"), "Missing FooCompat struct");
-        assert!(code.contains("pub enum FooNativeRequest"), "Missing FooNativeRequest enum");
-        assert!(code.contains("pub enum FooCompatRequest"), "Missing FooCompatRequest enum");
-        let import_count = code.matches("pub use schematic_definitions::foo::*").count();
-        assert_eq!(import_count, 1, "Expected exactly 1 definitions import, found {}", import_count);
-        let shared_count = code.matches("use crate::shared::{RequestParts, SchematicError}").count();
-        assert_eq!(shared_count, 1, "Expected exactly 1 shared import, found {}", shared_count);
+        assert!(
+            code.contains("pub struct FooNative"),
+            "Missing FooNative struct"
+        );
+        assert!(
+            code.contains("pub struct FooCompat"),
+            "Missing FooCompat struct"
+        );
+        assert!(
+            code.contains("pub enum FooNativeRequest"),
+            "Missing FooNativeRequest enum"
+        );
+        assert!(
+            code.contains("pub enum FooCompatRequest"),
+            "Missing FooCompatRequest enum"
+        );
+        let import_count = code
+            .matches("pub use schematic_definitions::foo::*")
+            .count();
+        assert_eq!(
+            import_count, 1,
+            "Expected exactly 1 definitions import, found {}",
+            import_count
+        );
+        let shared_count = code
+            .matches("use crate::shared::{RequestParts, SchematicError}")
+            .count();
+        assert_eq!(
+            shared_count, 1,
+            "Expected exactly 1 shared import, found {}",
+            shared_count
+        );
     }
 
     #[test]
@@ -807,8 +834,14 @@ mod tests {
         let result = generate_and_write_all(&apis, temp_dir.path(), false);
         assert!(result.is_ok());
         assert!(temp_dir.path().join("foo.rs").exists(), "Missing foo.rs");
-        assert!(!temp_dir.path().join("foonative.rs").exists(), "Unexpected foonative.rs");
-        assert!(!temp_dir.path().join("foocompat.rs").exists(), "Unexpected foocompat.rs");
+        assert!(
+            !temp_dir.path().join("foonative.rs").exists(),
+            "Unexpected foonative.rs"
+        );
+        assert!(
+            !temp_dir.path().join("foocompat.rs").exists(),
+            "Unexpected foocompat.rs"
+        );
         let foo_content = fs::read_to_string(temp_dir.path().join("foo.rs")).unwrap();
         assert!(foo_content.contains("pub struct FooNative"));
         assert!(foo_content.contains("pub struct FooCompat"));
@@ -824,9 +857,18 @@ mod tests {
         fs::write(temp_dir.path().join("old_api.rs"), "// stale").unwrap();
         fs::write(temp_dir.path().join("Cargo.toml"), "# keep").unwrap();
         generate_and_write_all(&apis, temp_dir.path(), false).unwrap();
-        assert!(!temp_dir.path().join("ollamaopenai.rs").exists(), "ollamaopenai.rs should be deleted");
-        assert!(!temp_dir.path().join("old_api.rs").exists(), "old_api.rs should be deleted");
-        assert!(temp_dir.path().join("Cargo.toml").exists(), "Cargo.toml should be preserved");
+        assert!(
+            !temp_dir.path().join("ollamaopenai.rs").exists(),
+            "ollamaopenai.rs should be deleted"
+        );
+        assert!(
+            !temp_dir.path().join("old_api.rs").exists(),
+            "old_api.rs should be deleted"
+        );
+        assert!(
+            temp_dir.path().join("Cargo.toml").exists(),
+            "Cargo.toml should be preserved"
+        );
         assert!(temp_dir.path().join("lib.rs").exists());
         assert!(temp_dir.path().join("shared.rs").exists());
         assert!(temp_dir.path().join("prelude.rs").exists());
@@ -842,7 +884,13 @@ mod tests {
         let code = format_code(&file);
         assert!(code.contains("FooNative"), "Missing FooNative in prelude");
         assert!(code.contains("FooCompat"), "Missing FooCompat in prelude");
-        assert!(code.contains("FooNativeRequest"), "Missing FooNativeRequest in prelude");
-        assert!(code.contains("FooCompatRequest"), "Missing FooCompatRequest in prelude");
+        assert!(
+            code.contains("FooNativeRequest"),
+            "Missing FooNativeRequest in prelude"
+        );
+        assert!(
+            code.contains("FooCompatRequest"),
+            "Missing FooCompatRequest in prelude"
+        );
     }
 }

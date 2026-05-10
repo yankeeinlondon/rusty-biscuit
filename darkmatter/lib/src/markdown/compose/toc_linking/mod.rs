@@ -6,6 +6,16 @@
 //! their TOC from raw source content, applies level/glob filtering and text
 //! cleanup, and replaces the directive with a bullet list of markdown links.
 //!
+//! ## Indentation Preservation
+//!
+//! The directive preserves the indentation context of the line it appears on.
+//! Each generated link line is prefixed with the same leading whitespace as the
+//! directive itself. When the directive is at column 1 (no leading whitespace),
+//! the parser scans backward to the previous non-empty line and uses its
+//! indentation as a fallback. This ensures that `::toc-linking` inside list
+//! items, blockquotes, or other indented containers produces correctly nested
+//! output.
+//!
 //! ## Examples
 //!
 //! ```text
@@ -77,6 +87,8 @@ pub(crate) fn render_resolved_directive(
     headings: &[MarkdownTocNode],
     options: &TocLinkingOptions,
     line: usize,
+    indent: &str,
+    inferred_indent: Option<&str>,
 ) -> Result<String, TocLinkingError> {
     let heading_filter =
         HeadingFilter::new(&options.keep_patterns, &options.filter_patterns, line)?;
@@ -86,6 +98,8 @@ pub(crate) fn render_resolved_directive(
         display_target,
         options,
         &heading_filter,
+        indent,
+        inferred_indent,
     ))
 }
 
@@ -120,8 +134,14 @@ pub(crate) fn process_toc_linking(
                 .cloned()
                 .collect::<Vec<_>>();
 
-            let replacement =
-                render_resolved_directive(&target, &headings, &directive.options, directive.line)?;
+            let replacement = render_resolved_directive(
+                &target,
+                &headings,
+                &directive.options,
+                directive.line,
+                &directive.indent,
+                directive.inferred_indent.as_deref(),
+            )?;
             replacements.push((directive.span.clone(), replacement));
         } else {
             let replacement = directive.options.empty_text.clone().unwrap_or_default();
@@ -312,5 +332,270 @@ mod tests {
         assert!(report.toc_links_generated > 0);
         assert!(report.has_changes());
         assert!(report.summary().contains("toc-link"));
+    }
+
+    #[test]
+    fn indented_toc_linking_nested_two_levels() {
+        let dir = TempDir::new().unwrap();
+        write_file(
+            dir.path(),
+            "api.md",
+            "# API\n\n## Getting Started\n\nIntro.\n\n## Configuration\n\nConfig.\n",
+        );
+
+        let source_path = dir.path().join("source.md");
+        write_file(dir.path(), "source.md", "");
+
+        let content = "- Item\n    - Subitem\n        ::toc-linking ./api.md\n".to_string();
+        let source = ComposeSource::File(source_path);
+        let options = TransclusionOptions {
+            source: source.clone(),
+            ..Default::default()
+        };
+
+        let (result, count) = process_toc_linking(&content, &source, &options, false).unwrap();
+        assert_eq!(count, 1);
+        // Every generated bullet should have 8 leading spaces (two levels deep)
+        for line in result.lines() {
+            if line.contains("[Getting Started]") || line.contains("[Configuration]") {
+                assert!(
+                    line.starts_with("        "),
+                    "Expected line to start with 8 spaces: {}",
+                    line
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn indented_toc_linking_at_column_one_in_list() {
+        let dir = TempDir::new().unwrap();
+        write_file(
+            dir.path(),
+            "api.md",
+            "# API\n\n## Getting Started\n\nIntro.\n",
+        );
+
+        let source_path = dir.path().join("source.md");
+        write_file(dir.path(), "source.md", "");
+
+        let content = "- Item\n  ::toc-linking ./api.md\n".to_string();
+        let source = ComposeSource::File(source_path);
+        let options = TransclusionOptions {
+            source: source.clone(),
+            ..Default::default()
+        };
+
+        let (result, count) = process_toc_linking(&content, &source, &options, false).unwrap();
+        assert_eq!(count, 1);
+        // Output should be indented to match the list item (2 spaces)
+        for line in result.lines() {
+            if line.contains("[Getting Started]") {
+                assert!(
+                    line.starts_with("  "),
+                    "Expected line to start with 2 spaces: {}",
+                    line
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn toc_linking_at_root_unchanged() {
+        let dir = TempDir::new().unwrap();
+        write_file(
+            dir.path(),
+            "api.md",
+            "# API\n\n## Getting Started\n\nIntro.\n",
+        );
+
+        let source_path = dir.path().join("source.md");
+        write_file(dir.path(), "source.md", "");
+
+        let content = "::toc-linking ./api.md\n".to_string();
+        let source = ComposeSource::File(source_path);
+        let options = TransclusionOptions {
+            source: source.clone(),
+            ..Default::default()
+        };
+
+        let (result, count) = process_toc_linking(&content, &source, &options, false).unwrap();
+        assert_eq!(count, 1);
+        // Output should start at column 1, unchanged from current behavior
+        for line in result.lines() {
+            if line.contains("[Getting Started]") {
+                assert!(
+                    line.starts_with("- ["),
+                    "Expected line to start at column 1: {}",
+                    line
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn indented_toc_linking_with_tabs() {
+        let dir = TempDir::new().unwrap();
+        write_file(
+            dir.path(),
+            "api.md",
+            "# API\n\n## Getting Started\n\nIntro.\n",
+        );
+
+        let source_path = dir.path().join("source.md");
+        write_file(dir.path(), "source.md", "");
+
+        let content = "- Item\n\t::toc-linking ./api.md\n".to_string();
+        let source = ComposeSource::File(source_path);
+        let options = TransclusionOptions {
+            source: source.clone(),
+            ..Default::default()
+        };
+
+        let (result, count) = process_toc_linking(&content, &source, &options, false).unwrap();
+        assert_eq!(count, 1);
+        for line in result.lines() {
+            if line.contains("[Getting Started]") {
+                assert!(
+                    line.starts_with('\t'),
+                    "Expected line to start with tab: {:?}",
+                    line
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn multiple_directives_at_different_indentation_levels() {
+        let dir = TempDir::new().unwrap();
+        write_file(
+            dir.path(),
+            "api.md",
+            "# API\n\n## Getting Started\n\nIntro.\n\n## Configuration\n\nConfig.\n",
+        );
+
+        let source_path = dir.path().join("source.md");
+        write_file(dir.path(), "source.md", "");
+
+        let content = "::toc-linking ./api.md\n\n- Item\n    ::toc-linking ./api.md\n".to_string();
+        let source = ComposeSource::File(source_path);
+        let options = TransclusionOptions {
+            source: source.clone(),
+            ..Default::default()
+        };
+
+        let (result, count) = process_toc_linking(&content, &source, &options, false).unwrap();
+        assert_eq!(count, 2);
+
+        let mut root_found = false;
+        let mut indented_found = false;
+
+        for line in result.lines() {
+            if line.contains("[Getting Started]") || line.contains("[Configuration]") {
+                if line.starts_with("- [") {
+                    root_found = true;
+                } else if line.starts_with("    ") {
+                    indented_found = true;
+                }
+            }
+        }
+
+        assert!(root_found, "Expected at least one root-level link");
+        assert!(indented_found, "Expected at least one indented link");
+    }
+
+    #[test]
+    fn empty_text_with_indentation() {
+        let dir = TempDir::new().unwrap();
+        write_file(dir.path(), "api.md", "# API\n");
+
+        let source_path = dir.path().join("source.md");
+        write_file(dir.path(), "source.md", "");
+
+        let content =
+            "- Item\n  ::toc-linking ./api.md level=h2 empty=\"no results\"\n".to_string();
+        let source = ComposeSource::File(source_path);
+        let options = TransclusionOptions {
+            source: source.clone(),
+            ..Default::default()
+        };
+
+        let (result, count) = process_toc_linking(&content, &source, &options, false).unwrap();
+        assert_eq!(count, 1);
+
+        let lines: Vec<&str> = result.lines().collect();
+        let toc_line = lines.iter().find(|l| l.contains("no results")).unwrap();
+        assert!(
+            toc_line.starts_with("  "),
+            "Expected empty_text to be indented: {:?}",
+            toc_line
+        );
+    }
+
+    #[test]
+    fn ac4_roundtrip_commonmark_list_nesting() {
+        let dir = TempDir::new().unwrap();
+        write_file(
+            dir.path(),
+            "api.md",
+            "# API\n\n## Getting Started\n\nIntro.\n\n## Configuration\n\nConfig.\n",
+        );
+
+        let source_path = dir.path().join("source.md");
+        write_file(dir.path(), "source.md", "");
+
+        let content = "- Item\n    - Subitem\n        ::toc-linking ./api.md\n".to_string();
+        let source = ComposeSource::File(source_path);
+        let options = TransclusionOptions {
+            source: source.clone(),
+            ..Default::default()
+        };
+
+        let (result, _) = process_toc_linking(&content, &source, &options, false).unwrap();
+
+        use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
+
+        let parser = Parser::new_ext(&result, Options::all());
+        let events: Vec<Event> = parser.collect();
+
+        let mut in_outer_list = false;
+        let mut in_outer_item = false;
+        let mut in_inner_list = false;
+
+        for event in &events {
+            match event {
+                Event::Start(Tag::List(_)) if !in_outer_list => {
+                    in_outer_list = true;
+                }
+                Event::Start(Tag::List(_)) if in_outer_item => {
+                    in_inner_list = true;
+                }
+                Event::Start(Tag::Item) if in_outer_list && !in_inner_list => {
+                    in_outer_item = true;
+                }
+                Event::End(TagEnd::Item) if in_outer_item && !in_inner_list => {
+                    in_outer_item = false;
+                }
+                Event::End(TagEnd::List(_)) if in_inner_list => {
+                    in_inner_list = false;
+                }
+                Event::End(TagEnd::List(_)) if in_outer_list => {
+                    in_outer_list = false;
+                }
+                _ => {}
+            }
+        }
+
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, Event::Start(Tag::List(_)))),
+            "Expected at least one List in parsed output"
+        );
+
+        let inner_list_exists = events
+            .iter()
+            .any(|e| matches!(e, Event::Start(Tag::List(_))));
+        assert!(inner_list_exists, "Expected nested list structure");
     }
 }

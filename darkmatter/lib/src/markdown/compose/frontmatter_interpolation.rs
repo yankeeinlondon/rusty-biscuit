@@ -16,7 +16,7 @@
 //! like `area` to be defined as `{{ctx.current_package_area}}` and then
 //! referenced by `success.stderr` as `{{area}}`.
 
-use super::expression::{EvaluationLookup, ExpressionFinder};
+use super::expression::{EvaluationLookup, Expr, ExpressionFinder, parse};
 use super::interpolation::{Evaluator, ScanMode, interpolate_text};
 use super::types::{ComposeContext, ComposeWarning};
 use crate::markdown::frontmatter::Frontmatter;
@@ -217,7 +217,7 @@ pub(crate) fn interpolate_frontmatter(
                 None => continue,
             };
 
-            let refs = extract_simple_key_refs(original);
+            let refs = extract_frontmatter_key_refs(original);
             let has_unresolved = refs
                 .iter()
                 .any(|r| templated_set.contains(r) && !resolved.contains(r));
@@ -280,32 +280,90 @@ pub(crate) fn interpolate_frontmatter(
     })
 }
 
-/// Extracts simple identifier references (bare variable names) from a JSON value tree.
+/// Extracts frontmatter-key references from a JSON value tree.
 ///
-/// Only collects expressions that are purely alphanumeric identifiers (no dots,
-/// operators, or function calls) so that `ctx.today`, `area || "default"`, and
-/// `length(items)` are excluded.
-fn extract_simple_key_refs(value: &Value) -> Vec<String> {
+/// Parses each interpolation expression as an AST and collects the root names
+/// of every `Expr::Variable` that resolves against frontmatter (i.e. not
+/// prefixed with `ctx.` or `env.`). This descends through ternary conditions
+/// and both branches, fallback expressions, comparisons, parenthesized
+/// expressions, unary operators, and function arguments — so that
+/// `{{ use ? spec : 'none' }}` is recognised as depending on `use` and `spec`.
+///
+/// Expressions that fail to parse contribute no dependencies; the rewrite
+/// pass surfaces those errors with full diagnostics.
+fn extract_frontmatter_key_refs(value: &Value) -> Vec<String> {
     let mut refs = Vec::new();
-    collect_simple_key_refs(value, &mut refs);
+    collect_frontmatter_key_refs(value, &mut refs);
     refs.sort();
     refs.dedup();
     refs
 }
 
-fn collect_simple_key_refs(value: &Value, refs: &mut Vec<String>) {
+fn collect_frontmatter_key_refs(value: &Value, refs: &mut Vec<String>) {
     match value {
         Value::String(s) => {
             for loc in ExpressionFinder::find_all_plain(s) {
-                let expr = loc.expression.trim();
-                if !expr.is_empty() && expr.chars().all(|c| c.is_alphanumeric() || c == '_') {
-                    refs.push(expr.to_string());
-                }
+                let Ok(expr) = parse(&loc.expression) else {
+                    continue;
+                };
+                collect_variable_roots(&expr, refs);
             }
         }
-        Value::Array(arr) => arr.iter().for_each(|v| collect_simple_key_refs(v, refs)),
-        Value::Object(obj) => obj.values().for_each(|v| collect_simple_key_refs(v, refs)),
+        Value::Array(arr) => arr
+            .iter()
+            .for_each(|v| collect_frontmatter_key_refs(v, refs)),
+        Value::Object(obj) => obj
+            .values()
+            .for_each(|v| collect_frontmatter_key_refs(v, refs)),
         _ => {}
+    }
+}
+
+/// Walks an `Expr` AST and pushes the root segment of every `Variable` node
+/// onto `refs`, skipping `ctx.*` and `env.*` since those resolve from the
+/// runtime context, not seed frontmatter.
+fn collect_variable_roots(expr: &Expr, refs: &mut Vec<String>) {
+    match expr {
+        Expr::Variable(path) => {
+            if path.starts_with("ctx.") || path.starts_with("env.") {
+                return;
+            }
+            let root = path.split('.').next().unwrap_or(path);
+            if !root.is_empty() {
+                refs.push(root.to_string());
+            }
+        }
+        Expr::StringLiteral(_) | Expr::NumberLiteral(_) | Expr::BoolLiteral(_) => {}
+        Expr::UnaryNot(inner)
+        | Expr::UnaryMinus(inner)
+        | Expr::Paren(inner)
+        | Expr::MemberAccess { base: inner, .. } => collect_variable_roots(inner, refs),
+        Expr::Fallback { primary, fallback } => {
+            collect_variable_roots(primary, refs);
+            collect_variable_roots(fallback, refs);
+        }
+        Expr::Ternary {
+            condition,
+            then_branch,
+            else_branch,
+        } => {
+            collect_variable_roots(condition, refs);
+            collect_variable_roots(then_branch, refs);
+            collect_variable_roots(else_branch, refs);
+        }
+        Expr::Comparison { left, right, .. } | Expr::Binary { left, right, .. } => {
+            collect_variable_roots(left, refs);
+            collect_variable_roots(right, refs);
+        }
+        Expr::Index { base, index } => {
+            collect_variable_roots(base, refs);
+            collect_variable_roots(index, refs);
+        }
+        Expr::FunctionCall { args, .. } => {
+            for arg in args {
+                collect_variable_roots(arg, refs);
+            }
+        }
     }
 }
 

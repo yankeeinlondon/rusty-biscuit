@@ -338,7 +338,10 @@ fn cmd_service_install(
 
     match report.outcome {
         autostart::Outcome::Wrote => {
-            println!("Installed autostart manifest at {}", report.manifest_path.display());
+            println!(
+                "Installed autostart manifest at {}",
+                report.manifest_path.display()
+            );
         }
         autostart::Outcome::AlreadyInstalled => {
             println!(
@@ -351,9 +354,7 @@ fn cmd_service_install(
     if let Some(step) = report.next_step {
         eprintln!("Next: {step}");
     }
-    eprintln!(
-        "Note: clipper will start on next login. Run `clip service start` to start now."
-    );
+    eprintln!("Note: clipper will start on next login. Run `clip service start` to start now.");
     Ok(())
 }
 

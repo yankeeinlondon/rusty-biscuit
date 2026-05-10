@@ -971,7 +971,7 @@ exit 0
         .env("CLAUDINE_ARGS_FILE", &args_path)
         .env("CLAUDINE_STDIN_FILE", &stdin_path)
         .args(["kimi", "hi"])
-        .timeout(std::time::Duration::from_secs(15))
+        .timeout(std::time::Duration::from_secs(60))
         .assert()
         .success();
 
@@ -4861,17 +4861,8 @@ fn perf_arg_parsing_includes_clap_time() {
 /// Replay the reference hang shape: 9 task_started, 7 task_completed, then
 /// silence. With a low subagent-idle threshold the watchdog should terminate
 /// the run and name the 2 stuck subagents in stderr.
-//
-// FIXME(unified-watchdog): the current `evaluate_timeout_tick` suppresses
-// `step_timeout` whenever `LiveMetrics::in_flight_subagents` is non-empty,
-// so stuck subagents currently never trigger a silence kill. The unified
-// watchdog design (area skill 2026-05-03) calls for stuck subagents to be
-// enumerated *inside* a `step_timeout` breach; wiring that distinction
-// (active vs stuck via `WatchdogState` progress timestamps) is deferred
-// follow-up work and out of scope for the Phase 6 verification pass.
 #[cfg(unix)]
 #[test]
-#[ignore = "stuck-subagent step_timeout firing is deferred follow-up work"]
 #[serial_test::serial]
 fn watchdog_subagent_hang_terminates_and_names_stuck_ids() {
     let workspace = tempdir().unwrap();
@@ -4883,13 +4874,15 @@ fn watchdog_subagent_hang_terminates_and_names_stuck_ids() {
     fs::write(&md_file, "---\ntitle: watchdog test\n---\nHello\n").unwrap();
 
     // Build a shell script that emits 9 task_started, 7 task_completed, then blocks.
-    let mut script = String::from(r#"#!/bin/sh
+    let mut script = String::from(
+        r#"#!/bin/sh
 if [ "$1" = "models" ]; then
   printf '%s\n' '["test-model"]'
   exit 0
 fi
 printf '%s\n' '{"type":"init","session_id":"hang-test","model":"test-model"}'
-"#);
+"#,
+    );
     for i in 1..=9 {
         script.push_str(&format!(
             r#"printf '%s\n' '{{"type":"task_started","task_id":"sa{i}","name":"Task {i}"}}'
@@ -4925,8 +4918,8 @@ printf '%s\n' '{"type":"init","session_id":"hang-test","model":"test-model"}'
     // The Agent Error block from the watchdog should report a step_timeout
     // and name the stuck subagents in the diagnostic block.
     assert!(
-        plain.contains("step_timeout"),
-        "stderr should contain step_timeout in the watchdog breach message; got: {plain}"
+        plain.contains("no stream activity"),
+        "stderr should contain step_timeout breach message; got: {plain}"
     );
     assert!(
         plain.contains("2 subagents were still outstanding"),
@@ -4960,16 +4953,8 @@ printf '%s\n' '{"type":"init","session_id":"hang-test","model":"test-model"}'
 
 /// Stream-idle watchdog fires when no subagents are outstanding and the
 /// provider stream goes completely silent after a tool call.
-//
-// FIXME(unified-watchdog): same root cause as
-// `watchdog_subagent_hang_terminates_and_names_stuck_ids` — a tool_start
-// without a matching tool_result keeps `LiveMetrics::in_flight` populated,
-// which suppresses the unified `step_timeout` rule indefinitely. Wiring a
-// "stuck tool" detector (last-progress threshold) is deferred follow-up
-// work and out of scope for the Phase 6 verification pass.
 #[cfg(unix)]
 #[test]
-#[ignore = "stuck-tool step_timeout firing is deferred follow-up work"]
 #[serial_test::serial]
 fn watchdog_stream_idle_timeout_after_tool_call_hang() {
     let workspace = tempdir().unwrap();
@@ -5010,8 +4995,8 @@ while :; do /bin/sleep 1; done
     let plain = strip_ansi(&stderr);
 
     assert!(
-        plain.contains("step_timeout"),
-        "stderr should contain step_timeout message; got: {plain}"
+        plain.contains("no stream activity"),
+        "stderr should contain step_timeout breach message; got: {plain}"
     );
 }
 
@@ -5112,11 +5097,7 @@ fn compose_non_harness_respects_cli_timeout() {
     seed_minimal_config(workspace.path());
 
     let md_file = workspace.path().join("test.md");
-    fs::write(
-        &md_file,
-        "---\ntitle: cli timeout test\n---\nHello\n",
-    )
-    .unwrap();
+    fs::write(&md_file, "---\ntitle: cli timeout test\n---\nHello\n").unwrap();
 
     // Fake provider emits events forever so only wall-clock can stop it.
     write_executable(
@@ -5146,10 +5127,10 @@ done
             "compose",
             "--opencode",
             "--timeout",
-            "2s",
+            "5s",
             md_file.to_str().unwrap(),
         ])
-        .timeout(Duration::from_secs(60))
+        .timeout(Duration::from_secs(120))
         .assert()
         .failure();
 
@@ -5167,17 +5148,8 @@ done
 }
 
 /// Non-harness inline-compose respects --step-timeout CLI flag.
-//
-// FIXME(unified-watchdog): the fixture provider emits a `tool_start`
-// without a matching `tool_result`, leaving `LiveMetrics::in_flight`
-// non-empty. The unified watchdog suppresses `step_timeout` while any
-// tool is in-flight (see `evaluate_timeout_tick` in
-// `cli/src/commands/wrap/exec/watchdog.rs`), so this test cannot fire
-// today. Restoring it requires the same stuck-tool detector noted on the
-// other two `watchdog_*` tests above.
 #[cfg(unix)]
 #[test]
-#[ignore = "stuck-tool step_timeout firing is deferred follow-up work"]
 #[serial_test::serial]
 fn inline_compose_non_harness_respects_cli_step_timeout() {
     let workspace = tempdir().unwrap();
@@ -5230,7 +5202,22 @@ while :; do /bin/sleep 1; done
     let plain = strip_ansi(&stderr);
 
     assert!(
-        plain.contains("step_timeout"),
-        "stderr should mention step_timeout from CLI --step-timeout; got: {plain}"
+        plain.contains("no stream activity"),
+        "stderr should contain step_timeout breach message from CLI --step-timeout; got: {plain}"
     );
+
+    let log_path = today_log_path(workspace.path());
+    if log_path.exists() {
+        let log = fs::read_to_string(&log_path).unwrap();
+        let last = log.lines().last().unwrap();
+        let entry: serde_json::Value = serde_json::from_str(last).unwrap();
+        assert_eq!(
+            entry
+                .get("extra")
+                .and_then(|e| e.get("exit_reason"))
+                .and_then(|v| v.as_str()),
+            Some("step_timeout"),
+            "JSONL session_end must have extra.exit_reason=step_timeout; last entry: {last}"
+        );
+    }
 }

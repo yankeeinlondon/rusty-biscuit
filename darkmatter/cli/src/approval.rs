@@ -118,11 +118,24 @@ fn write_prompt<W: Write>(
     ))
     .render_optimistic(None);
     let opt2_num = Prose::new("<green>2</green>").render_optimistic(None);
-    let opt2_desc = Prose::new(format!(
-        "<dim>(persists \"{}\" with any args to whitelist)</dim>",
-        escape_prose(&request.executable)
-    ))
-    .render_optimistic(None);
+    let opt2_desc = if request.chain_executables.is_empty() {
+        Prose::new(format!(
+            "<dim>(persists \"{}\" with any args to whitelist)</dim>",
+            escape_prose(&request.executable)
+        ))
+        .render_optimistic(None)
+    } else {
+        let executables_list = request
+            .chain_executables
+            .iter()
+            .map(|exe| format!("\"{}\"", escape_prose(exe)))
+            .collect::<Vec<_>>()
+            .join(", ");
+        Prose::new(format!(
+            "<dim>(persists {executables_list} with any args to whitelist)</dim>"
+        ))
+        .render_optimistic(None)
+    };
     let opt3_num = Prose::new("<cyan>3</cyan>").render_optimistic(None);
     let opt3_desc = Prose::new("<dim>(this session only)</dim>").render_optimistic(None);
     let opt4_num = Prose::new("<yellow>4</yellow>").render_optimistic(None);
@@ -193,6 +206,7 @@ mod tests {
             whitelist_path: PathBuf::from("/tmp/.darkmatter-shell-whitelist"),
             blacklist_path: PathBuf::from("/tmp/.darkmatter-shell-blacklist"),
             alias_name: None,
+            chain_executables: Vec::new(),
         }
     }
 
@@ -286,6 +300,28 @@ mod tests {
         assert!(prompt.contains("Allow once"));
         assert!(prompt.contains("Deny"));
         assert!(prompt.contains("Blacklist and stop"));
+    }
+
+    #[test]
+    fn prompt_lists_chain_executables_for_chain_request() {
+        let mut request = request();
+        request.chain_executables = vec!["echo".to_string(), "pwd".to_string()];
+        request.raw_command = "echo hello && pwd".to_string();
+        let mut input = Cursor::new(b"3\n".to_vec());
+        let mut output = Vec::new();
+
+        approve_with_io(&request, &mut input, &mut output).unwrap();
+        let prompt = strip_ansi(&String::from_utf8(output).unwrap());
+
+        // Both executables should appear in the option-2 description.
+        assert!(
+            prompt.contains("\"echo\""),
+            "expected echo in prompt: {prompt}"
+        );
+        assert!(
+            prompt.contains("\"pwd\""),
+            "expected pwd in prompt: {prompt}"
+        );
     }
 
     #[test]

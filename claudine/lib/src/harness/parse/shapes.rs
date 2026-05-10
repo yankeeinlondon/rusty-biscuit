@@ -65,7 +65,11 @@ pub(super) fn extract_shape(
 }
 
 /// Extract a `usize` from a scalar value.
-pub(super) fn extract_usize(value: &Value, name: &str, source_path: &std::path::Path) -> Result<usize, HarnessError> {
+pub(super) fn extract_usize(
+    value: &Value,
+    name: &str,
+    source_path: &std::path::Path,
+) -> Result<usize, HarnessError> {
     match value {
         Value::Number(n) => {
             n.as_u64()

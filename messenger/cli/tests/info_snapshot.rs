@@ -45,10 +45,7 @@ fn full_report() -> InfoReport {
                 description: "macOS notification sender".into(),
             },
         ],
-        election_order: vec![
-            "dunstify".into(),
-            "notify-send".into(),
-        ],
+        election_order: vec!["dunstify".into(), "notify-send".into()],
         routes: vec![
             RouteRecord {
                 name: "desktop".into(),

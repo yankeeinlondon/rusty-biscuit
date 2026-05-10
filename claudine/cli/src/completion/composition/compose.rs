@@ -9,11 +9,11 @@
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
+use super::{Candidate, REPO_DIR_WALK_RANK, display_name, name_stem};
 use crate::completion::frontmatter;
 use crate::completion::fuzzy::{self, DirMatchMode, PartialLen};
 use crate::completion::scopes::{self, ComposeMode, Scope, ScopeContext, ScopeKind, ScopeSet};
 use crate::completion::walker;
-use super::{display_name, name_stem, Candidate, REPO_DIR_WALK_RANK};
 
 /// Empty / Word path: walk every configured scope, apply fuzzy matching to
 /// the active segment, and consult [`PartialLen`] to decide whether
@@ -237,7 +237,11 @@ fn render_entry_word(
 ///
 /// Falls back to scope-leaf-relative rendering only when no anchor root
 /// is available.
-pub(super) fn format_relative_insert(scope: &Scope, entry: &Path, ctx: &ScopeContext) -> Option<String> {
+pub(super) fn format_relative_insert(
+    scope: &Scope,
+    entry: &Path,
+    ctx: &ScopeContext,
+) -> Option<String> {
     if scope.kind == ScopeKind::UserClaudinePrompts
         && let Some(insert) = format_home_relative_insert(entry, ctx)
     {

@@ -113,14 +113,19 @@ pub(super) fn map_json_object(output: &CommandOutput) -> Result<HookResponse> {
     })
 }
 
-pub(super) fn map_regex_with_compiled(regex: &Regex, output: &CommandOutput) -> Result<HookResponse> {
+pub(super) fn map_regex_with_compiled(
+    regex: &Regex,
+    output: &CommandOutput,
+) -> Result<HookResponse> {
     let captures = regex.captures(&output.stdout).ok_or_else(|| {
         crate::error::ClaudineError::TemplateError("regex mapper produced no match".to_string())
     })?;
 
     let decision = captures
         .name("decision")
-        .map(|capture| super::parse_decision(&serde_json::Value::String(capture.as_str().to_string())))
+        .map(|capture| {
+            super::parse_decision(&serde_json::Value::String(capture.as_str().to_string()))
+        })
         .unwrap_or(None);
     let reason = captures
         .name("reason")

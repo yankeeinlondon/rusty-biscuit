@@ -1,6 +1,6 @@
 //! Auto-generated provider model enum
 //!
-//! Generated: 2026-05-04T04:02:14.801265+00:00
+//! Generated: 2026-05-07T02:07:06.174438+00:00
 //! Generator: gen-models v0.1.0
 //! Provider: ZenMux
 //!
@@ -136,6 +136,8 @@ pub enum ProviderModelZenMux {
     Moonshotai___Kimi__K2_5,
     /// Model: `moonshotai/kimi-k2.6`
     Moonshotai___Kimi__K2_6,
+    /// Model: `openai/chat-latest`
+    Openai___Chat__Latest,
     /// Model: `openai/gpt-4.1`
     Openai___Gpt__4_1,
     /// Model: `openai/gpt-4.1-mini`

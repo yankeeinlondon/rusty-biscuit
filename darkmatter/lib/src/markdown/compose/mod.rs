@@ -168,18 +168,14 @@ pub(crate) fn find_target_range(
             if let Some(idx) = outer_text.find(pattern) {
                 let mut actual_idx = idx + attr_name.len() + 1; // skip past attr_name=
                 // Skip optional whitespace after =
-                while actual_idx < outer_text.len()
-                    && outer_text[actual_idx..].starts_with(' ')
-                {
+                while actual_idx < outer_text.len() && outer_text[actual_idx..].starts_with(' ') {
                     actual_idx += 1;
                 }
                 let start = span.start + actual_idx + 1; // skip past quote
                 let end = start + raw_target.len();
                 trace!(
                     "find_target_range: attribute-aware match for '{}' in {:?} at {}",
-                    raw_target,
-                    record.origin.syntax,
-                    start
+                    raw_target, record.origin.syntax, start
                 );
                 return Some((start, end));
             }
@@ -206,9 +202,7 @@ pub(crate) fn find_target_range(
                     let end = start + encoded.len();
                     trace!(
                         "find_target_range: HTML-encoded match for '{}' in {:?} at {}",
-                        raw_target,
-                        record.origin.syntax,
-                        start
+                        raw_target, record.origin.syntax, start
                     );
                     return Some((start, end));
                 }
@@ -250,7 +244,9 @@ pub(crate) fn find_target_range(
 }
 
 /// Maps a ReferenceSyntax to its target attribute name for HTML-aware matching.
-fn get_attribute_name_for_syntax(syntax: &crate::markdown::reference::ReferenceSyntax) -> Option<&'static str> {
+fn get_attribute_name_for_syntax(
+    syntax: &crate::markdown::reference::ReferenceSyntax,
+) -> Option<&'static str> {
     use crate::markdown::reference::ReferenceSyntax;
     match syntax {
         ReferenceSyntax::HtmlAnchor | ReferenceSyntax::HtmlLinkTag => Some("href"),
@@ -735,7 +731,8 @@ impl Markdown {
             }
             ComposeOperation::PageBlocks => self.run_page_blocks_stage(state, report),
             ComposeOperation::Interpolation => {
-                report.interpolations_applied = self.run_interpolation_stage(state, options)?;
+                report.interpolations_applied =
+                    self.run_interpolation_stage(state, options, report)?;
                 Ok(())
             }
             ComposeOperation::ShellExpansion => {
@@ -1100,6 +1097,7 @@ impl Markdown {
         &mut self,
         state: &EffectiveState,
         options: &ComposeOptions,
+        report: &mut ComposeReport,
     ) -> MarkdownResult<usize> {
         use interpolation::{Evaluator, ScanMode, interpolate_text};
 
@@ -1121,6 +1119,7 @@ impl Markdown {
         if result.replacements > 0 {
             self.content = result.output;
         }
+        report.warnings.extend(result.warnings);
         debug!(
             count = result.replacements,
             "compose: interpolations applied"
@@ -1693,6 +1692,8 @@ impl Markdown {
                                 &headings,
                                 &options_clone,
                                 line,
+                                &directive.indent,
+                                directive.inferred_indent.as_deref(),
                             )
                             .map_err(crate::markdown::types::MarkdownError::TocLinking)?;
                             Ok(cache::OperationResult { content })
@@ -1723,6 +1724,14 @@ impl Markdown {
         }
     }
 
+    // NOTE: `::file` and `::code` directives share the same indentation
+    // preservation bug as `::toc-linking` (see spec.md for 2026-05-07).
+    // Unlike `::toc-linking`, the fix is not trivially co-located here:
+    // `PreparedTransclusion::Markdown` and `PreparedTransclusion::Code`
+    // do not capture directive indentation, and the underlying
+    // `transclusion::Directive` struct lacks indent fields. Fixing this
+    // would require structural changes across the transclusion pipeline.
+    // Tracked as part of the same feature but deferred to a follow-up.
     #[allow(clippy::too_many_arguments)]
     fn render_markdown_transclusion(
         &self,
@@ -3901,8 +3910,9 @@ Rounded: {{ round(pi) }}"#;
             .unwrap();
 
         assert_eq!(report.frontmatter_interpolations_applied, 0);
-        // body interpolation sees the raw templated value
-        assert!(composed.content().contains("{{base}}/spec.md"));
+        // body interpolation resolves {{spec}} to {{base}}/spec.md and then
+        // recursively resolves {{base}} in the same pass.
+        assert!(composed.content().contains("/path/spec.md"));
     }
 
     #[test]
@@ -4321,7 +4331,7 @@ Rounded: {{ round(pi) }}"#;
         }
 
         #[test]
-        fn frontmatter_shell_rejects_double_pipe_in_command() {
+        fn frontmatter_shell_or_chain_works() {
             let temp_dir = TempDir::new().unwrap();
             let content = "---\nval: \"$(false || echo fallback)\"\n---\n";
             let md: Markdown = content.into();
@@ -4334,11 +4344,10 @@ Rounded: {{ round(pi) }}"#;
                     ..Default::default()
                 });
 
-            let err = md.compose_with(options).unwrap_err();
-            assert!(
-                err.to_string().contains("pipes") || err.to_string().contains("Shell pipes"),
-                "Expected shell pipe rejection for '||', got: {}",
-                err
+            let (composed, _report) = md.compose_with(options).unwrap();
+            assert_eq!(
+                composed.frontmatter().as_map().get("val"),
+                Some(&serde_json::json!("fallback"))
             );
         }
     }

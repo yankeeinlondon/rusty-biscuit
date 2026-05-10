@@ -4,12 +4,12 @@ use biscuit_file::serde_yaml_ng;
 use biscuit_hash::xx_hash;
 use chrono::{DateTime, NaiveDate, NaiveDateTime, Utc};
 use ignore::WalkBuilder;
+use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
-use rayon::prelude::*;
 use tracing::{debug, instrument};
 
 /// Parsing detail level for `parse_markdown_meta_with_mode`.
@@ -197,12 +197,7 @@ pub fn detect_blast_radius_docs(root: &Path) -> Option<Vec<MarkdownMeta>> {
     let mut docs: Vec<MarkdownMeta> = paths
         .into_par_iter()
         .filter_map(|path| {
-            parse_markdown_meta_with_mode(
-                &path,
-                &repo_root,
-                &[],
-                DocParseMode::BlastRadiusOnly,
-            )
+            parse_markdown_meta_with_mode(&path, &repo_root, &[], DocParseMode::BlastRadiusOnly)
         })
         .filter(|doc| doc.has_blast_radius)
         .collect();

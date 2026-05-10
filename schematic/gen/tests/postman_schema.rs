@@ -78,8 +78,7 @@ pub(crate) fn validate_postman_json(value: &Value) -> Result<(), Vec<String>> {
 /// `jsonschema` crate's draft-04 support has regressed.
 #[test]
 fn vendored_schema_compiles_as_json_schema() {
-    let schema: Value =
-        serde_json::from_slice(POSTMAN_SCHEMA_BYTES).expect("schema is valid JSON");
+    let schema: Value = serde_json::from_slice(POSTMAN_SCHEMA_BYTES).expect("schema is valid JSON");
     assert_eq!(
         schema.get("$schema").and_then(Value::as_str),
         Some("http://json-schema.org/draft-04/schema#"),
@@ -118,8 +117,7 @@ fn emqx_grouped_collection_validates_against_postman_schema() {
         .expect("schematic/gen has parent")
         .join("postman")
         .join("emqx.postman_collection.json");
-    let bytes = std::fs::read(&path)
-        .unwrap_or_else(|e| panic!("read {}: {}", path.display(), e));
+    let bytes = std::fs::read(&path).unwrap_or_else(|e| panic!("read {}: {}", path.display(), e));
     let value: Value = serde_json::from_slice(&bytes)
         .unwrap_or_else(|e| panic!("parse {}: {}", path.display(), e));
     if let Err(errors) = validate_postman_json(&value) {

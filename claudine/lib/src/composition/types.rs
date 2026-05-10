@@ -41,6 +41,107 @@ pub struct ResolvedCompositionSource {
     pub markdown: Markdown,
 }
 
+/// Validated loop configuration parsed from a prompt's `loop` frontmatter.
+#[derive(Debug, Clone, PartialEq)]
+pub struct LoopConfig {
+    /// The condition that decides whether loop execution continues.
+    pub condition: LoopCondition,
+    /// Actions applied to frontmatter after each completed iteration.
+    pub actions: Vec<LoopAction>,
+    /// Optional per-document positive iteration cap.
+    pub max_iterations: Option<usize>,
+    /// Optional per-document failure behavior.
+    pub fail_fast: Option<bool>,
+}
+
+/// A loop condition. `while` continues while truthy; `until` continues until truthy.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LoopCondition {
+    /// Continue while this expression evaluates to true.
+    While(String),
+    /// Continue until this expression evaluates to true.
+    Until(String),
+}
+
+/// A frontmatter mutation action executed between loop iterations.
+#[derive(Debug, Clone, PartialEq)]
+pub enum LoopAction {
+    /// Increment a numeric property by one.
+    Increment(String),
+    /// Decrement a numeric property by one.
+    Decrement(String),
+    /// Set a property to the provided value.
+    Set {
+        /// Frontmatter property to update.
+        prop: String,
+        /// New value.
+        value: serde_json::Value,
+    },
+    /// Append a value to a property.
+    Append {
+        /// Frontmatter property to update.
+        prop: String,
+        /// Value to append.
+        value: serde_json::Value,
+    },
+    /// Prepend a value to a property.
+    Prepend {
+        /// Frontmatter property to update.
+        prop: String,
+        /// Value to prepend.
+        value: serde_json::Value,
+    },
+    /// Shallow-merge an object into a property.
+    Merge {
+        /// Frontmatter property to update.
+        prop: String,
+        /// Object value to merge.
+        value: serde_json::Value,
+    },
+}
+
+/// Ambient loop variables injected into each loop iteration.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AmbientVariable {
+    /// 1-based loop iteration number.
+    Iteration,
+    /// Whether the current iteration is the first.
+    IsFirst,
+    /// Whether the current iteration is expected to be the last.
+    IsLast,
+    /// Captured output from the previous iteration.
+    LastOutput,
+    /// Exit code from the previous iteration.
+    LastExitCode,
+}
+
+impl AmbientVariable {
+    /// Reserved ambient variable names.
+    pub const NAMES: &[&str] = &[
+        "iteration",
+        "is_first",
+        "is_last",
+        "last_output",
+        "last_exit_code",
+    ];
+
+    /// Returns true when `name` is a reserved ambient variable.
+    pub fn is_reserved(name: &str) -> bool {
+        Self::NAMES.contains(&name)
+    }
+
+    /// Return the frontmatter/template key for this ambient variable.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Iteration => "iteration",
+            Self::IsFirst => "is_first",
+            Self::IsLast => "is_last",
+            Self::LastOutput => "last_output",
+            Self::LastExitCode => "last_exit_code",
+        }
+    }
+}
+
 /// Why a particular provider was selected.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SelectionReason {

@@ -2,10 +2,12 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 
 use rusqlite::{Connection, params_from_iter};
 
-use crate::reporting::types::{DateRange, LabeledCount, RepoActivity, ReposReport, ReportingFilters};
 use crate::error::Result;
+use crate::reporting::types::{
+    DateRange, LabeledCount, RepoActivity, ReportingFilters, ReposReport,
+};
 
-use super::common::{validate_range, WhereBuilder};
+use super::common::{WhereBuilder, validate_range};
 
 pub(crate) fn repos(
     conn: &Connection,

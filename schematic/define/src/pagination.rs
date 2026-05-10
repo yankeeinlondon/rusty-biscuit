@@ -278,9 +278,7 @@ impl PaginationStyle {
 #[non_exhaustive]
 pub enum PaginationResponse {
     /// Next page URL is in a response body field.
-    BodyField {
-        next_field: String,
-    },
+    BodyField { next_field: String },
 
     /// Pagination via RFC 5988 Link header.
     LinkHeader,

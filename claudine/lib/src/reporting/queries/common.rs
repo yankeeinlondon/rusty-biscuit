@@ -1,15 +1,17 @@
-
-use chrono::{DateTime, Utc};
 #[cfg(test)]
 use chrono::NaiveDate;
+use chrono::{DateTime, Utc};
 use rusqlite::types::Value as SqlValue;
 use rusqlite::{Connection, params_from_iter};
 
-use crate::reporting::metrics::{RecoveryEvent, classify_tool, normalize_tool_name};
-use crate::reporting::types::{DailyToolStat, DateRange, LabeledCount, ProviderSplit, ReportingFilters, SessionInfo, UsageTotals};
 use crate::error::{ClaudineError, Result};
 use crate::events::AgenticEvent;
 use crate::provider::Provider;
+use crate::reporting::metrics::{RecoveryEvent, classify_tool, normalize_tool_name};
+use crate::reporting::types::{
+    DailyToolStat, DateRange, LabeledCount, ProviderSplit, ReportingFilters, SessionInfo,
+    UsageTotals,
+};
 
 #[derive(Debug, Default)]
 pub(crate) struct WhereBuilder {

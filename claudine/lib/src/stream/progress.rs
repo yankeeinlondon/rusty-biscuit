@@ -30,6 +30,8 @@ pub fn new_live_metrics() -> LiveMetrics {
 pub struct InFlightTool {
     pub name: Option<String>,
     pub started_at: Instant,
+    /// Wall-clock time of the most recent progress event for this tool.
+    pub last_progress_at: Instant,
 }
 
 /// A subagent invocation the parser has started but not yet seen a stop for.
@@ -37,6 +39,8 @@ pub struct InFlightTool {
 pub struct InFlightSubagent {
     pub name: Option<String>,
     pub started_at: Instant,
+    /// Wall-clock time of the most recent progress event for this subagent.
+    pub last_progress_at: Instant,
 }
 
 /// Mutable state the announcer and the heartbeat share.
@@ -104,6 +108,7 @@ impl LiveMetricsState {
             InFlightTool {
                 name,
                 started_at: now,
+                last_progress_at: now,
             },
         );
         self.last_event_at = Some(now);
@@ -120,6 +125,12 @@ impl LiveMetricsState {
     /// suppresses while the provider is actively producing output.
     pub fn record_activity(&mut self, now: Instant) {
         self.last_event_at = Some(now);
+        for tool in self.in_flight.values_mut() {
+            tool.last_progress_at = now;
+        }
+        for subagent in self.in_flight_subagents.values_mut() {
+            subagent.last_progress_at = now;
+        }
     }
 
     pub fn update_token_usage(&mut self, usage: NormalizedTokenUsage) {
@@ -136,6 +147,7 @@ impl LiveMetricsState {
             InFlightSubagent {
                 name,
                 started_at: now,
+                last_progress_at: now,
             },
         );
         self.last_event_at = Some(now);
@@ -175,6 +187,7 @@ impl LiveMetricsState {
                     InFlightTool {
                         name: name.clone(),
                         started_at: now,
+                        last_progress_at: now,
                     },
                 );
             }
@@ -196,6 +209,7 @@ impl LiveMetricsState {
                     InFlightSubagent {
                         name: name.clone(),
                         started_at: now,
+                        last_progress_at: now,
                     },
                 );
             }
@@ -234,6 +248,26 @@ impl LiveMetricsState {
             }
             _ => {}
         }
+    }
+
+    /// Returns all in-flight tools whose `last_progress_at` is at least
+    /// `threshold` older than `now`.
+    pub fn stuck_tools(&self, now: Instant, threshold: Duration) -> Vec<&InFlightTool> {
+        self.in_flight
+            .values()
+            .filter(|tool| now.saturating_duration_since(tool.last_progress_at) >= threshold)
+            .collect()
+    }
+
+    /// Returns all in-flight subagents whose `last_progress_at` is at least
+    /// `threshold` older than `now`.
+    pub fn stuck_subagents(&self, now: Instant, threshold: Duration) -> Vec<&InFlightSubagent> {
+        self.in_flight_subagents
+            .values()
+            .filter(|subagent| {
+                now.saturating_duration_since(subagent.last_progress_at) >= threshold
+            })
+            .collect()
     }
 }
 
@@ -350,6 +384,50 @@ mod tests {
         let now = Instant::now();
         state.record_activity(now);
         assert_eq!(state.last_event_at, Some(now));
+    }
+
+    #[test]
+    fn stuck_tools_returns_empty_when_all_fresh() {
+        let mut state = LiveMetricsState::default();
+        let now = Instant::now();
+        state.record_tool_start("tool-1".into(), Some("Bash".into()), now);
+        state.record_tool_start("tool-2".into(), Some("Read".into()), now);
+        let stuck = state.stuck_tools(now, Duration::from_secs(5));
+        assert!(stuck.is_empty(), "all fresh tools must return empty vec");
+    }
+
+    #[test]
+    fn stuck_tools_returns_stuck_ones() {
+        let mut state = LiveMetricsState::default();
+        let now = Instant::now();
+        let fresh = now;
+        let stale = now - Duration::from_secs(10);
+        state.record_tool_start("tool-1".into(), Some("Bash".into()), stale);
+        state.record_tool_start("tool-2".into(), Some("Read".into()), fresh);
+        // Manually override last_progress_at for the stale tool
+        if let Some(tool) = state.in_flight.get_mut("tool-1") {
+            tool.last_progress_at = stale;
+        }
+        let stuck = state.stuck_tools(now, Duration::from_secs(5));
+        assert_eq!(stuck.len(), 1, "exactly one tool should be stuck");
+        assert_eq!(stuck[0].name.as_deref(), Some("Bash"));
+    }
+
+    #[test]
+    fn stuck_subagents_returns_stuck_ones() {
+        let mut state = LiveMetricsState::default();
+        let now = Instant::now();
+        let fresh = now;
+        let stale = now - Duration::from_secs(10);
+        state.record_subagent_start("sa-1".into(), Some("researcher".into()), stale);
+        state.record_subagent_start("sa-2".into(), Some("coder".into()), fresh);
+        // Manually override last_progress_at for the stale subagent
+        if let Some(subagent) = state.in_flight_subagents.get_mut("sa-1") {
+            subagent.last_progress_at = stale;
+        }
+        let stuck = state.stuck_subagents(now, Duration::from_secs(5));
+        assert_eq!(stuck.len(), 1, "exactly one subagent should be stuck");
+        assert_eq!(stuck[0].name.as_deref(), Some("researcher"));
     }
 
     mod observe_event_tests {

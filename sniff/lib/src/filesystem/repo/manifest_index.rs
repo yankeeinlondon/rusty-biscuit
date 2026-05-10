@@ -117,8 +117,7 @@ impl ManifestIndex {
             }
         }
 
-        let shared: Arc<Mutex<Vec<(PathBuf, ManifestKind)>>> =
-            Arc::new(Mutex::new(Vec::new()));
+        let shared: Arc<Mutex<Vec<(PathBuf, ManifestKind)>>> = Arc::new(Mutex::new(Vec::new()));
 
         WalkBuilder::new(root)
             .hidden(false)

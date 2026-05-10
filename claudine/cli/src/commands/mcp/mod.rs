@@ -222,10 +222,7 @@ pub(super) fn server_label(server: &McpServer) -> String {
     }
 }
 
-pub(super) fn prompt_for_server_query(
-    catalog: &McpCatalogStore,
-    prompt: &str,
-) -> Result<String> {
+pub(super) fn prompt_for_server_query(catalog: &McpCatalogStore, prompt: &str) -> Result<String> {
     if !std::io::stdin().is_terminal() {
         return Err(eyre!("missing MCP server argument"));
     }

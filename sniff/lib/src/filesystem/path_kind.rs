@@ -7,8 +7,8 @@
 
 use std::path::Path;
 
-use crate::filesystem::file_types::{lookup_exact_filename, lookup_extension};
 use crate::filesystem::FileAssociation;
+use crate::filesystem::file_types::{lookup_exact_filename, lookup_extension};
 
 /// Returns `true` if the path refers to a source code file.
 ///

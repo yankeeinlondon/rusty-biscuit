@@ -17,8 +17,8 @@ pub(crate) mod timeouts;
 pub(crate) mod watchdog;
 pub(crate) mod wiring;
 
-pub(crate) use spawn::{run_child, run_child_capture, run_child_stream_semantic};
 pub(crate) use exit::{exit_code_from_status, resolve_first_response};
+pub(crate) use spawn::{run_child, run_child_capture, run_child_stream_semantic};
 
 pub(crate) struct ChildIoOptions<'a> {
     pub(crate) stdout_noise_prefixes: &'a [&'a str],

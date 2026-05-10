@@ -11,10 +11,10 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
-use crate::programs::enums::NotificationHelper;
 use crate::executable_index::ExecutableIndex;
-use crate::programs::contract::ExecutableSource;
 use crate::programs::category_detector::CategoryDetector;
+use crate::programs::contract::ExecutableSource;
+use crate::programs::enums::NotificationHelper;
 
 /// Information about the active Linux notification daemon.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

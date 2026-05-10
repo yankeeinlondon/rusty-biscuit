@@ -149,34 +149,34 @@ fn map_schema_to_model(
                 target: TypeRef::Array(Box::new(item_type)),
             }))
         }
-        openapiv3::SchemaKind::Type(openapiv3::Type::String(_)) => Some(ModelDef::Alias(
-            TypeAlias {
+        openapiv3::SchemaKind::Type(openapiv3::Type::String(_)) => {
+            Some(ModelDef::Alias(TypeAlias {
                 name: rust_name.to_string(),
                 description,
                 target: TypeRef::Primitive(PrimitiveType::String),
-            },
-        )),
-        openapiv3::SchemaKind::Type(openapiv3::Type::Integer(_)) => Some(ModelDef::Alias(
-            TypeAlias {
+            }))
+        }
+        openapiv3::SchemaKind::Type(openapiv3::Type::Integer(_)) => {
+            Some(ModelDef::Alias(TypeAlias {
                 name: rust_name.to_string(),
                 description,
                 target: TypeRef::Primitive(PrimitiveType::Integer),
-            },
-        )),
-        openapiv3::SchemaKind::Type(openapiv3::Type::Number(_)) => Some(ModelDef::Alias(
-            TypeAlias {
+            }))
+        }
+        openapiv3::SchemaKind::Type(openapiv3::Type::Number(_)) => {
+            Some(ModelDef::Alias(TypeAlias {
                 name: rust_name.to_string(),
                 description,
                 target: TypeRef::Primitive(PrimitiveType::Number),
-            },
-        )),
-        openapiv3::SchemaKind::Type(openapiv3::Type::Boolean(_)) => Some(ModelDef::Alias(
-            TypeAlias {
+            }))
+        }
+        openapiv3::SchemaKind::Type(openapiv3::Type::Boolean(_)) => {
+            Some(ModelDef::Alias(TypeAlias {
                 name: rust_name.to_string(),
                 description,
                 target: TypeRef::Primitive(PrimitiveType::Boolean),
-            },
-        )),
+            }))
+        }
         openapiv3::SchemaKind::OneOf { one_of } => {
             let variants: Vec<TypeRef> = one_of
                 .iter()

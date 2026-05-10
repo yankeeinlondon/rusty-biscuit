@@ -544,7 +544,11 @@ mod tests {
         let registry = openapi_registry();
         let openapi_schemas = registry.to_openapi_schemas();
 
-        assert!(openapi_schemas.len() >= 20, "expected at least 20 schemas, got {}", openapi_schemas.len());
+        assert!(
+            openapi_schemas.len() >= 20,
+            "expected at least 20 schemas, got {}",
+            openapi_schemas.len()
+        );
         assert!(openapi_schemas.contains_key("RepositoryInfo"));
         assert!(openapi_schemas.contains_key("PullRequestSummary"));
         assert!(openapi_schemas.contains_key("Vec<PullRequestSummary>"));

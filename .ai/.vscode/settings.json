@@ -74,5 +74,7 @@
         "wezterm",
         "yazi",
         "zune"
-    ]
+    ],
+    "git.autofetchPeriod": 0,
+    "git.repositoryScanMaxDepth": 0
 }

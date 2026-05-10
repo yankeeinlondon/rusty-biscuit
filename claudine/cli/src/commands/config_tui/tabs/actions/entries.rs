@@ -63,9 +63,7 @@ fn effective_action_entries(app: &App) -> Vec<ActionEntry> {
     merged
 }
 
-pub(super) fn current_actions_map(
-    app: &App,
-) -> Option<&HashMap<AgenticEvent, Vec<HookAction>>> {
+pub(super) fn current_actions_map(app: &App) -> Option<&HashMap<AgenticEvent, Vec<HookAction>>> {
     match app.actions_view {
         ActionView::Effective => None,
         ActionView::User => Some(&app.config.actions),

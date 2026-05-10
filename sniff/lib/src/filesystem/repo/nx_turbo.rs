@@ -13,10 +13,7 @@ use super::detection::{
 use super::manifest_index::ManifestIndex;
 use super::types::{MonorepoTool, PackageDiscoverySource, RepoInfo};
 
-pub(super) fn detect_nx(
-    root: &Path,
-    index: Option<&ManifestIndex>,
-) -> Result<Option<RepoInfo>> {
+pub(super) fn detect_nx(root: &Path, index: Option<&ManifestIndex>) -> Result<Option<RepoInfo>> {
     let nx_json = root.join("nx.json");
     if !nx_json.exists() {
         return Ok(None);
@@ -110,10 +107,7 @@ pub(super) fn detect_turborepo(
     }))
 }
 
-pub(super) fn detect_lerna(
-    root: &Path,
-    index: Option<&ManifestIndex>,
-) -> Result<Option<RepoInfo>> {
+pub(super) fn detect_lerna(root: &Path, index: Option<&ManifestIndex>) -> Result<Option<RepoInfo>> {
     let lerna_json = root.join("lerna.json");
     if !lerna_json.exists() {
         return Ok(None);

@@ -18,12 +18,12 @@ pub mod interview;
 pub mod options;
 pub mod plan;
 
+pub(crate) use command::method_available;
 pub use command::{
     astral_installer_url, build_install_announcement, build_install_failure_status,
     build_install_success_status, build_retry_choice_prose, build_retry_quit_prose,
     get_install_command, get_versioned_install_command,
 };
-pub(crate) use command::method_available;
 pub use execute::{
     execute_install, execute_install_captured, execute_versioned_install,
     execute_versioned_install_captured,
@@ -33,7 +33,5 @@ pub use interview::{
     InstallInterviewOptions, InstallInterviewOutcome, InstallOutputStream, InstallStatusKind,
     RetryChoice, RetryPrompt, RetryPromptChoice, run_install_interview,
 };
-pub use options::{
-    InstallCapturedOutcome, InstallCapturedResult, InstallOptions, InstallResult,
-};
+pub use options::{InstallCapturedOutcome, InstallCapturedResult, InstallOptions, InstallResult};
 pub use plan::{InstallPlan, InstallPlanOption, InstallPlanReason, build_install_plan};

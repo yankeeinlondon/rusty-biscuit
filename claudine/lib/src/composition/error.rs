@@ -2,8 +2,8 @@
 
 use std::path::PathBuf;
 
-use biscuit_terminal::components::status_block::StatusBlock;
 use biscuit_terminal::components::status::StatusState;
+use biscuit_terminal::components::status_block::StatusBlock;
 use biscuit_terminal::errors::{BlockError, ErrorHeader, StatusBlockExt};
 use biscuit_terminal::terminal::Terminal;
 use darkmatter::markdown::MarkdownError;
@@ -222,6 +222,74 @@ pub enum CompositionError {
         failures: Vec<SequenceSelectionFailure>,
         failure_count: usize,
     },
+
+    // -- Loop errors -----------------------------------------------------------
+    /// The `loop` frontmatter value is invalid.
+    #[error("invalid loop definition: {0}")]
+    LoopInvalid(String),
+
+    /// Loop execution exceeded its configured safety cap.
+    #[error(
+        "loop limit exceeded for {prompt_path} at iteration {iteration}; cap is {cap}",
+        prompt_path = prompt_path.display()
+    )]
+    LoopLimitExceeded {
+        /// Maximum allowed iteration count.
+        cap: usize,
+        /// Prompt file being executed.
+        prompt_path: PathBuf,
+        /// 1-based iteration that exceeded the limit.
+        iteration: usize,
+    },
+
+    /// A loop action failed validation or execution.
+    #[error(
+        "invalid loop action at iteration {iteration}, action {action_index} of {total_actions}: {message}"
+    )]
+    InvalidAction {
+        /// 1-based iteration index.
+        iteration: usize,
+        /// 1-based action index.
+        action_index: usize,
+        /// Total actions in this iteration.
+        total_actions: usize,
+        /// Human-readable failure reason.
+        message: String,
+    },
+
+    /// Increment targeted a property with an unsupported type.
+    #[error(
+        "invalid increment at iteration {iteration}, action {action_index} of {total_actions}: property `{property}` has type {found}"
+    )]
+    InvalidIncrementType {
+        /// 1-based iteration index.
+        iteration: usize,
+        /// 1-based action index.
+        action_index: usize,
+        /// Total actions in this iteration.
+        total_actions: usize,
+        /// Property that was targeted.
+        property: String,
+        /// Actual property type.
+        found: String,
+    },
+
+    /// Decrement targeted a property with an unsupported type.
+    #[error(
+        "invalid decrement at iteration {iteration}, action {action_index} of {total_actions}: property `{property}` has type {found}"
+    )]
+    InvalidDecrementType {
+        /// 1-based iteration index.
+        iteration: usize,
+        /// 1-based action index.
+        action_index: usize,
+        /// Total actions in this iteration.
+        total_actions: usize,
+        /// Property that was targeted.
+        property: String,
+        /// Actual property type.
+        found: String,
+    },
 }
 
 /// Per-step failure information for sequence selection errors.
@@ -254,10 +322,16 @@ impl BlockError for CompositionError {
 
                 let file_display = source_file.display().to_string();
                 let escaped = escape_prose_path(&file_display);
-                let file_link =
-                    format!("<a href=\"{escaped}\">{}</a>", escape_prose_path(&source_file.file_name().map_or_else(|| file_display.to_string(), |n| n.to_string_lossy().to_string())));
+                let file_link = format!(
+                    "<a href=\"{escaped}\">{}</a>",
+                    escape_prose_path(&source_file.file_name().map_or_else(
+                        || file_display.to_string(),
+                        |n| n.to_string_lossy().to_string()
+                    ))
+                );
 
-                let mut body = format!("Unknown property <cyan>`{dotted_property}`</cyan> in {file_link}");
+                let mut body =
+                    format!("Unknown property <cyan>`{dotted_property}`</cyan> in {file_link}");
                 if !expected_fields.is_empty() {
                     body.push_str("\n\n<b>Expected one of:</b>");
                     for field in expected_fields {

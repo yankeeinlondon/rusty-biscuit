@@ -4,13 +4,14 @@ use chrono::NaiveDate;
 use rusqlite::types::Value as SqlValue;
 use rusqlite::{Connection, params_from_iter};
 
-use super::common::{
-    load_provider_split, load_tool_stats, parse_provider, repo_label, validate_range,
-    WhereBuilder,
-};
-use crate::reporting::types::{DateRange, ProviderSplit, ReportingFilters, TrendPoint, TrendsReport};
-use crate::error::Result;
 use super::common::SessionBreakdown;
+use super::common::{
+    WhereBuilder, load_provider_split, load_tool_stats, parse_provider, repo_label, validate_range,
+};
+use crate::error::Result;
+use crate::reporting::types::{
+    DateRange, ProviderSplit, ReportingFilters, TrendPoint, TrendsReport,
+};
 
 pub(crate) fn trends(
     conn: &Connection,

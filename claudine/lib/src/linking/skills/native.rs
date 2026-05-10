@@ -116,8 +116,8 @@ mod tests {
 
     use tempfile::TempDir;
 
-    use super::fix_missing_skills;
     use super::super::ExceptionType;
+    use super::fix_missing_skills;
     use crate::linking::capabilities::ALL_PROVIDERS;
     use crate::linking::paths::ProviderPaths;
     use crate::linking::skills::test_helpers::{
@@ -248,8 +248,10 @@ mod tests {
                 agent_also_reads_from: vec![],
             },
         );
-        let paths =
-            crate::linking::paths::ProviderSkillPaths::from_providers_for_test(providers, tmp.path().to_path_buf());
+        let paths = crate::linking::paths::ProviderSkillPaths::from_providers_for_test(
+            providers,
+            tmp.path().to_path_buf(),
+        );
 
         let user_dir = tmp.path().join("user/skills");
         setup_skill(&user_dir, "my-skill", "Skill", "# Body\n");

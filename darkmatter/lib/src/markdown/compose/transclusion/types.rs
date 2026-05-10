@@ -485,7 +485,7 @@ impl biscuit_terminal::errors::BlockError for TransclusionError {
                 .body(format!(
                     "<dim>Expression:</dim> <cyan>{expr}</cyan>\n<dim>Line:</dim> {line}\n<dim>Message:</dim> {message}"
                 ))
-                .hint("Operators: <cyan>&&  ||  !  ==  !=  >  >=  <</cyan> plus helpers like <cyan>HasKey</cyan>, <cyan>Contains</cyan>, <cyan>Length</cyan>."),
+                .hint("Operators: <cyan>&&  ||  !  ==  !=  >  >=  <  <=  +  -  *  /  %  []  .</cyan> plus helpers like <cyan>HasKey</cyan>, <cyan>Contains</cyan>, <cyan>Length</cyan>, <cyan>min/max/abs</cyan>, <cyan>first/last</cyan>, <cyan>IsString/IsNumber/IsArray/IsNull/IsObject/IsEmpty</cyan>, <cyan>StartsWith/EndsWith</cyan>, <cyan>Lower/Upper/Capitalize</cyan>, case helpers, and date validators (<cyan>IsDate</cyan>, <cyan>IsToday</cyan>, etc.)."),
 
             TransclusionError::Relevel(message) => StatusBlock::new(StatusState::Error)
                 .error_header(ErrorHeader::new("TransclusionError", "re-leveling failed"))

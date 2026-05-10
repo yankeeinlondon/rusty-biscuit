@@ -231,14 +231,15 @@ Wrapper passthrough runs with no prompt file skip the header entirely; their onl
 OpenCode has an additional recovery path because its structured stdout stream is not a reliable process-lifecycle contract:
 
 - Some successful runs end on `step_finish.part.reason = "stop"` and then never exit cleanly.
-- Some subagent-heavy runs go completely silent after the last visible `Task(...)` completion even though the parent process remains alive.
+- Some subagent-heavy runs go completely silent after the last visible `Task(...)` completion even though the parent process remains alive. OpenCode dispatches the `task` tool as an ordinary tool, so the parent stream sees `tool_use` / `tool_result` for each subagent (not `task_started` / `task_completed`); after every dispatched task returns, the parent sometimes never emits a final `step_finish` with `reason = "stop"`.
 
-To avoid indefinite hangs in those cases, Claudine's OpenCode wait loop now polls `LiveMetricsState` while it waits for process exit:
+To avoid indefinite hangs in those cases, Claudine's OpenCode wait loop polls `LiveMetricsState` while it waits for process exit. The hang-recovery rule fires when **all** of these hold:
 
-- If OpenCode has already reported `provider_status = "stop"` and then stays silent for the normal stall window (default **120 s**), Claudine terminates the hung process and treats the run as successful.
-- If OpenCode has no visible in-flight work and stays silent for the hard recovery window (default **300 s**), Claudine terminates the process and synthesizes `error_kind = "provider_stalled"`.
+- At least one `step_finish` event has been observed (i.e. `provider_status` is not `None`). This guarantees the parser has crossed at least one step boundary, which rules out slow-startup false positives.
+- No tools and no subagents are in flight (`in_flight` and `in_flight_subagents` are both empty).
+- The stream has been silent for the recovery window (default **120 s**).
 
-Set `CLAUDINE_OPENCODE_HANG_TIMEOUT_SECONDS=<seconds>` to override the hard silent-stall recovery window.
+When all conditions hold, Claudine SIGTERMs the hung process and treats the run as successful (`CompletedButHung`). The synthesized message names the last observed `step_finish.reason` (`stop` or `tool-calls`) so operators can distinguish a clean-finish hang from a parallel-tool-dispatch hang.
 
 ## Timing Threads
 

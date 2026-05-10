@@ -18,7 +18,7 @@ use crate::errors::GeneratorError;
 use crate::output::{generate_and_write, generate_and_write_all};
 
 /// List of available API names for error messages.
-const AVAILABLE_APIS: &str = "anthropic, bitbucket, openai, elevenlabs, eversolo, gitea, github, gitlab, huggingface, lmstudio, ollama-native, ollama-openai, emqx-basic, emqx-bearer, samsung-smart-tv, unfolded-circle-core-rest, all";
+const AVAILABLE_APIS: &str = "anthropic, artificial-analysis-data, artificial-analysis-critpt, bitbucket, openai, elevenlabs, eversolo, gitea, github, gitlab, huggingface, lmstudio, ollama-native, ollama-openai, emqx-basic, emqx-bearer, samsung-smart-tv, unfolded-circle-core-rest, all";
 
 /// Returns the available API names string.
 pub fn available_apis() -> &'static str {
@@ -28,6 +28,9 @@ pub fn available_apis() -> &'static str {
 /// Resolves an API name to its definition.
 pub fn resolve_api(name: &str) -> Result<RestApi, GeneratorError> {
     use schematic_definitions::anthropic::define_anthropic_api;
+    use schematic_definitions::artificial_analysis::{
+        define_artificial_analysis_critpt_api, define_artificial_analysis_data_api,
+    };
     use schematic_definitions::bitbucket::define_bitbucket_api;
     use schematic_definitions::elevenlabs::define_elevenlabs_rest_api;
     use schematic_definitions::emqx::{define_emqx_basic_api, define_emqx_bearer_api};
@@ -44,6 +47,8 @@ pub fn resolve_api(name: &str) -> Result<RestApi, GeneratorError> {
 
     match name {
         "anthropic" => Ok(define_anthropic_api()),
+        "artificial-analysis-data" => Ok(define_artificial_analysis_data_api()),
+        "artificial-analysis-critpt" => Ok(define_artificial_analysis_critpt_api()),
         "bitbucket" => Ok(define_bitbucket_api()),
         "openai" => Ok(define_openai_api()),
         "elevenlabs" => Ok(define_elevenlabs_rest_api()),
@@ -72,6 +77,9 @@ pub fn resolve_api(name: &str) -> Result<RestApi, GeneratorError> {
 /// Returns all available API definitions for batch generation.
 pub fn resolve_all_apis() -> Vec<RestApi> {
     use schematic_definitions::anthropic::define_anthropic_api;
+    use schematic_definitions::artificial_analysis::{
+        define_artificial_analysis_critpt_api, define_artificial_analysis_data_api,
+    };
     use schematic_definitions::bitbucket::define_bitbucket_api;
     use schematic_definitions::elevenlabs::define_elevenlabs_rest_api;
     use schematic_definitions::emqx::{define_emqx_basic_api, define_emqx_bearer_api};
@@ -88,6 +96,8 @@ pub fn resolve_all_apis() -> Vec<RestApi> {
 
     vec![
         define_anthropic_api(),
+        define_artificial_analysis_data_api(),
+        define_artificial_analysis_critpt_api(),
         define_bitbucket_api(),
         define_openai_api(),
         define_elevenlabs_rest_api(),
@@ -216,10 +226,7 @@ pub fn missing_schemas_error(
     api_name: &str,
     missing: &[String],
 ) -> GeneratorError {
-    let first_missing = missing
-        .first()
-        .map(String::as_str)
-        .unwrap_or("MissingType");
+    let first_missing = missing.first().map(String::as_str).unwrap_or("MissingType");
     GeneratorError::ConfigError(format!(
         "OpenAPI registry incomplete for module \"{module}\" (API \"{api}\"): \
          missing schema(s) {missing:?}. \
@@ -605,11 +612,9 @@ pub fn run_generate_all(opts: &GenerateOpts<'_>) -> Result<(), GeneratorError> {
             })?;
 
             for member in module_apis.iter() {
-                registry
-                    .validate_completeness(member)
-                    .map_err(|missing| {
-                        missing_schemas_error(module_name, &member.name, &missing)
-                    })?;
+                registry.validate_completeness(member).map_err(|missing| {
+                    missing_schemas_error(module_name, &member.name, &missing)
+                })?;
             }
 
             let api_refs: Vec<&RestApi> = module_apis.iter().collect();
@@ -639,8 +644,7 @@ pub fn run_generate_all(opts: &GenerateOpts<'_>) -> Result<(), GeneratorError> {
 
         for (module_name, module_apis) in grouped.iter() {
             if module_apis.len() == 1 {
-                let module_name_resolved =
-                    crate::export::resolve_module_name(&module_apis[0]);
+                let module_name_resolved = crate::export::resolve_module_name(&module_apis[0]);
                 postman_files.insert(format!("{}.postman_collection.json", module_name_resolved));
 
                 run_postman_export(&module_apis[0], postman_dir, opts.dry_run, opts.verbose)?;
