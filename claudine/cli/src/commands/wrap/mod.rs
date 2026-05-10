@@ -139,8 +139,10 @@ pub(crate) fn detect_wrap_startup(cwd: &Path) -> Result<WrapStartupDetection> {
         })
         .unwrap_or((None, None));
 
+    // Direct wrapper has no composed-document source, so no source-repo
+    // hint to pass. `repo_root` and `child_cwd` both follow the launch CWD.
     let launch_workspace =
-        env::launch_workspace_context_from_repo_info(cwd, git_root.as_deref(), repo.as_ref());
+        env::launch_workspace_context_from_repo_info(cwd, git_root.as_deref(), repo.as_ref(), None);
 
     let env_context = claudine::events::environment_context_from_sniff_result(result);
 
@@ -1323,6 +1325,77 @@ mod tests {
 
         assert!(message.contains("cannot run wrapped Codex session"));
         assert!(message.contains("docs:"));
+    }
+
+    /// W2 regression: when the prep snapshot already knows where the
+    /// provider binary lives, `resolve_binary_path_direct` must return
+    /// that path without touching `which::which`. We verify this by
+    /// seeding the snapshot with a synthetic path that does **not** exist
+    /// on `PATH`; if the function fell through to `which::which`, the
+    /// call would error with `binary_missing_error`.
+    #[test]
+    fn resolve_binary_path_direct_uses_snapshot_without_which_lookup() {
+        use std::collections::{BTreeMap, BTreeSet};
+
+        let synthetic = PathBuf::from("/nonexistent/cache/codex-bin-stub");
+        let mut binary_paths = BTreeMap::new();
+        binary_paths.insert(Provider::Codex, synthetic.clone());
+        let snapshot = InstalledProviderSnapshot {
+            runnable: vec![Provider::Codex],
+            excluded: BTreeSet::new(),
+            all_installed: vec![Provider::Codex],
+            binary_paths,
+        };
+
+        let profile = profile::profile_for_provider(Provider::Codex).unwrap();
+        let resolved =
+            resolve_binary_path_direct(profile, Some(&snapshot)).expect("snapshot path wins");
+
+        assert_eq!(
+            resolved, synthetic,
+            "snapshot path must be returned verbatim, not re-resolved via `which`"
+        );
+    }
+
+    /// Companion: when the snapshot has no entry for the requested
+    /// provider, the legacy `which::which` fallback path is taken.
+    /// In an unhydrated environment (no real `codex` binary on PATH),
+    /// that path must still surface the actionable missing-binary error
+    /// rather than panic.
+    #[test]
+    fn resolve_binary_path_direct_falls_back_when_snapshot_lacks_provider() {
+        use std::collections::{BTreeMap, BTreeSet};
+
+        let snapshot = InstalledProviderSnapshot {
+            runnable: vec![],
+            excluded: BTreeSet::new(),
+            all_installed: vec![],
+            binary_paths: BTreeMap::new(),
+        };
+        let profile = profile::profile_for_provider(Provider::Codex).unwrap();
+
+        // Force PATH to a directory we know contains no binaries so the
+        // `which::which` fallback deterministically misses.
+        let empty = tempfile::tempdir().unwrap();
+        let prev_path = std::env::var_os("PATH");
+        // SAFETY: tests in this binary are not parallelised across this
+        // env var; the variable is restored before returning.
+        unsafe {
+            std::env::set_var("PATH", empty.path());
+        }
+        let result = resolve_binary_path_direct(profile, Some(&snapshot));
+        unsafe {
+            match prev_path {
+                Some(p) => std::env::set_var("PATH", p),
+                None => std::env::remove_var("PATH"),
+            }
+        }
+
+        let error = result.expect_err("missing-binary fallback should error");
+        assert!(
+            error.to_string().contains("cannot run wrapped Codex"),
+            "expected actionable error; got {error}"
+        );
     }
 
     #[test]

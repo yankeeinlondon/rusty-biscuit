@@ -9,6 +9,7 @@
 use std::collections::HashMap;
 use std::io::IsTerminal;
 use std::path::Path;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 use biscuit_terminal::components::status::{Status, StatusState};
@@ -54,6 +55,54 @@ pub(crate) use inline_guards::{cleanup_inline_output, split_frontmatter_and_body
 pub(crate) use prep_context::CompositionPrepContext;
 pub(crate) use structured::run_structured_composition;
 pub(crate) use summary::{emit_composition_summary, emit_minimal_composition_summary};
+
+/// W0 instrumentation counter: increments every time
+/// [`select_launch_workspace`] falls back to the legacy
+/// `env::resolve_launch_workspace_context` call.
+///
+/// The fallback path performs a fresh `detect_git` + `detect_repo`
+/// filesystem scan, which is exactly the redundancy W0 was designed to
+/// remove. The counter is process-global so a regression test can
+/// observe it across whatever spawn / fixture machinery the test uses
+/// without having to thread an injectable counter through the entire
+/// composition request type. Tests reset it via
+/// [`reset_launch_workspace_fallbacks_for_tests`].
+static LAUNCH_WORKSPACE_FALLBACK_COUNT: AtomicUsize = AtomicUsize::new(0);
+
+/// Choose the launch workspace context for the executor.
+///
+/// Returns the precomputed `prep` value when present (the W0 hot path).
+/// Falls back to the legacy `env::resolve_launch_workspace_context` walk
+/// only for library callers that don't thread a `CompositionPrepContext`
+/// (none in the production CLI).
+///
+/// The fallback branch increments [`LAUNCH_WORKSPACE_FALLBACK_COUNT`] so
+/// regression tests can prove the production hot path stays on the
+/// no-walk branch even after future refactors.
+pub(crate) fn select_launch_workspace(
+    prep: Option<&env::LaunchWorkspaceContext>,
+    launch_cwd: &Path,
+    source_repo_root: Option<&Path>,
+) -> env::LaunchWorkspaceContext {
+    if let Some(p) = prep {
+        return p.clone();
+    }
+    LAUNCH_WORKSPACE_FALLBACK_COUNT.fetch_add(1, Ordering::SeqCst);
+    env::resolve_launch_workspace_context(launch_cwd, source_repo_root)
+}
+
+/// Test-only: snapshot of the fallback counter.
+#[cfg(test)]
+pub(crate) fn launch_workspace_fallback_count_for_tests() -> usize {
+    LAUNCH_WORKSPACE_FALLBACK_COUNT.load(Ordering::SeqCst)
+}
+
+/// Test-only: reset the fallback counter so an isolated test can
+/// observe a clean baseline.
+#[cfg(test)]
+pub(crate) fn reset_launch_workspace_fallbacks_for_tests() {
+    LAUNCH_WORKSPACE_FALLBACK_COUNT.store(0, Ordering::SeqCst);
+}
 
 /// Enforce the `--repo` legacy hard-fail contract when prep-time
 /// launch-context detection failed.
@@ -453,7 +502,10 @@ pub(crate) fn refresh_for_model_validation(
     }
     let _span =
         tracing::info_span!("compose_prep.model_catalog", provider = %provider.as_slug()).entered();
-    catalog.refresh_provider_blocking(provider);
+    // W3: prefer non-blocking refresh so the current run never waits on a
+    // dynamic-source subprocess (`opencode models`) when a cache already
+    // exists. The async path falls back to blocking on true cold-cache.
+    catalog.refresh_provider_async(provider);
 }
 
 /// Same gating as [`refresh_for_model_validation`] but reads the
@@ -554,10 +606,11 @@ pub(crate) fn execute_composition_request_inner(
     let show_checks = !silent;
 
     let source_repo_root = request.prepared.source_repo_root.as_deref();
-    let launch_workspace = request
-        .prep_launch_workspace
-        .clone()
-        .unwrap_or_else(|| env::resolve_launch_workspace_context(&launch_cwd, source_repo_root));
+    let launch_workspace = select_launch_workspace(
+        request.prep_launch_workspace.as_ref(),
+        &launch_cwd,
+        source_repo_root,
+    );
 
     // -- Provider detection and selection ---------------------------------
 
@@ -1765,6 +1818,55 @@ pub(crate) fn load_selection_config_for_repo(repo_root: Option<&Path>) -> Option
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// W0 regression: when the executor is given a precomputed
+    /// `prep_launch_workspace`, [`select_launch_workspace`] must
+    /// short-circuit before reaching the legacy
+    /// `env::resolve_launch_workspace_context` walk. The fallback
+    /// counter is process-global so we reset it under `serial_test` to
+    /// observe a clean baseline.
+    #[test]
+    #[serial_test::serial]
+    fn select_launch_workspace_uses_prep_without_calling_fallback() {
+        use std::path::PathBuf;
+        reset_launch_workspace_fallbacks_for_tests();
+
+        let prep = env::LaunchWorkspaceContext {
+            launch_cwd: PathBuf::from("/tmp/launch"),
+            repo_root: Some(PathBuf::from("/tmp/launch")),
+            child_cwd: PathBuf::from("/tmp/launch"),
+            package_context: None,
+            warnings: Vec::new(),
+        };
+
+        let result = select_launch_workspace(Some(&prep), Path::new("/tmp/launch"), None);
+        assert_eq!(result.launch_cwd, prep.launch_cwd);
+        assert_eq!(
+            launch_workspace_fallback_count_for_tests(),
+            0,
+            "providing prep_launch_workspace must not call the fallback walker"
+        );
+    }
+
+    /// W0 contract: the fallback path is still reachable for legacy
+    /// callers that don't thread a `CompositionPrepContext` (e.g. a
+    /// hand-built library invocation). Calling without `prep` must
+    /// increment the counter exactly once so a future refactor that
+    /// adds a hidden second walk would fail this assertion.
+    #[test]
+    #[serial_test::serial]
+    fn select_launch_workspace_falls_back_once_when_prep_missing() {
+        reset_launch_workspace_fallbacks_for_tests();
+        let cwd = std::env::current_dir().unwrap();
+
+        let _ = select_launch_workspace(None, &cwd, None);
+
+        assert_eq!(
+            launch_workspace_fallback_count_for_tests(),
+            1,
+            "missing prep_launch_workspace must call the fallback walker exactly once"
+        );
+    }
 
     #[test]
     fn enforce_repo_launch_detection_passes_when_no_error() {

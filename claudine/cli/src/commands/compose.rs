@@ -283,7 +283,10 @@ fn run_compose_inner(
     })?;
 
     // Receipt banner: immediate feedback that the request was accepted.
-    if !shared.silent && !shared.quiet {
+    // Suppressed only by `--silent`. Per spec W1, `--quiet` follows the
+    // existing execution header's detail rules — which include emitting
+    // the brief one-liner — so the banner appears under `--quiet`.
+    if !shared.silent {
         use biscuit_terminal::components::renderable::Renderable;
         use biscuit_terminal::components::status::Status;
         let term = crate::log::terminal();
@@ -558,7 +561,10 @@ fn run_inline_compose_inner(
     })?;
 
     // Receipt banner: immediate feedback that the request was accepted.
-    if !shared.silent && !shared.quiet {
+    // Suppressed only by `--silent`. Per spec W1, `--quiet` follows the
+    // existing execution header's detail rules — which include emitting
+    // the brief one-liner — so the banner appears under `--quiet`.
+    if !shared.silent {
         use biscuit_terminal::components::renderable::Renderable;
         use biscuit_terminal::components::status::Status;
         let term = crate::log::terminal();

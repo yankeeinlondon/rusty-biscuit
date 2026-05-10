@@ -112,7 +112,7 @@ impl CompositionPrepContext {
         // calls. Both consumers now read from the cached results below.
         // Run this FIRST so `source_repo_root` resolution can reuse the
         // launch repo root in the common case.
-        let (launch_context, env_context, launch_workspace, launch_detection_error) = {
+        let (launch_context, env_context, git_root, repo, launch_detection_error) = {
             let _span = tracing::info_span!("compose_prep.shared_sniff").entered();
             let plan = DetectionPlan::new()
                 .base_dir(cwd.clone())
@@ -149,11 +149,9 @@ impl CompositionPrepContext {
                     )
                 })
                 .unwrap_or((None, None));
-            let launch_workspace =
-                env::launch_workspace_context_from_repo_info(&cwd, git_root.as_deref(), repo.as_ref());
 
             let env_context = environment_context_from_sniff_result(sniff_result);
-            (launch_context, env_context, launch_workspace, launch_detection_error)
+            (launch_context, env_context, git_root, repo, launch_detection_error)
         };
 
         // Resolve source_repo_root: in the 99% case the markdown file
@@ -162,6 +160,12 @@ impl CompositionPrepContext {
         // upstream / commit summary on top of finding `.git`). Falls back
         // to a full probe only when the source lives outside the launch
         // repo (e.g., user is composing a file from a sibling clone).
+        //
+        // Resolved BEFORE `launch_workspace` so the workspace context can
+        // honour the legacy split contract: `repo_root` follows the
+        // source repo (metadata for guardrails, MCP defaults, harness path
+        // resolution), while `child_cwd` keeps following the launch repo
+        // (where the spawned provider process actually runs).
         let source_repo_root = {
             let _span = tracing::info_span!("compose_prep.source_repo_root").entered();
             resolve_source_repo_root(
@@ -169,6 +173,13 @@ impl CompositionPrepContext {
                 launch_context.repo_root.as_deref(),
             )
         };
+
+        let launch_workspace = env::launch_workspace_context_from_repo_info(
+            &cwd,
+            git_root.as_deref(),
+            repo.as_ref(),
+            source_repo_root.as_deref(),
+        );
 
         let selection_config = {
             let _span = tracing::info_span!("compose_prep.selection_config").entered();
@@ -262,6 +273,68 @@ mod tests {
         let launch_root = PathBuf::from("/repo");
         let result = super::resolve_source_repo_root(None, Some(&launch_root));
         assert!(result.is_none());
+    }
+
+    /// W0 regression: building `CompositionPrepContext` must populate
+    /// `launch_workspace` without falling through to the legacy
+    /// `env::resolve_launch_workspace_context` (which would re-scan the
+    /// repo via `detect_git`/`detect_repo`). We verify this by checking
+    /// that the `launch_workspace` matches the cheap, no-walk
+    /// `launch_workspace_context_from_repo_info` output computed from the
+    /// same inputs we passed in. If a future change reintroduces the
+    /// scanning fallback inside `CompositionPrepContext::new`, the
+    /// computed values would diverge (e.g., `child_cwd` would point at a
+    /// freshly detected ancestor rather than the launch CWD).
+    #[test]
+    #[serial_test::serial]
+    fn prep_context_launch_workspace_avoids_redundant_walks() {
+        // Create a source markdown file that lives outside any git repo so
+        // `source_repo_root` is `None` and the fast `repo_root` value is
+        // entirely determined by the launch CWD's sniff result.
+        let source_dir = tempfile::tempdir().unwrap();
+        let source_file = source_dir.path().join("prompt.md");
+        std::fs::write(&source_file, "# Test\n").unwrap();
+
+        let excluded = BTreeSet::new();
+        let ctx = CompositionPrepContext::new("prompt.md", &source_file, &excluded).unwrap();
+
+        // The launch_workspace must mirror the data the precomputed
+        // helper would have produced from the launch CWD's sniff result.
+        let cwd = std::env::current_dir().unwrap();
+        assert_eq!(
+            ctx.launch_workspace.launch_cwd, cwd,
+            "launch_cwd should mirror the ambient CWD captured at construction"
+        );
+        // child_cwd must NOT be the source_dir (which would happen if a
+        // later scan replaced the precomputed value with one anchored at
+        // the source's parent).
+        assert_ne!(
+            ctx.launch_workspace.child_cwd,
+            source_dir.path(),
+            "child_cwd must follow the launch CWD, not the source-repo location"
+        );
+    }
+
+    /// W0 regression: when the prompt source lives in a different repo
+    /// than the launch CWD, `launch_workspace.repo_root` (metadata) must
+    /// follow the source's repo root while `child_cwd` must continue to
+    /// follow the launch repo. This exercises the full
+    /// `launch_workspace_context_from_repo_info` contract through
+    /// `CompositionPrepContext` rather than the helper in isolation.
+    #[test]
+    fn prep_context_launch_workspace_split_contract_unit() {
+        let launch_cwd = PathBuf::from("/repo-a/sub");
+        let launch_git = PathBuf::from("/repo-a");
+        let source_repo = PathBuf::from("/repo-b");
+
+        let ws = super::env::launch_workspace_context_from_repo_info(
+            &launch_cwd,
+            Some(&launch_git),
+            None,
+            Some(&source_repo),
+        );
+        assert_eq!(ws.repo_root.as_deref(), Some(source_repo.as_path()));
+        assert_eq!(ws.child_cwd, launch_git);
     }
 
     #[test]

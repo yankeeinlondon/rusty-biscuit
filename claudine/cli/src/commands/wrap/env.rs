@@ -391,15 +391,28 @@ pub(crate) fn resolve_launch_workspace_context(
 /// `SniffResult`; `repo` should come from its repo section. Callers that
 /// have neither can pass `None` for both — the resulting context will
 /// behave as if no repo was detected.
+///
+/// `source_repo_root_hint` preserves the legacy
+/// [`resolve_launch_workspace_context`] split contract: when a composed
+/// markdown source lives in a different repo than the launch CWD (sibling
+/// clone, external prompt), the metadata-bearing `repo_root` should follow
+/// the source's repo so guardrails, MCP defaults, and harness path
+/// resolution key off the document. The `child_cwd` (where the spawned
+/// provider process actually runs) must still follow the launch CWD's
+/// repo root so the provider does not jump into an unrelated worktree.
 pub(crate) fn launch_workspace_context_from_repo_info(
     launch_cwd: &Path,
     git_root: Option<&Path>,
     repo: Option<&RepoInfo>,
+    source_repo_root_hint: Option<&Path>,
 ) -> LaunchWorkspaceContext {
-    let repo_root = git_root
+    let launch_repo_root = git_root
         .map(Path::to_path_buf)
         .or_else(|| repo.map(|r| r.root.clone()));
-    let child_cwd = repo_root
+    let repo_root = source_repo_root_hint
+        .map(Path::to_path_buf)
+        .or_else(|| launch_repo_root.clone());
+    let child_cwd = launch_repo_root
         .clone()
         .unwrap_or_else(|| launch_cwd.to_path_buf());
 
@@ -819,6 +832,84 @@ mod tests {
             package_candidates_for_area("claudine", &packages),
             vec!["claudine".to_string(), "claudine-cli".to_string()]
         );
+    }
+
+    fn fake_repo_info(root: &Path) -> RepoInfo {
+        RepoInfo {
+            is_monorepo: false,
+            monorepo_tool: None,
+            workspace_tools: vec![],
+            root: root.to_path_buf(),
+            dependencies: None,
+            dev_dependencies: None,
+            peer_dependencies: None,
+            optional_dependencies: None,
+            packages: None,
+        }
+    }
+
+    #[test]
+    fn launch_workspace_repo_root_follows_source_when_outside_launch_repo() {
+        // Out-of-repo prompt case: launch CWD lives in repo A, prompt
+        // markdown lives in repo B. `repo_root` (metadata) must follow
+        // repo B so guardrails / MCP / harness key off the document repo,
+        // but `child_cwd` must follow repo A so the spawned provider
+        // process stays in the user's worktree.
+        let launch_cwd = PathBuf::from("/repo-a/sub");
+        let launch_git = PathBuf::from("/repo-a");
+        let source_repo = PathBuf::from("/repo-b");
+        let launch_repo_info = fake_repo_info(&launch_git);
+
+        let ctx = launch_workspace_context_from_repo_info(
+            &launch_cwd,
+            Some(&launch_git),
+            Some(&launch_repo_info),
+            Some(&source_repo),
+        );
+
+        assert_eq!(ctx.repo_root.as_deref(), Some(source_repo.as_path()));
+        assert_eq!(ctx.child_cwd, launch_git);
+        assert_eq!(ctx.launch_cwd, launch_cwd);
+    }
+
+    #[test]
+    fn launch_workspace_falls_back_to_launch_repo_when_no_source_hint() {
+        // Common case (source inside launch repo, or direct wrapper with no
+        // source at all): `repo_root` and `child_cwd` should both follow
+        // the launch git root.
+        let launch_cwd = PathBuf::from("/repo-a/sub");
+        let launch_git = PathBuf::from("/repo-a");
+        let launch_repo_info = fake_repo_info(&launch_git);
+
+        let ctx = launch_workspace_context_from_repo_info(
+            &launch_cwd,
+            Some(&launch_git),
+            Some(&launch_repo_info),
+            None,
+        );
+
+        assert_eq!(ctx.repo_root.as_deref(), Some(launch_git.as_path()));
+        assert_eq!(ctx.child_cwd, launch_git);
+    }
+
+    #[test]
+    fn launch_workspace_source_hint_with_no_launch_repo_uses_source_for_meta_only() {
+        // Edge case: launch CWD is not inside any git repo, but the
+        // composed source lives in one. Metadata follows the source repo;
+        // the child process still launches in the user's CWD because we
+        // have no launch-repo root to anchor it.
+        let launch_cwd = PathBuf::from("/tmp/scratch");
+        let source_repo = PathBuf::from("/repo-b");
+
+        let ctx = launch_workspace_context_from_repo_info(
+            &launch_cwd,
+            None,
+            None,
+            Some(&source_repo),
+        );
+
+        assert_eq!(ctx.repo_root.as_deref(), Some(source_repo.as_path()));
+        assert_eq!(ctx.child_cwd, launch_cwd);
     }
 
     #[test]
