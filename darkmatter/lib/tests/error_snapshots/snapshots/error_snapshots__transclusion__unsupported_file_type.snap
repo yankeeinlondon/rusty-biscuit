@@ -3,5 +3,5 @@ source: darkmatter/lib/tests/error_snapshots/transclusion.rs
 expression: out
 ---
 ⨫ TransclusionError: unsupported file type
-┃ Path: ./thing.xyz
-Use ::file for markdown or ::code for text/source.
+┃ File ./thing.xyz is not a supported markdown document.
+Transclusion targets must have .md or .markdown extensions.

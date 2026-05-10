@@ -4,7 +4,10 @@ expression: out
 ---
 ⨫ ImageRefError: malformed markdown image
 ┃ Message: expected ( after alt
-┃ Input:
-┃   ![alt] image.png
-┃          ^
-Use the pattern !alt with balanced brackets and parentheses.
+┃ 
+┃ Image parsing failed here:
+┃ 
+┃   > 1 │ ![alt] image.png
+┃ 
+┃         ^ (offset 7)
+Use the pattern !alt with balanced brackets.

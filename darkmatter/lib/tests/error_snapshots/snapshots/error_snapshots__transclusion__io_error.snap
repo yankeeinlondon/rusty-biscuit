@@ -2,7 +2,6 @@
 source: darkmatter/lib/tests/error_snapshots/transclusion.rs
 expression: out
 ---
-⨫ TransclusionError: I/O error
-┃ Kind: NotFound
+⨫ TransclusionError: I/O failure
 ┃ file gone
-Confirm the referenced file exists and is readable.
+Check file existence and permissions.

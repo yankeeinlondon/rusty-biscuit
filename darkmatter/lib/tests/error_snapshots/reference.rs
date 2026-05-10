@@ -1,19 +1,18 @@
 //! `ReferenceError` variant snapshots.
 
 use std::io;
-use std::path::PathBuf;
 
 use darkmatter::markdown::MarkdownError;
 use darkmatter::markdown::reference::ReferenceError;
 
-use crate::helpers::{assert_contains_all, render};
+use crate::helpers::{assert_contains_all, render, test_ctx_lines};
 
 #[test]
 fn parse_directive_shows_line_and_syntax_hint() {
     let err = ReferenceError::ParseDirective {
+        ctx: test_ctx_lines(8, "docs/root.md"),
         line: 5,
         message: "unexpected end".into(),
-        source_file: PathBuf::from("docs/root.md"),
         directive_text: "::file ./broken.md when=".into(),
         caret_col: Some(27),
     };
@@ -27,7 +26,7 @@ fn parse_directive_shows_line_and_syntax_hint() {
             "unexpected end",
             "docs/root.md",
             "::file ./broken.md when=",
-            "^",
+            "Column 27",
             "::file",
         ],
     );
@@ -76,7 +75,7 @@ fn compose_delegates_inner_block() {
 fn io_error_shows_kind() {
     let err = ReferenceError::Io(io::Error::new(io::ErrorKind::NotFound, "file gone"));
     let out = render(&err);
-    assert_contains_all(&out, &["ReferenceError", "I/O error", "NotFound"]);
+    assert_contains_all(&out, &["ReferenceError", "I/O failure", "file gone"]);
     insta::assert_snapshot!("io_error", out);
 }
 
@@ -85,6 +84,6 @@ fn url_error_has_scheme_hint() {
     let parse_error = url::Url::parse("not a url").unwrap_err();
     let err = ReferenceError::Url(parse_error);
     let out = render(&err);
-    assert_contains_all(&out, &["ReferenceError", "URL parse error", "https://"]);
+    assert_contains_all(&out, &["ReferenceError", "URL parse failure", "https://"]);
     insta::assert_snapshot!("url_error", out);
 }

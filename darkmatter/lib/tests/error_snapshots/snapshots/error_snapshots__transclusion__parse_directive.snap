@@ -3,6 +3,12 @@ source: darkmatter/lib/tests/error_snapshots/transclusion.rs
 expression: out
 ---
 ⨫ TransclusionError: directive parse failed
-┃ Line: 3
-┃ Message: unexpected token
-Expected syntax: ::file ./path.md | ::code ./file.rs.
+┃ Directive parsing failed here:
+┃ 
+┃     2 │ line 2
+┃   > 3 │ line 3
+┃     4 │ line 4
+┃ 
+┃ Gutter: Column 8 is near the error.
+Error: unexpected token
+Check syntax: ::file path="..."

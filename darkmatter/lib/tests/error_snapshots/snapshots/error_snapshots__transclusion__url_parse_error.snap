@@ -2,6 +2,6 @@
 source: darkmatter/lib/tests/error_snapshots/transclusion.rs
 expression: out
 ---
-⨫ TransclusionError: URL parse error
+⨫ TransclusionError: URL parse failure
 ┃ relative URL without a base
-Use a fully qualified URL including the https:// scheme.
+Verify the URL scheme and format (e.g., https://example.com).

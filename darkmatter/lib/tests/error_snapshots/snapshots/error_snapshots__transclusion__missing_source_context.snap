@@ -3,6 +3,7 @@ source: darkmatter/lib/tests/error_snapshots/transclusion.rs
 expression: out
 ---
 ⨫ TransclusionError: missing source context
-┃ Reference: ./sibling.md
-┃ Line: 4
-Load the document from a file or URL so relative refs can resolve.
+┃ Could not resolve ./sibling.md at line 4.
+┃ 
+┃ Note: Relative transclusions require a file-backed source.
+Try using an absolute path or `@/` repo-root reference.

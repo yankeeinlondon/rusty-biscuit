@@ -2,6 +2,6 @@
 source: darkmatter/lib/tests/error_snapshots/transclusion.rs
 expression: out
 ---
-⨫ TransclusionError: non-text code source
-┃ Path: ./binary.bin
-Only UTF-8 text files can be transcluded with ::code.
+⨫ TransclusionError: binary code source
+┃ The code source ./binary.bin is not valid UTF-8 text.
+::code transclusion only supports text files.

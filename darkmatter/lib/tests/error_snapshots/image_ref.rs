@@ -3,7 +3,7 @@
 use darkmatter::render::image_ref::ImageRefError;
 use darkmatter::render::stylesheet::StylesheetError;
 
-use crate::helpers::{assert_contains_all, render};
+use crate::helpers::{assert_contains_all, render, test_ctx};
 
 #[test]
 fn empty_source_has_actionable_hint() {
@@ -47,8 +47,8 @@ fn malformed_html_includes_message() {
 #[test]
 fn malformed_markdown_includes_message_input_and_caret() {
     let err = ImageRefError::MalformedMarkdown {
+        ctx: test_ctx("![alt] image.png\n", "doc.md"),
         message: "expected ( after alt".into(),
-        input: Some("![alt] image.png".into()),
         caret: Some(7),
     };
     let out = render(&err);

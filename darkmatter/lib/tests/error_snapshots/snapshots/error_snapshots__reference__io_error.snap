@@ -2,7 +2,6 @@
 source: darkmatter/lib/tests/error_snapshots/reference.rs
 expression: out
 ---
-⨫ ReferenceError: I/O error
-┃ Kind: NotFound
+⨫ ReferenceError: I/O failure
 ┃ file gone
-Confirm the referenced file exists and is readable.
+Check file existence and permissions.

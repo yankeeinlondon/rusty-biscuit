@@ -3,7 +3,9 @@ source: darkmatter/lib/tests/error_snapshots/transclusion.rs
 expression: out
 ---
 ⨫ TransclusionError: condition parse failed
-┃ Expression: a &&& b
-┃ Line: 4
-┃ Message: unexpected token
-Operators: &&  ||  !  ==  !=  >  >=  <  <=  +  -  *  /  %  []  . plus helpers like HasKey, Contains, Length, min/max/abs, first/last, IsString/IsNumber/IsArray/IsNull/IsObject/IsEmpty, StartsWith/EndsWith, Lower/Upper/Capitalize, case helpers, and date validators (IsDate, IsToday, etc.).
+┃ Failed to parse when="a &&& b":
+┃ 
+┃     3 │ line 3
+┃   > 4 │ line 4
+┃     5 │ line 5
+Error: unexpected token

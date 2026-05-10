@@ -3,6 +3,9 @@ source: darkmatter/lib/tests/error_snapshots/page_block.rs
 expression: out
 ---
 ⨫ PageBlockError: directive parse failed
-┃ Line: 12
 ┃ Message: unexpected token
+┃ 
+┃     11 │ line 11
+┃   > 12 │ line 12
+┃     13 │ line 13
 Opening syntax: ::block when="expr" — close with ::end-block.

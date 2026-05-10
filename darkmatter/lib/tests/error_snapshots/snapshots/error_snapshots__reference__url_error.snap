@@ -2,6 +2,6 @@
 source: darkmatter/lib/tests/error_snapshots/reference.rs
 expression: out
 ---
-⨫ ReferenceError: URL parse error
+⨫ ReferenceError: URL parse failure
 ┃ relative URL without a base
-Use a fully qualified URL including the https:// scheme.
+Verify the URL scheme and format (e.g., https://example.com).

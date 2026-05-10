@@ -4,4 +4,4 @@ expression: out
 ---
 ⨫ TransclusionError: re-leveling failed
 ┃ would push past H6
-Pick a target heading level that fits within H1–H6.
+Check that transcluded headings do not push past H6.

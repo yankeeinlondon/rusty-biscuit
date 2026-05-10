@@ -4,4 +4,7 @@ expression: out
 ---
 ⨫ LinkError: malformed markdown link
 ┃ Message: missing closing bracket
-Use the pattern display with balanced brackets and parentheses.
+┃ 
+┃ Link parsing failed here:
+┃ 
+Use the pattern display with balanced brackets.

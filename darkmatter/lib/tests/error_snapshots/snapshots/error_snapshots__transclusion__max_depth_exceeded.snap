@@ -2,6 +2,6 @@
 source: darkmatter/lib/tests/error_snapshots/transclusion.rs
 expression: out
 ---
-⨫ TransclusionError: max recursion depth exceeded
-┃ Max depth: 8
-Flatten the transclusion tree or raise the configured max depth.
+⨫ TransclusionError: recursion limit hit
+┃ Transclusion depth exceeded the limit of 8.
+Increase max_depth in frontmatter or simplify the document tree.

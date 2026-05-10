@@ -5,7 +5,7 @@ use std::time::Duration;
 
 use darkmatter::markdown::compose::{ShellCommandOrigin, ShellExpansionError};
 
-use crate::helpers::{assert_contains_all, render};
+use crate::helpers::{assert_contains_all, render, test_ctx};
 
 fn body_origin() -> ShellCommandOrigin {
     ShellCommandOrigin::Body { line: 17 }
@@ -20,6 +20,7 @@ fn frontmatter_origin() -> ShellCommandOrigin {
 #[test]
 fn parse_directive_shows_origin_and_syntax_hint() {
     let err = ShellExpansionError::ParseDirective {
+        ctx: test_ctx("", "doc.md"),
         origin: body_origin(),
         message: "unterminated quote".into(),
     };
@@ -41,6 +42,7 @@ fn command_not_found_has_path_hint() {
     let err = ShellExpansionError::CommandNotFound {
         command: "nx".into(),
         origin: body_origin(),
+        ctx: test_ctx("", "doc.md"),
     };
     let out = render(&err);
     assert_contains_all(
@@ -61,6 +63,7 @@ fn blacklisted_shows_reason() {
         command: "rm -rf /".into(),
         reason: "destructive".into(),
         origin: body_origin(),
+        ctx: test_ctx("", "doc.md"),
     };
     let out = render(&err);
     assert_contains_all(
@@ -81,6 +84,7 @@ fn approval_required_names_whitelist_paths() {
         whitelist_path: PathBuf::from("/tmp/wl"),
         blacklist_path: PathBuf::from("/tmp/bl"),
         origin: body_origin(),
+        ctx: test_ctx("", "doc.md"),
     };
     let out = render(&err);
     assert_contains_all(
@@ -101,6 +105,7 @@ fn denied_shows_command_and_origin() {
     let err = ShellExpansionError::Denied {
         command: "git push".into(),
         origin: frontmatter_origin(),
+        ctx: test_ctx("", "doc.md"),
     };
     let out = render(&err);
     assert_contains_all(
@@ -117,6 +122,7 @@ fn denied_shows_command_and_origin() {
 #[test]
 fn not_pre_approved_surfaces_command() {
     let err = ShellExpansionError::NotPreApproved {
+        ctx: test_ctx("", "doc.md"),
         command: "pnpm run build".into(),
         origin: body_origin(),
         source_desc: " (from whitelist)".into(),
@@ -134,6 +140,7 @@ fn timeout_includes_duration() {
         command: "sleep 30".into(),
         timeout: Duration::from_secs(5),
         origin: body_origin(),
+        ctx: test_ctx("", "doc.md"),
     };
     let out = render(&err);
     assert_contains_all(&out, &["ShellExpansionError", "timed out", "sleep 30"]);
@@ -147,6 +154,7 @@ fn execution_failed_includes_stderr() {
         stdout: String::new(),
         stderr: "ls: unrecognized option".into(),
         origin: body_origin(),
+        ctx: test_ctx("", "doc.md"),
     };
     let out = render(&err);
     assert_contains_all(

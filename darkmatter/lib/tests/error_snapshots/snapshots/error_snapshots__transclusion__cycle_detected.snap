@@ -4,7 +4,10 @@ expression: out
 ---
 ⨫ TransclusionError: cycle detected
 ┃ Chain:
-┃   1. a.md :line 3
-┃   2. b.md :line 7
-┃   3. a.md :line 3
+┃ 
+┃   a.md :line 3
+┃ 
+┃   b.md :line 7
+┃ 
+┃   a.md :line 3
 Break the cycle by removing one transclusion edge.

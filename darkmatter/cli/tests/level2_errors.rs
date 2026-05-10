@@ -25,7 +25,7 @@ fn level2_error_header_contains_osc8_hyperlink() {
 
     // Run `md` on the broken file
     let cmd = format!("md {}", file_path.display());
-    harness.send_command(&cmd).expect("send_command failed");
+    harness.send_command_with_env(&cmd, &[]).expect("send_command_with_env failed");
     
     // Wait for output
     let _ = biscuit_test_harness::wait_for_prompt(&mut harness);
@@ -57,7 +57,7 @@ fn level2_error_excerpt_contains_gutter_and_dimming() {
     harness.spawn_shell().expect("spawn_shell failed");
 
     let cmd = format!("md {}", file_path.display());
-    harness.send_command(&cmd).expect("send_command failed");
+    harness.send_command_with_env(&cmd, &[]).expect("send_command_with_env failed");
     let _ = biscuit_test_harness::wait_for_prompt(&mut harness);
 
     let frame = harness.capture().expect("capture failed");

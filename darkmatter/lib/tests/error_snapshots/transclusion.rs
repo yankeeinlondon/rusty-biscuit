@@ -5,11 +5,12 @@ use std::path::PathBuf;
 
 use darkmatter::markdown::compose::TransclusionError;
 
-use crate::helpers::{assert_contains_all, render};
+use crate::helpers::{assert_contains_all, render, test_ctx, test_ctx_lines};
 
 #[test]
 fn parse_directive_has_syntax_hint() {
     let err = TransclusionError::ParseDirective {
+        ctx: test_ctx_lines(8, "doc.md"),
         line: 3,
         message: "unexpected token".into(),
         caret_col: Some(8),
@@ -32,9 +33,9 @@ fn parse_directive_has_syntax_hint() {
 fn invalid_reference_shows_reference() {
     use darkmatter::markdown::compose::transclusion::DirectiveKind;
     let err = TransclusionError::InvalidReference {
+        ctx: test_ctx_lines(5, "doc.md"),
         reference: "//weird".into(),
         line: 2,
-        source_file: PathBuf::from("doc.md"),
         directive_kind: DirectiveKind::File,
     };
     let out = render(&err);
@@ -42,11 +43,10 @@ fn invalid_reference_shows_reference() {
         &out,
         &[
             "TransclusionError",
-            "invalid reference",
+            "could not be resolved",
             "//weird",
             "2",
             "doc.md",
-            "::file",
         ],
     );
     insta::assert_snapshot!("invalid_reference", out);
@@ -109,7 +109,7 @@ fn non_text_code_source_shows_path() {
     let out = render(&err);
     assert_contains_all(
         &out,
-        &["TransclusionError", "non-text code source", "./binary.bin"],
+        &["TransclusionError", "binary code source", "./binary.bin"],
     );
     insta::assert_snapshot!("non_text_code_source", out);
 }
@@ -144,7 +144,7 @@ fn max_depth_exceeded_shows_limit() {
     let out = render(&err);
     assert_contains_all(
         &out,
-        &["TransclusionError", "max recursion depth exceeded", "8"],
+        &["TransclusionError", "recursion limit hit", "8"],
     );
     insta::assert_snapshot!("max_depth_exceeded", out);
 }
@@ -152,6 +152,7 @@ fn max_depth_exceeded_shows_limit() {
 #[test]
 fn condition_eval_shows_expr_and_state_hint() {
     let err = TransclusionError::ConditionEval {
+        ctx: test_ctx_lines(15, "doc.md"),
         expr: "length(items) > 0".into(),
         line: 10,
         message: "items not found".into(),
@@ -173,6 +174,7 @@ fn condition_eval_shows_expr_and_state_hint() {
 #[test]
 fn condition_parse_lists_operators_and_helpers() {
     let err = TransclusionError::ConditionParse {
+        ctx: test_ctx_lines(8, "doc.md"),
         expr: "a &&& b".into(),
         line: 4,
         message: "unexpected token".into(),
@@ -185,8 +187,7 @@ fn condition_parse_lists_operators_and_helpers() {
             "condition parse failed",
             "a &&& b",
             "4",
-            "&&",
-            "HasKey",
+            "unexpected token",
         ],
     );
     insta::assert_snapshot!("condition_parse", out);
@@ -227,6 +228,7 @@ fn url_execution_disabled_shows_url() {
 #[test]
 fn invalid_frontmatter_assignment_shows_cta() {
     let err = TransclusionError::InvalidFrontmatterAssignment {
+        ctx: test_ctx_lines(8, "doc.md"),
         line: 5,
         raw: "bogus".into(),
         reason: "expected JSON5 object".into(),
@@ -237,10 +239,8 @@ fn invalid_frontmatter_assignment_shows_cta() {
         &[
             "TransclusionError",
             "invalid frontmatter assignment",
-            "5",
             "bogus",
             "expected JSON5 object",
-            "--allow-invalid-frontmatter-assignment",
         ],
     );
     insta::assert_snapshot!("invalid_frontmatter_assignment", out);
@@ -249,6 +249,7 @@ fn invalid_frontmatter_assignment_shows_cta() {
 #[test]
 fn invalid_reassigned_frontmatter_property_shows_cta() {
     let err = TransclusionError::InvalidReassignedFrontmatterProperty {
+        ctx: test_ctx_lines(8, "doc.md"),
         line: 6,
         name: "title".into(),
     };
@@ -257,10 +258,8 @@ fn invalid_reassigned_frontmatter_property_shows_cta() {
         &out,
         &[
             "TransclusionError",
-            "reassigned frontmatter property",
-            "6",
+            "duplicate frontmatter property",
             "title",
-            "--allow-reassigned-frontmatter-property",
         ],
     );
     insta::assert_snapshot!("invalid_reassigned_frontmatter_property", out);
@@ -270,7 +269,7 @@ fn invalid_reassigned_frontmatter_property_shows_cta() {
 fn io_error_shows_kind() {
     let err = TransclusionError::Io(io::Error::new(io::ErrorKind::NotFound, "file gone"));
     let out = render(&err);
-    assert_contains_all(&out, &["TransclusionError", "I/O error", "NotFound"]);
+    assert_contains_all(&out, &["TransclusionError", "I/O failure", "file gone"]);
     insta::assert_snapshot!("io_error", out);
 }
 
@@ -279,7 +278,7 @@ fn url_parse_error_has_scheme_hint() {
     let parse_error = url::Url::parse("not a url").unwrap_err();
     let err = TransclusionError::UrlParse(parse_error);
     let out = render(&err);
-    assert_contains_all(&out, &["TransclusionError", "URL parse error", "https://"]);
+    assert_contains_all(&out, &["TransclusionError", "URL parse failure", "https://"]);
     insta::assert_snapshot!("url_parse_error", out);
 }
 
@@ -292,7 +291,7 @@ fn json_error_includes_position() {
         &out,
         &[
             "TransclusionError",
-            "directive option parse error",
+            "JSON5 parse failure in options",
             "line",
             "column",
         ],

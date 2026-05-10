@@ -3,10 +3,12 @@ source: darkmatter/lib/tests/error_snapshots/reference.rs
 expression: out
 ---
 ⨫ ReferenceError: directive parse failed
-┃ Source: docs/root.md
-┃ Line: 5
-┃ Message: unexpected end
-┃ Directive:
-┃   ::file ./broken.md when=
-┃                             ^
-Expected: ::file ./doc.md, ::code ./file.rs, or ::url https://….
+┃ Directive parsing failed in docs/root.md:
+┃ 
+┃     4 │ line 4
+┃   > 5 │ line 5
+┃     6 │ line 6
+┃ 
+┃ Gutter: Column 27 is near the error in: ::file ./broken.md when=
+Error: unexpected end
+Check syntax: ::file path="..."

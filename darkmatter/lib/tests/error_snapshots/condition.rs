@@ -2,11 +2,12 @@
 
 use darkmatter::markdown::compose::conditions::ConditionError;
 
-use crate::helpers::{assert_contains_all, render};
+use crate::helpers::{assert_contains_all, render, test_ctx_lines};
 
 #[test]
 fn parse_lists_operators_and_helpers() {
     let err = ConditionError::Parse {
+        ctx: test_ctx_lines(8, "test.md"),
         expr: "a &&& b".into(),
         line: 4,
         message: "unexpected token".into(),
@@ -20,7 +21,7 @@ fn parse_lists_operators_and_helpers() {
             "parse failed",
             "a &&& b",
             "4",
-            "unexpected token",
+            "near position 3",
             "^",
             "&&",
             "HasKey",
@@ -32,6 +33,7 @@ fn parse_lists_operators_and_helpers() {
 #[test]
 fn eval_points_at_state() {
     let err = ConditionError::Eval {
+        ctx: test_ctx_lines(15, "test.md"),
         expr: "length(items) > 0".into(),
         line: 10,
         message: "items not found".into(),
