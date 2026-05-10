@@ -181,7 +181,7 @@ impl LifecycleEmitter for DefaultLifecycleEmitter {
     }
 
     fn emit_notification(&self, title: &str) {
-        crate::messaging::execute_notification(title);
+        crate::messaging::execute_notification(title, None);
     }
 }
 
@@ -794,7 +794,7 @@ pub fn emit_lifecycle_signal(
     }
     // notify
     if let Some(notify_title) = &notification.notify {
-        crate::messaging::execute_notification(notify_title);
+        crate::messaging::execute_notification(notify_title, None);
     }
 
     // --- Audio phases (sequential, blocking, lazy TTS config) ---
@@ -1758,9 +1758,15 @@ mod tests {
     #[tokio::test]
     async fn default_lifecycle_emitter_emit_notification_does_not_panic() {
         let emitter = DefaultLifecycleEmitter;
-        // Fire-and-forget: should return immediately without panic
-        emitter.emit_notification("unit testing — you can dismiss this notification");
-        // Give the spawned task a moment to start
+        // Fire-and-forget through the title-only trait method.
+        emitter.emit_notification("unit testing");
+        // And exercise the body-bearing path directly so the rendered
+        // notification has a distinct title and message line.
+        crate::messaging::execute_notification(
+            "unit testing",
+            Some("you can dismiss this notification"),
+        );
+        // Give the spawned tasks a moment to start
         tokio::task::yield_now().await;
     }
 

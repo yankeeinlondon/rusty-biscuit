@@ -59,3 +59,5 @@ insta = { version = "1.34", features = ["json"] }
 expectrl = "0.8"
 proptest = "1.4"
 serial_test = "3"
+rstest = "0.25"
+test-toolkit = { path = "../../tools/test-toolkit" }

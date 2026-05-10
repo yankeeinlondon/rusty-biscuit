@@ -265,8 +265,7 @@ mod tests {
         let lookup = LoopExpressionLookup::new(&fm, &ambient);
 
         assert!(
-            evaluate_condition(&LoopCondition::While("_loop_count == 1".into()), &lookup)
-                .unwrap()
+            evaluate_condition(&LoopCondition::While("_loop_count == 1".into()), &lookup).unwrap()
         );
         assert!(
             evaluate_condition(

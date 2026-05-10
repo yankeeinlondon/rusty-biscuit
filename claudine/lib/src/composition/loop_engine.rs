@@ -351,7 +351,9 @@ fn compute_is_last(
         last_exit_code,
     );
     let speculative_lookup = LoopExpressionLookup::new(frontmatter, &speculative_ambient);
-    let Ok(next_frontmatter) = apply_actions(config, frontmatter, iteration, Some(&speculative_lookup)) else {
+    let Ok(next_frontmatter) =
+        apply_actions(config, frontmatter, iteration, Some(&speculative_lookup))
+    else {
         return Ok(false);
     };
     let next_ambient = LoopAmbient::new(
@@ -390,10 +392,7 @@ fn insert_ambient_overrides(frontmatter: &mut Map<String, Value>, ambient: &Loop
         "_loop_count".to_string(),
         Value::Number(ambient.iteration.into()),
     );
-    frontmatter.insert(
-        "_loop_is_first".to_string(),
-        Value::Bool(ambient.is_first),
-    );
+    frontmatter.insert("_loop_is_first".to_string(), Value::Bool(ambient.is_first));
     frontmatter.insert("_loop_is_last".to_string(), Value::Bool(ambient.is_last));
     frontmatter.insert(
         "_loop_last_output".to_string(),
@@ -652,7 +651,12 @@ mod tests {
             &config,
             Map::new(),
             LoopExecutionOptions::default(),
-            |ctx| Ok(LoopIterationOutput::success(format!("ran-{}", ctx.iteration))),
+            |ctx| {
+                Ok(LoopIterationOutput::success(format!(
+                    "ran-{}",
+                    ctx.iteration
+                )))
+            },
         )
         .unwrap();
 
@@ -661,10 +665,7 @@ mod tests {
         // the JSON number 2 (typed), and `echo` should be the string output
         // captured from iteration 2's executor.
         assert_eq!(result.final_frontmatter.get("stamp"), Some(&json!(2)));
-        assert_eq!(
-            result.final_frontmatter.get("echo"),
-            Some(&json!("ran-2"))
-        );
+        assert_eq!(result.final_frontmatter.get("echo"), Some(&json!("ran-2")));
     }
 
     #[test]

@@ -84,3 +84,5 @@ serial_test = "3"
 serde_json = "1.0"
 criterion = "0.5"
 proptest = "1.6"
+rstest = "0.25"
+test-toolkit = { path = "../../tools/test-toolkit" }

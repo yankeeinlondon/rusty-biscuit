@@ -69,9 +69,7 @@ fn enforce_repo_launch_detection(
     repo: bool,
     prep_launch_detection_error: Option<&str>,
 ) -> Result<()> {
-    if repo
-        && let Some(error) = prep_launch_detection_error
-    {
+    if repo && let Some(error) = prep_launch_detection_error {
         return Err(eyre!(
             "--repo requires startup repo detection, but launch-context detection failed: {error}"
         ));
@@ -357,9 +355,8 @@ pub(crate) fn eagerly_resolve_target(
         if let Some(provider) = explicit_provider {
             // Probe model resolution without catalog to determine whether
             // an env var override makes refresh unnecessary.
-            let (_, probe_reason) = claudine::composition::resolve_model_with_hints(
-                provider, hints, cli_model, None,
-            );
+            let (_, probe_reason) =
+                claudine::composition::resolve_model_with_hints(provider, hints, cli_model, None);
             refresh_for_model_validation(&catalog, provider, hints, Some(&probe_reason));
             let (model, model_reason) = claudine::composition::resolve_model_with_hints(
                 provider,
@@ -380,9 +377,8 @@ pub(crate) fn eagerly_resolve_target(
             .map_err(|e| eyre!("provider selection cancelled: {e}"))?;
         // Probe model resolution without catalog to determine whether
         // an env var override makes refresh unnecessary.
-        let (_, probe_reason) = claudine::composition::resolve_model_with_hints(
-            provider, hints, cli_model, None,
-        );
+        let (_, probe_reason) =
+            claudine::composition::resolve_model_with_hints(provider, hints, cli_model, None);
         refresh_for_model_validation(&catalog, provider, hints, Some(&probe_reason));
         let (model, model_reason) = claudine::composition::resolve_model_with_hints(
             provider,
@@ -455,7 +451,8 @@ pub(crate) fn refresh_for_model_validation(
     ) {
         return;
     }
-    let _span = tracing::info_span!("compose_prep.model_catalog", provider = %provider.as_slug()).entered();
+    let _span =
+        tracing::info_span!("compose_prep.model_catalog", provider = %provider.as_slug()).entered();
     catalog.refresh_provider_blocking(provider);
 }
 
@@ -467,7 +464,12 @@ fn refresh_for_prepared_model_validation(
     prepared: &claudine::composition::PreparedComposition,
     resolved_model_reason: Option<&ModelResolutionReason>,
 ) {
-    refresh_for_model_validation(catalog, provider, &prepared.selection_hints, resolved_model_reason);
+    refresh_for_model_validation(
+        catalog,
+        provider,
+        &prepared.selection_hints,
+        resolved_model_reason,
+    );
 }
 
 /// Inject `AGENT` into both the parent process env and the supplied
@@ -973,10 +975,7 @@ pub(crate) fn execute_composition_request_inner(
         }
     }
 
-    enforce_repo_launch_detection(
-        request.repo,
-        request.prep_launch_detection_error.as_deref(),
-    )?;
+    enforce_repo_launch_detection(request.repo, request.prep_launch_detection_error.as_deref())?;
     let launch_context = if let Some(prep) = request.prep_launch_context.as_ref() {
         // Phase fix (2026-05-09-slow-prep): reuse the launch_context computed
         // by the shared sniff scan in `CompositionPrepContext` instead of
@@ -1754,8 +1753,7 @@ mod tests {
         // The legacy contract: `--repo` requires startup repo detection,
         // so a captured prep-time sniff failure must abort the run with
         // a hard error that surfaces the original sniff message.
-        let result =
-            enforce_repo_launch_detection(true, Some("filesystem probe failed: io error"));
+        let result = enforce_repo_launch_detection(true, Some("filesystem probe failed: io error"));
         let err = result.expect_err("--repo + prep sniff failure must error");
         let message = err.to_string();
         assert!(
@@ -2075,18 +2073,13 @@ mod tests {
         let _g2 = EnvGuard::clear("MODEL");
 
         let tmp = tempfile::tempdir().unwrap();
-        let catalog = claudine::model_catalog::ModelCatalogService::with_cache_dir(
-            tmp.path().to_path_buf(),
-        );
+        let catalog =
+            claudine::model_catalog::ModelCatalogService::with_cache_dir(tmp.path().to_path_buf());
         let hints = make_hints_with_model("slow");
 
         // Probe resolution without catalog tells us the model comes from env
-        let (_, probe_reason) = claudine::composition::resolve_model_with_hints(
-            Provider::OpenCode,
-            &hints,
-            None,
-            None,
-        );
+        let (_, probe_reason) =
+            claudine::composition::resolve_model_with_hints(Provider::OpenCode, &hints, None, None);
         assert!(matches!(
             probe_reason,
             ModelResolutionReason::ProviderEnv("OPENCODE_MODEL")
@@ -2105,17 +2098,12 @@ mod tests {
         let _g2 = EnvGuard::clear("OPENCODE_MODEL");
 
         let tmp = tempfile::tempdir().unwrap();
-        let catalog = claudine::model_catalog::ModelCatalogService::with_cache_dir(
-            tmp.path().to_path_buf(),
-        );
+        let catalog =
+            claudine::model_catalog::ModelCatalogService::with_cache_dir(tmp.path().to_path_buf());
         let hints = make_hints_with_model("slow");
 
-        let (_, probe_reason) = claudine::composition::resolve_model_with_hints(
-            Provider::OpenCode,
-            &hints,
-            None,
-            None,
-        );
+        let (_, probe_reason) =
+            claudine::composition::resolve_model_with_hints(Provider::OpenCode, &hints, None, None);
         assert!(matches!(probe_reason, ModelResolutionReason::GenericEnv));
 
         refresh_for_model_validation(&catalog, Provider::OpenCode, &hints, Some(&probe_reason));
@@ -2130,17 +2118,12 @@ mod tests {
         let _g2 = EnvGuard::clear("MODEL");
 
         let tmp = tempfile::tempdir().unwrap();
-        let catalog = claudine::model_catalog::ModelCatalogService::with_cache_dir(
-            tmp.path().to_path_buf(),
-        );
+        let catalog =
+            claudine::model_catalog::ModelCatalogService::with_cache_dir(tmp.path().to_path_buf());
         let hints = make_hints_with_model("slow");
 
-        let (_, probe_reason) = claudine::composition::resolve_model_with_hints(
-            Provider::Claude,
-            &hints,
-            None,
-            None,
-        );
+        let (_, probe_reason) =
+            claudine::composition::resolve_model_with_hints(Provider::Claude, &hints, None, None);
         assert!(matches!(
             probe_reason,
             ModelResolutionReason::ProviderEnv("CLAUDE_MODEL")
@@ -2161,17 +2144,12 @@ mod tests {
         let _g2 = EnvGuard::clear("MODEL");
 
         let tmp = tempfile::tempdir().unwrap();
-        let catalog = claudine::model_catalog::ModelCatalogService::with_cache_dir(
-            tmp.path().to_path_buf(),
-        );
+        let catalog =
+            claudine::model_catalog::ModelCatalogService::with_cache_dir(tmp.path().to_path_buf());
         let hints = make_hints_with_model("slow");
 
-        let (_, probe_reason) = claudine::composition::resolve_model_with_hints(
-            Provider::OpenCode,
-            &hints,
-            None,
-            None,
-        );
+        let (_, probe_reason) =
+            claudine::composition::resolve_model_with_hints(Provider::OpenCode, &hints, None, None);
         assert!(matches!(
             probe_reason,
             ModelResolutionReason::FrontmatterSingle | ModelResolutionReason::ProviderDefault
