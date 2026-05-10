@@ -7,11 +7,18 @@ use std::ops::Range;
 pub enum PageBlockError {
     /// Failed to parse a page block directive.
     #[error("Failed to parse page block at line {line}: {message}")]
-    ParseDirective { line: usize, message: String },
+    ParseDirective {
+        ctx: biscuit_terminal::errors::SourceContext,
+        line: usize,
+        message: String,
+    },
 
     /// Encountered `::end-block` without a matching `::block`.
     #[error("Unmatched ::end-block at line {line}")]
-    UnmatchedEnd { line: usize },
+    UnmatchedEnd {
+        ctx: biscuit_terminal::errors::SourceContext,
+        line: usize,
+    },
 
     /// Reached end of file with an unclosed `::block`.
     #[error("Unterminated ::block starting at line {opening_line}")]
@@ -37,16 +44,20 @@ impl biscuit_terminal::errors::BlockError for PageBlockError {
         use biscuit_terminal::errors::{ErrorHeader, StatusBlockExt};
 
         match self {
-            PageBlockError::ParseDirective { line, message } => StatusBlock::new(StatusState::Error)
+            PageBlockError::ParseDirective { ctx, line, message } => StatusBlock::new(StatusState::Error)
                 .error_header(ErrorHeader::new("PageBlockError", "directive parse failed"))
-                .body(format!(
-                    "<dim>Line:</dim> {line}\n<dim>Message:</dim> {message}"
-                ))
+                .body(vec![
+                    Prose::new(format!("<dim>Message:</dim> {message}")),
+                    ctx.excerpt_prose(*line, 1, "md"),
+                ])
                 .hint("Opening syntax: <cyan>::block when=\"expr\"</cyan> — close with <cyan>::end-block</cyan>."),
 
-            PageBlockError::UnmatchedEnd { line } => StatusBlock::new(StatusState::Error)
+            PageBlockError::UnmatchedEnd { ctx, line } => StatusBlock::new(StatusState::Error)
                 .error_header(ErrorHeader::new("PageBlockError", "unmatched ::end-block"))
-                .body(format!("<dim>Line:</dim> {line}"))
+                .body(vec![
+                    Prose::new("This end-block has no matching start:"),
+                    ctx.excerpt_prose(*line, 1, "md"),
+                ])
                 .hint("Add a matching <cyan>::block</cyan> directive above this closing line."),
 
             PageBlockError::UnterminatedBlock { ctx, opening_line, .. } => {

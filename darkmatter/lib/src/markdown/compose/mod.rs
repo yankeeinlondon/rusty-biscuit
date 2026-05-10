@@ -837,7 +837,10 @@ impl Markdown {
                 ComposeOperation::BlockTransclusion | ComposeOperation::CodeTransclusion
             )
         }) {
-            Some(transclusion::parse_directives(&self.content)?)
+            Some(transclusion::parse_directives(
+                &self.content,
+                self.source_context_for_errors(),
+            )?)
         } else {
             None
         };
@@ -845,6 +848,7 @@ impl Markdown {
         let frontmatter_refs = if operations.contains(&ComposeOperation::FrontmatterTransclusion) {
             Some(transclusion::parse_frontmatter_refs(
                 self.frontmatter().as_map(),
+                self.source_context_for_errors(),
             )?)
         } else {
             None
@@ -1147,7 +1151,8 @@ impl Markdown {
         runtime: &mut shell_expansion::types::PipelineRuntime,
         report: &mut ComposeReport,
     ) -> MarkdownResult<()> {
-        let directives = shell_expansion::parse_directives(&self.content)?;
+        let directives =
+            shell_expansion::parse_directives(&self.content, self.source_context_for_errors())?;
         debug!(
             directive_count = directives.len(),
             "compose: shell expansion directives found"
@@ -1266,6 +1271,7 @@ impl Markdown {
                         } else {
                             return Err(
                                 transclusion::TransclusionError::InvalidFrontmatterAssignment {
+                                    ctx: self.source_context_for_errors(),
                                     line: *line,
                                     raw: raw.clone(),
                                     reason: reason.clone(),
@@ -1291,6 +1297,7 @@ impl Markdown {
                         } else {
                             return Err(
                                 transclusion::TransclusionError::InvalidReassignedFrontmatterProperty {
+                                    ctx: self.source_context_for_errors(),
                                     line: directive.line,
                                     name: name.clone(),
                                 }
@@ -1302,7 +1309,12 @@ impl Markdown {
             }
 
             if let Some(expr) = &directive.options.when_expr {
-                let should_include = transclusion::evaluate_condition(expr, state, directive.line)?;
+                let should_include = transclusion::evaluate_condition(
+                    expr,
+                    state,
+                    directive.line,
+                    self.source_context_for_errors(),
+                )?;
                 if !should_include {
                     let mut fixed_report = ComposeReport::new();
                     fixed_report.transclusions_skipped = 1;
@@ -1324,6 +1336,7 @@ impl Markdown {
                 &transclusion_opts,
                 &options.source,
                 directive.line,
+                self.source_context_for_errors(),
             ) {
                 Ok(resolved) => resolved,
                 Err(err) if ignore_invalid => {
@@ -1466,6 +1479,7 @@ impl Markdown {
             &transclusion_opts,
             &options.source,
             0,
+            self.source_context_for_errors(),
         ) {
             Ok(resolved) => resolved,
             Err(err) if ignore_invalid => {

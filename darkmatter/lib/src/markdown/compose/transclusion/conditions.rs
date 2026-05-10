@@ -6,34 +6,40 @@
 use super::types::TransclusionError;
 use crate::markdown::compose::EffectiveState;
 use crate::markdown::compose::conditions::{self, ConditionError};
+use biscuit_terminal::errors::SourceContext;
 
 /// Evaluates a `when` condition expression.
 pub fn evaluate_condition(
     expr: &str,
     state: &EffectiveState,
     line: usize,
+    ctx: SourceContext,
 ) -> Result<bool, TransclusionError> {
-    conditions::evaluate_condition(expr, state, line).map_err(|e| e.into())
+    conditions::evaluate_condition(expr, state, line, ctx).map_err(|e| e.into())
 }
 
 impl From<ConditionError> for TransclusionError {
     fn from(err: ConditionError) -> Self {
         match err {
             ConditionError::Parse {
+                ctx,
                 expr,
                 line,
                 message,
                 span: _,
             } => TransclusionError::ConditionParse {
+                ctx,
                 expr,
                 line,
                 message,
             },
             ConditionError::Eval {
+                ctx,
                 expr,
                 line,
                 message,
             } => TransclusionError::ConditionEval {
+                ctx,
                 expr,
                 line,
                 message,

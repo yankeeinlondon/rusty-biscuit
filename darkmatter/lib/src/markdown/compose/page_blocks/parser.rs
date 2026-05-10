@@ -23,23 +23,27 @@ struct UnfinishedRegion {
 /// reached with an open block.
 pub fn parse_page_blocks(
     content: &str,
-    source: biscuit_terminal::errors::SourceContext,
+    ctx: biscuit_terminal::errors::SourceContext,
 ) -> Result<Vec<PageBlockRegion>, PageBlockError> {
     let pairs = super::super::block_pairs::scan_block_pairs(content).map_err(|e| match e {
         super::super::block_pairs::BlockPairError::UnmatchedEnd { line } => {
-            PageBlockError::UnmatchedEnd { line }
+            PageBlockError::UnmatchedEnd {
+                ctx: ctx.clone(),
+                line,
+            }
         }
         super::super::block_pairs::BlockPairError::UnterminatedBlock {
             line,
             opening_text,
             file_ends_at_line: _,
         } => PageBlockError::UnterminatedBlock {
-            ctx: source.clone(),
+            ctx: ctx.clone(),
             opening_line: line,
             opening_text,
         },
         super::super::block_pairs::BlockPairError::TrailingContent { line, content } => {
             PageBlockError::ParseDirective {
+                ctx: ctx.clone(),
                 line,
                 message: format!("Unexpected content after ::end-block: '{content}'"),
             }
@@ -58,7 +62,7 @@ pub fn parse_page_blocks(
     let mut stack: Vec<usize> = Vec::new();
 
     for pair in page_pairs {
-        let options = parse_block_options_from_opener(&pair.opening_text, pair.start_line)?;
+        let options = parse_block_options_from_opener(&pair.opening_text, pair.start_line, &ctx)?;
         let region = PageBlockRegion {
             span: pair.span.clone(),
             body_span: pair.body_span.clone(),
@@ -125,17 +129,22 @@ pub fn parse_page_blocks(
 fn parse_block_options_from_opener(
     opener: &str,
     line: usize,
+    ctx: &biscuit_terminal::errors::SourceContext,
 ) -> Result<PageBlockOptions, PageBlockError> {
     let after = opener
         .find("::block")
         .map(|idx| &opener[idx + "::block".len()..])
         .unwrap_or(opener)
         .trim_start();
-    parse_block_options(after, line)
+    parse_block_options(after, line, ctx)
 }
 
 /// Parses the option part of a `::block` directive line (everything after `::block`).
-fn parse_block_options(input: &str, line: usize) -> Result<PageBlockOptions, PageBlockError> {
+fn parse_block_options(
+    input: &str,
+    line: usize,
+    ctx: &biscuit_terminal::errors::SourceContext,
+) -> Result<PageBlockOptions, PageBlockError> {
     let mut options = PageBlockOptions {
         when_expr: None,
         unknown_options: Vec::new(),
@@ -153,11 +162,29 @@ fn parse_block_options(input: &str, line: usize) -> Result<PageBlockOptions, Pag
             break;
         }
 
-        let key = cursor.read_identifier(line)?;
+        let key = cursor.read_identifier(line).map_err(|e| {
+            PageBlockError::ParseDirective {
+                ctx: ctx.clone(),
+                line: e.line,
+                message: e.message,
+            }
+        })?;
         cursor.skip_ws();
-        cursor.expect_char('=', line)?;
+        cursor.expect_char('=', line).map_err(|e| {
+            PageBlockError::ParseDirective {
+                ctx: ctx.clone(),
+                line: e.line,
+                message: e.message,
+            }
+        })?;
         cursor.skip_ws();
-        let value = cursor.read_value(line)?;
+        let value = cursor.read_value(line).map_err(|e| {
+            PageBlockError::ParseDirective {
+                ctx: ctx.clone(),
+                line: e.line,
+                message: e.message,
+            }
+        })?;
 
         match key.as_str() {
             "when" => {
@@ -170,15 +197,6 @@ fn parse_block_options(input: &str, line: usize) -> Result<PageBlockOptions, Pag
     }
 
     Ok(options)
-}
-
-impl From<CursorError> for PageBlockError {
-    fn from(e: CursorError) -> Self {
-        PageBlockError::ParseDirective {
-            line: e.line,
-            message: e.message,
-        }
-    }
 }
 
 #[cfg(test)]

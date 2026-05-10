@@ -19,6 +19,21 @@ pub(crate) struct CursorError {
     pub message: String,
 }
 
+impl CursorError {
+    /// Converts this error into a [`TransclusionError`](crate::markdown::compose::transclusion::TransclusionError).
+    pub fn into_transclusion_error(
+        self,
+        ctx: crate::markdown::compose::transclusion::SourceContext,
+    ) -> crate::markdown::compose::transclusion::TransclusionError {
+        crate::markdown::compose::transclusion::TransclusionError::ParseDirective {
+            ctx,
+            line: self.line,
+            message: self.message,
+            caret_col: Some(self.column),
+        }
+    }
+}
+
 impl<'a> Cursor<'a> {
     pub fn new(input: &'a str) -> Self {
         Self { input, pos: 0 }
