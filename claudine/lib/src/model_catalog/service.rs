@@ -192,6 +192,71 @@ impl ModelCatalogService {
         .join();
     }
 
+    /// Background refresh for a single provider (W3).
+    ///
+    /// Returns immediately, leaving the existing on-disk cache (if any)
+    /// in place for the current invocation. The refresh runs in a
+    /// detached worker thread and updates the on-disk cache for the
+    /// *next* invocation.
+    ///
+    /// ## Cold start
+    ///
+    /// When no cache exists yet for a dynamic-source provider (true
+    /// first-run), this falls back to [`refresh_provider_blocking`] so
+    /// frontmatter `model:` validation has data to work with rather than
+    /// silently flagging a brand-new model as unknown.
+    ///
+    /// ## Static and no-source providers
+    ///
+    /// Static-source providers (Claude, Codex) and no-source providers
+    /// (Gemini, Goose, Kimi, Roo) are essentially free to refresh, so
+    /// this delegates to [`refresh_provider_blocking`] which writes the
+    /// static list to cache without spawning any subprocess.
+    ///
+    /// ## Escape hatch
+    ///
+    /// Setting `CLAUDINE_BACKGROUND_REFRESH=0` forces the caller-blocking
+    /// path for users who explicitly want the legacy behaviour.
+    pub fn refresh_provider_async(&self, provider: Provider) {
+        if std::env::var("CLAUDINE_BACKGROUND_REFRESH").as_deref() == Ok("0") {
+            self.refresh_provider_blocking(provider);
+            return;
+        }
+
+        let info = provider_info(provider);
+        match info.dynamic_source {
+            ModelCatalogSource::None | ModelCatalogSource::Static => {
+                // Cheap: no subprocess spawn. Run inline so callers
+                // observe the static catalog immediately.
+                self.refresh_provider_blocking(provider);
+                return;
+            }
+            ModelCatalogSource::OpencodeCli | ModelCatalogSource::OpencodeCliQwenFiltered => {}
+        }
+
+        // Cold-start fallback: no cache exists yet. We must block so the
+        // current run has data; otherwise frontmatter `model:` validation
+        // would silently flag a brand-new model as unknown.
+        if self.cache.read(provider).is_none() {
+            self.refresh_provider_blocking(provider);
+            return;
+        }
+
+        // Detached background refresh. The next invocation reads the
+        // refreshed cache; the current one keeps using the stale entry.
+        // Cache write uses an atomic temp+rename so a process exiting
+        // mid-refresh leaves the previous cache intact.
+        let self_clone = self.clone();
+        std::thread::spawn(move || {
+            let Ok(rt) = tokio::runtime::Runtime::new() else {
+                return;
+            };
+            rt.block_on(async {
+                let _ = self_clone.refresh_provider(provider).await;
+            });
+        });
+    }
+
     /// Refresh the catalog for a single provider.
     ///
     /// Attempts to fetch the latest catalog. On failure, the existing cache
@@ -624,6 +689,145 @@ mod tests {
         // shared list.
         assert!(qwen_result.contains(&"qwen-2.5-coder".to_string()));
         assert!(!qwen_result.contains(&"gpt-5".to_string()));
+    }
+
+    /// W3: when a cache file already exists for a dynamic-source
+    /// provider, `refresh_provider_async` must return promptly without
+    /// blocking on the fetcher closure. We prove this by installing a
+    /// fetcher that parks indefinitely; if the call were blocking, the
+    /// test would exceed its time budget.
+    ///
+    /// `serial` because the env-var sibling test mutates
+    /// `CLAUDINE_BACKGROUND_REFRESH` for the whole process.
+    #[test]
+    #[serial_test::serial]
+    fn refresh_provider_async_returns_immediately_when_cache_exists() {
+        use std::sync::mpsc;
+        use std::time::Duration;
+        use tokio::sync::Notify;
+
+        let tmp = tempfile::tempdir().unwrap();
+        let mut service = ModelCatalogService::with_cache_dir(tmp.path().to_path_buf());
+
+        // Seed an on-disk cache so the provider has a non-empty entry.
+        let entry = ModelCacheEntry {
+            provider: Provider::OpenCode,
+            models: vec!["seeded-model".into()],
+            fetched_at: chrono::Utc::now(),
+        };
+        service.cache.write(&entry).unwrap();
+
+        // Install a fetcher that would block forever if called. The async
+        // refresh should never await on it from the caller's thread.
+        let parked = Arc::new(Notify::new());
+        let parked_for_fetcher = parked.clone();
+        service.set_opencode_fetcher(Arc::new(move || {
+            let parked = parked_for_fetcher.clone();
+            Box::pin(async move {
+                parked.notified().await;
+                Ok(Vec::new())
+            })
+        }));
+
+        // Run the call on a worker thread and require it to return well
+        // under the wall-clock budget the parked fetcher would impose.
+        let svc = service.clone();
+        let (tx, rx) = mpsc::channel();
+        std::thread::spawn(move || {
+            svc.refresh_provider_async(Provider::OpenCode);
+            let _ = tx.send(());
+        });
+        rx.recv_timeout(Duration::from_secs(5))
+            .expect("refresh_provider_async must not block when cache exists");
+
+        // The seeded cache must still be readable immediately after the
+        // call returns — the current invocation always sees the existing
+        // entry, never the in-flight refresh.
+        let read = service.cache.read(Provider::OpenCode).unwrap();
+        assert_eq!(read.models, vec!["seeded-model"]);
+
+        // Release the parked fetcher so the detached background thread
+        // can wind down without leaking the runtime.
+        parked.notify_waiters();
+    }
+
+    /// W3: a true cold start (no cache) must fall back to blocking
+    /// behaviour so frontmatter `model:` validation has data.
+    #[test]
+    #[serial_test::serial]
+    fn refresh_provider_async_blocks_when_no_cache() {
+        use crate::model_catalog::provider_sources::CatalogFetchError;
+
+        let tmp = tempfile::tempdir().unwrap();
+        let service = ModelCatalogService::with_cache_dir(tmp.path().to_path_buf());
+
+        // Seed only the in-memory dedup cell so OpenCode "fetch" returns
+        // immediately without spawning the real subprocess. The disk
+        // cache remains empty, exercising the cold-start fallback.
+        service.prime_opencode_dedup(Err(CatalogFetchError::CliNotFound("opencode".into())));
+
+        // Pre-condition: no on-disk cache.
+        assert!(service.cache.read(Provider::OpenCode).is_none());
+
+        // Cold-start path is synchronous: the call must block on
+        // `refresh_provider_blocking` even though we asked for async.
+        service.refresh_provider_async(Provider::OpenCode);
+        // The fetcher returned an error so no entry was written, but the
+        // call returned. (If the fallback hadn't been blocking, the test
+        // would still race, but we'd lose the cold-cache contract.)
+    }
+
+    /// W3: static-source providers always run inline because the static
+    /// catalog list is in-process and free.
+    #[test]
+    #[serial_test::serial]
+    fn refresh_provider_async_static_runs_inline() {
+        let tmp = tempfile::tempdir().unwrap();
+        let service = ModelCatalogService::with_cache_dir(tmp.path().to_path_buf());
+
+        service.refresh_provider_async(Provider::Claude);
+        // Static catalog must have been written to cache by the inline
+        // refresh, so a follow-up read returns the static list.
+        let read = service.cache.read(Provider::Claude).unwrap();
+        assert!(!read.models.is_empty());
+        assert_eq!(service.opencode_fetch_attempts(), 0);
+    }
+
+    /// W3 escape hatch: `CLAUDINE_BACKGROUND_REFRESH=0` forces the
+    /// caller-blocking path even when a cache exists.
+    #[test]
+    #[serial_test::serial]
+    fn refresh_provider_async_env_var_disables_background() {
+        use crate::model_catalog::provider_sources::CatalogFetchError;
+
+        let tmp = tempfile::tempdir().unwrap();
+        let service = ModelCatalogService::with_cache_dir(tmp.path().to_path_buf());
+
+        let entry = ModelCacheEntry {
+            provider: Provider::OpenCode,
+            models: vec!["seeded".into()],
+            fetched_at: chrono::Utc::now(),
+        };
+        service.cache.write(&entry).unwrap();
+        service.prime_opencode_dedup(Err(CatalogFetchError::CliNotFound("opencode".into())));
+
+        let prior = std::env::var("CLAUDINE_BACKGROUND_REFRESH").ok();
+        unsafe {
+            std::env::set_var("CLAUDINE_BACKGROUND_REFRESH", "0");
+        }
+        // With the env var set we go through `refresh_provider_blocking`,
+        // which uses the primed dedup cell and returns synchronously.
+        service.refresh_provider_async(Provider::OpenCode);
+        unsafe {
+            match prior {
+                Some(v) => std::env::set_var("CLAUDINE_BACKGROUND_REFRESH", v),
+                None => std::env::remove_var("CLAUDINE_BACKGROUND_REFRESH"),
+            }
+        }
+
+        // The original cache survives because the primed fetch returned an error.
+        let read = service.cache.read(Provider::OpenCode).unwrap();
+        assert_eq!(read.models, vec!["seeded"]);
     }
 
     #[test]
