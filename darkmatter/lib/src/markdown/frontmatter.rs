@@ -173,10 +173,30 @@ impl Default for Frontmatter {
     }
 }
 
+use biscuit_terminal::errors::SourceContext;
+
+/// Strategy for merging frontmatter fields.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MergeStrategy {
+    /// Overwrite existing keys with incoming values (default).
+    Overwrite,
+    /// Keep existing keys; incoming values are ignored for duplicates.
+    KeepExisting,
+    /// Fail if any incoming key already exists.
+    ErrorOnConflict,
+    /// For incoming keys that already exist, keep the original but insert
+    /// the new value into an array (not implemented).
+    Append,
+    /// Prefer external overrides (used by transclusion `set=`).
+    PreferExternal,
+}
 /// Parses frontmatter from markdown content.
 ///
 /// Frontmatter must be at the start of the document between `---` delimiters.
-pub(super) fn parse_frontmatter(content: &str) -> MarkdownResult<(Frontmatter, String)> {
+pub(super) fn parse_frontmatter(
+    content: &str,
+    ctx: SourceContext,
+) -> MarkdownResult<(Frontmatter, String)> {
     let lines: Vec<&str> = content.lines().collect();
 
     // Check if document starts with frontmatter delimiter
@@ -200,18 +220,14 @@ pub(super) fn parse_frontmatter(content: &str) -> MarkdownResult<(Frontmatter, S
     let yaml_lines = &lines[1..closing_idx];
     let yaml_content = yaml_lines.join("\n");
 
-    // Parse YAML with fallback strategies:
-    // 1. Direct parse
-    // 2. Tab normalization
-    // 3. Protect interpolation expressions ({{ }}) that may contain
-    //    YAML-significant characters (e.g., quotes in fallback values)
+    // Parse YAML with fallback strategies
     let frontmatter_map: FrontmatterMap = if yaml_content.trim().is_empty() {
         FrontmatterMap::new()
     } else {
         parse_yaml_with_fallbacks(&yaml_content).map_err(|source| {
             MarkdownError::FrontmatterParse {
+                ctx: ctx.clone(),
                 source,
-                yaml: yaml_content.clone(),
             }
         })?
     };

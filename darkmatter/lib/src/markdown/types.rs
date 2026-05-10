@@ -9,6 +9,8 @@ use thiserror::Error;
 
 use crate::markdown::errors::blocks;
 
+use biscuit_terminal::errors::SourceContext;
+
 /// Type alias for frontmatter data.
 ///
 /// Uses `IndexMap` to preserve insertion order so that frontmatter keys
@@ -19,14 +21,11 @@ pub type FrontmatterMap = IndexMap<String, serde_json::Value>;
 #[derive(Error, Debug)]
 pub enum MarkdownError {
     /// Failed to parse frontmatter YAML.
-    ///
-    /// Carries the original YAML body (between the leading `---` markers) so
-    /// renderers can surface the offending line in error reports.
-    #[error("Failed to parse frontmatter: {source}")]
+    #[error("Failed to parse frontmatter in {}: {source}", .ctx.display.display())]
     FrontmatterParse {
+        ctx: SourceContext,
         #[source]
         source: YamlParseError,
-        yaml: String,
     },
 
     /// Failed to merge frontmatter.
@@ -112,8 +111,8 @@ impl BlockError for MarkdownError {
             MarkdownError::CtxMerge(inner) => inner.status_block(term),
 
             // Leaf variants own their block shape.
-            MarkdownError::FrontmatterParse { source, yaml } => {
-                blocks::frontmatter_parse_block(source, yaml)
+            MarkdownError::FrontmatterParse { ctx, source } => {
+                blocks::frontmatter_parse_block(ctx, source)
             }
             MarkdownError::FrontmatterMerge(message) => blocks::frontmatter_merge_block(message),
             MarkdownError::FileLoad(source) => blocks::file_load_block(source),

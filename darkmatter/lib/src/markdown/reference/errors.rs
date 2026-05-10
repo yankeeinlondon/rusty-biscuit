@@ -2,17 +2,18 @@
 
 use std::path::PathBuf;
 
+use biscuit_terminal::errors::SourceContext;
 use thiserror::Error;
 
 /// Errors produced by reference analysis.
 #[derive(Debug, Error)]
 pub enum ReferenceError {
     /// Failed to parse a directive.
-    #[error("Failed to parse directive in {} at line {line}: {message}", .source_file.display())]
+    #[error("Failed to parse directive in {} at line {line}: {message}", .ctx.display.display())]
     ParseDirective {
+        ctx: SourceContext,
         line: usize,
         message: String,
-        source_file: PathBuf,
         directive_text: String,
         caret_col: Option<usize>,
     },
@@ -53,43 +54,46 @@ impl biscuit_terminal::errors::BlockError for ReferenceError {
         &self,
         term: &biscuit_terminal::terminal::Terminal,
     ) -> biscuit_terminal::components::status_block::StatusBlock {
+        use biscuit_terminal::components::prose::Prose;
         use biscuit_terminal::components::status::StatusState;
         use biscuit_terminal::components::status_block::StatusBlock;
         use biscuit_terminal::errors::{ErrorHeader, StatusBlockExt};
 
         match self {
             ReferenceError::ParseDirective {
+                ctx,
                 line,
                 message,
-                source_file,
                 directive_text,
                 caret_col,
             } => {
-                let caret_line =
-                    caret_col.map(|col| format!("\n  {}^", " ".repeat(col.saturating_sub(1))));
+                let mut body = vec![
+                    Prose::new("Directive parsing failed here:"),
+                    ctx.excerpt_prose(*line, 1, "md"),
+                ];
+
+                if let Some(col) = caret_col {
+                    body.push(Prose::new(format!(
+                        "<dim>Gutter:</dim> Column {col} is near the error in: <dim>{directive_text}</dim>"
+                    )));
+                }
 
                 StatusBlock::new(StatusState::Error)
-                    .error_header(ErrorHeader::new(
-                        "ReferenceError",
-                        "directive parse failed",
+                    .error_header(ErrorHeader::new("ReferenceError", "directive parse failed"))
+                    .body(body)
+                    .hint(format!(
+                        "Error: {message}\nCheck syntax: <cyan>::file path=\"...\"</cyan>"
                     ))
-                    .body(format!(
-                        "<dim>Source:</dim> <cyan>{}</cyan>\n<dim>Line:</dim> {line}\n<dim>Message:</dim> {message}\n<dim>Directive:</dim>\n  {directive_text}{}",
-                        source_file.display(),
-                        caret_line.unwrap_or_default()
-                    ))
-                    .hint("Expected: <cyan>::file ./doc.md</cyan>, <cyan>::code ./file.rs</cyan>, or <cyan>::url https://…</cyan>.")
             }
 
             ReferenceError::MissingSourceContext { reference, line } => {
                 StatusBlock::new(StatusState::Error)
                     .error_header(ErrorHeader::new("ReferenceError", "missing source context"))
                     .body(format!(
-                        "<dim>Reference:</dim> <cyan>{reference}</cyan>\n<dim>Line:</dim> {line}"
+                        "Could not resolve <cyan>{reference}</cyan> at line {line}.\n\
+                         <dim>Note:</dim> Relative references require a file-backed source."
                     ))
-                    .hint(
-                        "Load the document from a path or URL so relative references can resolve.",
-                    )
+                    .hint("Try using an absolute path or `@/` repo-root reference.")
             }
 
             ReferenceError::Validation(message) => StatusBlock::new(StatusState::Error)
@@ -97,24 +101,22 @@ impl biscuit_terminal::errors::BlockError for ReferenceError {
                 .body(message.clone())
                 .hint("Review the reference graph and fix any reported cycles or dangling edges."),
 
-            ReferenceError::Compose(inner) => {
-                biscuit_terminal::errors::BlockError::status_block(inner.as_ref(), term)
-            }
+            ReferenceError::Compose(inner) => inner.status_block(term),
 
             ReferenceError::FileReference(source) => StatusBlock::new(StatusState::Error)
-                .error_header(ErrorHeader::new("ReferenceError", "file reference error"))
-                .body(format!("{source}"))
-                .hint("Verify the reference string and surrounding compose source."),
+                .error_header(ErrorHeader::new("ReferenceError", "file reference failure"))
+                .body(source.to_string())
+                .hint("Check repository-root (`@/`) or package (`!`) prefix usage."),
 
             ReferenceError::Io(source) => StatusBlock::new(StatusState::Error)
-                .error_header(ErrorHeader::new("ReferenceError", "I/O error"))
-                .body(format!("<dim>Kind:</dim> {:?}\n{source}", source.kind()))
-                .hint("Confirm the referenced file exists and is readable."),
+                .error_header(ErrorHeader::new("ReferenceError", "I/O failure"))
+                .body(source.to_string())
+                .hint("Check file existence and permissions."),
 
             ReferenceError::Url(source) => StatusBlock::new(StatusState::Error)
-                .error_header(ErrorHeader::new("ReferenceError", "URL parse error"))
-                .body(format!("{source}"))
-                .hint("Use a fully qualified URL including the <cyan>https://</cyan> scheme."),
+                .error_header(ErrorHeader::new("ReferenceError", "URL parse failure"))
+                .body(source.to_string())
+                .hint("Verify the URL scheme and format (e.g., https://example.com)."),
         }
     }
 }

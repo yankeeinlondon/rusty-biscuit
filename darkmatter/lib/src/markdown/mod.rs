@@ -214,7 +214,12 @@ impl Markdown {
     /// are still accepted and returned with an empty [`Frontmatter`].
     pub fn try_from_content(content: impl Into<String>) -> MarkdownResult<Self> {
         let content = content.into();
-        let (frontmatter, remaining) = frontmatter::parse_frontmatter(&content)?;
+        let ctx = biscuit_terminal::errors::SourceContext::new(
+            std::path::PathBuf::from("unknown"),
+            std::path::PathBuf::from("unknown"),
+            content.as_str(),
+        );
+        let (frontmatter, remaining) = frontmatter::parse_frontmatter(&content, ctx)?;
         Ok(Self::with_frontmatter(frontmatter, remaining))
     }
 
@@ -813,7 +818,12 @@ impl Markdown {
 
 impl From<String> for Markdown {
     fn from(content: String) -> Self {
-        match frontmatter::parse_frontmatter(&content) {
+        let ctx = biscuit_terminal::errors::SourceContext::new(
+            std::path::PathBuf::from("unknown"),
+            std::path::PathBuf::from("unknown"),
+            content.as_str(),
+        );
+        match frontmatter::parse_frontmatter(&content, ctx) {
             Ok((frontmatter, remaining_content)) => {
                 Self::with_frontmatter(frontmatter, remaining_content)
             }

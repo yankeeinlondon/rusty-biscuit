@@ -15,7 +15,7 @@ use crate::markdown::compose::cache::RunLocalCache;
 use crate::markdown::compose::conditions;
 use crate::markdown::compose::toc_linking;
 use crate::markdown::compose::transclusion::{
-    DirectiveKind, TransclusionRuntime, parse_directives, parse_frontmatter_refs,
+    DirectiveKind, SourceContext, TransclusionRuntime, parse_directives, parse_frontmatter_refs,
 };
 use crate::markdown::compose::{ComposeOperation, ComposeSource, EffectiveStateBuilder};
 use crate::markdown::normalize::HeadingLevel;
@@ -241,6 +241,11 @@ fn build_node(
     // leaf documents with no transclusions.
     let prepared_content = prepare_content(md, source, options)?;
 
+    let ctx = {
+        let base = md.source_context_for_errors();
+        SourceContext::new(base.absolute, base.display, prepared_content.clone())
+    };
+
     // Build heading index for section context on transclusion insertions
     let heading_index = build_heading_index(&prepared_content);
 
@@ -283,13 +288,17 @@ fn build_node(
     };
 
     // Block directives
-    if let Ok(directives) = parse_directives(&prepared_content) {
+    if let Ok(directives) = parse_directives(&prepared_content, ctx.clone()) {
         for directive in &directives {
             // Evaluate `when=` condition — skip directive entirely if false.
             if let Some(ref when_expr) = directive.options.when_expr {
-                let condition_met =
-                    conditions::evaluate_condition(when_expr, &effective_state, directive.line)
-                        .unwrap_or(false);
+                let condition_met = conditions::evaluate_condition(
+                    when_expr,
+                    &effective_state,
+                    directive.line,
+                    ctx.clone(),
+                )
+                .unwrap_or(false);
                 if !condition_met {
                     continue;
                 }
@@ -509,7 +518,7 @@ fn build_node(
     }
 
     // Frontmatter prologue/epilogue
-    if let Ok(fm_refs) = parse_frontmatter_refs(md.frontmatter().as_map()) {
+    if let Ok(fm_refs) = parse_frontmatter_refs(md.frontmatter().as_map(), ctx.clone()) {
         for (idx, prologue) in fm_refs.prologue.iter().enumerate() {
             let is_literal = is_literal_content(prologue);
 

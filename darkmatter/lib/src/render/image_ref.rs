@@ -9,6 +9,7 @@ use std::fmt;
 
 use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::components::renderable::Renderable;
+use biscuit_terminal::errors::SourceContext;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -45,8 +46,9 @@ pub enum ImageRefError {
     /// Markdown input failed to parse.
     #[error("malformed markdown image reference: {message}")]
     MalformedMarkdown {
+        ctx: SourceContext,
         message: String,
-        input: Option<String>,
+        /// Byte offset in `ctx.content` where the error occurred.
         caret: Option<usize>,
     },
 
@@ -123,18 +125,29 @@ impl biscuit_terminal::errors::BlockError for ImageRefError {
                 ),
 
             Self::MalformedMarkdown {
+                ctx,
                 message,
-                input,
                 caret,
-            } => StatusBlock::new(StatusState::Error)
-                .error_header(ErrorHeader::new(
-                    "ImageRefError",
-                    "malformed markdown image",
-                ))
-                .body(render_markdown_parse_body(message, input.as_deref(), *caret))
-                .hint(
-                    "Use the pattern <cyan>![alt](src \"optional title\")</cyan> with balanced brackets and parentheses.",
-                ),
+            } => {
+                let mut body = vec![Prose::new(format!("<dim>Message:</dim> {message}"))];
+                body.push(Prose::new("Image parsing failed here:"));
+
+                // Image fragments usually start at line 1 of their own string.
+                body.push(ctx.excerpt_prose(1, 0, "md"));
+
+                if let Some(pos) = caret {
+                    body.push(Prose::new(format!(
+                        "{} <red><b>^</b></red> (offset {})",
+                        " ".repeat(*pos),
+                        pos
+                    )));
+                }
+
+                StatusBlock::new(StatusState::Error)
+                    .error_header(ErrorHeader::new("ImageRefError", "malformed markdown image"))
+                    .body(body)
+                    .hint("Use the pattern <cyan>![alt](src \"optional title\")</cyan> with balanced brackets.")
+            }
 
             Self::InvalidStyle(source) => {
                 biscuit_terminal::errors::BlockError::status_block(source, term)
@@ -194,8 +207,12 @@ impl ImageRefError {
     /// Creates a markdown-parse error without source-context details.
     pub fn malformed_markdown(message: impl Into<String>) -> Self {
         Self::MalformedMarkdown {
+            ctx: SourceContext::new(
+                std::path::PathBuf::from("unknown"),
+                std::path::PathBuf::from("unknown"),
+                "",
+            ),
             message: message.into(),
-            input: None,
             caret: None,
         }
     }
@@ -205,9 +222,14 @@ impl ImageRefError {
         input: impl Into<String>,
         caret: usize,
     ) -> Self {
+        let input_str = input.into();
         Self::MalformedMarkdown {
+            ctx: SourceContext::new(
+                std::path::PathBuf::from("unknown"),
+                std::path::PathBuf::from("unknown"),
+                input_str,
+            ),
             message: message.into(),
-            input: Some(input.into()),
             caret: Some(caret),
         }
     }
@@ -1529,29 +1551,6 @@ fn find_closing_paren(input: &str, start: usize) -> Result<usize, ImageRefError>
         input,
         start,
     ))
-}
-
-fn render_markdown_parse_body(message: &str, input: Option<&str>, caret: Option<usize>) -> String {
-    let mut body = format!("<dim>Message:</dim> {message}");
-
-    if let Some(input) = input {
-        body.push_str(&format!("\n<dim>Input:</dim>\n  <cyan>{input}</cyan>"));
-        if let Some(caret) = caret {
-            body.push('\n');
-            body.push_str(&caret_marker(input, caret));
-        }
-    }
-
-    body
-}
-
-fn caret_marker(input: &str, byte_offset: usize) -> String {
-    let clamped = byte_offset.min(input.len());
-    let column = input
-        .char_indices()
-        .take_while(|(idx, _)| *idx < clamped)
-        .count();
-    format!("  {}^", " ".repeat(column))
 }
 
 fn extract_markdown_url(content: &str) -> (String, &str) {
