@@ -437,6 +437,9 @@ fn run_compose_inner(
             env_overrides: env_overrides.clone(),
             shared_approval_cache: Some(std::sync::Arc::clone(&shared_approval_cache)),
             sequence: false,
+            prep_launch_context: Some(prep_context.launch_context.clone()),
+            prep_env_context: Some(prep_context.env_context.clone()),
+            prep_launch_detection_error: prep_context.launch_detection_error.clone(),
         };
 
         let outcome = super::wrap::composition::execute_composition_request_inner(
@@ -518,6 +521,9 @@ fn run_compose_inner(
         env_overrides,
         shared_approval_cache: Some(shared_approval_cache),
         sequence: false,
+        prep_launch_context: Some(prep_context.launch_context.clone()),
+        prep_env_context: Some(prep_context.env_context.clone()),
+        prep_launch_detection_error: prep_context.launch_detection_error.clone(),
     };
 
     execute_composition_request(request, verbose, startup_timings, shared.perf)
@@ -681,16 +687,19 @@ fn run_inline_compose_inner(
         set_overrides.as_ref(),
         loop_options,
         |ctx| {
-        let prepared = composition::prepare_inline(
-            &source,
-            composition::PrepareOptions {
-                set_overrides: Some(ctx.as_set_overrides()),
-                pre_approved_commands: Some(preflight.approved_commands.clone()),
-                env_overrides: env_overrides.clone(),
-                perf_enabled: shared.perf,
-                source_repo_root: prep_context.source_repo_root.clone(),
-            },
-        )?;
+        let prepared = {
+            let _span = info_span!("compose_prep.prepare_inline").entered();
+            composition::prepare_inline(
+                &source,
+                composition::PrepareOptions {
+                    set_overrides: Some(ctx.as_set_overrides()),
+                    pre_approved_commands: Some(preflight.approved_commands.clone()),
+                    env_overrides: env_overrides.clone(),
+                    perf_enabled: shared.perf,
+                    source_repo_root: prep_context.source_repo_root.clone(),
+                },
+            )?
+        };
 
         let request = CompositionExecutionRequest {
             mode: CompositionMode::InlineFrontmatterPrompt,
@@ -719,6 +728,9 @@ fn run_inline_compose_inner(
             env_overrides: env_overrides.clone(),
             shared_approval_cache: Some(std::sync::Arc::clone(&shared_approval_cache)),
             sequence: false,
+            prep_launch_context: Some(prep_context.launch_context.clone()),
+            prep_env_context: Some(prep_context.env_context.clone()),
+            prep_launch_detection_error: prep_context.launch_detection_error.clone(),
         };
 
         let outcome = super::wrap::composition::execute_composition_request_inner(
@@ -759,16 +771,19 @@ fn run_inline_compose_inner(
     }
 
     // ── Single execution path (no loop) ──────────────────────────────────
-    let prepared = composition::prepare_inline(
-        &source,
-        composition::PrepareOptions {
-            set_overrides,
-            pre_approved_commands: Some(preflight.approved_commands),
-            env_overrides: env_overrides.clone(),
-            perf_enabled: shared.perf,
-            source_repo_root: prep_context.source_repo_root.clone(),
-        },
-    )?;
+    let prepared = {
+        let _span = info_span!("compose_prep.prepare_inline").entered();
+        composition::prepare_inline(
+            &source,
+            composition::PrepareOptions {
+                set_overrides,
+                pre_approved_commands: Some(preflight.approved_commands),
+                env_overrides: env_overrides.clone(),
+                perf_enabled: shared.perf,
+                source_repo_root: prep_context.source_repo_root.clone(),
+            },
+        )?
+    };
 
     let request = CompositionExecutionRequest {
         mode: CompositionMode::InlineFrontmatterPrompt,
@@ -797,6 +812,9 @@ fn run_inline_compose_inner(
         env_overrides,
         shared_approval_cache: Some(shared_approval_cache),
         sequence: false,
+        prep_launch_context: Some(prep_context.launch_context.clone()),
+        prep_env_context: Some(prep_context.env_context.clone()),
+        prep_launch_detection_error: prep_context.launch_detection_error.clone(),
     };
 
     execute_composition_request(request, verbose, startup_timings, shared.perf)
@@ -1357,5 +1375,48 @@ mod tests {
         short.insert("b".into(), json!(2));
         let result = merge_set_overrides(Some(r#"{"a":"1"}"#), short).unwrap();
         assert_eq!(result, Some(json!({"a": "1", "b": 2})));
+    }
+
+    // ── SIGINT / Ctrl+C during prep (Phase 5) ────────────────────────
+
+    #[cfg(unix)]
+    #[test]
+    #[serial_test::serial]
+    fn sigint_during_prep_sets_interrupt_flag_and_renders_notice() {
+        // Ensure the global flag starts clean and will be restored on exit.
+        crate::output::clear_user_interrupt_for_tests();
+        assert!(!crate::output::user_interrupt_observed());
+
+        let prompt = "prompts/test.md";
+        let _guard = install_user_interrupt_guard(prompt);
+
+        // Deliver SIGINT to ourselves. The handler must be async-signal-safe
+        // and may run on this thread or a signal-delivery thread.
+        unsafe {
+            libc::kill(libc::getpid(), libc::SIGINT);
+        }
+
+        // Give the kernel a moment to deliver the signal.
+        std::thread::sleep(std::time::Duration::from_millis(50));
+
+        assert!(
+            crate::output::user_interrupt_observed(),
+            "SIGINT should set the user-interrupt flag"
+        );
+
+        // The notice formatting should produce a non-empty string containing
+        // the prompt argument.
+        let notice = format_user_interrupt_message(prompt);
+        assert!(
+            notice.contains("User interrupted compose operation"),
+            "notice should contain the interrupt message"
+        );
+        assert!(
+            notice.contains(prompt),
+            "notice should reference the prompt file"
+        );
+
+        // Clean up so later tests in the same process see a clean flag.
+        crate::output::clear_user_interrupt_for_tests();
     }
 }
