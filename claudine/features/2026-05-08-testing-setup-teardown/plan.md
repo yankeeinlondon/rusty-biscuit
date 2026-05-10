@@ -7,8 +7,18 @@ docs_updated_during_phase_1:
   - claudine/features/2026-05-08-testing-setup-teardown/plan.md
 docs_created_during_phase_1: []
 skills_files_updated_during_phase_1: []
+source_files_during_phase_2:
+  - Cargo.toml
+  - tools/test-toolkit/Cargo.toml
+  - tools/test-toolkit/src/lib.rs
+docs_updated_during_phase_2:
+  - claudine/features/2026-05-08-testing-setup-teardown/plan.md
+  - docs/dependencies.md
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2: []
 packages:
   - claudine
+  - test-toolkit
 ---
 
 # Testing Setup/Teardown Execution Plan
@@ -34,13 +44,20 @@ packages:
 
 ## Phase 2: Add the Shared `test-toolkit` Crate
 
-- [ ] Create the `tools/test-toolkit` package with a minimal library crate and add it as a workspace member.
-- [ ] Add crate metadata, dependencies, and dev-dependencies needed for the initial scope: `tracing` for phase spans and test dependencies for validating env restoration.
-- [ ] Implement `trace_phase!` as an exported macro that creates an INFO `tracing` span, enters it for the wrapped block, and returns the block result.
-- [ ] Implement `EnvGuard` with constructors for setting an environment variable and removing it, preserving whether the variable was previously unset or previously set.
-- [ ] Ensure `EnvGuard` restores/removes variables in `Drop` and exposes enough API for tests without encouraging manual teardown calls.
-- [ ] Add unit tests for `trace_phase!` expression return behavior, `EnvGuard` restore behavior, `EnvGuard` removal behavior, and nested guard behavior.
-- [ ] Validation checkpoint: run `cargo test -p test-toolkit` or `cargo nextest run -p test-toolkit` and confirm the new crate is isolated and passing.
+- [x] Create the `tools/test-toolkit` package with a minimal library crate and add it as a workspace member.
+- [x] Add crate metadata, dependencies, and dev-dependencies needed for the initial scope: `tracing` for phase spans and test dependencies for validating env restoration.
+- [x] Implement `trace_phase!` as an exported macro that creates an INFO `tracing` span, enters it for the wrapped block, and returns the block result.
+- [x] Implement `EnvGuard` with constructors for setting an environment variable and removing it, preserving whether the variable was previously unset or previously set.
+- [x] Ensure `EnvGuard` restores/removes variables in `Drop` and exposes enough API for tests without encouraging manual teardown calls.
+- [x] Add unit tests for `trace_phase!` expression return behavior, `EnvGuard` restore behavior, `EnvGuard` removal behavior, and nested guard behavior.
+- [x] Validation checkpoint: run `cargo test -p test-toolkit` or `cargo nextest run -p test-toolkit` and confirm the new crate is isolated and passing.
+
+### Phase 2 Implementation Notes
+
+- Added the `test-toolkit` package at `tools/test-toolkit` and registered it as a workspace member.
+- `trace_phase!` wraps a block in an INFO-level tracing span and returns the block result, so it can be used for fixture setup expressions as well as assertion blocks.
+- `EnvGuard` preserves the prior env state and restores it in `Drop`. Its constructors are `unsafe` because Rust 2024 treats process environment mutation as unsafe global state; callers must serialize env access with `#[serial_test::serial]` or an equivalent strategy.
+- Validation completed with `cargo test -p test-toolkit` and `cargo clippy -p test-toolkit --all-targets -- -D warnings`.
 
 ## Phase 3: Configure Monorepo Test Timing
 
