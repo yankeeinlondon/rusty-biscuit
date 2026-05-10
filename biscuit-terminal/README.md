@@ -191,7 +191,7 @@ Supporting helpers live alongside the trait:
   can show a linked path, a frontmatter snapshot, and a source excerpt.
 
 See
-[`darkmatter/docs/error-rendering.md`](../darkmatter/docs/error-rendering.md)
+[`darkmatter/docs/errors/README.md`](../darkmatter/docs/errors/README.md)
 for an end-to-end rendering contract and adoption guide.
 
 Each downstream crate that implements `BlockError` for its own error types is
