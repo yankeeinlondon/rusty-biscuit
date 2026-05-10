@@ -8,7 +8,7 @@ area: "{{ctx.current_package_area}}"
 dir: "$(dirname '{{spec}}'')"
 review: "review-{{iteration}}.md"
 review_filepath: "{{area}}/{{dir}}/{{review}}"
-plan: "{{root}}/{{area}}/{{dir}}/plan-for-implementing-review-suggestions-{{iteration}}.md"
+plan: "{{root}}/{{area}}/{{dir}}/plan-for-review-{{iteration}}.md"
 parameters:
     review: "string"
     plan: 

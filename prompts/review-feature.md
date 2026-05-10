@@ -70,7 +70,7 @@ classify the verification level present and call out any mismatch:
 
 - "Spec requires modifier-press to surface badges" + only Level-1 tests = **gap, not "ready"**.
 - "Spec requires hotkey chord activation" + Level-2 in tmux but no Level-1 chord-byte test = fine.
-- "Spec requires `^X` badges with specific colours" + Level-1 unit tests on style only = needs
+- "Spec requires `^X` badges with specific colors" + Level-1 unit tests on style only = needs
   Level-2 capture verifying real-terminal rendering.
 
 A feature MAY be marked production-ready only when each user-observable requirement has at minimum
