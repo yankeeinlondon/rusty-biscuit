@@ -693,6 +693,8 @@ if let Some(text) = receipt.reply_text() {
 # }
 ```
 
+`helper_used()` returns `None` when the native backend handled the send — callers can use this to detect whether a fallback occurred without inspecting metadata directly. `reply_text()` is a convenience for the `Activation::Reply` arm and returns `None` for any other activation type.
+
 ---
 
 ## Notification-Aware Messages
@@ -704,7 +706,7 @@ Messenger gives you three ways to control this trade-off:
 ### 1. Single Markdown string (default)
 
 ```bash
-messenger send "phase **1** of *6* complete" --route discord:bot-updates
+messenger send "phase **1** of *6* complete" --route discord.bot-updates
 ```
 
 Markdown is rendered in chat; the notification shows the raw characters. Use this when you don't care about the notification's appearance.
@@ -714,7 +716,7 @@ Markdown is rendered in chat; the notification shows the raw characters. Use thi
 ```bash
 messenger send "phase **1** of *6* complete" \
     --summary "Phase 1 of 6 complete" \
-    --route discord:bot-updates
+    --route discord.bot-updates
 ```
 
 The notification banner reads `Phase 1 of 6 complete`; the in-channel message is a rich embed rendering the Markdown. Library callers use:
@@ -727,11 +729,9 @@ Message::summarized("Phase 1 of 6 complete", "phase **1** of *6* complete")
 
 ```bash
 messenger send "phase **1** of *6* complete" --strip-markdown \
-    --route discord:bot-updates
+    --route discord.bot-updates
 ```
 
 Markdown is removed before sending; both the chat and the notification show plain text. Library callers use `Message::markdown_stripped(md)`.
 
 Providers without a notification/rich split (Telegram, Signal, Slack) receive a single rendered string per their native flavor; the summary half of `Summarized` is used by push providers (APNs, FCM) and flat-text providers (Signal, WhatsApp, Desktop).
-
-`helper_used()` returns `None` when the native backend handled the send — callers can use this to detect whether a fallback occurred without inspecting metadata directly. `reply_text()` is a convenience for the `Activation::Reply` arm and returns `None` for any other activation type.
