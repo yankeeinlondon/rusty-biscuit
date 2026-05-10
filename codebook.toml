@@ -1,5 +1,6 @@
 words = [
     "cliclick",
+    "diagnosability",
     "failfast",
     "frontmatter",
     "gfm",
@@ -10,6 +11,7 @@ words = [
     "opencode",
     "parallelizable",
     "renderable",
+    "repo's",
     "rstest",
     "tmux",
     "tokio",
