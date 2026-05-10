@@ -139,6 +139,7 @@ pub fn normalize_dispatch(
     let has_markdown = matches!(
         normalized_message.body,
         Some(crate::message::MessageBody::Markdown(_))
+            | Some(crate::message::MessageBody::Summarized { .. })
     );
     if has_markdown && !capabilities.supports_markdown_rendering {
         if dispatch.options.compatibility == CompatibilityMode::Strict {
