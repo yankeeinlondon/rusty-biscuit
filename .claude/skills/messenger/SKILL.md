@@ -32,6 +32,22 @@ let dispatch = Dispatch::to(Target::slack_channel("C01234567"));
 let receipt = messenger.send(dispatch, &message).await?;
 ```
 
+### Notification-Aware Messages
+
+Providers like Discord render Markdown in chat but generate desktop notifications from raw text. Three options:
+
+1. **Single Markdown string** (default): `Message::markdown("**bold**")` — rendered in chat, raw in notifications
+2. **Plain summary + rich body**: `Message::summarized("plain", "**rich**")` — clean notification, rich embed (Discord)
+3. **Strip formatting**: `Message::markdown_stripped("**bold**")` — plain text everywhere
+
+CLI equivalents:
+
+```bash
+messenger send "**rich**" --route discord:channel                        # default
+messenger send "**rich**" --summary "plain" --route discord:channel      # split
+messenger send "**rich**" --strip-markdown --route discord:channel       # stripped
+```
+
 ## Provider Support
 
 | Provider | Feature flag | Rich text | Replies | Attachments | Location | Silent | Link preview |
@@ -108,7 +124,7 @@ Slack also ships two adapters behind the `slack` feature: `SlackProvider` (bot t
 | Type | Module | Role |
 |------|--------|------|
 | `Message` | `message.rs` | Portable body, attachments, location, metadata |
-| `MessageBody` | `message.rs` | `Plain(String)` or `Markdown(String)` |
+| `MessageBody` | `message.rs` | `Plain(String)`, `Markdown(String)`, or `Summarized { summary, markdown }` |
 | `Attachment` | `attachment.rs` | File payload with kind, source, caption |
 | `Dispatch` | `dispatch.rs` | Target + reply context + delivery options |
 | `Target` | `target.rs` | Provider-specific destination enum |
