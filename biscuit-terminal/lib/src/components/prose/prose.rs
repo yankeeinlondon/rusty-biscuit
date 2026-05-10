@@ -140,3 +140,42 @@ impl Default for Prose {
         }
     }
 }
+
+impl From<Prose> for Vec<Prose> {
+    fn from(prose: Prose) -> Self {
+        vec![prose]
+    }
+}
+
+/// A trait for types that can be converted into a `Vec<Prose>`.
+///
+/// This exists because Rust's orphan rules prevent implementing
+/// `From<&str>` and `From<String>` for `Vec<Prose>` directly.
+pub trait IntoProseVec {
+    /// Convert into a vector of `Prose` items.
+    fn into_prose_vec(self) -> Vec<Prose>;
+}
+
+impl IntoProseVec for Vec<Prose> {
+    fn into_prose_vec(self) -> Vec<Prose> {
+        self
+    }
+}
+
+impl IntoProseVec for Prose {
+    fn into_prose_vec(self) -> Vec<Prose> {
+        vec![self]
+    }
+}
+
+impl IntoProseVec for &str {
+    fn into_prose_vec(self) -> Vec<Prose> {
+        vec![Prose::new(self)]
+    }
+}
+
+impl IntoProseVec for String {
+    fn into_prose_vec(self) -> Vec<Prose> {
+        vec![Prose::new(self)]
+    }
+}
