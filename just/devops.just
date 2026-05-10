@@ -49,7 +49,8 @@ _install path pkg_name binary="" *args="":
 # commits all the staged changes with OpenCode (model is MODEL or COMMIT_MODEL)
 [arg("agent", long="agent")]
 [arg("model", long="model")]
-commit agent="opencode" model="" *args="":
+[arg("yolo", long="yolo")]
+commit yolo="true" agent="opencode" model="":
     #!/usr/bin/env bash
     set -euo pipefail
     model=""
@@ -62,6 +63,10 @@ commit agent="opencode" model="" *args="":
             fi
         fi
     fi
+    yolo=""
+    if [[ "{{ yolo }}" == "true" ]]; then
+        yolo="-y"
+    fi
     echo ""
     echo -e "Committing staged changes in the {{ bold }}Rusty Biscuit{{ reset }} monorepo to git"
     if [[ -z "$model" ]]; then
@@ -72,7 +77,7 @@ commit agent="opencode" model="" *args="":
     echo ""
     echo -e "{{ bold }}{{ blue }}Staged Files:{{ reset }}"
     sniff repo staged-files || ( echo "No Staged Files! Nothing to do ..." )
-    claudine compose --{{ agent }} "@prompts/commit.md" --op "commit" --quiet -y ${model} {{ args }}
+    claudine compose --{{ agent }} "@prompts/commit.md" --op "commit" --quiet ${yolo} ${model}
     just _speak "git commits completed in the $(sniff repo package-area) package area of rusty biscuit"
     sniff repo git-status --compact 2>/dev/null || exit 0
     echo
