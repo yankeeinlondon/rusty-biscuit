@@ -90,8 +90,8 @@ output fails the build.
 
 ## Adding a New Error Variant
 
-1. Add a `source: SourceContext` field to the variant when the error
-   originates from a file.
+1. Add a `ctx: SourceContext` field to the variant when the error
+   originates from a file. The conventional field name is `ctx`.
 2. Implement `BlockError::status_block` for the variant. Build the body
    as a `Vec<Prose>`. Use the `SourceContext` helpers for the linked
    header, frontmatter snapshot, and source excerpt.
