@@ -11,6 +11,7 @@ use std::hash::{Hash, Hasher};
 
 use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::components::renderable::Renderable;
+use biscuit_terminal::errors::SourceContext;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -45,8 +46,9 @@ pub enum LinkError {
     /// Markdown input failed to parse.
     #[error("malformed markdown link: {message}")]
     MalformedMarkdown {
+        ctx: Box<SourceContext>,
         message: String,
-        input: Option<String>,
+        /// Byte offset in `ctx.content` where the error occurred.
         caret: Option<usize>,
     },
 
@@ -96,15 +98,29 @@ impl biscuit_terminal::errors::BlockError for LinkError {
                 ),
 
             Self::MalformedMarkdown {
+                ctx,
                 message,
-                input,
                 caret,
-            } => StatusBlock::new(StatusState::Error)
-                .error_header(ErrorHeader::new("LinkError", "malformed markdown link"))
-                .body(render_markdown_parse_body(message, input.as_deref(), *caret))
-                .hint(
-                    "Use the pattern <cyan>[display](url \"optional title\")</cyan> with balanced brackets and parentheses.",
-                ),
+            } => {
+                let mut body = vec![Prose::new(format!("<dim>Message:</dim> {message}"))];
+                body.push(Prose::new("Link parsing failed here:"));
+
+                // Link fragments usually start at line 1 of their own string.
+                body.push(ctx.excerpt_prose(1, 0, "md"));
+
+                if let Some(pos) = caret {
+                    body.push(Prose::new(format!(
+                        "{} <red><b>^</b></red> (offset {})",
+                        " ".repeat(*pos),
+                        pos
+                    )));
+                }
+
+                StatusBlock::new(StatusState::Error)
+                    .error_header(ErrorHeader::new("LinkError", "malformed markdown link"))
+                    .body(body)
+                    .hint("Use the pattern <cyan>[display](url \"optional title\")</cyan> with balanced brackets.")
+            }
 
             Self::MissingHref => StatusBlock::new(StatusState::Error)
                 .error_header(ErrorHeader::new("LinkError", "missing href"))
@@ -117,7 +133,10 @@ impl biscuit_terminal::errors::BlockError for LinkError {
 
             Self::InvalidTarget { value } => StatusBlock::new(StatusState::Error)
                 .error_header(ErrorHeader::new("LinkError", "invalid target"))
-                .body(format!("<dim>Target:</dim> <cyan>{value}</cyan>"))
+                .body(format!(
+                    "<dim>Target:</dim> <cyan>{}</cyan>",
+                    value.replace('_', "\\_"),
+                ))
                 .hint(
                     "Valid targets: <cyan>\\_self</cyan>, <cyan>\\_blank</cyan>, <cyan>\\_parent</cyan>, <cyan>\\_top</cyan>, or a named context.",
                 ),
@@ -136,8 +155,12 @@ impl LinkError {
     /// Creates a markdown-parse error without source-context details.
     pub fn malformed_markdown(message: impl Into<String>) -> Self {
         Self::MalformedMarkdown {
+            ctx: Box::new(SourceContext::new(
+                std::path::PathBuf::from("unknown"),
+                std::path::PathBuf::from("unknown"),
+                "",
+            )),
             message: message.into(),
-            input: None,
             caret: None,
         }
     }
@@ -147,9 +170,14 @@ impl LinkError {
         input: impl Into<String>,
         caret: usize,
     ) -> Self {
+        let input_str = input.into();
         Self::MalformedMarkdown {
+            ctx: Box::new(SourceContext::new(
+                std::path::PathBuf::from("unknown"),
+                std::path::PathBuf::from("unknown"),
+                input_str,
+            )),
             message: message.into(),
-            input: Some(input.into()),
             caret: Some(caret),
         }
     }
@@ -1154,29 +1182,6 @@ fn find_closing_paren(input: &str, start: usize) -> Result<usize, LinkError> {
         input,
         start,
     ))
-}
-
-fn render_markdown_parse_body(message: &str, input: Option<&str>, caret: Option<usize>) -> String {
-    let mut body = format!("<dim>Message:</dim> {message}");
-
-    if let Some(input) = input {
-        body.push_str(&format!("\n<dim>Input:</dim>\n  <cyan>{input}</cyan>"));
-        if let Some(caret) = caret {
-            body.push('\n');
-            body.push_str(&caret_marker(input, caret));
-        }
-    }
-
-    body
-}
-
-fn caret_marker(input: &str, byte_offset: usize) -> String {
-    let clamped = byte_offset.min(input.len());
-    let column = input
-        .char_indices()
-        .take_while(|(idx, _)| *idx < clamped)
-        .count();
-    format!("  {}^", " ".repeat(column))
 }
 
 fn extract_url(content: &str) -> (String, &str) {

@@ -1,9 +1,36 @@
 //! Type definitions for the transclusion phase.
 
+use biscuit_terminal::errors::SourceContext;
 use crate::markdown::compose::ComposeSource;
 use std::ops::Range;
 use std::path::PathBuf;
 use thiserror::Error;
+
+/// Source info derived from a compose source.
+#[derive(Debug, Clone, Default)]
+pub struct TransclusionSource {
+    /// Current local file, if known.
+    pub file: Option<PathBuf>,
+    /// Current URL source, if known.
+    pub url: Option<url::Url>,
+}
+
+impl TransclusionSource {
+    /// Builds transclusion source info from a compose source.
+    pub fn from_source(source: &ComposeSource) -> Self {
+        match source {
+            ComposeSource::Unknown => Self::default(),
+            ComposeSource::File(path) => Self {
+                file: Some(path.clone()),
+                url: None,
+            },
+            ComposeSource::Url(url) => Self {
+                file: None,
+                url: Some(url.clone()),
+            },
+        }
+    }
+}
 
 /// Supported directive kinds.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -292,6 +319,7 @@ pub struct FrontmatterRefs {
 pub enum TransclusionError {
     #[error("Failed to parse directive at line {line}: {message}")]
     ParseDirective {
+        ctx: Box<SourceContext>,
         line: usize,
         message: String,
         caret_col: Option<usize>,
@@ -300,12 +328,12 @@ pub enum TransclusionError {
     #[error(
         "Invalid {} reference '{reference}' in {} at line {line}",
         .directive_kind.as_str(),
-        .source_file.display()
+        .ctx.display.display()
     )]
     InvalidReference {
+        ctx: Box<SourceContext>,
         reference: String,
         line: usize,
-        source_file: PathBuf,
         directive_kind: DirectiveKind,
     },
 
@@ -329,6 +357,7 @@ pub enum TransclusionError {
 
     #[error("Failed to evaluate condition '{expr}' at line {line}: {message}")]
     ConditionEval {
+        ctx: Box<SourceContext>,
         expr: String,
         line: usize,
         message: String,
@@ -336,6 +365,7 @@ pub enum TransclusionError {
 
     #[error("Failed to parse condition '{expr}' at line {line}: {message}")]
     ConditionParse {
+        ctx: Box<SourceContext>,
         expr: String,
         line: usize,
         message: String,
@@ -351,6 +381,7 @@ pub enum TransclusionError {
         "Invalid frontmatter assignment on '::file' directive at line {line}: {reason} (value: {raw})"
     )]
     InvalidFrontmatterAssignment {
+        ctx: Box<SourceContext>,
         line: usize,
         raw: String,
         reason: String,
@@ -359,7 +390,11 @@ pub enum TransclusionError {
     #[error(
         "Invalid reassigned frontmatter property '{name}' on '::file' directive at line {line}"
     )]
-    InvalidReassignedFrontmatterProperty { line: usize, name: String },
+    InvalidReassignedFrontmatterProperty {
+        ctx: Box<SourceContext>,
+        line: usize,
+        name: String,
+    },
 
     #[error("I/O error: {0}")]
     Io(#[from] std::io::Error),
@@ -379,29 +414,62 @@ impl biscuit_terminal::errors::BlockError for TransclusionError {
         &self,
         _term: &biscuit_terminal::terminal::Terminal,
     ) -> biscuit_terminal::components::status_block::StatusBlock {
+        use biscuit_terminal::components::prose::Prose;
         use biscuit_terminal::components::status::StatusState;
         use biscuit_terminal::components::status_block::StatusBlock;
         use biscuit_terminal::errors::{ErrorHeader, StatusBlockExt};
 
         match self {
-            TransclusionError::ParseDirective { line, message, .. } => StatusBlock::new(StatusState::Error)
-                .error_header(ErrorHeader::new("TransclusionError", "directive parse failed"))
-                .body(format!("<dim>Line:</dim> {line}\n<dim>Message:</dim> {message}"))
-                .hint("Expected syntax: <cyan>::file ./path.md</cyan> | <cyan>::code ./file.rs</cyan>."),
+            TransclusionError::ParseDirective {
+                ctx,
+                line,
+                message,
+                caret_col,
+            } => {
+                let mut body = vec![
+                    Prose::new("Directive parsing failed here:"),
+                    ctx.excerpt_prose(*line, 1, "md"),
+                ];
 
-            TransclusionError::InvalidReference { reference, line, source_file, directive_kind } => {
-                let kind_str = match directive_kind {
-                    DirectiveKind::File => "::file",
-                    DirectiveKind::Code => "::code",
-                    DirectiveKind::Url => "::url",
-                };
+                if let Some(col) = caret_col {
+                    body.push(Prose::new(format!(
+                        "<dim>Gutter:</dim> Column {col} is near the error."
+                    )));
+                }
+
                 StatusBlock::new(StatusState::Error)
-                    .error_header(ErrorHeader::new("TransclusionError", "invalid reference"))
-                    .body(format!(
-                        "<dim>Source file:</dim> <cyan>{}</cyan>\n<dim>Line:</dim> {line}\n<dim>Directive:</dim> {kind_str}\n<dim>Reference:</dim> <cyan>{reference}</cyan>",
-                        source_file.display()
+                    .error_header(ErrorHeader::new("TransclusionError", "directive parse failed"))
+                    .body(body)
+                    .hint(format!(
+                        "Error: {message}\nCheck syntax: <cyan>::file path=\"...\"</cyan>"
                     ))
-                    .hint("Use a relative path, absolute path, or <cyan>https://</cyan> URL.")
+            }
+
+            TransclusionError::InvalidReference {
+                ctx,
+                reference,
+                line,
+                directive_kind,
+            } => {
+                let body = vec![
+                    Prose::new(format!(
+                        "Invalid {} reference <red><b>{}</b></red> found in:",
+                        directive_kind.as_str(),
+                        reference
+                    )),
+                    ctx.excerpt_prose(*line, 2, "md"),
+                ];
+
+                StatusBlock::new(StatusState::Error)
+                    .error_header(ErrorHeader::new(
+                        "TransclusionError",
+                        &format!(
+                            "The reference in {} could not be resolved.",
+                            ctx.linked_path_prose().content()
+                        ),
+                    ))
+                    .body(body)
+                    .hint("Verify the path exists and matches your configuration limits.")
             }
 
             TransclusionError::MissingSourceContext { reference, line } => {
@@ -410,10 +478,15 @@ impl biscuit_terminal::errors::BlockError for TransclusionError {
                         "TransclusionError",
                         "missing source context",
                     ))
-                    .body(format!(
-                        "<dim>Reference:</dim> <cyan>{reference}</cyan>\n<dim>Line:</dim> {line}"
-                    ))
-                    .hint("Load the document from a file or URL so relative refs can resolve.")
+                    .body(vec![
+                        Prose::new(format!(
+                            "Could not resolve <cyan>{reference}</cyan> at line {line}."
+                        )),
+                        Prose::new(
+                            "<dim>Note:</dim> Relative transclusions require a file-backed source.",
+                        ),
+                    ])
+                    .hint("Try using an absolute path or `@/` repo-root reference.")
             }
 
             TransclusionError::UnsupportedReferenceType { reference } => {
@@ -422,126 +495,161 @@ impl biscuit_terminal::errors::BlockError for TransclusionError {
                         "TransclusionError",
                         "unsupported reference type",
                     ))
-                    .body(format!("<dim>Reference:</dim> <cyan>{reference}</cyan>"))
-                    .hint("Supported types: local file paths, HTTP(S) URLs.")
+                    .body(format!("The reference <cyan>{reference}</cyan> uses an unsupported scheme or syntax."))
+                    .hint("Supported: <dim>./relative, @/repo, !package, vault:, %, {{ENV}}</dim>")
             }
 
             TransclusionError::UnsupportedFileType { path } => StatusBlock::new(StatusState::Error)
-                .error_header(ErrorHeader::new(
-                    "TransclusionError",
-                    "unsupported file type",
+                .error_header(ErrorHeader::new("TransclusionError", "unsupported file type"))
+                .body(format!(
+                    "File <cyan>{}</cyan> is not a supported markdown document.",
+                    path.display()
                 ))
-                .body(format!("<dim>Path:</dim> <cyan>{}</cyan>", path.display()))
-                .hint("Use <cyan>::file</cyan> for markdown or <cyan>::code</cyan> for text/source."),
+                .hint("Transclusion targets must have <dim>.md</dim> or <dim>.markdown</dim> extensions."),
 
             TransclusionError::NonTextCodeSource { path } => StatusBlock::new(StatusState::Error)
-                .error_header(ErrorHeader::new("TransclusionError", "non-text code source"))
-                .body(format!("<dim>Path:</dim> <cyan>{}</cyan>", path.display()))
-                .hint("Only UTF-8 text files can be transcluded with <cyan>::code</cyan>."),
+                .error_header(ErrorHeader::new("TransclusionError", "binary code source"))
+                .body(format!(
+                    "The code source <cyan>{}</cyan> is not valid UTF-8 text.",
+                    path.display()
+                ))
+                .hint("::code transclusion only supports text files."),
 
             TransclusionError::CycleDetected { chain } => {
-                let chain_display = chain
-                    .iter()
-                    .enumerate()
-                    .map(|(i, (path, line))| {
-                        format!(
-                            "  {}. <cyan>{}</cyan> <dim>:line {}</dim>",
-                            i + 1,
-                            path.display(),
-                            line
-                        )
-                    })
-                    .collect::<Vec<_>>()
-                    .join("\n");
+                let mut body = vec![Prose::new("Chain:")];
+                for (path, line) in chain {
+                    body.push(Prose::new(format!(
+                        "  <blue>{}</blue> <dim>:line {}</dim>",
+                        path.display(),
+                        line
+                    )));
+                }
+
                 StatusBlock::new(StatusState::Error)
                     .error_header(ErrorHeader::new("TransclusionError", "cycle detected"))
-                    .body(format!("<dim>Chain:</dim>\n{chain_display}"))
+                    .body(body)
                     .hint("Break the cycle by removing one transclusion edge.")
             }
 
             TransclusionError::MaxDepthExceeded { max_depth } => StatusBlock::new(StatusState::Error)
-                .error_header(ErrorHeader::new(
-                    "TransclusionError",
-                    "max recursion depth exceeded",
-                ))
-                .body(format!("<dim>Max depth:</dim> {max_depth}"))
-                .hint("Flatten the transclusion tree or raise the configured max depth."),
+                .error_header(ErrorHeader::new("TransclusionError", "recursion limit hit"))
+                .body(format!("Transclusion depth exceeded the limit of <cyan>{max_depth}</cyan>."))
+                .hint("Increase <dim>max_depth</dim> in frontmatter or simplify the document tree."),
 
-            TransclusionError::ConditionEval { expr, line, message } => StatusBlock::new(StatusState::Error)
-                .error_header(ErrorHeader::new(
-                    "TransclusionError",
-                    "condition evaluation failed",
-                ))
-                .body(format!(
-                    "<dim>Expression:</dim> <cyan>{expr}</cyan>\n<dim>Line:</dim> {line}\n<dim>Message:</dim> {message}"
-                ))
-                .hint("Check that every variable referenced is present in the effective state."),
+            TransclusionError::ConditionEval {
+                ctx,
+                expr,
+                line,
+                message,
+            } => {
+                let body = vec![
+                    Prose::new(format!(
+                        "Failed to evaluate <cyan>when=\"{}\"</cyan>:",
+                        expr
+                    )),
+                    ctx.excerpt_prose(*line, 1, "md"),
+                ];
 
-            TransclusionError::ConditionParse { expr, line, message } => StatusBlock::new(StatusState::Error)
-                .error_header(ErrorHeader::new(
-                    "TransclusionError",
-                    "condition parse failed",
-                ))
-                .body(format!(
-                    "<dim>Expression:</dim> <cyan>{expr}</cyan>\n<dim>Line:</dim> {line}\n<dim>Message:</dim> {message}"
-                ))
-                .hint("Operators: <cyan>&&  ||  !  ==  !=  >  >=  <  <=  +  -  *  /  %  []  .</cyan> plus helpers like <cyan>HasKey</cyan>, <cyan>Contains</cyan>, <cyan>Length</cyan>, <cyan>min/max/abs</cyan>, <cyan>first/last</cyan>, <cyan>IsString/IsNumber/IsArray/IsNull/IsObject/IsEmpty</cyan>, <cyan>StartsWith/EndsWith</cyan>, <cyan>Lower/Upper/Capitalize</cyan>, case helpers, and date validators (<cyan>IsDate</cyan>, <cyan>IsToday</cyan>, etc.)."),
+                StatusBlock::new(StatusState::Error)
+                    .error_header(ErrorHeader::new(
+                        "TransclusionError",
+                        "condition evaluation failed",
+                    ))
+                    .body(body)
+                    .hint(format!("Error: {message}"))
+            }
+
+            TransclusionError::ConditionParse {
+                ctx,
+                expr,
+                line,
+                message,
+            } => {
+                let body = vec![
+                    Prose::new(format!("Failed to parse <cyan>when=\"{}\"</cyan>:", expr)),
+                    ctx.excerpt_prose(*line, 1, "md"),
+                ];
+
+                StatusBlock::new(StatusState::Error)
+                    .error_header(ErrorHeader::new("TransclusionError", "condition parse failed"))
+                    .body(body)
+                    .hint(format!("Error: {message}"))
+            }
 
             TransclusionError::Relevel(message) => StatusBlock::new(StatusState::Error)
                 .error_header(ErrorHeader::new("TransclusionError", "re-leveling failed"))
                 .body(message.clone())
-                .hint("Pick a target heading level that fits within H1–H6."),
+                .hint("Check that transcluded headings do not push past H6."),
 
             TransclusionError::UrlExecutionDisabled { url } => StatusBlock::new(StatusState::Error)
                 .error_header(ErrorHeader::new(
                     "TransclusionError",
                     "remote transclusion disabled",
                 ))
-                .body(format!("<dim>URL:</dim> <cyan>{url}</cyan>"))
-                .hint("Enable URL transclusion in the compose options to allow this request."),
+                .body(format!("The URL <cyan>{url}</cyan> was blocked by policy."))
+                .hint("Enable <dim>allow_remote: true</dim> in frontmatter or CLI options."),
 
-            TransclusionError::InvalidFrontmatterAssignment { line, raw, reason } => StatusBlock::new(StatusState::Error)
-                .error_header(ErrorHeader::new(
-                    "TransclusionError",
-                    "invalid frontmatter assignment",
-                ))
-                .body(format!(
-                    "<dim>Line:</dim> {line}\n<dim>Value:</dim> <cyan>{raw}</cyan>\n<dim>Reason:</dim> {reason}"
-                ))
-                .hint("Run with <cyan>--allow-invalid-frontmatter-assignment</cyan> to downgrade to a warning."),
+            TransclusionError::InvalidFrontmatterAssignment {
+                ctx,
+                line,
+                raw,
+                reason,
+            } => {
+                let body = vec![
+                    Prose::new("Invalid frontmatter override in directive:"),
+                    ctx.excerpt_prose(*line, 1, "md"),
+                    Prose::new(format!("<dim>Value:</dim> <red>{}</red>", raw)),
+                ];
 
-            TransclusionError::InvalidReassignedFrontmatterProperty { line, name } => StatusBlock::new(StatusState::Error)
-                .error_header(ErrorHeader::new(
-                    "TransclusionError",
-                    "reassigned frontmatter property",
-                ))
-                .body(format!(
-                    "<dim>Line:</dim> {line}\n<dim>Property:</dim> <cyan>{name}</cyan>"
-                ))
-                .hint("Run with <cyan>--allow-reassigned-frontmatter-property</cyan> to downgrade to a warning."),
+                StatusBlock::new(StatusState::Error)
+                    .error_header(ErrorHeader::new(
+                        "TransclusionError",
+                        "invalid frontmatter assignment",
+                    ))
+                    .body(body)
+                    .hint(format!("Error: {reason}"))
+            }
+
+            TransclusionError::InvalidReassignedFrontmatterProperty { ctx, line, name } => {
+                let body = vec![
+                    Prose::new(format!(
+                        "Duplicate assignment to property <red><b>{}</b></red> found in:",
+                        name
+                    )),
+                    ctx.excerpt_prose(*line, 1, "md"),
+                ];
+
+                StatusBlock::new(StatusState::Error)
+                    .error_header(ErrorHeader::new(
+                        "TransclusionError",
+                        "duplicate frontmatter property",
+                    ))
+                    .body(body)
+                    .hint("Use only one assignment per property name on a directive line.")
+            }
 
             TransclusionError::Io(source) => StatusBlock::new(StatusState::Error)
-                .error_header(ErrorHeader::new("TransclusionError", "I/O error"))
-                .body(format!("<dim>Kind:</dim> {:?}\n{source}", source.kind()))
-                .hint("Confirm the referenced file exists and is readable."),
+                .error_header(ErrorHeader::new("TransclusionError", "I/O failure"))
+                .body(source.to_string())
+                .hint("Check file existence and permissions."),
 
             TransclusionError::UrlParse(source) => StatusBlock::new(StatusState::Error)
-                .error_header(ErrorHeader::new("TransclusionError", "URL parse error"))
-                .body(format!("{source}"))
-                .hint("Use a fully qualified URL including the <cyan>https://</cyan> scheme."),
+                .error_header(ErrorHeader::new("TransclusionError", "URL parse failure"))
+                .body(source.to_string())
+                .hint("Verify the URL scheme and format (e.g., https://example.com)."),
 
             TransclusionError::FileReference(source) => StatusBlock::new(StatusState::Error)
                 .error_header(ErrorHeader::new(
                     "TransclusionError",
-                    "file reference error",
+                    "file reference failure",
                 ))
-                .body(format!("{source}"))
-                .hint("Verify the reference string and surrounding compose source."),
+                .body(source.to_string())
+                .hint("Check repository-root (`@/`) or package (`!`) prefix usage."),
 
             TransclusionError::Json(source) => StatusBlock::new(StatusState::Error)
                 .error_header(ErrorHeader::new(
                     "TransclusionError",
-                    "directive option parse error",
+                    "JSON5 parse failure in options",
                 ))
                 .body(format!(
                     "{source}\n<dim>Position:</dim> line {}, column {}",
@@ -549,32 +657,6 @@ impl biscuit_terminal::errors::BlockError for TransclusionError {
                     source.column()
                 ))
                 .hint("Directive options use JSON5; check braces, quoting, and commas."),
-        }
-    }
-}
-
-/// Source info derived from a compose source.
-#[derive(Debug, Clone, Default)]
-pub struct SourceContext {
-    /// Current local file, if known.
-    pub file: Option<PathBuf>,
-    /// Current URL source, if known.
-    pub url: Option<url::Url>,
-}
-
-impl SourceContext {
-    /// Builds source context from a compose source.
-    pub fn from_source(source: &ComposeSource) -> Self {
-        match source {
-            ComposeSource::Unknown => Self::default(),
-            ComposeSource::File(path) => Self {
-                file: Some(path.clone()),
-                url: None,
-            },
-            ComposeSource::Url(url) => Self {
-                file: None,
-                url: Some(url.clone()),
-            },
         }
     }
 }

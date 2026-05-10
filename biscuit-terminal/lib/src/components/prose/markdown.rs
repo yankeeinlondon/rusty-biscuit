@@ -47,17 +47,96 @@ fn is_intra_word(prev: Option<char>, next: Option<char>) -> bool {
     is_word_neighbour(prev) && is_word_neighbour(next)
 }
 
+const CODE_BLOCK_PLACEHOLDER_MARK: char = '\u{0002}';
+
+/// Phase 0: lift fenced code blocks (` ```lang\n...\n``` `) into opaque
+/// placeholders so that inner backticks, asterisks, and underscores are
+/// never interpreted as Markdown.
+///
+/// Returns the text with placeholders and a vector of (language, body)
+/// tuples for later restoration.
+fn convert_fenced_code_blocks(input: &str) -> (String, Vec<(String, String)>) {
+    let lines: Vec<&str> = input.lines().collect();
+    let mut output_lines: Vec<String> = Vec::new();
+    let mut code_blocks: Vec<(String, String)> = Vec::new();
+    let mut i = 0;
+
+    while i < lines.len() {
+        let line = lines[i];
+        let trimmed = line.trim_start();
+
+        if let Some(after_fence) = trimmed.strip_prefix("```") {
+            let lang = after_fence.trim().to_string();
+            let mut body_lines = Vec::new();
+            i += 1;
+
+            while i < lines.len() {
+                let body_line = lines[i];
+                if body_line.trim_start() == "```" {
+                    i += 1;
+                    break;
+                }
+                body_lines.push(body_line);
+                i += 1;
+            }
+
+            let placeholder = format!(
+                "{m}CODE{n}{m}",
+                m = CODE_BLOCK_PLACEHOLDER_MARK,
+                n = code_blocks.len()
+            );
+            code_blocks.push((lang, body_lines.join("\n")));
+            output_lines.push(placeholder);
+        } else {
+            output_lines.push(line.to_string());
+            i += 1;
+        }
+    }
+
+    (output_lines.join("\n"), code_blocks)
+}
+
+/// Restore each `\u{0002}CODE<n>\u{0002}` placeholder with a
+/// `<code-block lang="...">...</code-block>` tag that the token parser
+/// recognises and renders as a dim, indented code block.
+fn restore_code_blocks(input: &str, blocks: &[(String, String)]) -> String {
+    if blocks.is_empty() {
+        return input.to_string();
+    }
+    let mut output = input.to_string();
+    for (i, (lang, body)) in blocks.iter().enumerate() {
+        let placeholder = format!("{m}CODE{i}{m}", m = CODE_BLOCK_PLACEHOLDER_MARK);
+        let tag = format!(
+            "<code-block lang=\"{}\">{}</code-block>",
+            html_escape(lang),
+            body
+        );
+        output = output.replace(&placeholder, &tag);
+    }
+    output
+}
+
+/// Minimal HTML escape for code-block language attributes.
+fn html_escape(s: &str) -> String {
+    s.replace('&', "&amp;")
+        .replace('"', "&quot;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+}
+
 /// Apply the full Markdown pre-processing pipeline.
 ///
-/// Order: links → bold → italics. The output is fed verbatim into the
-/// existing block-tag parser. Backslash escapes for `*`, `_`, `[`, `]`,
-/// `(`, `)` are preserved end-to-end so the downstream parser converts
-/// them to literal characters via Phase 1's escape handling.
+/// Order: fenced code blocks → links → bold → italics. The output is fed
+/// verbatim into the existing block-tag parser. Backslash escapes for `*`,
+/// `_`, `[`, `]`, `(`, `)` are preserved end-to-end so the downstream parser
+/// converts them to literal characters via Phase 1's escape handling.
 pub(super) fn preprocess_markdown(input: &str) -> String {
-    let (with_links, hrefs) = convert_links(input);
+    let (with_code, code_blocks) = convert_fenced_code_blocks(input);
+    let (with_links, hrefs) = convert_links(&with_code);
     let with_bold = convert_bold(&with_links);
     let with_italics = convert_italics(&with_bold);
-    restore_hrefs(&with_italics, &hrefs)
+    let restored = restore_hrefs(&with_italics, &hrefs);
+    restore_code_blocks(&restored, &code_blocks)
 }
 
 /// Characters that participate in backslash escape sequences during
@@ -769,5 +848,36 @@ mod tests {
             preprocess_markdown("<dim>=OPENCODE_CONFIG_CONTENT</dim>"),
             "<dim>=OPENCODE_CONFIG_CONTENT</dim>",
         );
+    }
+
+    // -- Fenced code blocks --------------------------------------------------
+
+    #[test]
+    fn fenced_code_block_basic() {
+        let input = "```yaml\nkey: value\n```";
+        let out = preprocess_markdown(input);
+        assert!(out.contains("<code-block lang=\"yaml\">"));
+        assert!(out.contains("key: value"));
+        assert!(out.contains("</code-block>"));
+    }
+
+    #[test]
+    fn fenced_code_block_no_lang() {
+        let input = "```\nplain text\n```";
+        let out = preprocess_markdown(input);
+        assert!(out.contains("<code-block lang=\"\">"));
+        assert!(out.contains("plain text"));
+    }
+
+    #[test]
+    fn fenced_code_block_preserves_inner_markdown() {
+        // Asterisks and underscores inside code blocks must NOT be
+        // interpreted as emphasis.
+        let input = "```\n**not bold**\n_not italic_\n```";
+        let out = preprocess_markdown(input);
+        assert!(!out.contains("<b>"));
+        assert!(!out.contains("<i>"));
+        assert!(out.contains("**not bold**"));
+        assert!(out.contains("_not italic_"));
     }
 }

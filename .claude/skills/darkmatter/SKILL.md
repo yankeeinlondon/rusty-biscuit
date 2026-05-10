@@ -164,6 +164,7 @@ This shortcut resolves:
 - [Terminal Output](./terminal.md) - ANSI rendering, themes, options
 - [Frontmatter](./frontmatter.md) - YAML parsing, merge strategies
 - [Document Comparison](./comparison.md) - Structural diff, change classification
+- [Error Conventions](./errors.md) - `BlockError` body contract, `SourceContext`, snapshot tests
 - [Module Structure](./structure.md) - Package organization and dependencies
 
 ## CLI

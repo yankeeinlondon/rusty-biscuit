@@ -70,6 +70,8 @@ pub struct ShellDirective {
     pub timeout_override: Option<std::time::Duration>,
     /// Parsed pipeline (supports chaining with && and ||).
     pub pipeline: Option<ShellPipeline>,
+    /// Source context used for diagnostic rendering when execution fails.
+    pub ctx: SourceContext,
 }
 
 impl ShellDirective {
@@ -473,23 +475,27 @@ pub enum ShellApprovalDecision {
     BlacklistPersist,
 }
 
-/// Errors from shell expansion operations.
+use biscuit_terminal::errors::SourceContext;
+
 #[derive(Error, Debug)]
 pub enum ShellExpansionError {
     #[error("Shell directive parse error at {origin}: {message}")]
     ParseDirective {
+        ctx: Box<SourceContext>,
         origin: ShellCommandOrigin,
         message: String,
     },
 
     #[error("Command not found: '{command}' at {origin}")]
     CommandNotFound {
+        ctx: Box<SourceContext>,
         command: String,
         origin: ShellCommandOrigin,
     },
 
     #[error("Blacklisted command '{command}' at {origin}: {reason}")]
     Blacklisted {
+        ctx: Box<SourceContext>,
         command: String,
         reason: String,
         origin: ShellCommandOrigin,
@@ -497,6 +503,7 @@ pub enum ShellExpansionError {
 
     #[error("Approval required for '{command}' at {origin}")]
     ApprovalRequired {
+        ctx: Box<SourceContext>,
         command: String,
         whitelist_path: PathBuf,
         blacklist_path: PathBuf,
@@ -505,6 +512,7 @@ pub enum ShellExpansionError {
 
     #[error("Command denied: '{command}' at {origin}")]
     Denied {
+        ctx: Box<SourceContext>,
         command: String,
         origin: ShellCommandOrigin,
     },
@@ -514,6 +522,7 @@ pub enum ShellExpansionError {
          This is a bug in the pre-flight scanner -- please report it."
     )]
     NotPreApproved {
+        ctx: Box<SourceContext>,
         command: String,
         origin: ShellCommandOrigin,
         source_desc: String,
@@ -521,6 +530,7 @@ pub enum ShellExpansionError {
 
     #[error("Command timed out after {timeout:?}: '{command}' at {origin}")]
     Timeout {
+        ctx: Box<SourceContext>,
         command: String,
         timeout: std::time::Duration,
         origin: ShellCommandOrigin,
@@ -528,6 +538,7 @@ pub enum ShellExpansionError {
 
     #[error("Command failed (exit {code}): '{command}' at {origin}")]
     ExecutionFailed {
+        ctx: Box<SourceContext>,
         command: String,
         code: i32,
         stdout: String,
@@ -547,74 +558,123 @@ impl biscuit_terminal::errors::BlockError for ShellExpansionError {
         &self,
         _term: &biscuit_terminal::terminal::Terminal,
     ) -> biscuit_terminal::components::status_block::StatusBlock {
+        use biscuit_terminal::components::prose::Prose;
         use biscuit_terminal::components::status::StatusState;
         use biscuit_terminal::components::status_block::StatusBlock;
         use biscuit_terminal::errors::{ErrorHeader, StatusBlockExt};
 
         match self {
-            ShellExpansionError::ParseDirective { origin, message } => StatusBlock::new(StatusState::Error)
+            ShellExpansionError::ParseDirective {
+                ctx,
+                origin,
+                message,
+            } => StatusBlock::new(StatusState::Error)
                 .error_header(ErrorHeader::new(
                     "ShellExpansionError",
                     "directive parse failed",
                 ))
-                .body(format!(
-                    "<dim>Origin:</dim> {origin}\n<dim>Message:</dim> {message}"
-                ))
+                .body(vec![
+                    Prose::new(format!("<dim>Origin:</dim> {origin}\n<dim>Message:</dim> {message}")),
+                    ctx.excerpt_prose(origin.line_number(), 1, "md"),
+                ])
                 .hint("Body syntax: <cyan>::shell \"command\"</cyan>. Frontmatter syntax: <cyan>key: $(command)</cyan>."),
 
-            ShellExpansionError::CommandNotFound { command, origin } => StatusBlock::new(StatusState::Error)
+            ShellExpansionError::CommandNotFound {
+                ctx,
+                command,
+                origin,
+            } => StatusBlock::new(StatusState::Error)
                 .error_header(ErrorHeader::new("ShellExpansionError", "command not found"))
-                .body(format!(
-                    "<dim>Command:</dim> <cyan>{command}</cyan>\n<dim>Origin:</dim> {origin}"
-                ))
+                .body(vec![
+                    Prose::new(format!(
+                        "<dim>Command:</dim> <cyan>{command}</cyan>\n<dim>Origin:</dim> {origin}"
+                    )),
+                    ctx.excerpt_prose(origin.line_number(), 1, "md"),
+                ])
                 .hint("Install the binary or update <cyan>$PATH</cyan> so it is discoverable."),
 
-            ShellExpansionError::Blacklisted { command, reason, origin } => StatusBlock::new(StatusState::Error)
+            ShellExpansionError::Blacklisted {
+                ctx,
+                command,
+                reason,
+                origin,
+            } => StatusBlock::new(StatusState::Error)
                 .error_header(ErrorHeader::new("ShellExpansionError", "command blacklisted"))
-                .body(format!(
-                    "<dim>Command:</dim> <cyan>{command}</cyan>\n<dim>Origin:</dim> {origin}\n<dim>Reason:</dim> {reason}"
-                ))
+                .body(vec![
+                    Prose::new(format!(
+                        "<dim>Command:</dim> <cyan>{command}</cyan>\n<dim>Origin:</dim> {origin}\n<dim>Reason:</dim> {reason}"
+                    )),
+                    ctx.excerpt_prose(origin.line_number(), 1, "md"),
+                ])
                 .hint("Remove the entry from your blacklist file if you trust this command."),
 
             ShellExpansionError::ApprovalRequired {
+                ctx,
                 command,
                 whitelist_path,
                 blacklist_path,
                 origin,
             } => StatusBlock::new(StatusState::Error)
                 .error_header(ErrorHeader::new("ShellExpansionError", "approval required"))
-                .body(format!(
-                    "<dim>Command:</dim> <cyan>{command}</cyan>\n<dim>Origin:</dim> {origin}\n<dim>Whitelist:</dim> {}\n<dim>Blacklist:</dim> {}",
-                    whitelist_path.display(),
-                    blacklist_path.display()
-                ))
+                .body(vec![
+                    Prose::new(format!(
+                        "<dim>Command:</dim> <cyan>{command}</cyan>\n<dim>Origin:</dim> {origin}\n<dim>Whitelist:</dim> {}\n<dim>Blacklist:</dim> {}",
+                        whitelist_path.display(),
+                        blacklist_path.display()
+                    )),
+                    ctx.excerpt_prose(origin.line_number(), 1, "md"),
+                ])
                 .hint("Re-run with <cyan>--approve-shell</cyan> or add the command to your whitelist."),
 
-            ShellExpansionError::Denied { command, origin } => StatusBlock::new(StatusState::Error)
+            ShellExpansionError::Denied {
+                ctx,
+                command,
+                origin,
+            } => StatusBlock::new(StatusState::Error)
                 .error_header(ErrorHeader::new("ShellExpansionError", "command denied"))
-                .body(format!(
-                    "<dim>Command:</dim> <cyan>{command}</cyan>\n<dim>Origin:</dim> {origin}"
-                ))
+                .body(vec![
+                    Prose::new(format!(
+                        "<dim>Command:</dim> <cyan>{command}</cyan>\n<dim>Origin:</dim> {origin}"
+                    )),
+                    ctx.excerpt_prose(origin.line_number(), 1, "md"),
+                ])
                 .hint("The user declined to approve this shell expansion."),
 
-            ShellExpansionError::NotPreApproved { command, origin, source_desc } => StatusBlock::new(StatusState::Error)
+            ShellExpansionError::NotPreApproved {
+                ctx,
+                command,
+                origin,
+                source_desc,
+            } => StatusBlock::new(StatusState::Error)
                 .error_header(ErrorHeader::new(
                     "ShellExpansionError",
                     "command not pre-approved",
                 ))
-                .body(format!(
-                    "<dim>Command:</dim> <cyan>{command}</cyan>\n<dim>Origin:</dim> {origin}\n<dim>Source:</dim> {source_desc}"
-                ))
+                .body(vec![
+                    Prose::new(format!(
+                        "<dim>Command:</dim> <cyan>{command}</cyan>\n<dim>Origin:</dim> {origin}\n<dim>Source:</dim> {source_desc}"
+                    )),
+                    ctx.excerpt_prose(origin.line_number(), 1, "md"),
+                ])
                 .hint("This is a bug in the pre-flight scanner — please report it."),
 
-            ShellExpansionError::Timeout { command, timeout, origin } => StatusBlock::new(StatusState::Error)
+            ShellExpansionError::Timeout {
+                ctx,
+                command,
+                timeout,
+                origin,
+            } => StatusBlock::new(StatusState::Error)
                 .error_header(ErrorHeader::new("ShellExpansionError", "command timed out"))
-                .body(format!(
-                    "<dim>Command:</dim> <cyan>{command}</cyan>\n<dim>Origin:</dim> {origin}\n<dim>Timeout:</dim> {timeout:?}"
-                ))
+                .body(vec![
+                    Prose::new(format!(
+                        "<dim>Command:</dim> <cyan>{command}</cyan>\n<dim>Origin:</dim> {origin}\n<dim>Timeout:</dim> {timeout:?}"
+                    )),
+                    ctx.excerpt_prose(origin.line_number(), 1, "md"),
+                ])
                 .hint("Raise the timeout, or pass <cyan>--allow-shell-timeout</cyan> to warn instead of fail."),
 
             ShellExpansionError::ExecutionFailed {
+                ctx,
                 command,
                 code,
                 stdout,
@@ -633,9 +693,12 @@ impl biscuit_terminal::errors::BlockError for ShellExpansionError {
                 };
                 StatusBlock::new(StatusState::Error)
                     .error_header(ErrorHeader::new("ShellExpansionError", "execution failed"))
-                    .body(format!(
-                        "<dim>Command:</dim> <cyan>{command}</cyan>\n<dim>Origin:</dim> {origin}\n<dim>Exit code:</dim> {code}{stdout_section}{stderr_section}"
-                    ))
+                    .body(vec![
+                        Prose::new(format!(
+                            "<dim>Command:</dim> <cyan>{command}</cyan>\n<dim>Origin:</dim> {origin}\n<dim>Exit code:</dim> {code}{stdout_section}{stderr_section}"
+                        )),
+                        ctx.excerpt_prose(origin.line_number(), 1, "md"),
+                    ])
                     .hint("Run the command directly to reproduce the failure.")
             }
 

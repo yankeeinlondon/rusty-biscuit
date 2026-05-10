@@ -57,7 +57,9 @@ commit agent="opencode" model="" *args="":
         model="--model {{ model }}"
     else
         if [[ "{{ agent }}" == "opencode" ]]; then
-            model="--model minimax/MiniMax-M2.7-highspeed"
+            if [[ -z "{{ model }}" ]]; then
+                model="--model minimax/MiniMax-M2.7-highspeed"
+            fi
         fi
     fi
     echo ""

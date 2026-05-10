@@ -104,7 +104,7 @@ mod tests {
                 (PathBuf::from("a.md"), 3),
             ],
         };
-        let md: MarkdownError = MarkdownError::Transclusion(inner);
+        let md: MarkdownError = MarkdownError::Transclusion(Box::new(inner));
         let report: Report = eyre!(claudine::composition::CompositionError::ComposeFailed(md));
 
         let rendered = try_render_block_report(&report, &width80()).expect("block error found");

@@ -1,7 +1,7 @@
 ---
 lessons_learned: "@.claudine/memory/commits.md"
-timeout: 10m
-step_timeout: 7m
+timeout: 12m
+step_timeout: 8m
 show_system_prompt: false
 ---
 # Commit Staged Files

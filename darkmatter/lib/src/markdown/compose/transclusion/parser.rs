@@ -6,12 +6,16 @@ use super::types::{
 };
 use crate::markdown::FrontmatterMap;
 use crate::markdown::compose::parse_utils::{
-    Cursor, CursorError, find_code_regions, is_in_code_region,
+    Cursor, find_code_regions, is_in_code_region,
 };
+use biscuit_terminal::errors::SourceContext;
 use serde_json::Value;
 
 /// Parses block transclusion directives from markdown content.
-pub fn parse_directives(content: &str) -> Result<Vec<BlockDirective>, TransclusionError> {
+pub fn parse_directives(
+    content: &str,
+    ctx: SourceContext,
+) -> Result<Vec<BlockDirective>, TransclusionError> {
     let code_regions = find_code_regions(content);
     let mut directives = Vec::new();
 
@@ -36,7 +40,7 @@ pub fn parse_directives(content: &str) -> Result<Vec<BlockDirective>, Transclusi
         {
             let first_non_ws = line_start + line.len().saturating_sub(line.trim_start().len());
             if !is_in_code_region(first_non_ws, &code_regions) {
-                let (kind, raw_target, options) = parse_directive_line(trimmed, line_number)?;
+                let (kind, raw_target, options) = parse_directive_line(trimmed, line_number, &ctx)?;
                 directives.push(BlockDirective {
                     kind,
                     raw_target,
@@ -57,9 +61,10 @@ pub fn parse_directives(content: &str) -> Result<Vec<BlockDirective>, Transclusi
 /// Parses frontmatter `prologue` and `epilogue` references.
 pub fn parse_frontmatter_refs(
     frontmatter: &FrontmatterMap,
+    ctx: SourceContext,
 ) -> Result<FrontmatterRefs, TransclusionError> {
-    let prologue = parse_reference_field(frontmatter.get("prologue"), "prologue")?;
-    let epilogue = parse_reference_field(frontmatter.get("epilogue"), "epilogue")?;
+    let prologue = parse_reference_field(frontmatter.get("prologue"), "prologue", &ctx)?;
+    let epilogue = parse_reference_field(frontmatter.get("epilogue"), "epilogue", &ctx)?;
 
     Ok(FrontmatterRefs { prologue, epilogue })
 }
@@ -67,6 +72,7 @@ pub fn parse_frontmatter_refs(
 fn parse_reference_field(
     value: Option<&Value>,
     field_name: &str,
+    ctx: &SourceContext,
 ) -> Result<Vec<String>, TransclusionError> {
     let Some(value) = value else {
         return Ok(Vec::new());
@@ -79,6 +85,7 @@ fn parse_reference_field(
             for item in items {
                 let Some(s) = item.as_str() else {
                     return Err(TransclusionError::ParseDirective {
+                        ctx: Box::new(ctx.clone()),
                         line: 0,
                         message: format!(
                             "Frontmatter '{}' must be a string or array of strings",
@@ -92,6 +99,7 @@ fn parse_reference_field(
             Ok(refs)
         }
         _ => Err(TransclusionError::ParseDirective {
+            ctx: Box::new(ctx.clone()),
             line: 0,
             message: format!(
                 "Frontmatter '{}' must be a string or array of strings",
@@ -105,17 +113,23 @@ fn parse_reference_field(
 fn parse_directive_line(
     input: &str,
     line: usize,
+    ctx: &SourceContext,
 ) -> Result<(DirectiveKind, String, BlockOptions), TransclusionError> {
     let mut cursor = Cursor::new(input);
 
-    cursor.expect_literal("::", line)?;
-    let kind_str = cursor.read_identifier(line)?;
+    cursor
+        .expect_literal("::", line)
+        .map_err(|e| e.into_transclusion_error(ctx.clone()))?;
+    let kind_str = cursor
+        .read_identifier(line)
+        .map_err(|e| e.into_transclusion_error(ctx.clone()))?;
     let kind = match kind_str.as_str() {
         "file" => DirectiveKind::File,
         "code" => DirectiveKind::Code,
         "url" => DirectiveKind::Url,
         _ => {
             return Err(TransclusionError::ParseDirective {
+                ctx: Box::new(ctx.clone()),
                 line,
                 message: format!(
                     "Unknown directive kind '{}': expected file/code/url",
@@ -127,9 +141,12 @@ fn parse_directive_line(
     };
 
     cursor.skip_ws();
-    let raw_target = cursor.read_value(line)?;
+    let raw_target = cursor
+        .read_value(line)
+        .map_err(|e| e.into_transclusion_error(ctx.clone()))?;
     if raw_target.is_empty() {
         return Err(TransclusionError::ParseDirective {
+            ctx: Box::new(ctx.clone()),
             line,
             message: "Directive target cannot be empty".to_string(),
             caret_col: None,
@@ -144,19 +161,25 @@ fn parse_directive_line(
             break;
         }
 
-        let key = cursor.read_identifier(line)?;
+        let key = cursor
+            .read_identifier(line)
+            .map_err(|e| e.into_transclusion_error(ctx.clone()))?;
 
         if key == "set" {
-            parse_set_option(&mut cursor, &mut options, line)?;
+            parse_set_option(&mut cursor, &mut options, line, ctx)?;
             continue;
         }
 
         cursor.skip_ws();
-        cursor.expect_char('=', line)?;
+        cursor
+            .expect_char('=', line)
+            .map_err(|e| e.into_transclusion_error(ctx.clone()))?;
         cursor.skip_ws();
-        let value = cursor.read_value(line)?;
+        let value = cursor
+            .read_value(line)
+            .map_err(|e| e.into_transclusion_error(ctx.clone()))?;
 
-        apply_option(&mut options, &key, &value, line)?;
+        apply_option(&mut options, &key, &value, line, ctx)?;
     }
 
     Ok((kind, raw_target, options))
@@ -171,17 +194,25 @@ fn parse_set_option(
     cursor: &mut Cursor<'_>,
     options: &mut BlockOptions,
     line: usize,
+    ctx: &SourceContext,
 ) -> Result<(), TransclusionError> {
-    let dotted = cursor.read_dotted_suffix(line)?;
+    let dotted = cursor
+        .read_dotted_suffix(line)
+        .map_err(|e| e.into_transclusion_error(ctx.clone()))?;
     cursor.skip_ws();
-    cursor.expect_char('=', line)?;
+    cursor
+        .expect_char('=', line)
+        .map_err(|e| e.into_transclusion_error(ctx.clone()))?;
     cursor.skip_ws();
 
     let was_quoted = matches!(cursor.current(), Some('\'') | Some('"'));
-    let raw = cursor.read_value(line)?;
+    let raw = cursor
+        .read_value(line)
+        .map_err(|e| e.into_transclusion_error(ctx.clone()))?;
 
     if raw.is_empty() && !was_quoted {
         return Err(TransclusionError::ParseDirective {
+            ctx: Box::new(ctx.clone()),
             line,
             message: match &dotted {
                 Some(name) => format!("'set.{}=' requires a JSON5 value", name),
@@ -192,7 +223,7 @@ fn parse_set_option(
     }
 
     match dotted {
-        Some(name) => apply_set_property(options, name, &raw, was_quoted, line),
+        Some(name) => apply_set_property(options, name, &raw, was_quoted, line, ctx),
         None => apply_set_object(options, &raw, was_quoted, line),
     }
 }
@@ -208,11 +239,13 @@ fn apply_set_property(
     raw: &str,
     was_quoted: bool,
     line: usize,
+    ctx: &SourceContext,
 ) -> Result<(), TransclusionError> {
     let parsed = if was_quoted {
         parse_json5_value(raw).unwrap_or_else(|_| Value::String(raw.to_string()))
     } else {
         parse_json5_value(raw).map_err(|e| TransclusionError::ParseDirective {
+            ctx: Box::new(ctx.clone()),
             line,
             message: format!("'set.{}=' requires a JSON5 value: {}", name, e),
             caret_col: None,
@@ -298,6 +331,7 @@ fn apply_option(
     key: &str,
     value: &str,
     line: usize,
+    ctx: &SourceContext,
 ) -> Result<(), TransclusionError> {
     match key {
         "replace" => {
@@ -306,9 +340,17 @@ fn apply_option(
             } else if value.eq_ignore_ascii_case("false") {
                 options.replace = ReplaceOption::InheritDefault;
             } else {
-                let parsed: Value = serde_json::from_str(value)?;
+                let parsed: Value = serde_json::from_str(value).map_err(|_| {
+                    TransclusionError::ParseDirective {
+                        ctx: Box::new(ctx.clone()),
+                        line,
+                        message: "replace option must be true/false or a JSON object".to_string(),
+                        caret_col: None,
+                    }
+                })?;
                 let Some(obj) = parsed.as_object() else {
                     return Err(TransclusionError::ParseDirective {
+                        ctx: Box::new(ctx.clone()),
                         line,
                         message: "replace option must be true/false or a JSON object".to_string(),
                         caret_col: None,
@@ -347,24 +389,24 @@ fn apply_option(
     Ok(())
 }
 
-impl From<CursorError> for TransclusionError {
-    fn from(e: CursorError) -> Self {
-        TransclusionError::ParseDirective {
-            line: e.line,
-            message: e.message,
-            caret_col: Some(e.column),
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::PathBuf;
+    use std::sync::Arc;
+
+    fn dummy_ctx(content: &str) -> SourceContext {
+        SourceContext::new(
+            PathBuf::from("/test.md"),
+            PathBuf::from("test.md"),
+            Arc::from(content),
+        )
+    }
 
     #[test]
     fn parses_simple_file_directive() {
         let content = "::file ./doc.md\n";
-        let directives = parse_directives(content).unwrap();
+        let directives = parse_directives(content, dummy_ctx(content)).unwrap();
 
         assert_eq!(directives.len(), 1);
         assert_eq!(directives[0].kind, DirectiveKind::File);
@@ -374,7 +416,7 @@ mod tests {
     #[test]
     fn parses_code_directive_options() {
         let content = r#"::code ./mod.rs quotation=true disclosure=More when=env.DEBUG"#;
-        let directives = parse_directives(content).unwrap();
+        let directives = parse_directives(content, dummy_ctx(content)).unwrap();
 
         assert_eq!(directives.len(), 1);
         let options = &directives[0].options;
@@ -386,7 +428,7 @@ mod tests {
     #[test]
     fn parses_json_replace_option() {
         let content = r#"::file ./doc.md replace={"FOO":"BAR"}"#;
-        let directives = parse_directives(content).unwrap();
+        let directives = parse_directives(content, dummy_ctx(content)).unwrap();
 
         assert_eq!(directives.len(), 1);
         match &directives[0].options.replace {
@@ -404,7 +446,7 @@ mod tests {
 ```
 ::file ./included.md
 "#;
-        let directives = parse_directives(content).unwrap();
+        let directives = parse_directives(content, dummy_ctx(content)).unwrap();
 
         assert_eq!(directives.len(), 1);
         assert_eq!(directives[0].raw_target, "./included.md");
@@ -413,7 +455,7 @@ mod tests {
     #[test]
     fn parses_exclude_option() {
         let content = r###"::file ./doc.md exclude="## Bad Section" exclude="## Also Bad*""###;
-        let directives = parse_directives(content).unwrap();
+        let directives = parse_directives(content, dummy_ctx(content)).unwrap();
 
         assert_eq!(directives.len(), 1);
         assert_eq!(
@@ -425,7 +467,7 @@ mod tests {
     #[test]
     fn parses_nested_double_quotes_in_when() {
         let content = r#"::file ./doc.md when="stage == "tech-design"""#;
-        let directives = parse_directives(content).unwrap();
+        let directives = parse_directives(content, dummy_ctx(content)).unwrap();
 
         assert_eq!(directives.len(), 1);
         assert_eq!(
@@ -437,7 +479,7 @@ mod tests {
     #[test]
     fn parses_single_quotes_in_when() {
         let content = r#"::file ./doc.md when="stage == 'tech-design'""#;
-        let directives = parse_directives(content).unwrap();
+        let directives = parse_directives(content, dummy_ctx(content)).unwrap();
 
         assert_eq!(directives.len(), 1);
         assert_eq!(
@@ -449,7 +491,7 @@ mod tests {
     #[test]
     fn parses_nested_quotes_followed_by_another_option() {
         let content = r#"::file ./doc.md when="stage == "plan"" quotation=true"#;
-        let directives = parse_directives(content).unwrap();
+        let directives = parse_directives(content, dummy_ctx(content)).unwrap();
 
         assert_eq!(directives.len(), 1);
         assert_eq!(
@@ -467,7 +509,8 @@ mod tests {
         }))
         .unwrap();
 
-        let refs = parse_frontmatter_refs(&fm).unwrap();
+        let content = "";
+        let refs = parse_frontmatter_refs(&fm, dummy_ctx(content)).unwrap();
         assert_eq!(refs.prologue, vec!["./a.md"]);
         assert_eq!(refs.epilogue, vec!["./b.md", "./c.md"]);
     }
@@ -475,7 +518,7 @@ mod tests {
     // ── set / set.NAME grammar ───────────────────────────────────────
 
     fn parse_single(content: &str) -> BlockDirective {
-        let mut directives = parse_directives(content).unwrap();
+        let mut directives = parse_directives(content, dummy_ctx(content)).unwrap();
         assert_eq!(directives.len(), 1);
         directives.pop().unwrap()
     }
@@ -535,25 +578,29 @@ mod tests {
 
     #[test]
     fn set_unquoted_bare_word_is_parse_error() {
-        let err = parse_directives("::file ./foo.md set.name=Bob").unwrap_err();
+        let content = "::file ./foo.md set.name=Bob";
+        let err = parse_directives(content, dummy_ctx(content)).unwrap_err();
         matches_parse_directive(&err);
     }
 
     #[test]
     fn set_empty_rhs_is_parse_error() {
-        let err = parse_directives("::file ./foo.md set.name=").unwrap_err();
+        let content = "::file ./foo.md set.name=";
+        let err = parse_directives(content, dummy_ctx(content)).unwrap_err();
         matches_parse_directive(&err);
     }
 
     #[test]
     fn set_bare_without_equals_is_parse_error() {
-        let err = parse_directives("::file ./foo.md set").unwrap_err();
+        let content = "::file ./foo.md set";
+        let err = parse_directives(content, dummy_ctx(content)).unwrap_err();
         matches_parse_directive(&err);
     }
 
     #[test]
     fn set_nested_dotted_key_is_parse_error() {
-        let err = parse_directives(r#"::file ./foo.md set.author.name="Bob""#).unwrap_err();
+        let content = r#"::file ./foo.md set.author.name="Bob""#;
+        let err = parse_directives(content, dummy_ctx(content)).unwrap_err();
         matches_parse_directive(&err);
     }
 

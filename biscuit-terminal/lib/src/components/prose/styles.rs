@@ -32,6 +32,11 @@ pub(super) enum BlockTagAction {
     /// terminal (e.g. `<double-underline>` with no underline support)
     /// or when the tag carries no useful payload (e.g. `<a href="">`).
     Suppress,
+    /// Render inner content as a dim, indented code block without
+    /// parsing Prose markup inside.
+    ///
+    /// Used for fenced code blocks (` ```lang\n...\n``` `).
+    CodeBlock,
 }
 
 /// Static lookup table for atomic tokens.
@@ -313,7 +318,10 @@ pub(super) fn block_tag_to_escape(
         // emit only the inner content with no surrounding escapes.
         "clipboard" => Some(BlockTagAction::Suppress),
 
-        // Try web colors, then Tailwind colors (foreground and background)
+        // Fenced code blocks (pre-processed from ` ```lang\n...\n``` `).
+        "code-block" => Some(BlockTagAction::CodeBlock),
+
+        // If none matched, return None (unknown tag).
         _ => {
             // Check for bg- prefix for background colors
             if let Some(color_name) = tag_name.strip_prefix("bg-") {

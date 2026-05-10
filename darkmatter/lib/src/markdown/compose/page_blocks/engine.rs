@@ -6,6 +6,7 @@ use super::types::{PageBlockError, PageBlockRegion};
 use crate::markdown::compose::EffectiveState;
 use crate::markdown::compose::conditions;
 use crate::markdown::compose::types::ComposeReport;
+use biscuit_terminal::errors::SourceContext;
 use tracing::debug;
 
 /// Renders page blocks by evaluating conditions and splicing content.
@@ -18,6 +19,7 @@ pub fn render_page_blocks(
     regions: &[PageBlockRegion],
     state: &EffectiveState,
     report: &mut ComposeReport,
+    ctx: SourceContext,
 ) -> Result<String, PageBlockError> {
     debug!(region_count = regions.len(), "page_blocks: rendering");
 
@@ -29,13 +31,22 @@ pub fn render_page_blocks(
         output.push_str(&content[cursor..region.span.start]);
 
         let condition = match &region.options.when_expr {
-            Some(expr) => conditions::evaluate_condition(expr, state, region.start_line)?,
+            Some(expr) => {
+                conditions::evaluate_condition(expr, state, region.start_line, ctx.clone())?
+            }
             None => true, // No when → treated as enabled
         };
 
         if condition {
             // Render body, recursively processing nested children
-            let body = render_body(content, &region.body_span, &region.children, state, report)?;
+            let body = render_body(
+                content,
+                &region.body_span,
+                &region.children,
+                state,
+                report,
+                &ctx,
+            )?;
             output.push_str(&body);
             report.page_blocks_rendered += 1;
         } else {
@@ -59,6 +70,7 @@ fn render_body(
     children: &[PageBlockRegion],
     state: &EffectiveState,
     report: &mut ComposeReport,
+    ctx: &SourceContext,
 ) -> Result<String, PageBlockError> {
     if children.is_empty() {
         return Ok(content[body_span.clone()].to_string());
@@ -72,12 +84,21 @@ fn render_body(
         output.push_str(&content[cursor..child.span.start]);
 
         let condition = match &child.options.when_expr {
-            Some(expr) => conditions::evaluate_condition(expr, state, child.start_line)?,
+            Some(expr) => {
+                conditions::evaluate_condition(expr, state, child.start_line, ctx.clone())?
+            }
             None => true,
         };
 
         if condition {
-            let body = render_body(content, &child.body_span, &child.children, state, report)?;
+            let body = render_body(
+                content,
+                &child.body_span,
+                &child.children,
+                state,
+                report,
+                ctx,
+            )?;
             output.push_str(&body);
             report.page_blocks_rendered += 1;
         } else {
@@ -114,9 +135,17 @@ mod tests {
     }
 
     fn render(content: &str, state: &EffectiveState) -> (String, ComposeReport) {
-        let regions = parse_page_blocks(content).unwrap();
+        use std::path::PathBuf;
+        use std::sync::Arc;
+        let source = SourceContext::new(
+            PathBuf::from("/test.md"),
+            PathBuf::from("test.md"),
+            Arc::from(content),
+        );
+        let regions = parse_page_blocks(content, source.clone()).unwrap();
         let mut report = ComposeReport::default();
-        let output = render_page_blocks(content, &regions, state, &mut report).unwrap();
+        let output =
+            render_page_blocks(content, &regions, state, &mut report, source).unwrap();
         (output, report)
     }
 
@@ -169,9 +198,15 @@ mod tests {
             .build()
             .unwrap();
 
-        let regions = parse_page_blocks(content).unwrap();
+        let source = SourceContext::new(
+            std::path::PathBuf::from("/test.md"),
+            std::path::PathBuf::from("test.md"),
+            std::sync::Arc::from(content),
+        );
+        let regions = parse_page_blocks(content, source.clone()).unwrap();
         let mut report = ComposeReport::default();
-        let output = render_page_blocks(content, &regions, &state, &mut report).unwrap();
+        let output =
+            render_page_blocks(content, &regions, &state, &mut report, source).unwrap();
         assert_eq!(output, "agent content\n");
     }
 
@@ -217,9 +252,14 @@ mod tests {
     fn condition_parse_error_propagates() {
         let content = "::block when=\"==\"\nbody\n::end-block\n";
         let state = state_with(json!({}));
-        let regions = parse_page_blocks(content).unwrap();
+        let source = SourceContext::new(
+            std::path::PathBuf::from("/test.md"),
+            std::path::PathBuf::from("test.md"),
+            std::sync::Arc::from(content),
+        );
+        let regions = parse_page_blocks(content, source.clone()).unwrap();
         let mut report = ComposeReport::default();
-        let result = render_page_blocks(content, &regions, &state, &mut report);
+        let result = render_page_blocks(content, &regions, &state, &mut report, source);
         assert!(result.is_err());
         assert!(matches!(result.unwrap_err(), PageBlockError::Condition(_)));
     }
