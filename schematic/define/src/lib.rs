@@ -158,8 +158,8 @@ pub use models::{
     TypeRef,
 };
 pub use oauth::{OAuth2ClientAuthMethod, OAuth2Config, OAuth2GrantType, PkceRequirement};
-pub use params::{EndpointParams, ParamDef, ParamStyle, QueryParamType};
 pub use pagination::{PaginationResponse, PaginationStyle};
+pub use params::{EndpointParams, ParamDef, ParamStyle, QueryParamType};
 pub use request::{ApiRequest, FormField, FormFieldKind};
 pub use response::ApiResponse;
 pub use schema::{Schema, SchemaObject};
@@ -187,8 +187,8 @@ pub mod core {
 /// This module groups types related to the transport layer of API communication.
 pub mod transport {
     pub use crate::headers::*;
-    pub use crate::params::*;
     pub use crate::pagination::*;
+    pub use crate::params::*;
     pub use crate::websocket::*;
 }
 

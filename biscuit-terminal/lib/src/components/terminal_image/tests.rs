@@ -488,8 +488,7 @@ fn test_render_iterm2() {
     // Should end with BEL
     assert!(result.ends_with("\x07"));
     // Filename should be base64 encoded
-    let expected_filename_b64 =
-        base64::engine::general_purpose::STANDARD.encode("test.png");
+    let expected_filename_b64 = base64::engine::general_purpose::STANDARD.encode("test.png");
     assert!(result.contains(&format!("name={}", expected_filename_b64)));
 }
 

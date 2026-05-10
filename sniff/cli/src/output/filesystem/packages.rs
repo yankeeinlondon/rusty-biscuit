@@ -5,9 +5,9 @@ use biscuit_terminal::components::renderable::Renderable;
 use biscuit_terminal::terminal::Terminal;
 use sniff::filesystem::repo::{Package, RepoInfo};
 
-use crate::args::PackagesFormat;
 use super::filter_packages;
 use super::resolve_dir;
+use crate::args::PackagesFormat;
 
 /// Render package names as a comma-separated plain text list.
 ///

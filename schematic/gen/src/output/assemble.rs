@@ -43,9 +43,9 @@ fn to_snake_case(s: &str) -> String {
 /// 2. Inferred from CamelCase name (e.g., "OllamaNative" -> "ollama")
 /// 3. Lowercase API name (fallback)
 pub fn get_module_path(api: &RestApi) -> String {
-    api.module_path
-        .clone()
-        .unwrap_or_else(|| crate::inference::infer_module_path(&api.name).unwrap_or_else(|| api.name.to_lowercase()))
+    api.module_path.clone().unwrap_or_else(|| {
+        crate::inference::infer_module_path(&api.name).unwrap_or_else(|| api.name.to_lowercase())
+    })
 }
 
 /// Returns the request suffix for the given API.

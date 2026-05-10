@@ -7,9 +7,7 @@ use biscuit_file::serde_yaml_ng;
 use crate::package::{DependencyEntry, DependencyKind};
 use crate::{Result, SniffError};
 
-use super::detection::{
-    dedupe_packages, expand_glob_patterns_with_deps, resolve_internal_deps,
-};
+use super::detection::{dedupe_packages, expand_glob_patterns_with_deps, resolve_internal_deps};
 use super::types::{MonorepoTool, RepoInfo};
 
 /// Parses a single dependency section from package.json.
@@ -303,4 +301,3 @@ pub(super) fn resolve_js_package_manager(
 
     "npm"
 }
-

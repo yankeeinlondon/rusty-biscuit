@@ -8,12 +8,11 @@ use crate::{
     },
 };
 
-use super::cell::{TableCellContent, pad_cell};
-use super::column::TableColumn;
+pub use super::cell::TableCellContent;
+use super::cell::pad_cell;
+pub use super::column::TableColumn;
 use super::types::VerticalAlign;
-use super::width::{
-    MeasuredColumn, TableWidthError, TableWidthMeasurements, TableWidthPlan,
-};
+use super::width::{MeasuredColumn, TableWidthError, TableWidthMeasurements, TableWidthPlan};
 use crate::discovery::detection::{ColorDepth, ColorMode};
 
 /// A table component for rendering tabular data.
@@ -1971,12 +1970,12 @@ fn build_border(widths: &[usize], left: char, junction: char, right: char) -> St
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::cell::{
         format_currency, format_float, format_integer, insert_thousands_separators,
     };
     use super::super::column::Conditional;
     use super::super::types::{ColumnType, Currency};
+    use super::*;
 
     // ── Existing tests ────────────────────────────────────────────
 

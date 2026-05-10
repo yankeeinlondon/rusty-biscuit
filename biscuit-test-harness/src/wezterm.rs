@@ -21,9 +21,8 @@ use std::process::{Command, Stdio};
 use std::time::Duration;
 
 use super::{
-    CapturedFrame, SpawnVisibility, TerminalHarness, wait_for_prompt,
-    run_with_timeout, run_with_stdin_timeout,
-    SPAWN_TIMEOUT, SEND_TIMEOUT, CAPTURE_TIMEOUT, QUERY_TIMEOUT, CLEANUP_TIMEOUT,
+    CAPTURE_TIMEOUT, CLEANUP_TIMEOUT, CapturedFrame, QUERY_TIMEOUT, SEND_TIMEOUT, SPAWN_TIMEOUT,
+    SpawnVisibility, TerminalHarness, run_with_stdin_timeout, run_with_timeout, wait_for_prompt,
 };
 
 /// Workspace name used when [`SpawnVisibility::Background`] is in

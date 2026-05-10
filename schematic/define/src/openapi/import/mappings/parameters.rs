@@ -138,8 +138,7 @@ fn map_schema_to_param_type(
         }
         ReferenceOr::Item(s) => match &s.schema_kind {
             SchemaKind::Type(Type::String(st)) => {
-                let values: Vec<String> =
-                    st.enumeration.iter().filter_map(|v| v.clone()).collect();
+                let values: Vec<String> = st.enumeration.iter().filter_map(|v| v.clone()).collect();
                 if !values.is_empty() {
                     return QueryParamType::Enum(values);
                 }
@@ -175,8 +174,7 @@ fn map_schema_to_param_type_boxed(
         }
         ReferenceOr::Item(s) => match &s.schema_kind {
             SchemaKind::Type(Type::String(st)) => {
-                let values: Vec<String> =
-                    st.enumeration.iter().filter_map(|v| v.clone()).collect();
+                let values: Vec<String> = st.enumeration.iter().filter_map(|v| v.clone()).collect();
                 if !values.is_empty() {
                     return QueryParamType::Enum(values);
                 }

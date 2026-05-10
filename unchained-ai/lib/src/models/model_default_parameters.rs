@@ -40,7 +40,10 @@ mod tests {
 
     #[test]
     fn test_new_is_default() {
-        assert_eq!(ModelDefaultParameters::new(), ModelDefaultParameters::default());
+        assert_eq!(
+            ModelDefaultParameters::new(),
+            ModelDefaultParameters::default()
+        );
     }
 
     #[test]

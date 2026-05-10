@@ -287,8 +287,8 @@ fn render_manifest(binary: &str, prefix: &Path) -> Result<RenderedManifest, Erro
         .join("user")
         .join("clipper.service");
     let body = render_linux_unit(binary);
-    let next_step = "systemctl --user daemon-reload && systemctl --user enable --now clipper"
-        .to_string();
+    let next_step =
+        "systemctl --user daemon-reload && systemctl --user enable --now clipper".to_string();
     Ok(RenderedManifest {
         path,
         body,

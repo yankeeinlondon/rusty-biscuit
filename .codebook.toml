@@ -1,0 +1,19 @@
+dictionaries = ["en_us", "en_gb"]
+
+ignore_patterns = [
+    "target/**/*",
+    ".git/**/*",
+    "**/node_modules/**/*"
+]
+
+words = [
+    "darkmatter",
+    "frontmatter",
+    "worktree",
+    "monorepo",
+    "Zed",
+    "tree-sitter",
+    "kimi",
+    "qwen",
+    "codex"
+]

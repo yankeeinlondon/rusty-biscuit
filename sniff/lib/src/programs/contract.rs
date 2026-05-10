@@ -406,9 +406,7 @@ pub trait CategoryEnum:
     ///
     /// Returns `Some(...)` to inject a synthetic detection result instead of
     /// searching PATH. Used for Windows SAPI which isn't a real executable.
-    fn platform_override(
-        &self,
-    ) -> Option<(std::path::PathBuf, ExecutableSource)> {
+    fn platform_override(&self) -> Option<(std::path::PathBuf, ExecutableSource)> {
         None
     }
 }

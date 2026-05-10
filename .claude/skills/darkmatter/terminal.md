@@ -73,6 +73,34 @@ let img = TerminalImage::new(path)?;
 img.render_with_options(&options)?;
 ```
 
+## ANSI Rendering Gotchas
+
+### Background Gaps in Blockquotes and Inline Code
+
+When rendering segments that share a background color (e.g. blockquote paragraphs or inline code inside a blockquote), **never** emit `\x1b[0m` (hard SGR reset) between words or spaces. Hard reset clears *all* attributes including the background color, which creates tiny one-cell gaps where the terminal's default background shows through. In blockquotes every word is a separate segment, so the gaps accumulate into visible artifacts.
+
+**Prefer a soft reset** that only clears style attributes while preserving the background:
+
+```rust
+// Hard reset - DON'T USE between adjacent background segments
+"\x1b[48;2;50;54;62mtext\x1b[0m"           // background is lost
+
+// Soft reset - preserves background across word boundaries
+"\x1b[48;2;50;54;62mtext\x1b[22;23;24;25;27;28;29;39m"
+```
+
+The soft reset sequence `\x1b[22;23;24;25;27;28;29;39m` clears:
+- `22` normal intensity, `23` italic off, `24` underline off
+- `25` blink off, `27` inverse off, `28` conceal off, `29` strikethrough off
+- `39` default foreground
+
+But **preserves** `48` (background color). This is implemented in:
+- `push_prose_text()` for blockquote prose words
+- `push_inline_code_with_bg()` for inline code inside blockquotes
+- `LineWrapper::clear_blockquote()` emits a final hard reset after padding
+
+**Reference issue**: Background gaps were visible as missing background on blank characters and commas inside inline code and blockquotes (2026-05-06).
+
 ## Mermaid Diagrams
 
 Terminal (via biscuit-terminal):

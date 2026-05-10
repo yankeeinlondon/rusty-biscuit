@@ -5,7 +5,9 @@ use clap::Parser;
 use strum::IntoEnumIterator;
 use tracing::{Level, info, warn};
 
-use unchained_ai::api::openai_api::{get_api_keys, get_provider_models_from_api, ProviderModelEntry};
+use unchained_ai::api::openai_api::{
+    ProviderModelEntry, get_api_keys, get_provider_models_from_api,
+};
 use unchained_ai::rigging::providers::Provider;
 
 mod errors;
@@ -124,13 +126,12 @@ async fn process_single_provider(
     output_dir: &std::path::Path,
     dry_run: bool,
 ) -> Result<ProviderResult, GeneratorError> {
-    let entries: Vec<ProviderModelEntry> =
-        get_provider_models_from_api(provider, api_key)
-            .await
-            .map_err(|e| GeneratorError::FetchFailed {
-                provider: format!("{:?}", provider),
-                reason: e.to_string(),
-            })?;
+    let entries: Vec<ProviderModelEntry> = get_provider_models_from_api(provider, api_key)
+        .await
+        .map_err(|e| GeneratorError::FetchFailed {
+            provider: format!("{:?}", provider),
+            reason: e.to_string(),
+        })?;
 
     if entries.is_empty() {
         return Err(GeneratorError::FetchFailed {
@@ -178,8 +179,9 @@ async fn process_single_provider(
 struct ProcessingResult {
     summary: GenerationSummary,
     all_model_ids: Vec<String>,
-    /// Raw provider-native metadata from OpenRouter, keyed by model ID.
-    openrouter_raw: HashMap<String, serde_json::Value>,
+    /// Raw provider-native metadata from APIs that return rich data,
+    /// keyed by model ID. Currently only OpenRouter provides rich metadata.
+    provider_native_raw: HashMap<String, serde_json::Value>,
 }
 
 /// Process all providers.
@@ -191,7 +193,7 @@ async fn process_providers(
 ) -> ProcessingResult {
     let mut summary = GenerationSummary::default();
     let mut all_model_ids = Vec::new();
-    let mut openrouter_raw = HashMap::new();
+    let mut provider_native_raw = HashMap::new();
 
     for provider in providers {
         let Some(api_key) = api_keys.get(&provider) else {
@@ -214,7 +216,7 @@ async fn process_providers(
                 summary.succeeded.push((provider, result.model_count));
                 all_model_ids.extend(result.model_ids);
                 if provider == Provider::OpenRouter {
-                    openrouter_raw = result.raw_metadata;
+                    provider_native_raw.extend(result.raw_metadata);
                 }
             }
             Err(e) => {
@@ -227,7 +229,7 @@ async fn process_providers(
     ProcessingResult {
         summary,
         all_model_ids,
-        openrouter_raw,
+        provider_native_raw,
     }
 }
 
@@ -311,24 +313,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let parsera_data = find_parsera_metadata(model_id, &parsera_index);
 
         let provider_native = result
-            .openrouter_raw
+            .provider_native_raw
             .get(model_id)
             .and_then(|v| provider_metadata::parse_provider_metadata(Provider::OpenRouter, v));
 
-        let is_openrouter = provider_native.is_some();
         let merged = MetadataGenerator::merge_metadata(provider_native, parsera_data);
 
         if merged.is_some() {
             matched_count += 1;
         }
 
-        metadata_gen.register(model_id.clone(), merged.clone());
-
-        if is_openrouter
-            && let Some(rich_meta) = merged
-        {
-            metadata_gen.register_openrouter(model_id.clone(), rich_meta);
-        }
+        metadata_gen.register(model_id.clone(), merged);
     }
 
     info!(
@@ -346,23 +341,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     } else {
         println!("\n--- Metadata ({} entries) ---", matched_count);
         println!("{}", metadata_code);
-    }
-
-    // Write rich OpenRouter metadata file
-    let openrouter_code = metadata_gen.generate_openrouter();
-    if !cli.dry_run {
-        let openrouter_path = output_dir.join("metadata_openrouter_generated.rs");
-        write_atomic(&openrouter_path, &openrouter_code)?;
-        info!(
-            "Wrote OpenRouter metadata to {}",
-            openrouter_path.display()
-        );
-    } else {
-        println!(
-            "\n--- OpenRouter Metadata ({} entries) ---",
-            metadata_gen.openrouter_count()
-        );
-        println!("{}", openrouter_code);
     }
 
     result.summary.print();

@@ -1,6 +1,6 @@
 //! Auto-generated provider model enum
 //!
-//! Generated: 2026-05-04T04:02:13.829254+00:00
+//! Generated: 2026-05-07T02:07:05.024388+00:00
 //! Generator: gen-models v0.1.0
 //! Provider: Xai
 //!
@@ -44,6 +44,8 @@ pub enum ProviderModelXai {
     Grok__Imagine__Image,
     /// Model: `grok-imagine-image-pro`
     Grok__Imagine__Image__Pro,
+    /// Model: `grok-imagine-image-quality`
+    Grok__Imagine__Image__Quality,
     /// Model: `grok-imagine-video`
     Grok__Imagine__Video,
     /// Custom model ID not in the predefined list.

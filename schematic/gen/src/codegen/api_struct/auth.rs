@@ -129,7 +129,9 @@ pub(crate) fn generate_auth_method_init(method: &schematic_define::AuthMethod) -
     }
 }
 
-pub(crate) fn generate_env_auth_strategy_init(strategy: &schematic_define::EnvAuthStrategy) -> TokenStream {
+pub(crate) fn generate_env_auth_strategy_init(
+    strategy: &schematic_define::EnvAuthStrategy,
+) -> TokenStream {
     match strategy {
         schematic_define::EnvAuthStrategy::BearerToken { header } => match header {
             Some(header) => {

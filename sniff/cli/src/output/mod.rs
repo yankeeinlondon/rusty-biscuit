@@ -14,8 +14,8 @@ mod os;
 mod programs;
 pub(crate) mod recent_commits;
 mod remote;
-pub(crate) mod repo_json;
 mod render;
+pub(crate) mod repo_json;
 mod services;
 mod topics;
 
@@ -128,8 +128,8 @@ pub enum OutputFilter {
 // Shared utility functions
 // ============================================================================
 
-pub(crate) use render::{format_bytes, format_number, format_uptime, relative_path};
 pub use render::render_performance_section;
+pub(crate) use render::{format_bytes, format_number, format_uptime, relative_path};
 
 // ============================================================================
 // Docs filtering

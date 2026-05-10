@@ -5,24 +5,34 @@
 //!
 //! ```text
 //! expression     = ternary
-//! ternary        = fallback ("?" fallback ":" fallback)?
-//! fallback       = comparison ("||" comparison)*
-//! comparison     = unary (comp_op unary)?
-//! unary          = "!" unary | primary
+//! ternary        = ternary_branch ("?" ternary ":" ternary)?
+//! ternary_branch = fallback                       (interpolation mode)
+//!                | logical_or                     (condition mode)
+//! logical_or     = logical_and ("||" logical_and)*
+//! fallback       = logical_and ("||" logical_and)*
+//! logical_and    = comparison ("&&" comparison)*  (condition mode only)
+//! comparison     = additive (comp_op additive)?
+//! additive       = multiplicative (("+" | "-") multiplicative)*
+//! multiplicative = unary (("*" | "/" | "%") unary)*
+//! unary          = "!" unary | "-" unary | postfix
+//! postfix        = primary ( "[" expression "]" | "." IDENT )*
 //! primary        = literal | variable | function_call | "(" expression ")"
 //! function_call  = variable "(" args? ")"
 //! args           = expression ("," expression)*
-//! literal        = STRING | NUMBER
+//! literal        = STRING | NUMBER | BOOL
 //! ```
 //!
 //! ## Operator Precedence
 //!
 //! Precedence from highest to lowest:
-//! 1. **Function calls** - `length(x)`, `number(x, 0)`
-//! 2. **Unary NOT** - `!x`
-//! 3. **Comparison** - `==`, `!=`, `>`, `>=`, `<`
-//! 4. **Fallback** - `||`
-//! 5. **Ternary** - `? :`
+//! 1. **Primary / postfix access** - literals, variables, function calls, `foo[0]`, `foo.bar`, `(expr)`
+//! 2. **Unary** - `!x`, `-x`
+//! 3. **Multiplicative** - `*`, `/`, `%`
+//! 4. **Additive** - `+`, `-`
+//! 5. **Comparison** - `==`, `!=`, `>`, `>=`, `<`, `<=`
+//! 6. **Logical AND** - `&&` (condition mode)
+//! 7. **Logical OR / Fallback** - `||`
+//! 8. **Ternary** - `? :` (right-associative)
 //!
 //! ## Examples
 //!
@@ -40,9 +50,16 @@
 //! // Ternary
 //! let expr = parse(r#"x ? "yes" : "no""#).unwrap();
 //! assert!(matches!(expr, Expr::Ternary { .. }));
+//!
+//! // Nested ternary (right-associative)
+//! let expr = parse(r#"a ? b ? c : d : e"#).unwrap();
+//! assert!(matches!(expr, Expr::Ternary { .. }));
 //! ```
 
-use super::{Lexer, LexerError, ParseMode, Token, ast::Expr};
+use super::{
+    Lexer, LexerError, ParseMode, Token,
+    ast::{BinaryOp, Expr},
+};
 use std::fmt;
 
 #[cfg(test)]
@@ -187,18 +204,21 @@ impl<'a> Parser<'a> {
 
     /// Parses a ternary expression.
     ///
-    /// In interpolation mode: `fallback ("?" fallback ":" fallback)?`
+    /// In interpolation mode: `fallback ("?" ternary ":" ternary)?`
     ///
-    /// In condition mode: `logical_or ("?" logical_or ":" logical_or)?`
+    /// In condition mode: `logical_or ("?" ternary ":" ternary)?`
+    ///
+    /// Branches are parsed recursively so nested ternaries are supported
+    /// without extra parentheses: `a ? b ? c : d : e`.
     fn parse_ternary(&mut self) -> Result<Expr, ParseError> {
         let mut expr = self.parse_ternary_branch()?;
 
         if matches!(self.current, Token::Question) {
             self.advance()?; // consume ?
-            let then_branch = self.parse_ternary_branch()?;
+            let then_branch = self.parse_ternary()?;
 
             self.expect(&Token::Colon, "':'")?;
-            let else_branch = self.parse_ternary_branch()?;
+            let else_branch = self.parse_ternary()?;
 
             expr = Expr::Ternary {
                 condition: Box::new(expr),
@@ -261,13 +281,16 @@ impl<'a> Parser<'a> {
         Ok(expr)
     }
 
-    /// Parses a fallback expression: `comparison ("||" comparison)*`
+    /// Parses a fallback expression: `logical_and ("||" logical_and)*`.
+    ///
+    /// `logical_and` is shared with condition mode so the comparison ladder
+    /// behaves identically across both parse modes.
     fn parse_fallback(&mut self) -> Result<Expr, ParseError> {
-        let mut expr = self.parse_comparison()?;
+        let mut expr = self.parse_logical_and()?;
 
         while matches!(self.current, Token::Pipe) {
             self.advance()?; // consume ||
-            let fallback = self.parse_comparison()?;
+            let fallback = self.parse_logical_and()?;
             expr = Expr::Fallback {
                 primary: Box::new(expr),
                 fallback: Box::new(fallback),
@@ -277,13 +300,13 @@ impl<'a> Parser<'a> {
         Ok(expr)
     }
 
-    /// Parses a comparison expression: `unary (comp_op unary)?`
+    /// Parses a comparison expression: `additive (comp_op additive)?`.
     fn parse_comparison(&mut self) -> Result<Expr, ParseError> {
-        let left = self.parse_unary()?;
+        let left = self.parse_additive()?;
 
         if let Token::CompOp(op) = self.current {
             self.advance()?; // consume operator
-            let right = self.parse_unary()?;
+            let right = self.parse_additive()?;
             return Ok(Expr::Comparison {
                 left: Box::new(left),
                 op,
@@ -294,14 +317,120 @@ impl<'a> Parser<'a> {
         Ok(left)
     }
 
-    /// Parses unary expressions: `"!" unary | primary`.
+    /// Parses an additive expression: `multiplicative (("+" | "-") multiplicative)*`.
+    ///
+    /// Left-associative — `a - b - c` parses as `(a - b) - c`.
+    fn parse_additive(&mut self) -> Result<Expr, ParseError> {
+        let mut expr = self.parse_multiplicative()?;
+
+        loop {
+            let op = match self.current {
+                Token::Plus => BinaryOp::Add,
+                Token::Minus => BinaryOp::Sub,
+                _ => break,
+            };
+            self.advance()?; // consume operator
+            let rhs = self.parse_multiplicative()?;
+            expr = Expr::Binary {
+                op,
+                left: Box::new(expr),
+                right: Box::new(rhs),
+            };
+        }
+
+        Ok(expr)
+    }
+
+    /// Parses a multiplicative expression: `unary (("*" | "/" | "%") unary)*`.
+    ///
+    /// Left-associative — `a / b / c` parses as `(a / b) / c`.
+    fn parse_multiplicative(&mut self) -> Result<Expr, ParseError> {
+        let mut expr = self.parse_unary()?;
+
+        loop {
+            let op = match self.current {
+                Token::Star => BinaryOp::Mul,
+                Token::Slash => BinaryOp::Div,
+                Token::Percent => BinaryOp::Mod,
+                _ => break,
+            };
+            self.advance()?; // consume operator
+            let rhs = self.parse_unary()?;
+            expr = Expr::Binary {
+                op,
+                left: Box::new(expr),
+                right: Box::new(rhs),
+            };
+        }
+
+        Ok(expr)
+    }
+
+    /// Parses unary expressions: `"!" unary | "-" unary | postfix`.
     fn parse_unary(&mut self) -> Result<Expr, ParseError> {
         if matches!(self.current, Token::Bang) {
             self.advance()?;
             let expr = self.parse_unary()?;
             return Ok(Expr::UnaryNot(Box::new(expr)));
         }
-        self.parse_primary()
+        if matches!(self.current, Token::Minus) {
+            self.advance()?;
+            let expr = self.parse_unary()?;
+            return Ok(Expr::UnaryMinus(Box::new(expr)));
+        }
+        self.parse_postfix()
+    }
+
+    /// Parses postfix access chains: `primary ( "[" expression "]" | "." IDENT )*`.
+    ///
+    /// Bracket access supports any expression as the index (numbers, negative
+    /// numbers via unary minus, string literals, or computed indexes). Postfix
+    /// dot is only emitted by the lexer when the dot cannot be folded into a
+    /// `Variable` token, so it appears after `]`, `)`, or function-call return.
+    fn parse_postfix(&mut self) -> Result<Expr, ParseError> {
+        let mut expr = self.parse_primary()?;
+
+        loop {
+            match &self.current {
+                Token::LBracket => {
+                    self.advance()?; // consume [
+                    let index = self.parse_expression()?;
+                    self.expect(&Token::RBracket, "']'")?;
+                    expr = Expr::Index {
+                        base: Box::new(expr),
+                        index: Box::new(index),
+                    };
+                }
+                Token::Dot => {
+                    self.advance()?; // consume .
+                    match self.current.clone() {
+                        Token::Variable(name) => {
+                            self.advance()?;
+                            expr = Expr::MemberAccess {
+                                base: Box::new(expr),
+                                name,
+                            };
+                        }
+                        Token::NumberLiteral(_) => {
+                            return Err(ParseError::new(
+                                "Numeric dot access is not supported (use bracket indexing for arrays)",
+                                self.position,
+                            ));
+                        }
+                        other => {
+                            return Err(ParseError::unexpected(
+                                "identifier after '.'",
+                                &other,
+                                self.position,
+                            ));
+                        }
+                    }
+                }
+                _ => break,
+            }
+        }
+
+        Ok(expr)
     }
 
     /// Parses a primary expression: literal, variable, function call, or parenthesized expression.
@@ -316,6 +445,11 @@ impl<'a> Parser<'a> {
                 let value = *n;
                 self.advance()?;
                 Ok(Expr::NumberLiteral(value))
+            }
+            Token::BoolLiteral(b) => {
+                let value = *b;
+                self.advance()?;
+                Ok(Expr::BoolLiteral(value))
             }
             Token::Variable(name) => {
                 let name = name.clone();
@@ -332,7 +466,7 @@ impl<'a> Parser<'a> {
                 self.advance()?; // consume (
                 let expr = self.parse_expression()?;
                 self.expect(&Token::RParen, "')'")?;
-                Ok(expr)
+                Ok(Expr::Paren(Box::new(expr)))
             }
             _ => Err(ParseError::unexpected(
                 "expression",
@@ -478,8 +612,43 @@ mod tests {
 
         #[test]
         fn parses_negative_number() {
+            // Negative numbers are now represented as UnaryMinus over a positive literal.
             let expr = parse("-42").unwrap();
-            assert!(matches!(expr, Expr::NumberLiteral(n) if n == -42.0));
+            match expr {
+                Expr::UnaryMinus(inner) => {
+                    assert!(matches!(*inner, Expr::NumberLiteral(n) if n == 42.0));
+                }
+                other => panic!("Expected UnaryMinus, got {other:?}"),
+            }
+        }
+
+        #[test]
+        fn parses_true_literal() {
+            let expr = parse("true").unwrap();
+            assert!(matches!(expr, Expr::BoolLiteral(b) if b));
+        }
+
+        #[test]
+        fn parses_false_literal() {
+            let expr = parse("false").unwrap();
+            assert!(matches!(expr, Expr::BoolLiteral(b) if !b));
+        }
+
+        #[test]
+        fn parses_ternary_with_bool_literals() {
+            let expr = parse("enabled ? true : false").unwrap();
+            match expr {
+                Expr::Ternary {
+                    condition,
+                    then_branch,
+                    else_branch,
+                } => {
+                    assert!(matches!(*condition, Expr::Variable(ref n) if n == "enabled"));
+                    assert!(matches!(*then_branch, Expr::BoolLiteral(true)));
+                    assert!(matches!(*else_branch, Expr::BoolLiteral(false)));
+                }
+                _ => panic!("Expected Ternary"),
+            }
         }
     }
 
@@ -616,6 +785,144 @@ mod tests {
                     assert!(matches!(*condition, Expr::Variable(ref n) if n == "x"));
                     assert!(matches!(*then_branch, Expr::Fallback { .. }));
                     assert!(matches!(*else_branch, Expr::Fallback { .. }));
+                }
+                _ => panic!("Expected Ternary"),
+            }
+        }
+
+        #[test]
+        fn parses_nested_ternary_in_true_branch() {
+            // a ? b ? c : d : e parses as a ? (b ? c : d) : e
+            let expr = parse("a ? b ? c : d : e").unwrap();
+            match expr {
+                Expr::Ternary {
+                    condition,
+                    then_branch,
+                    else_branch,
+                } => {
+                    assert!(matches!(*condition, Expr::Variable(ref n) if n == "a"));
+                    assert!(matches!(*else_branch, Expr::Variable(ref n) if n == "e"));
+                    // then_branch should itself be a ternary
+                    match *then_branch {
+                        Expr::Ternary {
+                            condition: inner_cond,
+                            then_branch: inner_then,
+                            else_branch: inner_else,
+                        } => {
+                            assert!(matches!(*inner_cond, Expr::Variable(ref n) if n == "b"));
+                            assert!(matches!(*inner_then, Expr::Variable(ref n) if n == "c"));
+                            assert!(matches!(*inner_else, Expr::Variable(ref n) if n == "d"));
+                        }
+                        _ => panic!("Expected nested Ternary in then_branch"),
+                    }
+                }
+                _ => panic!("Expected Ternary"),
+            }
+        }
+
+        #[test]
+        fn parses_nested_ternary_in_false_branch() {
+            // a ? b : c ? d : e parses as a ? b : (c ? d : e)
+            let expr = parse("a ? b : c ? d : e").unwrap();
+            match expr {
+                Expr::Ternary {
+                    condition,
+                    then_branch,
+                    else_branch,
+                } => {
+                    assert!(matches!(*condition, Expr::Variable(ref n) if n == "a"));
+                    assert!(matches!(*then_branch, Expr::Variable(ref n) if n == "b"));
+                    // else_branch should itself be a ternary
+                    match *else_branch {
+                        Expr::Ternary {
+                            condition: inner_cond,
+                            then_branch: inner_then,
+                            else_branch: inner_else,
+                        } => {
+                            assert!(matches!(*inner_cond, Expr::Variable(ref n) if n == "c"));
+                            assert!(matches!(*inner_then, Expr::Variable(ref n) if n == "d"));
+                            assert!(matches!(*inner_else, Expr::Variable(ref n) if n == "e"));
+                        }
+                        _ => panic!("Expected nested Ternary in else_branch"),
+                    }
+                }
+                _ => panic!("Expected Ternary"),
+            }
+        }
+
+        #[test]
+        fn parses_parenthesized_nested_ternary() {
+            // a ? (b ? c : d) : e
+            let expr = parse("a ? (b ? c : d) : e").unwrap();
+            match expr {
+                Expr::Ternary {
+                    condition,
+                    then_branch,
+                    else_branch,
+                } => {
+                    assert!(matches!(*condition, Expr::Variable(ref n) if n == "a"));
+                    assert!(matches!(*else_branch, Expr::Variable(ref n) if n == "e"));
+                    match *then_branch {
+                        Expr::Paren(inner) => match *inner {
+                            Expr::Ternary {
+                                condition: inner_cond,
+                                then_branch: inner_then,
+                                else_branch: inner_else,
+                            } => {
+                                assert!(matches!(*inner_cond, Expr::Variable(ref n) if n == "b"));
+                                assert!(matches!(*inner_then, Expr::Variable(ref n) if n == "c"));
+                                assert!(matches!(*inner_else, Expr::Variable(ref n) if n == "d"));
+                            }
+                            _ => panic!("Expected nested Ternary inside Paren"),
+                        },
+                        _ => panic!("Expected Paren wrapping nested Ternary in then_branch"),
+                    }
+                }
+                _ => panic!("Expected Ternary"),
+            }
+        }
+
+        #[test]
+        fn parses_deeply_nested_ternary() {
+            // a ? b ? c ? d : e : f : g
+            let expr = parse("a ? b ? c ? d : e : f : g").unwrap();
+            match expr {
+                Expr::Ternary {
+                    condition,
+                    then_branch,
+                    else_branch,
+                } => {
+                    assert!(matches!(*condition, Expr::Variable(ref n) if n == "a"));
+                    assert!(matches!(*else_branch, Expr::Variable(ref n) if n == "g"));
+                    match *then_branch {
+                        Expr::Ternary {
+                            condition: inner_cond,
+                            then_branch: inner_then,
+                            else_branch: inner_else,
+                        } => {
+                            assert!(matches!(*inner_cond, Expr::Variable(ref n) if n == "b"));
+                            assert!(matches!(*inner_else, Expr::Variable(ref n) if n == "f"));
+                            match *inner_then {
+                                Expr::Ternary {
+                                    condition: deepest_cond,
+                                    then_branch: deepest_then,
+                                    else_branch: deepest_else,
+                                } => {
+                                    assert!(
+                                        matches!(*deepest_cond, Expr::Variable(ref n) if n == "c")
+                                    );
+                                    assert!(
+                                        matches!(*deepest_then, Expr::Variable(ref n) if n == "d")
+                                    );
+                                    assert!(
+                                        matches!(*deepest_else, Expr::Variable(ref n) if n == "e")
+                                    );
+                                }
+                                _ => panic!("Expected deepest Ternary"),
+                            }
+                        }
+                        _ => panic!("Expected nested Ternary in then_branch"),
+                    }
                 }
                 _ => panic!("Expected Ternary"),
             }
@@ -863,19 +1170,29 @@ mod tests {
         #[test]
         fn parses_parenthesized_expression() {
             let expr = parse("(foo)").unwrap();
-            assert!(matches!(expr, Expr::Variable(name) if name == "foo"));
+            assert!(
+                matches!(expr, Expr::Paren(inner) if matches!(*inner, Expr::Variable(ref name) if name == "foo"))
+            );
         }
 
         #[test]
         fn parses_nested_parentheses() {
             let expr = parse("((foo))").unwrap();
-            assert!(matches!(expr, Expr::Variable(name) if name == "foo"));
+            match expr {
+                Expr::Paren(outer) => match *outer {
+                    Expr::Paren(inner) => {
+                        assert!(matches!(*inner, Expr::Variable(ref name) if name == "foo"));
+                    }
+                    _ => panic!("Expected inner Paren"),
+                },
+                _ => panic!("Expected Paren"),
+            }
         }
 
         #[test]
         fn parses_parenthesized_fallback() {
             let expr = parse("(foo || bar)").unwrap();
-            assert!(matches!(expr, Expr::Fallback { .. }));
+            assert!(matches!(expr, Expr::Paren(inner) if matches!(*inner, Expr::Fallback { .. })));
         }
 
         #[test]
@@ -884,7 +1201,9 @@ mod tests {
             let expr = parse("(a || b) ? c : d").unwrap();
             match expr {
                 Expr::Ternary { condition, .. } => {
-                    assert!(matches!(*condition, Expr::Fallback { .. }));
+                    assert!(
+                        matches!(*condition, Expr::Paren(inner) if matches!(*inner, Expr::Fallback { .. }))
+                    );
                 }
                 _ => panic!("Expected Ternary"),
             }
@@ -959,6 +1278,29 @@ mod tests {
         }
 
         #[test]
+        fn error_paren_around_bare_colon_in_ternary() {
+            // a ? (b : c) — colon inside parentheses without matching ?
+            let result = parse("a ? (b : c)");
+            assert!(result.is_err(), "colon inside parens without ? should fail");
+        }
+
+        #[test]
+        fn error_unmatched_paren_in_ternary() {
+            // a ? b) : c
+            let result = parse("a ? b) : c");
+            assert!(result.is_err(), "unmatched ')' should fail");
+        }
+
+        #[test]
+        fn error_unbalanced_paren_in_nested_ternary() {
+            // a ? (b ? c : d
+            let result = parse("a ? (b ? c : d");
+            assert!(result.is_err(), "missing closing ')' should fail");
+            let err = result.unwrap_err();
+            assert!(err.message.contains("')'"));
+        }
+
+        #[test]
         fn error_trailing_pipe() {
             let result = parse("foo ||");
             assert!(result.is_err());
@@ -1000,6 +1342,24 @@ mod tests {
             let err = result.unwrap_err();
             assert!(err.message.contains("end of expression"));
         }
+
+        #[test]
+        fn error_invalid_groupings_from_spec() {
+            // a group can not encapsulate both the true and false path of the top level comparison
+            assert!(parse("a ? ( b ? 'tt' : 'tf' : c ? 'ft' : 'ff' )").is_err());
+
+            // unbalanced: missing closing
+            assert!(parse("a ? ( b ? 'tt' : 'tf' : c ? 'ft' : 'ff'").is_err());
+
+            // unbalanced: missing opening (parenthesis must wrap a complete pattern)
+            assert!(parse("a ? b ? 'tt' : 'tf' : c ? ('ft' : 'ff')").is_err());
+
+            // parenthesis must wrap a complete pattern
+            assert!(parse("a ? b ? ( 'tt' : 'tf' ) : c ? ( 'ft' : 'ff' )").is_err());
+
+            // parenthesis encapsulates part of top level but not full
+            assert!(parse("a ? b ( ? 'tt' : 'tf' ) : c ( ? 'ft' : 'ff' )").is_err());
+        }
     }
 
     mod parse_error_display {
@@ -1032,6 +1392,26 @@ mod tests {
         }
 
         #[test]
+        fn roundtrip_bool_literal() {
+            let expr = parse("true").unwrap();
+            assert_eq!(expr.to_string(), "true");
+            let expr = parse("false").unwrap();
+            assert_eq!(expr.to_string(), "false");
+        }
+
+        #[test]
+        fn roundtrip_parenthesized_variable() {
+            let expr = parse("(foo)").unwrap();
+            assert_eq!(expr.to_string(), "(foo)");
+        }
+
+        #[test]
+        fn roundtrip_parenthesized_fallback() {
+            let expr = parse(r#"(foo || "default")"#).unwrap();
+            assert_eq!(expr.to_string(), "(foo || \"default\")");
+        }
+
+        #[test]
         fn roundtrip_fallback() {
             let expr = parse(r#"foo || "default""#).unwrap();
             assert_eq!(expr.to_string(), "foo || \"default\"");
@@ -1053,6 +1433,281 @@ mod tests {
         fn roundtrip_function() {
             let expr = parse("length(items)").unwrap();
             assert_eq!(expr.to_string(), "length(items)");
+        }
+    }
+
+    mod arithmetic {
+        use super::*;
+        use crate::markdown::compose::expression::ast::BinaryOp;
+
+        fn extract_binary(expr: &Expr) -> (BinaryOp, &Expr, &Expr) {
+            match expr {
+                Expr::Binary { op, left, right } => (*op, left.as_ref(), right.as_ref()),
+                other => panic!("expected Binary, got {other:?}"),
+            }
+        }
+
+        #[test]
+        fn parses_addition() {
+            let (op, left, right) = {
+                let expr = parse("a + b").unwrap();
+                let (op, l, r) = extract_binary(&expr);
+                (op, l.clone(), r.clone())
+            };
+            assert_eq!(op, BinaryOp::Add);
+            assert!(matches!(left, Expr::Variable(ref n) if n == "a"));
+            assert!(matches!(right, Expr::Variable(ref n) if n == "b"));
+        }
+
+        #[test]
+        fn parses_all_arithmetic_ops() {
+            for (src, expected) in [
+                ("a + b", BinaryOp::Add),
+                ("a - b", BinaryOp::Sub),
+                ("a * b", BinaryOp::Mul),
+                ("a / b", BinaryOp::Div),
+                ("a % b", BinaryOp::Mod),
+            ] {
+                let expr = parse(src).unwrap();
+                let (op, _, _) = extract_binary(&expr);
+                assert_eq!(op, expected, "for source {src}");
+            }
+        }
+
+        #[test]
+        fn subtraction_is_left_associative() {
+            // a - b - c parses as (a - b) - c
+            let expr = parse("a - b - c").unwrap();
+            let (outer_op, outer_left, outer_right) = extract_binary(&expr);
+            assert_eq!(outer_op, BinaryOp::Sub);
+            assert!(matches!(outer_right, Expr::Variable(n) if n == "c"));
+            let (inner_op, inner_left, inner_right) = extract_binary(outer_left);
+            assert_eq!(inner_op, BinaryOp::Sub);
+            assert!(matches!(inner_left, Expr::Variable(n) if n == "a"));
+            assert!(matches!(inner_right, Expr::Variable(n) if n == "b"));
+        }
+
+        #[test]
+        fn division_is_left_associative() {
+            // a / b / c parses as (a / b) / c
+            let expr = parse("a / b / c").unwrap();
+            let (outer_op, outer_left, outer_right) = extract_binary(&expr);
+            assert_eq!(outer_op, BinaryOp::Div);
+            assert!(matches!(outer_right, Expr::Variable(n) if n == "c"));
+            let (inner_op, _, _) = extract_binary(outer_left);
+            assert_eq!(inner_op, BinaryOp::Div);
+        }
+
+        #[test]
+        fn fallback_is_left_associative() {
+            // a || b || c parses as (a || b) || c
+            let expr = parse("a || b || c").unwrap();
+            match expr {
+                Expr::Fallback { primary, fallback } => {
+                    assert!(matches!(*fallback, Expr::Variable(ref n) if n == "c"));
+                    assert!(matches!(*primary, Expr::Fallback { .. }));
+                }
+                other => panic!("expected Fallback, got {other:?}"),
+            }
+        }
+
+        #[test]
+        fn multiplicative_binds_tighter_than_additive() {
+            // a + b * c parses as a + (b * c)
+            let expr = parse("a + b * c").unwrap();
+            let (top_op, top_left, top_right) = extract_binary(&expr);
+            assert_eq!(top_op, BinaryOp::Add);
+            assert!(matches!(top_left, Expr::Variable(n) if n == "a"));
+            let (inner_op, _, _) = extract_binary(top_right);
+            assert_eq!(inner_op, BinaryOp::Mul);
+        }
+
+        #[test]
+        fn additive_binds_tighter_than_comparison() {
+            // a + b <= c parses as (a + b) <= c
+            let expr = parse("a + b <= c").unwrap();
+            match expr {
+                Expr::Comparison { left, op, right } => {
+                    assert_eq!(op, ComparisonOp::LessThanOrEqual);
+                    let (inner_op, _, _) = extract_binary(left.as_ref());
+                    assert_eq!(inner_op, BinaryOp::Add);
+                    assert!(matches!(*right, Expr::Variable(ref n) if n == "c"));
+                }
+                other => panic!("expected Comparison, got {other:?}"),
+            }
+        }
+
+        #[test]
+        fn comparison_binds_tighter_than_fallback() {
+            // a + b * c <= d || e parses as ((a + b * c) <= d) || e
+            let expr = parse("a + b * c <= d || e").unwrap();
+            match expr {
+                Expr::Fallback { primary, fallback } => {
+                    assert!(matches!(*fallback, Expr::Variable(ref n) if n == "e"));
+                    assert!(matches!(*primary, Expr::Comparison { .. }));
+                }
+                other => panic!("expected Fallback, got {other:?}"),
+            }
+        }
+
+        #[test]
+        fn unary_minus_on_variable() {
+            let expr = parse("-a").unwrap();
+            match expr {
+                Expr::UnaryMinus(inner) => {
+                    assert!(matches!(*inner, Expr::Variable(ref n) if n == "a"));
+                }
+                other => panic!("expected UnaryMinus, got {other:?}"),
+            }
+        }
+
+        #[test]
+        fn unary_minus_in_subtraction_no_space() {
+            // 5-3 is left=5, op=Sub, right=3
+            let expr = parse("5-3").unwrap();
+            let (op, left, right) = extract_binary(&expr);
+            assert_eq!(op, BinaryOp::Sub);
+            assert!(matches!(left, Expr::NumberLiteral(n) if *n == 5.0));
+            assert!(matches!(right, Expr::NumberLiteral(n) if *n == 3.0));
+        }
+
+        #[test]
+        fn unary_minus_after_operator() {
+            // 5 + -3 is 5 + (-3)
+            let expr = parse("5 + -3").unwrap();
+            let (op, _, right) = extract_binary(&expr);
+            assert_eq!(op, BinaryOp::Add);
+            assert!(matches!(right, Expr::UnaryMinus(_)));
+        }
+    }
+
+    mod bracket_access {
+        use super::*;
+
+        #[test]
+        fn parses_simple_index() {
+            let expr = parse("items[0]").unwrap();
+            match expr {
+                Expr::Index { base, index } => {
+                    assert!(matches!(*base, Expr::Variable(ref n) if n == "items"));
+                    assert!(matches!(*index, Expr::NumberLiteral(n) if n == 0.0));
+                }
+                other => panic!("expected Index, got {other:?}"),
+            }
+        }
+
+        #[test]
+        fn parses_negative_index() {
+            let expr = parse("items[-1]").unwrap();
+            match expr {
+                Expr::Index { base, index } => {
+                    assert!(matches!(*base, Expr::Variable(ref n) if n == "items"));
+                    match *index {
+                        Expr::UnaryMinus(inner) => {
+                            assert!(matches!(*inner, Expr::NumberLiteral(n) if n == 1.0));
+                        }
+                        other => panic!("expected UnaryMinus index, got {other:?}"),
+                    }
+                }
+                other => panic!("expected Index, got {other:?}"),
+            }
+        }
+
+        #[test]
+        fn parses_string_key() {
+            let expr = parse(r#"config["key"]"#).unwrap();
+            match expr {
+                Expr::Index { base, index } => {
+                    assert!(matches!(*base, Expr::Variable(ref n) if n == "config"));
+                    assert!(matches!(*index, Expr::StringLiteral(ref s) if s == "key"));
+                }
+                other => panic!("expected Index, got {other:?}"),
+            }
+        }
+
+        #[test]
+        fn parses_chained_bracket_access() {
+            // config["key"][0]
+            let expr = parse(r#"config["key"][0]"#).unwrap();
+            match expr {
+                Expr::Index { base, index } => {
+                    assert!(matches!(*index, Expr::NumberLiteral(n) if n == 0.0));
+                    assert!(matches!(*base, Expr::Index { .. }));
+                }
+                other => panic!("expected outer Index, got {other:?}"),
+            }
+        }
+
+        #[test]
+        fn parses_index_then_member_access() {
+            // items[-1].name
+            let expr = parse("items[-1].name").unwrap();
+            match expr {
+                Expr::MemberAccess { base, name } => {
+                    assert_eq!(name, "name");
+                    assert!(matches!(*base, Expr::Index { .. }));
+                }
+                other => panic!("expected MemberAccess, got {other:?}"),
+            }
+        }
+
+        #[test]
+        fn member_access_after_paren() {
+            let expr = parse("(foo).bar").unwrap();
+            match expr {
+                Expr::MemberAccess { base, name } => {
+                    assert_eq!(name, "bar");
+                    assert!(matches!(*base, Expr::Paren(_)));
+                }
+                other => panic!("expected MemberAccess, got {other:?}"),
+            }
+        }
+
+        #[test]
+        fn dotted_variable_then_bracket() {
+            // foo.bar[0] — dotted path is a single Variable, followed by Index.
+            let expr = parse("foo.bar[0]").unwrap();
+            match expr {
+                Expr::Index { base, index } => {
+                    assert!(matches!(*base, Expr::Variable(ref n) if n == "foo.bar"));
+                    assert!(matches!(*index, Expr::NumberLiteral(n) if n == 0.0));
+                }
+                other => panic!("expected Index, got {other:?}"),
+            }
+        }
+
+        #[test]
+        fn rejects_numeric_dot_access() {
+            let result = parse("foo.0");
+            assert!(result.is_err(), "foo.0 should be rejected");
+            let err = result.unwrap_err();
+            assert!(
+                err.message.contains("Numeric dot access"),
+                "expected numeric-dot-access error, got: {}",
+                err.message
+            );
+        }
+    }
+
+    mod ternary_associativity {
+        use super::*;
+
+        #[test]
+        fn ternary_is_right_associative_for_else_branch() {
+            // a ? b : c ? d : e parses as a ? b : (c ? d : e)
+            let expr = parse("a ? b : c ? d : e").unwrap();
+            match expr {
+                Expr::Ternary {
+                    condition,
+                    then_branch,
+                    else_branch,
+                } => {
+                    assert!(matches!(*condition, Expr::Variable(ref n) if n == "a"));
+                    assert!(matches!(*then_branch, Expr::Variable(ref n) if n == "b"));
+                    assert!(matches!(*else_branch, Expr::Ternary { .. }));
+                }
+                other => panic!("expected Ternary, got {other:?}"),
+            }
         }
     }
 
@@ -1116,12 +1771,16 @@ mod tests {
 
         #[test]
         fn condition_parenthesized_or_then_and() {
-            // (a || b) && c parses as And(Or(a, b), c)
+            // (a || b) && c parses as And(Paren(Or(a, b)), c)
             let expr = parse_condition("(a || b) && c").unwrap();
             let (outer, args) = extract_call(&expr);
             assert_eq!(outer, "And");
             assert_eq!(args.len(), 2);
-            let (inner, inner_args) = extract_call(&args[0]);
+            let paren = match &args[0] {
+                Expr::Paren(inner) => inner,
+                other => panic!("expected Paren, got {other:?}"),
+            };
+            let (inner, inner_args) = extract_call(paren);
             assert_eq!(inner, "Or");
             assert!(matches!(&inner_args[0], Expr::Variable(n) if n == "a"));
             assert!(matches!(&inner_args[1], Expr::Variable(n) if n == "b"));
@@ -1136,7 +1795,11 @@ mod tests {
             assert_eq!(outer, "Or");
             assert_eq!(args.len(), 2);
             assert!(matches!(&args[0], Expr::Variable(n) if n == "a"));
-            let (inner, inner_args) = extract_call(&args[1]);
+            let paren = match &args[1] {
+                Expr::Paren(inner) => inner,
+                other => panic!("expected Paren, got {other:?}"),
+            };
+            let (inner, inner_args) = extract_call(paren);
             assert_eq!(inner, "Or");
             assert!(matches!(&inner_args[0], Expr::Variable(n) if n == "b"));
             assert!(matches!(&inner_args[1], Expr::Variable(n) if n == "c"));

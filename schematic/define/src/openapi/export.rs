@@ -1434,7 +1434,10 @@ mod tests {
         let options = ExportOptions::new();
 
         let result = export(&api, &registry, &options);
-        assert!(result.is_ok(), "export should succeed when all refs are resolved");
+        assert!(
+            result.is_ok(),
+            "export should succeed when all refs are resolved"
+        );
     }
 
     // =============================================

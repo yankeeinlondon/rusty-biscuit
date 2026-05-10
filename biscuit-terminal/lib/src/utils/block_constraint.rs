@@ -1,6 +1,6 @@
 use unicode_width::UnicodeWidthChar;
 
-use crate::{terminal::Terminal, utils::wrap_policy::WordWrap, utils::word_wrap::truncate};
+use crate::{terminal::Terminal, utils::word_wrap::truncate, utils::wrap_policy::WordWrap};
 
 /// Splits the string content passed in into a vector of string based
 /// on any explicit new lines found in the content.

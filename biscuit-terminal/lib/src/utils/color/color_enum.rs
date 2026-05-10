@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use super::{basic_color_to_rgb, BasicColor, RgbColor, Tailwind, WebColor, WEB_COLOR_LOOKUP};
+use super::{BasicColor, RgbColor, Tailwind, WEB_COLOR_LOOKUP, WebColor, basic_color_to_rgb};
 
 /// A unified color type supporting multiple color representations.
 ///

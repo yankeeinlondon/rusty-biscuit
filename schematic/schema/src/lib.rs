@@ -10,6 +10,8 @@
 //! | Module | Client | Description | Auth |
 //! |--------|--------|-------------|------|
 //! | [`anthropic`] | [`Anthropic`](anthropic::Anthropic) | Anthropic Messages API for Claude AI interactions and agent tool use | API Key (`X-Api-Key`) |
+//! | [`artificial_analysis`] | [`ArtificialAnalysisData`](artificial_analysis::ArtificialAnalysisData) | Artificial Analysis free data API: LLM and media-model benchmark catalogs. Attribution: as required by the Artificial Analysis API terms, all usage must include attribution to https://artificialanalysis.ai/. | API Key (`x-api-key`) |
+//! | [`artificial_analysis`] | [`ArtificialAnalysisCritPt`](artificial_analysis::ArtificialAnalysisCritPt) | Artificial Analysis CritPt benchmark: submit code-generation results for evaluation. Attribution: as required by the Artificial Analysis API terms, all usage must include attribution to https://artificialanalysis.ai/. | API Key (`x-api-key`) |
 //! | [`bitbucket`] | [`Bitbucket`](bitbucket::Bitbucket) | Bitbucket Cloud REST API v2.0 for repository, PR, issue, and tag workflows | Basic |
 //! | [`openai`] | [`OpenAI`](openai::OpenAI) | OpenAI REST API for model management | Bearer |
 //! | [`elevenlabs`] | [`ElevenLabs`](elevenlabs::ElevenLabs) | ElevenLabs Creative Platform API for text-to-speech, voice management, and sound generation | API Key (`xi-api-key`) |
@@ -96,25 +98,26 @@
 //!
 //! All request methods return `Result<T, SchematicError>`. See
 //! [`shared::SchematicError`] for the full error enum and handling examples.
-pub mod shared;
-pub mod prelude;
 pub mod anthropic;
+pub mod artificial_analysis;
 pub mod bitbucket;
-pub mod openai;
 pub mod elevenlabs;
+pub mod elevenlabs_ws;
+pub mod emqx;
+pub mod eversolo;
 pub mod gitea;
 pub mod github;
 pub mod gitlab;
 pub mod huggingface;
 pub mod lmstudio;
 pub mod ollama;
-pub mod emqx;
-pub mod eversolo;
+pub mod openai;
+pub mod prelude;
 pub mod samsung_smart_tv;
+pub mod samsung_smart_tv_remote_ws;
+pub mod shared;
 pub mod unfolded_circle_core_rest;
-pub mod ws_shared;
-pub mod elevenlabs_ws;
 pub mod unfolded_circle_core_ws;
 pub mod unfolded_circle_dock_ws;
 pub mod unfolded_circle_integration_ws;
-pub mod samsung_smart_tv_remote_ws;
+pub mod ws_shared;

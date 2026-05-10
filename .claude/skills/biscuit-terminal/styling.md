@@ -154,6 +154,45 @@ Example:
 → "Click \x1b]8;;https://example.com\x07here\x1b]8;;\x07 for more"
 ```
 
+### Markdown Subset
+
+A third grammar — a strict CommonMark subset — is recognised in addition to atomic tokens and block tags. Markdown forms are pre-processed into the equivalent block-tag form before rendering:
+
+| Markdown        | Equivalent block tag           |
+|-----------------|--------------------------------|
+| `[desc](ref)`   | `<a href="ref">desc</a>`       |
+| `**text**`      | `<b>text</b>`                  |
+| `_text_`        | `<i>text</i>`                  |
+
+Strict subset — `__bold__` and `*italics*` are **not** recognised; both pass through as literal text. The pre-processor runs in a fixed order: links → bold → italics → block-tag/atomic-token parser. Link URLs are placeholdered before the bold/italics phases so a URL like `https://example.com/path_with_underscores` is never re-interpreted.
+
+#### Flanking rule (intra-word inhibition)
+
+`_` and `**` are treated as **literal text** when they sit between two word characters (Unicode alphanumerics on both sides). This protects identifier-shaped strings from being mangled when interpolated into Prose format strings:
+
+| Input | Output | Why |
+|-------|--------|-----|
+| `OPENCODE_CONFIG_CONTENT` | `OPENCODE_CONFIG_CONTENT` | Every `_` is intra-word |
+| `_foo_bar_` | `<i>foo_bar</i>` | Outer `_` flanked by start/end; inner `_` skipped |
+| `foo**bar**baz` | `foo**bar**baz` | Both `**` runs intra-word |
+| `**foo**bar**baz**` | `<b>foo**bar**baz</b>` | Outer `**` flanked; inner pairs intra-word |
+| `(_text_)` | `(<i>text</i>)` | Punctuation neighbours form boundaries |
+| `<dim>=OPENCODE_CONFIG_CONTENT</dim>` | unchanged | Tag wrapper preserved; intra-word `_` not triggered inside body |
+
+The rule is symmetric across openers and closers and applies to both `_` and `**`. It is a deliberately simpler rule than full CommonMark left/right-flanking — terminal markup is overwhelmingly ASCII identifiers and predictability beats spec parity.
+
+**Practical consequence for callers:** dynamic content interpolated into a Prose format string (env-var keys, file paths, identifiers) usually does **not** require escaping — the flanking rule already protects identifier-shaped values.
+
+#### Escape mechanism
+
+A backslash escapes the immediately following character. Escapable: `* _ [ ] ( ) < > { \`. Use this when you need a literal Markdown sigil at a position where the flanking rule would *not* already inhibit it (e.g. `\_emphasis_` for a leading literal `_`).
+
+```
+\_text\_  →  _text_   (literal underscores, no italics)
+\*\*x\*\* →  **x**    (literal asterisks)
+\\        →  \        (literal backslash)
+```
+
 ### Prose Options
 
 ```rust

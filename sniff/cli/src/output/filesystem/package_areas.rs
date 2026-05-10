@@ -5,12 +5,10 @@ use biscuit_terminal::components::renderable::Renderable;
 use biscuit_terminal::terminal::Terminal;
 use sniff::filesystem::repo::{Package, RepoInfo};
 
-use crate::args::PackagesFormat;
 use super::RepoFilter;
-use super::packages::{
-    dirty_package_names, staged_package_names, unstaged_package_names,
-};
+use super::packages::{dirty_package_names, staged_package_names, unstaged_package_names};
 use super::resolve_dir;
+use crate::args::PackagesFormat;
 
 /// Collect unique package area names, honoring the optional scope and filters.
 fn select_repo_package_areas<'a>(

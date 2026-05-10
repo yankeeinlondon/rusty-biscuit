@@ -334,7 +334,7 @@ fn build_collection_auth(auth: &ExportAuth) -> Option<PostmanAuth> {
                 },
                 PostmanVariable {
                     key: "value".to_string(),
-                    value: Some(format!("{{{{{}}}}}" , variable)),
+                    value: Some(format!("{{{{{}}}}}", variable)),
                     description: None,
                 },
                 PostmanVariable {
@@ -466,7 +466,13 @@ fn build_request_item(
     base_url_var: &str,
 ) -> PostmanItem {
     let path_params = extract_path_params(&endpoint.path);
-    let url = build_url(&api.base_url, &endpoint.path, &path_params, endpoint, base_url_var);
+    let url = build_url(
+        &api.base_url,
+        &endpoint.path,
+        &path_params,
+        endpoint,
+        base_url_var,
+    );
     let headers = build_headers(endpoint, api);
     let body = endpoint
         .request
@@ -649,14 +655,12 @@ fn build_body(export_body: &ExportBody) -> PostmanBody {
 /// representation without re-deriving kind from the field name).
 fn build_form_param(field: &FormField) -> PostmanFormParam {
     match &field.kind {
-        FormFieldExportKind::File { .. } | FormFieldExportKind::Files { .. } => {
-            PostmanFormParam {
-                key: field.name.clone(),
-                value: None,
-                description: field.description.clone(),
-                type_field: "file".to_string(),
-            }
-        }
+        FormFieldExportKind::File { .. } | FormFieldExportKind::Files { .. } => PostmanFormParam {
+            key: field.name.clone(),
+            value: None,
+            description: field.description.clone(),
+            type_field: "file".to_string(),
+        },
         FormFieldExportKind::Text | FormFieldExportKind::Json => PostmanFormParam {
             key: field.name.clone(),
             value: Some(String::new()),
@@ -785,8 +789,7 @@ pub fn build_postman_collection_grouped(apis: &[&RestApi], module_name: &str) ->
     let duplicate_ids: std::collections::HashSet<String> = if uniform {
         std::collections::HashSet::new()
     } else {
-        let mut counts: std::collections::HashMap<&str, usize> =
-            std::collections::HashMap::new();
+        let mut counts: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
         for api in apis {
             for endpoint in &api.endpoints {
                 *counts.entry(endpoint.id.as_str()).or_insert(0) += 1;
@@ -810,8 +813,14 @@ pub fn build_postman_collection_grouped(apis: &[&RestApi], module_name: &str) ->
         for endpoint in &api.endpoints {
             let folder_key = extract_folder_key(&endpoint.path);
             let disambiguate = !uniform && duplicate_ids.contains(&endpoint.id);
-            let request_item =
-                build_request_item(endpoint, api, owning_auth, !uniform, disambiguate, base_url_var);
+            let request_item = build_request_item(
+                endpoint,
+                api,
+                owning_auth,
+                !uniform,
+                disambiguate,
+                base_url_var,
+            );
             folders
                 .entry(folder_key.clone())
                 .or_default()
@@ -1295,11 +1304,8 @@ mod tests {
         // schematic_definitions::elevenlabs: an `audio` file part with
         // an MP3/WAV accept pattern and an optional `name` text part.
         let request = schematic_define::request::ApiRequest::form_data(vec![
-            schematic_define::request::FormField::file_accept(
-                "audio",
-                vec!["audio/*".into()],
-            )
-            .with_description("Audio file (mp3, wav, ogg, m4a)"),
+            schematic_define::request::FormField::file_accept("audio", vec!["audio/*".into()])
+                .with_description("Audio file (mp3, wav, ogg, m4a)"),
             schematic_define::request::FormField::text("name")
                 .optional()
                 .with_description("Name for the sample"),
@@ -1595,11 +1601,7 @@ mod tests {
         let mut api = minimal_api();
         api.auth = AuthStrategy::BearerToken { header: None };
         let collection = build_postman_collection(&api);
-        let keys: Vec<&str> = collection
-            .variable
-            .iter()
-            .map(|v| v.key.as_str())
-            .collect();
+        let keys: Vec<&str> = collection.variable.iter().map(|v| v.key.as_str()).collect();
         assert!(keys.contains(&"baseUrl"));
         assert!(
             keys.contains(&"bearerToken"),
@@ -1613,11 +1615,7 @@ mod tests {
         let mut api = minimal_api();
         api.auth = AuthStrategy::Basic;
         let collection = build_postman_collection(&api);
-        let keys: Vec<&str> = collection
-            .variable
-            .iter()
-            .map(|v| v.key.as_str())
-            .collect();
+        let keys: Vec<&str> = collection.variable.iter().map(|v| v.key.as_str()).collect();
         assert!(keys.contains(&"baseUrl"));
         assert!(keys.contains(&"username"), "missing username in {:?}", keys);
         assert!(keys.contains(&"password"), "missing password in {:?}", keys);
@@ -1630,11 +1628,7 @@ mod tests {
             header: "X-API-Key".to_string(),
         };
         let collection = build_postman_collection(&api);
-        let keys: Vec<&str> = collection
-            .variable
-            .iter()
-            .map(|v| v.key.as_str())
-            .collect();
+        let keys: Vec<&str> = collection.variable.iter().map(|v| v.key.as_str()).collect();
         assert!(keys.contains(&"baseUrl"));
         assert!(keys.contains(&"apiKey"), "missing apiKey in {:?}", keys);
     }
@@ -1687,11 +1681,7 @@ mod tests {
         api2.auth = AuthStrategy::BearerToken { header: None };
 
         let collection = build_postman_collection_grouped(&[&api1, &api2], "test_module");
-        let keys: Vec<&str> = collection
-            .variable
-            .iter()
-            .map(|v| v.key.as_str())
-            .collect();
+        let keys: Vec<&str> = collection.variable.iter().map(|v| v.key.as_str()).collect();
         assert!(keys.contains(&"baseUrl"));
         assert!(keys.contains(&"baseUrl2"));
         assert!(
@@ -1759,10 +1749,7 @@ mod tests {
         api2.endpoints = vec![endpoint("ListC", "/c")];
 
         let collection = build_postman_collection_grouped(&[&api1, &api2], "uniform");
-        let coll_auth = collection
-            .auth
-            .as_ref()
-            .expect("collection auth set");
+        let coll_auth = collection.auth.as_ref().expect("collection auth set");
         assert_eq!(coll_auth.type_field, "bearer");
 
         for (name, request) in collect_requests(&collection) {
@@ -1785,13 +1772,19 @@ mod tests {
         let mut basic = minimal_api();
         basic.name = "BasicApi".to_string();
         basic.auth = AuthStrategy::Basic;
-        basic.endpoints = vec![endpoint("ListItems", "/items"), endpoint("BasicOnly", "/bo")];
+        basic.endpoints = vec![
+            endpoint("ListItems", "/items"),
+            endpoint("BasicOnly", "/bo"),
+        ];
 
         let mut bearer = minimal_api();
         bearer.name = "BearerApi".to_string();
         bearer.base_url = "https://api2.test.com/v1".to_string();
         bearer.auth = AuthStrategy::BearerToken { header: None };
-        bearer.endpoints = vec![endpoint("ListItems", "/items"), endpoint("BearerOnly", "/be")];
+        bearer.endpoints = vec![
+            endpoint("ListItems", "/items"),
+            endpoint("BearerOnly", "/be"),
+        ];
 
         let collection = build_postman_collection_grouped(&[&basic, &bearer], "mixed");
         assert!(
@@ -1833,11 +1826,7 @@ mod tests {
         bearer.endpoints = vec![endpoint("Y", "/y")];
 
         let collection = build_postman_collection_grouped(&[&basic, &bearer], "mixed");
-        let keys: Vec<&str> = collection
-            .variable
-            .iter()
-            .map(|v| v.key.as_str())
-            .collect();
+        let keys: Vec<&str> = collection.variable.iter().map(|v| v.key.as_str()).collect();
         assert!(keys.contains(&"username"), "missing username in {:?}", keys);
         assert!(keys.contains(&"password"), "missing password in {:?}", keys);
         assert!(
@@ -1935,11 +1924,7 @@ mod tests {
         api2.auth = AuthStrategy::BearerToken { header: None };
 
         let collection = build_postman_collection_grouped(&[&api1, &api2], "mixed_module");
-        let keys: Vec<&str> = collection
-            .variable
-            .iter()
-            .map(|v| v.key.as_str())
-            .collect();
+        let keys: Vec<&str> = collection.variable.iter().map(|v| v.key.as_str()).collect();
         assert!(keys.contains(&"username"), "missing username in {:?}", keys);
         assert!(keys.contains(&"password"), "missing password in {:?}", keys);
         assert!(

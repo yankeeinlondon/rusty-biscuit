@@ -72,7 +72,6 @@ pub(crate) fn filter_packages<'a>(packages: &'a [Package], filters: &[String]) -
     }
 }
 
-
 mod deps;
 mod docs;
 mod files;
@@ -85,40 +84,29 @@ mod repo;
 // Re-exports from submodules
 pub use deps::{render_repo_deps_text, render_repo_deps_visual};
 pub use docs::render_docs_output;
-pub use files::{PathListFormat, render_files_section, render_path_list};
 pub(crate) use files::filter_file_breakdown;
-pub use repo::{render_filesystem_section, render_repo_section};
-pub use packages::{
-    collect_repo_package_names,
-    render_dirty_packages,
-    render_repo_package,
-    render_repo_package_root,
-    render_repo_packages_formatted,
-    render_staged_packages,
-    render_unstaged_packages,
-};
+pub use files::{PathListFormat, render_files_section, render_path_list};
+pub(crate) use language::primary_language_name;
+pub use language::{render_language_section, render_repo_language};
 pub use package_areas::{
-    collect_repo_package_area_names,
-    render_dirty_package_areas,
-    render_repo_package_area,
-    render_repo_package_area_root,
-    render_repo_package_areas_formatted,
-    render_staged_package_areas,
-    render_unstaged_package_areas,
-};
-pub(crate) use packages::{
-    select_dirty_package_names,
-    select_repo_packages,
-    select_staged_package_names,
-    select_unstaged_package_names,
+    collect_repo_package_area_names, render_dirty_package_areas, render_repo_package_area,
+    render_repo_package_area_root, render_repo_package_areas_formatted,
+    render_staged_package_areas, render_unstaged_package_areas,
 };
 pub(crate) use package_areas::{
-    select_dirty_package_area_names,
-    select_staged_package_area_names,
+    select_dirty_package_area_names, select_staged_package_area_names,
     select_unstaged_package_area_names,
 };
-pub use language::{render_language_section, render_repo_language};
-pub(crate) use language::primary_language_name;
+pub use packages::{
+    collect_repo_package_names, render_dirty_packages, render_repo_package,
+    render_repo_package_root, render_repo_packages_formatted, render_staged_packages,
+    render_unstaged_packages,
+};
+pub(crate) use packages::{
+    select_dirty_package_names, select_repo_packages, select_staged_package_names,
+    select_unstaged_package_names,
+};
+pub use repo::{render_filesystem_section, render_repo_section};
 
 /// Format a commit datetime to a relative date string and 12hr time string.
 ///
@@ -1104,9 +1092,9 @@ fn resolve_dir(base_dir: Option<&Path>) -> PathBuf {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::deps::build_deps_mermaid;
     use super::repo::build_area_hierarchy;
+    use super::*;
     use chrono::Utc;
     use sniff::filesystem::docs::MarkdownMeta;
     use sniff::filesystem::git::{
@@ -1349,14 +1337,20 @@ mod tests {
         fn normal_area_returns_package_area() {
             let pkg = make_package("cli", "sniff", &[]);
 
-            assert_eq!(super::super::package_areas::package_area_root(&pkg), "sniff");
+            assert_eq!(
+                super::super::package_areas::package_area_root(&pkg),
+                "sniff"
+            );
         }
 
         #[test]
         fn multi_segment_area_returns_full_package_area() {
             let pkg = make_package("my_package", "apps/browser", &[]);
 
-            assert_eq!(super::super::package_areas::package_area_root(&pkg), "apps/browser");
+            assert_eq!(
+                super::super::package_areas::package_area_root(&pkg),
+                "apps/browser"
+            );
         }
 
         #[test]
@@ -1365,7 +1359,10 @@ mod tests {
             pkg.relative = "actual/path".to_string();
             pkg.path = PathBuf::from("/repo/actual/path");
 
-            assert_eq!(super::super::package_areas::package_area_root(&pkg), "actual");
+            assert_eq!(
+                super::super::package_areas::package_area_root(&pkg),
+                "actual"
+            );
         }
     }
 

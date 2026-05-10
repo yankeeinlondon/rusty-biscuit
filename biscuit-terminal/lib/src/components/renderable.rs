@@ -10,7 +10,7 @@ use crate::utils::wrap_policy::WordWrap;
 /// can be reduced down to a string designed to be displayed
 /// in a terminal.
 ///
-/// Every implementor owns a [`Layout`] that controls margins,
+/// Every implementer owns a [`Layout`] that controls margins,
 /// alignment, word-wrap, and row-fill strategy. The required
 /// accessors `layout()` / `layout_mut()` expose it, while
 /// the provided builder methods let callers configure it

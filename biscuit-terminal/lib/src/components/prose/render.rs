@@ -1,8 +1,6 @@
 //! [`Renderable`] implementation for [`Prose`].
 
-use crate::{
-    components::renderable::Renderable, terminal::Terminal, utils::layout::Layout,
-};
+use crate::{components::renderable::Renderable, terminal::Terminal, utils::layout::Layout};
 
 use super::prose::Prose;
 

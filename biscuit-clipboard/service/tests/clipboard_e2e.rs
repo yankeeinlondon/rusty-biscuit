@@ -73,17 +73,14 @@ async fn start_service() -> (ServiceHandle, u16) {
         .expect("spawn clipper");
 
     // Poll for the port file to appear.
-    let port = tokio::time::timeout(
-        Duration::from_millis(HEALTH_TIMEOUT_MS),
-        async {
-            loop {
-                if let Some(p) = read_port_file_in(runtime_dir.path()) {
-                    return p;
-                }
-                tokio::time::sleep(Duration::from_millis(50)).await;
+    let port = tokio::time::timeout(Duration::from_millis(HEALTH_TIMEOUT_MS), async {
+        loop {
+            if let Some(p) = read_port_file_in(runtime_dir.path()) {
+                return p;
             }
-        },
-    )
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    })
     .await
     .expect("clipper did not write port file in time");
 
@@ -119,11 +116,7 @@ async fn wait_for_history_entry(port: u16, expected_preview: &str) -> Option<ser
             if let Ok(json) = resp.json::<serde_json::Value>().await {
                 if let Some(entries) = json.get("entries").and_then(|v| v.as_array()) {
                     for entry in entries {
-                        if entry
-                            .get("preview")
-                            .and_then(|p| p.as_str())
-                            == Some(expected_preview)
-                        {
+                        if entry.get("preview").and_then(|p| p.as_str()) == Some(expected_preview) {
                             return Some(entry.clone());
                         }
                     }
@@ -209,12 +202,11 @@ async fn e2e_image_roundtrip() {
     let png: Vec<u8> = vec![
         0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, // PNG signature
         0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44, 0x52, // IHDR chunk
-        0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
-        0x08, 0x02, 0x00, 0x00, 0x00, 0x90, 0x77, 0x53,
-        0xDE, // IHDR CRC
+        0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x02, 0x00, 0x00, 0x00, 0x90, 0x77,
+        0x53, 0xDE, // IHDR CRC
         0x00, 0x00, 0x00, 0x0C, 0x49, 0x44, 0x41, 0x54, // IDAT chunk
-        0x08, 0xD7, 0x63, 0xF8, 0x0F, 0x00, 0x00, 0x01,
-        0x01, 0x00, 0x05, 0x18, 0xD8, 0xAE, // IDAT CRC
+        0x08, 0xD7, 0x63, 0xF8, 0x0F, 0x00, 0x00, 0x01, 0x01, 0x00, 0x05, 0x18, 0xD8,
+        0xAE, // IDAT CRC
         0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4E, 0x44, // IEND chunk
         0xAE, 0x42, 0x60, 0x82, // IEND CRC
     ];
@@ -244,10 +236,12 @@ async fn e2e_concealed_skipped_macos() {
     // the macOS `pbcopy` tool with a custom UTI.
     let output = Command::new("osascript")
         .arg("-e")
-        .arg(r#"
+        .arg(
+            r#"
             set the clipboard to "concealed-secret"
             do shell script "echo 'concealed-secret' | pbcopy"
-        "#)
+        "#,
+        )
         .output()
         .expect("osascript");
 

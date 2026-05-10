@@ -19,7 +19,9 @@ Commands:
   set      Set a frontmatter property on a markdown document
   rm       Remove one or more frontmatter properties from a markdown document
   edit     Open a markdown file in your preferred editor
+  validate Validate references in a markdown document
   hash     Hash a markdown document's frontmatter and body
+  graph    Visualize a markdown file's dependency graph
 
 Arguments:
   [INPUT]  Input file path (reads from stdin if not provided, use "-" for explicit stdin)
@@ -38,6 +40,8 @@ Arguments:
 - [`set <file-ref> <prop> <value>`](./set.md) - sets a frontmatter property on the referenced Markdown file; also supports the syntax `set <file-ref> <json5>` to set a dictionary of values.
 - [`rm <file-ref> <prop>`](./rm.md) - removes a Frontmatter property on the referenced Markdown file
 - [`edit <file-ref>`](./edit.md) - opens the referenced Markdown file and blocks until the user closes that file in their editor.
+- [`validate <file-ref>`](./validate.md) - validates references (links, images, transclusions) in the document.
+- [`graph <file-ref>`](./graph.md) - visualizes the dependency graph of the document.
 
 ## File References
 

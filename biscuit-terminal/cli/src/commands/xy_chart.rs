@@ -302,8 +302,7 @@ pub fn render_xy_chart(
         XyChartType::Bar => "bar chart",
         XyChartType::Line => "line chart",
     };
-    display_mermaid(&diagram, &instructions, chart_name, layout, meta, false,
-    )?;
+    display_mermaid(&diagram, &instructions, chart_name, layout, meta, false)?;
 
     if example {
         let cmd = match chart_type {

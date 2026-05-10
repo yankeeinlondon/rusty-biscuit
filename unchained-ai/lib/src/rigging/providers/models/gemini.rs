@@ -1,6 +1,6 @@
 //! Auto-generated provider model enum
 //!
-//! Generated: 2026-05-04T04:02:11.785165+00:00
+//! Generated: 2026-05-07T02:07:02.844849+00:00
 //! Generator: gen-models v0.1.0
 //! Provider: Gemini
 //!
@@ -40,6 +40,12 @@ pub enum ProviderModelGemini {
     Gemini__2_5__Flash__Image,
     /// Model: `gemini-2.5-flash-lite`
     Gemini__2_5__Flash__Lite,
+    /// Model: `gemini-2.5-flash-native-audio-latest`
+    Gemini__2_5__Flash__Native__Audio__Latest,
+    /// Model: `gemini-2.5-flash-native-audio-preview-09-2025`
+    Gemini__2_5__Flash__Native__Audio__Preview__09__2025,
+    /// Model: `gemini-2.5-flash-native-audio-preview-12-2025`
+    Gemini__2_5__Flash__Native__Audio__Preview__12__2025,
     /// Model: `gemini-2.5-flash-preview-tts`
     Gemini__2_5__Flash__Preview__Tts,
     /// Model: `gemini-2.5-pro`
@@ -56,6 +62,8 @@ pub enum ProviderModelGemini {
     Gemini__3_1__Flash__Image__Preview,
     /// Model: `gemini-3.1-flash-lite-preview`
     Gemini__3_1__Flash__Lite__Preview,
+    /// Model: `gemini-3.1-flash-live-preview`
+    Gemini__3_1__Flash__Live__Preview,
     /// Model: `gemini-3.1-flash-tts-preview`
     Gemini__3_1__Flash__Tts__Preview,
     /// Model: `gemini-3.1-pro-preview`
@@ -78,18 +86,6 @@ pub enum ProviderModelGemini {
     Gemini__Robotics__Er__1_5__Preview,
     /// Model: `gemini-robotics-er-1.6-preview`
     Gemini__Robotics__Er__1_6__Preview,
-    /// Model: `gemma-3-12b-it`
-    Gemma__3__12b__It,
-    /// Model: `gemma-3-1b-it`
-    Gemma__3__1b__It,
-    /// Model: `gemma-3-27b-it`
-    Gemma__3__27b__It,
-    /// Model: `gemma-3-4b-it`
-    Gemma__3__4b__It,
-    /// Model: `gemma-3n-e2b-it`
-    Gemma__3n__E2b__It,
-    /// Model: `gemma-3n-e4b-it`
-    Gemma__3n__E4b__It,
     /// Model: `gemma-4-26b-a4b-it`
     Gemma__4__26b__A4b__It,
     /// Model: `gemma-4-31b-it`
@@ -116,6 +112,8 @@ pub enum ProviderModelGemini {
     Veo__3_1__Fast__Generate__Preview,
     /// Model: `veo-3.1-generate-preview`
     Veo__3_1__Generate__Preview,
+    /// Model: `veo-3.1-lite-generate-preview`
+    Veo__3_1__Lite__Generate__Preview,
     /// Custom model ID not in the predefined list.
     Bespoke(String),
 }

@@ -2035,7 +2035,10 @@ mod tests {
             assert!(matches!(
                 cli.command,
                 Some(Commands::Repo {
-                    repo_subcommand: Some(RepoSubcommand::Worktree { no_error: false, on_error: None }),
+                    repo_subcommand: Some(RepoSubcommand::Worktree {
+                        no_error: false,
+                        on_error: None
+                    }),
                     ..
                 })
             ));

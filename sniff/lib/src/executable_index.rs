@@ -93,9 +93,7 @@ impl ExecutableIndex {
             .map(|p| std::env::split_paths(&p).count())
             .unwrap_or(0);
 
-        let eager_path = EAGER_PATH_CACHE
-            .get_or_init(scan_path_executables)
-            .clone();
+        let eager_path = EAGER_PATH_CACHE.get_or_init(scan_path_executables).clone();
 
         debug!(entries = eager_path.len(), "eager PATH index built");
 
@@ -103,9 +101,7 @@ impl ExecutableIndex {
             path_dir_count,
             eager_path: Some(eager_path),
             #[cfg(target_os = "macos")]
-            bundle_executables: BUNDLE_INDEX_CACHE
-                .get_or_init(build_bundle_index)
-                .clone(),
+            bundle_executables: BUNDLE_INDEX_CACHE.get_or_init(build_bundle_index).clone(),
             #[cfg(target_os = "windows")]
             windows_index: crate::programs::windows_apps::build_windows_index(),
         }
