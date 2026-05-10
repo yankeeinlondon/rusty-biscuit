@@ -33,7 +33,10 @@ pub fn render_toc_links(
             } else {
                 apply_cleanup(&h.title, &options.cleanup_services)
             };
-            format!("{}- [{}]({}#{})", effective_indent, display, file_path, h.slug)
+            format!(
+                "{}- [{}]({}#{})",
+                effective_indent, display, file_path, h.slug
+            )
         })
         .collect();
 
@@ -203,14 +206,7 @@ mod tests {
         let headings: Vec<&MarkdownTocNode> = vec![&h1];
         let options = TocLinkingOptions::default();
 
-        let result = render_toc_links(
-            &headings,
-            "./doc.md",
-            &options,
-            &default_filter(),
-            "",
-            None,
-        );
+        let result = render_toc_links(&headings, "./doc.md", &options, &default_filter(), "", None);
         assert_eq!(result, "- [Getting Started](./doc.md#getting-started)");
     }
 }

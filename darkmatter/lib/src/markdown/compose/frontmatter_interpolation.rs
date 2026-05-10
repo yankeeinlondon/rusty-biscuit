@@ -309,7 +309,9 @@ fn collect_frontmatter_key_refs(value: &Value, refs: &mut Vec<String>) {
                 collect_variable_roots(&expr, refs);
             }
         }
-        Value::Array(arr) => arr.iter().for_each(|v| collect_frontmatter_key_refs(v, refs)),
+        Value::Array(arr) => arr
+            .iter()
+            .for_each(|v| collect_frontmatter_key_refs(v, refs)),
         Value::Object(obj) => obj
             .values()
             .for_each(|v| collect_frontmatter_key_refs(v, refs)),
@@ -349,8 +351,7 @@ fn collect_variable_roots(expr: &Expr, refs: &mut Vec<String>) {
             collect_variable_roots(then_branch, refs);
             collect_variable_roots(else_branch, refs);
         }
-        Expr::Comparison { left, right, .. }
-        | Expr::Binary { left, right, .. } => {
+        Expr::Comparison { left, right, .. } | Expr::Binary { left, right, .. } => {
             collect_variable_roots(left, refs);
             collect_variable_roots(right, refs);
         }

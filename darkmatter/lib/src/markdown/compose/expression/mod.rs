@@ -78,11 +78,34 @@ pub use parser::{ParseError, Parser, parse, parse_condition};
 
 use serde_json::Value;
 
-/// Converts an expression value into a number using the same coercion rules
-/// the comparison operators use, returning an error message tagged with the
-/// originating operator when the value cannot be represented as a number.
+/// Converts a value to a number for arithmetic operations.
+///
+/// Accepts numbers and parseable strings; rejects booleans, null, arrays,
+/// and objects.
+fn to_number_arithmetic(value: &Value) -> Option<f64> {
+    match value {
+        Value::Number(n) => n.as_f64(),
+        Value::String(s) => s.parse::<f64>().ok(),
+        _ => None,
+    }
+}
+
+/// Converts an expression value into a number for arithmetic operations,
+/// returning an error message tagged with the originating operator when the
+/// value cannot be represented as a number.
 fn require_number(value: &Value, op_label: &str) -> Result<f64, String> {
-    to_number(value).ok_or_else(|| format!("{op_label} requires numeric operands"))
+    to_number_arithmetic(value).ok_or_else(|| format!("{op_label} requires numeric operands"))
+}
+
+/// Converts a value to a number for array indexing.
+///
+/// Only actual numbers are accepted; all other types (including strings and
+/// booleans) are rejected.
+fn to_number_index(value: &Value) -> Option<f64> {
+    match value {
+        Value::Number(n) => n.as_f64(),
+        _ => None,
+    }
 }
 
 fn json_number(value: f64) -> Result<Value, String> {
@@ -402,7 +425,7 @@ fn evaluate_index(base: &Value, index: &Value) -> Value {
     match base {
         Value::Null => Value::Null,
         Value::Array(items) => {
-            let Some(n) = to_number(index) else {
+            let Some(n) = to_number_index(index) else {
                 return Value::Null;
             };
             if n.fract() != 0.0 {
@@ -417,14 +440,10 @@ fn evaluate_index(base: &Value, index: &Value) -> Value {
                 items[resolved as usize].clone()
             }
         }
-        Value::Object(map) => {
-            let key = match index {
-                Value::String(s) => s.clone(),
-                Value::Null => return Value::Null,
-                other => scalar_string(other),
-            };
-            map.get(&key).cloned().unwrap_or(Value::Null)
-        }
+        Value::Object(map) => match index {
+            Value::String(s) => map.get(s).cloned().unwrap_or(Value::Null),
+            _ => Value::Null,
+        },
         _ => Value::Null,
     }
 }
@@ -705,8 +724,14 @@ mod tests {
 
         #[test]
         fn bool_literal_evaluates_to_json_bool() {
-            assert_eq!(evaluate(&Expr::BoolLiteral(true), &lookup(json!({}))).unwrap(), json!(true));
-            assert_eq!(evaluate(&Expr::BoolLiteral(false), &lookup(json!({}))).unwrap(), json!(false));
+            assert_eq!(
+                evaluate(&Expr::BoolLiteral(true), &lookup(json!({}))).unwrap(),
+                json!(true)
+            );
+            assert_eq!(
+                evaluate(&Expr::BoolLiteral(false), &lookup(json!({}))).unwrap(),
+                json!(false)
+            );
         }
 
         #[test]
@@ -760,32 +785,74 @@ mod tests {
 
         #[test]
         fn equal_and_not_equal_numeric() {
-            assert_eq!(cmp(json!(5), ComparisonOp::Equal, json!(5)).unwrap(), json!(true));
-            assert_eq!(cmp(json!(5), ComparisonOp::NotEqual, json!(6)).unwrap(), json!(true));
+            assert_eq!(
+                cmp(json!(5), ComparisonOp::Equal, json!(5)).unwrap(),
+                json!(true)
+            );
+            assert_eq!(
+                cmp(json!(5), ComparisonOp::NotEqual, json!(6)).unwrap(),
+                json!(true)
+            );
         }
 
         #[test]
         fn greater_than_and_greater_than_or_equal() {
-            assert_eq!(cmp(json!(6), ComparisonOp::GreaterThan, json!(5)).unwrap(), json!(true));
-            assert_eq!(cmp(json!(5), ComparisonOp::GreaterThan, json!(5)).unwrap(), json!(false));
-            assert_eq!(cmp(json!(5), ComparisonOp::GreaterThanOrEqual, json!(5)).unwrap(), json!(true));
-            assert_eq!(cmp(json!(4), ComparisonOp::GreaterThanOrEqual, json!(5)).unwrap(), json!(false));
+            assert_eq!(
+                cmp(json!(6), ComparisonOp::GreaterThan, json!(5)).unwrap(),
+                json!(true)
+            );
+            assert_eq!(
+                cmp(json!(5), ComparisonOp::GreaterThan, json!(5)).unwrap(),
+                json!(false)
+            );
+            assert_eq!(
+                cmp(json!(5), ComparisonOp::GreaterThanOrEqual, json!(5)).unwrap(),
+                json!(true)
+            );
+            assert_eq!(
+                cmp(json!(4), ComparisonOp::GreaterThanOrEqual, json!(5)).unwrap(),
+                json!(false)
+            );
         }
 
         #[test]
         fn less_than_and_less_than_or_equal() {
-            assert_eq!(cmp(json!(4), ComparisonOp::LessThan, json!(5)).unwrap(), json!(true));
-            assert_eq!(cmp(json!(5), ComparisonOp::LessThan, json!(5)).unwrap(), json!(false));
-            assert_eq!(cmp(json!(5), ComparisonOp::LessThanOrEqual, json!(5)).unwrap(), json!(true));
-            assert_eq!(cmp(json!(6), ComparisonOp::LessThanOrEqual, json!(5)).unwrap(), json!(false));
+            assert_eq!(
+                cmp(json!(4), ComparisonOp::LessThan, json!(5)).unwrap(),
+                json!(true)
+            );
+            assert_eq!(
+                cmp(json!(5), ComparisonOp::LessThan, json!(5)).unwrap(),
+                json!(false)
+            );
+            assert_eq!(
+                cmp(json!(5), ComparisonOp::LessThanOrEqual, json!(5)).unwrap(),
+                json!(true)
+            );
+            assert_eq!(
+                cmp(json!(6), ComparisonOp::LessThanOrEqual, json!(5)).unwrap(),
+                json!(false)
+            );
         }
 
         #[test]
         fn comparisons_coerce_string_backed_numerics() {
-            assert_eq!(cmp(json!("5"), ComparisonOp::GreaterThan, json!(3)).unwrap(), json!(true));
-            assert_eq!(cmp(json!("5"), ComparisonOp::LessThanOrEqual, json!(5)).unwrap(), json!(true));
-            assert_eq!(cmp(json!(2), ComparisonOp::LessThan, json!("3")).unwrap(), json!(true));
-            assert_eq!(cmp(json!("10"), ComparisonOp::GreaterThanOrEqual, json!("5")).unwrap(), json!(true));
+            assert_eq!(
+                cmp(json!("5"), ComparisonOp::GreaterThan, json!(3)).unwrap(),
+                json!(true)
+            );
+            assert_eq!(
+                cmp(json!("5"), ComparisonOp::LessThanOrEqual, json!(5)).unwrap(),
+                json!(true)
+            );
+            assert_eq!(
+                cmp(json!(2), ComparisonOp::LessThan, json!("3")).unwrap(),
+                json!(true)
+            );
+            assert_eq!(
+                cmp(json!("10"), ComparisonOp::GreaterThanOrEqual, json!("5")).unwrap(),
+                json!(true)
+            );
         }
     }
 
@@ -816,8 +883,14 @@ mod tests {
         fn addition_subtraction_multiplication_division() {
             assert_eq!(binary(BinaryOp::Add, json!(2), json!(3)).unwrap(), json!(5));
             assert_eq!(binary(BinaryOp::Sub, json!(7), json!(2)).unwrap(), json!(5));
-            assert_eq!(binary(BinaryOp::Mul, json!(4), json!(3)).unwrap(), json!(12));
-            assert_eq!(binary(BinaryOp::Div, json!(10), json!(2)).unwrap(), json!(5));
+            assert_eq!(
+                binary(BinaryOp::Mul, json!(4), json!(3)).unwrap(),
+                json!(12)
+            );
+            assert_eq!(
+                binary(BinaryOp::Div, json!(10), json!(2)).unwrap(),
+                json!(5)
+            );
         }
 
         #[test]
@@ -829,15 +902,27 @@ mod tests {
         #[test]
         fn modulus_basic_positive_operands() {
             assert_eq!(binary(BinaryOp::Mod, json!(7), json!(3)).unwrap(), json!(1));
-            assert_eq!(binary(BinaryOp::Mod, json!(10), json!(5)).unwrap(), json!(0));
+            assert_eq!(
+                binary(BinaryOp::Mod, json!(10), json!(5)).unwrap(),
+                json!(0)
+            );
         }
 
         #[test]
         fn c_style_remainder_negative_dividend() {
             // Sign follows the left operand (dividend).
-            assert_eq!(binary(BinaryOp::Mod, json!(-5), json!(3)).unwrap(), json!(-2));
-            assert_eq!(binary(BinaryOp::Mod, json!(-7), json!(3)).unwrap(), json!(-1));
-            assert_eq!(binary(BinaryOp::Mod, json!(5), json!(-3)).unwrap(), json!(2));
+            assert_eq!(
+                binary(BinaryOp::Mod, json!(-5), json!(3)).unwrap(),
+                json!(-2)
+            );
+            assert_eq!(
+                binary(BinaryOp::Mod, json!(-7), json!(3)).unwrap(),
+                json!(-1)
+            );
+            assert_eq!(
+                binary(BinaryOp::Mod, json!(5), json!(-3)).unwrap(),
+                json!(2)
+            );
         }
 
         #[test]
@@ -899,6 +984,63 @@ mod tests {
             };
             let err = evaluate(&expr, &state).unwrap_err();
             assert!(err.contains("Addition"), "got: {err}");
+        }
+
+        #[test]
+        fn arithmetic_with_boolean_operands_returns_error() {
+            let state = lookup(json!({"flag": true}));
+
+            // true + 1
+            let expr = Expr::Binary {
+                op: BinaryOp::Add,
+                left: Box::new(Expr::Variable("flag".to_string())),
+                right: Box::new(Expr::NumberLiteral(1.0)),
+            };
+            let err = evaluate(&expr, &state).unwrap_err();
+            assert!(err.contains("Addition"), "got: {err}");
+
+            // false - 1
+            let expr = Expr::Binary {
+                op: BinaryOp::Sub,
+                left: Box::new(Expr::BoolLiteral(false)),
+                right: Box::new(Expr::NumberLiteral(1.0)),
+            };
+            let err = evaluate(&expr, &state).unwrap_err();
+            assert!(err.contains("Subtraction"), "got: {err}");
+
+            // true * 2
+            let expr = Expr::Binary {
+                op: BinaryOp::Mul,
+                left: Box::new(Expr::BoolLiteral(true)),
+                right: Box::new(Expr::NumberLiteral(2.0)),
+            };
+            let err = evaluate(&expr, &state).unwrap_err();
+            assert!(err.contains("Multiplication"), "got: {err}");
+
+            // true / 2
+            let expr = Expr::Binary {
+                op: BinaryOp::Div,
+                left: Box::new(Expr::BoolLiteral(true)),
+                right: Box::new(Expr::NumberLiteral(2.0)),
+            };
+            let err = evaluate(&expr, &state).unwrap_err();
+            assert!(err.contains("Division"), "got: {err}");
+
+            // true % 2
+            let expr = Expr::Binary {
+                op: BinaryOp::Mod,
+                left: Box::new(Expr::BoolLiteral(true)),
+                right: Box::new(Expr::NumberLiteral(2.0)),
+            };
+            let err = evaluate(&expr, &state).unwrap_err();
+            assert!(err.contains("Remainder"), "got: {err}");
+        }
+
+        #[test]
+        fn unary_minus_with_boolean_returns_error() {
+            let expr = Expr::UnaryMinus(Box::new(Expr::BoolLiteral(true)));
+            let err = evaluate(&expr, &lookup(json!({}))).unwrap_err();
+            assert!(err.contains("Unary '-'"), "got: {err}");
         }
     }
 
@@ -1044,6 +1186,135 @@ mod tests {
             };
             assert_eq!(evaluate(&expr, &state).unwrap(), json!("second"));
         }
+
+        #[test]
+        fn bracket_index_with_non_numeric_returns_null() {
+            let state = lookup(json!({"items": ["a", "b", "c"], "obj": {"x": 1}, "arr": [1]}));
+
+            // Boolean index
+            let expr = Expr::Index {
+                base: Box::new(Expr::Variable("items".to_string())),
+                index: Box::new(Expr::BoolLiteral(true)),
+            };
+            assert_eq!(evaluate(&expr, &state).unwrap(), Value::Null);
+
+            let expr = Expr::Index {
+                base: Box::new(Expr::Variable("items".to_string())),
+                index: Box::new(Expr::BoolLiteral(false)),
+            };
+            assert_eq!(evaluate(&expr, &state).unwrap(), Value::Null);
+
+            // String index
+            let expr = Expr::Index {
+                base: Box::new(Expr::Variable("items".to_string())),
+                index: Box::new(Expr::StringLiteral("0".to_string())),
+            };
+            assert_eq!(evaluate(&expr, &state).unwrap(), Value::Null);
+
+            // Null index
+            let expr = Expr::Index {
+                base: Box::new(Expr::Variable("items".to_string())),
+                index: Box::new(Expr::Variable("missing".to_string())),
+            };
+            assert_eq!(evaluate(&expr, &state).unwrap(), Value::Null);
+
+            // Object index
+            let expr = Expr::Index {
+                base: Box::new(Expr::Variable("items".to_string())),
+                index: Box::new(Expr::Variable("obj".to_string())),
+            };
+            assert_eq!(evaluate(&expr, &state).unwrap(), Value::Null);
+
+            // Array index
+            let expr = Expr::Index {
+                base: Box::new(Expr::Variable("items".to_string())),
+                index: Box::new(Expr::Variable("arr".to_string())),
+            };
+            assert_eq!(evaluate(&expr, &state).unwrap(), Value::Null);
+        }
+
+        #[test]
+        fn object_bracket_with_non_string_index_returns_null() {
+            let state = lookup(json!({"obj": {"key": "value"}}));
+
+            // Numeric index
+            let expr = Expr::Index {
+                base: Box::new(Expr::Variable("obj".to_string())),
+                index: Box::new(Expr::NumberLiteral(0.0)),
+            };
+            assert_eq!(evaluate(&expr, &state).unwrap(), Value::Null);
+
+            // Float index
+            let expr = Expr::Index {
+                base: Box::new(Expr::Variable("obj".to_string())),
+                index: Box::new(Expr::NumberLiteral(1.5)),
+            };
+            assert_eq!(evaluate(&expr, &state).unwrap(), Value::Null);
+
+            // Boolean true index
+            let expr = Expr::Index {
+                base: Box::new(Expr::Variable("obj".to_string())),
+                index: Box::new(Expr::BoolLiteral(true)),
+            };
+            assert_eq!(evaluate(&expr, &state).unwrap(), Value::Null);
+
+            // Boolean false index
+            let expr = Expr::Index {
+                base: Box::new(Expr::Variable("obj".to_string())),
+                index: Box::new(Expr::BoolLiteral(false)),
+            };
+            assert_eq!(evaluate(&expr, &state).unwrap(), Value::Null);
+
+            // Null index
+            let expr = Expr::Index {
+                base: Box::new(Expr::Variable("obj".to_string())),
+                index: Box::new(Expr::Variable("missing".to_string())),
+            };
+            assert_eq!(evaluate(&expr, &state).unwrap(), Value::Null);
+
+            // Array index
+            let expr = Expr::Index {
+                base: Box::new(Expr::Variable("obj".to_string())),
+                index: Box::new(Expr::Variable("arr".to_string())),
+            };
+            assert_eq!(evaluate(&expr, &state).unwrap(), Value::Null);
+
+            // Object index
+            let expr = Expr::Index {
+                base: Box::new(Expr::Variable("obj".to_string())),
+                index: Box::new(Expr::Variable("obj".to_string())),
+            };
+            assert_eq!(evaluate(&expr, &state).unwrap(), Value::Null);
+        }
+
+        #[test]
+        fn object_bracket_with_string_key_preserved() {
+            let state = lookup(json!({"config": {"theme": "dark", "nested": {"key": "value"}}}));
+
+            // Existing string key
+            let expr = Expr::Index {
+                base: Box::new(Expr::Variable("config".to_string())),
+                index: Box::new(Expr::StringLiteral("theme".to_string())),
+            };
+            assert_eq!(evaluate(&expr, &state).unwrap(), json!("dark"));
+
+            // Missing string key
+            let expr = Expr::Index {
+                base: Box::new(Expr::Variable("config".to_string())),
+                index: Box::new(Expr::StringLiteral("missing".to_string())),
+            };
+            assert_eq!(evaluate(&expr, &state).unwrap(), Value::Null);
+
+            // Nested object access via chained bracket
+            let expr = Expr::Index {
+                base: Box::new(Expr::Index {
+                    base: Box::new(Expr::Variable("config".to_string())),
+                    index: Box::new(Expr::StringLiteral("nested".to_string())),
+                }),
+                index: Box::new(Expr::StringLiteral("key".to_string())),
+            };
+            assert_eq!(evaluate(&expr, &state).unwrap(), json!("value"));
+        }
     }
 
     mod truthiness {
@@ -1117,6 +1388,246 @@ mod tests {
         #[test]
         fn truthy_non_empty_object() {
             assert!(is_truthy(&json!({"a": 1})));
+        }
+    }
+
+    mod date_helpers {
+        use super::*;
+
+        fn eval_expr(expr_str: &str) -> Result<Value, String> {
+            let expr = parse(expr_str).map_err(|e| e.message)?;
+            evaluate(&expr, &lookup(json!({})))
+        }
+
+        fn eval_expr_with_data(expr_str: &str, data: Value) -> Result<Value, String> {
+            let expr = parse(expr_str).map_err(|e| e.message)?;
+            evaluate(&expr, &lookup(data))
+        }
+
+        // ── Strict date validators ─────────────────────────────────────
+
+        #[test]
+        fn isdate_accepts_valid_iso_date() {
+            assert_eq!(eval_expr(r#"IsDate("2024-06-15")"#).unwrap(), json!(true));
+        }
+
+        #[test]
+        fn isdate_rejects_invalid_and_non_strings() {
+            assert_eq!(eval_expr(r#"IsDate("not-a-date")"#).unwrap(), json!(false));
+            assert_eq!(eval_expr(r#"IsDate("2024/06/15")"#).unwrap(), json!(false));
+            assert_eq!(eval_expr("IsDate(123)").unwrap(), json!(false));
+            assert_eq!(eval_expr("IsDate(null)").unwrap(), json!(false));
+            assert_eq!(eval_expr("IsDate(true)").unwrap(), json!(false));
+        }
+
+        #[test]
+        fn isdateutc_same_contract_as_isdate() {
+            assert_eq!(
+                eval_expr(r#"IsDateUtc("2024-06-15")"#).unwrap(),
+                json!(true)
+            );
+            assert_eq!(eval_expr(r#"IsDateUtc("bad")"#).unwrap(), json!(false));
+            assert_eq!(eval_expr("IsDateUtc(123)").unwrap(), json!(false));
+        }
+
+        #[test]
+        fn isdatetime_accepts_iso_datetimes() {
+            assert_eq!(
+                eval_expr(r#"IsDateTime("2024-06-15T12:30:00")"#).unwrap(),
+                json!(true)
+            );
+            assert_eq!(
+                eval_expr(r#"IsDateTime("2024-06-15T12:30:00Z")"#).unwrap(),
+                json!(true)
+            );
+            assert_eq!(
+                eval_expr(r#"IsDateTime("2024-06-15T12:30:00+02:00")"#).unwrap(),
+                json!(true)
+            );
+        }
+
+        #[test]
+        fn isdatetime_rejects_plain_dates_and_non_strings() {
+            assert_eq!(
+                eval_expr(r#"IsDateTime("2024-06-15")"#).unwrap(),
+                json!(false)
+            );
+            assert_eq!(eval_expr("IsDateTime(123)").unwrap(), json!(false));
+            assert_eq!(eval_expr("IsDateTime(null)").unwrap(), json!(false));
+        }
+
+        #[test]
+        fn isdatetimeutc_same_contract_as_isdatetime() {
+            assert_eq!(
+                eval_expr(r#"IsDateTimeUtc("2024-06-15T12:30:00Z")"#).unwrap(),
+                json!(true)
+            );
+            assert_eq!(
+                eval_expr(r#"IsDateTimeUtc("2024-06-15")"#).unwrap(),
+                json!(false)
+            );
+        }
+
+        // ── Relative date validators (deterministic false cases) ───────
+
+        #[test]
+        fn istoday_returns_false_for_distant_dates() {
+            // Using a date far in the past so it is never "today"
+            assert_eq!(eval_expr(r#"IsToday("1900-01-01")"#).unwrap(), json!(false));
+            assert_eq!(eval_expr(r#"IsToday("2100-12-31")"#).unwrap(), json!(false));
+        }
+
+        #[test]
+        fn istoday_rejects_non_strings_and_null() {
+            assert_eq!(eval_expr("IsToday(123)").unwrap(), json!(false));
+            assert_eq!(eval_expr("IsToday(null)").unwrap(), json!(false));
+            assert_eq!(eval_expr("IsToday(true)").unwrap(), json!(false));
+        }
+
+        #[test]
+        fn istodayutc_returns_false_for_distant_dates() {
+            assert_eq!(
+                eval_expr(r#"IsTodayUtc("1900-01-01")"#).unwrap(),
+                json!(false)
+            );
+        }
+
+        #[test]
+        fn isyesterday_returns_false_for_distant_dates() {
+            assert_eq!(
+                eval_expr(r#"IsYesterday("1900-01-01")"#).unwrap(),
+                json!(false)
+            );
+        }
+
+        #[test]
+        fn isyesterdayutc_returns_false_for_distant_dates() {
+            assert_eq!(
+                eval_expr(r#"IsYesterdayUtc("1900-01-01")"#).unwrap(),
+                json!(false)
+            );
+        }
+
+        #[test]
+        fn istomorrow_returns_false_for_distant_dates() {
+            assert_eq!(
+                eval_expr(r#"IsTomorrow("1900-01-01")"#).unwrap(),
+                json!(false)
+            );
+        }
+
+        #[test]
+        fn istomorrowutc_returns_false_for_distant_dates() {
+            assert_eq!(
+                eval_expr(r#"IsTomorrowUtc("1900-01-01")"#).unwrap(),
+                json!(false)
+            );
+        }
+
+        #[test]
+        fn isthismonth_returns_false_for_distant_dates() {
+            assert_eq!(
+                eval_expr(r#"IsThisMonth("1900-01-01")"#).unwrap(),
+                json!(false)
+            );
+            assert_eq!(
+                eval_expr(r#"IsThisMonth("2100-12-31")"#).unwrap(),
+                json!(false)
+            );
+        }
+
+        #[test]
+        fn isthismonthutc_returns_false_for_distant_dates() {
+            assert_eq!(
+                eval_expr(r#"IsThisMonthUtc("1900-01-01")"#).unwrap(),
+                json!(false)
+            );
+        }
+
+        #[test]
+        fn isthisyear_returns_false_for_distant_dates() {
+            assert_eq!(
+                eval_expr(r#"IsThisYear("1900-01-01")"#).unwrap(),
+                json!(false)
+            );
+            assert_eq!(
+                eval_expr(r#"IsThisYear("2100-12-31")"#).unwrap(),
+                json!(false)
+            );
+        }
+
+        #[test]
+        fn isthisyearutc_returns_false_for_distant_dates() {
+            assert_eq!(
+                eval_expr(r#"IsThisYearUtc("1900-01-01")"#).unwrap(),
+                json!(false)
+            );
+        }
+
+        #[test]
+        fn relative_validators_accept_datetime_strings_and_return_bool() {
+            // Verify datetime strings parse without error and return boolean
+            let result = eval_expr(r#"IsToday("1900-01-01T00:00:00")"#).unwrap();
+            assert!(result.is_boolean());
+            let result = eval_expr(r#"IsTodayUtc("1900-01-01T00:00:00Z")"#).unwrap();
+            assert!(result.is_boolean());
+        }
+
+        #[test]
+        fn all_date_helper_names_are_dispatchable() {
+            // Smoke test: every required helper name parses and evaluates
+            let helpers = [
+                r#"IsDate("2024-06-15")"#,
+                r#"IsDateUtc("2024-06-15")"#,
+                r#"IsDateTime("2024-06-15T12:00:00")"#,
+                r#"IsDateTimeUtc("2024-06-15T12:00:00Z")"#,
+                r#"IsToday("1900-01-01")"#,
+                r#"IsTodayUtc("1900-01-01")"#,
+                r#"IsYesterday("1900-01-01")"#,
+                r#"IsYesterdayUtc("1900-01-01")"#,
+                r#"IsTomorrow("1900-01-01")"#,
+                r#"IsTomorrowUtc("1900-01-01")"#,
+                r#"IsThisMonth("1900-01-01")"#,
+                r#"IsThisMonthUtc("1900-01-01")"#,
+                r#"IsThisYear("1900-01-01")"#,
+                r#"IsThisYearUtc("1900-01-01")"#,
+            ];
+            for expr_str in &helpers {
+                let result = eval_expr(expr_str);
+                assert!(
+                    result.is_ok(),
+                    "{expr_str} should parse and evaluate, got: {result:?}"
+                );
+                assert!(
+                    result.unwrap().is_boolean(),
+                    "{expr_str} should return a boolean"
+                );
+            }
+        }
+
+        #[test]
+        fn date_helpers_work_with_variables() {
+            let data = json!({
+                "date_str": "2024-06-15",
+                "bad_str": "not-a-date",
+                "distant": "1900-01-01"
+            });
+            assert_eq!(
+                eval_expr_with_data("IsDate(date_str)", data.clone()).unwrap(),
+                json!(true)
+            );
+            assert_eq!(
+                eval_expr_with_data("IsDate(bad_str)", data.clone()).unwrap(),
+                json!(false)
+            );
+            assert_eq!(
+                eval_expr_with_data("IsToday(distant)", data.clone()).unwrap(),
+                json!(false)
+            );
+            assert_eq!(
+                eval_expr_with_data("IsThisYear(distant)", data.clone()).unwrap(),
+                json!(false)
+            );
         }
     }
 }

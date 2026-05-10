@@ -741,3 +741,5 @@ For command-line usage, see the [darkmatter-cli](../cli/) package which provides
 - **biscuit-terminal**: Terminal detection, image rendering, mermaid diagrams, table rendering
 - **biscuit-hash**: Content hashing (xxHash) for TOC, delta, and mermaid caching
 - **serde**: Frontmatter serialization
+- **chrono**: Date/time handling for expression validators (reused; no new dependency added)
+- **sniff**: System detection for timezone-aware date validators (reused; no new dependency added)

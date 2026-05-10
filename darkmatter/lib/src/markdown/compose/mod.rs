@@ -731,7 +731,8 @@ impl Markdown {
             }
             ComposeOperation::PageBlocks => self.run_page_blocks_stage(state, report),
             ComposeOperation::Interpolation => {
-                report.interpolations_applied = self.run_interpolation_stage(state, options)?;
+                report.interpolations_applied =
+                    self.run_interpolation_stage(state, options, report)?;
                 Ok(())
             }
             ComposeOperation::ShellExpansion => {
@@ -1096,6 +1097,7 @@ impl Markdown {
         &mut self,
         state: &EffectiveState,
         options: &ComposeOptions,
+        report: &mut ComposeReport,
     ) -> MarkdownResult<usize> {
         use interpolation::{Evaluator, ScanMode, interpolate_text};
 
@@ -1117,6 +1119,7 @@ impl Markdown {
         if result.replacements > 0 {
             self.content = result.output;
         }
+        report.warnings.extend(result.warnings);
         debug!(
             count = result.replacements,
             "compose: interpolations applied"

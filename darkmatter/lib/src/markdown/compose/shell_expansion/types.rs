@@ -92,9 +92,7 @@ impl ShellDirective {
 
     /// Returns true if this directive contains a chain (multiple actions).
     pub fn is_chain(&self) -> bool {
-        self.pipeline
-            .as_ref()
-            .is_some_and(|p| p.actions.len() > 1)
+        self.pipeline.as_ref().is_some_and(|p| p.actions.len() > 1)
     }
 }
 
@@ -123,7 +121,10 @@ impl ShellPipeline {
 
     /// Returns all executables in the pipeline.
     pub fn executables(&self) -> Vec<&str> {
-        self.actions.iter().map(|a| a.command.executable.as_str()).collect()
+        self.actions
+            .iter()
+            .map(|a| a.command.executable.as_str())
+            .collect()
     }
 
     /// Returns a display string for the whole pipeline including chain

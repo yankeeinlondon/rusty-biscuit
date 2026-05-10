@@ -46,7 +46,6 @@ fn require_number(name: &str, value: &Value) -> Result<f64, String> {
         Value::Number(n) => n
             .as_f64()
             .ok_or_else(|| format!("{name}() received an unrepresentable number")),
-        Value::Bool(b) => Ok(if *b { 1.0 } else { 0.0 }),
         _ => Err(format!("{name}() requires numeric arguments")),
     }
 }
@@ -464,7 +463,11 @@ pub fn is_yesterday_utc(args: &[Value]) -> Result<Value, String> {
 
 pub fn is_tomorrow(args: &[Value]) -> Result<Value, String> {
     require_args("IsTomorrow", args, 1)?;
-    Ok(Value::Bool(is_tomorrow_with(&args[0], today_local(), false)))
+    Ok(Value::Bool(is_tomorrow_with(
+        &args[0],
+        today_local(),
+        false,
+    )))
 }
 
 pub fn is_tomorrow_utc(args: &[Value]) -> Result<Value, String> {
@@ -661,6 +664,23 @@ mod tests {
             let err = abs_fn(&v(json!("nope"))).unwrap_err();
             assert!(err.contains("abs"));
         }
+
+        #[test]
+        fn math_with_boolean_returns_error() {
+            let err = min_fn(&vv(json!(true), json!(5))).unwrap_err();
+            assert!(err.contains("min"), "got: {err}");
+            let err = max_fn(&vv(json!(false), json!(5))).unwrap_err();
+            assert!(err.contains("max"), "got: {err}");
+            let err = abs_fn(&v(json!(true))).unwrap_err();
+            assert!(err.contains("abs"), "got: {err}");
+        }
+
+        #[test]
+        fn math_with_null_propagates() {
+            assert_eq!(min_fn(&vv(json!(null), json!(5))).unwrap(), json!(null));
+            assert_eq!(max_fn(&vv(json!(2), json!(null))).unwrap(), json!(null));
+            assert_eq!(abs_fn(&v(json!(null))).unwrap(), json!(null));
+        }
     }
 
     mod fn_collection {
@@ -851,7 +871,10 @@ mod tests {
             assert_eq!(is_date(&v(json!("2024/06/15"))).unwrap(), json!(false));
             assert_eq!(is_date(&v(json!("06-15-2024"))).unwrap(), json!(false));
             assert_eq!(is_date(&v(json!("2024-13-01"))).unwrap(), json!(false));
-            assert_eq!(is_date(&v(json!("2024-06-15T00:00:00"))).unwrap(), json!(false));
+            assert_eq!(
+                is_date(&v(json!("2024-06-15T00:00:00"))).unwrap(),
+                json!(false)
+            );
         }
 
         #[test]

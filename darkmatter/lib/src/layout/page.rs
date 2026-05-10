@@ -325,10 +325,7 @@ impl DarkmatterPage {
     }
 
     /// Pass through to [`TerminalOptions::dim_mode`].
-    pub fn with_dim_mode(
-        mut self,
-        mode: crate::markdown::output::terminal::DimMode,
-    ) -> Self {
+    pub fn with_dim_mode(mut self, mode: crate::markdown::output::terminal::DimMode) -> Self {
         self.options.dim_mode = mode;
         self
     }
@@ -559,7 +556,9 @@ mod tests {
     #[test]
     fn validate_horizontal_space_rejects_overflow() {
         let term = Terminal::new_optimistic(10);
-        let page = DarkmatterPage::new(&term).with_margin_x(5).with_padding_x(1);
+        let page = DarkmatterPage::new(&term)
+            .with_margin_x(5)
+            .with_padding_x(1);
         let err = page.validate_horizontal_space().unwrap_err();
         assert_eq!(
             err,
@@ -630,10 +629,7 @@ mod tests {
         let page = page()
             .with_terminal_options(custom)
             .with_image_mode(TerminalImageMode::Force);
-        assert_eq!(
-            page.terminal_options().image_mode,
-            TerminalImageMode::Force
-        );
+        assert_eq!(page.terminal_options().image_mode, TerminalImageMode::Force);
     }
 
     #[test]

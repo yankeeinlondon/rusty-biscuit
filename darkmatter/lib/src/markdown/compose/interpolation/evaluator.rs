@@ -1844,15 +1844,9 @@ mod tests {
         #[test]
         fn less_than_or_equal_in_ternary() {
             let state = create_test_state(json!({ "count": 3 }));
-            assert_eq!(
-                render(&state, r#"count <= 3 ? "small" : "big""#),
-                "small"
-            );
+            assert_eq!(render(&state, r#"count <= 3 ? "small" : "big""#), "small");
             let state = create_test_state(json!({ "count": 4 }));
-            assert_eq!(
-                render(&state, r#"count <= 3 ? "small" : "big""#),
-                "big"
-            );
+            assert_eq!(render(&state, r#"count <= 3 ? "small" : "big""#), "big");
         }
 
         #[test]

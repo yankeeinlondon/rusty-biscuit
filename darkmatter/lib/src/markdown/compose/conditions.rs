@@ -885,9 +885,7 @@ mod tests {
         #[test]
         fn bracket_object_key_in_when_clause() {
             let state = test_state(json!({ "config": { "theme": "dark" } }));
-            assert!(evaluate_condition(
-                r#"config["theme"] == 'dark'"#, &state, 1
-            ).unwrap());
+            assert!(evaluate_condition(r#"config["theme"] == 'dark'"#, &state, 1).unwrap());
         }
 
         #[test]
@@ -920,29 +918,17 @@ mod tests {
         #[test]
         fn string_predicates_in_when_clause() {
             let state = test_state(json!({ "title": "Hello World" }));
-            assert!(evaluate_condition(
-                r#"StartsWith(title, "Hello")"#, &state, 1
-            ).unwrap());
-            assert!(evaluate_condition(
-                r#"EndsWith(title, "World")"#, &state, 1
-            ).unwrap());
-            assert!(!evaluate_condition(
-                r#"StartsWith(title, "world")"#, &state, 1
-            ).unwrap());
+            assert!(evaluate_condition(r#"StartsWith(title, "Hello")"#, &state, 1).unwrap());
+            assert!(evaluate_condition(r#"EndsWith(title, "World")"#, &state, 1).unwrap());
+            assert!(!evaluate_condition(r#"StartsWith(title, "world")"#, &state, 1).unwrap());
         }
 
         #[test]
         fn string_mutations_in_when_clause() {
             let state = test_state(json!({ "title": "Hello World" }));
-            assert!(evaluate_condition(
-                "Lower(title) == 'hello world'", &state, 1
-            ).unwrap());
-            assert!(evaluate_condition(
-                "KebabCase(title) == 'hello-world'", &state, 1
-            ).unwrap());
-            assert!(evaluate_condition(
-                "Upper(title) == 'HELLO WORLD'", &state, 1
-            ).unwrap());
+            assert!(evaluate_condition("Lower(title) == 'hello world'", &state, 1).unwrap());
+            assert!(evaluate_condition("KebabCase(title) == 'hello-world'", &state, 1).unwrap());
+            assert!(evaluate_condition("Upper(title) == 'HELLO WORLD'", &state, 1).unwrap());
         }
 
         #[test]
@@ -1022,8 +1008,17 @@ mod tests {
             let block = err.status_block(&terminal);
             let rendered = format!("{block:?}");
             for needle in [
-                "<=", "+", "*", "%", "[]", "min, max, abs", "first, last",
-                "IsString", "StartsWith", "KebabCase", "IsDate",
+                "<=",
+                "+",
+                "*",
+                "%",
+                "[]",
+                "min, max, abs",
+                "first, last",
+                "IsString",
+                "StartsWith",
+                "KebabCase",
+                "IsDate",
             ] {
                 assert!(
                     rendered.contains(needle),

@@ -378,14 +378,8 @@ mod tests {
         // We simulate this by having a frontmatter value that resolves to itself.
         let state = make_state(json!({"self_ref": "{{self_ref}}"}));
         let evaluator = Evaluator::new(&state);
-        let result = interpolate_text(
-            "{{ self_ref }}",
-            &evaluator,
-            ScanMode::Plain,
-            false,
-            "test",
-        )
-        .unwrap();
+        let result =
+            interpolate_text("{{ self_ref }}", &evaluator, ScanMode::Plain, false, "test").unwrap();
         // After 10 iterations the depth limit is hit and a warning is emitted.
         assert_eq!(result.replacements, 10);
         assert_eq!(result.warnings.len(), 1);
