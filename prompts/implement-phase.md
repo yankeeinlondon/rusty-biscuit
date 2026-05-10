@@ -2,6 +2,7 @@
 phase: 1
 total_phases: ""
 plan: ""
+area: "{{ctx.current_context_area}}"
 success: 
     say: "Phase {{phase}} of the plan was implemented"
     message: "✅ phase **{{phase}}** (_of {{total_phases}}_) of the plan `{{plan}}` successfully completed  in the **{{ctx.current_package_area}}** _package area_."
@@ -19,7 +20,7 @@ loop:
 # Implement Phase {{phase}}
 ::end-block
 
-Your task is to implement phase {{phase}} of the plan found in {{plan}}.
+Your task is to implement phase {{phase}} of the plan found in '@{{area}}/{{plan}}'.
 
 ::block when="memory"
 > **NOTE:** for context you should read the lessons learned discovered in earlier stages of this plan. You will find these lessons learned in memory/{{memory}}.md. 
