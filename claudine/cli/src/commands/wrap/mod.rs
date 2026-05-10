@@ -161,6 +161,7 @@ fn fallback_wrap_startup(cwd: &Path) -> WrapStartupDetection {
             repo_root: None,
             package_area_root: None,
             package_root: None,
+            agent: None,
         },
         launch_workspace: claudine::composition::LaunchWorkspaceContext {
             launch_cwd: cwd.to_path_buf(),
@@ -335,16 +336,6 @@ fn run_provider_wrapper_inner(
             provider
         )
     })?;
-
-    // SAFETY: this runs at subcommand entry on the main task before any
-    // child threads, sub-renders, or hooks have been spawned. No concurrent
-    // env reads exist at this point, so mutating the process env upholds
-    // Rust 2024's `std::env::set_var` safety contract. Setting AGENT
-    // here lets `{{env.AGENT}}` resolve in any prompt rendered by the
-    // parent (system prompt, dispatch templates) before the child launch.
-    unsafe {
-        std::env::set_var("AGENT", profile.agent_env());
-    }
 
     let cwd = std::env::current_dir()?;
 
@@ -626,6 +617,11 @@ fn run_provider_wrapper_inner(
         append_file: args.append_system_prompt.clone(),
         replace_file: args.replace_system_prompt.clone(),
     };
+    // Plumb the provider slug into the launch context so system-prompt
+    // templates that reference {{env.AGENT}} resolve correctly without
+    // mutating the parent process env.
+    let mut launch_context = launch_context;
+    launch_context.agent = Some(profile.agent_env().to_string());
     let effective_sp = claudine::system_prompt::resolve_and_prepare_for_session(
         &sp_args,
         &launch_context,
@@ -634,12 +630,17 @@ fn run_provider_wrapper_inner(
 
     let mut sp_artifacts: Vec<system_prompt::SystemPromptArtifact> = Vec::new();
 
+    let scoped_tmp = system_prompt::scoped_tmp_dir(&launch_workspace);
+    system_prompt::maybe_gitignore_claudine_tmp(
+        launch_workspace.repo_root.as_deref().unwrap_or(&launch_workspace.launch_cwd),
+    );
+
     match &effective_sp {
         claudine::system_prompt::EffectiveSystemPrompt::None
         | claudine::system_prompt::EffectiveSystemPrompt::Disabled { .. } => {}
         claudine::system_prompt::EffectiveSystemPrompt::Ready(prepared) => {
             let application =
-                profile.apply_system_prompt(prepared, !non_interactive_requested, &cwd)?;
+                profile.apply_system_prompt(prepared, !non_interactive_requested, &cwd, &scoped_tmp)?;
             child_args.extend(application.args);
             env_overrides.extend(
                 application

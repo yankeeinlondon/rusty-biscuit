@@ -524,21 +524,16 @@ fn refresh_for_prepared_model_validation(
     );
 }
 
-/// Inject `AGENT` into both the parent process env and the supplied
-/// `env_overrides` map so composition templates and downstream
-/// system-prompt rendering see the chosen provider's slug.
+/// Inject `AGENT` into the supplied `env_overrides` map so composition
+/// templates and downstream system-prompt rendering see the chosen provider's
+/// slug. The wrapper no longer mutates the parent process env for AGENT;
+/// child processes receive it through `build_child_env_with_launch` and
+/// composition contexts receive it through `env_overrides`.
 pub(crate) fn install_agent_env_for_composition(
     target: &ResolvedExecutionTarget,
     env_overrides: &mut std::collections::BTreeMap<String, String>,
 ) {
     let slug = target.provider.as_slug().to_string();
-    // SAFETY: composition entry runs on the main task before any worker
-    // threads or hooks have spawned. Setting AGENT here is the only
-    // mutation of the parent process env at this point, satisfying
-    // Rust 2024's `set_var` safety contract.
-    unsafe {
-        std::env::set_var("AGENT", &slug);
-    }
     env_overrides.insert("AGENT".to_string(), slug);
 }
 
@@ -829,7 +824,7 @@ pub(crate) fn execute_composition_request_inner(
         &[],
         needs_repo_shadow_home,
         needs_mcp_shadow_home || needs_repo_shadow_home,
-        launch_workspace,
+        launch_workspace.clone(),
     )?;
 
     // -- Operation env override -----------------------------------------------
@@ -1060,7 +1055,7 @@ pub(crate) fn execute_composition_request_inner(
     record_substage(&mut perf_collector, &mut last_checkpoint, "argv assembly");
 
     enforce_repo_launch_detection(request.repo, request.prep_launch_detection_error.as_deref())?;
-    let launch_context = if let Some(prep) = request.prep_launch_context.as_ref() {
+    let mut launch_context = if let Some(prep) = request.prep_launch_context.as_ref() {
         // Phase fix (2026-05-09-slow-prep): reuse the launch_context computed
         // by the shared sniff scan in `CompositionPrepContext` instead of
         // re-running `sniff::detect_with_plan` here.
@@ -1084,15 +1079,25 @@ pub(crate) fn execute_composition_request_inner(
                     repo_root: None,
                     package_area_root: None,
                     package_root: None,
+                    agent: None,
                 }
             }
         }
     };
+    // Plumb the provider slug into the launch context so system-prompt
+    // templates that reference {{env.AGENT}} resolve correctly without
+    // mutating the parent process env.
+    launch_context.agent = Some(target.provider.as_slug().to_string());
     let effective_sp = claudine::system_prompt::resolve_and_prepare_for_session(
         &request.system_prompt_args,
         &launch_context,
         effective_non_interactive,
     )?;
+
+    let scoped_tmp = super::system_prompt::scoped_tmp_dir(&launch_workspace);
+    super::system_prompt::maybe_gitignore_claudine_tmp(
+        launch_workspace.repo_root.as_deref().unwrap_or(&launch_workspace.launch_cwd),
+    );
 
     let mut sp_artifacts: Vec<super::system_prompt::SystemPromptArtifact> = Vec::new();
 
@@ -1101,7 +1106,7 @@ pub(crate) fn execute_composition_request_inner(
         | claudine::system_prompt::EffectiveSystemPrompt::Disabled { .. } => {}
         claudine::system_prompt::EffectiveSystemPrompt::Ready(prepared) => {
             let application =
-                profile.apply_system_prompt(prepared, !effective_non_interactive, &launch_cwd)?;
+                profile.apply_system_prompt(prepared, !effective_non_interactive, &launch_cwd, &scoped_tmp)?;
             child_args.extend(application.args);
             for (k, v) in application.env {
                 if k == "HOME" && env_plan.env.contains_key(std::ffi::OsStr::new("HOME")) {

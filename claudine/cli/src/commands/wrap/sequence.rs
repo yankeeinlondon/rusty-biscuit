@@ -313,20 +313,12 @@ pub(crate) fn execute_sequence(
             effective_fail_fast.to_string(),
         );
         // Inject AGENT for this step using the resolved target so
-        // {{env.AGENT}} in the body composes correctly. The mutation of
-        // the parent process env happens once below for step 0, then
-        // gets refreshed each step in case earlier steps changed it.
+        // {{env.AGENT}} in the body composes correctly.
         let target = resolved_targets
             .get(step_index)
             .ok_or_else(|| eyre!("missing resolved target for step {}", step_index + 1))?;
         let slug = target.provider.as_slug().to_string();
         env_overrides.insert("AGENT".to_string(), slug.clone());
-        // SAFETY: sequence orchestrator runs on the main task; per-step
-        // updates of this single env var precede any composition or
-        // child-process spawn for that step.
-        unsafe {
-            std::env::set_var("AGENT", &slug);
-        }
 
         let compose_options = {
             let mut ctx = darkmatter::markdown::compose::ComposeContext::capture();
