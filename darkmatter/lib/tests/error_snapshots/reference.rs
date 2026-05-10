@@ -10,7 +10,7 @@ use crate::helpers::{assert_contains_all, render, test_ctx_lines};
 #[test]
 fn parse_directive_shows_line_and_syntax_hint() {
     let err = ReferenceError::ParseDirective {
-        ctx: test_ctx_lines(8, "docs/root.md"),
+        ctx: Box::new(test_ctx_lines(8, "docs/root.md")),
         line: 5,
         message: "unexpected end".into(),
         directive_text: "::file ./broken.md when=".into(),

@@ -12,7 +12,7 @@ use crate::helpers::{assert_contains_all, render, render_with_ansi, test_ctx_lin
 #[test]
 fn parse_directive_shows_line_and_hint() {
     let err = PageBlockError::ParseDirective {
-        ctx: test_ctx_lines(15, "test.md"),
+        ctx: Box::new(test_ctx_lines(15, "test.md")),
         line: 12,
         message: "unexpected token".into(),
     };
@@ -34,7 +34,7 @@ fn parse_directive_shows_line_and_hint() {
 #[test]
 fn unmatched_end_hints_at_block() {
     let err = PageBlockError::UnmatchedEnd {
-        ctx: test_ctx_lines(25, "test.md"),
+        ctx: Box::new(test_ctx_lines(25, "test.md")),
         line: 20,
     };
     let out = render(&err);
@@ -54,7 +54,7 @@ fn unterminated_block_shows_opening_line() {
         Arc::from(content),
     );
     let err = PageBlockError::UnterminatedBlock {
-        ctx,
+        ctx: Box::new(ctx),
         opening_line: 8,
         opening_text: "::block when=\"condition\"".to_string(),
     };
@@ -91,7 +91,7 @@ fn unterminated_block_emits_ansi_styling() {
         Arc::from(content),
     );
     let err = PageBlockError::UnterminatedBlock {
-        ctx,
+        ctx: Box::new(ctx),
         opening_line: 8,
         opening_text: "::block when=\"condition\"".to_string(),
     };
@@ -112,13 +112,13 @@ fn unterminated_block_emits_ansi_styling() {
 
 #[test]
 fn condition_delegates_inner_block() {
-    let err = PageBlockError::Condition(ConditionError::Parse {
-        ctx: test_ctx_lines(8, "test.md"),
+    let err = PageBlockError::Condition(Box::new(ConditionError::Parse {
+        ctx: Box::new(test_ctx_lines(8, "test.md")),
         expr: "a &&& b".into(),
         line: 4,
         message: "unexpected token".into(),
         span: 3..4,
-    });
+    }));
     let out = render(&err);
     assert_contains_all(
         &out,

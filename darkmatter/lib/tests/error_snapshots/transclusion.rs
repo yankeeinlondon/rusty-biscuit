@@ -10,7 +10,7 @@ use crate::helpers::{assert_contains_all, render, test_ctx, test_ctx_lines};
 #[test]
 fn parse_directive_has_syntax_hint() {
     let err = TransclusionError::ParseDirective {
-        ctx: test_ctx_lines(8, "doc.md"),
+        ctx: Box::new(test_ctx_lines(8, "doc.md")),
         line: 3,
         message: "unexpected token".into(),
         caret_col: Some(8),
@@ -33,7 +33,7 @@ fn parse_directive_has_syntax_hint() {
 fn invalid_reference_shows_reference() {
     use darkmatter::markdown::compose::transclusion::DirectiveKind;
     let err = TransclusionError::InvalidReference {
-        ctx: test_ctx_lines(5, "doc.md"),
+        ctx: Box::new(test_ctx_lines(5, "doc.md")),
         reference: "//weird".into(),
         line: 2,
         directive_kind: DirectiveKind::File,
@@ -152,7 +152,7 @@ fn max_depth_exceeded_shows_limit() {
 #[test]
 fn condition_eval_shows_expr_and_state_hint() {
     let err = TransclusionError::ConditionEval {
-        ctx: test_ctx_lines(15, "doc.md"),
+        ctx: Box::new(test_ctx_lines(15, "doc.md")),
         expr: "length(items) > 0".into(),
         line: 10,
         message: "items not found".into(),
@@ -174,7 +174,7 @@ fn condition_eval_shows_expr_and_state_hint() {
 #[test]
 fn condition_parse_lists_operators_and_helpers() {
     let err = TransclusionError::ConditionParse {
-        ctx: test_ctx_lines(8, "doc.md"),
+        ctx: Box::new(test_ctx_lines(8, "doc.md")),
         expr: "a &&& b".into(),
         line: 4,
         message: "unexpected token".into(),
@@ -228,7 +228,7 @@ fn url_execution_disabled_shows_url() {
 #[test]
 fn invalid_frontmatter_assignment_shows_cta() {
     let err = TransclusionError::InvalidFrontmatterAssignment {
-        ctx: test_ctx_lines(8, "doc.md"),
+        ctx: Box::new(test_ctx_lines(8, "doc.md")),
         line: 5,
         raw: "bogus".into(),
         reason: "expected JSON5 object".into(),
@@ -249,7 +249,7 @@ fn invalid_frontmatter_assignment_shows_cta() {
 #[test]
 fn invalid_reassigned_frontmatter_property_shows_cta() {
     let err = TransclusionError::InvalidReassignedFrontmatterProperty {
-        ctx: test_ctx_lines(8, "doc.md"),
+        ctx: Box::new(test_ctx_lines(8, "doc.md")),
         line: 6,
         name: "title".into(),
     };

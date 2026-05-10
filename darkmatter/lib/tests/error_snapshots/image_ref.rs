@@ -47,7 +47,7 @@ fn malformed_html_includes_message() {
 #[test]
 fn malformed_markdown_includes_message_input_and_caret() {
     let err = ImageRefError::MalformedMarkdown {
-        ctx: test_ctx("![alt] image.png\n", "doc.md"),
+        ctx: Box::new(test_ctx("![alt] image.png\n", "doc.md")),
         message: "expected ( after alt".into(),
         caret: Some(7),
     };

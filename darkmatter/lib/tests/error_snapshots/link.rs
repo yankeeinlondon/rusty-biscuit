@@ -32,7 +32,7 @@ fn malformed_html_includes_message() {
 #[test]
 fn malformed_markdown_includes_message_input_and_caret() {
     let err = LinkError::MalformedMarkdown {
-        ctx: test_ctx("[label] target\n", "doc.md"),
+        ctx: Box::new(test_ctx("[label] target\n", "doc.md")),
         message: "expected ( after display text".into(),
         caret: Some(8),
     };

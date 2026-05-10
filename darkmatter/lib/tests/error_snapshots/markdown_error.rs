@@ -106,7 +106,7 @@ fn transclusion_delegation_surfaces_inner_block_only() {
             (PathBuf::from("a.md"), 3),
         ],
     };
-    let err = MarkdownError::Transclusion(inner);
+    let err = MarkdownError::Transclusion(Box::new(inner));
     let out = render(&err);
     assert_contains_all(
         &out,
