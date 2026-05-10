@@ -117,7 +117,10 @@ impl biscuit_terminal::errors::BlockError for LinkError {
 
             Self::InvalidTarget { value } => StatusBlock::new(StatusState::Error)
                 .error_header(ErrorHeader::new("LinkError", "invalid target"))
-                .body(format!("<dim>Target:</dim> <cyan>{value}</cyan>"))
+                .body(format!(
+                    "<dim>Target:</dim> <cyan>{}</cyan>",
+                    value.replace('_', "\\_"),
+                ))
                 .hint(
                     "Valid targets: <cyan>\\_self</cyan>, <cyan>\\_blank</cyan>, <cyan>\\_parent</cyan>, <cyan>\\_top</cyan>, or a named context.",
                 ),

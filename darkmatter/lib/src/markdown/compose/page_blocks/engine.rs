@@ -177,7 +177,13 @@ mod tests {
             .build()
             .unwrap();
 
-        let regions = parse_page_blocks(content).unwrap();
+        use biscuit_terminal::errors::SourceContext;
+        let source = SourceContext::new(
+            std::path::PathBuf::from("/test.md"),
+            std::path::PathBuf::from("test.md"),
+            std::sync::Arc::from(content),
+        );
+        let regions = parse_page_blocks(content, source).unwrap();
         let mut report = ComposeReport::default();
         let output = render_page_blocks(content, &regions, &state, &mut report).unwrap();
         assert_eq!(output, "agent content\n");
@@ -223,6 +229,7 @@ mod tests {
 
     #[test]
     fn condition_parse_error_propagates() {
+        use biscuit_terminal::errors::SourceContext;
         let content = "::block when=\"==\"\nbody\n::end-block\n";
         let state = state_with(json!({}));
         let source = SourceContext::new(

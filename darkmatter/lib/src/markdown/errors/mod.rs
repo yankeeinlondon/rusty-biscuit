@@ -204,10 +204,18 @@ mod tests {
 
     #[test]
     fn page_block_unterminated_has_opening_line() {
+        // Build content where line 14 contains the opening directive so the
+        // excerpt actually surfaces the line number.
+        let mut content = String::new();
+        for n in 1..14 {
+            content.push_str(&format!("line {n}\n"));
+        }
+        content.push_str("::block when=\"x\"\nbody\n");
+
         let ctx = biscuit_terminal::errors::SourceContext::new(
             std::path::PathBuf::from("/test.md"),
             std::path::PathBuf::from("test.md"),
-            "::block when=\"x\"\nbody\n",
+            content,
         );
         let err = PageBlockError::UnterminatedBlock {
             ctx,
