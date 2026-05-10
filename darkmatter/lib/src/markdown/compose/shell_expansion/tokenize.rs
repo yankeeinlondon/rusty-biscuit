@@ -305,7 +305,10 @@ pub fn tokenize(input: &str) -> Result<Vec<ShellToken>, ShellExpansionError> {
     Ok(tokens)
 }
 
-fn flush_token(tokens: &mut Vec<ShellToken>, current: &mut String) -> Result<(), ShellExpansionError> {
+fn flush_token(
+    tokens: &mut Vec<ShellToken>,
+    current: &mut String,
+) -> Result<(), ShellExpansionError> {
     if !current.is_empty() {
         tokens.push(ShellToken::Word(current.clone()));
         current.clear();
@@ -323,8 +326,17 @@ fn skip_whitespace(chars: &mut std::iter::Peekable<std::str::Chars>) {
 fn read_bare_word(chars: &mut std::iter::Peekable<std::str::Chars>) -> String {
     let mut word = String::new();
     while let Some(&ch) = chars.peek() {
-        if ch.is_whitespace() || ch == '&' || ch == '|' || ch == ';' || ch == '<' || ch == '>'
-            || ch == '\'' || ch == '"' || ch == '`' || ch == '\\' || ch == '$'
+        if ch.is_whitespace()
+            || ch == '&'
+            || ch == '|'
+            || ch == ';'
+            || ch == '<'
+            || ch == '>'
+            || ch == '\''
+            || ch == '"'
+            || ch == '`'
+            || ch == '\\'
+            || ch == '$'
         {
             break;
         }
@@ -556,14 +568,24 @@ mod tests {
     fn tokenize_unterminated_single_quote_fails() {
         let result = tokenize("echo 'unterminated");
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("Unterminated single quote"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("Unterminated single quote")
+        );
     }
 
     #[test]
     fn tokenize_unterminated_double_quote_fails() {
         let result = tokenize(r#"echo "unterminated"#);
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("Unterminated double quote"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("Unterminated double quote")
+        );
     }
 
     #[test]
@@ -584,21 +606,36 @@ mod tests {
     fn tokenize_input_redirect_fails() {
         let result = tokenize("cat < file.txt");
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("Input redirection"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("Input redirection")
+        );
     }
 
     #[test]
     fn tokenize_append_redirect_fails() {
         let result = tokenize("echo hello >> file.txt");
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("Append redirection"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("Append redirection")
+        );
     }
 
     #[test]
     fn tokenize_dollar_substitution_fails() {
         let result = tokenize("echo $(date)");
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("Command substitution"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("Command substitution")
+        );
     }
 
     #[test]
@@ -617,7 +654,12 @@ mod tests {
     fn tokenize_trailing_backslash_fails() {
         let result = tokenize("echo hello\\");
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("Trailing backslash"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("Trailing backslash")
+        );
     }
 
     #[test]
@@ -756,14 +798,20 @@ mod tests {
     fn pipeline_with_stdout_null() {
         let tokens = tokenize("ls > /dev/null").unwrap();
         let pipeline = parse_pipeline(&tokens).unwrap();
-        assert_eq!(pipeline.actions[0].command.redirection.stdout, StdoutTarget::Null);
+        assert_eq!(
+            pipeline.actions[0].command.redirection.stdout,
+            StdoutTarget::Null
+        );
     }
 
     #[test]
     fn pipeline_with_stderr_to_stdout() {
         let tokens = tokenize("cmd 2>&1").unwrap();
         let pipeline = parse_pipeline(&tokens).unwrap();
-        assert_eq!(pipeline.actions[0].command.redirection.stderr, StderrTarget::ToStdout);
+        assert_eq!(
+            pipeline.actions[0].command.redirection.stderr,
+            StderrTarget::ToStdout
+        );
     }
 
     /// `> /dev/null 2>&1`: stdout is redirected to null first, then `2>&1`

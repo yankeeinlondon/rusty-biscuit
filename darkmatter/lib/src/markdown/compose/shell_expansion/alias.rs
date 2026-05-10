@@ -4,8 +4,8 @@
 //! login shell (`$SHELL`). This allows `::shell` directives to use common
 //! aliases like `ll`, `la`, etc.
 
-use super::tokenize::tokenize;
 use super::tokenize::ShellToken;
+use super::tokenize::tokenize;
 use std::process::{Command, Stdio};
 
 /// Result of resolving a shell alias.

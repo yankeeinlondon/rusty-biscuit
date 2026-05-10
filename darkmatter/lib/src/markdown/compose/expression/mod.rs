@@ -534,8 +534,14 @@ mod tests {
 
         #[test]
         fn bool_literal_evaluates_to_json_bool() {
-            assert_eq!(evaluate(&Expr::BoolLiteral(true), &lookup(json!({}))).unwrap(), json!(true));
-            assert_eq!(evaluate(&Expr::BoolLiteral(false), &lookup(json!({}))).unwrap(), json!(false));
+            assert_eq!(
+                evaluate(&Expr::BoolLiteral(true), &lookup(json!({}))).unwrap(),
+                json!(true)
+            );
+            assert_eq!(
+                evaluate(&Expr::BoolLiteral(false), &lookup(json!({}))).unwrap(),
+                json!(false)
+            );
         }
 
         #[test]

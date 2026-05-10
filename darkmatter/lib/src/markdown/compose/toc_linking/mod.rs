@@ -512,7 +512,8 @@ mod tests {
         let source_path = dir.path().join("source.md");
         write_file(dir.path(), "source.md", "");
 
-        let content = "- Item\n  ::toc-linking ./api.md level=h2 empty=\"no results\"\n".to_string();
+        let content =
+            "- Item\n  ::toc-linking ./api.md level=h2 empty=\"no results\"\n".to_string();
         let source = ComposeSource::File(source_path);
         let options = TransclusionOptions {
             source: source.clone(),
@@ -586,13 +587,15 @@ mod tests {
         }
 
         assert!(
-            events.iter().any(|e| matches!(e, Event::Start(Tag::List(_)))),
+            events
+                .iter()
+                .any(|e| matches!(e, Event::Start(Tag::List(_)))),
             "Expected at least one List in parsed output"
         );
 
-        let inner_list_exists = events.iter().any(|e| {
-            matches!(e, Event::Start(Tag::List(_)))
-        });
+        let inner_list_exists = events
+            .iter()
+            .any(|e| matches!(e, Event::Start(Tag::List(_))));
         assert!(inner_list_exists, "Expected nested list structure");
     }
 }

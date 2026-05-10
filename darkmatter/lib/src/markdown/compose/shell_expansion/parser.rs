@@ -1,9 +1,7 @@
 //! Parser for `::shell` directives in markdown content.
 
-use super::tokenize::{parse_pipeline, tokenize, ShellToken};
-use super::types::{
-    ErrorHandling, ShellCommandOrigin, ShellDirective, ShellExpansionError,
-};
+use super::tokenize::{ShellToken, parse_pipeline, tokenize};
+use super::types::{ErrorHandling, ShellCommandOrigin, ShellDirective, ShellExpansionError};
 use crate::markdown::compose::parse_utils::{find_code_regions, is_in_code_region};
 
 /// Parses all `::shell` directives from markdown content.
@@ -178,10 +176,14 @@ fn extract_options_from_tokens(
                             handling.except_exit_code.push((code, opt_args[1].clone()));
                         }
                         "--stderr-contains" => {
-                            handling.stderr_contains.push((opt_args[0].clone(), opt_args[1].clone()));
+                            handling
+                                .stderr_contains
+                                .push((opt_args[0].clone(), opt_args[1].clone()));
                         }
                         "--stderr-lacks" => {
-                            handling.stderr_lacks.push((opt_args[0].clone(), opt_args[1].clone()));
+                            handling
+                                .stderr_lacks
+                                .push((opt_args[0].clone(), opt_args[1].clone()));
                         }
                         "--enrich-error" => {
                             handling.enrich_error = Some(opt_args[0].clone());

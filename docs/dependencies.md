@@ -43,6 +43,7 @@ This is a Rust workspace with the following modules:
 - `unchained-ai/lib/Cargo.toml` - LLM pipeline primitives and provider integrations
 - `unchained-ai/gen/Cargo.toml` - Provider model enum generator (`gen-models`)
 - `unchained-ai/cli/Cargo.toml` - Future AI CLI (`unchained`)
+- `tools/test-toolkit/Cargo.toml` - Shared test lifecycle helpers
 
 ## Workspace Packages
 
@@ -273,6 +274,12 @@ This is a Rust workspace with the following modules:
     _Messenger CLI binary (`messenger`) with route config, receipts, and interactive setup._
 
     _Tags: workspace, cli, messaging, notifications_
+
+- [test-toolkit](./tools/test-toolkit) _v0.1.0_
+
+    _Shared test lifecycle helpers, including tracing phase spans and environment-variable guards._
+
+    _Tags: workspace, library, testing_
 
 ## Production Dependencies
 
@@ -1067,6 +1074,12 @@ This is a Rust workspace with the following modules:
     _Property-based testing framework generating arbitrary inputs and shrinking failing cases._
 
     _Tags: testing, property-testing, fuzzing_
+
+- [rstest](https://github.com/la10736/rstest) _v0.25_
+
+    _Fixture-based and parameterized testing framework used for new and modified Claudine tests._
+
+    _Tags: testing, fixtures, parameterized-tests_
 
 - [serial_test](https://github.com/palfrey/serial_test) _v3.2_
 

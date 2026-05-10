@@ -1,0 +1,15 @@
+# test-toolkit justfile
+
+# Verify that nextest slow-timeout configuration is honored
+verify-nextest-config:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "Running nextest slow-timeout verification..."
+    output=$(cargo nextest run --profile default -p test-toolkit --test nextest_config_verification 2>&1)
+    if echo "$output" | grep -qi "slow"; then
+        echo "✅ nextest correctly flagged the slow test"
+    else
+        echo "❌ nextest did NOT flag the slow test — configuration may not be honored"
+        echo "$output"
+        exit 1
+    fi

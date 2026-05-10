@@ -780,9 +780,15 @@ mod tests {
                                     then_branch: deepest_then,
                                     else_branch: deepest_else,
                                 } => {
-                                    assert!(matches!(*deepest_cond, Expr::Variable(ref n) if n == "c"));
-                                    assert!(matches!(*deepest_then, Expr::Variable(ref n) if n == "d"));
-                                    assert!(matches!(*deepest_else, Expr::Variable(ref n) if n == "e"));
+                                    assert!(
+                                        matches!(*deepest_cond, Expr::Variable(ref n) if n == "c")
+                                    );
+                                    assert!(
+                                        matches!(*deepest_then, Expr::Variable(ref n) if n == "d")
+                                    );
+                                    assert!(
+                                        matches!(*deepest_else, Expr::Variable(ref n) if n == "e")
+                                    );
                                 }
                                 _ => panic!("Expected deepest Ternary"),
                             }
@@ -1036,7 +1042,9 @@ mod tests {
         #[test]
         fn parses_parenthesized_expression() {
             let expr = parse("(foo)").unwrap();
-            assert!(matches!(expr, Expr::Paren(inner) if matches!(*inner, Expr::Variable(ref name) if name == "foo")));
+            assert!(
+                matches!(expr, Expr::Paren(inner) if matches!(*inner, Expr::Variable(ref name) if name == "foo"))
+            );
         }
 
         #[test]
@@ -1065,7 +1073,9 @@ mod tests {
             let expr = parse("(a || b) ? c : d").unwrap();
             match expr {
                 Expr::Ternary { condition, .. } => {
-                    assert!(matches!(*condition, Expr::Paren(inner) if matches!(*inner, Expr::Fallback { .. })));
+                    assert!(
+                        matches!(*condition, Expr::Paren(inner) if matches!(*inner, Expr::Fallback { .. }))
+                    );
                 }
                 _ => panic!("Expected Ternary"),
             }
@@ -1209,16 +1219,16 @@ mod tests {
         fn error_invalid_groupings_from_spec() {
             // a group can not encapsulate both the true and false path of the top level comparison
             assert!(parse("a ? ( b ? 'tt' : 'tf' : c ? 'ft' : 'ff' )").is_err());
-            
+
             // unbalanced: missing closing
             assert!(parse("a ? ( b ? 'tt' : 'tf' : c ? 'ft' : 'ff'").is_err());
-            
+
             // unbalanced: missing opening (parenthesis must wrap a complete pattern)
             assert!(parse("a ? b ? 'tt' : 'tf' : c ? ('ft' : 'ff')").is_err());
-            
+
             // parenthesis must wrap a complete pattern
             assert!(parse("a ? b ? ( 'tt' : 'tf' ) : c ? ( 'ft' : 'ff' )").is_err());
-            
+
             // parenthesis encapsulates part of top level but not full
             assert!(parse("a ? b ( ? 'tt' : 'tf' ) : c ( ? 'ft' : 'ff' )").is_err());
         }

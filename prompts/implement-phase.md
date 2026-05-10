@@ -4,9 +4,9 @@ total_phases: ""
 plan: ""
 dir: "$(dirname '{{plan}}')"
 area: "{{ctx.current_package_area}}"
-pass_icon: "_loop_is_last ? '✅' : '☑'"
+pass_icon: "{{ _loop_is_last ? '✅' : '🧑‍💻' }}"
 start:
-    message: "🎬 starting the implementation of phase #{{phase}} of `{{area}}/{{dir}}`"
+    message: "🎬  starting the implementation of phase **#{{phase}}** of `{{plan}}`"
 success: 
     say: "Phase {{phase}} of the plan in the {{area}} package area, was implemented successfully"
     message: "{{pass_icon}} phase **{{phase}}** (_of {{total_phases}}_) of the plan `{{area}}/{{plan}}` successfully completed"
@@ -18,6 +18,14 @@ failure:
 loop:
     until: "phase > total_phases"
     action: increment(phase)
+next:
+    when: suggest
+    compose: "@prompts/review-feature.md"
+    with_frontmatter:
+        iteration: 1
+        dir: "{{dir}}"
+        spec: "() => find_file({{dir}}/review*.md)"
+        design: "() => find_file({{dir}}/tech-design*.md)"
 ---
 ::block when="total_phases"
 # Implement Phase {{phase}} of {{total_phases}}
