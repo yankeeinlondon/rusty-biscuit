@@ -82,7 +82,7 @@ output is emitted before B-end.
 | B2.3.a | **Shared `sniff::detect_with_plan` scan** [M] | `compose_prep.shared_sniff`. Single rooted scan at launch CWD covering git summary + repo structure (no os/hw/net). Replaces what used to be two redundant scans (`LaunchContext::from_cwd` and `detect_environment_fast`). Yields a cached `LaunchContext` and a cached `EnvironmentContext`. |
 | B2.3.b | **Resolve source repo root** [M] | `compose_prep.source_repo_root`. Fast path when source's parent dir is inside the launch repo (reuse launch root). Slow path: `detect_git` probe on the source's parent dir. |
 | B2.3.c | **Load selection config** [M] | `compose_prep.selection_config`. Reads `~/.claudine/config.json` and (when present) `<repo>/.claudine/config.json` for `favorite_agent` and `model_overrides`. |
-| B2.3.d | **Build installed-provider snapshot** [M] | `compose_prep.installed_clients`. PATH scan via `sniff::programs::InstalledAiClients` for the eight supported provider CLIs, filtered by `--exclude`. |
+| B2.3.d | **Build installed-provider snapshot** [M] | `compose_prep.installed_clients`. PATH scan via `sniff::programs::InstalledAiClients` for the eight supported provider CLIs, filtered by `--exclude`. Also populates `binary_paths` used by C1.4 (W2). |
 
 ### B3. Eager target resolution
 
@@ -146,7 +146,7 @@ the `composition_prepare` span.
 | C1.1 | **Reuse eager target** [M] | When `request.resolved_target` is `Some` (compose's normal path), reuse it and skip the entire C1 fallback below. Saves a duplicate `InstalledAiClients` PATH scan + `load_selection_config` + catalog build. |
 | C1.2 | **Fallback re-resolution** [O] | Only triggered by callers that don't pre-resolve (legacy library callers). Mirrors B2.3 + B3 inline. |
 | C1.3 | **Look up `WrapperProfile`** [M] | `profile_for_provider(provider)`. |
-| C1.4 | **Resolve binary path** [M] | `resolve_binary_path_direct(profile)` — re-scans PATH for the chosen provider's binary (because B2.3.d only cached presence, not the path used). |
+| C1.4 | **Resolve binary path** [M] | `resolve_binary_path_direct(profile)` — consults the `InstalledProviderSnapshot.binary_paths` map built during B2.3.d; falls back to `which::which` only for legacy callers. **Optimized by W2.** |
 | C1.5 | **Inline+interactive support check** [O-mode] | Hard-fail when inline closure is requested with an interactive provider that doesn't support it. |
 | C1.6 | **Compute `effective_non_interactive`** [M] | `!session_interactive`. Drives every downstream branching decision. |
 
@@ -154,7 +154,7 @@ the `composition_prepare` span.
 
 | # | Step | Notes |
 |---|------|-------|
-| C2.1 | **Build header `EnvPlan`** [M] | Lightweight env plan for the header only; package context comes from B2.3.a. |
+| C2.1 | **Build header `EnvPlan`** [M] | Lightweight env plan for the header only; package context comes from `request.prep_launch_workspace` (cached in B2.3.a via W0). No redundant filesystem scans. |
 | C2.2 | **Emit execution header** [M, unless `--silent`] | `crate::output::log_wrapper_header` — first line on stderr. **This is the perceived-latency line.** Everything before this is invisible to the user. |
 
 ### C3. MCP composition (optional)
@@ -163,7 +163,7 @@ the `composition_prepare` span.
 |---|------|-------|
 | C3.1 | **Decide MCP shadow-HOME need** [M] | Codex/Gemini + (`--mcp` or `--use`). |
 | C3.2 | **Decide repo shadow-HOME need** [O-flag] | `--repo`. |
-| C3.3 | **Build child env (`env::build_child_env`)** [M] | Includes filtering of sensitive variables, `--include` overrides, shadow-HOME setup. |
+| C3.3 | **Build child env (`env::build_child_env_with_launch`)** [M] | Uses the pre-computed `LaunchWorkspaceContext` from `request.prep_launch_workspace` (W0). No redundant `resolve_launch_workspace_context` call. |
 | C3.4 | **Apply `--operation` env override** [O-flag] | |
 | C3.5 | **Apply request-level env overrides** [M] | E.g., `FAIL_FAST` from sequence. |
 | C3.6 | **MCP: bootstrap state** [O-flag] | `bootstrap_mcp_state`. |
@@ -379,13 +379,13 @@ Spans `composition_postprocess`.
 
 | Hot region | Why it can be slow |
 |---|---|
-| **B2.3.a `compose_prep.shared_sniff`** | Filesystem walk for git + repo structure, even though much is already known by the shell. |
+| **B2.3.a `compose_prep.shared_sniff`** | Filesystem walk for git + repo structure. Now also builds the `LaunchWorkspaceContext` reused in C2.1 and C3.3 (W0). |
 | **B2.3.b `compose_prep.source_repo_root`** | When the source lives outside the launch repo, full `detect_git` probe (HEAD + branch + upstream + commit summary). |
 | **B2.3.d `compose_prep.installed_clients`** | Full PATH scan for *all* eight provider binaries every invocation. |
 | **B3.4 `compose_prep.model_catalog`** | OpenCode and Qwen shell out to `<provider> models` synchronously. |
 | **B4.4 `compose_prep.shell_preflight`** | Each `$(…)` in the template runs synchronously. |
 | **B6.1 / B6.2 `prepare_direct` / `prepare_inline`** | Full Darkmatter compose pass; for big templates this is non-trivial. |
-| **C1.4 `resolve_binary_path_direct`** | Re-runs PATH resolution even though B2.3.d already established presence. |
+| **C1.4 `resolve_binary_path_direct`** | Consults `InstalledProviderSnapshot.binary_paths` built during B2.3.d; no fresh PATH scan in the common path. **Optimized by W2.** |
 | **C5.3 `resolve_and_prepare_for_session`** | Walks launch-context hierarchy + Darkmatter prep on `system-prompt.md`. |
 | **D8 `compose_prep.environment`** | Cache hit is common after Phase 2 fixes, but the legacy fallback re-runs `detect_environment_fast`. |
 | **E3.4 `spawn()`** | Provider startup is the largest unavoidable single cost (Node/Python/Go warmup). |
@@ -397,12 +397,13 @@ Spans `composition_postprocess`.
 
 In order of when they appear on stderr today:
 
-1. **C2.2 — execution header** (first visible byte). Everything in A and B is invisible.
-2. **D1 — "Starting pre-flight checks"** status.
-3. **D7 — "Preflight: shell commands approved"** status.
-4. **D9 / D10 / D11** — env / system-prompt / compose-prompt blocks (verbose-gated).
-5. **E4.* — live tool calls & assistant text streaming.**
-6. **F2.2 / F3.6 — trailer summary.**
+1. **W1 — receipt banner** (`→ Composing <file>…`) — first visible byte within ~50ms of process start (Phase A/B boundary). **Added by W1.**
+2. **C2.2 — execution header** (provider, mode, yolo, etc.). Follows after prep completes.
+3. **D1 — "Starting pre-flight checks"** status.
+4. **D7 — "Preflight: shell commands approved"** status.
+5. **D9 / D10 / D11** — env / system-prompt / compose-prompt blocks (verbose-gated).
+6. **E4.* — live tool calls & assistant text streaming.**
+7. **F2.2 / F3.6 — trailer summary.**
 
 The **time from Enter to step 1** is the dominant perceived-latency win
 available, because today the user stares at a blank screen through the
