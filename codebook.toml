@@ -1,4 +1,5 @@
 words = [
+    "cliclick",
     "darkmatter",
     "darkmatter's",
     "frontmatter",
@@ -9,4 +10,6 @@ words = [
     "reflowing",
     "renderable",
     "renderer's",
+    "tmux",
+    "wezterm",
 ]
