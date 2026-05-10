@@ -167,12 +167,7 @@ pub(crate) fn execute_sequence(
             Ok(provider)
         } else {
             let target = claudine::composition::resolve_target_non_tty_with_hints(
-                None,
-                &raw_hints,
-                snapshot,
-                favorite,
-                cli_model,
-                None,
+                None, &raw_hints, snapshot, favorite, cli_model, None,
             );
             target.map(|t| t.provider)
         };
@@ -194,10 +189,7 @@ pub(crate) fn execute_sequence(
             // override the frontmatter `model` hint. Refresh is skipped in
             // those cases (matches the direct compose path).
             let (_, probe_reason) = claudine::composition::resolve_model_with_hints(
-                provider,
-                &raw_hints,
-                cli_model,
-                None,
+                provider, &raw_hints, cli_model, None,
             );
             // Refresh once per unique provider, and only when the
             // frontmatter `model` hint will actually be validated against

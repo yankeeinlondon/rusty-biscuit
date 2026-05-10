@@ -231,10 +231,7 @@ mod tests {
         let launch_root = PathBuf::from("/repo");
         let source_parent = PathBuf::from("/repo/prompts");
 
-        let result = super::resolve_source_repo_root(
-            Some(&source_parent),
-            Some(&launch_root),
-        );
+        let result = super::resolve_source_repo_root(Some(&source_parent), Some(&launch_root));
         assert_eq!(result, Some(launch_root));
     }
 

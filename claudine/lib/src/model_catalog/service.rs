@@ -79,7 +79,10 @@ impl std::fmt::Debug for ModelCatalogService {
         f.debug_struct("ModelCatalogService")
             .field("cache", &self.cache)
             .field("overrides", &self.overrides)
-            .field("opencode_dedup_initialized", &self.opencode_dedup.initialized())
+            .field(
+                "opencode_dedup_initialized",
+                &self.opencode_dedup.initialized(),
+            )
             .field(
                 "opencode_fetch_attempts",
                 &self.opencode_fetch_attempts.load(Ordering::SeqCst),
@@ -193,10 +196,7 @@ impl ModelCatalogService {
     ///
     /// Attempts to fetch the latest catalog. On failure, the existing cache
     /// is left untouched (stale-cache fallback).
-    pub async fn refresh(
-        &self,
-        provider: Provider,
-    ) -> Result<Vec<String>, CatalogFetchError> {
+    pub async fn refresh(&self, provider: Provider) -> Result<Vec<String>, CatalogFetchError> {
         let fetched = fetch_provider_catalog(provider).await?;
         let entry = ModelCacheEntry {
             provider,
@@ -493,10 +493,7 @@ mod tests {
         // up front to avoid relying on `opencode` being on PATH.
         let tmp = tempfile::tempdir().unwrap();
         let service = ModelCatalogService::with_cache_dir(tmp.path().to_path_buf());
-        service.prime_opencode_dedup(Ok(vec![
-            "qwen-coder".into(),
-            "gpt-5.2".into(),
-        ]));
+        service.prime_opencode_dedup(Ok(vec!["qwen-coder".into(), "gpt-5.2".into()]));
         service.refresh_provider_blocking(Provider::OpenCode);
         service.refresh_provider_blocking(Provider::QwenCode);
         assert_eq!(

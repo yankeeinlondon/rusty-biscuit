@@ -640,8 +640,7 @@ pub(crate) fn format_user_interrupt_status() -> String {
 /// presses Ctrl+C. Rendering surfaces consult this to relabel any
 /// post-interrupt agent error as a user-action block instead of a red
 /// `Agent Error`.
-static USER_INTERRUPTED: std::sync::atomic::AtomicBool =
-    std::sync::atomic::AtomicBool::new(false);
+static USER_INTERRUPTED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 /// Mark that a user interrupt was observed in this process.
 ///
