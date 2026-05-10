@@ -65,8 +65,8 @@ fn convert_fenced_code_blocks(input: &str) -> (String, Vec<(String, String)>) {
         let line = lines[i];
         let trimmed = line.trim_start();
 
-        if trimmed.starts_with("```") {
-            let lang = trimmed[3..].trim().to_string();
+        if let Some(after_fence) = trimmed.strip_prefix("```") {
+            let lang = after_fence.trim().to_string();
             let mut body_lines = Vec::new();
             i += 1;
 

@@ -10,7 +10,7 @@ use std::sync::Arc;
 use crate::components::prose::Prose;
 
 /// Resolved source context for an error that originates in a file.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SourceContext {
     /// Absolute path used for OSC 8 hyperlinks.
     pub absolute: PathBuf,
