@@ -199,52 +199,50 @@ impl ChoiceLayout {
         let (start, _end) = *self.row_ranges.get(row)?;
         self.item_rects.get(start).map(|rect| rect.option_index)
     }
-}
 
-/// Navigates to the closest item in the adjacent row.
-///
-/// `delta` of `-1` means the row above; `1` means the row below.
-/// Returns `None` if the layout is empty, the current hover is not found,
-/// or no enabled option exists in the target row.
-pub fn navigate_row<V: Clone + PartialEq>(
-    layout: &ChoiceLayout,
-    options: &[super::choose::ChoiceOption<V>],
-    current_hover: usize,
-    delta: i32,
-) -> Option<usize> {
-    if layout.is_empty() {
-        return None;
-    }
-
-    let current_row = layout.row_of(current_hover)?;
-    let row_count = layout.row_count();
-    if row_count == 0 {
-        return None;
-    }
-
-    let target_row = if delta < 0 {
-        if current_row == 0 {
-            row_count - 1
-        } else {
-            current_row - 1
+    /// Navigates to the closest item in the adjacent row.
+    ///
+    /// `delta` of `-1` means the row above; `1` means the row below.
+    /// Returns `None` if the layout is empty, the current hover is not found,
+    /// or no enabled option exists in the target row.
+    pub fn navigate_row<V: Clone + PartialEq>(
+        &self,
+        options: &[super::choose::ChoiceOption<V>],
+        current_hover: usize,
+        delta: i32,
+    ) -> Option<usize> {
+        if self.is_empty() {
+            return None;
         }
-    } else {
-        if current_row + 1 >= row_count {
+
+        let current_row = self.row_of(current_hover)?;
+        let row_count = self.row_count();
+        if row_count == 0 {
+            return None;
+        }
+
+        let target_row = if delta < 0 {
+            if current_row == 0 {
+                row_count - 1
+            } else {
+                current_row - 1
+            }
+        } else if current_row + 1 >= row_count {
             0
         } else {
             current_row + 1
+        };
+
+        let current_col = self.col_of(current_hover).unwrap_or(0);
+        let target_idx = self
+            .closest_in_row(target_row, current_col)
+            .or_else(|| self.last_in_row(target_row))?;
+
+        if options.get(target_idx).is_some_and(|o| !o.disabled) {
+            Some(target_idx)
+        } else {
+            None
         }
-    };
-
-    let current_col = layout.col_of(current_hover).unwrap_or(0);
-    let target_idx = layout
-        .closest_in_row(target_row, current_col)
-        .or_else(|| layout.last_in_row(target_row))?;
-
-    if options.get(target_idx).is_some_and(|o| !o.disabled) {
-        Some(target_idx)
-    } else {
-        None
     }
 }
 
@@ -392,9 +390,9 @@ mod tests {
         ];
 
         // From option 0 (row 0), down goes to row 1 -> option 2.
-        assert_eq!(navigate_row(&layout, &options, 0, 1), Some(2));
+        assert_eq!(layout.navigate_row(&options, 0, 1), Some(2));
         // From option 2 (row 1), up goes to row 0 -> closest column is option 0.
-        assert_eq!(navigate_row(&layout, &options, 2, -1), Some(0));
+        assert_eq!(layout.navigate_row(&options, 2, -1), Some(0));
     }
 
     #[test]
@@ -413,9 +411,9 @@ mod tests {
         ];
 
         // From row 0, up wraps to last row.
-        assert_eq!(navigate_row(&layout, &options, 0, -1), Some(2));
+        assert_eq!(layout.navigate_row(&options, 0, -1), Some(2));
         // From row 1, down wraps to first row.
-        assert_eq!(navigate_row(&layout, &options, 2, 1), Some(0));
+        assert_eq!(layout.navigate_row(&options, 2, 1), Some(0));
     }
 
     #[test]
@@ -444,11 +442,11 @@ mod tests {
 
         // Down-arrow from the first row drops to row 1 (option 2 or
         // 3), never to a badge row that doesn't exist in the layout.
-        let next = navigate_row(&layout, &options, 0, 1).expect("next row");
+        let next = layout.navigate_row(&options, 0, 1).expect("next row");
         assert!(next == 2 || next == 3);
         // Up-arrow from row 1 goes back to row 0, again never to a
         // badge sub-row.
-        let prev = navigate_row(&layout, &options, next, -1).expect("prev row");
+        let prev = layout.navigate_row(&options, next, -1).expect("prev row");
         assert!(prev == 0 || prev == 1);
     }
 
@@ -469,7 +467,7 @@ mod tests {
         options[2].disabled = true;
 
         // Target row has only disabled option -> None.
-        assert_eq!(navigate_row(&layout, &options, 0, 1), None);
+        assert_eq!(layout.navigate_row(&options, 0, 1), None);
     }
 
     #[test]
