@@ -635,67 +635,70 @@ pub fn run_compose(
         use darkmatter::markdown::compose::ShellExpansionError;
 
         match e {
-            ShellExpansion(ShellExpansionError::ExecutionFailed {
-                command,
-                code,
-                stderr,
-                origin,
-                ..
-            }) => {
-                let detail = stderr.trim();
-                if detail.is_empty() {
-                    eyre!("Shell command failed (exit {code}) at {origin}: '{command}'")
-                } else {
+            ShellExpansion(inner) => match *inner {
+                ShellExpansionError::ExecutionFailed {
+                    command,
+                    code,
+                    stderr,
+                    origin,
+                    ..
+                } => {
+                    let detail = stderr.trim();
+                    if detail.is_empty() {
+                        eyre!("Shell command failed (exit {code}) at {origin}: '{command}'")
+                    } else {
+                        eyre!(
+                            "Shell command failed (exit {code}) at {origin}: '{command}'\n{detail}"
+                        )
+                    }
+                }
+                ShellExpansionError::CommandNotFound { command, origin, .. } => {
                     eyre!(
-                        "Shell command failed (exit {code}) at {origin}: '{command}'\n{detail}"
+                        "Command not found: '{command}' ({origin})\n\
+                         Ensure '{command}' is installed and available on your PATH."
                     )
                 }
-            }
-            ShellExpansion(ShellExpansionError::CommandNotFound { command, origin, .. }) => {
-                eyre!(
-                    "Command not found: '{command}' ({origin})\n\
-                     Ensure '{command}' is installed and available on your PATH."
-                )
-            }
-            ShellExpansion(ShellExpansionError::Timeout {
-                command,
-                timeout,
-                origin,
-                ..
-            }) => {
-                eyre!("Shell command timed out after {timeout:?} at {origin}: '{command}'")
-            }
-            ShellExpansion(ShellExpansionError::Blacklisted {
-                command,
-                reason,
-                origin,
-                ..
-            }) => {
-                eyre!("Blocked command at {origin}: '{command}'\nReason: {reason}")
-            }
-            ShellExpansion(ShellExpansionError::Denied { command, origin, .. }) => {
-                eyre!("Command denied at {origin}: '{command}'")
-            }
-            ShellExpansion(ShellExpansionError::ApprovalRequired {
-                command,
-                whitelist_path,
-                origin: _,
-                ..
-            }) => {
-                let executable = command.split_whitespace().next().unwrap_or(&command);
-                // Backslash-escape underscores so Prose (used by `main` to
-                // render error chains) does not mistake `_..._` patterns in
-                // paths or command names for italic markdown.
-                let escape_prose = |s: &str| s.replace('_', "\\_");
-                let path = whitelist_path.display().to_string();
-                eyre!(
-                    "Approval required for '{}'.\nTo allow in non-interactive mode, add one of these to {}:\n  exact {}\n  prefix {}",
-                    escape_prose(&command),
-                    escape_prose(&path),
-                    escape_prose(&command),
-                    escape_prose(executable),
-                )
-            }
+                ShellExpansionError::Timeout {
+                    command,
+                    timeout,
+                    origin,
+                    ..
+                } => {
+                    eyre!("Shell command timed out after {timeout:?} at {origin}: '{command}'")
+                }
+                ShellExpansionError::Blacklisted {
+                    command,
+                    reason,
+                    origin,
+                    ..
+                } => {
+                    eyre!("Blocked command at {origin}: '{command}'\nReason: {reason}")
+                }
+                ShellExpansionError::Denied { command, origin, .. } => {
+                    eyre!("Command denied at {origin}: '{command}'")
+                }
+                ShellExpansionError::ApprovalRequired {
+                    command,
+                    whitelist_path,
+                    origin: _,
+                    ..
+                } => {
+                    let executable = command.split_whitespace().next().unwrap_or(&command);
+                    // Backslash-escape underscores so Prose (used by `main` to
+                    // render error chains) does not mistake `_..._` patterns in
+                    // paths or command names for italic markdown.
+                    let escape_prose = |s: &str| s.replace('_', "\\_");
+                    let path = whitelist_path.display().to_string();
+                    eyre!(
+                        "Approval required for '{}'.\nTo allow in non-interactive mode, add one of these to {}:\n  exact {}\n  prefix {}",
+                        escape_prose(&command),
+                        escape_prose(&path),
+                        escape_prose(&command),
+                        escape_prose(executable),
+                    )
+                }
+                other => eyre!("{other}"),
+            },
             other => other.into(),
         }
     })?;
