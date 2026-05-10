@@ -1,7 +1,5 @@
 //! Error types for the reference analysis subsystem.
 
-use std::path::PathBuf;
-
 use biscuit_terminal::errors::SourceContext;
 use thiserror::Error;
 
@@ -11,7 +9,7 @@ pub enum ReferenceError {
     /// Failed to parse a directive.
     #[error("Failed to parse directive in {} at line {line}: {message}", .ctx.display.display())]
     ParseDirective {
-        ctx: SourceContext,
+        ctx: Box<SourceContext>,
         line: usize,
         message: String,
         directive_text: String,

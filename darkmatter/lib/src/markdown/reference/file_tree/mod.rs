@@ -231,7 +231,7 @@ impl FileTree {
             .md
             .reference_graph(self.graph_options.clone())
             .map_err(|e| match e {
-                MarkdownError::Reference(re) => FileTreeError::Reference(re),
+                MarkdownError::Reference(re) => FileTreeError::Reference(*re),
                 other => FileTreeError::Markdown(other),
             })?;
 
@@ -239,7 +239,7 @@ impl FileTree {
             let mut val_opts = self.validation_options.clone();
             val_opts.graph = self.graph_options.clone();
             Some(self.md.validate_references(val_opts).map_err(|e| match e {
-                MarkdownError::Reference(re) => FileTreeError::Reference(re),
+                MarkdownError::Reference(re) => FileTreeError::Reference(*re),
                 other => FileTreeError::Markdown(other),
             })?)
         } else {

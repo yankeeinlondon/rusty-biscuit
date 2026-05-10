@@ -55,6 +55,7 @@ fn resolve_transclusion_target(
     }
 }
 
+#[allow(dead_code)]
 fn source_file_for_error(source: &ComposeSource) -> PathBuf {
     match source {
         ComposeSource::File(path) => path.clone(),

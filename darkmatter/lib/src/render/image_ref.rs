@@ -46,7 +46,7 @@ pub enum ImageRefError {
     /// Markdown input failed to parse.
     #[error("malformed markdown image reference: {message}")]
     MalformedMarkdown {
-        ctx: SourceContext,
+        ctx: Box<SourceContext>,
         message: String,
         /// Byte offset in `ctx.content` where the error occurred.
         caret: Option<usize>,
@@ -207,11 +207,11 @@ impl ImageRefError {
     /// Creates a markdown-parse error without source-context details.
     pub fn malformed_markdown(message: impl Into<String>) -> Self {
         Self::MalformedMarkdown {
-            ctx: SourceContext::new(
+            ctx: Box::new(SourceContext::new(
                 std::path::PathBuf::from("unknown"),
                 std::path::PathBuf::from("unknown"),
                 "",
-            ),
+            )),
             message: message.into(),
             caret: None,
         }
@@ -224,11 +224,11 @@ impl ImageRefError {
     ) -> Self {
         let input_str = input.into();
         Self::MalformedMarkdown {
-            ctx: SourceContext::new(
+            ctx: Box::new(SourceContext::new(
                 std::path::PathBuf::from("unknown"),
                 std::path::PathBuf::from("unknown"),
                 input_str,
-            ),
+            )),
             message: message.into(),
             caret: Some(caret),
         }

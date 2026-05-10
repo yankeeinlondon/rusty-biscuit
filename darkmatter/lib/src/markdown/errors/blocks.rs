@@ -18,7 +18,6 @@ use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::components::status::StatusState;
 use biscuit_terminal::components::status_block::StatusBlock;
 use biscuit_terminal::errors::{ErrorHeader, SourceContext, StatusBlockExt};
-use std::path::PathBuf;
 
 /// Build the [`StatusBlock`] for [`MarkdownError::FileLoad`].
 pub(crate) fn file_load_block(source: &std::io::Error) -> StatusBlock {
@@ -136,6 +135,8 @@ pub(crate) fn transform_block(message: &str) -> StatusBlock {
 
 #[cfg(test)]
 mod tests {
+    use std::path::PathBuf;
+
     use biscuit_terminal::components::renderable::Renderable;
     use biscuit_terminal::utils::escape_codes::strip_escape_codes;
 

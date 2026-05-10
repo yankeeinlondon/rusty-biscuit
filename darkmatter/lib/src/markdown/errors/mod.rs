@@ -153,7 +153,7 @@ mod tests {
                 (PathBuf::from("a.md"), 3),
             ],
         };
-        let err = MarkdownError::Transclusion(inner);
+        let err = MarkdownError::Transclusion(Box::new(inner));
         let out = render(&err);
         assert!(out.contains("TransclusionError"));
         assert!(out.contains("cycle detected"));
@@ -183,7 +183,7 @@ mod tests {
     #[test]
     fn shell_execution_failed_includes_stderr() {
         let err = ShellExpansionError::ExecutionFailed {
-            ctx: test_ctx(),
+            ctx: Box::new(test_ctx()),
             command: "ls --bogus".into(),
             code: 2,
             stdout: String::new(),
@@ -200,7 +200,7 @@ mod tests {
     #[test]
     fn shell_approval_required_names_whitelist_paths() {
         let err = ShellExpansionError::ApprovalRequired {
-            ctx: test_ctx(),
+            ctx: Box::new(test_ctx()),
             command: "gh repo list".into(),
             whitelist_path: "/tmp/wl".into(),
             blacklist_path: "/tmp/bl".into(),
@@ -229,7 +229,7 @@ mod tests {
             content,
         );
         let err = PageBlockError::UnterminatedBlock {
-            ctx,
+            ctx: Box::new(ctx),
             opening_line: 14,
             opening_text: "::block when=\"x\"".to_string(),
         };
@@ -243,7 +243,7 @@ mod tests {
     #[test]
     fn condition_parse_lists_operators() {
         let err = ConditionError::Parse {
-            ctx: test_ctx(),
+            ctx: Box::new(test_ctx()),
             expr: "a &&& b".into(),
             line: 7,
             message: "unexpected token".into(),
@@ -286,11 +286,11 @@ mod tests {
     #[test]
     fn reference_parse_directive_has_syntax_hint() {
         let err = ReferenceError::ParseDirective {
-            ctx: SourceContext::new(
+            ctx: Box::new(SourceContext::new(
                 PathBuf::from("/tmp/test/docs/root.md"),
                 PathBuf::from("docs/root.md"),
                 "::file ./broken.md when=\n".to_string(),
-            ),
+            )),
             line: 2,
             message: "unexpected end".into(),
             directive_text: "::file ./broken.md when=".to_string(),
