@@ -12,11 +12,11 @@ use std::time::Duration;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
+use crate::executable_index::ExecutableIndex;
 use crate::os::{LinuxFamily, OsType, detect_linux_distro, detect_os_type};
 use crate::performance;
+use crate::programs::categories::{InstalledLanguagePackageManagers, InstalledOsPackageManagers};
 use crate::programs::enums::{LanguagePackageManager, OsPackageManager};
-use crate::programs::find_program::ExecutableIndex;
-use crate::programs::pkg_mngrs::{InstalledLanguagePackageManagers, InstalledOsPackageManagers};
 
 const PROBE_TIMEOUT: Duration = Duration::from_secs(2);
 

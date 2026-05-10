@@ -27,8 +27,8 @@ use claudine::linking::{
     CanonicalSelection, LinkableResource, ResourceScope, ranked_provider_preferences,
     resolve_repo_root, select_canonical_provider, set_canonical_provider,
 };
+use claudine::protect::config::ProtectConfig;
 use claudine::provider::Provider;
-use claudine::services::ProtectConfig;
 
 use crate::log;
 

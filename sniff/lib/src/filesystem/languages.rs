@@ -176,7 +176,7 @@ mod tests {
         // Create a JavaScript file
         fs::write(dir.path().join("index.js"), "console.log('hi')").unwrap();
 
-        let result = detect_languages(dir.path()).unwrap();
+        let result = detect_languages(dir.path()).unwrap().sorted();
 
         // Find Rust stats
         let rust_stats = result

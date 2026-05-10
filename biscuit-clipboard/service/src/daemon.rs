@@ -183,7 +183,10 @@ mod tests {
         let daemon = DaemonFiles::with_runtime_dir(dir.path().to_path_buf());
 
         fs::write(daemon.pid_file(), "999999999").unwrap();
-        assert!(!daemon.is_already_running(), "Dead PID should not count as running");
+        assert!(
+            !daemon.is_already_running(),
+            "Dead PID should not count as running"
+        );
     }
 
     #[test]

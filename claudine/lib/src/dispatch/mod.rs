@@ -1,3 +1,4 @@
+pub(crate) mod deps;
 pub mod expression;
 pub mod loader;
 pub mod matcher;
@@ -15,10 +16,10 @@ use crate::actions::{HookDecision, HookResponse};
 use crate::adapters::{self, AdapterError};
 use crate::error::Result;
 use crate::events::{AgenticEvent, EnvironmentContext, EventMeta, ResolvedHook};
+use crate::protect::decision::ProtectDecision;
+use crate::protect::observe::extract_protect_request;
+use crate::protect::report::format_blocked_message;
 use crate::provider::Provider;
-use crate::services::protect::decision::ProtectDecision;
-use crate::services::protect::observe::extract_protect_request;
-use crate::services::protect::report::format_blocked_message;
 
 /// Wrapper-session-scoped dispatch runtime.
 ///
@@ -660,7 +661,8 @@ fn finalize_response(
 mod tests {
     use super::*;
     use crate::actions::*;
-    use crate::config::claudine_config::{ClaudineConfig, TtsValue, VoiceSelection};
+    use crate::config::claudine_config::ClaudineConfig;
+    use crate::config::tts::{TtsValue, VoiceSelection};
     use crate::events::*;
     use crate::provider::Provider;
     use serde_json::json;
@@ -1157,9 +1159,8 @@ mod tests {
 
     #[test]
     fn bridge_settings_from_tts_config() {
-        use crate::config::claudine_config::{
-            ClaudineConfig, Gender, TtsConfigSettings, TtsValue, VoiceSelection,
-        };
+        use crate::config::claudine_config::ClaudineConfig;
+        use crate::config::tts::{Gender, TtsConfigSettings, TtsValue, VoiceSelection};
         let config = ClaudineConfig {
             tts: TtsValue::Config(TtsConfigSettings {
                 provider: "say".to_string(),
@@ -1176,9 +1177,8 @@ mod tests {
 
     #[test]
     fn bridge_settings_from_tts_config_gendered_voice() {
-        use crate::config::claudine_config::{
-            ClaudineConfig, Gender, TtsConfigSettings, TtsValue, VoiceSelection,
-        };
+        use crate::config::claudine_config::ClaudineConfig;
+        use crate::config::tts::{Gender, TtsConfigSettings, TtsValue, VoiceSelection};
         let config = ClaudineConfig {
             tts: TtsValue::Config(TtsConfigSettings {
                 provider: "elevenlabs".to_string(),

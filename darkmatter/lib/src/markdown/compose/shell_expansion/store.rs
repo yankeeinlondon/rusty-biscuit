@@ -4,6 +4,7 @@ use super::types::{
     ShellExpansionError, ShellExpansionOptions, ShellPolicyPaths, ShellRuleEntry, ShellRuleSet,
 };
 use crate::markdown::compose::ComposeSource;
+use crate::markdown::compose::find_git_root_from;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
@@ -57,7 +58,7 @@ pub fn resolve_policy_paths(
         };
 
         // Try to find git repo root by walking up
-        find_git_root(&base_dir).unwrap_or_else(|| {
+        find_git_root_from(&base_dir).unwrap_or_else(|| {
             // Fall back to HOME if no git repo
             dirs::home_dir().unwrap_or(base_dir)
         })
@@ -70,19 +71,6 @@ pub fn resolve_policy_paths(
         whitelist,
         blacklist,
     })
-}
-
-/// Walks up from the given directory to find a `.git` directory.
-fn find_git_root(start: &Path) -> Option<PathBuf> {
-    let mut current = start;
-
-    loop {
-        if current.join(".git").exists() {
-            return Some(current.to_path_buf());
-        }
-
-        current = current.parent()?;
-    }
 }
 
 /// Loads a ruleset from a policy file.
@@ -462,14 +450,14 @@ mod tests {
         let subdir = temp_dir.path().join("subdir");
         std::fs::create_dir(&subdir).unwrap();
 
-        let root = find_git_root(&subdir);
+        let root = find_git_root_from(&subdir);
         assert_eq!(root, Some(temp_dir.path().to_path_buf()));
     }
 
     #[test]
     fn find_git_root_returns_none_if_not_found() {
         let temp_dir = TempDir::new().unwrap();
-        let root = find_git_root(temp_dir.path());
+        let root = find_git_root_from(temp_dir.path());
         assert!(root.is_none());
     }
 }

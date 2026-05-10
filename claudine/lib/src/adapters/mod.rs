@@ -11,8 +11,8 @@ use serde_json::Value;
 
 use crate::actions::HookResponse;
 use crate::events::{AgenticEvent, EventMeta};
+use crate::protect::decision::ProtectDecision;
 use crate::provider::Provider;
-use crate::services::protect::decision::ProtectDecision;
 
 /// Adapter-level parse/format errors.
 #[derive(Debug, thiserror::Error)]
@@ -187,8 +187,8 @@ mod tests {
 
     #[test]
     fn protect_outcome_mapping_allow_and_block() {
-        use crate::services::protect::catalog::{RuleGroup, ScanSurface};
-        use crate::services::protect::decision::ProtectMatch;
+        use crate::protect::catalog::{RuleGroup, ScanSurface};
+        use crate::protect::decision::ProtectMatch;
 
         let fixture_events = [
             AgenticEvent::BeforeTool,

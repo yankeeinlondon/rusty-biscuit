@@ -32,6 +32,12 @@ These flags apply to all `sniff repo` subcommands:
 | [`git-status`](./repo_git-status.md) | Branch, commits, working tree status, and worktree info |
 | [`hash <SHA>`](./repo_hash.md) | Inspect a specific commit by hash (full or short) |
 
+### Worktree
+
+| Subcommand | Description |
+|------------|-------------|
+| [`worktree`](./repo_worktree.md) | Name of the current Git linked worktree |
+
 ### File Listing
 
 | Subcommand | Description |
@@ -84,6 +90,17 @@ sniff repo packages !vendor          # Exclude packages matching "vendor"
 - Prefix `!` negates the filter
 - Multiple filters are combined with OR logic
 - Matching is case-insensitive
+
+## Package and Package-Area Scoping (`-p` / `--package-area`)
+
+Most package- and area-aware subcommands also accept two structured scoping flags that compose with the positional filter (AND):
+
+| Flag | Match Semantics |
+|------|-----------------|
+| `-p/--package <PKG>` | Exact (case-insensitive) match on `Package.name` |
+| `--package-area <AREA>` | Case-insensitive prefix match on `Package.package_area` (so `homelab` matches both `homelab` and `homelab/server`) |
+
+Passing both flags produces the AND intersection: the resolved package must live within the resolved area. Mismatches and unknown values fail with explicit errors that list the valid names. See each subcommand page for the full coverage matrix.
 
 ## JSON Output (`--json`)
 

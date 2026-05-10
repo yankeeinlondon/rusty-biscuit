@@ -3,7 +3,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::components::renderable::Renderable;
-use biscuit_terminal::discovery::detection::ColorDepth;
+use biscuit_terminal::discovery::detection::{ColorDepth, ColorMode};
 use biscuit_terminal::terminal::Terminal;
 
 static PLAIN: AtomicBool = AtomicBool::new(false);
@@ -49,13 +49,11 @@ fn forced_width(default: u32) -> u32 {
 /// detected terminal.
 pub fn terminal() -> Terminal {
     if colors_disabled() {
-        Terminal::builder()
-            .is_tty(false)
-            .color_depth(ColorDepth::None)
-            .build()
+        plain_terminal(forced_width(80))
     } else if force_color_enabled() {
         Terminal::new_optimistic(forced_width(80))
     } else {
+        // Normal mode - let Terminal::new() detect, but it will now cache
         Terminal::new()
     }
 }
@@ -68,13 +66,18 @@ pub fn terminal() -> Terminal {
 pub fn optimistic_terminal(width: Option<u32>) -> Terminal {
     let w = width.unwrap_or(80);
     if colors_disabled() {
-        Terminal::builder()
-            .is_tty(false)
-            .color_depth(ColorDepth::None)
-            .build()
+        plain_terminal(w)
     } else {
         Terminal::new_optimistic(w)
     }
+}
+
+fn plain_terminal(width: u32) -> Terminal {
+    let mut term = Terminal::new_optimistic(width);
+    term.is_tty = false;
+    term.color_depth = ColorDepth::None;
+    term.color_mode = ColorMode::Dark;
+    term
 }
 
 /// Strip ANSI escape codes if plain mode is active, otherwise return as-is.
@@ -147,6 +150,7 @@ mod tests {
         let term = terminal();
         assert!(!term.is_tty);
         assert_eq!(term.color_depth, ColorDepth::None);
+        assert!(matches!(term.color_mode, ColorMode::Dark));
 
         unsafe {
             std::env::remove_var("NO_COLOR");
@@ -185,6 +189,7 @@ mod tests {
         let term = optimistic_terminal(Some(100));
         assert!(!term.is_tty);
         assert_eq!(term.color_depth, ColorDepth::None);
+        assert!(matches!(term.color_mode, ColorMode::Dark));
 
         set_plain(false);
         unsafe {

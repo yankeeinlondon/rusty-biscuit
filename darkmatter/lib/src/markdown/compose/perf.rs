@@ -20,12 +20,14 @@ pub(crate) enum PerfMetricKind {
     Interpolation,
     ShellExpansion,
     ShellBlocks,
+    LinkResolve,
     TransclusionParse,
     TransclusionPrepare,
     TransclusionResolve,
     TransclusionApply,
     Cleanup,
     Normalization,
+    LinkNormalization,
 }
 
 impl PerfMetricKind {
@@ -40,12 +42,14 @@ impl PerfMetricKind {
             Self::Interpolation => ComposeStage::Interpolation,
             Self::ShellExpansion => ComposeStage::ShellExpansion,
             Self::ShellBlocks => ComposeStage::ShellBlocks,
+            Self::LinkResolve => ComposeStage::LinkResolve,
             Self::TransclusionParse => ComposeStage::TransclusionParse,
             Self::TransclusionPrepare => ComposeStage::TransclusionPrepare,
             Self::TransclusionResolve => ComposeStage::TransclusionResolve,
             Self::TransclusionApply => ComposeStage::TransclusionApply,
             Self::Cleanup => ComposeStage::Cleanup,
             Self::Normalization => ComposeStage::Normalization,
+            Self::LinkNormalization => ComposeStage::LinkNormalization,
         }
     }
 
@@ -60,12 +64,14 @@ impl PerfMetricKind {
             Self::Interpolation,
             Self::ShellExpansion,
             Self::ShellBlocks,
+            Self::LinkResolve,
             Self::TransclusionParse,
             Self::TransclusionPrepare,
             Self::TransclusionResolve,
             Self::TransclusionApply,
             Self::Cleanup,
             Self::Normalization,
+            Self::LinkNormalization,
         ]
     }
 }
@@ -77,7 +83,7 @@ pub(crate) struct PerfCollector {
     enabled: bool,
     start: Option<Instant>,
     /// Fixed-size array indexed by `PerfMetricKind` ordinal.
-    durations: [(Duration, usize); 14],
+    durations: [(Duration, usize); 16],
 }
 
 impl PerfCollector {
@@ -87,7 +93,7 @@ impl PerfCollector {
         Self {
             enabled,
             start: if enabled { Some(Instant::now()) } else { None },
-            durations: [(Duration::ZERO, 0); 14],
+            durations: [(Duration::ZERO, 0); 16],
         }
     }
 

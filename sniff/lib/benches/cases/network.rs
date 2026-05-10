@@ -26,7 +26,7 @@ pub fn register(c: &mut Criterion) {
 
     let mut group = util::configure_group(c, "network");
 
-    group.bench_function("interfaces_only", |b| {
+    group.bench_function("network_interfaces_enumeration_only", |b| {
         let req = NetworkRequest::interfaces_only();
         b.iter(|| {
             let info = detect_network_with_request(black_box(&req)).expect("interfaces_only");
@@ -36,7 +36,7 @@ pub fn register(c: &mut Criterion) {
 
     // `force_refresh` bypasses the global TTL cache, so this group
     // measures the real HTTP round-trip against the wiremock fixture.
-    group.bench_function("wan_ip_forced_refresh", |b| {
+    group.bench_function("wan_ip_http_roundtrip_no_cache", |b| {
         let req = NetworkRequest::full().force_refresh(true);
         b.iter(|| {
             let info = detect_network_with_request(black_box(&req)).expect("wan_ip_forced_refresh");
@@ -48,7 +48,7 @@ pub fn register(c: &mut Criterion) {
     // measures the interfaces walk plus cache-hit bookkeeping.
     let warm = NetworkRequest::full();
     let _ = detect_network_with_request(&warm).expect("prime WAN IP cache");
-    group.bench_function("wan_ip_cached", |b| {
+    group.bench_function("wan_ip_cache_hit_plus_interfaces", |b| {
         let req = NetworkRequest::full();
         b.iter(|| {
             let info = detect_network_with_request(black_box(&req)).expect("wan_ip_cached");

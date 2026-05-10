@@ -1,6 +1,32 @@
+//! Content types and per-format payload models for clipboard entries.
+//!
+//! The clipboard speaks five orthogonal formats — text, html, rtf,
+//! image, files — and a single change can populate several at once.
+//! This module models that with a tagged [`ClipboardFormat`] enum and
+//! a separate [`ContentType`] discriminant for places where only the
+//! shape (not the bytes) matters.
+//!
+//! ## Examples
+//!
+//! ```
+//! use biscuit_clipboard::content::{ClipboardFormat, ContentType};
+//!
+//! let fmt = ClipboardFormat::Text("hello".into());
+//! assert_eq!(fmt.content_type(), ContentType::Text);
+//! assert_eq!(fmt.preview(), "hello");
+//! ```
+
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
+/// Coarse content discriminant for a clipboard format.
+///
+/// Used wherever the type-of-content matters but the bytes do not —
+/// e.g. format-priority selection, REST query params, error
+/// envelopes, and the `EntrySummary.content_type` wire field.
+///
+/// The serde wire form is snake_case (`text`, `html`, `rtf`, `image`,
+/// `files`) per the spec.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ContentType {
@@ -11,6 +37,11 @@ pub enum ContentType {
     Files,
 }
 
+/// One captured clipboard format with its payload.
+///
+/// The serde wire form is `{ "type": "text", "data": "..." }` — see
+/// the spec's REST examples. Each variant carries enough information
+/// to reconstruct the format without consulting the OS clipboard.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", content = "data")]
 pub enum ClipboardFormat {
@@ -103,13 +134,36 @@ impl ClipboardFormat {
     }
 }
 
+/// One captured image, either inline in memory or spilled to disk.
+///
+/// Small images stay inline (default cutoff 64 KiB — see
+/// [`crate::Storage::with_spill_threshold`]); larger images are
+/// written to a content-addressed file and the entry stores the path
+/// plus dimensions instead. Both variants serialize to JSON; the
+/// `Spilled` variant carries enough information for the recipient to
+/// reload the bytes via [`crate::Storage::load_spilled`].
+///
+/// ## Examples
+///
+/// ```
+/// use biscuit_clipboard::content::ImageSnapshot;
+///
+/// let img = ImageSnapshot::Inline { data: vec![1, 2, 3], width: 4, height: 4 };
+/// assert_eq!(img.size_bytes(), 3);
+/// assert_eq!(img.data(), Some([1u8, 2, 3].as_slice()));
+/// ```
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum ImageSnapshot {
+    /// In-memory image bytes.
     Inline {
         data: Vec<u8>,
         width: u32,
         height: u32,
     },
+    /// Image bytes that were spilled to a content-addressed file at
+    /// `path`. The filename stem is the 16-char hex xxhash of the
+    /// payload, which is recovered by [`crate::entry::content_hash_of`]
+    /// for dedup probes.
     Spilled {
         path: PathBuf,
         width: u32,
@@ -140,10 +194,24 @@ impl ImageSnapshot {
         }
     }
 
-    pub fn data(&self) -> &[u8] {
+    /// Return the inline image bytes, if available.
+    ///
+    /// ## Returns
+    ///
+    /// - `Some(&[u8])` for [`ImageSnapshot::Inline`] — bytes are
+    ///   directly accessible.
+    /// - `None` for [`ImageSnapshot::Spilled`] — the bytes live on
+    ///   disk and must be loaded via [`crate::storage::Storage::load_spilled`].
+    ///
+    /// ## Notes
+    ///
+    /// This previously returned `&[u8]` and silently yielded an empty
+    /// slice for the spilled case, which caused hash collisions across
+    /// any two spilled images. Callers MUST handle the `None` case.
+    pub fn data(&self) -> Option<&[u8]> {
         match self {
-            Self::Inline { data, .. } => data,
-            Self::Spilled { .. } => &[],
+            Self::Inline { data, .. } => Some(data),
+            Self::Spilled { .. } => None,
         }
     }
 }

@@ -4,6 +4,7 @@ use std::sync::LazyLock;
 
 use sniff::programs::AiCli;
 
+use super::OutputFormatSelector;
 use super::ProviderInfo;
 use super::acp::AcpSupport;
 use super::behavior::{
@@ -14,10 +15,7 @@ use super::event_mapping::{EventMapping, EventMappingTable};
 use super::identity::Provider;
 use super::known_gap::KnownGap;
 use super::model_catalog_source::ModelCatalogSource;
-use super::output_format::{
-    EntrypointMode, EntrypointSpec, OutputFormat, OutputFormatSupport,
-};
-use super::OutputFormatSelector;
+use super::output_format::{EntrypointMode, EntrypointSpec, OutputFormat, OutputFormatSupport};
 use super::path_template::PathTemplate;
 use super::prompt_args::{COMMON_VALUE_TAKING_FLAGS, PromptArgConventions};
 use super::reasoning::ReasoningSupport;
@@ -40,7 +38,6 @@ use crate::linking::capabilities::{
 };
 use crate::provider::EventSupportLevel;
 use crate::stream::parser::SemanticStreamParser;
-use crate::stream::qwen_semantic::QwenSemanticStreamParser;
 use crate::stream::{ParserConfig, StreamProtocol};
 
 #[derive(Debug)]
@@ -58,9 +55,9 @@ impl ProviderBehavior for QwenProvider {
     fn create_semantic_parser(
         &self,
         sink: BoxedSemanticEventSink,
-        _config: ParserConfig,
+        config: ParserConfig,
     ) -> Box<dyn SemanticStreamParser> {
-        Box::new(QwenSemanticStreamParser::new(sink))
+        crate::stream::providers::for_provider(Provider::QwenCode, sink, config)
     }
 }
 impl McpBehavior for QwenProvider {

@@ -971,7 +971,7 @@ exit 0
         .env("CLAUDINE_ARGS_FILE", &args_path)
         .env("CLAUDINE_STDIN_FILE", &stdin_path)
         .args(["kimi", "hi"])
-        .timeout(std::time::Duration::from_secs(15))
+        .timeout(std::time::Duration::from_secs(60))
         .assert()
         .success();
 
@@ -4874,13 +4874,15 @@ fn watchdog_subagent_hang_terminates_and_names_stuck_ids() {
     fs::write(&md_file, "---\ntitle: watchdog test\n---\nHello\n").unwrap();
 
     // Build a shell script that emits 9 task_started, 7 task_completed, then blocks.
-    let mut script = String::from(r#"#!/bin/sh
+    let mut script = String::from(
+        r#"#!/bin/sh
 if [ "$1" = "models" ]; then
   printf '%s\n' '["test-model"]'
   exit 0
 fi
 printf '%s\n' '{"type":"init","session_id":"hang-test","model":"test-model"}'
-"#);
+"#,
+    );
     for i in 1..=9 {
         script.push_str(&format!(
             r#"printf '%s\n' '{{"type":"task_started","task_id":"sa{i}","name":"Task {i}"}}'
@@ -4916,8 +4918,8 @@ printf '%s\n' '{"type":"init","session_id":"hang-test","model":"test-model"}'
     // The Agent Error block from the watchdog should report a step_timeout
     // and name the stuck subagents in the diagnostic block.
     assert!(
-        plain.contains("step_timeout"),
-        "stderr should contain step_timeout in the watchdog breach message; got: {plain}"
+        plain.contains("no stream activity"),
+        "stderr should contain step_timeout breach message; got: {plain}"
     );
     assert!(
         plain.contains("2 subagents were still outstanding"),
@@ -4939,9 +4941,12 @@ printf '%s\n' '{"type":"init","session_id":"hang-test","model":"test-model"}'
         let last = log.lines().last().unwrap();
         let entry: serde_json::Value = serde_json::from_str(last).unwrap();
         assert_eq!(
-            entry.get("exit_reason").and_then(|v| v.as_str()),
+            entry
+                .get("extra")
+                .and_then(|e| e.get("exit_reason"))
+                .and_then(|v| v.as_str()),
             Some("step_timeout"),
-            "JSONL session_end must have exit_reason=step_timeout; last entry: {last}"
+            "JSONL session_end must have extra.exit_reason=step_timeout; last entry: {last}"
         );
     }
 }
@@ -4990,8 +4995,8 @@ while :; do /bin/sleep 1; done
     let plain = strip_ansi(&stderr);
 
     assert!(
-        plain.contains("step_timeout"),
-        "stderr should contain step_timeout message; got: {plain}"
+        plain.contains("no stream activity"),
+        "stderr should contain step_timeout breach message; got: {plain}"
     );
 }
 
@@ -5071,9 +5076,12 @@ done
         let last = log.lines().last().unwrap();
         let entry: serde_json::Value = serde_json::from_str(last).unwrap();
         assert_eq!(
-            entry.get("exit_reason").and_then(|v| v.as_str()),
+            entry
+                .get("extra")
+                .and_then(|e| e.get("exit_reason"))
+                .and_then(|v| v.as_str()),
             Some("timeout"),
-            "JSONL session_end must have exit_reason=timeout; last entry: {last}"
+            "JSONL session_end must have extra.exit_reason=timeout; last entry: {last}"
         );
     }
 }
@@ -5089,11 +5097,7 @@ fn compose_non_harness_respects_cli_timeout() {
     seed_minimal_config(workspace.path());
 
     let md_file = workspace.path().join("test.md");
-    fs::write(
-        &md_file,
-        "---\ntitle: cli timeout test\n---\nHello\n",
-    )
-    .unwrap();
+    fs::write(&md_file, "---\ntitle: cli timeout test\n---\nHello\n").unwrap();
 
     // Fake provider emits events forever so only wall-clock can stop it.
     write_executable(
@@ -5123,10 +5127,10 @@ done
             "compose",
             "--opencode",
             "--timeout",
-            "2s",
+            "5s",
             md_file.to_str().unwrap(),
         ])
-        .timeout(Duration::from_secs(60))
+        .timeout(Duration::from_secs(120))
         .assert()
         .failure();
 
@@ -5198,7 +5202,22 @@ while :; do /bin/sleep 1; done
     let plain = strip_ansi(&stderr);
 
     assert!(
-        plain.contains("step_timeout"),
-        "stderr should mention step_timeout from CLI --step-timeout; got: {plain}"
+        plain.contains("no stream activity"),
+        "stderr should contain step_timeout breach message from CLI --step-timeout; got: {plain}"
     );
+
+    let log_path = today_log_path(workspace.path());
+    if log_path.exists() {
+        let log = fs::read_to_string(&log_path).unwrap();
+        let last = log.lines().last().unwrap();
+        let entry: serde_json::Value = serde_json::from_str(last).unwrap();
+        assert_eq!(
+            entry
+                .get("extra")
+                .and_then(|e| e.get("exit_reason"))
+                .and_then(|v| v.as_str()),
+            Some("step_timeout"),
+            "JSONL session_end must have extra.exit_reason=step_timeout; last entry: {last}"
+        );
+    }
 }

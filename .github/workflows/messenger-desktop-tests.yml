@@ -57,6 +57,9 @@ jobs:
       - name: Cargo check (--all-features)
         run: cargo check -p messenger --all-features
 
+      - name: Build desktop helper stubs
+        run: cargo build -p messenger --features desktop --bins
+
       - name: Run messenger lib unit tests (desktop feature)
         run: cargo test -p messenger --features desktop --lib
 

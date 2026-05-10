@@ -47,6 +47,14 @@ pub enum ReferenceKind {
     Hyperlink,
     /// An image (`<img>` or markdown image).
     Image,
+    /// A video (`<video>`).
+    HtmlVideo,
+    /// An audio element (`<audio>`).
+    HtmlAudio,
+    /// A source element (`<source>`).
+    HtmlSource,
+    /// An iframe (`<iframe>`).
+    HtmlIframe,
     /// A transclusion directive (`::file`, `::url`, `::code`, prologue/epilogue).
     Transclusion,
     /// A CSS import (`<link rel="stylesheet">` or `@import`).
@@ -74,6 +82,14 @@ pub enum ReferenceSyntax {
     MarkdownImage,
     /// `<img src="...">` HTML image.
     HtmlImage,
+    /// `<video src="...">` HTML video.
+    HtmlVideoTag,
+    /// `<audio src="...">` HTML audio.
+    HtmlAudioTag,
+    /// `<source src="...">` HTML source.
+    HtmlSourceTag,
+    /// `<iframe src="...">` HTML iframe.
+    HtmlIframeTag,
     /// `::file path` directive.
     DirectiveFile,
     /// `::url https://...` directive.

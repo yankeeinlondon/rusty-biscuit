@@ -281,7 +281,7 @@ impl GraphExpression {
         syntax: GraphInputSyntax,
         inverse: bool,
     ) -> Result<Self, GraphRenderError> {
-        let color_mode = Terminal::color_mode();
+        let color_mode = crate::discovery::detection::color_mode();
         let is_dark = matches!(
             color_mode,
             crate::discovery::detection::ColorMode::Dark

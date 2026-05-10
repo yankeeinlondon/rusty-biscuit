@@ -1905,9 +1905,12 @@ fn prose_style_text(term: &Terminal, template: &str, text: &str) -> String {
 }
 
 fn unique_placeholder(text: &str) -> String {
+    // Avoid characters Prose interprets as inline markdown (notably `_`, which
+    // pairs as italics/bold). The placeholder must survive `Prose::render`
+    // unchanged so we can swap in the original text afterwards.
     let mut idx = 0usize;
     loop {
-        let candidate = format!("__DM_STYLESHEET_TEXT_{idx}__");
+        let candidate = format!("XDMSTYLESHEETTEXT{idx}XEND");
         if !text.contains(&candidate) {
             return candidate;
         }

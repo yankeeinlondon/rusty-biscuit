@@ -1,0 +1,62 @@
+Analyzing dependencies of crates in this directory...
+cargo-machete found the following unused dependencies in this directory:
+research -- ./research/lib/Cargo.toml:
+	rig-core
+homelab-server -- ./homelab/server/Cargo.toml:
+	dirs
+	tower
+schematic-oauth -- ./schematic/oauth/Cargo.toml:
+	url
+schematic-schema -- ./schematic/gen/schematic/schema/Cargo.toml:
+	tokio
+agent-sandbox-cli -- ./agent-sandbox/cli/Cargo.toml:
+	clap
+	clap_complete
+	color-eyre
+	tracing
+	tracing-subscriber
+unchained-ai-cli -- ./unchained-ai/cli/Cargo.toml:
+	tracing
+unchained-ai -- ./unchained-ai/lib/Cargo.toml:
+	rig-core
+	tracing-subscriber
+model_id -- ./unchained-ai/model_id/Cargo.toml:
+	proc-macro2
+worktree-cli -- ./worktree/cli/Cargo.toml:
+	dirs
+model-citizen -- ./model-citizen/lib/Cargo.toml:
+	schematic-schema
+	sniff
+sniff -- ./sniff/lib/Cargo.toml:
+	ec4rs
+messenger -- ./messenger/lib/Cargo.toml:
+	rustls
+darkmatter-cli -- ./darkmatter/cli/Cargo.toml:
+	sniff
+	tokio
+biscuit-visualized -- ./biscuit-visualized/src/Cargo.toml:
+	layout-rs
+	serde
+	tempfile
+	tracing
+biscuit-terminal -- ./biscuit-terminal/lib/Cargo.toml:
+	tracing-subscriber
+biscuit-file -- ./biscuit-file/lib/Cargo.toml:
+	jsonschema
+	pdfium-render
+	serde
+ui -- ./tabby/ui/Cargo.toml:
+	clap
+
+If you believe cargo-machete has detected an unused dependency incorrectly,
+you can add the dependency to the list of dependencies to ignore in the
+`[package.metadata.cargo-machete]` section of the appropriate Cargo.toml.
+For example:
+
+[package.metadata.cargo-machete]
+ignored = ["prost"]
+
+You can also try running it with the `--with-metadata` flag for better accuracy,
+though this may modify your Cargo.lock files.
+
+Done!

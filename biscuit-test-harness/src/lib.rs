@@ -21,10 +21,12 @@
 
 #![allow(dead_code)]
 
-use std::io;
+use std::io::{self, Read, Write};
 use std::path::PathBuf;
+use std::process::{Command, Stdio};
 use std::time::Duration;
 
+pub mod apple_terminal;
 pub mod cliclick;
 pub mod kitty;
 pub mod tmux;
@@ -411,7 +413,10 @@ pub fn apply_color_forcing_env(cmd: &mut std::process::Command) {
 pub fn wait_for_prompt(harness: &mut impl TerminalHarness) -> io::Result<()> {
     for _ in 0..50 {
         std::thread::sleep(Duration::from_millis(100));
-        let frame = harness.capture()?;
+        let frame = match harness.capture() {
+            Ok(f) => f,
+            Err(_) => continue,
+        };
         if let Some(last_line) = frame.plain.lines().last() {
             let trimmed = last_line.trim_end();
             if trimmed.ends_with('$') || trimmed.ends_with('#') || trimmed.ends_with('%') {
@@ -423,13 +428,165 @@ pub fn wait_for_prompt(harness: &mut impl TerminalHarness) -> io::Result<()> {
 }
 
 fn which(bin: &str) -> bool {
-    std::process::Command::new("which")
+    Command::new("which")
         .arg(bin)
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
         .status()
         .map(|s| s.success())
         .unwrap_or(false)
+}
+
+// ------------------------------------------------------------------
+// Timeout helpers
+// ------------------------------------------------------------------
+
+/// Default timeout for spawning a new terminal pane or window.
+pub const SPAWN_TIMEOUT: Duration = Duration::from_secs(15);
+/// Default timeout for sending text/keystrokes to a terminal.
+pub const SEND_TIMEOUT: Duration = Duration::from_secs(10);
+/// Default timeout for capturing pane or window contents.
+pub const CAPTURE_TIMEOUT: Duration = Duration::from_secs(10);
+/// Default timeout for query operations (list panes, geometry, etc.).
+pub const QUERY_TIMEOUT: Duration = Duration::from_secs(10);
+/// Default timeout for cleanup operations (kill pane, close window).
+pub const CLEANUP_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// Runs `cmd` with a wall-clock timeout.
+///
+/// Internally polls [`Child::try_wait`](std::process::Child::try_wait)
+/// every 50 ms. If the timeout is reached before the child exits, the
+/// child is killed and a [`TimedOut`](io::ErrorKind::TimedOut) error
+/// is returned.
+///
+/// ## Stderr / stdout
+///
+/// The command's stdout and stderr are captured into the returned
+/// [`Output`](std::process::Output). If the command times out, neither
+/// stream is available.
+///
+/// ## Pipe-deadlock safety
+///
+/// stdout and stderr are drained on background threads so that a
+/// chatty child cannot deadlock itself by filling either pipe buffer
+/// before the polling loop has a chance to reap it.
+pub fn run_with_timeout(cmd: &mut Command, timeout: Duration) -> io::Result<std::process::Output> {
+    let mut child = cmd.stdout(Stdio::piped()).stderr(Stdio::piped()).spawn()?;
+
+    // Drain pipes on background threads to avoid pipe-buffer deadlock.
+    let stdout_handle = child.stdout.take().map(|mut out| {
+        std::thread::spawn(move || {
+            let mut buf = Vec::new();
+            let _ = Read::read_to_end(&mut out, &mut buf);
+            buf
+        })
+    });
+    let stderr_handle = child.stderr.take().map(|mut err| {
+        std::thread::spawn(move || {
+            let mut buf = Vec::new();
+            let _ = Read::read_to_end(&mut err, &mut buf);
+            buf
+        })
+    });
+
+    let deadline = std::time::Instant::now() + timeout;
+    loop {
+        match child.try_wait()? {
+            Some(status) => {
+                let stdout = stdout_handle
+                    .map(|h| h.join().unwrap_or_default())
+                    .unwrap_or_default();
+                let stderr = stderr_handle
+                    .map(|h| h.join().unwrap_or_default())
+                    .unwrap_or_default();
+                return Ok(std::process::Output {
+                    status,
+                    stdout,
+                    stderr,
+                });
+            }
+            None => {
+                if std::time::Instant::now() >= deadline {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return Err(io::Error::new(
+                        io::ErrorKind::TimedOut,
+                        format!("command timed out after {:?}", timeout),
+                    ));
+                }
+                std::thread::sleep(Duration::from_millis(50));
+            }
+        }
+    }
+}
+
+/// Spawns `cmd`, writes `stdin_bytes` to its stdin, then waits for the
+/// child to exit with a timeout.
+///
+/// This is the [`run_with_timeout`] equivalent for commands that need
+/// data piped to their standard input (e.g. `wezterm cli send-text` or
+/// `kitty @ send-text`).
+pub fn run_with_stdin_timeout(
+    cmd: &mut Command,
+    stdin_bytes: &[u8],
+    timeout: Duration,
+) -> io::Result<std::process::Output> {
+    let mut child = cmd
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()?;
+
+    if let Some(mut stdin) = child.stdin.take() {
+        stdin.write_all(stdin_bytes)?;
+        // Dropping stdin closes the pipe so the child sees EOF.
+    }
+
+    // Drain pipes on background threads to avoid pipe-buffer deadlock.
+    let stdout_handle = child.stdout.take().map(|mut out| {
+        std::thread::spawn(move || {
+            let mut buf = Vec::new();
+            let _ = Read::read_to_end(&mut out, &mut buf);
+            buf
+        })
+    });
+    let stderr_handle = child.stderr.take().map(|mut err| {
+        std::thread::spawn(move || {
+            let mut buf = Vec::new();
+            let _ = Read::read_to_end(&mut err, &mut buf);
+            buf
+        })
+    });
+
+    let deadline = std::time::Instant::now() + timeout;
+    loop {
+        match child.try_wait()? {
+            Some(status) => {
+                let stdout = stdout_handle
+                    .map(|h| h.join().unwrap_or_default())
+                    .unwrap_or_default();
+                let stderr = stderr_handle
+                    .map(|h| h.join().unwrap_or_default())
+                    .unwrap_or_default();
+                return Ok(std::process::Output {
+                    status,
+                    stdout,
+                    stderr,
+                });
+            }
+            None => {
+                if std::time::Instant::now() >= deadline {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return Err(io::Error::new(
+                        io::ErrorKind::TimedOut,
+                        format!("command timed out after {:?}", timeout),
+                    ));
+                }
+                std::thread::sleep(Duration::from_millis(50));
+            }
+        }
+    }
 }
 
 #[cfg(test)]

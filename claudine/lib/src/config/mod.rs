@@ -6,13 +6,24 @@ pub(crate) mod codex;
 pub(crate) mod gemini;
 pub(crate) mod goose;
 pub(crate) mod kimicode;
+pub mod merge;
+pub mod messaging_block;
 pub mod migration;
 pub(crate) mod opencode;
 pub(crate) mod qwen;
 pub(crate) mod roo;
 mod trait_def;
+pub mod tts;
 
 pub use trait_def::{AgentConfigurator, ProviderHookPlan, RegistrationResult, SkipReason};
+
+// Re-exports for convenient access and backward compatibility
+pub use claudine_config::{
+    ClaudineConfig, DefaultSounds, DetailedModelOverride, ModelOverrideMode, ProviderModelOverride,
+    RepoOverrideConfig,
+};
+pub use messaging_block::{ClaudineMessengerConfig, MessengerProviderConfig};
+pub use tts::{Gender, TtsConfigSettings, TtsValue, VoiceSelection};
 
 pub(crate) use claude::ClaudeConfigurator;
 pub(crate) use codex::CodexConfigurator;

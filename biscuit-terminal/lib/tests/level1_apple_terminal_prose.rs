@@ -105,6 +105,78 @@ fn apple_terminal_double_underline_degrades_to_straight() {
     );
 }
 
+/// `{{double-underline}}` (atomic-token form) must obey the same
+/// capability-aware degradation policy as `<double-underline>`.
+///
+/// On Apple Terminal: only the straight underline is supported, so the
+/// emitted SGR must be `\x1b[4m` and never the unsupported `\x1b[4:2m`.
+#[test]
+fn apple_terminal_double_underline_atomic_token_degrades() {
+    let mut session = spawn_with_env(&[
+        ("PROBE", "prose"),
+        ("PROBE_TERM_PROGRAM", "Apple_Terminal"),
+        (
+            "PROBE_PROSE_INPUT",
+            "{{double-underline}}important text{{reset}}",
+        ),
+    ]);
+
+    let output = drain(&mut session);
+
+    assert!(
+        output.contains("---PROSE---"),
+        "expected prose probe markers, got: {output:?}"
+    );
+    assert!(
+        output.contains("important text"),
+        "expected literal content, got: {output:?}"
+    );
+    assert!(
+        !output.contains("\x1b[4:2m"),
+        "expected no double-underline SGR on Apple Terminal, got: {output:?}"
+    );
+    assert!(
+        output.contains("\x1b[4m"),
+        "expected straight-underline SGR fallback, got: {output:?}"
+    );
+}
+
+/// `PROBE_FORCE_OSC8=true` must override the canonical
+/// `detection::osc8_link_support()` policy and re-enable OSC8 emission
+/// even when the probe's other inputs (e.g. `TERM_PROGRAM=Apple_Terminal`)
+/// would normally resolve to "no OSC8 support".
+///
+/// This is the positive-case Level-1 proof for the override path that
+/// the production probe inherits from
+/// [`biscuit_terminal::discovery::detection::osc8_link_support`].
+#[test]
+fn probe_force_osc8_emits_osc_when_forced_on() {
+    let mut session = spawn_with_env(&[
+        ("PROBE", "prose"),
+        ("PROBE_TERM_PROGRAM", "Apple_Terminal"),
+        ("PROBE_FORCE_OSC8", "true"),
+        (
+            "PROBE_PROSE_INPUT",
+            "<a href=\"https://example.com\">click here</a>",
+        ),
+    ]);
+
+    let output = drain(&mut session);
+
+    assert!(
+        output.contains("---PROSE---"),
+        "expected prose probe markers, got: {output:?}"
+    );
+    assert!(
+        output.contains("\x1b]8;;https://example.com"),
+        "expected OSC8 escape with href when override is forced on, got: {output:?}"
+    );
+    assert!(
+        !output.contains("[click here]("),
+        "expected no markdown fallback when override forces OSC8 on, got: {output:?}"
+    );
+}
+
 #[test]
 fn no_underline_support_emits_plain_text() {
     // Use explicit overrides to manufacture the "no underline at all"
@@ -138,5 +210,58 @@ fn no_underline_support_emits_plain_text() {
     assert!(
         !output.contains("\x1b[4m"),
         "expected no straight-underline SGR, got: {output:?}"
+    );
+}
+
+/// Atomic-token form (`{{double-underline}}...`) must obey the same
+/// "no underline support → plain text" policy as the block-tag form
+/// (`<double-underline>...</double-underline>`).
+///
+/// With both straight and double underline disabled via the probe overrides,
+/// the rendered output between the probe markers must be exactly the literal
+/// text — no SGR sequences of any kind.
+#[test]
+fn atomic_double_underline_no_underline_support_emits_plain_text() {
+    let mut session = spawn_with_env(&[
+        ("PROBE", "prose"),
+        ("PROBE_TERM_PROGRAM", "Apple_Terminal"),
+        ("PROBE_FORCE_UNDERLINE_STRAIGHT", "false"),
+        ("PROBE_FORCE_UNDERLINE_DOUBLE", "false"),
+        ("PROBE_PROSE_INPUT", "{{double-underline}}important text"),
+    ]);
+
+    let output = drain(&mut session);
+
+    assert!(
+        output.contains("---PROSE---"),
+        "expected prose probe markers, got: {output:?}"
+    );
+
+    // PTY translates LF to CRLF on output, so split on the CRLF form.
+    let rendered = output
+        .split("---PROSE---\r\n")
+        .nth(1)
+        .and_then(|s| s.split("\r\n---END---").next())
+        .unwrap_or("");
+
+    assert_eq!(
+        rendered, "important text",
+        "expected exactly the plain literal between probe markers, got: {rendered:?} (full output: {output:?})"
+    );
+    assert!(
+        !output.contains("\x1b["),
+        "expected no SGR escape of any kind, got: {output:?}"
+    );
+    assert!(
+        !output.contains("\x1b[4:2m"),
+        "expected no double-underline SGR, got: {output:?}"
+    );
+    assert!(
+        !output.contains("\x1b[4m"),
+        "expected no straight-underline SGR, got: {output:?}"
+    );
+    assert!(
+        !output.contains("\x1b[0m"),
+        "expected no reset SGR, got: {output:?}"
     );
 }

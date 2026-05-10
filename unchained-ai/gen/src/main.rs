@@ -5,13 +5,16 @@ use clap::Parser;
 use strum::IntoEnumIterator;
 use tracing::{Level, info, warn};
 
-use unchained_ai::api::openai_api::{get_api_keys, get_provider_models_from_api};
+use unchained_ai::api::openai_api::{
+    ProviderModelEntry, get_api_keys, get_provider_models_from_api,
+};
 use unchained_ai::rigging::providers::Provider;
 
 mod errors;
 mod generator;
 mod metadata_generator;
 mod parsera;
+mod provider_metadata;
 
 use errors::GeneratorError;
 use generator::ModelEnumGenerator;
@@ -23,13 +26,13 @@ use parsera::{ParseraModel, fetch_parsera_specs_with_retry, find_parsera_metadat
 #[command(about = "Generate provider model enum files from API")]
 #[command(version)]
 struct Cli {
-    /// Output directory for generated files
-    #[arg(
-        short,
-        long,
-        default_value = "unchained-ai/lib/src/rigging/providers/models"
-    )]
-    output: PathBuf,
+    /// Output directory for generated files.
+    ///
+    /// Defaults to `<unchained-ai-gen crate>/../lib/src/rigging/providers/models`
+    /// resolved against `CARGO_MANIFEST_DIR`, so the generator targets the real
+    /// `unchained-ai/lib` regardless of the caller's working directory.
+    #[arg(short, long)]
+    output: Option<PathBuf>,
 
     /// Specific providers to generate (comma-separated)
     #[arg(short, long)]
@@ -46,6 +49,18 @@ struct Cli {
     /// Dry run - don't write files, just show what would be generated
     #[arg(long)]
     dry_run: bool,
+}
+
+/// Resolve the default output directory relative to the gen crate's manifest,
+/// not the caller's current working directory.
+fn default_output_dir() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("..")
+        .join("lib")
+        .join("src")
+        .join("rigging")
+        .join("providers")
+        .join("models")
 }
 
 /// Summary of the generation process.
@@ -100,6 +115,8 @@ struct ProviderResult {
     model_count: usize,
     /// Model IDs for metadata collection.
     model_ids: Vec<String>,
+    /// Raw provider-native metadata keyed by unprefixed model ID.
+    raw_metadata: HashMap<String, serde_json::Value>,
 }
 
 /// Process a single provider.
@@ -109,27 +126,30 @@ async fn process_single_provider(
     output_dir: &std::path::Path,
     dry_run: bool,
 ) -> Result<ProviderResult, GeneratorError> {
-    // Fetch models from API
-    let models = get_provider_models_from_api(provider, api_key)
+    let entries: Vec<ProviderModelEntry> = get_provider_models_from_api(provider, api_key)
         .await
         .map_err(|e| GeneratorError::FetchFailed {
             provider: format!("{:?}", provider),
             reason: e.to_string(),
         })?;
 
-    if models.is_empty() {
+    if entries.is_empty() {
         return Err(GeneratorError::FetchFailed {
             provider: format!("{:?}", provider),
             reason: "No models returned from API".to_string(),
         });
     }
 
-    // Collect model IDs for metadata
-    let model_ids: Vec<String> = models.clone();
+    // Collect model IDs and raw metadata
+    let model_ids: Vec<String> = entries.iter().map(|e| e.id.clone()).collect();
+    let raw_metadata: HashMap<String, serde_json::Value> = entries
+        .into_iter()
+        .filter_map(|e| e.raw_metadata.map(|v| (e.id, v)))
+        .collect();
 
     // Generate code
     let provider_name = format!("{:?}", provider);
-    let generator = ModelEnumGenerator::new(provider_name, models);
+    let generator = ModelEnumGenerator::new(provider_name, model_ids.clone());
     let code = generator.generate();
     let model_count = generator.model_count();
 
@@ -137,7 +157,6 @@ async fn process_single_provider(
         println!("\n--- {:?} ({} models) ---", provider, model_count);
         println!("{}", code);
     } else {
-        // Write to file
         let filename = format!("{}.rs", provider_to_filename(provider));
         let output_path = output_dir.join(&filename);
 
@@ -152,6 +171,7 @@ async fn process_single_provider(
     Ok(ProviderResult {
         model_count,
         model_ids,
+        raw_metadata,
     })
 }
 
@@ -159,6 +179,9 @@ async fn process_single_provider(
 struct ProcessingResult {
     summary: GenerationSummary,
     all_model_ids: Vec<String>,
+    /// Raw provider-native metadata from APIs that return rich data,
+    /// keyed by model ID. Currently only OpenRouter provides rich metadata.
+    provider_native_raw: HashMap<String, serde_json::Value>,
 }
 
 /// Process all providers.
@@ -170,9 +193,9 @@ async fn process_providers(
 ) -> ProcessingResult {
     let mut summary = GenerationSummary::default();
     let mut all_model_ids = Vec::new();
+    let mut provider_native_raw = HashMap::new();
 
     for provider in providers {
-        // Check if we have an API key
         let Some(api_key) = api_keys.get(&provider) else {
             summary
                 .skipped
@@ -180,7 +203,6 @@ async fn process_providers(
             continue;
         };
 
-        // Skip local providers
         if provider.config().is_local {
             summary
                 .skipped
@@ -193,6 +215,9 @@ async fn process_providers(
                 info!("Generated {} models for {:?}", result.model_count, provider);
                 summary.succeeded.push((provider, result.model_count));
                 all_model_ids.extend(result.model_ids);
+                if provider == Provider::OpenRouter {
+                    provider_native_raw.extend(result.raw_metadata);
+                }
             }
             Err(e) => {
                 warn!("Skipping {:?}: {}", provider, e);
@@ -204,6 +229,7 @@ async fn process_providers(
     ProcessingResult {
         summary,
         all_model_ids,
+        provider_native_raw,
     }
 }
 
@@ -268,41 +294,53 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     info!("Processing {} providers", providers.len());
 
+    let output_dir = cli.output.clone().unwrap_or_else(default_output_dir);
+    info!("Output directory: {}", output_dir.display());
+
     // Ensure output directory exists
     if !cli.dry_run {
-        std::fs::create_dir_all(&cli.output)?;
+        std::fs::create_dir_all(&output_dir)?;
     }
 
     // Process providers
-    let result = process_providers(providers, &api_keys, &cli.output, cli.dry_run).await;
+    let result = process_providers(providers, &api_keys, &output_dir, cli.dry_run).await;
 
-    // Generate metadata lookup table
+    // Generate metadata lookup table with merge logic
     let mut metadata_gen = MetadataGenerator::new();
     let mut matched_count = 0;
 
     for model_id in &result.all_model_ids {
         let parsera_data = find_parsera_metadata(model_id, &parsera_index);
-        if parsera_data.is_some() {
+
+        let provider_native = result
+            .provider_native_raw
+            .get(model_id)
+            .and_then(|v| provider_metadata::parse_provider_metadata(Provider::OpenRouter, v));
+
+        let merged = MetadataGenerator::merge_metadata(provider_native, parsera_data);
+
+        if merged.is_some() {
             matched_count += 1;
         }
-        metadata_gen.register(model_id.clone(), parsera_data.cloned());
+
+        metadata_gen.register(model_id.clone(), merged);
     }
 
     info!(
-        "Matched {}/{} models with Parsera metadata",
+        "Matched {}/{} models with metadata",
         matched_count,
         result.all_model_ids.len()
     );
 
-    // Write metadata file
+    // Write compact metadata file
+    let metadata_code = metadata_gen.generate();
     if !cli.dry_run {
-        let metadata_code = metadata_gen.generate();
-        let metadata_path = cli.output.join("metadata_generated.rs");
+        let metadata_path = output_dir.join("metadata_generated.rs");
         write_atomic(&metadata_path, &metadata_code)?;
         info!("Wrote metadata to {}", metadata_path.display());
     } else {
         println!("\n--- Metadata ({} entries) ---", matched_count);
-        println!("{}", metadata_gen.generate());
+        println!("{}", metadata_code);
     }
 
     result.summary.print();

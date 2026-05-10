@@ -16,6 +16,7 @@
         "Gini",
         "heaptrack",
         "Helicone",
+        "highspeed",
         "hmac",
         "hostable",
         "indicatif",
@@ -73,5 +74,7 @@
         "wezterm",
         "yazi",
         "zune"
-    ]
+    ],
+    "git.autofetchPeriod": 0,
+    "git.repositoryScanMaxDepth": 0
 }

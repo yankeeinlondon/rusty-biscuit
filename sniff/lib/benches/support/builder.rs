@@ -504,6 +504,62 @@ pub fn build_git_repo_with_fake_remotes(
     repo
 }
 
+/// Build a git repo with `package_count` Cargo packages, each with a
+/// `Cargo.toml`, `src/lib.rs`, and a few classified files.
+///
+/// This fixture is designed to isolate `refresh_package_boundaries` by
+/// providing a controllable number of manifest boundaries and source
+/// files without the overhead of a multi-ecosystem monorepo.
+///
+/// Returns the opened `Repository` handle.
+pub fn build_cargo_monorepo(root: &Path, package_count: usize) -> Repository {
+    let repo = Repository::init(root).expect("init cargo monorepo");
+
+    let cargo_members: Vec<String> = (0..package_count)
+        .map(|i| format!("\"crates/pkg{i:03}\""))
+        .collect();
+    let workspace_manifest = format!(
+        "[workspace]\nresolver = \"2\"\nmembers = [\n    {}\n]\n",
+        cargo_members.join(",\n    ")
+    );
+    write_file(&root.join("Cargo.toml"), &workspace_manifest);
+    write_file(&root.join("README.md"), "# cargo monorepo fixture\n");
+    write_file(&root.join(".gitignore"), "target/\n");
+
+    for i in 0..package_count {
+        let pkg = root.join(format!("crates/pkg{i:03}"));
+        write_file(
+            &pkg.join("Cargo.toml"),
+            &format!("[package]\nname = \"pkg{i:03}\"\nversion = \"0.1.0\"\nedition = \"2021\"\n"),
+        );
+        write_file(
+            &pkg.join("src/lib.rs"),
+            &format!("pub fn n() -> u32 {{ {i} }}\n"),
+        );
+        write_file(
+            &pkg.join("src/util.rs"),
+            "pub fn util() -> &'static str { \"util\" }\n",
+        );
+        write_file(&pkg.join("tests/smoke.rs"), "#[test] fn ok() {}\n");
+        write_file(&pkg.join("README.md"), &format!("# pkg{i:03}\n"));
+    }
+
+    commit_all(&repo, "c1: initial cargo monorepo layout");
+
+    // Leave a couple of dirty files so the inventory has classified
+    // files to assign to packages during boundary refresh.
+    write_file(
+        &root.join("crates/pkg000/src/lib.rs"),
+        "pub fn n() -> u32 { 999 }\n",
+    );
+    write_file(
+        &root.join("crates/pkg001/src/util.rs"),
+        "pub fn util() -> &'static str { \"dirty\" }\n",
+    );
+
+    repo
+}
+
 /// Build a non-git directory containing a shallow-wide language mix
 /// plus one deeply nested path. Useful for language/file-type scanning
 /// benchmarks that should not pay git discovery costs.

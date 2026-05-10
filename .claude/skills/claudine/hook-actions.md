@@ -247,3 +247,36 @@ Shell environment variables are supported via `{{env.VAR_NAME}}` with optional d
   "message": "Tool {{tool_name}} failed on {{git.branch}}: {{error}}"
 }
 ```
+
+## Conditional Execution (`when`)
+
+Every action variant supports an optional `when` field containing a Darkmatter condition expression. When present, the expression is evaluated against the active `EventMeta` before the action runs; if the result is falsy or the expression is invalid, the action is skipped without aborting the rest of the binding.
+
+### Path Resolution
+
+Path resolution inside `when` is identical to dispatch templates and event binding matchers:
+
+- `env.NAME`, `extra.<path>`, `tool_input.<path>`, `tool_response.<path>`
+- `os.*`, `hardware.*`, `git.*`, `project.*`
+- Top-level event fields: `provider`, `event`, `tool_name`, etc.
+
+`ctx.*` (e.g. `ctx.today`, `ctx.year`) is the **only** `when`-exclusive surface. It is deliberately unresolved in templates, matchers, and harness validation.
+
+### Example
+
+```json
+{
+  "type": "speak",
+  "when": "git.branch == 'main'",
+  "message": "Running on main branch"
+}
+```
+
+```json
+{
+  "type": "call",
+  "when": "ctx.today != ''",
+  "command": "daily-check",
+  "mapper": { "type": "exit_code" }
+}
+```

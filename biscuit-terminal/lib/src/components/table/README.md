@@ -130,14 +130,14 @@ Table rendering now goes through an explicit planning phase before any rows are 
 Public planning APIs are available on `Table`:
 
 ```rust
-use biscuit_terminal::components::table::table::{Table, TableColumn};
+use biscuit_terminal::components::table::{Table, TableColumn};
 
 let table = Table::new().with_columns(vec![TableColumn::new("Name")]);
 let measurements = table.measure_widths(80)?;
 let plan = table.plan_widths(80)?;
 assert_eq!(measurements.available_render_width, 80);
 assert_eq!(plan.visible_column_indices, vec![0]);
-# Ok::<(), biscuit_terminal::components::table::table::TableWidthError>(())
+# Ok::<(), biscuit_terminal::components::table::TableWidthError>(())
 ```
 
 The number of columns is still derived from whichever is larger: the column definitions count or the widest data row. Extra cells participate in measurement and rendering with default table-column semantics when no explicit `TableColumn` exists for that index.

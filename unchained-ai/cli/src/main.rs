@@ -1,15 +1,20 @@
 use clap::{CommandFactory, Parser, Subcommand};
 use clap_complete::Shell;
 use color_eyre::eyre::Result;
+use unchained_ai::rigging::providers::models::ProviderModel;
 
 mod commands;
 
 /// AI pipeline tools and agent status monitoring
+fn model_value_parser() -> clap::builder::PossibleValuesParser {
+    clap::builder::PossibleValuesParser::new(ProviderModel::all_wire_ids())
+}
+
 #[derive(Parser)]
 #[command(
     name = "unchained",
     version,
-    about,
+    about = "AI pipeline tools and agent status monitoring",
     after_help = "Use 'unchained <command> --help' for more information about a command."
 )]
 struct Cli {
@@ -36,6 +41,18 @@ enum Commands {
         /// Filter to a specific platform (claude, codex)
         #[arg(short, long)]
         platform: Option<String>,
+    },
+    /// List models defined by `unchained-ai-gen`, optionally with metadata
+    Models {
+        /// Filter to a specific provider (e.g. openai, anthropic, gemini)
+        #[arg(short, long)]
+        provider: Option<String>,
+    },
+    /// Show detailed metadata for a specific model
+    Model {
+        /// Model identifier in provider/model-id format (e.g. openai/o3)
+        #[arg(value_parser = model_value_parser())]
+        model: String,
     },
 }
 
@@ -66,6 +83,12 @@ async fn main() -> Result<()> {
     match cli.command {
         Some(Commands::Limits { platform }) => {
             commands::limits::run(platform, cli.json).await?;
+        }
+        Some(Commands::Models { provider }) => {
+            commands::models::run(provider, cli.json, cli.verbose > 0).await?;
+        }
+        Some(Commands::Model { model }) => {
+            commands::model::run(model, cli.json).await?;
         }
         None => {
             Cli::command().print_help()?;

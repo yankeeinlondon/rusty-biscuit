@@ -1,5 +1,0 @@
-> Note: interpolation can point to frontmatter properties defined on the page but it also always gets two lookup variables defined for it:
-> 
-> * env - the env property is a dictionary of environment variables
-> * ctx - the ctx (short for "context") property is a dictionary of contextual information about the environment the page is being executed in. This is defined in detail in Context Variables document.
-

@@ -74,7 +74,7 @@ fn test_terminal_dimension_methods() {
     let term = Terminal::new();
     let width = term.width();
     let height = term.height();
-    let _color_mode = Terminal::color_mode();
+    let _color_mode = term.color_mode();
 
     // Dimensions should be reasonable
     assert!(width > 0, "Width should be positive");

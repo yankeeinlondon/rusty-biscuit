@@ -187,7 +187,7 @@ mod tests {
 
     #[test]
     fn test_topic_info_has_issues() {
-        let mut topic = TopicInfo::new("test".to_string(), PathBuf::from("/test"));
+        let topic = TopicInfo::new("test".to_string(), PathBuf::from("/test"));
         assert!(!topic.has_issues());
 
         let mut topic2 = TopicInfo::new("test".to_string(), PathBuf::from("/test"));
@@ -201,7 +201,7 @@ mod tests {
 
     #[test]
     fn test_topic_info_has_critical_issues() {
-        let mut topic = TopicInfo::new("test".to_string(), PathBuf::from("/test"));
+        let topic = TopicInfo::new("test".to_string(), PathBuf::from("/test"));
         assert!(!topic.has_critical_issues());
 
         let mut topic2 = TopicInfo::new("test".to_string(), PathBuf::from("/test"));

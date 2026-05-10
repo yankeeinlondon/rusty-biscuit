@@ -5,6 +5,7 @@ use std::sync::LazyLock;
 
 use sniff::programs::AiCli;
 
+use super::OutputFormatSelector;
 use super::ProviderInfo;
 use super::acp::AcpSupport;
 use super::behavior::{
@@ -15,10 +16,7 @@ use super::event_mapping::{EventMapping, EventMappingTable};
 use super::identity::Provider;
 use super::known_gap::KnownGap;
 use super::model_catalog_source::ModelCatalogSource;
-use super::output_format::{
-    EntrypointMode, EntrypointSpec, OutputFormat, OutputFormatSupport,
-};
-use super::OutputFormatSelector;
+use super::output_format::{EntrypointMode, EntrypointSpec, OutputFormat, OutputFormatSupport};
 use super::path_template::PathTemplate;
 use super::prompt_args::PromptArgConventions;
 use super::reasoning::ReasoningSupport;
@@ -47,7 +45,6 @@ use crate::mcp::inject::{CodexInjector, McpInjector};
 use crate::mcp::state::Scope;
 use crate::mcp::types::McpServer;
 use crate::provider::EventSupportLevel;
-use crate::stream::codex_semantic::CodexSemanticStreamParser;
 use crate::stream::parser::SemanticStreamParser;
 use crate::stream::{ParserConfig, StreamProtocol};
 
@@ -66,7 +63,7 @@ impl ProviderBehavior for CodexProvider {
         sink: BoxedSemanticEventSink,
         config: ParserConfig,
     ) -> Box<dyn SemanticStreamParser> {
-        Box::new(CodexSemanticStreamParser::new(sink, config.model))
+        crate::stream::providers::for_provider(Provider::Codex, sink, config)
     }
 }
 impl McpBehavior for CodexProvider {

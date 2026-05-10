@@ -230,11 +230,42 @@ pub enum Token {
     /// Comma `,` for function arguments.
     Comma,
 
+    /// Postfix dot `.` used between a non-identifier base and a member name.
+    ///
+    /// Plain dotted identifier paths (`foo.bar.baz`) are folded into a single
+    /// [`Token::Variable`] by the lexer; this token is only emitted when a
+    /// `.` cannot be absorbed into a variable, such as after `]` or `)`.
+    Dot,
+
+    /// Left bracket `[`.
+    LBracket,
+
+    /// Right bracket `]`.
+    RBracket,
+
+    /// Arithmetic plus `+`.
+    Plus,
+
+    /// Arithmetic minus / unary minus `-`.
+    Minus,
+
+    /// Arithmetic multiplication `*`.
+    Star,
+
+    /// Arithmetic division `/`.
+    Slash,
+
+    /// Arithmetic remainder `%`.
+    Percent,
+
     /// A string literal (content without quotes).
     StringLiteral(String),
 
     /// A numeric literal.
     NumberLiteral(f64),
+
+    /// A boolean literal: `true` or `false`.
+    BoolLiteral(bool),
 
     /// A comparison operator.
     CompOp(ComparisonOp),
@@ -280,8 +311,17 @@ impl fmt::Display for Token {
             Token::LParen => write!(f, "("),
             Token::RParen => write!(f, ")"),
             Token::Comma => write!(f, ","),
+            Token::Dot => write!(f, "."),
+            Token::LBracket => write!(f, "["),
+            Token::RBracket => write!(f, "]"),
+            Token::Plus => write!(f, "+"),
+            Token::Minus => write!(f, "-"),
+            Token::Star => write!(f, "*"),
+            Token::Slash => write!(f, "/"),
+            Token::Percent => write!(f, "%"),
             Token::StringLiteral(s) => write!(f, "\"{}\"", s),
             Token::NumberLiteral(n) => write!(f, "{}", n),
+            Token::BoolLiteral(b) => write!(f, "{}", b),
             Token::CompOp(op) => write!(f, "{}", op),
             Token::Bang => write!(f, "!"),
             Token::AndAnd => write!(f, "&&"),
@@ -304,6 +344,8 @@ pub enum ComparisonOp {
     GreaterThanOrEqual,
     /// Less than `<`
     LessThan,
+    /// Less than or equal `<=`
+    LessThanOrEqual,
 }
 
 impl fmt::Display for ComparisonOp {
@@ -314,6 +356,7 @@ impl fmt::Display for ComparisonOp {
             ComparisonOp::GreaterThan => write!(f, ">"),
             ComparisonOp::GreaterThanOrEqual => write!(f, ">="),
             ComparisonOp::LessThan => write!(f, "<"),
+            ComparisonOp::LessThanOrEqual => write!(f, "<="),
         }
     }
 }
@@ -470,6 +513,38 @@ impl<'a> Lexer<'a> {
                 self.advance();
                 Ok(Token::Comma)
             }
+            '.' => {
+                self.advance();
+                Ok(Token::Dot)
+            }
+            '[' => {
+                self.advance();
+                Ok(Token::LBracket)
+            }
+            ']' => {
+                self.advance();
+                Ok(Token::RBracket)
+            }
+            '+' => {
+                self.advance();
+                Ok(Token::Plus)
+            }
+            '-' => {
+                self.advance();
+                Ok(Token::Minus)
+            }
+            '*' => {
+                self.advance();
+                Ok(Token::Star)
+            }
+            '/' => {
+                self.advance();
+                Ok(Token::Slash)
+            }
+            '%' => {
+                self.advance();
+                Ok(Token::Percent)
+            }
             '"' | '\'' => self.read_string(ch),
             '=' => {
                 self.advance();
@@ -503,13 +578,14 @@ impl<'a> Lexer<'a> {
             }
             '<' => {
                 self.advance();
-                Ok(Token::CompOp(ComparisonOp::LessThan))
+                if self.current_char() == Some('=') {
+                    self.advance();
+                    Ok(Token::CompOp(ComparisonOp::LessThanOrEqual))
+                } else {
+                    Ok(Token::CompOp(ComparisonOp::LessThan))
+                }
             }
-            _ if ch.is_ascii_digit()
-                || (ch == '-' && self.peek_char().is_some_and(|c| c.is_ascii_digit())) =>
-            {
-                self.read_number()
-            }
+            _ if ch.is_ascii_digit() => self.read_number(),
             _ if is_identifier_start(ch) => self.read_variable(),
             _ => Err(LexerError::new(
                 format!("Unexpected character: '{}'", ch),
@@ -632,15 +708,13 @@ impl<'a> Lexer<'a> {
     }
 
     /// Reads a numeric literal.
+    ///
+    /// Numbers are always non-negative at the lexer level. Unary minus is
+    /// handled in the parser so `5 - 3` tokenizes as three tokens rather than
+    /// being collapsed into `5, -3`.
     fn read_number(&mut self) -> Result<Token, LexerError> {
         let start_pos = self.pos;
         let mut value = String::new();
-
-        // Handle negative sign
-        if self.current_char() == Some('-') {
-            value.push('-');
-            self.advance();
-        }
 
         // Read integer part
         while let Some(ch) = self.current_char() {
@@ -714,7 +788,11 @@ impl<'a> Lexer<'a> {
             }
         }
 
-        Ok(Token::Variable(name))
+        Ok(match name.as_str() {
+            "true" => Token::BoolLiteral(true),
+            "false" => Token::BoolLiteral(false),
+            _ => Token::Variable(name),
+        })
     }
 }
 
@@ -987,11 +1065,13 @@ After code {{ end }}."#;
 
         #[test]
         fn tokenizes_negative_integer() {
+            // Unary minus is parser-level. Lexer always emits Minus + positive number.
             let mut lexer = Lexer::new("-42");
             let tokens = lexer.tokenize_all().unwrap();
 
-            assert_eq!(tokens.len(), 2);
-            assert!(matches!(&tokens[0], Token::NumberLiteral(n) if *n == -42.0));
+            assert_eq!(tokens.len(), 3);
+            assert!(matches!(&tokens[0], Token::Minus));
+            assert!(matches!(&tokens[1], Token::NumberLiteral(n) if *n == 42.0));
         }
 
         #[test]
@@ -1010,10 +1090,42 @@ After code {{ end }}."#;
             let mut lexer = Lexer::new("-3.15");
             let tokens = lexer.tokenize_all().unwrap();
 
-            assert_eq!(tokens.len(), 2);
+            assert_eq!(tokens.len(), 3);
+            assert!(matches!(&tokens[0], Token::Minus));
             assert!(
-                matches!(&tokens[0], Token::NumberLiteral(n) if (*n - -3.15).abs() < f64::EPSILON)
+                matches!(&tokens[1], Token::NumberLiteral(n) if (*n - 3.15).abs() < f64::EPSILON)
             );
+        }
+
+        #[test]
+        fn tokenizes_true_literal() {
+            let mut lexer = Lexer::new("true");
+            let tokens = lexer.tokenize_all().unwrap();
+
+            assert_eq!(tokens.len(), 2);
+            assert!(matches!(&tokens[0], Token::BoolLiteral(b) if *b));
+        }
+
+        #[test]
+        fn tokenizes_false_literal() {
+            let mut lexer = Lexer::new("false");
+            let tokens = lexer.tokenize_all().unwrap();
+
+            assert_eq!(tokens.len(), 2);
+            assert!(matches!(&tokens[0], Token::BoolLiteral(b) if !*b));
+        }
+
+        #[test]
+        fn tokenizes_bool_literal_in_expression() {
+            let mut lexer = Lexer::new("enabled ? true : false");
+            let tokens = lexer.tokenize_all().unwrap();
+
+            assert_eq!(tokens.len(), 6);
+            assert!(matches!(&tokens[0], Token::Variable(v) if v == "enabled"));
+            assert!(matches!(&tokens[1], Token::Question));
+            assert!(matches!(&tokens[2], Token::BoolLiteral(b) if *b));
+            assert!(matches!(&tokens[3], Token::Colon));
+            assert!(matches!(&tokens[4], Token::BoolLiteral(b) if !*b));
         }
 
         #[test]
@@ -1071,6 +1183,126 @@ After code {{ end }}."#;
             let tokens = lexer.tokenize_all().unwrap();
 
             assert!(matches!(&tokens[1], Token::CompOp(ComparisonOp::LessThan)));
+        }
+
+        #[test]
+        fn tokenizes_less_than_or_equal() {
+            let mut lexer = Lexer::new("a <= b");
+            let tokens = lexer.tokenize_all().unwrap();
+
+            assert!(matches!(
+                &tokens[1],
+                Token::CompOp(ComparisonOp::LessThanOrEqual)
+            ));
+        }
+
+        #[test]
+        fn tokenizes_arithmetic_operators() {
+            let mut lexer = Lexer::new("a + b - c * d / e % f");
+            let tokens = lexer.tokenize_all().unwrap();
+
+            assert!(matches!(&tokens[1], Token::Plus));
+            assert!(matches!(&tokens[3], Token::Minus));
+            assert!(matches!(&tokens[5], Token::Star));
+            assert!(matches!(&tokens[7], Token::Slash));
+            assert!(matches!(&tokens[9], Token::Percent));
+        }
+
+        #[test]
+        fn tokenizes_arithmetic_no_space() {
+            let mut lexer = Lexer::new("5-3");
+            let tokens = lexer.tokenize_all().unwrap();
+
+            assert_eq!(tokens.len(), 4);
+            assert!(matches!(&tokens[0], Token::NumberLiteral(n) if *n == 5.0));
+            assert!(matches!(&tokens[1], Token::Minus));
+            assert!(matches!(&tokens[2], Token::NumberLiteral(n) if *n == 3.0));
+        }
+
+        #[test]
+        fn tokenizes_brackets() {
+            let mut lexer = Lexer::new("items[0]");
+            let tokens = lexer.tokenize_all().unwrap();
+
+            assert_eq!(tokens.len(), 5);
+            assert!(matches!(&tokens[0], Token::Variable(v) if v == "items"));
+            assert!(matches!(&tokens[1], Token::LBracket));
+            assert!(matches!(&tokens[2], Token::NumberLiteral(n) if *n == 0.0));
+            assert!(matches!(&tokens[3], Token::RBracket));
+        }
+
+        #[test]
+        fn tokenizes_negative_index() {
+            let mut lexer = Lexer::new("items[-1]");
+            let tokens = lexer.tokenize_all().unwrap();
+
+            assert_eq!(tokens.len(), 6);
+            assert!(matches!(&tokens[0], Token::Variable(v) if v == "items"));
+            assert!(matches!(&tokens[1], Token::LBracket));
+            assert!(matches!(&tokens[2], Token::Minus));
+            assert!(matches!(&tokens[3], Token::NumberLiteral(n) if *n == 1.0));
+            assert!(matches!(&tokens[4], Token::RBracket));
+        }
+
+        #[test]
+        fn tokenizes_string_index() {
+            let mut lexer = Lexer::new(r#"config["key"]"#);
+            let tokens = lexer.tokenize_all().unwrap();
+
+            assert_eq!(tokens.len(), 5);
+            assert!(matches!(&tokens[0], Token::Variable(v) if v == "config"));
+            assert!(matches!(&tokens[1], Token::LBracket));
+            assert!(matches!(&tokens[2], Token::StringLiteral(s) if s == "key"));
+            assert!(matches!(&tokens[3], Token::RBracket));
+        }
+
+        #[test]
+        fn tokenizes_postfix_dot_after_paren() {
+            // Plain dotted paths are folded into Variable; standalone Dot is
+            // emitted only when the dot can't be absorbed (e.g., after `)`).
+            let mut lexer = Lexer::new("(foo).bar");
+            let tokens = lexer.tokenize_all().unwrap();
+
+            assert!(matches!(&tokens[0], Token::LParen));
+            assert!(matches!(&tokens[1], Token::Variable(v) if v == "foo"));
+            assert!(matches!(&tokens[2], Token::RParen));
+            assert!(matches!(&tokens[3], Token::Dot));
+            assert!(matches!(&tokens[4], Token::Variable(v) if v == "bar"));
+        }
+
+        #[test]
+        fn tokenizes_postfix_dot_after_bracket() {
+            let mut lexer = Lexer::new("items[0].name");
+            let tokens = lexer.tokenize_all().unwrap();
+
+            assert!(matches!(&tokens[0], Token::Variable(v) if v == "items"));
+            assert!(matches!(&tokens[1], Token::LBracket));
+            assert!(matches!(&tokens[2], Token::NumberLiteral(_)));
+            assert!(matches!(&tokens[3], Token::RBracket));
+            assert!(matches!(&tokens[4], Token::Dot));
+            assert!(matches!(&tokens[5], Token::Variable(v) if v == "name"));
+        }
+
+        #[test]
+        fn tokenizes_dotted_variable_then_bracket() {
+            let mut lexer = Lexer::new("foo.bar[0]");
+            let tokens = lexer.tokenize_all().unwrap();
+
+            assert_eq!(tokens.len(), 5);
+            assert!(matches!(&tokens[0], Token::Variable(v) if v == "foo.bar"));
+            assert!(matches!(&tokens[1], Token::LBracket));
+        }
+
+        #[test]
+        fn tokenizes_dot_followed_by_digit() {
+            // foo.0 — dot is not absorbed into the variable because `0` is not
+            // an identifier start. Lexer emits Dot + NumberLiteral.
+            let mut lexer = Lexer::new("foo.0");
+            let tokens = lexer.tokenize_all().unwrap();
+
+            assert!(matches!(&tokens[0], Token::Variable(v) if v == "foo"));
+            assert!(matches!(&tokens[1], Token::Dot));
+            assert!(matches!(&tokens[2], Token::NumberLiteral(n) if *n == 0.0));
         }
     }
 
@@ -1354,6 +1586,8 @@ After code {{ end }}."#;
                 "\"hello\""
             );
             assert_eq!(Token::NumberLiteral(42.0).to_string(), "42");
+            assert_eq!(Token::BoolLiteral(true).to_string(), "true");
+            assert_eq!(Token::BoolLiteral(false).to_string(), "false");
         }
 
         #[test]
@@ -1363,6 +1597,23 @@ After code {{ end }}."#;
             assert_eq!(ComparisonOp::GreaterThan.to_string(), ">");
             assert_eq!(ComparisonOp::GreaterThanOrEqual.to_string(), ">=");
             assert_eq!(ComparisonOp::LessThan.to_string(), "<");
+            assert_eq!(ComparisonOp::LessThanOrEqual.to_string(), "<=");
+        }
+
+        #[test]
+        fn arithmetic_tokens_display() {
+            assert_eq!(Token::Plus.to_string(), "+");
+            assert_eq!(Token::Minus.to_string(), "-");
+            assert_eq!(Token::Star.to_string(), "*");
+            assert_eq!(Token::Slash.to_string(), "/");
+            assert_eq!(Token::Percent.to_string(), "%");
+        }
+
+        #[test]
+        fn bracket_and_dot_tokens_display() {
+            assert_eq!(Token::LBracket.to_string(), "[");
+            assert_eq!(Token::RBracket.to_string(), "]");
+            assert_eq!(Token::Dot.to_string(), ".");
         }
 
         #[test]

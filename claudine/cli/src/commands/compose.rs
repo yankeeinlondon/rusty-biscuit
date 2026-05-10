@@ -168,6 +168,10 @@ pub struct SharedComposeArgs {
     /// Emit a performance report to stderr after command completion.
     #[arg(long)]
     pub perf: bool,
+
+    /// Maximum number of loop iterations (overrides `loop.max` frontmatter).
+    #[arg(long = "max-iterations", value_name = "N")]
+    pub max_iterations: Option<usize>,
 }
 
 impl SharedComposeArgs {
@@ -356,6 +360,88 @@ fn run_compose_inner(
         &approval_options,
     )?;
 
+    // ── Loop detection and execution ─────────────────────────────────────
+    let loop_options = claudine::composition::LoopExecutionOptions {
+        max_iterations: shared
+            .max_iterations
+            .or(claudine::composition::resolve_max_iterations_from_env()),
+        fail_fast: claudine::composition::resolve_fail_fast_from_env(),
+    };
+
+    let file_for_loop = file.clone();
+    if let Some(loop_result) = run_loop_with_overrides(
+        &source,
+        set_overrides.as_ref(),
+        loop_options,
+        |ctx| {
+            let prepared = composition::prepare_direct(
+                &source,
+                composition::PrepareOptions {
+                    set_overrides: Some(ctx.as_set_overrides()),
+                    pre_approved_commands: Some(preflight.approved_commands.clone()),
+                    env_overrides: env_overrides.clone(),
+                    perf_enabled: shared.perf,
+                },
+            )?;
+
+            let request = CompositionExecutionRequest {
+                mode: CompositionMode::ChainedDocument,
+                file_ref: file_for_loop.clone(),
+                prepared,
+                resolved_target: Some(resolved_target.clone()),
+                explicit_provider: shared.explicit_provider(),
+                excluded: shared.excluded(),
+                yolo: shared.yolo,
+                include: shared.include.clone(),
+                model: shared.model.clone(),
+                output: shared.output,
+                system_prompt_args: system_prompt_args.clone(),
+                timeout: shared.timeout.clone(),
+                step_timeout: shared.step_timeout.clone(),
+                operation: shared.operation.clone(),
+                sandbox: shared.sandbox,
+                repo: shared.repo,
+                dry_run: shared.dry_run,
+                mcp: shared.mcp,
+                mcp_use: shared.mcp_use.clone(),
+                strict: shared.strict,
+                session_interactive: shared.interactive,
+                quiet: shared.quiet,
+                silent: shared.silent,
+                env_overrides: env_overrides.clone(),
+                shared_approval_cache: Some(std::sync::Arc::clone(&shared_approval_cache)),
+                sequence: false,
+            };
+
+            let outcome = super::wrap::composition::execute_composition_request_inner(
+                request,
+                verbose,
+                None,
+                shared.perf,
+            )
+            .map_err(|e| claudine::composition::CompositionError::LoopInvalid(e.to_string()))?;
+
+            if outcome.exit_code == 0 {
+                Ok(claudine::composition::LoopIterationOutput::success(""))
+            } else {
+                Ok(claudine::composition::LoopIterationOutput::failure(
+                    "",
+                    outcome.exit_code,
+                    claudine::composition::CompositionError::LoopInvalid(format!(
+                        "provider exited with code {}",
+                        outcome.exit_code
+                    )),
+                ))
+            }
+        },
+    )? {
+        if let Some(error) = loop_result.error {
+            return Err(error.into());
+        }
+        return Ok(loop_result.final_exit_code);
+    }
+
+    // ── Single execution path (no loop) ──────────────────────────────────
     let prepared = composition::prepare_direct(
         &source,
         composition::PrepareOptions {
@@ -521,6 +607,88 @@ fn run_inline_compose_inner(
         &approval_options,
     )?;
 
+    // ── Loop detection and execution ─────────────────────────────────────
+    let loop_options = claudine::composition::LoopExecutionOptions {
+        max_iterations: shared
+            .max_iterations
+            .or(claudine::composition::resolve_max_iterations_from_env()),
+        fail_fast: claudine::composition::resolve_fail_fast_from_env(),
+    };
+
+    let file_for_loop = file.clone();
+    if let Some(loop_result) = run_loop_with_overrides(
+        &source,
+        set_overrides.as_ref(),
+        loop_options,
+        |ctx| {
+            let prepared = composition::prepare_inline(
+                &source,
+                composition::PrepareOptions {
+                    set_overrides: Some(ctx.as_set_overrides()),
+                    pre_approved_commands: Some(preflight.approved_commands.clone()),
+                    env_overrides: env_overrides.clone(),
+                    perf_enabled: shared.perf,
+                },
+            )?;
+
+            let request = CompositionExecutionRequest {
+                mode: CompositionMode::InlineFrontmatterPrompt,
+                file_ref: file_for_loop.clone(),
+                prepared,
+                resolved_target: Some(resolved_target.clone()),
+                explicit_provider: shared.explicit_provider(),
+                excluded: shared.excluded(),
+                yolo: shared.yolo,
+                include: shared.include.clone(),
+                model: shared.model.clone(),
+                output: shared.output,
+                system_prompt_args: system_prompt_args.clone(),
+                timeout: shared.timeout.clone(),
+                step_timeout: shared.step_timeout.clone(),
+                operation: shared.operation.clone(),
+                sandbox: shared.sandbox,
+                repo: shared.repo,
+                dry_run: shared.dry_run,
+                mcp: shared.mcp,
+                mcp_use: shared.mcp_use.clone(),
+                strict: shared.strict,
+                session_interactive: shared.interactive,
+                quiet: shared.quiet,
+                silent: shared.silent,
+                env_overrides: env_overrides.clone(),
+                shared_approval_cache: Some(std::sync::Arc::clone(&shared_approval_cache)),
+                sequence: false,
+            };
+
+            let outcome = super::wrap::composition::execute_composition_request_inner(
+                request,
+                verbose,
+                None,
+                shared.perf,
+            )
+            .map_err(|e| claudine::composition::CompositionError::LoopInvalid(e.to_string()))?;
+
+            if outcome.exit_code == 0 {
+                Ok(claudine::composition::LoopIterationOutput::success(""))
+            } else {
+                Ok(claudine::composition::LoopIterationOutput::failure(
+                    "",
+                    outcome.exit_code,
+                    claudine::composition::CompositionError::LoopInvalid(format!(
+                        "provider exited with code {}",
+                        outcome.exit_code
+                    )),
+                ))
+            }
+        },
+    )? {
+        if let Some(error) = loop_result.error {
+            return Err(error.into());
+        }
+        return Ok(loop_result.final_exit_code);
+    }
+
+    // ── Single execution path (no loop) ──────────────────────────────────
     let prepared = composition::prepare_inline(
         &source,
         composition::PrepareOptions {
@@ -561,6 +729,60 @@ fn run_inline_compose_inner(
     };
 
     execute_composition_request(request, verbose, startup_timings, shared.perf)
+}
+
+/// Run a composition loop with CLI `--set` / shorthand setter overrides
+/// merged into the loop's initial frontmatter.
+///
+/// Returns `Ok(None)` when the source has no `loop` frontmatter, matching
+/// [`claudine::composition::execute_loop`].
+///
+/// CLI overrides shadow on-disk frontmatter values from the very first
+/// iteration so that the loop condition and templated body see the values
+/// the user passed on the command line.
+fn run_loop_with_overrides<F>(
+    source: &claudine::composition::ResolvedCompositionSource,
+    set_overrides: Option<&serde_json::Value>,
+    options: claudine::composition::LoopExecutionOptions,
+    executor: F,
+) -> std::result::Result<
+    Option<claudine::composition::LoopExecutionResult>,
+    claudine::composition::CompositionError,
+>
+where
+    F: FnMut(
+        claudine::composition::LoopIterationContext,
+    ) -> std::result::Result<
+        claudine::composition::LoopIterationOutput,
+        claudine::composition::CompositionError,
+    >,
+{
+    let Some(config) = claudine::composition::resolve_loop_config(source)? else {
+        return Ok(None);
+    };
+
+    let mut initial_frontmatter: serde_json::Map<String, serde_json::Value> = source
+        .markdown
+        .frontmatter()
+        .as_map()
+        .iter()
+        .map(|(k, v)| (k.clone(), v.clone()))
+        .collect();
+
+    if let Some(serde_json::Value::Object(overrides)) = set_overrides {
+        for (k, v) in overrides {
+            initial_frontmatter.insert(k.clone(), v.clone());
+        }
+    }
+
+    let result = claudine::composition::execute_loop_with_config(
+        &source.resolved_path,
+        &config,
+        initial_frontmatter,
+        options,
+        executor,
+    )?;
+    Ok(Some(result))
 }
 
 /// Parse `--set` JSON/JSON5, validate it's an object, return as `serde_json::Value`.

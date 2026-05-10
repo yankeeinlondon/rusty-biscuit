@@ -10,7 +10,8 @@ use crate::{
     terminal::Terminal,
     utils::{
         color::Color,
-        layout::{Layout, Margin, WordWrap},
+        layout::{Layout, Margin},
+        wrap_policy::WordWrap,
     },
 };
 

@@ -1,6 +1,6 @@
 ---
 name: biscuit-terminal
-description: Expert knowledge for the biscuit-terminal Rust library - the authority for terminal capability detection (13+ emulators) and rich terminal rendering. Provides inline image rendering (Kitty/iTerm2 protocols), terminal-facing Mermaid and graph adapters backed by biscuit-visualized, OS/font detection, escape code analysis, color system (BasicColor, WebColor, Tailwind), and composable rendering components. Use when building CLI apps with terminal-aware features, rendering images or diagrams inline, detecting color/underline/italics/dim support, or querying terminal environment. Darkmatter depends on this for terminal Mermaid rendering.
+description: Expert knowledge for the biscuit-terminal Rust library - the authority for terminal capability detection (13+ emulators) and rich terminal rendering. Provides inline image rendering (Kitty/iTerm2 protocols), terminal-facing Mermaid and graph adapters backed by biscuit-visualized, OS/font detection, escape code analysis, color system (BasicColor, WebColor, Tailwind), and composable rendering components. The `Prose` component supports three input grammars — atomic tokens (`{{bold}}`), block tags (`<bold>...</bold>`), and a Markdown subset (`**bold**`, `_italics_`, `[desc](url)`) with intra-word flanking rules so identifiers like `OPENCODE_CONFIG_CONTENT` pass through unmangled. Use when building CLI apps with terminal-aware features, rendering images or diagrams inline, detecting color/underline/italics/dim support, or querying terminal environment. Darkmatter depends on this for terminal Mermaid rendering.
 ---
 
 # biscuit-terminal
@@ -44,7 +44,7 @@ if term.supports_italic { println!("\x1b[3mItalic\x1b[0m"); }
 | [Detection Functions](./discovery.md) | App, color, underline, italics, dim, multiplex detection |
 | [OS & Environment](./os-environment.md) | OS, distro, CI, fonts, locale |
 | [Escape Codes](./escape-codes.md) | Strip, analyze, visual width calculation |
-| [Styling](./styling.md) | Terminal-aware styling, Prose component, TextBlock |
+| [Styling](./styling.md) | Terminal-aware styling, Prose component (atomic tokens, block tags, Markdown subset with flanking rules), TextBlock |
 | [bt Command](./cli.md) | CLI tool: 17 commands for inspection, diagrams, text, and filesystem |
 
 ## Common Patterns
@@ -256,7 +256,8 @@ biscuit_terminal/
 │   ├── mermaid.rs        # Terminal-facing Mermaid adapter
 │   └── graph_expression.rs # Terminal-facing graph adapter
 └── utils/
-    ├── layout.rs         # Layout, Margin, WordWrap, Alignment
+    ├── layout.rs         # Layout, Margin, Alignment
+    ├── wrap_policy.rs    # WordWrap enum
     ├── color.rs          # Color, BasicColor, RgbColor, WebColor, Tailwind, HdrColor
     ├── styling.rs        # Stylist trait, FontWeight, Style
     ├── escape_codes.rs   # ANSI escape code generation
@@ -297,14 +298,39 @@ biscuit-terminal follows the Level 1 / 2 / 3 testing vocabulary from the
 The `biscuit-test-harness` workspace member provides:
 
 - `TerminalHarness` trait — `spawn`, `send_text`, `capture`, `settle`.
-- `WezTermHarness`, `KittyHarness`, `TmuxHarness` implementations.
+- `WezTermHarness`, `KittyHarness`, `TmuxHarness`, `AppleTerminalHarness`
+  implementations.
 - `CapturedFrame { raw, plain }` plus a robust ECMA-48 `strip_ansi` helper.
 - `available()` probes that check the binary on `$PATH` plus required env
-  (`WEZTERM_UNIX_SOCKET`, `KITTY_LISTEN_ON`, `TMUX`).
+  (`WEZTERM_UNIX_SOCKET`, `KITTY_LISTEN_ON`, `TMUX`). `AppleTerminalHarness`
+  additionally returns false in CI (`CI=1`) and off-macOS.
 - `skip_with_reason()` for clean test skips.
 
 Level-2 tests skip cleanly when the required terminal emulator is
 unavailable; no `#[ignore]` markers are used.
+
+#### `AppleTerminalHarness` capture limitation
+
+Terminal.app's AppleScript interface exposes only the **plain visible
+text** of a tab — there is no API to retrieve the raw ANSI/SGR byte
+stream. `CapturedFrame::raw` and `CapturedFrame::plain` therefore hold
+the same string. Use this harness for "no escape garbage is visible"
+assertions; use Level-1 PTY tests for byte-level negative assertions
+(e.g. "no OSC8 bytes were emitted").
+
+#### macOS focus-restore trap (AppleScript)
+
+Harnesses that snapshot the frontmost app via System Events
+(`name of first process whose frontmost is true`) and then restore it
+with `tell application <name> to activate` will pop a modal "Choose
+Application — Where is X?" dialog whenever the captured *process* name
+differs from any installed `.app` bundle name (WezTerm → `wezterm-gui`,
+all Electron apps, Slack/Discord/etc.). The dialog blocks the test
+until a human dismisses it. Always restore via System Events instead:
+`tell application "System Events" to set frontmost of (first process
+whose name is prevApp) to true`. See the **cli** skill →
+"Restoring focus after a test spawns a GUI window (macOS)" for the
+full rationale and the affected-app table.
 
 ### Adding new Level-1 tests
 

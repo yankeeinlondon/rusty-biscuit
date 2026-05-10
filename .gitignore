@@ -72,4 +72,10 @@ Cargo.lock
 **/*.snap.new
 **/*.pending-snap
 
+# Timing artifacts emitted by `just _lint` / `just _test` recipes
+**/lint-*-timing.jsonl
+**/test-*-timing.jsonl
+
 .opencode/package-lock.json
+**/lint-*timing.jsonl
+**/test-*timing.jsonl

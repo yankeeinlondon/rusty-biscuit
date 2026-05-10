@@ -1,3 +1,12 @@
+//! Disk-spill cache for large clipboard payloads.
+//!
+//! [`Storage`] owns a single content-addressed cache directory
+//! (default: `<dirs::cache_dir>/biscuit-clipboard`). Inline images
+//! larger than the configured threshold are written there as
+//! `{xxhash:016x}.dat` files; the in-memory entry switches to
+//! `ImageSnapshot::Spilled { path, ... }` and the bytes are loaded on
+//! demand via [`Storage::load_spilled`].
+
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -6,12 +15,30 @@ use crate::error::ClipboardError;
 
 const DEFAULT_SPILL_THRESHOLD: usize = 64 * 1024;
 
+/// Disk-spill cache for large clipboard payloads.
+///
+/// ## Examples
+///
+/// ```no_run
+/// use biscuit_clipboard::Storage;
+///
+/// let storage = Storage::new().expect("storage init");
+/// // Use the storage to spill or load images...
+/// ```
+#[derive(Clone)]
 pub struct Storage {
     cache_dir: PathBuf,
     spill_threshold: usize,
 }
 
 impl Storage {
+    /// Build a [`Storage`] rooted at the platform default cache dir.
+    ///
+    /// ## Errors
+    ///
+    /// Returns [`ClipboardError::Backend`] if the platform cache
+    /// directory cannot be determined; returns [`ClipboardError::Io`]
+    /// if creating the directory fails.
     pub fn new() -> Result<Self, ClipboardError> {
         let cache_dir = Self::default_cache_dir()?;
         fs::create_dir_all(&cache_dir)?;
@@ -35,9 +62,23 @@ impl Storage {
         &self.cache_dir
     }
 
+    /// Compute a content-addressed hash of the inline image bytes.
+    /// Returns the same hash for two inline images with identical bytes,
+    /// so the spilled file lands at the same path.
+    pub fn hash_image_payload(image: &ImageSnapshot) -> u64 {
+        match image {
+            ImageSnapshot::Inline { data, .. } => biscuit_hash::xx_hash_bytes(data),
+            ImageSnapshot::Spilled { size_bytes, .. } => *size_bytes,
+        }
+    }
+
     pub fn spill_if_needed(&self, content_hash: u64, image: ImageSnapshot) -> ImageSnapshot {
         match &image {
-            ImageSnapshot::Inline { data, width, height } => {
+            ImageSnapshot::Inline {
+                data,
+                width,
+                height,
+            } => {
                 if data.len() > self.spill_threshold {
                     let file_name = format!("{:016x}.dat", content_hash);
                     let path = self.cache_dir.join(&file_name);
@@ -130,7 +171,10 @@ mod tests {
         let result = storage.spill_if_needed(0xABCD, img);
         match result {
             ImageSnapshot::Spilled {
-                path, width, height, ..
+                path,
+                width,
+                height,
+                ..
             } => {
                 assert_eq!(width, 10);
                 assert_eq!(height, 10);
@@ -234,12 +278,15 @@ mod tests {
 
         match &spilled {
             ImageSnapshot::Spilled {
-                path, width, height, ..
+                path,
+                width,
+                height,
+                ..
             } => {
                 assert_eq!(*width, 8);
                 assert_eq!(*height, 8);
                 assert!(path.exists());
-                assert!(path.extension().map_or(false, |e| e == "dat"));
+                assert!(path.extension().is_some_and(|e| e == "dat"));
             }
             _ => panic!("Should have spilled"),
         }

@@ -1,0 +1,2 @@
+# Late Binding Frontmatter Interpolation
+

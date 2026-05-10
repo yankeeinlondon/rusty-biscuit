@@ -15,11 +15,14 @@
 
 use std::env;
 use std::ffi::OsString;
-use std::io::{self, Write};
+use std::io;
 use std::process::{Command, Stdio};
 use std::time::Duration;
 
-use super::{CapturedFrame, SpawnVisibility, TerminalHarness, wait_for_prompt};
+use super::{
+    CAPTURE_TIMEOUT, CLEANUP_TIMEOUT, CapturedFrame, QUERY_TIMEOUT, SEND_TIMEOUT, SPAWN_TIMEOUT,
+    SpawnVisibility, TerminalHarness, run_with_stdin_timeout, run_with_timeout, wait_for_prompt,
+};
 
 /// Harness that drives a running kitty GUI via `kitty @`.
 pub struct KittyHarness {
@@ -72,11 +75,9 @@ impl KittyHarness {
     /// parsed, or the spawned window id is not present in the listing.
     pub fn pane_cols(&self) -> io::Result<u32> {
         let want = self.window_id().to_string();
-        let out = Command::new("kitty")
-            .args(["@", "ls"])
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .output()?;
+        let mut cmd = Command::new("kitty");
+        cmd.args(["@", "ls"]);
+        let out = run_with_timeout(&mut cmd, QUERY_TIMEOUT)?;
         if !out.status.success() {
             return Err(io::Error::other(format!(
                 "kitty @ ls failed: {}",
@@ -134,11 +135,11 @@ impl KittyHarness {
 
     fn close_window(&mut self) {
         if let Some(id) = self.window_id.take() {
-            let _ = Command::new("kitty")
-                .args(["@", "close-window", "--match", &format!("id:{id}")])
+            let mut cmd = Command::new("kitty");
+            cmd.args(["@", "close-window", "--match", &format!("id:{id}")])
                 .stdout(Stdio::null())
-                .stderr(Stdio::null())
-                .status();
+                .stderr(Stdio::null());
+            let _ = run_with_timeout(&mut cmd, CLEANUP_TIMEOUT);
         }
     }
 }
@@ -192,7 +193,7 @@ impl TerminalHarness for KittyHarness {
         // state.
         super::apply_color_forcing_env(&mut cmd);
 
-        let out = cmd.output()?;
+        let out = run_with_timeout(&mut cmd, SPAWN_TIMEOUT)?;
         if !out.status.success() {
             return Err(io::Error::other(format!(
                 "kitty @ launch failed: {}",
@@ -225,7 +226,7 @@ impl TerminalHarness for KittyHarness {
         for a in args {
             cmd.arg(a);
         }
-        let out = cmd.output()?;
+        let out = run_with_timeout(&mut cmd, SPAWN_TIMEOUT)?;
         if !out.status.success() {
             return Err(io::Error::other(format!(
                 "kitty @ launch failed: {}",
@@ -243,23 +244,16 @@ impl TerminalHarness for KittyHarness {
 
     fn send_text(&mut self, bytes: &[u8]) -> io::Result<()> {
         let id = self.window_id().to_string();
-        let mut child = Command::new("kitty")
-            .args([
-                "@",
-                "send-text",
-                "--match",
-                &format!("id:{id}"),
-                "--from-file",
-                "/dev/stdin",
-            ])
-            .stdin(Stdio::piped())
-            .stdout(Stdio::null())
-            .stderr(Stdio::piped())
-            .spawn()?;
-        if let Some(stdin) = child.stdin.as_mut() {
-            stdin.write_all(bytes)?;
-        }
-        let out = child.wait_with_output()?;
+        let mut cmd = Command::new("kitty");
+        cmd.args([
+            "@",
+            "send-text",
+            "--match",
+            &format!("id:{id}"),
+            "--from-file",
+            "/dev/stdin",
+        ]);
+        let out = run_with_stdin_timeout(&mut cmd, bytes, SEND_TIMEOUT)?;
         if !out.status.success() {
             return Err(io::Error::other(format!(
                 "kitty @ send-text failed: {}",
@@ -271,16 +265,16 @@ impl TerminalHarness for KittyHarness {
 
     fn capture(&mut self) -> io::Result<CapturedFrame> {
         let id = self.window_id().to_string();
-        let out = Command::new("kitty")
-            .args([
-                "@",
-                "get-text",
-                "--match",
-                &format!("id:{id}"),
-                "--extent=screen",
-                "--ansi",
-            ])
-            .output()?;
+        let mut cmd = Command::new("kitty");
+        cmd.args([
+            "@",
+            "get-text",
+            "--match",
+            &format!("id:{id}"),
+            "--extent=screen",
+            "--ansi",
+        ]);
+        let out = run_with_timeout(&mut cmd, CAPTURE_TIMEOUT)?;
         if !out.status.success() {
             return Err(io::Error::other(format!(
                 "kitty @ get-text failed: {}",

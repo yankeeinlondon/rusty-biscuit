@@ -78,6 +78,21 @@
 //! ```
 //!
 //! ```
+//! use schematic_definitions::artificial_analysis::{
+//!     define_artificial_analysis_data_api,
+//!     define_artificial_analysis_critpt_api,
+//! };
+//!
+//! let data = define_artificial_analysis_data_api();
+//! assert_eq!(data.name, "ArtificialAnalysisData");
+//! assert_eq!(data.endpoints.len(), 6);
+//!
+//! let critpt = define_artificial_analysis_critpt_api();
+//! assert_eq!(critpt.name, "ArtificialAnalysisCritPt");
+//! assert_eq!(critpt.endpoints.len(), 1);
+//! ```
+//!
+//! ```
 //! use schematic_definitions::emqx::{define_emqx_basic_api, define_emqx_bearer_api};
 //!
 //! let basic_api = define_emqx_basic_api();
@@ -146,6 +161,7 @@
 //! ```
 
 pub mod anthropic;
+pub mod artificial_analysis;
 pub mod bitbucket;
 pub mod elevenlabs;
 pub mod emqx;
@@ -172,6 +188,9 @@ pub mod unfolded_circle_core_rest {
 
 // Re-export API definition functions for convenience
 pub use anthropic::define_anthropic_api;
+pub use artificial_analysis::{
+    define_artificial_analysis_critpt_api, define_artificial_analysis_data_api,
+};
 pub use bitbucket::define_bitbucket_api;
 pub use elevenlabs::{define_elevenlabs_rest_api, define_elevenlabs_websocket_api};
 pub use emqx::{define_emqx_basic_api, define_emqx_bearer_api};
@@ -212,6 +231,8 @@ use schematic_define::RestApi;
 pub fn apis_by_module() -> IndexMap<String, Vec<RestApi>> {
     let all_apis = vec![
         define_anthropic_api(),
+        define_artificial_analysis_data_api(),
+        define_artificial_analysis_critpt_api(),
         define_bitbucket_api(),
         define_openai_api(),
         define_elevenlabs_rest_api(),

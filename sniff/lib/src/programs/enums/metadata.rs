@@ -1,12 +1,11 @@
 //! Metadata tables and implementations for program categories.
 
+use crate::programs::contract::{CategoryEnum, InstallationMethod};
 use crate::programs::schema::{ProgramInfo, ProgramMetadata, VersionFlag, VersionParseStrategy};
-use crate::programs::types::InstallationMethod;
 
 use super::categories::{
-    ALL_OS, AiCli, CategoryEnum, Editor, HeadlessAudio, LINUX_ONLY, LanguagePackageManager,
-    MACOS_ONLY, NotificationHelper, OsPackageManager, TerminalApp, TtsClient, UNIX_ONLY, Utility,
-    WINDOWS_ONLY,
+    ALL_OS, AiCli, Editor, HeadlessAudio, LINUX_ONLY, LanguagePackageManager, MACOS_ONLY,
+    NotificationHelper, OsPackageManager, TerminalApp, TtsClient, UNIX_ONLY, Utility, WINDOWS_ONLY,
 };
 
 pub(crate) static BREW_INSTALL: &[InstallationMethod] = &[InstallationMethod::RemoteBash(
@@ -2171,13 +2170,16 @@ impl CategoryEnum for TtsClient {
 
     fn platform_override(
         &self,
-    ) -> Option<(std::path::PathBuf, crate::programs::types::ExecutableSource)> {
+    ) -> Option<(
+        std::path::PathBuf,
+        crate::programs::contract::ExecutableSource,
+    )> {
         match self {
             TtsClient::WindowsSapi => {
                 if cfg!(target_os = "windows") {
                     Some((
                         std::path::PathBuf::from("sapi"),
-                        crate::programs::types::ExecutableSource::Path,
+                        crate::programs::contract::ExecutableSource::Path,
                     ))
                 } else {
                     None
@@ -3209,13 +3211,16 @@ impl CategoryEnum for NotificationHelper {
 
     fn platform_override(
         &self,
-    ) -> Option<(std::path::PathBuf, crate::programs::types::ExecutableSource)> {
+    ) -> Option<(
+        std::path::PathBuf,
+        crate::programs::contract::ExecutableSource,
+    )> {
         match self {
             NotificationHelper::BurntToast => {
                 if cfg!(target_os = "windows") && is_burnttoast_available() {
                     Some((
                         std::path::PathBuf::from("BurntToast"),
-                        crate::programs::types::ExecutableSource::Path,
+                        crate::programs::contract::ExecutableSource::Path,
                     ))
                 } else {
                     None

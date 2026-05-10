@@ -4,6 +4,7 @@ use biscuit_file::serde_yaml_ng;
 use biscuit_hash::xx_hash;
 use chrono::{DateTime, NaiveDate, NaiveDateTime, Utc};
 use ignore::WalkBuilder;
+use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
@@ -173,7 +174,6 @@ pub fn detect_docs(root: &Path) -> Option<Vec<MarkdownMeta>> {
 pub fn detect_blast_radius_docs(root: &Path) -> Option<Vec<MarkdownMeta>> {
     let repo = git2::Repository::discover(root).ok()?;
     let repo_root = repo.workdir()?.to_path_buf();
-    let packages = collect_repo_packages(&repo_root);
 
     let walker = WalkBuilder::new(&repo_root)
         .hidden(false)
@@ -182,7 +182,7 @@ pub fn detect_blast_radius_docs(root: &Path) -> Option<Vec<MarkdownMeta>> {
         .git_exclude(true)
         .build();
 
-    let mut docs: Vec<MarkdownMeta> = walker
+    let paths: Vec<_> = walker
         .filter_map(|entry| entry.ok())
         .filter(|entry| {
             entry.file_type().is_some_and(|ft| ft.is_file())
@@ -191,39 +191,19 @@ pub fn detect_blast_radius_docs(root: &Path) -> Option<Vec<MarkdownMeta>> {
                     .extension()
                     .is_some_and(|ext| ext.eq_ignore_ascii_case("md"))
         })
-        .filter_map(|entry| {
-            parse_markdown_meta_with_mode(
-                entry.path(),
-                &repo_root,
-                &packages,
-                DocParseMode::BlastRadiusOnly,
-            )
+        .map(|entry| entry.path().to_path_buf())
+        .collect();
+
+    let mut docs: Vec<MarkdownMeta> = paths
+        .into_par_iter()
+        .filter_map(|path| {
+            parse_markdown_meta_with_mode(&path, &repo_root, &[], DocParseMode::BlastRadiusOnly)
         })
         .filter(|doc| doc.has_blast_radius)
         .collect();
 
     docs.sort_by(|a, b| a.relative.cmp(&b.relative));
     if docs.is_empty() { None } else { Some(docs) }
-}
-
-fn collect_repo_packages(repo_root: &Path) -> Vec<(String, PathBuf)> {
-    detect_repo(repo_root)
-        .ok()
-        .flatten()
-        .and_then(|info| info.packages)
-        .map(|pkgs| {
-            pkgs.into_iter()
-                .map(|p| {
-                    let rel_path = p
-                        .path
-                        .strip_prefix(repo_root)
-                        .unwrap_or(&p.path)
-                        .to_path_buf();
-                    (p.name, rel_path)
-                })
-                .collect::<Vec<_>>()
-        })
-        .unwrap_or_default()
 }
 
 /// Detect markdown documents using pre-computed package info.
@@ -247,7 +227,7 @@ fn collect_markdown_files(repo_root: &Path, packages: &[(String, PathBuf)]) -> V
         .git_exclude(true)
         .build();
 
-    let mut docs: Vec<MarkdownMeta> = walker
+    let paths: Vec<_> = walker
         .filter_map(|entry| entry.ok())
         .filter(|entry| {
             entry.file_type().is_some_and(|ft| ft.is_file())
@@ -256,7 +236,12 @@ fn collect_markdown_files(repo_root: &Path, packages: &[(String, PathBuf)]) -> V
                     .extension()
                     .is_some_and(|ext| ext.eq_ignore_ascii_case("md"))
         })
-        .filter_map(|entry| parse_markdown_meta(entry.path(), repo_root, packages))
+        .map(|entry| entry.path().to_path_buf())
+        .collect();
+
+    let mut docs: Vec<MarkdownMeta> = paths
+        .into_par_iter()
+        .filter_map(|path| parse_markdown_meta(&path, repo_root, packages))
         .collect();
 
     docs.sort_by(|a, b| a.relative.cmp(&b.relative));
