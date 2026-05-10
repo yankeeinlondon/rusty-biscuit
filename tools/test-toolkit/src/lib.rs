@@ -242,6 +242,9 @@ mod tests {
     const RESTORE_KEY: &str = "TEST_TOOLKIT_ENV_GUARD_RESTORE";
     const REMOVE_KEY: &str = "TEST_TOOLKIT_ENV_GUARD_REMOVE";
     const NESTED_KEY: &str = "TEST_TOOLKIT_ENV_GUARD_NESTED";
+    const SAFE_SET_RESTORE_KEY: &str = "TEST_TOOLKIT_SAFE_SET_RESTORE";
+    const SAFE_REMOVE_KEY: &str = "TEST_TOOLKIT_SAFE_REMOVE";
+    const SAFE_SET_UNSET_KEY: &str = "TEST_TOOLKIT_SAFE_SET_UNSET";
 
     #[test]
     fn trace_phase_returns_wrapped_expression_result() {
@@ -349,54 +352,54 @@ mod tests {
         // set_safe does not require #[serial_test::serial] because it
         // acquires the internal ENV_GUARD_LOCK.
         unsafe {
-            env::set_var(RESTORE_KEY, "before");
+            env::set_var(SAFE_SET_RESTORE_KEY, "before");
         }
 
         {
-            let guard = EnvGuard::set_safe(RESTORE_KEY, "during");
-            assert_eq!(guard.key(), RESTORE_KEY);
+            let guard = EnvGuard::set_safe(SAFE_SET_RESTORE_KEY, "during");
+            assert_eq!(guard.key(), SAFE_SET_RESTORE_KEY);
             assert!(guard.had_previous_value());
-            assert_eq!(env::var(RESTORE_KEY).as_deref(), Ok("during"));
+            assert_eq!(env::var(SAFE_SET_RESTORE_KEY).as_deref(), Ok("during"));
         }
 
-        assert_eq!(env::var(RESTORE_KEY).as_deref(), Ok("before"));
+        assert_eq!(env::var(SAFE_SET_RESTORE_KEY).as_deref(), Ok("before"));
         unsafe {
-            env::remove_var(RESTORE_KEY);
+            env::remove_var(SAFE_SET_RESTORE_KEY);
         }
     }
 
     #[test]
     fn env_guard_safe_remove_restores_previous_value() {
         unsafe {
-            env::set_var(REMOVE_KEY, "before");
+            env::set_var(SAFE_REMOVE_KEY, "before");
         }
 
         {
-            let guard = EnvGuard::remove_safe(REMOVE_KEY);
-            assert_eq!(guard.key(), REMOVE_KEY);
+            let guard = EnvGuard::remove_safe(SAFE_REMOVE_KEY);
+            assert_eq!(guard.key(), SAFE_REMOVE_KEY);
             assert!(guard.had_previous_value());
-            assert!(env::var_os(REMOVE_KEY).is_none());
+            assert!(env::var_os(SAFE_REMOVE_KEY).is_none());
         }
 
-        assert_eq!(env::var(REMOVE_KEY).as_deref(), Ok("before"));
+        assert_eq!(env::var(SAFE_REMOVE_KEY).as_deref(), Ok("before"));
         unsafe {
-            env::remove_var(REMOVE_KEY);
+            env::remove_var(SAFE_REMOVE_KEY);
         }
     }
 
     #[test]
     fn env_guard_safe_set_restores_unset_variable() {
         unsafe {
-            env::remove_var(REMOVE_KEY);
+            env::remove_var(SAFE_SET_UNSET_KEY);
         }
 
         {
-            let guard = EnvGuard::set_safe(REMOVE_KEY, "during");
+            let guard = EnvGuard::set_safe(SAFE_SET_UNSET_KEY, "during");
             assert!(!guard.had_previous_value());
-            assert_eq!(env::var(REMOVE_KEY).as_deref(), Ok("during"));
+            assert_eq!(env::var(SAFE_SET_UNSET_KEY).as_deref(), Ok("during"));
         }
 
-        assert!(env::var_os(REMOVE_KEY).is_none());
+        assert!(env::var_os(SAFE_SET_UNSET_KEY).is_none());
     }
 
     #[test]
