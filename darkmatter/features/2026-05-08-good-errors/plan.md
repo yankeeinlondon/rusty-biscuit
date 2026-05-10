@@ -2,6 +2,95 @@
 phases: 2
 created: 2026-05-09
 start_phase: 1
+source_files_during_phase_1:
+  - darkmatter/lib/src/markdown/compose/page_blocks/engine.rs
+  - darkmatter/lib/src/markdown/errors/mod.rs
+  - darkmatter/lib/src/render/link.rs
+  - darkmatter/lib/tests/error_snapshots/page_block.rs
+  - darkmatter/lib/tests/error_snapshots/snapshots/error_snapshots__page_block__unterminated_block.snap
+  - biscuit-terminal/lib/src/components/prose/markdown.rs
+docs_updated_during_phase_1: []
+docs_created_during_phase_1:
+  - darkmatter/docs/errors/README.md
+skills_files_updated_during_phase_1: []
+source_files_during_phase_2:
+  - darkmatter/lib/tests/error_snapshots/condition.rs
+  - darkmatter/lib/tests/error_snapshots/deferred_set.rs
+  - darkmatter/lib/tests/error_snapshots/image_ref.rs
+  - darkmatter/lib/tests/error_snapshots/link.rs
+  - darkmatter/lib/tests/error_snapshots/page_block.rs
+  - darkmatter/lib/tests/error_snapshots/reference.rs
+  - darkmatter/lib/tests/error_snapshots/stylesheet.rs
+  - darkmatter/lib/tests/error_snapshots/transclusion.rs
+  - darkmatter/lib/tests/error_snapshots/snapshots/error_snapshots__condition__eval.snap
+  - darkmatter/lib/tests/error_snapshots/snapshots/error_snapshots__condition__parse.snap
+  - darkmatter/lib/tests/error_snapshots/snapshots/error_snapshots__deferred_set__invalid_assignment.snap
+  - darkmatter/lib/tests/error_snapshots/snapshots/error_snapshots__deferred_set__reassigned_property.snap
+  - darkmatter/lib/tests/error_snapshots/snapshots/error_snapshots__image_ref__empty_source.snap
+  - darkmatter/lib/tests/error_snapshots/snapshots/error_snapshots__image_ref__invalid_decoding.snap
+  - darkmatter/lib/tests/error_snapshots/snapshots/error_snapshots__image_ref__invalid_fetch_priority.snap
+  - darkmatter/lib/tests/error_snapshots/snapshots/error_snapshots__image_ref__invalid_loading.snap
+  - darkmatter/lib/tests/error_snapshots/snapshots/error_snapshots__image_ref__invalid_referrer_policy_no_match.snap
+  - darkmatter/lib/tests/error_snapshots/snapshots/error_snapshots__image_ref__invalid_referrer_policy_suggests.snap
+  - darkmatter/lib/tests/error_snapshots/snapshots/error_snapshots__image_ref__invalid_style_delegates.snap
+  - darkmatter/lib/tests/error_snapshots/snapshots/error_snapshots__image_ref__malformed_html.snap
+  - darkmatter/lib/tests/error_snapshots/snapshots/error_snapshots__image_ref__malformed_markdown_with_context.snap
+  - darkmatter/lib/tests/error_snapshots/snapshots/error_snapshots__image_ref__malformed_markdown_without_context.snap
+  - darkmatter/lib/tests/error_snapshots/snapshots/error_snapshots__image_ref__missing_source.snap
+  - darkmatter/lib/tests/error_snapshots/snapshots/error_snapshots__image_ref__unrecognized_format.snap
+  - darkmatter/lib/tests/error_snapshots/snapshots/error_snapshots__link__empty_href.snap
+  - darkmatter/lib/tests/error_snapshots/snapshots/error_snapshots__link__invalid_style_delegates.snap
+  - darkmatter/lib/tests/error_snapshots/snapshots/error_snapshots__link__invalid_target.snap
+  - darkmatter/lib/tests/error_snapshots/snapshots/error_snapshots__link__malformed_html.snap
+  - darkmatter/lib/tests/error_snapshots/snapshots/error_snapshots__link__malformed_markdown_with_context.snap
+  - darkmatter/lib/tests/error_snapshots/snapshots/error_snapshots__link__malformed_markdown_without_context.snap
+  - darkmatter/lib/tests/error_snapshots/snapshots/error_snapshots__link__missing_href.snap
+  - darkmatter/lib/tests/error_snapshots/snapshots/error_snapshots__link__unrecognized_format.snap
+  - darkmatter/lib/tests/error_snapshots/snapshots/error_snapshots__page_block__condition_delegates.snap
+  - darkmatter/lib/tests/error_snapshots/snapshots/error_snapshots__page_block__parse_directive.snap
+  - darkmatter/lib/tests/error_snapshots/snapshots/error_snapshots__page_block__unmatched_end.snap
+  - darkmatter/lib/tests/error_snapshots/snapshots/error_snapshots__reference__compose_delegates.snap
+  - darkmatter/lib/tests/error_snapshots/snapshots/error_snapshots__reference__io_error.snap
+  - darkmatter/lib/tests/error_snapshots/snapshots/error_snapshots__reference__missing_source_context.snap
+  - darkmatter/lib/tests/error_snapshots/snapshots/error_snapshots__reference__parse_directive.snap
+  - darkmatter/lib/tests/error_snapshots/snapshots/error_snapshots__reference__url_error.snap
+  - darkmatter/lib/tests/error_snapshots/snapshots/error_snapshots__reference__validation.snap
+  - darkmatter/lib/tests/error_snapshots/snapshots/error_snapshots__stylesheet__invalid_color.snap
+  - darkmatter/lib/tests/error_snapshots/snapshots/error_snapshots__stylesheet__invalid_custom_property.snap
+  - darkmatter/lib/tests/error_snapshots/snapshots/error_snapshots__stylesheet__invalid_declaration.snap
+  - darkmatter/lib/tests/error_snapshots/snapshots/error_snapshots__stylesheet__invalid_integer.snap
+  - darkmatter/lib/tests/error_snapshots/snapshots/error_snapshots__stylesheet__invalid_multi_sizing.snap
+  - darkmatter/lib/tests/error_snapshots/snapshots/error_snapshots__stylesheet__invalid_property_name.snap
+  - darkmatter/lib/tests/error_snapshots/snapshots/error_snapshots__stylesheet__invalid_raw_value.snap
+  - darkmatter/lib/tests/error_snapshots/snapshots/error_snapshots__stylesheet__invalid_sizing.snap
+  - darkmatter/lib/tests/error_snapshots/snapshots/error_snapshots__stylesheet__property_value_type_mismatch.snap
+  - darkmatter/lib/tests/error_snapshots/snapshots/error_snapshots__transclusion__condition_eval.snap
+  - darkmatter/lib/tests/error_snapshots/snapshots/error_snapshots__transclusion__condition_parse.snap
+  - darkmatter/lib/tests/error_snapshots/snapshots/error_snapshots__transclusion__cycle_detected.snap
+  - darkmatter/lib/tests/error_snapshots/snapshots/error_snapshots__transclusion__invalid_frontmatter_assignment.snap
+  - darkmatter/lib/tests/error_snapshots/snapshots/error_snapshots__transclusion__invalid_reassigned_frontmatter_property.snap
+  - darkmatter/lib/tests/error_snapshots/snapshots/error_snapshots__transclusion__invalid_reference.snap
+  - darkmatter/lib/tests/error_snapshots/snapshots/error_snapshots__transclusion__io_error.snap
+  - darkmatter/lib/tests/error_snapshots/snapshots/error_snapshots__transclusion__json_error.snap
+  - darkmatter/lib/tests/error_snapshots/snapshots/error_snapshots__transclusion__max_depth_exceeded.snap
+  - darkmatter/lib/tests/error_snapshots/snapshots/error_snapshots__transclusion__missing_source_context.snap
+  - darkmatter/lib/tests/error_snapshots/snapshots/error_snapshots__transclusion__non_text_code_source.snap
+  - darkmatter/lib/tests/error_snapshots/snapshots/error_snapshots__transclusion__parse_directive.snap
+  - darkmatter/lib/tests/error_snapshots/snapshots/error_snapshots__transclusion__relevel.snap
+  - darkmatter/lib/tests/error_snapshots/snapshots/error_snapshots__transclusion__unsupported_file_type.snap
+  - darkmatter/lib/tests/error_snapshots/snapshots/error_snapshots__transclusion__unsupported_reference_type.snap
+  - darkmatter/lib/tests/error_snapshots/snapshots/error_snapshots__transclusion__url_execution_disabled.snap
+  - darkmatter/lib/tests/error_snapshots/snapshots/error_snapshots__transclusion__url_parse_error.snap
+docs_updated_during_phase_2:
+  - darkmatter/README.md
+  - biscuit-terminal/README.md
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2:
+  - .claude/skills/darkmatter/SKILL.md
+  - .claude/skills/darkmatter/errors.md
+packages:
+  - darkmatter
+  - biscuit-terminal
 ---
 
 # Execution Plan: Good Errors
