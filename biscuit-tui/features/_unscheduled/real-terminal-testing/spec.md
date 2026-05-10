@@ -252,7 +252,7 @@ These come directly from the biscuit-tui Level-3 debugging session and represent
 3. **Click-to-focus beats activate-to-focus across apps.** AXRaise + click is the only reliable way on macOS to make a specific window of an app the `keyWindow` from a different parent app.
 4. **Batched event injection beats sequential calls.** Multiple separate cliclick processes leave focus-drift windows. The library's `click_then_chord(...)` does it in one cliclick invocation.
 5. **`--test-threads=1` is mandatory** for tests that each spawn their own GUI window. The library's macros / helpers should surface this requirement loudly.
-6. **A "plain key delivers" baseline test is the single most useful Level-3 diagnostic.** Always include one in any Level-3 suite — it localises any failure to either the harness layer (broken) or the modifier/chord layer (config issue).
+6. **A "plain key delivers" baseline test is the single most useful Level-3 diagnostic.** Always include one in any Level-3 suite — it localizes any failure to either the harness layer (broken) or the modifier/chord layer (config issue).
 7. **Bare-modifier Level-3 testing on macOS is currently unsolvable from userspace.** Don't pretend otherwise. Mark it `#[ignore]`, point at the Level-2 raw-bytes fallback, document the future fix path (`core_graphics` flagsChanged injector).
 
 ## Open questions

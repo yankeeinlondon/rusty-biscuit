@@ -366,6 +366,12 @@ This is a Rust workspace with the following modules:
 
     _Tags: cli, interactive, prompts_
 
+- [heck](https://github.com/withoutboats/heck) _v0.5_ [📄](https://docs.rs/heck)
+
+    _Case conversion helpers used by the `question` CLI naming-convention flags._
+
+    _Tags: cli, strings, case-conversion_
+
 - [owo-colors](https://github.com/owo-colors/owo-colors) _v4.2_ [📄](https://docs.rs/owo-colors)
 
     _Zero-allocation no_std-compatible terminal color library. Drop-in replacement for colored with color detection support._

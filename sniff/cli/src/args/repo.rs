@@ -10,12 +10,15 @@ pub enum RepoAction {
     Structure {
         filter: Vec<String>,
         latest_versions: bool,
+        package: Option<String>,
+        package_area: Option<String>,
     },
     GitStatus {
         history: usize,
         refresh_remotes: bool,
         compact: bool,
         package: Option<String>,
+        package_area: Option<String>,
     },
     Hash {
         sha: String,
@@ -23,9 +26,11 @@ pub enum RepoAction {
     StagedFiles(FileListArgs),
     UnstagedFiles {
         package: Option<String>,
+        package_area: Option<String>,
     },
     UntrackedFiles {
         package: Option<String>,
+        package_area: Option<String>,
     },
     Remote {
         remote: String,
@@ -33,14 +38,18 @@ pub enum RepoAction {
     Deps {
         filter: Vec<String>,
         ui: bool,
+        package: Option<String>,
+        package_area: Option<String>,
     },
     Packages {
         filter: Vec<String>,
+        package: Option<String>,
         package_area: Option<String>,
         format: PackagesFormat,
     },
     PackageAreas {
         filter: Vec<String>,
+        package: Option<String>,
         package_area: Option<String>,
         format: PackagesFormat,
     },
@@ -54,21 +63,33 @@ pub enum RepoAction {
     },
     DirtyPackages {
         filter: Vec<String>,
+        package: Option<String>,
+        package_area: Option<String>,
     },
     DirtyPackageAreas {
         filter: Vec<String>,
+        package: Option<String>,
+        package_area: Option<String>,
     },
     StagedPackages {
         filter: Vec<String>,
+        package: Option<String>,
+        package_area: Option<String>,
     },
     StagedPackageAreas {
         filter: Vec<String>,
+        package: Option<String>,
+        package_area: Option<String>,
     },
     UnstagedPackages {
         filter: Vec<String>,
+        package: Option<String>,
+        package_area: Option<String>,
     },
     UnstagedPackageAreas {
         filter: Vec<String>,
+        package: Option<String>,
+        package_area: Option<String>,
     },
     PackageRoot,
     PackageAreaRoot,
@@ -165,6 +186,12 @@ pub enum RepoSubcommand {
     Structure {
         /// Filter packages by name (or @area); prefix with ! to exclude
         filter: Vec<String>,
+        /// Scope to a specific package
+        #[arg(short, long, value_name = "PKG", add = clap_complete::engine::ArgValueCandidates::new(repo_package_candidates))]
+        package: Option<String>,
+        /// Scope to a specific package area
+        #[arg(long, value_name = "AREA", add = clap_complete::engine::ArgValueCandidates::new(repo_package_area_candidates))]
+        package_area: Option<String>,
     },
     /// Show git status with commit history
     #[command(name = "git-status")]
@@ -178,9 +205,12 @@ pub enum RepoSubcommand {
         /// Only render the Status section
         #[arg(long)]
         compact: bool,
-        /// Scope git view to a specific package or package area
-        #[arg(short, long, value_name = "PKG")]
+        /// Scope to a specific package
+        #[arg(short, long, value_name = "PKG", add = clap_complete::engine::ArgValueCandidates::new(repo_package_candidates))]
         package: Option<String>,
+        /// Scope to a specific package area
+        #[arg(long, value_name = "AREA", add = clap_complete::engine::ArgValueCandidates::new(repo_package_area_candidates))]
+        package_area: Option<String>,
     },
     /// Show details for a specific commit hash
     Hash {
@@ -194,16 +224,22 @@ pub enum RepoSubcommand {
     /// List unstaged files (modified in working tree)
     #[command(name = "unstaged-files")]
     UnstagedFiles {
-        /// Scope to a specific package or package area
-        #[arg(short, long, value_name = "PKG")]
+        /// Scope to a specific package
+        #[arg(short, long, value_name = "PKG", add = clap_complete::engine::ArgValueCandidates::new(repo_package_candidates))]
         package: Option<String>,
+        /// Scope to a specific package area
+        #[arg(long, value_name = "AREA", add = clap_complete::engine::ArgValueCandidates::new(repo_package_area_candidates))]
+        package_area: Option<String>,
     },
     /// List untracked files (not under version control)
     #[command(name = "untracked-files")]
     UntrackedFiles {
-        /// Scope to a specific package or package area
-        #[arg(short, long, value_name = "PKG")]
+        /// Scope to a specific package
+        #[arg(short, long, value_name = "PKG", add = clap_complete::engine::ArgValueCandidates::new(repo_package_candidates))]
         package: Option<String>,
+        /// Scope to a specific package area
+        #[arg(long, value_name = "AREA", add = clap_complete::engine::ArgValueCandidates::new(repo_package_area_candidates))]
+        package_area: Option<String>,
     },
     /// List dirty source code files (staged + modified + untracked source files)
     #[command(name = "dirty-source-code")]
@@ -230,11 +266,20 @@ pub enum RepoSubcommand {
         ui: bool,
         /// Filter packages by name (or @area); prefix with ! to exclude
         filter: Vec<String>,
+        /// Scope to a specific package
+        #[arg(short, long, value_name = "PKG", add = clap_complete::engine::ArgValueCandidates::new(repo_package_candidates))]
+        package: Option<String>,
+        /// Scope to a specific package area
+        #[arg(long, value_name = "AREA", add = clap_complete::engine::ArgValueCandidates::new(repo_package_area_candidates))]
+        package_area: Option<String>,
     },
     /// Output only package names as a comma-separated list
     Packages {
         /// Filter packages by name (or @area); prefix with ! to exclude
         filter: Vec<String>,
+        /// Scope to a specific package
+        #[arg(short, long, value_name = "PKG", add = clap_complete::engine::ArgValueCandidates::new(repo_package_candidates))]
+        package: Option<String>,
         /// Restrict output to packages in the specified package area
         #[arg(long, value_name = "AREA", add = clap_complete::engine::ArgValueCandidates::new(repo_package_area_candidates))]
         package_area: Option<String>,
@@ -250,6 +295,9 @@ pub enum RepoSubcommand {
     PackageAreas {
         /// Filter by area name; prefix with ! to exclude
         filter: Vec<String>,
+        /// Scope to a specific package
+        #[arg(short, long, value_name = "PKG", add = clap_complete::engine::ArgValueCandidates::new(repo_package_candidates))]
+        package: Option<String>,
         /// Restrict output to a specific package area
         #[arg(long, value_name = "AREA", add = clap_complete::engine::ArgValueCandidates::new(repo_package_area_candidates))]
         package_area: Option<String>,
@@ -284,35 +332,71 @@ pub enum RepoSubcommand {
     DirtyPackages {
         /// Filter packages by name (or @area); prefix with ! to exclude
         filter: Vec<String>,
+        /// Scope to a specific package
+        #[arg(short, long, value_name = "PKG", add = clap_complete::engine::ArgValueCandidates::new(repo_package_candidates))]
+        package: Option<String>,
+        /// Scope to a specific package area
+        #[arg(long, value_name = "AREA", add = clap_complete::engine::ArgValueCandidates::new(repo_package_area_candidates))]
+        package_area: Option<String>,
     },
     /// Output only package area names that have uncommitted changes
     DirtyPackageAreas {
         /// Filter packages by name (or @area); prefix with ! to exclude
         filter: Vec<String>,
+        /// Scope to a specific package
+        #[arg(short, long, value_name = "PKG", add = clap_complete::engine::ArgValueCandidates::new(repo_package_candidates))]
+        package: Option<String>,
+        /// Scope to a specific package area
+        #[arg(long, value_name = "AREA", add = clap_complete::engine::ArgValueCandidates::new(repo_package_area_candidates))]
+        package_area: Option<String>,
     },
     /// Output only package names that have staged files
     #[command(name = "staged-packages")]
     StagedPackages {
         /// Filter packages by name (or @area); prefix with ! to exclude
         filter: Vec<String>,
+        /// Scope to a specific package
+        #[arg(short, long, value_name = "PKG", add = clap_complete::engine::ArgValueCandidates::new(repo_package_candidates))]
+        package: Option<String>,
+        /// Scope to a specific package area
+        #[arg(long, value_name = "AREA", add = clap_complete::engine::ArgValueCandidates::new(repo_package_area_candidates))]
+        package_area: Option<String>,
     },
     /// Output only package area names that have staged files
     #[command(name = "staged-package-areas")]
     StagedPackageAreas {
         /// Filter packages by name (or @area); prefix with ! to exclude
         filter: Vec<String>,
+        /// Scope to a specific package
+        #[arg(short, long, value_name = "PKG", add = clap_complete::engine::ArgValueCandidates::new(repo_package_candidates))]
+        package: Option<String>,
+        /// Scope to a specific package area
+        #[arg(long, value_name = "AREA", add = clap_complete::engine::ArgValueCandidates::new(repo_package_area_candidates))]
+        package_area: Option<String>,
     },
     /// Output only package names that have unstaged changes
     #[command(name = "unstaged-packages")]
     UnstagedPackages {
         /// Filter packages by name (or @area); prefix with ! to exclude
         filter: Vec<String>,
+        /// Scope to a specific package
+        #[arg(short, long, value_name = "PKG", add = clap_complete::engine::ArgValueCandidates::new(repo_package_candidates))]
+        package: Option<String>,
+        /// Scope to a specific package area
+        #[arg(long, value_name = "AREA", add = clap_complete::engine::ArgValueCandidates::new(repo_package_area_candidates))]
+        package_area: Option<String>,
     },
     /// Output only package area names that have unstaged changes
     #[command(name = "unstaged-package-areas")]
     UnstagedPackageAreas {
         /// Filter packages by name (or @area); prefix with ! to exclude
         filter: Vec<String>,
+        /// Scope to a specific package
+        #[arg(short, long, value_name = "PKG", add = clap_complete::engine::ArgValueCandidates::new(repo_package_candidates))]
+        package: Option<String>,
+        /// Scope to a specific package area
+        #[arg(long, value_name = "AREA", add = clap_complete::engine::ArgValueCandidates::new(repo_package_area_candidates))]
+        package_area: Option<String>,
     },
     /// Output the root directory of the current package
     PackageRoot,

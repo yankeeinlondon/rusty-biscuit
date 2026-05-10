@@ -103,7 +103,8 @@ pub use packages::{
     render_unstaged_packages,
 };
 pub(crate) use packages::{
-    select_dirty_package_names, select_staged_package_names, select_unstaged_package_names,
+    select_dirty_package_names, select_repo_packages, select_staged_package_names,
+    select_unstaged_package_names,
 };
 pub use repo::{render_filesystem_section, render_repo_section};
 
@@ -1533,7 +1534,7 @@ mod tests {
             git.status.dirty = vec![make_dirty_file("alpha/src/main.rs")];
             let result = build_result(repo, git);
 
-            let names = select_dirty_package_names(&result, &[]);
+            let names = select_dirty_package_names(&result, &[], None, None);
             assert!(
                 names.is_empty(),
                 "expected empty for non-monorepo, got {names:?}"
@@ -1556,7 +1557,7 @@ mod tests {
             git.status.dirty = vec![make_dirty_file("area-a/alpha/src/main.rs")];
             let result = build_result(repo, git);
 
-            let names = select_dirty_package_names(&result, &[]);
+            let names = select_dirty_package_names(&result, &[], None, None);
             assert_eq!(names, vec!["alpha".to_string()]);
         }
 
@@ -1574,7 +1575,7 @@ mod tests {
             git.status.dirty = vec![make_dirty_file("area-a/alpha/src/main.rs")];
             let result = build_result(repo, git);
 
-            let areas = select_dirty_package_area_names(&result, &[]);
+            let areas = select_dirty_package_area_names(&result, &[], None, None);
             assert_eq!(areas, vec!["area-a".to_string()]);
         }
 
@@ -1595,7 +1596,7 @@ mod tests {
             ];
             let result = build_result(repo, git);
 
-            let names = select_dirty_package_names(&result, &["@area-a".to_string()]);
+            let names = select_dirty_package_names(&result, &["@area-a".to_string()], None, None);
             assert_eq!(names, vec!["alpha".to_string()]);
         }
 
@@ -1614,10 +1615,10 @@ mod tests {
             }]);
             let result = build_result(repo, git);
 
-            let names = select_staged_package_names(&result, &[]);
+            let names = select_staged_package_names(&result, &[], None, None);
             assert_eq!(names, vec!["alpha".to_string()]);
 
-            let areas = select_staged_package_area_names(&result, &[]);
+            let areas = select_staged_package_area_names(&result, &[], None, None);
             assert_eq!(areas, vec!["area-a".to_string()]);
         }
 
@@ -1636,10 +1637,10 @@ mod tests {
             }]);
             let result = build_result(repo, git);
 
-            let names = select_unstaged_package_names(&result, &[]);
+            let names = select_unstaged_package_names(&result, &[], None, None);
             assert_eq!(names, vec!["alpha".to_string()]);
 
-            let areas = select_unstaged_package_area_names(&result, &[]);
+            let areas = select_unstaged_package_area_names(&result, &[], None, None);
             assert_eq!(areas, vec!["area-a".to_string()]);
         }
 
@@ -1657,10 +1658,10 @@ mod tests {
             }]);
             let result = build_result(repo, git);
 
-            assert!(select_staged_package_names(&result, &[]).is_empty());
-            assert!(select_unstaged_package_names(&result, &[]).is_empty());
-            assert!(select_staged_package_area_names(&result, &[]).is_empty());
-            assert!(select_unstaged_package_area_names(&result, &[]).is_empty());
+            assert!(select_staged_package_names(&result, &[], None, None).is_empty());
+            assert!(select_unstaged_package_names(&result, &[], None, None).is_empty());
+            assert!(select_staged_package_area_names(&result, &[], None, None).is_empty());
+            assert!(select_unstaged_package_area_names(&result, &[], None, None).is_empty());
         }
     }
 

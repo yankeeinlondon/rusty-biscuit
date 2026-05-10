@@ -100,6 +100,10 @@ fn expression_uses_known_features(expr: &Expr) -> bool {
         Expr::Paren(inner) => expression_uses_known_features(inner),
         Expr::StringLiteral(_) | Expr::NumberLiteral(_) | Expr::BoolLiteral(_) => true,
         Expr::UnaryNot(_)
+        | Expr::UnaryMinus(_)
+        | Expr::Binary { .. }
+        | Expr::Index { .. }
+        | Expr::MemberAccess { .. }
         | Expr::Fallback { .. }
         | Expr::Ternary { .. }
         | Expr::Comparison { .. }

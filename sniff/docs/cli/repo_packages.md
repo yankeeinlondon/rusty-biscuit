@@ -23,7 +23,8 @@ sniff-cli, sniff, research-cli, research, homelab-cli, homelab, homelab-server
 | Argument/Flag | Description |
 |---------------|-------------|
 | `[filter...]` | Optional substring filters to narrow the package list |
-| `--package-area <AREA>` | Restrict output to packages in the given area |
+| `-p`, `--package <PKG>` | Restrict output to a single package (exact match on `Package.name`) |
+| `--package-area <AREA>` | Restrict output to packages in the given area (prefix match on `Package.package_area`) |
 | `--md` | Render as a Markdown unordered list (one `- name` per line) |
 | `--list` | Render as a raw list (one name per line, no bullet) |
 | `-v`, `--verbose` | Append each package's repo-relative root directory in dim italic |
@@ -51,9 +52,16 @@ sniff repo packages !test            # All packages except those matching "test"
 
 Multiple filters apply OR logic (a package is included if any filter matches).
 
-### Scoping to a Package Area
+### Scoping to a Package or Package Area
 
-`--package-area <AREA>` applies an exact-match (case-insensitive) filter on the package area and composes with positional filters:
+`-p/--package <PKG>` restricts output to a single package by exact (case-insensitive) name match:
+
+```bash
+sniff repo packages -p sniff-cli
+# sniff-cli
+```
+
+`--package-area <AREA>` restricts output to packages whose area starts with the supplied prefix (case-insensitive). It composes with positional filters:
 
 ```bash
 sniff repo packages --package-area homelab
@@ -61,7 +69,9 @@ sniff repo packages --package-area homelab
 # sony-receiver-integration, unfolded-integration-helper
 ```
 
-Shell completion suggests known areas detected in the current repo.
+Passing both `-p` and `--package-area` produces the AND intersection. If the resolved package does not live within the resolved area, the command fails with an explicit error. Unknown values for either flag fail with an error listing the valid names.
+
+Shell completion suggests known package and area names detected in the current repo.
 
 ## Output Formats
 

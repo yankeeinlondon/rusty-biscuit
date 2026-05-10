@@ -7,6 +7,7 @@
 //! preserved; string sources fall back to the legacy prefix/delimiter
 //! parsing.
 
+use heck::{ToKebabCase, ToLowerCamelCase, ToSnakeCase, ToTitleCase, ToUpperCamelCase};
 use tui_chrome::{ChoiceOption, HotkeySpec};
 
 use crate::option_sources::RawOption;
@@ -172,77 +173,14 @@ fn split_bracket_prefix(s: &str) -> Option<(&str, &str)> {
 pub fn apply_convention(s: &str, convention: NamingConvention) -> String {
     match convention {
         NamingConvention::None => s.to_string(),
-        NamingConvention::CamelCase => to_camel_case(s),
-        NamingConvention::PascalCase => to_pascal_case(s),
-        NamingConvention::KebabCase => to_kebab_case(s),
-        NamingConvention::SnakeCase => to_snake_case(s),
-        NamingConvention::TitleCase => to_title_case(s),
+        NamingConvention::CamelCase => s.to_lower_camel_case(),
+        NamingConvention::PascalCase => s.to_upper_camel_case(),
+        NamingConvention::KebabCase => s.to_kebab_case(),
+        NamingConvention::SnakeCase => s.to_snake_case(),
+        NamingConvention::TitleCase => s.to_title_case(),
         NamingConvention::Caps => s.to_uppercase(),
         NamingConvention::Lowercase => s.to_lowercase(),
     }
-}
-
-fn to_camel_case(s: &str) -> String {
-    let words: Vec<&str> = s.split_whitespace().collect();
-    if words.is_empty() {
-        return String::new();
-    }
-    let mut result = words[0].to_lowercase();
-    for word in &words[1..] {
-        let mut chars = word.chars();
-        if let Some(first) = chars.next() {
-            result.push(first.to_uppercase().next().unwrap_or(first));
-            result.extend(chars.flat_map(|c| c.to_lowercase()));
-        }
-    }
-    result
-}
-
-fn to_pascal_case(s: &str) -> String {
-    s.split_whitespace()
-        .map(|word| {
-            let mut chars = word.chars();
-            match chars.next() {
-                Some(first) => {
-                    let mut result = first.to_uppercase().collect::<String>();
-                    result.extend(chars.flat_map(|c| c.to_lowercase()));
-                    result
-                }
-                None => String::new(),
-            }
-        })
-        .collect()
-}
-
-fn to_kebab_case(s: &str) -> String {
-    s.split_whitespace()
-        .map(|w| w.to_lowercase())
-        .collect::<Vec<_>>()
-        .join("-")
-}
-
-fn to_snake_case(s: &str) -> String {
-    s.split_whitespace()
-        .map(|w| w.to_lowercase())
-        .collect::<Vec<_>>()
-        .join("_")
-}
-
-fn to_title_case(s: &str) -> String {
-    s.split_whitespace()
-        .map(|word| {
-            let mut chars = word.chars();
-            match chars.next() {
-                Some(first) => {
-                    let mut result = first.to_uppercase().collect::<String>();
-                    result.extend(chars.flat_map(|c| c.to_lowercase()));
-                    result
-                }
-                None => String::new(),
-            }
-        })
-        .collect::<Vec<_>>()
-        .join(" ")
 }
 
 /// Assigns numeric hotkeys to options when enabled.

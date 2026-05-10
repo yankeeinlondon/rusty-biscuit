@@ -9,6 +9,7 @@
 pub mod boolean_switch;
 pub mod choice_layout;
 pub mod choice_render;
+mod choice_state;
 pub mod choose;
 pub mod choose_many;
 pub mod choose_one;
