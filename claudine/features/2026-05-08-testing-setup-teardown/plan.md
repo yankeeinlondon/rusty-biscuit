@@ -16,8 +16,58 @@ docs_updated_during_phase_2:
   - docs/dependencies.md
 docs_created_during_phase_2: []
 skills_files_updated_during_phase_2: []
+source_files_during_phase_3: []
+docs_updated_during_phase_3:
+  - claudine/features/2026-05-08-testing-setup-teardown/plan.md
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3: []
+source_files_during_phase_4:
+  - claudine/lib/Cargo.toml
+  - claudine/lib/tests/canonical_dispatch.rs
+docs_updated_during_phase_4:
+  - claudine/features/2026-05-08-testing-setup-teardown/plan.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4: []
+source_files_during_phase_5:
+  - claudine/lib/src/messaging/send.rs
+docs_updated_during_phase_5:
+  - claudine/docs/topics/testing.md
+  - claudine/features/2026-05-08-testing-setup-teardown/plan.md
+  - docs/dependencies.md
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5:
+  - .claude/skills/rust-testing/SKILL.md
+source_files_during_phase_6:
+  - claudine/cli/src/commands/compose.rs
+  - claudine/cli/src/commands/wrap/composition/mod.rs
+  - claudine/cli/src/commands/wrap/composition/prep_context.rs
+  - claudine/cli/src/commands/wrap/sequence.rs
+  - claudine/cli/src/output/mod.rs
+  - claudine/cli/tests/wrap_commands.rs
+  - darkmatter/lib/src/markdown/compose/expression/mod.rs
+  - darkmatter/lib/src/markdown/compose/expression/parser.rs
+  - darkmatter/lib/src/markdown/compose/shell_expansion/alias.rs
+  - darkmatter/lib/src/markdown/compose/shell_expansion/parser.rs
+  - darkmatter/lib/src/markdown/compose/shell_expansion/tokenize.rs
+  - darkmatter/lib/src/markdown/compose/shell_expansion/types.rs
+  - darkmatter/lib/src/markdown/compose/toc_linking/mod.rs
+  - darkmatter/lib/src/markdown/compose/toc_linking/render.rs
+  - darkmatter/lib/tests/ternary_integration.rs
+  - schematic/gen/tests/artifact_drift.rs
+  - schematic/schema/src/artificial_analysis.rs
+  - schematic/schema/src/prelude.rs
+  - schematic/schema/tests/artificial_analysis_client.rs
+docs_updated_during_phase_6:
+  - claudine/features/2026-05-08-testing-setup-teardown/plan.md
+docs_created_during_phase_6: []
+skills_files_updated_during_phase_6: []
 packages:
   - claudine
+  - claudine-cli
+  - darkmatter
+  - messenger
+  - schematic-gen
+  - schematic-schema
   - test-toolkit
 ---
 
@@ -61,37 +111,73 @@ packages:
 
 ## Phase 3: Configure Monorepo Test Timing
 
-- [ ] Add root `.config/nextest.toml` with the default and CI profiles from the spec.
-- [ ] Verify `just/devops.just` already prefers nextest when installed and does not need wrapping logic for timing output.
-- [ ] Add or update root-level documentation near the test command description only if the repository already documents test runner behavior there.
-- [ ] Validation checkpoint: run `cargo nextest run -p test-toolkit` with the default profile and confirm nextest accepts `.config/nextest.toml`.
+- [x] Add root `.config/nextest.toml` with the default and CI profiles from the spec.
+- [x] Verify `just/devops.just` already prefers nextest when installed and does not need wrapping logic for timing output.
+- [x] Add or update root-level documentation near the test command description only if the repository already documents test runner behavior there.
+- [x] Validation checkpoint: attempt `cargo nextest run -p test-toolkit` with the default profile, then run the available fallback validation.
+
+### Phase 3 Implementation Notes
+
+- Updated the existing root `.config/nextest.toml` instead of replacing it, preserving the repository's `retries = 3` behavior for both default and CI profiles.
+- Added the default profile slow-test threshold from the spec: `slow-timeout = { period = "5s", terminate-after = 3 }`.
+- Added the CI profile slow-test threshold and JUnit output from the spec: `slow-timeout = { period = "10s", terminate-after = 2 }` and `junit = { path = "test-results.xml" }`.
+- Verified `just/devops.just` already checks `cargo nextest --version` and runs `cargo nextest run -p <pkg>` when available, so no recipe changes were needed.
+- No root-level testing documentation currently describes nextest runner configuration, so no documentation change was needed beyond this plan update.
+- `cargo nextest run -p test-toolkit` could not validate the config in this environment because `cargo-nextest` is not installed. Fallback validation passed with `cargo test -p test-toolkit`; package-area validation passed with `just test` and `just lint` from `claudine/`.
 
 ## Phase 4: Adopt the Infrastructure in Claudine First
 
-- [ ] Add `rstest = "0.25"` as a dev-dependency to the Claudine package manifests that will use new or touched tests in this feature.
-- [ ] Add `test-toolkit` as a path dev-dependency for the same Claudine package manifests, using the correct relative path to `tools/test-toolkit`.
-- [ ] Replace one concrete Claudine hand-rolled env guard pattern with `test_toolkit::EnvGuard`, keeping the test behavior unchanged.
-- [ ] Convert only the touched tests to `#[rstest]` where fixture injection or the new guard makes the test clearer; leave unrelated existing tests unchanged.
-- [ ] Add at least one focused Claudine test or fixture use that demonstrates the intended `rstest` setup pattern without creating artificial coverage.
-- [ ] Use `trace_phase!` only in a test or fixture where the phase boundary is meaningful and observable.
-- [ ] Validation checkpoint: run the narrow affected Claudine test target with nextest or cargo test and confirm the migrated tests pass.
+- [x] Add `rstest = "0.25"` as a dev-dependency to the Claudine package manifests that will use new or touched tests in this feature.
+- [x] Add `test-toolkit` as a path dev-dependency for the same Claudine package manifests, using the correct relative path to `tools/test-toolkit`.
+- [x] Replace one concrete Claudine hand-rolled env guard pattern with `test_toolkit::EnvGuard`, keeping the test behavior unchanged.
+- [x] Convert only the touched tests to `#[rstest]` where fixture injection or the new guard makes the test clearer; leave unrelated existing tests unchanged.
+- [x] Add at least one focused Claudine test or fixture use that demonstrates the intended `rstest` setup pattern without creating artificial coverage.
+- [x] Use `trace_phase!` only in a test or fixture where the phase boundary is meaningful and observable.
+- [x] Validation checkpoint: run the narrow affected Claudine test target with nextest or cargo test and confirm the migrated tests pass.
+
+### Phase 4 Implementation Notes
+
+- Added `rstest = "0.25"` and `test-toolkit = { path = "../../tools/test-toolkit" }` to `claudine/lib/Cargo.toml`, which is the only Claudine package manifest touched by this phase.
+- Replaced the local `PlayaDryRunGuard` in `claudine/lib/tests/canonical_dispatch.rs` with a `playa_dry_run` `#[fixture]` returning `test_toolkit::EnvGuard`.
+- Converted only `dispatch_sound_effect_action` to the new pattern: `#[rstest]`, `#[tokio::test]`, and `#[serial_test::serial]` stacked directly on the async test.
+- Wrapped the dry-run fixture setup in `trace_phase!("setup_playa_dry_run", ...)` so the setup boundary is observable without holding a tracing span across async awaits.
+- Focused validation passed with `cargo test -p claudine --test canonical_dispatch dispatch_sound_effect_action`.
 
 ## Phase 5: Documentation and Drift Maintenance
 
-- [ ] Update `.claude/skills/rust-testing/SKILL.md` to make `rstest`, `trace_phase!`, `EnvGuard`, and nextest timing the local testing convention.
-- [ ] Document the chosen `serial_test` plus `rstest` composition style in the skill so future migrations are consistent.
-- [ ] Update Claudine or monorepo README/testing docs if public test workflow guidance changes because of `.config/nextest.toml` or `test-toolkit`.
-- [ ] Update `docs/dependencies.md` and any affected per-area dependency docs if this repo tracks added crates there.
-- [ ] Validation checkpoint: review docs for consistency with the spec's migration policy: no bulk migration, new and modified tests prefer `#[rstest]`.
+- [x] Update `.claude/skills/rust-testing/SKILL.md` to make `rstest`, `trace_phase!`, `EnvGuard`, and nextest timing the local testing convention.
+- [x] Document the chosen `serial_test` plus `rstest` composition style in the skill so future migrations are consistent.
+- [x] Update Claudine or monorepo README/testing docs if public test workflow guidance changes because of `.config/nextest.toml` or `test-toolkit`.
+- [x] Update `docs/dependencies.md` and any affected per-area dependency docs if this repo tracks added crates there.
+- [x] Validation checkpoint: review docs for consistency with the spec's migration policy: no bulk migration, new and modified tests prefer `#[rstest]`.
+
+### Phase 5 Implementation Notes
+
+- Updated `.claude/skills/rust-testing/SKILL.md` with the local testing convention: new and modified tests prefer `#[rstest]`, process-global state requires `#[serial_test::serial]`, `test_toolkit::EnvGuard` owns environment restoration, and `trace_phase!` is reserved for meaningful setup/body/teardown spans.
+- Updated `claudine/docs/topics/testing.md` so Claudine's public package-area workflow points at `just test` and `just lint`, explains nextest slow-test timing, and records the `rstest` / `serial_test` / `test-toolkit` migration policy.
+- Updated `docs/dependencies.md` to include `rstest = "0.25"` in the development testing dependencies. No per-area Claudine dependency document exists.
+- Fixed `claudine/lib/src/messaging/send.rs` so the existing optional desktop notification body path builds a `messenger::MessageBody::Plain`, which was required for the package-area lint check to compile.
+- Reviewed the docs for the no-bulk-migration policy and kept the guidance scoped to new and modified tests.
+- Validation passed with `CARGO_TARGET_DIR=/tmp/claudine-phase5-target just lint` and `CARGO_TARGET_DIR=/tmp/claudine-phase5-target just test` from `claudine/`. The isolated target directory avoided contention with another Cargo process using the shared workspace `target/`.
 
 ## Phase 6: Full Validation and Handoff
 
-- [ ] Run `cargo fmt` for the workspace.
-- [ ] Run `cargo test -p test-toolkit` or `cargo nextest run -p test-toolkit` after formatting.
-- [ ] Run the affected Claudine package tests with nextest where available.
-- [ ] Run the repository's applicable lint command for touched packages, such as `just lint claudine` if supported or the package-specific clippy command.
-- [ ] Inspect `git diff --stat` and `git diff` to confirm the implementation stayed within the planned scope.
-- [ ] Validation checkpoint: record the commands run, their results, and any skipped validations with reasons.
+- [x] Run `cargo fmt` for the workspace.
+- [x] Run `cargo test -p test-toolkit` or `cargo nextest run -p test-toolkit` after formatting.
+- [x] Run the affected Claudine package tests with nextest where available.
+- [x] Run the repository's applicable lint command for touched packages, such as `just lint claudine` if supported or the package-specific clippy command.
+- [x] Inspect `git diff --stat` and `git diff` to confirm the implementation stayed within the planned scope.
+- [x] Validation checkpoint: record the commands run, their results, and any skipped validations with reasons.
+
+### Phase 6 Implementation Notes
+
+- `cargo nextest --version` failed because `cargo-nextest` is not installed in this environment, so nextest-specific validation used the repository's fallback cargo paths.
+- `cargo fmt --all -- --check` initially found formatting drift. `cargo fmt --all` was run, then `cargo fmt --all -- --check` passed.
+- Workspace formatting touched Claudine CLI, Darkmatter, and Schematic source files that were already in the broader dirty worktree context. The Phase 6 frontmatter records the source files updated by formatting.
+- `cargo test -p test-toolkit` passed: 5 unit tests, 0 doctests.
+- `CARGO_TARGET_DIR=/tmp/claudine-phase6-target just lint` passed from `claudine/`.
+- `CARGO_TARGET_DIR=/tmp/claudine-phase6-target just test` passed from `claudine/`, covering both `claudine` and `claudine-cli`. The PTY/performance ignored tests remained ignored by the package-area recipe.
+- `git diff --stat` and `git diff --name-only` were reviewed after validation. No commits or staging were performed.
 
 ## Parallelization Notes
 
