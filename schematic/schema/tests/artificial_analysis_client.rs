@@ -73,13 +73,10 @@ fn llm_models_response_empty() -> serde_json::Value {
 fn media_models_response_empty(include_categories: Option<bool>) -> serde_json::Value {
     let mut value = serde_json::json!({ "status": 200, "data": [] });
     if let Some(include) = include_categories {
-        value
-            .as_object_mut()
-            .expect("object")
-            .insert(
-                "include_categories".to_string(),
-                serde_json::Value::Bool(include),
-            );
+        value.as_object_mut().expect("object").insert(
+            "include_categories".to_string(),
+            serde_json::Value::Bool(include),
+        );
     }
     value
 }
@@ -526,9 +523,7 @@ async fn list_llm_models_decodes_populated_response() {
 
     Mock::given(method("GET"))
         .and(path("/data/llms/models"))
-        .respond_with(
-            ResponseTemplate::new(200).set_body_json(llm_models_response_one_populated()),
-        )
+        .respond_with(ResponseTemplate::new(200).set_body_json(llm_models_response_one_populated()))
         .mount(&mock_server)
         .await;
 
@@ -622,8 +617,7 @@ async fn list_image_editing_models_decodes_response_without_optional_fields() {
     Mock::given(method("GET"))
         .and(path("/data/media/image-editing"))
         .respond_with(
-            ResponseTemplate::new(200)
-                .set_body_json(media_models_response_one_without_optionals()),
+            ResponseTemplate::new(200).set_body_json(media_models_response_one_without_optionals()),
         )
         .mount(&mock_server)
         .await;
