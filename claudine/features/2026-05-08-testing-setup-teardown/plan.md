@@ -2,17 +2,35 @@
 phases: 6
 created: 2026-05-09
 start_phase: 1
+source_files_during_phase_1: []
+docs_updated_during_phase_1:
+  - claudine/features/2026-05-08-testing-setup-teardown/plan.md
+docs_created_during_phase_1: []
+skills_files_updated_during_phase_1: []
+packages:
+  - claudine
 ---
 
 # Testing Setup/Teardown Execution Plan
 
 ## Phase 1: Baseline Inventory and Decisions
 
-- [ ] Confirm the workspace package list with `cargo metadata --no-deps --format-version 1` and record whether `tools/test-toolkit` already exists.
-- [ ] Inspect root `Cargo.toml`, `just/devops.just`, and existing `.config/` contents to confirm where new workspace members, dev-dependencies, and nextest config belong.
-- [ ] Inspect representative Claudine tests for existing setup/teardown patterns, especially hand-rolled env guards such as `PlayaDryRunGuard` in `canonical_dispatch.rs`.
-- [ ] Decide the standard `serial_test` composition style for `rstest` tests and document the chosen convention in the implementation notes before touching tests.
-- [ ] Validation checkpoint: identify the exact files that will be added or changed, and confirm no existing tests need bulk migration.
+- [x] Confirm the workspace package list with `cargo metadata --no-deps --format-version 1` and record whether `tools/test-toolkit` already exists.
+- [x] Inspect root `Cargo.toml`, `just/devops.just`, and existing `.config/` contents to confirm where new workspace members, dev-dependencies, and nextest config belong.
+- [x] Inspect representative Claudine tests for existing setup/teardown patterns, especially hand-rolled env guards such as `PlayaDryRunGuard` in `canonical_dispatch.rs`.
+- [x] Decide the standard `serial_test` composition style for `rstest` tests and document the chosen convention in the implementation notes before touching tests.
+- [x] Validation checkpoint: identify the exact files that will be added or changed, and confirm no existing tests need bulk migration.
+
+### Phase 1 Implementation Notes
+
+- Workspace inventory: `cargo metadata --no-deps --format-version 1` reports 56 workspace members. `sniff repo` reports 57 Rust packages because it also shows the excluded `schematic/schema` package. `tools/test-toolkit` does not exist yet.
+- Root `Cargo.toml`: new shared test infrastructure belongs in the workspace `members` list as `tools/test-toolkit`. `schematic/schema` remains excluded and is unrelated to this feature.
+- `just/devops.just`: `_test` already prefers `cargo nextest run -p <pkg>` when nextest is installed, falling back to `cargo test -p <pkg>`. No timing wrapper logic is needed.
+- Existing `.config/nextest.toml`: present already, but it only configures `retries = 3` for `default` and `ci`. Phase 3 should preserve or intentionally reconcile that retry behavior while adding the spec's slow-test and JUnit settings.
+- Claudine package manifests: `claudine/lib/Cargo.toml` and `claudine/cli/Cargo.toml` both already use `serial_test = "3"` as a dev-dependency. Neither has `rstest` or `test-toolkit` yet. Phase 4 should add those only to the package manifests whose tests are actually touched.
+- Representative env-guard patterns: `claudine/lib/tests/canonical_dispatch.rs` has `PlayaDryRunGuard` for `PLAYA_DRY_RUN=1`; `claudine/cli/src/commands/wrap/composition/mod.rs`, `claudine/cli/src/commands/wrap/live_semantic_sink/mod.rs`, and `claudine/cli/src/commands/wrap/exec/timeouts.rs` have similar local `EnvGuard` / `TestEnvGuard` patterns. Phase 4 should migrate one concrete Claudine pattern first, with `canonical_dispatch.rs` as the most focused target.
+- Standard `rstest` + `serial_test` convention: use `#[rstest]` on new or newly migrated tests, and stack `#[serial_test::serial]` directly on the same test when global env or other process-global state requires serialization. Prefer the fully qualified `#[serial_test::serial]` attribute in migrated tests, avoid `rstest_reuse` for now, and keep `#[rstest]` visually first. Async tests should use the `rstest` async-compatible form required by the final selected implementation and should not be migrated unless the fixture or guard change makes the test clearer.
+- Planned file scope for later phases: `Cargo.toml`, `tools/test-toolkit/Cargo.toml`, `tools/test-toolkit/src/lib.rs`, `.config/nextest.toml`, the touched Claudine manifest(s), one focused Claudine test file such as `claudine/lib/tests/canonical_dispatch.rs`, `.claude/skills/rust-testing/SKILL.md`, and any dependency/testing documentation required by the added crates. No existing tests need bulk migration.
 
 ## Phase 2: Add the Shared `test-toolkit` Crate
 
