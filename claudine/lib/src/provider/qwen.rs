@@ -203,16 +203,20 @@ const QWEN_ENTRYPOINTS: &[EntrypointSpec] = &[EntrypointSpec {
 
 static QWEN_SYSTEM_PROMPT: SystemPromptSpec = SystemPromptSpec {
     append: SystemPromptDeliveryByMode {
-        interactive: SystemPromptDelivery::ShadowHomeFile {
-            relative_path: ".qwen/QWEN.md",
+        interactive: SystemPromptDelivery::InlineFlag {
+            flag: "--append-system-prompt",
         },
-        non_interactive: SystemPromptDelivery::ShadowHomeFile {
-            relative_path: ".qwen/QWEN.md",
+        non_interactive: SystemPromptDelivery::InlineFlag {
+            flag: "--append-system-prompt",
         },
     },
     replace: SystemPromptDeliveryByMode {
-        interactive: SystemPromptDelivery::Unsupported,
-        non_interactive: SystemPromptDelivery::Unsupported,
+        interactive: SystemPromptDelivery::InlineFlag {
+            flag: "--system-prompt",
+        },
+        non_interactive: SystemPromptDelivery::InlineFlag {
+            flag: "--system-prompt",
+        },
     },
     memory_files: QWEN_MEMORY_FILES,
 };
@@ -439,8 +443,8 @@ fn build_qwen_agent_capabilities() -> AgentCapabilities {
                     "@path markdown imports",
                     "/memory refresh",
                 ],
-                full_replacement_supported: false,
-                replacement_mechanisms: vec![],
+                full_replacement_supported: true,
+                replacement_mechanisms: vec!["--system-prompt"],
                 memory_files: vec!["~/.qwen/QWEN.md", "QWEN.md"],
             },
             permissions: PermissionCapabilities {

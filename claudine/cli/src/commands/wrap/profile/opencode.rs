@@ -50,6 +50,7 @@ impl WrapperProfile for OpencodeWrapper {
         prompt: &PreparedSystemPrompt,
         _interactive: bool,
         _cwd: &Path,
+        _scoped_tmp: &Path,
     ) -> Result<crate::commands::wrap::system_prompt::SystemPromptApplication> {
         use crate::commands::wrap::system_prompt::{SystemPromptApplication, SystemPromptArtifact};
 
@@ -81,15 +82,12 @@ impl WrapperProfile for OpencodeWrapper {
 
     fn apply_model(
         &self,
-        args: &mut Vec<String>,
+        _args: &mut Vec<String>,
         env_overrides: &mut Vec<(String, String)>,
         model: &str,
     ) -> Option<String> {
-        // OpenCode requires both the CLI --model flag AND the MODEL env var.
-        // The typed catalog has no field for dual-delivery model side effects,
-        // so this override is kept to set both surfaces.
-        args.push("--model".to_string());
-        args.push(model.to_string());
+        // OpenCode reads MODEL from the environment; the env override is
+        // sufficient. No --model argv push is needed.
         env_overrides.push(("MODEL".to_string(), model.to_string()));
         None
     }
