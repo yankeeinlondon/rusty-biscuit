@@ -19,7 +19,7 @@ fn map_compose_error(source_path: &std::path::Path, err: MarkdownError) -> Compo
     match err {
         MarkdownError::ShellExpansion(shell_err) => CompositionError::ShellExpansionFailed {
             source_path: source_path.to_path_buf(),
-            error: Box::new(shell_err),
+            error: shell_err,
         },
         other => CompositionError::ComposeFailed(other),
     }
