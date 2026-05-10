@@ -16,15 +16,16 @@ fn level2_error_header_contains_osc8_hyperlink() {
     }
 
     let dir = tempdir().unwrap();
-    let file_path = dir.path().join("broken.md");
-    // Invalid frontmatter to trigger MarkdownError::FrontmatterParse
-    fs::write(&file_path, "---\ntitle: [unclosed\n---\n").unwrap();
+    let file_path = dir.path().join("unterminated.md");
+    // Unterminated page block to trigger PageBlockError::UnterminatedBlock
+    // (which includes the file path in the error header as an OSC8 hyperlink)
+    fs::write(&file_path, "::block when=\"true\"\nbody\n").unwrap();
 
     let mut harness = WezTermHarness::new();
     harness.spawn_shell().expect("spawn_shell failed");
 
-    // Run `md` on the broken file
-    let cmd = format!("md {}", file_path.display());
+    // Run `md compose` to trigger page-block parsing
+    let cmd = format!("md compose {}", file_path.display());
     harness.send_command_with_env(&cmd, &[]).expect("send_command_with_env failed");
     
     // Wait for output
@@ -33,9 +34,11 @@ fn level2_error_header_contains_osc8_hyperlink() {
     let frame = harness.capture().expect("capture failed");
     
     // Verify OSC 8 hyperlink in the header
-    // The header should contain something like \x1b]8;;file:///...broken.md\x07broken.md\x1b]8;;\x07
-    let expected_url = format!("file://{}", file_path.to_string_lossy());
-    assert_osc8_link_present(&frame, &expected_url, "broken.md");
+    // The header should contain something like \x1b]8;;file:///...unterminated.md\x07unterminated.md\x1b]8;;\x07
+    // Use canonicalize because macOS /var is a symlink to /private/var.
+    let canonical = file_path.canonicalize().expect("canonicalize failed");
+    let expected_url = format!("file://{}", canonical.to_string_lossy());
+    assert_osc8_link_present(&frame, &expected_url, "unterminated.md");
 }
 
 #[test]
@@ -56,7 +59,7 @@ fn level2_error_excerpt_contains_gutter_and_dimming() {
     let mut harness = WezTermHarness::new();
     harness.spawn_shell().expect("spawn_shell failed");
 
-    let cmd = format!("md {}", file_path.display());
+    let cmd = format!("md compose {}", file_path.display());
     harness.send_command_with_env(&cmd, &[]).expect("send_command_with_env failed");
     let _ = biscuit_test_harness::wait_for_prompt(&mut harness);
 
@@ -66,8 +69,13 @@ fn level2_error_excerpt_contains_gutter_and_dimming() {
     assert!(frame.plain.contains("> 1 │ ::block"));
     
     // Verify dimming (if possible via hex check or similar)
-    // <dim> often maps to \x1b[2m
-    assert!(frame.raw.contains("\x1b[2m"), "expected dimmed output in raw capture");
+    // <dim> maps to \x1b[2m or \x1b[0;2m depending on context
+    let has_dim = frame.raw.contains("\x1b[2m") || frame.raw.contains("\x1b[0;2m");
+    assert!(
+        has_dim,
+        "expected dimmed output in raw capture. raw:\n{}",
+        frame.raw
+    );
 }
 
 fn assert_osc8_link_present(frame: &CapturedFrame, url: &str, label: &str) {
