@@ -5148,17 +5148,8 @@ done
 }
 
 /// Non-harness inline-compose respects --step-timeout CLI flag.
-//
-// FIXME(unified-watchdog): the fixture provider emits a `tool_start`
-// without a matching `tool_result`, leaving `LiveMetrics::in_flight`
-// non-empty. The unified watchdog suppresses `step_timeout` while any
-// tool is in-flight (see `evaluate_timeout_tick` in
-// `cli/src/commands/wrap/exec/watchdog.rs`), so this test cannot fire
-// today. Restoring it requires the same stuck-tool detector noted on the
-// other two `watchdog_*` tests above.
 #[cfg(unix)]
 #[test]
-#[ignore = "stuck-tool step_timeout firing is deferred follow-up work"]
 #[serial_test::serial]
 fn inline_compose_non_harness_respects_cli_step_timeout() {
     let workspace = tempdir().unwrap();
@@ -5211,7 +5202,22 @@ while :; do /bin/sleep 1; done
     let plain = strip_ansi(&stderr);
 
     assert!(
-        plain.contains("step_timeout"),
-        "stderr should mention step_timeout from CLI --step-timeout; got: {plain}"
+        plain.contains("no stream activity"),
+        "stderr should contain step_timeout breach message from CLI --step-timeout; got: {plain}"
     );
+
+    let log_path = today_log_path(workspace.path());
+    if log_path.exists() {
+        let log = fs::read_to_string(&log_path).unwrap();
+        let last = log.lines().last().unwrap();
+        let entry: serde_json::Value = serde_json::from_str(last).unwrap();
+        assert_eq!(
+            entry
+                .get("extra")
+                .and_then(|e| e.get("exit_reason"))
+                .and_then(|v| v.as_str()),
+            Some("step_timeout"),
+            "JSONL session_end must have extra.exit_reason=step_timeout; last entry: {last}"
+        );
+    }
 }

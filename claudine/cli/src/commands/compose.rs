@@ -369,7 +369,11 @@ fn run_compose_inner(
     };
 
     let file_for_loop = file.clone();
-    if let Some(loop_result) = claudine::composition::execute_loop(&source, loop_options, |ctx| {
+    if let Some(loop_result) = run_loop_with_overrides(
+        &source,
+        set_overrides.as_ref(),
+        loop_options,
+        |ctx| {
         let prepared = composition::prepare_direct(
             &source,
             composition::PrepareOptions {
@@ -429,7 +433,8 @@ fn run_compose_inner(
                 )),
             ))
         }
-    })? {
+        },
+    )? {
         if let Some(error) = loop_result.error {
             return Err(error.into());
         }
@@ -611,7 +616,11 @@ fn run_inline_compose_inner(
     };
 
     let file_for_loop = file.clone();
-    if let Some(loop_result) = claudine::composition::execute_loop(&source, loop_options, |ctx| {
+    if let Some(loop_result) = run_loop_with_overrides(
+        &source,
+        set_overrides.as_ref(),
+        loop_options,
+        |ctx| {
         let prepared = composition::prepare_inline(
             &source,
             composition::PrepareOptions {
@@ -671,7 +680,8 @@ fn run_inline_compose_inner(
                 )),
             ))
         }
-    })? {
+        },
+    )? {
         if let Some(error) = loop_result.error {
             return Err(error.into());
         }
@@ -719,6 +729,60 @@ fn run_inline_compose_inner(
     };
 
     execute_composition_request(request, verbose, startup_timings, shared.perf)
+}
+
+/// Run a composition loop with CLI `--set` / shorthand setter overrides
+/// merged into the loop's initial frontmatter.
+///
+/// Returns `Ok(None)` when the source has no `loop` frontmatter, matching
+/// [`claudine::composition::execute_loop`].
+///
+/// CLI overrides shadow on-disk frontmatter values from the very first
+/// iteration so that the loop condition and templated body see the values
+/// the user passed on the command line.
+fn run_loop_with_overrides<F>(
+    source: &claudine::composition::ResolvedCompositionSource,
+    set_overrides: Option<&serde_json::Value>,
+    options: claudine::composition::LoopExecutionOptions,
+    executor: F,
+) -> std::result::Result<
+    Option<claudine::composition::LoopExecutionResult>,
+    claudine::composition::CompositionError,
+>
+where
+    F: FnMut(
+        claudine::composition::LoopIterationContext,
+    ) -> std::result::Result<
+        claudine::composition::LoopIterationOutput,
+        claudine::composition::CompositionError,
+    >,
+{
+    let Some(config) = claudine::composition::resolve_loop_config(source)? else {
+        return Ok(None);
+    };
+
+    let mut initial_frontmatter: serde_json::Map<String, serde_json::Value> = source
+        .markdown
+        .frontmatter()
+        .as_map()
+        .iter()
+        .map(|(k, v)| (k.clone(), v.clone()))
+        .collect();
+
+    if let Some(serde_json::Value::Object(overrides)) = set_overrides {
+        for (k, v) in overrides {
+            initial_frontmatter.insert(k.clone(), v.clone());
+        }
+    }
+
+    let result = claudine::composition::execute_loop_with_config(
+        &source.resolved_path,
+        &config,
+        initial_frontmatter,
+        options,
+        executor,
+    )?;
+    Ok(Some(result))
 }
 
 /// Parse `--set` JSON/JSON5, validate it's an object, return as `serde_json::Value`.
