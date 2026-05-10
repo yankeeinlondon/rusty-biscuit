@@ -1,6 +1,6 @@
 # Expression Syntax
 
-The document @darkmatter/docs/title/boolean-conditional-logic.md has been used for a while to document a set of expressions which Darkmatter allows for in:
+The document @darkmatter/docs/title/darkmatter-expressions.md documents the expression language that Darkmatter allows for in:
 
 - conditional clauses (such as the `when` property of several directives)
 - interpolation (e.g., `{{ foo || bar }}` or `{{ foo > 5 }}`)

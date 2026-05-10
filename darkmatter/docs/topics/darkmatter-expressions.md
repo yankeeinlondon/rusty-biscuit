@@ -111,9 +111,13 @@ Dot access reads named properties of a dictionary: `foo.bar.baz`.
 
 Bracket access reads array indexes and object keys.
 
-- arrays: `foo[0]`, `foo[-1]` (negative indexes count from the end)
-- objects: `foo["key"]` (string keys)
-- chained: `items[-1].name`, `config["key"][0]`
+- **arrays**: `foo[0]`, `foo[-1]` (negative indexes count from the end). The
+  index expression must evaluate to a number; booleans, strings, objects,
+  arrays, and `null` indexes return `null`.
+- **objects**: `foo["key"]` (string keys only). The index expression must
+  evaluate to a string; numbers, booleans, objects, arrays, and `null` keys
+  return `null`.
+- **chained**: `items[-1].name`, `config["key"][0]`
 
 Bracket access follows a **null-propagation philosophy**: any invalid bracket
 access returns `null` and never errors.
@@ -122,8 +126,10 @@ access returns `null` and never errors.
 |------|--------|
 | `items[-1]` on empty array | `null` |
 | `items[0]` where `items` is `null` | `null` |
+| `items[true]` where `items` is an array | `null` |
 | `config["key"]` where `config` is a string | `null` |
 | `obj["missing"]` | `null` |
+| `obj[0]` where `obj` is an object | `null` |
 
 ## Interpolation vs. Condition Mode
 
@@ -239,6 +245,10 @@ resolve to the same function.
 - `min(a, b)` — minimum of two numbers
 - `max(a, b)` — maximum of two numbers
 - `abs(x)` — absolute value
+
+Math helpers require numeric arguments. Booleans, strings, arrays, objects,
+and `null` all produce a type-mismatch error (`null` propagates to `null` when
+null-safety applies — see [Function Contracts](#function-contracts)).
 
 ### Type Predicates
 

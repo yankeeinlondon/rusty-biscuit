@@ -1,7 +1,7 @@
 ---
 phases: 6
 created: 2026-05-09
-start_phase: 3
+start_phase: 5
 source_files_during_phase_1: []
 docs_updated_during_phase_1: []
 docs_created_during_phase_1:
@@ -27,6 +27,18 @@ source_files_during_phase_4:
 docs_updated_during_phase_4: []
 docs_created_during_phase_4: []
 skills_files_updated_during_phase_4: []
+source_files_during_phase_5: []
+docs_updated_during_phase_5:
+  - darkmatter/lib/README.md
+  - darkmatter/features/2026-05-08-expression-syntax/spec.md
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5: []
+source_files_during_phase_6:
+  - darkmatter/lib/tests/expression_regression.rs
+docs_updated_during_phase_6:
+  - darkmatter/features/2026-05-08-expression-syntax/plan.md
+docs_created_during_phase_6: []
+skills_files_updated_during_phase_6: []
 packages:
   - darkmatter
   - darkmatter-cli
@@ -81,23 +93,23 @@ packages:
 
 ## Phase 5: Integration, Diagnostics, And Documentation
 
-- [ ] Update interpolation tests to prove new arithmetic, access, predicates, and string/date helpers work inside `{{ ... }}` and produce expected rendered strings.
-- [ ] Update condition tests to prove the same expression syntax works in `when` clauses for page blocks, transclusion directives, and the `evaluate_condition_against` shortcut API.
-- [ ] Update expression parse/evaluation error messages and condition syntax hints so `<=`, arithmetic operators, bracket access, and the expanded helper list are visible in diagnostics.
-- [ ] Rename user-facing docs from "Boolean Conditional Logic" to "Darkmatter Expressions", including the primary topic file, links from page blocks and transclusion docs, and any README references.
-- [ ] Document operator precedence, associativity, truthiness, null propagation, arithmetic errors, function contracts, bracket access, and timezone behavior in the renamed expression docs.
-- [ ] Update rustdoc in `compose::expression`, `compose::conditions`, and interpolation modules, keeping the repo's rustdoc section-order convention.
-- [ ] Update `docs/dependencies.md` and the darkmatter package dependency docs if any crates or features are added or removed; otherwise explicitly note that existing `chrono` and `sniff` dependencies were reused.
-- [ ] Parallelizable: documentation and diagnostic hint updates can proceed alongside integration tests once the public syntax and helper names are stable.
-- [ ] Validation checkpoint: run doc-sensitive checks with `cargo test -p darkmatter --doc` and a targeted search confirming no stale "boolean expression" terminology remains where it now refers to general Darkmatter expressions.
+- [x] Update interpolation tests to prove new arithmetic, access, predicates, and string/date helpers work inside `{{ ... }}` and produce expected rendered strings.
+- [x] Update condition tests to prove the same expression syntax works in `when` clauses for page blocks, transclusion directives, and the `evaluate_condition_against` shortcut API.
+- [x] Update expression parse/evaluation error messages and condition syntax hints so `<=`, arithmetic operators, bracket access, and the expanded helper list are visible in diagnostics.
+- [x] Rename user-facing docs from "Boolean Conditional Logic" to "Darkmatter Expressions", including the primary topic file, links from page blocks and transclusion docs, and any README references.
+- [x] Document operator precedence, associativity, truthiness, null propagation, arithmetic errors, function contracts, bracket access, and timezone behavior in the renamed expression docs.
+- [x] Update rustdoc in `compose::expression`, `compose::conditions`, and interpolation modules, keeping the repo's rustdoc section-order convention.
+- [x] Update `docs/dependencies.md` and the darkmatter package dependency docs if any crates or features are added or removed; otherwise explicitly note that existing `chrono` and `sniff` dependencies were reused.
+- [x] Parallelizable: documentation and diagnostic hint updates can proceed alongside integration tests once the public syntax and helper names are stable.
+- [x] Validation checkpoint: run doc-sensitive checks with `cargo test -p darkmatter --doc` and a targeted search confirming no stale "boolean expression" terminology remains where it now refers to general Darkmatter expressions.
 
 ## Phase 6: Full Verification And Release Readiness
 
-- [ ] Run formatting for the touched Rust code with `cargo fmt --package darkmatter` or the repository's established formatting command.
-- [ ] Run focused library tests for expression, interpolation, conditions, page blocks, and transclusion behavior.
-- [ ] Run `cargo test -p darkmatter` and investigate any failures before broader workspace validation.
-- [ ] Run the relevant root or area lint command, preferring `just lint` or the darkmatter area `justfile` recipe if available.
-- [ ] Run the relevant root or area build command, preferring `just build` or the darkmatter area `justfile` recipe if available.
-- [ ] Add regression examples or fixtures for representative end-to-end documents using arithmetic, type predicates, bracket access, date helpers, and string mutation helpers together.
-- [ ] Review changed public docs, rustdocs, and error snapshots for consistency with the spec and with the final implemented behavior.
-- [ ] Validation checkpoint: final acceptance requires green formatting, focused tests, `cargo test -p darkmatter`, lint/build commands, and a reviewer-readable summary of any skipped commands or unresolved semantic tradeoffs.
+- [x] Run formatting for the touched Rust code with `cargo fmt --package darkmatter` or the repository's established formatting command.
+- [x] Run focused library tests for expression, interpolation, conditions, page blocks, and transclusion behavior.
+- [x] Run `cargo test -p darkmatter` and investigate any failures before broader workspace validation.
+- [x] Run the relevant root or area lint command, preferring `just lint` or the darkmatter area `justfile` recipe if available.
+- [x] Run the relevant root or area build command, preferring `just build` or the darkmatter area `justfile` recipe if available.
+- [x] Add regression examples or fixtures for representative end-to-end documents using arithmetic, type predicates, bracket access, date helpers, and string mutation helpers together.
+- [x] Review changed public docs, rustdocs, and error snapshots for consistency with the spec and with the final implemented behavior.
+- [x] Validation checkpoint: final acceptance requires green formatting, focused tests, `cargo test -p darkmatter`, lint/build commands, and a reviewer-readable summary of any skipped commands or unresolved semantic tradeoffs.
