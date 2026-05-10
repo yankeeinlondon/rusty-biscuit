@@ -307,6 +307,12 @@ fn parse_env_duration(name: &str) -> Option<Duration> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    // test-toolkit provides EnvGuard for safe RAII environment-variable
+    // management in tests. All env-mutating tests in this module are
+    // annotated with `#[serial_test::serial]` to prevent cross-test
+    // interference because the process environment is global state.
+    use rstest::rstest;
+    use test_toolkit::EnvGuard;
 
     #[test]
     fn detect_step_timeout_fires_after_silence_exceeds_budget() {
@@ -518,12 +524,13 @@ mod tests {
         assert!(only_silence.any_enabled());
     }
 
-    #[test]
+    #[rstest]
     #[serial_test::serial]
     fn timeout_config_resolve_honours_pre_resolved_inputs() {
         // Ensure env knobs are absent so we observe the inputs cleanly.
-        let _g1 = TestEnvGuard::clear("CLAUDINE_KILL_GRACE");
-        let _g2 = TestEnvGuard::clear("CLAUDINE_WATCHDOG_INTERVAL");
+        // SAFETY: serial_test::serial prevents concurrent env access.
+        let _g1 = unsafe { EnvGuard::remove("CLAUDINE_KILL_GRACE") };
+        let _g2 = unsafe { EnvGuard::remove("CLAUDINE_WATCHDOG_INTERVAL") };
 
         let config = TimeoutConfig::resolve(
             Some(Duration::from_secs(7200)),
@@ -536,15 +543,16 @@ mod tests {
         assert_eq!(config.interval, Duration::from_secs(5));
     }
 
-    #[test]
+    #[rstest]
     #[serial_test::serial]
     fn timeout_config_resolve_does_not_consult_timeout_env_vars() {
         // Composition layer owns timeout/step_timeout precedence; resolve
         // must NOT read these env vars itself.
-        let _g1 = TestEnvGuard::set("CLAUDINE_TIMEOUT", "1h");
-        let _g2 = TestEnvGuard::set("CLAUDINE_STEP_TIMEOUT", "5m");
-        let _g3 = TestEnvGuard::clear("CLAUDINE_KILL_GRACE");
-        let _g4 = TestEnvGuard::clear("CLAUDINE_WATCHDOG_INTERVAL");
+        // SAFETY: serial_test::serial prevents concurrent env access.
+        let _g1 = unsafe { EnvGuard::set("CLAUDINE_TIMEOUT", "1h") };
+        let _g2 = unsafe { EnvGuard::set("CLAUDINE_STEP_TIMEOUT", "5m") };
+        let _g3 = unsafe { EnvGuard::remove("CLAUDINE_KILL_GRACE") };
+        let _g4 = unsafe { EnvGuard::remove("CLAUDINE_WATCHDOG_INTERVAL") };
 
         let config = TimeoutConfig::resolve(None, None);
         assert_eq!(
@@ -557,46 +565,50 @@ mod tests {
         );
     }
 
-    #[test]
+    #[rstest]
     #[serial_test::serial]
     fn timeout_config_resolve_parses_kill_grace_and_interval_env_vars() {
-        let _g1 = TestEnvGuard::set("CLAUDINE_KILL_GRACE", "30s");
-        let _g2 = TestEnvGuard::set("CLAUDINE_WATCHDOG_INTERVAL", "2s");
+        // SAFETY: serial_test::serial prevents concurrent env access.
+        let _g1 = unsafe { EnvGuard::set("CLAUDINE_KILL_GRACE", "30s") };
+        let _g2 = unsafe { EnvGuard::set("CLAUDINE_WATCHDOG_INTERVAL", "2s") };
 
         let config = TimeoutConfig::resolve(None, None);
         assert_eq!(config.kill_grace, Duration::from_secs(30));
         assert_eq!(config.interval, Duration::from_secs(2));
     }
 
-    #[test]
+    #[rstest]
     #[serial_test::serial]
     fn timeout_config_resolve_falls_back_when_env_invalid() {
-        let _g1 = TestEnvGuard::set("CLAUDINE_KILL_GRACE", "garbage");
-        let _g2 = TestEnvGuard::set("CLAUDINE_WATCHDOG_INTERVAL", "");
+        // SAFETY: serial_test::serial prevents concurrent env access.
+        let _g1 = unsafe { EnvGuard::set("CLAUDINE_KILL_GRACE", "garbage") };
+        let _g2 = unsafe { EnvGuard::set("CLAUDINE_WATCHDOG_INTERVAL", "") };
 
         let config = TimeoutConfig::resolve(None, None);
         assert_eq!(config.kill_grace, Duration::from_secs(10));
         assert_eq!(config.interval, Duration::from_secs(5));
     }
 
-    #[test]
+    #[rstest]
     #[serial_test::serial]
     fn timeout_config_resolve_accepts_minute_and_hour_units() {
-        let _g1 = TestEnvGuard::set("CLAUDINE_KILL_GRACE", "1m");
-        let _g2 = TestEnvGuard::set("CLAUDINE_WATCHDOG_INTERVAL", "1h");
+        // SAFETY: serial_test::serial prevents concurrent env access.
+        let _g1 = unsafe { EnvGuard::set("CLAUDINE_KILL_GRACE", "1m") };
+        let _g2 = unsafe { EnvGuard::set("CLAUDINE_WATCHDOG_INTERVAL", "1h") };
 
         let config = TimeoutConfig::resolve(None, None);
         assert_eq!(config.kill_grace, Duration::from_secs(60));
         assert_eq!(config.interval, Duration::from_secs(3600));
     }
 
-    #[test]
+    #[rstest]
     #[serial_test::serial]
     fn timeout_config_resolve_cli_wins_over_frontmatter_env_and_default() {
-        let _g1 = TestEnvGuard::clear("CLAUDINE_TIMEOUT");
-        let _g2 = TestEnvGuard::clear("CLAUDINE_STEP_TIMEOUT");
-        let _g3 = TestEnvGuard::clear("CLAUDINE_KILL_GRACE");
-        let _g4 = TestEnvGuard::clear("CLAUDINE_WATCHDOG_INTERVAL");
+        // SAFETY: serial_test::serial prevents concurrent env access.
+        let _g1 = unsafe { EnvGuard::remove("CLAUDINE_TIMEOUT") };
+        let _g2 = unsafe { EnvGuard::remove("CLAUDINE_STEP_TIMEOUT") };
+        let _g3 = unsafe { EnvGuard::remove("CLAUDINE_KILL_GRACE") };
+        let _g4 = unsafe { EnvGuard::remove("CLAUDINE_WATCHDOG_INTERVAL") };
 
         // Simulating the composition layer resolving CLI > frontmatter > env
         let resolved_timeout = Some(Duration::from_secs(7200)); // from CLI
@@ -606,36 +618,4 @@ mod tests {
         assert_eq!(config.step_timeout, Some(Duration::from_secs(1800)));
     }
 
-    /// RAII wrapper that restores the prior env var value on drop.
-    struct TestEnvGuard {
-        key: &'static str,
-        prior: Option<String>,
-    }
-    impl TestEnvGuard {
-        fn set(key: &'static str, value: &str) -> Self {
-            let prior = std::env::var(key).ok();
-            unsafe {
-                std::env::set_var(key, value);
-            }
-            Self { key, prior }
-        }
-
-        fn clear(key: &'static str) -> Self {
-            let prior = std::env::var(key).ok();
-            unsafe {
-                std::env::remove_var(key);
-            }
-            Self { key, prior }
-        }
-    }
-    impl Drop for TestEnvGuard {
-        fn drop(&mut self) {
-            unsafe {
-                match &self.prior {
-                    Some(v) => std::env::set_var(self.key, v),
-                    None => std::env::remove_var(self.key),
-                }
-            }
-        }
-    }
 }

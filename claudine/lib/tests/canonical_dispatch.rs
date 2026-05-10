@@ -6,34 +6,17 @@ use claudine::dispatch::loader::{CanonicalRuntimeConfig, compile_canonical_runti
 use claudine::dispatch::{dispatch_canonical_with_runtime, write_dispatch_event_to};
 use claudine::events::{AgenticEvent, EventMeta};
 use claudine::provider::Provider;
-use serial_test::serial;
+use rstest::{fixture, rstest};
 use tempfile::TempDir;
+use test_toolkit::{EnvGuard, trace_phase};
 
-/// RAII guard that sets `PLAYA_DRY_RUN=1` for its lifetime so the
-/// dispatch pipeline never opens a real audio device during the test.
-///
-/// Pair with `#[serial]` so concurrent tests cannot observe inconsistent
-/// env-var state.
-struct PlayaDryRunGuard;
-
-impl PlayaDryRunGuard {
-    fn enable() -> Self {
-        // SAFETY: tests using this guard are marked #[serial] so no
-        // parallel test reads or writes the env var concurrently.
-        unsafe {
-            std::env::set_var("PLAYA_DRY_RUN", "1");
-        }
-        Self
-    }
-}
-
-impl Drop for PlayaDryRunGuard {
-    fn drop(&mut self) {
-        // SAFETY: same as `enable` above.
-        unsafe {
-            std::env::remove_var("PLAYA_DRY_RUN");
-        }
-    }
+#[fixture]
+fn playa_dry_run() -> EnvGuard {
+    trace_phase!("setup_playa_dry_run", {
+        // SAFETY: tests using this fixture are marked #[serial_test::serial]
+        // so no parallel test reads or writes the env var concurrently.
+        unsafe { EnvGuard::set("PLAYA_DRY_RUN", "1") }
+    })
 }
 
 fn make_config_with_action(event: AgenticEvent, action: HookAction) -> CanonicalRuntimeConfig {
@@ -51,11 +34,11 @@ fn make_config_with_action(event: AgenticEvent, action: HookAction) -> Canonical
 /// Dispatching a `SoundEffect` action completes without error and returns
 /// no blocking response.  Real audio playback is suppressed via
 /// `PLAYA_DRY_RUN=1` so a wedged audio device cannot stall the test.
+#[rstest]
 #[tokio::test]
-#[serial]
-async fn dispatch_sound_effect_action() {
-    let _guard = PlayaDryRunGuard::enable();
-
+#[serial_test::serial]
+async fn dispatch_sound_effect_action(playa_dry_run: EnvGuard) {
+    let _playa_dry_run = playa_dry_run;
     let runtime = make_config_with_action(
         AgenticEvent::HumanInTheLoop,
         HookAction::SoundEffect {
