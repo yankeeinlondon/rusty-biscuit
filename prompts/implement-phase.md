@@ -6,7 +6,7 @@ dir: "$(dirname '{{plan}}')"
 area: "{{ctx.current_package_area}}"
 pass_icon: "{{ _loop_is_last ? '✅' : '🧑‍💻' }}"
 start:
-    message: "🎬  starting the implementation of phase **#{{phase}}** of `{{plan}}`"
+    message: "🎬  starting the implementation of phase **#{{phase}}** of `{{ctx.current_package_area}}/{{plan}}`"
 success: 
     say: "Phase {{phase}} of the plan in the {{area}} package area, was implemented successfully"
     message: "{{pass_icon}} phase **{{phase}}** (_of {{total_phases}}_) of the plan `{{area}}/{{plan}}` successfully completed"
@@ -34,13 +34,11 @@ next:
 # Implement Phase {{phase}}
 ::end-block
 
-Your task is to implement phase {{phase}} of the plan found in {{plan}}.
+Your task is to implement phase {{phase}} of the plan found in {{area}}/{{plan}}.
 
 ::block when="memory"
 > **NOTE:** for context you should read the lessons learned discovered in earlier stages of this plan. You will find these lessons learned in memory/{{memory}}.md. 
 ::end-block
-
-- use the '{{ctx.current_package_area}}' skill during this implementation
 
 You are done when:
 
