@@ -1759,7 +1759,7 @@ mod tests {
     async fn default_lifecycle_emitter_emit_notification_does_not_panic() {
         let emitter = DefaultLifecycleEmitter;
         // Fire-and-forget: should return immediately without panic
-        emitter.emit_notification("test notification title");
+        emitter.emit_notification("unit testing — you can dismiss this notification");
         // Give the spawned task a moment to start
         tokio::task::yield_now().await;
     }
