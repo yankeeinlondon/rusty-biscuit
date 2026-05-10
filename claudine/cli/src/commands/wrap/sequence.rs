@@ -487,6 +487,8 @@ pub(crate) fn execute_sequence(
             silent: shared.silent,
             env_overrides: step_ctx.env_overrides.clone(),
             shared_approval_cache: Some(Arc::clone(&shared_approval_cache)),
+            installed_snapshot: Some(prep_context.installed_snapshot.clone()),
+            prep_launch_workspace: Some(prep_context.launch_workspace.clone()),
             prep_launch_context: Some(prep_context.launch_context.clone()),
             prep_env_context: Some(prep_context.env_context.clone()),
             prep_launch_detection_error: prep_context.launch_detection_error.clone(),

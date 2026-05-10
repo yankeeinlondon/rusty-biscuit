@@ -55,6 +55,7 @@ pub(crate) use resume::{
 };
 
 use biscuit_terminal::terminal::Terminal;
+use claudine::composition::InstalledProviderSnapshot;
 use claudine::events::EnvironmentContext;
 use claudine::provider::Provider;
 use claudine::stream::stderr::Verbosity;
@@ -94,7 +95,7 @@ pub(crate) struct McpRuntimeInfo {
 pub(crate) struct WrapStartupDetection {
     pub(crate) env_context: EnvironmentContext,
     pub(crate) launch_context: claudine::system_prompt::LaunchContext,
-    pub(crate) launch_workspace: env::LaunchWorkspaceContext,
+    pub(crate) launch_workspace: claudine::composition::LaunchWorkspaceContext,
 }
 
 /// Run one sniff-based filesystem scan and build every startup context
@@ -159,7 +160,7 @@ fn fallback_wrap_startup(cwd: &Path) -> WrapStartupDetection {
             package_area_root: None,
             package_root: None,
         },
-        launch_workspace: env::LaunchWorkspaceContext {
+        launch_workspace: claudine::composition::LaunchWorkspaceContext {
             launch_cwd: cwd.to_path_buf(),
             repo_root: None,
             child_cwd: cwd.to_path_buf(),
@@ -214,7 +215,18 @@ pub(crate) fn resolve_binary_path(
 /// entire set of known AI CLIs. Used on the hot path of the direct wrapper
 /// so we don't pay for a full PATH walk over ~9 binaries when only one is
 /// needed.
-pub(crate) fn resolve_binary_path_direct(profile: &dyn WrapperProfile) -> Result<PathBuf> {
+///
+/// When `snapshot` is provided and contains a path for the provider, the
+/// cached path is returned immediately, avoiding the `which` syscall.
+pub(crate) fn resolve_binary_path_direct(
+    profile: &dyn WrapperProfile,
+    snapshot: Option<&InstalledProviderSnapshot>,
+) -> Result<PathBuf> {
+    if let Some(snapshot) = snapshot
+        && let Some(path) = snapshot.binary_path(profile.provider())
+    {
+        return Ok(path.to_path_buf());
+    }
     which::which(profile.binary()).map_err(|_| binary_missing_error(profile))
 }
 
@@ -338,7 +350,7 @@ fn run_provider_wrapper_inner(
         "wrapper_binary_resolution",
         provider = %provider,
     )
-    .in_scope(|| resolve_binary_path_direct(profile))?;
+    .in_scope(|| resolve_binary_path_direct(profile, None))?;
 
     let raw_agent_params: Vec<String> = std::env::args().skip(2).collect();
     let mut child_args = args.passthrough.clone();
@@ -1322,7 +1334,7 @@ mod tests {
             added: Vec::new(),
             repo_root: None,
             child_cwd: PathBuf::from("/tmp"),
-            package_context: Some(env::PackageContext {
+            package_context: Some(claudine::composition::PackageContext {
                 package_area: "claudine".to_string(),
                 package: Some("claudine-cli".to_string()),
                 candidates: vec!["claudine-cli".to_string()],
@@ -1345,7 +1357,7 @@ mod tests {
             added: Vec::new(),
             repo_root: None,
             child_cwd: PathBuf::from("/tmp"),
-            package_context: Some(env::PackageContext {
+            package_context: Some(claudine::composition::PackageContext {
                 package_area: "claudine".to_string(),
                 package: None,
                 candidates: vec!["claudine".to_string(), "claudine-cli".to_string()],

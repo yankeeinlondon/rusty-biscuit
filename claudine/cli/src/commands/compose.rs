@@ -273,13 +273,24 @@ pub fn run_inline_compose(
 fn run_compose_inner(
     args: ComposeArgs,
     verbose: u8,
-    startup_timings: Option<crate::perf::StartupTimings>,
+    mut startup_timings: Option<crate::perf::StartupTimings>,
 ) -> Result<i32> {
+    let compose_entry = std::time::Instant::now();
     let ComposeArgs { shared, args } = args;
     let parsed = parse_composition_positionals(&args)?;
     let file = parsed.file_ref.ok_or_else(|| {
         eyre!("missing file reference: expected exactly one file reference plus optional key=value setters")
     })?;
+
+    // Receipt banner: immediate feedback that the request was accepted.
+    if !shared.silent && !shared.quiet {
+        use biscuit_terminal::components::renderable::Renderable;
+        use biscuit_terminal::components::status::Status;
+        let term = crate::log::terminal();
+        let status = Status::from_prose(format!("→ Composing {file}…"));
+        crate::log::message(&status.render(&term));
+    }
+
     // Install the process-scoped SIGINT handler now so Ctrl+C during the
     // (potentially slow) compose prep phase produces the same INFO notice
     // and exit-130 outcome the loop emits during its iterations.
@@ -434,6 +445,8 @@ fn run_compose_inner(
                 env_overrides: env_overrides.clone(),
                 shared_approval_cache: Some(std::sync::Arc::clone(&shared_approval_cache)),
                 sequence: false,
+                installed_snapshot: Some(prep_context.installed_snapshot.clone()),
+                prep_launch_workspace: Some(prep_context.launch_workspace.clone()),
                 prep_launch_context: Some(prep_context.launch_context.clone()),
                 prep_env_context: Some(prep_context.env_context.clone()),
                 prep_launch_detection_error: prep_context.launch_detection_error.clone(),
@@ -517,11 +530,17 @@ fn run_compose_inner(
         silent: shared.silent,
         env_overrides,
         shared_approval_cache: Some(shared_approval_cache),
-        sequence: false,
-        prep_launch_context: Some(prep_context.launch_context.clone()),
-        prep_env_context: Some(prep_context.env_context.clone()),
-        prep_launch_detection_error: prep_context.launch_detection_error.clone(),
-    };
+                sequence: false,
+                installed_snapshot: Some(prep_context.installed_snapshot.clone()),
+                prep_launch_workspace: Some(prep_context.launch_workspace.clone()),
+                prep_launch_context: Some(prep_context.launch_context.clone()),
+                prep_env_context: Some(prep_context.env_context.clone()),
+                prep_launch_detection_error: prep_context.launch_detection_error.clone(),
+            };
+
+    if let Some(ref mut timings) = startup_timings {
+        timings.prep_phase = compose_entry.elapsed();
+    }
 
     execute_composition_request(request, verbose, startup_timings, shared.perf)
 }
@@ -529,13 +548,24 @@ fn run_compose_inner(
 fn run_inline_compose_inner(
     args: InlineComposeArgs,
     verbose: u8,
-    startup_timings: Option<crate::perf::StartupTimings>,
+    mut startup_timings: Option<crate::perf::StartupTimings>,
 ) -> Result<i32> {
+    let inline_compose_entry = std::time::Instant::now();
     let InlineComposeArgs { shared, args } = args;
     let parsed = parse_composition_positionals(&args)?;
     let file = parsed.file_ref.ok_or_else(|| {
         eyre!("missing file reference: expected exactly one file reference plus optional key=value setters")
     })?;
+
+    // Receipt banner: immediate feedback that the request was accepted.
+    if !shared.silent && !shared.quiet {
+        use biscuit_terminal::components::renderable::Renderable;
+        use biscuit_terminal::components::status::Status;
+        let term = crate::log::terminal();
+        let status = Status::from_prose(format!("→ Composing {file}…"));
+        crate::log::message(&status.render(&term));
+    }
+
     // Install the process-scoped SIGINT handler now so Ctrl+C during the
     // (potentially slow) compose prep phase produces the same INFO notice
     // and exit-130 outcome the loop emits during its iterations.
@@ -722,6 +752,8 @@ fn run_inline_compose_inner(
                 env_overrides: env_overrides.clone(),
                 shared_approval_cache: Some(std::sync::Arc::clone(&shared_approval_cache)),
                 sequence: false,
+                installed_snapshot: Some(prep_context.installed_snapshot.clone()),
+                prep_launch_workspace: Some(prep_context.launch_workspace.clone()),
                 prep_launch_context: Some(prep_context.launch_context.clone()),
                 prep_env_context: Some(prep_context.env_context.clone()),
                 prep_launch_detection_error: prep_context.launch_detection_error.clone(),
@@ -806,10 +838,16 @@ fn run_inline_compose_inner(
         env_overrides,
         shared_approval_cache: Some(shared_approval_cache),
         sequence: false,
+        installed_snapshot: Some(prep_context.installed_snapshot.clone()),
+        prep_launch_workspace: Some(prep_context.launch_workspace.clone()),
         prep_launch_context: Some(prep_context.launch_context.clone()),
         prep_env_context: Some(prep_context.env_context.clone()),
         prep_launch_detection_error: prep_context.launch_detection_error.clone(),
     };
+
+    if let Some(ref mut timings) = startup_timings {
+        timings.prep_phase = inline_compose_entry.elapsed();
+    }
 
     execute_composition_request(request, verbose, startup_timings, shared.perf)
 }

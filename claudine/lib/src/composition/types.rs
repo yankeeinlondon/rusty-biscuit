@@ -10,6 +10,7 @@ use darkmatter::markdown::Markdown;
 use darkmatter::markdown::compose::ComposePerfReport;
 use serde::{Deserialize, Serialize};
 
+use super::launch_workspace::LaunchWorkspaceContext;
 use super::lifecycle::LifecycleConfig;
 use crate::harness::shell::CachedApprovalDecision;
 use crate::provider::Provider;
@@ -195,6 +196,15 @@ pub struct InstalledProviderSnapshot {
     pub excluded: BTreeSet<Provider>,
     /// All installed providers (including excluded ones).
     pub all_installed: Vec<Provider>,
+    /// Resolved binary paths for each installed provider.
+    pub binary_paths: BTreeMap<Provider, PathBuf>,
+}
+
+impl InstalledProviderSnapshot {
+    /// Return the resolved binary path for a provider, if known.
+    pub fn binary_path(&self, provider: Provider) -> Option<&std::path::Path> {
+        self.binary_paths.get(&provider).map(|p| p.as_path())
+    }
 }
 
 /// Why a provider was chosen.
@@ -476,6 +486,18 @@ pub struct CompositionExecutionRequest {
     /// Whether this request is part of a sequence run. When `true`, the
     /// execution header shows a `Sequence` badge.
     pub sequence: bool,
+    /// Pre-computed installed-provider snapshot, supplied by callers that
+    /// already ran host detection during prep (e.g. `CompositionPrepContext`).
+    /// When `Some`, the executor skips the `InstalledAiClients::new()` scan
+    /// and uses this snapshot for both provider selection and binary path
+    /// resolution.
+    pub installed_snapshot: Option<InstalledProviderSnapshot>,
+    /// Pre-computed launch-CWD `LaunchWorkspaceContext`, supplied by callers
+    /// that already ran a shared `sniff::detect_with_plan` scan during prep
+    /// (e.g. `CompositionPrepContext`). When `Some`, the executor reuses it
+    /// instead of calling `resolve_launch_workspace_context` again for both
+    /// the header env plan and the child env build.
+    pub prep_launch_workspace: Option<LaunchWorkspaceContext>,
     /// Pre-computed launch-CWD `LaunchContext`, supplied by callers that
     /// already ran a shared `sniff::detect_with_plan` scan during prep
     /// (e.g. `CompositionPrepContext`). When `Some`, the executor reuses

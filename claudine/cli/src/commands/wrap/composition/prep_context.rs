@@ -20,7 +20,7 @@
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
-use claudine::composition::{InstalledProviderSnapshot, build_installed_snapshot};
+use claudine::composition::{InstalledProviderSnapshot, LaunchWorkspaceContext, build_installed_snapshot};
 use claudine::events::{EnvironmentContext, environment_context_from_sniff_result};
 use claudine::provider::{PROVIDERS_DISPLAY_ORDER, Provider};
 use claudine::system_prompt::LaunchContext;
@@ -28,7 +28,7 @@ use color_eyre::eyre::Result;
 use sniff::programs::InstalledAiClients;
 use sniff::request::*;
 
-use super::{SelectionConfig, load_selection_config_for_repo};
+use super::{SelectionConfig, env, load_selection_config_for_repo};
 
 /// CLI-private invocation context used to deduplicate source-root and
 /// selection-config discovery across compose prep phases.
@@ -61,6 +61,11 @@ pub(crate) struct CompositionPrepContext {
     /// per-invocation `detect_environment_fast` re-scan is skipped when
     /// it would have run against the same root.
     pub env_context: EnvironmentContext,
+    /// Launch-CWD `LaunchWorkspaceContext`, derived from the same shared
+    /// sniff scan. Threaded into `execute_composition_request_inner` so
+    /// both the header env plan and the child env build reuse it instead
+    /// of calling `resolve_launch_workspace_context` again.
+    pub launch_workspace: LaunchWorkspaceContext,
     /// Captured error message from the shared sniff scan, if it failed.
     ///
     /// The shared scan uses `unwrap_or_default()` to keep prep best-
@@ -107,7 +112,7 @@ impl CompositionPrepContext {
         // calls. Both consumers now read from the cached results below.
         // Run this FIRST so `source_repo_root` resolution can reuse the
         // launch repo root in the common case.
-        let (launch_context, env_context, launch_detection_error) = {
+        let (launch_context, env_context, launch_workspace, launch_detection_error) = {
             let _span = tracing::info_span!("compose_prep.shared_sniff").entered();
             let plan = DetectionPlan::new()
                 .base_dir(cwd.clone())
@@ -131,8 +136,24 @@ impl CompositionPrepContext {
                 Err(error) => (sniff::SniffResult::default(), Some(error.to_string())),
             };
             let launch_context = LaunchContext::from_sniff_result(&sniff_result, &cwd);
+
+            // Extract git/repo info for LaunchWorkspaceContext before
+            // moving sniff_result into environment_context_from_sniff_result.
+            let (git_root, repo) = sniff_result
+                .filesystem
+                .as_ref()
+                .map(|f| {
+                    (
+                        f.git.as_ref().map(|g| g.repo_root.clone()),
+                        f.repo.as_ref().cloned(),
+                    )
+                })
+                .unwrap_or((None, None));
+            let launch_workspace =
+                env::launch_workspace_context_from_repo_info(&cwd, git_root.as_deref(), repo.as_ref());
+
             let env_context = environment_context_from_sniff_result(sniff_result);
-            (launch_context, env_context, launch_detection_error)
+            (launch_context, env_context, launch_workspace, launch_detection_error)
         };
 
         // Resolve source_repo_root: in the 99% case the markdown file
@@ -161,7 +182,7 @@ impl CompositionPrepContext {
                 .into_iter()
                 .filter(|p| clients.path(p.sniff_ai_cli()).is_some())
                 .collect();
-            build_installed_snapshot(&installed, excluded)
+            build_installed_snapshot(&installed, excluded, &clients)
         };
 
         Ok(Self {
@@ -174,6 +195,7 @@ impl CompositionPrepContext {
             installed_snapshot,
             launch_context,
             env_context,
+            launch_workspace,
             launch_detection_error,
         })
     }

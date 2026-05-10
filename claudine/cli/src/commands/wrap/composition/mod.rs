@@ -530,6 +530,19 @@ pub(crate) fn execute_composition_request_inner(
     } else {
         None
     };
+    let mut last_checkpoint = total_start;
+    /// Helper to record a named sub-stage timing and reset the checkpoint.
+    fn record_substage(
+        collector: &mut Option<crate::perf::CommandPerfCollector>,
+        checkpoint: &mut std::time::Instant,
+        name: &'static str,
+    ) {
+        if let Some(c) = collector {
+            let elapsed = checkpoint.elapsed();
+            c.mark_substage(name, elapsed);
+            *checkpoint = std::time::Instant::now();
+        }
+    }
 
     let _span = tracing::info_span!("composition_prepare").entered();
 
@@ -541,7 +554,10 @@ pub(crate) fn execute_composition_request_inner(
     let show_checks = !silent;
 
     let source_repo_root = request.prepared.source_repo_root.as_deref();
-    let launch_workspace = env::resolve_launch_workspace_context(&launch_cwd, source_repo_root);
+    let launch_workspace = request
+        .prep_launch_workspace
+        .clone()
+        .unwrap_or_else(|| env::resolve_launch_workspace_context(&launch_cwd, source_repo_root));
 
     // -- Provider detection and selection ---------------------------------
 
@@ -554,13 +570,17 @@ pub(crate) fn execute_composition_request_inner(
     let target = if let Some(ref t) = request.resolved_target {
         t.clone()
     } else {
-        let clients = InstalledAiClients::new();
-        let installed: Vec<Provider> = PROVIDERS_DISPLAY_ORDER
-            .into_iter()
-            .filter(|p| clients.path(p.sniff_ai_cli()).is_some())
-            .collect();
-
-        let snapshot = build_installed_snapshot(&installed, &request.excluded);
+        let snapshot = match request.installed_snapshot {
+            Some(ref s) => s.clone(),
+            None => {
+                let clients = InstalledAiClients::new();
+                let installed: Vec<Provider> = PROVIDERS_DISPLAY_ORDER
+                    .into_iter()
+                    .filter(|p| clients.path(p.sniff_ai_cli()).is_some())
+                    .collect();
+                build_installed_snapshot(&installed, &request.excluded, &clients)
+            }
+        };
 
         let selection_config = load_selection_config(source_repo_root.unwrap_or(&launch_cwd));
         let catalog = match &selection_config {
@@ -687,12 +707,13 @@ pub(crate) fn execute_composition_request_inner(
         _ => SelectionReason::InteractiveChoice,
     };
     let is_inline = matches!(request.prepared.closure, CompositionClosurePlan::Inline(_));
+    record_substage(&mut perf_collector, &mut last_checkpoint, "target resolution");
 
     // -- Profile, binary, arguments, environment --------------------------
 
     let profile = profile::profile_for_provider(provider)
         .ok_or_else(|| eyre!("'{}' cannot be wrapped", provider))?;
-    let binary_path = resolve_binary_path_direct(profile)?;
+    let binary_path = resolve_binary_path_direct(profile, request.installed_snapshot.as_ref())?;
 
     // -- Inline + interactive check ---------------------------------------
 
@@ -738,23 +759,24 @@ pub(crate) fn execute_composition_request_inner(
         );
     }
 
+    record_substage(&mut perf_collector, &mut last_checkpoint, "header env plan");
+
     let needs_mcp_shadow_home = (request.mcp || !request.mcp_use.is_empty())
         && matches!(provider, Provider::Codex | Provider::Gemini);
     let needs_repo_shadow_home = request.repo;
     let raw_agent_params: Vec<String> = std::env::args().skip(1).collect();
     let yolo_enabled = request.yolo;
-    let mut env_plan = env::build_child_env(
+    let mut env_plan = env::build_child_env_with_launch(
         profile,
         provider,
         &request.include,
         yolo_enabled,
         request.session_interactive,
         &raw_agent_params,
-        &launch_cwd,
         &[],
         needs_repo_shadow_home,
         needs_mcp_shadow_home || needs_repo_shadow_home,
-        source_repo_root,
+        launch_workspace,
     )?;
 
     // -- Operation env override -----------------------------------------------
@@ -772,6 +794,8 @@ pub(crate) fn execute_composition_request_inner(
             .env
             .insert(key.clone().into(), value.clone().into());
     }
+
+    record_substage(&mut perf_collector, &mut last_checkpoint, "child env build");
 
     let mut effective_prompt = request.prepared.prompt.clone();
     let mut mcp_extra_args = Vec::new();
@@ -880,6 +904,11 @@ pub(crate) fn execute_composition_request_inner(
                 provider.as_slug()
             ));
         }
+        record_substage(&mut perf_collector, &mut last_checkpoint, "mcp composition");
+    } else {
+        if let Some(ref mut collector) = perf_collector {
+            collector.mark_substage("mcp composition", std::time::Duration::ZERO);
+        }
     }
 
     let mut child_args = Vec::new();
@@ -975,6 +1004,8 @@ pub(crate) fn execute_composition_request_inner(
         }
     }
 
+    record_substage(&mut perf_collector, &mut last_checkpoint, "argv assembly");
+
     enforce_repo_launch_detection(request.repo, request.prep_launch_detection_error.as_deref())?;
     let launch_context = if let Some(prep) = request.prep_launch_context.as_ref() {
         // Phase fix (2026-05-09-slow-prep): reuse the launch_context computed
@@ -1047,6 +1078,8 @@ pub(crate) fn execute_composition_request_inner(
         log::warn(&warn);
     }
 
+    record_substage(&mut perf_collector, &mut last_checkpoint, "system prompt");
+
     // Timeout validation
     if request.timeout.is_some() && request.session_interactive {
         return Err(eyre!("--timeout cannot be used with --interactive mode"));
@@ -1115,6 +1148,8 @@ pub(crate) fn execute_composition_request_inner(
     }
 
     let sp_display_lines = super::system_prompt::describe_effective(&effective_sp);
+
+    record_substage(&mut perf_collector, &mut last_checkpoint, "stream + prompt delivery");
 
     if let Some(collector) = perf_collector.as_mut() {
         collector.mark_env_setup_complete();

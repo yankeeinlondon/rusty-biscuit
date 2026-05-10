@@ -9,6 +9,8 @@ use sniff::filesystem::repo::{Package, RepoInfo, detect_repo};
 use super::profile::WrapperProfile;
 use super::repo_home;
 
+pub(crate) use claudine::composition::{LaunchWorkspaceContext, PackageContext};
+
 #[derive(Debug, Default)]
 #[allow(dead_code)]
 pub(crate) struct EnvPlan {
@@ -26,24 +28,8 @@ pub(crate) struct EnvPlan {
     pub(crate) shadow_home_path: Option<PathBuf>,
 }
 
-#[derive(Debug)]
-#[allow(dead_code)]
-pub(crate) struct LaunchWorkspaceContext {
-    pub(crate) launch_cwd: PathBuf,
-    pub(crate) repo_root: Option<PathBuf>,
-    pub(crate) child_cwd: PathBuf,
-    pub(crate) package_context: Option<PackageContext>,
-    pub(crate) warnings: Vec<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct PackageContext {
-    pub(crate) package_area: String,
-    pub(crate) package: Option<String>,
-    pub(crate) candidates: Vec<String>,
-}
-
 #[allow(clippy::too_many_arguments)]
+#[allow(dead_code)] // kept for tests and legacy callers; production paths use `build_child_env_with_launch`
 pub(crate) fn build_child_env(
     profile: &dyn WrapperProfile,
     provider: claudine::provider::Provider,

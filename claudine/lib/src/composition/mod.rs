@@ -10,6 +10,7 @@ pub mod closure;
 mod error;
 mod guardrails;
 pub mod lifecycle;
+pub mod launch_workspace;
 pub mod loop_actions;
 pub mod loop_config;
 pub mod loop_engine;
@@ -48,6 +49,7 @@ pub use select::{
     resolve_target_non_tty_with_catalog, resolve_target_non_tty_with_hints, select_provider,
 };
 pub use sequence::{build_step_overlay, resolve_sequence_plan};
+pub use launch_workspace::{LaunchWorkspaceContext, PackageContext};
 pub use types::{
     AgentHint, AmbientVariable, CompositionClosurePlan, CompositionExecutionRequest,
     CompositionMode, EffectiveSelectionHints, InlineClosurePlan, InstalledProviderSnapshot,
