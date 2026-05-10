@@ -77,3 +77,4 @@ Cargo.lock
 **/test-*-timing.jsonl
 
 .opencode/package-lock.json
+.claudine/tmp/
