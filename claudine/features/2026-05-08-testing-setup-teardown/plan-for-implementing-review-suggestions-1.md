@@ -3,7 +3,7 @@ created: "2026-05-09T19:05:48"
 review: "claudine/features/2026-05-08-testing-setup-teardown/review-1.md"
 spec: "claudine/features/2026-05-08-testing-setup-teardown/spec.md"
 phases: 4
-current_phase: 2
+current_phase: 3
 source_files_during_phase_1:
   - tools/test-toolkit/Cargo.toml
   - tools/test-toolkit/src/lib.rs
@@ -18,8 +18,15 @@ docs_updated_during_phase_2:
 docs_created_during_phase_2:
   - tools/test-toolkit/README.md
 skills_files_updated_during_phase_2: []
+source_files_during_phase_3:
+  - claudine/cli/Cargo.toml
+  - claudine/cli/src/commands/wrap/exec/timeouts.rs
+docs_updated_during_phase_3: []
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3: []
 packages:
   - test-toolkit
+  - claudine-cli
 ---
 
 # Plan: Implement Review Suggestions for Testing Setup & Teardown
@@ -80,19 +87,19 @@ This plan addresses all gaps identified in the review of the `testing-setup-tear
 
 **Goal:** Close the high-severity gap where `claudine-cli` cannot adopt the new testing standards because its `Cargo.toml` lacks the required dev-dependencies.
 
-- [ ] Add `rstest = "0.25"` to `[dev-dependencies]` in `claudine/cli/Cargo.toml`
-- [ ] Add `test-toolkit = { path = "../../tools/test-toolkit" }` to `[dev-dependencies]` in `claudine/cli/Cargo.toml`
-- [ ] Identify one CLI test that modifies or reads process environment variables as the migration candidate
-  - Search for `std::env::set_var`, `std::env::remove_var`, or tests that are sensitive to env state
-  - Good candidates: tests in `claudine/cli/tests/wrap_commands.rs` that set timeout-related env vars, or tests that manipulate `PLAYA_DRY_RUN`
-- [ ] Migrate the chosen test to use `test_toolkit::EnvGuard` and `#[rstest]`
-  - Replace any hand-rolled env set/restore logic with `EnvGuard::set` / `EnvGuard::remove`
-  - Add `#[serial_test::serial]` if the test touches global env state
-  - Wrap fixture setup in `trace_phase!("setup", { ... })` if a fixture is extracted
-  - Ensure the test compiles and passes
-- [ ] Add a brief comment in the migrated test explaining why `test-toolkit` is used (pattern documentation for future migrations)
+- [x] Add `rstest = "0.25"` to `[dev-dependencies]` in `claudine/cli/Cargo.toml`
+- [x] Add `test-toolkit = { path = "../../tools/test-toolkit" }` to `[dev-dependencies]` in `claudine/cli/Cargo.toml`
+- [x] Identify one CLI test that modifies or reads process environment variables as the migration candidate
+  - Found: unit tests in `claudine/cli/src/commands/wrap/exec/timeouts.rs` which used a hand-rolled `TestEnvGuard` struct
+- [x] Migrate the chosen test to use `test_toolkit::EnvGuard` and `#[rstest]`
+  - Replaced hand-rolled `TestEnvGuard` with `test_toolkit::EnvGuard`
+  - Replaced `TestEnvGuard::set` / `TestEnvGuard::clear` with `unsafe { EnvGuard::set(...) }` / `unsafe { EnvGuard::remove(...) }`
+  - Tests already had `#[serial_test::serial]` annotations
+  - Added `#[rstest]` attribute to migrated tests
+  - All tests compile and pass
+- [x] Add a brief comment in the migrated test explaining why `test-toolkit` is used (pattern documentation for future migrations)
 
-**Validation checkpoint:** `cargo test -p claudine-cli --test <migrated_test_name>` passes.
+**Validation checkpoint:** `cargo test -p claudine-cli` passes.
 
 ---
 

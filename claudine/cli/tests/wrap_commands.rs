@@ -5242,7 +5242,12 @@ fn compose_claude_dry_run_does_not_call_opencode_models() {
         .env("NO_COLOR", "1")
         .env("HOME", workspace.path())
         .env("PATH", augmented_path(&path_dir))
-        .args(["compose", "--claude", "--dry-run", md_file.to_str().unwrap()])
+        .args([
+            "compose",
+            "--claude",
+            "--dry-run",
+            md_file.to_str().unwrap(),
+        ])
         .assert()
         .success();
 }
@@ -5269,7 +5274,12 @@ fn inline_compose_claude_dry_run_does_not_call_opencode_models() {
         .env("NO_COLOR", "1")
         .env("HOME", workspace.path())
         .env("PATH", augmented_path(&path_dir))
-        .args(["inline-compose", "--claude", "--dry-run", md_file.to_str().unwrap()])
+        .args([
+            "inline-compose",
+            "--claude",
+            "--dry-run",
+            md_file.to_str().unwrap(),
+        ])
         .assert()
         .success();
 }
@@ -5318,7 +5328,12 @@ fn compose_opencode_dry_run_calls_opencode_models_and_fails_with_test_double() {
         .env("HOME", workspace.path())
         .env("PATH", augmented_path(&path_dir))
         .env("OPENCODE_MODEL", "test-model")
-        .args(["compose", "--opencode", "--dry-run", md_file.to_str().unwrap()])
+        .args([
+            "compose",
+            "--opencode",
+            "--dry-run",
+            md_file.to_str().unwrap(),
+        ])
         .assert()
         .success();
 }
@@ -5349,7 +5364,12 @@ fn sequence_opencode_dry_run_with_env_model_skips_opencode_models_call() {
         .env("HOME", workspace.path())
         .env("PATH", augmented_path(&path_dir))
         .env("OPENCODE_MODEL", "env-model")
-        .args(["sequence", "--opencode", "--dry-run", md_file.to_str().unwrap()])
+        .args([
+            "sequence",
+            "--opencode",
+            "--dry-run",
+            md_file.to_str().unwrap(),
+        ])
         .assert()
         .success();
 }
@@ -5379,7 +5399,12 @@ fn sequence_claude_dry_run_does_not_call_opencode_models() {
         .env("NO_COLOR", "1")
         .env("HOME", workspace.path())
         .env("PATH", augmented_path(&path_dir))
-        .args(["sequence", "--claude", "--dry-run", md_file.to_str().unwrap()])
+        .args([
+            "sequence",
+            "--claude",
+            "--dry-run",
+            md_file.to_str().unwrap(),
+        ])
         .assert()
         .success();
 }
@@ -5428,7 +5453,12 @@ exit 0
         .env("NO_COLOR", "1")
         .env("HOME", workspace.path())
         .env("PATH", augmented_path(&path_dir))
-        .args(["compose", "--opencode", "--dry-run", md_file.to_str().unwrap()])
+        .args([
+            "compose",
+            "--opencode",
+            "--dry-run",
+            md_file.to_str().unwrap(),
+        ])
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
         .spawn()

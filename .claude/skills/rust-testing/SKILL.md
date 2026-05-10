@@ -18,6 +18,9 @@ Comprehensive testing patterns for Rust using the built-in framework, cargo-next
 - Structure tests with AAA pattern: Arrange, Act, Assert
 - Run `cargo nextest run` instead of `cargo test` for better performance and output
 - Verify the active Rust toolchain before trusting test results in multi-toolchain environments
+- In this workspace, new and modified tests should prefer `#[rstest]` for fixtures and parameterization; do not bulk-migrate unrelated tests just for style consistency
+- Use `test_toolkit::EnvGuard` for process environment setup/teardown and serialize those tests with `#[serial_test::serial]`
+- Use `test_toolkit::trace_phase!` around meaningful setup/body/teardown boundaries when tracing would help diagnose fixture or integration-test hangs
 
 ## Quick Reference
 
@@ -68,7 +71,11 @@ cargo bench                     # Run criterion benchmarks
 cargo +nightly test             # Pin a newer toolchain when default cargo is too old
 cargo +stable nextest run       # Pin stable explicitly when shell cargo is inconsistent
 cargo nextest run -p my_crate   # Package-scoped monorepo verification
+just test                       # Package-area verification when an area justfile exists
+just lint                       # Package-area lint verification when an area justfile exists
 ```
+
+In this workspace, the root `.config/nextest.toml` keeps package-scoped nextest as the preferred runner. The default profile treats tests as slow after 5 seconds and terminates after 3 slow periods; the CI profile treats tests as slow after 10 seconds, terminates after 2 slow periods, and writes JUnit output to `test-results.xml`.
 
 ## Toolchain Troubleshooting
 
@@ -155,6 +162,77 @@ fn parse_config() -> Result<(), Box<dyn std::error::Error>> {
     assert_eq!(config.get("key"), Some("value"));
     Ok(())
 }
+```
+
+### Workspace Fixtures and Env Guards
+
+For Rusty Biscuit workspace tests, prefer `rstest` for new or touched tests that need fixtures or case parameterization. Keep `#[rstest]` visually first, then stack the async/test runtime attribute when needed, and add `#[serial_test::serial]` directly on the same test when it touches process-global state such as environment variables.
+
+Use fully qualified `#[serial_test::serial]` in migrated tests so the synchronization requirement is obvious at the call site. Do not use `rstest_reuse` for local migrations unless there is a real repeated-case matrix to share.
+
+```rust
+use rstest::{fixture, rstest};
+use test_toolkit::{trace_phase, EnvGuard};
+
+#[fixture]
+fn playa_dry_run() -> EnvGuard {
+    trace_phase!("setup_playa_dry_run", {
+        // Safe constructor: acquires an internal mutex during creation/drop.
+        EnvGuard::set_safe("PLAYA_DRY_RUN", "1")
+    })
+}
+
+#[rstest]
+#[tokio::test]
+#[serial_test::serial]
+async fn dispatch_sound_effect_action(#[from(playa_dry_run)] _dry_run: EnvGuard) {
+    // arrange, act, assert
+}
+```
+
+`EnvGuard` restores the previous value on drop, including restoring nested guards in stack order. It provides two API styles:
+
+- **Safe constructors** (`set_safe`, `remove_safe`) acquire an internal mutex during creation and drop. They can be used without `#[serial_test::serial]` in test suites that do not otherwise touch the process environment. Heavy concurrent test suites should still use `#[serial_test::serial]` to avoid lock contention.
+- **Unsafe constructors** (`set`, `remove`) require the caller to ensure serialization. Use these when the test is already annotated with `#[serial_test::serial]` and you want to avoid the internal lock overhead.
+
+`trace_phase!` creates an `INFO` tracing span and returns the wrapped block result. It is intended for observable fixture or integration-test boundaries, not as decoration around every assertion.
+
+#### `trace_phase!` and `init_test_tracing()`
+
+`trace_phase!` emits spans at `INFO` level. The default tracing subscriber is typically `ERROR` level, so spans are invisible unless you initialize a subscriber or raise the env filter.
+
+```rust
+use test_toolkit::{init_test_tracing, trace_phase};
+
+#[test]
+fn example_with_tracing() {
+    init_test_tracing(); // one-time, idempotent
+    trace_phase!("setup", {
+        // fixture setup here
+    });
+    trace_phase!("body", {
+        // test body here
+    });
+}
+```
+
+Alternatively, run tests with `RUST_LOG=info` or `RUST_LOG=test_toolkit=info` instead of calling `init_test_tracing()`.
+
+#### Nextest Configuration and Verification
+
+The workspace `.config/nextest.toml` defines slow-test thresholds:
+
+- **default profile**: Tests slower than `5s` are flagged as slow after 3 periods.
+- **ci profile**: Tests slower than `10s` are flagged as slow after 2 periods, and JUnit XML is written to `test-results.xml`.
+
+Verify the configuration is honored:
+
+```bash
+# Run the verification test
+cargo nextest run --profile default -p test-toolkit --test nextest_config_verification
+
+# Or use the justfile recipe
+just verify-nextest-config
 ```
 
 ### Shared CLI Integration Helpers
@@ -250,7 +328,7 @@ fn panics_on_invalid_index() {
 | proptest | Property-based testing | `proptest = "1"` |
 | mockall | Mock generation | `mockall = "0.13"` |
 | criterion | Benchmarking | `criterion = "0.5"` |
-| rstest | Fixtures and parameterized tests | `rstest = "0.18"` |
+| rstest | Fixtures and parameterized tests | `rstest = "0.25"` |
 | pretty_assertions | Better diff output | `pretty_assertions = "1"` |
 | insta | Snapshot testing | `insta = "1"` |
 | testcontainers | Docker-based integration tests | `testcontainers = "0.15"` |
