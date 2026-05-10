@@ -182,7 +182,7 @@ pub(crate) fn execute_command_detailed(
     // Standard single-command path (no redirections)
     let resolved_path =
         which::which(&directive.executable).map_err(|_| ShellExpansionError::CommandNotFound {
-            ctx: directive.ctx.clone(),
+            ctx: Box::new(directive.ctx.clone()),
             command: directive.executable.clone(),
             origin: directive.origin.clone(),
         })?;
@@ -206,7 +206,7 @@ pub(crate) fn execute_command_detailed(
     let mut child = cmd
         .spawn()
         .map_err(|e| ShellExpansionError::ExecutionFailed {
-            ctx: directive.ctx.clone(),
+            ctx: Box::new(directive.ctx.clone()),
             command: directive.raw_command.clone(),
             code: -1,
             stdout: String::new(),
@@ -276,7 +276,7 @@ pub(crate) fn execute_command_detailed(
                     }
 
                     return Err(ShellExpansionError::ExecutionFailed {
-                        ctx: directive.ctx.clone(),
+                        ctx: Box::new(directive.ctx.clone()),
                         command: directive.raw_command.clone(),
                         code: status.code().unwrap_or(-1),
                         stdout,
@@ -295,7 +295,7 @@ pub(crate) fn execute_command_detailed(
                     match shell_opts.timeout_behavior {
                         ShellTimeoutBehavior::Error => {
                             return Err(ShellExpansionError::Timeout {
-                                ctx: directive.ctx.clone(),
+                                ctx: Box::new(directive.ctx.clone()),
                                 command: directive.raw_command.clone(),
                                 timeout,
                                 origin: directive.origin.clone(),
@@ -310,7 +310,7 @@ pub(crate) fn execute_command_detailed(
             }
             Err(e) => {
                 return Err(ShellExpansionError::ExecutionFailed {
-                    ctx: directive.ctx.clone(),
+                    ctx: Box::new(directive.ctx.clone()),
                     command: directive.raw_command.clone(),
                     code: -1,
                     stdout: String::new(),
@@ -440,7 +440,7 @@ fn execute_pipeline_detailed(
 
                     if !any_or_handler {
                         return Err(ShellExpansionError::ExecutionFailed {
-                            ctx: directive.ctx.clone(),
+                            ctx: Box::new(directive.ctx.clone()),
                             command: directive.raw_command.clone(),
                             code,
                             stdout: combined_stdout,
@@ -452,7 +452,7 @@ fn execute_pipeline_detailed(
             }
             Err(ShellExpansionError::Timeout { .. }) => {
                 return Err(ShellExpansionError::Timeout {
-                    ctx: directive.ctx.clone(),
+                    ctx: Box::new(directive.ctx.clone()),
                     command: directive.raw_command.clone(),
                     timeout,
                     origin: directive.origin.clone(),
@@ -483,7 +483,7 @@ fn execute_single_action(
 ) -> Result<CommandExecution, ShellExpansionError> {
     let resolved_path =
         which::which(&action.executable).map_err(|_| ShellExpansionError::CommandNotFound {
-            ctx: ctx.clone(),
+            ctx: Box::new(ctx.clone()),
             command: action.executable.clone(),
             origin: origin.clone(),
         })?;
@@ -499,7 +499,7 @@ fn execute_single_action(
 
     let capture = configure_streams(&mut cmd, &action.redirection).map_err(|e| {
         ShellExpansionError::ExecutionFailed {
-            ctx: ctx.clone(),
+            ctx: Box::new(ctx.clone()),
             command: raw_command.to_string(),
             code: -1,
             stdout: String::new(),
@@ -511,7 +511,7 @@ fn execute_single_action(
     let mut child = cmd
         .spawn()
         .map_err(|e| ShellExpansionError::ExecutionFailed {
-            ctx: ctx.clone(),
+            ctx: Box::new(ctx.clone()),
             command: raw_command.to_string(),
             code: -1,
             stdout: String::new(),
@@ -604,7 +604,7 @@ fn execute_single_action(
                     return Ok(CommandExecution::from_streams(final_stdout, final_stderr));
                 } else {
                     return Err(ShellExpansionError::ExecutionFailed {
-                        ctx: ctx.clone(),
+                        ctx: Box::new(ctx.clone()),
                         command: raw_command.to_string(),
                         code: status.code().unwrap_or(-1),
                         stdout: final_stdout,
@@ -620,7 +620,7 @@ fn execute_single_action(
                     match shell_opts.timeout_behavior {
                         ShellTimeoutBehavior::Error => {
                             return Err(ShellExpansionError::Timeout {
-                                ctx: ctx.clone(),
+                                ctx: Box::new(ctx.clone()),
                                 command: raw_command.to_string(),
                                 timeout,
                                 origin: origin.clone(),
@@ -635,7 +635,7 @@ fn execute_single_action(
             }
             Err(e) => {
                 return Err(ShellExpansionError::ExecutionFailed {
-                    ctx: ctx.clone(),
+                    ctx: Box::new(ctx.clone()),
                     command: raw_command.to_string(),
                     code: -1,
                     stdout: String::new(),
@@ -738,7 +738,7 @@ fn join_output_thread_raw(
     handle
         .join()
         .map_err(|_| ShellExpansionError::ExecutionFailed {
-            ctx: ctx.clone(),
+            ctx: Box::new(ctx.clone()),
             command: String::new(),
             code: -1,
             stdout: String::new(),

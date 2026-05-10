@@ -481,21 +481,21 @@ use biscuit_terminal::errors::SourceContext;
 pub enum ShellExpansionError {
     #[error("Shell directive parse error at {origin}: {message}")]
     ParseDirective {
-        ctx: SourceContext,
+        ctx: Box<SourceContext>,
         origin: ShellCommandOrigin,
         message: String,
     },
 
     #[error("Command not found: '{command}' at {origin}")]
     CommandNotFound {
-        ctx: SourceContext,
+        ctx: Box<SourceContext>,
         command: String,
         origin: ShellCommandOrigin,
     },
 
     #[error("Blacklisted command '{command}' at {origin}: {reason}")]
     Blacklisted {
-        ctx: SourceContext,
+        ctx: Box<SourceContext>,
         command: String,
         reason: String,
         origin: ShellCommandOrigin,
@@ -503,7 +503,7 @@ pub enum ShellExpansionError {
 
     #[error("Approval required for '{command}' at {origin}")]
     ApprovalRequired {
-        ctx: SourceContext,
+        ctx: Box<SourceContext>,
         command: String,
         whitelist_path: PathBuf,
         blacklist_path: PathBuf,
@@ -512,7 +512,7 @@ pub enum ShellExpansionError {
 
     #[error("Command denied: '{command}' at {origin}")]
     Denied {
-        ctx: SourceContext,
+        ctx: Box<SourceContext>,
         command: String,
         origin: ShellCommandOrigin,
     },
@@ -522,7 +522,7 @@ pub enum ShellExpansionError {
          This is a bug in the pre-flight scanner -- please report it."
     )]
     NotPreApproved {
-        ctx: SourceContext,
+        ctx: Box<SourceContext>,
         command: String,
         origin: ShellCommandOrigin,
         source_desc: String,
@@ -530,7 +530,7 @@ pub enum ShellExpansionError {
 
     #[error("Command timed out after {timeout:?}: '{command}' at {origin}")]
     Timeout {
-        ctx: SourceContext,
+        ctx: Box<SourceContext>,
         command: String,
         timeout: std::time::Duration,
         origin: ShellCommandOrigin,
@@ -538,7 +538,7 @@ pub enum ShellExpansionError {
 
     #[error("Command failed (exit {code}): '{command}' at {origin}")]
     ExecutionFailed {
-        ctx: SourceContext,
+        ctx: Box<SourceContext>,
         command: String,
         code: i32,
         stdout: String,

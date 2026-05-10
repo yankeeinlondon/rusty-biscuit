@@ -971,10 +971,12 @@ impl Markdown {
                 Err(error) => {
                     let is_structural = matches!(
                         error,
-                        MarkdownError::Transclusion(
-                            transclusion::TransclusionError::CycleDetected { .. }
-                                | transclusion::TransclusionError::MaxDepthExceeded { .. }
-                        )
+                        MarkdownError::Transclusion(ref inner)
+                            if matches!(
+                                inner.as_ref(),
+                                transclusion::TransclusionError::CycleDetected { .. }
+                                    | transclusion::TransclusionError::MaxDepthExceeded { .. }
+                            )
                     );
                     if is_structural || options.fail_fast {
                         return Err(error);
@@ -1282,7 +1284,7 @@ impl Markdown {
                         } else {
                             return Err(
                                 transclusion::TransclusionError::InvalidFrontmatterAssignment {
-                                    ctx: self.source_context_for_errors(),
+                                    ctx: Box::new(self.source_context_for_errors()),
                                     line: *line,
                                     raw: raw.clone(),
                                     reason: reason.clone(),
@@ -1308,7 +1310,7 @@ impl Markdown {
                         } else {
                             return Err(
                                 transclusion::TransclusionError::InvalidReassignedFrontmatterProperty {
-                                    ctx: self.source_context_for_errors(),
+                                    ctx: Box::new(self.source_context_for_errors()),
                                     line: directive.line,
                                     name: name.clone(),
                                 }
@@ -2975,7 +2977,8 @@ Rounded: {{ round(pi) }}"#;
 
         assert!(matches!(
             err,
-            MarkdownError::Transclusion(transclusion::TransclusionError::CycleDetected { .. })
+            MarkdownError::Transclusion(ref inner)
+                if matches!(inner.as_ref(), transclusion::TransclusionError::CycleDetected { .. })
         ));
     }
 
@@ -3101,9 +3104,11 @@ Rounded: {{ round(pi) }}"#;
         let err = md.compose().unwrap_err();
         assert!(matches!(
             err,
-            MarkdownError::Transclusion(
-                transclusion::TransclusionError::MissingSourceContext { .. }
-            )
+            MarkdownError::Transclusion(ref inner)
+                if matches!(
+                    inner.as_ref(),
+                    transclusion::TransclusionError::MissingSourceContext { .. }
+                )
         ));
     }
 

@@ -25,7 +25,7 @@ pub enum ConditionError {
     /// Failed to parse a condition expression.
     #[error("Failed to parse condition '{expr}' at line {line}: {message}")]
     Parse {
-        ctx: SourceContext,
+        ctx: Box<SourceContext>,
         expr: String,
         line: usize,
         message: String,
@@ -39,7 +39,7 @@ pub enum ConditionError {
     /// Failed to evaluate a condition expression.
     #[error("Failed to evaluate condition '{expr}' at line {line}: {message}")]
     Eval {
-        ctx: SourceContext,
+        ctx: Box<SourceContext>,
         expr: String,
         line: usize,
         message: String,
@@ -77,6 +77,7 @@ impl biscuit_terminal::errors::BlockError for ConditionError {
                         " ".repeat(span.start),
                         span.start
                     )),
+                    Prose::new(format!("<dim>Message:</dim> {message}")),
                 ];
 
                 StatusBlock::new(StatusState::Error)
@@ -133,7 +134,7 @@ pub fn evaluate_condition(
     trace!(expr = %expr, line, "conditions: evaluating");
 
     let parsed = parse_condition(expr).map_err(|e| ConditionError::Parse {
-        ctx: ctx.clone(),
+        ctx: Box::new(ctx.clone()),
         expr: expr.to_string(),
         line,
         message: e.message.clone(),
@@ -141,7 +142,7 @@ pub fn evaluate_condition(
     })?;
 
     let value = evaluate(&parsed, state).map_err(|message| ConditionError::Eval {
-        ctx,
+        ctx: Box::new(ctx),
         expr: expr.to_string(),
         line,
         message,
@@ -167,6 +168,7 @@ fn parse_error_span(expr: &str, position: usize) -> Range<usize> {
     }
 }
 
+#[allow(dead_code)]
 fn caret_marker(input: &str, byte_offset: usize) -> String {
     let clamped = byte_offset.min(input.len());
     let column = input
@@ -240,7 +242,7 @@ pub fn evaluate_condition_against(
     );
 
     let parsed = parse_condition(expr).map_err(|e| ConditionError::Parse {
-        ctx: ctx.clone(),
+        ctx: Box::new(ctx.clone()),
         expr: expr.to_string(),
         line: 1,
         message: e.message.clone(),
@@ -249,7 +251,7 @@ pub fn evaluate_condition_against(
 
     let lookup = ShortcutLookup::new(data, work_dir);
     let value = evaluate(&parsed, &lookup).map_err(|message| ConditionError::Eval {
-        ctx,
+        ctx: Box::new(ctx),
         expr: expr.to_string(),
         line: 1,
         message,
@@ -1037,7 +1039,7 @@ mod tests {
             use biscuit_terminal::terminal::Terminal;
 
             let err = ConditionError::Parse {
-                ctx: dummy_ctx(),
+                ctx: Box::new(dummy_ctx()),
                 expr: "&& invalid".to_string(),
                 line: 1,
                 message: "Unexpected token".to_string(),

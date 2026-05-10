@@ -62,7 +62,7 @@ pub enum MarkdownError {
 
     /// Transclusion pipeline error.
     #[error("Transclusion error: {0}")]
-    Transclusion(#[from] crate::markdown::compose::TransclusionError),
+    Transclusion(#[from] Box<crate::markdown::compose::TransclusionError>),
 
     /// TOC linking pipeline error.
     #[error("TOC linking error: {0}")]
@@ -70,11 +70,11 @@ pub enum MarkdownError {
 
     /// Shell expansion pipeline error.
     #[error("Shell expansion failed: {0}")]
-    ShellExpansion(#[from] crate::markdown::compose::ShellExpansionError),
+    ShellExpansion(#[from] Box<crate::markdown::compose::ShellExpansionError>),
 
     /// Page block pipeline error.
     #[error("Page block error: {0}")]
-    PageBlock(#[from] crate::markdown::compose::page_blocks::PageBlockError),
+    PageBlock(#[from] Box<crate::markdown::compose::page_blocks::PageBlockError>),
 
     /// Shell block pipeline error.
     #[error("Shell block error: {0}")]
@@ -82,16 +82,40 @@ pub enum MarkdownError {
 
     /// Reference analysis error.
     #[error("Reference error: {0}")]
-    Reference(#[from] crate::markdown::reference::ReferenceError),
+    Reference(#[from] Box<crate::markdown::reference::ReferenceError>),
 
     /// Context merge error (invalid user ctx).
     #[error("Context error: {0}")]
     CtxMerge(#[from] crate::markdown::compose::context::merge::CtxMergeError),
 }
 
+impl From<crate::markdown::compose::TransclusionError> for MarkdownError {
+    fn from(err: crate::markdown::compose::TransclusionError) -> Self {
+        MarkdownError::Transclusion(Box::new(err))
+    }
+}
+
+impl From<crate::markdown::compose::ShellExpansionError> for MarkdownError {
+    fn from(err: crate::markdown::compose::ShellExpansionError) -> Self {
+        MarkdownError::ShellExpansion(Box::new(err))
+    }
+}
+
+impl From<crate::markdown::compose::page_blocks::PageBlockError> for MarkdownError {
+    fn from(err: crate::markdown::compose::page_blocks::PageBlockError) -> Self {
+        MarkdownError::PageBlock(Box::new(err))
+    }
+}
+
 impl From<crate::markdown::compose::ShellBlockError> for MarkdownError {
     fn from(err: crate::markdown::compose::ShellBlockError) -> Self {
         MarkdownError::ShellBlock(Box::new(err))
+    }
+}
+
+impl From<crate::markdown::reference::ReferenceError> for MarkdownError {
+    fn from(err: crate::markdown::reference::ReferenceError) -> Self {
+        MarkdownError::Reference(Box::new(err))
     }
 }
 

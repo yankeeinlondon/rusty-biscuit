@@ -8,7 +8,7 @@ pub enum PageBlockError {
     /// Failed to parse a page block directive.
     #[error("Failed to parse page block at line {line}: {message}")]
     ParseDirective {
-        ctx: biscuit_terminal::errors::SourceContext,
+        ctx: Box<biscuit_terminal::errors::SourceContext>,
         line: usize,
         message: String,
     },
@@ -16,21 +16,27 @@ pub enum PageBlockError {
     /// Encountered `::end-block` without a matching `::block`.
     #[error("Unmatched ::end-block at line {line}")]
     UnmatchedEnd {
-        ctx: biscuit_terminal::errors::SourceContext,
+        ctx: Box<biscuit_terminal::errors::SourceContext>,
         line: usize,
     },
 
     /// Reached end of file with an unclosed `::block`.
     #[error("Unterminated ::block starting at line {opening_line}")]
     UnterminatedBlock {
-        ctx: biscuit_terminal::errors::SourceContext,
+        ctx: Box<biscuit_terminal::errors::SourceContext>,
         opening_line: usize,
         opening_text: String,
     },
 
     /// Condition parsing or evaluation failed.
     #[error("{0}")]
-    Condition(#[from] super::super::conditions::ConditionError),
+    Condition(#[from] Box<super::super::conditions::ConditionError>),
+}
+
+impl From<super::super::conditions::ConditionError> for PageBlockError {
+    fn from(err: super::super::conditions::ConditionError) -> Self {
+        PageBlockError::Condition(Box::new(err))
+    }
 }
 
 impl biscuit_terminal::errors::BlockError for PageBlockError {
@@ -84,7 +90,7 @@ impl biscuit_terminal::errors::BlockError for PageBlockError {
             }
 
             PageBlockError::Condition(inner) => {
-                biscuit_terminal::errors::BlockError::status_block(inner, term)
+                inner.status_block(term)
             }
         }
     }

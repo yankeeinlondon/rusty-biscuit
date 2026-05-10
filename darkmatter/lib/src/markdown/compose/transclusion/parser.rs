@@ -6,7 +6,7 @@ use super::types::{
 };
 use crate::markdown::FrontmatterMap;
 use crate::markdown::compose::parse_utils::{
-    Cursor, CursorError, find_code_regions, is_in_code_region,
+    Cursor, find_code_regions, is_in_code_region,
 };
 use biscuit_terminal::errors::SourceContext;
 use serde_json::Value;
@@ -85,7 +85,7 @@ fn parse_reference_field(
             for item in items {
                 let Some(s) = item.as_str() else {
                     return Err(TransclusionError::ParseDirective {
-                        ctx: ctx.clone(),
+                        ctx: Box::new(ctx.clone()),
                         line: 0,
                         message: format!(
                             "Frontmatter '{}' must be a string or array of strings",
@@ -99,7 +99,7 @@ fn parse_reference_field(
             Ok(refs)
         }
         _ => Err(TransclusionError::ParseDirective {
-            ctx: ctx.clone(),
+            ctx: Box::new(ctx.clone()),
             line: 0,
             message: format!(
                 "Frontmatter '{}' must be a string or array of strings",
@@ -129,7 +129,7 @@ fn parse_directive_line(
         "url" => DirectiveKind::Url,
         _ => {
             return Err(TransclusionError::ParseDirective {
-                ctx: ctx.clone(),
+                ctx: Box::new(ctx.clone()),
                 line,
                 message: format!(
                     "Unknown directive kind '{}': expected file/code/url",
@@ -146,7 +146,7 @@ fn parse_directive_line(
         .map_err(|e| e.into_transclusion_error(ctx.clone()))?;
     if raw_target.is_empty() {
         return Err(TransclusionError::ParseDirective {
-            ctx: ctx.clone(),
+            ctx: Box::new(ctx.clone()),
             line,
             message: "Directive target cannot be empty".to_string(),
             caret_col: None,
@@ -212,7 +212,7 @@ fn parse_set_option(
 
     if raw.is_empty() && !was_quoted {
         return Err(TransclusionError::ParseDirective {
-            ctx: ctx.clone(),
+            ctx: Box::new(ctx.clone()),
             line,
             message: match &dotted {
                 Some(name) => format!("'set.{}=' requires a JSON5 value", name),
@@ -245,7 +245,7 @@ fn apply_set_property(
         parse_json5_value(raw).unwrap_or_else(|_| Value::String(raw.to_string()))
     } else {
         parse_json5_value(raw).map_err(|e| TransclusionError::ParseDirective {
-            ctx: ctx.clone(),
+            ctx: Box::new(ctx.clone()),
             line,
             message: format!("'set.{}=' requires a JSON5 value: {}", name, e),
             caret_col: None,
@@ -342,7 +342,7 @@ fn apply_option(
             } else {
                 let parsed: Value = serde_json::from_str(value).map_err(|_| {
                     TransclusionError::ParseDirective {
-                        ctx: ctx.clone(),
+                        ctx: Box::new(ctx.clone()),
                         line,
                         message: "replace option must be true/false or a JSON object".to_string(),
                         caret_col: None,
@@ -350,7 +350,7 @@ fn apply_option(
                 })?;
                 let Some(obj) = parsed.as_object() else {
                     return Err(TransclusionError::ParseDirective {
-                        ctx: ctx.clone(),
+                        ctx: Box::new(ctx.clone()),
                         line,
                         message: "replace option must be true/false or a JSON object".to_string(),
                         caret_col: None,

@@ -165,7 +165,7 @@ pub(crate) fn prepare_directive(
         for normalized in &normalized_commands {
             if !approved.contains(normalized) {
                 return Err(ShellExpansionError::NotPreApproved {
-                    ctx: directive.ctx.clone(),
+                    ctx: Box::new(directive.ctx.clone()),
                     command: display_command.clone(),
                     origin: directive.origin.clone(),
                     source_desc: match &options.source {
@@ -189,7 +189,7 @@ pub(crate) fn prepare_directive(
     for (exe, args) in executables_with_args(&effective) {
         if let Some(reason) = check_builtin_blacklist(&exe, &args) {
             return Err(ShellExpansionError::Blacklisted {
-                ctx: directive.ctx.clone(),
+                ctx: Box::new(directive.ctx.clone()),
                 command: display_command.clone(),
                 reason,
                 origin: directive.origin.clone(),
@@ -202,7 +202,7 @@ pub(crate) fn prepare_directive(
         let (exe, args) = executable_and_args_at(&effective, i);
         if check_user_blacklist(&runtime_snapshot.user_blacklist, &exe, &args, normalized) {
             return Err(ShellExpansionError::Blacklisted {
-                ctx: directive.ctx.clone(),
+                ctx: Box::new(directive.ctx.clone()),
                 command: display_command.clone(),
                 reason: "user blacklist".to_string(),
                 origin: directive.origin.clone(),
@@ -260,7 +260,7 @@ pub(crate) fn prepare_directive(
                 shell_runtime.complete_allow_once(normalized, false);
             }
             return Err(ShellExpansionError::ApprovalRequired {
-                ctx: directive.ctx.clone(),
+                ctx: Box::new(directive.ctx.clone()),
                 command: display_command,
                 whitelist_path: policy_paths.whitelist.clone(),
                 blacklist_path: policy_paths.blacklist.clone(),
@@ -348,7 +348,7 @@ pub(crate) fn prepare_directive(
                     shell_runtime.complete_allow_once(normalized, false);
                 }
                 Err(ShellExpansionError::Denied {
-                    ctx: directive.ctx.clone(),
+                    ctx: Box::new(directive.ctx.clone()),
                     command: display_command,
                     origin: directive.origin.clone(),
                 })
@@ -360,7 +360,7 @@ pub(crate) fn prepare_directive(
                     shell_runtime.persist_blacklist_exact(normalized.clone());
                 }
                 Err(ShellExpansionError::Blacklisted {
-                    ctx: directive.ctx.clone(),
+                    ctx: Box::new(directive.ctx.clone()),
                     command: display_command,
                     reason: "user blacklisted".to_string(),
                     origin: directive.origin.clone(),
@@ -369,7 +369,7 @@ pub(crate) fn prepare_directive(
         }
     } else {
         Err(ShellExpansionError::ApprovalRequired {
-            ctx: directive.ctx.clone(),
+            ctx: Box::new(directive.ctx.clone()),
             command: display_command,
             whitelist_path: policy_paths.whitelist.clone(),
             blacklist_path: policy_paths.blacklist.clone(),

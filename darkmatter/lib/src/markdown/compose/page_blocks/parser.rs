@@ -1,7 +1,7 @@
 //! Parser for `::block` / `::end-block` paired directives.
 
 use super::types::{PageBlockError, PageBlockOptions, PageBlockRegion};
-use crate::markdown::compose::parse_utils::{Cursor, CursorError};
+use crate::markdown::compose::parse_utils::Cursor;
 
 /// Internal helper for building the region tree.
 struct UnfinishedRegion {
@@ -28,7 +28,7 @@ pub fn parse_page_blocks(
     let pairs = super::super::block_pairs::scan_block_pairs(content).map_err(|e| match e {
         super::super::block_pairs::BlockPairError::UnmatchedEnd { line } => {
             PageBlockError::UnmatchedEnd {
-                ctx: ctx.clone(),
+                ctx: Box::new(ctx.clone()),
                 line,
             }
         }
@@ -37,13 +37,13 @@ pub fn parse_page_blocks(
             opening_text,
             file_ends_at_line: _,
         } => PageBlockError::UnterminatedBlock {
-            ctx: ctx.clone(),
+            ctx: Box::new(ctx.clone()),
             opening_line: line,
             opening_text,
         },
         super::super::block_pairs::BlockPairError::TrailingContent { line, content } => {
             PageBlockError::ParseDirective {
-                ctx: ctx.clone(),
+                ctx: Box::new(ctx.clone()),
                 line,
                 message: format!("Unexpected content after ::end-block: '{content}'"),
             }
@@ -164,7 +164,7 @@ fn parse_block_options(
 
         let key = cursor.read_identifier(line).map_err(|e| {
             PageBlockError::ParseDirective {
-                ctx: ctx.clone(),
+                ctx: Box::new(ctx.clone()),
                 line: e.line,
                 message: e.message,
             }
@@ -172,7 +172,7 @@ fn parse_block_options(
         cursor.skip_ws();
         cursor.expect_char('=', line).map_err(|e| {
             PageBlockError::ParseDirective {
-                ctx: ctx.clone(),
+                ctx: Box::new(ctx.clone()),
                 line: e.line,
                 message: e.message,
             }
@@ -180,7 +180,7 @@ fn parse_block_options(
         cursor.skip_ws();
         let value = cursor.read_value(line).map_err(|e| {
             PageBlockError::ParseDirective {
-                ctx: ctx.clone(),
+                ctx: Box::new(ctx.clone()),
                 line: e.line,
                 message: e.message,
             }

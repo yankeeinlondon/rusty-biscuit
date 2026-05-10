@@ -319,7 +319,7 @@ pub struct FrontmatterRefs {
 pub enum TransclusionError {
     #[error("Failed to parse directive at line {line}: {message}")]
     ParseDirective {
-        ctx: SourceContext,
+        ctx: Box<SourceContext>,
         line: usize,
         message: String,
         caret_col: Option<usize>,
@@ -331,7 +331,7 @@ pub enum TransclusionError {
         .ctx.display.display()
     )]
     InvalidReference {
-        ctx: SourceContext,
+        ctx: Box<SourceContext>,
         reference: String,
         line: usize,
         directive_kind: DirectiveKind,
@@ -357,7 +357,7 @@ pub enum TransclusionError {
 
     #[error("Failed to evaluate condition '{expr}' at line {line}: {message}")]
     ConditionEval {
-        ctx: SourceContext,
+        ctx: Box<SourceContext>,
         expr: String,
         line: usize,
         message: String,
@@ -365,7 +365,7 @@ pub enum TransclusionError {
 
     #[error("Failed to parse condition '{expr}' at line {line}: {message}")]
     ConditionParse {
-        ctx: SourceContext,
+        ctx: Box<SourceContext>,
         expr: String,
         line: usize,
         message: String,
@@ -381,7 +381,7 @@ pub enum TransclusionError {
         "Invalid frontmatter assignment on '::file' directive at line {line}: {reason} (value: {raw})"
     )]
     InvalidFrontmatterAssignment {
-        ctx: SourceContext,
+        ctx: Box<SourceContext>,
         line: usize,
         raw: String,
         reason: String,
@@ -391,7 +391,7 @@ pub enum TransclusionError {
         "Invalid reassigned frontmatter property '{name}' on '::file' directive at line {line}"
     )]
     InvalidReassignedFrontmatterProperty {
-        ctx: SourceContext,
+        ctx: Box<SourceContext>,
         line: usize,
         name: String,
     },

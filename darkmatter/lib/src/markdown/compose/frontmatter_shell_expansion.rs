@@ -335,7 +335,7 @@ fn frontmatter_parse_error(
     message: impl Into<String>,
 ) -> ShellExpansionError {
     ShellExpansionError::ParseDirective {
-        ctx: ctx.clone(),
+        ctx: Box::new(ctx.clone()),
         origin: ShellCommandOrigin::Frontmatter {
             key: key.to_string(),
         },

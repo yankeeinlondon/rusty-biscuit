@@ -98,7 +98,7 @@ pub(crate) fn resolve_path(
     if is_file_reference_target(raw_target) {
         if raw_target.starts_with('@') && !options.resolve_repo_root {
             return Err(TransclusionError::InvalidReference {
-                ctx,
+                ctx: Box::new(ctx),
                 reference: raw_target.to_string(),
                 line,
                 directive_kind: kind,

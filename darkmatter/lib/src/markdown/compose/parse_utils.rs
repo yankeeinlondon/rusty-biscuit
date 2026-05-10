@@ -26,7 +26,7 @@ impl CursorError {
         ctx: biscuit_terminal::errors::SourceContext,
     ) -> crate::markdown::compose::transclusion::TransclusionError {
         crate::markdown::compose::transclusion::TransclusionError::ParseDirective {
-            ctx,
+            ctx: Box::new(ctx),
             line: self.line,
             message: self.message,
             caret_col: Some(self.column),

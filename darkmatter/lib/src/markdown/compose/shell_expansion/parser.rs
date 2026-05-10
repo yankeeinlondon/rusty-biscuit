@@ -52,7 +52,7 @@ pub fn parse_directives(
                 // Parse the command
                 let tokens = tokenize(command_text, &ctx).map_err(|e| {
                     ShellExpansionError::ParseDirective {
-                        ctx: ctx.clone(),
+                        ctx: Box::new(ctx.clone()),
                         origin: ShellCommandOrigin::Body { line: line_num },
                         message: match e {
                             ShellExpansionError::ParseDirective { message, .. } => message,
@@ -63,7 +63,7 @@ pub fn parse_directives(
 
                 if tokens.is_empty() {
                     return Err(ShellExpansionError::ParseDirective {
-                        ctx: ctx.clone(),
+                        ctx: Box::new(ctx.clone()),
                         origin: ShellCommandOrigin::Body { line: line_num },
                         message: "Empty command".to_string(),
                     });
@@ -75,7 +75,7 @@ pub fn parse_directives(
 
                 if shell_tokens.is_empty() {
                     return Err(ShellExpansionError::ParseDirective {
-                        ctx: ctx.clone(),
+                        ctx: Box::new(ctx.clone()),
                         origin: ShellCommandOrigin::Body { line: line_num },
                         message: "No command after error handling options".to_string(),
                     });
@@ -84,7 +84,7 @@ pub fn parse_directives(
                 // Parse the pipeline from the shell tokens
                 let pipeline = parse_pipeline(&shell_tokens, &ctx).map_err(|e| {
                     ShellExpansionError::ParseDirective {
-                        ctx: ctx.clone(),
+                        ctx: Box::new(ctx.clone()),
                         origin: ShellCommandOrigin::Body { line: line_num },
                         message: match e {
                             ShellExpansionError::ParseDirective { message, .. } => message,
@@ -172,7 +172,7 @@ fn extract_options_from_tokens(
 
                     if opt_args.len() < argc {
                         return Err(ShellExpansionError::ParseDirective {
-                            ctx: ctx.clone(),
+                            ctx: Box::new(ctx.clone()),
                             origin: ShellCommandOrigin::Body { line },
                             message: format!("{option} requires {argc} argument(s)"),
                         });
@@ -214,7 +214,7 @@ fn extract_options_from_tokens(
                 } else if let Some(value_str) = w.strip_prefix("::timeout:") {
                     let seconds: u64 = value_str.parse().map_err(|_| {
                         ShellExpansionError::ParseDirective {
-                            ctx: ctx.clone(),
+                            ctx: Box::new(ctx.clone()),
                             origin: ShellCommandOrigin::Body { line },
                             message: format!(
                                 "::timeout requires a positive integer of seconds, got '{value_str}'"
@@ -223,7 +223,7 @@ fn extract_options_from_tokens(
                     })?;
                     if seconds == 0 {
                         return Err(ShellExpansionError::ParseDirective {
-                            ctx: ctx.clone(),
+                            ctx: Box::new(ctx.clone()),
                             origin: ShellCommandOrigin::Body { line },
                             message: "::timeout value must be greater than zero".to_string(),
                         });
@@ -231,7 +231,7 @@ fn extract_options_from_tokens(
                     // ::timeout must be the last token
                     if i != tokens.len() - 1 {
                         return Err(ShellExpansionError::ParseDirective {
-                            ctx: ctx.clone(),
+                            ctx: Box::new(ctx.clone()),
                             origin: ShellCommandOrigin::Body { line },
                             message: "::timeout:<N> must be the last token on the ::shell line"
                                 .to_string(),
@@ -264,7 +264,7 @@ fn parse_exit_code(
 ) -> Result<i32, ShellExpansionError> {
     raw.parse::<i32>()
         .map_err(|_| ShellExpansionError::ParseDirective {
-            ctx: ctx.clone(),
+            ctx: Box::new(ctx.clone()),
             origin: ShellCommandOrigin::Body { line },
             message: format!("{option_name} requires an integer exit code, got '{raw}'"),
         })
