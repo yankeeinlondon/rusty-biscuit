@@ -478,10 +478,14 @@ impl biscuit_terminal::errors::BlockError for TransclusionError {
                         "TransclusionError",
                         "missing source context",
                     ))
-                    .body(format!(
-                        "Could not resolve <cyan>{reference}</cyan> at line {line}.\n\
-                         <dim>Note:</dim> Relative transclusions require a file-backed source."
-                    ))
+                    .body(vec![
+                        Prose::new(format!(
+                            "Could not resolve <cyan>{reference}</cyan> at line {line}."
+                        )),
+                        Prose::new(
+                            "<dim>Note:</dim> Relative transclusions require a file-backed source.",
+                        ),
+                    ])
                     .hint("Try using an absolute path or `@/` repo-root reference.")
             }
 

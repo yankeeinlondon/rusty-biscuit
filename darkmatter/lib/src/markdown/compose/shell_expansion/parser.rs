@@ -3,6 +3,7 @@
 use super::tokenize::{ShellToken, parse_pipeline, tokenize};
 use super::types::{ErrorHandling, ShellCommandOrigin, ShellDirective, ShellExpansionError};
 use crate::markdown::compose::parse_utils::{find_code_regions, is_in_code_region};
+use biscuit_terminal::errors::SourceContext;
 
 /// Parses all `::shell` directives from markdown content.
 ///
@@ -17,10 +18,13 @@ use crate::markdown::compose::parse_utils::{find_code_regions, is_in_code_region
 /// ## Examples
 ///
 /// ```
+/// use biscuit_terminal::errors::SourceContext;
 /// use darkmatter::markdown::compose::shell_expansion::parser::parse_directives;
+/// use std::path::PathBuf;
 ///
 /// let content = "# Test\n::shell echo hello\nSome text\n";
-/// let directives = parse_directives(content).unwrap();
+/// let ctx = SourceContext::new(PathBuf::from("/t"), PathBuf::from("t"), content);
+/// let directives = parse_directives(content, ctx).unwrap();
 /// assert_eq!(directives.len(), 1);
 /// assert_eq!(directives[0].executable, "echo");
 /// ```
@@ -46,15 +50,16 @@ pub fn parse_directives(
             let trimmed = line.trim();
             if let Some(command_text) = trimmed.strip_prefix("::shell ") {
                 // Parse the command
-                let tokens =
-                    tokenize(command_text).map_err(|e| ShellExpansionError::ParseDirective {
+                let tokens = tokenize(command_text, &ctx).map_err(|e| {
+                    ShellExpansionError::ParseDirective {
                         ctx: ctx.clone(),
                         origin: ShellCommandOrigin::Body { line: line_num },
                         message: match e {
                             ShellExpansionError::ParseDirective { message, .. } => message,
                             _ => e.to_string(),
                         },
-                    })?;
+                    }
+                })?;
 
                 if tokens.is_empty() {
                     return Err(ShellExpansionError::ParseDirective {
@@ -77,7 +82,7 @@ pub fn parse_directives(
                 }
 
                 // Parse the pipeline from the shell tokens
-                let pipeline = parse_pipeline(&shell_tokens).map_err(|e| {
+                let pipeline = parse_pipeline(&shell_tokens, &ctx).map_err(|e| {
                     ShellExpansionError::ParseDirective {
                         ctx: ctx.clone(),
                         origin: ShellCommandOrigin::Body { line: line_num },
@@ -101,6 +106,7 @@ pub fn parse_directives(
                     error_handling,
                     timeout_override,
                     pipeline: Some(pipeline),
+                    ctx: ctx.clone(),
                 });
             }
         }
@@ -267,6 +273,7 @@ fn parse_exit_code(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::PathBuf;
     use std::sync::Arc;
 
     fn dummy_ctx(content: &str) -> SourceContext {

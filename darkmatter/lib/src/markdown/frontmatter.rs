@@ -1,6 +1,7 @@
 //! Frontmatter parsing and manipulation utilities.
 
 use biscuit_file::YamlParseError;
+use biscuit_terminal::errors::SourceContext;
 
 use super::types::{FrontmatterMap, MarkdownError, MarkdownResult};
 use biscuit_file::serde_yaml_ng;
@@ -173,23 +174,6 @@ impl Default for Frontmatter {
     }
 }
 
-use biscuit_terminal::errors::SourceContext;
-
-/// Strategy for merging frontmatter fields.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum MergeStrategy {
-    /// Overwrite existing keys with incoming values (default).
-    Overwrite,
-    /// Keep existing keys; incoming values are ignored for duplicates.
-    KeepExisting,
-    /// Fail if any incoming key already exists.
-    ErrorOnConflict,
-    /// For incoming keys that already exist, keep the original but insert
-    /// the new value into an array (not implemented).
-    Append,
-    /// Prefer external overrides (used by transclusion `set=`).
-    PreferExternal,
-}
 /// Parses frontmatter from markdown content.
 ///
 /// Frontmatter must be at the start of the document between `---` delimiters.
@@ -505,6 +489,18 @@ fn normalize_frontmatter_indentation(yaml: &str) -> String {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    fn test_ctx() -> SourceContext {
+        SourceContext::new(
+            std::path::PathBuf::from("/test"),
+            std::path::PathBuf::from("test"),
+            String::new(),
+        )
+    }
+
+    fn parse_frontmatter(content: &str) -> MarkdownResult<(Frontmatter, String)> {
+        super::parse_frontmatter(content, test_ctx())
+    }
 
     #[test]
     fn test_frontmatter_get() {

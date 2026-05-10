@@ -116,8 +116,10 @@ impl Markdown {
         }
 
         // Check frontmatter prologue/epilogue
-        if let Ok(refs) = parse_frontmatter_refs(self.frontmatter().as_map())
-            && (!refs.prologue.is_empty() || !refs.epilogue.is_empty())
+        if let Ok(refs) = parse_frontmatter_refs(
+            self.frontmatter().as_map(),
+            self.source_context_for_errors(),
+        ) && (!refs.prologue.is_empty() || !refs.epilogue.is_empty())
         {
             return true;
         }

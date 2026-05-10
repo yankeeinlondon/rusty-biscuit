@@ -70,6 +70,8 @@ pub struct ShellDirective {
     pub timeout_override: Option<std::time::Duration>,
     /// Parsed pipeline (supports chaining with && and ||).
     pub pipeline: Option<ShellPipeline>,
+    /// Source context used for diagnostic rendering when execution fails.
+    pub ctx: SourceContext,
 }
 
 impl ShellDirective {
@@ -556,6 +558,7 @@ impl biscuit_terminal::errors::BlockError for ShellExpansionError {
         &self,
         _term: &biscuit_terminal::terminal::Terminal,
     ) -> biscuit_terminal::components::status_block::StatusBlock {
+        use biscuit_terminal::components::prose::Prose;
         use biscuit_terminal::components::status::StatusState;
         use biscuit_terminal::components::status_block::StatusBlock;
         use biscuit_terminal::errors::{ErrorHeader, StatusBlockExt};

@@ -16,7 +16,7 @@ use super::expression::{CtxLookup, EvaluationLookup, evaluate, is_truthy, parse_
 use biscuit_terminal::errors::SourceContext;
 use serde_json::Value;
 use std::ops::Range;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use tracing::{debug, trace};
 
 /// Errors from condition parsing or evaluation.
@@ -352,6 +352,11 @@ mod tests {
             PathBuf::from("test.md"),
             "",
         )
+    }
+
+    /// Test shim that supplies a dummy `SourceContext` so call sites stay terse.
+    fn eval_cond(expr: &str, state: &EffectiveState, line: usize) -> Result<bool, ConditionError> {
+        super::evaluate_condition(expr, state, line, dummy_ctx())
     }
 
     #[test]
@@ -892,33 +897,33 @@ mod tests {
         #[test]
         fn less_than_or_equal_in_when_clause() {
             let state = test_state(json!({ "count": 3 }));
-            assert!(evaluate_condition("count <= 5", &state, 1).unwrap());
-            assert!(evaluate_condition("count <= 3", &state, 1).unwrap());
-            assert!(!evaluate_condition("count <= 2", &state, 1).unwrap());
+            assert!(eval_cond("count <= 5", &state, 1).unwrap());
+            assert!(eval_cond("count <= 3", &state, 1).unwrap());
+            assert!(!eval_cond("count <= 2", &state, 1).unwrap());
         }
 
         #[test]
         fn arithmetic_in_when_clause() {
             let state = test_state(json!({ "count": 10 }));
-            assert!(evaluate_condition("count + 5 == 15", &state, 1).unwrap());
-            assert!(evaluate_condition("count - 5 == 5", &state, 1).unwrap());
-            assert!(evaluate_condition("count * 2 > 15", &state, 1).unwrap());
-            assert!(evaluate_condition("count % 3 == 1", &state, 1).unwrap());
+            assert!(eval_cond("count + 5 == 15", &state, 1).unwrap());
+            assert!(eval_cond("count - 5 == 5", &state, 1).unwrap());
+            assert!(eval_cond("count * 2 > 15", &state, 1).unwrap());
+            assert!(eval_cond("count % 3 == 1", &state, 1).unwrap());
         }
 
         #[test]
         fn bracket_index_in_when_clause() {
             let state = test_state(json!({ "items": ["a", "b", "c"] }));
-            assert!(evaluate_condition("items[0] == 'a'", &state, 1).unwrap());
-            assert!(evaluate_condition("items[-1] == 'c'", &state, 1).unwrap());
+            assert!(eval_cond("items[0] == 'a'", &state, 1).unwrap());
+            assert!(eval_cond("items[-1] == 'c'", &state, 1).unwrap());
             // Out-of-range -> null -> string compare against literal is false
-            assert!(!evaluate_condition("items[99] == 'a'", &state, 1).unwrap());
+            assert!(!eval_cond("items[99] == 'a'", &state, 1).unwrap());
         }
 
         #[test]
         fn bracket_object_key_in_when_clause() {
             let state = test_state(json!({ "config": { "theme": "dark" } }));
-            assert!(evaluate_condition(r#"config["theme"] == 'dark'"#, &state, 1).unwrap());
+            assert!(eval_cond(r#"config["theme"] == 'dark'"#, &state, 1).unwrap());
         }
 
         #[test]
@@ -926,42 +931,42 @@ mod tests {
             let state = test_state(json!({
                 "tags": ["one", "two"], "title": "doc", "missing_field": null
             }));
-            assert!(evaluate_condition("IsArray(tags)", &state, 1).unwrap());
-            assert!(evaluate_condition("IsString(title)", &state, 1).unwrap());
-            assert!(evaluate_condition("IsNull(missing_field)", &state, 1).unwrap());
-            assert!(evaluate_condition("IsEmpty(missing)", &state, 1).unwrap());
-            assert!(!evaluate_condition("IsEmpty(tags)", &state, 1).unwrap());
+            assert!(eval_cond("IsArray(tags)", &state, 1).unwrap());
+            assert!(eval_cond("IsString(title)", &state, 1).unwrap());
+            assert!(eval_cond("IsNull(missing_field)", &state, 1).unwrap());
+            assert!(eval_cond("IsEmpty(missing)", &state, 1).unwrap());
+            assert!(!eval_cond("IsEmpty(tags)", &state, 1).unwrap());
         }
 
         #[test]
         fn math_helpers_in_when_clause() {
             let state = test_state(json!({ "a": 7, "b": 3 }));
-            assert!(evaluate_condition("min(a, b) == 3", &state, 1).unwrap());
-            assert!(evaluate_condition("max(a, b) == 7", &state, 1).unwrap());
-            assert!(evaluate_condition("abs(-4) == 4", &state, 1).unwrap());
+            assert!(eval_cond("min(a, b) == 3", &state, 1).unwrap());
+            assert!(eval_cond("max(a, b) == 7", &state, 1).unwrap());
+            assert!(eval_cond("abs(-4) == 4", &state, 1).unwrap());
         }
 
         #[test]
         fn collection_helpers_in_when_clause() {
             let state = test_state(json!({ "items": [10, 20, 30] }));
-            assert!(evaluate_condition("first(items) == 10", &state, 1).unwrap());
-            assert!(evaluate_condition("last(items) == 30", &state, 1).unwrap());
+            assert!(eval_cond("first(items) == 10", &state, 1).unwrap());
+            assert!(eval_cond("last(items) == 30", &state, 1).unwrap());
         }
 
         #[test]
         fn string_predicates_in_when_clause() {
             let state = test_state(json!({ "title": "Hello World" }));
-            assert!(evaluate_condition(r#"StartsWith(title, "Hello")"#, &state, 1).unwrap());
-            assert!(evaluate_condition(r#"EndsWith(title, "World")"#, &state, 1).unwrap());
-            assert!(!evaluate_condition(r#"StartsWith(title, "world")"#, &state, 1).unwrap());
+            assert!(eval_cond(r#"StartsWith(title, "Hello")"#, &state, 1).unwrap());
+            assert!(eval_cond(r#"EndsWith(title, "World")"#, &state, 1).unwrap());
+            assert!(!eval_cond(r#"StartsWith(title, "world")"#, &state, 1).unwrap());
         }
 
         #[test]
         fn string_mutations_in_when_clause() {
             let state = test_state(json!({ "title": "Hello World" }));
-            assert!(evaluate_condition("Lower(title) == 'hello world'", &state, 1).unwrap());
-            assert!(evaluate_condition("KebabCase(title) == 'hello-world'", &state, 1).unwrap());
-            assert!(evaluate_condition("Upper(title) == 'HELLO WORLD'", &state, 1).unwrap());
+            assert!(eval_cond("Lower(title) == 'hello world'", &state, 1).unwrap());
+            assert!(eval_cond("KebabCase(title) == 'hello-world'", &state, 1).unwrap());
+            assert!(eval_cond("Upper(title) == 'HELLO WORLD'", &state, 1).unwrap());
         }
 
         #[test]
@@ -971,10 +976,10 @@ mod tests {
                 "bad_date": "06-15-2024",
                 "dt": "2024-06-15T12:30:00Z"
             }));
-            assert!(evaluate_condition("IsDate(good_date)", &state, 1).unwrap());
-            assert!(!evaluate_condition("IsDate(bad_date)", &state, 1).unwrap());
-            assert!(evaluate_condition("IsDateTime(dt)", &state, 1).unwrap());
-            assert!(!evaluate_condition("IsDate(missing)", &state, 1).unwrap());
+            assert!(eval_cond("IsDate(good_date)", &state, 1).unwrap());
+            assert!(!eval_cond("IsDate(bad_date)", &state, 1).unwrap());
+            assert!(eval_cond("IsDateTime(dt)", &state, 1).unwrap());
+            assert!(!eval_cond("IsDate(missing)", &state, 1).unwrap());
         }
 
         #[test]
@@ -1032,6 +1037,7 @@ mod tests {
             use biscuit_terminal::terminal::Terminal;
 
             let err = ConditionError::Parse {
+                ctx: dummy_ctx(),
                 expr: "&& invalid".to_string(),
                 line: 1,
                 message: "Unexpected token".to_string(),

@@ -651,7 +651,7 @@ pub fn run_compose(
                     )
                 }
             }
-            ShellExpansion(ShellExpansionError::CommandNotFound { command, origin }) => {
+            ShellExpansion(ShellExpansionError::CommandNotFound { command, origin, .. }) => {
                 eyre!(
                     "Command not found: '{command}' ({origin})\n\
                      Ensure '{command}' is installed and available on your PATH."
@@ -661,6 +661,7 @@ pub fn run_compose(
                 command,
                 timeout,
                 origin,
+                ..
             }) => {
                 eyre!("Shell command timed out after {timeout:?} at {origin}: '{command}'")
             }
@@ -668,10 +669,11 @@ pub fn run_compose(
                 command,
                 reason,
                 origin,
+                ..
             }) => {
                 eyre!("Blocked command at {origin}: '{command}'\nReason: {reason}")
             }
-            ShellExpansion(ShellExpansionError::Denied { command, origin }) => {
+            ShellExpansion(ShellExpansionError::Denied { command, origin, .. }) => {
                 eyre!("Command denied at {origin}: '{command}'")
             }
             ShellExpansion(ShellExpansionError::ApprovalRequired {

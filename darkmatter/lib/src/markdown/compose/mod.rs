@@ -513,11 +513,13 @@ impl Markdown {
             // visible to all later stages.
             if options.is_enabled(ComposeOperation::FrontmatterShellExpansion) {
                 let fse_start = perf.is_enabled().then(std::time::Instant::now);
+                let fse_ctx = self.source_context_for_errors();
                 let fse_report = frontmatter_shell_expansion::execute_frontmatter_shell_expansion(
                     self.frontmatter_mut(),
                     &options,
                     runtime,
                     pre_interpolation_snapshot.as_ref(),
+                    &fse_ctx,
                 )?;
                 report.frontmatter_shell_expansions_applied = fse_report.replacements;
                 report.shell_approvals_used += fse_report.approvals_used;
@@ -738,12 +740,16 @@ impl Markdown {
             ComposeOperation::ShellExpansion => {
                 self.run_shell_expansion_stage(options, runtime, report)
             }
-            ComposeOperation::ShellBlocks => shell_blocks::run_shell_blocks_stage_for_markdown(
-                &mut self.content,
-                options,
-                &mut runtime.shell,
-                report,
-            ),
+            ComposeOperation::ShellBlocks => {
+                let sb_ctx = self.source_context_for_errors();
+                shell_blocks::run_shell_blocks_stage_for_markdown(
+                    &mut self.content,
+                    options,
+                    &mut runtime.shell,
+                    report,
+                    &sb_ctx,
+                )
+            }
             ComposeOperation::LinkResolve => link_resolve::link_resolve(self, options, report),
             _ => Ok(()),
         }
@@ -1188,7 +1194,7 @@ impl Markdown {
     ) -> MarkdownResult<()> {
         debug!("compose: running page blocks");
         let source = self.source_context_for_errors();
-        let regions = page_blocks::parser::parse_page_blocks(&self.content, source)?;
+        let regions = page_blocks::parser::parse_page_blocks(&self.content, source.clone())?;
         if regions.is_empty() {
             return Ok(());
         }
@@ -1212,8 +1218,13 @@ impl Markdown {
             warn_unknown_options(region, report);
         }
 
-        self.content =
-            page_blocks::engine::render_page_blocks(&self.content, &regions, state, report)?;
+        self.content = page_blocks::engine::render_page_blocks(
+            &self.content,
+            &regions,
+            state,
+            report,
+            source,
+        )?;
         Ok(())
     }
 
@@ -1664,6 +1675,7 @@ impl Markdown {
                         &directive,
                         &options.source,
                         &transclusion_opts,
+                        self.source_context_for_errors(),
                     )? {
                     let cache_handle = {
                         let runtime = runtime_mutex.lock().unwrap();

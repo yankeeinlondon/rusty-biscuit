@@ -8,6 +8,7 @@ use crate::markdown::FrontmatterMap;
 use crate::markdown::compose::parse_utils::{
     Cursor, CursorError, find_code_regions, is_in_code_region,
 };
+use biscuit_terminal::errors::SourceContext;
 use serde_json::Value;
 
 /// Parses block transclusion directives from markdown content.
@@ -391,6 +392,7 @@ fn apply_option(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::PathBuf;
     use std::sync::Arc;
 
     fn dummy_ctx(content: &str) -> SourceContext {

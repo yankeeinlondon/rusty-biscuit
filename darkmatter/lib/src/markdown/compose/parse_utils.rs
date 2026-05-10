@@ -23,7 +23,7 @@ impl CursorError {
     /// Converts this error into a [`TransclusionError`](crate::markdown::compose::transclusion::TransclusionError).
     pub fn into_transclusion_error(
         self,
-        ctx: crate::markdown::compose::transclusion::SourceContext,
+        ctx: biscuit_terminal::errors::SourceContext,
     ) -> crate::markdown::compose::transclusion::TransclusionError {
         crate::markdown::compose::transclusion::TransclusionError::ParseDirective {
             ctx,

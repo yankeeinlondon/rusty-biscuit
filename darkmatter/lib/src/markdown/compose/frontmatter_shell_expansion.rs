@@ -14,6 +14,7 @@ use super::shell_expansion::{execute_prepared_directive, prepare_directive};
 use super::types::{ComposeOptions, ComposeWarning};
 use crate::markdown::frontmatter::Frontmatter;
 use crate::markdown::types::MarkdownResult;
+use biscuit_terminal::errors::SourceContext;
 use rayon::prelude::*;
 use serde_json::Value;
 use std::collections::HashMap;
@@ -63,6 +64,7 @@ pub(crate) fn parse_shell_value(
     value: &str,
     key: &str,
     original_value: Option<&str>,
+    ctx: &SourceContext,
 ) -> Result<Option<FrontmatterShellDirective>, ShellExpansionError> {
     // Must start with $(
     if !value.starts_with("$(") {
@@ -70,7 +72,7 @@ pub(crate) fn parse_shell_value(
     }
 
     let rest = &value[2..];
-    let close_pos = find_unquoted_closing_paren(rest, key)?;
+    let close_pos = find_unquoted_closing_paren(rest, key, ctx)?;
 
     let inner_command = &rest[..close_pos];
     let after_close = &rest[close_pos + 1..];
@@ -80,12 +82,14 @@ pub(crate) fn parse_shell_value(
         let timeout_val: u64 = timeout_str.parse().map_err(|_| {
             frontmatter_parse_error(
                 key,
+                ctx,
                 "Invalid ::timeout value in frontmatter shell expression; expected a positive integer number of seconds",
             )
         })?;
         if timeout_val == 0 {
             return Err(frontmatter_parse_error(
                 key,
+                ctx,
                 "Frontmatter shell timeout must be greater than zero",
             ));
         }
@@ -93,6 +97,7 @@ pub(crate) fn parse_shell_value(
     } else if !after_close.is_empty() {
         return Err(frontmatter_parse_error(
             key,
+            ctx,
             "Unexpected trailing content after frontmatter shell expression",
         ));
     } else {
@@ -101,14 +106,15 @@ pub(crate) fn parse_shell_value(
 
     // Check executable-token interpolation rule if we have the original
     if let Some(original) = original_value {
-        validate_no_executable_interpolation(original, key)?;
+        validate_no_executable_interpolation(original, key, ctx)?;
     }
 
     // Tokenize the inner command
-    let tokens = tokenize(inner_command).map_err(|error| remap_parse_error(error, key))?;
+    let tokens = tokenize(inner_command, ctx).map_err(|error| remap_parse_error(error, key, ctx))?;
 
     // Parse into a pipeline
-    let pipeline = parse_pipeline(&tokens).map_err(|error| remap_parse_error(error, key))?;
+    let pipeline =
+        parse_pipeline(&tokens, ctx).map_err(|error| remap_parse_error(error, key, ctx))?;
 
     let executable = pipeline.actions[0].command.executable.clone();
     let args = pipeline.actions[0].command.args.clone();
@@ -132,6 +138,7 @@ pub(crate) fn parse_shell_value(
 fn validate_no_executable_interpolation(
     original: &str,
     key: &str,
+    ctx: &SourceContext,
 ) -> Result<(), ShellExpansionError> {
     // Must start with $(
     if !original.starts_with("$(") {
@@ -139,7 +146,7 @@ fn validate_no_executable_interpolation(
     }
 
     let rest = &original[2..];
-    let close_pos = find_unquoted_closing_paren(rest, key)?;
+    let close_pos = find_unquoted_closing_paren(rest, key, ctx)?;
 
     let inner = &rest[..close_pos];
 
@@ -148,6 +155,7 @@ fn validate_no_executable_interpolation(
         if executable_portion.contains("{{") && executable_portion.contains("}}") {
             return Err(frontmatter_parse_error(
                 key,
+                ctx,
                 "Frontmatter shell executable may not come from interpolation",
             ));
         }
@@ -217,6 +225,7 @@ fn split_at_chain_operators(input: &str) -> Vec<&str> {
 pub(crate) fn scan_frontmatter(
     frontmatter: &Frontmatter,
     pre_interpolation_snapshot: Option<&HashMap<String, String>>,
+    ctx: &SourceContext,
 ) -> Result<Vec<FrontmatterShellDirective>, ShellExpansionError> {
     let mut directives = Vec::new();
     let fm = frontmatter.as_map();
@@ -228,7 +237,7 @@ pub(crate) fn scan_frontmatter(
                 .and_then(|map| map.get(key))
                 .map(|s| s.as_str());
 
-            if let Some(directive) = parse_shell_value(s, key, original)? {
+            if let Some(directive) = parse_shell_value(s, key, original, ctx)? {
                 directives.push(directive);
             }
         }
@@ -254,8 +263,9 @@ pub(crate) fn execute_frontmatter_shell_expansion(
     options: &ComposeOptions,
     runtime: &mut PipelineRuntime,
     pre_interpolation_snapshot: Option<&HashMap<String, String>>,
+    ctx: &SourceContext,
 ) -> MarkdownResult<FrontmatterShellExpansionReport> {
-    let candidates = scan_frontmatter(frontmatter, pre_interpolation_snapshot)?;
+    let candidates = scan_frontmatter(frontmatter, pre_interpolation_snapshot, ctx)?;
 
     if candidates.is_empty() {
         return Ok(FrontmatterShellExpansionReport {
@@ -285,6 +295,7 @@ pub(crate) fn execute_frontmatter_shell_expansion(
             error_handling: ErrorHandling::default(),
             timeout_override: candidate.timeout_override,
             pipeline: candidate.pipeline.clone(),
+            ctx: ctx.clone(),
         };
 
         prepared.push((
@@ -318,8 +329,13 @@ pub(crate) fn execute_frontmatter_shell_expansion(
     })
 }
 
-fn frontmatter_parse_error(key: &str, message: impl Into<String>) -> ShellExpansionError {
+fn frontmatter_parse_error(
+    key: &str,
+    ctx: &SourceContext,
+    message: impl Into<String>,
+) -> ShellExpansionError {
     ShellExpansionError::ParseDirective {
+        ctx: ctx.clone(),
         origin: ShellCommandOrigin::Frontmatter {
             key: key.to_string(),
         },
@@ -327,16 +343,24 @@ fn frontmatter_parse_error(key: &str, message: impl Into<String>) -> ShellExpans
     }
 }
 
-fn remap_parse_error(error: ShellExpansionError, key: &str) -> ShellExpansionError {
+fn remap_parse_error(
+    error: ShellExpansionError,
+    key: &str,
+    ctx: &SourceContext,
+) -> ShellExpansionError {
     match error {
         ShellExpansionError::ParseDirective { message, .. } => {
-            frontmatter_parse_error(key, message)
+            frontmatter_parse_error(key, ctx, message)
         }
         other => other,
     }
 }
 
-fn find_unquoted_closing_paren(rest: &str, key: &str) -> Result<usize, ShellExpansionError> {
+fn find_unquoted_closing_paren(
+    rest: &str,
+    key: &str,
+    ctx: &SourceContext,
+) -> Result<usize, ShellExpansionError> {
     let mut in_single = false;
     let mut in_double = false;
     let mut escaped = false;
@@ -358,6 +382,7 @@ fn find_unquoted_closing_paren(rest: &str, key: &str) -> Result<usize, ShellExpa
 
     Err(frontmatter_parse_error(
         key,
+        ctx,
         "Missing closing ')' in frontmatter shell expression",
     ))
 }
@@ -394,6 +419,45 @@ fn first_token_portion(input: &str) -> &str {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    fn test_ctx() -> SourceContext {
+        SourceContext::new(
+            std::path::PathBuf::from("/test"),
+            std::path::PathBuf::from("test"),
+            String::new(),
+        )
+    }
+
+    fn parse_shell_value(
+        value: &str,
+        key: &str,
+        original_value: Option<&str>,
+    ) -> Result<Option<FrontmatterShellDirective>, ShellExpansionError> {
+        super::parse_shell_value(value, key, original_value, &test_ctx())
+    }
+
+    #[allow(dead_code)]
+    fn scan_frontmatter(
+        frontmatter: &Frontmatter,
+        pre_interpolation_snapshot: Option<&std::collections::HashMap<String, String>>,
+    ) -> Result<Vec<FrontmatterShellDirective>, ShellExpansionError> {
+        super::scan_frontmatter(frontmatter, pre_interpolation_snapshot, &test_ctx())
+    }
+
+    fn execute_frontmatter_shell_expansion(
+        frontmatter: &mut Frontmatter,
+        options: &ComposeOptions,
+        runtime: &mut PipelineRuntime,
+        pre_interpolation_snapshot: Option<&std::collections::HashMap<String, String>>,
+    ) -> MarkdownResult<FrontmatterShellExpansionReport> {
+        super::execute_frontmatter_shell_expansion(
+            frontmatter,
+            options,
+            runtime,
+            pre_interpolation_snapshot,
+            &test_ctx(),
+        )
+    }
 
     #[test]
     fn detects_simple_shell_expression() {
@@ -613,6 +677,7 @@ mod execution_tests {
     use crate::markdown::compose::types::ComposeOptions;
     use crate::markdown::frontmatter::Frontmatter;
     use serde_json::json;
+    use serial_test::serial;
     use std::path::PathBuf;
     use std::sync::Arc;
     use std::time::{Duration, Instant};
@@ -624,6 +689,29 @@ mod execution_tests {
             _ => Default::default(),
         };
         Frontmatter::from_map(map)
+    }
+
+    fn test_ctx() -> SourceContext {
+        SourceContext::new(
+            PathBuf::from("/test"),
+            PathBuf::from("test"),
+            String::new(),
+        )
+    }
+
+    fn execute_frontmatter_shell_expansion(
+        frontmatter: &mut Frontmatter,
+        options: &ComposeOptions,
+        runtime: &mut PipelineRuntime,
+        pre_interpolation_snapshot: Option<&std::collections::HashMap<String, String>>,
+    ) -> crate::markdown::types::MarkdownResult<FrontmatterShellExpansionReport> {
+        super::execute_frontmatter_shell_expansion(
+            frontmatter,
+            options,
+            runtime,
+            pre_interpolation_snapshot,
+            &test_ctx(),
+        )
     }
 
     struct MockApproval;
@@ -796,6 +884,7 @@ mod execution_tests {
     }
 
     #[test]
+    #[serial]
     fn execute_frontmatter_commands_concurrently() {
         let Some(python) = find_python() else {
             return;

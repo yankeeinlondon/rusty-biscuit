@@ -1,7 +1,8 @@
 //! Path and URL resolution for transclusion references.
 
-use super::types::{DirectiveKind, ResolvedTarget, SourceContext, TransclusionError};
+use super::types::{DirectiveKind, ResolvedTarget, TransclusionError};
 use crate::markdown::compose::{ComposeSource, TransclusionOptions};
+use biscuit_terminal::errors::SourceContext;
 use biscuit_file::FileReference;
 use std::path::{Path, PathBuf};
 use tracing::{debug, instrument, trace};
@@ -291,6 +292,7 @@ pub fn normalize_reference_token(raw: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serial_test::serial;
     use tempfile::tempdir;
 
     fn default_options() -> TransclusionOptions {
@@ -346,6 +348,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn resolves_repo_root_reference() {
         let dir = tempdir().unwrap();
         // Canonicalize the tempdir root to resolve macOS /var -> /private/var symlink
@@ -428,6 +431,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn resolves_magic_path_prepended() {
         let dir = tempdir().unwrap();
         let root = std::fs::canonicalize(dir.path()).unwrap();
@@ -458,6 +462,7 @@ mod tests {
             &opts,
             &ComposeSource::File(source_path),
             1,
+            dummy_ctx("# root"),
         );
 
         std::env::set_current_dir(&original_dir).unwrap();

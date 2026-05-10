@@ -14,8 +14,10 @@ use crate::markdown::Markdown;
 use crate::markdown::compose::cache::RunLocalCache;
 use crate::markdown::compose::conditions;
 use crate::markdown::compose::toc_linking;
+use biscuit_terminal::errors::SourceContext;
+
 use crate::markdown::compose::transclusion::{
-    DirectiveKind, SourceContext, TransclusionRuntime, parse_directives, parse_frontmatter_refs,
+    DirectiveKind, TransclusionRuntime, parse_directives, parse_frontmatter_refs,
 };
 use crate::markdown::compose::{ComposeOperation, ComposeSource, EffectiveStateBuilder};
 use crate::markdown::normalize::HeadingLevel;
@@ -395,7 +397,7 @@ fn build_node(
                 .unwrap_or((None, None));
 
             if let Some((display_target, path)) =
-                resolve_toc_linking_target(directive, source, &transclusion_options)
+                resolve_toc_linking_target(directive, source, &transclusion_options, ctx.clone())
             {
                 if extract_references {
                     local_references.records.push(ReferenceRecord {
@@ -855,8 +857,9 @@ fn resolve_toc_linking_target(
     directive: &toc_linking::TocLinkingDirective,
     source: &ComposeSource,
     transclusion_options: &crate::markdown::compose::TransclusionOptions,
+    ctx: SourceContext,
 ) -> Option<(String, std::path::PathBuf)> {
-    toc_linking::resolve_target_chain(directive, source, transclusion_options)
+    toc_linking::resolve_target_chain(directive, source, transclusion_options, ctx)
         .ok()
         .flatten()
 }

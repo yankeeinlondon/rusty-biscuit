@@ -264,7 +264,7 @@ mod tests {
         let result = parse_page_blocks(content, dummy_source(content));
         assert!(result.is_err());
         let err = result.unwrap_err();
-        assert!(matches!(err, PageBlockError::UnmatchedEnd { line: 1 }));
+        assert!(matches!(err, PageBlockError::UnmatchedEnd { line: 1, .. }));
     }
 
     #[test]

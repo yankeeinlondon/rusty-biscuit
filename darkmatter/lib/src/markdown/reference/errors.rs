@@ -67,10 +67,15 @@ impl biscuit_terminal::errors::BlockError for ReferenceError {
                 directive_text,
                 caret_col,
             } => {
-                let mut body = vec![
-                    Prose::new("Directive parsing failed here:"),
-                    ctx.excerpt_prose(*line, 1, "md"),
-                ];
+                let mut body = vec![Prose::new(format!(
+                    "Directive parsing failed in {}:",
+                    ctx.linked_path_prose().content()
+                ))];
+                if let Some(fm) = ctx.frontmatter_prose() {
+                    body.push(Prose::new("The Frontmatter of this document was:"));
+                    body.push(fm);
+                }
+                body.push(ctx.excerpt_prose(*line, 1, "md"));
 
                 if let Some(col) = caret_col {
                     body.push(Prose::new(format!(
@@ -89,10 +94,14 @@ impl biscuit_terminal::errors::BlockError for ReferenceError {
             ReferenceError::MissingSourceContext { reference, line } => {
                 StatusBlock::new(StatusState::Error)
                     .error_header(ErrorHeader::new("ReferenceError", "missing source context"))
-                    .body(format!(
-                        "Could not resolve <cyan>{reference}</cyan> at line {line}.\n\
-                         <dim>Note:</dim> Relative references require a file-backed source."
-                    ))
+                    .body(vec![
+                        Prose::new(format!(
+                            "Could not resolve <cyan>{reference}</cyan> at line {line}."
+                        )),
+                        Prose::new(
+                            "<dim>Note:</dim> Relative references require a file-backed source.",
+                        ),
+                    ])
                     .hint("Try using an absolute path or `@/` repo-root reference.")
             }
 

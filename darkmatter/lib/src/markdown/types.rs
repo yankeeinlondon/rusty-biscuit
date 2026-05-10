@@ -112,7 +112,7 @@ impl BlockError for MarkdownError {
 
             // Leaf variants own their block shape.
             MarkdownError::FrontmatterParse { ctx, source } => {
-                blocks::frontmatter_parse_block(ctx, source)
+                blocks::frontmatter_parse_block(ctx.clone(), source)
             }
             MarkdownError::FrontmatterMerge(message) => blocks::frontmatter_merge_block(message),
             MarkdownError::FileLoad(source) => blocks::file_load_block(source),
