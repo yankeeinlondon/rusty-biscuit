@@ -523,7 +523,15 @@ pub(crate) fn execute_harness_attempt(
         if let Some(codex_output) = structured_codex_output {
             codex_output.apply_to_summary(&mut summary);
         }
-        if provider == Provider::Codex && !summary.assistant_text.is_empty() {
+        // Codex delivers its final assistant message via the
+        // `--output-last-message` file; this block renders that file's
+        // contents to stdout. Suppress on user interrupt because the
+        // overlapping `agent_message` prose already rendered live as
+        // `▌ ` thinking blocks above.
+        if provider == Provider::Codex
+            && !summary.assistant_text.is_empty()
+            && !crate::output::user_interrupt_observed()
+        {
             section_stream.enter_final_stdout();
             let text = &summary.assistant_text;
             if std::io::stdout().is_terminal() {
