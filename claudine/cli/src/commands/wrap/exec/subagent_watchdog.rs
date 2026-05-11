@@ -5,7 +5,7 @@
 //! can be unit-tested in isolation and reused by both the live semantic sink
 //! and the exec-layer watchdog ticker.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::time::{Duration, Instant};
 
 /// Identifier for a subagent.
@@ -56,14 +56,39 @@ pub(crate) struct SubagentDiagnosticLine {
     pub(crate) elapsed_since_start: Duration,
 }
 
+/// Information about a recently completed subagent, stored in a bounded
+/// ring-buffer for breach-diagnostic enrichment.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct RecentSubagentInfo {
+    pub(crate) id: SubagentId,
+    pub(crate) name: Option<String>,
+    pub(crate) description: Option<String>,
+    pub(crate) completed_at: Instant,
+    pub(crate) status: Option<String>,
+}
+
+const RECENT_SUBAGENTS_CAP: usize = 5;
+
 /// Shared watchdog state tracking active subagents.
 ///
 /// All mutation methods accept an explicit `now` so tests can drive time
 /// deterministically. Thin convenience wrappers that call `Instant::now()`
 /// are provided for production call sites.
-#[derive(Debug, Default, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct WatchdogState {
     active: HashMap<SubagentId, ActiveSubagentInfo>,
+    /// Bounded ring-buffer of the most recent subagent completions,
+    /// newest-first. Capacity is [`RECENT_SUBAGENTS_CAP`].
+    pub(crate) recent_subagents: VecDeque<RecentSubagentInfo>,
+}
+
+impl Default for WatchdogState {
+    fn default() -> Self {
+        Self {
+            active: HashMap::new(),
+            recent_subagents: VecDeque::with_capacity(RECENT_SUBAGENTS_CAP),
+        }
+    }
 }
 
 impl WatchdogState {
@@ -101,14 +126,41 @@ impl WatchdogState {
     }
 
     /// Record that a subagent stopped.
-    pub(crate) fn subagent_stopped(&mut self, id: &SubagentId, _now: Instant) {
+    ///
+    /// Pushes a [`RecentSubagentInfo`] entry into the bounded ring-buffer
+    /// so breach diagnostics can enumerate recently completed work even
+    /// when no subagents are currently outstanding.
+    pub(crate) fn subagent_stopped(
+        &mut self,
+        id: &SubagentId,
+        name: Option<String>,
+        description: Option<String>,
+        status: Option<String>,
+        now: Instant,
+    ) {
         self.active.remove(id);
+        if self.recent_subagents.len() >= RECENT_SUBAGENTS_CAP {
+            self.recent_subagents.pop_back();
+        }
+        self.recent_subagents.push_front(RecentSubagentInfo {
+            id: id.clone(),
+            name,
+            description,
+            completed_at: now,
+            status,
+        });
     }
 
     /// Convenience: record a subagent stop using the current instant.
     #[allow(dead_code)]
-    pub(crate) fn subagent_stopped_now(&mut self, id: &SubagentId) {
-        self.subagent_stopped(id, Instant::now());
+    pub(crate) fn subagent_stopped_now(
+        &mut self,
+        id: &SubagentId,
+        name: Option<String>,
+        description: Option<String>,
+        status: Option<String>,
+    ) {
+        self.subagent_stopped(id, name, description, status, Instant::now());
     }
 
     /// Record progress for an active subagent.
@@ -236,7 +288,7 @@ mod tests {
                 .any(|s| s.id == "b" && s.name.as_deref() == Some("Beta"))
         );
 
-        state.subagent_stopped(&"a".into(), t0);
+        state.subagent_stopped(&"a".into(), None, None, None, t0);
         let active = state.active_subagents(t0);
         assert_eq!(active.len(), 1);
         assert_eq!(active[0].id, "b");
@@ -357,7 +409,7 @@ mod tests {
         let mut state = WatchdogState::default();
         let t0 = now();
         state.subagent_started("a".into(), None, t0);
-        state.subagent_stopped(&"a".into(), t0);
+        state.subagent_stopped(&"a".into(), None, None, None, t0);
 
         let lines = state.diagnostic_lines(t0, Duration::from_secs(10));
         assert!(lines.is_empty());
@@ -408,7 +460,7 @@ mod tests {
         let t0 = now();
         state.subagent_started("a".into(), None, t0);
         state.subagent_started("b".into(), None, t0);
-        state.subagent_stopped(&"a".into(), t0);
+        state.subagent_stopped(&"a".into(), None, None, None, t0);
 
         let outstanding = state.outstanding_at_breach(t0);
         assert_eq!(outstanding.len(), 1);
@@ -420,5 +472,90 @@ mod tests {
         let state = WatchdogState::default();
         let outstanding = state.outstanding_at_breach(now());
         assert!(outstanding.is_empty());
+    }
+
+    // --- recent_subagents ring-buffer tests ---
+
+    #[test]
+    fn subagent_stop_populates_recent_subagents() {
+        let mut state = WatchdogState::default();
+        let t0 = now();
+        state.subagent_started("a".into(), Some("Alpha".into()), t0);
+        state.subagent_stopped(
+            &"a".into(),
+            Some("Alpha".into()),
+            Some("research task".into()),
+            Some("success".into()),
+            t0,
+        );
+        assert_eq!(state.recent_subagents.len(), 1);
+        let entry = &state.recent_subagents[0];
+        assert_eq!(entry.id, "a");
+        assert_eq!(entry.name.as_deref(), Some("Alpha"));
+        assert_eq!(entry.description.as_deref(), Some("research task"));
+        assert_eq!(entry.status.as_deref(), Some("success"));
+        assert_eq!(entry.completed_at, t0);
+    }
+
+    #[test]
+    fn recent_subagents_ring_buffer_caps_at_5() {
+        let mut state = WatchdogState::default();
+        let t0 = now();
+        for i in 0..7 {
+            let id = format!("sa-{i}");
+            state.subagent_started(id.clone(), None, t0);
+            state.subagent_stopped(
+                &id,
+                Some(format!("name-{i}")),
+                Some(format!("desc-{i}")),
+                Some("success".into()),
+                t0 + Duration::from_secs(i as u64),
+            );
+        }
+        assert_eq!(state.recent_subagents.len(), 5);
+        // Newest-first: the last 5 pushed (sa-2 through sa-6)
+        let ids: Vec<_> = state
+            .recent_subagents
+            .iter()
+            .map(|e| e.id.as_str())
+            .collect();
+        assert_eq!(ids, vec!["sa-6", "sa-5", "sa-4", "sa-3", "sa-2"]);
+    }
+
+    #[test]
+    fn recent_subagents_newest_first_order() {
+        let mut state = WatchdogState::default();
+        let t0 = now();
+        for i in 0..3 {
+            let id = format!("sa-{i}");
+            state.subagent_started(id.clone(), None, t0);
+            state.subagent_stopped(
+                &id,
+                None,
+                None,
+                None,
+                t0 + Duration::from_secs(i as u64),
+            );
+        }
+        let ids: Vec<_> = state
+            .recent_subagents
+            .iter()
+            .map(|e| e.id.as_str())
+            .collect();
+        assert_eq!(ids, vec!["sa-2", "sa-1", "sa-0"]);
+    }
+
+    #[test]
+    fn subagent_stop_without_description_or_status_still_records() {
+        let mut state = WatchdogState::default();
+        let t0 = now();
+        state.subagent_started("x".into(), Some("X".into()), t0);
+        state.subagent_stopped(&"x".into(), Some("X".into()), None, None, t0);
+        assert_eq!(state.recent_subagents.len(), 1);
+        let entry = &state.recent_subagents[0];
+        assert_eq!(entry.id, "x");
+        assert_eq!(entry.name.as_deref(), Some("X"));
+        assert!(entry.description.is_none());
+        assert!(entry.status.is_none());
     }
 }

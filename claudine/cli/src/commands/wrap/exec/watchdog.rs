@@ -469,11 +469,15 @@ pub(crate) fn evaluate_timeout_tick(
     if let Some(budget) = config.step_timeout {
         let (
             last_activity_at,
+            last_event_at,
+            last_byte_at,
             stuck_tools,
             stuck_subagents,
             any_active,
             any_stuck,
             provider_status_seen,
+            step_in_flight,
+            subagent_done_count,
         ) = match live_metrics.lock() {
             Ok(g) => {
                 let stuck_tools: Vec<claudine::stream::progress::InFlightTool> =
@@ -486,13 +490,19 @@ pub(crate) fn evaluate_timeout_tick(
                 let any_stuck = !stuck_tools.is_empty() || !stuck_subagents.is_empty();
                 let any_active = !g.in_flight.is_empty() || !g.in_flight_subagents.is_empty();
                 let provider_status_seen = g.provider_status.is_some();
+                let step_in_flight = g.step_in_flight;
+                let subagent_done_count = g.subagent_done_count;
                 (
                     g.last_activity_at(),
+                    g.last_event_at,
+                    g.last_byte_at,
                     stuck_tools,
                     stuck_subagents,
                     any_active,
                     any_stuck,
                     provider_status_seen,
+                    step_in_flight,
+                    subagent_done_count,
                 )
             }
             Err(_) => return WatchdogTickResult::Ok,
@@ -501,13 +511,28 @@ pub(crate) fn evaluate_timeout_tick(
         // `tool_start` or `task_started` events, so `in_flight` /
         // `in_flight_subagents` stay empty during legitimate work and
         // the stuck-aware suppression above has nothing to suppress
-        // against. Until at least one `step_finish` boundary has been
-        // observed (`provider_status.is_some()`), suppress the silence
-        // rule entirely so slow startup and slow first turns cannot
-        // trip a kill. The wall-clock `timeout` rule above remains the
-        // unconditional backstop.
+        // against. Two conditions suppress the silence rule:
+        //
+        // 1. `step_in_flight` is true — a step is currently open between
+        //    `step_start` and the next `step_finish`. Mid-step silence is
+        //    expected while subagents work.  However, if BOTH the
+        //    structured-event clock and the raw-byte clock are stale
+        //    beyond the budget, the breach still fires — the per-step
+        //    grace must not override the byte-heartbeat backstop.
+        // 2. `provider_status` is None — no `step_finish` has ever been
+        //    observed, protecting slow startup / slow first turns.
+        //
+        // The wall-clock `timeout` rule above remains the unconditional
+        // backstop in both cases.
+        let both_clocks_stale = match (last_event_at, last_byte_at) {
+            (Some(e), Some(b)) => {
+                now.saturating_duration_since(e) >= budget
+                    && now.saturating_duration_since(b) >= budget
+            }
+            _ => false,
+        };
         if config.provider == Some(claudine::provider::Provider::OpenCode)
-            && !provider_status_seen
+            && ((step_in_flight && !both_clocks_stale) || !provider_status_seen)
         {
             return WatchdogTickResult::Ok;
         }
@@ -518,16 +543,27 @@ pub(crate) fn evaluate_timeout_tick(
         if let Some(last) = last_activity_at {
             let silence = now.saturating_duration_since(last);
             if silence >= budget {
-                let outstanding = match watchdog_state.lock() {
-                    Ok(g) => g.outstanding_at_breach(now),
-                    Err(_) => Vec::new(),
+                let (outstanding, recent_subagents) = match watchdog_state.lock() {
+                    Ok(g) => {
+                        let outstanding = g.outstanding_at_breach(now);
+                        let recent = g.recent_subagents.clone();
+                        (outstanding, recent)
+                    }
+                    Err(_) => (Vec::new(), std::collections::VecDeque::new()),
                 };
+                let is_opencode = config.provider == Some(claudine::provider::Provider::OpenCode);
                 fired.store(true, Ordering::SeqCst);
                 let message = format_step_timeout_breach_message(
                     silence,
                     &outstanding,
                     &stuck_tools,
                     &stuck_subagents,
+                    is_opencode.then_some(OpenCodeBreachContext {
+                        subagent_done_count,
+                        step_in_flight,
+                        recent_subagents,
+                        now,
+                    }),
                 );
                 return WatchdogTickResult::Breach(WatchdogTermination {
                     reason: WatchdogTerminationReason::StepTimeout,
@@ -541,6 +577,17 @@ pub(crate) fn evaluate_timeout_tick(
     WatchdogTickResult::Ok
 }
 
+/// Extra diagnostic context used when enriching an OpenCode `step_timeout`
+/// breach. Only populated when the provider is OpenCode and the standard
+/// `outstanding_at_breach()` snapshot is empty.
+#[derive(Debug, Clone)]
+pub(crate) struct OpenCodeBreachContext {
+    pub(crate) subagent_done_count: u32,
+    pub(crate) step_in_flight: bool,
+    pub(crate) recent_subagents: std::collections::VecDeque<super::subagent_watchdog::RecentSubagentInfo>,
+    pub(crate) now: Instant,
+}
+
 /// Format the human-readable breach message for a `step_timeout` event.
 ///
 /// When `outstanding` is non-empty the message enumerates the subagents
@@ -551,15 +598,55 @@ pub(crate) fn evaluate_timeout_tick(
 ///
 /// When `stuck_tools` or `stuck_subagents` is non-empty the message also
 /// enumerates those stuck items.
+///
+/// For OpenCode, when `outstanding` is empty, `opencode_context` provides
+/// enriched diagnostics: subagent completion count, whether a step was in
+/// flight, and the most recent completed subagents from the ring-buffer.
 pub(crate) fn format_step_timeout_breach_message(
     silence: Duration,
     outstanding: &[super::subagent_watchdog::ActiveSubagentSnapshot],
     stuck_tools: &[claudine::stream::progress::InFlightTool],
     stuck_subagents: &[claudine::stream::progress::InFlightSubagent],
+    opencode_context: Option<OpenCodeBreachContext>,
 ) -> String {
     let silence_text = format_duration(silence);
     if outstanding.is_empty() && stuck_tools.is_empty() && stuck_subagents.is_empty() {
-        return format!("no stream activity for {silence_text}; terminating due to step_timeout");
+        let mut msg = format!("no stream activity for {silence_text}; terminating due to step_timeout");
+        if let Some(ctx) = opencode_context {
+            if ctx.subagent_done_count > 0 {
+                let plural = if ctx.subagent_done_count == 1 { "subagent" } else { "subagents" };
+                let count = ctx.subagent_done_count;
+                msg = format!("{count} {plural} observed in this step. {msg}");
+            }
+            if let Some(last) = ctx.recent_subagents.front() {
+                let since = format_duration(ctx.now.saturating_duration_since(last.completed_at));
+                msg.push_str(&format!(" Last subagent completion {since} ago."));
+            }
+            if ctx.step_in_flight {
+                // A breach with `step_in_flight=true` can only happen on the
+                // byte-heartbeat backstop path (both event and byte clocks
+                // stale) — the per-step grace otherwise suppresses the
+                // silence rule while a step is open. Anchor the wording so
+                // operators understand the child genuinely produced no
+                // bytes during the silence window, not that a step closed
+                // and then went silent.
+                msg.push_str(&format!(
+                    " A step boundary was still open and the child produced no bytes for {silence_text} — \
+                     the parent agent may have been waiting on a parallel subagent that has not yet returned.",
+                ));
+            }
+            if !ctx.recent_subagents.is_empty() {
+                msg.push_str("\n\nRecent subagents:");
+                for info in &ctx.recent_subagents {
+                    let since = format_duration(ctx.now.saturating_duration_since(info.completed_at));
+                    let desc = info.description.as_ref().or(info.name.as_ref());
+                    let label = desc.map(|s| s.as_str()).unwrap_or("(unnamed)");
+                    let status = info.status.as_deref().unwrap_or("unknown");
+                    msg.push_str(&format!("\n  ← {label} ({since} ago, {status})"));
+                }
+            }
+        }
+        return msg;
     }
 
     let mut lines =
@@ -1335,7 +1422,7 @@ mod tests {
 
     #[test]
     fn format_step_timeout_breach_message_no_outstanding() {
-        let msg = format_step_timeout_breach_message(Duration::from_secs(180), &[], &[], &[]);
+        let msg = format_step_timeout_breach_message(Duration::from_secs(180), &[], &[], &[], None);
         assert!(msg.contains("3m 0s"));
         assert!(msg.contains("step_timeout"));
         assert!(!msg.contains("subagent"));
@@ -1357,6 +1444,7 @@ mod tests {
             std::slice::from_ref(&snap),
             &[],
             &[],
+            None,
         );
         assert!(msg.contains("30m 0s"));
         assert!(msg.contains("1 subagent"));
@@ -1377,6 +1465,7 @@ mod tests {
             &[],
             std::slice::from_ref(&tool),
             &[],
+            None,
         );
         assert!(msg.contains("3m 0s"));
         assert!(msg.contains("1 tool"));
@@ -1570,6 +1659,446 @@ mod tests {
             }
             other => panic!(
                 "Claude stuck subagent must release the in-flight gate; expected StepTimeout, got: {other:?}"
+            ),
+        }
+        assert!(fired.load(Ordering::SeqCst));
+    }
+
+    // ------------------------------------------------------------------
+    // Phase 4 — OpenCode breach-diagnostic enrichment (unit tests)
+    // ------------------------------------------------------------------
+
+    #[test]
+    fn format_step_timeout_breach_message_opencode_names_subagent_count() {
+        let mut recent = std::collections::VecDeque::new();
+        recent.push_back(crate::commands::wrap::exec::subagent_watchdog::RecentSubagentInfo {
+            id: "sa-1".into(),
+            name: Some("Alpha".into()),
+            description: Some("do alpha".into()),
+            completed_at: Instant::now(),
+            status: Some("success".into()),
+        });
+        let ctx = OpenCodeBreachContext {
+            subagent_done_count: 3,
+            step_in_flight: true,
+            recent_subagents: recent,
+            now: Instant::now(),
+        };
+        let msg = format_step_timeout_breach_message(
+            Duration::from_secs(180),
+            &[],
+            &[],
+            &[],
+            Some(ctx),
+        );
+        assert!(msg.contains("3 subagents observed"), "got: {msg}");
+        assert!(
+            msg.contains("step boundary was still open"),
+            "got: {msg}"
+        );
+    }
+
+    #[test]
+    fn format_step_timeout_breach_message_opencode_lists_recent_descriptions() {
+        let mut recent = std::collections::VecDeque::new();
+        // Simulate newest-first ring buffer: push_front so Desc-4 (newest)
+        // ends up at the front of the deque.
+        for i in 0..5 {
+            recent.push_front(crate::commands::wrap::exec::subagent_watchdog::RecentSubagentInfo {
+                id: format!("sa-{i}"),
+                name: Some(format!("Name-{i}")),
+                description: Some(format!("Desc-{i}")),
+                completed_at: Instant::now() - Duration::from_secs((5 - i) as u64 * 60),
+                status: Some("success".into()),
+            });
+        }
+        let ctx = OpenCodeBreachContext {
+            subagent_done_count: 5,
+            step_in_flight: false,
+            recent_subagents: recent,
+            now: Instant::now(),
+        };
+        let msg = format_step_timeout_breach_message(
+            Duration::from_secs(180),
+            &[],
+            &[],
+            &[],
+            Some(ctx),
+        );
+        assert!(msg.contains("5 subagents observed"), "got: {msg}");
+        assert!(msg.contains("Recent subagents:"), "got: {msg}");
+        // Newest first: Desc-4 should appear before Desc-3
+        let idx_4 = msg.find("Desc-4").expect("Desc-4 should be present");
+        let idx_3 = msg.find("Desc-3").expect("Desc-3 should be present");
+        assert!(idx_4 < idx_3, "newest-first order required: {msg}");
+    }
+
+    #[test]
+    fn format_step_timeout_breach_message_opencode_no_recent_subagents() {
+        let ctx = OpenCodeBreachContext {
+            subagent_done_count: 0,
+            step_in_flight: true,
+            recent_subagents: std::collections::VecDeque::new(),
+            now: Instant::now(),
+        };
+        let msg = format_step_timeout_breach_message(
+            Duration::from_secs(180),
+            &[],
+            &[],
+            &[],
+            Some(ctx),
+        );
+        assert!(msg.contains("step_timeout"), "got: {msg}");
+        assert!(
+            !msg.contains("subagents observed"),
+            "count 0 must not render: {msg}"
+        );
+        assert!(
+            msg.contains("step boundary was still open"),
+            "step_in_flight hint must appear: {msg}"
+        );
+    }
+
+    // ------------------------------------------------------------------
+    // Phase 5 — per-step grace + subagent lifecycle synthesis tests
+    // ------------------------------------------------------------------
+
+    #[test]
+    fn opencode_step_in_flight_suppresses_silence() {
+        // OpenCode + step_timeout + step_finish observed (provider_status is
+        // Some) BUT step_in_flight is true → silence beyond budget must be
+        // suppressed. Once step_in_flight is cleared, the breach should fire.
+        let config = TimeoutConfig {
+            timeout: None,
+            step_timeout: Some(Duration::from_secs(5)),
+            provider: Some(claudine::provider::Provider::OpenCode),
+            ..Default::default()
+        };
+        let state = Arc::new(std::sync::Mutex::new(WatchdogState::default()));
+        let metrics = claudine::stream::progress::new_live_metrics();
+        let fired = AtomicBool::new(false);
+        let t0 = Instant::now() - Duration::from_secs(10);
+
+        {
+            let mut m = metrics.lock().unwrap();
+            m.last_event_at = Some(t0);
+            m.provider_status = Some("stop".into());
+            m.step_in_flight = true;
+        }
+
+        let result = evaluate_timeout_tick(&config, Instant::now(), t0, &state, &metrics, &fired);
+        assert_eq!(
+            result,
+            WatchdogTickResult::Ok,
+            "OpenCode with step_in_flight=true must suppress step_timeout even after step_finish"
+        );
+        assert!(!fired.load(Ordering::SeqCst));
+
+        // Now clear step_in_flight (emulate step_finish) and re-evaluate
+        {
+            let mut m = metrics.lock().unwrap();
+            m.step_in_flight = false;
+        }
+
+        let result = evaluate_timeout_tick(&config, Instant::now(), t0, &state, &metrics, &fired);
+        match result {
+            WatchdogTickResult::Breach(ref w) => {
+                assert_eq!(w.reason, WatchdogTerminationReason::StepTimeout);
+            }
+            other => panic!(
+                "expected StepTimeout breach once step_in_flight is cleared, got: {other:?}"
+            ),
+        }
+        assert!(fired.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn opencode_step_in_flight_resets_per_step() {
+        // The per-step grace must reset for each new step_start/step_finish
+        // cycle, not be a one-shot guard. This test drives `observe_event`
+        // through a sequence of real `Info{step_phase=start|finish}` events
+        // on a SINGLE `LiveMetricsState` instance so the toggling logic is
+        // exercised end-to-end — not just the predicate behavior against
+        // a hand-set field.
+        let config = TimeoutConfig {
+            timeout: None,
+            step_timeout: Some(Duration::from_secs(5)),
+            provider: Some(claudine::provider::Provider::OpenCode),
+            ..Default::default()
+        };
+        let state = Arc::new(std::sync::Mutex::new(WatchdogState::default()));
+        let metrics = claudine::stream::progress::new_live_metrics();
+        let fired = AtomicBool::new(false);
+        let session_start = Instant::now() - Duration::from_secs(60);
+
+        // --- Cycle 1: step_start fed through observe_event ---
+        {
+            let mut m = metrics.lock().unwrap();
+            m.observe_event(
+                &claudine::stream::semantic::SemanticEvent::Info {
+                    message: "step_start".into(),
+                    extra: serde_json::json!({"step_phase": "start"}),
+                },
+                Instant::now() - Duration::from_secs(30),
+            );
+            assert!(
+                m.step_in_flight,
+                "observe_event must set step_in_flight=true on step_start"
+            );
+        }
+        let result =
+            evaluate_timeout_tick(&config, Instant::now(), session_start, &state, &metrics, &fired);
+        assert_eq!(
+            result,
+            WatchdogTickResult::Ok,
+            "first step_start must suppress step_timeout (silence stale, step_in_flight=true)"
+        );
+        assert!(!fired.load(Ordering::SeqCst));
+
+        // --- Cycle 1: step_finish fed through observe_event ---
+        {
+            let mut m = metrics.lock().unwrap();
+            m.observe_event(
+                &claudine::stream::semantic::SemanticEvent::Info {
+                    message: "step_finish".into(),
+                    extra: serde_json::json!({"step_phase": "finish", "reason": "tool-calls"}),
+                },
+                Instant::now() - Duration::from_secs(20),
+            );
+            assert!(
+                !m.step_in_flight,
+                "observe_event must clear step_in_flight on step_finish"
+            );
+            assert_eq!(m.provider_status.as_deref(), Some("tool-calls"));
+        }
+        let result =
+            evaluate_timeout_tick(&config, Instant::now(), session_start, &state, &metrics, &fired);
+        assert!(
+            matches!(result, WatchdogTickResult::Breach(ref w) if w.reason == WatchdogTerminationReason::StepTimeout),
+            "step_finish must release suppression and allow step_timeout to fire; got: {result:?}"
+        );
+        assert!(fired.load(Ordering::SeqCst));
+
+        // --- Cycle 2: step_start fed through observe_event again (per-step reset) ---
+        fired.store(false, Ordering::SeqCst);
+        {
+            let mut m = metrics.lock().unwrap();
+            m.observe_event(
+                &claudine::stream::semantic::SemanticEvent::Info {
+                    message: "step_start".into(),
+                    extra: serde_json::json!({"step_phase": "start"}),
+                },
+                Instant::now() - Duration::from_secs(10),
+            );
+            assert!(
+                m.step_in_flight,
+                "second step_start must toggle step_in_flight back to true (per-step reset)"
+            );
+            // provider_status remains Some from the first step_finish — proves
+            // the grace does NOT rely on the cold-start (`provider_status=None`)
+            // protection; it must come from `step_in_flight` alone.
+            assert_eq!(m.provider_status.as_deref(), Some("tool-calls"));
+        }
+        let result =
+            evaluate_timeout_tick(&config, Instant::now(), session_start, &state, &metrics, &fired);
+        assert_eq!(
+            result,
+            WatchdogTickResult::Ok,
+            "second step_start must suppress step_timeout again (per-step grace reset)"
+        );
+        assert!(!fired.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn opencode_byte_heartbeat_still_catches_zero_byte_hang() {
+        // Even when step_in_flight is true, if BOTH the structured-event
+        // clock and the raw-byte clock are stale beyond step_timeout, the
+        // breach must fire. The per-step grace must not override the byte
+        // heartbeat backstop.
+        let config = TimeoutConfig {
+            timeout: None,
+            step_timeout: Some(Duration::from_secs(5)),
+            provider: Some(claudine::provider::Provider::OpenCode),
+            ..Default::default()
+        };
+        let state = Arc::new(std::sync::Mutex::new(WatchdogState::default()));
+        let metrics = claudine::stream::progress::new_live_metrics();
+        let fired = AtomicBool::new(false);
+        let stale = Instant::now() - Duration::from_secs(10);
+
+        {
+            let mut m = metrics.lock().unwrap();
+            m.last_event_at = Some(stale);
+            m.last_byte_at = Some(stale);
+            m.step_in_flight = true;
+            m.provider_status = Some("stop".into());
+        }
+
+        let result = evaluate_timeout_tick(&config, Instant::now(), stale, &state, &metrics, &fired);
+        match result {
+            WatchdogTickResult::Breach(ref w) => {
+                assert_eq!(w.reason, WatchdogTerminationReason::StepTimeout);
+            }
+            other => panic!(
+                "expected StepTimeout breach when both byte and event clocks are stale, even with step_in_flight; got: {other:?}"
+            ),
+        }
+        assert!(fired.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn opencode_cold_start_suppresses_even_when_both_clocks_stale() {
+        // Cold-start counter-test: `provider_status` is None (no `step_finish`
+        // has ever been observed) and BOTH the structured-event clock and
+        // the raw-byte clock are stale past `step_timeout`. The documented
+        // OpenCode-grace contract says the breach must NOT fire — cold-start
+        // protection is unconditional on the byte-heartbeat backstop because
+        // the wrapper is still inside the slow-first-turn window.
+        //
+        // Pair with `opencode_byte_heartbeat_still_catches_zero_byte_hang`
+        // which covers the post-cold-start `step_in_flight=true` arm where
+        // the byte-heartbeat DOES escape suppression.
+        let config = TimeoutConfig {
+            timeout: None,
+            step_timeout: Some(Duration::from_secs(5)),
+            provider: Some(claudine::provider::Provider::OpenCode),
+            ..Default::default()
+        };
+        let state = Arc::new(std::sync::Mutex::new(WatchdogState::default()));
+        let metrics = claudine::stream::progress::new_live_metrics();
+        let fired = AtomicBool::new(false);
+        let stale = Instant::now() - Duration::from_secs(10);
+
+        {
+            let mut m = metrics.lock().unwrap();
+            m.last_event_at = Some(stale);
+            m.last_byte_at = Some(stale);
+            // provider_status stays None — no step_finish has been observed.
+            // step_in_flight stays false — no step_start either.
+            assert!(m.provider_status.is_none());
+            assert!(!m.step_in_flight);
+        }
+
+        let result = evaluate_timeout_tick(&config, Instant::now(), stale, &state, &metrics, &fired);
+        assert_eq!(
+            result,
+            WatchdogTickResult::Ok,
+            "cold-start path (provider_status=None) must suppress step_timeout even when both clocks are stale; got: {result:?}"
+        );
+        assert!(!fired.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn opencode_breach_diagnostic_names_subagent_count() {
+        // When 3 synthesized Task completions have been observed and then a
+        // silence breach fires, the rendered message must contain the count.
+        let config = TimeoutConfig {
+            timeout: None,
+            step_timeout: Some(Duration::from_secs(5)),
+            provider: Some(claudine::provider::Provider::OpenCode),
+            ..Default::default()
+        };
+        let state = Arc::new(std::sync::Mutex::new(WatchdogState::default()));
+        let metrics = claudine::stream::progress::new_live_metrics();
+        let fired = AtomicBool::new(false);
+        let t0 = Instant::now() - Duration::from_secs(10);
+
+        {
+            let mut s = state.lock().unwrap();
+            for i in 0..3 {
+                s.subagent_stopped(
+                    &format!("sa-{i}"),
+                    Some(format!("Task {i}")),
+                    Some(format!("Description {i}")),
+                    Some("success".into()),
+                    t0,
+                );
+            }
+        }
+
+        {
+            let mut m = metrics.lock().unwrap();
+            m.last_event_at = Some(t0);
+            m.provider_status = Some("stop".into());
+            m.step_in_flight = false;
+            m.subagent_done_count = 3;
+        }
+
+        let result = evaluate_timeout_tick(&config, Instant::now(), t0, &state, &metrics, &fired);
+        match result {
+            WatchdogTickResult::Breach(ref w) => {
+                assert_eq!(w.reason, WatchdogTerminationReason::StepTimeout);
+                assert!(
+                    w.message.contains("3 subagents observed"),
+                    "breach message should name subagent count: {}",
+                    w.message
+                );
+            }
+            other => panic!(
+                "expected StepTimeout breach with subagent count diagnostic; got: {other:?}"
+            ),
+        }
+        assert!(fired.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn opencode_breach_diagnostic_lists_recent_subagent_descriptions() {
+        // When 5 synthesized Task completions with distinct descriptions have
+        // been observed, the breach message must list all 5 in newest-first
+        // order.
+        let config = TimeoutConfig {
+            timeout: None,
+            step_timeout: Some(Duration::from_secs(5)),
+            provider: Some(claudine::provider::Provider::OpenCode),
+            ..Default::default()
+        };
+        let state = Arc::new(std::sync::Mutex::new(WatchdogState::default()));
+        let metrics = claudine::stream::progress::new_live_metrics();
+        let fired = AtomicBool::new(false);
+        let t0 = Instant::now() - Duration::from_secs(10);
+
+        {
+            let mut s = state.lock().unwrap();
+            for i in 0..5 {
+                s.subagent_stopped(
+                    &format!("sa-{i}"),
+                    Some(format!("Name {i}")),
+                    Some(format!("Desc-{i}")),
+                    Some("success".into()),
+                    t0 + Duration::from_secs(i as u64),
+                );
+            }
+        }
+
+        {
+            let mut m = metrics.lock().unwrap();
+            m.last_event_at = Some(t0);
+            m.provider_status = Some("stop".into());
+            m.step_in_flight = false;
+            m.subagent_done_count = 5;
+        }
+
+        let result = evaluate_timeout_tick(&config, Instant::now(), t0, &state, &metrics, &fired);
+        match result {
+            WatchdogTickResult::Breach(ref w) => {
+                assert_eq!(w.reason, WatchdogTerminationReason::StepTimeout);
+                assert!(
+                    w.message.contains("5 subagents observed"),
+                    "breach message should name subagent count: {}",
+                    w.message
+                );
+                assert!(
+                    w.message.contains("Recent subagents:"),
+                    "breach message should list recent subagents: {}",
+                    w.message
+                );
+                // Newest first: Desc-4 should appear before Desc-3
+                let idx_4 = w.message.find("Desc-4").expect("Desc-4 should be present");
+                let idx_3 = w.message.find("Desc-3").expect("Desc-3 should be present");
+                assert!(idx_4 < idx_3, "newest-first order required: {}", w.message);
+            }
+            other => panic!(
+                "expected StepTimeout breach with recent subagent descriptions; got: {other:?}"
             ),
         }
         assert!(fired.load(Ordering::SeqCst));
