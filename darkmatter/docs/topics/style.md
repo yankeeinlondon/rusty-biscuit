@@ -51,7 +51,7 @@ While _every_ style property provides the _common_ mutations, each of the types 
     - **IMPORTANT:** currently the `hr` functionality has implemented their bespoke styles directly to the top-level `hr` property and that needs to be moved here as `style.hr`
         - `darkmatter/lib/src/markdown/block/hr_builder.rs:117`
     - `kind` (this replaces `hr.style` when moved from current implementation)
-    - `
+    - 
 - `table`
     - `width`
     - `max-width`
