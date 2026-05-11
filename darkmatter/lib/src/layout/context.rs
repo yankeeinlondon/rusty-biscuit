@@ -142,7 +142,9 @@ impl LayoutContext {
         let has_layout = margin != PageMargin::ZERO
             || padding != PagePadding::ZERO
             || page_background != PageBackground::Transparent
-            || max_width.is_some();
+            || max_width.is_some()
+            || !alignments.is_empty()
+            || !fills.is_empty();
 
         // Resolve background color and render color mode.
         let (background_color, render_color_mode) = match page_background {

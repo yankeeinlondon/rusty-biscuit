@@ -1088,7 +1088,7 @@ mod tests {
 
     #[test]
     fn zero_config_render_matches_for_terminal() {
-        let term = Terminal::new_optimistic(120);
+        let term = Terminal::new();
         let page = DarkmatterPage::new(&term);
         let md: Markdown = "# Hello World\n\nSome prose here.\n".into();
 
@@ -1105,7 +1105,7 @@ mod tests {
 
     #[test]
     fn zero_config_render_with_list_matches_for_terminal() {
-        let term = Terminal::new_optimistic(120);
+        let term = Terminal::new();
         let page = DarkmatterPage::new(&term);
         let md: Markdown = "# List\n\n- Item one\n- Item two\n".into();
 
@@ -1122,7 +1122,7 @@ mod tests {
 
     #[test]
     fn zero_config_render_with_code_block_matches_for_terminal() {
-        let term = Terminal::new_optimistic(120);
+        let term = Terminal::new();
         let page = DarkmatterPage::new(&term);
         let md: Markdown = "```rust\nfn main() {}\n```\n".into();
 
@@ -1652,7 +1652,7 @@ mod tests {
 
     #[test]
     fn zero_config_render_with_blockquote_matches_for_terminal() {
-        let term = Terminal::new_optimistic(120);
+        let term = Terminal::new();
         let page = DarkmatterPage::new(&term);
         let md: Markdown = "> A quoted paragraph\n".into();
 
@@ -1669,7 +1669,7 @@ mod tests {
 
     #[test]
     fn zero_config_render_with_table_matches_for_terminal() {
-        let term = Terminal::new_optimistic(120);
+        let term = Terminal::new();
         let page = DarkmatterPage::new(&term);
         let md: Markdown = "| A | B |\n|---|---|\n| 1 | 2 |\n".into();
 
@@ -1686,7 +1686,7 @@ mod tests {
 
     #[test]
     fn zero_config_render_with_horizontal_rule_matches_for_terminal() {
-        let term = Terminal::new_optimistic(120);
+        let term = Terminal::new();
         let page = DarkmatterPage::new(&term);
         let md: Markdown = "# Hello\n\n---\n\nWorld\n".into();
 
