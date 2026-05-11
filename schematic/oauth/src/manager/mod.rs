@@ -4,21 +4,24 @@
 //! high-level methods for authorization code, client credentials, token
 //! refresh, and revocation flows.
 
+mod authorization_code;
+mod client_credentials;
+mod refresh;
+mod revocation;
+
 use oauth2::basic::{
     BasicErrorResponse, BasicRevocationErrorResponse, BasicTokenIntrospectionResponse,
     BasicTokenResponse,
 };
 use oauth2::{
-    AuthUrl, AuthorizationCode, ClientId, ClientSecret, CsrfToken, EndpointMaybeSet,
-    EndpointNotSet, EndpointSet, PkceCodeChallenge, PkceCodeVerifier, RedirectUrl, RefreshToken,
-    RevocationUrl, Scope, StandardRevocableToken, TokenResponse, TokenUrl,
+    AuthUrl, ClientId, ClientSecret, EndpointMaybeSet, EndpointNotSet, EndpointSet, RedirectUrl,
+    RevocationUrl, TokenResponse, TokenUrl,
 };
-use schematic_define::PkceRequirement;
 use tokio::sync::RwLock;
 
 use crate::error::OAuthError;
 use crate::store::TokenStore;
-use crate::types::{AuthorizationSession, OAuth2RuntimeConfig, StoredTokens};
+use crate::types::{OAuth2RuntimeConfig, StoredTokens};
 
 /// Concrete client type with all optional endpoints using `EndpointMaybeSet`.
 ///
@@ -28,7 +31,7 @@ type OAuthClient = oauth2::Client<
     BasicErrorResponse,
     BasicTokenResponse,
     BasicTokenIntrospectionResponse,
-    StandardRevocableToken,
+    oauth2::StandardRevocableToken,
     BasicRevocationErrorResponse,
     EndpointMaybeSet, // auth URL
     EndpointNotSet,   // device auth URL
@@ -68,9 +71,9 @@ type OAuthClient = oauth2::Client<
 /// let manager = OAuth2Manager::new(config, Box::new(MemoryTokenStore::new())).unwrap();
 /// ```
 pub struct OAuth2Manager {
-    client: OAuthClient,
-    config: OAuth2RuntimeConfig,
-    store: RwLock<Box<dyn TokenStore>>,
+    pub(super) client: OAuthClient,
+    pub(super) config: OAuth2RuntimeConfig,
+    pub(super) store: RwLock<Box<dyn TokenStore>>,
 }
 
 impl OAuth2Manager {
@@ -128,207 +131,13 @@ impl OAuth2Manager {
             store: RwLock::new(store),
         })
     }
-
-    /// Begins an authorization code flow by building the authorization URL.
-    ///
-    /// The caller should direct the user to the returned URL. After the user
-    /// authorizes, pass the callback `code` and `state` to [`Self::exchange_code`].
-    ///
-    /// ## Errors
-    ///
-    /// Returns `OAuthError::Configuration` if the authorization URL is not set
-    /// on the provider config.
-    pub fn begin_authorization(&self) -> Result<AuthorizationSession, OAuthError> {
-        let mut auth_request = self
-            .client
-            .authorize_url(CsrfToken::new_random)
-            .map_err(|e| OAuthError::Configuration(e.to_string()))?;
-
-        for scope in &self.config.scopes {
-            auth_request = auth_request.add_scope(Scope::new(scope.clone()));
-        }
-
-        let pkce_verifier = match self.config.provider.pkce {
-            PkceRequirement::Required | PkceRequirement::Supported => {
-                let (challenge, verifier) = PkceCodeChallenge::new_random_sha256();
-                auth_request = auth_request.set_pkce_challenge(challenge);
-                Some(verifier.secret().to_string())
-            }
-            PkceRequirement::NotUsed | _ => None,
-        };
-
-        let (url, csrf_state) = auth_request.url();
-
-        Ok(AuthorizationSession {
-            authorization_url: url.to_string(),
-            csrf_state: csrf_state.secret().to_string(),
-            pkce_verifier,
-        })
-    }
-
-    /// Exchanges an authorization code for tokens and stores them.
-    ///
-    /// Validates the CSRF state parameter before performing the exchange.
-    ///
-    /// ## Errors
-    ///
-    /// - `OAuthError::StateMismatch` if the CSRF state does not match.
-    /// - `OAuthError::TokenExchange` if the token endpoint returns an error.
-    pub async fn exchange_code(
-        &self,
-        code: &str,
-        state: &str,
-        session: &AuthorizationSession,
-    ) -> Result<StoredTokens, OAuthError> {
-        if state != session.csrf_state {
-            return Err(OAuthError::StateMismatch {
-                expected: session.csrf_state.clone(),
-                actual: state.to_string(),
-            });
-        }
-
-        let mut token_request = self
-            .client
-            .exchange_code(AuthorizationCode::new(code.to_string()));
-
-        if let Some(ref verifier) = session.pkce_verifier {
-            token_request =
-                token_request.set_pkce_verifier(PkceCodeVerifier::new(verifier.clone()));
-        }
-
-        let http_client = build_http_client()?;
-        let token_response: BasicTokenResponse = token_request
-            .request_async(&http_client)
-            .await
-            .map_err(|e| OAuthError::TokenExchange(e.to_string()))?;
-
-        let tokens = extract_tokens(&token_response, &self.config.scopes);
-
-        let store = self.store.write().await;
-        store
-            .save(&tokens)
-            .map_err(|e| OAuthError::TokenStore(e.to_string()))?;
-
-        Ok(tokens)
-    }
-
-    /// Acquires a token using the client credentials grant.
-    ///
-    /// Stores the resulting token for subsequent use via [`Self::get_valid_token`].
-    ///
-    /// ## Errors
-    ///
-    /// Returns `OAuthError::TokenExchange` if the token endpoint returns an error.
-    pub async fn acquire_client_credentials_token(&self) -> Result<StoredTokens, OAuthError> {
-        let mut request = self.client.exchange_client_credentials();
-
-        for scope in &self.config.scopes {
-            request = request.add_scope(Scope::new(scope.clone()));
-        }
-
-        let http_client = build_http_client()?;
-        let token_response: BasicTokenResponse = request
-            .request_async(&http_client)
-            .await
-            .map_err(|e| OAuthError::TokenExchange(e.to_string()))?;
-
-        let tokens = extract_tokens(&token_response, &self.config.scopes);
-
-        let store = self.store.write().await;
-        store
-            .save(&tokens)
-            .map_err(|e| OAuthError::TokenStore(e.to_string()))?;
-
-        Ok(tokens)
-    }
-
-    /// Returns a valid access token string, refreshing if necessary.
-    ///
-    /// ## Errors
-    ///
-    /// - `OAuthError::AuthenticationRequired` if no token is stored.
-    /// - `OAuthError::TokenRefresh` if refresh fails.
-    pub async fn get_valid_token(&self) -> Result<String, OAuthError> {
-        let store = self.store.read().await;
-        let tokens = store.load()?;
-        drop(store);
-
-        match tokens {
-            Some(tokens) if !tokens.is_expired() => Ok(tokens.access_token),
-            Some(tokens) if tokens.refresh_token.is_some() => self.refresh_token(&tokens).await,
-            Some(_) | None => Err(OAuthError::AuthenticationRequired),
-        }
-    }
-
-    /// Revokes the current token if a revocation URL is configured.
-    ///
-    /// Clears the token store after successful revocation.
-    ///
-    /// ## Errors
-    ///
-    /// - `OAuthError::Configuration` if no revocation URL is configured.
-    /// - `OAuthError::TokenRefresh` if the revocation request fails.
-    /// - `OAuthError::AuthenticationRequired` if no token is stored.
-    pub async fn revoke_token(&self) -> Result<(), OAuthError> {
-        if self.config.provider.revocation_url.is_none() {
-            return Err(OAuthError::Configuration(
-                "No revocation URL configured for this provider".into(),
-            ));
-        }
-
-        let store = self.store.read().await;
-        let tokens = store.load()?;
-        drop(store);
-
-        let tokens = tokens.ok_or(OAuthError::AuthenticationRequired)?;
-
-        let http_client = build_http_client()?;
-        let token_to_revoke = oauth2::AccessToken::new(tokens.access_token);
-
-        self.client
-            .revoke_token(token_to_revoke.into())
-            .map_err(|e| OAuthError::Configuration(e.to_string()))?
-            .request_async(&http_client)
-            .await
-            .map_err(|e| OAuthError::TokenRefresh(format!("Revocation failed: {e}")))?;
-
-        let store = self.store.write().await;
-        store.clear()?;
-
-        Ok(())
-    }
-
-    /// Refreshes the token using the stored refresh token.
-    async fn refresh_token(&self, tokens: &StoredTokens) -> Result<String, OAuthError> {
-        let refresh_token = tokens
-            .refresh_token
-            .as_ref()
-            .ok_or(OAuthError::TokenRefresh(
-                "No refresh token available".into(),
-            ))?;
-
-        let http_client = build_http_client()?;
-        let token_response: BasicTokenResponse = self
-            .client
-            .exchange_refresh_token(&RefreshToken::new(refresh_token.clone()))
-            .request_async(&http_client)
-            .await
-            .map_err(|e| OAuthError::TokenRefresh(e.to_string()))?;
-
-        let new_tokens = extract_tokens(&token_response, &self.config.scopes);
-
-        let store = self.store.write().await;
-        store.save(&new_tokens)?;
-
-        Ok(new_tokens.access_token)
-    }
 }
 
 /// Builds a reqwest HTTP client configured for OAuth2 flows.
 ///
 /// Disables redirect following to prevent SSRF vulnerabilities, as
 /// recommended by the `oauth2` crate documentation.
-fn build_http_client() -> Result<reqwest::Client, OAuthError> {
+pub(super) fn build_http_client() -> Result<reqwest::Client, OAuthError> {
     reqwest::ClientBuilder::new()
         .redirect(reqwest::redirect::Policy::none())
         .build()
@@ -336,7 +145,7 @@ fn build_http_client() -> Result<reqwest::Client, OAuthError> {
 }
 
 /// Extracts token data from an OAuth2 token response into a `StoredTokens`.
-fn extract_tokens<EF, TT>(
+pub(super) fn extract_tokens<EF, TT>(
     response: &oauth2::StandardTokenResponse<EF, TT>,
     default_scopes: &[String],
 ) -> StoredTokens
@@ -365,9 +174,9 @@ where
 mod tests {
     use super::*;
     use crate::store::MemoryTokenStore;
-    use schematic_define::{OAuth2ClientAuthMethod, OAuth2Config, OAuth2GrantType};
+    use schematic_define::{OAuth2ClientAuthMethod, OAuth2Config, OAuth2GrantType, PkceRequirement};
 
-    fn auth_code_config() -> OAuth2RuntimeConfig {
+    pub(super) fn auth_code_config() -> OAuth2RuntimeConfig {
         OAuth2RuntimeConfig {
             provider: OAuth2Config {
                 grant_type: OAuth2GrantType::AuthorizationCodePkce,
@@ -386,7 +195,7 @@ mod tests {
         }
     }
 
-    fn client_credentials_config() -> OAuth2RuntimeConfig {
+    pub(super) fn client_credentials_config() -> OAuth2RuntimeConfig {
         OAuth2RuntimeConfig {
             provider: OAuth2Config {
                 grant_type: OAuth2GrantType::ClientCredentials,
