@@ -19,9 +19,13 @@
 //! provision WezTerm should always set this so Level 2 coverage is
 //! actually enforced, not just nominally present.
 
+use biscuit_test_harness::wezterm::WezTermHarness;
 use biscuit_test_harness::{CapturedFrame, TerminalHarness, skip_with_reason};
 use serial_test::serial;
 use std::fs;
+use std::sync::Mutex;
+use std::sync::atomic::{AtomicU32, Ordering};
+use std::time::{Duration, Instant};
 use tempfile::tempdir;
 
 /// Returns `true` when the environment requires Level 2 tests to run (CI mode).
@@ -32,11 +36,77 @@ fn level2_required() -> bool {
     )
 }
 
-/// Helper: write a markdown fixture, run `md` with the given flags inside the
-/// harness, and return the captured frame.
-fn run_md(file_body: &str, extra_args: &str) -> Option<(CapturedFrame, std::path::PathBuf)> {
-    use biscuit_test_harness::wezterm::WezTermHarness;
+/// Process-wide shared WezTerm pane reused across every test in this file.
+///
+/// Spawning a fresh WezTerm window is the dominant cost in Level 2 layout
+/// tests (≈2–3 s per spawn plus the prompt-readiness wait). All tests in
+/// this file are `#[serial(level2_terminal)]`, so they execute one at a
+/// time and can safely share a single pane.
+///
+/// Between invocations the pane is reset with `clear` so each test sees a
+/// clean visible region. The pane is intentionally not torn down at end of
+/// process — it lives in WezTerm's background workspace and is reclaimed
+/// when WezTerm exits.
+static SHARED_HARNESS: Mutex<Option<WezTermHarness>> = Mutex::new(None);
 
+/// Monotonic counter for sentinel uniqueness across tests in this binary.
+static SENTINEL_COUNTER: AtomicU32 = AtomicU32::new(0);
+
+/// Maximum wall time we'll spend waiting for a single command's completion
+/// sentinel to appear in the pane. Generous — most `md` invocations finish
+/// in well under a second; this is a safety net for first-run cold builds.
+const SENTINEL_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// Polls the pane every 50 ms looking for `sentinel`, returning the final
+/// captured frame once it appears. Returns the last attempted capture on
+/// timeout so callers can include it in panic diagnostics.
+fn wait_for_sentinel(
+    harness: &mut WezTermHarness,
+    sentinel: &str,
+) -> Result<CapturedFrame, CapturedFrame> {
+    let deadline = Instant::now() + SENTINEL_TIMEOUT;
+    let mut last = CapturedFrame::from_raw(String::new());
+    while Instant::now() < deadline {
+        if let Ok(frame) = harness.capture() {
+            // The sentinel also appears inline in the command echo
+            // (e.g. `$ md ...; printf '\n__DM_DONE_0__\n'`). Only treat the
+            // sentinel as completion when it appears on a line of its own,
+            // which only happens after `printf` actually runs.
+            if frame.plain.lines().any(|l| l.trim() == sentinel) {
+                return Ok(frame);
+            }
+            last = frame;
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    Err(last)
+}
+
+/// Runs `cmd` in the shared pane, appending a unique completion sentinel so
+/// we can detect when `cmd` has finished without depending on the user's
+/// shell prompt format.
+fn run_with_sentinel(harness: &mut WezTermHarness, cmd: &str) -> CapturedFrame {
+    let id = SENTINEL_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let sentinel = format!("__DM_LVL2_DONE_{id}__");
+    // `printf` is portable across bash/zsh and emits the sentinel on its own
+    // line so it never visually fuses with `md`'s last row.
+    let wrapped = format!("{cmd}; printf '\\n{sentinel}\\n'");
+    harness
+        .send_command_with_env(&wrapped, &[])
+        .expect("send_command_with_env failed");
+    match wait_for_sentinel(harness, &sentinel) {
+        Ok(frame) => frame,
+        Err(last) => panic!(
+            "timed out waiting for sentinel {sentinel} after {SENTINEL_TIMEOUT:?}. \
+             last plain capture:\n{}",
+            last.plain
+        ),
+    }
+}
+
+/// Helper: write a markdown fixture, run `md` with the given flags inside the
+/// shared harness pane, and return the captured frame.
+fn run_md(file_body: &str, extra_args: &str) -> Option<(CapturedFrame, std::path::PathBuf)> {
     if !WezTermHarness::available() {
         if level2_required() {
             panic!(
@@ -52,16 +122,24 @@ fn run_md(file_body: &str, extra_args: &str) -> Option<(CapturedFrame, std::path
     let file_path = dir.path().join("layout.md");
     fs::write(&file_path, file_body).unwrap();
 
-    let mut harness = WezTermHarness::new();
-    harness.spawn_shell().expect("spawn_shell failed");
+    // Recover from a previous test's panic — poisoned mutexes are fine here
+    // since the harness state is just a pane id we re-validate via `clear`.
+    let mut guard = SHARED_HARNESS
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner());
+    if guard.is_none() {
+        let mut harness = WezTermHarness::new();
+        harness.spawn_shell().expect("spawn_shell failed");
+        *guard = Some(harness);
+    }
+    let harness = guard.as_mut().unwrap();
+
+    // Reset the visible region so the previous test's output does not bleed
+    // into this capture. `clear` is portable across bash and zsh.
+    run_with_sentinel(harness, "clear");
 
     let cmd = format!("md {} {}", file_path.display(), extra_args);
-    harness
-        .send_command_with_env(&cmd, &[])
-        .expect("send_command_with_env failed");
-    let _ = biscuit_test_harness::wait_for_prompt(&mut harness);
-
-    let frame = harness.capture().expect("capture failed");
+    let frame = run_with_sentinel(harness, &cmd);
     // Keep tempdir alive past capture by returning its path.
     Some((frame, file_path))
 }
@@ -388,13 +466,17 @@ fn level2_table_center_alignment_indents_more_than_left() {
 | - | - |\n\
 | sentinelA | sentinelB |\n";
 
-    let Some((left, _)) = run_md(body, "--align-tables left --fill-tables max=20 --max-width 60")
+    // `max` must be wide enough for the table to actually render — each
+    // wrapping column needs ~9 cols of content plus pipes/padding, so a
+    // 2-column table needs roughly 25 cols minimum. We pick 40 so the cap
+    // still leaves visible alignment surplus on the 60-col page.
+    let Some((left, _)) = run_md(body, "--align-tables left --fill-tables max=40 --max-width 60")
     else {
         return;
     };
     let Some((center, _)) = run_md(
         body,
-        "--align-tables center --fill-tables max=20 --max-width 60",
+        "--align-tables center --fill-tables max=40 --max-width 60",
     ) else {
         return;
     };
@@ -403,12 +485,17 @@ fn level2_table_center_alignment_indents_more_than_left() {
         .plain
         .lines()
         .find(|l| l.contains("sentinelA"))
-        .expect("left: data row");
+        .unwrap_or_else(|| panic!("left: data row missing. plain:\n---\n{}\n---", left.plain));
     let row_center = center
         .plain
         .lines()
         .find(|l| l.contains("sentinelA"))
-        .expect("center: data row");
+        .unwrap_or_else(|| {
+            panic!(
+                "center: data row missing. plain:\n---\n{}\n---",
+                center.plain
+            )
+        });
     let left_indent = row_left.chars().take_while(|c| *c == ' ').count();
     let center_indent = row_center.chars().take_while(|c| *c == ' ').count();
     assert!(
