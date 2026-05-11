@@ -5267,6 +5267,98 @@ exit 0
     }
 }
 
+/// Drives an OpenCode `task` tool completion through the full wrap stack and
+/// asserts the synthesized SubagentStart/SubagentStop lifecycle reaches the
+/// live sink and populates `WatchdogState.recent_subagents`. Verified
+/// end-to-end by triggering a `step_timeout` breach after `step_finish` and
+/// asserting the rendered "Recent subagents:" listing names the descriptions
+/// supplied in the synthetic OpenCode stream.
+#[cfg(unix)]
+#[test]
+#[serial_test::serial]
+fn watchdog_opencode_task_synthesis_populates_recent_subagents_in_breach() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+    seed_minimal_config(workspace.path());
+
+    let md_file = workspace.path().join("test.md");
+    fs::write(
+        &md_file,
+        "---\ntitle: opencode task synthesis integration\n---\nHello\n",
+    )
+    .unwrap();
+
+    // Fake OpenCode emits:
+    //   1. init + step_start
+    //   2. two `task` tool_use completions with distinct descriptions
+    //   3. step_finish (closes the per-step grace window)
+    //   4. silence longer than step_timeout (triggers breach)
+    //   5. exit 0
+    write_executable(
+        &path_dir.join("opencode"),
+        r#"#!/bin/sh
+if [ "$1" = "models" ]; then
+  printf '%s\n' '["test-model"]'
+  exit 0
+fi
+printf '%s\n' '{"type":"init","session_id":"oc-task-syn","model":"test-model"}'
+printf '%s\n' '{"type":"step_start","sessionID":"oc-task-syn"}'
+printf '%s\n' '{"type":"tool_use","part":{"id":"t1","tool":"task","state":{"status":"completed","input":{"description":"First subagent task"},"metadata":{"sessionId":"child-1"},"output":"done"}}}'
+printf '%s\n' '{"type":"tool_use","part":{"id":"t2","tool":"task","state":{"status":"completed","input":{"description":"Second subagent task"},"metadata":{"sessionId":"child-2"},"output":"done"}}}'
+printf '%s\n' '{"type":"step_finish","sessionID":"oc-task-syn","part":{"reason":"stop","tokens":{"input":1,"output":1,"total":2}}}'
+/bin/sleep 6
+exit 0
+"#,
+    );
+
+    let assert = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
+        .env("PATH", &path_dir)
+        .env("OPENCODE_MODEL", "test-model")
+        .env("CLAUDINE_STEP_TIMEOUT", "2s")
+        .env("CLAUDINE_WATCHDOG_INTERVAL", "1s")
+        .env("CLAUDINE_KILL_GRACE", "1s")
+        .args(["compose", "--opencode", md_file.to_str().unwrap()])
+        .timeout(Duration::from_secs(30))
+        .assert()
+        .failure();
+
+    let stderr = String::from_utf8_lossy(&assert.get_output().stderr);
+    let plain = strip_ansi(&stderr);
+
+    assert!(
+        plain.contains("Recent subagents:"),
+        "stderr must contain 'Recent subagents:' listing from breach diagnostic; got: {plain}"
+    );
+    // Scope the newest-first ordering assertion to the breach listing only —
+    // the live stream above the breach lists tools in chronological order so
+    // a naive `plain.find(...)` would compare the wrong occurrences.
+    let listing_start = plain
+        .find("Recent subagents:")
+        .expect("Recent subagents: header must be present");
+    let listing = &plain[listing_start..];
+    assert!(
+        listing.contains("First subagent task"),
+        "Recent subagents listing must mention 'First subagent task'; got: {listing}"
+    );
+    assert!(
+        listing.contains("Second subagent task"),
+        "Recent subagents listing must mention 'Second subagent task'; got: {listing}"
+    );
+    let idx_second = listing.find("Second subagent task");
+    let idx_first = listing.find("First subagent task");
+    assert!(
+        idx_second.is_some() && idx_first.is_some() && idx_second < idx_first,
+        "Recent subagents listing must be newest-first; got: {listing}"
+    );
+    assert!(
+        plain.contains("2 subagents observed"),
+        "breach diagnostic must name the observed subagent count; got: {plain}"
+    );
+}
+
 /// Non-harness compose respects --timeout CLI flag (duration grammar).
 #[cfg(unix)]
 #[test]
