@@ -25,7 +25,7 @@ failure:
 # Review of {{dir}}
 > Iteration #{{iteration}}
 
-::file _senior.reviewer.md
+::file _senior-reviewer.md
 
 ## Context
 
