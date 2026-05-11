@@ -4,7 +4,7 @@
 //! including discovery, filtering, and formatting.
 
 use research::list::{
-    ResearchOutput, apply_filters, discover_topics, format_json, format_terminal,
+    ResearchOutput, TopicType, apply_filters, discover_topics, format_json, format_terminal,
 };
 use std::path::PathBuf;
 
@@ -37,7 +37,7 @@ fn test_complete_topic_has_no_issues() {
         .find(|t| t.name == "complete-topic")
         .expect("complete-topic not found");
 
-    assert_eq!(complete.topic_type, "library");
+    assert_eq!(complete.topic_type, TopicType::Library);
     assert_eq!(
         complete.description,
         Some("A complete test library with all files present".to_string())
@@ -62,7 +62,7 @@ fn test_incomplete_topic_has_critical_issues() {
         .find(|t| t.name == "incomplete-topic")
         .expect("incomplete-topic not found");
 
-    assert_eq!(incomplete.topic_type, "framework");
+    assert_eq!(incomplete.topic_type, TopicType::Framework);
     assert_eq!(
         incomplete.description,
         Some("An incomplete test framework with missing files".to_string())
@@ -104,7 +104,8 @@ fn test_corrupt_metadata_topic_marked_as_missing() {
         .expect("corrupt-metadata not found");
 
     assert_eq!(
-        corrupt.topic_type, "library",
+        corrupt.topic_type,
+        TopicType::Library,
         "Should use default type when metadata missing"
     );
     assert_eq!(corrupt.description, None, "Should have no description");
@@ -148,7 +149,7 @@ fn test_filter_by_type() {
 
     assert_eq!(filtered.len(), 1, "Should match exactly 1 framework");
     assert_eq!(filtered[0].name, "incomplete-topic");
-    assert_eq!(filtered[0].topic_type, "framework");
+    assert_eq!(filtered[0].topic_type, TopicType::Framework);
 }
 
 #[test]

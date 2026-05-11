@@ -278,7 +278,7 @@ fn default_helper_order(
 pub fn render_text(report: &InfoReport, term: &Terminal) -> String {
     let mut out = String::new();
 
-    out.push_str(&Prose::new(format!("<b>Host OS:</b> {}", report.host_os)).render(&term));
+    out.push_str(&Prose::new(format!("<b>Host OS:</b> {}", report.host_os)).render(term));
     out.push('\n');
     if let Some(daemon) = &report.active_daemon {
         let vendor = daemon
@@ -296,48 +296,48 @@ pub fn render_text(report: &InfoReport, term: &Terminal) -> String {
                 "<b>Active daemon:</b> {}{vendor}{version}",
                 daemon.name
             ))
-            .render(&term),
+            .render(term),
         );
         out.push('\n');
     }
     if let Some(bundle_id) = &report.bundle_id {
         out.push_str(
-            &Prose::new(format!("<b>macOS bundle id:</b> <dim>{}</dim>", bundle_id)).render(&term),
+            &Prose::new(format!("<b>macOS bundle id:</b> <dim>{}</dim>", bundle_id)).render(term),
         );
         out.push('\n');
     }
     if let Some(app_id) = &report.app_id {
         out.push_str(
-            &Prose::new(format!("<b>Windows app id:</b> <dim>{}</dim>", app_id)).render(&term),
+            &Prose::new(format!("<b>Windows app id:</b> <dim>{}</dim>", app_id)).render(term),
         );
         out.push('\n');
     }
 
     out.push('\n');
-    out.push_str(&render_helper_table(report, &term));
+    out.push_str(&render_helper_table(report, term));
 
     out.push('\n');
-    out.push_str(&Prose::new("<b>Election order on this host</b>").render(&term));
+    out.push_str(&Prose::new("<b>Election order on this host</b>").render(term));
     out.push('\n');
     if report.election_order.is_empty() {
         out.push_str(
             &Prose::new("  <dim>(no helpers installed; falling back to native backend)</dim>")
-                .render(&term),
+                .render(term),
         );
         out.push('\n');
     } else {
         for (i, helper) in report.election_order.iter().enumerate() {
-            out.push_str(&Prose::new(format!("  <dim>{}.</dim> {}", i + 1, helper)).render(&term));
+            out.push_str(&Prose::new(format!("  <dim>{}.</dim> {}", i + 1, helper)).render(term));
             out.push('\n');
         }
     }
 
     out.push('\n');
-    out.push_str(&Prose::new("<b>Configured routes</b>").render(&term));
+    out.push_str(&Prose::new("<b>Configured routes</b>").render(term));
     out.push('\n');
     if report.routes.is_empty() {
         out.push_str(
-            &Prose::new("  <dim>(none configured; run `messenger setup`)</dim>").render(&term),
+            &Prose::new("  <dim>(none configured; run `messenger setup`)</dim>").render(term),
         );
         out.push('\n');
     } else {
@@ -352,7 +352,7 @@ pub fn render_text(report: &InfoReport, term: &Terminal) -> String {
                     "  <b>{}</b> <dim>→</dim> {}{marker}",
                     route.name, route.provider
                 ))
-                .render(&term),
+                .render(term),
             );
             out.push('\n');
         }

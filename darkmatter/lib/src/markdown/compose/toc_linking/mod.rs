@@ -43,6 +43,7 @@ use crate::markdown::Markdown;
 use crate::markdown::compose::transclusion::{DirectiveKind, resolve_path};
 use crate::markdown::compose::{ComposeSource, TransclusionOptions};
 use crate::markdown::toc::MarkdownTocNode;
+use biscuit_terminal::errors::SourceContext;
 use filter::HeadingFilter;
 use parser::parse_toc_linking_directives;
 use render::render_toc_links;
@@ -61,11 +62,18 @@ pub(crate) fn resolve_target_chain(
     directive: &TocLinkingDirective,
     source: &ComposeSource,
     transclusion_options: &TransclusionOptions,
+    ctx: SourceContext,
 ) -> Result<Option<(String, std::path::PathBuf)>, TocLinkingError> {
     trace!(target = %directive.targets.join(" > "), "toc_linking: resolving target chain");
 
     for target in &directive.targets {
-        match resolve_file(target, transclusion_options, source, directive.line) {
+        match resolve_file(
+            target,
+            transclusion_options,
+            source,
+            directive.line,
+            ctx.clone(),
+        ) {
             Ok(path) => return Ok(Some((target.clone(), path))),
             Err(_) => continue,
         }
@@ -122,8 +130,20 @@ pub(crate) fn process_toc_linking(
 
     let mut replacements: Vec<(std::ops::Range<usize>, String)> = Vec::new();
 
+    let ctx = match source {
+        ComposeSource::File(path) => {
+            let content = std::fs::read_to_string(path).unwrap_or_default();
+            SourceContext::new(path.clone(), path.clone(), content)
+        }
+        _ => SourceContext::new(
+            std::path::PathBuf::from("<unknown>"),
+            std::path::PathBuf::from("<unknown>"),
+            content.to_string(),
+        ),
+    };
     for directive in &directives {
-        if let Some((target, path)) = resolve_target_chain(directive, source, transclusion_options)?
+        if let Some((target, path)) =
+            resolve_target_chain(directive, source, transclusion_options, ctx.clone())?
         {
             let file_content = std::fs::read_to_string(&path)?;
             let md: Markdown = file_content.as_str().into();
@@ -166,13 +186,15 @@ fn resolve_file(
     options: &TransclusionOptions,
     source: &ComposeSource,
     line: usize,
+    ctx: SourceContext,
 ) -> Result<std::path::PathBuf, TocLinkingError> {
-    let path = resolve_path(target, DirectiveKind::File, options, source, line).map_err(|_| {
-        TocLinkingError::FileNotFound {
-            path: target.to_string(),
-            line,
-        }
-    })?;
+    let path =
+        resolve_path(target, DirectiveKind::File, options, source, line, ctx).map_err(|_| {
+            TocLinkingError::FileNotFound {
+                path: target.to_string(),
+                line,
+            }
+        })?;
 
     if !path.exists() {
         return Err(TocLinkingError::FileNotFound {

@@ -173,7 +173,7 @@ fn format_main_line(topic: &TopicInfo, hide_type_badge: bool, verbose: bool) -> 
     // Type badge (unless hidden)
     if !hide_type_badge {
         parts.push(" ".to_string());
-        parts.push(format_type_badge(&topic.topic_type));
+        parts.push(format_type_badge(topic.topic_type.as_str()));
     }
 
     // Language icon after type badge (in all modes)
@@ -393,7 +393,7 @@ fn format_migration_issue(topic: &TopicInfo) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::list::types::{ResearchOutput, TopicInfo};
+    use crate::list::types::{ResearchOutput, TopicInfo, TopicType};
     use std::path::PathBuf;
 
     #[test]
@@ -414,7 +414,7 @@ mod tests {
     fn test_format_json_single_topic() {
         let topic = TopicInfo {
             name: "test-library".to_string(),
-            topic_type: "library".to_string(),
+            topic_type: TopicType::Library,
             description: Some("A test library for testing".to_string()),
             language: None,
             additional_files: vec!["custom_prompt".to_string()],
@@ -433,7 +433,7 @@ mod tests {
 
         // Verify the content matches
         assert_eq!(parsed[0].name, "test-library");
-        assert_eq!(parsed[0].topic_type, "library");
+        assert_eq!(parsed[0].topic_type, TopicType::Library);
         assert_eq!(
             parsed[0].description,
             Some("A test library for testing".to_string())
@@ -454,7 +454,7 @@ mod tests {
     fn test_format_json_multiple_topics() {
         let topic1 = TopicInfo {
             name: "lib-one".to_string(),
-            topic_type: "library".to_string(),
+            topic_type: TopicType::Library,
             description: Some("First library".to_string()),
             language: None,
             additional_files: vec![],
@@ -466,7 +466,7 @@ mod tests {
 
         let topic2 = TopicInfo {
             name: "lib-two".to_string(),
-            topic_type: "framework".to_string(),
+            topic_type: TopicType::Framework,
             description: Some("Second framework".to_string()),
             language: None,
             additional_files: vec!["question_1".to_string(), "question_2".to_string()],
@@ -478,7 +478,7 @@ mod tests {
 
         let topic3 = TopicInfo {
             name: "lib-three".to_string(),
-            topic_type: "software".to_string(),
+            topic_type: TopicType::Software,
             description: None,
             language: None,
             additional_files: vec![],
@@ -497,19 +497,19 @@ mod tests {
 
         // Verify all topics are present with correct data
         assert_eq!(parsed[0].name, "lib-one");
-        assert_eq!(parsed[0].topic_type, "library");
+        assert_eq!(parsed[0].topic_type, TopicType::Library);
         assert_eq!(parsed[0].description, Some("First library".to_string()));
         assert_eq!(parsed[0].additional_files.len(), 0);
         assert_eq!(parsed[0].missing_output.len(), 0);
 
         assert_eq!(parsed[1].name, "lib-two");
-        assert_eq!(parsed[1].topic_type, "framework");
+        assert_eq!(parsed[1].topic_type, TopicType::Framework);
         assert_eq!(parsed[1].additional_files.len(), 2);
         assert_eq!(parsed[1].missing_output.len(), 2);
         assert_eq!(parsed[1].needs_migration, false);
 
         assert_eq!(parsed[2].name, "lib-three");
-        assert_eq!(parsed[2].topic_type, "software");
+        assert_eq!(parsed[2].topic_type, TopicType::Software);
         assert_eq!(parsed[2].description, None);
         assert_eq!(parsed[2].missing_underlying.len(), 2);
     }
@@ -529,7 +529,7 @@ mod tests {
     fn test_format_json_includes_all_fields() {
         let topic = TopicInfo {
             name: "complete-topic".to_string(),
-            topic_type: "library".to_string(),
+            topic_type: TopicType::Library,
             description: Some("Complete topic".to_string()),
             language: None,
             additional_files: vec!["file1".to_string()],

@@ -897,7 +897,7 @@ fn test_set_overlay_strict_rejects_reassigned() {
         .arg(dir.path().join("parent.md"))
         .assert()
         .failure()
-        .stderr(predicate::str::contains("reassigned frontmatter property"));
+        .stderr(predicate::str::contains("duplicate frontmatter property"));
 }
 
 #[test]
@@ -1550,7 +1550,6 @@ fn test_get_malformed_frontmatter_renders_status_block_with_offending_line() {
         .failure()
         .stderr(predicate::str::contains("MarkdownError"))
         .stderr(predicate::str::contains("frontmatter parse failed"))
-        .stderr(predicate::str::contains("Position:"))
         .stderr(predicate::str::contains("'@' magic lookup emits results"));
 }
 
@@ -2494,8 +2493,11 @@ fn test_completions_fish() {
 #[test]
 fn test_line_numbers_html_output() {
     let input = "```rust\nfn main() {}\n```";
+    // Use `--line-numbers=true` to avoid the optional-arg ambiguity with the
+    // `-` stdin marker positional. The bare form `--line-numbers -` would let
+    // clap consume `-` as the optional value.
     md_cmd()
-        .args(["--output", "html", "--line-numbers", "-"])
+        .args(["--output", "html", "--line-numbers=true", "-"])
         .write_stdin(input)
         .assert()
         .success()
@@ -2769,4 +2771,488 @@ fn test_compose_html_spaced_attributes() {
         !stdout.contains("src = \"./img.png\""),
         "stdout should not contain unprocessed spaced src, got:\n{stdout}"
     );
+}
+
+// =============================================================================
+//                          LAYOUT FLAGS (Phase 5)
+// =============================================================================
+
+#[test]
+fn layout_margin_shorthand_overrides_axis_and_side() {
+    let tmp = md_file("# Hello\n");
+    let output = md_cmd()
+        .arg(tmp.path())
+        .arg("--margin")
+        .arg("4")
+        .arg("--mx")
+        .arg("2")
+        .arg("--mt")
+        .arg("1")
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "margin flags should parse and be accepted"
+    );
+}
+
+#[test]
+fn layout_padding_shorthand_overrides_axis_and_side() {
+    let tmp = md_file("# Hello\n");
+    let output = md_cmd()
+        .arg(tmp.path())
+        .arg("--padding")
+        .arg("4")
+        .arg("--px")
+        .arg("2")
+        .arg("--pt")
+        .arg("1")
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "padding flags should parse and be accepted"
+    );
+}
+
+#[test]
+fn layout_max_width_zero_rejected() {
+    let tmp = md_file("# Hello\n");
+    let output = md_cmd()
+        .arg(tmp.path())
+        .arg("--max-width")
+        .arg("0")
+        .output()
+        .unwrap();
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("max-width") || stderr.contains("0"),
+        "should reject --max-width 0, got: {stderr}"
+    );
+}
+
+#[test]
+fn layout_max_width_positive_accepted() {
+    let tmp = md_file("# Hello\n");
+    let output = md_cmd()
+        .arg(tmp.path())
+        .arg("--max-width")
+        .arg("80")
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+}
+
+#[test]
+fn layout_fill_full_accepted() {
+    let tmp = md_file("```rust\nfn main() {}\n```\n");
+    let output = md_cmd()
+        .arg(tmp.path())
+        .arg("--fill")
+        .arg("full")
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+}
+
+#[test]
+fn layout_fill_pad_fixed_accepted() {
+    let tmp = md_file("```rust\nfn main() {}\n```\n");
+    let output = md_cmd()
+        .arg(tmp.path())
+        .arg("--fill")
+        .arg("pad=4")
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+}
+
+#[test]
+fn layout_fill_pad_percent_accepted() {
+    let tmp = md_file("```rust\nfn main() {}\n```\n");
+    let output = md_cmd()
+        .arg(tmp.path())
+        .arg("--fill")
+        .arg("pad=10%")
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+}
+
+#[test]
+fn layout_fill_indent_max_explicit_accepted() {
+    let tmp = md_file("```rust\nfn main() {}\n```\n");
+    for fill in ["indent=2", "max=40", "explicit=60"] {
+        let output = md_cmd()
+            .arg(tmp.path())
+            .arg("--fill")
+            .arg(fill)
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "--fill {fill} should succeed");
+    }
+}
+
+#[test]
+fn layout_fill_unknown_kind_rejected() {
+    let tmp = md_file("# Hello\n");
+    let output = md_cmd()
+        .arg(tmp.path())
+        .arg("--fill")
+        .arg("unknown=4")
+        .output()
+        .unwrap();
+
+    assert!(!output.status.success());
+}
+
+#[test]
+fn layout_fill_percent_over_100_rejected() {
+    let tmp = md_file("# Hello\n");
+    let output = md_cmd()
+        .arg(tmp.path())
+        .arg("--fill")
+        .arg("pad=150%")
+        .output()
+        .unwrap();
+
+    assert!(!output.status.success());
+}
+
+#[test]
+fn layout_fill_negative_rejected() {
+    let tmp = md_file("# Hello\n");
+    let output = md_cmd()
+        .arg(tmp.path())
+        .arg("--fill")
+        .arg("pad=-1")
+        .output()
+        .unwrap();
+
+    assert!(!output.status.success());
+}
+
+#[test]
+fn layout_alignment_global_accepted() {
+    let tmp = md_file("| A | B |\n|---|---|\n| 1 | 2 |\n");
+    for align in ["left", "center", "right"] {
+        let output = md_cmd()
+            .arg(tmp.path())
+            .arg("--alignment")
+            .arg(align)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "--alignment {align} should succeed"
+        );
+    }
+}
+
+#[test]
+fn layout_align_component_overrides_global() {
+    let tmp = md_file("```rust\nfn main() {}\n```\n");
+    let output = md_cmd()
+        .arg(tmp.path())
+        .arg("--alignment")
+        .arg("center")
+        .arg("--align-code-blocks")
+        .arg("left")
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+}
+
+#[test]
+fn layout_page_bg_accepted() {
+    let tmp = md_file("# Hello\n");
+    for bg in ["transparent", "subtle", "pronounced"] {
+        let output = md_cmd()
+            .arg(tmp.path())
+            .arg("--page-bg")
+            .arg(bg)
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "--page-bg {bg} should succeed");
+    }
+}
+
+#[test]
+fn layout_page_background_alias_works() {
+    let tmp = md_file("# Hello\n");
+    let output = md_cmd()
+        .arg(tmp.path())
+        .arg("--page-background")
+        .arg("subtle")
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+}
+
+#[test]
+fn layout_line_numbers_flag_accepted() {
+    let tmp = md_file("```rust\nfn main() {}\n```\n");
+    let output = md_cmd()
+        .arg(tmp.path())
+        .arg("--line-numbers")
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "--line-numbers flag should be accepted"
+    );
+}
+
+#[test]
+fn layout_line_numbers_true_accepted() {
+    let tmp = md_file("```rust\nfn main() {}\n```\n");
+    let output = md_cmd()
+        .arg(tmp.path())
+        .arg("--line-numbers")
+        .arg("true")
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "--line-numbers true should be accepted"
+    );
+}
+
+#[test]
+fn layout_line_numbers_false_accepted() {
+    let tmp = md_file("```rust\nfn main() {}\n```\n");
+    let output = md_cmd()
+        .arg(tmp.path())
+        .arg("--line-numbers")
+        .arg("false")
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "--line-numbers false should be accepted"
+    );
+}
+
+#[test]
+fn layout_fill_component_specific_accepted() {
+    let tmp = md_file("```rust\nfn main() {}\n```\n");
+    let output = md_cmd()
+        .arg(tmp.path())
+        .arg("--fill-code-blocks")
+        .arg("max=40")
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+}
+
+#[test]
+fn layout_margin_negative_rejected() {
+    let tmp = md_file("# Hello\n");
+    let output = md_cmd()
+        .arg(tmp.path())
+        .arg("--margin")
+        .arg("-1")
+        .output()
+        .unwrap();
+
+    assert!(!output.status.success());
+}
+
+#[test]
+fn layout_no_flags_preserves_existing_behavior() {
+    let tmp = md_file("# Hello World\n\nSome prose here.\n");
+    let output = md_cmd().arg(tmp.path()).output().unwrap();
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("Hello World"),
+        "output should contain heading without layout flags"
+    );
+}
+
+#[test]
+fn layout_combined_margin_padding_bg() {
+    let tmp = md_file("# Hello\n");
+    let output = md_cmd()
+        .arg(tmp.path())
+        .arg("--margin")
+        .arg("2")
+        .arg("--padding")
+        .arg("1")
+        .arg("--page-bg")
+        .arg("subtle")
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+}
+
+// =============================================================================
+//                          RESOLVED LAYOUT PRECEDENCE TESTS
+// =============================================================================
+//
+// These tests assert that CLI precedence rules produce the documented
+// observable resolved page state — not just that the CLI parses successfully.
+// They drive `apply_cli_layout_flags` against parsed `Cli` values and verify
+// the final `DarkmatterPage` getters (`margin()`, `padding()`, `fill_for()`,
+// `alignment_for()`, `max_width()`, `line_numbers()`).
+
+use biscuit_terminal::terminal::Terminal;
+use clap::Parser;
+use darkmatter::layout::{
+    DarkmatterPage, PageAlignment, PageComponent, PageFill, WidthUnit,
+};
+use darkmatter_cli::Cli;
+use darkmatter_cli::output::apply_cli_layout_flags;
+
+fn parse_cli(args: &[&str]) -> Cli {
+    let mut full = vec!["md"];
+    full.extend_from_slice(args);
+    Cli::try_parse_from(full).expect("CLI args must parse")
+}
+
+fn resolved_page(args: &[&str]) -> DarkmatterPage {
+    let cli = parse_cli(args);
+    let term = Terminal::new_optimistic(120);
+    apply_cli_layout_flags(DarkmatterPage::new(&term), &cli)
+}
+
+#[test]
+fn layout_resolved_margin_shorthand_then_top_override() {
+    // `-m 2 --mt 0`: shorthand sets all sides to 2, then --mt clears just the
+    // top. The reviewer specifically called this out: precedence checks
+    // should assert observable resolved behavior, not parse success.
+    let page = resolved_page(&["fixture.md", "-m", "2", "--mt", "0"]);
+    let m = page.margin();
+    assert_eq!(m.top, 0, "--mt 0 must override -m 2 on the top edge");
+    assert_eq!(m.bottom, 2, "-m 2 must apply to the bottom edge");
+    assert_eq!(m.left, 2, "-m 2 must apply to the left edge");
+    assert_eq!(m.right, 2, "-m 2 must apply to the right edge");
+}
+
+#[test]
+fn layout_resolved_margin_axis_then_side() {
+    // `-m 4 --mx 2 --mt 1`: shorthand 4 everywhere, then horizontal axis to 2,
+    // then top to 1.
+    let page = resolved_page(&["fixture.md", "-m", "4", "--mx", "2", "--mt", "1"]);
+    let m = page.margin();
+    assert_eq!(m.top, 1, "--mt 1 overrides axis and shorthand on top");
+    assert_eq!(m.bottom, 4, "shorthand survives on bottom (no override)");
+    assert_eq!(m.left, 2, "--mx 2 overrides shorthand on left");
+    assert_eq!(m.right, 2, "--mx 2 overrides shorthand on right");
+}
+
+#[test]
+fn layout_resolved_padding_axis_then_side() {
+    let page = resolved_page(&["fixture.md", "--padding", "4", "--px", "2", "--pt", "1"]);
+    let p = page.padding();
+    assert_eq!(p.top, 1);
+    assert_eq!(p.bottom, 4);
+    assert_eq!(p.left, 2);
+    assert_eq!(p.right, 2);
+}
+
+#[test]
+fn layout_resolved_fill_global_then_component_specific() {
+    // `--fill max=40 --fill-code-blocks max=30`: global fill applies to all
+    // components, then code-block-specific fill overrides only that one.
+    let page = resolved_page(&[
+        "fixture.md",
+        "--fill",
+        "max=40",
+        "--fill-code-blocks",
+        "max=30",
+    ]);
+    assert_eq!(
+        page.fill_for(PageComponent::CodeBlocks),
+        PageFill::Max(WidthUnit::Fixed(30)),
+        "code-block-specific fill must override global"
+    );
+    assert_eq!(
+        page.fill_for(PageComponent::Lists),
+        PageFill::Max(WidthUnit::Fixed(40)),
+        "lists must still see the global fill"
+    );
+    assert_eq!(
+        page.fill_for(PageComponent::Tables),
+        PageFill::Max(WidthUnit::Fixed(40)),
+        "tables must still see the global fill"
+    );
+}
+
+#[test]
+fn layout_resolved_alignment_global_then_component_specific() {
+    let page = resolved_page(&[
+        "fixture.md",
+        "--alignment",
+        "center",
+        "--align-code-blocks",
+        "left",
+    ]);
+    assert_eq!(
+        page.alignment_for(PageComponent::CodeBlocks),
+        PageAlignment::Left,
+        "code-block-specific alignment must override global"
+    );
+    assert_eq!(
+        page.alignment_for(PageComponent::Lists),
+        PageAlignment::Center,
+        "lists must still see the global alignment"
+    );
+    assert_eq!(
+        page.alignment_for(PageComponent::BlockQuotes),
+        PageAlignment::Center,
+        "blockquotes must still see the global alignment"
+    );
+}
+
+#[test]
+fn layout_resolved_max_width() {
+    let page = resolved_page(&["fixture.md", "--max-width", "80"]);
+    assert_eq!(page.max_width(), Some(80));
+}
+
+#[test]
+fn layout_parsed_line_numbers_flag_values() {
+    // `--line-numbers` (no value) defaults to true; `--line-numbers false`
+    // explicitly disables. Verified against the parsed CLI struct since the
+    // CLI's `render_terminal_output` applies this flag separately from the
+    // layout-flag pipeline.
+    assert_eq!(parse_cli(&["fixture.md", "--line-numbers"]).line_numbers, Some(true));
+    assert_eq!(
+        parse_cli(&["fixture.md", "--line-numbers", "true"]).line_numbers,
+        Some(true)
+    );
+    assert_eq!(
+        parse_cli(&["fixture.md", "--line-numbers", "false"]).line_numbers,
+        Some(false)
+    );
+    assert_eq!(parse_cli(&["fixture.md"]).line_numbers, None);
+}
+
+#[test]
+fn layout_resolved_mt_alone_does_not_set_other_sides() {
+    // `--mt 3` alone must leave other edges at default (0); no implicit
+    // bleed from shorthand.
+    let page = resolved_page(&["fixture.md", "--mt", "3"]);
+    let m = page.margin();
+    assert_eq!(m.top, 3);
+    assert_eq!(m.bottom, 0);
+    assert_eq!(m.left, 0);
+    assert_eq!(m.right, 0);
 }

@@ -1,0 +1,13 @@
+[package]
+name = "test-toolkit"
+version = "0.1.0"
+edition = "2024"
+license = "AGPL-3.0-only"
+description = "Shared test lifecycle helpers for the Rusty Biscuit workspace"
+
+[dependencies]
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+
+[dev-dependencies]
+serial_test = "3"

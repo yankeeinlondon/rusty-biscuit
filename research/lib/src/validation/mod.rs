@@ -13,4 +13,4 @@ pub use frontmatter::{
     parse_and_validate_changelog_frontmatter, parse_and_validate_frontmatter,
     repair_skill_frontmatter,
 };
-pub use health::{ResearchHealth, ResearchType, ValidationError, research_health};
+pub use health::{ResearchHealth, ValidationError, research_health};

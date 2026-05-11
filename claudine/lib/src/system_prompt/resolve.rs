@@ -33,6 +33,7 @@ const NON_INTERACTIVE_FILENAME: &str = "non-interactive.md";
 ///
 /// let args = SystemPromptArgs::default();
 /// let context = LaunchContext {
+///     agent: None,
 ///     cwd: PathBuf::from("/workspace"),
 ///     repo_root: Some(PathBuf::from("/workspace")),
 ///     package_area_root: None,
@@ -218,6 +219,7 @@ mod tests {
             ..Default::default()
         };
         let context = LaunchContext {
+            agent: None,
             cwd: tmp.path().to_path_buf(),
             repo_root: None,
             package_area_root: None,
@@ -249,6 +251,7 @@ mod tests {
             ..Default::default()
         };
         let context = LaunchContext {
+            agent: None,
             cwd: tmp.path().to_path_buf(),
             repo_root: None,
             package_area_root: None,
@@ -279,6 +282,7 @@ mod tests {
             ..Default::default()
         };
         let context = LaunchContext {
+            agent: None,
             cwd: tmp.path().to_path_buf(),
             repo_root: None,
             package_area_root: None,
@@ -316,6 +320,7 @@ mod tests {
             ..Default::default()
         };
         let context = LaunchContext {
+            agent: None,
             cwd: tmp.path().to_path_buf(),
             repo_root: Some(tmp.path().to_path_buf()),
             package_area_root: None,
@@ -349,6 +354,7 @@ mod tests {
 
         let args = SystemPromptArgs::default();
         let context = LaunchContext {
+            agent: None,
             cwd: package.clone(),
             repo_root: Some(repo.clone()),
             package_area_root: Some(area.clone()),
@@ -382,6 +388,7 @@ mod tests {
 
         let args = SystemPromptArgs::default();
         let context = LaunchContext {
+            agent: None,
             cwd: package.clone(),
             repo_root: Some(repo.clone()),
             package_area_root: Some(area.clone()),
@@ -414,6 +421,7 @@ mod tests {
 
         let args = SystemPromptArgs::default();
         let context = LaunchContext {
+            agent: None,
             cwd: package.clone(),
             repo_root: Some(repo.clone()),
             package_area_root: Some(area.clone()),
@@ -449,6 +457,7 @@ mod tests {
 
         let args = SystemPromptArgs::default();
         let context = LaunchContext {
+            agent: None,
             cwd: repo.clone(),
             repo_root: Some(repo.clone()),
             package_area_root: None,
@@ -477,6 +486,7 @@ mod tests {
 
         let args = SystemPromptArgs::default();
         let context = LaunchContext {
+            agent: None,
             cwd: repo.clone(),
             repo_root: Some(repo.clone()),
             package_area_root: None,
@@ -509,6 +519,7 @@ mod tests {
 
         let args = SystemPromptArgs::default();
         let context = LaunchContext {
+            agent: None,
             cwd: repo.clone(),
             repo_root: Some(repo.clone()),
             package_area_root: None,
@@ -540,6 +551,7 @@ mod tests {
 
         let args = SystemPromptArgs::default();
         let context = LaunchContext {
+            agent: None,
             cwd: cwd.clone(),
             repo_root: None, // Not in a repo
             package_area_root: None,
@@ -583,6 +595,7 @@ mod tests {
         }
 
         let context = LaunchContext {
+            agent: None,
             cwd: repo.clone(),
             repo_root: Some(repo.clone()),
             package_area_root: None,
@@ -631,6 +644,7 @@ mod tests {
         }
 
         let context = LaunchContext {
+            agent: None,
             cwd: tmp.path().to_path_buf(),
             repo_root: None,
             package_area_root: None,

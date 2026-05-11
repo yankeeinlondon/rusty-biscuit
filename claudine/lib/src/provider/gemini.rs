@@ -263,19 +263,19 @@ const GEMINI_ENTRYPOINTS: &[EntrypointSpec] = &[EntrypointSpec {
 
 static GEMINI_SYSTEM_PROMPT: SystemPromptSpec = SystemPromptSpec {
     append: SystemPromptDeliveryByMode {
-        interactive: SystemPromptDelivery::ShadowHomeFile {
-            relative_path: ".gemini/GEMINI.md",
+        interactive: SystemPromptDelivery::EnvVarFile {
+            env_var: "GEMINI_SYSTEM_MD",
         },
-        non_interactive: SystemPromptDelivery::ShadowHomeFile {
-            relative_path: ".gemini/GEMINI.md",
+        non_interactive: SystemPromptDelivery::EnvVarFile {
+            env_var: "GEMINI_SYSTEM_MD",
         },
     },
     replace: SystemPromptDeliveryByMode {
-        interactive: SystemPromptDelivery::ShadowHomeFile {
-            relative_path: ".gemini/GEMINI.md",
+        interactive: SystemPromptDelivery::EnvVarFile {
+            env_var: "GEMINI_SYSTEM_MD",
         },
-        non_interactive: SystemPromptDelivery::ShadowHomeFile {
-            relative_path: ".gemini/GEMINI.md",
+        non_interactive: SystemPromptDelivery::EnvVarFile {
+            env_var: "GEMINI_SYSTEM_MD",
         },
     },
     memory_files: GEMINI_MEMORY_FILES,

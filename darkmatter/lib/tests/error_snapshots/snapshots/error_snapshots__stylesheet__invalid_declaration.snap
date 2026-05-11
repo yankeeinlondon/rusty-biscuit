@@ -1,0 +1,7 @@
+---
+source: darkmatter/lib/tests/error_snapshots/stylesheet.rs
+expression: out
+---
+⨫ StylesheetError: invalid declaration
+┃ Declaration: color
+Each declaration must be of the form property: value;.

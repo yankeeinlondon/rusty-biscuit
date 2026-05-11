@@ -55,6 +55,7 @@ fn resolve_transclusion_target(
     }
 }
 
+#[allow(dead_code)]
 fn source_file_for_error(source: &ComposeSource) -> PathBuf {
     match source {
         ComposeSource::File(path) => path.clone(),
@@ -72,30 +73,25 @@ fn directive_text_at_line(content: &str, line: usize) -> String {
         .to_string()
 }
 
-fn map_reference_parse_error(
-    source: &ComposeSource,
-    content: &str,
-    err: crate::markdown::compose::TransclusionError,
-) -> ReferenceError {
+fn map_reference_parse_error(err: crate::markdown::compose::TransclusionError) -> ReferenceError {
     match err {
         crate::markdown::compose::TransclusionError::ParseDirective {
+            ctx,
             line,
             message,
             caret_col,
         } => ReferenceError::ParseDirective {
+            ctx: ctx.clone(),
             line,
             message,
-            source_file: source_file_for_error(source),
-            directive_text: directive_text_at_line(content, line),
+            directive_text: directive_text_at_line(&ctx.content, line),
             caret_col,
         },
-        other => ReferenceError::ParseDirective {
-            line: 0,
-            message: other.to_string(),
-            source_file: source_file_for_error(source),
-            directive_text: String::new(),
-            caret_col: None,
-        },
+        other => {
+            // This is a fallback for errors that aren't ParseDirective but
+            // occurred during parsing.
+            ReferenceError::Validation(other.to_string())
+        }
     }
 }
 
@@ -104,7 +100,7 @@ impl Markdown {
     /// (`::file`, `::code`, `::url`, `::toc-linking`, `prologue`, or `epilogue`).
     pub fn has_transclusions(&self) -> bool {
         // Check block directives
-        if let Ok(directives) = parse_directives(self.content())
+        if let Ok(directives) = parse_directives(self.content(), self.source_context_for_errors())
             && !directives.is_empty()
         {
             return true;
@@ -119,8 +115,10 @@ impl Markdown {
         }
 
         // Check frontmatter prologue/epilogue
-        if let Ok(refs) = parse_frontmatter_refs(self.frontmatter().as_map())
-            && (!refs.prologue.is_empty() || !refs.epilogue.is_empty())
+        if let Ok(refs) = parse_frontmatter_refs(
+            self.frontmatter().as_map(),
+            self.source_context_for_errors(),
+        ) && (!refs.prologue.is_empty() || !refs.epilogue.is_empty())
         {
             return true;
         }
@@ -137,8 +135,8 @@ impl Markdown {
         let mut refs = Vec::new();
 
         // Block directives (::file, ::code, ::url)
-        let directives = parse_directives(self.content())
-            .map_err(|e| map_reference_parse_error(&source, self.content(), e))?;
+        let directives = parse_directives(self.content(), self.source_context_for_errors())
+            .map_err(map_reference_parse_error)?;
 
         for directive in &directives {
             let kind = match directive.kind {
@@ -198,7 +196,10 @@ impl Markdown {
         }
 
         // Frontmatter prologue/epilogue
-        if let Ok(fm_refs) = parse_frontmatter_refs(self.frontmatter().as_map()) {
+        if let Ok(fm_refs) = parse_frontmatter_refs(
+            self.frontmatter().as_map(),
+            self.source_context_for_errors(),
+        ) {
             for prologue in &fm_refs.prologue {
                 let resolved_target = resolve_transclusion_target(prologue, &source, &[]);
                 refs.push(TransclusionRef {

@@ -11,6 +11,7 @@ use claudine::stream::summary::StreamExecutionSummary;
 
 pub(crate) mod exit;
 pub(crate) mod spawn;
+pub(crate) mod stream_capture;
 pub(crate) mod subagent_watchdog;
 pub(crate) mod termination;
 pub(crate) mod timeouts;

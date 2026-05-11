@@ -70,12 +70,8 @@
 //! ```
 pub use crate::shared::{RequestParts, SchematicError};
 pub use crate::anthropic::{Anthropic, AnthropicRequest};
-pub use crate::artificial_analysis::{
-    ArtificialAnalysisData, ArtificialAnalysisDataRequest,
-};
-pub use crate::artificial_analysis::{
-    ArtificialAnalysisCritPt, ArtificialAnalysisCritPtRequest,
-};
+pub use crate::artificial_analysis::{ArtificialAnalysisCritPt, ArtificialAnalysisCritPtRequest};
+pub use crate::artificial_analysis::{ArtificialAnalysisData, ArtificialAnalysisDataRequest};
 pub use crate::bitbucket::{Bitbucket, BitbucketRequest};
 pub use crate::openai::{OpenAI, OpenAIRequest};
 pub use crate::elevenlabs::{ElevenLabs, ElevenLabsRequest};

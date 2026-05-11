@@ -12,7 +12,6 @@ Environment Variables:
 • AGENT=codex
 • AGENT_PARAMS=["--include","OPENAI_API_KEY","--","--version"]
 • CLAUDINE_SESSION_ID=<redacted>
-• HOME=<redacted>
 • INTERACTIVE=true
 • PACKAGE=claudine-cli
 • PACKAGE_AREA=claudine
@@ -44,5 +43,10 @@ System Prompt(appended):
   ▌ - whenever you are attempt to convert a string based file reference to a
   ▌ real file path in the filesystem you should use `FileReference` struct
   ▌ from `biscuit-file` and use the `biscuit-file` skill
+  ▌ - when a package area has both a library and CLI (as many do) the naming
+  ▌ convention is:
+  ▌ 
+  ▌     - `{name}` for library
+  ▌     - `{name}-cli` for the CLI
 
 ✓ Pre-flight checks have passed

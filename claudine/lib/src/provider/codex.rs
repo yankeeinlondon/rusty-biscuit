@@ -21,7 +21,7 @@ use super::path_template::PathTemplate;
 use super::prompt_args::PromptArgConventions;
 use super::reasoning::ReasoningSupport;
 use super::system_prompt::{
-    SystemPromptCustomTag, SystemPromptDelivery, SystemPromptDeliveryByMode, SystemPromptSpec,
+    SystemPromptDelivery, SystemPromptDeliveryByMode, SystemPromptSpec,
 };
 use super::yolo::YoloSupport;
 use crate::adapters::ProviderAdapter;
@@ -326,12 +326,24 @@ const CODEX_ENTRYPOINTS: &[EntrypointSpec] = &[
 
 static CODEX_SYSTEM_PROMPT: SystemPromptSpec = SystemPromptSpec {
     append: SystemPromptDeliveryByMode {
-        interactive: SystemPromptDelivery::Custom(SystemPromptCustomTag::CodexInstructionsFile),
-        non_interactive: SystemPromptDelivery::Custom(SystemPromptCustomTag::CodexInstructionsFile),
+        interactive: SystemPromptDelivery::ConfigKeyInline {
+            flag: "-c",
+            key: "developer_instructions",
+        },
+        non_interactive: SystemPromptDelivery::ConfigKeyInline {
+            flag: "-c",
+            key: "developer_instructions",
+        },
     },
     replace: SystemPromptDeliveryByMode {
-        interactive: SystemPromptDelivery::Custom(SystemPromptCustomTag::CodexInstructionsFile),
-        non_interactive: SystemPromptDelivery::Custom(SystemPromptCustomTag::CodexInstructionsFile),
+        interactive: SystemPromptDelivery::ConfigKeyFile {
+            flag: "-c",
+            key: "model_instructions_file",
+        },
+        non_interactive: SystemPromptDelivery::ConfigKeyFile {
+            flag: "-c",
+            key: "model_instructions_file",
+        },
     },
     memory_files: CODEX_MEMORY_FILES,
 };

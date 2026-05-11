@@ -55,6 +55,7 @@ pub(crate) use resume::{
 };
 
 use biscuit_terminal::terminal::Terminal;
+use claudine::composition::InstalledProviderSnapshot;
 use claudine::events::EnvironmentContext;
 use claudine::provider::Provider;
 use claudine::stream::stderr::Verbosity;
@@ -94,7 +95,7 @@ pub(crate) struct McpRuntimeInfo {
 pub(crate) struct WrapStartupDetection {
     pub(crate) env_context: EnvironmentContext,
     pub(crate) launch_context: claudine::system_prompt::LaunchContext,
-    pub(crate) launch_workspace: env::LaunchWorkspaceContext,
+    pub(crate) launch_workspace: claudine::composition::LaunchWorkspaceContext,
 }
 
 /// Run one sniff-based filesystem scan and build every startup context
@@ -138,8 +139,10 @@ pub(crate) fn detect_wrap_startup(cwd: &Path) -> Result<WrapStartupDetection> {
         })
         .unwrap_or((None, None));
 
+    // Direct wrapper has no composed-document source, so no source-repo
+    // hint to pass. `repo_root` and `child_cwd` both follow the launch CWD.
     let launch_workspace =
-        env::launch_workspace_context_from_repo_info(cwd, git_root.as_deref(), repo.as_ref());
+        env::launch_workspace_context_from_repo_info(cwd, git_root.as_deref(), repo.as_ref(), None);
 
     let env_context = claudine::events::environment_context_from_sniff_result(result);
 
@@ -158,8 +161,9 @@ fn fallback_wrap_startup(cwd: &Path) -> WrapStartupDetection {
             repo_root: None,
             package_area_root: None,
             package_root: None,
+            agent: None,
         },
-        launch_workspace: env::LaunchWorkspaceContext {
+        launch_workspace: claudine::composition::LaunchWorkspaceContext {
             launch_cwd: cwd.to_path_buf(),
             repo_root: None,
             child_cwd: cwd.to_path_buf(),
@@ -199,6 +203,7 @@ fn wrap_terminal_for_mode(non_interactive: bool) -> Terminal {
     }
 }
 
+#[cfg(test)]
 pub(crate) fn resolve_binary_path(
     profile: &dyn WrapperProfile,
     clients: &InstalledAiClients,
@@ -213,7 +218,18 @@ pub(crate) fn resolve_binary_path(
 /// entire set of known AI CLIs. Used on the hot path of the direct wrapper
 /// so we don't pay for a full PATH walk over ~9 binaries when only one is
 /// needed.
-pub(crate) fn resolve_binary_path_direct(profile: &dyn WrapperProfile) -> Result<PathBuf> {
+///
+/// When `snapshot` is provided and contains a path for the provider, the
+/// cached path is returned immediately, avoiding the `which` syscall.
+pub(crate) fn resolve_binary_path_direct(
+    profile: &dyn WrapperProfile,
+    snapshot: Option<&InstalledProviderSnapshot>,
+) -> Result<PathBuf> {
+    if let Some(snapshot) = snapshot
+        && let Some(path) = snapshot.binary_path(profile.provider())
+    {
+        return Ok(path.to_path_buf());
+    }
     which::which(profile.binary()).map_err(|_| binary_missing_error(profile))
 }
 
@@ -321,23 +337,13 @@ fn run_provider_wrapper_inner(
         )
     })?;
 
-    // SAFETY: this runs at subcommand entry on the main task before any
-    // child threads, sub-renders, or hooks have been spawned. No concurrent
-    // env reads exist at this point, so mutating the process env upholds
-    // Rust 2024's `std::env::set_var` safety contract. Setting AGENT
-    // here lets `{{env.AGENT}}` resolve in any prompt rendered by the
-    // parent (system prompt, dispatch templates) before the child launch.
-    unsafe {
-        std::env::set_var("AGENT", profile.agent_env());
-    }
-
     let cwd = std::env::current_dir()?;
 
     let binary_path = info_span!(
         "wrapper_binary_resolution",
         provider = %provider,
     )
-    .in_scope(|| resolve_binary_path_direct(profile))?;
+    .in_scope(|| resolve_binary_path_direct(profile, None))?;
 
     let raw_agent_params: Vec<String> = std::env::args().skip(2).collect();
     let mut child_args = args.passthrough.clone();
@@ -611,6 +617,11 @@ fn run_provider_wrapper_inner(
         append_file: args.append_system_prompt.clone(),
         replace_file: args.replace_system_prompt.clone(),
     };
+    // Plumb the provider slug into the launch context so system-prompt
+    // templates that reference {{env.AGENT}} resolve correctly without
+    // mutating the parent process env.
+    let mut launch_context = launch_context;
+    launch_context.agent = Some(profile.agent_env().to_string());
     let effective_sp = claudine::system_prompt::resolve_and_prepare_for_session(
         &sp_args,
         &launch_context,
@@ -619,12 +630,17 @@ fn run_provider_wrapper_inner(
 
     let mut sp_artifacts: Vec<system_prompt::SystemPromptArtifact> = Vec::new();
 
+    let scoped_tmp = system_prompt::scoped_tmp_dir(&launch_workspace);
+    system_prompt::maybe_gitignore_claudine_tmp(
+        launch_workspace.repo_root.as_deref().unwrap_or(&launch_workspace.launch_cwd),
+    );
+
     match &effective_sp {
         claudine::system_prompt::EffectiveSystemPrompt::None
         | claudine::system_prompt::EffectiveSystemPrompt::Disabled { .. } => {}
         claudine::system_prompt::EffectiveSystemPrompt::Ready(prepared) => {
             let application =
-                profile.apply_system_prompt(prepared, !non_interactive_requested, &cwd)?;
+                profile.apply_system_prompt(prepared, !non_interactive_requested, &cwd, &scoped_tmp)?;
             child_args.extend(application.args);
             env_overrides.extend(
                 application
@@ -1201,7 +1217,8 @@ fn run_provider_wrapper_inner(
                 None,
                 cli_step_timeout.clone(),
                 None,
-            );
+            )
+            .with_provider(provider);
             exec::run_child_stream_semantic(
                 binary_path.as_path(),
                 &child_args,
@@ -1312,6 +1329,77 @@ mod tests {
         assert!(message.contains("docs:"));
     }
 
+    /// W2 regression: when the prep snapshot already knows where the
+    /// provider binary lives, `resolve_binary_path_direct` must return
+    /// that path without touching `which::which`. We verify this by
+    /// seeding the snapshot with a synthetic path that does **not** exist
+    /// on `PATH`; if the function fell through to `which::which`, the
+    /// call would error with `binary_missing_error`.
+    #[test]
+    fn resolve_binary_path_direct_uses_snapshot_without_which_lookup() {
+        use std::collections::{BTreeMap, BTreeSet};
+
+        let synthetic = PathBuf::from("/nonexistent/cache/codex-bin-stub");
+        let mut binary_paths = BTreeMap::new();
+        binary_paths.insert(Provider::Codex, synthetic.clone());
+        let snapshot = InstalledProviderSnapshot {
+            runnable: vec![Provider::Codex],
+            excluded: BTreeSet::new(),
+            all_installed: vec![Provider::Codex],
+            binary_paths,
+        };
+
+        let profile = profile::profile_for_provider(Provider::Codex).unwrap();
+        let resolved =
+            resolve_binary_path_direct(profile, Some(&snapshot)).expect("snapshot path wins");
+
+        assert_eq!(
+            resolved, synthetic,
+            "snapshot path must be returned verbatim, not re-resolved via `which`"
+        );
+    }
+
+    /// Companion: when the snapshot has no entry for the requested
+    /// provider, the legacy `which::which` fallback path is taken.
+    /// In an unhydrated environment (no real `codex` binary on PATH),
+    /// that path must still surface the actionable missing-binary error
+    /// rather than panic.
+    #[test]
+    fn resolve_binary_path_direct_falls_back_when_snapshot_lacks_provider() {
+        use std::collections::{BTreeMap, BTreeSet};
+
+        let snapshot = InstalledProviderSnapshot {
+            runnable: vec![],
+            excluded: BTreeSet::new(),
+            all_installed: vec![],
+            binary_paths: BTreeMap::new(),
+        };
+        let profile = profile::profile_for_provider(Provider::Codex).unwrap();
+
+        // Force PATH to a directory we know contains no binaries so the
+        // `which::which` fallback deterministically misses.
+        let empty = tempfile::tempdir().unwrap();
+        let prev_path = std::env::var_os("PATH");
+        // SAFETY: tests in this binary are not parallelised across this
+        // env var; the variable is restored before returning.
+        unsafe {
+            std::env::set_var("PATH", empty.path());
+        }
+        let result = resolve_binary_path_direct(profile, Some(&snapshot));
+        unsafe {
+            match prev_path {
+                Some(p) => std::env::set_var("PATH", p),
+                None => std::env::remove_var("PATH"),
+            }
+        }
+
+        let error = result.expect_err("missing-binary fallback should error");
+        assert!(
+            error.to_string().contains("cannot run wrapped Codex"),
+            "expected actionable error; got {error}"
+        );
+    }
+
     #[test]
     fn package_name_display_shows_resolved_package_and_area() {
         let env_plan = env::EnvPlan {
@@ -1321,7 +1409,7 @@ mod tests {
             added: Vec::new(),
             repo_root: None,
             child_cwd: PathBuf::from("/tmp"),
-            package_context: Some(env::PackageContext {
+            package_context: Some(claudine::composition::PackageContext {
                 package_area: "claudine".to_string(),
                 package: Some("claudine-cli".to_string()),
                 candidates: vec!["claudine-cli".to_string()],
@@ -1344,7 +1432,7 @@ mod tests {
             added: Vec::new(),
             repo_root: None,
             child_cwd: PathBuf::from("/tmp"),
-            package_context: Some(env::PackageContext {
+            package_context: Some(claudine::composition::PackageContext {
                 package_area: "claudine".to_string(),
                 package: None,
                 candidates: vec!["claudine".to_string(), "claudine-cli".to_string()],

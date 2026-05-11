@@ -65,8 +65,7 @@ trace/*
 
 ~$*.docx
 **/debug/*
-Cargo.lock
-**/Cargo.lock/*
+**/Cargo.lock
 
 # Insta pending snapshots (transient — should never be committed)
 **/*.snap.new
@@ -76,7 +75,7 @@ Cargo.lock
 **/lint-*-timing.jsonl
 **/test-*-timing.jsonl
 
-.opencode/package-lock.json
 **/lint-*timing.jsonl
 **/test-*timing.jsonl
 .claudine/tmp/
+**/tmp-stream*

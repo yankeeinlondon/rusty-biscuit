@@ -290,6 +290,16 @@ pub enum CompositionError {
         /// Actual property type.
         found: String,
     },
+
+    /// Loop execution was interrupted by the user (SIGINT / Ctrl+C).
+    #[error(
+        "user interrupted looping operation in {prompt_path}",
+        prompt_path = prompt_path.display()
+    )]
+    LoopInterrupted {
+        /// Prompt file being executed when the interrupt was observed.
+        prompt_path: PathBuf,
+    },
 }
 
 /// Per-step failure information for sequence selection errors.

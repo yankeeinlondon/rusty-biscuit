@@ -1,7 +1,7 @@
 ---
 lessons_learned: "@.claudine/memory/commits.md"
-timeout: 10m
-step_timeout: 7m
+timeout: 15m
+step_timeout: 8m
 show_system_prompt: false
 ---
 # Commit Staged Files
@@ -26,7 +26,14 @@ The valid operations we use include: fix, docs, chore, feat, refactor, style, pe
 
 This monorepo has the following packages:
 
-::shell sniff repo packages
+::shell sniff repo packages 
+
+::block when="ctx.current_package_area"
+However you've started this session in the "{{ctx.current_package_area}}" package area so the most relevant packages to focus on are:
+
+::shell sniff repo packages --package-area '{{ctx.current_package_area}}'
+
+::end-block
 
 Of these packages, the following ones appear to have changes _staged_ for commit:
 
@@ -55,7 +62,7 @@ The lessons learned are found in {{lessons_learned}}
 
 The following files have been staged for commit:
 
-::shell sniff repo staged-files -v --plain
+::shell sniff repo staged-files -v --plain --on-error 'no staged files; nothing to do!'
 
 ## Task
 

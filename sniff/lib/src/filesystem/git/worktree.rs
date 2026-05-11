@@ -47,6 +47,43 @@ pub fn get_current_worktree_name(cwd: &Path) -> Result<Option<String>, Box<dyn E
     Ok(name)
 }
 
+/// Returns the name and fully-qualified path of the current linked worktree.
+///
+/// Similar to [`get_current_worktree_name`], but also returns the absolute
+/// path to the worktree's root directory. Returns `None` when inside the
+/// main worktree, outside any repository, or when the worktree path has no
+/// valid basename.
+pub fn get_current_worktree_info(cwd: &Path) -> Result<Option<(String, String)>, Box<dyn Error>> {
+    let repo = match git2::Repository::discover(cwd) {
+        Ok(r) => r,
+        Err(_) => return Ok(None),
+    };
+
+    if !repo.is_worktree() {
+        return Ok(None);
+    }
+
+    let workdir = match repo.workdir() {
+        Some(wd) => wd,
+        None => return Ok(None),
+    };
+
+    let name = workdir
+        .file_name()
+        .and_then(|n| n.to_str())
+        .map(String::from);
+
+    let path = std::fs::canonicalize(workdir)
+        .unwrap_or_else(|_| workdir.to_path_buf())
+        .to_string_lossy()
+        .to_string();
+
+    match name {
+        Some(n) => Ok(Some((n, path))),
+        None => Ok(None),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -108,5 +145,29 @@ mod tests {
 
         let name = get_current_worktree_name(tmp.path()).unwrap();
         assert_eq!(name, None, "outside any repo should return None");
+    }
+
+    #[test]
+    fn info_inside_linked_worktree_returns_name_and_path() {
+        let (dir, repo) = setup_repo();
+
+        let worktree_path = dir.path().join("feature-branch");
+        let _wt = repo
+            .worktree("feature-branch", &worktree_path, None)
+            .unwrap();
+
+        let info = get_current_worktree_info(&worktree_path).unwrap();
+        let (name, path) = info.expect("should return info");
+        assert_eq!(name, "feature-branch");
+        assert!(path.ends_with("feature-branch"));
+        assert!(std::path::Path::new(&path).is_absolute());
+    }
+
+    #[test]
+    fn info_inside_main_worktree_returns_none() {
+        let (dir, _repo) = setup_repo();
+
+        let info = get_current_worktree_info(dir.path()).unwrap();
+        assert_eq!(info, None, "main worktree should return None");
     }
 }

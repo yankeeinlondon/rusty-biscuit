@@ -178,7 +178,7 @@ pub fn collect_shell_commands(
 
     // Parse ::shell directives from the fully-resolved content.
     // ShellExpansionError converts into MarkdownError via From impl.
-    let directives = parse_directives(composed.content())?;
+    let directives = parse_directives(composed.content(), composed.source_context_for_errors())?;
 
     for directive in directives {
         // Look up provenance from the source map (shared by every action)
@@ -339,13 +339,19 @@ fn collect_frontmatter_commands_recursive(
         .with_allow_ctx_override(options.allow_ctx_override)
         .build()?;
 
-    for directive in transclusion::parse_directives(prepared.content())? {
+    let prepared_ctx = prepared.source_context_for_errors();
+    for directive in transclusion::parse_directives(prepared.content(), prepared_ctx.clone())? {
         if directive.kind != transclusion::DirectiveKind::File {
             continue;
         }
 
         if let Some(expr) = &directive.options.when_expr
-            && !transclusion::evaluate_condition(expr, &state, directive.line)?
+            && !transclusion::evaluate_condition(
+                expr,
+                &state,
+                directive.line,
+                prepared_ctx.clone(),
+            )?
         {
             continue;
         }
@@ -357,6 +363,7 @@ fn collect_frontmatter_commands_recursive(
             &transclusion_opts,
             &options.source,
             directive.line,
+            prepared_ctx.clone(),
         )?
         else {
             continue;
@@ -384,7 +391,10 @@ fn collect_frontmatter_commands_recursive(
         )?;
     }
 
-    let refs = transclusion::parse_frontmatter_refs(prepared.frontmatter().as_map())?;
+    let refs = transclusion::parse_frontmatter_refs(
+        prepared.frontmatter().as_map(),
+        prepared_ctx.clone(),
+    )?;
     for reference in refs.prologue.iter().chain(refs.epilogue.iter()) {
         if !transclusion::is_url_like(reference) && !transclusion::is_file_like_reference(reference)
         {
@@ -397,8 +407,14 @@ fn collect_frontmatter_commands_recursive(
             transclusion::DirectiveKind::File
         };
 
-        let transclusion::ResolvedTarget::File { path, .. } =
-            transclusion::resolve_target(kind, reference, &transclusion_opts, &options.source, 0)?
+        let transclusion::ResolvedTarget::File { path, .. } = transclusion::resolve_target(
+            kind,
+            reference,
+            &transclusion_opts,
+            &options.source,
+            0,
+            prepared_ctx.clone(),
+        )?
         else {
             continue;
         };
@@ -426,10 +442,20 @@ fn scan_one_frontmatter(
     let mut fm_clone = markdown.clone();
     let pre_interpolation_snapshot = prepare_frontmatter_for_compose(&mut fm_clone, options, true);
     if options.is_enabled(ComposeOperation::FrontmatterInterpolation) {
-        let _ = interpolate_frontmatter(fm_clone.frontmatter_mut(), options.context(), false);
+        let _ = interpolate_frontmatter(
+            fm_clone.frontmatter_mut(),
+            options.context(),
+            false,
+            false,
+        );
     }
 
-    let candidates = scan_frontmatter(fm_clone.frontmatter(), pre_interpolation_snapshot.as_ref())?;
+    let scan_ctx = fm_clone.source_context_for_errors();
+    let candidates = scan_frontmatter(
+        fm_clone.frontmatter(),
+        pre_interpolation_snapshot.as_ref(),
+        &scan_ctx,
+    )?;
 
     for candidate in candidates {
         // Build a synthetic ShellDirective so we can reuse the chain expander.
@@ -444,6 +470,7 @@ fn scan_one_frontmatter(
             error_handling: Default::default(),
             timeout_override: candidate.timeout_override,
             pipeline: candidate.pipeline.clone(),
+            ctx: scan_ctx.clone(),
         };
 
         for (raw_action, exe_raw, args_raw) in directive_action_iter(&directive) {

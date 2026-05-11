@@ -15,7 +15,7 @@ mod render;
 mod styles;
 mod tokens;
 
-pub use self::prose::Prose;
+pub use self::prose::{IntoProseVec, Prose};
 
 #[cfg(test)]
 mod tests {
@@ -871,5 +871,24 @@ mod tests {
             "must not contain any SGR escape, got: {:?}",
             result
         );
+    }
+
+    /// Fenced code blocks render with dim color and 2-space indent.
+    #[test]
+    fn code_block_renders_dim_and_indented() {
+        let prose = Prose::new("<code-block lang=\"yaml\">key: value\nlist:\n  - a</code-block>");
+        let result = prose.parse_tokens(None);
+        assert!(result.contains("\x1b[2m  key: value\x1b[0m"));
+        assert!(result.contains("\x1b[2m  list:\x1b[0m"));
+        assert!(result.contains("\x1b[2m    - a\x1b[0m"));
+    }
+
+    /// Prose markup inside fenced code blocks is NOT parsed.
+    #[test]
+    fn fenced_code_block_preserves_literal_markup() {
+        let prose = Prose::new("```\n**not bold**\n```");
+        let result = prose.parse_tokens(None);
+        assert!(result.contains("**not bold**"), "got: {:?}", result);
+        assert!(!result.contains("\x1b[1m"));
     }
 }

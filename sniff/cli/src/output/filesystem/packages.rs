@@ -12,26 +12,37 @@ use crate::args::PackagesFormat;
 /// Render package names as a comma-separated plain text list.
 ///
 /// Returns an error message if the repo is not a monorepo.
-/// Filter a package list by name/area filters and an optional package-area scope.
-fn select_repo_packages<'a>(
+/// Filter a package list by name/area filters and optional `--package` /
+/// `--package-area` scopes.
+///
+/// `package` matches by exact case-insensitive `Package.name`. `package_area`
+/// matches by case-insensitive **prefix** on `Package.package_area`, so
+/// `--package-area homelab` includes `homelab` and `homelab/server`.
+pub(crate) fn select_repo_packages<'a>(
     packages: &'a [Package],
     repo_filter: &[String],
+    package: Option<&str>,
     package_area: Option<&str>,
 ) -> Vec<&'a Package> {
     let mut filtered = filter_packages(packages, repo_filter);
+    if let Some(name) = package {
+        let needle = name.to_lowercase();
+        filtered.retain(|p| p.name.to_lowercase() == needle);
+    }
     if let Some(area) = package_area {
         let needle = area.to_lowercase();
-        filtered.retain(|p| p.package_area.to_lowercase() == needle);
+        filtered.retain(|p| p.package_area.to_lowercase().starts_with(&needle));
     }
     filtered
 }
 
-/// Collect package names matching the given filters and area scope.
+/// Collect package names matching the given filters and scope.
 ///
 /// Returns an empty vec when the repo is not a monorepo.
 pub fn collect_repo_package_names<'a>(
     repo: &'a RepoInfo,
     repo_filter: &[String],
+    package: Option<&str>,
     package_area: Option<&str>,
 ) -> Vec<&'a str> {
     if !repo.is_monorepo {
@@ -40,7 +51,7 @@ pub fn collect_repo_package_names<'a>(
     let Some(packages) = repo.packages.as_ref() else {
         return Vec::new();
     };
-    select_repo_packages(packages, repo_filter, package_area)
+    select_repo_packages(packages, repo_filter, package, package_area)
         .into_iter()
         .map(|p| p.name.as_str())
         .collect()
@@ -68,6 +79,7 @@ fn package_entry_markup(pkg: &Package, verbose: u8) -> String {
 pub fn render_repo_packages_formatted(
     repo: &RepoInfo,
     repo_filter: &[String],
+    package: Option<&str>,
     package_area: Option<&str>,
     format: PackagesFormat,
     verbose: u8,
@@ -82,7 +94,7 @@ pub fn render_repo_packages_formatted(
         return String::new();
     };
 
-    let filtered = select_repo_packages(packages, repo_filter, package_area);
+    let filtered = select_repo_packages(packages, repo_filter, package, package_area);
     if filtered.is_empty() {
         return String::new();
     }
@@ -181,6 +193,8 @@ pub(crate) fn dirty_package_names(result: &sniff::SniffResult) -> Vec<String> {
 pub(crate) fn select_dirty_package_names(
     result: &sniff::SniffResult,
     repo_filter: &[String],
+    package: Option<&str>,
+    package_area: Option<&str>,
 ) -> Vec<String> {
     let Some(repo) = result.filesystem.as_ref().and_then(|fs| fs.repo.as_ref()) else {
         return Vec::new();
@@ -190,14 +204,14 @@ pub(crate) fn select_dirty_package_names(
     }
 
     let names = dirty_package_names(result);
-    if repo_filter.is_empty() {
+    if repo_filter.is_empty() && package.is_none() && package_area.is_none() {
         return names;
     }
 
     let Some(packages) = repo.packages.as_ref() else {
         return Vec::new();
     };
-    let filtered = filter_packages(packages, repo_filter);
+    let filtered = select_repo_packages(packages, repo_filter, package, package_area);
     let filtered_names: std::collections::HashSet<&str> =
         filtered.iter().map(|p| p.name.as_str()).collect();
     names
@@ -208,12 +222,17 @@ pub(crate) fn select_dirty_package_names(
 /// Render package names with uncommitted changes as a comma-separated list.
 ///
 /// Returns an error message if the repo is not a monorepo.
-pub fn render_dirty_packages(result: &sniff::SniffResult, repo_filter: &[String]) -> String {
+pub fn render_dirty_packages(
+    result: &sniff::SniffResult,
+    repo_filter: &[String],
+    package: Option<&str>,
+    package_area: Option<&str>,
+) -> String {
     let repo = result.filesystem.as_ref().and_then(|fs| fs.repo.as_ref());
 
     match repo {
         Some(repo) if repo.is_monorepo => {
-            select_dirty_package_names(result, repo_filter).join(", ")
+            select_dirty_package_names(result, repo_filter, package, package_area).join(", ")
         }
         _ => String::from(
             "- the \"--dirty-packages\" switch is only intended to be used in a monorepo",
@@ -280,6 +299,8 @@ pub(crate) fn staged_package_names(result: &sniff::SniffResult) -> Vec<String> {
 pub(crate) fn select_staged_package_names(
     result: &sniff::SniffResult,
     repo_filter: &[String],
+    package: Option<&str>,
+    package_area: Option<&str>,
 ) -> Vec<String> {
     let Some(repo) = result.filesystem.as_ref().and_then(|fs| fs.repo.as_ref()) else {
         return Vec::new();
@@ -289,14 +310,14 @@ pub(crate) fn select_staged_package_names(
     }
 
     let names = staged_package_names(result);
-    if repo_filter.is_empty() {
+    if repo_filter.is_empty() && package.is_none() && package_area.is_none() {
         return names;
     }
 
     let Some(packages) = repo.packages.as_ref() else {
         return Vec::new();
     };
-    let filtered = filter_packages(packages, repo_filter);
+    let filtered = select_repo_packages(packages, repo_filter, package, package_area);
     let filtered_names: std::collections::HashSet<&str> =
         filtered.iter().map(|p| p.name.as_str()).collect();
     names
@@ -307,12 +328,17 @@ pub(crate) fn select_staged_package_names(
 /// Render package names with staged files as a comma-separated list.
 ///
 /// Returns an error message if the repo is not a monorepo.
-pub fn render_staged_packages(result: &sniff::SniffResult, repo_filter: &[String]) -> String {
+pub fn render_staged_packages(
+    result: &sniff::SniffResult,
+    repo_filter: &[String],
+    package: Option<&str>,
+    package_area: Option<&str>,
+) -> String {
     let repo = result.filesystem.as_ref().and_then(|fs| fs.repo.as_ref());
 
     match repo {
         Some(repo) if repo.is_monorepo => {
-            select_staged_package_names(result, repo_filter).join(", ")
+            select_staged_package_names(result, repo_filter, package, package_area).join(", ")
         }
         _ => String::from(
             "- the \"staged-packages\" subcommand is only intended to be used in a monorepo",
@@ -379,6 +405,8 @@ pub(crate) fn unstaged_package_names(result: &sniff::SniffResult) -> Vec<String>
 pub(crate) fn select_unstaged_package_names(
     result: &sniff::SniffResult,
     repo_filter: &[String],
+    package: Option<&str>,
+    package_area: Option<&str>,
 ) -> Vec<String> {
     let Some(repo) = result.filesystem.as_ref().and_then(|fs| fs.repo.as_ref()) else {
         return Vec::new();
@@ -388,14 +416,14 @@ pub(crate) fn select_unstaged_package_names(
     }
 
     let names = unstaged_package_names(result);
-    if repo_filter.is_empty() {
+    if repo_filter.is_empty() && package.is_none() && package_area.is_none() {
         return names;
     }
 
     let Some(packages) = repo.packages.as_ref() else {
         return Vec::new();
     };
-    let filtered = filter_packages(packages, repo_filter);
+    let filtered = select_repo_packages(packages, repo_filter, package, package_area);
     let filtered_names: std::collections::HashSet<&str> =
         filtered.iter().map(|p| p.name.as_str()).collect();
     names
@@ -406,12 +434,17 @@ pub(crate) fn select_unstaged_package_names(
 /// Render package names with unstaged changes as a comma-separated list.
 ///
 /// Returns an error message if the repo is not a monorepo.
-pub fn render_unstaged_packages(result: &sniff::SniffResult, repo_filter: &[String]) -> String {
+pub fn render_unstaged_packages(
+    result: &sniff::SniffResult,
+    repo_filter: &[String],
+    package: Option<&str>,
+    package_area: Option<&str>,
+) -> String {
     let repo = result.filesystem.as_ref().and_then(|fs| fs.repo.as_ref());
 
     match repo {
         Some(repo) if repo.is_monorepo => {
-            select_unstaged_package_names(result, repo_filter).join(", ")
+            select_unstaged_package_names(result, repo_filter, package, package_area).join(", ")
         }
         _ => String::from(
             "- the \"unstaged-packages\" subcommand is only intended to be used in a monorepo",

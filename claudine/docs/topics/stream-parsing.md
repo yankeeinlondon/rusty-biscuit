@@ -225,3 +225,73 @@ A `rg '\.get\('` across the parser files turns up only legitimate uses after the
 4. **Test assertions like `raw.get("tools").is_none()`** — verifying the `raw_summary` compaction pass stripped the large arrays.
 
 No handler method accepts `&Value` for field extraction anymore.
+
+## Raw Stream Capture (Diagnostic)
+
+When a provider stalls — most often OpenCode going silent after subagent completion or between "I'll do X" assistant text and the corresponding `tool_use` — the semantic parser only records what it successfully decoded. To make post-mortem analysis possible, Claudine offers an opt-in raw NDJSON capture that mirrors every line the wrapped child writes to stdout, with millisecond timing relative to spawn. The capture is implemented at the spawn layer, not the parser, so even lines that the typed dispatch silently skips (unknown event types, format drift) end up on disk.
+
+### Activation
+
+Set `CLAUDINE_RAW_STREAM_DIR` to a writable directory. Any non-empty value enables capture; unset or empty disables it (and the in-loop hook is zero-cost). The variable accepts `~`-prefixed paths.
+
+```bash
+CLAUDINE_RAW_STREAM_DIR=~/claudine-traces claudine opencode "say hi"
+```
+
+### File layout
+
+For each spawn that produces a structured stream, two files appear under the configured directory:
+
+```
+<provider-slug>-<YYYYMMDDTHHMMSS>-<pid>.ndjson      # raw capture
+<provider-slug>-<YYYYMMDDTHHMMSS>-<pid>.meta.json   # sidecar
+```
+
+The `.ndjson` file is one JSON object per line. Each line wraps the original raw line emitted by the child, preserving the original verbatim but adding a timestamp so timing is recoverable without separately joining to the child's clock:
+
+```json
+{"ts_ms": 0,    "raw": "{\"type\":\"step_start\",\"sessionID\":\"ses_1\"}"}
+{"ts_ms": 125,  "raw": "{\"type\":\"text\",\"text\":\"hello\"}"}
+{"ts_ms": 4830, "raw": "{\"type\":\"step_finish\",\"part\":{...}}"}
+```
+
+- `ts_ms` is milliseconds elapsed since the wrapper's `Instant::now()` at spawn — the same reference the byte-heartbeat and silence detector use.
+- `raw` is the exact line as read from the child's stdout (no trailing newline, no normalization).
+- Whitespace-only lines are skipped (matching the byte-heartbeat policy in `spawn.rs`) so blank flushes don't pollute the trace.
+
+The `.meta.json` sidecar carries the run's provenance:
+
+```json
+{
+  "provider": "opencode",
+  "pid": 12345,
+  "started_at": "2026-05-10T18:42:15-07:00",
+  "claudine_version": "0.1.0"
+}
+```
+
+### Inspection patterns
+
+Time deltas between consecutive emissions are the most useful signal when diagnosing a stall:
+
+```bash
+# Show timing + first 80 chars of each captured line.
+jq -rc '"\(.ts_ms) \(.raw[:80])"' ~/claudine-traces/opencode-*.ndjson | tail -50
+
+# Compute gaps between events (the gap right before the kill is the smoking gun).
+jq -s 'map(.ts_ms) | . as $t | [range(1; length)] | map($t[.] - $t[.-1])' \
+  ~/claudine-traces/opencode-*.ndjson
+```
+
+A common pattern observed on OpenCode + Minimax 2.7 stalls: a normal cadence of events while subagents run, then a single assistant `text` line announcing the next action ("Running sniff repo to get the repo state:"), followed by *zero* further lines until the `step_timeout` watchdog fires. That confirms the silence is on the provider side, not in claudine's parsing — the typed dispatch never had a chance to drop anything because nothing was emitted.
+
+### Where it's hooked
+
+`StreamCapture` is owned by the stdout reader thread inside `run_child_stream_semantic` ([`claudine/cli/src/commands/wrap/exec/stream_capture.rs`](../../../claudine/cli/src/commands/wrap/exec/stream_capture.rs), wired in [`claudine/cli/src/commands/wrap/exec/spawn.rs`](../../../claudine/cli/src/commands/wrap/exec/spawn.rs)). It runs right after the byte-heartbeat and before `parser.feed_line`, so a captured line is guaranteed to have refreshed `last_byte_at` even if the typed parser silently discards it. All capture I/O errors are debug-traced and never propagate — the goal is diagnostic visibility, never a new failure mode.
+
+### Scope and limitations
+
+- Only stdout is captured today. Stderr capture can be added if a future diagnosis requires it.
+- The capture is per-spawn; sequence / inline-compose loops produce one pair of files per child invocation.
+- File rotation is not built in. The intended use is short, targeted runs while reproducing a stall; long-running campaigns should rotate or prune externally.
+- The capture is purely passive. It does not influence parser dispatch, watchdog timing, or any user-facing rendering.

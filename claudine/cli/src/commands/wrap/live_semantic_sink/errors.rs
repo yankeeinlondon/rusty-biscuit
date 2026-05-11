@@ -20,9 +20,22 @@ impl LiveSemanticSink {
         kind: SemanticErrorKind,
         message: &str,
     ) {
-        let (label, border_color) = error_kind_presentation(kind);
-        let escaped = super::escape_prose(message);
-        let body = format!("<red><b>{label}</b></red>\n{escaped}");
+        // When the user has Ctrl+C'd this run, the agent's dying-breath
+        // event is not an "Agent Error" — relabel it so operators see the
+        // real cause. The classification machinery itself stays untouched
+        // because the parsers cannot know about our process-scoped flag.
+        let interrupted = crate::output::user_interrupt_observed();
+        let (label, border_color, body_text) = if interrupted {
+            (
+                "User Action",
+                Color::Tailwind(Tailwind::Yellow700),
+                "User pressed CTRL+C to stop the session".to_string(),
+            )
+        } else {
+            let (label, border_color) = error_kind_presentation(kind);
+            (label, border_color, super::escape_prose(message))
+        };
+        let body = format!("<red><b>{label}</b></red>\n{body_text}");
         let prose = Prose::new(body).with_word_wrap(WordWrap::WrapProse(None, None));
         let block = StatusBlock::new(StatusState::Error)
             .body(prose)

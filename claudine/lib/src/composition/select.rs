@@ -1,6 +1,6 @@
 //! Provider and model resolution for composition workflows.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use crate::model_catalog::ModelCatalogService;
 use crate::provider::{PROVIDERS_DISPLAY_ORDER, Provider, provider_info};
@@ -17,10 +17,10 @@ use super::types::{
 /// The caller (typically the CLI) is responsible for running host
 /// detection once and passing the result here.  This keeps the
 /// library side pure and unit-testable.
-#[allow(dead_code)]
 pub fn build_installed_snapshot(
     installed: &[Provider],
     excluded: &BTreeSet<Provider>,
+    clients: &sniff::programs::InstalledAiClients,
 ) -> InstalledProviderSnapshot {
     let runnable: Vec<Provider> = installed
         .iter()
@@ -28,10 +28,18 @@ pub fn build_installed_snapshot(
         .filter(|p| !excluded.contains(p) && *p != Provider::RooCode)
         .collect();
 
+    let mut binary_paths = BTreeMap::new();
+    for provider in installed {
+        if let Some(path) = clients.path(provider.sniff_ai_cli()) {
+            binary_paths.insert(*provider, path);
+        }
+    }
+
     InstalledProviderSnapshot {
         runnable,
         excluded: excluded.clone(),
         all_installed: installed.to_vec(),
+        binary_paths,
     }
 }
 
@@ -457,6 +465,7 @@ pub fn select_provider(
         runnable: build_candidate_set(installed, excluded),
         excluded: excluded.clone(),
         all_installed: installed.to_vec(),
+        binary_paths: std::collections::BTreeMap::new(),
     };
 
     let target = resolve_target_non_tty(explicit_provider, prepared, &snapshot, favorite, None)?;
@@ -524,7 +533,17 @@ mod tests {
         installed: Vec<Provider>,
         excluded: BTreeSet<Provider>,
     ) -> InstalledProviderSnapshot {
-        build_installed_snapshot(&installed, &excluded)
+        let runnable: Vec<Provider> = installed
+            .iter()
+            .copied()
+            .filter(|p| !excluded.contains(p) && *p != Provider::RooCode)
+            .collect();
+        InstalledProviderSnapshot {
+            runnable,
+            excluded,
+            all_installed: installed,
+            binary_paths: std::collections::BTreeMap::new(),
+        }
     }
 
     #[test]

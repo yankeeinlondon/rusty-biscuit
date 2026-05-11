@@ -166,6 +166,7 @@ impl TerminalHarness for TmuxHarness {
             "40",
             &shell_cmd,
         ]);
+        super::apply_color_forcing_env(&mut cmd);
         let out = run_with_timeout(&mut cmd, SPAWN_TIMEOUT)?;
         if !out.status.success() {
             return Err(io::Error::other("tmux new-session failed"));

@@ -241,9 +241,8 @@ fn artificial_analysis_attribution_present_in_all_artifacts() {
     ];
 
     for (label, path) in artifacts {
-        let contents = fs::read_to_string(&path).unwrap_or_else(|e| {
-            panic!("read {label} at {} failed: {e}", path.display())
-        });
+        let contents = fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("read {label} at {} failed: {e}", path.display()));
         assert!(
             contents.contains(ATTRIBUTION_URL),
             "{label} ({}) is missing the required Artificial Analysis \

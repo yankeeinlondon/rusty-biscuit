@@ -148,6 +148,15 @@ let state = InputTableState::new(columns, vec![]);
 - `choose_one_from_markdown_list` / `choose_many_from_markdown_list`
 - `choose_one_from_dictionary` / `choose_many_from_dictionary` (YAML/JSON)
 
+The underlying canonical parsers are also public:
+
+- `choice_options_from_csv`
+- `choice_options_from_markdown_list`
+- `choice_options_from_dictionary`
+
+The `question` CLI source resolver reuses these helpers for CSV,
+markdown-list, and dictionary compatibility sources.
+
 ## CLI (`question`)
 
 ```bash
@@ -220,7 +229,7 @@ lib/src/
 ├── prelude.rs      # Convenience re-exports
 ├── core/
 │   ├── event.rs        # EventOutcome
-│   ├── standalone.rs   # run_standalone, run_standalone_with_chrome, drive_event_loop, StandaloneState, HandleEvent
+│   ├── standalone/     # standalone runner traits, event loops, terminal lifecycle, inline viewport handling
 │   ├── keybindings.rs  # KeyBindings
 │   ├── theme.rs        # ComponentTheme
 │   ├── frame.rs        # FrameChrome, FrameChromeConfig, BorderStyle, Margin, Padding, HeightSpec
@@ -230,17 +239,22 @@ lib/src/
 │   ├── sort.rs         # SortOrder, OptionSort
 │   └── terminal_style.rs # TerminalStyle, TerminalBackground, NerdFontStatus
 ├── components/
+│   ├── choice_state.rs     # Shared ChooseOne/ChooseMany runtime state and hotkey helpers
 │   ├── text_input.rs
 │   ├── text_area_input.rs
 │   ├── boolean_switch.rs
 │   ├── choose.rs           # ChoiceInput, ChoiceOption, SelectionMode, Orientation, HotkeySpec, HotkeyDisplayMode, ActiveChoiceColor
+│   ├── choice_render/      # Shared choice renderer split by badge/highlight/vertical/horizontal rendering
 │   ├── choose_one.rs
+│   ├── choose_one/         # ChooseOne tests
 │   ├── choose_many.rs
+│   ├── choose_many/        # ChooseMany tests
 │   └── input_table/
 │       ├── mod.rs
 │       ├── cell.rs     # CellState, CellValue, Row, RowCell
 │       ├── column.rs   # InputTableColumn, configs
-│       └── table.rs    # InputTable, InputTableState
+│       ├── table.rs    # InputTable, InputTableState
+│       └── table/      # InputTable tests
 └── helpers/
     └── choice_builders.rs
 
@@ -257,13 +271,13 @@ cli/src/
     ├── boolean_switch.rs
     ├── choose_one.rs
     ├── choose_many.rs
-    ├── common_choose.rs   # Shared args: ChooseChromeArgs, source resolution, FrameChrome/build helpers
-    └── input_table.rs
+    ├── common_choose.rs   # Shared choose args: ChooseSourceArgs, ChooseChromeArgs, source/input resolution, run plumbing, FrameChrome/build helpers
+    └── input_table/       # input-table command, column parsing, tests
 ```
 
 ## Testing Conventions
 
-- Unit tests in `#[cfg(test)] mod tests` within source files
+- Unit tests live in sibling `tests.rs` modules for decomposed components and in inline `#[cfg(test)]` modules for smaller files
 - Use `TestBackend` for rendering tests
 - Synthetic events via `drive_event_loop` with `Vec<Event>` iterator
 - Prefer `assert_eq!` on `EventOutcome` variants

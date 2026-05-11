@@ -177,14 +177,13 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
         }
 
         // Handle docs mode separately for split-stream output
-        if let Commands::Docs { .. } = cmd {
+        if let Commands::Docs { paths_only, .. } = cmd {
             let base = cli
                 .base
                 .clone()
                 .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| ".".into()));
             let docs_filter = cmd.docs_filter();
 
-            // Discover repo root for detect_docs
             let repo = git2::Repository::discover(&base)
                 .map_err(|e| format!("Not a git repository: {}", e))?;
             let repo_root = repo
@@ -192,7 +191,172 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 .ok_or("Bare repository not supported")?
                 .to_path_buf();
 
-            let all_docs = sniff::filesystem::detect_docs(&repo_root).unwrap_or_default();
+            let has_area_filter = !docs_filter.package_area.is_empty();
+            let has_pkg_filter = !docs_filter.package.is_empty();
+            let needs_full_parse = cli.verbose > 0 || cli.json;
+
+            let target_dirs: Vec<std::path::PathBuf> = if has_area_filter {
+                docs_filter
+                    .package_area
+                    .iter()
+                    .map(|area| repo_root.join(area))
+                    .collect()
+            } else if has_pkg_filter {
+                let pkgs = sniff::filesystem::docs::detect_repo_packages(&repo_root);
+                let lowered: Vec<String> =
+                    docs_filter.package.iter().map(|p| p.to_lowercase()).collect();
+                pkgs.iter()
+                    .filter(|(name, _)| lowered.iter().any(|p| name.eq_ignore_ascii_case(p)))
+                    .map(|(_, rel)| repo_root.join(rel))
+                    .collect()
+            } else {
+                vec![repo_root.to_path_buf()]
+            };
+
+            if *paths_only {
+                let paths = if has_area_filter || has_pkg_filter {
+                    sniff::filesystem::docs::collect_markdown_paths_fast(&target_dirs)
+                } else {
+                    sniff::filesystem::docs::collect_markdown_paths_from_dirs(&target_dirs)
+                };
+                let filtered: Vec<String> = paths
+                    .iter()
+                    .map(|p| {
+                        p.strip_prefix(&repo_root)
+                            .unwrap_or(p)
+                            .to_string_lossy()
+                            .into_owned()
+                    })
+                    .filter(|rel| {
+                        if !docs_filter.filter.is_empty() {
+                            let path_lower = rel.to_lowercase();
+                            return docs_filter
+                                .filter
+                                .iter()
+                                .any(|s| path_lower.contains(&s.to_lowercase()));
+                        }
+                        true
+                    })
+                    .collect();
+
+                if cli.json {
+                    let json_val = serde_json::json!(filtered);
+                    output::print_json_value(json_val, perf.build_report().as_ref());
+                } else {
+                    for path in &filtered {
+                        println!("{}", path);
+                    }
+                }
+                perf.emit_stdout(None);
+                return Ok(());
+            }
+
+            let has_metadata_filter = docs_filter.has_prompt
+                || docs_filter.blast_radius
+                || docs_filter.readme
+                || docs_filter.plan
+                || docs_filter.src;
+
+            let mut all_docs;
+
+            if needs_full_parse && has_metadata_filter {
+                let root_for_pkgs = repo_root.clone();
+                let pkg_handle = std::thread::spawn(move || {
+                    sniff::filesystem::docs::detect_repo_packages(&root_for_pkgs)
+                });
+
+                let phase1 = sniff::filesystem::docs::collect_markdown_files_from_dirs(
+                    &target_dirs,
+                    &repo_root,
+                    &[],
+                    sniff::filesystem::docs::DocParseMode::FrontmatterOnly,
+                    |_| true,
+                );
+
+                let narrowed: Vec<std::path::PathBuf> = output::filter_docs(&phase1, &docs_filter)
+                    .into_iter()
+                    .map(|d| d.filepath.clone())
+                    .collect();
+
+                let packages = if has_area_filter && !has_pkg_filter {
+                    sniff::filesystem::docs::detect_packages_in_dirs(
+                        &repo_root,
+                        &target_dirs,
+                    )
+                } else {
+                    pkg_handle.join().unwrap_or_default()
+                };
+
+                if narrowed.is_empty() {
+                    all_docs = vec![];
+                } else {
+                    all_docs = sniff::filesystem::docs::parse_markdown_files(
+                        &narrowed,
+                        &repo_root,
+                        &packages,
+                        sniff::filesystem::docs::DocParseMode::Full,
+                    );
+                }
+            } else if has_area_filter && !has_pkg_filter {
+                let packages = sniff::filesystem::docs::detect_packages_in_dirs(
+                    &repo_root,
+                    &target_dirs,
+                );
+                let mode = if needs_full_parse {
+                    sniff::filesystem::docs::DocParseMode::Full
+                } else {
+                    sniff::filesystem::docs::DocParseMode::FrontmatterOnly
+                };
+                all_docs = sniff::filesystem::docs::collect_markdown_files_from_dirs(
+                    &target_dirs,
+                    &repo_root,
+                    &packages,
+                    mode,
+                    |_| true,
+                );
+            } else if !has_area_filter && !has_pkg_filter && needs_full_parse {
+                let root_for_pkgs = repo_root.clone();
+                let pkg_handle = std::thread::spawn(move || {
+                    sniff::filesystem::docs::detect_repo_packages(&root_for_pkgs)
+                });
+                all_docs = sniff::filesystem::docs::collect_markdown_files_from_dirs(
+                    &target_dirs,
+                    &repo_root,
+                    &[],
+                    sniff::filesystem::docs::DocParseMode::Full,
+                    |_| true,
+                );
+                let packages = pkg_handle.join().unwrap_or_default();
+                sniff::filesystem::docs::assign_packages(
+                    &mut all_docs,
+                    &packages,
+                    &repo_root,
+                );
+            } else if has_pkg_filter || needs_full_parse {
+                let packages =
+                    sniff::filesystem::docs::detect_repo_packages(&repo_root);
+                let mode = if needs_full_parse {
+                    sniff::filesystem::docs::DocParseMode::Full
+                } else {
+                    sniff::filesystem::docs::DocParseMode::FrontmatterOnly
+                };
+                all_docs = sniff::filesystem::docs::collect_markdown_files_from_dirs(
+                    &target_dirs,
+                    &repo_root,
+                    &packages,
+                    mode,
+                    |_| true,
+                );
+            } else {
+                all_docs = sniff::filesystem::docs::collect_markdown_files_from_dirs(
+                    &target_dirs,
+                    &repo_root,
+                    &[],
+                    sniff::filesystem::docs::DocParseMode::FrontmatterOnly,
+                    |_| true,
+                );
+            }
+
             let filtered = output::filter_docs(&all_docs, &docs_filter);
 
             if cli.json {
@@ -378,10 +542,13 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 }
                 return Ok(());
             }
-            crate::args::RepoAction::UnstagedFiles { package } => {
+            crate::args::RepoAction::UnstagedFiles {
+                package,
+                package_area,
+            } => {
                 let args = crate::args::FileListArgs {
                     package: package.clone(),
-                    package_area: None,
+                    package_area: package_area.clone(),
                     list: false,
                     csv: false,
                     no_path: false,
@@ -399,10 +566,13 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                     &perf,
                 );
             }
-            crate::args::RepoAction::UntrackedFiles { package } => {
+            crate::args::RepoAction::UntrackedFiles {
+                package,
+                package_area,
+            } => {
                 let args = crate::args::FileListArgs {
                     package: package.clone(),
-                    package_area: None,
+                    package_area: package_area.clone(),
                     list: false,
                     csv: false,
                     no_path: false,
@@ -526,7 +696,15 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                         output::print_json_value(outcome.value, perf.build_report().as_ref());
                         return Ok(());
                     }
-                    println!("{name}");
+                    if cli.verbose > 0 {
+                        if let Some(info) = sniff::filesystem::git::get_current_worktree_info(dir)? {
+                            println!("{} [{}]", info.0, info.1);
+                        } else {
+                            println!("{name}");
+                        }
+                    } else {
+                        println!("{name}");
+                    }
                     perf.emit_stderr(None);
                     return Ok(());
                 }
@@ -552,15 +730,21 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
             }
             crate::args::RepoAction::Packages {
                 filter,
+                package,
                 package_area,
                 format,
+                no_error,
+                on_error,
             } => {
                 return handle_repo_packages(
                     base_dir.as_deref(),
                     RepoPackagesArgs {
                         filter,
+                        package: package.as_deref(),
                         package_area: package_area.as_deref(),
                         format: *format,
+                        no_error: *no_error,
+                        on_error: on_error.clone(),
                     },
                     cli.json,
                     cli.plain,
@@ -570,15 +754,21 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
             }
             crate::args::RepoAction::PackageAreas {
                 filter,
+                package,
                 package_area,
                 format,
+                no_error,
+                on_error,
             } => {
                 return handle_repo_package_areas(
                     base_dir.as_deref(),
                     RepoPackageAreasArgs {
                         filter,
+                        package: package.as_deref(),
                         package_area: package_area.as_deref(),
                         format: *format,
+                        no_error: *no_error,
+                        on_error: on_error.clone(),
                     },
                     cli.json,
                     cli.plain,
@@ -753,72 +943,132 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut result = detect_with_plan(plan)?;
 
-    // Handle package scoping for git actions
-    let package_for_git = match &repo_action {
-        Some(crate::args::RepoAction::GitStatus { package, .. }) => package.clone(),
+    // Handle package scoping for git actions. Both `--package` and
+    // `--package-area` are honored; when both are passed, the resolved package
+    // path must lie within the resolved area (intersection error fires here).
+    let git_scope = match &repo_action {
+        Some(crate::args::RepoAction::GitStatus {
+            package,
+            package_area,
+            ..
+        }) => resolve_package_and_area(
+            packages_from_result(&result),
+            package.as_deref(),
+            package_area.as_deref(),
+        )?,
         _ => None,
     };
-    if let Some(pkg_name) = &package_for_git {
-        let path_prefix = resolve_package_path(&result, pkg_name)?;
+    if let Some(path_prefix) = git_scope.as_deref()
+        && let Some(ref mut filesystem) = result.filesystem
+        && filesystem.git.is_some()
+    {
+        let dir = base_dir
+            .as_deref()
+            .unwrap_or_else(|| std::path::Path::new("."));
+        if let Ok(repo) = git2::Repository::discover(dir) {
+            let scoped_commits =
+                sniff::filesystem::get_commits_for_path(&repo, path_prefix, history_count);
+            if let Some(ref mut git) = filesystem.git {
+                git.recent = scoped_commits;
 
-        if let Some(ref mut filesystem) = result.filesystem
-            && filesystem.git.is_some()
-        {
-            let dir = base_dir
-                .as_deref()
-                .unwrap_or_else(|| std::path::Path::new("."));
-            if let Ok(repo) = git2::Repository::discover(dir) {
-                let scoped_commits =
-                    sniff::filesystem::get_commits_for_path(&repo, &path_prefix, history_count);
-                if let Some(ref mut git) = filesystem.git {
-                    git.recent = scoped_commits;
+                // Filter file_changes to the package path
+                git.file_changes
+                    .retain(|f| f.path.to_string_lossy().starts_with(path_prefix));
 
-                    // Filter file_changes to the package path
-                    git.file_changes
-                        .retain(|f| f.path.to_string_lossy().starts_with(&path_prefix));
+                // Filter dirty files
+                git.status
+                    .dirty
+                    .retain(|f| f.filepath.to_string_lossy().starts_with(path_prefix));
 
-                    // Filter dirty files
-                    git.status
-                        .dirty
-                        .retain(|f| f.filepath.to_string_lossy().starts_with(&path_prefix));
+                // Filter untracked files
+                git.status
+                    .untracked
+                    .retain(|f| f.filepath.to_string_lossy().starts_with(path_prefix));
 
-                    // Filter untracked files
-                    git.status
-                        .untracked
-                        .retain(|f| f.filepath.to_string_lossy().starts_with(&path_prefix));
-
-                    // Update counts to match filtered lists
-                    git.status.staged_count = git
+                // Update counts to match filtered lists
+                git.status.staged_count = git
+                    .file_changes
+                    .iter()
+                    .filter(|f| {
+                        f.status == sniff::filesystem::git::FileStatus::Staged
+                            || f.status == sniff::filesystem::git::FileStatus::Both
+                    })
+                    .count();
+                git.status.unstaged_count = git
+                    .file_changes
+                    .iter()
+                    .filter(|f| {
+                        f.status == sniff::filesystem::git::FileStatus::Modified
+                            || f.status == sniff::filesystem::git::FileStatus::Both
+                    })
+                    .count();
+                git.status.untracked_count = git
+                    .file_changes
+                    .iter()
+                    .filter(|f| f.status == sniff::filesystem::git::FileStatus::Untracked)
+                    .count();
+                git.status.is_dirty = git.status.staged_count > 0
+                    || git.status.unstaged_count > 0
+                    || git.status.untracked_count > 0
+                    || git
                         .file_changes
                         .iter()
-                        .filter(|f| {
-                            f.status == sniff::filesystem::git::FileStatus::Staged
-                                || f.status == sniff::filesystem::git::FileStatus::Both
-                        })
-                        .count();
-                    git.status.unstaged_count = git
-                        .file_changes
-                        .iter()
-                        .filter(|f| {
-                            f.status == sniff::filesystem::git::FileStatus::Modified
-                                || f.status == sniff::filesystem::git::FileStatus::Both
-                        })
-                        .count();
-                    git.status.untracked_count = git
-                        .file_changes
-                        .iter()
-                        .filter(|f| f.status == sniff::filesystem::git::FileStatus::Untracked)
-                        .count();
-                    git.status.is_dirty = git.status.staged_count > 0
-                        || git.status.unstaged_count > 0
-                        || git.status.untracked_count > 0
-                        || git
-                            .file_changes
-                            .iter()
-                            .any(|f| f.status == sniff::filesystem::git::FileStatus::Conflicted);
-                }
+                        .any(|f| f.status == sniff::filesystem::git::FileStatus::Conflicted);
             }
         }
+    }
+
+    // Tier 2/3 scoping: validate that `--package` and `--package-area` resolve
+    // and (when both supplied) overlap. The output functions apply the actual
+    // filtering; this call surfaces the intersection error before render time.
+    if let Some(
+        crate::args::RepoAction::Structure {
+            package,
+            package_area,
+            ..
+        }
+        | crate::args::RepoAction::Deps {
+            package,
+            package_area,
+            ..
+        }
+        | crate::args::RepoAction::DirtyPackages {
+            package,
+            package_area,
+            ..
+        }
+        | crate::args::RepoAction::DirtyPackageAreas {
+            package,
+            package_area,
+            ..
+        }
+        | crate::args::RepoAction::StagedPackages {
+            package,
+            package_area,
+            ..
+        }
+        | crate::args::RepoAction::StagedPackageAreas {
+            package,
+            package_area,
+            ..
+        }
+        | crate::args::RepoAction::UnstagedPackages {
+            package,
+            package_area,
+            ..
+        }
+        | crate::args::RepoAction::UnstagedPackageAreas {
+            package,
+            package_area,
+            ..
+        },
+    ) = &repo_action
+    {
+        resolve_package_and_area(
+            packages_from_result(&result),
+            package.as_deref(),
+            package_area.as_deref(),
+        )?;
     }
 
     // Handle Package/PackageArea early returns (need detection result but not enrichment)
@@ -1107,53 +1357,143 @@ async fn enrich_result_dependencies(mut result: SniffResult) -> SniffResult {
 
 /// Resolve a package name to its path prefix for git filtering.
 ///
-/// Tries exact match on `Package.name` first, then falls back to `Package.package_area`.
-/// Returns the relative path prefix (e.g., "homelab/server" or "homelab").
-fn resolve_package_path(
-    result: &SniffResult,
+/// Performs an exact case-insensitive match on `Package.name`. The returned
+/// path always ends with a trailing `/` so `starts_with` filtering matches
+/// whole-segment boundaries.
+///
+/// ## Errors
+///
+/// Returns an error listing valid package names when no package matches.
+pub(super) fn resolve_package_path(
+    packages: Option<&[sniff::filesystem::repo::Package]>,
     pkg_name: &str,
 ) -> Result<String, Box<dyn std::error::Error>> {
-    let packages = result
-        .filesystem
-        .as_ref()
-        .and_then(|fs| fs.repo.as_ref())
-        .and_then(|repo| repo.packages.as_ref());
-
     let Some(packages) = packages else {
         return Err("No packages found in this repository".into());
     };
 
     let lower = pkg_name.to_lowercase();
 
-    // Try exact match on package name
     if let Some(pkg) = packages.iter().find(|p| p.name.to_lowercase() == lower) {
         return Ok(format!("{}/", pkg.relative));
     }
 
-    // Try match on package_area
-    if let Some(pkg) = packages
-        .iter()
-        .find(|p| p.package_area.to_lowercase() == lower)
-    {
-        return Ok(format!("{}/", pkg.package_area));
-    }
-
-    // No match — list valid options
     let mut names: Vec<&str> = packages.iter().map(|p| p.name.as_str()).collect();
     names.sort();
     names.dedup();
+
+    Err(format!(
+        "Package '{}' not found.\n\nValid package names: {}",
+        pkg_name,
+        names.join(", "),
+    )
+    .into())
+}
+
+/// Resolve a package-area name to its path prefix for git filtering.
+///
+/// Performs a case-insensitive **prefix** match on `Package.package_area`.
+/// The returned path always ends with a trailing `/` so `starts_with`
+/// filtering matches whole-segment boundaries. The canonical area casing
+/// from the package list is preserved.
+///
+/// ## Errors
+///
+/// Returns an error listing valid package areas when no area matches.
+pub(super) fn resolve_package_area_path(
+    packages: Option<&[sniff::filesystem::repo::Package]>,
+    area: &str,
+) -> Result<String, Box<dyn std::error::Error>> {
+    let Some(packages) = packages else {
+        return Err("No packages found in this repository".into());
+    };
+
+    let lower = area.to_lowercase();
+
+    if let Some(pkg) = packages
+        .iter()
+        .find(|p| p.package_area.to_lowercase().starts_with(&lower))
+    {
+        return Ok(format!("{}/", pkg.package_area));
+    }
 
     let mut areas: Vec<&str> = packages.iter().map(|p| p.package_area.as_str()).collect();
     areas.sort();
     areas.dedup();
 
     Err(format!(
-        "Package '{}' not found.\n\nValid package names: {}\nValid package areas: {}",
-        pkg_name,
-        names.join(", "),
-        areas.join(", ")
+        "Package area '{}' not found.\n\nValid package areas: {}",
+        area,
+        areas.join(", "),
     )
     .into())
+}
+
+/// Resolve and intersect optional `--package` and `--package-area` inputs.
+///
+/// Returns `Ok(None)` when both inputs are `None`. Otherwise resolves the
+/// inputs that are `Some` via [`resolve_package_path`] and
+/// [`resolve_package_area_path`] respectively. When **both** are `Some`, the
+/// resolved package path must start with the resolved area path; otherwise
+/// the function returns a hard error. The narrower prefix (the package path)
+/// is returned in the overlap case.
+///
+/// ## Errors
+///
+/// - Either resolver propagates its error when an input does not match.
+/// - When both resolve but the package is in a different area, the error
+///   message names the package, its real area, and the requested area.
+pub(super) fn resolve_package_and_area(
+    packages: Option<&[sniff::filesystem::repo::Package]>,
+    package: Option<&str>,
+    area: Option<&str>,
+) -> Result<Option<String>, Box<dyn std::error::Error>> {
+    match (package, area) {
+        (None, None) => Ok(None),
+        (Some(name), None) => resolve_package_path(packages, name).map(Some),
+        (None, Some(area)) => resolve_package_area_path(packages, area).map(Some),
+        (Some(name), Some(area)) => {
+            let pkg_path = resolve_package_path(packages, name)?;
+            let area_path = resolve_package_area_path(packages, area)?;
+            if !pkg_path.starts_with(&area_path) {
+                let lower_name = name.to_lowercase();
+                let real_area = packages
+                    .and_then(|pkgs| pkgs.iter().find(|p| p.name.to_lowercase() == lower_name))
+                    .map(|p| p.package_area.clone())
+                    .unwrap_or_else(|| pkg_path.trim_end_matches('/').to_string());
+                let requested =
+                    area_path_label(packages, area).unwrap_or_else(|| area.to_string());
+                return Err(format!(
+                    "Package '{name}' is in area '{real_area}', not '{requested}'"
+                )
+                .into());
+            }
+            Ok(Some(pkg_path))
+        }
+    }
+}
+
+/// Return the canonical package-area label for an input string, if any
+/// package's area starts with the (case-insensitive) input.
+fn area_path_label(
+    packages: Option<&[sniff::filesystem::repo::Package]>,
+    area: &str,
+) -> Option<String> {
+    let packages = packages?;
+    let lower = area.to_lowercase();
+    packages
+        .iter()
+        .find(|p| p.package_area.to_lowercase().starts_with(&lower))
+        .map(|p| p.package_area.clone())
+}
+
+/// Extract the package list from a [`SniffResult`] for resolver consumption.
+fn packages_from_result(result: &SniffResult) -> Option<&[sniff::filesystem::repo::Package]> {
+    result
+        .filesystem
+        .as_ref()
+        .and_then(|fs| fs.repo.as_ref())
+        .and_then(|repo| repo.packages.as_deref())
 }
 
 /// Detect only the program category needed for the given output filter.

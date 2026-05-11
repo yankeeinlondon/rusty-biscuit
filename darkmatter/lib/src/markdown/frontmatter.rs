@@ -1,6 +1,7 @@
 //! Frontmatter parsing and manipulation utilities.
 
 use biscuit_file::YamlParseError;
+use biscuit_terminal::errors::SourceContext;
 
 use super::types::{FrontmatterMap, MarkdownError, MarkdownResult};
 use biscuit_file::serde_yaml_ng;
@@ -176,7 +177,10 @@ impl Default for Frontmatter {
 /// Parses frontmatter from markdown content.
 ///
 /// Frontmatter must be at the start of the document between `---` delimiters.
-pub(super) fn parse_frontmatter(content: &str) -> MarkdownResult<(Frontmatter, String)> {
+pub(super) fn parse_frontmatter(
+    content: &str,
+    ctx: SourceContext,
+) -> MarkdownResult<(Frontmatter, String)> {
     let lines: Vec<&str> = content.lines().collect();
 
     // Check if document starts with frontmatter delimiter
@@ -200,18 +204,14 @@ pub(super) fn parse_frontmatter(content: &str) -> MarkdownResult<(Frontmatter, S
     let yaml_lines = &lines[1..closing_idx];
     let yaml_content = yaml_lines.join("\n");
 
-    // Parse YAML with fallback strategies:
-    // 1. Direct parse
-    // 2. Tab normalization
-    // 3. Protect interpolation expressions ({{ }}) that may contain
-    //    YAML-significant characters (e.g., quotes in fallback values)
+    // Parse YAML with fallback strategies
     let frontmatter_map: FrontmatterMap = if yaml_content.trim().is_empty() {
         FrontmatterMap::new()
     } else {
         parse_yaml_with_fallbacks(&yaml_content).map_err(|source| {
             MarkdownError::FrontmatterParse {
+                ctx: ctx.clone(),
                 source,
-                yaml: yaml_content.clone(),
             }
         })?
     };
@@ -489,6 +489,18 @@ fn normalize_frontmatter_indentation(yaml: &str) -> String {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    fn test_ctx() -> SourceContext {
+        SourceContext::new(
+            std::path::PathBuf::from("/test"),
+            std::path::PathBuf::from("test"),
+            String::new(),
+        )
+    }
+
+    fn parse_frontmatter(content: &str) -> MarkdownResult<(Frontmatter, String)> {
+        super::parse_frontmatter(content, test_ctx())
+    }
 
     #[test]
     fn test_frontmatter_get() {

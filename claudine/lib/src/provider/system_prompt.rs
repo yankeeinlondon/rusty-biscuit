@@ -38,6 +38,23 @@ pub enum SystemPromptDelivery {
         /// Path within the shadow home, relative to its root.
         relative_path: &'static str,
     },
+    /// Provider config-override flag plus key, with the prompt content
+    /// inlined as the value. E.g. Codex `-c developer_instructions="..."`.
+    ConfigKeyInline {
+        /// The CLI flag name including leading dashes.
+        flag: &'static str,
+        /// The config key name.
+        key: &'static str,
+    },
+    /// Provider config-override flag plus key, with the value being a
+    /// path to a file containing the prompt. E.g. Codex
+    /// `-c model_instructions_file=<path>`.
+    ConfigKeyFile {
+        /// The CLI flag name including leading dashes.
+        flag: &'static str,
+        /// The config key name.
+        key: &'static str,
+    },
     /// Provider-specific behavior captured by a typed tag rather than
     /// a flag.
     Custom(SystemPromptCustomTag),
@@ -57,6 +74,10 @@ pub enum SystemPromptCustomTag {
     /// Goose: receipt management is delegated to the configurator stack.
     GooseRecipe,
     /// Codex: `model_instructions_file` config setting in `config.toml`.
+    #[deprecated(
+        since = "0.6.0",
+        note = "Replaced by ConfigKeyFile/ConfigKeyInline in SystemPromptDelivery; kept for one deprecation cycle"
+    )]
     CodexInstructionsFile,
     /// Roo Code: per-mode system prompt files under `.roo/`.
     RooModePromptFile,
@@ -83,4 +104,45 @@ pub struct SystemPromptSpec {
     /// Memory / instruction files that contribute to the system prompt
     /// hierarchy, e.g. `CLAUDE.md`, `AGENTS.md`.
     pub memory_files: &'static [PathTemplate],
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn config_key_inline_serializes_round_trip() {
+        let delivery = SystemPromptDelivery::ConfigKeyInline {
+            flag: "-c",
+            key: "developer_instructions",
+        };
+        let json = serde_json::to_value(&delivery).expect("ConfigKeyInline serializes");
+        assert_eq!(
+            json,
+            serde_json::json!({
+                "config_key_inline": {
+                    "flag": "-c",
+                    "key": "developer_instructions"
+                }
+            })
+        );
+    }
+
+    #[test]
+    fn config_key_file_serializes_round_trip() {
+        let delivery = SystemPromptDelivery::ConfigKeyFile {
+            flag: "-c",
+            key: "model_instructions_file",
+        };
+        let json = serde_json::to_value(&delivery).expect("ConfigKeyFile serializes");
+        assert_eq!(
+            json,
+            serde_json::json!({
+                "config_key_file": {
+                    "flag": "-c",
+                    "key": "model_instructions_file"
+                }
+            })
+        );
+    }
 }

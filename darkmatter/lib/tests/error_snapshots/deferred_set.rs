@@ -23,6 +23,7 @@ fn invalid_assignment_shows_raw_and_reason() {
             "set=",
         ],
     );
+    insta::assert_snapshot!("invalid_assignment", out);
 }
 
 #[test]
@@ -40,4 +41,5 @@ fn reassigned_property_shows_property_name() {
             "set.NAME=",
         ],
     );
+    insta::assert_snapshot!("reassigned_property", out);
 }

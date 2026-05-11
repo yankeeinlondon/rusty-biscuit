@@ -121,32 +121,31 @@ pub(crate) fn execute_sequence(
         composition::parse_selection_hints_from_frontmatter(source.markdown.frontmatter())?;
     let raw_hints = apply_user_set_to_hints(raw_hints, user_set_overrides.as_ref())?;
 
-    let clients = sniff::programs::InstalledAiClients::new();
-    let installed: Vec<claudine::provider::Provider> = claudine::provider::PROVIDERS_DISPLAY_ORDER
-        .into_iter()
-        .filter(|p| clients.path(p.sniff_ai_cli()).is_some())
-        .collect();
-    let excluded = shared.excluded();
-    let snapshot = claudine::composition::build_installed_snapshot(&installed, &excluded);
-
-    let source_repo_root = source.resolved_path.parent().and_then(|parent| {
-        sniff::filesystem::git::detect_git(parent, false, 1)
-            .ok()
-            .flatten()
-            .map(|info| info.repo_root)
-    });
-    let selection_config_path = source_repo_root.clone().unwrap_or_else(|| {
-        std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."))
-    });
-    let selection_config = super::composition::load_selection_config(&selection_config_path);
-    let catalog = match &selection_config {
+    // Phase 2 (2026-05-09-slow-prep): build the per-invocation prep context
+    // once. Later phases (per-step compose, harness preflight, execution
+    // request) reuse the same source-repo-root, selection config, and
+    // installed-provider snapshot instead of rediscovering them.
+    let prep_context = super::composition::CompositionPrepContext::new(
+        &source.original_ref,
+        &source.resolved_path,
+        &shared.excluded(),
+    )?;
+    let snapshot = &prep_context.installed_snapshot;
+    let source_repo_root = prep_context.source_repo_root.clone();
+    let catalog = match prep_context.selection_config.as_ref() {
         Some(cfg) => claudine::model_catalog::ModelCatalogService::with_overrides(
             cfg.model_overrides.clone(),
         ),
         None => claudine::model_catalog::ModelCatalogService::new(),
     };
-    catalog.refresh_blocking();
-    let favorite = selection_config.as_ref().and_then(|c| c.favorite);
+    // Phase 1 (2026-05-09-slow-prep): refresh is provider-scoped and only
+    // happens when a frontmatter `model` hint will actually be validated
+    // against the catalog. The previous unconditional `refresh_blocking()`
+    // shelled out to `opencode models` even for `--claude` runs.
+    let favorite = prep_context
+        .selection_config
+        .as_ref()
+        .and_then(|c| c.favorite);
 
     let explicit_provider = shared.explicit_provider();
     let cli_model = shared.model.as_deref();
@@ -156,27 +155,25 @@ pub(crate) fn execute_sequence(
 
     let mut drafts: Vec<SequenceStepDraft> = Vec::with_capacity(total_steps);
     let mut failures: Vec<claudine::composition::SequenceSelectionFailure> = Vec::new();
+    let mut refreshed_providers: std::collections::BTreeSet<claudine::provider::Provider> =
+        std::collections::BTreeSet::new();
 
     for step_index in 0..total_steps {
         let step = &plan.steps[step_index];
 
-        // Resolve provider for this step
+        // Resolve provider for this step. Provider resolution itself does
+        // not require a catalog, so this first pass uses `None`.
         let provider_result = if let Some(provider) = explicit_provider {
             Ok(provider)
         } else {
             let target = claudine::composition::resolve_target_non_tty_with_hints(
-                None,
-                &raw_hints,
-                &snapshot,
-                favorite,
-                cli_model,
-                Some(&catalog),
+                None, &raw_hints, snapshot, favorite, cli_model, None,
             );
             target.map(|t| t.provider)
         };
 
         let provider_plan = match claudine::composition::build_picker_plan_with_hints(
-            &raw_hints, &snapshot, favorite,
+            &raw_hints, snapshot, favorite,
         ) {
             Ok(plan) => plan,
             Err(_) => claudine::composition::ProviderPickerPlan {
@@ -187,6 +184,25 @@ pub(crate) fn execute_sequence(
 
         let provider_for_model = explicit_provider.or(provider_result.as_ref().ok().copied());
         let (model, model_reason) = if let Some(provider) = provider_for_model {
+            // Probe model resolution without catalog so the refresh gate
+            // can observe whether CLI / provider env / generic MODEL would
+            // override the frontmatter `model` hint. Refresh is skipped in
+            // those cases (matches the direct compose path).
+            let (_, probe_reason) = claudine::composition::resolve_model_with_hints(
+                provider, &raw_hints, cli_model, None,
+            );
+            // Refresh once per unique provider, and only when the
+            // frontmatter `model` hint will actually be validated against
+            // the catalog.
+            if refreshed_providers.insert(provider) {
+                let _span = tracing::info_span!("compose_prep.model_catalog", provider = %provider.as_slug(), step = step_index).entered();
+                super::composition::refresh_for_model_validation(
+                    &catalog,
+                    provider,
+                    &raw_hints,
+                    Some(&probe_reason),
+                );
+            }
             claudine::composition::resolve_model_with_hints(
                 provider,
                 &raw_hints,
@@ -297,20 +313,12 @@ pub(crate) fn execute_sequence(
             effective_fail_fast.to_string(),
         );
         // Inject AGENT for this step using the resolved target so
-        // {{env.AGENT}} in the body composes correctly. The mutation of
-        // the parent process env happens once below for step 0, then
-        // gets refreshed each step in case earlier steps changed it.
+        // {{env.AGENT}} in the body composes correctly.
         let target = resolved_targets
             .get(step_index)
             .ok_or_else(|| eyre!("missing resolved target for step {}", step_index + 1))?;
         let slug = target.provider.as_slug().to_string();
         env_overrides.insert("AGENT".to_string(), slug.clone());
-        // SAFETY: sequence orchestrator runs on the main task; per-step
-        // updates of this single env var precede any composition or
-        // child-process spawn for that step.
-        unsafe {
-            std::env::set_var("AGENT", &slug);
-        }
 
         let compose_options = {
             let mut ctx = darkmatter::markdown::compose::ComposeContext::capture();
@@ -325,7 +333,7 @@ pub(crate) fn execute_sequence(
 
         let approval_options = super::build_harness_shell_options_with_cache(
             &source.resolved_path,
-            None,
+            source_repo_root.as_deref(),
             Some(Arc::clone(&shared_approval_cache)),
         );
 
@@ -344,6 +352,7 @@ pub(crate) fn execute_sequence(
             pre_approved_commands: Some(cumulative_approved.clone()),
             env_overrides: env_overrides.clone(),
             perf_enabled: shared.perf,
+            source_repo_root: source_repo_root.clone(),
         };
         let prepared = composition::prepare_direct(source, prepare_options)?;
 
@@ -470,6 +479,11 @@ pub(crate) fn execute_sequence(
             silent: shared.silent,
             env_overrides: step_ctx.env_overrides.clone(),
             shared_approval_cache: Some(Arc::clone(&shared_approval_cache)),
+            installed_snapshot: Some(prep_context.installed_snapshot.clone()),
+            prep_launch_workspace: Some(prep_context.launch_workspace.clone()),
+            prep_launch_context: Some(prep_context.launch_context.clone()),
+            prep_env_context: Some(prep_context.env_context.clone()),
+            prep_launch_detection_error: prep_context.launch_detection_error.clone(),
         };
 
         let step_result = super::composition::execute_composition_request_inner(

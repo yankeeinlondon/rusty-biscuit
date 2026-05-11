@@ -91,8 +91,23 @@ enum Commands {
         strict: bool,
 
         /// Send as plain text (disable Markdown rendering).
-        #[arg(long)]
+        #[arg(long, conflicts_with = "summary")]
         plain: bool,
+
+        /// Plain notification summary paired with a Markdown body.
+        ///
+        /// On providers with a notification surface distinct from the rendered
+        /// surface (Discord), the summary becomes the notification banner text and
+        /// the message argument becomes a rich embed. Implies Markdown body —
+        /// cannot combine with --plain.
+        #[arg(long, conflicts_with = "plain")]
+        summary: Option<String>,
+
+        /// Strip Markdown formatting from the message body before sending.
+        ///
+        /// Mutually exclusive with --plain (redundant) and --summary (incoherent).
+        #[arg(long, conflicts_with_all = ["plain", "summary"])]
+        strip_markdown: bool,
 
         /// Attach a geographic location (format: "LAT,LON").
         #[arg(long, value_name = "LAT,LON")]
@@ -264,6 +279,8 @@ async fn main() -> Result<()> {
             silent,
             strict,
             plain,
+            summary,
+            strip_markdown,
             location,
             title,
             subtitle,
@@ -289,6 +306,8 @@ async fn main() -> Result<()> {
                 silent,
                 strict,
                 plain,
+                summary,
+                strip_markdown,
                 location,
                 title,
                 subtitle,
@@ -421,6 +440,8 @@ struct SendArgs {
     silent: bool,
     strict: bool,
     plain: bool,
+    summary: Option<String>,
+    strip_markdown: bool,
     location: Option<String>,
     title: Option<String>,
     subtitle: Option<String>,
@@ -504,6 +525,8 @@ async fn send_message(args: SendArgs) -> Result<()> {
         silent,
         strict,
         plain,
+        summary,
+        strip_markdown,
         location,
         title,
         subtitle,
@@ -546,7 +569,11 @@ async fn send_message(args: SendArgs) -> Result<()> {
 
     let mut message = match message_text.as_deref() {
         Some(text) if !text.is_empty() => {
-            if plain {
+            if strip_markdown {
+                messenger::Message::markdown_stripped(text)
+            } else if let Some(summary_text) = summary.as_deref() {
+                messenger::Message::summarized(summary_text, text)
+            } else if plain {
                 messenger::Message::text(text)
             } else {
                 messenger::Message::markdown(text)

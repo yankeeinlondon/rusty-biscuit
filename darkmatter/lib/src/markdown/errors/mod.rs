@@ -117,6 +117,7 @@ pub fn as_block_error<'a>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use biscuit_terminal::errors::SourceContext;
     use biscuit_terminal::utils::escape_codes::strip_escape_codes;
     use std::path::PathBuf;
 
@@ -124,6 +125,10 @@ mod tests {
 
     fn render(err: &dyn BlockError) -> String {
         strip_escape_codes(err.report_block_error_optimistic(Some(80)))
+    }
+
+    fn test_ctx() -> SourceContext {
+        SourceContext::new(PathBuf::from("/test"), PathBuf::from("test"), String::new())
     }
 
     #[test]
@@ -144,7 +149,7 @@ mod tests {
                 (PathBuf::from("a.md"), 3),
             ],
         };
-        let err = MarkdownError::Transclusion(inner);
+        let err = MarkdownError::Transclusion(Box::new(inner));
         let out = render(&err);
         assert!(out.contains("TransclusionError"));
         assert!(out.contains("cycle detected"));
@@ -174,6 +179,7 @@ mod tests {
     #[test]
     fn shell_execution_failed_includes_stderr() {
         let err = ShellExpansionError::ExecutionFailed {
+            ctx: Box::new(test_ctx()),
             command: "ls --bogus".into(),
             code: 2,
             stdout: String::new(),
@@ -190,6 +196,7 @@ mod tests {
     #[test]
     fn shell_approval_required_names_whitelist_paths() {
         let err = ShellExpansionError::ApprovalRequired {
+            ctx: Box::new(test_ctx()),
             command: "gh repo list".into(),
             whitelist_path: "/tmp/wl".into(),
             blacklist_path: "/tmp/bl".into(),
@@ -204,22 +211,35 @@ mod tests {
 
     #[test]
     fn page_block_unterminated_has_opening_line() {
+        // Build content where line 14 contains the opening directive so the
+        // excerpt actually surfaces the line number.
+        let mut content = String::new();
+        for n in 1..14 {
+            content.push_str(&format!("line {n}\n"));
+        }
+        content.push_str("::block when=\"x\"\nbody\n");
+
+        let ctx = biscuit_terminal::errors::SourceContext::new(
+            std::path::PathBuf::from("/test.md"),
+            std::path::PathBuf::from("test.md"),
+            content,
+        );
         let err = PageBlockError::UnterminatedBlock {
-            line: 14,
+            ctx: Box::new(ctx),
+            opening_line: 14,
             opening_text: "::block when=\"x\"".to_string(),
-            file_ends_at_line: 50,
         };
         let out = render(&err);
         assert!(out.contains("unterminated"));
         assert!(out.contains("14"));
         assert!(out.contains("::block when=\"x\""));
-        assert!(out.contains("50"));
         assert!(out.contains("::end-block"));
     }
 
     #[test]
     fn condition_parse_lists_operators() {
         let err = ConditionError::Parse {
+            ctx: Box::new(test_ctx()),
             expr: "a &&& b".into(),
             line: 7,
             message: "unexpected token".into(),
@@ -262,9 +282,13 @@ mod tests {
     #[test]
     fn reference_parse_directive_has_syntax_hint() {
         let err = ReferenceError::ParseDirective {
+            ctx: Box::new(SourceContext::new(
+                PathBuf::from("/tmp/test/docs/root.md"),
+                PathBuf::from("docs/root.md"),
+                "::file ./broken.md when=\n".to_string(),
+            )),
             line: 2,
             message: "unexpected end".into(),
-            source_file: PathBuf::from("docs/root.md"),
             directive_text: "::file ./broken.md when=".to_string(),
             caret_col: Some(27),
         };
@@ -272,7 +296,7 @@ mod tests {
         assert!(out.contains("ReferenceError"));
         assert!(out.contains("docs/root.md"));
         assert!(out.contains("::file ./broken.md when="));
-        assert!(out.contains("^"));
+        assert!(out.contains("Column 27"));
         assert!(out.contains("::file"));
     }
 

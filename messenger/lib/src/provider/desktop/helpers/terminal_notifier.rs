@@ -48,14 +48,11 @@ impl TerminalNotifierHelper {
             args.push(OsString::from(subtitle));
         }
 
-        if let Some(body) = request.body.as_deref() {
-            args.push(OsString::from("-message"));
-            args.push(OsString::from(body));
-        } else {
-            // terminal-notifier requires `-message`; fall back to title.
-            args.push(OsString::from("-message"));
-            args.push(OsString::from(&request.title));
-        }
+        // terminal-notifier requires `-message`. When body is missing, pass an
+        // empty string so the notification renders title-only instead of
+        // duplicating the title as the message body.
+        args.push(OsString::from("-message"));
+        args.push(OsString::from(request.body.as_deref().unwrap_or("")));
 
         if let Some(icon) = request.icon.as_ref()
             && let NotificationIcon::Path(path) = icon
@@ -243,7 +240,7 @@ mod tests {
     }
 
     #[test]
-    fn build_args_falls_back_to_title_when_body_missing() {
+    fn build_args_uses_empty_message_when_body_missing() {
         let helper = helper();
         let mut request = notice_request();
         request.body = None;
@@ -253,7 +250,7 @@ mod tests {
             .map(|s| s.to_string_lossy().into_owned())
             .collect();
         let pos = rendered.iter().position(|s| s == "-message").unwrap();
-        assert_eq!(rendered[pos + 1], "Hello");
+        assert_eq!(rendered[pos + 1], "");
     }
 
     #[test]

@@ -23,6 +23,7 @@ use biscuit_terminal::components::status::{Status, StatusState};
 use super::super::section::SectionTracker;
 use super::super::stream_io::StreamOutput;
 use super::exit::exit_code_from_status;
+use super::stream_capture::StreamCapture;
 use super::subagent_watchdog::WatchdogState;
 use super::termination::{
     WatchdogTermination, apply_early_termination_to_summary, wait_with_signal_and_early_termination,
@@ -611,7 +612,6 @@ pub(crate) fn run_child_stream_semantic(
         Arc::new(std::sync::Mutex::new(StreamTextRenderer::new()));
 
     let stdout_output = stream_output.clone();
-    let wait_loop_metrics = live_metrics.clone();
 
     // Dedicated 30-second ticker that flushes any buffered markdown the
     // provider has not terminated with a paragraph boundary. Independent
@@ -659,6 +659,11 @@ pub(crate) fn run_child_stream_semantic(
     let stdout_renderer = text_renderer.clone();
     let first_semantic_at_clone = Arc::clone(&first_semantic_at);
     let first_raw_stdout_at_clone = Arc::clone(&first_raw_stdout_at);
+    let stdout_byte_metrics = live_metrics.clone();
+    // Opt-in raw NDJSON capture for post-mortem analysis. Activated by
+    // `CLAUDINE_RAW_STREAM_DIR`; `None` (and zero overhead) otherwise.
+    let stream_capture_owned =
+        StreamCapture::open(timeout_config.provider, child.id(), started_at);
     let stdout_handle = thread::spawn(move || {
         let _stream_guard = stream_span.enter();
         let _parse_span = info_span!("stream_parse").entered();
@@ -687,15 +692,32 @@ pub(crate) fn run_child_stream_semantic(
 
         let mut parser: Box<dyn SemanticStreamParser> = build_parser(output_cb, reasoning_cb);
         let mut fallback_mode = false;
+        let mut stream_capture = stream_capture_owned;
 
         for line in reader.lines() {
             let Ok(line) = line else { break };
 
+            let line_at = Instant::now();
             {
                 let mut g = first_raw_stdout_at_clone.lock().unwrap();
                 if g.is_none() {
-                    *g = Some(Instant::now());
+                    *g = Some(line_at);
                 }
+            }
+
+            // Provider-agnostic activity heartbeat: refresh the byte clock
+            // BEFORE feeding the line to the semantic parser, so even
+            // partially-buffered or post-completion-only providers (notably
+            // OpenCode, which emits no `tool_start` / `task_started`) keep
+            // the silence rule honest. Whitespace-only lines are ignored.
+            if let Ok(mut g) = stdout_byte_metrics.lock() {
+                g.record_byte_activity(&line, line_at);
+            }
+
+            // Mirror the raw line to the post-mortem capture file when
+            // `CLAUDINE_RAW_STREAM_DIR` is set. No-op otherwise.
+            if let Some(capture) = stream_capture.as_mut() {
+                capture.record_line(&line, line_at);
             }
 
             if fallback_mode {
@@ -750,12 +772,23 @@ pub(crate) fn run_child_stream_semantic(
     let has_bridge = bridge_for_thread.is_some();
     let capture_always = has_bridge;
     let first_stderr_at_clone = Arc::clone(&first_stderr_at);
+    let stderr_byte_metrics = live_metrics.clone();
     let stderr_handle = thread::spawn(move || {
         let _stderr_guard = stderr_span.enter();
         let reader = BufReader::new(pipe);
         let mut captured = String::new();
         for line in reader.lines() {
             let Ok(line) = line else { break };
+
+            // Refresh the byte heartbeat for every non-empty stderr line,
+            // including noise-prefixed and bridge-consumed lines — those are
+            // still bytes flowing from the wrapped child and prove it is
+            // making progress. Done before noise filtering for that reason.
+            let line_at = Instant::now();
+            if let Ok(mut g) = stderr_byte_metrics.lock() {
+                g.record_byte_activity(&line, line_at);
+            }
+
             if prefixes.iter().any(|p| line.starts_with(p.as_str())) {
                 continue;
             }
@@ -763,7 +796,7 @@ pub(crate) fn run_child_stream_semantic(
             {
                 let mut g = first_stderr_at_clone.lock().unwrap();
                 if g.is_none() {
-                    *g = Some(Instant::now());
+                    *g = Some(line_at);
                 }
             }
 
@@ -812,10 +845,6 @@ pub(crate) fn run_child_stream_semantic(
         }
     }
 
-    // OpenCode hang recovery: `opencode_stop_threshold` is the post-"stop"
-    // grace window (120s). It does not drive a user-visible timing line.
-    let opencode_stop_threshold = Duration::from_secs(120);
-
     // Watchdog channel: the ticker sends termination requests; the wait
     // loop receives them and escalates SIGTERM → SIGKILL via the same
     // pathway used for stderr-bridge early termination.
@@ -857,8 +886,6 @@ pub(crate) fn run_child_stream_semantic(
             true,
             rx,
             wd_rx,
-            Some(wait_loop_metrics),
-            opencode_stop_threshold,
             timeout_config.kill_grace,
         )?
     } else {
@@ -867,9 +894,7 @@ pub(crate) fn run_child_stream_semantic(
     };
 
     if let Some(
-        EarlyTermination::CompletedButHung { message }
-        | EarlyTermination::Timeout { message }
-        | EarlyTermination::StepTimeout { message, .. },
+        EarlyTermination::Timeout { message } | EarlyTermination::StepTimeout { message, .. },
     ) = early_termination.as_ref()
     {
         let rendered = Status::new(message)

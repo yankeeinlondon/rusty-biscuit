@@ -24,7 +24,7 @@ use crate::{
 pub struct StatusBlock {
     severity: StatusState,
     header: Option<String>,
-    body: Option<RenderableContent>,
+    body: Vec<Prose>,
     hint: Option<String>,
     border_color: Option<Color>,
     border: String,
@@ -37,7 +37,7 @@ impl StatusBlock {
         Self {
             severity,
             header: None,
-            body: None,
+            body: Vec::new(),
             hint: None,
             border_color: None,
             border: "┃ ".to_string(),
@@ -56,10 +56,21 @@ impl StatusBlock {
         self
     }
 
-    /// Set the block quote body content.
-    pub fn body(mut self, body: impl Into<RenderableContent>) -> Self {
-        self.body = Some(body.into());
+    /// Set the body content as a vector of [`Prose`] items.
+    ///
+    /// Each item is rendered individually and stacked vertically with a
+    /// single blank line between them inside a continuous block quote.
+    pub fn body(mut self, body: impl crate::components::prose::IntoProseVec) -> Self {
+        self.body = body.into_prose_vec();
         self
+    }
+
+    /// Set the body to a single [`Prose`] item.
+    ///
+    /// Convenience shortcut for the common case where the body is a single
+    /// styled line or paragraph.
+    pub fn body_line(self, line: impl Into<Prose>) -> Self {
+        self.body(vec![line.into()])
     }
 
     /// Set a prose-formatted hint rendered below the block quote.
@@ -100,10 +111,17 @@ impl Renderable for StatusBlock {
             parts.push(status.render(term));
         }
 
-        if let Some(ref body) = self.body {
-            let mut block = BlockQuote::new(body.clone(), None::<&str>)
-                .with_left_block_color(self.resolved_border_color())
-                .with_border(&self.border);
+        if !self.body.is_empty() {
+            let composed = self
+                .body
+                .iter()
+                .map(|p| p.render(term))
+                .collect::<Vec<_>>()
+                .join("\n\n");
+            let mut block =
+                BlockQuote::new(RenderableContent::String(composed), None::<&str>)
+                    .with_left_block_color(self.resolved_border_color())
+                    .with_border(&self.border);
             block.layout_mut().left_margin = self.layout.left_margin.clone();
             block.layout_mut().right_margin = self.layout.right_margin.clone();
             block.layout_mut().word_wrap = self.layout.word_wrap.clone();
@@ -137,9 +155,7 @@ impl Renderable for StatusBlock {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{
-        components::compose::Compose, discovery::detection::ColorDepth, utils::color::Tailwind,
-    };
+    use crate::{discovery::detection::ColorDepth, utils::color::Tailwind};
 
     fn strip_ansi(s: &str) -> String {
         let mut result = String::with_capacity(s.len());
@@ -309,14 +325,13 @@ mod tests {
     }
 
     #[test]
-    fn body_from_compose() {
+    fn body_from_vec_prose() {
         let term = no_color_terminal(80);
-        let mut compose = Compose::default();
-        compose.add_text("first ");
-        compose.add_prose(Prose::new("<b>second</b>"));
-        let block = StatusBlock::new(StatusState::Success).body(compose);
+        let block = StatusBlock::new(StatusState::Success)
+            .body(vec![Prose::new("first"), Prose::new("<b>second</b>")]);
         let rendered = strip_ansi(&block.render(&term));
-        assert!(rendered.contains("┃ first second"));
+        assert!(rendered.contains("┃ first"));
+        assert!(rendered.contains("┃ second"));
     }
 
     #[test]

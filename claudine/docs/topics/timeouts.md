@@ -58,36 +58,121 @@ from the moment Claudine spawns it.
 as the child keeps emitting structured events at a healthy cadence, the
 silence clock keeps resetting and the ticker stays asleep.
 
-- **Formula.** The ticker fires when `now - last_event_at >= step_timeout`
-  **and** no tool calls or subagents are currently in-flight.
+- **Formula.** The ticker fires when `now - last_activity_at >= step_timeout`,
+  the in-flight gate does not suppress, and one full activity signal has
+  been observed (first-event grace). `last_activity_at` is the more
+  recent of two clocks — the structured-event clock `last_event_at` and
+  the raw-byte clock `last_byte_at` — so even a provider whose
+  structured events lag behind real progress refreshes silence whenever
+  bytes flow.
+- **Resets.** Every parent-stream **activity event** advances
+  `last_event_at`; every non-empty chunk of stdout/stderr bytes from the
+  wrapped child advances `last_byte_at`. See
+  [Activity vocabulary](#activity-vocabulary) below for the exact
+  taxonomy.
+- **First-event grace.** Until at least one activity signal has been
+  observed on either clock, the rule cannot fire. Slow provider startup
+  or a long first model response will not be killed.
 - **In-flight gate.** When the structured stream reports in-flight tool
   calls (`in_flight`) or active subagents (`in_flight_subagents`), the
-  rule is suppressed entirely. A long-running Task/subagent call produces
-  parent-stream silence by design while the child works; the wall-clock
-  `timeout` rule serves as the backstop for truly stuck tool calls.
-- **Resets.** Every parent-stream event resets `last_event_at`: tool
-  calls, tool results, reasoning chunks, info/warning lines, assistant
-  text deltas, and recognized subagent progress events.
+  rule is suppressed *unless* the in-flight item itself is stuck. See
+  [Stuck-aware suppression](#stuck-aware-suppression).
 - **Default.** `30m`. The default is intentionally large so that legitimate
   long-running tool calls (deep research, large test suites) finish without
   spurious kills. Overriding with a smaller value is the right choice when
   a session legitimately should not go silent for that long.
 - **Exit reason on breach.** `step_timeout`.
 
-**Worked example.**
+### Activity vocabulary
+
+Two independent clocks feed the silence reference. The ticker uses the
+more recent of the two on every evaluation.
+
+#### Structured-event clock (`last_event_at`)
+
+A parent-stream event refreshes `last_event_at` if and only if it lands as
+one of the following [`SemanticEvent`](../../lib/src/stream/semantic.rs)
+variants (the `SemanticEvent::is_activity()` predicate):
+
+| Variant | Typical source |
+|---|---|
+| `OutputText` | Assistant text / `text` / `text_delta` / `assistant_text` |
+| `Reasoning` | Provider reasoning chunks |
+| `ToolCall` | A tool start (where the provider emits one) |
+| `ToolResult` | A tool completion |
+| `SubagentStart` | A subagent dispatch (where the provider emits one) |
+| `SubagentStop` | A subagent completion |
+| `FileChange` | A workspace edit notification |
+| `PlanUpdate` | A todo/plan revision |
+| `Info` | Step boundaries, tool progress markers, generic info lines |
+| `Warning` | Provider-emitted warnings or malformed-line surfaces |
+| `Error` | Terminal or non-terminal stream errors |
+| `ProviderExtension` | Any unrecognised event the parser preserves verbatim |
+
+The following variants are **envelopes** and do not reset the silence
+clock: `SessionStart`, `TurnStart`, `TurnComplete`, `PermissionRequest`.
+
+#### Raw-byte clock (`last_byte_at`)
+
+Every non-empty chunk of stdout (and stderr for providers that emit
+structured events on stderr) read from the wrapped child refreshes
+`last_byte_at` **before** the bytes are handed to the semantic parser.
+This is a provider-agnostic activity signal that protects against false
+silence kills on providers whose structured stream is sparse enough that
+`last_event_at` can lag behind real progress (notably OpenCode — see
+[Provider-specific stream variants](#provider-specific-stream-variants)).
+
+Bytes that contain no non-whitespace characters are ignored so a child
+that flushes blank lines cannot look infinitely active. The heartbeat
+fires at the byte-stream layer, so partially buffered output (provider
+mid-flush) also refreshes the clock. A child that is truly stuck
+producing zero bytes still allows `step_timeout` to fire normally; the
+byte heartbeat does not mask genuine hangs.
+
+### Stuck-aware suppression
+
+The in-flight gate is **not** an absolute suppression. The ticker
+classifies each in-flight tool or subagent as *active* or *stuck*:
+
+- **Active.** `now - last_progress_at < step_timeout`. The tool/subagent
+  has produced a recent progress event (or was started recently) and is
+  presumed healthy.
+- **Stuck.** `now - last_progress_at >= step_timeout`. The tool/subagent
+  has not produced any progress within the silence budget.
+
+Suppression rules:
+
+1. If at least one in-flight item exists and **all** in-flight items are
+   active, the silence rule is suppressed.
+2. If any in-flight item is stuck, the silence rule is allowed to fire
+   and the breach message enumerates the stuck items.
+3. If no in-flight items exist, the silence rule is evaluated normally
+   against `last_event_at` (this is the path most provider runs follow).
+
+This suppression depends on the provider populating `in_flight` /
+`in_flight_subagents`. See
+[Provider-specific stream variants](#provider-specific-stream-variants)
+for cases where a provider's stream does not feed this state and the
+gate is effectively bypassed.
+
+**Worked example (Claude-style provider with rich start/stop events).**
 
 ```txt
 12:00:00  child spawned                                         last_event_at = 12:00:00
-12:00:01  tool_use: Task (starts rust-developer subagent)     last_event_at = 12:00:01
-12:00:02  task_started: id=B                                   last_event_at = 12:00:02
+12:00:01  ToolCall: Task (rust-developer)                       last_event_at = 12:00:01
+                                                                in_flight_subagents={B}
+12:00:02  SubagentStart id=B                                    last_event_at = 12:00:02
+                                                                B.last_progress_at = 12:00:02
 12:00:03  ...stream goes silent while subagent works...
-12:30:03  step_timeout budget met (30m)                        IN-FLIGHT GATE: suppressed
-                                                                     (in_flight_subagents non-empty)
-...subagent continues working...
-13:00:00  task_completed: id=B                                  last_event_at = 13:00:00
-13:00:01  tool_result: Task                                     in_flight cleared
-13:00:01  parent agent continues with subagent output
+12:30:03  step_timeout budget met (30m)                         in_flight_subagents non-empty
+                                                                B.last_progress_at age = 30m
+                                                                B classified STUCK
+                                                                step_timeout fires with stuck list
 ```
+
+If the subagent had emitted any progress event during that window
+(e.g., a `task_progress` Info line), `B.last_progress_at` would have
+advanced and the gate would have continued to suppress.
 
 ## Configuration sources and precedence
 
@@ -140,12 +225,21 @@ $ CLAUDINE_STEP_TIMEOUT=0s claudine compose prompt-without-frontmatter.md
 | `CLAUDINE_TIMEOUT` | none | Wall-clock budget when neither CLI nor frontmatter supplies one. Duration string (`30s`, `5m`, `2h`). |
 | `CLAUDINE_STEP_TIMEOUT` | `30m` | Stream-silence budget when neither CLI nor frontmatter supplies one. Duration string. |
 
+`CLAUDINE_TIMEOUT` and `CLAUDINE_STEP_TIMEOUT` are the **only two**
+user-facing timeout env vars. They map 1-for-1 to the `timeout` and
+`step_timeout` frontmatter properties (with environment-style
+capitalisation). There is no third user-facing knob in this namespace.
+
 Both values use the same `parse_timeout` grammar as frontmatter, so
 `30s`, `5m`, `2h`, and `0s` all parse the same way.
 
+### Internal cadence
+
 The ticker evaluates both rules at a 5-second cadence. After a breach,
 the wait loop sends SIGTERM and then waits 10 seconds before escalating
-to SIGKILL. These internals are not configurable.
+to SIGKILL. These internals are intentionally not part of the
+user-facing surface; they are constants from the user's perspective and
+must not be promoted to a third public timeout concept.
 
 ## Defaults and rationale
 
@@ -287,41 +381,145 @@ built-in default), so simply leaving `timeout` out of frontmatter does
 **not** disable it — that just means "use whatever lower-priority source
 is configured."
 
+## Provider-specific stream variants
+
+Claudine's `step_timeout` rule and its in-flight gate both depend on the
+wrapped provider emitting structured events at a useful cadence. Provider
+streams differ substantially in event richness, and those differences
+shape how the silence rule behaves in practice.
+
+The table below summarises which event surfaces each provider's parser
+populates today (entries marked **(parsed)** route into the activity
+clock and the in-flight gate; entries marked **(silent)** mean the
+provider never emits the event so the corresponding code path stays
+inert).
+
+| Provider | Tool start (`tool_start` → `ToolCall`) | Tool finish (`tool_end` / `tool_use` → `ToolResult`) | Subagent start (`task_started` → `SubagentStart`) | Subagent finish (`task_completed` → `SubagentStop`) | Text deltas (`OutputText`) | Reasoning chunks (`Reasoning`) |
+|---|---|---|---|---|---|---|
+| Claude Code | parsed | parsed | parsed | parsed | parsed | parsed |
+| Codex | parsed | parsed | parsed | parsed | parsed | parsed |
+| Gemini | parsed | parsed | (n/a — Gemini does not expose subagents) | (n/a) | parsed | parsed |
+| Goose | parsed | parsed | (n/a) | (n/a) | parsed | parsed |
+| Kimi Code | parsed | parsed | (n/a) | (n/a) | parsed | parsed |
+| OpenCode | **silent** | parsed | **silent** | parsed | parsed | parsed |
+| Qwen Code | parsed | parsed | (n/a) | (n/a) | parsed | parsed |
+| Roo Code | parsed | parsed | parsed | parsed | parsed | parsed |
+
+The OpenCode row is the structurally important one and is detailed
+below.
+
+### OpenCode
+
+OpenCode's CLI streams its `tool_use` and `task_completed` events
+**only after the tool or subagent has reached `completed` / `error`**.
+There is no paired request-side event on the wire; per the parser docs,
+"OpenCode emits `tool_use` only after the tool has reached `completed`
+/ `error`. OpenCode does not emit a paired request-side event, so we
+emit only a `ToolResult` (no synthesized `ToolCall`)." The
+`task_started` event variant is recognised in the parser but is not
+emitted in practice by current OpenCode releases.
+
+The functional consequence: during OpenCode runs,
+`LiveMetricsState.in_flight` and `in_flight_subagents` are **never
+populated**. The in-flight gate from
+[Stuck-aware suppression](#stuck-aware-suppression) is a no-op for
+OpenCode — there is nothing for the gate to suppress against. Two
+complementary mechanisms compensate so legitimate work is not
+misclassified as a hang:
+
+1. **Raw-byte heartbeat.** The byte-stream clock `last_byte_at` (see
+   [Raw-byte clock](#raw-byte-clock-last_byte_at)) refreshes whenever
+   the wrapped child writes any non-whitespace bytes, including
+   partially-buffered output that has not yet parsed into a structured
+   `SemanticEvent`. This is the provider-agnostic protection that
+   covers OpenCode-style sparse streams.
+2. **Per-step `provider_status` grace.** The silence rule is
+   suppressed **while an OpenCode step is in flight** — from
+   `step_start` until the matching `step_finish` — because mid-step
+   silence is expected on this provider. The grace resets for every
+   new step, so multi-step flows that dispatch subagents mid-stream
+   are protected throughout the entire session, not just during the
+   first step. The wall-clock `timeout` rule is **not** suppressed; it
+   remains the unconditional backstop. The guard fires only for
+   OpenCode; richer-stream providers do not need it.
+3. **Synthesized subagent lifecycle.** When OpenCode completes a
+   `task` tool, Claudine synthesizes `SubagentStart` → `SubagentStop`
+   events from the `tool_use` payload so the breach diagnostic can
+   report how many subagents have been observed and when the last one
+   finished, even though OpenCode never emits native `task_started` /
+   `task_completed` events.
+
+This matters most for two flow shapes:
+
+1. **A long-running tool (e.g. a `bash` command running a test suite)
+   inside a single OpenCode turn.** OpenCode does not stream a
+   `tool_start` for the bash invocation, so claudine cannot register
+   the tool as in-flight. The byte heartbeat refreshes whenever the
+   bash tool produces output; the silence clock fires only if the
+   tool itself goes truly quiet for `step_timeout`.
+2. **A `task`-tool fan-out followed by a long synthesis turn.** Once
+   the parallel `task_completed` events stop arriving, the parent
+   model may spend significant wall-clock time composing its closing
+   response. The byte heartbeat refreshes whenever the model streams
+   any reasoning or text bytes — even before they parse into a
+   `SemanticEvent` — so post-fan-out synthesis turns are no longer
+   misclassified as silence.
+
+Recommendations for OpenCode workloads:
+
+- Set `step_timeout` more generously than for Claude/Codex on
+  comparable workloads. A rule of thumb is 2–3× the value you would
+  use for a richer-stream provider performing the same task.
+- Prefer the wall-clock `timeout` rule over a tight `step_timeout` for
+  bounding total session duration; the wall-clock rule is independent
+  of stream richness.
+- For tool-heavy commit/synthesis flows, `step_timeout: 30m` (the
+  built-in default) is usually appropriate even when shorter values
+  would be safe on Claude or Codex.
+
 ## Worked example: the OpenCode hang class
 
-The reference incident that motivated this design was an OpenCode session
-that issued nine parallel `task` subagents, observed seven
-`task_completed` events, and then went completely silent. The wrapped
-process never exited and Claudine had no diagnostic surface to terminate
-the session.
+The reference incident that motivated the unified `step_timeout` was an
+OpenCode session that issued multiple parallel `task` subagents,
+observed each `task_completed` event, and then went completely silent
+during the closing synthesis. The wrapped process never exited and
+Claudine had no diagnostic surface to terminate the session.
 
-With the unified `step_timeout`:
+With the unified `step_timeout`, OpenCode's actual stream surface, the
+byte heartbeat, and the per-step `provider_status` grace:
 
 ```
-12:00:00  claudine compose ... (default step_timeout = 30m)
-12:00:01  9 × task_started observed                last_event_at = 12:00:01
-12:14:32  7 × task_completed observed              last_event_at = 12:14:32
-12:14:33  ...silence...
+12:00:00  claudine compose ... (step_timeout = 30m)
+12:00:01  step_start observed                       step_in_flight = true
+                                                     silence rule suppressed
+12:00:02  parent text: "Launching N subagents..."   last_event_at = 12:00:02
+                                                     last_byte_at  = 12:00:02
+                                                     in_flight_subagents = {}  (no task_started)
+12:14:32  N × task_completed observed               last_event_at = 12:14:32
+                                                     last_byte_at  = 12:14:32
+                                                     subagent_done_count = N
+12:14:33  step_finish observed                      step_in_flight = false
+                                                     silence rule re-enabled
+12:14:34  parent text: "All N succeeded..."         last_event_at = 12:14:34
+                                                     last_byte_at  = 12:14:34
+12:14:35  ...closing synthesis streams reasoning bytes (no parsed event)...
+                                                     last_byte_at  advances on each chunk
+                                                     last_event_at remains stale
+                                                     silence = now - last_activity_at < 30m
+                                                     → no kill
 
-# At 12:30:00 (silence_window default 30s) the flush_if_idle ticker emits:
- ⏳ Awaiting subagent: <id-A> (16m)
- ⏳ Awaiting subagent: <id-B> (14m)
-
-# At 12:44:33 (last_event_at + 30m) the ticker fires:
-> Step Timeout
-> No stream activity for 30m. Outstanding subagents:
->   - <id-A> (<name-A>) — 30m since last progress
->   - <id-B> (<name-B>) — 30m since last progress
-
-# Termination path:
-12:44:33  SIGTERM
-12:44:43  SIGKILL (10s grace period)
-12:44:43  session_end → error_kind: "step_timeout"
+# A genuinely stuck child (zero bytes for 30m) would fire normally:
+13:14:35  no bytes, no events for 30m              step_timeout fires
+13:14:35  SIGTERM → SIGKILL (10s grace)            session_end → error_kind: "step_timeout"
 ```
 
-The synthesized summary records the breach so downstream reporting (`claudine
-logs`) can attribute the hang to a stream-silence kill rather than a
-generic non-zero exit.
+Note the contrast with the Claude-style worked example earlier: the
+breach message for OpenCode includes the count of subagents observed
+in the current step and the elapsed time since the last completion,
+so a timeout during a long subagent fan-out is no longer misreported
+as "no outstanding subagents". The byte heartbeat distinguishes
+between *the model is silently composing* (bytes still flowing) and
+*the wrapped process is genuinely stuck* (no bytes at all).
 
 To kill the same hang faster during incident triage, drop the silence
 budget for the next run:

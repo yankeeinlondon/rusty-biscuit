@@ -207,7 +207,7 @@ impl AgentErrorReport {
         }
 
         let block = StatusBlock::new(StatusState::Error)
-            .body(compose)
+            .body(Prose::new(compose.render(term)))
             .border_color(border_color)
             .left_margin(Margin::Chars(2))
             .right_margin(Margin::Chars(2));

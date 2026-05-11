@@ -174,6 +174,13 @@ struct WebhookJsonBody<'a> {
     content: Option<&'a str>,
     #[serde(skip_serializing_if = "Option::is_none")]
     attachments: Option<Vec<AttachmentMeta>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    embeds: Option<Vec<EmbedBody>>,
+}
+
+#[derive(Serialize, Clone)]
+struct EmbedBody {
+    description: String,
 }
 
 /// Attachment metadata included in the JSON or `payload_json` field.
@@ -239,16 +246,33 @@ impl super::Provider for DiscordWebhookProvider {
             tracing::Span::current().record("thread_id", tracing::field::display(thread));
         }
 
-        let content = message.render_body_with_location(ProviderKind::DiscordWebhook);
-        let content_opt = if content.is_empty() {
-            None
-        } else {
-            Some(content.as_str())
+        let summary = message.render_summary();
+        let rich = message.render_rich(ProviderKind::DiscordWebhook);
+        let location_line = message.location().map(|l| l.format_text_line());
+
+        let (content_owned, embeds_owned): (Option<String>, Option<Vec<EmbedBody>>) = match rich {
+            Some(mut rich_md) => {
+                if let Some(loc) = location_line {
+                    if !rich_md.is_empty() {
+                        rich_md.push('\n');
+                    }
+                    rich_md.push_str(&loc);
+                }
+                let content = if summary.is_empty() { None } else { Some(summary) };
+                (content, Some(vec![EmbedBody { description: rich_md }]))
+            }
+            None => {
+                let content = message.render_body_with_location(ProviderKind::DiscordWebhook);
+                let content = if content.is_empty() { None } else { Some(content) };
+                (content, None)
+            }
         };
+        let content_opt = content_owned.as_deref();
 
         let attachments = message.attachments();
         tracing::debug!(
-            content_len = content.len(),
+            content_len = content_owned.as_ref().map(String::len).unwrap_or(0),
+            has_embed = embeds_owned.is_some(),
             attachment_count = attachments.len(),
             has_thread = thread_id.is_some(),
             "sending Discord webhook message"
@@ -262,6 +286,7 @@ impl super::Provider for DiscordWebhookProvider {
             let body = WebhookJsonBody {
                 content: content_opt,
                 attachments: None,
+                embeds: embeds_owned.clone(),
             };
             self.client.post(url).json(&body).send().await
         } else {
@@ -283,6 +308,7 @@ impl super::Provider for DiscordWebhookProvider {
             let payload = WebhookJsonBody {
                 content: content_opt,
                 attachments: Some(metas),
+                embeds: embeds_owned.clone(),
             };
             let payload_json = serde_json::to_string(&payload)
                 .map_err(|e| ProviderKind::DiscordWebhook.transport_error(e))?;

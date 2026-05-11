@@ -6,6 +6,7 @@ use claudine::provider::{
     provider_info,
 };
 use claudine::stream::StreamProtocol;
+use claudine::provider::SystemPromptSpec;
 use claudine::system_prompt::{PreparedSystemPrompt, SystemPromptMode};
 use color_eyre::eyre::{Result, bail, eyre};
 
@@ -539,6 +540,13 @@ pub(crate) trait WrapperProfile: Send + Sync {
 
     // -- Universal --system-prompt flag --------------------------------------
 
+    /// Return the [`SystemPromptSpec`] for this provider.
+    ///
+    /// Default: reads from the central provider catalog.
+    fn system_prompt_spec(&self) -> &'static SystemPromptSpec {
+        provider_info(self.provider()).system_prompt
+    }
+
     /// Map a resolved system prompt to provider-specific flags, env, and
     /// temp artifacts.
     ///
@@ -549,6 +557,7 @@ pub(crate) trait WrapperProfile: Send + Sync {
         prompt: &PreparedSystemPrompt,
         _interactive: bool,
         _cwd: &Path,
+        _scoped_tmp: &Path,
     ) -> Result<super::system_prompt::SystemPromptApplication> {
         Ok(super::system_prompt::SystemPromptApplication {
             args: vec![],

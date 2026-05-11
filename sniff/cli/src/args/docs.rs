@@ -13,6 +13,10 @@ pub struct DocsFilter {
     pub has_prompt: bool,
     /// Show only documents that have a blast_radius frontmatter key.
     pub blast_radius: bool,
+    /// Package areas to include (OR logic); empty means no filter.
+    pub package_area: Vec<String>,
+    /// Package names to include (OR logic); empty means no filter.
+    pub package: Vec<String>,
     /// Substring filter on filepath/filename (case-insensitive).
     pub filter: Vec<String>,
 }

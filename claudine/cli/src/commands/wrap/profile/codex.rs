@@ -33,36 +33,18 @@ impl WrapperProfile for CodexWrapper {
     fn apply_system_prompt(
         &self,
         prompt: &PreparedSystemPrompt,
-        _interactive: bool,
+        interactive: bool,
         _cwd: &Path,
+        scoped_tmp: &Path,
     ) -> Result<crate::commands::wrap::system_prompt::SystemPromptApplication> {
-        use crate::commands::wrap::system_prompt::{SystemPromptApplication, SystemPromptArtifact};
-
-        let mut app = SystemPromptApplication::empty();
-        match prompt.mode {
-            SystemPromptMode::Append => {
-                let (tmp_home, _overlay_path) =
-                    crate::commands::wrap::system_prompt::create_ephemeral_overlay_home(
-                        ".codex",
-                        "AGENTS.override.md",
-                        &prompt.composed_markdown,
-                    )?;
-                app.env.push((
-                    std::ffi::OsString::from("HOME"),
-                    tmp_home.path().as_os_str().to_owned(),
-                ));
-                app.artifacts.push(SystemPromptArtifact::TempDir(tmp_home));
-            }
-            SystemPromptMode::Replace => {
-                let mut tmp = tempfile::NamedTempFile::new()?;
-                tmp.write_all(prompt.composed_markdown.as_bytes())?;
-                app.args.push("-c".to_string());
-                app.args
-                    .push(format!("model_instructions_file={}", tmp.path().display()));
-                app.artifacts.push(SystemPromptArtifact::TempFile(tmp));
-            }
-        }
-        Ok(app)
+        crate::commands::wrap::system_prompt::apply_system_prompt_via_spec(
+            self.system_prompt_spec(),
+            prompt.mode,
+            interactive,
+            &prompt.composed_markdown,
+            None,
+            scoped_tmp,
+        )
     }
 
     fn apply_sandbox(&self, args: &mut Vec<String>) -> Option<String> {

@@ -372,7 +372,8 @@ pub(crate) fn build_harness_launch(
         plan_timeout,
         cli_step_timeout,
         plan_step_timeout,
-    );
+    )
+    .with_provider(provider);
 
     Ok(AttemptLaunch {
         args,
