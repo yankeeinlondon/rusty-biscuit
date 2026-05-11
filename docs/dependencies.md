@@ -38,7 +38,8 @@ This is a Rust workspace with the following modules:
 - `tabby/ui/Cargo.toml` - Future UI module
 - `tree-hugger/lib/Cargo.toml` - Tree-sitter symbol extraction (16 languages)
 - `tree-hugger/cli/Cargo.toml` - Symbol extraction CLI (`hug`)
-- `tui/Cargo.toml` - Future TUI module (no dependencies)
+- `biscuit-tui/lib/Cargo.toml` - TUI chrome (input components built on Ratatui)
+- `biscuit-tui/cli/Cargo.toml` - TUI input CLI (`question`)
 - `unchained-ai/lib/Cargo.toml` - LLM pipeline primitives and provider integrations
 - `unchained-ai/gen/Cargo.toml` - Provider model enum generator (`gen-models`)
 - `unchained-ai/cli/Cargo.toml` - Future AI CLI (`unchained`)
@@ -92,6 +93,18 @@ This is a Rust workspace with the following modules:
     _Shared visualization library for Mermaid diagrams and graph rendering. Pure Rust with no external dependencies._
 
     _Tags: workspace, library, visualization_
+
+- [tui-chrome](./biscuit-tui/lib) _v0.1.0_
+
+    _TUI input components (text input, toggle, choice, text area, grid) built on Ratatui. Embeddable widgets and a standalone runner._
+
+    _Tags: workspace, library, tui, inputs_
+
+- [tui-chrome-cli](./biscuit-tui/cli) _v0.1.0_
+
+    _Interactive prompt CLI (`question`) exposing tui-chrome components as subcommands with raw/json/null output modes._
+
+    _Tags: workspace, cli, tui, inputs_
 
 - [claudine](./claudine) _v0.1.0_
 
@@ -249,6 +262,18 @@ This is a Rust workspace with the following modules:
 
     _Tags: workspace, cli, codegen_
 
+- [messenger](./messenger/lib) _v0.1.0_
+
+    _Unified outbound messaging library for Rust (Discord, Slack, Signal, WhatsApp, Telegram, desktop OS notifications)._
+
+    _Tags: workspace, library, messaging, notifications_
+
+- [messenger-cli](./messenger/cli) _v0.1.0_
+
+    _Messenger CLI binary (`messenger`) with route config, receipts, and interactive setup._
+
+    _Tags: workspace, cli, messaging, notifications_
+
 ## Production Dependencies
 
 ### AI & LLM
@@ -340,6 +365,12 @@ This is a Rust workspace with the following modules:
     _Library for building interactive CLI prompts with text, select, multiselect, date, editor, and password prompts._
 
     _Tags: cli, interactive, prompts_
+
+- [heck](https://github.com/withoutboats/heck) _v0.5_ [📄](https://docs.rs/heck)
+
+    _Case conversion helpers used by the `question` CLI naming-convention flags._
+
+    _Tags: cli, strings, case-conversion_
 
 - [owo-colors](https://github.com/owo-colors/owo-colors) _v4.2_ [📄](https://docs.rs/owo-colors)
 
@@ -647,6 +678,32 @@ This is a Rust workspace with the following modules:
 
     _Tags: pdf, rendering, pdfium_
 
+### Notifications & Messaging
+
+- [notify-rust](https://github.com/hoodie/notify-rust) _v4_ [📄](https://docs.rs/notify-rust)
+
+    _Cross-platform desktop notifications via the freedesktop.org D-Bus Notifications interface. Used by `messenger`'s Linux desktop backend._
+
+    _Tags: notifications, dbus, linux, desktop_
+
+- [winrt-notification](https://github.com/allenbenz/winrt-notification) _v0.5_ [📄](https://docs.rs/winrt-notification)
+
+    _Thin wrapper around the WinRT toast notification API. Used by `messenger`'s Windows desktop backend for unpackaged Win32 apps._
+
+    _Tags: notifications, winrt, windows, toast_
+
+- [objc2-user-notifications](https://github.com/madsmtm/objc2) _v0.3_ [📄](https://docs.rs/objc2-user-notifications)
+
+    _Safe Rust bindings to Apple's `UserNotifications.framework`. Used as the opt-in native path for `messenger`'s macOS desktop backend._
+
+    _Tags: notifications, macos, objc, framework_
+
+- [objc2-foundation](https://github.com/madsmtm/objc2) _v0.3_ [📄](https://docs.rs/objc2-foundation)
+
+    _Safe Rust bindings to Apple's Foundation framework (NSString, NSError, NSDictionary). Companion crate to `objc2-user-notifications` in the macOS desktop backend._
+
+    _Tags: foundation, macos, objc, bindings_
+
 ### Platform-Specific
 
 - [coreaudio-sys](https://crates.io/crates/coreaudio-sys) _v0.2_
@@ -694,6 +751,12 @@ This is a Rust workspace with the following modules:
     _Random number generators with fast implementations and broad distribution support._
 
     _Tags: random, rng, generation_
+
+- [uuid](https://github.com/uuid-rs/uuid) _v1_ [📄](https://docs.rs/uuid)
+
+    _Universally unique identifier (UUID) generation and parsing. Used by `messenger`'s desktop backends to synthesize stable `notification_id` values on macOS (AppleScript/native) and Windows (WinRT toast)._
+
+    _Tags: uuid, identifiers, random_
 
 ### Regex & Text Processing
 
@@ -992,6 +1055,12 @@ This is a Rust workspace with the following modules:
     _Snapshot testing library with VS Code integration and beautiful diffs._
 
     _Tags: testing, snapshots, tdd_
+
+- [criterion](https://github.com/bheisler/criterion.rs) _v0.5_ [📄](https://docs.rs/criterion)
+
+    _Statistics-driven micro-benchmarking framework for Rust with HTML reports and regression detection. Used by `sniff/lib/benches/perf.rs`._
+
+    _Tags: testing, benchmarking, performance_
 
 - [predicates](https://github.com/assert-rs/predicates-rs) _v3.1_
 

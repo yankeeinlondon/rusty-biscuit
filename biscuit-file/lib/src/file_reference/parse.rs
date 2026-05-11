@@ -16,6 +16,11 @@ pub(crate) fn parse(raw: &str) -> Result<ParsedReference, FileReferenceError> {
     }
 
     let (recursive, remainder) = strip_recursive(raw);
+    if recursive && remainder.is_empty() {
+        return Err(FileReferenceError::InvalidSyntax(
+            "`%` prefix requires a path".to_string(),
+        ));
+    }
     let (kind, path_str) = detect_kind(remainder);
     let template = parse_template(path_str)?;
 
@@ -23,6 +28,7 @@ pub(crate) fn parse(raw: &str) -> Result<ParsedReference, FileReferenceError> {
         recursive,
         kind: match kind {
             DetectedKind::Relative => ReferenceKind::Relative(template),
+            DetectedKind::ImplicitRelative => ReferenceKind::ImplicitRelative(template),
             DetectedKind::Absolute => ReferenceKind::Absolute(template),
             DetectedKind::Magic => ReferenceKind::Magic(template),
             DetectedKind::Package => ReferenceKind::Package(template),
@@ -45,6 +51,7 @@ fn strip_recursive(raw: &str) -> (bool, &str) {
 
 enum DetectedKind {
     Relative,
+    ImplicitRelative,
     Absolute,
     Magic,
     Package,
@@ -69,7 +76,10 @@ fn detect_kind(s: &str) -> (DetectedKind, &str) {
     if s.starts_with('/') {
         return (DetectedKind::Absolute, s);
     }
-    (DetectedKind::Relative, s)
+    if s.starts_with("./") || s.starts_with("../") || s == "." || s == ".." {
+        return (DetectedKind::Relative, s);
+    }
+    (DetectedKind::ImplicitRelative, s)
 }
 
 /// Parse a path string into a `PathTemplate` with literal and env-var segments.
@@ -196,7 +206,7 @@ mod tests {
     #[test]
     fn interpolation_single_var() {
         let parsed = parse("{{DIR}}/foo.md").unwrap();
-        assert!(matches!(parsed.kind, ReferenceKind::Relative(_)));
+        assert!(matches!(parsed.kind, ReferenceKind::ImplicitRelative(_)));
         let template = parsed.kind.template();
         assert_eq!(template.segments.len(), 2);
         assert_eq!(
@@ -275,9 +285,42 @@ mod tests {
     }
 
     #[test]
-    fn bare_filename() {
+    fn bare_filename_is_implicit_relative() {
         let parsed = parse("foo.md").unwrap();
         assert!(!parsed.recursive);
+        assert!(matches!(parsed.kind, ReferenceKind::ImplicitRelative(_)));
+    }
+
+    #[test]
+    fn bare_subdir_path_is_implicit_relative() {
+        let parsed = parse("docs/spec.md").unwrap();
+        assert!(!parsed.recursive);
+        assert!(matches!(parsed.kind, ReferenceKind::ImplicitRelative(_)));
+        let template = parsed.kind.template();
+        assert_eq!(
+            template.segments[0],
+            TemplateSegment::Literal("docs/spec.md".to_string())
+        );
+    }
+
+    #[test]
+    fn explicit_dot_slash_is_relative() {
+        let parsed = parse("./foo.md").unwrap();
+        assert!(matches!(parsed.kind, ReferenceKind::Relative(_)));
+    }
+
+    #[test]
+    fn lone_recursive_prefix_rejected() {
+        let err = parse("%").unwrap_err();
+        assert!(
+            matches!(err, FileReferenceError::InvalidSyntax(_)),
+            "expected InvalidSyntax, got: {err}"
+        );
+    }
+
+    #[test]
+    fn explicit_dotdot_slash_is_relative() {
+        let parsed = parse("../foo.md").unwrap();
         assert!(matches!(parsed.kind, ReferenceKind::Relative(_)));
     }
 }

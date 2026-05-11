@@ -36,11 +36,19 @@
 //! ```
 
 // API definition functions
+pub use crate::artificial_analysis::{
+    define_artificial_analysis_critpt_api, define_artificial_analysis_data_api,
+};
 pub use crate::bitbucket::define_bitbucket_api;
 pub use crate::gitea::define_gitea_api;
 pub use crate::github::define_github_api;
 pub use crate::openai::define_openai_api;
 pub use crate::unfolded_circle::define_unfolded_circle_core_rest_api;
+
+// Response types for Artificial Analysis (top-level only)
+pub use crate::artificial_analysis::{
+    CritPtEvaluateBody, CritPtEvaluateResponse, LlmModelsResponse, MediaModelsResponse,
+};
 
 // Response types for OpenAI
 pub use crate::openai::{DeleteModelResponse, ListModelsResponse, Model};
@@ -55,7 +63,7 @@ pub use crate::github::{
 pub use crate::gitea::{
     AnnotatedTagObject as GiteaAnnotatedTagObject, GitRef as GiteaGitRef,
     GitTreeResponse as GiteaGitTreeResponse, IssueSummary as GiteaIssueSummary,
-    PullRequestSummary as GiteaPullRequestSummary, Release as GiteaRelease,
+    Label as GiteaLabel, PullRequestSummary as GiteaPullRequestSummary, Release as GiteaRelease,
     RepoTag as GiteaRepoTag, RepositoryInfo as GiteaRepositoryInfo,
 };
 

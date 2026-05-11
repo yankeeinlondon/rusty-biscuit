@@ -3,19 +3,23 @@
 use clap::Args;
 use claudine::composition::{self, SequenceExecutionOptions};
 use color_eyre::eyre::{Result, eyre};
+use tracing::info_span;
 
 use super::compose::SharedComposeArgs;
-use crate::log;
 
 /// Run a Markdown document as a serial sequence of composition steps.
+///
+/// Positional tokens are one file reference plus optional `key=value` setters
+/// in any order. Inline setters override `--set` on overlapping keys; reserved
+/// per-step overlay keys still win over both.
 #[derive(Debug, Clone, Args)]
 pub struct SequenceArgs {
     #[command(flatten)]
     pub shared: SharedComposeArgs,
 
-    /// File reference to the sequence document.
-    #[arg(value_name = "FILE")]
-    pub file: String,
+    /// File reference and/or `key=value` setters.
+    #[arg(value_name = "ARG", num_args = 1.., required = true)]
+    pub args: Vec<String>,
 
     /// Override the document's fail-fast behavior for this run.
     /// Accepts: true, false, 1, 0, yes, no.
@@ -34,36 +38,68 @@ fn parse_boolish(s: &str) -> Result<bool, String> {
 }
 
 /// Entry point for `claudine sequence`.
-pub fn run_sequence(args: SequenceArgs, verbose: u8) -> Result<()> {
-    let code = match run_sequence_inner(args, verbose) {
-        Ok(code) => code,
-        Err(error) => {
-            log::error(&error.to_string());
-            1
-        }
-    };
+///
+/// Errors returned here bubble up to the top-level walker in `main.rs`,
+/// which renders darkmatter `BlockError` reports for typed Markdown
+/// failures and falls back to `color_eyre` otherwise.
+pub fn run_sequence(
+    args: SequenceArgs,
+    verbose: u8,
+    startup_timings: Option<crate::perf::StartupTimings>,
+) -> Result<()> {
+    let code = run_sequence_inner(args, verbose, startup_timings)?;
     std::process::exit(code);
 }
 
-fn run_sequence_inner(args: SequenceArgs, verbose: u8) -> Result<i32> {
+fn run_sequence_inner(
+    args: SequenceArgs,
+    verbose: u8,
+    startup_timings: Option<crate::perf::StartupTimings>,
+) -> Result<i32> {
     let SequenceArgs {
         shared,
-        file,
+        args,
         fail_fast,
     } = args;
 
-    let source = composition::resolve_composition_source(&file).map_err(|e| eyre!("{e}"))?;
+    if shared.timeout.is_some() && shared.interactive {
+        return Err(eyre!("--timeout cannot be used with --interactive mode"));
+    }
+    if shared.step_timeout.is_some() && shared.interactive {
+        return Err(eyre!(
+            "--step-timeout cannot be used with --interactive mode"
+        ));
+    }
+    // Early validation: both flags share the same duration grammar.
+    if let Some(ref raw) = shared.timeout {
+        claudine::harness::parse_timeout(raw, std::path::Path::new("<--timeout>"))
+            .map_err(|e| eyre!("invalid --timeout value: {e}"))?;
+    }
+    shared.step_timeout_secs()?;
 
-    let plan = composition::resolve_sequence_plan(&source)
-        .map_err(|e| eyre!("{e}"))?
-        .ok_or_else(|| {
-            eyre!(
-                "file '{}' does not define a `sequence` frontmatter property",
-                file
-            )
-        })?;
+    let parsed = super::compose::parse_composition_positionals(&args)?;
+    let file = parsed.file_ref.ok_or_else(|| {
+        eyre!("missing file reference: expected exactly one file reference plus optional key=value setters")
+    })?;
 
-    let set_overrides = super::compose::parse_set_json(shared.set.as_deref())?;
+    let source = composition::resolve_composition_source(&file)?;
+
+    let _sequence_span = info_span!(
+        "sequence",
+        file = %source.resolved_path.display(),
+        fail_fast = ?fail_fast,
+    )
+    .entered();
+
+    let plan = composition::resolve_sequence_plan(&source)?.ok_or_else(|| {
+        eyre!(
+            "file '{}' does not define a `sequence` frontmatter property",
+            file
+        )
+    })?;
+
+    let set_overrides =
+        super::compose::merge_set_overrides(shared.set.as_deref(), parsed.shorthand_setters)?;
 
     let execution_options = SequenceExecutionOptions {
         fail_fast_override: fail_fast,
@@ -76,5 +112,7 @@ fn run_sequence_inner(args: SequenceArgs, verbose: u8) -> Result<i32> {
         set_overrides,
         execution_options,
         verbose,
+        shared.perf,
+        startup_timings,
     )
 }

@@ -236,7 +236,7 @@ pub fn collect_metadata() -> TerminalMetadata {
         repo_root: terminal.repo_root.as_ref().map(|p| p.display().to_string()),
         package_root: terminal.package_root.clone(),
         color_depth: terminal.color_depth.clone(),
-        color_mode: Terminal::color_mode(),
+        color_mode: terminal.color_mode(),
         bg_color,
         text_color,
         cursor_color,
@@ -335,7 +335,7 @@ pub fn format_connection(conn: &Connection) -> ConnectionInfo {
     }
 }
 
-pub fn print_pretty(metadata: &TerminalMetadata, verbose: bool) {
+pub fn print_pretty(metadata: &TerminalMetadata, verbose: u8) {
     let s = crate::types::CliStyles::detect();
 
     println!();
@@ -485,9 +485,6 @@ pub fn print_pretty(metadata: &TerminalMetadata, verbose: bool) {
         check(metadata.underline_support.colored)
     );
 
-    // Reserved for future verbose-only output
-    let _ = verbose;
-
     // Multiplexing
     println!("\n{}{}Multiplexing{}", s.bold, s.blue, s.reset);
     println!("  Type:       {:?}", metadata.multiplex);
@@ -536,6 +533,57 @@ pub fn print_pretty(metadata: &TerminalMetadata, verbose: bool) {
         println!("  File:       {}", config);
     }
 
+    // Verbose-only: environment details
+    if verbose >= 1 {
+        println!("\n{}{}Environment{}", s.bold, s.blue, s.reset);
+        println!(
+            "  TERM:       {}",
+            std::env::var("TERM").unwrap_or_else(|_| format!("{}unset{}", s.dim, s.reset))
+        );
+        println!(
+            "  TERM_PROGRAM: {}",
+            std::env::var("TERM_PROGRAM").unwrap_or_else(|_| format!("{}unset{}", s.dim, s.reset))
+        );
+        println!(
+            "  COLORTERM:  {}",
+            std::env::var("COLORTERM").unwrap_or_else(|_| format!("{}unset{}", s.dim, s.reset))
+        );
+        println!(
+            "  NO_COLOR:   {}",
+            if std::env::var("NO_COLOR").is_ok() {
+                format!("{}set{}", s.yellow, s.reset)
+            } else {
+                format!("{}unset{}", s.dim, s.reset)
+            }
+        );
+    }
+
+    // Very verbose: raw detection values
+    if verbose >= 2 {
+        println!("\n{}{}Raw Detection{}", s.bold, s.blue, s.reset);
+        println!(
+            "  TERM_PROGRAM_VERSION: {}",
+            std::env::var("TERM_PROGRAM_VERSION")
+                .unwrap_or_else(|_| format!("{}unset{}", s.dim, s.reset))
+        );
+        println!(
+            "  LANG:       {}",
+            std::env::var("LANG").unwrap_or_else(|_| format!("{}unset{}", s.dim, s.reset))
+        );
+        println!(
+            "  LC_ALL:     {}",
+            std::env::var("LC_ALL").unwrap_or_else(|_| format!("{}unset{}", s.dim, s.reset))
+        );
+        println!(
+            "  SSH_CLIENT: {}",
+            std::env::var("SSH_CLIENT").unwrap_or_else(|_| format!("{}unset{}", s.dim, s.reset))
+        );
+        println!(
+            "  TMUX:       {}",
+            std::env::var("TMUX").unwrap_or_else(|_| format!("{}unset{}", s.dim, s.reset))
+        );
+    }
+
     println!();
 }
 
@@ -553,13 +601,13 @@ mod tests {
         let analysis = analyze_content(text);
         assert_eq!(analysis.total_length, 11);
         assert_eq!(analysis.line_count, 1);
-        assert_eq!(analysis.contains_color_escape_codes, true);
+        assert!(analysis.contains_color_escape_codes);
 
         let clean_text = "Just plain text\nwith two lines";
         let analysis_clean = analyze_content(clean_text);
         assert_eq!(analysis_clean.total_length, 29);
         assert_eq!(analysis_clean.line_count, 2);
-        assert_eq!(analysis_clean.contains_color_escape_codes, false);
+        assert!(!analysis_clean.contains_color_escape_codes);
     }
 
     #[test]
@@ -567,10 +615,7 @@ mod tests {
         assert_eq!(TerminalApp::Kitty.to_string(), "Kitty");
         assert_eq!(TerminalApp::Ghostty.to_string(), "Ghostty");
         assert_eq!(TerminalApp::ITerm2.to_string(), "ITerm2");
-        assert_eq!(
-            TerminalApp::Other("xterm".to_string()).to_string(),
-            "xterm"
-        );
+        assert_eq!(TerminalApp::Other("xterm".to_string()).to_string(), "xterm");
         assert_eq!(
             TerminalApp::Other("Windows Terminal".to_string()).to_string(),
             "Windows Terminal"

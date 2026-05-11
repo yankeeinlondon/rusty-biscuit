@@ -1,9 +1,11 @@
 {
     "cSpell.words": [
+        "ALSA",
         "distros",
         "highspeed",
         "libasound",
         "libsound",
+        "rodio",
         "ZENMUX"
     ]
 }

@@ -6,16 +6,19 @@
 //!
 //! ## Modules
 //!
-//! - [`distro`] - Linux distribution detection and classification
-//! - [`locale`] - Locale detection from environment variables
-//! - [`time`] - Timezone and NTP status detection
-//! - [`package_manager`] - System package manager detection
+//! - `distro` - Linux distribution detection and classification
+//! - `locale` - Locale detection from environment variables
+//! - `time` - Timezone and NTP status detection
+//! - `package_manager` - System package manager detection
 
 use serde::{Deserialize, Serialize};
+use std::time::Instant;
 use sysinfo::System;
+use tracing::Level;
 use tracing::instrument;
 
 use crate::Result;
+use crate::performance;
 use crate::request::OsRequest;
 
 // Submodules
@@ -23,6 +26,8 @@ mod distro;
 mod locale;
 mod package_manager;
 mod time;
+#[cfg(any(target_os = "windows", test))]
+mod windows_timezone_map;
 
 // Re-export all public types for API stability
 pub use distro::{
@@ -212,35 +217,48 @@ pub fn detect_os_with_request(request: &OsRequest) -> Result<OsInfo> {
         if s.is_empty() { None } else { Some(s) }
     };
 
+    let identity_started = Instant::now();
     let os_type = detect_os_type();
     let linux_distro = detect_linux_distro();
     let linux_family = linux_distro.as_ref().map(|d| d.family);
+    performance::record_logged_stage("os.identity", identity_started.elapsed(), Level::DEBUG);
 
+    let package_manager_started = Instant::now();
     let system_package_managers = if request.include_package_managers {
+        let index = crate::executable_index::ExecutableIndex::build_path_only();
         match os_type {
-            OsType::Linux => Some(detect_linux_package_managers(linux_family)),
-            OsType::MacOS => Some(detect_macos_package_managers()),
-            OsType::Windows => Some(detect_windows_package_managers()),
+            OsType::Linux => Some(detect_linux_package_managers(linux_family, Some(&index))),
+            OsType::MacOS => Some(detect_macos_package_managers(Some(&index))),
+            OsType::Windows => Some(detect_windows_package_managers(Some(&index))),
             OsType::FreeBSD | OsType::OpenBSD | OsType::NetBSD => {
-                Some(detect_bsd_package_managers(os_type))
+                Some(detect_bsd_package_managers(os_type, Some(&index)))
             }
             OsType::IOS | OsType::Android | OsType::Other => None,
         }
     } else {
         None
     };
+    performance::record_logged_stage(
+        "os.package_managers",
+        package_manager_started.elapsed(),
+        Level::DEBUG,
+    );
 
+    let locale_started = Instant::now();
     let locale = if request.include_locale {
         Some(detect_locale())
     } else {
         None
     };
+    performance::record_logged_stage("os.locale", locale_started.elapsed(), Level::DEBUG);
 
+    let time_started = Instant::now();
     let time = if request.include_timezone || request.include_ntp_status {
         Some(detect_timezone_with_options(request.include_ntp_status))
     } else {
         None
     };
+    performance::record_logged_stage("os.time", time_started.elapsed(), Level::DEBUG);
 
     Ok(OsInfo {
         os_type,

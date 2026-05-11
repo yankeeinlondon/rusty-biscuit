@@ -30,6 +30,25 @@ unchained limits --json
 
 Output includes progress bars showing short-term and long-term cap usage for each platform.
 
+### `unchained models`
+
+List all known provider models with optional metadata display.
+
+```bash
+# List all models across all providers
+unchained models
+
+# Filter to a specific provider
+unchained models --provider openai
+unchained models --provider anthropic
+
+# Show verbose metadata (context window, modalities, pricing, etc.)
+unchained models --provider openai --verbose
+
+# Output as JSON
+unchained models --json
+```
+
 ## Shell Completions
 
 ```bash

@@ -1,0 +1,3 @@
+[[layer]]
+name = "define-internal"
+order = ["headers", "auth", "oauth"]

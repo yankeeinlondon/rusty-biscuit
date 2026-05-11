@@ -1,11 +1,11 @@
 use std::collections::BTreeMap;
-use std::fs;
 use std::path::PathBuf;
 
+use async_trait::async_trait;
 use serde_json::{Map, Value, json};
+use tokio::fs;
 
 use crate::error::{ClaudineError, Result};
-use crate::events::Provider;
 use crate::permissions::backend::{BackendCapabilities, BackendFidelity, ProviderPolicyBackend};
 use crate::permissions::canonical::{
     CanonicalApprovalMode, CanonicalPolicy, CanonicalRuleProvenance, CommandAccessRule,
@@ -16,12 +16,14 @@ use crate::permissions::change::{
     CommandPattern, PolicyChange, PolicyChangeOp, PolicyChangeTarget, PolicyPersistence,
 };
 use crate::permissions::context::{CliPolicyInput, PolicyContext};
+use crate::permissions::json_utils::ensure_json_value;
 use crate::permissions::mutation::{
     ConfigEditPlan, OneShotMutationPlan, PersistentMutationPlan, PolicyMutationPlan,
 };
 use crate::permissions::native::{
     NativeEffectivePolicy, NativePolicyLayer, PolicySource, PolicySourceKind, ProviderCliOverrides,
 };
+use crate::provider::Provider;
 
 #[derive(Debug, Clone, Default)]
 struct PermissionSpec {
@@ -55,6 +57,7 @@ struct OpenCodeState {
 #[derive(Debug, Default)]
 pub(crate) struct OpenCodePolicyBackend;
 
+#[async_trait]
 impl ProviderPolicyBackend for OpenCodePolicyBackend {
     fn provider(&self) -> Provider {
         Provider::OpenCode
@@ -73,11 +76,11 @@ impl ProviderPolicyBackend for OpenCodePolicyBackend {
         }
     }
 
-    fn discover_sources(&self, ctx: &PolicyContext) -> Result<Vec<PolicySource>> {
+    async fn discover_sources(&self, ctx: &PolicyContext) -> Result<Vec<PolicySource>> {
         let mut sources = Vec::new();
         if let Some(repo_root) = &ctx.repo_root {
             let path = repo_root.join("opencode.json");
-            if path.exists() {
+            if fs::try_exists(&path).await.unwrap_or(false) {
                 sources.push(PolicySource {
                     id: "opencode-repo".to_owned(),
                     kind: PolicySourceKind::RepoConfig,
@@ -89,7 +92,7 @@ impl ProviderPolicyBackend for OpenCodePolicyBackend {
         }
         if let Some(home) = &ctx.home_dir {
             let path = home.join(".config/opencode/opencode.json");
-            if path.exists() {
+            if fs::try_exists(&path).await.unwrap_or(false) {
                 sources.push(PolicySource {
                     id: "opencode-user".to_owned(),
                     kind: PolicySourceKind::UserConfig,
@@ -103,7 +106,7 @@ impl ProviderPolicyBackend for OpenCodePolicyBackend {
         Ok(sources)
     }
 
-    fn load_native_layers(
+    async fn load_native_layers(
         &self,
         _ctx: &PolicyContext,
         sources: &[PolicySource],
@@ -116,7 +119,7 @@ impl ProviderPolicyBackend for OpenCodePolicyBackend {
                     source.id
                 ))
             })?;
-            let content = fs::read_to_string(path)?;
+            let content = fs::read_to_string(path).await?;
             let value: Value = serde_json::from_str(&content).map_err(|error| {
                 ClaudineError::PolicyNativeParse {
                     source_id: source.id.clone(),
@@ -215,7 +218,7 @@ impl ProviderPolicyBackend for OpenCodePolicyBackend {
         ))
     }
 
-    fn canonicalize(
+    async fn canonicalize(
         &self,
         _ctx: &PolicyContext,
         native: &NativeEffectivePolicy,
@@ -284,14 +287,14 @@ impl ProviderPolicyBackend for OpenCodePolicyBackend {
         Ok(policy)
     }
 
-    fn plan_change(
+    async fn plan_change(
         &self,
         ctx: &PolicyContext,
         current: &NativeEffectivePolicy,
         change: &PolicyChange,
     ) -> Result<PolicyMutationPlan> {
         let (source_id, path) = choose_target(ctx, current, change.target)?;
-        let before_text = fs::read_to_string(&path).ok();
+        let before_text = fs::read_to_string(&path).await.ok();
         let mut root = before_text
             .as_deref()
             .and_then(|text| serde_json::from_str::<Value>(text).ok())
@@ -615,23 +618,8 @@ fn set_permission_pattern(root: &mut Value, path: &[&str], pattern: &str, effect
     }
     target
         .as_object_mut()
-        .expect("object")
+        .expect("set_permission_pattern: target was just set to Object above")
         .insert(pattern.to_owned(), Value::String(effect.to_owned()));
-}
-
-fn ensure_json_value<'a>(root: &'a mut Value, path: &[&str]) -> &'a mut Value {
-    let mut current = root;
-    for key in path {
-        if !current.is_object() {
-            *current = Value::Object(Map::new());
-        }
-        current = current
-            .as_object_mut()
-            .expect("object")
-            .entry((*key).to_owned())
-            .or_insert(Value::Null);
-    }
-    current
 }
 
 #[cfg(test)]
@@ -643,8 +631,8 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let home = dir.path().join("home");
         let repo = dir.path().join("repo");
-        fs::create_dir_all(home.join(".config/opencode")).unwrap();
-        fs::create_dir_all(&repo).unwrap();
+        std::fs::create_dir_all(home.join(".config/opencode")).unwrap();
+        std::fs::create_dir_all(&repo).unwrap();
         (
             dir,
             PolicyContext::new(repo.clone())
@@ -657,11 +645,11 @@ mod tests {
         )
     }
 
-    #[test]
-    fn opencode_backend_queries_bash_and_tasks() {
+    #[tokio::test]
+    async fn opencode_backend_queries_bash_and_tasks() {
         let (_dir, ctx) = setup_ctx();
         let path = ctx.repo_root.as_ref().unwrap().join("opencode.json");
-        fs::write(
+        tokio::fs::write(
             &path,
             serde_json::to_string_pretty(&json!({
                 "permission": {
@@ -681,13 +669,14 @@ mod tests {
             }))
             .unwrap(),
         )
+        .await
         .unwrap();
 
         let backend = OpenCodePolicyBackend;
-        let sources = backend.discover_sources(&ctx).unwrap();
-        let layers = backend.load_native_layers(&ctx, &sources).unwrap();
+        let sources = backend.discover_sources(&ctx).await.unwrap();
+        let layers = backend.load_native_layers(&ctx, &sources).await.unwrap();
         let native = backend.compose_native_policy(&ctx, &layers, None).unwrap();
-        let canonical = backend.canonicalize(&ctx, &native).unwrap();
+        let canonical = backend.canonicalize(&ctx, &native).await.unwrap();
         let snapshot =
             ConfiguredPolicySnapshot::from_parts(Provider::OpenCode, native, canonical, &ctx);
 
@@ -705,8 +694,8 @@ mod tests {
         assert!(snapshot.can_spawn_subagent(Some("code-reviewer")).is_ask());
     }
 
-    #[test]
-    fn opencode_one_shot_plan_uses_env_override() {
+    #[tokio::test]
+    async fn opencode_one_shot_plan_uses_env_override() {
         let (_dir, ctx) = setup_ctx();
         let backend = OpenCodePolicyBackend;
         let current = NativeEffectivePolicy::new(
@@ -722,7 +711,7 @@ mod tests {
             PolicyChangeOp::SetApprovalMode(CanonicalApprovalMode::AutoApprove),
         ]);
 
-        let plan = backend.plan_change(&ctx, &current, &change).unwrap();
+        let plan = backend.plan_change(&ctx, &current, &change).await.unwrap();
         let one_shot = plan.one_shot_plan.unwrap();
 
         assert!(one_shot.argv.contains(&"--yolo".to_owned()));

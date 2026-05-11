@@ -7,39 +7,10 @@ use predicates::str::contains;
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::time::Duration;
 use tempfile::tempdir;
-
-fn write_executable(path: &Path, content: &str) {
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        fs::write(path, content).unwrap();
-        let mut perms = fs::metadata(path).unwrap().permissions();
-        perms.set_mode(0o755);
-        fs::set_permissions(path, perms).unwrap();
-    }
-    #[cfg(not(unix))]
-    {
-        fs::write(path, content).unwrap();
-    }
-}
-
-fn write_file(path: &Path, content: &str) {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).unwrap();
-    }
-    fs::write(path, content).unwrap();
-}
-
-fn init_git_repo(path: &Path) -> bool {
-    Command::new("git")
-        .arg("init")
-        .current_dir(path)
-        .status()
-        .map(|status| status.success())
-        .unwrap_or(false)
-}
+mod common;
+use common::{augmented_path, init_git_repo, strip_ansi, write, write_executable, write_json};
 
 fn create_claudine_monorepo(workspace: &Path) -> Option<(PathBuf, PathBuf, PathBuf)> {
     let repo_root = workspace.join("repo");
@@ -51,14 +22,14 @@ fn create_claudine_monorepo(workspace: &Path) -> Option<(PathBuf, PathBuf, PathB
     fs::create_dir_all(lib_dir.join("src")).unwrap();
     fs::create_dir_all(&bin_dir).unwrap();
 
-    write_file(
+    write(
         &repo_root.join("Cargo.toml"),
         r#"[workspace]
 resolver = "2"
 members = ["claudine/lib", "claudine/cli"]
 "#,
     );
-    write_file(
+    write(
         &lib_dir.join("Cargo.toml"),
         r#"[package]
 name = "claudine"
@@ -66,8 +37,8 @@ version = "0.1.0"
 edition = "2024"
 "#,
     );
-    write_file(&lib_dir.join("src/lib.rs"), "");
-    write_file(
+    write(&lib_dir.join("src/lib.rs"), "");
+    write(
         &launch_dir.join("Cargo.toml"),
         r#"[package]
 name = "claudine-cli"
@@ -75,7 +46,7 @@ version = "0.1.0"
 edition = "2024"
 "#,
     );
-    write_file(&launch_dir.join("src/main.rs"), "fn main() {}\n");
+    write(&launch_dir.join("src/main.rs"), "fn main() {}\n");
 
     if !init_git_repo(&repo_root) {
         return None;
@@ -111,39 +82,10 @@ fn redact_temp_home(input: &str) -> String {
     format!("{}HOME=<redacted>{}", &input[..start], &after[end..])
 }
 
-fn strip_ansi(input: &str) -> String {
-    let mut out = String::with_capacity(input.len());
-    let mut chars = input.chars().peekable();
-
-    while let Some(ch) = chars.next() {
-        if ch == '\u{1b}' {
-            if chars.peek() == Some(&'[') {
-                chars.next();
-                for code in chars.by_ref() {
-                    if ('@'..='~').contains(&code) {
-                        break;
-                    }
-                }
-            }
-            continue;
-        }
-        out.push(ch);
-    }
-
-    out
-}
-
 fn today_log_path(home: &Path) -> std::path::PathBuf {
     home.join(".claudine")
         .join("logs")
         .join(format!("{}.jsonl", Local::now().format("%Y-%m-%d")))
-}
-
-fn write_json<T: serde::Serialize>(path: &Path, value: &T) {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).unwrap();
-    }
-    fs::write(path, serde_json::to_string_pretty(value).unwrap()).unwrap();
 }
 
 fn make_server(id: &str) -> McpServer {
@@ -206,6 +148,12 @@ fn seed_empty_provider_state(home: &Path) {
     );
 }
 
+fn seed_minimal_config(home: &Path) {
+    let dir = home.join(".claudine");
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(dir.join("config.json"), "{}").unwrap();
+}
+
 #[test]
 fn help_lists_wrapper_subcommands() {
     let assert = cargo_bin_cmd!("claudine")
@@ -240,6 +188,26 @@ fn wrapper_help_includes_expected_flags() {
         plain.contains("--model") || plain.contains("model"),
         "help output should describe model selection; stdout was: {plain}"
     );
+    assert!(
+        plain.contains("--edit"),
+        "help output should describe prompt editing; stdout was: {plain}"
+    );
+    assert!(
+        plain.contains("--perf"),
+        "help output should describe performance reporting; stdout was: {plain}"
+    );
+}
+
+#[test]
+fn wrapper_rejects_edit_and_interactive_conflict() {
+    cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .args(["codex", "--edit", "--interactive"])
+        .assert()
+        .failure()
+        .stderr(contains("--edit"))
+        .stderr(contains("--interactive"))
+        .stderr(contains("cannot be used"));
 }
 
 #[cfg(unix)]
@@ -248,13 +216,16 @@ fn wrapper_preserves_passthrough_args_and_injects_env() {
     let workspace = tempdir().unwrap();
     let path_dir = workspace.path().join("bin");
     fs::create_dir_all(&path_dir).unwrap();
+    seed_minimal_config(workspace.path());
     let args_path = workspace.path().join("args.txt");
     let env_path = workspace.path().join("env.txt");
+    let stdin_path = workspace.path().join("stdin.txt");
 
     write_executable(
         &path_dir.join("codex"),
         r#"#!/bin/sh
 printf '%s\n' "$@" > "$CLAUDINE_ARGS_FILE"
+/bin/cat > "$CLAUDINE_STDIN_FILE"
 {
   printf 'AGENT=%s\n' "$AGENT"
   printf 'YOLO=%s\n' "$YOLO"
@@ -267,9 +238,11 @@ exit 0
 
     cargo_bin_cmd!("claudine")
         .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
         .env("PATH", &path_dir)
         .env("CLAUDINE_ARGS_FILE", &args_path)
         .env("CLAUDINE_ENV_FILE", &env_path)
+        .env("CLAUDINE_STDIN_FILE", &stdin_path)
         .args(["codex", "--yolo", "--", "--json", "summarize repo"])
         .assert()
         .success();
@@ -281,16 +254,84 @@ exit 0
         vec![
             "exec",
             "--json",
-            "summarize repo",
             "--dangerously-bypass-approvals-and-sandbox",
         ]
     );
+
+    let stdin = fs::read_to_string(&stdin_path).unwrap();
+    assert_eq!(stdin, "summarize repo");
 
     let env_lines = fs::read_to_string(&env_path).unwrap();
     assert!(env_lines.contains("AGENT=codex"));
     assert!(env_lines.contains("YOLO=true"));
     assert!(env_lines.contains("INTERACTIVE=false"));
     assert!(env_lines.contains("AGENT_PARAMS=["));
+}
+
+#[cfg(unix)]
+#[test]
+fn wrapper_rejects_edit_without_interactive_terminal_before_launch() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+    seed_minimal_config(workspace.path());
+    let args_path = workspace.path().join("args.txt");
+
+    write_executable(
+        &path_dir.join("codex"),
+        r#"#!/bin/sh
+printf '%s\n' "$@" > "$CLAUDINE_ARGS_FILE"
+exit 0
+"#,
+    );
+
+    cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
+        .env("PATH", &path_dir)
+        .env("CLAUDINE_ARGS_FILE", &args_path)
+        .args(["codex", "summarize repo", "--edit"])
+        .assert()
+        .failure()
+        .stderr(contains("--edit requires an interactive terminal"));
+
+    assert!(
+        !args_path.exists(),
+        "provider should not launch when --edit is requested without a TTY"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn wrapper_preserves_post_boundary_edit_passthrough() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+    seed_minimal_config(workspace.path());
+    let args_path = workspace.path().join("args.txt");
+
+    write_executable(
+        &path_dir.join("codex"),
+        r#"#!/bin/sh
+printf '%s\n' "$@" > "$CLAUDINE_ARGS_FILE"
+exit 0
+"#,
+    );
+
+    cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
+        .env("PATH", &path_dir)
+        .env("CLAUDINE_ARGS_FILE", &args_path)
+        .args(["codex", "--", "--edit", "--version"])
+        .assert()
+        .success();
+
+    let args = fs::read_to_string(&args_path).unwrap();
+    assert!(
+        args.lines().any(|line| line == "--edit"),
+        "post-boundary --edit should reach the provider; args were: {args}"
+    );
 }
 
 #[cfg(unix)]
@@ -304,6 +345,7 @@ fn codex_wrapper_uses_shadow_home_for_repo_prompt_overlay_without_repo_flag() {
 
     fs::create_dir_all(&repo_dir).unwrap();
     fs::create_dir_all(&path_dir).unwrap();
+    seed_minimal_config(&fake_home);
     fs::create_dir_all(fake_home.join(".codex")).unwrap();
     fs::create_dir_all(repo_dir.join(".claude/commands")).unwrap();
     fs::write(
@@ -349,6 +391,7 @@ fn wrapper_reports_removed_sensitive_env_names() {
     let path_dir = workspace.path().join("bin");
     let fake_home = workspace.path().join("home");
     fs::create_dir_all(&path_dir).unwrap();
+    seed_minimal_config(&fake_home);
     fs::create_dir_all(fake_home.join(".codex")).unwrap();
 
     write_executable(
@@ -381,6 +424,7 @@ fn wrapper_propagates_child_exit_code() {
     let workspace = tempdir().unwrap();
     let path_dir = workspace.path().join("bin");
     fs::create_dir_all(&path_dir).unwrap();
+    seed_minimal_config(workspace.path());
 
     write_executable(
         &path_dir.join("codex"),
@@ -391,6 +435,7 @@ exit 17
 
     cargo_bin_cmd!("claudine")
         .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
         .env("PATH", &path_dir)
         .args(["codex", "--", "--version"])
         .assert()
@@ -403,27 +448,35 @@ fn wrapper_consumes_non_interactive_alias_from_passthrough() {
     let workspace = tempdir().unwrap();
     let path_dir = workspace.path().join("bin");
     fs::create_dir_all(&path_dir).unwrap();
+    seed_minimal_config(workspace.path());
     let args_path = workspace.path().join("args.txt");
+    let stdin_path = workspace.path().join("stdin.txt");
 
     write_executable(
         &path_dir.join("codex"),
         r#"#!/bin/sh
 printf '%s\n' "$@" > "$CLAUDINE_ARGS_FILE"
+/bin/cat > "$CLAUDINE_STDIN_FILE"
 exit 0
 "#,
     );
 
     cargo_bin_cmd!("claudine")
         .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
         .env("PATH", &path_dir)
         .env("CLAUDINE_ARGS_FILE", &args_path)
+        .env("CLAUDINE_STDIN_FILE", &stdin_path)
         .args(["codex", "--json", "summarize repo"])
         .assert()
         .success();
 
     let args = fs::read_to_string(&args_path).unwrap();
     let args: Vec<&str> = args.lines().collect();
-    assert_eq!(args, vec!["exec", "--json", "summarize repo"]);
+    assert_eq!(args, vec!["exec", "--json"]);
+
+    let stdin = fs::read_to_string(&stdin_path).unwrap();
+    assert_eq!(stdin, "summarize repo");
 }
 
 #[cfg(unix)]
@@ -432,6 +485,7 @@ fn wrapper_logs_are_written_to_stderr_not_stdout() {
     let workspace = tempdir().unwrap();
     let path_dir = workspace.path().join("bin");
     fs::create_dir_all(&path_dir).unwrap();
+    seed_minimal_config(workspace.path());
 
     write_executable(
         &path_dir.join("codex"),
@@ -442,6 +496,7 @@ exit 0
 
     cargo_bin_cmd!("claudine")
         .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
         .env("PATH", &path_dir)
         .args(["codex", "--", "--version"])
         .assert()
@@ -457,6 +512,7 @@ fn wrapper_rejects_direct_provider_yolo_flag_with_guidance() {
     let workspace = tempdir().unwrap();
     let path_dir = workspace.path().join("bin");
     fs::create_dir_all(&path_dir).unwrap();
+    seed_minimal_config(workspace.path());
 
     write_executable(
         &path_dir.join("claude"),
@@ -467,6 +523,7 @@ exit 0
 
     cargo_bin_cmd!("claudine")
         .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
         .env("PATH", &path_dir)
         .args(["claude", "--dangerously-skip-permissions", "hi"])
         .assert()
@@ -510,10 +567,11 @@ exit 0
 
 #[cfg(unix)]
 #[test]
-fn opencode_non_interactive_injects_default_model() {
+fn opencode_non_interactive_requires_model_when_missing() {
     let workspace = tempdir().unwrap();
     let path_dir = workspace.path().join("bin");
     fs::create_dir_all(&path_dir).unwrap();
+    seed_minimal_config(workspace.path());
     let args_path = workspace.path().join("args.txt");
     let env_path = workspace.path().join("env.txt");
 
@@ -528,27 +586,31 @@ exit 0
 
     cargo_bin_cmd!("claudine")
         .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
         .env("PATH", &path_dir)
         .env("CLAUDINE_ARGS_FILE", &args_path)
         .env("CLAUDINE_ENV_FILE", &env_path)
         .args(["opencode", "summarize"])
         .assert()
-        .success()
-        .stderr(contains("Opencode requires a model be specified"));
+        .failure()
+        .stderr(contains("No model specified!"))
+        .stderr(contains("OPENCODE_MODEL"));
 
-    let args = fs::read_to_string(&args_path).unwrap();
-    let args: Vec<&str> = args.lines().collect();
-    assert!(args.contains(&"run"));
-    assert!(args.contains(&"--model"));
-    assert!(args.contains(&"minimax/MiniMax-M2.5-highspeed"));
-    let env_lines = fs::read_to_string(&env_path).unwrap();
-    assert!(env_lines.contains("MODEL=minimax/MiniMax-M2.5-highspeed"));
+    assert!(
+        !args_path.exists(),
+        "child process should not launch when no non-interactive model is available"
+    );
+    assert!(
+        !env_path.exists(),
+        "child process should not launch when no non-interactive model is available"
+    );
 }
 
 #[cfg(unix)]
 #[test]
 fn opencode_launches_child_from_repo_root() {
     let workspace = tempdir().unwrap();
+    seed_minimal_config(workspace.path());
     let Some((repo_root, launch_dir, bin_dir)) = create_claudine_monorepo(workspace.path()) else {
         eprintln!("Skipping integration test: git init unavailable");
         return;
@@ -573,6 +635,8 @@ exit 0
     cargo_bin_cmd!("claudine")
         .current_dir(&launch_dir)
         .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
+        .env("OPENCODE_MODEL", "test-model")
         .env("PATH", &bin_dir)
         .env("CLAUDINE_PWD_FILE", &pwd_path)
         .env("CLAUDINE_ARGS_FILE", &args_path)
@@ -598,6 +662,7 @@ fn opencode_non_interactive_model_precedence_uses_env_overrides() {
     let workspace = tempdir().unwrap();
     let path_dir = workspace.path().join("bin");
     fs::create_dir_all(&path_dir).unwrap();
+    seed_minimal_config(workspace.path());
     let args_path = workspace.path().join("args.txt");
     let env_path = workspace.path().join("env.txt");
 
@@ -612,10 +677,10 @@ exit 0
 
     cargo_bin_cmd!("claudine")
         .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
         .env("PATH", &path_dir)
         .env("CLAUDINE_ARGS_FILE", &args_path)
         .env("CLAUDINE_ENV_FILE", &env_path)
-        .env("MODEL", "from-model")
         .env("OPENCODE_MODEL", "from-opencode")
         .args(["opencode", "summarize"])
         .assert()
@@ -635,6 +700,7 @@ fn opencode_non_interactive_explicit_cli_model_sets_model_env() {
     let workspace = tempdir().unwrap();
     let path_dir = workspace.path().join("bin");
     fs::create_dir_all(&path_dir).unwrap();
+    seed_minimal_config(workspace.path());
     let args_path = workspace.path().join("args.txt");
     let env_path = workspace.path().join("env.txt");
 
@@ -649,6 +715,7 @@ exit 0
 
     cargo_bin_cmd!("claudine")
         .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
         .env("PATH", &path_dir)
         .env("CLAUDINE_ARGS_FILE", &args_path)
         .env("CLAUDINE_ENV_FILE", &env_path)
@@ -668,6 +735,7 @@ fn opencode_post_summary_messages_are_logged_after_summary_block() {
     let workspace = tempdir().unwrap();
     let path_dir = workspace.path().join("bin");
     fs::create_dir_all(&path_dir).unwrap();
+    seed_minimal_config(workspace.path());
 
     write_executable(
         &path_dir.join("opencode"),
@@ -676,10 +744,15 @@ exit 0
 "#,
     );
 
+    // Interactive mode (-i) still warns that OpenCode doesn't support --yolo
+    // in interactive sessions (refined copy). This keeps the deferred-warning
+    // ordering test meaningful after non-interactive forwards the flag.
     let assert = cargo_bin_cmd!("claudine")
         .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
         .env("PATH", &path_dir)
-        .args(["opencode", "-y", "hi"])
+        .env("OPENCODE_MODEL", "test-model")
+        .args(["opencode", "-i", "-y"])
         .assert()
         .success();
 
@@ -688,15 +761,16 @@ exit 0
     assert!(plain.starts_with('\n'));
     assert!(plain.contains("\nClaudine"));
     let summary_index = plain.find("Environment Variables:").unwrap();
+    // Prose `<i>` tags render as ANSI italics which NO_COLOR strips, leaving
+    // the word without markup in the plain-text output.
+    let warning_needle = "--yolo mode is not supported in OpenCode interactive sessions";
     let warning_index = plain
-        .find("- Warning: --yolo is not supported for 'opencode' and was ignored")
-        .unwrap();
-    let hint_index = plain
-        .find("Opencode requires a model be specified")
-        .unwrap();
+        .find(warning_needle)
+        .unwrap_or_else(|| panic!("expected refined interactive warning in stderr; got:\n{plain}"));
 
     assert!(warning_index > summary_index);
-    assert!(hint_index > summary_index);
+    // In interactive mode YOLO stays marked unsupported for OpenCode, so the
+    // header should not advertise a YOLO badge.
     let header_line = plain
         .lines()
         .find(|line| line.contains("Claudine"))
@@ -716,6 +790,7 @@ fn wrapper_header_shows_provider_name() {
     let workspace = tempdir().unwrap();
     let path_dir = workspace.path().join("bin");
     fs::create_dir_all(&path_dir).unwrap();
+    seed_minimal_config(workspace.path());
 
     write_executable(
         &path_dir.join("codex"),
@@ -726,6 +801,7 @@ exit 0
 
     let assert = cargo_bin_cmd!("claudine")
         .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
         .env("PATH", &path_dir)
         .args(["codex", "--", "--version"])
         .assert()
@@ -753,6 +829,7 @@ fn gemini_wrapper_applies_yolo_as_approval_mode() {
     let workspace = tempdir().unwrap();
     let path_dir = workspace.path().join("bin");
     fs::create_dir_all(&path_dir).unwrap();
+    seed_minimal_config(workspace.path());
     let args_path = workspace.path().join("args.txt");
 
     write_executable(
@@ -765,6 +842,7 @@ exit 0
 
     cargo_bin_cmd!("claudine")
         .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
         .env("PATH", &path_dir)
         .env("CLAUDINE_ARGS_FILE", &args_path)
         .args(["gemini", "--yolo", "--", "-p", "summarize"])
@@ -787,6 +865,7 @@ fn goose_wrapper_yolo_sets_env_var() {
     let workspace = tempdir().unwrap();
     let path_dir = workspace.path().join("bin");
     fs::create_dir_all(&path_dir).unwrap();
+    seed_minimal_config(workspace.path());
     let env_path = workspace.path().join("env.txt");
 
     write_executable(
@@ -799,6 +878,7 @@ exit 0
 
     cargo_bin_cmd!("claudine")
         .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
         .env("PATH", &path_dir)
         .env("CLAUDINE_ENV_FILE", &env_path)
         .args(["goose", "--yolo", "summarize"])
@@ -815,6 +895,7 @@ fn goose_wrapper_non_interactive_prepends_run() {
     let workspace = tempdir().unwrap();
     let path_dir = workspace.path().join("bin");
     fs::create_dir_all(&path_dir).unwrap();
+    seed_minimal_config(workspace.path());
     let args_path = workspace.path().join("args.txt");
 
     write_executable(
@@ -827,6 +908,7 @@ exit 0
 
     cargo_bin_cmd!("claudine")
         .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
         .env("PATH", &path_dir)
         .env("CLAUDINE_ARGS_FILE", &args_path)
         .args(["goose", "summarize"])
@@ -843,34 +925,83 @@ exit 0
 // Kimi wrapper (review 6.2)
 // ---------------------------------------------------------------------------
 
+/// Non-interactive Kimi runs use `--wire` JSON-RPC mode.
+///
+/// Phase 4 of the Kimi fix retired Kimi's legacy `--print` /
+/// `--output-format stream-json` path: structured output now flows over
+/// the JSON-RPC wire protocol on stdin and stdout. The wrapper appends
+/// `--wire` instead of `--print`, and the prompt is delivered as a typed
+/// `prompt` request rather than seeded on stdin.
 #[cfg(unix)]
 #[test]
-fn kimi_wrapper_non_interactive_appends_print() {
+fn kimi_wrapper_non_interactive_appends_wire() {
     let workspace = tempdir().unwrap();
     let path_dir = workspace.path().join("bin");
     fs::create_dir_all(&path_dir).unwrap();
+    seed_minimal_config(workspace.path());
     let args_path = workspace.path().join("args.txt");
+    let stdin_path = workspace.path().join("stdin.txt");
 
+    // Stub kimi: capture argv to one file and the first two stdin lines
+    // (the JSON-RPC `initialize` and `prompt` requests) into a separate
+    // file so the test can assert on the prompt envelope. The stub
+    // produces a minimal initialize response between reads so the
+    // semantic parser advances past handshake, then emits a final
+    // `prompt` response so claudine's wait loop can shut down cleanly.
     write_executable(
         &path_dir.join("kimi"),
         r#"#!/bin/sh
 printf '%s\n' "$@" > "$CLAUDINE_ARGS_FILE"
+: > "$CLAUDINE_STDIN_FILE"
+read INIT_LINE
+printf '%s\n' "$INIT_LINE" >> "$CLAUDINE_STDIN_FILE"
+printf '%s\n' '{"jsonrpc":"2.0","id":"init-1","result":{"protocol_version":"1.9","server":{"name":"kimi","version":"1.38.0"},"capabilities":{}}}'
+read PROMPT_LINE
+printf '%s\n' "$PROMPT_LINE" >> "$CLAUDINE_STDIN_FILE"
+printf '%s\n' '{"jsonrpc":"2.0","method":"event","params":{"type":"TurnEnd","payload":{}}}'
+printf '%s\n' '{"jsonrpc":"2.0","id":"prompt-2","result":{"status":"finished"}}'
 exit 0
 "#,
     );
 
     cargo_bin_cmd!("claudine")
         .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
         .env("PATH", &path_dir)
         .env("CLAUDINE_ARGS_FILE", &args_path)
+        .env("CLAUDINE_STDIN_FILE", &stdin_path)
         .args(["kimi", "hi"])
+        .timeout(std::time::Duration::from_secs(60))
         .assert()
         .success();
 
     let args = fs::read_to_string(&args_path).unwrap();
     let args: Vec<&str> = args.lines().collect();
-    assert!(args.contains(&"--print"));
-    assert!(args.contains(&"hi"));
+    assert!(
+        args.contains(&"--wire"),
+        "kimi non-interactive run must append --wire; got args: {args:?}"
+    );
+    assert!(
+        !args.contains(&"--print"),
+        "kimi non-interactive run must not append --print; got args: {args:?}"
+    );
+    assert!(
+        !args.contains(&"--output-format"),
+        "kimi non-interactive run must not pass --output-format; got args: {args:?}"
+    );
+
+    // Wire-mode delivers the prompt as a JSON-RPC `prompt` request, not
+    // via stdin. Verify the prompt envelope reached the child instead of
+    // a bare `hi` stdin seed.
+    let stdin = fs::read_to_string(&stdin_path).unwrap();
+    assert!(
+        stdin.contains("\"method\":\"prompt\""),
+        "kimi wire mode must send a JSON-RPC prompt method on stdin; got stdin: {stdin}"
+    );
+    assert!(
+        stdin.contains("\"user_input\":\"hi\""),
+        "kimi wire mode must carry the prompt as params.user_input; got stdin: {stdin}"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -883,6 +1014,7 @@ fn qwen_wrapper_rejects_direct_approval_mode_yolo() {
     let workspace = tempdir().unwrap();
     let path_dir = workspace.path().join("bin");
     fs::create_dir_all(&path_dir).unwrap();
+    seed_minimal_config(workspace.path());
 
     write_executable(
         &path_dir.join("qwen"),
@@ -893,6 +1025,7 @@ exit 0
 
     cargo_bin_cmd!("claudine")
         .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
         .env("PATH", &path_dir)
         .args(["qwen", "--approval-mode", "yolo", "--", "-p", "hi"])
         .assert()
@@ -908,6 +1041,7 @@ fn wrapper_dry_run_prints_command_and_exits_zero() {
     let workspace = tempdir().unwrap();
     let path_dir = workspace.path().join("bin");
     fs::create_dir_all(&path_dir).unwrap();
+    seed_minimal_config(workspace.path());
 
     write_executable(
         &path_dir.join("codex"),
@@ -919,6 +1053,7 @@ exit 1
 
     let assert = cargo_bin_cmd!("claudine")
         .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
         .env("PATH", &path_dir)
         .args(["codex", "--dry-run", "--", "--version"])
         .assert()
@@ -934,10 +1069,98 @@ exit 1
 
 #[cfg(unix)]
 #[test]
-fn wrapper_quiet_suppresses_summary() {
+fn wrapper_perf_emits_report_to_stderr_only() {
     let workspace = tempdir().unwrap();
     let path_dir = workspace.path().join("bin");
     fs::create_dir_all(&path_dir).unwrap();
+    seed_minimal_config(workspace.path());
+
+    write_executable(
+        &path_dir.join("codex"),
+        r#"#!/bin/sh
+exit 0
+"#,
+    );
+
+    let assert = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
+        .env("PATH", &path_dir)
+        .args(["codex", "--perf", "--", "--version"])
+        .assert()
+        .success()
+        .stdout("");
+
+    let stderr = String::from_utf8_lossy(&assert.get_output().stderr).to_string();
+    let plain = strip_ansi(&stderr);
+    assert!(
+        plain.contains("Performance"),
+        "stderr should contain Performance section; got: {plain}"
+    );
+    assert!(
+        plain.contains("CLI Overhead"),
+        "stderr should contain CLI Overhead section; got: {plain}"
+    );
+    assert!(
+        plain.contains("Agent Execution"),
+        "stderr should contain Agent Execution section; got: {plain}"
+    );
+    assert!(
+        plain.contains("launches:"),
+        "stderr should show launch count; got: {plain}"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn wrapper_dry_run_perf_emits_report_with_skipped_note() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+    seed_minimal_config(workspace.path());
+
+    write_executable(
+        &path_dir.join("codex"),
+        r#"#!/bin/sh
+echo "SHOULD NOT RUN"
+exit 1
+"#,
+    );
+
+    let assert = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
+        .env("PATH", &path_dir)
+        .args(["codex", "--dry-run", "--perf", "--", "--version"])
+        .assert()
+        .success()
+        .stdout("");
+
+    let stderr = String::from_utf8_lossy(&assert.get_output().stderr).to_string();
+    let plain = strip_ansi(&stderr);
+    assert!(
+        plain.contains("Performance"),
+        "stderr should contain Performance section; got: {plain}"
+    );
+    assert!(
+        plain.contains("CLI Overhead"),
+        "stderr should contain CLI Overhead section; got: {plain}"
+    );
+    assert!(
+        plain.contains("dry run") || plain.contains("skipped"),
+        "stderr should mention dry run; got: {plain}"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn wrapper_quiet_suppresses_summary() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    let system_prompt = workspace.path().join("system-prompt.md");
+    fs::create_dir_all(&path_dir).unwrap();
+    seed_minimal_config(workspace.path());
+    fs::write(&system_prompt, "Quiet mode prompt").unwrap();
 
     write_executable(
         &path_dir.join("codex"),
@@ -949,24 +1172,38 @@ exit 0
     // --quiet shows header but suppresses env details and info
     let assert = cargo_bin_cmd!("claudine")
         .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
         .env("PATH", &path_dir)
-        .args(["codex", "--quiet", "--", "--version"])
+        .args([
+            "codex",
+            "--quiet",
+            "--append-system-prompt",
+            system_prompt.to_str().unwrap(),
+            "--",
+            "--version",
+        ])
         .assert()
         .success();
 
     let stderr = String::from_utf8_lossy(&assert.get_output().stderr).to_string();
+    let stderr_plain = strip_ansi(&stderr);
     assert!(
-        stderr.contains("Claudine"),
+        stderr_plain.contains("Claudine"),
         "Quiet mode should show header but stderr was: {stderr}"
     );
     assert!(
-        !stderr.contains("Environment Variables"),
+        !stderr_plain.contains("Environment Variables"),
         "Quiet mode should suppress env details but stderr was: {stderr}"
+    );
+    assert!(
+        stderr_plain.contains("System Prompt(appended):"),
+        "Quiet mode should still show the system prompt when set but stderr was: {stderr}"
     );
 
     // --silent suppresses everything
     let assert = cargo_bin_cmd!("claudine")
         .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
         .env("PATH", &path_dir)
         .args(["codex", "--silent", "--", "--version"])
         .assert()
@@ -981,10 +1218,38 @@ exit 0
 
 #[cfg(unix)]
 #[test]
+fn wrapper_missing_explicit_system_prompt_fails_visibly() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    let missing_prompt = workspace.path().join("missing-prompt.md");
+    fs::create_dir_all(&path_dir).unwrap();
+    seed_minimal_config(workspace.path());
+
+    write_executable(&path_dir.join("codex"), "#!/bin/sh\nexit 0\n");
+
+    cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
+        .env("PATH", &path_dir)
+        .args([
+            "codex",
+            "--append-system-prompt",
+            missing_prompt.to_str().unwrap(),
+            "--",
+            "--version",
+        ])
+        .assert()
+        .code(1)
+        .stderr(contains("missing-prompt.md"));
+}
+
+#[cfg(unix)]
+#[test]
 fn wrapper_universal_model_flag_passes_to_provider() {
     let workspace = tempdir().unwrap();
     let path_dir = workspace.path().join("bin");
     fs::create_dir_all(&path_dir).unwrap();
+    seed_minimal_config(workspace.path());
     let args_path = workspace.path().join("args.txt");
 
     write_executable(
@@ -997,6 +1262,7 @@ exit 0
 
     cargo_bin_cmd!("claudine")
         .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
         .env("PATH", &path_dir)
         .env("CLAUDINE_ARGS_FILE", &args_path)
         .args(["claude", "--model", "claude-sonnet-4-6", "hi"])
@@ -1019,6 +1285,7 @@ fn wrapper_removes_new_sensitive_env_patterns() {
     let workspace = tempdir().unwrap();
     let path_dir = workspace.path().join("bin");
     fs::create_dir_all(&path_dir).unwrap();
+    seed_minimal_config(workspace.path());
 
     write_executable(
         &path_dir.join("codex"),
@@ -1029,6 +1296,7 @@ exit 0
 
     let assert = cargo_bin_cmd!("claudine")
         .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
         .env("PATH", &path_dir)
         .env("SSH_PRIVATE_KEY", "secret")
         .env("AWS_ACCESS_KEY_ID", "secret")
@@ -1054,6 +1322,7 @@ fn wrapper_timeout_rejects_in_interactive_mode() {
     let workspace = tempdir().unwrap();
     let path_dir = workspace.path().join("bin");
     fs::create_dir_all(&path_dir).unwrap();
+    seed_minimal_config(workspace.path());
 
     write_executable(
         &path_dir.join("codex"),
@@ -1065,8 +1334,9 @@ exit 0
     // No prompt → interactive by default → --timeout should fail
     cargo_bin_cmd!("claudine")
         .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
         .env("PATH", &path_dir)
-        .args(["codex", "--timeout", "30"])
+        .args(["codex", "--timeout", "30s"])
         .assert()
         .code(1)
         .stderr(contains(
@@ -1076,8 +1346,9 @@ exit 0
     // --interactive + --timeout → explicit conflict
     cargo_bin_cmd!("claudine")
         .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
         .env("PATH", &path_dir)
-        .args(["codex", "--timeout", "30", "-i", "--", "hello"])
+        .args(["codex", "--timeout", "30s", "-i", "--", "hello"])
         .assert()
         .code(1)
         .stderr(contains("--timeout cannot be used with --interactive mode"));
@@ -1093,6 +1364,7 @@ fn wrapper_redacts_sensitive_args_in_agent_params() {
     let workspace = tempdir().unwrap();
     let path_dir = workspace.path().join("bin");
     fs::create_dir_all(&path_dir).unwrap();
+    seed_minimal_config(workspace.path());
     let env_path = workspace.path().join("env.txt");
 
     write_executable(
@@ -1105,6 +1377,7 @@ exit 0
 
     cargo_bin_cmd!("claudine")
         .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
         .env("PATH", &path_dir)
         .env("CLAUDINE_ENV_FILE", &env_path)
         .args([
@@ -1139,6 +1412,7 @@ fn codex_structured_mode_reconstructs_stdout_and_writes_summary_event() {
     let args_path = workspace.path().join("args.txt");
     fs::create_dir_all(&path_dir).unwrap();
     fs::create_dir_all(&fake_home).unwrap();
+    seed_minimal_config(&fake_home);
 
     write_executable(
         &path_dir.join("codex"),
@@ -1205,6 +1479,7 @@ fn structured_verbosity_controls_stream_stderr_lines() {
     let fake_home = workspace.path().join("home");
     fs::create_dir_all(&path_dir).unwrap();
     fs::create_dir_all(&fake_home).unwrap();
+    seed_minimal_config(&fake_home);
 
     write_executable(
         &path_dir.join("gemini"),
@@ -1278,6 +1553,7 @@ fn gemini_structured_success_suppresses_provider_stderr_noise() {
     let fake_home = workspace.path().join("home");
     fs::create_dir_all(&path_dir).unwrap();
     fs::create_dir_all(&fake_home).unwrap();
+    seed_minimal_config(&fake_home);
 
     write_executable(
         &path_dir.join("gemini"),
@@ -1318,6 +1594,7 @@ fn structured_completion_summary_is_separated_on_stderr() {
     let fake_home = workspace.path().join("home");
     fs::create_dir_all(&path_dir).unwrap();
     fs::create_dir_all(&fake_home).unwrap();
+    seed_minimal_config(&fake_home);
 
     write_executable(
         &path_dir.join("gemini"),
@@ -1353,6 +1630,7 @@ fn structured_verbose_summary_restores_rich_prose_fields() {
     let fake_home = workspace.path().join("home");
     fs::create_dir_all(&path_dir).unwrap();
     fs::create_dir_all(&fake_home).unwrap();
+    seed_minimal_config(&fake_home);
 
     write_executable(
         &path_dir.join("gemini"),
@@ -1394,6 +1672,7 @@ fn structured_quiet_verbose_uses_old_verbose_summary_renderer() {
     let fake_home = workspace.path().join("home");
     fs::create_dir_all(&path_dir).unwrap();
     fs::create_dir_all(&fake_home).unwrap();
+    seed_minimal_config(&fake_home);
 
     write_executable(
         &path_dir.join("claude"),
@@ -1436,6 +1715,7 @@ fn structured_verbose_summary_reports_no_tool_calls_when_absent() {
     let fake_home = workspace.path().join("home");
     fs::create_dir_all(&path_dir).unwrap();
     fs::create_dir_all(&fake_home).unwrap();
+    seed_minimal_config(&fake_home);
 
     write_executable(
         &path_dir.join("claude"),
@@ -1464,8 +1744,7 @@ printf '%s\n' '{"type":"result","duration_ms":4600,"total_cost_usd":0.02,"usage"
 // ===========================================================================
 
 #[test]
-fn compose_requires_file_argument() {
-    // When no file is provided, clap shows usage which includes the expected flags
+fn compose_requires_positional_arg() {
     let assert = cargo_bin_cmd!("claudine")
         .env("NO_COLOR", "1")
         .args(["compose"])
@@ -1474,11 +1753,11 @@ fn compose_requires_file_argument() {
 
     let stderr = String::from_utf8_lossy(&assert.get_output().stderr);
     let plain = strip_ansi(&stderr);
-    assert!(plain.contains("FILE"), "usage should show FILE argument");
+    assert!(plain.contains("ARG"), "usage should show ARG positional");
 }
 
 #[test]
-fn inline_compose_requires_file_argument() {
+fn inline_compose_requires_positional_arg() {
     let assert = cargo_bin_cmd!("claudine")
         .env("NO_COLOR", "1")
         .args(["inline-compose"])
@@ -1487,7 +1766,59 @@ fn inline_compose_requires_file_argument() {
 
     let stderr = String::from_utf8_lossy(&assert.get_output().stderr);
     let plain = strip_ansi(&stderr);
-    assert!(plain.contains("FILE"), "usage should show FILE argument");
+    assert!(plain.contains("ARG"), "usage should show ARG positional");
+}
+
+#[test]
+fn compose_missing_file_with_setter_only() {
+    let assert = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .args(["compose", "key=val"])
+        .assert()
+        .code(1);
+    let stderr = String::from_utf8_lossy(&assert.get_output().stderr);
+    let plain = strip_ansi(&stderr);
+    assert!(
+        plain.contains("missing file reference"),
+        "expected missing-file error, got: {plain}"
+    );
+}
+
+#[test]
+fn compose_empty_key_setter_errors() {
+    let assert = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .args(["compose", "=foo"])
+        .assert()
+        .code(1);
+    let stderr = String::from_utf8_lossy(&assert.get_output().stderr);
+    let plain = strip_ansi(&stderr);
+    assert!(
+        plain.contains("setter key must not be empty"),
+        "expected empty-key setter error, got: {plain}"
+    );
+}
+
+#[test]
+fn compose_multiple_file_candidates_errors() {
+    let workspace = tempdir().unwrap();
+    let a = workspace.path().join("a.md");
+    let b = workspace.path().join("b.md");
+    fs::write(&a, "---\n---\nbody\n").unwrap();
+    fs::write(&b, "---\n---\nbody\n").unwrap();
+
+    let assert = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
+        .args(["compose", a.to_str().unwrap(), b.to_str().unwrap()])
+        .assert()
+        .code(1);
+    let stderr = String::from_utf8_lossy(&assert.get_output().stderr);
+    let plain = strip_ansi(&stderr);
+    assert!(
+        plain.contains("multiple"),
+        "expected multiple-file error, got: {plain}"
+    );
 }
 
 #[test]
@@ -1512,6 +1843,35 @@ fn compose_rejects_non_markdown_file() {
         .code(1);
 }
 
+#[cfg(unix)]
+#[test]
+fn compose_missing_explicit_system_prompt_fails_visibly() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    let md_file = workspace.path().join("prompt.md");
+    let missing_prompt = workspace.path().join("missing-system-prompt.md");
+    fs::create_dir_all(&path_dir).unwrap();
+    seed_minimal_config(workspace.path());
+    fs::write(&md_file, "---\ntitle: test\n---\nHello compose\n").unwrap();
+
+    write_executable(&path_dir.join("codex"), "#!/bin/sh\nexit 0\n");
+
+    cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
+        .env("PATH", &path_dir)
+        .args([
+            "compose",
+            "--codex",
+            "--append-system-prompt",
+            missing_prompt.to_str().unwrap(),
+            md_file.to_str().unwrap(),
+        ])
+        .assert()
+        .code(1)
+        .stderr(contains("missing-system-prompt.md"));
+}
+
 #[test]
 fn inline_compose_rejects_missing_prompt_property() {
     let workspace = tempdir().unwrap();
@@ -1532,6 +1892,7 @@ fn explicit_provider_flag_bypasses_chooser() {
     let path_dir = workspace.path().join("bin");
     let args_path = workspace.path().join("args.txt");
     fs::create_dir_all(&path_dir).unwrap();
+    seed_minimal_config(workspace.path());
 
     let md_file = workspace.path().join("test.md");
     fs::write(&md_file, "---\ntitle: test\n---\nPrompt body\n").unwrap();
@@ -1552,6 +1913,7 @@ exit 99
 
     let assert = cargo_bin_cmd!("claudine")
         .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
         .env("PATH", &path_dir)
         .env("CLAUDINE_ARGS_FILE", &args_path)
         .args([
@@ -1578,6 +1940,7 @@ fn compose_uses_wrapper_grade_execution() {
     let workspace = tempdir().unwrap();
     let path_dir = workspace.path().join("bin");
     fs::create_dir_all(&path_dir).unwrap();
+    seed_minimal_config(workspace.path());
 
     let md_file = workspace.path().join("test.md");
     fs::write(&md_file, "---\ntitle: test\n---\nHello compose\n").unwrap();
@@ -1592,6 +1955,7 @@ exit 0
 
     let assert = cargo_bin_cmd!("claudine")
         .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
         .env("PATH", &path_dir)
         .args(["compose", "--codex", md_file.to_str().unwrap()])
         .assert()
@@ -1607,10 +1971,161 @@ exit 0
 
 #[cfg(unix)]
 #[test]
+fn compose_resolves_env_agent_in_body_template() {
+    // Regression: `{{env.AGENT}}` in a compose body must resolve to the
+    // chosen provider's slug, since AGENT is now set in the parent
+    // process env *before* templates render.
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+    seed_minimal_config(workspace.path());
+
+    let md_file = workspace.path().join("test.md");
+    fs::write(
+        &md_file,
+        "---\ntitle: agent env test\n---\nrunning on {{env.AGENT}}\n",
+    )
+    .unwrap();
+
+    let stdin_path = workspace.path().join("stdin.txt");
+    write_executable(
+        &path_dir.join("codex"),
+        r#"#!/bin/sh
+/bin/cat > "$CLAUDINE_STDIN_FILE"
+exit 0
+"#,
+    );
+
+    cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
+        .env("PATH", &path_dir)
+        .env("CLAUDINE_STDIN_FILE", &stdin_path)
+        .args(["compose", "--codex", md_file.to_str().unwrap()])
+        .assert()
+        .success();
+
+    let stdin = fs::read_to_string(&stdin_path).unwrap();
+    assert!(
+        stdin.contains("running on codex"),
+        "{{{{env.AGENT}}}} should resolve to the chosen provider during \
+         compose body rendering; prompt was: {stdin:?}"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn inline_compose_resolves_env_agent_in_prompt_template() {
+    // `{{env.AGENT}}` in the inline-compose `prompt` frontmatter must
+    // resolve to the chosen provider's slug after eager target resolution.
+    // Uses Goose because its `-t <prompt>` argv delivery is easy to
+    // capture, and its plain-stdout output works without structured streams.
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+    seed_minimal_config(workspace.path());
+
+    let md_file = workspace.path().join("inline.md");
+    fs::write(
+        &md_file,
+        "---\nprompt: 'pick: {{env.AGENT}}'\nagent: goose\n---\noriginal body\n",
+    )
+    .unwrap();
+
+    let captured_args = workspace.path().join("captured_args.txt");
+    write_executable(
+        &path_dir.join("goose"),
+        r#"#!/bin/sh
+printf '%s\n' "$@" > "$CLAUDINE_CAPTURED_ARGS"
+printf 'updated body content\n'
+exit 0
+"#,
+    );
+
+    cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
+        .env("PATH", &path_dir)
+        .env("CLAUDINE_CAPTURED_ARGS", &captured_args)
+        .args(["inline-compose", md_file.to_str().unwrap()])
+        .assert()
+        .success();
+
+    let argv = fs::read_to_string(&captured_args).unwrap();
+    assert!(
+        argv.contains("pick: goose"),
+        "{{{{env.AGENT}}}} should resolve during inline-compose prompt \
+         rendering; argv was: {argv:?}"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn wrapper_resolves_env_agent_in_system_prompt() {
+    // Direct wrappers must set AGENT before the parent renders any
+    // system-prompt.md template. Use the Claude wrapper because its
+    // non-interactive system-prompt delivery writes the composed prompt
+    // to a temp file passed via --append-system-prompt-file, which the
+    // shim can capture verbatim.
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+    seed_minimal_config(workspace.path());
+
+    let system_prompt = workspace.path().join("system-prompt.md");
+    fs::write(&system_prompt, "you are running on {{env.AGENT}}\n").unwrap();
+
+    let captured_prompt = workspace.path().join("captured_prompt.txt");
+    let captured_args = workspace.path().join("captured_args.txt");
+    write_executable(
+        &path_dir.join("claude"),
+        r#"#!/bin/sh
+printf '%s\n' "$@" > "$CLAUDINE_CAPTURED_ARGS"
+: > "$CLAUDINE_CAPTURED_PROMPT"
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --append-system-prompt-file|--system-prompt-file)
+            shift
+            if [ -n "$1" ] && [ -f "$1" ]; then
+                /bin/cat "$1" >> "$CLAUDINE_CAPTURED_PROMPT"
+            else
+                printf 'TMPFILE_MISSING:%s\n' "$1" >> "$CLAUDINE_CAPTURED_PROMPT"
+            fi
+            ;;
+    esac
+    shift
+done
+exit 0
+"#,
+    );
+
+    cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
+        .env("PATH", &path_dir)
+        .env("CLAUDINE_CAPTURED_PROMPT", &captured_prompt)
+        .env("CLAUDINE_CAPTURED_ARGS", &captured_args)
+        .current_dir(workspace.path())
+        .args(["claude", "--", "ping"])
+        .assert()
+        .success();
+
+    let argv = fs::read_to_string(&captured_args).unwrap_or_default();
+    let captured = fs::read_to_string(&captured_prompt).unwrap_or_default();
+    assert!(
+        captured.contains("running on claude"),
+        "system-prompt template should resolve {{{{env.AGENT}}}} to the \
+         wrapper's provider slug; argv: {argv:?}; captured prompt: {captured:?}"
+    );
+}
+
+#[cfg(unix)]
+#[test]
 fn compose_preflight_error_includes_source_provenance() {
     let workspace = tempdir().unwrap();
     let path_dir = workspace.path().join("bin");
     fs::create_dir_all(&path_dir).unwrap();
+    seed_minimal_config(workspace.path());
 
     // Markdown with a ::shell directive that is NOT whitelisted.
     let md_file = workspace.path().join("template.md");
@@ -1668,6 +2183,7 @@ fn compose_interactive_preflight_with_whitelisted_command() {
     let workspace = tempdir().unwrap();
     let path_dir = workspace.path().join("bin");
     fs::create_dir_all(&path_dir).unwrap();
+    seed_minimal_config(workspace.path());
 
     let md_file = workspace.path().join("template.md");
     fs::write(
@@ -1688,7 +2204,7 @@ fn compose_interactive_preflight_with_whitelisted_command() {
 
     write_executable(
         &path_dir.join("codex"),
-        "#!/bin/sh\necho 'provider-launched' >&2\nexit 0\n",
+        "#!/bin/sh\ncat > /dev/null\necho 'provider-launched' >&2\nexit 0\n",
     );
 
     // Include system dirs so shell expansion can find `echo`.
@@ -1722,6 +2238,7 @@ fn compose_skips_shell_hidden_by_false_block() {
     let workspace = tempdir().unwrap();
     let path_dir = workspace.path().join("bin");
     fs::create_dir_all(&path_dir).unwrap();
+    seed_minimal_config(workspace.path());
 
     // The ::shell is inside a ::block when="false" — Darkmatter's composition
     // excludes it, so preflight never discovers the un-whitelisted command.
@@ -1746,6 +2263,7 @@ fn compose_skips_shell_hidden_by_false_block() {
         .env("NO_COLOR", "1")
         .env("HOME", workspace.path())
         .env("PATH", &path_dir)
+        .current_dir(workspace.path())
         .args(["compose", "--codex", md_file.to_str().unwrap()])
         .assert()
         .success();
@@ -1766,6 +2284,7 @@ fn compose_shell_preflight_passes_with_whitelisted_commands() {
     let path_dir = workspace.path().join("bin");
     let marker_path = workspace.path().join("provider-ran.txt");
     fs::create_dir_all(&path_dir).unwrap();
+    seed_minimal_config(workspace.path());
 
     // Markdown with a whitelisted ::shell command AND a harness shell pre-check.
     let md_file = workspace.path().join("template.md");
@@ -1820,6 +2339,7 @@ fn wrapper_restores_repo_harness_for_plain_prompts() {
     let path_dir = workspace.path().join("bin");
     let marker_path = workspace.path().join("provider-ran.txt");
     fs::create_dir_all(&path_dir).unwrap();
+    seed_minimal_config(workspace.path());
 
     fs::write(
         workspace.path().join("CLAUDE.md"),
@@ -1837,6 +2357,7 @@ exit 0
 
     cargo_bin_cmd!("claudine")
         .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
         .env("PATH", &path_dir)
         .env("CLAUDINE_MARKER_FILE", &marker_path)
         .current_dir(workspace.path())
@@ -1896,6 +2417,7 @@ fn inline_compose_rejects_empty_captured_output() {
     let workspace = tempdir().unwrap();
     let path_dir = workspace.path().join("bin");
     fs::create_dir_all(&path_dir).unwrap();
+    seed_minimal_config(workspace.path());
 
     let md_file = workspace.path().join("test.md");
     fs::write(
@@ -1915,6 +2437,7 @@ exit 0
     {
         let assert = cargo_bin_cmd!("claudine")
             .env("NO_COLOR", "1")
+            .env("HOME", workspace.path())
             .env("PATH", &path_dir)
             .args(["inline-compose", "--codex", md_file.to_str().unwrap()])
             .assert();
@@ -1990,6 +2513,7 @@ fn inline_compose_preserves_frontmatter() {
     let workspace = tempdir().unwrap();
     let path_dir = workspace.path().join("bin");
     fs::create_dir_all(&path_dir).unwrap();
+    seed_minimal_config(workspace.path());
 
     let md_file = workspace.path().join("test.md");
     let original = "---\nprompt: Generate content\nlast_updated: 2026-01-01\n---\nOriginal body\n";
@@ -2008,6 +2532,7 @@ fn inline_compose_preserves_frontmatter() {
 
     let assert = cargo_bin_cmd!("claudine")
         .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
         .env("PATH", &path_dir)
         .args(["inline-compose", "--goose", md_file.to_str().unwrap()])
         .assert();
@@ -2040,6 +2565,7 @@ fn inline_compose_preserves_frontmatter() {
 
 #[cfg(unix)]
 #[test]
+#[serial_test::serial]
 fn inline_compose_file_changed_post_check_sees_closure_artifact() {
     // Verifies that file-state post_checks like `file_changed` evaluate
     // AFTER inline closure has rewritten the document, not before.
@@ -2090,6 +2616,7 @@ fn inline_compose_no_overwrite_on_failure() {
     let workspace = tempdir().unwrap();
     let path_dir = workspace.path().join("bin");
     fs::create_dir_all(&path_dir).unwrap();
+    seed_minimal_config(workspace.path());
 
     let md_file = workspace.path().join("test.md");
     let original = "---\nprompt: Generate content\n---\nOriginal body\n";
@@ -2105,6 +2632,7 @@ exit 1
 
     let _assert = cargo_bin_cmd!("claudine")
         .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
         .env("PATH", &path_dir)
         .args(["inline-compose", "--codex", md_file.to_str().unwrap()])
         .assert();
@@ -2160,6 +2688,7 @@ fn inline_compose_interactive_codex_uses_captured_last_message() {
     let workspace = tempdir().unwrap();
     let path_dir = workspace.path().join("bin");
     fs::create_dir_all(&path_dir).unwrap();
+    seed_minimal_config(workspace.path());
 
     let md_file = workspace.path().join("test.md");
     fs::write(
@@ -2185,6 +2714,7 @@ exit 1
 
     cargo_bin_cmd!("claudine")
         .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
         .env("PATH", &path_dir)
         .args([
             "inline-compose",
@@ -2209,6 +2739,7 @@ fn compose_interactive_claude_seeds_prompt_as_positional_arg() {
     let path_dir = workspace.path().join("bin");
     let args_path = workspace.path().join("args.txt");
     fs::create_dir_all(&path_dir).unwrap();
+    seed_minimal_config(workspace.path());
 
     let md_file = workspace.path().join("test.md");
     fs::write(&md_file, "---\ntitle: test\n---\nHello Claude\n").unwrap();
@@ -2223,6 +2754,7 @@ exit 0
 
     cargo_bin_cmd!("claudine")
         .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
         .env("PATH", &path_dir)
         .env("CLAUDINE_ARGS_FILE", &args_path)
         .args([
@@ -2290,6 +2822,7 @@ fn compose_opencode_non_interactive_passes_prompt_as_positional_arg() {
     let path_dir = workspace.path().join("bin");
     let args_path = workspace.path().join("args.txt");
     fs::create_dir_all(&path_dir).unwrap();
+    seed_minimal_config(workspace.path());
 
     let md_file = workspace.path().join("test.md");
     fs::write(&md_file, "---\ntitle: test\n---\nHello OpenCode\n").unwrap();
@@ -2304,7 +2837,9 @@ exit 0
 
     cargo_bin_cmd!("claudine")
         .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
         .env("PATH", &path_dir)
+        .env("OPENCODE_MODEL", "test-model")
         .env("CLAUDINE_ARGS_FILE", &args_path)
         .args(["compose", "--opencode", md_file.to_str().unwrap()])
         .assert()
@@ -2338,6 +2873,7 @@ exit 0
 #[test]
 fn compose_opencode_launches_child_from_repo_root() {
     let workspace = tempdir().unwrap();
+    seed_minimal_config(workspace.path());
     let Some((repo_root, launch_dir, bin_dir)) = create_claudine_monorepo(workspace.path()) else {
         eprintln!("Skipping integration test: git init unavailable");
         return;
@@ -2346,7 +2882,7 @@ fn compose_opencode_launches_child_from_repo_root() {
     let env_path = workspace.path().join("env.txt");
     let args_path = workspace.path().join("args.txt");
     let md_file = repo_root.join("prompts/test.md");
-    write_file(&md_file, "---\ntitle: test\n---\nHello OpenCode\n");
+    write(&md_file, "---\ntitle: test\n---\nHello OpenCode\n");
 
     write_executable(
         &bin_dir.join("opencode"),
@@ -2364,6 +2900,8 @@ exit 0
     cargo_bin_cmd!("claudine")
         .current_dir(&launch_dir)
         .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
+        .env("OPENCODE_MODEL", "test-model")
         .env("PATH", &bin_dir)
         .env("CLAUDINE_PWD_FILE", &pwd_path)
         .env("CLAUDINE_ARGS_FILE", &args_path)
@@ -2389,6 +2927,7 @@ exit 0
 #[test]
 fn compose_opencode_launches_from_repo_root_for_package_prompt_refs() {
     let workspace = tempdir().unwrap();
+    seed_minimal_config(workspace.path());
     let Some((repo_root, _launch_dir, bin_dir)) = create_claudine_monorepo(workspace.path()) else {
         eprintln!("Skipping integration test: git init unavailable");
         return;
@@ -2398,7 +2937,7 @@ fn compose_opencode_launches_from_repo_root_for_package_prompt_refs() {
     let env_path = workspace.path().join("env-package.txt");
     let args_path = workspace.path().join("args-package.txt");
     let md_file = package_root.join("prompts/test.md");
-    write_file(&md_file, "---\ntitle: test\n---\nHello OpenCode\n");
+    write(&md_file, "---\ntitle: test\n---\nHello OpenCode\n");
 
     write_executable(
         &bin_dir.join("opencode"),
@@ -2416,6 +2955,8 @@ exit 0
     cargo_bin_cmd!("claudine")
         .current_dir(&package_root)
         .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
+        .env("OPENCODE_MODEL", "test-model")
         .env("PATH", &bin_dir)
         .env("CLAUDINE_PWD_FILE", &pwd_path)
         .env("CLAUDINE_ARGS_FILE", &args_path)
@@ -2462,7 +3003,7 @@ fn compose_supports_mcp_runtime_and_tag_cleanup() {
     write_executable(
         &path_dir.join("codex"),
         r#"#!/bin/sh
-cat > "$CLAUDINE_STDIN_FILE"
+/bin/cat > "$CLAUDINE_STDIN_FILE"
 {
   printf 'HOME=%s\n' "$HOME"
 } > "$CLAUDINE_ENV_FILE"
@@ -2499,6 +3040,7 @@ fn codex_structured_compose_filters_stdin_banner() {
     let workspace = tempdir().unwrap();
     let path_dir = workspace.path().join("bin");
     fs::create_dir_all(&path_dir).unwrap();
+    seed_minimal_config(workspace.path());
 
     let md_file = workspace.path().join("test.md");
     fs::write(&md_file, "---\ntitle: test\n---\nHello Codex\n").unwrap();
@@ -2516,7 +3058,7 @@ for arg in "$@"; do
 done
 
 printf '%s\n' 'Reading prompt from stdin...' >&2
-cat > /dev/null
+/bin/cat > /dev/null
 if [ -n "$last_message" ]; then
   printf '%s\n' 'Recovered answer' > "$last_message"
 fi
@@ -2528,6 +3070,7 @@ printf '%s\n' '{"type":"turn.completed","usage":{"input_tokens":20,"output_token
 
     let assert = cargo_bin_cmd!("claudine")
         .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
         .env("PATH", &path_dir)
         .args(["compose", "--codex", "--quiet", md_file.to_str().unwrap()])
         .assert()
@@ -2544,6 +3087,7 @@ fn codex_structured_compose_surfaces_live_tool_progress() {
     let workspace = tempdir().unwrap();
     let path_dir = workspace.path().join("bin");
     fs::create_dir_all(&path_dir).unwrap();
+    seed_minimal_config(workspace.path());
 
     let md_file = workspace.path().join("test.md");
     fs::write(&md_file, "---\ntitle: test\n---\nHello Codex\n").unwrap();
@@ -2560,7 +3104,7 @@ for arg in "$@"; do
   prev="$arg"
 done
 
-cat > /dev/null
+/bin/cat > /dev/null
 printf '%s\n' '{"type":"thread.started","thread_id":"codex-1"}'
 printf '%s\n' '{"type":"turn.started"}'
 printf '%s\n' '{"type":"item.started","item":{"id":"t1","type":"command_exec","tool_name":"shell","input":{"cmd":"git status"}}}'
@@ -2576,6 +3120,7 @@ fi
 
     let assert = cargo_bin_cmd!("claudine")
         .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
         .env("PATH", &path_dir)
         .args(["compose", "--codex", "--quiet", md_file.to_str().unwrap()])
         .assert()
@@ -2583,10 +3128,20 @@ fi
         .stdout("Recovered answer\n");
 
     let stderr_plain = strip_ansi(&String::from_utf8_lossy(&assert.get_output().stderr));
-    assert!(stderr_plain.contains(r#"tool: shell {"cmd":"git status"}"#));
-    assert!(stderr_plain.contains(r#"tool result: shell id=t1 result="ok""#));
-    assert!(stderr_plain.contains("tool: view_image"));
-    assert!(stderr_plain.contains(r#"tool result: view_image id=t2 result="ok""#));
+    // The sink now renders the first non-empty string value as the tool
+    // input preview instead of a truncated JSON blob (Plan 3 hardening).
+    // Post response-refinement humanization (Task 1.2), tool names are
+    // title-cased (`shell` → `Shell`, `view_image` → `View Image`).
+    // Per the 2026-04-16 more-is-more Phase 1 change, tool call lines
+    // render as `Name(summary)` instead of `Name · summary`.
+    assert!(
+        stderr_plain.contains("Shell(git status)"),
+        "missing Shell call with 'git status' preview in parens in:\n{stderr_plain}"
+    );
+    assert!(
+        stderr_plain.contains("View Image"),
+        "missing View Image line in:\n{stderr_plain}"
+    );
 }
 
 #[cfg(unix)]
@@ -2598,6 +3153,7 @@ fn no_cross_provider_retry_after_launch() {
     let workspace = tempdir().unwrap();
     let path_dir = workspace.path().join("bin");
     fs::create_dir_all(&path_dir).unwrap();
+    seed_minimal_config(workspace.path());
 
     let md_file = workspace.path().join("test.md");
     fs::write(&md_file, "---\ntitle: test\n---\nPrompt body\n").unwrap();
@@ -2621,6 +3177,7 @@ exit 0
     // Explicitly select codex. It exits 42. No fallback to claude.
     cargo_bin_cmd!("claudine")
         .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
         .env("PATH", &path_dir)
         .args(["compose", "--codex", md_file.to_str().unwrap()])
         .assert()
@@ -2672,6 +3229,7 @@ fn retired_prompt_file_flag_rejected_in_wrapper() {
 
 #[cfg(unix)]
 #[test]
+#[serial_test::serial]
 fn repo_scoped_config_favorite_selects_provider() {
     // Verifies that a repo-level .claudine/config.json with a linking
     // preference is consulted during composition selection so the
@@ -2680,6 +3238,7 @@ fn repo_scoped_config_favorite_selects_provider() {
     let path_dir = workspace.path().join("bin");
     let args_file = workspace.path().join("goose-args.txt");
     fs::create_dir_all(&path_dir).unwrap();
+    seed_minimal_config(workspace.path());
 
     // Initialize a git repo so repo root detection works
     std::process::Command::new("git")
@@ -2688,12 +3247,12 @@ fn repo_scoped_config_favorite_selects_provider() {
         .output()
         .unwrap();
 
-    // Create repo-local config with goose as the favorite
+    // Create repo-local config with goose as the preferred agent
     let config_dir = workspace.path().join(".claudine");
     fs::create_dir_all(&config_dir).unwrap();
     fs::write(
         config_dir.join("config.json"),
-        r#"{"version":"1","settings":{"linking":{"preference":["goose"],"canonical_provider":{}}},"providers":{}}"#,
+        r#"{"preferred_agent":"goose"}"#,
     )
     .unwrap();
 
@@ -2740,19 +3299,19 @@ exit 99
 
 #[cfg(unix)]
 #[test]
-fn ambiguous_agent_hint_no_tty_returns_error() {
-    // Verifies that an ambiguous `agent` hint with no TTY returns an error
-    // instead of hanging on interactive selection.
+fn agent_hint_resolved_early_in_non_tty() {
+    // Verifies that an `agent` hint is resolved during preparation
+    // (not at launch), so prefix matches like "c" resolve to the
+    // first match (Claude) instead of being treated as ambiguous.
     let workspace = tempdir().unwrap();
     let path_dir = workspace.path().join("bin");
     fs::create_dir_all(&path_dir).unwrap();
+    seed_minimal_config(workspace.path());
 
     let md_file = workspace.path().join("test.md");
-    // "agent: c" matches both claude and codex via prefix matching,
-    // producing an ambiguous hint that requires interactive selection.
     fs::write(&md_file, "---\ntitle: test\nagent: c\n---\nPrompt\n").unwrap();
 
-    // Install both claude and codex so "c" is ambiguous
+    // Install both claude and codex; "c" resolves to Claude (first prefix match)
     write_executable(&path_dir.join("claude"), "#!/bin/sh\nexit 0\n");
     write_executable(&path_dir.join("codex"), "#!/bin/sh\nexit 0\n");
 
@@ -2762,13 +3321,47 @@ fn ambiguous_agent_hint_no_tty_returns_error() {
 
     cargo_bin_cmd!("claudine")
         .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
+        .env("PATH", &path_dir)
+        .pipe_stdin(&stdin_file)
+        .unwrap()
+        .args(["compose", md_file.to_str().unwrap()])
+        .assert()
+        .success();
+}
+
+#[cfg(unix)]
+#[test]
+fn unknown_agent_hint_fails_early_in_non_tty() {
+    // Verifies that an unknown `agent` hint fails during preparation
+    // instead of hanging on interactive selection.
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+    seed_minimal_config(workspace.path());
+
+    let md_file = workspace.path().join("test.md");
+    fs::write(
+        &md_file,
+        "---\ntitle: test\nagent: unknown-provider\n---\nPrompt\n",
+    )
+    .unwrap();
+
+    write_executable(&path_dir.join("claude"), "#!/bin/sh\nexit 0\n");
+
+    let stdin_file = workspace.path().join("empty-stdin.txt");
+    fs::write(&stdin_file, "").unwrap();
+
+    cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
         .env("PATH", &path_dir)
         .pipe_stdin(&stdin_file)
         .unwrap()
         .args(["compose", md_file.to_str().unwrap()])
         .assert()
         .code(1)
-        .stderr(contains("ambiguous"));
+        .stderr(contains("does not match any known provider"));
 }
 
 #[cfg(unix)]
@@ -2781,6 +3374,7 @@ fn effective_composed_frontmatter_activates_harness() {
     let path_dir = workspace.path().join("bin");
     let marker_path = workspace.path().join("provider-ran.txt");
     fs::create_dir_all(&path_dir).unwrap();
+    seed_minimal_config(workspace.path());
 
     // The source file transcludes another file that adds pre_checks.
     // Since we can't easily set up full transclusion in an integration
@@ -2802,6 +3396,7 @@ exit 0
 
     cargo_bin_cmd!("claudine")
         .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
         .env("PATH", &path_dir)
         .env("CLAUDINE_MARKER_FILE", &marker_path)
         .current_dir(workspace.path())
@@ -2885,6 +3480,7 @@ fn inline_compose_readonly_file_fails_without_harness() {
     let workspace = tempdir().unwrap();
     let path_dir = workspace.path().join("bin");
     fs::create_dir_all(&path_dir).unwrap();
+    seed_minimal_config(workspace.path());
 
     let md_file = workspace.path().join("readonly.md");
     fs::write(&md_file, "---\nprompt: Generate\n---\nBody\n").unwrap();
@@ -2901,6 +3497,7 @@ fn inline_compose_readonly_file_fails_without_harness() {
 
     let assert = cargo_bin_cmd!("claudine")
         .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
         .env("PATH", &path_dir)
         .args(["inline-compose", "--goose", md_file.to_str().unwrap()])
         .assert()
@@ -2929,6 +3526,7 @@ fn inline_compose_harness_writability_pre_check_fires() {
     let path_dir = workspace.path().join("bin");
     let marker_path = workspace.path().join("provider-ran.txt");
     fs::create_dir_all(&path_dir).unwrap();
+    seed_minimal_config(workspace.path());
 
     let md_file = workspace.path().join("locked.md");
     fs::write(
@@ -2949,6 +3547,7 @@ fn inline_compose_harness_writability_pre_check_fires() {
 
     let assert = cargo_bin_cmd!("claudine")
         .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
         .env("PATH", &path_dir)
         .current_dir(workspace.path())
         .args(["inline-compose", "--goose", md_file.to_str().unwrap()])
@@ -2983,6 +3582,7 @@ fn handler_engagement_banner_suppressed_when_retry_ceiling_reached() {
     let workspace = tempdir().unwrap();
     let path_dir = workspace.path().join("bin");
     fs::create_dir_all(&path_dir).unwrap();
+    seed_minimal_config(workspace.path());
 
     let md_file = workspace.path().join("test.md");
     // retries: 1 means only one retry attempt is allowed.
@@ -3000,6 +3600,7 @@ fn handler_engagement_banner_suppressed_when_retry_ceiling_reached() {
 
     let assert = cargo_bin_cmd!("claudine")
         .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
         .env("PATH", &path_dir)
         .current_dir(workspace.path())
         .args(["inline-compose", "--goose", md_file.to_str().unwrap()])
@@ -3027,6 +3628,7 @@ fn handler_engagement_banner_emitted_once_on_successful_recovery() {
     let path_dir = workspace.path().join("bin");
     let count_path = workspace.path().join("attempt-count.txt");
     fs::create_dir_all(&path_dir).unwrap();
+    seed_minimal_config(workspace.path());
 
     let md_file = workspace.path().join("test.md");
     fs::write(
@@ -3056,6 +3658,7 @@ exit 0
 
     let assert = cargo_bin_cmd!("claudine")
         .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
         .env("PATH", &path_dir)
         .env("CLAUDINE_COUNT_FILE", &count_path)
         .current_dir(workspace.path())
@@ -3086,6 +3689,7 @@ fn redirect_handler_updates_source_file_reporting() {
     let path_dir = workspace.path().join("bin");
     let count_path = workspace.path().join("attempt-count.txt");
     fs::create_dir_all(&path_dir).unwrap();
+    seed_minimal_config(workspace.path());
 
     let redirect_file = workspace.path().join("redirect-target.md");
     fs::write(
@@ -3126,6 +3730,7 @@ exit 0
 
     let assert = cargo_bin_cmd!("claudine")
         .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
         .env("PATH", &path_dir)
         .env("CLAUDINE_COUNT_FILE", &count_path)
         .current_dir(workspace.path())
@@ -3163,6 +3768,7 @@ fn silent_suppresses_validation_reporting_output() {
     let workspace = tempdir().unwrap();
     let path_dir = workspace.path().join("bin");
     fs::create_dir_all(&path_dir).unwrap();
+    seed_minimal_config(workspace.path());
 
     let md_file = workspace.path().join("test.md");
     fs::write(
@@ -3179,6 +3785,7 @@ fn silent_suppresses_validation_reporting_output() {
     // Normal run — should see pre-check failure reporting
     let normal = cargo_bin_cmd!("claudine")
         .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
         .env("PATH", &path_dir)
         .current_dir(workspace.path())
         .args(["compose", "--codex", md_file.to_str().unwrap()])
@@ -3197,6 +3804,7 @@ fn silent_suppresses_validation_reporting_output() {
     // Silent run — validation reporting lines should be absent
     let silent = cargo_bin_cmd!("claudine")
         .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
         .env("PATH", &path_dir)
         .current_dir(workspace.path())
         .args(["compose", "--codex", "--silent", md_file.to_str().unwrap()])
@@ -3225,6 +3833,7 @@ fn silent_suppresses_handler_engagement_banner() {
     let path_dir = workspace.path().join("bin");
     let count_path = workspace.path().join("attempt-count.txt");
     fs::create_dir_all(&path_dir).unwrap();
+    seed_minimal_config(workspace.path());
 
     let md_file = workspace.path().join("test.md");
     fs::write(
@@ -3253,6 +3862,7 @@ exit 0
 
     let assert = cargo_bin_cmd!("claudine")
         .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
         .env("PATH", &path_dir)
         .env("CLAUDINE_COUNT_FILE", &count_path)
         .current_dir(workspace.path())
@@ -3271,4 +3881,1343 @@ exit 0
         !collapsed.contains("engaging registered handlers"),
         "--silent should suppress handler-engagement banner; stderr:\n{stderr}"
     );
+}
+
+// ---------------------------------------------------------------------------
+// Per-provider dry-run regression tests (Task 18)
+//
+// These tests are the structural guard that would have caught the original
+// Gemini/Qwen drift: composition pipelines that silently bailed because
+// `apply_non_interactive` re-read args before the prompt was injected.
+// A successful dry-run (exit 0 + "DRY RUN" in output) proves the full
+// extraction → delivery → output pipeline ran without error.
+// ---------------------------------------------------------------------------
+
+/// End-to-end: for every wrapped provider, verify that
+/// `claudine <provider> --dry-run "hello"` produces a successful
+/// dry-run (exit 0) and that the dry-run output section is printed.
+///
+/// Providers that deliver the prompt via argv (Gemini, Qwen, OpenCode,
+/// Goose) also have "hello" visible in the Command: line; providers that
+/// seed stdin (Claude, Codex, Kimi) do not, but the pipeline still
+/// completes and emits the DRY RUN header, which is sufficient to prove
+/// that the prompt was accepted and processed. Runs for all 7 wrapped
+/// providers with stub binaries on PATH.
+#[cfg(unix)]
+#[test]
+fn direct_wrap_dry_run_delivers_prompt_for_every_provider() {
+    for provider_slug in [
+        "claude", "codex", "gemini", "kimi", "opencode", "qwen", "goose",
+    ] {
+        let workspace = tempdir().unwrap();
+        let path_dir = workspace.path().join("bin");
+        fs::create_dir_all(&path_dir).unwrap();
+        seed_minimal_config(workspace.path());
+
+        // Stub binary so PATH resolution succeeds in dry-run mode.
+        // Dry-run never actually spawns the child, so the stub body
+        // doesn't matter — the stub only needs to exist and be
+        // executable for claudine's binary-resolution step.
+        write_executable(&path_dir.join(provider_slug), "#!/bin/sh\nexit 0\n");
+
+        let output = cargo_bin_cmd!("claudine")
+            .env("NO_COLOR", "1")
+            .env("HOME", workspace.path())
+            .env("OPENCODE_MODEL", "test-model")
+            .env("PATH", &path_dir)
+            .args([provider_slug, "--dry-run", "hello"])
+            .output()
+            .unwrap();
+
+        assert!(
+            output.status.success(),
+            "`claudine {provider_slug} --dry-run hello` failed: stderr={}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+
+        let combined = format!(
+            "{}{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let normalized = strip_ansi(&combined);
+        assert!(
+            normalized.contains("DRY RUN"),
+            "`claudine {provider_slug} --dry-run hello` did not emit a DRY RUN section:\n{normalized}"
+        );
+    }
+}
+
+/// End-to-end: for every wrapped provider, verify that
+/// `claudine sequence compose.md --<provider> --dry-run` runs cleanly
+/// through the composition pipeline with a trivial markdown body.
+///
+/// Regression guard for the composition-path drift: if a provider's
+/// `apply_entrypoint` / `apply_non_interactive_flags` / `prompt_delivery`
+/// chain silently bails when the prompt arrives via the composition
+/// body, this test fails.
+#[cfg(unix)]
+#[test]
+fn sequence_composition_dry_run_for_every_provider() {
+    for provider_slug in [
+        "claude", "codex", "gemini", "kimi", "opencode", "qwen", "goose",
+    ] {
+        let workspace = tempdir().unwrap();
+        let path_dir = workspace.path().join("bin");
+        fs::create_dir_all(&path_dir).unwrap();
+        seed_minimal_config(workspace.path());
+
+        write_executable(&path_dir.join(provider_slug), "#!/bin/sh\nexit 0\n");
+
+        let compose_file = workspace.path().join("compose.md");
+        fs::write(
+            &compose_file,
+            "---\nsequence:\n  - step_one\n---\ncomposed body text\n",
+        )
+        .unwrap();
+
+        let output = cargo_bin_cmd!("claudine")
+            .env("NO_COLOR", "1")
+            .env("OPENCODE_MODEL", "test-model")
+            .env("PATH", &path_dir)
+            .current_dir(workspace.path())
+            .args([
+                "sequence",
+                "compose.md",
+                &format!("--{provider_slug}"),
+                "--dry-run",
+            ])
+            .output()
+            .unwrap();
+
+        assert!(
+            output.status.success(),
+            "`claudine sequence compose.md --{provider_slug} --dry-run` failed: stderr={}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+}
+
+// ---------------------------------------------------------------------------
+// OpenCode model resolution (Phase 7 integration tests)
+// ---------------------------------------------------------------------------
+
+#[cfg(unix)]
+mod opencode_model_integration {
+    use super::*;
+
+    #[test]
+    fn no_model_provided_renders_blockquote_without_text_above() {
+        let workspace = tempdir().unwrap();
+        let path_dir = workspace.path().join("bin");
+        fs::create_dir_all(&path_dir).unwrap();
+
+        write_executable(
+            &path_dir.join("opencode"),
+            r#"#!/bin/sh
+exit 0
+"#,
+        );
+
+        let assert = cargo_bin_cmd!("claudine")
+            .env("NO_COLOR", "1")
+            .env("HOME", workspace.path())
+            .env("PATH", &path_dir)
+            .args(["opencode", "summarize"])
+            .assert()
+            .code(1);
+
+        let stderr = String::from_utf8_lossy(&assert.get_output().stderr).to_string();
+        let plain = strip_ansi(&stderr);
+
+        assert!(plain.contains("No model specified!"));
+        assert!(plain.contains("OPENCODE_MODEL"));
+        assert!(plain.contains("--model"));
+        assert!(plain.contains("opencode models"));
+
+        let block_quote_start = plain.find("┃").unwrap();
+        let before_block = &plain[..block_quote_start];
+        let trimmed_before = before_block.trim();
+        assert!(
+            trimmed_before.is_empty(),
+            "no text should appear above the BlockQuote; got: '{trimmed_before}'"
+        );
+    }
+
+    #[test]
+    fn cli_model_proceeds_past_resolver() {
+        let workspace = tempdir().unwrap();
+        let path_dir = workspace.path().join("bin");
+        fs::create_dir_all(&path_dir).unwrap();
+        let args_path = workspace.path().join("args.txt");
+
+        write_executable(
+            &path_dir.join("opencode"),
+            r#"#!/bin/sh
+printf '%s\n' "$@" > "$CLAUDINE_ARGS_FILE"
+exit 0
+"#,
+        );
+
+        cargo_bin_cmd!("claudine")
+            .env("NO_COLOR", "1")
+            .env("PATH", &path_dir)
+            .env("CLAUDINE_ARGS_FILE", &args_path)
+            .args(["opencode", "--model", "test-model", "summarize"])
+            .assert()
+            .success();
+
+        let args = fs::read_to_string(&args_path).unwrap();
+        assert!(args.lines().any(|line| line == "test-model"));
+    }
+
+    #[test]
+    fn invalid_model_error_shows_suggestions() {
+        let workspace = tempdir().unwrap();
+        let path_dir = workspace.path().join("bin");
+        fs::create_dir_all(&path_dir).unwrap();
+
+        write_executable(
+            &path_dir.join("opencode"),
+            r#"#!/bin/sh
+printf 'Error: ProviderModelNotFoundError: model bad-model not found\nsuggestions: ["provider/a", "provider/b"]\n' >&2
+exit 1
+"#,
+        );
+
+        let assert = cargo_bin_cmd!("claudine")
+            .env("NO_COLOR", "1")
+            .env("HOME", workspace.path())
+            .env("PATH", &path_dir)
+            .env("OPENCODE_MODEL", "bad-model")
+            .args(["opencode", "summarize"])
+            .assert()
+            .code(1);
+
+        let stderr = String::from_utf8_lossy(&assert.get_output().stderr).to_string();
+        let plain = strip_ansi(&stderr);
+
+        assert!(
+            plain.contains("Invalid model specified")
+                || plain.contains("ProviderModelNotFoundError"),
+            "expected model-not-found error in stderr; got:\n{plain}"
+        );
+        assert!(
+            plain.contains("provider/a"),
+            "expected suggestion 'provider/a' in stderr; got:\n{plain}"
+        );
+        assert!(
+            plain.contains("provider/b"),
+            "expected suggestion 'provider/b' in stderr; got:\n{plain}"
+        );
+    }
+
+    #[test]
+    fn config_file_model_resolves_successfully() {
+        let workspace = tempdir().unwrap();
+        let path_dir = workspace.path().join("bin");
+        fs::create_dir_all(&path_dir).unwrap();
+        let args_path = workspace.path().join("args.txt");
+        let env_path = workspace.path().join("env.txt");
+
+        let config_dir = workspace.path().join(".config/opencode");
+        fs::create_dir_all(&config_dir).unwrap();
+        fs::write(
+            config_dir.join("config.json"),
+            r#"{"model":"config-default-model"}"#,
+        )
+        .unwrap();
+
+        write_executable(
+            &path_dir.join("opencode"),
+            r#"#!/bin/sh
+printf '%s\n' "$@" > "$CLAUDINE_ARGS_FILE"
+printf 'MODEL=%s\n' "$MODEL" > "$CLAUDINE_ENV_FILE"
+exit 0
+"#,
+        );
+
+        cargo_bin_cmd!("claudine")
+            .env("NO_COLOR", "1")
+            .env("HOME", workspace.path())
+            .env("PATH", &path_dir)
+            .env("CLAUDINE_ARGS_FILE", &args_path)
+            .env("CLAUDINE_ENV_FILE", &env_path)
+            .args(["opencode", "summarize"])
+            .assert()
+            .success();
+
+        let env_lines = fs::read_to_string(&env_path).unwrap();
+        assert!(env_lines.contains("MODEL=config-default-model"));
+
+        let args = fs::read_to_string(&args_path).unwrap();
+        assert!(
+            !args.lines().any(|line| line == "--model"),
+            "ConfigDefault should NOT push --model to child args"
+        );
+    }
+}
+
+/// End-to-end regression test for the OpenCode structured wrap pipeline.
+///
+/// Motivated by review-2 finding #4: the OpenCode assistant-text bug that
+/// inspired this feature was in the wrapped pipeline, not just the parser.
+/// This test mirrors the Codex/Gemini `*_structured_*` coverage so the
+/// end-to-end OpenCode path has the same regression surface.
+///
+/// Asserts that a real child process, stream parser, and live sink
+/// cooperate to produce:
+///
+/// 1. The assistant text reaches stdout (regression guard for the missing-
+///    assistant-text bug).
+/// 2. The tool completion renders as a canonical incoming `←` line with
+///    a humanized tool name — NOT a synthesized outgoing `→` line and
+///    NOT via the `⚙` Info glyph.
+/// 3. No two consecutive blank lines appear in the combined stdout +
+///    stderr rendered output (Child 3 section-spacing contract).
+/// 4. The session-id marker and the trailer render on stderr.
+#[cfg(unix)]
+#[test]
+#[serial_test::serial]
+fn opencode_structured_e2e_stdout_and_section_spacing() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    let fake_home = workspace.path().join("home");
+    fs::create_dir_all(&path_dir).unwrap();
+    fs::create_dir_all(&fake_home).unwrap();
+
+    // Minimal OpenCode fake binary. Uses the simple parser-compatible
+    // event shapes (matching the `step_start` / `text` / `tool_end` /
+    // `step_complete` parser unit tests in opencode_semantic.rs) rather
+    // than the full nested `.part` payload, which keeps the test
+    // resilient to stream-protocol evolution while still exercising the
+    // sink end-to-end.
+    let args_path = workspace.path().join("args.txt");
+    write_executable(
+        &path_dir.join("opencode"),
+        r#"#!/bin/sh
+printf '%s\n' "$@" > "$CLAUDINE_ARGS_FILE"
+printf '%s\n' '{"type":"step_start","sessionID":"ses_oc_e2e"}'
+printf '%s\n' '{"type":"tool_end","part":{"tool_use_id":"t1","status":"success","content":"ok","tool_name":"bash"}}'
+printf '%s\n' '{"type":"text","text":"The answer is 42."}'
+printf '%s\n' '{"type":"step_complete","usage":{"input_tokens":10,"output_tokens":5,"total_tokens":15},"cost_usd":0.001,"duration_ms":1500}'
+"#,
+    );
+
+    let assert = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", &fake_home)
+        .env("PATH", &path_dir)
+        .env("OPENCODE_MODEL", "test-model")
+        .env("CLAUDINE_ARGS_FILE", &args_path)
+        // NOTE: intentionally do NOT pass `--format json` here — claudine
+        // treats an explicit native output request as a signal to skip
+        // structured streaming and forward raw bytes, which would bypass
+        // every behavior this test is guarding.
+        .args(["opencode", "what is the answer"])
+        .assert()
+        .success();
+
+    let args_captured = fs::read_to_string(&args_path).unwrap_or_default();
+    assert!(
+        !args_captured.is_empty(),
+        "fake opencode should have been invoked (CLAUDINE_ARGS_FILE empty)"
+    );
+
+    let out = assert.get_output();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let stderr_raw = String::from_utf8_lossy(&out.stderr);
+    let stderr = strip_ansi(&stderr_raw);
+
+    // 1. Assistant text reaches stdout.
+    assert!(
+        stdout.contains("The answer is 42."),
+        "expected assistant text on stdout; stdout={stdout:?}"
+    );
+
+    // 2. Incoming `←` line exists; no synthesized outgoing `→` line; no
+    //    `⚙` Info glyph routing.
+    assert!(
+        stderr.contains('\u{2190}'),
+        "expected incoming ← arrow for tool completion; stderr={stderr}"
+    );
+    assert!(
+        !stderr.contains('\u{2192}'),
+        "OpenCode must NOT synthesize an outgoing → line; stderr={stderr}"
+    );
+    assert!(
+        !stderr.contains('\u{2699}'),
+        "tool result must NOT be rendered via the ⚙ Info glyph; stderr={stderr}"
+    );
+    assert!(
+        stderr.contains("Bash"),
+        "humanized tool name must render; stderr={stderr}"
+    );
+
+    // 3. Session ID + trailer render on stderr.
+    assert!(
+        stderr.contains("session ID") && stderr.contains("ses_oc_e2e"),
+        "expected session ID marker; stderr={stderr}"
+    );
+    assert!(
+        stderr.contains("1.5s") || stderr.contains("1.500s") || stderr.contains("1,500ms"),
+        "expected trailer duration (1.5s); stderr={stderr}"
+    );
+
+    // 4. No two consecutive blank lines in combined stdout+stderr. The
+    //    stderr side is line-structured already; the stdout side is a
+    //    single chunk so we just concat and split on '\n'.
+    let combined = format!("{stdout}{stderr}");
+    let mut prev_blank = false;
+    for line in combined.lines() {
+        let is_blank = line.trim().is_empty();
+        assert!(
+            !(is_blank && prev_blank),
+            "two consecutive blank lines in combined rendered output:\n---\n{combined}\n---"
+        );
+        prev_blank = is_blank;
+    }
+}
+
+// ---------------------------------------------------------------------------
+// OpenCode stderr log bridge integration (Phase 6 integration scenarios)
+//
+// These tests drive claudine's structured OpenCode wrapper path end-to-end
+// with a fake `opencode` binary that emits NDJSON on stdout and structured
+// log records on stderr. They assert against the persisted JSONL log row
+// produced by the summary event emitter in
+// `claudine::stream::reporting::summary_to_event_meta(...)` so the
+// verification does not depend on terminal rendering or ANSI behavior.
+// ---------------------------------------------------------------------------
+
+#[cfg(unix)]
+fn read_summary_row(home: &Path) -> serde_json::Value {
+    let log_path = today_log_path(home);
+    let contents =
+        fs::read_to_string(&log_path).expect("today's JSONL log should exist after wrap run");
+    let row = contents
+        .lines()
+        .find(|line| line.contains("\"synthetic_kind\":\"stream_wrapper_summary\""))
+        .unwrap_or_else(|| panic!("no stream_wrapper_summary row in log:\n{contents}"));
+    serde_json::from_str::<serde_json::Value>(row)
+        .unwrap_or_else(|e| panic!("failed to parse summary row as JSON ({e}): {row}"))
+}
+
+/// Phase 6 scenario: stderr rate limit arrives before any stdout semantic
+/// event. The bridge should signal early termination, kill the child, and
+/// synthesize a `usage_limit_reached` failure summary.
+#[cfg(unix)]
+#[test]
+#[serial_test::serial]
+fn opencode_stderr_rate_limit_before_stdout_forces_early_termination() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    let fake_home = workspace.path().join("home");
+    fs::create_dir_all(&path_dir).unwrap();
+    fs::create_dir_all(&fake_home).unwrap();
+    seed_minimal_config(&fake_home);
+
+    // The fake binary only writes the rate-limit ERROR to stderr, then
+    // sleeps so the bridge has to abort it. If claudine fails to terminate
+    // early, the assert_cmd timeout would trip and the test would fail.
+    write_executable(
+        &path_dir.join("opencode"),
+        r#"#!/bin/sh
+printf '%s\n' 'ERROR 2026-04-15T19:26:02 +3054ms service=llm providerID=zai-coding-plan modelID=glm-5.1 error={"error":{"name":"AI_RetryError","reason":"maxRetriesExceeded","errors":[{"name":"AI_APICallError","statusCode":429,"responseBody":"{\"error\":{\"code\":\"1308\",\"message\":\"Usage limit reached. Your limit will reset at 2026-04-16 04:18:56\"}}"}]}}' >&2
+sleep 30
+exit 0
+"#,
+    );
+
+    let assert = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", &fake_home)
+        .env("PATH", augmented_path(&path_dir))
+        .env("OPENCODE_MODEL", "test-model")
+        .timeout(std::time::Duration::from_secs(30))
+        .args(["opencode", "describe the thing"])
+        .assert()
+        .failure();
+
+    let output = assert.get_output();
+    let exit_code = output.status.code().unwrap_or(-1);
+    assert_eq!(
+        exit_code,
+        1,
+        "pre-stream rate limit must map to exit_code=1; got {exit_code}, stderr={}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let row = read_summary_row(&fake_home);
+    assert_eq!(row["extra"]["exit_code"], serde_json::json!(1));
+    assert_eq!(
+        row["error"].as_str().unwrap_or(""),
+        row["error"].as_str().unwrap_or(""),
+        "error field should carry the rate-limit message",
+    );
+    let diagnostics = &row["extra"]["provider_summary"]["stderr_diagnostics"];
+    assert_eq!(
+        diagnostics["rate_limit_events"],
+        serde_json::json!(1),
+        "stderr diagnostics should record the rate-limit event: row={row}",
+    );
+    let rate_limit = &row["extra"]["provider_summary"]["rate_limit"];
+    assert_eq!(
+        rate_limit["is_throttled"],
+        serde_json::json!(true),
+        "rate_limit.is_throttled should be true: row={row}",
+    );
+    assert!(
+        rate_limit["reset_at"].is_string(),
+        "rate_limit.reset_at should be populated: row={row}",
+    );
+}
+
+/// Phase 6 scenario: a malformed asset stderr line during an otherwise-
+/// successful run should surface as a Warning event (rendered once per
+/// line) without failing the session. Per the 2026-04-18 OpenCode
+/// reporting contract, the diagnostics counter is preserved while the
+/// trailer Config badge is suppressed.
+#[cfg(unix)]
+#[test]
+#[serial_test::serial]
+fn opencode_stderr_malformed_asset_records_diagnostic_without_config_badge() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    let fake_home = workspace.path().join("home");
+    fs::create_dir_all(&path_dir).unwrap();
+    fs::create_dir_all(&fake_home).unwrap();
+    seed_minimal_config(&fake_home);
+
+    write_executable(
+        &path_dir.join("opencode"),
+        r#"#!/bin/sh
+printf '%s\n' 'ERROR 2026-04-15T21:28:30 +315ms service=config command=/Users/ken/.config/opencode/commands/catalog.md err=ENOENT: no such file or directory, open '"'"'/Users/ken/.config/opencode/commands/catalog.md'"'"' failed to load command' >&2
+printf '%s\n' '{"type":"step_start","sessionID":"ses_cfg_ok"}'
+printf '%s\n' '{"type":"text","text":"Warnings are non-fatal."}'
+printf '%s\n' '{"type":"step_complete","usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2},"duration_ms":200}'
+exit 0
+"#,
+    );
+
+    cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", &fake_home)
+        .env("PATH", augmented_path(&path_dir))
+        .env("OPENCODE_MODEL", "test-model")
+        .args(["opencode", "just classify"])
+        .assert()
+        .success();
+
+    let row = read_summary_row(&fake_home);
+    let diagnostics = &row["extra"]["provider_summary"]["stderr_diagnostics"];
+    assert_eq!(
+        diagnostics["malformed_asset_events"],
+        serde_json::json!(1),
+        "stderr diagnostics should record one malformed asset: row={row}",
+    );
+    // Per the 2026-04-18 OpenCode reporting contract, malformed-asset
+    // events do not produce a trailer Config badge — the per-line
+    // Warning surface is the authoritative reporting channel. The
+    // `badges` field may be absent or empty; either is acceptable as
+    // long as no Config-category badge is present.
+    let badges = row["extra"]["badges"].as_array();
+    if let Some(b) = badges {
+        assert!(
+            !b.iter()
+                .any(|b| b["category"] == serde_json::json!("config")),
+            "Config trailer badge must be absent — malformed assets are surfaced once per Warning line: {b:?}",
+        );
+    }
+    assert_eq!(
+        row["extra"]["exit_code"],
+        serde_json::json!(0),
+        "malformed assets should not fail the session: row={row}",
+    );
+}
+
+/// Phase 6 scenario: mixed structured stderr plus an ANSI-wrapped raw
+/// `Error:` line plus benign chatter. The bridge should consume only
+/// classified lines while raw lines still reach the user unchanged.
+#[cfg(unix)]
+#[test]
+#[serial_test::serial]
+fn opencode_stderr_mixed_shapes_only_consume_classified_lines() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    let fake_home = workspace.path().join("home");
+    fs::create_dir_all(&path_dir).unwrap();
+    fs::create_dir_all(&fake_home).unwrap();
+    seed_minimal_config(&fake_home);
+
+    // `bare chatter line` should flow through as raw stderr because it
+    // doesn't match the header regex and isn't an ANSI `Error:` block.
+    // The ERROR/skill line is classified as MalformedAsset.
+    write_executable(
+        &path_dir.join("opencode"),
+        r#"#!/bin/sh
+printf '%s\n' 'ERROR 2026-04-15T21:28:30 +0ms service=config skill=/tmp/s.md err=ENOENT failed to load skill' >&2
+printf '%s\n' 'bare chatter line from the provider' >&2
+printf '%s\n' '{"type":"step_start","sessionID":"ses_mix"}'
+printf '%s\n' '{"type":"text","text":"All good."}'
+printf '%s\n' '{"type":"step_complete","usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2},"duration_ms":100}'
+exit 0
+"#,
+    );
+
+    let assert = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", &fake_home)
+        .env("PATH", augmented_path(&path_dir))
+        .env("OPENCODE_MODEL", "test-model")
+        .args(["opencode", "mixed run"])
+        .assert()
+        .success();
+
+    let stderr = strip_ansi(&String::from_utf8_lossy(&assert.get_output().stderr));
+    // Structured ERROR line must NOT reach raw stderr passthrough
+    // (the bridge consumed it, then re-emitted it as a Warning event).
+    assert!(
+        !stderr.contains("failed to load skill"),
+        "classified stderr must be suppressed from raw passthrough; stderr={stderr}",
+    );
+    // Bare chatter is unclassified so it must continue to surface.
+    assert!(
+        stderr.contains("bare chatter line"),
+        "unclassified stderr must still passthrough to the operator; stderr={stderr}",
+    );
+
+    let row = read_summary_row(&fake_home);
+    let diagnostics = &row["extra"]["provider_summary"]["stderr_diagnostics"];
+    assert_eq!(
+        diagnostics["malformed_asset_events"],
+        serde_json::json!(1),
+        "stderr diagnostics should record the malformed asset: row={row}",
+    );
+    assert!(
+        row["extra"]["provider_summary"]["stderr_diagnostics"]["log_records_parsed"]
+            .as_u64()
+            .unwrap_or(0)
+            >= 1,
+        "log_records_parsed should count the structured record: row={row}",
+    );
+}
+
+/// Phase 6 scenario: the final summary must contain merged `stderr_text`,
+/// `stderr_diagnostics`, and recomputed `badges`. Guards the wrapper-layer
+/// summary merge step that runs after both reader threads join.
+#[cfg(unix)]
+#[test]
+#[serial_test::serial]
+fn opencode_structured_summary_merges_stderr_diagnostics_and_badges() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    let fake_home = workspace.path().join("home");
+    fs::create_dir_all(&path_dir).unwrap();
+    fs::create_dir_all(&fake_home).unwrap();
+    seed_minimal_config(&fake_home);
+
+    write_executable(
+        &path_dir.join("opencode"),
+        r#"#!/bin/sh
+printf '%s\n' 'ERROR 2026-04-15T21:28:30 +0ms service=config command=/tmp/a.md err=ENOENT failed to load command' >&2
+printf '%s\n' 'ERROR 2026-04-15T21:28:30 +0ms service=config agent=/tmp/b.md err=ENOENT failed to load agent' >&2
+printf '%s\n' '{"type":"step_start","sessionID":"ses_merge"}'
+printf '%s\n' '{"type":"text","text":"Merge ok."}'
+printf '%s\n' '{"type":"step_complete","usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2},"duration_ms":50}'
+exit 0
+"#,
+    );
+
+    cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", &fake_home)
+        .env("PATH", augmented_path(&path_dir))
+        .env("OPENCODE_MODEL", "test-model")
+        .args(["opencode", "merge probe"])
+        .assert()
+        .success();
+
+    let row = read_summary_row(&fake_home);
+    let diagnostics = &row["extra"]["provider_summary"]["stderr_diagnostics"];
+    assert_eq!(
+        diagnostics["malformed_asset_events"],
+        serde_json::json!(2),
+        "both malformed asset events should be accumulated: row={row}",
+    );
+    assert!(
+        diagnostics["log_records_parsed"].as_u64().unwrap_or(0) >= 2,
+        "log_records_parsed should count both records: row={row}",
+    );
+
+    // Per the 2026-04-18 OpenCode reporting contract, malformed-asset
+    // events do not produce a trailer Config badge — the per-line
+    // Warning surface is the authoritative reporting channel. The
+    // `badges` field may be absent or empty; either is acceptable as
+    // long as no Config-category badge is present.
+    let badges = row["extra"]["badges"].as_array();
+    if let Some(b) = badges {
+        assert!(
+            !b.iter()
+                .any(|b| b["category"] == serde_json::json!("config")),
+            "Config trailer badge must be absent after stderr merge — diagnostics counter still records the events: {b:?}",
+        );
+    }
+}
+
+// ============================================================================
+// Performance flag tests
+// ============================================================================
+
+#[cfg(unix)]
+#[test]
+fn compose_perf_emits_report_to_stderr() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+    seed_minimal_config(workspace.path());
+
+    let md_file = workspace.path().join("test.md");
+    fs::write(&md_file, "---\ntitle: perf test\n---\n# Hello\n").unwrap();
+
+    write_executable(
+        &path_dir.join("goose"),
+        "#!/bin/sh\necho 'Agent response'\nexit 0\n",
+    );
+
+    let assert = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
+        .env("PATH", augmented_path(&path_dir))
+        .args(["compose", "--goose", "--perf", md_file.to_str().unwrap()])
+        .assert()
+        .success();
+
+    let stderr = String::from_utf8_lossy(&assert.get_output().stderr);
+    let plain = strip_ansi(&stderr);
+
+    assert!(
+        plain.contains("Performance"),
+        "stderr should contain Performance section; got: {plain}"
+    );
+    assert!(
+        plain.contains("CLI Overhead"),
+        "stderr should contain CLI Overhead section; got: {plain}"
+    );
+    assert!(
+        plain.contains("Agent Execution"),
+        "stderr should contain Agent Execution section; got: {plain}"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn compose_perf_stdout_matches_non_perf() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+    seed_minimal_config(workspace.path());
+
+    let md_file = workspace.path().join("test.md");
+    fs::write(&md_file, "---\ntitle: perf test\n---\n# Hello\n").unwrap();
+
+    write_executable(
+        &path_dir.join("goose"),
+        "#!/bin/sh\necho 'Agent response'\nexit 0\n",
+    );
+
+    let perf_assert = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
+        .env("PATH", augmented_path(&path_dir))
+        .args(["compose", "--goose", "--perf", md_file.to_str().unwrap()])
+        .assert()
+        .success();
+
+    let plain_assert = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
+        .env("PATH", augmented_path(&path_dir))
+        .args(["compose", "--goose", md_file.to_str().unwrap()])
+        .assert()
+        .success();
+
+    let perf_stdout = String::from_utf8_lossy(&perf_assert.get_output().stdout);
+    let plain_stdout = String::from_utf8_lossy(&plain_assert.get_output().stdout);
+
+    assert_eq!(
+        perf_stdout, plain_stdout,
+        "stdout must be identical between --perf and non-perf runs"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn inline_compose_perf_emits_report_to_stderr() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+    seed_minimal_config(workspace.path());
+
+    let md_file = workspace.path().join("test.md");
+    fs::write(
+        &md_file,
+        "---\ntitle: inline perf\nprompt: say hello\n---\n# Body\n",
+    )
+    .unwrap();
+
+    write_executable(
+        &path_dir.join("goose"),
+        "#!/bin/sh\necho 'Replacement body'\nexit 0\n",
+    );
+
+    let assert = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
+        .env("PATH", augmented_path(&path_dir))
+        .args([
+            "inline-compose",
+            "--goose",
+            "--perf",
+            md_file.to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+
+    let stderr = String::from_utf8_lossy(&assert.get_output().stderr);
+    let plain = strip_ansi(&stderr);
+
+    assert!(
+        plain.contains("Performance"),
+        "stderr should contain Performance section; got: {plain}"
+    );
+    assert!(
+        plain.contains("CLI Overhead"),
+        "stderr should contain CLI Overhead section; got: {plain}"
+    );
+    assert!(
+        plain.contains("Agent Execution"),
+        "stderr should contain Agent Execution section; got: {plain}"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn inline_compose_perf_stdout_matches_non_perf() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+    seed_minimal_config(workspace.path());
+
+    let md_file_perf = workspace.path().join("test-perf.md");
+    let md_file_plain = workspace.path().join("test-plain.md");
+    let content = "---\ntitle: inline perf\nprompt: say hello\n---\n# Body\n";
+    fs::write(&md_file_perf, content).unwrap();
+    fs::write(&md_file_plain, content).unwrap();
+
+    write_executable(
+        &path_dir.join("goose"),
+        "#!/bin/sh\necho 'Replacement body'\nexit 0\n",
+    );
+
+    let perf_assert = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
+        .env("PATH", augmented_path(&path_dir))
+        .args([
+            "inline-compose",
+            "--goose",
+            "--perf",
+            md_file_perf.to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+
+    let plain_assert = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
+        .env("PATH", augmented_path(&path_dir))
+        .args(["inline-compose", "--goose", md_file_plain.to_str().unwrap()])
+        .assert()
+        .success();
+
+    let perf_stdout = String::from_utf8_lossy(&perf_assert.get_output().stdout);
+    let plain_stdout = String::from_utf8_lossy(&plain_assert.get_output().stdout);
+
+    assert_eq!(
+        perf_stdout, plain_stdout,
+        "stdout must be identical between --perf and non-perf runs"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn compose_dry_run_perf_renders_report_without_agent_execution() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+    seed_minimal_config(workspace.path());
+
+    let md_file = workspace.path().join("test.md");
+    fs::write(&md_file, "---\ntitle: dry run perf\n---\n# Hello\n").unwrap();
+
+    write_executable(
+        &path_dir.join("goose"),
+        "#!/bin/sh\necho 'should not run'\nexit 0\n",
+    );
+
+    let assert = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
+        .env("PATH", augmented_path(&path_dir))
+        .args([
+            "compose",
+            "--goose",
+            "--perf",
+            "--dry-run",
+            md_file.to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+
+    let stderr = String::from_utf8_lossy(&assert.get_output().stderr);
+    let plain = strip_ansi(&stderr);
+
+    assert!(
+        plain.contains("Performance"),
+        "stderr should contain Performance section; got: {plain}"
+    );
+    assert!(
+        plain.contains("dry run"),
+        "perf report should note dry run; got: {plain}"
+    );
+
+    // Provider should NOT have run in dry-run mode.
+    let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
+    assert!(
+        !stdout.contains("should not run"),
+        "provider should not execute in dry-run mode"
+    );
+}
+
+/// Verifies that the `arg parsing:` timing in the perf report captures
+/// the full pipeline including `argv::normalize` and `parse_cli_from`.
+/// This is a smoke test: the exact duration is environment-dependent, but
+/// the line must appear with a formatted duration.
+#[cfg(unix)]
+#[test]
+fn perf_arg_parsing_includes_clap_time() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+    seed_minimal_config(workspace.path());
+
+    let md_file = workspace.path().join("test.md");
+    fs::write(&md_file, "---\ntitle: arg parse perf\n---\n# Hello\n").unwrap();
+
+    write_executable(
+        &path_dir.join("goose"),
+        "#!/bin/sh\necho 'Agent response'\nexit 0\n",
+    );
+
+    let assert = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
+        .env("PATH", augmented_path(&path_dir))
+        .args(["compose", "--goose", "--perf", md_file.to_str().unwrap()])
+        .assert()
+        .success();
+
+    let stderr = String::from_utf8_lossy(&assert.get_output().stderr);
+    let plain = strip_ansi(&stderr);
+
+    // The arg parsing line must be present and show a duration.
+    // We allow 0µs because timer resolution varies, but the line must exist.
+    assert!(
+        plain.contains("arg parsing:"),
+        "perf report must include arg parsing timing; got: {plain}"
+    );
+
+    // Ensure the other startup timings are also present, confirming the
+    // full CLI Overhead section is rendered.
+    assert!(
+        plain.contains("config loading:"),
+        "perf report must include config loading timing; got: {plain}"
+    );
+    assert!(
+        plain.contains("tracing init:"),
+        "perf report must include tracing init timing; got: {plain}"
+    );
+    assert!(
+        plain.contains("environment setup:"),
+        "perf report must include environment setup timing; got: {plain}"
+    );
+}
+
+// ===========================================================================
+// Watchdog fixture tests (Phase 5)
+// ===========================================================================
+
+/// Replay the reference hang shape: 9 task_started, 7 task_completed, then
+/// silence. With a low subagent-idle threshold the watchdog should terminate
+/// the run and name the 2 stuck subagents in stderr.
+#[cfg(unix)]
+#[test]
+#[serial_test::serial]
+fn watchdog_subagent_hang_terminates_and_names_stuck_ids() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+    seed_minimal_config(workspace.path());
+
+    let md_file = workspace.path().join("test.md");
+    fs::write(&md_file, "---\ntitle: watchdog test\n---\nHello\n").unwrap();
+
+    // Build a shell script that emits 9 task_started, 7 task_completed, then blocks.
+    let mut script = String::from(
+        r#"#!/bin/sh
+if [ "$1" = "models" ]; then
+  printf '%s\n' '["test-model"]'
+  exit 0
+fi
+printf '%s\n' '{"type":"init","session_id":"hang-test","model":"test-model"}'
+"#,
+    );
+    for i in 1..=9 {
+        script.push_str(&format!(
+            r#"printf '%s\n' '{{"type":"task_started","task_id":"sa{i}","name":"Task {i}"}}'
+"#,
+        ));
+    }
+    for i in 1..=7 {
+        script.push_str(&format!(
+            r#"printf '%s\n' '{{"type":"task_completed","task_id":"sa{i}","name":"Task {i}","status":"success"}}'
+"#,
+        ));
+    }
+    script.push_str("while :; do /bin/sleep 1; done\n");
+
+    write_executable(&path_dir.join("opencode"), &script);
+
+    let assert = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
+        .env("PATH", &path_dir)
+        .env("OPENCODE_MODEL", "test-model")
+        .env("CLAUDINE_STEP_TIMEOUT", "2s")
+        .env("CLAUDINE_WATCHDOG_INTERVAL", "1s")
+        .env("CLAUDINE_KILL_GRACE", "1s")
+        .args(["compose", "--opencode", md_file.to_str().unwrap()])
+        .timeout(Duration::from_secs(60))
+        .assert()
+        .failure();
+
+    let stderr = String::from_utf8_lossy(&assert.get_output().stderr);
+    let plain = strip_ansi(&stderr);
+
+    // The Agent Error block from the watchdog should report a step_timeout
+    // and name the stuck subagents in the diagnostic block.
+    assert!(
+        plain.contains("no stream activity"),
+        "stderr should contain step_timeout breach message; got: {plain}"
+    );
+    assert!(
+        plain.contains("2 subagents were still outstanding"),
+        "stderr should enumerate stuck subagent count; got: {plain}"
+    );
+    assert!(
+        plain.contains("sa8 \"Task 8\""),
+        "stderr should name stuck subagent 8 with id and name; got: {plain}"
+    );
+    assert!(
+        plain.contains("sa9 \"Task 9\""),
+        "stderr should name stuck subagent 9 with id and name; got: {plain}"
+    );
+
+    // Assert the JSONL summary field.
+    let log_path = today_log_path(workspace.path());
+    if log_path.exists() {
+        let log = fs::read_to_string(&log_path).unwrap();
+        let last = log.lines().last().unwrap();
+        let entry: serde_json::Value = serde_json::from_str(last).unwrap();
+        assert_eq!(
+            entry
+                .get("extra")
+                .and_then(|e| e.get("exit_reason"))
+                .and_then(|v| v.as_str()),
+            Some("step_timeout"),
+            "JSONL session_end must have extra.exit_reason=step_timeout; last entry: {last}"
+        );
+    }
+}
+
+/// Stream-idle watchdog fires when no subagents are outstanding and the
+/// provider stream goes completely silent after a tool call.
+#[cfg(unix)]
+#[test]
+#[serial_test::serial]
+fn watchdog_stream_idle_timeout_after_tool_call_hang() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+    seed_minimal_config(workspace.path());
+
+    let md_file = workspace.path().join("test.md");
+    fs::write(&md_file, "---\ntitle: idle test\n---\nHello\n").unwrap();
+
+    write_executable(
+        &path_dir.join("opencode"),
+        r#"#!/bin/sh
+if [ "$1" = "models" ]; then
+  printf '%s\n' '["test-model"]'
+  exit 0
+fi
+printf '%s\n' '{"type":"init","session_id":"idle-test","model":"test-model"}'
+printf '%s\n' '{"type":"tool_start","part":{"id":"t1","tool_name":"bash","input":{"command":"ls"}}}'
+while :; do /bin/sleep 1; done
+"#,
+    );
+
+    let assert = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
+        .env("PATH", &path_dir)
+        .env("OPENCODE_MODEL", "test-model")
+        .env("CLAUDINE_STEP_TIMEOUT", "2s")
+        .env("CLAUDINE_WATCHDOG_INTERVAL", "1s")
+        .env("CLAUDINE_KILL_GRACE", "1s")
+        .args(["compose", "--opencode", md_file.to_str().unwrap()])
+        .timeout(Duration::from_secs(60))
+        .assert()
+        .failure();
+
+    let stderr = String::from_utf8_lossy(&assert.get_output().stderr);
+    let plain = strip_ansi(&stderr);
+
+    assert!(
+        plain.contains("no stream activity"),
+        "stderr should contain step_timeout breach message; got: {plain}"
+    );
+}
+
+/// Wall-clock watchdog fires when the run exceeds the configured `timeout`
+/// even if the parent stream keeps emitting events. Asserts termination
+/// with exit reason `timeout` (rendered breach message contains
+/// "wall-clock") and that the synthesised summary trailer reflects the
+/// wall-clock kill.
+#[cfg(unix)]
+#[test]
+#[serial_test::serial]
+fn watchdog_wall_clock_timeout_terminates_active_stream() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+    seed_minimal_config(workspace.path());
+
+    let md_file = workspace.path().join("test.md");
+    fs::write(&md_file, "---\ntitle: wall-clock test\n---\nHello\n").unwrap();
+
+    // Fake provider keeps emitting events forever (~10/sec) so the parent
+    // stream is never silent — only the wall-clock budget can stop it.
+    write_executable(
+        &path_dir.join("opencode"),
+        r#"#!/bin/sh
+if [ "$1" = "models" ]; then
+  printf '%s\n' '["test-model"]'
+  exit 0
+fi
+printf '%s\n' '{"type":"init","session_id":"wall-clock-test","model":"test-model"}'
+i=0
+while :; do
+  printf '%s\n' "{\"type\":\"task_started\",\"task_id\":\"sa$i\",\"name\":\"Task $i\"}"
+  printf '%s\n' "{\"type\":\"task_completed\",\"task_id\":\"sa$i\",\"name\":\"Task $i\",\"status\":\"success\"}"
+  i=$((i + 1))
+  /bin/sleep 0.1
+done
+"#,
+    );
+
+    let assert = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
+        .env("PATH", &path_dir)
+        .env("OPENCODE_MODEL", "test-model")
+        .env("CLAUDINE_TIMEOUT", "2s")
+        // Disable step_timeout so only the wall-clock rule can fire.
+        .env("CLAUDINE_STEP_TIMEOUT", "0s")
+        .env("CLAUDINE_WATCHDOG_INTERVAL", "1s")
+        .env("CLAUDINE_KILL_GRACE", "1s")
+        .args(["compose", "--opencode", md_file.to_str().unwrap()])
+        .timeout(Duration::from_secs(60))
+        .assert()
+        .failure();
+
+    let stderr = String::from_utf8_lossy(&assert.get_output().stderr);
+    let plain = strip_ansi(&stderr);
+
+    // The Agent Error block from the watchdog should report the
+    // wall-clock breach. The breach message format is
+    // "wall-clock budget exceeded after <duration>".
+    assert!(
+        plain.contains("wall-clock"),
+        "stderr should mention the wall-clock budget; got: {plain}"
+    );
+    // It must NOT report a step_timeout breach since the silence rule was
+    // disabled.
+    assert!(
+        !plain.contains("step_timeout"),
+        "stderr should not mention step_timeout when only wall-clock fires; got: {plain}"
+    );
+
+    // Assert the JSONL summary field.
+    let log_path = today_log_path(workspace.path());
+    if log_path.exists() {
+        let log = fs::read_to_string(&log_path).unwrap();
+        let last = log.lines().last().unwrap();
+        let entry: serde_json::Value = serde_json::from_str(last).unwrap();
+        assert_eq!(
+            entry
+                .get("extra")
+                .and_then(|e| e.get("exit_reason"))
+                .and_then(|v| v.as_str()),
+            Some("timeout"),
+            "JSONL session_end must have extra.exit_reason=timeout; last entry: {last}"
+        );
+    }
+}
+
+/// Non-harness compose respects --timeout CLI flag (duration grammar).
+#[cfg(unix)]
+#[test]
+#[serial_test::serial]
+fn compose_non_harness_respects_cli_timeout() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+    seed_minimal_config(workspace.path());
+
+    let md_file = workspace.path().join("test.md");
+    fs::write(&md_file, "---\ntitle: cli timeout test\n---\nHello\n").unwrap();
+
+    // Fake provider emits events forever so only wall-clock can stop it.
+    write_executable(
+        &path_dir.join("opencode"),
+        r#"#!/bin/sh
+if [ "$1" = "models" ]; then
+  printf '%s\n' '["test-model"]'
+  exit 0
+fi
+printf '%s\n' '{"type":"init","session_id":"cli-timeout-test","model":"test-model"}'
+while :; do
+  printf '%s\n' '{"type":"thinking","text":"working..."}'
+  /bin/sleep 0.1
+done
+"#,
+    );
+
+    let assert = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
+        .env("PATH", &path_dir)
+        .env("OPENCODE_MODEL", "test-model")
+        .env("CLAUDINE_STEP_TIMEOUT", "0s")
+        .env("CLAUDINE_WATCHDOG_INTERVAL", "1s")
+        .env("CLAUDINE_KILL_GRACE", "1s")
+        .args([
+            "compose",
+            "--opencode",
+            "--timeout",
+            "5s",
+            md_file.to_str().unwrap(),
+        ])
+        .timeout(Duration::from_secs(120))
+        .assert()
+        .failure();
+
+    let stderr = String::from_utf8_lossy(&assert.get_output().stderr);
+    let plain = strip_ansi(&stderr);
+
+    assert!(
+        plain.contains("wall-clock"),
+        "stderr should mention wall-clock budget from CLI --timeout; got: {plain}"
+    );
+    assert!(
+        !plain.contains("step_timeout"),
+        "stderr should not mention step_timeout when disabled; got: {plain}"
+    );
+}
+
+/// Non-harness inline-compose respects --step-timeout CLI flag.
+#[cfg(unix)]
+#[test]
+#[serial_test::serial]
+fn inline_compose_non_harness_respects_cli_step_timeout() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+    seed_minimal_config(workspace.path());
+
+    let md_file = workspace.path().join("test.md");
+    fs::write(
+        &md_file,
+        "---\ntitle: cli step timeout test\nprompt: hello\n---\nBody\n",
+    )
+    .unwrap();
+
+    // Fake provider emits one event then blocks forever.
+    write_executable(
+        &path_dir.join("opencode"),
+        r#"#!/bin/sh
+if [ "$1" = "models" ]; then
+  printf '%s\n' '["test-model"]'
+  exit 0
+fi
+printf '%s\n' '{"type":"init","session_id":"cli-step-test","model":"test-model"}'
+printf '%s\n' '{"type":"tool_start","part":{"id":"t1","tool_name":"bash","input":{"command":"ls"}}}'
+while :; do /bin/sleep 1; done
+"#,
+    );
+
+    let assert = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
+        .env("PATH", &path_dir)
+        .env("OPENCODE_MODEL", "test-model")
+        .env("CLAUDINE_TIMEOUT", "0s")
+        .env("CLAUDINE_STEP_TIMEOUT", "2s")
+        .env("CLAUDINE_WATCHDOG_INTERVAL", "1s")
+        .env("CLAUDINE_KILL_GRACE", "1s")
+        .args([
+            "inline-compose",
+            "--opencode",
+            "--step-timeout",
+            "2s",
+            md_file.to_str().unwrap(),
+        ])
+        .timeout(Duration::from_secs(60))
+        .assert()
+        .failure();
+
+    let stderr = String::from_utf8_lossy(&assert.get_output().stderr);
+    let plain = strip_ansi(&stderr);
+
+    assert!(
+        plain.contains("no stream activity"),
+        "stderr should contain step_timeout breach message from CLI --step-timeout; got: {plain}"
+    );
+
+    let log_path = today_log_path(workspace.path());
+    if log_path.exists() {
+        let log = fs::read_to_string(&log_path).unwrap();
+        let last = log.lines().last().unwrap();
+        let entry: serde_json::Value = serde_json::from_str(last).unwrap();
+        assert_eq!(
+            entry
+                .get("extra")
+                .and_then(|e| e.get("exit_reason"))
+                .and_then(|v| v.as_str()),
+            Some("step_timeout"),
+            "JSONL session_end must have extra.exit_reason=step_timeout; last entry: {last}"
+        );
+    }
 }

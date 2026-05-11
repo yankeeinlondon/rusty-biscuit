@@ -8,61 +8,11 @@ use git2::Repository;
 use serde::{Deserialize, Serialize};
 use tracing::{debug, instrument};
 
-use crate::filesystem::FileAssociation;
-use crate::filesystem::docs::{MarkdownMeta, detect_docs};
-use crate::filesystem::file_types::{lookup_exact_filename, lookup_extension};
+use crate::filesystem::docs::{MarkdownMeta, detect_blast_radius_docs};
 use crate::filesystem::git::get_commit_files;
+pub use crate::filesystem::path_kind::{is_documentation_path, is_source_code_path};
 use crate::filesystem::repo::detect_repo;
 use crate::{Result, SniffError};
-
-// ---------------------------------------------------------------------------
-// Source-code detection
-// ---------------------------------------------------------------------------
-
-/// Returns `true` if the path refers to a source code file.
-///
-/// Classification uses the file-type registry (exact filename match, then
-/// extension match). Paths whose association is `ProgrammingLanguage`,
-/// `FrameworkFile`, or `Styling` are considered source code. HTML/HTM files
-/// are also accepted as an explicit fallback (they are classified as
-/// `Documentation` in the registry but were historically treated as source
-/// code in the CLI).
-pub fn is_source_code_path(path: &Path) -> bool {
-    let file_name = match path.file_name().and_then(|n| n.to_str()) {
-        Some(name) => name,
-        None => return false,
-    };
-
-    // Try exact filename match first
-    if let Some(desc) = lookup_exact_filename(file_name) {
-        return matches!(
-            desc.association,
-            FileAssociation::ProgrammingLanguage
-                | FileAssociation::FrameworkFile
-                | FileAssociation::Styling
-        );
-    }
-
-    // Try extension match
-    if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
-        // Explicit fallback: accept HTML/HTM (classified as Documentation in
-        // the registry, but historically treated as source code)
-        if ext.eq_ignore_ascii_case("html") || ext.eq_ignore_ascii_case("htm") {
-            return true;
-        }
-
-        if let Some(desc) = lookup_extension(ext) {
-            return matches!(
-                desc.association,
-                FileAssociation::ProgrammingLanguage
-                    | FileAssociation::FrameworkFile
-                    | FileAssociation::Styling
-            );
-        }
-    }
-
-    false
-}
 
 // ---------------------------------------------------------------------------
 // Changed-path collection
@@ -78,6 +28,8 @@ pub enum ChangeScope {
     Staged,
     /// Modified + Both only (excludes untracked).
     Unstaged,
+    /// Untracked files only (new files not yet under version control).
+    Untracked,
     /// Files changed in the HEAD commit.
     LastCommit,
 }
@@ -240,6 +192,7 @@ fn collect_working_tree_paths(repo: &Repository, scope: ChangeScope) -> Result<V
             ChangeScope::Dirty => is_staged || is_unstaged || is_untracked,
             ChangeScope::Staged => is_staged,
             ChangeScope::Unstaged => is_unstaged,
+            ChangeScope::Untracked => is_untracked,
             ChangeScope::LastCommit => unreachable!(),
         };
 
@@ -313,21 +266,19 @@ pub fn find_blast_radius_documents(
         return Ok(Vec::new());
     }
 
-    let docs = match detect_docs(&result.repo_root) {
+    // Use the blast-radius-only parser: documents are streamed until the
+    // closing frontmatter delimiter and only the `blast_radius` key is parsed.
+    // Docs without `blast_radius` are never returned by this scanner.
+    let docs = match detect_blast_radius_docs(&result.repo_root) {
         Some(docs) => docs,
         None => return Ok(Vec::new()),
     };
 
     let mut matched: Vec<MarkdownMeta> = docs
         .into_iter()
-        .filter(|doc| {
-            if !doc.has_blast_radius {
-                return false;
-            }
-            match &doc.blast_radius {
-                Some(paths) => paths.iter().any(|p| changed_set.contains(p)),
-                None => false,
-            }
+        .filter(|doc| match &doc.blast_radius {
+            Some(paths) => paths.iter().any(|p| changed_set.contains(p)),
+            None => false,
         })
         .collect();
 
@@ -338,80 +289,6 @@ pub fn find_blast_radius_documents(
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    mod source_code_detection {
-        use super::*;
-
-        #[test]
-        fn rust_file_is_source_code() {
-            assert!(is_source_code_path(&PathBuf::from("src/main.rs")));
-        }
-
-        #[test]
-        fn typescript_file_is_source_code() {
-            assert!(is_source_code_path(&PathBuf::from("src/index.ts")));
-        }
-
-        #[test]
-        fn vue_file_is_source_code() {
-            assert!(is_source_code_path(&PathBuf::from("components/App.vue")));
-        }
-
-        #[test]
-        fn css_file_is_source_code() {
-            assert!(is_source_code_path(&PathBuf::from("styles/main.css")));
-        }
-
-        #[test]
-        fn html_file_is_source_code() {
-            assert!(is_source_code_path(&PathBuf::from("public/index.html")));
-        }
-
-        #[test]
-        fn htm_file_is_source_code() {
-            assert!(is_source_code_path(&PathBuf::from("public/page.htm")));
-        }
-
-        #[test]
-        fn markdown_is_not_source_code() {
-            assert!(!is_source_code_path(&PathBuf::from("docs/README.md")));
-        }
-
-        #[test]
-        fn json_is_not_source_code() {
-            assert!(!is_source_code_path(&PathBuf::from("config.json")));
-        }
-
-        #[test]
-        fn png_is_not_source_code() {
-            assert!(!is_source_code_path(&PathBuf::from("images/logo.png")));
-        }
-
-        #[test]
-        fn no_extension_is_not_source_code() {
-            assert!(!is_source_code_path(&PathBuf::from("Makefile")));
-        }
-
-        #[test]
-        fn scss_is_source_code() {
-            assert!(is_source_code_path(&PathBuf::from("styles/theme.scss")));
-        }
-
-        #[test]
-        fn python_is_source_code() {
-            assert!(is_source_code_path(&PathBuf::from("script.py")));
-        }
-
-        #[test]
-        fn toml_is_not_source_code() {
-            assert!(!is_source_code_path(&PathBuf::from("Cargo.toml")));
-        }
-
-        #[test]
-        fn yaml_is_not_source_code() {
-            assert!(!is_source_code_path(&PathBuf::from("config.yaml")));
-        }
-    }
 
     mod changed_path_collection {
         use super::*;

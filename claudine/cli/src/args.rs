@@ -59,8 +59,11 @@ pub(crate) enum Commands {
     Handle(commands::handle::HandleArgs),
     /// Generate shell completions.
     Completions(commands::completions::CompletionsArgs),
-    /// Interactive setup wizard.
-    Init(commands::init::InitArgs),
+    /// Hidden completion engine invoked by generated bash/zsh/fish scripts.
+    #[command(name = "__complete", hide = true)]
+    Complete(commands::completions::CompleteArgs),
+    /// Manage Claudine configuration with a TUI.
+    Config(commands::config_tui::ConfigArgs),
     /// Re-sync hook registrations with detected agents.
     Sync(commands::sync::SyncArgs),
     /// Show registered hooks for all detected agents.
@@ -76,7 +79,7 @@ pub(crate) enum Commands {
     #[allow(clippy::enum_variant_names)]
     SlashCommands(commands::slash_commands::SlashCommandsArgs),
     /// Show provider capability matrix (skill/slash/agent/hooks).
-    Providers,
+    Providers(commands::providers::ProvidersArgs),
     /// Query and sync Claudine JSONL logs through the reporting index.
     Logs(commands::logs::LogsArgs),
     /// Remove Claudine hooks from all agents.

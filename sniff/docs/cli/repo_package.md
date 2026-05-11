@@ -26,6 +26,8 @@ Exits with code 1 if the current directory is not inside a recognized package.
 |----------|-------------|
 | `-b/--base <DIR>` | Analyze a specific directory instead of the current |
 | `-v/--verbose` | Show the package location alongside the name |
+| `--no-error` | Exit 0 with no output when no results found |
+| `--on-error <MESSAGE>` | Message to display when no results found |
 
 ## Verbose Mode (`-v`)
 
@@ -40,7 +42,7 @@ sniff-cli (located in sniff/cli)
 | Code | Meaning |
 |------|---------|
 | `0` | Current directory belongs to a package |
-| `1` | Not inside a recognized package |
+| `1` | Not inside a recognized package (unless `--no-error`) |
 
 ## Examples
 
@@ -58,6 +60,21 @@ sniff repo package -b /path/to/homelab/server
 # → homelab-server
 ```
 
+## Error Handling
+
+By default, exits with code 1 when not inside a package. Use `--no-error` and `--on-error` to customize:
+
+```bash
+# Silently succeed with no output
+sniff repo package --no-error
+
+# Show a custom message on stderr and exit 1
+sniff repo package --on-error "Not in a package"
+
+# Show a custom message on stdout and exit 0
+sniff repo package --no-error --on-error "Not in a package"
+```
+
 ## Usage in Scripts
 
 ```bash
@@ -69,4 +86,23 @@ cargo build -p "$PKG"
 if [ "$(sniff repo package)" = "sniff-cli" ]; then
     echo "In the sniff CLI package"
 fi
+
+# Safe fallback when not in a package
+PKG=$(sniff repo package --no-error)
+if [ -n "$PKG" ]; then
+    cargo test -p "$PKG"
+fi
+```
+
+## JSON Output (`--json`)
+
+```bash
+sniff --json repo package
+```
+
+Returns a `{ name: "<pkg>" }` object. Exit code semantics still
+honour `--no-error` / `--on-error`.
+
+```json
+{ "name": "sniff-cli" }
 ```

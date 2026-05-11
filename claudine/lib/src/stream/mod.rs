@@ -1,20 +1,26 @@
-pub mod claude;
-pub mod codex;
-pub mod gemini;
-pub mod kimi;
-pub mod opencode;
+pub mod badges;
+pub mod logs;
 pub mod parser;
-pub mod qwen;
+pub mod path_link;
+pub mod progress;
+pub mod prompt_timing;
+pub mod protocol;
+pub mod providers;
 pub mod reporting;
+pub mod semantic;
 pub mod stderr;
 pub mod summary;
+pub mod thinking;
 pub mod token_usage;
+pub mod tool_display;
 
 use serde::{Deserialize, Serialize};
 use tracing::trace;
 
-use crate::events::Provider;
-use parser::{StreamEventSink, StreamParser};
+use crate::provider_id::Provider;
+use parser::SemanticStreamParser;
+
+pub use semantic::{NullSemanticSink, SemanticEvent, SemanticEventSink};
 
 /// Ensure text from a full assistant message ends with a newline.
 ///
@@ -38,6 +44,10 @@ pub enum StreamProtocol {
     StreamJson,
     Ndjson,
     Jsonl,
+    /// JSON-RPC 2.0 over line-delimited JSON. Used by Kimi Code's `--wire`
+    /// mode where stdout carries `{"jsonrpc":"2.0",…}` envelopes (events,
+    /// requests, responses) instead of provider-specific stream-json shapes.
+    WireJsonRpc,
 }
 
 /// Optional configuration for parser construction.
@@ -47,37 +57,36 @@ pub struct ParserConfig {
     pub model: Option<String>,
 }
 
-/// Create the appropriate parser for a provider.
-pub fn create_parser(
+/// Create a semantic-event parser for a provider.
+///
+/// Dispatches through the provider's
+/// [`ProviderBehavior::create_semantic_parser`](crate::provider::ProviderBehavior::create_semantic_parser)
+/// implementation. Providers without a native semantic parser fall back
+/// through the trait default to a degenerate Claude-shaped parser.
+pub fn create_semantic_parser<S: SemanticEventSink + Send + 'static>(
     provider: Provider,
-    sink: impl StreamEventSink + 'static,
+    sink: S,
     config: ParserConfig,
-) -> Box<dyn StreamParser> {
-    match provider {
-        Provider::Claude => Box::new(claude::ClaudeStreamParser::new(sink)),
-        Provider::Codex => Box::new(codex::CodexStreamParser::new(sink, config.model)),
-        Provider::Gemini => Box::new(gemini::GeminiStreamParser::new(sink)),
-        Provider::KimiCode => Box::new(kimi::KimiStreamParser::new(sink)),
-        Provider::OpenCode => Box::new(opencode::OpenCodeStreamParser::new(sink, config.model)),
-        Provider::QwenCode => Box::new(qwen::QwenStreamParser::new(sink)),
-        _ => Box::new(claude::ClaudeStreamParser::new(sink)),
-    }
+) -> Box<dyn SemanticStreamParser> {
+    let boxed: Box<dyn SemanticEventSink + Send + 'static> = Box::new(sink);
+    crate::provider::provider_info(provider)
+        .behavior
+        .create_semantic_parser(boxed, config)
 }
 
 /// Return the stream protocol used by a provider, if supported.
 pub fn stream_protocol_for(provider: Provider) -> Option<StreamProtocol> {
-    match provider {
-        Provider::Claude => Some(StreamProtocol::StreamJson),
-        Provider::Codex => Some(StreamProtocol::Jsonl),
-        Provider::Gemini => Some(StreamProtocol::StreamJson),
-        Provider::KimiCode => Some(StreamProtocol::StreamJson),
-        Provider::OpenCode => Some(StreamProtocol::Ndjson),
-        Provider::QwenCode => Some(StreamProtocol::StreamJson),
-        _ => None,
-    }
+    crate::provider::provider_info(provider).stream_protocol
 }
 
 pub(crate) fn trace_parser_event(provider: Provider, event_type: &str, line_num: usize) {
+    let _span = tracing::info_span!(
+        "stream_parse_event",
+        provider = %provider,
+        event_type,
+        line_num,
+    )
+    .entered();
     trace!(
         provider = %provider,
         event_type,
@@ -91,6 +100,13 @@ pub(crate) fn trace_session_metadata(
     session_id: Option<&str>,
     model: Option<&str>,
 ) {
+    let _span = tracing::info_span!(
+        "stream_session_metadata",
+        provider = %provider,
+        session_id = session_id.unwrap_or(""),
+        model = model.unwrap_or(""),
+    )
+    .entered();
     trace!(
         provider = %provider,
         session_id = session_id.unwrap_or(""),
@@ -100,6 +116,13 @@ pub(crate) fn trace_session_metadata(
 }
 
 pub(crate) fn trace_tool_event(provider: Provider, tool_calls: u32, tool_name: Option<&str>) {
+    let _span = tracing::info_span!(
+        "stream_tool_event",
+        provider = %provider,
+        tool_calls,
+        tool_name = tool_name.unwrap_or(""),
+    )
+    .entered();
     trace!(
         provider = %provider,
         tool_calls,
@@ -114,6 +137,12 @@ pub(crate) fn trace_summary_update(
     duration_ms: Option<u64>,
     cost_usd: Option<f64>,
 ) {
+    let _span = tracing::info_span!(
+        "stream_summary",
+        provider = %provider,
+        duration_ms = duration_ms.unwrap_or(0),
+    )
+    .entered();
     trace!(
         provider = %provider,
         provider_status = provider_status.unwrap_or(""),
@@ -130,6 +159,14 @@ pub(crate) fn trace_parser_finish(
     num_turns: u32,
     provider_status: Option<&str>,
 ) {
+    let _span = tracing::info_span!(
+        "stream_parser_finish",
+        provider = %provider,
+        exit_code,
+        tool_calls,
+        num_turns,
+    )
+    .entered();
     trace!(
         provider = %provider,
         exit_code,
@@ -141,6 +178,12 @@ pub(crate) fn trace_parser_finish(
 }
 
 pub(crate) fn trace_malformed_line(provider: Provider, line_num: usize, message: &str) {
+    let _span = tracing::info_span!(
+        "stream_malformed",
+        provider = %provider,
+        line_num,
+    )
+    .entered();
     trace!(
         provider = %provider,
         line_num,
@@ -150,56 +193,8 @@ pub(crate) fn trace_malformed_line(provider: Provider, line_num: usize, message:
 }
 
 #[cfg(test)]
-pub(crate) mod test_support {
-    use serde_json::Value;
-
-    use super::parser::EventMeta;
-
-    pub(crate) struct ToolContractExpectation<'a> {
-        pub(crate) name: &'a str,
-        pub(crate) id: Option<&'a str>,
-        pub(crate) input_field: Option<(&'a str, &'a str)>,
-        pub(crate) status: Option<&'a str>,
-        pub(crate) response: Option<Value>,
-    }
-
-    pub(crate) fn assert_tool_event_contract(
-        before: &EventMeta,
-        after: Option<&EventMeta>,
-        expected: ToolContractExpectation<'_>,
-    ) {
-        assert_eq!(before.extra["tool_name"], expected.name);
-        if let Some(id) = expected.id {
-            assert_eq!(before.extra["tool_id"], id);
-        }
-        if let Some((field, value)) = expected.input_field {
-            assert_eq!(before.extra["tool_input"][field], value);
-        }
-
-        let Some(after) = after else {
-            return;
-        };
-
-        assert_eq!(after.extra["tool_name"], expected.name);
-        if let Some(id) = expected.id {
-            assert_eq!(after.extra["tool_id"], id);
-        }
-        if let Some((field, value)) = expected.input_field {
-            assert_eq!(after.extra["tool_input"][field], value);
-        }
-        if let Some(status) = expected.status {
-            assert_eq!(after.extra["status"], status);
-        }
-        if let Some(response) = expected.response {
-            assert_eq!(after.extra["tool_response"], response);
-        }
-    }
-}
-
-#[cfg(test)]
 mod tests {
     use super::*;
-    use parser::NullSink;
 
     #[test]
     fn stream_protocol_serde_round_trip() {
@@ -207,29 +202,13 @@ mod tests {
             (StreamProtocol::StreamJson, "\"stream-json\""),
             (StreamProtocol::Ndjson, "\"ndjson\""),
             (StreamProtocol::Jsonl, "\"jsonl\""),
+            (StreamProtocol::WireJsonRpc, "\"wire-json-rpc\""),
         ];
         for (proto, expected_json) in &protocols {
             let json = serde_json::to_string(proto).unwrap();
             assert_eq!(&json, expected_json);
             let restored: StreamProtocol = serde_json::from_str(&json).unwrap();
             assert_eq!(proto, &restored);
-        }
-    }
-
-    #[test]
-    fn create_parser_returns_correct_provider() {
-        let providers = [
-            Provider::Claude,
-            Provider::Codex,
-            Provider::Gemini,
-            Provider::KimiCode,
-            Provider::OpenCode,
-            Provider::QwenCode,
-        ];
-        for provider in &providers {
-            let parser = create_parser(*provider, NullSink, ParserConfig::default());
-            let summary = parser.finish(0);
-            assert_eq!(summary.provider, *provider);
         }
     }
 
@@ -247,10 +226,133 @@ mod tests {
             stream_protocol_for(Provider::OpenCode),
             Some(StreamProtocol::Ndjson)
         );
+        assert_eq!(
+            stream_protocol_for(Provider::KimiCode),
+            Some(StreamProtocol::WireJsonRpc)
+        );
     }
 
     #[test]
     fn stream_protocol_for_unsupported_providers() {
         assert_eq!(stream_protocol_for(Provider::Goose), None);
+    }
+
+    mod semantic_parser {
+        use std::sync::{Arc, Mutex};
+
+        use super::super::{
+            ParserConfig, SemanticEvent, SemanticEventSink, create_semantic_parser,
+        };
+        use crate::provider_id::Provider;
+        struct RecordingSemanticSink {
+            events: Arc<Mutex<Vec<SemanticEvent>>>,
+        }
+
+        impl SemanticEventSink for RecordingSemanticSink {
+            fn on_semantic_event(&mut self, event: SemanticEvent) {
+                self.events.lock().unwrap().push(event);
+            }
+        }
+
+        fn kinds_of(events: &[SemanticEvent]) -> Vec<&'static str> {
+            events.iter().map(|e| e.kind_str()).collect()
+        }
+
+        #[test]
+        fn claude_parser_emits_semantic_events() {
+            let events = Arc::new(Mutex::new(Vec::new()));
+            let sink = RecordingSemanticSink {
+                events: events.clone(),
+            };
+            let mut parser =
+                create_semantic_parser(Provider::Claude, sink, ParserConfig::default());
+
+            parser
+                .feed_line(r#"{"type":"init","session_id":"s1","model":"claude"}"#)
+                .unwrap();
+            parser
+                .feed_line(r#"{"type":"assistant","content":[{"type":"text","text":"Hello"}]}"#)
+                .unwrap();
+            parser
+                .feed_line(r#"{"type":"tool_use","id":"t1","name":"bash","input":{"cmd":"ls"}}"#)
+                .unwrap();
+            parser
+                .feed_line(r#"{"type":"tool_result","tool_use_id":"t1","content":"ok"}"#)
+                .unwrap();
+
+            let collected = events.lock().unwrap().clone();
+            let kinds = kinds_of(&collected);
+            assert!(kinds.contains(&"session_start"), "kinds = {kinds:?}");
+            assert!(kinds.contains(&"output_text"), "kinds = {kinds:?}");
+            assert!(kinds.contains(&"tool_call"), "kinds = {kinds:?}");
+            assert!(kinds.contains(&"tool_result"), "kinds = {kinds:?}");
+
+            let summary = parser.finish(0);
+            assert_eq!(summary.provider, Provider::Claude);
+        }
+
+        #[test]
+        fn malformed_json_emits_warning_instead_of_error() {
+            let events = Arc::new(Mutex::new(Vec::new()));
+            let sink = RecordingSemanticSink {
+                events: events.clone(),
+            };
+            let mut parser =
+                create_semantic_parser(Provider::Claude, sink, ParserConfig::default());
+
+            let result = parser.feed_line("not json {{{");
+            assert!(result.is_ok());
+
+            let collected = events.lock().unwrap().clone();
+            assert!(
+                collected
+                    .iter()
+                    .any(|e| matches!(e, SemanticEvent::Warning { .. })),
+                "expected a Warning event, got {:?}",
+                kinds_of(&collected)
+            );
+        }
+
+        #[test]
+        fn thinking_delta_becomes_reasoning_event() {
+            let events = Arc::new(Mutex::new(Vec::new()));
+            let sink = RecordingSemanticSink {
+                events: events.clone(),
+            };
+            let mut parser =
+                create_semantic_parser(Provider::Claude, sink, ParserConfig::default());
+
+            parser
+                .feed_line(
+                    r#"{"type":"content_block_delta","delta":{"type":"thinking_delta","thinking":"pondering"}}"#,
+                )
+                .unwrap();
+
+            let collected = events.lock().unwrap().clone();
+            assert!(collected.iter().any(
+                |e| matches!(e, SemanticEvent::Reasoning { text, .. } if text == "pondering")
+            ));
+        }
+
+        #[test]
+        fn rate_limit_becomes_warning_event() {
+            let events = Arc::new(Mutex::new(Vec::new()));
+            let sink = RecordingSemanticSink {
+                events: events.clone(),
+            };
+            let mut parser =
+                create_semantic_parser(Provider::Claude, sink, ParserConfig::default());
+
+            parser
+                .feed_line(
+                    r#"{"type":"rate_limit_event","is_throttled":true,"retry_after_ms":5000,"message":"Rate limit"}"#,
+                )
+                .unwrap();
+
+            let collected = events.lock().unwrap().clone();
+            assert!(collected.iter().any(
+                |e| matches!(e, SemanticEvent::Warning { message, .. } if message == "Rate limit")
+            ));
+        }
     }
 }

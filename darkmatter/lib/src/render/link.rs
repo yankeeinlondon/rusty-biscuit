@@ -11,6 +11,7 @@ use std::hash::{Hash, Hasher};
 
 use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::components::renderable::Renderable;
+use biscuit_terminal::errors::SourceContext;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -43,8 +44,13 @@ pub enum LinkError {
     MalformedHtml(String),
 
     /// Markdown input failed to parse.
-    #[error("malformed markdown link: {0}")]
-    MalformedMarkdown(String),
+    #[error("malformed markdown link: {message}")]
+    MalformedMarkdown {
+        ctx: Box<SourceContext>,
+        message: String,
+        /// Byte offset in `ctx.content` where the error occurred.
+        caret: Option<usize>,
+    },
 
     /// Missing required href/url field.
     #[error("link is missing href/url")]
@@ -60,6 +66,127 @@ pub enum LinkError {
         /// Received target value.
         value: String,
     },
+}
+
+impl biscuit_terminal::errors::BlockError for LinkError {
+    fn status_block(
+        &self,
+        term: &biscuit_terminal::terminal::Terminal,
+    ) -> biscuit_terminal::components::status_block::StatusBlock {
+        use biscuit_terminal::components::status::StatusState;
+        use biscuit_terminal::components::status_block::StatusBlock;
+        use biscuit_terminal::errors::{ErrorHeader, StatusBlockExt};
+
+        match self {
+            Self::EmptyHref => StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new("LinkError", "empty href"))
+                .body("Link href cannot be empty or whitespace-only.")
+                .hint("Pass a non-empty URL, relative path, or anchor to <cyan>Link::new</cyan>."),
+
+            Self::UnrecognizedFormat => StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new("LinkError", "unrecognized link format"))
+                .body("Input did not look like an HTML `<a>` tag or a Markdown `[text](href)` link.")
+                .hint(
+                    "Use <cyan>[display](url)</cyan> for Markdown or <cyan>&lt;a href=\"url\"&gt;text&lt;/a&gt;</cyan> for HTML.",
+                ),
+
+            Self::MalformedHtml(message) => StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new("LinkError", "malformed HTML link"))
+                .body(format!("<dim>Message:</dim> {message}"))
+                .hint(
+                    "Ensure the link opens with <cyan>&lt;a ...&gt;</cyan> and closes with <cyan>&lt;/a&gt;</cyan> and has an <cyan>href</cyan> attribute.",
+                ),
+
+            Self::MalformedMarkdown {
+                ctx,
+                message,
+                caret,
+            } => {
+                let mut body = vec![Prose::new(format!("<dim>Message:</dim> {message}"))];
+                body.push(Prose::new("Link parsing failed here:"));
+
+                // Link fragments usually start at line 1 of their own string.
+                body.push(ctx.excerpt_prose(1, 0, "md"));
+
+                if let Some(pos) = caret {
+                    body.push(Prose::new(format!(
+                        "{} <red><b>^</b></red> (offset {})",
+                        " ".repeat(*pos),
+                        pos
+                    )));
+                }
+
+                StatusBlock::new(StatusState::Error)
+                    .error_header(ErrorHeader::new("LinkError", "malformed markdown link"))
+                    .body(body)
+                    .hint("Use the pattern <cyan>[display](url \"optional title\")</cyan> with balanced brackets.")
+            }
+
+            Self::MissingHref => StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new("LinkError", "missing href"))
+                .body("Link has no `href`/`url` attribute.")
+                .hint("Add an <cyan>href=\"...\"</cyan> attribute (HTML) or a URL inside <cyan>( )</cyan> (Markdown)."),
+
+            Self::InvalidStyle(source) => {
+                biscuit_terminal::errors::BlockError::status_block(source, term)
+            }
+
+            Self::InvalidTarget { value } => StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new("LinkError", "invalid target"))
+                .body(format!(
+                    "<dim>Target:</dim> <cyan>{}</cyan>",
+                    value.replace('_', "\\_"),
+                ))
+                .hint(
+                    "Valid targets: <cyan>\\_self</cyan>, <cyan>\\_blank</cyan>, <cyan>\\_parent</cyan>, <cyan>\\_top</cyan>, or a named context.",
+                ),
+        }
+    }
+
+    fn block_source(&self) -> Option<&(dyn biscuit_terminal::errors::BlockError + 'static)> {
+        match self {
+            Self::InvalidStyle(inner) => Some(inner),
+            _ => None,
+        }
+    }
+}
+
+impl LinkError {
+    /// Creates a markdown-parse error without source-context details.
+    pub fn malformed_markdown(message: impl Into<String>) -> Self {
+        Self::MalformedMarkdown {
+            ctx: Box::new(SourceContext::new(
+                std::path::PathBuf::from("unknown"),
+                std::path::PathBuf::from("unknown"),
+                "",
+            )),
+            message: message.into(),
+            caret: None,
+        }
+    }
+
+    fn malformed_markdown_with_context(
+        message: impl Into<String>,
+        input: impl Into<String>,
+        caret: usize,
+    ) -> Self {
+        let input_str = input.into();
+        Self::MalformedMarkdown {
+            ctx: Box::new(SourceContext::new(
+                std::path::PathBuf::from("unknown"),
+                std::path::PathBuf::from("unknown"),
+                input_str,
+            )),
+            message: message.into(),
+            caret: Some(caret),
+        }
+    }
+}
+
+impl From<&str> for LinkError {
+    fn from(value: &str) -> Self {
+        Self::malformed_markdown(value)
+    }
 }
 
 /// Backward-compatible parse error alias.
@@ -866,8 +993,10 @@ fn is_anchor_closing_tag(input: &str) -> bool {
 fn parse_markdown_link(input: &str) -> Result<Link, LinkError> {
     let input = input.trim();
     if !input.starts_with('[') {
-        return Err(LinkError::MalformedMarkdown(
-            "link must start with '['".to_string(),
+        return Err(LinkError::malformed_markdown_with_context(
+            "link must start with '['",
+            input,
+            0,
         ));
     }
 
@@ -876,8 +1005,10 @@ fn parse_markdown_link(input: &str) -> Result<Link, LinkError> {
 
     let rest = &input[display_end + 1..];
     if !rest.starts_with('(') {
-        return Err(LinkError::MalformedMarkdown(
-            "expected '(' after display text".to_string(),
+        return Err(LinkError::malformed_markdown_with_context(
+            "expected '(' after display text",
+            input,
+            display_end + 1,
         ));
     }
 
@@ -996,8 +1127,10 @@ fn find_closing_bracket(input: &str, start: usize) -> Result<usize, LinkError> {
         }
     }
 
-    Err(LinkError::MalformedMarkdown(
-        "unmatched '[' in link".to_string(),
+    Err(LinkError::malformed_markdown_with_context(
+        "unmatched '[' in link",
+        input,
+        start,
     ))
 }
 
@@ -1044,8 +1177,10 @@ fn find_closing_paren(input: &str, start: usize) -> Result<usize, LinkError> {
         }
     }
 
-    Err(LinkError::MalformedMarkdown(
-        "unmatched '(' in link".to_string(),
+    Err(LinkError::malformed_markdown_with_context(
+        "unmatched '(' in link",
+        input,
+        start,
     ))
 }
 

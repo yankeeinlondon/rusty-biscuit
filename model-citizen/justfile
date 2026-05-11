@@ -1,5 +1,14 @@
 set dotenv-load
 set positional-arguments
+# set allow-duplicate-recipes
+set shell := ["bash", "-eu", "-o", "pipefail", "-c"]
+
+import "../just/lifecycle.just"
+import "../just/plan.just"
+import "../just/review.just"
+import "../just/notify.just"
+import "../just/ai.just"
+import "../just/devops.just"
 
 BOLD := '\033[1m'
 ITALIC := '\033[3m'
@@ -14,9 +23,6 @@ BLUE := '\033[34m'
 MAGENTA := '\033[35m'
 CYAN := '\033[36m'
 WHITE := '\033[37m'
-DOCS := ""
-
-PACKAGE := "Model Citizen"
 
 default:
     #!/usr/bin/env bash
@@ -34,91 +40,6 @@ default:
     just --list | grep -v 'default'
     echo
 
-# Uses TTS if available but never error
-_speak *args:
-    @so-you-say "{{args}}" --background >/dev/null 2>&1 || exit 0
-
-# play a sound effect if `playa` CLI is installed (never errors)
-_play effect background="":
-    @playa "{{effect}}" "{{background}}" >/dev/null 2>&1 || exit 0
-
-_notify message title=PACKAGE:
-    #!/usr/bin/env bash
-    if command -v osascript &> /dev/null; then
-        osascript -e 'display notification "message" with title "{{title}}"'
-    elif command -v notify-send &> /dev/null; then
-        notify-send '{{message}}'
-    fi
-
-_ask_opencode prompt:
-    #!/usr/bin/env bash
-    if command -v opencode &> /dev/null; then
-        local MODEL
-        MODEL="${MODEL:-minimax/MiniMax-M2.5-highspeed}"
-        echo
-        echo -e "{{DIM}}{{ITALIC}}- {{RESET}}Note: {{DIM}}using the {{BOLD}}${MODEL}{{DIM}} model with {{BOLD}}OpenCode CLI{{DIM}}.{{RESET}}"
-        echo -e "{{DIM}}{{ITALIC}}- you can choose a different model by setting the {{BOLD}}MODEL{{DIM}} env variable"
-        echo
-        opencode run "{{prompt}}" --model "$MODEL"  || (
-            echo
-            echo -e "Attempt to use {{RED}}{{BOLD}}OpenCode{{RESET}} for query failed! Will try using Claude instead"
-            echo
-            just _ask_claude "{{prompt}}"
-        )
-    else
-        echo
-        echo -e "{{RED}}{{BOLD}}ERROR:{{RESET}} the attempt to ask the {{BOLD}}OpenCode{{RESET}} CLI is not possible as the host system does not have it installed!"
-        echo
-        exit 1
-    fi
-
-_ask_claude prompt:
-    #!/usr/bin/env bash
-    if command -v claude &> /dev/null; then
-        echo
-        echo -e "{{DIM}}{{ITALIC}}- {{RESET}}Note: {{DIM}}{{ITALIC}}using {{BOLD}}Claude Code{{DIM}} with whatever is setup as the default model.{{RESET}}"
-        echo
-
-        unset ANTHROPIC_API_KEY && claude -p "{{prompt}}"
-    else
-        echo
-        echo -e "{{RED}}{{BOLD}}ERROR:{{RESET}} the attempt to ask the {{BOLD}}Claude{{RESET}} CLI is not possible as the host system does not have it installed!"
-        echo
-        exit 1
-    fi
-
-_ask_codex prompt:
-    #!/usr/bin/env bash
-    if command -v codex &> /dev/null; then
-        echo
-        echo -e "{{DIM}}{{ITALIC}}- {{RESET}}Note: {{DIM}}{{ITALIC}}using {{BOLD}}Codex CLI{{DIM}} with whatever is setup as the default model.{{RESET}}"
-        echo
-
-        codex exec "{{prompt}}"  || (
-            echo
-            echo -e "Attempt to use {{RED}}{{BOLD}}Codex CLI{{RESET}} for query failed! Will try using Claude instead"
-            echo
-            just _ask_claude "{{prompt}}"
-        )
-    else
-        echo
-        echo -e "{{RED}}{{BOLD}}ERROR:{{RESET}} the attempt to ask the {{BOLD}}Codex{{RESET}} CLI is not possible as the host system does not have it installed!"
-        echo
-        exit 1
-    fi
-
-
-# use an AI agent to respond to a question (uses `AGENT`)
-ask prompt:
-    #!/usr/bin/env bash
-    if [[ "${AGENT,,}" == "opencode" ]]; then
-        just _ask_opencode "{{prompt}}" || ( echo -e "- OpenCode failed so will try using Claude Code instead ..." && just _ask_claude "{{prompt}}" || exit 1 )
-    elif [[ "${AGENT,,}" == "codex"  ]]; then
-        just _ask_codex "{{prompt}}" || ( echo -e "- Codex failed so will try using Claude Code instead ..." && just _ask_claude "{{prompt}}" || exit 1 )
-    else
-        just _ask_claude "{{prompt}}" || ( echo -e "- will try using Opencode instead ..." && just _ask_opencode "{{prompt}}" || exit 1 )
-    fi
-
 # build model-citizen packages (lib, cli)
 build *args="":
     @echo ""
@@ -127,33 +48,25 @@ build *args="":
     @echo ""
     @cargo build -p model-citizen -p model-citizen-cli {{args}}
 
-# run tests for model-citizen packages
+# Test both library and CLI.
 test *args="":
-    @echo ""
-    @echo "Testing Model Citizen"
-    @echo "---------------------"
-    @echo ""
-    @cargo test -p model-citizen -p model-citizen-cli {{args}}
+    @just _test model-citizen {{args}}
+    @just _test model-citizen-cli {{args}}
 
-# run clippy on model-citizen packages
+# Lint both the library and CLI
 lint:
-    @echo ""
-    @echo "Linting Model Citizen"
-    @echo "---------------------"
-    @echo ""
-    @cargo clippy -p model-citizen -- -D warnings
-    @cargo clippy -p model-citizen-cli -- -D warnings
+    @just _lint model-citizen
+    @just _lint model-citizen-cli
 
-install:
-    @echo ""
-    @echo "{{BOLD}}Building Model Citizen Library{{RESET}}"
-    @cargo build -p model-citizen --release
-    @echo ""
-    @echo "{{BOLD}}{{YELLOW}}Installing Model Citizen CLI{{RESET}}"
-    @cargo install --path ./cli
-    @echo ""
-    @echo "{{BOLD}}{{BLUE}}Model Citizen CLI installed{{RESET}}"
-    @echo ""
+# Lint (and fix) both the library and CLI
+lint-fix:
+    @just _lint model-citizen || just _fix_lint model-citizen
+    @just _lint model-citizen-cli || just _fix_lint model-citizen-cli
+
+install *args="":
+    @just build --release
+    @just _install "./cli" "Model Citizen" {{args}}
+
 
 check:
     @echo ""
@@ -161,63 +74,15 @@ check:
     @echo ""
     @cargo check -p model-citizen -p model-citizen-cli
 
-# Open Opencode
-oc *args="":
-    @claudine opencode --include GEMINI_API_KEY --include X_AI_API_KEY --include ZAI_API_KEY --include ZENMUX_API_KEY --include OPEN_ROUTER_API_KEY {{args}}
-
-# Open Claude Code in YOLO mode
-cc *args="":
-    @claudine claude --yolo {{args}}
-
-# Open codex in YOLO mode
-codex *args="":
-    @claudine codex --yolo {{args}}
-
-# Open Claude Code
-gem *args="":
-    @claudine gemini --yolo --include GEMINI_API_KEY {{args}}
-
 # Outdated packages
 outdated:
     @cargo outdated --root-deps-only
 
-# commits all the staged changes using model from MODEL or COMMIT_MODEL in OpenCode
-commit:
-    @echo ""
-    @echo -e "Committing staged changes in the {{BOLD}}Rusty Biscuit{{RESET}} monorepo to git"
-    @echo -e "{{DIM}}{{ITALIC}}- using the {{RESET}}{{ITALIC}}${MODEL:-${COMMIT_MODEL:-minimax/MiniMax-M2.7-highspeed}} {{DIM}}model{{RESET}}"
-    @echo ""
-    @echo -e "{{BOLD}}{{BLUE}}Staged Files:{{RESET}}"
-    @sniff repo staged-files || ( echo "No Staged Files! Nothing to do ..." && exit 1 )
-    @claudine compose --opencode "@prompts/commit.md" --op "commit" --quiet --model "${COMMIT_MODEL:-${MODEL:-minimax/MiniMax-M2.7-highspeed}}"
-    @just _speak "git commits completed in rusty-biscuit monorepo"
-    @sniff repo git-status 2>/dev/null || exit 0
-    @echo
-
-# adds/updates the "skill" for this package
-refresh-skill:
-    @clear
-    @echo "Refreshing {{BOLD}}model-citizen{{RESET}} skill"
-    @unset ANTHROPIC_API_KEY && cd .. && claude --dangerously-skip-permissions --model opus -p \'"$(cat docs/skills-model-citizen.md)"\'
-    @if command -v so-you-say >/dev/null 2>&1; then \
-        so-you-say "the skill for the package model-citizen has been updated"; \
-    fi
-
-# fix documentation drift, refresh the skill, and review CLAUDE.md
-drift *args="":
-    @echo
-    @printf "%b\n" "Running drift workflow for {{BOLD}}model-citizen{{RESET}} via Rust drift script"
-    @echo
-    @echo "- step 1: update package docs for code drift"
-    @echo "- step 2: refresh package skill from updated docs"
-    @echo "- step 3: review CLAUDE.md for needed updates"
-    @echo "- export PREFER_AGENT=codex to force codex (default is claude)"
-    @echo
-    @cargo run --manifest-path ../scripts/Cargo.toml --bin drift -- model-citizen {{DOCS}} {{args}}
-    @_speak "the drift recipe for the model-citizen package has completed; documentation and agent skills have been updated and possibly some adjustments to the CLAUDE.md file where appropriate."
+readme:
+    _readme_files claudine
 
 
 # No-op recipe: reference color vars so linters won't report them as unused.
 # Run `just _colors` if you want to exercise this (it does nothing).
 _colors:
-    @: {{BOLD}} {{ITALIC}} {{RESET}} {{YELLOW2}} {{BLACK}} {{RED}} {{GREEN}} {{YELLOW}} {{BLUE}} {{MAGENTA}} {{CYAN}} {{WHITE}} >/dev/null || true
+    @: {{BOLD}} {{ITALIC}} {{RESET}} {{YELLOW2}} {{BLACK}} {{RED}} {{GREEN}} {{YELLOW}} {{BLUE}} {{MAGENTA}} {{CYAN}} {{WHITE}} {{DIM}} >/dev/null || true

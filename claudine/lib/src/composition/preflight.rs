@@ -11,12 +11,11 @@ use darkmatter::markdown::Markdown;
 use darkmatter::markdown::compose::ComposeOptions;
 use darkmatter::markdown::compose::shell_expansion::discovery::collect_shell_commands;
 use darkmatter::markdown::compose::shell_expansion::policy::normalize_command;
-use darkmatter::markdown::compose::shell_expansion::tokenize::tokenize;
 
 use crate::composition::error::CompositionError;
 use crate::harness::audit::collect_auditable_commands;
 use crate::harness::model::HarnessPlan;
-use crate::harness::shell::ShellApprovalOptions;
+use crate::harness::shell::{ShellApprovalOptions, tokenize_words_strict};
 
 /// Result of pre-flight shell command approval.
 #[derive(Debug)]
@@ -54,13 +53,13 @@ pub fn resolve_shell_approvals(
 
     // -- Source 1: Template ::shell directives ---------------------------------
     if let (Some(md), Some(opts)) = (markdown, compose_options) {
-        let entries = collect_shell_commands(md, opts)
-            .map_err(|e| CompositionError::PreFlightDiscoveryFailed(e.to_string()))?;
+        let entries =
+            collect_shell_commands(md, opts).map_err(CompositionError::PreFlightDiscoveryFailed)?;
         for entry in &entries {
             all_commands.push((
                 entry.normalized.clone(),
                 entry.source_file.clone(),
-                entry.line,
+                entry.origin.line_number(),
             ));
         }
     }
@@ -100,7 +99,8 @@ pub fn resolve_shell_approvals(
     // -- Check each command against policy -------------------------------------
     for (normalized, source_file, line) in &unique {
         // Split normalized command back into parts for the existing validator.
-        let parts: Vec<String> = tokenize(normalized).unwrap_or_else(|_| vec![normalized.clone()]);
+        let parts: Vec<String> =
+            tokenize_words_strict(normalized).unwrap_or_else(|_| vec![normalized.clone()]);
 
         match crate::harness::shell::validate_and_approve_command_parts(
             &parts,
@@ -238,6 +238,9 @@ mod tests {
         HarnessPlan {
             source_path: PathBuf::from("/tmp/test.md"),
             timeout: None,
+            step_timeout: None,
+            timeout_warn: None,
+            step_timeout_warn: None,
             pre_checks: Vec::new(),
             post_checks: Vec::new(),
             handlers: HandlerTable::default(),
@@ -308,6 +311,7 @@ mod tests {
             },
             message_template: None,
             subject_key: None,
+            source: None,
         });
 
         let (_dir, approval_options) = approval_options_with_whitelist(&["echo"]);
@@ -357,6 +361,7 @@ mod tests {
             },
             message_template: None,
             subject_key: None,
+            source: None,
         });
 
         let (_dir, approval_options) = approval_options_with_whitelist(&["echo"]);
@@ -587,6 +592,9 @@ mod tests {
         HarnessPlan {
             source_path: source.to_path_buf(),
             timeout: None,
+            step_timeout: None,
+            timeout_warn: None,
+            step_timeout_warn: None,
             pre_checks: vec![ValidationRule {
                 id: ValidationRuleId(0),
                 event: ValidationEvent::ShellCommand,
@@ -602,6 +610,7 @@ mod tests {
                 },
                 message_template: None,
                 subject_key: None,
+                source: None,
             }],
             post_checks: Vec::new(),
             handlers: HandlerTable::default(),
@@ -737,6 +746,9 @@ mod tests {
             }
             other => panic!("expected File source, got: {other:?}"),
         }
-        assert!(req.line > 0, "line should be the real line number, not 0");
+        assert!(
+            req.origin.line_number() > 0,
+            "line should be the real line number, not 0"
+        );
     }
 }

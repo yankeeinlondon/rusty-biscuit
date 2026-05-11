@@ -21,7 +21,7 @@ use std::str::FromStr;
 /// assert_eq!("80".parse::<WidthSpec>().unwrap(), WidthSpec::Chars(80));
 /// assert_eq!("fill".parse::<WidthSpec>().unwrap(), WidthSpec::Fill);
 /// ```
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
 pub enum WidthSpec {
     /// Percentage of terminal width (1-100)
     Percent(u8),
@@ -172,7 +172,7 @@ mod tests {
 /// Accepted formats: `#rgb`, `#rrggbb`, `#rrggbbaa`
 ///
 /// Implements `FromStr` for clap parse-time validation.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
 pub struct HexColor(String);
 
 impl HexColor {

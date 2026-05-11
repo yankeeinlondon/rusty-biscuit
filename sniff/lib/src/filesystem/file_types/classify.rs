@@ -5,12 +5,16 @@ use super::model::{
 };
 use super::registry;
 use crate::Result;
+use crate::performance;
 use ignore::{DirEntry, WalkBuilder};
 use std::fs::File;
 use std::io::Read;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::time::Instant;
+use tracing::trace;
 
-const MAX_FILES: usize = 10_000;
+pub(crate) const MAX_FILES: usize = 10_000;
 const READ_LIMIT: usize = 8 * 1024;
 
 pub fn scan_file_inventory(root: &Path) -> Result<FileInventory> {
@@ -21,6 +25,7 @@ pub fn scan_file_inventory_with_exclusions(
     root: &Path,
     exclude_roots: &[PathBuf],
 ) -> Result<FileInventory> {
+    let started = Instant::now();
     let scope = FileScanScope {
         root: root.to_path_buf(),
         exclude_roots: exclude_roots
@@ -35,13 +40,117 @@ pub fn scan_file_inventory_with_exclusions(
             .collect(),
     };
 
+    // Use parallel walker with Drop-based flush (same pattern as system_view.rs).
+    // The parallel path sorts output so results are deterministic.
+    let (classifications, total_files_scanned) =
+        scan_inventory_parallel(root, &scope.exclude_roots);
+
+    performance::record_logged_stage(
+        "filesystem.file_inventory.scan",
+        started.elapsed(),
+        tracing::Level::DEBUG,
+    );
+
+    Ok(FileInventory {
+        scope,
+        total_files_scanned,
+        classifications: Arc::new(classifications),
+    })
+}
+
+fn scan_inventory_parallel(
+    root: &Path,
+    exclude_roots: &[PathBuf],
+) -> (Vec<FileClassification>, usize) {
+    use ignore::WalkState;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::{Arc, Mutex};
+
+    /// Worker-local classification buffer that flushes its contents to the
+    /// shared accumulator when the walker drops the per-thread closure.
+    ///
+    /// This mirrors the pattern in `system_view::WorkerBuffers` and ensures
+    /// that classifications recorded on each walker thread are visible after
+    /// the parallel walk completes, even if a worker panics.
+    struct LocalClassifications {
+        shared: Arc<Mutex<Vec<FileClassification>>>,
+        local: Vec<FileClassification>,
+    }
+
+    impl Drop for LocalClassifications {
+        fn drop(&mut self) {
+            if self.local.is_empty() {
+                return;
+            }
+            let mut shared = self
+                .shared
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            shared.append(&mut self.local);
+        }
+    }
+
+    let shared: Arc<Mutex<Vec<FileClassification>>> = Arc::new(Mutex::new(Vec::new()));
+    let scanned = Arc::new(AtomicUsize::new(0));
+
+    WalkBuilder::new(root)
+        .hidden(false)
+        .git_ignore(true)
+        .git_global(true)
+        .git_exclude(true)
+        .filter_entry({
+            let exclude_roots = exclude_roots.to_vec();
+            move |entry| !is_excluded_entry(entry, &exclude_roots)
+        })
+        .build_parallel()
+        .run(|| {
+            let scanned = Arc::clone(&scanned);
+            let scan_root = root.to_path_buf();
+            let mut buffer = LocalClassifications {
+                shared: Arc::clone(&shared),
+                local: Vec::new(),
+            };
+            Box::new(move |result| {
+                let Ok(entry) = result else {
+                    return WalkState::Continue;
+                };
+                if !entry.file_type().is_some_and(|ft| ft.is_file()) {
+                    return WalkState::Continue;
+                }
+                let idx = scanned.fetch_add(1, Ordering::Relaxed);
+                if idx >= MAX_FILES {
+                    return WalkState::Continue;
+                }
+                // Only record per-file counters when metrics feature is enabled
+                // to reduce atomic overhead in the hot path.
+                #[cfg(feature = "metrics")]
+                performance::increment_counter("filesystem.file_inventory.files_scanned", 1);
+                buffer.local.push(classify_file(&scan_root, entry.path()));
+                WalkState::Continue
+            })
+        });
+
+    let total = scanned.load(Ordering::Relaxed).min(MAX_FILES);
+    let mut classifications = match Arc::try_unwrap(shared) {
+        Ok(mutex) => mutex.into_inner().unwrap_or_default(),
+        Err(arc) => arc.lock().unwrap_or_else(|e| e.into_inner()).clone(),
+    };
+    classifications.sort_by(|a, b| a.path.cmp(&b.path));
+    (classifications, total)
+}
+
+#[allow(dead_code)]
+fn scan_inventory_sequential(
+    root: &Path,
+    exclude_roots: &[PathBuf],
+) -> (Vec<FileClassification>, usize) {
     let walker = WalkBuilder::new(root)
         .hidden(false)
         .git_ignore(true)
         .git_global(true)
         .git_exclude(true)
         .filter_entry({
-            let exclude_roots = scope.exclude_roots.clone();
+            let exclude_roots = exclude_roots.to_vec();
             move |entry| !is_excluded_entry(entry, &exclude_roots)
         })
         .build();
@@ -55,14 +164,14 @@ pub fn scan_file_inventory_with_exclusions(
         .take(MAX_FILES)
     {
         total_files_scanned += 1;
+        // Only record per-file counters when metrics feature is enabled
+        // to reduce overhead in the hot path.
+        #[cfg(feature = "metrics")]
+        performance::increment_counter("filesystem.file_inventory.files_scanned", 1);
         classifications.push(classify_file(root, entry.path()));
     }
 
-    Ok(FileInventory {
-        scope,
-        total_files_scanned,
-        classifications,
-    })
+    (classifications, total_files_scanned)
 }
 
 fn is_excluded_entry(entry: &DirEntry, exclude_roots: &[PathBuf]) -> bool {
@@ -77,22 +186,52 @@ fn is_excluded_entry(entry: &DirEntry, exclude_roots: &[PathBuf]) -> bool {
         return false;
     }
 
+    entry
+        .file_name()
+        .to_str()
+        .is_some_and(should_skip_directory_name)
+}
+
+pub(crate) fn should_skip_directory_name(name: &str) -> bool {
     matches!(
-        entry.file_name().to_str(),
-        Some(
-            ".git"
-                | ".turbo"
-                | "node_modules"
-                | "target"
-                | "vendor"
-                | "dist"
-                | "build"
-                | "__pycache__"
-        )
+        name,
+        ".git"
+            | ".turbo"
+            | "node_modules"
+            | "target"
+            | "vendor"
+            | "dist"
+            | "build"
+            | "__pycache__"
+            | ".venv"
+            | "venv"
+            | ".env"
+            | ".pytest_cache"
+            | ".mypy_cache"
+            | ".tox"
+            | ".ruff_cache"
+            | ".next"
+            | ".nuxt"
+            | ".output"
+            | ".vercel"
+            | ".parcel-cache"
+            | ".cache"
+            | "out"
+            | "bin"
+            | "obj"
+            | ".idea"
+            | ".vscode"
+            | "coverage"
+            | "htmlcov"
+            | ".svelte-kit"
+            | ".astro"
     )
 }
 
-fn classify_file(root: &Path, path: &Path) -> FileClassification {
+pub(crate) fn classify_file(root: &Path, path: &Path) -> FileClassification {
+    // Start timing unconditionally; the overhead of Instant::now() is ~10-30ns
+    // and is only used when metrics feature is enabled.
+    let started = Instant::now();
     let relative_path = path.strip_prefix(root).unwrap_or(path).to_path_buf();
     let file_name = path
         .file_name()
@@ -101,36 +240,44 @@ fn classify_file(root: &Path, path: &Path) -> FileClassification {
     let extension = path.extension().and_then(|value| value.to_str());
 
     if let Some(descriptor) = registry::lookup_exact_filename(file_name) {
-        return FileClassification {
-            path: relative_path,
-            association: descriptor.association,
-            language: descriptor.language,
-            language_type: descriptor.language_type,
-            framework: descriptor.framework,
-            related_languages: Vec::new(),
-            confidence: ClassificationConfidence::Exact,
-            source: ClassificationSource::ExactFilename,
-        };
+        return finish_classification(
+            relative_path,
+            FileClassification {
+                path: PathBuf::new(),
+                association: descriptor.association,
+                language: descriptor.language,
+                language_type: descriptor.language_type,
+                framework: descriptor.framework,
+                related_languages: Vec::new(),
+                confidence: ClassificationConfidence::Exact,
+                source: ClassificationSource::ExactFilename,
+            },
+            started,
+        );
     }
 
     if let Some(descriptor) = registry::lookup_basename_pattern(file_name) {
-        return FileClassification {
-            path: relative_path,
-            association: descriptor.association,
-            language: descriptor.language,
-            language_type: descriptor.language_type,
-            framework: descriptor.framework,
-            related_languages: vec![ProgrammingLanguage::TypeScript],
-            confidence: ClassificationConfidence::High,
-            source: ClassificationSource::ExactFilename,
-        };
+        return finish_classification(
+            relative_path,
+            FileClassification {
+                path: PathBuf::new(),
+                association: descriptor.association,
+                language: descriptor.language,
+                language_type: descriptor.language_type,
+                framework: descriptor.framework,
+                related_languages: vec![ProgrammingLanguage::TypeScript],
+                confidence: ClassificationConfidence::High,
+                source: ClassificationSource::ExactFilename,
+            },
+            started,
+        );
     }
 
     if let Some(ext) = extension
         && let Some(descriptor) = registry::lookup_extension(ext)
     {
         let mut classification = FileClassification {
-            path: relative_path,
+            path: PathBuf::new(),
             association: descriptor.association,
             language: descriptor.language,
             language_type: descriptor.language_type,
@@ -143,50 +290,170 @@ fn classify_file(root: &Path, path: &Path) -> FileClassification {
         if descriptor.association == FileAssociation::FrameworkFile
             && let Some(framework) = descriptor.framework
         {
+            #[cfg(feature = "metrics")]
+            let framework_started = Instant::now();
             let (related_languages, confidence, source) =
                 framework::related_languages(framework, path);
+            #[cfg(feature = "metrics")]
+            performance::record_stage(
+                "filesystem.file_inventory.classify.framework",
+                framework_started.elapsed(),
+            );
             classification.related_languages = related_languages;
             classification.confidence = confidence;
             classification.source = source;
         }
 
-        return classification;
+        return finish_classification(relative_path, classification, started);
     }
 
     let header = read_prefix(path, READ_LIMIT);
     if let Some(ref bytes) = header {
-        if let Some(classification) = classify_by_shebang(bytes, &relative_path) {
-            return classification;
+        if let Some(classification) = classify_by_shebang(bytes) {
+            return finish_classification(relative_path, classification, started);
         }
-        if let Some(classification) = classify_by_binary_signature(path, bytes, &relative_path) {
-            return classification;
+        if let Some(classification) = classify_by_binary_signature(path, bytes) {
+            return finish_classification(relative_path, classification, started);
         }
-        if is_probably_text(bytes)
-            && let Ok(Some(detection)) = hyperpolyglot::detect(path)
-            && let Some(language) = ProgrammingLanguage::from_hyperpolyglot(detection.language())
-        {
-            return FileClassification {
-                path: relative_path,
-                association: FileAssociation::ProgrammingLanguage,
-                language: Some(language),
-                language_type: Some(language.language_type()),
-                framework: None,
-                related_languages: Vec::new(),
-                confidence: ClassificationConfidence::Low,
-                source: ClassificationSource::Fallback,
-            };
+        if is_probably_text(bytes) && extension.is_some_and(is_hyperpolyglot_worthwhile) {
+            #[cfg(feature = "metrics")]
+            performance::increment_counter(
+                "filesystem.file_inventory.files_classified_by_content",
+                1,
+            );
+            #[cfg(feature = "metrics")]
+            let hyperpolyglot_started = Instant::now();
+            let detection = hyperpolyglot::detect(path);
+            #[cfg(feature = "metrics")]
+            {
+                let hyperpolyglot_elapsed = hyperpolyglot_started.elapsed();
+                performance::record_stage(
+                    "filesystem.file_inventory.classify.hyperpolyglot",
+                    hyperpolyglot_elapsed,
+                );
+                trace!(
+                    path = %relative_path.display(),
+                    duration_ms = performance::duration_ms(hyperpolyglot_elapsed),
+                    "hyperpolyglot probe complete"
+                );
+            }
+            #[cfg(not(feature = "metrics"))]
+            {
+                trace!(
+                    path = %relative_path.display(),
+                    "hyperpolyglot probe complete"
+                );
+            }
+            if let Ok(Some(detection)) = detection
+                && let Some(language) =
+                    ProgrammingLanguage::from_hyperpolyglot(detection.language())
+            {
+                #[cfg(feature = "metrics")]
+                performance::increment_counter(
+                    "filesystem.file_inventory.files_classified_by_hyperpolyglot",
+                    1,
+                );
+                return finish_classification(
+                    relative_path,
+                    FileClassification {
+                        path: PathBuf::new(),
+                        association: FileAssociation::ProgrammingLanguage,
+                        language: Some(language),
+                        language_type: Some(language.language_type()),
+                        framework: None,
+                        related_languages: Vec::new(),
+                        confidence: ClassificationConfidence::Low,
+                        source: ClassificationSource::Fallback,
+                    },
+                    started,
+                );
+            }
         }
     }
 
-    FileClassification {
-        path: relative_path,
-        association: FileAssociation::Unknown,
-        language: None,
-        language_type: None,
-        framework: None,
-        related_languages: Vec::new(),
-        confidence: ClassificationConfidence::Low,
-        source: ClassificationSource::Fallback,
+    finish_classification(
+        relative_path,
+        FileClassification {
+            path: PathBuf::new(),
+            association: FileAssociation::Unknown,
+            language: None,
+            language_type: None,
+            framework: None,
+            related_languages: Vec::new(),
+            confidence: ClassificationConfidence::Low,
+            source: ClassificationSource::Fallback,
+        },
+        started,
+    )
+}
+
+fn finish_classification(
+    relative_path: PathBuf,
+    mut classification: FileClassification,
+    started: Instant,
+) -> FileClassification {
+    classification.path = relative_path;
+    // Only record detailed per-file metrics when the metrics feature is enabled.
+    // This avoids mutex contention and counter overhead in the hot path for
+    // the default build.
+    #[cfg(feature = "metrics")]
+    {
+        let duration = started.elapsed();
+        performance::increment_counter("filesystem.file_inventory.files_classified", 1);
+        performance::increment_counter_dynamic(classification_counter_name(&classification), 1);
+        performance::record_stage(classification_stage_name(&classification), duration);
+        trace!(
+            path = %classification.path.display(),
+            source = ?classification.source,
+            association = ?classification.association,
+            duration_ms = performance::duration_ms(duration),
+            "file classified"
+        );
+    }
+    #[cfg(not(feature = "metrics"))]
+    {
+        let _ = started; // suppress unused warning when metrics is off
+        trace!(
+            path = %classification.path.display(),
+            source = ?classification.source,
+            association = ?classification.association,
+            "file classified"
+        );
+    }
+    classification
+}
+
+#[cfg(feature = "metrics")]
+fn classification_stage_name(classification: &FileClassification) -> &'static str {
+    match classification.source {
+        ClassificationSource::ExactFilename => "filesystem.file_inventory.classify.exact_filename",
+        ClassificationSource::Extension => "filesystem.file_inventory.classify.extension",
+        ClassificationSource::Shebang => "filesystem.file_inventory.classify.shebang",
+        ClassificationSource::EmbeddedLanguageHint => {
+            "filesystem.file_inventory.classify.embedded_language_hint"
+        }
+        ClassificationSource::BinarySignature => {
+            "filesystem.file_inventory.classify.binary_signature"
+        }
+        ClassificationSource::Fallback => "filesystem.file_inventory.classify.fallback",
+    }
+}
+
+#[cfg(feature = "metrics")]
+fn classification_counter_name(classification: &FileClassification) -> &'static str {
+    match classification.source {
+        ClassificationSource::ExactFilename => {
+            "filesystem.file_inventory.classified_exact_filename"
+        }
+        ClassificationSource::Extension => "filesystem.file_inventory.classified_extension",
+        ClassificationSource::Shebang => "filesystem.file_inventory.classified_shebang",
+        ClassificationSource::EmbeddedLanguageHint => {
+            "filesystem.file_inventory.classified_embedded_language_hint"
+        }
+        ClassificationSource::BinarySignature => {
+            "filesystem.file_inventory.classified_binary_signature"
+        }
+        ClassificationSource::Fallback => "filesystem.file_inventory.classified_fallback",
     }
 }
 
@@ -198,7 +465,7 @@ fn read_prefix(path: &Path, limit: usize) -> Option<Vec<u8>> {
     Some(buffer)
 }
 
-fn classify_by_shebang(bytes: &[u8], relative_path: &Path) -> Option<FileClassification> {
+fn classify_by_shebang(bytes: &[u8]) -> Option<FileClassification> {
     let content = std::str::from_utf8(bytes).ok()?;
     let first_line = content.lines().next()?;
     let shebang = first_line.strip_prefix("#!")?.trim();
@@ -212,8 +479,10 @@ fn classify_by_shebang(bytes: &[u8], relative_path: &Path) -> Option<FileClassif
 
     let descriptor = registry::shebang_descriptor(interpreter)?;
 
+    performance::increment_counter("filesystem.file_inventory.files_classified_by_content", 1);
+
     Some(FileClassification {
-        path: relative_path.to_path_buf(),
+        path: PathBuf::new(),
         association: descriptor.association,
         language: descriptor.language,
         language_type: descriptor.language_type,
@@ -224,11 +493,7 @@ fn classify_by_shebang(bytes: &[u8], relative_path: &Path) -> Option<FileClassif
     })
 }
 
-fn classify_by_binary_signature(
-    path: &Path,
-    bytes: &[u8],
-    relative_path: &Path,
-) -> Option<FileClassification> {
+fn classify_by_binary_signature(path: &Path, bytes: &[u8]) -> Option<FileClassification> {
     let association = if bytes.starts_with(b"%PDF-") {
         FileAssociation::Binary
     } else if bytes.starts_with(b"\x89PNG\r\n\x1a\n")
@@ -267,8 +532,10 @@ fn classify_by_binary_signature(
         return None;
     };
 
+    performance::increment_counter("filesystem.file_inventory.files_classified_by_content", 1);
+
     Some(FileClassification {
-        path: relative_path.to_path_buf(),
+        path: PathBuf::new(),
         association,
         language: None,
         language_type: None,
@@ -291,6 +558,39 @@ fn is_probably_text(bytes: &[u8]) -> bool {
         return false;
     }
     std::str::from_utf8(bytes).is_ok()
+}
+
+/// Determines whether a file extension is worth analyzing with hyperpolyglot.
+///
+/// Hyperpolyglot is a heavyweight content analysis that may spawn subprocesses.
+/// Skip generic extensions that are unlikely to contain meaningful source code.
+fn is_hyperpolyglot_worthwhile(ext: &str) -> bool {
+    !matches!(
+        ext.to_ascii_lowercase().as_str(),
+        "txt"
+            | "log"
+            | "tmp"
+            | "bak"
+            | "out"
+            | "cache"
+            | "md"
+            | "rst"
+            | "csv"
+            | "tsv"
+            | "json"
+            | "yaml"
+            | "yml"
+            | "xml"
+            | "ini"
+            | "cfg"
+            | "conf"
+            | "properties"
+            | "env"
+            | "gitignore"
+            | "dockerignore"
+            | "eslintignore"
+            | "prettierignore"
+    )
 }
 
 /// Project a package-level inventory from a shared repo inventory.
@@ -342,7 +642,7 @@ pub fn project_package_inventory(
             exclude_roots: exclude_roots.to_vec(),
         },
         total_files_scanned: classifications.len(),
-        classifications,
+        classifications: Arc::new(classifications),
     }
 }
 
@@ -484,5 +784,49 @@ mod tests {
             pkg_inventory.classifications[0].language,
             Some(ProgrammingLanguage::Rust)
         );
+    }
+
+    /// Regression test for the parallel inventory scanner.
+    ///
+    /// Before the worker-local flush fix, `scan_inventory_parallel` would
+    /// walk and classify files but drop the per-thread results, returning
+    /// an empty vector. This test exercises the parallel path directly
+    /// and asserts that classifications are preserved.
+    #[test]
+    fn parallel_inventory_returns_populated_classifications() {
+        let dir = TempDir::new().unwrap();
+
+        // Create a small fixture tree with varied file types
+        fs::create_dir_all(dir.path().join("src")).unwrap();
+        fs::create_dir_all(dir.path().join("tests")).unwrap();
+        fs::write(dir.path().join("src/main.rs"), "fn main() {}").unwrap();
+        fs::write(dir.path().join("src/lib.rs"), "pub fn lib() {}").unwrap();
+        fs::write(dir.path().join("tests/test.rs"), "#[test] fn t() {}").unwrap();
+        fs::write(dir.path().join("README.md"), "# Project").unwrap();
+        fs::write(dir.path().join("Cargo.toml"), "[package]\nname = 'x'\n").unwrap();
+
+        // Call the parallel path directly
+        let (classifications, total) = scan_inventory_parallel(dir.path(), &[]);
+
+        assert!(
+            !classifications.is_empty(),
+            "parallel inventory must return non-empty classifications; got {} files scanned, {} classifications",
+            total,
+            classifications.len()
+        );
+        assert_eq!(classifications.len(), total);
+
+        // Verify expected file types are present
+        let rust_count = classifications
+            .iter()
+            .filter(|c| c.language == Some(ProgrammingLanguage::Rust))
+            .count();
+        assert_eq!(rust_count, 3, "expected 3 Rust files");
+
+        let md_count = classifications
+            .iter()
+            .filter(|c| c.association == FileAssociation::Documentation)
+            .count();
+        assert_eq!(md_count, 1, "expected 1 markdown file");
     }
 }

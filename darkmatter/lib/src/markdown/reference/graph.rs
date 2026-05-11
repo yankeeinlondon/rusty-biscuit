@@ -10,15 +10,17 @@ use super::types::{
     ReferenceInsertionContext, ReferenceKind, ReferenceOrigin, ReferenceRecord, ReferenceSet,
     ReferenceSyntax, classify_target, make_reference_id,
 };
-use crate::markdown::normalize::HeadingLevel;
 use crate::markdown::Markdown;
 use crate::markdown::compose::cache::RunLocalCache;
 use crate::markdown::compose::conditions;
 use crate::markdown::compose::toc_linking;
+use biscuit_terminal::errors::SourceContext;
+
 use crate::markdown::compose::transclusion::{
     DirectiveKind, TransclusionRuntime, parse_directives, parse_frontmatter_refs,
 };
 use crate::markdown::compose::{ComposeOperation, ComposeSource, EffectiveStateBuilder};
+use crate::markdown::normalize::HeadingLevel;
 use crate::markdown::types::MarkdownResult;
 
 /// Runtime state for reference graph analysis.
@@ -28,6 +30,14 @@ use crate::markdown::types::MarkdownResult;
 struct ReferenceAnalysisRuntime {
     transclusion: TransclusionRuntime,
     cache: RunLocalCache,
+}
+
+fn source_to_path(source: &ComposeSource) -> std::path::PathBuf {
+    match source {
+        ComposeSource::File(path) => path.clone(),
+        ComposeSource::Url(url) => std::path::PathBuf::from(url.to_string()),
+        ComposeSource::Unknown => std::path::PathBuf::from("<unknown>"),
+    }
 }
 
 impl ReferenceAnalysisRuntime {
@@ -72,7 +82,9 @@ fn build_graph_inner(
     // Seed the runtime with the root node so child documents that
     // transclude the root are detected as cycles immediately.
     let root_id = source_to_id(&source);
-    let _ = runtime.transclusion.enter(root_id.to_string());
+    let _ = runtime
+        .transclusion
+        .enter(root_id.to_string(), source_to_path(&source), 1);
 
     let (root, all_nodes) = build_node(md, &source, options, &mut runtime, extract_references)?;
 
@@ -142,7 +154,8 @@ fn flatten_node(node: &ReferenceGraphNode, graph: &ReferenceGraph, out: &mut Vec
             for (&line, insertions) in insertion_map.range(last_line..record.origin.line) {
                 if emitted_insertion_lines.insert(line) {
                     for insertion in insertions {
-                        if let Some(child_node) = graph.node_by_id(insertion.child_node_id.as_ref()) {
+                        if let Some(child_node) = graph.node_by_id(insertion.child_node_id.as_ref())
+                        {
                             flatten_node(child_node, graph, out);
                         }
                     }
@@ -230,6 +243,11 @@ fn build_node(
     // leaf documents with no transclusions.
     let prepared_content = prepare_content(md, source, options)?;
 
+    let ctx = {
+        let base = md.source_context_for_errors();
+        SourceContext::new(base.absolute, base.display, prepared_content.clone())
+    };
+
     // Build heading index for section context on transclusion insertions
     let heading_index = build_heading_index(&prepared_content);
 
@@ -272,13 +290,17 @@ fn build_node(
     };
 
     // Block directives
-    if let Ok(directives) = parse_directives(&prepared_content) {
+    if let Ok(directives) = parse_directives(&prepared_content, ctx.clone()) {
         for directive in &directives {
             // Evaluate `when=` condition — skip directive entirely if false.
             if let Some(ref when_expr) = directive.options.when_expr {
-                let condition_met =
-                    conditions::evaluate_condition(when_expr, &effective_state, directive.line)
-                        .unwrap_or(false);
+                let condition_met = conditions::evaluate_condition(
+                    when_expr,
+                    &effective_state,
+                    directive.line,
+                    ctx.clone(),
+                )
+                .unwrap_or(false);
                 if !condition_met {
                     continue;
                 }
@@ -316,7 +338,11 @@ fn build_node(
                     let child_id = source_to_id(&child_source);
 
                     // Cycle/depth check
-                    if runtime.transclusion.enter(child_id.to_string()).is_ok() {
+                    if runtime
+                        .transclusion
+                        .enter(child_id.to_string(), child_path.clone(), directive.line)
+                        .is_ok()
+                    {
                         if let Some(child_md) = runtime.load_markdown(&child_path) {
                             let (child_node, mut descendants) = build_node(
                                 &child_md,
@@ -371,7 +397,7 @@ fn build_node(
                 .unwrap_or((None, None));
 
             if let Some((display_target, path)) =
-                resolve_toc_linking_target(directive, source, &transclusion_options)
+                resolve_toc_linking_target(directive, source, &transclusion_options, ctx.clone())
             {
                 if extract_references {
                     local_references.records.push(ReferenceRecord {
@@ -407,7 +433,11 @@ fn build_node(
                     }
                 }
 
-                if runtime.transclusion.enter(child_id.to_string()).is_ok() {
+                if runtime
+                    .transclusion
+                    .enter(child_id.to_string(), path.clone(), directive.line)
+                    .is_ok()
+                {
                     if let Some(child_md) = runtime.load_markdown(&path) {
                         let (child_node, mut descendants) = build_node(
                             &child_md,
@@ -490,7 +520,7 @@ fn build_node(
     }
 
     // Frontmatter prologue/epilogue
-    if let Ok(fm_refs) = parse_frontmatter_refs(md.frontmatter().as_map()) {
+    if let Ok(fm_refs) = parse_frontmatter_refs(md.frontmatter().as_map(), ctx.clone()) {
         for (idx, prologue) in fm_refs.prologue.iter().enumerate() {
             let is_literal = is_literal_content(prologue);
 
@@ -531,7 +561,11 @@ fn build_node(
                 let child_source = ComposeSource::File(child_path.clone());
                 let child_id = source_to_id(&child_source);
 
-                if runtime.transclusion.enter(child_id.to_string()).is_ok() {
+                if runtime
+                    .transclusion
+                    .enter(child_id.to_string(), child_path.clone(), 0)
+                    .is_ok()
+                {
                     if let Some(child_md) = runtime.load_markdown(&child_path) {
                         let (child_node, mut descendants) = build_node(
                             &child_md,
@@ -602,7 +636,11 @@ fn build_node(
                 let child_source = ComposeSource::File(child_path.clone());
                 let child_id = source_to_id(&child_source);
 
-                if runtime.transclusion.enter(child_id.to_string()).is_ok() {
+                if runtime
+                    .transclusion
+                    .enter(child_id.to_string(), child_path.clone(), 0)
+                    .is_ok()
+                {
                     if let Some(child_md) = runtime.load_markdown(&child_path) {
                         let (child_node, mut descendants) = build_node(
                             &child_md,
@@ -819,8 +857,9 @@ fn resolve_toc_linking_target(
     directive: &toc_linking::TocLinkingDirective,
     source: &ComposeSource,
     transclusion_options: &crate::markdown::compose::TransclusionOptions,
+    ctx: SourceContext,
 ) -> Option<(String, std::path::PathBuf)> {
-    toc_linking::resolve_target_chain(directive, source, transclusion_options)
+    toc_linking::resolve_target_chain(directive, source, transclusion_options, ctx)
         .ok()
         .flatten()
 }
@@ -901,7 +940,10 @@ mod tests {
 
     #[test]
     fn source_to_id_unknown() {
-        assert_eq!(source_to_id(&ComposeSource::Unknown), NodeId::from("unknown"));
+        assert_eq!(
+            source_to_id(&ComposeSource::Unknown),
+            NodeId::from("unknown")
+        );
     }
 
     #[test]
@@ -1129,5 +1171,76 @@ mod tests {
         assert_eq!(flat.len(), 2);
         assert_eq!(flat.records[0].id, "a_ref");
         assert_eq!(flat.records[1].id, "b_ref");
+    }
+
+    #[test]
+    fn when_infix_and_true_follows_transclusion() {
+        let dir = tempfile::TempDir::new().unwrap();
+
+        let child_path = dir.path().join("child.md");
+        std::fs::write(&child_path, "[link](https://example.com)").unwrap();
+
+        let root_path = dir.path().join("root.md");
+        std::fs::write(
+            &root_path,
+            "---\nenabled: true\nvisible: true\n---\n\n::file child.md when=\"enabled && visible\"\n",
+        )
+        .unwrap();
+
+        let root_md = Markdown::try_from(root_path.as_path()).unwrap();
+        let options = ReferenceGraphOptions::default();
+        let graph = build_reference_graph(&root_md, &options).unwrap();
+
+        // Root + child = 2 nodes when the condition is true
+        assert_eq!(graph.node_count(), 2);
+        let transclusions = graph.root.local_references.transclusions();
+        assert_eq!(transclusions.len(), 1);
+    }
+
+    #[test]
+    fn when_infix_and_false_skips_transclusion() {
+        let dir = tempfile::TempDir::new().unwrap();
+
+        let child_path = dir.path().join("child.md");
+        std::fs::write(&child_path, "[link](https://example.com)").unwrap();
+
+        let root_path = dir.path().join("root.md");
+        std::fs::write(
+            &root_path,
+            "---\nenabled: true\nvisible: false\n---\n\n::file child.md when=\"enabled && visible\"\n",
+        )
+        .unwrap();
+
+        let root_md = Markdown::try_from(root_path.as_path()).unwrap();
+        let options = ReferenceGraphOptions::default();
+        let graph = build_reference_graph(&root_md, &options).unwrap();
+
+        // Child is skipped, so only the root node remains
+        assert_eq!(graph.node_count(), 1);
+        let transclusions = graph.root.local_references.transclusions();
+        assert_eq!(transclusions.len(), 0);
+    }
+
+    #[test]
+    fn when_infix_or_follows_on_either_true() {
+        let dir = tempfile::TempDir::new().unwrap();
+
+        let child_path = dir.path().join("child.md");
+        std::fs::write(&child_path, "[link](https://example.com)").unwrap();
+
+        let root_path = dir.path().join("root.md");
+        std::fs::write(
+            &root_path,
+            "---\nprimary: false\nbackup: true\n---\n\n::file child.md when=\"primary || backup\"\n",
+        )
+        .unwrap();
+
+        let root_md = Markdown::try_from(root_path.as_path()).unwrap();
+        let options = ReferenceGraphOptions::default();
+        let graph = build_reference_graph(&root_md, &options).unwrap();
+
+        assert_eq!(graph.node_count(), 2);
+        let transclusions = graph.root.local_references.transclusions();
+        assert_eq!(transclusions.len(), 1);
     }
 }

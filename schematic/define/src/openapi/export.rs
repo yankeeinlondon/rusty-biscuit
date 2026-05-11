@@ -71,7 +71,7 @@ pub fn export<R: SchemaRegistryLike>(
         extensions.insert("x-schematic".to_string(), doc_ext.into());
     }
 
-    Ok(OpenAPI {
+    let openapi = OpenAPI {
         openapi: "3.0.3".to_string(),
         info,
         servers,
@@ -92,7 +92,169 @@ pub fn export<R: SchemaRegistryLike>(
                 ..Default::default()
             }),
         extensions,
-    })
+    };
+
+    validate_ref_closure(&openapi)?;
+
+    Ok(openapi)
+}
+
+/// Validates that every `$ref` in the OpenAPI document points to a schema that exists
+/// in `components.schemas`.
+///
+/// This prevents dangling references in generated OpenAPI artifacts.
+fn validate_ref_closure(openapi: &OpenAPI) -> Result<(), OpenApiError> {
+    let schema_names = openapi
+        .components
+        .as_ref()
+        .map(|c| {
+            c.schemas
+                .keys()
+                .map(|k| k.as_str())
+                .collect::<std::collections::HashSet<_>>()
+        })
+        .unwrap_or_default();
+
+    let mut missing = Vec::new();
+    let mut visitor = |reference: &str| {
+        if let Some(name) = reference.strip_prefix("#/components/schemas/")
+            && !schema_names.contains(name)
+        {
+            missing.push(name.to_string());
+        }
+    };
+
+    // Walk paths
+    for (_path, item) in &openapi.paths.paths {
+        if let ReferenceOr::Item(item) = item {
+            visit_operation(item.get.as_ref(), &mut visitor);
+            visit_operation(item.post.as_ref(), &mut visitor);
+            visit_operation(item.put.as_ref(), &mut visitor);
+            visit_operation(item.patch.as_ref(), &mut visitor);
+            visit_operation(item.delete.as_ref(), &mut visitor);
+            visit_operation(item.head.as_ref(), &mut visitor);
+            visit_operation(item.options.as_ref(), &mut visitor);
+        }
+    }
+
+    // Walk components.schemas themselves (for nested refs)
+    if let Some(components) = &openapi.components {
+        for (_name, schema) in &components.schemas {
+            if let ReferenceOr::Item(schema) = schema {
+                visit_schema(schema, &mut visitor);
+            }
+        }
+    }
+
+    if missing.is_empty() {
+        Ok(())
+    } else {
+        missing.sort();
+        missing.dedup();
+        Err(OpenApiError::UnresolvedRefs { refs: missing })
+    }
+}
+
+/// Visits all `$ref` references inside an `Operation`.
+fn visit_operation<F: FnMut(&str)>(op: Option<&Operation>, visitor: &mut F) {
+    let Some(op) = op else { return };
+
+    // Request body schemas
+    if let Some(ReferenceOr::Item(body)) = &op.request_body {
+        for (_content_type, media_type) in &body.content {
+            if let Some(schema) = &media_type.schema {
+                visit_ref_or_schema(schema, visitor);
+            }
+        }
+    }
+
+    // Response schemas
+    for (_status, response) in &op.responses.responses {
+        if let ReferenceOr::Item(response) = response {
+            for (_content_type, media_type) in &response.content {
+                if let Some(schema) = &media_type.schema {
+                    visit_ref_or_schema(schema, visitor);
+                }
+            }
+        }
+    }
+}
+
+/// Visits all `$ref` references inside a `Schema` recursively.
+fn visit_schema<F: FnMut(&str)>(schema: &openapiv3::Schema, visitor: &mut F) {
+    match &schema.schema_kind {
+        openapiv3::SchemaKind::Type(openapiv3::Type::Object(obj)) => {
+            for (_prop, prop_schema) in &obj.properties {
+                visit_ref_or_boxed_schema(prop_schema, visitor);
+            }
+            if let Some(additional) = &obj.additional_properties {
+                match additional {
+                    openapiv3::AdditionalProperties::Any(b) => {
+                        if *b {
+                            // any additional properties - nothing to visit
+                        }
+                    }
+                    openapiv3::AdditionalProperties::Schema(s) => {
+                        visit_boxed_ref_or_schema(s, visitor);
+                    }
+                }
+            }
+        }
+        openapiv3::SchemaKind::Type(openapiv3::Type::Array(arr)) => {
+            if let Some(items) = &arr.items {
+                visit_ref_or_boxed_schema(items, visitor);
+            }
+        }
+        openapiv3::SchemaKind::AllOf { all_of } => {
+            for schema in all_of {
+                visit_ref_or_schema(schema, visitor);
+            }
+        }
+        openapiv3::SchemaKind::AnyOf { any_of } => {
+            for schema in any_of {
+                visit_ref_or_schema(schema, visitor);
+            }
+        }
+        openapiv3::SchemaKind::OneOf { one_of } => {
+            for schema in one_of {
+                visit_ref_or_schema(schema, visitor);
+            }
+        }
+        openapiv3::SchemaKind::Not { not } => {
+            visit_boxed_ref_or_schema(not, visitor);
+        }
+        _ => {}
+    }
+}
+
+/// Visits a `ReferenceOr<Box<Schema>>`.
+fn visit_ref_or_boxed_schema<F: FnMut(&str)>(
+    reference_or: &ReferenceOr<Box<openapiv3::Schema>>,
+    visitor: &mut F,
+) {
+    match reference_or {
+        ReferenceOr::Reference { reference } => visitor(reference),
+        ReferenceOr::Item(schema) => visit_schema(schema, visitor),
+    }
+}
+
+/// Visits a `ReferenceOr<Schema>`.
+fn visit_ref_or_schema<F: FnMut(&str)>(
+    reference_or: &ReferenceOr<openapiv3::Schema>,
+    visitor: &mut F,
+) {
+    match reference_or {
+        ReferenceOr::Reference { reference } => visitor(reference),
+        ReferenceOr::Item(schema) => visit_schema(schema, visitor),
+    }
+}
+
+/// Visits a `Box<ReferenceOr<Schema>>`.
+fn visit_boxed_ref_or_schema<F: FnMut(&str)>(
+    boxed: &ReferenceOr<openapiv3::Schema>,
+    visitor: &mut F,
+) {
+    visit_ref_or_schema(boxed, visitor);
 }
 
 /// Trait for schema registry abstraction.
@@ -998,14 +1160,13 @@ mod tests {
     fn extract_path_params_typed_as_string() {
         let params = extract_path_params("/items/{item_id}");
 
-        if let openapiv3::Parameter::Path { parameter_data, .. } = &params[0] {
-            if let openapiv3::ParameterSchemaOrContent::Schema(ReferenceOr::Item(schema)) =
+        if let openapiv3::Parameter::Path { parameter_data, .. } = &params[0]
+            && let openapiv3::ParameterSchemaOrContent::Schema(ReferenceOr::Item(schema)) =
                 &parameter_data.format
-            {
-                match &schema.schema_kind {
-                    openapiv3::SchemaKind::Type(openapiv3::Type::String(_)) => {}
-                    _ => panic!("Expected string type"),
-                }
+        {
+            match &schema.schema_kind {
+                openapiv3::SchemaKind::Type(openapiv3::Type::String(_)) => {}
+                _ => panic!("Expected string type"),
             }
         }
     }
@@ -1149,6 +1310,134 @@ mod tests {
         let options = ExportOptions::new().with_version("9.0.0");
         let info = map_info(&api, &options);
         assert_eq!(info.version, "9.0.0");
+    }
+
+    // =============================================
+    // $ref closure validation tests
+    // =============================================
+
+    #[test]
+    fn export_fails_on_unresolved_request_schema_ref() {
+        let api = RestApi {
+            name: "TestAPI".to_string(),
+            description: "Test".to_string(),
+            base_url: "https://api.test.com/v1".to_string(),
+            docs_url: None,
+            auth: AuthStrategy::None,
+            auth_policy: None,
+            env_auth: vec![],
+            env_username: None,
+            headers: vec![],
+            endpoints: vec![Endpoint {
+                id: "Create".to_string(),
+                method: RestMethod::Post,
+                path: "/create".to_string(),
+                description: "Create something".to_string(),
+                request: Some(ApiRequest::json_type("MissingBody")),
+                response: ApiResponse::Empty,
+                headers: vec![],
+                params: None,
+                oauth_scopes: None,
+            }],
+            module_path: None,
+            request_suffix: None,
+            version: None,
+            env_mapping: None,
+        };
+        let registry = TestRegistry::new();
+        let options = ExportOptions::new();
+
+        let result = export(&api, &registry, &options);
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        let err_str = err.to_string();
+        assert!(
+            err_str.contains("MissingBody"),
+            "error should mention MissingBody: {}",
+            err_str
+        );
+    }
+
+    #[test]
+    fn export_fails_on_unresolved_response_schema_ref() {
+        let api = RestApi {
+            name: "TestAPI".to_string(),
+            description: "Test".to_string(),
+            base_url: "https://api.test.com/v1".to_string(),
+            docs_url: None,
+            auth: AuthStrategy::None,
+            auth_policy: None,
+            env_auth: vec![],
+            env_username: None,
+            headers: vec![],
+            endpoints: vec![Endpoint {
+                id: "Get".to_string(),
+                method: RestMethod::Get,
+                path: "/get".to_string(),
+                description: "Get something".to_string(),
+                request: None,
+                response: ApiResponse::json_type("MissingResponse"),
+                headers: vec![],
+                params: None,
+                oauth_scopes: None,
+            }],
+            module_path: None,
+            request_suffix: None,
+            version: None,
+            env_mapping: None,
+        };
+        let registry = TestRegistry::new();
+        let options = ExportOptions::new();
+
+        let result = export(&api, &registry, &options);
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        let err_str = err.to_string();
+        assert!(
+            err_str.contains("MissingResponse"),
+            "error should mention MissingResponse: {}",
+            err_str
+        );
+    }
+
+    #[test]
+    fn export_succeeds_when_all_refs_are_resolved() {
+        let api = RestApi {
+            name: "TestAPI".to_string(),
+            description: "Test".to_string(),
+            base_url: "https://api.test.com/v1".to_string(),
+            docs_url: None,
+            auth: AuthStrategy::None,
+            auth_policy: None,
+            env_auth: vec![],
+            env_username: None,
+            headers: vec![],
+            endpoints: vec![Endpoint {
+                id: "Create".to_string(),
+                method: RestMethod::Post,
+                path: "/create".to_string(),
+                description: "Create something".to_string(),
+                request: Some(ApiRequest::json_type("RequestBody")),
+                response: ApiResponse::json_type("ResponseBody"),
+                headers: vec![],
+                params: None,
+                oauth_scopes: None,
+            }],
+            module_path: None,
+            request_suffix: None,
+            version: None,
+            env_mapping: None,
+        };
+        let registry = TestRegistry::new()
+            .with_schema("RequestBody")
+            .with_schema("ResponseBody");
+        let options = ExportOptions::new();
+
+        let result = export(&api, &registry, &options);
+        assert!(
+            result.is_ok(),
+            "export should succeed when all refs are resolved"
+        );
     }
 
     // =============================================

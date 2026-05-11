@@ -7,8 +7,8 @@ mod css;
 pub mod errors;
 pub mod file_tree;
 mod graph;
-mod html;
-mod local;
+pub(crate) mod html;
+pub(crate) mod local;
 pub mod meta;
 pub mod types;
 pub mod validate;
@@ -22,6 +22,7 @@ use crate::markdown::compose::transclusion::{
     BlockOptions, DirectiveKind, parse_directives, parse_frontmatter_refs,
 };
 use crate::markdown::types::MarkdownResult;
+use std::path::PathBuf;
 
 /// Resolve a raw transclusion target to a string path using `FileReference`
 /// semantics, with fallback to simple path join.
@@ -54,12 +55,54 @@ fn resolve_transclusion_target(
     }
 }
 
+#[allow(dead_code)]
+fn source_file_for_error(source: &ComposeSource) -> PathBuf {
+    match source {
+        ComposeSource::File(path) => path.clone(),
+        ComposeSource::Url(url) => PathBuf::from(url.to_string()),
+        ComposeSource::Unknown => PathBuf::from("<unknown>"),
+    }
+}
+
+fn directive_text_at_line(content: &str, line: usize) -> String {
+    content
+        .lines()
+        .nth(line.saturating_sub(1))
+        .unwrap_or_default()
+        .trim()
+        .to_string()
+}
+
+fn map_reference_parse_error(
+    err: crate::markdown::compose::TransclusionError,
+) -> ReferenceError {
+    match err {
+        crate::markdown::compose::TransclusionError::ParseDirective {
+            ctx,
+            line,
+            message,
+            caret_col,
+        } => ReferenceError::ParseDirective {
+            ctx: ctx.clone(),
+            line,
+            message,
+            directive_text: directive_text_at_line(&ctx.content, line),
+            caret_col,
+        },
+        other => {
+            // This is a fallback for errors that aren't ParseDirective but
+            // occurred during parsing.
+            ReferenceError::Validation(other.to_string())
+        }
+    }
+}
+
 impl Markdown {
     /// Returns `true` if this document contains any transclusion directives
     /// (`::file`, `::code`, `::url`, `::toc-linking`, `prologue`, or `epilogue`).
     pub fn has_transclusions(&self) -> bool {
         // Check block directives
-        if let Ok(directives) = parse_directives(self.content())
+        if let Ok(directives) = parse_directives(self.content(), self.source_context_for_errors())
             && !directives.is_empty()
         {
             return true;
@@ -74,8 +117,10 @@ impl Markdown {
         }
 
         // Check frontmatter prologue/epilogue
-        if let Ok(refs) = parse_frontmatter_refs(self.frontmatter().as_map())
-            && (!refs.prologue.is_empty() || !refs.epilogue.is_empty())
+        if let Ok(refs) = parse_frontmatter_refs(
+            self.frontmatter().as_map(),
+            self.source_context_for_errors(),
+        ) && (!refs.prologue.is_empty() || !refs.epilogue.is_empty())
         {
             return true;
         }
@@ -92,11 +137,8 @@ impl Markdown {
         let mut refs = Vec::new();
 
         // Block directives (::file, ::code, ::url)
-        let directives =
-            parse_directives(self.content()).map_err(|e| ReferenceError::ParseDirective {
-                line: 0,
-                message: e.to_string(),
-            })?;
+        let directives = parse_directives(self.content(), self.source_context_for_errors())
+            .map_err(map_reference_parse_error)?;
 
         for directive in &directives {
             let kind = match directive.kind {
@@ -156,7 +198,9 @@ impl Markdown {
         }
 
         // Frontmatter prologue/epilogue
-        if let Ok(fm_refs) = parse_frontmatter_refs(self.frontmatter().as_map()) {
+        if let Ok(fm_refs) =
+            parse_frontmatter_refs(self.frontmatter().as_map(), self.source_context_for_errors())
+        {
             for prologue in &fm_refs.prologue {
                 let resolved_target = resolve_transclusion_target(prologue, &source, &[]);
                 refs.push(TransclusionRef {
@@ -253,7 +297,9 @@ impl Markdown {
         &self,
         options: ReferenceGraphOptions,
     ) -> MarkdownResult<Vec<InlineCssBlock>> {
-        Ok(self.composed_references(options)?.filter_convert(ReferenceKind::InlineCss))
+        Ok(self
+            .composed_references(options)?
+            .filter_convert(ReferenceKind::InlineCss))
     }
 
     /// Returns CSS `@import` references across the composed document graph.
@@ -261,7 +307,9 @@ impl Markdown {
         &self,
         options: ReferenceGraphOptions,
     ) -> MarkdownResult<Vec<ImportReference>> {
-        Ok(self.composed_references(options)?.filter_convert(ReferenceKind::CssImport))
+        Ok(self
+            .composed_references(options)?
+            .filter_convert(ReferenceKind::CssImport))
     }
 
     /// Returns inline script blocks across the composed document graph.
@@ -269,7 +317,9 @@ impl Markdown {
         &self,
         options: ReferenceGraphOptions,
     ) -> MarkdownResult<Vec<InlineScriptBlock>> {
-        Ok(self.composed_references(options)?.filter_convert(ReferenceKind::InlineScript))
+        Ok(self
+            .composed_references(options)?
+            .filter_convert(ReferenceKind::InlineScript))
     }
 
     /// Returns `<script src="...">` import references across the composed document graph.
@@ -277,7 +327,9 @@ impl Markdown {
         &self,
         options: ReferenceGraphOptions,
     ) -> MarkdownResult<Vec<ImportReference>> {
-        Ok(self.composed_references(options)?.filter_convert(ReferenceKind::ScriptImport))
+        Ok(self
+            .composed_references(options)?
+            .filter_convert(ReferenceKind::ScriptImport))
     }
 
     /// Returns font import references across the composed document graph.
@@ -285,7 +337,9 @@ impl Markdown {
         &self,
         options: ReferenceGraphOptions,
     ) -> MarkdownResult<Vec<ImportReference>> {
-        Ok(self.composed_references(options)?.filter_convert(ReferenceKind::FontImport))
+        Ok(self
+            .composed_references(options)?
+            .filter_convert(ReferenceKind::FontImport))
     }
 
     // ── Phase 2: Extended extraction (local, single-document) ──────

@@ -7,6 +7,8 @@ It is used for document assembly workflows like:
 - interpolation (`{{ ... }}`)
 - replacement transforms
 - transclusion (`::file`, `::code`, and related directives)
+- **link resolve** (converts relative links to absolute paths before transclusion)
+- **link normalization** (converts absolute paths back to portable forms in the final document)
 
 Unlike `read`, `compose` focuses on transformed content, not display rendering defaults.
 
@@ -26,6 +28,13 @@ md compose -
 md compose doc.md --state '{"name":"Alice","env":"prod"}'
 md compose doc.md --state '{name: "Alice", env: "prod"}'
 
+# Override values using --set
+md compose doc.md --set '{"name":"Bob"}'
+
+# Override values using shorthand setters
+md compose doc.md name=Bob iteration=1
+md compose - name=Alice draft=false
+
 # Include frontmatter in output
 md compose doc.md --frontmatter
 md compose doc.md --fm
@@ -36,11 +45,32 @@ md compose doc.md --output json
 
 # Show output via temp artifact
 md compose doc.md --show
+
+# Report shell commands that compose could execute, without running them
+md compose doc.md --shell
 ```
+
+### Shorthand Setter Syntax
+
+Positional arguments matching `key=value` are treated as override setters, equivalent to adding the key-value pair to `--set`. This provides a more ergonomic syntax for common overrides:
+
+```bash
+md compose doc.md iteration=1 draft=false name=Alice
+```
+
+**Value parsing**: Values are parsed as JSON5 with a string fallback. This means:
+- Numbers (`iteration=1`) and booleans (`draft=false`) are parsed as their native types
+- Objects and arrays can use JSON5 syntax: `meta={author:"Alice"}`
+- Unquoted strings are treated as literal strings: `name=Alice`
+- Empty values (`empty=`) resolve to an empty string
+
+**Key grammar**: Keys must match `[A-Za-z_][A-Za-z0-9_-]*`. Tokens with `/`, `:`, or other path-like characters in the key portion are treated as input paths rather than setters. This means `./foo=bar.md` is correctly classified as a file path.
+
+**Limitation**: Shorthand setters only set top-level keys. For nested paths, use `--set` with dot-notation or JSON objects.
 
 ### Arguments
 
-- `[INPUT]`: Markdown file path (supports `@` file references). Use `-` for stdin. If omitted, reads stdin when piped; otherwise errors.
+- `[ARGS]`: Positional arguments — an optional input file path followed by zero or more `key=value` setters. Use `-` for stdin. If no path is provided, reads stdin when piped; otherwise errors.
 
 ### Options
 
@@ -53,6 +83,7 @@ md compose doc.md --show
 - `--allow-missing-transclusions`: allow missing transclusion targets; the directive is removed from the output and issues are reported on stderr with exit code 0.
 - `--allow-any-missing-reference`: combines all `--allow-missing-*` flags.
 - `--allow-ctx-override`: allow non-object `ctx` frontmatter. By default, a document that defines `ctx` as a non-object (e.g., a string or array) causes a hard error. This flag downgrades the error to a warning, and the runtime context is used instead.
+- `--shell`: report shell commands discovered in the compose tree and exit without executing them. The report includes body `::shell` directives and top-level frontmatter `$(...)` shell expressions, including commands discovered through markdown transclusions.
 - `--perf`: emit a structured performance report to stderr after compose completes. The report includes both command-level timings (input loading, context capture, validation, option construction) and per-stage compose pipeline timings. The report is printed after any compose warnings and deferred validation issues.
 
 ### Compose Warnings
@@ -84,18 +115,21 @@ Compose warnings (context merge collisions, partial runtime capture failures, et
 - For markdown/auto: prints composed content and opens markdown artifact.
 - For html/json: opens artifact instead of printing to stdout.
 
-### State Merge Behavior
+### Precedence
 
-The `--state` flag provides **default values** for the document's frontmatter:
+Override values are applied in this order (highest priority last):
 
-- Null or missing frontmatter keys are filled in from `--state`.
-- Existing non-null frontmatter values are preserved (document wins).
-- Accepts both JSON and JSON5 (unquoted keys, trailing commas, comments).
+1. **Document frontmatter** — base values from the document itself
+2. **`--state`** — fills null/missing keys without overriding existing values
+3. **`--set`** — unconditional overwrite of matching keys
+4. **Shorthand `key=value`** — unconditional overwrite, highest CLI priority
+
+Shorthand setters are merged into the same `--set` override map. On key collision, the shorthand value wins.
 
 ```bash
-# Given frontmatter: { stage: "plan", feature: null }
-md compose doc.md --state '{feature: "auth", stage: "build"}'
-# Result: stage stays "plan" (existing), feature becomes "auth" (was null)
+# --state provides defaults, --set overrides, shorthand overrides both
+md compose doc.md --state '{"name":"Alice"}' --set '{"name":"Bob"}' name=Charlie
+# Result: name is "Charlie"
 ```
 
 ### Transform Context

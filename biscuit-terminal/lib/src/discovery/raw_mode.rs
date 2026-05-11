@@ -31,7 +31,18 @@ impl RawModeGuard {
     /// Enter raw mode on the given file descriptor.
     ///
     /// Disables canonical mode and echo. Sets VMIN=0 and VTIME=1 (100ms read timeout).
+    ///
+    /// ## Errors
+    ///
+    /// Returns `Err` if `tcgetattr` or `tcsetattr` fails. Also returns `Err` on WSL 1,
+    /// where `tcsetattr` reports success but the Windows console layer keeps stdin in
+    /// cooked mode — any subsequent `read()` would block until the user presses Enter.
+    /// Callers relying on this guard for a bounded probe should treat the error as a
+    /// signal to fall back to heuristic detection.
     pub fn new(fd: libc::c_int) -> Result<Self, String> {
+        if crate::discovery::os_detection::is_wsl1() {
+            return Err("WSL 1 does not honor raw-mode termios flags".into());
+        }
         let mut original: libc::termios = unsafe { std::mem::zeroed() };
         if unsafe { libc::tcgetattr(fd, &mut original) } != 0 {
             return Err("failed to get terminal attributes".into());

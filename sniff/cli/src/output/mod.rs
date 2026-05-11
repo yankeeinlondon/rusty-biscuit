@@ -4,19 +4,22 @@
 //! Each major section (OS, Hardware, Network, Filesystem, Programs, Services)
 //! has its own submodule.
 
+mod commit_blocks;
 mod filesystem;
 mod hardware;
 mod just;
 mod network;
+mod notification_helpers;
 mod os;
 mod programs;
+pub(crate) mod recent_commits;
 mod remote;
+mod render;
+pub(crate) mod repo_json;
 mod services;
 mod topics;
 
-use std::path::Path;
-
-use sniff::SniffResult;
+use sniff::{PerformanceReport, SniffResult};
 
 use crate::args::{DocsFilter, FilesFilter, RepoAction};
 
@@ -27,23 +30,29 @@ pub struct TextOutput {
 }
 
 pub use filesystem::{
-    PathListFormat, render_docs_output, render_git_file_list, render_git_section,
-    render_hash_section, render_path_list,
+    PathListFormat, render_docs_output, render_git_section, render_hash_section, render_path_list,
 };
 pub use just::{filter_justfiles_for_json, render_just_text};
-pub use programs::{print_programs_json, render_programs_markdown};
-pub use remote::{print_remote_json, render_remote_text};
+pub use notification_helpers::{
+    print_notification_helpers_json, render_notification_helpers_markdown,
+};
+pub use programs::{build_programs_json, render_programs_markdown};
+pub use remote::{
+    print_remote_json, render_pull_requests_empty, render_pull_requests_table,
+    render_pull_requests_verbose, render_remote_text,
+};
 pub use services::{print_services_json, render_services_text};
 pub use topics::render_topics_table;
 
 // Re-export types needed by submodules
 pub(crate) use filesystem::{
-    print_current_package_area_dirty, print_package_area_has_source_code_changes,
-    render_dirty_package_areas, render_dirty_packages, render_files_section,
-    render_filesystem_section, render_language_section, render_repo_deps_text,
-    render_repo_deps_visual, render_repo_package, render_repo_package_area,
-    render_repo_package_area_root, render_repo_package_root, render_repo_packages,
-    render_repo_root, render_repo_section, render_staged_package_areas, render_staged_packages,
+    collect_repo_package_area_names, collect_repo_package_names, print_current_package_area_dirty,
+    print_package_area_has_source_code_changes, render_dirty_package_areas, render_dirty_packages,
+    render_files_section, render_filesystem_section, render_language_section,
+    render_repo_deps_text, render_repo_deps_visual, render_repo_language, render_repo_package,
+    render_repo_package_area, render_repo_package_area_root, render_repo_package_areas_formatted,
+    render_repo_package_root, render_repo_packages_formatted, render_repo_root,
+    render_repo_section, render_staged_package_areas, render_staged_packages,
     render_unstaged_package_areas, render_unstaged_packages,
 };
 pub(crate) use hardware::{
@@ -83,8 +92,6 @@ pub enum OutputFilter {
     AudioDevices,
     /// Show only repo/monorepo info (filesystem subsection, flattened in JSON)
     Repo,
-    /// Show only language detection (filesystem subsection, flattened in JSON)
-    Language,
     /// Show only broad file associations (filesystem subsection, flattened in JSON)
     Files,
     /// Show only markdown document metadata (filesystem subsection, flattened in JSON)
@@ -107,6 +114,8 @@ pub enum OutputFilter {
     HeadlessAudio,
     /// Show only AI CLI tools (programs subsection)
     AiClients,
+    /// Show only desktop notification helpers (programs subsection)
+    NotificationHelpers,
     /// Show only system services (init system and service list)
     Services,
     /// Show justfiles and their recipes
@@ -119,89 +128,8 @@ pub enum OutputFilter {
 // Shared utility functions
 // ============================================================================
 
-/// Format bytes into human-readable units (KB, MB, GB, TB)
-pub(crate) fn format_bytes(bytes: u64) -> String {
-    const KB: u64 = 1024;
-    const MB: u64 = KB * 1024;
-    const GB: u64 = MB * 1024;
-    const TB: u64 = GB * 1024;
-
-    if bytes >= TB {
-        format!("{:.1} TB", bytes as f64 / TB as f64)
-    } else if bytes >= GB {
-        format!("{:.1} GB", bytes as f64 / GB as f64)
-    } else if bytes >= MB {
-        format!("{:.1} MB", bytes as f64 / MB as f64)
-    } else if bytes >= KB {
-        format!("{:.1} KB", bytes as f64 / KB as f64)
-    } else {
-        format!("{} bytes", bytes)
-    }
-}
-
-/// Format large numbers with comma separators
-pub(crate) fn format_number(n: usize) -> String {
-    let s = n.to_string();
-    let mut result = String::new();
-    for (i, c) in s.chars().rev().enumerate() {
-        if i > 0 && i % 3 == 0 {
-            result.insert(0, ',');
-        }
-        result.insert(0, c);
-    }
-    result
-}
-
-/// Convert absolute path to relative path from repo root
-pub(crate) fn relative_path(path: &Path, repo_root: Option<&Path>) -> String {
-    if let Some(root) = repo_root
-        && let Ok(rel) = path.strip_prefix(root)
-    {
-        return rel.display().to_string();
-    }
-    path.display().to_string()
-}
-
-/// Format uptime in seconds to a human-readable string
-pub(crate) fn format_uptime(seconds: u64) -> String {
-    let days = seconds / 86400;
-    let hours = (seconds % 86400) / 3600;
-    let minutes = (seconds % 3600) / 60;
-    let secs = seconds % 60;
-
-    let mut parts = Vec::new();
-
-    if days > 0 {
-        parts.push(format!("{} day{}", days, if days == 1 { "" } else { "s" }));
-    }
-    if hours > 0 {
-        parts.push(format!(
-            "{} hour{}",
-            hours,
-            if hours == 1 { "" } else { "s" }
-        ));
-    }
-    if minutes > 0 || (days == 0 && hours == 0 && secs == 0) {
-        parts.push(format!(
-            "{} minute{}",
-            minutes,
-            if minutes == 1 { "" } else { "s" }
-        ));
-    }
-    if secs > 0 && days == 0 && hours == 0 {
-        parts.push(format!(
-            "{} second{}",
-            secs,
-            if secs == 1 { "" } else { "s" }
-        ));
-    }
-
-    if parts.is_empty() {
-        "0 seconds".to_string()
-    } else {
-        parts.join(", ")
-    }
-}
+pub use render::render_performance_section;
+pub(crate) use render::{format_bytes, format_number, format_uptime, relative_path};
 
 // ============================================================================
 // Docs filtering
@@ -388,83 +316,146 @@ pub fn render_text(
         }
         OutputFilter::Repo => {
             match repo_action {
-                Some(RepoAction::Package) => {
-                    let rendered = render_repo_package(result, base_dir, verbose);
+                Some(RepoAction::Package { .. }) => {
+                    unreachable!("Package is handled as an early return in commands.rs")
+                }
+                Some(RepoAction::PackageArea { .. }) => {
+                    unreachable!("PackageArea is handled as an early return in commands.rs")
+                }
+                Some(RepoAction::Worktree { .. }) => {
+                    unreachable!("Worktree is handled as an early return in commands.rs")
+                }
+                Some(RepoAction::Packages { .. }) => {
+                    unreachable!("Packages is handled as an early return in commands.rs")
+                }
+                Some(RepoAction::PackageAreas { .. }) => {
+                    unreachable!("PackageAreas is handled as an early return in commands.rs")
+                }
+                Some(RepoAction::DirtyPackages {
+                    filter,
+                    package,
+                    package_area,
+                }) => {
+                    let rendered = render_dirty_packages(
+                        result,
+                        filter,
+                        package.as_deref(),
+                        package_area.as_deref(),
+                    );
                     if rendered.is_empty() {
                         std::process::exit(1);
                     }
                     out.push_str(&rendered);
                     out.push('\n');
                 }
-                Some(RepoAction::PackageArea) => {
-                    let rendered = render_repo_package_area(result, base_dir);
+                Some(RepoAction::DirtyPackageAreas {
+                    filter,
+                    package,
+                    package_area,
+                }) => {
+                    let rendered = render_dirty_package_areas(
+                        result,
+                        filter,
+                        package.as_deref(),
+                        package_area.as_deref(),
+                    );
                     if rendered.is_empty() {
                         std::process::exit(1);
                     }
                     out.push_str(&rendered);
                     out.push('\n');
                 }
-                Some(RepoAction::Packages { filter }) => {
-                    let rendered = render_repo_packages(result, filter);
-                    out.push_str(&rendered);
-                    out.push('\n');
-                }
-                Some(RepoAction::DirtyPackages { filter }) => {
-                    let rendered = render_dirty_packages(result, filter);
+                Some(RepoAction::StagedPackages {
+                    filter,
+                    package,
+                    package_area,
+                }) => {
+                    let rendered = render_staged_packages(
+                        result,
+                        filter,
+                        package.as_deref(),
+                        package_area.as_deref(),
+                    );
                     if rendered.is_empty() {
                         std::process::exit(1);
                     }
                     out.push_str(&rendered);
                     out.push('\n');
                 }
-                Some(RepoAction::DirtyPackageAreas { filter }) => {
-                    let rendered = render_dirty_package_areas(result, filter);
+                Some(RepoAction::StagedPackageAreas {
+                    filter,
+                    package,
+                    package_area,
+                }) => {
+                    let rendered = render_staged_package_areas(
+                        result,
+                        filter,
+                        package.as_deref(),
+                        package_area.as_deref(),
+                    );
                     if rendered.is_empty() {
                         std::process::exit(1);
                     }
                     out.push_str(&rendered);
                     out.push('\n');
                 }
-                Some(RepoAction::StagedPackages { filter }) => {
-                    let rendered = render_staged_packages(result, filter);
+                Some(RepoAction::UnstagedPackages {
+                    filter,
+                    package,
+                    package_area,
+                }) => {
+                    let rendered = render_unstaged_packages(
+                        result,
+                        filter,
+                        package.as_deref(),
+                        package_area.as_deref(),
+                    );
                     if rendered.is_empty() {
                         std::process::exit(1);
                     }
                     out.push_str(&rendered);
                     out.push('\n');
                 }
-                Some(RepoAction::StagedPackageAreas { filter }) => {
-                    let rendered = render_staged_package_areas(result, filter);
+                Some(RepoAction::UnstagedPackageAreas {
+                    filter,
+                    package,
+                    package_area,
+                }) => {
+                    let rendered = render_unstaged_package_areas(
+                        result,
+                        filter,
+                        package.as_deref(),
+                        package_area.as_deref(),
+                    );
                     if rendered.is_empty() {
                         std::process::exit(1);
                     }
                     out.push_str(&rendered);
                     out.push('\n');
                 }
-                Some(RepoAction::UnstagedPackages { filter }) => {
-                    let rendered = render_unstaged_packages(result, filter);
-                    if rendered.is_empty() {
-                        std::process::exit(1);
-                    }
-                    out.push_str(&rendered);
-                    out.push('\n');
-                }
-                Some(RepoAction::UnstagedPackageAreas { filter }) => {
-                    let rendered = render_unstaged_package_areas(result, filter);
-                    if rendered.is_empty() {
-                        std::process::exit(1);
-                    }
-                    out.push_str(&rendered);
-                    out.push('\n');
-                }
-                Some(RepoAction::Deps { ui, filter }) => {
+                Some(RepoAction::Deps {
+                    ui,
+                    filter,
+                    package,
+                    package_area,
+                }) => {
                     if let Some(ref filesystem) = result.filesystem
                         && let Some(ref repo) = filesystem.repo
                     {
                         if *ui {
-                            out.push_str(&render_repo_deps_visual(repo, filter));
+                            out.push_str(&render_repo_deps_visual(
+                                repo,
+                                filter,
+                                package.as_deref(),
+                                package_area.as_deref(),
+                            ));
                         } else {
-                            out.push_str(&render_repo_deps_text(repo, filter));
+                            out.push_str(&render_repo_deps_text(
+                                repo,
+                                filter,
+                                package.as_deref(),
+                                package_area.as_deref(),
+                            ));
                         }
                     }
                 }
@@ -500,14 +491,31 @@ pub fn render_text(
                     // Side-effect only: calls std::process::exit
                     print_package_area_has_source_code_changes(result, base_dir, verbose);
                 }
-                Some(RepoAction::GitStatus { .. }) => {
+                Some(RepoAction::GitStatus { compact, .. }) => {
                     if let Some(ref filesystem) = result.filesystem
                         && let Some(ref git) = filesystem.git
                     {
-                        out.push_str(&render_git_section(git, history_count, verbose));
+                        out.push_str(&render_git_section(git, history_count, verbose, *compact));
                     }
                 }
-                Some(RepoAction::Structure { filter, .. }) => {
+                Some(RepoAction::Language { breakdown: true }) => {
+                    out.push_str(&render_language_section(result, verbose, base_dir));
+                }
+                Some(RepoAction::Language { breakdown: false }) => {
+                    let rendered = render_repo_language(result, base_dir);
+                    if rendered.is_empty() {
+                        // Mirror locator family: empty == not detected → exit 1, no stdout.
+                        // JSON path emits `{ "language": null }` with the same exit code.
+                        std::process::exit(1);
+                    }
+                    out.push_str(&rendered);
+                }
+                Some(RepoAction::Structure {
+                    filter,
+                    package,
+                    package_area,
+                    ..
+                }) => {
                     if let Some(ref filesystem) = result.filesystem
                         && let Some(ref repo) = filesystem.repo
                     {
@@ -516,6 +524,8 @@ pub fn render_text(
                             verbose,
                             repo_root,
                             filter,
+                            package.as_deref(),
+                            package_area.as_deref(),
                             latest_versions_requested,
                         ));
                     }
@@ -529,6 +539,8 @@ pub fn render_text(
                             verbose,
                             repo_root,
                             &[],
+                            None,
+                            None,
                             latest_versions_requested,
                         ));
                     }
@@ -537,13 +549,6 @@ pub fn render_text(
                     // Hash, Remote, StagedFiles, UnstagedFiles, UntrackedFiles
                     // are handled as early returns in commands.rs
                 }
-            }
-        }
-        OutputFilter::Language => {
-            if let Some(ref filesystem) = result.filesystem
-                && let Some(ref langs) = filesystem.languages
-            {
-                out.push_str(&render_language_section(langs, verbose));
             }
         }
         OutputFilter::Files => {
@@ -574,6 +579,7 @@ pub fn render_text(
         | OutputFilter::TerminalApps
         | OutputFilter::HeadlessAudio
         | OutputFilter::AiClients
+        | OutputFilter::NotificationHelpers
         | OutputFilter::Services
         | OutputFilter::Just
         | OutputFilter::BlastRadius => {
@@ -593,15 +599,23 @@ pub fn render_text(
 ///
 /// For subsection filters (--cpu, --gpu, --memory, --storage, --git, --repo, --language),
 /// the output is flattened to the top level without the parent container.
+///
+/// ## Returns
+///
+/// A tuple of `(value, exit_code)`. `exit_code` is `None` for almost every
+/// filter; only the boolean / locator repo-action arms set it (so the caller
+/// can `std::process::exit(code)` after the JSON is flushed).
 fn apply_filter_to_json(
     result: &SniffResult,
     filter: OutputFilter,
     docs_filter: &DocsFilter,
     files_filter: &FilesFilter,
-) -> serde_json::Value {
+    repo_action: Option<&RepoAction>,
+    base_dir: Option<&std::path::Path>,
+) -> (serde_json::Value, Option<i32>) {
     use serde_json::{Value, json};
 
-    match filter {
+    let value = match filter {
         OutputFilter::All => {
             // No filtering - serialize everything
             serde_json::to_value(result).unwrap_or(Value::Null)
@@ -679,20 +693,11 @@ fn apply_filter_to_json(
             }
         }
         OutputFilter::Repo => {
-            // Flatten: return repo data at top level
-            if let Some(ref fs) = result.filesystem {
-                serde_json::to_value(&fs.repo).unwrap_or(Value::Null)
-            } else {
-                json!({})
-            }
-        }
-        OutputFilter::Language => {
-            // Flatten: return languages data at top level
-            if let Some(ref fs) = result.filesystem {
-                serde_json::to_value(&fs.languages).unwrap_or(Value::Null)
-            } else {
-                json!({})
-            }
+            // Dispatch on RepoAction so each subcommand can return a focused
+            // JSON shape. Locator and boolean families also surface an
+            // explicit exit code; we capture both and return-early below.
+            let outcome = repo_json::build_with_outcome(result, repo_action, base_dir);
+            return (outcome.value, outcome.exit_code);
         }
         OutputFilter::Files => {
             if let Some(ref fs) = result.filesystem
@@ -725,6 +730,7 @@ fn apply_filter_to_json(
         | OutputFilter::TerminalApps
         | OutputFilter::HeadlessAudio
         | OutputFilter::AiClients
+        | OutputFilter::NotificationHelpers
         | OutputFilter::Services
         | OutputFilter::Just
         | OutputFilter::BlastRadius => {
@@ -732,23 +738,86 @@ fn apply_filter_to_json(
                 "Programs, Services, Just, and BlastRadius filters should be handled separately"
             )
         }
+    };
+    (value, None)
+}
+
+pub fn attach_performance(
+    mut filtered_json: serde_json::Value,
+    performance: &PerformanceReport,
+) -> serde_json::Value {
+    let performance_json = serde_json::to_value(performance).unwrap_or(serde_json::Value::Null);
+    match &mut filtered_json {
+        serde_json::Value::Object(map) => {
+            map.insert("performance".to_string(), performance_json);
+            filtered_json
+        }
+        _ => serde_json::json!({
+            "data": filtered_json,
+            "performance": performance_json,
+        }),
     }
 }
 
+fn attach_performance_from_result(
+    filtered_json: serde_json::Value,
+    result: &SniffResult,
+) -> serde_json::Value {
+    match result.performance.as_ref() {
+        Some(perf) => attach_performance(filtered_json, perf),
+        None => filtered_json,
+    }
+}
+
+/// Print a JSON value to stdout, optionally injecting performance data.
+///
+/// When `performance` is `Some`, the data is injected into the JSON value
+/// (as a sibling field for objects, or wrapped as `{ data, performance }`
+/// for non-objects), matching the behavior of [`attach_performance`].
+pub fn print_json_value(value: serde_json::Value, performance: Option<&PerformanceReport>) {
+    let output = match performance {
+        Some(perf) => attach_performance(value, perf),
+        None => value,
+    };
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&output).unwrap_or_default()
+    );
+}
+
+/// Print a filtered JSON view of `result` to stdout.
+///
+/// ## Returns
+///
+/// `Ok(Some(code))` when the underlying repo-action JSON wants the process
+/// to exit with `code` after stdout has been flushed (boolean and locator
+/// families). `Ok(None)` when no special exit code is needed and the caller
+/// can return normally from `main`.
 pub fn print_json(
     result: &SniffResult,
     filter: OutputFilter,
     docs_filter: &DocsFilter,
     files_filter: &FilesFilter,
-) -> serde_json::Result<()> {
-    let filtered_json = apply_filter_to_json(result, filter, docs_filter, files_filter);
-    println!("{}", serde_json::to_string_pretty(&filtered_json)?);
-    Ok(())
+    repo_action: Option<&RepoAction>,
+    base_dir: Option<&std::path::Path>,
+) -> serde_json::Result<Option<i32>> {
+    let (filtered, exit_code) = apply_filter_to_json(
+        result,
+        filter,
+        docs_filter,
+        files_filter,
+        repo_action,
+        base_dir,
+    );
+    let with_perf = attach_performance_from_result(filtered, result);
+    println!("{}", serde_json::to_string_pretty(&with_perf)?);
+    Ok(exit_code)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use sniff::{PerformanceReport, performance::PerformanceStage};
 
     mod docs_filter {
         use super::*;
@@ -984,48 +1053,49 @@ mod tests {
     }
 
     #[test]
-    fn test_format_uptime_zero() {
-        assert_eq!(format_uptime(0), "0 minutes");
+    fn attach_performance_to_object_filter_output() {
+        let result = SniffResult {
+            os: None,
+            hardware: None,
+            network: None,
+            filesystem: None,
+            performance: Some(PerformanceReport {
+                total_duration_ms: 12.5,
+                stages: std::collections::BTreeMap::from([(
+                    "detect.total".to_string(),
+                    PerformanceStage {
+                        calls: 1,
+                        total_duration_ms: 12.5,
+                        max_duration_ms: 12.5,
+                        last_duration_ms: 12.5,
+                    },
+                )]),
+                counters: std::collections::BTreeMap::from([("files".to_string(), 3)]),
+            }),
+        };
+
+        let filtered =
+            attach_performance_from_result(serde_json::json!({"name": "sniff"}), &result);
+        assert_eq!(filtered["name"], "sniff");
+        assert_eq!(filtered["performance"]["total_duration_ms"], 12.5);
     }
 
     #[test]
-    fn test_format_uptime_seconds() {
-        assert_eq!(format_uptime(30), "30 seconds");
-        assert_eq!(format_uptime(1), "1 second");
-    }
+    fn attach_performance_wraps_non_object_output() {
+        let result = SniffResult {
+            os: None,
+            hardware: None,
+            network: None,
+            filesystem: None,
+            performance: Some(PerformanceReport {
+                total_duration_ms: 8.0,
+                stages: std::collections::BTreeMap::new(),
+                counters: std::collections::BTreeMap::from([("files".to_string(), 2)]),
+            }),
+        };
 
-    #[test]
-    fn test_format_uptime_minutes() {
-        assert_eq!(format_uptime(60), "1 minute");
-        assert_eq!(format_uptime(120), "2 minutes");
-        assert_eq!(format_uptime(90), "1 minute, 30 seconds");
-    }
-
-    #[test]
-    fn test_format_uptime_hours() {
-        assert_eq!(format_uptime(3600), "1 hour");
-        assert_eq!(format_uptime(3660), "1 hour, 1 minute");
-        assert_eq!(format_uptime(7200), "2 hours");
-        assert_eq!(format_uptime(7320), "2 hours, 2 minutes");
-    }
-
-    #[test]
-    fn test_format_uptime_days() {
-        assert_eq!(format_uptime(86400), "1 day");
-        assert_eq!(format_uptime(86400 + 3600), "1 day, 1 hour");
-        assert_eq!(format_uptime(86400 + 3660), "1 day, 1 hour, 1 minute");
-        assert_eq!(
-            format_uptime(2 * 86400 + 5 * 3600 + 30 * 60),
-            "2 days, 5 hours, 30 minutes"
-        );
-    }
-
-    #[test]
-    fn test_format_uptime_long() {
-        // 16 days, 13 hours, 26 minutes
-        assert_eq!(
-            format_uptime(16 * 86400 + 13 * 3600 + 26 * 60),
-            "16 days, 13 hours, 26 minutes"
-        );
+        let filtered = attach_performance_from_result(serde_json::json!(["a", "b"]), &result);
+        assert_eq!(filtered["data"], serde_json::json!(["a", "b"]));
+        assert_eq!(filtered["performance"]["counters"]["files"], 2);
     }
 }

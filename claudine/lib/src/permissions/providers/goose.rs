@@ -1,9 +1,8 @@
-use std::fs;
-
+use async_trait::async_trait;
 use biscuit_file::serde_yaml_ng;
+use tokio::fs;
 
 use crate::error::{ClaudineError, Result};
-use crate::events::Provider;
 use crate::permissions::backend::{BackendCapabilities, BackendFidelity, ProviderPolicyBackend};
 use crate::permissions::canonical::{
     CanonicalPolicy, CanonicalRuleProvenance, PathProtectionRule, PolicyMode, PolicyWarning,
@@ -14,6 +13,7 @@ use crate::permissions::mutation::PolicyMutationPlan;
 use crate::permissions::native::{
     NativeEffectivePolicy, NativePolicyLayer, PolicySource, PolicySourceKind, ProviderCliOverrides,
 };
+use crate::provider::Provider;
 
 #[derive(Debug, Clone)]
 enum GooseLayerData {
@@ -32,6 +32,7 @@ struct GooseState {
 #[derive(Debug, Default)]
 pub(crate) struct GoosePolicyBackend;
 
+#[async_trait]
 impl ProviderPolicyBackend for GoosePolicyBackend {
     fn provider(&self) -> Provider {
         Provider::Goose
@@ -50,7 +51,7 @@ impl ProviderPolicyBackend for GoosePolicyBackend {
         }
     }
 
-    fn discover_sources(&self, ctx: &PolicyContext) -> Result<Vec<PolicySource>> {
+    async fn discover_sources(&self, ctx: &PolicyContext) -> Result<Vec<PolicySource>> {
         let mut sources = Vec::new();
         if let Some(home) = &ctx.home_dir {
             for (id, rel, precedence) in [
@@ -58,7 +59,7 @@ impl ProviderPolicyBackend for GoosePolicyBackend {
                 ("goose-permissions", ".config/goose/permission.yaml", 41),
             ] {
                 let path = home.join(rel);
-                if path.exists() {
+                if fs::try_exists(&path).await.unwrap_or(false) {
                     sources.push(PolicySource {
                         id: id.to_owned(),
                         kind: PolicySourceKind::UserConfig,
@@ -73,7 +74,7 @@ impl ProviderPolicyBackend for GoosePolicyBackend {
         Ok(sources)
     }
 
-    fn load_native_layers(
+    async fn load_native_layers(
         &self,
         _ctx: &PolicyContext,
         sources: &[PolicySource],
@@ -86,7 +87,7 @@ impl ProviderPolicyBackend for GoosePolicyBackend {
                     source.id
                 ))
             })?;
-            let content = fs::read_to_string(path)?;
+            let content = fs::read_to_string(path).await?;
             let parsed: serde_yaml_ng::Value =
                 serde_yaml_ng::from_str(&content).map_err(|error| {
                     ClaudineError::PolicyNativeParse {
@@ -164,7 +165,7 @@ impl ProviderPolicyBackend for GoosePolicyBackend {
         ))
     }
 
-    fn canonicalize(
+    async fn canonicalize(
         &self,
         _ctx: &PolicyContext,
         native: &NativeEffectivePolicy,
@@ -214,7 +215,7 @@ impl ProviderPolicyBackend for GoosePolicyBackend {
         Ok(policy)
     }
 
-    fn plan_change(
+    async fn plan_change(
         &self,
         _ctx: &PolicyContext,
         _current: &NativeEffectivePolicy,
@@ -231,19 +232,23 @@ impl ProviderPolicyBackend for GoosePolicyBackend {
 mod tests {
     use super::*;
 
-    #[test]
-    fn goose_backend_returns_partial_snapshot_instead_of_missing_backend() {
+    #[tokio::test]
+    async fn goose_backend_returns_partial_snapshot_instead_of_missing_backend() {
         let dir = tempfile::tempdir().unwrap();
         let home = dir.path().join("home");
-        fs::create_dir_all(home.join(".config/goose")).unwrap();
-        fs::write(home.join(".config/goose/config.yaml"), "provider: openai\n").unwrap();
+        tokio::fs::create_dir_all(home.join(".config/goose"))
+            .await
+            .unwrap();
+        tokio::fs::write(home.join(".config/goose/config.yaml"), "provider: openai\n")
+            .await
+            .unwrap();
 
         let ctx = PolicyContext::new(dir.path().join("repo")).with_home_dir(home);
         let backend = GoosePolicyBackend;
-        let sources = backend.discover_sources(&ctx).unwrap();
-        let layers = backend.load_native_layers(&ctx, &sources).unwrap();
+        let sources = backend.discover_sources(&ctx).await.unwrap();
+        let layers = backend.load_native_layers(&ctx, &sources).await.unwrap();
         let native = backend.compose_native_policy(&ctx, &layers, None).unwrap();
-        let canonical = backend.canonicalize(&ctx, &native).unwrap();
+        let canonical = backend.canonicalize(&ctx, &native).await.unwrap();
 
         assert_eq!(canonical.provider, Provider::Goose);
         assert!(!canonical.warnings.is_empty());

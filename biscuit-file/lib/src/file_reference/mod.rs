@@ -28,6 +28,83 @@ use std::path::{Path, PathBuf};
 
 pub use error::FileReferenceError;
 
+/// Entry form for a partial completion token.
+///
+/// Corresponds to the subset of [`ReferenceKind`] variants that
+/// [`FileReference::complete_partial`] supports.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CompletionEntryForm {
+    /// `@`-prefixed magic path. Roots are the enclosing git root and the
+    /// user's home directory.
+    Magic,
+    /// Bare implicit-relative path. Roots are the caller-provided base
+    /// directory and its enclosing git root (when distinct).
+    ImplicitRelative,
+}
+
+/// Expansion of a partial completion token.
+///
+/// Returned by [`FileReference::complete_partial`] for tokens in the two
+/// supported entry forms. Exposes the absolute directories a completion
+/// consumer should enumerate, the partial filename being matched, and the
+/// prefix the shell will re-insert in front of each emitted candidate.
+#[derive(Debug, Clone)]
+pub struct PartialCompletion {
+    entry_form: CompletionEntryForm,
+    roots: Vec<PathBuf>,
+    active_segment: String,
+    rendered_prefix: String,
+}
+
+impl PartialCompletion {
+    /// The classified entry form of the token.
+    pub fn entry_form(&self) -> CompletionEntryForm {
+        self.entry_form
+    }
+
+    /// Absolute directories the caller should enumerate candidates from.
+    ///
+    /// Each root already has the scope (everything before the active
+    /// segment) appended. Callers should not assume these directories
+    /// exist on the filesystem; non-existent roots should simply yield
+    /// no candidates.
+    pub fn roots(&self) -> &[PathBuf] {
+        &self.roots
+    }
+
+    /// The partial filename after the last `/` in the token.
+    ///
+    /// Empty for tokens that end with `/` or for the bare-sigil token `@`.
+    pub fn active_segment(&self) -> &str {
+        &self.active_segment
+    }
+
+    /// The string to render before each matched filename in the emitted
+    /// completion candidate.
+    ///
+    /// For `Magic` tokens this preserves the leading `@` and the scope
+    /// (e.g. `@prompts/`); for `ImplicitRelative` tokens it is just the
+    /// scope (e.g. `prompts/`), and may be empty when the user has typed
+    /// no `/`.
+    pub fn rendered_prefix(&self) -> &str {
+        &self.rendered_prefix
+    }
+}
+
+pub(crate) fn make_partial_completion(
+    entry_form: CompletionEntryForm,
+    roots: Vec<PathBuf>,
+    active_segment: String,
+    rendered_prefix: String,
+) -> PartialCompletion {
+    PartialCompletion {
+        entry_form,
+        roots,
+        active_segment,
+        rendered_prefix,
+    }
+}
+
 /// Position for magic path insertion.
 ///
 /// ## Examples
@@ -184,6 +261,49 @@ impl FileReference {
         resolve::resolve(&self.parsed, &self.magic_paths, &self.vault_roots, &ctx)
     }
 
+    /// Expand a partial completion token into its implied roots and segments.
+    ///
+    /// Given a (possibly incomplete) reference string like `@prompts/p` and
+    /// a base directory, returns the absolute roots a completion consumer
+    /// should enumerate, the active segment (partial filename after the
+    /// last `/`), and the prefix the shell will insert in front of each
+    /// candidate.
+    ///
+    /// Only two entry forms are supported: `@`-prefixed magic paths and
+    /// implicit-relative paths. All other forms (`!`, `/`, `./`, `../`,
+    /// `vault:`, `%`, `{{...}}`) return `Ok(None)` so callers can cleanly
+    /// opt out rather than silently re-interpret them.
+    ///
+    /// Resolution rules:
+    ///
+    /// - Path-separator reset: the active segment is the portion after the
+    ///   last `/`. Everything up to and including that `/` is the
+    ///   "scope", which is appended to each implied root.
+    /// - Magic form: roots are `{git_root, home_dir}` (in that order),
+    ///   each with the scope appended.
+    /// - Implicit relative: roots are `{base, git_root}` (distinct), each
+    ///   with the scope appended.
+    ///
+    /// Markdown filtering, ranking, and typed-length policy are not
+    /// applied here -- they are the caller's responsibility.
+    ///
+    /// ## Returns
+    ///
+    /// - `Ok(Some(completion))` -- the token is completable
+    /// - `Ok(None)` -- the token uses an unsupported entry form
+    ///
+    /// ## Errors
+    ///
+    /// Returns an error only if the caller passes a relative `base` and
+    /// the ambient CWD cannot be read, or if git discovery itself fails.
+    /// A missing git repository is **not** an error.
+    pub fn complete_partial(
+        token: &str,
+        base: &Path,
+    ) -> Result<Option<PartialCompletion>, FileReferenceError> {
+        resolve::complete_partial(token, base)
+    }
+
     /// Resolve the reference and return a path relative to `base`.
     ///
     /// If `base` is `None`, the current working directory is used.
@@ -235,6 +355,7 @@ pub(crate) struct ParsedReference {
 #[derive(Debug, Clone)]
 pub(crate) enum ReferenceKind {
     Relative(PathTemplate),
+    ImplicitRelative(PathTemplate),
     Absolute(PathTemplate),
     Magic(PathTemplate),
     Package(PathTemplate),
@@ -245,6 +366,7 @@ impl ReferenceKind {
     pub(crate) fn template(&self) -> &PathTemplate {
         match self {
             Self::Relative(t)
+            | Self::ImplicitRelative(t)
             | Self::Absolute(t)
             | Self::Magic(t)
             | Self::Package(t)

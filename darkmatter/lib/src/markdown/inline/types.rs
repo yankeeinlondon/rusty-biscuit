@@ -25,17 +25,36 @@ pub enum InlineTag {
     /// Renders as `<mark>` in HTML or with a yellow background in terminal.
     /// This syntax is supported by popular editors like Obsidian and Typora.
     Mark,
+
+    /// Dim/faint text (`⌄text⌄`).
+    ///
+    /// Terminal-first dim syntax that maps to ANSI SGR `2` when supported.
+    /// Falls back to plain text in terminals without dim support.
+    /// HTML output preserves the `⌄` delimiters as literal characters.
+    Dim,
     // Future extensions:
     // Underline,    // __text__ or ++text++
     // Subscript,    // ~text~
     // Superscript,  // ^text^
 }
 
+/// Attributes for horizontal rule with custom styling.
+#[derive(Debug, Clone, PartialEq, Default, serde::Deserialize)]
+pub struct HorizontalRuleAttrs {
+    pub style: Option<String>,
+    pub alignment: Option<String>,
+    pub weight: Option<String>,
+    pub width: Option<String>,
+    pub color: Option<String>,
+}
+
 /// Wrapper for pulldown-cmark events with custom inline extensions.
 ///
 /// This enum wraps standard pulldown-cmark events while adding support
-/// for custom inline tags. It allows the `MarkProcessor` iterator adapter
-/// to emit both standard and custom events in a unified stream.
+/// for custom inline tags. It allows the [`InlineStyleProcessor`] iterator
+/// adapter to emit both standard and custom events in a unified stream.
+///
+/// [`InlineStyleProcessor`]: super::InlineStyleProcessor
 ///
 /// ## Examples
 ///
@@ -62,6 +81,9 @@ pub enum InlineEvent<'a> {
 
     /// End of a custom inline tag.
     End(InlineTag),
+
+    /// Horizontal rule with attributes.
+    HorizontalRule(HorizontalRuleAttrs),
 }
 
 impl<'a> From<Event<'a>> for InlineEvent<'a> {
@@ -89,6 +111,12 @@ impl InlineEvent<'_> {
         matches!(self, InlineEvent::End(_))
     }
 
+    /// Returns `true` if this is a horizontal rule event.
+    #[inline]
+    pub fn is_horizontal_rule(&self) -> bool {
+        matches!(self, InlineEvent::HorizontalRule(_))
+    }
+
     /// Returns the inner standard event if this is a Standard variant.
     pub fn as_standard(&self) -> Option<&Event<'_>> {
         match self {
@@ -101,7 +129,15 @@ impl InlineEvent<'_> {
     pub fn inline_tag(&self) -> Option<InlineTag> {
         match self {
             InlineEvent::Start(tag) | InlineEvent::End(tag) => Some(*tag),
-            InlineEvent::Standard(_) => None,
+            InlineEvent::Standard(_) | InlineEvent::HorizontalRule(_) => None,
+        }
+    }
+
+    /// Returns the horizontal rule attributes if this is a HorizontalRule variant.
+    pub fn horizontal_rule_attrs(&self) -> Option<&HorizontalRuleAttrs> {
+        match self {
+            InlineEvent::HorizontalRule(attrs) => Some(attrs),
+            _ => None,
         }
     }
 }
@@ -177,5 +213,42 @@ mod tests {
 
         let end = InlineEvent::End(InlineTag::Mark);
         assert_eq!(end.inline_tag(), Some(InlineTag::Mark));
+    }
+
+    #[test]
+    fn test_inline_tag_dim_debug() {
+        let tag = InlineTag::Dim;
+        assert_eq!(format!("{:?}", tag), "Dim");
+    }
+
+    #[test]
+    fn test_inline_tag_dim_equality() {
+        assert_eq!(InlineTag::Dim, InlineTag::Dim);
+        assert_ne!(InlineTag::Dim, InlineTag::Mark);
+    }
+
+    #[test]
+    fn test_inline_tag_dim_clone() {
+        let tag = InlineTag::Dim;
+        let cloned = tag;
+        assert_eq!(tag, cloned);
+    }
+
+    #[test]
+    fn test_inline_event_start_dim() {
+        let event = InlineEvent::Start(InlineTag::Dim);
+        assert!(!event.is_standard());
+        assert!(event.is_start());
+        assert!(!event.is_end());
+        assert_eq!(event.inline_tag(), Some(InlineTag::Dim));
+    }
+
+    #[test]
+    fn test_inline_event_end_dim() {
+        let event = InlineEvent::End(InlineTag::Dim);
+        assert!(!event.is_standard());
+        assert!(!event.is_start());
+        assert!(event.is_end());
+        assert_eq!(event.inline_tag(), Some(InlineTag::Dim));
     }
 }

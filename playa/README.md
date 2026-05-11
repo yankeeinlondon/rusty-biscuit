@@ -31,12 +31,29 @@ You can build and install the CLI binary by running:
 just install
 ```
 
-> **Note**: on Linux (or WSL) you will want to make sure you have both the ALSA library and the `pkgconfig` application:
+This installs the portable default build. It works on macOS, Linux, and WSL without any platform-specific install-time feature detection.
+The Linux-specific native event-audio backend is opt-in.
+
+> **Linux native audio opt-in**: if you want the Linux `sfx-native-linux` backend, install ALSA and PulseAudio development libraries plus `pkg-config`:
 > 
 > ```sh
 > # debian/ubuntu distros
-> sudo apt install just pkg-config libasound2-dev 
+> sudo apt install just pkg-config libasound2-dev libpulse-dev
 > ```
+>
+> Then install with either:
+>
+> ```sh
+> just install-linux-native
+> ```
+>
+> or:
+>
+> ```sh
+> cargo install --path playa/cli --features sfx-native-linux
+> ```
+>
+> On WSL this still installs a Linux binary, not a native Windows `.exe`. The default `just install` path avoids Linux-specific link requirements, while the explicit Linux-native install above works in WSL only if those Linux development packages are installed and your WSL environment has usable audio support.
 >
 > On **all** platforms we expect you to have the [**just**]() runner installed.
 

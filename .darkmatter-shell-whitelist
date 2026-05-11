@@ -2,3 +2,6 @@ prefix echo
 prefix sniff
 prefix ll
 prefix ls
+prefix basename
+prefix just
+prefix dirname

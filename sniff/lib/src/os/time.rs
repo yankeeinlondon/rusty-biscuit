@@ -31,9 +31,18 @@ pub enum NtpStatus {
 ///
 /// Contains details about the system's timezone configuration, UTC offset,
 /// daylight saving time status, and NTP synchronization state.
+///
+/// ## Platform Notes
+///
+/// - **Linux / macOS**: `timezone` is an IANA name (e.g. `America/Los_Angeles`).
+/// - **Windows**: `timezone` is a mapped IANA name when the Windows zone is
+///   recognised, otherwise the raw Windows timezone ID from `tzutil`.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct TimeInfo {
-    /// IANA timezone name (e.g., "America/Los_Angeles", "Europe/London")
+    /// Best-effort timezone identifier.
+    ///
+    /// On Linux/macOS this is an IANA name.  On Windows this is a mapped IANA
+    /// name when possible, falling back to the raw Windows timezone ID.
     pub timezone: Option<String>,
     /// Offset from UTC in seconds (negative = west of UTC, positive = east)
     pub utc_offset_seconds: i32,
@@ -47,6 +56,9 @@ pub struct TimeInfo {
     pub monotonic_available: bool,
 }
 
+/// Default timeout for NTP detection commands (3 seconds).
+const NTP_TIMEOUT_SECS: u64 = 3;
+
 /// Runs a command with a timeout, returning stdout as a string if successful.
 ///
 /// ## Arguments
@@ -59,7 +71,6 @@ pub struct TimeInfo {
 ///
 /// `Some(String)` containing stdout if the command succeeds, `None` otherwise.
 /// Returns `None` for permission errors, timeouts, or any execution failure.
-#[allow(dead_code)] // Used only on Linux for NTP detection
 pub(crate) fn run_command_with_timeout(
     cmd: &str,
     args: &[&str],
@@ -229,11 +240,12 @@ pub(crate) fn extract_timezone_from_path(path: &str) -> Option<String> {
 ///
 /// - **Linux**: Reads `/etc/timezone` or parses `/etc/localtime` symlink target
 /// - **macOS**: Parses `/etc/localtime` symlink target
-/// - **Windows**: Returns `None` (registry query not implemented)
+/// - **Windows**: Probes `tzutil /g` and maps the result to an IANA name
+///   (falls back to the raw Windows timezone ID when unmapped)
 ///
 /// ## Returns
 ///
-/// The IANA timezone name (e.g., "America/Los_Angeles") if detected, `None` otherwise.
+/// The timezone identifier if detected, `None` otherwise.
 #[cfg(target_os = "linux")]
 fn detect_timezone_name() -> Option<String> {
     // Try /etc/timezone first (Debian/Ubuntu style)
@@ -268,9 +280,37 @@ fn detect_timezone_name() -> Option<String> {
 
 #[cfg(target_os = "windows")]
 fn detect_timezone_name() -> Option<String> {
-    // Windows timezone detection requires registry queries
-    // which is complex - return None for initial implementation
-    None
+    let raw_output = Command::new("tzutil")
+        .arg("/g")
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .output()
+        .ok()?;
+
+    if !raw_output.status.success() {
+        return None;
+    }
+
+    let windows_id = parse_windows_timezone_id_output(&raw_output.stdout)?;
+    Some(
+        crate::os::windows_timezone_map::map_windows_timezone_to_iana(&windows_id)
+            .map(|s| s.to_string())
+            .unwrap_or(windows_id),
+    )
+}
+
+/// Parse raw `tzutil /g` stdout into a clean Windows timezone ID.
+///
+/// Strips trailing CR/LF and whitespace, returning `None` for empty output.
+/// This is a pure function so it can be unit-tested on any platform.
+#[cfg(any(target_os = "windows", test))]
+fn parse_windows_timezone_id_output(stdout: &[u8]) -> Option<String> {
+    let id = std::str::from_utf8(stdout).ok()?;
+    let trimmed = id.trim_end().trim_end_matches('\r').trim_end_matches('\n');
+    if trimmed.is_empty() {
+        return None;
+    }
+    Some(trimmed.to_string())
 }
 
 #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
@@ -283,8 +323,8 @@ fn detect_timezone_name() -> Option<String> {
 /// ## Platform Behavior
 ///
 /// - **Linux**: Queries `timedatectl` with a 5-second timeout
-/// - **macOS**: Returns `Unknown` (sntp status check is complex)
-/// - **Windows**: Returns `Unknown` (w32tm query not implemented)
+/// - **macOS**: Queries `sntp` with the server from `/etc/ntp.conf` (5-second timeout)
+/// - **Windows**: Queries `w32tm /query /status` with a 5-second timeout
 ///
 /// ## Returns
 ///
@@ -292,41 +332,66 @@ fn detect_timezone_name() -> Option<String> {
 /// unsupported platforms, or when the status cannot be determined.
 #[cfg(target_os = "linux")]
 pub fn detect_ntp_status() -> NtpStatus {
-    // Use timedatectl to check NTP status
+    // Use a single timedatectl call to check both NTP synchronized and NTP active status.
+    // This halves the command overhead compared to two separate invocations.
     let output = run_command_with_timeout(
         "timedatectl",
-        &["show", "--property=NTPSynchronized", "--value"],
-        5,
+        &["show", "--property=NTPSynchronized,NTP", "--value"],
+        NTP_TIMEOUT_SECS,
     );
 
-    match output.as_deref().map(str::trim) {
+    let lines: Vec<&str> = output
+        .as_deref()
+        .map(|s| s.lines().collect())
+        .unwrap_or_default();
+
+    // timedatectl outputs values in the order the properties were requested:
+    // line 0 -> NTPSynchronized, line 1 -> NTP
+    let ntp_synchronized = lines.first().copied().map(str::trim);
+    let ntp_active = lines.get(1).copied().map(str::trim);
+
+    match ntp_synchronized {
         Some("yes") => NtpStatus::Synchronized,
-        Some("no") => {
-            // Check if NTP is active but not synced vs inactive
-            let ntp_active =
-                run_command_with_timeout("timedatectl", &["show", "--property=NTP", "--value"], 5);
-            match ntp_active.as_deref().map(str::trim) {
-                Some("yes") => NtpStatus::Unsynchronized,
-                Some("no") => NtpStatus::Inactive,
-                _ => NtpStatus::Unknown,
-            }
-        }
+        Some("no") => match ntp_active {
+            Some("yes") => NtpStatus::Unsynchronized,
+            Some("no") => NtpStatus::Inactive,
+            _ => NtpStatus::Unknown,
+        },
         _ => NtpStatus::Unknown,
     }
 }
 
 #[cfg(target_os = "macos")]
 pub fn detect_ntp_status() -> NtpStatus {
-    // macOS NTP status detection is complex (requires sntp or systemsetup)
-    // Return Unknown for initial implementation
-    NtpStatus::Unknown
+    // Read the configured NTP server from /etc/ntp.conf, fall back to time.apple.com
+    let server = std::fs::read_to_string("/etc/ntp.conf")
+        .ok()
+        .and_then(|contents| {
+            contents
+                .lines()
+                .find(|line| line.starts_with("server "))
+                .and_then(|line| line.split_whitespace().nth(1))
+                .map(String::from)
+        })
+        .unwrap_or_else(|| "time.apple.com".to_string());
+
+    // sntp ships with macOS and works without admin privileges
+    let output = run_command_with_timeout("sntp", &[&server], NTP_TIMEOUT_SECS);
+    match output {
+        // A successful response contains the offset, e.g. "+0.001527 +/- 0.004895 time.apple.com"
+        Some(text) if text.contains("+/-") => NtpStatus::Synchronized,
+        _ => NtpStatus::Unknown,
+    }
 }
 
 #[cfg(target_os = "windows")]
 pub fn detect_ntp_status() -> NtpStatus {
-    // Windows NTP status requires w32tm query
-    // Return Unknown for initial implementation
-    NtpStatus::Unknown
+    let output = run_command_with_timeout("w32tm", &["/query", "/status"], NTP_TIMEOUT_SECS);
+    match output {
+        Some(text) if text.contains("Leap Indicator: 0") => NtpStatus::Synchronized,
+        Some(text) if text.contains("Leap Indicator:") => NtpStatus::Unsynchronized,
+        _ => NtpStatus::Unknown,
+    }
 }
 
 #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
@@ -417,7 +482,7 @@ pub fn detect_timezone_with_options(probe_ntp: bool) -> TimeInfo {
 /// Detects timezone and time-related system information.
 ///
 /// Gathers timezone name, UTC offset, DST status, and NTP synchronization state.
-/// This is equivalent to calling [`detect_timezone_with_options(true)`].
+/// This is equivalent to calling [`detect_timezone_with_options`] with `true`.
 ///
 /// ## Examples
 ///
@@ -550,5 +615,68 @@ mod tests {
                 | NtpStatus::Inactive
                 | NtpStatus::Unknown
         );
+    }
+
+    #[test]
+    fn test_parse_windows_timezone_id_trims_output() {
+        let raw = b"Pacific Standard Time\r\n";
+        let result = parse_windows_timezone_id_output(raw);
+        assert_eq!(result, Some("Pacific Standard Time".to_string()));
+
+        let trailing_only = b"  Eastern Standard Time  \r\n";
+        let result2 = parse_windows_timezone_id_output(trailing_only);
+        assert_eq!(result2, Some("  Eastern Standard Time".to_string()));
+    }
+
+    #[test]
+    fn test_parse_windows_timezone_id_rejects_empty() {
+        assert_eq!(parse_windows_timezone_id_output(b""), None);
+        assert_eq!(parse_windows_timezone_id_output(b"\r\n"), None);
+        assert_eq!(parse_windows_timezone_id_output(b"   \r\n"), None);
+    }
+
+    #[test]
+    fn test_windows_timezone_map_common_ids() {
+        use crate::os::windows_timezone_map::map_windows_timezone_to_iana;
+
+        assert_eq!(
+            map_windows_timezone_to_iana("Pacific Standard Time"),
+            Some("America/Los_Angeles")
+        );
+        assert_eq!(map_windows_timezone_to_iana("UTC"), Some("Etc/UTC"));
+        assert_eq!(
+            map_windows_timezone_to_iana("W. Europe Standard Time"),
+            Some("Europe/Berlin")
+        );
+    }
+
+    #[test]
+    fn test_windows_timezone_map_unknown_returns_none() {
+        use crate::os::windows_timezone_map::map_windows_timezone_to_iana;
+
+        assert_eq!(map_windows_timezone_to_iana("Nonexistent/Zone"), None);
+        assert_eq!(map_windows_timezone_to_iana(""), None);
+    }
+
+    // ============================================================================
+    // NTP timeout tests (issue #19)
+    // ============================================================================
+
+    #[test]
+    fn test_ntp_timeout_is_three_seconds() {
+        // The timeout was reduced from 5s to 3s as part of issue #19.
+        assert_eq!(NTP_TIMEOUT_SECS, 3);
+    }
+
+    #[test]
+    fn test_run_command_with_timeout_respects_timeout() {
+        // Use a command that sleeps longer than the timeout
+        let start = std::time::Instant::now();
+        let result = run_command_with_timeout("sleep", &["10"], 1);
+        let elapsed = start.elapsed();
+
+        // Should return None (timeout) and take less than 5 seconds
+        assert!(result.is_none());
+        assert!(elapsed < std::time::Duration::from_secs(5));
     }
 }

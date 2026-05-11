@@ -4,11 +4,10 @@ use std::path::{Path, PathBuf};
 
 use serde_json::json;
 
+use super::types::{McpServer, McpTransport};
 use crate::config::atomic::atomic_write;
 use crate::error::{ClaudineError, Result};
-use crate::events::Provider;
-
-use super::types::{McpServer, McpTransport};
+use crate::provider::Provider;
 
 // ---------------------------------------------------------------------------
 // Injection result
@@ -362,12 +361,9 @@ impl McpInjector for GeminiInjector {
 /// - Roo (VS Code extension, not a wrapper target)
 /// - Qwen, Goose, Kimi (blocked on research)
 pub fn injector_for_provider(provider: Provider) -> Option<Box<dyn McpInjector>> {
-    match provider {
-        Provider::OpenCode => Some(Box::new(OpenCodeInjector)),
-        Provider::Codex => Some(Box::new(CodexInjector)),
-        Provider::Gemini => Some(Box::new(GeminiInjector)),
-        _ => None,
-    }
+    crate::provider::provider_info(provider)
+        .mcp
+        .runtime_injector()
 }
 
 fn provider_override_value<'a>(

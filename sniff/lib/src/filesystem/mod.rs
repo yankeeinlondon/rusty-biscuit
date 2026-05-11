@@ -1,7 +1,11 @@
 use crate::Result;
+use crate::performance;
 use crate::request::{FilesystemRequest, GitRequest};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::time::Instant;
+use tracing::Level;
 use tracing::instrument;
 
 pub mod blast_radius;
@@ -11,9 +15,13 @@ pub mod formatting;
 pub mod git;
 pub mod just;
 pub mod languages;
+pub mod path_kind;
 pub mod repo;
+mod system_view;
 
-pub use docs::{MarkdownMeta, RepoDocuments, TitleSource, UpdatedSource, detect_docs};
+pub use docs::{
+    MarkdownMeta, RepoDocuments, TitleSource, UpdatedSource, collect_markdown_paths, detect_docs,
+};
 pub use file_types::{
     FileAssociation, FileAssociationBreakdown, FileAssociationStats, FileClassification,
     FileInventory, FrameworkKind, FrameworkStats, ProgrammingLanguage, ProgrammingLanguageStats,
@@ -21,9 +29,12 @@ pub use file_types::{
 };
 pub use formatting::{EditorConfigSection, FormattingConfig, detect_formatting};
 pub use git::{
-    BehindStatus, CommitInfo, DeltaKind, GitHostingProvider, GitInfo, GitRepo, LocalBranchInfo,
-    RemoteInfo, RepoStatus, detect_git, detect_git_with_request, detect_merge_conflicts,
-    get_commit_by_sha, get_commit_files, get_commits_for_path,
+    BehindStatus, CommitDesc, CommitDescSet, CommitInfo, DeltaKind, GitHostingProvider, GitInfo,
+    GitRepo, LocalBranchInfo, PeriodSpecifier, RemoteInfo, RepoStatus, detect_git,
+    detect_git_with_request, detect_merge_conflicts, get_commit_by_sha, get_commit_files,
+    get_commits_for_path, get_recent_commits_by_count, get_recent_commits_by_date,
+    get_recent_commits_by_duration, get_recent_commits_by_hash, get_recent_commits_in_range,
+    parse_period,
 };
 pub use just::{JustRecipe, JustRecipeParam, JustfileInfo, detect_justfiles};
 pub use languages::{LanguageBreakdown, LanguageStats, detect_languages};
@@ -68,105 +79,202 @@ pub fn detect_filesystem_with_request(
     root: &Path,
     request: &FilesystemRequest,
 ) -> Result<FilesystemInfo> {
-    // Stage 1: Git detection
-    let git = match &request.git {
-        Some(git_request) => git::detect_git_with_request(root, git_request)?,
-        None => None,
-    };
+    let collector = performance::current_collector();
+    let need_repo_context = request.repo.is_some() || request.include_docs;
+    let need_repo_full = request
+        .repo
+        .as_ref()
+        .is_some_and(|repo| !repo.structure_only);
+    let need_shared_view = need_repo_full
+        || request.include_file_inventory
+        || request.include_docs
+        || request.include_formatting;
+    let shared_root = determine_shared_walk_root(root, request);
 
-    // Stage 2: Repo detection
-    // When full repo detection is requested, also capture the shared file
-    // inventory it already builds so Stage 3 can reuse it instead of
-    // rescanning the tree.
-    let repo_root_path = git.as_ref().map(|g| g.repo_root.as_path()).unwrap_or(root);
-    let (repo, repo_inventory) = match &request.repo {
-        Some(repo_request) => {
-            if repo_request.structure_only {
-                (detect_repo_structure(repo_root_path)?, None)
-            } else {
-                repo::detect_repo_with_inventory(repo_root_path)?
-            }
-        }
-        None => (None, None),
-    };
+    std::thread::scope(|scope| {
+        let git_handle = request.git.as_ref().map(|git_request| {
+            let collector = collector.clone();
+            scope.spawn(move || {
+                performance::with_current_collector(collector, || {
+                    let git_started = Instant::now();
+                    let git = git::detect_git_with_request(root, git_request);
+                    performance::record_logged_stage(
+                        "filesystem.git",
+                        git_started.elapsed(),
+                        Level::DEBUG,
+                    );
+                    git
+                })
+            })
+        });
 
-    // Stage 3: File inventory and language breakdown
-    // When full repo detection already scanned the tree, reuse that
-    // inventory (filtered to the target scope) instead of walking again.
-    let (files, languages) = if request.include_file_inventory {
-        let inventory = match repo.as_ref().and_then(|r| r.package_for_dir(root)) {
-            Some(package) => {
-                let exclude_roots = repo
-                    .as_ref()
-                    .and_then(|r| r.packages.as_ref())
-                    .map(|packages| {
-                        packages
-                            .iter()
-                            .filter(|c| c.path != package.path)
-                            .filter(|c| c.path.starts_with(&package.path))
-                            .map(|c| c.path.clone())
-                            .collect::<Vec<_>>()
-                    })
-                    .unwrap_or_default();
-                match repo_inventory {
-                    Some(ref inv) => Some(filter_inventory(inv, &package.path, &exclude_roots)),
-                    None => file_types::scan_file_inventory_with_exclusions(
-                        &package.path,
-                        &exclude_roots,
-                    )
-                    .ok(),
-                }
-            }
-            None => match repo_inventory {
-                Some(ref inv) if inv.scope.root == root => Some(inv.clone()),
-                _ => file_types::scan_file_inventory(root).ok(),
-            },
+        let formatting_handle = request.include_formatting.then(|| {
+            let collector = collector.clone();
+            scope.spawn(move || {
+                performance::with_current_collector(collector, || {
+                    let formatting_started = Instant::now();
+                    let formatting = detect_formatting(root).ok().flatten();
+                    performance::record_logged_stage(
+                        "filesystem.formatting",
+                        formatting_started.elapsed(),
+                        Level::DEBUG,
+                    );
+                    formatting
+                })
+            })
+        });
+
+        let shared_view_handle = need_shared_view.then(|| {
+            let collector = collector.clone();
+            let shared_root = shared_root.clone();
+            let options = system_view::SharedWalkOptions {
+                collect_manifests: need_repo_full || request.include_docs,
+                collect_inventory: request.include_file_inventory || need_repo_full,
+                collect_docs: request.include_docs,
+            };
+            scope.spawn(move || {
+                performance::with_current_collector(collector, || {
+                    system_view::build_filesystem_system_view(&shared_root, options)
+                })
+            })
+        });
+
+        let git = match git_handle {
+            Some(handle) => handle.join().unwrap()?,
+            None => None,
+        };
+        let formatting = formatting_handle.and_then(|handle| handle.join().unwrap());
+        let shared_view = shared_view_handle.map(|handle| handle.join().unwrap());
+
+        let repo_detection_root = if request.repo.is_some() {
+            git.as_ref().map(|g| g.repo_root.as_path()).unwrap_or(root)
+        } else {
+            shared_view
+                .as_ref()
+                .map(|view| view.root.as_path())
+                .unwrap_or(root)
+        };
+        let shared_repo_data = shared_view
+            .as_ref()
+            .filter(|view| view.root == repo_detection_root);
+
+        let repo_started = Instant::now();
+        let repo_context = if need_repo_context {
+            let structure_only = request
+                .repo
+                .as_ref()
+                .map(|repo| repo.structure_only)
+                .unwrap_or(true);
+            let (repo_info, _) = repo::detection::detect_repo_inner_with_shared(
+                repo_detection_root,
+                structure_only,
+                shared_repo_data.and_then(|view| view.manifest_index.as_ref()),
+                shared_repo_data.and_then(|view| view.inventory.as_ref()),
+            )?;
+            repo_info
+        } else {
+            None
+        };
+        performance::record_logged_stage("filesystem.repo", repo_started.elapsed(), Level::DEBUG);
+        let repo = if request.repo.is_some() {
+            repo_context.clone()
+        } else {
+            None
         };
 
-        match inventory {
-            Some(inv) => {
-                let (fab, lang_summary) = file_types::summarize_file_inventory(&inv);
-                (Some(fab), Some(lang_summary))
+        let inventory_started = Instant::now();
+        let (files, languages) = if request.include_file_inventory {
+            let inventory = match repo_context.as_ref().and_then(|r| r.package_for_dir(root)) {
+                Some(package) => {
+                    let exclude_roots = repo_context
+                        .as_ref()
+                        .and_then(|r| r.packages.as_ref())
+                        .map(|packages| {
+                            packages
+                                .iter()
+                                .filter(|candidate| candidate.path != package.path)
+                                .filter(|candidate| candidate.path.starts_with(&package.path))
+                                .map(|candidate| candidate.path.clone())
+                                .collect::<Vec<_>>()
+                        })
+                        .unwrap_or_default();
+                    match shared_view
+                        .as_ref()
+                        .and_then(|view| view.inventory.as_ref())
+                    {
+                        Some(inventory) => {
+                            Some(filter_inventory(inventory, &package.path, &exclude_roots))
+                        }
+                        None => file_types::scan_file_inventory_with_exclusions(
+                            &package.path,
+                            &exclude_roots,
+                        )
+                        .ok(),
+                    }
+                }
+                None => match shared_view
+                    .as_ref()
+                    .and_then(|view| view.inventory.as_ref())
+                {
+                    Some(inventory) if inventory.scope.root == root => Some(inventory.clone()),
+                    Some(inventory) => Some(filter_inventory(inventory, root, &[])),
+                    None => file_types::scan_file_inventory(root).ok(),
+                },
+            };
+
+            match inventory {
+                Some(inventory) => {
+                    let (fab, lang_summary) = file_types::summarize_file_inventory(&inventory);
+                    (Some(fab), Some(lang_summary))
+                }
+                None => (None, None),
             }
-            None => (None, None),
-        }
-    } else {
-        (None, None)
-    };
+        } else {
+            (None, None)
+        };
+        performance::record_logged_stage(
+            "filesystem.inventory",
+            inventory_started.elapsed(),
+            Level::DEBUG,
+        );
 
-    // Stage 4: Formatting
-    let formatting = if request.include_formatting {
-        detect_formatting(root).ok().flatten()
-    } else {
-        None
-    };
+        let docs_started = Instant::now();
+        let docs = if request.include_docs {
+            let mut docs = shared_view
+                .as_ref()
+                .and_then(|view| view.docs.clone())
+                .unwrap_or_default();
 
-    // Stage 5: Docs
-    let docs = if request.include_docs {
-        match (
-            git.as_ref(),
-            repo.as_ref().and_then(|r| r.packages.as_ref()),
-        ) {
-            (Some(git_info), Some(packages)) => {
-                let pkg_tuples: Vec<(String, PathBuf)> = packages
+            if let Some(packages) = repo_context
+                .as_ref()
+                .and_then(|repo| repo.packages.as_ref())
+            {
+                let package_paths: Vec<(String, PathBuf)> = packages
                     .iter()
-                    .map(|p| (p.name.clone(), PathBuf::from(&p.relative)))
+                    .map(|package| (package.name.clone(), PathBuf::from(&package.relative)))
                     .collect();
-                docs::detect_docs_with_packages(&git_info.repo_root, &pkg_tuples)
+                let docs_root = shared_view
+                    .as_ref()
+                    .map(|view| view.root.as_path())
+                    .or_else(|| git.as_ref().map(|info| info.repo_root.as_path()))
+                    .unwrap_or(root);
+                docs::assign_packages(&mut docs, &package_paths, docs_root);
             }
-            _ => detect_docs(root),
-        }
-    } else {
-        None
-    };
 
-    Ok(FilesystemInfo {
-        languages,
-        files,
-        git,
-        repo,
-        formatting,
-        docs,
+            if docs.is_empty() { None } else { Some(docs) }
+        } else {
+            None
+        };
+        performance::record_logged_stage("filesystem.docs", docs_started.elapsed(), Level::DEBUG);
+
+        Ok(FilesystemInfo {
+            languages,
+            files,
+            git,
+            repo,
+            formatting,
+            docs,
+        })
     })
 }
 
@@ -207,7 +315,20 @@ fn filter_inventory(
         .filter_map(|ex| ex.strip_prefix(source_root).ok())
         .collect();
 
-    let classifications: Vec<_> = source
+    // Use Arc::make_mut to share the underlying data when possible.
+    // If no filtering is needed, return a clone of the Arc (zero-copy).
+    if target_prefix == Path::new("") && exclude_prefixes.is_empty() {
+        return file_types::FileInventory {
+            scope: file_types::FileScanScope {
+                root: target_root.to_path_buf(),
+                exclude_roots: exclude_roots.to_vec(),
+            },
+            total_files_scanned: source.classifications.len(),
+            classifications: source.classifications.clone(),
+        };
+    }
+
+    let classifications: Vec<file_types::FileClassification> = source
         .classifications
         .iter()
         .filter(|c| {
@@ -227,6 +348,213 @@ fn filter_inventory(
             exclude_roots: exclude_roots.to_vec(),
         },
         total_files_scanned: total,
-        classifications,
+        classifications: Arc::new(classifications),
+    }
+}
+
+fn determine_shared_walk_root(root: &Path, request: &FilesystemRequest) -> PathBuf {
+    if request.repo.is_some() && request.git.is_none() {
+        return root.to_path_buf();
+    }
+
+    // Only discover git root when git detection is actually requested
+    if request.git.is_some() {
+        return discover_repo_root(root).unwrap_or_else(|| root.to_path_buf());
+    }
+
+    // For docs-only requests, skip git discovery and use the provided root
+    if request.include_docs {
+        return root.to_path_buf();
+    }
+
+    root.to_path_buf()
+}
+
+fn discover_repo_root(root: &Path) -> Option<PathBuf> {
+    let repo = git2::Repository::discover(root).ok()?;
+    repo.workdir().map(Path::to_path_buf)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::request::RepoRequest;
+
+    #[test]
+    fn need_shared_view_includes_formatting() {
+        // When only formatting is requested, shared view should still be triggered
+        let mut request = FilesystemRequest::new();
+        request.include_formatting = true;
+        let need_repo_full = request
+            .repo
+            .as_ref()
+            .is_some_and(|repo| !repo.structure_only);
+        let need_shared_view = need_repo_full
+            || request.include_file_inventory
+            || request.include_docs
+            || request.include_formatting;
+
+        assert!(
+            need_shared_view,
+            "include_formatting should trigger shared view"
+        );
+    }
+
+    #[test]
+    fn need_shared_view_true_for_repo_detection() {
+        let request = FilesystemRequest::new().repo(RepoRequest::full());
+        let need_repo_full = request
+            .repo
+            .as_ref()
+            .is_some_and(|repo| !repo.structure_only);
+        let need_shared_view = need_repo_full
+            || request.include_file_inventory
+            || request.include_docs
+            || request.include_formatting;
+
+        assert!(
+            need_shared_view,
+            "repo detection should trigger shared view"
+        );
+    }
+
+    #[test]
+    fn need_shared_view_false_for_structure_only_repo() {
+        let request = FilesystemRequest::new()
+            .git(GitRequest::summary())
+            .repo(RepoRequest::structure())
+            .without_docs()
+            .without_formatting()
+            .without_file_inventory();
+        let need_repo_full = request
+            .repo
+            .as_ref()
+            .is_some_and(|repo| !repo.structure_only);
+        let need_shared_view = need_repo_full
+            || request.include_file_inventory
+            || request.include_docs
+            || request.include_formatting;
+
+        assert!(
+            !need_shared_view,
+            "structure-only repo without other shared features should not trigger shared view"
+        );
+    }
+
+    #[test]
+    fn need_shared_view_true_for_file_inventory() {
+        let mut request = FilesystemRequest::new();
+        request.include_file_inventory = true;
+        let need_repo_full = request
+            .repo
+            .as_ref()
+            .is_some_and(|repo| !repo.structure_only);
+        let need_shared_view = need_repo_full
+            || request.include_file_inventory
+            || request.include_docs
+            || request.include_formatting;
+
+        assert!(
+            need_shared_view,
+            "file inventory should trigger shared view"
+        );
+    }
+
+    #[test]
+    fn need_shared_view_false_when_all_disabled() {
+        let request = FilesystemRequest::new()
+            .without_git()
+            .without_repo()
+            .without_docs()
+            .without_formatting()
+            .without_file_inventory();
+        let need_repo_full = request
+            .repo
+            .as_ref()
+            .is_some_and(|repo| !repo.structure_only);
+        let need_shared_view = need_repo_full
+            || request.include_file_inventory
+            || request.include_docs
+            || request.include_formatting;
+
+        assert!(
+            !need_shared_view,
+            "request with all features disabled should not trigger shared view"
+        );
+    }
+
+    // ============================================================================
+    // filter_inventory tests (issue #21)
+    // ============================================================================
+
+    #[test]
+    fn filter_inventory_zero_copy_when_no_filtering_needed() {
+        use crate::filesystem::file_types::{FileClassification, FileScanScope};
+        use std::sync::Arc;
+
+        let root = PathBuf::from("/repo");
+        let classifications = Arc::new(vec![
+            FileClassification {
+                path: PathBuf::from("src/main.rs"),
+                ..Default::default()
+            },
+            FileClassification {
+                path: PathBuf::from("README.md"),
+                ..Default::default()
+            },
+        ]);
+
+        let inventory = file_types::FileInventory {
+            scope: FileScanScope {
+                root: root.clone(),
+                exclude_roots: vec![],
+            },
+            total_files_scanned: 2,
+            classifications: classifications.clone(),
+        };
+
+        // When target_root == source_root and no excludes, filter_inventory
+        // should return a clone of the Arc (zero-copy).
+        let filtered = filter_inventory(&inventory, &root, &[]);
+        assert_eq!(filtered.total_files_scanned, 2);
+        assert!(Arc::ptr_eq(
+            &inventory.classifications,
+            &filtered.classifications
+        ));
+    }
+
+    #[test]
+    fn filter_inventory_clones_when_filtering_needed() {
+        use crate::filesystem::file_types::{FileClassification, FileScanScope};
+        use std::sync::Arc;
+
+        let root = PathBuf::from("/repo");
+        let classifications = Arc::new(vec![
+            FileClassification {
+                path: PathBuf::from("packages/foo/src/lib.rs"),
+                ..Default::default()
+            },
+            FileClassification {
+                path: PathBuf::from("packages/bar/src/lib.rs"),
+                ..Default::default()
+            },
+        ]);
+
+        let inventory = file_types::FileInventory {
+            scope: FileScanScope {
+                root: root.clone(),
+                exclude_roots: vec![],
+            },
+            total_files_scanned: 2,
+            classifications,
+        };
+
+        let target = PathBuf::from("/repo/packages/foo");
+        let filtered = filter_inventory(&inventory, &target, &[]);
+        assert_eq!(filtered.total_files_scanned, 1);
+        assert_eq!(
+            filtered.classifications[0].path,
+            PathBuf::from("packages/foo/src/lib.rs")
+        );
     }
 }

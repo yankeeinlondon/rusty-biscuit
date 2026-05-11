@@ -151,15 +151,14 @@ impl super::Provider for TelegramProvider {
     }
 
     fn capabilities(&self) -> CapabilitySet {
-        const TELEGRAM_CAPABILITIES: CapabilitySet = CapabilitySet {
+        CapabilitySet {
             supports_markdown_rendering: true,
             supports_reply: true,
-            supports_attachments: false,
+            supported_attachment_kinds: std::collections::BTreeSet::new(),
             supports_location: true,
             supports_silent_delivery: true,
             supports_link_preview_control: true,
-        };
-        TELEGRAM_CAPABILITIES
+        }
     }
 
     #[tracing::instrument(skip_all, fields(provider = "telegram", chat = tracing::field::Empty))]
@@ -233,6 +232,10 @@ impl super::Provider for TelegramProvider {
         // Render message body
         let (text, parse_mode) = match message.body() {
             Some(MessageBody::Markdown(_)) => (
+                message.render_body_for_provider(ProviderKind::Telegram),
+                Some("HTML"),
+            ),
+            Some(MessageBody::Summarized { .. }) => (
                 message.render_body_for_provider(ProviderKind::Telegram),
                 Some("HTML"),
             ),

@@ -55,6 +55,56 @@ pub enum FileTreeError {
     Reference(#[from] ReferenceError),
 }
 
+impl biscuit_terminal::errors::BlockError for FileTreeError {
+    fn status_block(
+        &self,
+        term: &biscuit_terminal::terminal::Terminal,
+    ) -> biscuit_terminal::components::status_block::StatusBlock {
+        use biscuit_terminal::components::status::StatusState;
+        use biscuit_terminal::components::status_block::StatusBlock;
+        use biscuit_terminal::errors::{ErrorHeader, StatusBlockExt};
+
+        match self {
+            FileTreeError::PathNotFound(path) => {
+                let absolute = path
+                    .canonicalize()
+                    .ok()
+                    .map(|p| p.display().to_string())
+                    .unwrap_or_else(|| path.display().to_string());
+                StatusBlock::new(StatusState::Error)
+                    .error_header(ErrorHeader::new("FileTreeError", "path not found"))
+                    .body(format!(
+                        "<dim>Path:</dim> <cyan>{}</cyan>\n<dim>Resolved:</dim> {absolute}",
+                        path.display()
+                    ))
+                    .hint("Invoke with a path that exists, e.g. <cyan>md graph ./docs/root.md</cyan>.")
+            }
+
+            FileTreeError::NotAFile(path) => {
+                let absolute = path
+                    .canonicalize()
+                    .ok()
+                    .map(|p| p.display().to_string())
+                    .unwrap_or_else(|| path.display().to_string());
+                StatusBlock::new(StatusState::Error)
+                    .error_header(ErrorHeader::new("FileTreeError", "not a file"))
+                    .body(format!(
+                        "<dim>Path:</dim> <cyan>{}</cyan>\n<dim>Resolved:</dim> {absolute}",
+                        path.display()
+                    ))
+                    .hint("Pass a regular file (markdown document) rather than a directory or symlink target.")
+            }
+
+            FileTreeError::Markdown(inner) => inner.status_block(term),
+            FileTreeError::Reference(inner) => inner.status_block(term),
+        }
+    }
+
+    fn block_source(&self) -> Option<&(dyn biscuit_terminal::errors::BlockError + 'static)> {
+        None
+    }
+}
+
 /// A terminal component that renders a Markdown file's dependency graph.
 ///
 /// Shows references above the file line and transclusions below,
@@ -181,7 +231,7 @@ impl FileTree {
             .md
             .reference_graph(self.graph_options.clone())
             .map_err(|e| match e {
-                MarkdownError::Reference(re) => FileTreeError::Reference(re),
+                MarkdownError::Reference(re) => FileTreeError::Reference(*re),
                 other => FileTreeError::Markdown(other),
             })?;
 
@@ -189,7 +239,7 @@ impl FileTree {
             let mut val_opts = self.validation_options.clone();
             val_opts.graph = self.graph_options.clone();
             Some(self.md.validate_references(val_opts).map_err(|e| match e {
-                MarkdownError::Reference(re) => FileTreeError::Reference(re),
+                MarkdownError::Reference(re) => FileTreeError::Reference(*re),
                 other => FileTreeError::Markdown(other),
             })?)
         } else {

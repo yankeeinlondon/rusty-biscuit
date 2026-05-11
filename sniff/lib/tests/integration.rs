@@ -1,7 +1,8 @@
 use sniff::filesystem::ProgrammingLanguage;
 use sniff::os::NtpStatus;
+use sniff::request::DetectionPlan;
 use sniff::{SniffConfig, detect, detect_with_config};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 mod fixtures;
@@ -67,6 +68,33 @@ fn test_serialization_roundtrip() {
     let orig_os = result.os.expect("os should be present");
     let parsed_os = parsed.os.expect("parsed os should be present");
     assert_eq!(orig_os.name, parsed_os.name);
+}
+
+#[test]
+fn test_performance_is_opt_in() {
+    let result = detect().unwrap();
+    assert!(result.performance.is_none());
+}
+
+#[test]
+fn test_performance_report_is_serialized_when_requested() {
+    let result = sniff::detect_with_plan(
+        DetectionPlan::new()
+            .without_network()
+            .without_filesystem()
+            .performance(true),
+    )
+    .unwrap();
+
+    let performance = result
+        .performance
+        .as_ref()
+        .expect("performance should be present");
+    assert!(performance.total_duration_ms >= 0.0);
+    assert!(performance.stages.contains_key("detect.total"));
+
+    let json = serde_json::to_value(&result).unwrap();
+    assert!(json.get("performance").is_some());
 }
 
 #[test]
@@ -266,13 +294,15 @@ fn test_detect_locale_returns_valid_data() {
     if locale.lang.is_some() || locale.lc_all.is_some() {
         // If we have locale data, preferred_language extraction should work
         // (unless the locale is "C" or "POSIX")
-        if let Some(ref lang) = locale.lang {
-            if lang != "C" && lang != "POSIX" && lang.contains('_') {
-                assert!(
-                    locale.preferred_language.is_some(),
-                    "Should extract preferred language from locale"
-                );
-            }
+        if let Some(ref lang) = locale.lang
+            && lang != "C"
+            && lang != "POSIX"
+            && lang.contains('_')
+        {
+            assert!(
+                locale.preferred_language.is_some(),
+                "Should extract preferred language from locale"
+            );
         }
     }
 
@@ -368,7 +398,7 @@ fn test_detect_os_type_matches_platform() {
 fn test_macos_package_managers_finds_expected_managers() {
     use sniff::hardware::{SystemPackageManager, detect_macos_package_managers};
 
-    let managers = detect_macos_package_managers();
+    let managers = detect_macos_package_managers(None);
 
     // softwareupdate is always present on macOS as a system utility
     let has_softwareupdate = managers
@@ -717,6 +747,69 @@ fn create_dirty_git_repo() -> (tempfile::TempDir, PathBuf) {
     (dir, path)
 }
 
+fn create_merge_conflict_repo() -> (tempfile::TempDir, PathBuf) {
+    use std::fs;
+    use std::process::Command;
+
+    fn run_git(dir: &std::path::Path, args: &[&str]) {
+        let status = Command::new("git")
+            .args(args)
+            .current_dir(dir)
+            .status()
+            .unwrap();
+        assert!(status.success(), "git {:?} failed with {:?}", args, status);
+    }
+
+    fn run_git_expect_failure(dir: &std::path::Path, args: &[&str]) {
+        let status = Command::new("git")
+            .args(args)
+            .current_dir(dir)
+            .status()
+            .unwrap();
+        assert!(
+            !status.success(),
+            "git {:?} unexpectedly succeeded with {:?}",
+            args,
+            status
+        );
+    }
+
+    fn git_stdout(dir: &std::path::Path, args: &[&str]) -> String {
+        let output = Command::new("git")
+            .args(args)
+            .current_dir(dir)
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "git {:?} failed", args);
+        String::from_utf8(output.stdout).unwrap().trim().to_string()
+    }
+
+    let dir = tempfile::TempDir::new().unwrap();
+
+    run_git(dir.path(), &["init"]);
+    run_git(dir.path(), &["config", "user.email", "test@test.com"]);
+    run_git(dir.path(), &["config", "user.name", "Test User"]);
+
+    fs::write(dir.path().join("conflict.txt"), "base\n").unwrap();
+    run_git(dir.path(), &["add", "conflict.txt"]);
+    run_git(dir.path(), &["commit", "-m", "initial commit"]);
+
+    let main_branch = git_stdout(dir.path(), &["rev-parse", "--abbrev-ref", "HEAD"]);
+
+    run_git(dir.path(), &["checkout", "-b", "feature"]);
+    fs::write(dir.path().join("conflict.txt"), "feature branch\n").unwrap();
+    run_git(dir.path(), &["commit", "-am", "feature change"]);
+
+    run_git(dir.path(), &["checkout", &main_branch]);
+    fs::write(dir.path().join("conflict.txt"), "main branch\n").unwrap();
+    run_git(dir.path(), &["commit", "-am", "main change"]);
+
+    run_git_expect_failure(dir.path(), &["merge", "feature"]);
+
+    let path = dir.path().to_path_buf();
+    (dir, path)
+}
+
 #[test]
 fn test_git_full_has_file_changes_but_no_diff_payloads() {
     use sniff::request::*;
@@ -810,6 +903,41 @@ fn test_git_deep_includes_diff_payloads() {
 }
 
 #[test]
+fn test_git_full_reports_conflicted_files() {
+    use sniff::filesystem::git::FileStatus;
+    use sniff::request::*;
+
+    let (_dir, path) = create_merge_conflict_repo();
+
+    let plan = DetectionPlan::new()
+        .base_dir(path)
+        .without_os()
+        .without_hardware()
+        .without_network()
+        .filesystem(
+            FilesystemRequest::new()
+                .git(GitRequest::full())
+                .without_repo()
+                .without_docs()
+                .without_formatting()
+                .without_file_inventory(),
+        );
+
+    let result = sniff::detect_with_plan(plan).unwrap();
+    let fs = result.filesystem.expect("filesystem should be present");
+    let git = fs.git.expect("git should be present");
+
+    assert!(git.status.is_dirty, "conflicted repo should be dirty");
+    assert!(
+        git.file_changes
+            .iter()
+            .any(|change| change.status == FileStatus::Conflicted
+                && change.path.as_os_str() == "conflict.txt"),
+        "conflicted files should be included in file_changes"
+    );
+}
+
+#[test]
 fn test_os_timezone_without_ntp() {
     use sniff::request::*;
 
@@ -874,4 +1002,1206 @@ fn test_executable_index_parity_with_which_for_common_programs() {
             prog, which_found, index_found
         );
     }
+}
+
+// ============================================================================
+// Windows Cross-Platform Integration Tests
+// ============================================================================
+
+/// Asserts that `primary_interface` is populated on eligible hosts.
+///
+/// On macOS and Linux a desktop/workstation usually has at least one
+/// non-loopback, up interface with an IPv4 address, so the primary
+/// selector should succeed.
+#[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
+#[test]
+fn test_network_primary_interface_is_populated() {
+    let result = detect().unwrap();
+    let network = result.network.expect("network should be present");
+
+    let has_eligible_interface = !network.permission_denied
+        && network
+            .interfaces
+            .iter()
+            .any(|i| !i.flags.is_loopback && !i.ipv4_addresses.is_empty() && i.flags.is_up);
+
+    if has_eligible_interface {
+        assert!(
+            network.primary_interface.is_some(),
+            "primary_interface should be populated when a non-loopback IPv4 interface exists"
+        );
+        let primary = network.primary_interface.unwrap();
+        assert!(
+            !primary.is_empty(),
+            "primary_interface name should not be empty"
+        );
+    }
+}
+
+/// Asserts that `services_detailed(ServiceState::All)` returns at least one
+/// service with a non-empty name on supported platforms.
+#[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
+#[test]
+fn test_services_detailed_returns_non_empty_names() {
+    use sniff::services::{ServiceManager, ServiceState};
+
+    let manager = ServiceManager::detect();
+    let services = manager.services_detailed(ServiceState::All);
+
+    if manager.init_system != sniff::services::InitSystem::Unknown {
+        assert!(
+            !services.is_empty(),
+            "services_detailed(All) should return at least one service for {:?}",
+            manager.init_system
+        );
+        for svc in &services {
+            assert!(
+                !svc.name.is_empty(),
+                "every service should have a non-empty name"
+            );
+        }
+    }
+}
+
+/// On Windows the default `detect_timezone()` code path should populate the
+/// `timezone` field via `tzutil`.  This test locks down the runtime contract
+/// on an actual Windows host without using the plan-based opt-in path.
+#[cfg(target_os = "windows")]
+#[test]
+fn test_detect_timezone_windows_populates_timezone_name() {
+    let time_info = sniff::hardware::detect_timezone();
+
+    assert!(
+        time_info.timezone.is_some(),
+        "detect_timezone() should populate timezone on Windows via tzutil"
+    );
+
+    let tz = time_info.timezone.unwrap();
+    assert!(!tz.is_empty(), "timezone name should not be empty");
+
+    // IANA names contain '/' (e.g. "America/Los_Angeles").  Unmapped Windows
+    // IDs typically contain "Standard" or "Daylight" but never '/'.
+    // Either way the value should be non-empty and valid.
+    assert!(
+        tz.len() >= 3,
+        "timezone name should be at least 3 characters, got: '{tz}'"
+    );
+}
+
+/// On Windows `services_detailed(Running)` should return only services whose
+/// SCM state is `SERVICE_RUNNING`.
+#[cfg(target_os = "windows")]
+#[test]
+fn test_services_detailed_running_filter_windows() {
+    use sniff::services::{ServiceManager, ServiceState};
+
+    let manager = ServiceManager::detect();
+    let all = manager.services_detailed(ServiceState::All);
+    let running = manager.services_detailed(ServiceState::Running);
+
+    // Running should be a subset of all
+    assert!(
+        running.len() <= all.len(),
+        "Running services ({}) should not exceed total ({})",
+        running.len(),
+        all.len()
+    );
+
+    for svc in &running {
+        assert!(
+            svc.running,
+            "Service '{}' passed Running filter but running=false",
+            svc.name
+        );
+    }
+}
+
+/// On Windows `services_detailed(Stopped)` should return only stopped services.
+#[cfg(target_os = "windows")]
+#[test]
+fn test_services_detailed_stopped_filter_windows() {
+    use sniff::services::{ServiceManager, ServiceState};
+
+    let manager = ServiceManager::detect();
+    let stopped = manager.services_detailed(ServiceState::Stopped);
+
+    for svc in &stopped {
+        assert!(
+            !svc.running,
+            "Service '{}' passed Stopped filter but running=true",
+            svc.name
+        );
+    }
+}
+
+// ============================================================================
+// Recent Commits Integration Tests (Step 13)
+// ============================================================================
+
+use chrono::{Duration, Utc};
+use git2::Repository;
+use std::fs;
+
+/// Create a temporary git repo with a single commit containing a Rust source file.
+fn create_recent_commits_repo() -> (tempfile::TempDir, PathBuf) {
+    let dir = tempfile::TempDir::new().unwrap();
+    let repo = Repository::init(dir.path()).unwrap();
+
+    let mut config = repo.config().unwrap();
+    config.set_str("user.email", "test@test.com").unwrap();
+    config.set_str("user.name", "Test User").unwrap();
+
+    let src_dir = dir.path().join("src");
+    fs::create_dir_all(&src_dir).unwrap();
+    fs::write(src_dir.join("main.rs"), "fn main() {}").unwrap();
+
+    let mut index = repo.index().unwrap();
+    index.add_path(std::path::Path::new("src/main.rs")).unwrap();
+    index.write().unwrap();
+
+    let tree_id = index.write_tree().unwrap();
+    let tree = repo.find_tree(tree_id).unwrap();
+    let sig = repo.signature().unwrap();
+    repo.commit(
+        Some("HEAD"),
+        &sig,
+        &sig,
+        "feat(cli): add main entry point\n\n- added src/main.rs\n- basic main function",
+        &tree,
+        &[],
+    )
+    .unwrap();
+
+    let path = dir.path().to_path_buf();
+    (dir, path)
+}
+
+#[test]
+fn test_get_recent_commits_by_duration_returns_commits() {
+    use sniff::filesystem::get_recent_commits_by_duration;
+
+    let (_dir, path) = create_recent_commits_repo();
+    let result = get_recent_commits_by_duration(&path, Duration::days(7), "last 7 days");
+    assert!(result.is_ok(), "Query should succeed: {:?}", result);
+    let set = result.unwrap();
+    assert!(!set.commits.is_empty(), "Should find at least one commit");
+    assert_eq!(
+        set.commits[0].description,
+        "feat(cli): add main entry point"
+    );
+}
+
+#[test]
+fn test_get_recent_commits_by_duration_empty_for_old_period() {
+    use sniff::filesystem::get_recent_commits_by_duration;
+
+    let (_dir, path) = create_recent_commits_repo();
+    let result = get_recent_commits_by_duration(&path, Duration::days(0), "last 0 days");
+    assert!(result.is_ok());
+    let set = result.unwrap();
+    assert!(
+        set.commits.is_empty(),
+        "Should find no commits for 0-day duration"
+    );
+}
+
+#[test]
+fn test_get_recent_commits_by_date_returns_commits() {
+    use sniff::filesystem::get_recent_commits_by_date;
+
+    let (_dir, path) = create_recent_commits_repo();
+    let today = Utc::now().date_naive();
+    let result = get_recent_commits_by_date(&path, today);
+    assert!(result.is_ok(), "Query should succeed: {:?}", result);
+    let set = result.unwrap();
+    assert!(!set.commits.is_empty(), "Should find commits since today");
+}
+
+#[test]
+fn test_get_recent_commits_by_date_future_date_returns_empty() {
+    use chrono::NaiveDate;
+    use sniff::filesystem::get_recent_commits_by_date;
+
+    let (_dir, path) = create_recent_commits_repo();
+    // Query for a date in the future - git commits have "now" timestamps
+    let future_date = NaiveDate::from_ymd_opt(2099, 12, 31).unwrap();
+    let result = get_recent_commits_by_date(&path, future_date);
+    assert!(result.is_ok());
+    let set = result.unwrap();
+    // All commits are "now", so none should be after 2099
+    assert!(
+        set.commits.is_empty(),
+        "Should find no commits after far-future date"
+    );
+}
+
+#[test]
+fn test_get_recent_commits_by_hash_resolves_commit() {
+    use sniff::filesystem::get_recent_commits_by_hash;
+
+    let (_dir, path) = create_recent_commits_repo();
+    let repo = Repository::open(&path).unwrap();
+    let head = repo.head().unwrap().peel_to_commit().unwrap();
+    let head_hash = head.id().to_string();
+
+    let result = get_recent_commits_by_hash(&path, &head_hash);
+    assert!(result.is_ok(), "Query should succeed: {:?}", result);
+    let set = result.unwrap();
+    assert!(!set.commits.is_empty(), "Should find the commit by hash");
+    assert!(set.commits[0].hash.contains(&head_hash[..8]));
+}
+
+#[test]
+fn test_get_recent_commits_by_hash_partial() {
+    use sniff::filesystem::get_recent_commits_by_hash;
+
+    let (_dir, path) = create_recent_commits_repo();
+    let repo = Repository::open(&path).unwrap();
+    let head = repo.head().unwrap().peel_to_commit().unwrap();
+    let short_hash = &head.id().to_string()[..7];
+
+    let result = get_recent_commits_by_hash(&path, short_hash);
+    assert!(
+        result.is_ok(),
+        "Query should succeed with partial hash: {:?}",
+        result
+    );
+    let set = result.unwrap();
+    assert!(
+        !set.commits.is_empty(),
+        "Should resolve partial hash to commit"
+    );
+}
+
+#[test]
+fn test_get_recent_commits_includes_files() {
+    use sniff::filesystem::get_recent_commits_by_duration;
+
+    let (_dir, path) = create_recent_commits_repo();
+    let result = get_recent_commits_by_duration(&path, Duration::days(7), "last 7 days");
+    assert!(result.is_ok());
+    let set = result.unwrap();
+    assert!(!set.commits.is_empty());
+    assert!(!set.commits[0].files.is_empty(), "Commit should have files");
+    assert!(
+        set.commits[0]
+            .files
+            .iter()
+            .any(|f| f.path.contains("main.rs"))
+    );
+}
+
+#[test]
+fn test_get_recent_commits_preserves_bullet_points() {
+    use sniff::filesystem::get_recent_commits_by_duration;
+
+    let (_dir, path) = create_recent_commits_repo();
+    let result = get_recent_commits_by_duration(&path, Duration::days(7), "last 7 days");
+    assert!(result.is_ok());
+    let set = result.unwrap();
+    assert!(!set.commits.is_empty());
+    assert!(
+        !set.commits[0].bullet_points.is_empty(),
+        "Should parse bullet points"
+    );
+    assert!(
+        set.commits[0]
+            .bullet_points
+            .iter()
+            .any(|b| b.contains("added src/main.rs"))
+    );
+}
+
+#[test]
+fn test_get_recent_commits_describe_produces_markdown() {
+    use sniff::filesystem::get_recent_commits_by_duration;
+
+    let (_dir, path) = create_recent_commits_repo();
+    let result = get_recent_commits_by_duration(&path, Duration::days(7), "last 7 days");
+    assert!(result.is_ok());
+    let set = result.unwrap();
+    let md = set.describe(true);
+    // Commit-centric format: "- [shorthash] ... at <time>: <message>"
+    assert!(
+        md.contains("- ["),
+        "Should start each commit block with bracketed short hash, got:\n{}",
+        md
+    );
+    assert!(
+        md.contains("    **Files Impacted:**"),
+        "Should have Files Impacted sub-block, got:\n{}",
+        md
+    );
+}
+
+#[test]
+fn test_get_recent_commits_source_code_changes_filters() {
+    use sniff::filesystem::get_recent_commits_by_duration;
+
+    let (_dir, path) = create_recent_commits_repo();
+    let result = get_recent_commits_by_duration(&path, Duration::days(7), "last 7 days");
+    assert!(result.is_ok());
+    let set = result.unwrap();
+    let md = set.source_code_changes(true);
+    assert!(
+        md.contains("Source Code Changes"),
+        "Should have source code section"
+    );
+    assert!(md.contains("main.rs"), "Should include .rs files");
+}
+
+#[test]
+fn test_get_recent_commits_documentation_changes_filters() {
+    use sniff::filesystem::get_recent_commits_by_duration;
+
+    let dir = tempfile::TempDir::new().unwrap();
+    let repo = Repository::init(dir.path()).unwrap();
+    let mut config = repo.config().unwrap();
+    config.set_str("user.email", "test@test.com").unwrap();
+    config.set_str("user.name", "Test User").unwrap();
+
+    fs::write(dir.path().join("README.md"), "# Test\n").unwrap();
+    let src_dir = dir.path().join("src");
+    fs::create_dir_all(&src_dir).unwrap();
+    fs::write(src_dir.join("lib.rs"), "pub fn foo() {}").unwrap();
+
+    let mut index = repo.index().unwrap();
+    index.add_path(std::path::Path::new("README.md")).unwrap();
+    index.add_path(std::path::Path::new("src/lib.rs")).unwrap();
+    index.write().unwrap();
+    let tree_id = index.write_tree().unwrap();
+    let tree = repo.find_tree(tree_id).unwrap();
+    let sig = repo.signature().unwrap();
+    repo.commit(Some("HEAD"), &sig, &sig, "add readme and lib", &tree, &[])
+        .unwrap();
+
+    let result = get_recent_commits_by_duration(dir.path(), Duration::days(7), "last 7 days");
+    assert!(result.is_ok());
+    let set = result.unwrap();
+    let md = set.documentation_changes(true);
+    assert!(
+        md.contains("Documentation Changes"),
+        "Should have docs section"
+    );
+    assert!(md.contains("README.md"), "Should include markdown");
+    assert!(!md.contains("lib.rs"), "Should not include .rs in docs");
+}
+
+#[test]
+fn test_get_recent_commits_not_a_repo_error() {
+    use sniff::filesystem::get_recent_commits_by_duration;
+
+    let dir = tempfile::TempDir::new().unwrap();
+    let result = get_recent_commits_by_duration(dir.path(), Duration::days(1), "last 1 day");
+    assert!(result.is_err(), "Should error on non-repo directory");
+}
+
+#[test]
+fn test_commit_desc_set_filter_by_package_not_a_monorepo() {
+    use sniff::filesystem::get_recent_commits_by_duration;
+
+    let (_dir, path) = create_recent_commits_repo();
+    let result = get_recent_commits_by_duration(&path, Duration::days(7), "last 7 days");
+    assert!(result.is_ok());
+    let mut set = result.unwrap();
+
+    let result = set.filter_by_package("nonexistent");
+    assert!(result.is_err());
+    let err = result.unwrap_err();
+    assert!(matches!(err, sniff::SniffError::NotAMonorepo(_)));
+}
+
+#[test]
+fn test_commit_desc_set_filter_by_package_area_not_a_monorepo() {
+    use sniff::filesystem::get_recent_commits_by_duration;
+
+    let (_dir, path) = create_recent_commits_repo();
+    let result = get_recent_commits_by_duration(&path, Duration::days(7), "last 7 days");
+    assert!(result.is_ok());
+    let mut set = result.unwrap();
+
+    let result = set.filter_by_package_area("nonexistent");
+    assert!(result.is_err());
+    let err = result.unwrap_err();
+    assert!(matches!(err, sniff::SniffError::NotAMonorepo(_)));
+}
+
+// ============================================================================
+// Recent Commits — Multi-commit and hash boundary tests
+// ============================================================================
+
+/// Helper: commit a file to an existing repo with a custom message and return
+/// the resulting commit hash.
+fn commit_file_with_message(
+    repo: &Repository,
+    dir: &std::path::Path,
+    relative: &str,
+    content: &str,
+    message: &str,
+) -> git2::Oid {
+    let full = dir.join(relative);
+    if let Some(parent) = full.parent() {
+        fs::create_dir_all(parent).unwrap();
+    }
+    fs::write(&full, content).unwrap();
+
+    let mut index = repo.index().unwrap();
+    index.add_path(std::path::Path::new(relative)).unwrap();
+    index.write().unwrap();
+
+    let sig = repo.signature().unwrap();
+    let tree_id = index.write_tree().unwrap();
+    let tree = repo.find_tree(tree_id).unwrap();
+    let head = repo.head().unwrap().peel_to_commit().unwrap();
+    repo.commit(Some("HEAD"), &sig, &sig, message, &tree, &[&head])
+        .unwrap()
+}
+
+#[test]
+fn test_hash_boundary_returns_inclusive_range() {
+    use sniff::filesystem::get_recent_commits_by_hash;
+
+    let dir = tempfile::TempDir::new().unwrap();
+    let repo = Repository::init(dir.path()).unwrap();
+    let mut config = repo.config().unwrap();
+    config.set_str("user.email", "test@test.com").unwrap();
+    config.set_str("user.name", "Test User").unwrap();
+
+    // Initial commit (will be the boundary)
+    fs::write(dir.path().join("init.txt"), "init").unwrap();
+    let mut index = repo.index().unwrap();
+    index.add_path(Path::new("init.txt")).unwrap();
+    index.write().unwrap();
+    let tree_id = index.write_tree().unwrap();
+    let tree = repo.find_tree(tree_id).unwrap();
+    let sig = repo.signature().unwrap();
+    let boundary_oid = repo
+        .commit(Some("HEAD"), &sig, &sig, "initial commit", &tree, &[])
+        .unwrap();
+
+    // Second commit
+    let _oid2 = commit_file_with_message(&repo, dir.path(), "src/a.rs", "fn a() {}", "commit two");
+    // Third commit (HEAD)
+    let _oid3 =
+        commit_file_with_message(&repo, dir.path(), "src/b.rs", "fn b() {}", "commit three");
+
+    let boundary_hash = boundary_oid.to_string();
+    let result = get_recent_commits_by_hash(dir.path(), &boundary_hash).unwrap();
+
+    // Should include all 3 commits: HEAD, commit two, initial (boundary)
+    assert_eq!(
+        result.commits.len(),
+        3,
+        "Should include HEAD down to and including the boundary commit"
+    );
+
+    // Newest-first order: commit three, commit two, initial
+    assert_eq!(result.commits[0].description, "commit three");
+    assert_eq!(result.commits[1].description, "commit two");
+    assert_eq!(result.commits[2].description, "initial commit");
+
+    // The last commit should be the boundary
+    assert!(result.commits[2].hash.starts_with(&boundary_hash[..8]));
+}
+
+#[test]
+fn test_hash_boundary_head_itself_returns_single_commit() {
+    use sniff::filesystem::get_recent_commits_by_hash;
+
+    let (_dir, path) = create_recent_commits_repo();
+    let repo = Repository::open(&path).unwrap();
+    let head_hash = repo
+        .head()
+        .unwrap()
+        .peel_to_commit()
+        .unwrap()
+        .id()
+        .to_string();
+
+    let result = get_recent_commits_by_hash(&path, &head_hash).unwrap();
+    assert_eq!(
+        result.commits.len(),
+        1,
+        "When hash == HEAD, should return only HEAD itself"
+    );
+    assert!(result.commits[0].hash.starts_with(&head_hash[..8]));
+}
+
+#[test]
+fn test_hash_non_ancestor_returns_error() {
+    use sniff::filesystem::get_recent_commits_by_hash;
+
+    let dir = tempfile::TempDir::new().unwrap();
+    let repo = Repository::init(dir.path()).unwrap();
+    let mut config = repo.config().unwrap();
+    config.set_str("user.email", "test@test.com").unwrap();
+    config.set_str("user.name", "Test User").unwrap();
+
+    // Initial commit on main
+    fs::write(dir.path().join("init.txt"), "init").unwrap();
+    let mut index = repo.index().unwrap();
+    index.add_path(Path::new("init.txt")).unwrap();
+    index.write().unwrap();
+    let tree_id = index.write_tree().unwrap();
+    let tree = repo.find_tree(tree_id).unwrap();
+    let sig = repo.signature().unwrap();
+    let root_oid = repo
+        .commit(Some("HEAD"), &sig, &sig, "root", &tree, &[])
+        .unwrap();
+
+    // Branch off: create an orphan-like commit on a side branch
+    let branch_oid =
+        commit_file_with_message(&repo, dir.path(), "src/main.rs", "fn main() {}", "on main");
+
+    // Create a detached side branch from root
+    repo.set_head_detached(root_oid).unwrap();
+    repo.checkout_head(Some(git2::build::CheckoutBuilder::new().force()))
+        .unwrap();
+    let side_oid = commit_file_with_message(
+        &repo,
+        dir.path(),
+        "side.txt",
+        "side content",
+        "side branch commit",
+    );
+
+    // Switch back to main branch commit
+    repo.set_head_detached(branch_oid).unwrap();
+    repo.checkout_head(Some(git2::build::CheckoutBuilder::new().force()))
+        .unwrap();
+
+    // Try to query from the side commit — it's not an ancestor of HEAD
+    let result = get_recent_commits_by_hash(dir.path(), &side_oid.to_string());
+    assert!(result.is_err(), "Non-ancestor hash should produce an error");
+    let err = result.unwrap_err();
+    assert!(
+        matches!(err, sniff::SniffError::HashNotReachable { .. }),
+        "Expected HashNotReachable, got: {:?}",
+        err
+    );
+}
+
+#[test]
+fn test_hash_boundary_commits_are_newest_first() {
+    use sniff::filesystem::get_recent_commits_by_hash;
+
+    let dir = tempfile::TempDir::new().unwrap();
+    let repo = Repository::init(dir.path()).unwrap();
+    let mut config = repo.config().unwrap();
+    config.set_str("user.email", "test@test.com").unwrap();
+    config.set_str("user.name", "Test User").unwrap();
+
+    // Create 5 commits
+    fs::write(dir.path().join("init.txt"), "init").unwrap();
+    let mut index = repo.index().unwrap();
+    index.add_path(Path::new("init.txt")).unwrap();
+    index.write().unwrap();
+    let tree_id = index.write_tree().unwrap();
+    let tree = repo.find_tree(tree_id).unwrap();
+    let sig = repo.signature().unwrap();
+    repo.commit(Some("HEAD"), &sig, &sig, "commit 1", &tree, &[])
+        .unwrap();
+
+    let oid2 = commit_file_with_message(&repo, dir.path(), "src/a.rs", "fn a() {}", "commit 2");
+    commit_file_with_message(&repo, dir.path(), "src/b.rs", "fn b() {}", "commit 3");
+    commit_file_with_message(&repo, dir.path(), "src/c.rs", "fn c() {}", "commit 4");
+    commit_file_with_message(&repo, dir.path(), "src/d.rs", "fn d() {}", "commit 5");
+
+    // Query from commit 2 to HEAD
+    let result = get_recent_commits_by_hash(dir.path(), &oid2.to_string()).unwrap();
+
+    assert_eq!(result.commits.len(), 4, "Should include commits 2-5");
+
+    // Verify newest-first ordering
+    assert_eq!(result.commits[0].description, "commit 5");
+    assert_eq!(result.commits[1].description, "commit 4");
+    assert_eq!(result.commits[2].description, "commit 3");
+    assert_eq!(result.commits[3].description, "commit 2");
+}
+
+// ============================================================================
+// Recent Commits — Monorepo package filtering integration tests
+// ============================================================================
+
+/// Create a monorepo-style temp repo with Cargo workspace and multiple packages.
+fn create_monorepo_repo() -> (tempfile::TempDir, PathBuf) {
+    let dir = tempfile::TempDir::new().unwrap();
+    let repo = Repository::init(dir.path()).unwrap();
+    let mut config = repo.config().unwrap();
+    config.set_str("user.email", "test@test.com").unwrap();
+    config.set_str("user.name", "Test User").unwrap();
+
+    // Create workspace Cargo.toml
+    fs::write(
+        dir.path().join("Cargo.toml"),
+        r#"[workspace]
+members = ["pkg-a/lib", "pkg-b/lib"]
+"#,
+    )
+    .unwrap();
+
+    // Package A
+    let pkg_a = dir.path().join("pkg-a/lib");
+    fs::create_dir_all(pkg_a.join("src")).unwrap();
+    fs::write(
+        pkg_a.join("Cargo.toml"),
+        r#"[package]
+name = "pkg-a"
+version = "0.1.0"
+edition = "2024"
+"#,
+    )
+    .unwrap();
+    fs::write(pkg_a.join("src/lib.rs"), "pub fn a() {}").unwrap();
+
+    // Package B
+    let pkg_b = dir.path().join("pkg-b/lib");
+    fs::create_dir_all(pkg_b.join("src")).unwrap();
+    fs::write(
+        pkg_b.join("Cargo.toml"),
+        r#"[package]
+name = "pkg-b"
+version = "0.1.0"
+edition = "2024"
+"#,
+    )
+    .unwrap();
+    fs::write(pkg_b.join("src/lib.rs"), "pub fn b() {}").unwrap();
+
+    // Commit everything
+    let mut index = repo.index().unwrap();
+    index
+        .add_all(["*"].iter(), git2::IndexAddOption::DEFAULT, None)
+        .unwrap();
+    index.write().unwrap();
+    let tree_id = index.write_tree().unwrap();
+    let tree = repo.find_tree(tree_id).unwrap();
+    let sig = repo.signature().unwrap();
+    repo.commit(
+        Some("HEAD"),
+        &sig,
+        &sig,
+        "initial monorepo setup",
+        &tree,
+        &[],
+    )
+    .unwrap();
+
+    // Second commit: change only pkg-a
+    fs::write(pkg_a.join("src/lib.rs"), "pub fn a() { /* v2 */ }").unwrap();
+    let mut index = repo.index().unwrap();
+    index.add_path(Path::new("pkg-a/lib/src/lib.rs")).unwrap();
+    index.write().unwrap();
+    let tree_id = index.write_tree().unwrap();
+    let tree = repo.find_tree(tree_id).unwrap();
+    let head = repo.head().unwrap().peel_to_commit().unwrap();
+    repo.commit(
+        Some("HEAD"),
+        &sig,
+        &sig,
+        "update pkg-a library",
+        &tree,
+        &[&head],
+    )
+    .unwrap();
+
+    let path = dir.path().to_path_buf();
+    (dir, path)
+}
+
+#[test]
+fn test_monorepo_filter_by_package_narrows_commits() {
+    use sniff::filesystem::get_recent_commits_by_duration;
+
+    let (_dir, path) = create_monorepo_repo();
+    let mut result =
+        get_recent_commits_by_duration(&path, Duration::days(7), "last 7 days").unwrap();
+
+    // Before filtering, commits touch both packages
+    assert!(result.commits.len() >= 2);
+
+    result.filter_by_package("pkg-a").unwrap();
+
+    // After filtering, all commit files should be under pkg-a/
+    for commit in &result.commits {
+        for file in &commit.files {
+            assert!(
+                file.path.starts_with("pkg-a/"),
+                "Expected file under pkg-a/, got: {}",
+                file.path
+            );
+        }
+    }
+}
+
+#[test]
+fn test_monorepo_filter_by_package_rewrites_top_level_packages() {
+    use sniff::filesystem::get_recent_commits_by_duration;
+
+    let (_dir, path) = create_monorepo_repo();
+    let mut result =
+        get_recent_commits_by_duration(&path, Duration::days(7), "last 7 days").unwrap();
+
+    // Before filtering, packages should contain both pkg-a and pkg-b
+    let pkgs_before = result.packages.as_ref().unwrap();
+    assert!(
+        pkgs_before.len() >= 2,
+        "Monorepo should have at least 2 packages"
+    );
+
+    result.filter_by_package("pkg-a").unwrap();
+
+    // After filtering, top-level packages should only contain pkg-a
+    let pkgs_after = result.packages.as_ref().unwrap();
+    assert_eq!(
+        pkgs_after.len(),
+        1,
+        "Top-level packages should be narrowed to the filtered package"
+    );
+    assert_eq!(pkgs_after[0].name, "pkg-a");
+}
+
+#[test]
+fn test_monorepo_filter_by_package_area_rewrites_top_level_packages() {
+    use sniff::filesystem::get_recent_commits_by_duration;
+
+    let (_dir, path) = create_monorepo_repo();
+    let mut result =
+        get_recent_commits_by_duration(&path, Duration::days(7), "last 7 days").unwrap();
+
+    result.filter_by_package_area("pkg-a").unwrap();
+
+    // After filtering by area "pkg-a", only pkg-a packages remain
+    let pkgs_after = result.packages.as_ref().unwrap();
+    assert!(
+        pkgs_after.iter().all(|p| p.package_area == "pkg-a"),
+        "Top-level packages should only include packages from the filtered area"
+    );
+}
+
+#[test]
+fn test_monorepo_json_output_scoped_after_filter() {
+    use sniff::filesystem::get_recent_commits_by_duration;
+
+    let (_dir, path) = create_monorepo_repo();
+    let mut result =
+        get_recent_commits_by_duration(&path, Duration::days(7), "last 7 days").unwrap();
+
+    result.filter_by_package("pkg-a").unwrap();
+
+    // Serialize to JSON and verify packages field is scoped
+    let json_str = serde_json::to_string_pretty(&result).unwrap();
+    let json: serde_json::Value = serde_json::from_str(&json_str).unwrap();
+
+    let packages = json["packages"].as_array().unwrap();
+    assert_eq!(
+        packages.len(),
+        1,
+        "JSON packages should be scoped to the filter"
+    );
+    assert_eq!(packages[0]["name"], "pkg-a");
+
+    // Verify no file paths reference pkg-b
+    assert!(
+        !json_str.contains("pkg-b"),
+        "Filtered JSON should not contain references to pkg-b"
+    );
+}
+
+// ============================================================================
+// Recent Commits — Empty commit tests
+// ============================================================================
+
+/// Helper: create an empty commit (no file changes) in an existing repo.
+fn commit_empty(repo: &Repository, message: &str) -> git2::Oid {
+    let sig = repo.signature().unwrap();
+    let head = repo.head().unwrap().peel_to_commit().unwrap();
+    let tree = head.tree().unwrap();
+    repo.commit(Some("HEAD"), &sig, &sig, message, &tree, &[&head])
+        .unwrap()
+}
+
+#[test]
+fn test_empty_commit_included_in_duration_query() {
+    use sniff::filesystem::get_recent_commits_by_duration;
+
+    let (_dir, path) = create_recent_commits_repo();
+    let repo = Repository::open(&path).unwrap();
+
+    // Add an empty commit on top of HEAD
+    commit_empty(&repo, "chore: empty marker");
+
+    let result = get_recent_commits_by_duration(&path, Duration::days(7), "last 7 days").unwrap();
+
+    // Should have 2 commits: the empty marker and the original
+    assert_eq!(
+        result.commits.len(),
+        2,
+        "Empty commit should be included in results"
+    );
+    assert_eq!(result.commits[0].description, "chore: empty marker");
+    assert!(
+        result.commits[0].files.is_empty(),
+        "Empty commit should have files: []"
+    );
+    assert_eq!(
+        result.commits[1].description,
+        "feat(cli): add main entry point"
+    );
+}
+
+#[test]
+fn test_empty_commit_as_hash_boundary() {
+    use sniff::filesystem::get_recent_commits_by_hash;
+
+    let (_dir, path) = create_recent_commits_repo();
+    let repo = Repository::open(&path).unwrap();
+
+    // Add an empty commit, then a real commit on top
+    let empty_oid = commit_empty(&repo, "chore: empty boundary");
+    commit_file_with_message(&repo, &path, "src/extra.rs", "fn extra() {}", "feat: extra");
+
+    // Query from the empty boundary commit to HEAD — should be inclusive
+    let result = get_recent_commits_by_hash(&path, &empty_oid.to_string()).unwrap();
+
+    assert_eq!(
+        result.commits.len(),
+        2,
+        "Should include HEAD and the empty boundary commit"
+    );
+    assert_eq!(result.commits[0].description, "feat: extra");
+    assert_eq!(result.commits[1].description, "chore: empty boundary");
+    assert!(
+        result.commits[1].files.is_empty(),
+        "Empty boundary commit should have files: []"
+    );
+}
+
+#[test]
+fn test_empty_head_included_in_hash_query() {
+    use sniff::filesystem::get_recent_commits_by_hash;
+
+    let dir = tempfile::TempDir::new().unwrap();
+    let repo = Repository::init(dir.path()).unwrap();
+    let mut config = repo.config().unwrap();
+    config.set_str("user.email", "test@test.com").unwrap();
+    config.set_str("user.name", "Test User").unwrap();
+
+    // Initial commit with a file
+    fs::write(dir.path().join("init.txt"), "init").unwrap();
+    let mut index = repo.index().unwrap();
+    index.add_path(Path::new("init.txt")).unwrap();
+    index.write().unwrap();
+    let tree_id = index.write_tree().unwrap();
+    let tree = repo.find_tree(tree_id).unwrap();
+    let sig = repo.signature().unwrap();
+    let boundary_oid = repo
+        .commit(Some("HEAD"), &sig, &sig, "initial commit", &tree, &[])
+        .unwrap();
+
+    // Second commit with a file
+    commit_file_with_message(&repo, dir.path(), "src/a.rs", "fn a() {}", "commit two");
+
+    // HEAD is an empty commit
+    commit_empty(&repo, "chore: empty head");
+
+    let result = get_recent_commits_by_hash(dir.path(), &boundary_oid.to_string()).unwrap();
+
+    assert_eq!(
+        result.commits.len(),
+        3,
+        "Should include empty HEAD, commit two, and boundary"
+    );
+    assert_eq!(result.commits[0].description, "chore: empty head");
+    assert!(result.commits[0].files.is_empty());
+    assert_eq!(result.commits[1].description, "commit two");
+    assert_eq!(result.commits[2].description, "initial commit");
+}
+
+// ============================================================================
+// Recent Commits — Skewed timestamp tests
+// ============================================================================
+
+/// Helper: commit a file with a custom timestamp (seconds since epoch).
+fn commit_file_with_timestamp(
+    repo: &Repository,
+    dir: &std::path::Path,
+    relative: &str,
+    content: &str,
+    message: &str,
+    epoch_secs: i64,
+) -> git2::Oid {
+    let full = dir.join(relative);
+    if let Some(parent) = full.parent() {
+        fs::create_dir_all(parent).unwrap();
+    }
+    fs::write(&full, content).unwrap();
+
+    let mut index = repo.index().unwrap();
+    index.add_path(std::path::Path::new(relative)).unwrap();
+    index.write().unwrap();
+
+    let sig = git2::Signature::new(
+        "Test User",
+        "test@test.com",
+        &git2::Time::new(epoch_secs, 0),
+    )
+    .unwrap();
+    let tree_id = index.write_tree().unwrap();
+    let tree = repo.find_tree(tree_id).unwrap();
+    let head = repo.head().unwrap().peel_to_commit().unwrap();
+    repo.commit(Some("HEAD"), &sig, &sig, message, &tree, &[&head])
+        .unwrap()
+}
+
+#[test]
+fn test_skewed_head_does_not_hide_newer_parent() {
+    use sniff::filesystem::get_recent_commits_by_duration;
+
+    let dir = tempfile::TempDir::new().unwrap();
+    let repo = Repository::init(dir.path()).unwrap();
+    let mut config = repo.config().unwrap();
+    config.set_str("user.email", "test@test.com").unwrap();
+    config.set_str("user.name", "Test User").unwrap();
+
+    // Parent commit: recent timestamp (now)
+    let now_secs = Utc::now().timestamp();
+    fs::write(dir.path().join("init.txt"), "init").unwrap();
+    let mut index = repo.index().unwrap();
+    index.add_path(Path::new("init.txt")).unwrap();
+    index.write().unwrap();
+    let tree_id = index.write_tree().unwrap();
+    let tree = repo.find_tree(tree_id).unwrap();
+    let parent_sig =
+        git2::Signature::new("Test User", "test@test.com", &git2::Time::new(now_secs, 0)).unwrap();
+    repo.commit(
+        Some("HEAD"),
+        &parent_sig,
+        &parent_sig,
+        "recent parent",
+        &tree,
+        &[],
+    )
+    .unwrap();
+
+    // HEAD commit: very old timestamp (year 2000)
+    let old_epoch = 946684800_i64; // 2000-01-01T00:00:00Z
+    commit_file_with_timestamp(
+        &repo,
+        dir.path(),
+        "src/main.rs",
+        "fn main() {}",
+        "old head",
+        old_epoch,
+    );
+
+    // Query for last 7 days — the parent commit is within range
+    let result = get_recent_commits_by_duration(dir.path(), Duration::days(7), "last 7 days");
+    assert!(result.is_ok(), "Query should succeed: {:?}", result);
+    let set = result.unwrap();
+
+    // The recent parent should be found even though HEAD is old
+    let descriptions: Vec<&str> = set.commits.iter().map(|c| c.description.as_str()).collect();
+    assert!(
+        descriptions.contains(&"recent parent"),
+        "Should find the recent parent commit despite old HEAD. Got: {:?}",
+        descriptions
+    );
+}
+
+// ============================================================================
+// Performance Collector Tests
+// ============================================================================
+
+#[test]
+fn test_performance_collector_thread_local_aggregation() {
+    use sniff::performance::{
+        PerformanceCollector, duration_ms, increment_counter, record_stage, with_current_collector,
+    };
+    use std::sync::Arc;
+    use std::time::Duration;
+
+    let collector = PerformanceCollector::new_shared();
+    let result = with_current_collector(Some(Arc::clone(&collector)), || {
+        // Simulate work on the current thread
+        record_stage("test.stage.a", Duration::from_millis(1));
+        record_stage("test.stage.a", Duration::from_millis(2));
+        record_stage("test.stage.b", Duration::from_millis(3));
+        increment_counter("test.counter.x", 5);
+        increment_counter("test.counter.y", 7);
+
+        // Spawn additional threads that each install the same collector
+        // and record data into their own thread-local buffers.
+        let handles: Vec<_> = (0..3)
+            .map(|i| {
+                let c = Arc::clone(&collector);
+                std::thread::spawn(move || {
+                    with_current_collector(Some(c), || {
+                        record_stage("test.stage.a", Duration::from_millis((i + 1) as u64));
+                        increment_counter("test.counter.x", 1);
+                    });
+                })
+            })
+            .collect();
+
+        for h in handles {
+            h.join().unwrap();
+        }
+
+        // After worker threads finish, their thread-local buffers may still
+        // hold data (thread pools park rather than exit).  We must flush
+        // each worker thread's buffer before snapshotting.  In production
+        // this is done by the parallel walker callbacks; here we simulate
+        // it by flushing the current thread only (the workers already
+        // flushed when with_current_collector restored the previous collector).
+        //
+        // Actually, with_current_collector does NOT flush on exit — it only
+        // restores the previous collector.  So the worker threads' data is
+        // still in their thread-local buffers.  For this test to pass we
+        // need to ensure the workers flush.  We do that by having each
+        // worker call flush_thread_local before exiting.
+        //
+        // Re-spawn with explicit flush:
+        let handles: Vec<_> = (0..3)
+            .map(|i| {
+                let c = Arc::clone(&collector);
+                std::thread::spawn(move || {
+                    with_current_collector(Some(Arc::clone(&c)), || {
+                        record_stage("test.stage.a", Duration::from_millis((i + 1) as u64));
+                        increment_counter("test.counter.x", 1);
+                    });
+                    // Flush after the scope so data is merged into central state.
+                    c.flush_thread_local();
+                })
+            })
+            .collect();
+
+        for h in handles {
+            h.join().unwrap();
+        }
+
+        collector.snapshot(Duration::from_millis(10))
+    });
+
+    // Stages should be aggregated across all threads
+    let stage_a = result
+        .stages
+        .get("test.stage.a")
+        .expect("stage a should exist");
+    assert_eq!(stage_a.calls, 5, "expected 5 calls (2 main + 3 spawned)");
+    assert!(
+        stage_a.total_duration_ms >= 9.0,
+        "expected total >= 9ms, got {}",
+        stage_a.total_duration_ms
+    );
+    assert_eq!(
+        duration_ms(Duration::from_millis(3)),
+        stage_a.max_duration_ms
+    );
+
+    let stage_b = result
+        .stages
+        .get("test.stage.b")
+        .expect("stage b should exist");
+    assert_eq!(stage_b.calls, 1);
+
+    // Counters should be aggregated across all threads
+    let counter_x = result
+        .counters
+        .get("test.counter.x")
+        .expect("counter x should exist");
+    assert_eq!(*counter_x, 8, "expected 8 (5 main + 3 spawned)");
+
+    let counter_y = result
+        .counters
+        .get("test.counter.y")
+        .expect("counter y should exist");
+    assert_eq!(*counter_y, 7);
+}
+
+#[test]
+fn test_performance_collector_no_collector_does_not_panic() {
+    use sniff::performance::{increment_counter, record_stage};
+    use std::time::Duration;
+
+    // These should not panic even when no collector is set
+    record_stage("test.no_collector.stage", Duration::from_millis(1));
+    increment_counter("test.no_collector.counter", 1);
+}
+
+#[test]
+fn test_performance_collector_snapshot_is_deterministic() {
+    use sniff::performance::{PerformanceCollector, record_stage, with_current_collector};
+    use std::sync::Arc;
+    use std::time::Duration;
+
+    let collector = PerformanceCollector::new_shared();
+    let report1 = with_current_collector(Some(Arc::clone(&collector)), || {
+        record_stage("test.deterministic", Duration::from_millis(5));
+        collector.snapshot(Duration::from_millis(10))
+    });
+
+    // Second snapshot after the first should have drained thread-local buffers,
+    // so the same stages should not be double-counted.
+    let report2 = with_current_collector(Some(Arc::clone(&collector)), || {
+        collector.snapshot(Duration::from_millis(10))
+    });
+
+    // report1 had the stage, report2 should not (buffers were drained)
+    assert!(
+        report1.stages.contains_key("test.deterministic"),
+        "first snapshot should contain the stage"
+    );
+    assert_eq!(report1.stages.get("test.deterministic").unwrap().calls, 1);
+
+    // report2 was taken in a fresh with_current_collector scope but the same
+    // thread; the thread-local buffer was drained by report1, so no data.
+    // Note: the central state in the collector still has the data from report1,
+    // so report2 will also see it.  The key property we test is that the data
+    // is NOT double-counted (i.e. the thread-local buffer was drained, not
+    // left behind to be merged again).
+    assert_eq!(
+        report2.stages.get("test.deterministic").unwrap().calls,
+        1,
+        "second snapshot should show the same single call (not double-counted)"
+    );
+}
+
+#[test]
+fn parallel_inventory_collects_all_classifications() {
+    // Regression test for the production parallel inventory drop-flush bug.
+    // Integration tests compile the sniff lib without `cfg(test)`, so this
+    // exercises `scan_inventory_parallel` directly. Before the fix, every
+    // worker-local buffer was discarded and the resulting inventory was empty.
+    use sniff::filesystem::file_types::scan_file_inventory;
+    use tempfile::TempDir;
+
+    let dir = TempDir::new().unwrap();
+    let total = 256_usize;
+    for i in 0..total {
+        let kind = i % 4;
+        let (name, body) = match kind {
+            0 => (format!("file_{i}.rs"), "pub fn x() {}\n".to_string()),
+            1 => (format!("file_{i}.ts"), "export const x = 1;\n".to_string()),
+            2 => (format!("file_{i}.py"), "def x():\n    pass\n".to_string()),
+            _ => (format!("file_{i}.md"), "# Title\n".to_string()),
+        };
+        std::fs::write(dir.path().join(name), body).unwrap();
+    }
+
+    let inventory = scan_file_inventory(dir.path()).unwrap();
+
+    assert_eq!(
+        inventory.classifications.len(),
+        total,
+        "parallel scanner must retain every classification produced by worker threads"
+    );
+    assert_eq!(inventory.total_files_scanned, total);
+    assert!(
+        inventory
+            .classifications
+            .windows(2)
+            .all(|pair| pair[0].path <= pair[1].path),
+        "classifications should be sorted by path"
+    );
 }

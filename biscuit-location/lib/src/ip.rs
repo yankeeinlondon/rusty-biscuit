@@ -1,7 +1,7 @@
 use std::net::IpAddr;
 use std::path::Path;
 
-use maxminddb::{geoip2, Mmap, Reader};
+use maxminddb::{Mmap, Reader, geoip2};
 
 use crate::error::LocationError;
 use crate::types::{Coordinates, Location, LocationSource, Place};
@@ -88,7 +88,10 @@ fn city_to_location(city: geoip2::City, ip: IpAddr) -> crate::Result<Location> {
         .and_then(|s| s.names.english)
         .map(|s| s.to_string());
 
-    let region_code = subdivision.as_ref().and_then(|s| s.iso_code).map(|s| s.to_string());
+    let region_code = subdivision
+        .as_ref()
+        .and_then(|s| s.iso_code)
+        .map(|s| s.to_string());
 
     let country = city.country.names.english.map(|s| s.to_string());
 

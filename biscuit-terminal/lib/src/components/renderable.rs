@@ -1,14 +1,16 @@
 use std::any::Any;
+use std::collections::HashMap;
 use std::rc::Rc;
 
 use crate::terminal::Terminal;
-use crate::utils::layout::{Alignment, Layout, Margin, RowFill, WordWrap};
+use crate::utils::layout::{Alignment, Layout, Margin, RowFill};
+use crate::utils::wrap_policy::WordWrap;
 
 /// A struct or enum which implements the **Renderable** trait
 /// can be reduced down to a string designed to be displayed
 /// in a terminal.
 ///
-/// Every implementor owns a [`Layout`] that controls margins,
+/// Every implementer owns a [`Layout`] that controls margins,
 /// alignment, word-wrap, and row-fill strategy. The required
 /// accessors `layout()` / `layout_mut()` expose it, while
 /// the provided builder methods let callers configure it
@@ -192,6 +194,29 @@ pub trait Renderable: std::fmt::Debug + Any {
             format!("{rendered}\n")
         }
     }
+}
+
+/// **Browser-Aware Render**
+///
+/// Renders the component as HTML/SVG suitable for browser display.
+/// This trait is used by libraries like darkmatter to generate
+/// web-compatible output from terminal components.
+pub trait BrowserRenderable: std::fmt::Debug + Any {
+    /// Renders the component to browser-compatible HTML/SVG.
+    fn render_to_browser(&self) -> String;
+
+    /// Renders the component to browser-compatible HTML/SVG with inline CSS variables.
+    /// The `variables` parameter provides CSS variable definitions that can be used
+    /// in the rendered output for dynamic styling.
+    fn render_to_browser_with_inline_variables(
+        &self,
+        _variables: &HashMap<String, String>,
+    ) -> String {
+        // Default implementation ignores variables and calls the basic render method
+        self.render_to_browser()
+    }
+
+    fn as_any(&self) -> &dyn Any;
 }
 
 /// Content that can be rendered as either plain text or a component.

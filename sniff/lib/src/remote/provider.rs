@@ -8,7 +8,7 @@ use async_trait::async_trait;
 
 use super::types::{
     CiCdInfo, DocumentRef, GitProvider, IssueInfo, KeyUrls, OrgInfo, OrgRepoRef, PullRequestInfo,
-    RemoteReport, RepoMetadata, TagsAndReleases,
+    PullRequestState, RemoteReport, RepoMetadata, TagsAndReleases,
 };
 use crate::error::SniffError;
 
@@ -72,14 +72,18 @@ pub trait RemoteRepoProvider: Send + Sync {
         path: &str,
     ) -> Result<String, SniffError>;
 
-    /// List open pull requests / merge requests.
+    /// List pull requests / merge requests filtered by state.
     ///
     /// For GitLab, these are called "merge requests". The provider
     /// implementation normalizes the terminology.
+    ///
+    /// The `state` parameter filters which PRs to return. Providers that
+    /// don't support a particular state natively will post-filter the results.
     async fn list_pull_requests(
         &self,
         owner: &str,
         repo: &str,
+        state: PullRequestState,
     ) -> Result<Vec<PullRequestInfo>, SniffError>;
 
     /// List open issues.
@@ -142,7 +146,7 @@ pub trait RemoteRepoProvider: Send + Sync {
         let org_info = self.get_org_info(owner).await.ok();
         let documents = self.list_documents(owner, repo).await.unwrap_or_default();
         let pull_requests = self
-            .list_pull_requests(owner, repo)
+            .list_pull_requests(owner, repo, PullRequestState::Open)
             .await
             .unwrap_or_default();
         let issues = self.list_issues(owner, repo).await.unwrap_or_default();

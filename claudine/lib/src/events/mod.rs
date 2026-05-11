@@ -4,17 +4,17 @@ mod environment;
 mod event_meta;
 mod init_defaults;
 mod matrix;
-mod provider;
+#[allow(deprecated)]
+pub mod provider;
 mod resolved_hook;
 
 pub use agentic_event::AgenticEvent;
 pub use config::{
-    CanonicalProviderSettings, EventBinding, GlobalSettings, HookerConfig, LinkingSettings,
-    ProviderConfig, TtsSettings,
+    CanonicalProviderSettings, EventBinding, GlobalSettings, LinkingSettings, TtsSettings,
 };
 pub use environment::{
     EnvironmentContext, GitContext, HardwareContext, OsContext, RepoContext, detect_environment,
-    detect_environment_fast,
+    detect_environment_fast, environment_context_from_sniff_result,
 };
 pub use event_meta::{EventMeta, ToolName};
 pub use init_defaults::{
@@ -23,7 +23,20 @@ pub use init_defaults::{
 };
 pub use matrix::{
     EventNativeMappingCell, EventNativeMappingRow, EventSupportCell, EventSupportRow,
-    NativeEventName, PROVIDERS_DISPLAY_ORDER, event_native_mapping_matrix, event_support_matrix,
+    NativeEventName, event_native_mapping_matrix, event_support_matrix,
 };
-pub use provider::{EventSupportLevel, Provider};
 pub use resolved_hook::ResolvedHook;
+
+// Deprecated compatibility re-exports.
+//
+// `Provider`, `PROVIDERS_DISPLAY_ORDER`, and `EventSupportLevel` previously
+// lived in `crate::events::provider` and are now owned by `crate::provider`.
+// The `provider` submodule above survives one release cycle as a thin
+// `#[deprecated]` re-export module per spec §"Migration Plan" and design
+// §6.1. Removal is scheduled for the post-Phase-8 cleanup release.
+//
+// Internal consumers must import directly from `crate::provider`; the
+// re-exports below exist solely to keep external consumers compiling
+// during the deprecation window.
+#[allow(deprecated)]
+pub use provider::{EventSupportLevel, PROVIDERS_DISPLAY_ORDER, Provider};

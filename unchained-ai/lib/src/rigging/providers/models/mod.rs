@@ -6,7 +6,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use super::Provider;
 
-use crate::models::model_metadata::{Modality, ModelMetadata};
+use crate::models::model_metadata::{Modality, ProviderModelMetadata};
 use crate::rigging::providers::models::{
     anthropic::ProviderModelAnthropic, deepseek::ProviderModelDeepseek,
     gemini::ProviderModelGemini, groq::ProviderModelGroq, mistral::ProviderModelMistral,
@@ -61,7 +61,7 @@ pub enum ProviderModel {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum ProviderModelParseError {
+pub enum ProviderModelParseError {
     InvalidFormat { input: String },
     UnknownProvider { provider: String, input: String },
     UnknownModel { provider: Provider, model: String },
@@ -92,7 +92,7 @@ impl fmt::Display for ProviderModelParseError {
 impl std::error::Error for ProviderModelParseError {}
 
 impl ProviderModel {
-    fn provider(&self) -> Provider {
+    pub fn provider(&self) -> Provider {
         match self {
             Self::Anthropic(_) => Provider::Anthropic,
             Self::Deepseek(_) => Provider::Deepseek,
@@ -108,11 +108,11 @@ impl ProviderModel {
         }
     }
 
-    pub(crate) fn wire_id(&self) -> String {
+    pub fn wire_id(&self) -> String {
         format!("{}/{}", provider_slug(self.provider()), self.model_id())
     }
 
-    pub(crate) fn parse_wire_id(input: &str) -> Result<Self, ProviderModelParseError> {
+    pub fn parse_wire_id(input: &str) -> Result<Self, ProviderModelParseError> {
         let trimmed = input.trim();
         let (provider_raw, model_id) =
             trimmed
@@ -248,7 +248,7 @@ impl ProviderModel {
     /// Metadata is fetched from the Parsera LLM Specs API at build time
     /// and includes context window, modalities, and capabilities.
     #[must_use]
-    pub fn metadata(&self) -> Option<&'static ModelMetadata> {
+    pub fn metadata(&self) -> Option<&'static ProviderModelMetadata> {
         match self {
             Self::Anthropic(m) => m.metadata(),
             Self::Deepseek(m) => m.metadata(),
@@ -262,6 +262,90 @@ impl ProviderModel {
             Self::Zai(m) => m.metadata(),
             Self::ZenMux(m) => m.metadata(),
         }
+    }
+
+    /// Returns all known wire IDs across all providers.
+    ///
+    /// Useful for shell completion and model discovery.
+    #[must_use]
+    pub fn all_wire_ids() -> Vec<&'static str> {
+        let mut ids = Vec::new();
+
+        for model in ProviderModelAnthropic::ALL {
+            ids.push(&*Box::leak(
+                ProviderModel::Anthropic(model.clone())
+                    .wire_id()
+                    .into_boxed_str(),
+            ));
+        }
+        for model in ProviderModelDeepseek::ALL {
+            ids.push(&*Box::leak(
+                ProviderModel::Deepseek(model.clone())
+                    .wire_id()
+                    .into_boxed_str(),
+            ));
+        }
+        for model in ProviderModelGemini::ALL {
+            ids.push(&*Box::leak(
+                ProviderModel::Gemini(model.clone())
+                    .wire_id()
+                    .into_boxed_str(),
+            ));
+        }
+        for model in ProviderModelGroq::ALL {
+            ids.push(&*Box::leak(
+                ProviderModel::Groq(model.clone())
+                    .wire_id()
+                    .into_boxed_str(),
+            ));
+        }
+        for model in ProviderModelMistral::ALL {
+            ids.push(&*Box::leak(
+                ProviderModel::Mistral(model.clone())
+                    .wire_id()
+                    .into_boxed_str(),
+            ));
+        }
+        for model in ProviderModelMoonshotAi::ALL {
+            ids.push(&*Box::leak(
+                ProviderModel::MoonshotAi(model.clone())
+                    .wire_id()
+                    .into_boxed_str(),
+            ));
+        }
+        for model in ProviderModelOpenAi::ALL {
+            ids.push(&*Box::leak(
+                ProviderModel::OpenAi(model.clone())
+                    .wire_id()
+                    .into_boxed_str(),
+            ));
+        }
+        for model in ProviderModelOpenRouter::ALL {
+            ids.push(&*Box::leak(
+                ProviderModel::OpenRouter(model.clone())
+                    .wire_id()
+                    .into_boxed_str(),
+            ));
+        }
+        for model in ProviderModelXai::ALL {
+            ids.push(&*Box::leak(
+                ProviderModel::Xai(model.clone()).wire_id().into_boxed_str(),
+            ));
+        }
+        for model in ProviderModelZai::ALL {
+            ids.push(&*Box::leak(
+                ProviderModel::Zai(model.clone()).wire_id().into_boxed_str(),
+            ));
+        }
+        for model in ProviderModelZenMux::ALL {
+            ids.push(&*Box::leak(
+                ProviderModel::ZenMux(model.clone())
+                    .wire_id()
+                    .into_boxed_str(),
+            ));
+        }
+
+        ids
     }
 
     /// Returns the context window size if known.
@@ -388,12 +472,12 @@ mod tests {
         // This test ensures the enum variants compile and are accessible
         let _anthropic =
             ProviderModel::Anthropic(ProviderModelAnthropic::Claude__Opus__4__5__20251101);
-        let _deepseek = ProviderModel::Deepseek(ProviderModelDeepseek::Deepseek__Chat);
+        let _deepseek = ProviderModel::Deepseek(ProviderModelDeepseek::Deepseek__V4__Flash);
         let _gemini = ProviderModel::Gemini(ProviderModelGemini::Gemini__2_5__Pro);
         let _groq = ProviderModel::Groq(ProviderModelGroq::Llama__3_3__70b__Versatile);
         let _mistral =
             ProviderModel::Mistral(ProviderModelMistral::Bespoke("mistral-large".to_string()));
-        let _moonshot = ProviderModel::MoonshotAi(ProviderModelMoonshotAi::Kimi__K2__Thinking);
+        let _moonshot = ProviderModel::MoonshotAi(ProviderModelMoonshotAi::Kimi__K2_5);
         let _openai = ProviderModel::OpenAi(ProviderModelOpenAi::O3);
         let _openrouter =
             ProviderModel::OpenRouter(ProviderModelOpenRouter::Bespoke("test".to_string()));
@@ -433,10 +517,10 @@ mod tests {
         assert!(meta.context_window.is_some());
         assert!(meta.context_window.unwrap() > 0);
 
-        // Test DeepSeek
-        let deepseek = ProviderModelDeepseek::Deepseek__Chat;
-        let meta = deepseek.metadata();
-        assert!(meta.is_some(), "DeepSeek Chat should have metadata");
+        // Test OpenAI O3 - a model with known metadata
+        let o3 = ProviderModelOpenAi::O3;
+        let meta = o3.metadata();
+        assert!(meta.is_some(), "OpenAI O3 should have metadata");
     }
 
     /// Test that Bespoke variants return None for metadata on individual enums.

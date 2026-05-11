@@ -1,9 +1,8 @@
 use std::path::{Path, PathBuf};
 
+use super::trait_def::{AgentConfigurator, ProviderHookPlan, RegistrationResult, SkipReason};
 use crate::error::Result;
-use crate::events::{HookerConfig, Provider};
-
-use super::trait_def::{AgentConfigurator, RegistrationResult, SkipReason};
+use crate::provider::Provider;
 
 pub(crate) struct GooseConfigurator;
 
@@ -14,7 +13,7 @@ impl AgentConfigurator for GooseConfigurator {
 
     fn register(
         &self,
-        _config: &HookerConfig,
+        _plan: &ProviderHookPlan,
         config_dir: Option<&Path>,
     ) -> Result<RegistrationResult> {
         let config_path = config_path(config_dir);
@@ -80,13 +79,12 @@ mod tests {
     fn register_skips_when_not_detected() {
         let tmp = TempDir::new().unwrap();
         let configurator = GooseConfigurator;
-        let config = crate::events::HookerConfig {
-            version: "1.0".to_string(),
-            settings: Default::default(),
-            providers: Default::default(),
+        let plan = ProviderHookPlan {
+            events: vec![],
+            canonical_for: None,
         };
 
-        let result = configurator.register(&config, Some(tmp.path())).unwrap();
+        let result = configurator.register(&plan, Some(tmp.path())).unwrap();
         assert!(matches!(
             result,
             RegistrationResult::Skipped(SkipReason::NotDetected)
@@ -100,13 +98,12 @@ mod tests {
         fs::write(&config_path, "provider: openai\n").unwrap();
 
         let configurator = GooseConfigurator;
-        let config = crate::events::HookerConfig {
-            version: "1.0".to_string(),
-            settings: Default::default(),
-            providers: Default::default(),
+        let plan = ProviderHookPlan {
+            events: vec![],
+            canonical_for: None,
         };
 
-        let result = configurator.register(&config, Some(tmp.path())).unwrap();
+        let result = configurator.register(&plan, Some(tmp.path())).unwrap();
         assert!(matches!(
             result,
             RegistrationResult::Skipped(SkipReason::WrapperOnly { .. })

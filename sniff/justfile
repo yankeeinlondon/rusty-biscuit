@@ -1,6 +1,17 @@
-set shell := ["bash", "-eu", "-o", "pipefail", "-c"]
 set dotenv-load
 set positional-arguments
+
+# set allow-duplicate-recipes
+
+set shell := ["bash", "-eu", "-o", "pipefail", "-c"]
+
+import "../just/lifecycle.just"
+import "../just/plan.just"
+import "../just/review.just"
+import "../just/notify.just"
+import "../just/ai.just"
+import "../just/spec.just"
+import "../just/devops.just"
 
 BOLD := '\033[1m'
 DIM := '\033[2m'
@@ -8,11 +19,9 @@ ITALIC := '\033[3m'
 RESET := '\033[0m'
 RED := '\033[31m'
 DOCS := ""
-
 PACKAGE := "sniff"
 LIB := lowercase(PACKAGE)
 CLI := LIB + "-cli"
-
 
 default:
     #!/usr/bin/env bash
@@ -20,131 +29,45 @@ default:
     if command -v md &> /dev/null; then
         md just.md
     else
-        @echo "{{BOLD}}Sniff CLI and Library{{RESET}}"
+        @echo "{{ BOLD }}Sniff CLI and Library{{ RESET }}"
         echo "=================================="
     fi
     echo
     just --list | grep -v 'default'
 
-
-# Uses TTS if available but never error
-_speak *args:
-    @so-you-say "{{args}}" --background >/dev/null 2>&1 || exit 0
-
-# play a sound effect if `playa` CLI is installed (never errors)
-_play effect background="":
-    @playa "{{effect}}" "{{background}}" >/dev/null 2>&1 || exit 0
-
-_notify message title=PACKAGE:
-    #!/usr/bin/env bash
-    if command -v osascript &> /dev/null; then
-        osascript -e 'display notification "message" with title "{{title}}"'
-    elif command -v notify-send &> /dev/null; then
-        notify-send '{{message}}'
-    fi
-
-_ask_opencode prompt:
-    #!/usr/bin/env bash
-    if command -v opencode &> /dev/null; then
-        local MODEL
-        MODEL="${MODEL:-minimax/MiniMax-M2.5-highspeed}"
-        echo
-        echo -e "{{DIM}}{{ITALIC}}- {{RESET}}Note: {{DIM}}using the {{BOLD}}${MODEL}{{DIM}} model with {{BOLD}}OpenCode CLI{{DIM}}.{{RESET}}"
-        echo -e "{{DIM}}{{ITALIC}}- you can choose a different model by setting the {{BOLD}}MODEL{{DIM}} env variable"
-        echo
-        opencode run "{{prompt}}" --model "$MODEL"  || (
-            echo
-            echo -e "Attempt to use {{RED}}{{BOLD}}OpenCode{{RESET}} for query failed! Will try using Claude instead"
-            echo
-            just _ask_claude "{{prompt}}"
-        )
-    else
-        echo
-        echo -e "{{RED}}{{BOLD}}ERROR:{{RESET}} the attempt to ask the {{BOLD}}OpenCode{{RESET}} CLI is not possible as the host system does not have it installed!"
-        echo
-        exit 1
-    fi
-
-_ask_claude prompt:
-    #!/usr/bin/env bash
-    if command -v claude &> /dev/null; then
-        echo
-        echo -e "{{DIM}}{{ITALIC}}- {{RESET}}Note: {{DIM}}{{ITALIC}}using {{BOLD}}Claude Code{{DIM}} with whatever is setup as the default model.{{RESET}}"
-        echo
-
-        unset ANTHROPIC_API_KEY && claude -p "{{prompt}}"
-    else
-        echo
-        echo -e "{{RED}}{{BOLD}}ERROR:{{RESET}} the attempt to ask the {{BOLD}}Claude{{RESET}} CLI is not possible as the host system does not have it installed!"
-        echo
-        exit 1
-    fi
-
-_ask_codex prompt:
-    #!/usr/bin/env bash
-    if command -v codex &> /dev/null; then
-        echo
-        echo -e "{{DIM}}{{ITALIC}}- {{RESET}}Note: {{DIM}}{{ITALIC}}using {{BOLD}}Codex CLI{{DIM}} with whatever is setup as the default model.{{RESET}}"
-        echo
-
-        codex exec "{{prompt}}"  || (
-            echo
-            echo -e "Attempt to use {{RED}}{{BOLD}}Codex CLI{{RESET}} for query failed! Will try using Claude instead"
-            echo
-            just _ask_claude "{{prompt}}"
-        )
-    else
-        echo
-        echo -e "{{RED}}{{BOLD}}ERROR:{{RESET}} the attempt to ask the {{BOLD}}Codex{{RESET}} CLI is not possible as the host system does not have it installed!"
-        echo
-        exit 1
-    fi
-
-
-# use an AI agent to respond to a question (uses `AGENT`)
-ask prompt:
-    #!/usr/bin/env bash
-    if [[ "${AGENT,,}" == "opencode" ]]; then
-        just _ask_opencode "{{prompt}}" || ( echo -e "- OpenCode failed so will try using Claude Code instead ..." && just _ask_claude "{{prompt}}" || exit 1 )
-    elif [[ "${AGENT,,}" == "codex"  ]]; then
-        just _ask_codex "{{prompt}}" || ( echo -e "- Codex failed so will try using Claude Code instead ..." && just _ask_claude "{{prompt}}" || exit 1 )
-    else
-        just _ask_claude "{{prompt}}" || ( echo -e "- will try using Opencode instead ..." && just _ask_opencode "{{prompt}}" || exit 1 )
-    fi
-
 # build library and CLI
 build *args="":
     @echo "Building ..."
     @echo
-    @cargo build -p sniff {{args}}
-    @cargo build -p sniff-cli {{args}}
+    @cargo build -p sniff {{ args }}
+    @cargo build -p sniff-cli {{ args }}
     @echo
 
 # test library and CLI
 test *args="":
-    @echo -e "Testing {{BOLD}}Library{{RESET}} code"
+    @echo -e "Testing {{ BOLD }}Library{{ RESET }} code"
     @echo ""
-    @cargo test -p sniff -- {{args}}
+    @cargo test -p sniff -- {{ args }}
     @echo ""
-    @echo -e "Testing {{BOLD}}CLI{{RESET}} code"
+    @echo -e "Testing {{ BOLD }}CLI{{ RESET }} code"
     @echo ""
-    @cargo test -p sniff-cli -- {{args}}
+    @cargo test -p sniff-cli -- {{ args }}
 
 # lint with clippy
 lint *args="":
-    @cargo clippy -p sniff -p sniff-cli -- {{args}}
+    @cargo clippy -p sniff -p sniff-cli -- {{ args }}
 
 # install latest release version of CLI
 install *args="":
     @echo ""
-    @echo -e "{{BOLD}}Building Sniff Library{{RESET}}"
+    @echo -e "{{ BOLD }}Building Sniff Library{{ RESET }}"
     @cargo build --release -p sniff  || ( playa effect error-2 2>/dev/null && exit 1 )
     @echo ""
-    @echo -e "{{BOLD}}{{YELLOW}}Installing Sniff CLI{{RESET}}"
+    @echo -e "{{ BOLD }}{{ YELLOW }}Installing Sniff CLI{{ RESET }}"
     @cargo build --release -p sniff-cli  || ( playa effect error-2 2>/dev/null && exit 1 )
-    @cargo install --path cli -- {{args}}  || ( playa effect error-2 2>/dev/null && exit 1 )
+    @cargo install --path cli -- {{ args }}  || ( playa effect error-2 2>/dev/null && exit 1 )
     @echo ""
-    @echo -e "{{BOLD}}{{BLUE}}Sniff CLI Installed{{RESET}}"
+    @echo -e "{{ BOLD }}{{ BLUE }}Sniff CLI Installed{{ RESET }}"
     @echo ""
     @playa effect drop-4 2>/dev/null || exit 0
 
@@ -152,66 +75,101 @@ install *args="":
 docs:
     @echo -e "Building and then showing latest docs for the library code"
     @echo ""
-    @cargo doc -p {{LIB}} --open
-    @just _speak "Documentation for the {{PACKAGE}} library has been built"
+    @cargo doc -p {{ LIB }} --open
+    @just _speak "Documentation for the {{ PACKAGE }} library has been built"
 
 # build and show the docs for the Sniff CLI
 docs_cli:
     @echo -e "Building and then showing latest docs for the Sniff CLI"
     @echo ""
-    @cargo doc -p {{CLI}} --open
-
-# Open Opencode
-oc *args="":
-    @claudine opencode --include GEMINI_API_KEY --include X_AI_API_KEY --include ZAI_API_KEY --include ZENMUX_API_KEY --include OPEN_ROUTER_API_KEY {{args}}
-
-# Open Claude Code in YOLO mode
-cc *args="":
-    @claudine claude --yolo {{args}}
-
-# Open codex in YOLO mode
-codex *args="":
-    @claudine codex --yolo {{args}}
-
-# Open Claude Code
-gem *args="":
-    @claudine gemini --yolo --include GEMINI_API_KEY {{args}}
+    @cargo doc -p {{ CLI }} --open
 
 # Outdated packages
 outdated:
-	@cargo outdated --root-deps-only
+    @cargo outdated --root-deps-only
 
+# ---------- benchmarking + profiling ----------
 
-# commits all the staged changes using model from MODEL or COMMIT_MODEL in OpenCode
-commit:
-    @echo ""
-    @echo -e "Committing staged changes in the {{BOLD}}Rusty Biscuit{{RESET}} monorepo to git"
-    @echo -e "{{DIM}}{{ITALIC}}- using the {{RESET}}{{ITALIC}}${MODEL:-${COMMIT_MODEL:-minimax/MiniMax-M2.7-highspeed}} {{DIM}}model{{RESET}}"
-    @echo ""
-    @echo -e "{{BOLD}}{{BLUE}}Staged Files:{{RESET}}"
-    @sniff repo staged-files || ( echo "No Staged Files! Nothing to do ..." && exit 1 )
-    @claudine compose --opencode "@prompts/commit.md" --op "commit" --quiet --model "${COMMIT_MODEL:-${MODEL:-minimax/MiniMax-M2.7-highspeed}}" -y
-    @just _speak "git commits completed in rusty-biscuit monorepo"
-    @sniff repo git-status 2>/dev/null || exit 0
-    @echo
+# run the full Criterion bench suite for sniff-lib
+bench *args="":
+    @echo -e "Running Criterion benches for {{ BOLD }}sniff{{ RESET }}"
+    @cargo bench -p sniff --features network --bench perf -- {{ args }}
 
+# run only the system-level benches
+bench-system *args="":
+    @cargo bench -p sniff --features network --bench perf -- ^system {{ args }}
 
-# fix documentation drift, refresh the skill, and review CLAUDE.md
-drift *args="":
-    @echo
-    @echo -e "Running drift workflow for {{BOLD}}sniff{{RESET}} via Rust drift script"
-    @echo
-    @echo "- step 1: update package docs for code drift"
-    @echo "- step 2: refresh package skill from updated docs"
-    @echo "- step 3: review CLAUDE.md for needed updates"
-    @echo "- export PREFER_AGENT=codex to force codex (default is claude)"
-    @echo
-    @cargo run --manifest-path ../scripts/Cargo.toml --bin drift -- sniff {{DOCS}} {{args}}
-    @_speak "the drift recipe for the sniff package has completed; documentation and agent skills have been updated and possibly some adjustments to the CLAUDE.md file where appropriate."
+# run only the hardware benches
+bench-hardware *args="":
+    @cargo bench -p sniff --features network --bench perf -- ^hardware {{ args }}
 
-skill-audio-programming:
-    @echo "Publishing the {{BOLD}}audio-programming{{RESET}} skill to this repo"
-    @mkdir -p ../.claude/skills/audio-programming
-    @cp ./docs/audio-programming/*.md ../.claude/skills/audio-programming
-    @md compose ./docs/audio-programming/SKILL.md > ../.claude/skills/audio-programming/SKILL.md
-    @echo "Published {{BOLD}}{{GREEN}}audio-programming{{RESET}}"
+# run only the filesystem benches
+bench-filesystem *args="":
+    @cargo bench -p sniff --features network --bench perf -- ^filesystem {{ args }}
+
+# run only the programs + services inventory benches
+bench-inventory *args="":
+    @cargo bench -p sniff --features network --bench perf -- ^inventory {{ args }}
+
+# run only the network benches (wiremock-backed)
+bench-network *args="":
+    @cargo bench -p sniff --features network --bench perf -- ^network {{ args }}
+
+# run the narrow CI subset of benches (matches sniff-performance.yml)
+bench-ci *args="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    filter="$(paste -sd'|' lib/benches/ci-bench-ids.txt | sed 's/\./\\./g')"
+    cargo bench -p sniff --features network --bench perf -- "^(${filter})$" {{ args }}
+
+# end-to-end CLI benchmarks via hyperfine (requires hyperfine on PATH)
+bench-cli:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if ! command -v hyperfine &> /dev/null; then
+        echo -e "{{ RED }}{{ BOLD }}ERROR:{{ RESET }} hyperfine is not installed."
+        echo "Install it with 'brew install hyperfine' or 'cargo install hyperfine'."
+        exit 1
+    fi
+    cargo build --release -p sniff-cli
+    SNIFF_BIN="$(cargo metadata --format-version 1 --no-deps \
+        | python3 -c 'import json,sys; print(json.load(sys.stdin)["target_directory"])')/release/sniff"
+    hyperfine --warmup 3 \
+        "${SNIFF_BIN} --version" \
+        "${SNIFF_BIN} --json" \
+        "${SNIFF_BIN} hardware --json"
+
+# generate a flamegraph for one of the sniff example entry points
+#
+# The `profile_filesystem` example materializes a deterministic
+# synthetic monorepo under $TMPDIR on its own, so running it without
+# arguments profiles the same workload as the Criterion benches. Pass
+# `--rebuild` as an extra arg to force a fresh fixture, or a path to
+
+# profile that path instead.
+profile target *args="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if ! command -v cargo-flamegraph &> /dev/null; then
+        echo -e "{{ RED }}{{ BOLD }}ERROR:{{ RESET }} cargo-flamegraph is not installed."
+        echo "Install it with 'cargo install flamegraph'."
+        exit 1
+    fi
+    cargo flamegraph --profile profiling -p sniff --features network --example "{{ target }}" -- {{ args }}
+
+# generate a flamegraph for the sniff CLI binary
+profile-cli *args="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if ! command -v cargo-flamegraph &> /dev/null; then
+        echo -e "{{ RED }}{{ BOLD }}ERROR:{{ RESET }} cargo-flamegraph is not installed."
+        echo "Install it with 'cargo install flamegraph'."
+        exit 1
+    fi
+    cargo flamegraph --profile profiling -p sniff-cli -- {{ args }}
+
+# No-op recipe: reference color vars so linters won't report them as unused.
+
+# Run `just _colors` if you want to exercise this (it does nothing).
+_colors:
+    @: {{ BOLD }} {{ ITALIC }} {{ RESET }} {{ BLACK }} {{ RED }} {{ GREEN }} {{ YELLOW }} {{ BLUE }} {{ MAGENTA }} {{ CYAN }} {{ WHITE }} {{ DIM }} >/dev/null || true

@@ -13,17 +13,21 @@ use std::time::{Duration, Instant};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) enum PerfMetricKind {
     FrontmatterInterpolation,
+    FrontmatterShellExpansion,
     EffectiveStateBuild,
     TextReplacement,
     PageBlocks,
     Interpolation,
     ShellExpansion,
+    ShellBlocks,
+    LinkResolve,
     TransclusionParse,
     TransclusionPrepare,
     TransclusionResolve,
     TransclusionApply,
     Cleanup,
     Normalization,
+    LinkNormalization,
 }
 
 impl PerfMetricKind {
@@ -31,17 +35,21 @@ impl PerfMetricKind {
     fn stage(self) -> ComposeStage {
         match self {
             Self::FrontmatterInterpolation => ComposeStage::FrontmatterInterpolation,
+            Self::FrontmatterShellExpansion => ComposeStage::FrontmatterShellExpansion,
             Self::EffectiveStateBuild => ComposeStage::EffectiveStateBuild,
             Self::TextReplacement => ComposeStage::TextReplacement,
             Self::PageBlocks => ComposeStage::PageBlocks,
             Self::Interpolation => ComposeStage::Interpolation,
             Self::ShellExpansion => ComposeStage::ShellExpansion,
+            Self::ShellBlocks => ComposeStage::ShellBlocks,
+            Self::LinkResolve => ComposeStage::LinkResolve,
             Self::TransclusionParse => ComposeStage::TransclusionParse,
             Self::TransclusionPrepare => ComposeStage::TransclusionPrepare,
             Self::TransclusionResolve => ComposeStage::TransclusionResolve,
             Self::TransclusionApply => ComposeStage::TransclusionApply,
             Self::Cleanup => ComposeStage::Cleanup,
             Self::Normalization => ComposeStage::Normalization,
+            Self::LinkNormalization => ComposeStage::LinkNormalization,
         }
     }
 
@@ -49,17 +57,21 @@ impl PerfMetricKind {
     fn all() -> &'static [PerfMetricKind] {
         &[
             Self::FrontmatterInterpolation,
+            Self::FrontmatterShellExpansion,
             Self::EffectiveStateBuild,
             Self::TextReplacement,
             Self::PageBlocks,
             Self::Interpolation,
             Self::ShellExpansion,
+            Self::ShellBlocks,
+            Self::LinkResolve,
             Self::TransclusionParse,
             Self::TransclusionPrepare,
             Self::TransclusionResolve,
             Self::TransclusionApply,
             Self::Cleanup,
             Self::Normalization,
+            Self::LinkNormalization,
         ]
     }
 }
@@ -71,7 +83,7 @@ pub(crate) struct PerfCollector {
     enabled: bool,
     start: Option<Instant>,
     /// Fixed-size array indexed by `PerfMetricKind` ordinal.
-    durations: [(Duration, usize); 12],
+    durations: [(Duration, usize); 16],
 }
 
 impl PerfCollector {
@@ -81,7 +93,7 @@ impl PerfCollector {
         Self {
             enabled,
             start: if enabled { Some(Instant::now()) } else { None },
-            durations: [(Duration::ZERO, 0); 12],
+            durations: [(Duration::ZERO, 0); 16],
         }
     }
 
@@ -220,7 +232,9 @@ mod tests {
         let esb_idx = stages
             .iter()
             .position(|s| *s == ComposeStage::EffectiveStateBuild);
-        let norm_idx = stages.iter().position(|s| *s == ComposeStage::Normalization);
+        let norm_idx = stages
+            .iter()
+            .position(|s| *s == ComposeStage::Normalization);
         assert!(esb_idx < norm_idx);
     }
 }

@@ -1,8 +1,15 @@
 //! Type definitions for the markdown module.
 
 use biscuit_file::YamlParseError;
+use biscuit_terminal::components::status_block::StatusBlock;
+use biscuit_terminal::errors::BlockError;
+use biscuit_terminal::terminal::Terminal;
 use indexmap::IndexMap;
 use thiserror::Error;
+
+use crate::markdown::errors::blocks;
+
+use biscuit_terminal::errors::SourceContext;
 
 /// Type alias for frontmatter data.
 ///
@@ -14,8 +21,12 @@ pub type FrontmatterMap = IndexMap<String, serde_json::Value>;
 #[derive(Error, Debug)]
 pub enum MarkdownError {
     /// Failed to parse frontmatter YAML.
-    #[error("Failed to parse frontmatter: {0}")]
-    FrontmatterParse(#[from] YamlParseError),
+    #[error("Failed to parse frontmatter in {}: {source}", .ctx.display.display())]
+    FrontmatterParse {
+        ctx: SourceContext,
+        #[source]
+        source: YamlParseError,
+    },
 
     /// Failed to merge frontmatter.
     #[error("Failed to merge frontmatter: {0}")]
@@ -51,7 +62,7 @@ pub enum MarkdownError {
 
     /// Transclusion pipeline error.
     #[error("Transclusion error: {0}")]
-    Transclusion(#[from] crate::markdown::compose::TransclusionError),
+    Transclusion(#[from] Box<crate::markdown::compose::TransclusionError>),
 
     /// TOC linking pipeline error.
     #[error("TOC linking error: {0}")]
@@ -59,20 +70,91 @@ pub enum MarkdownError {
 
     /// Shell expansion pipeline error.
     #[error("Shell expansion failed: {0}")]
-    ShellExpansion(#[from] crate::markdown::compose::ShellExpansionError),
+    ShellExpansion(#[from] Box<crate::markdown::compose::ShellExpansionError>),
 
     /// Page block pipeline error.
     #[error("Page block error: {0}")]
-    PageBlock(#[from] crate::markdown::compose::page_blocks::PageBlockError),
+    PageBlock(#[from] Box<crate::markdown::compose::page_blocks::PageBlockError>),
+
+    /// Shell block pipeline error.
+    #[error("Shell block error: {0}")]
+    ShellBlock(#[from] Box<crate::markdown::compose::ShellBlockError>),
 
     /// Reference analysis error.
     #[error("Reference error: {0}")]
-    Reference(#[from] crate::markdown::reference::ReferenceError),
+    Reference(#[from] Box<crate::markdown::reference::ReferenceError>),
 
     /// Context merge error (invalid user ctx).
     #[error("Context error: {0}")]
     CtxMerge(#[from] crate::markdown::compose::context::merge::CtxMergeError),
 }
 
+impl From<crate::markdown::compose::TransclusionError> for MarkdownError {
+    fn from(err: crate::markdown::compose::TransclusionError) -> Self {
+        MarkdownError::Transclusion(Box::new(err))
+    }
+}
+
+impl From<crate::markdown::compose::ShellExpansionError> for MarkdownError {
+    fn from(err: crate::markdown::compose::ShellExpansionError) -> Self {
+        MarkdownError::ShellExpansion(Box::new(err))
+    }
+}
+
+impl From<crate::markdown::compose::page_blocks::PageBlockError> for MarkdownError {
+    fn from(err: crate::markdown::compose::page_blocks::PageBlockError) -> Self {
+        MarkdownError::PageBlock(Box::new(err))
+    }
+}
+
+impl From<crate::markdown::compose::ShellBlockError> for MarkdownError {
+    fn from(err: crate::markdown::compose::ShellBlockError) -> Self {
+        MarkdownError::ShellBlock(Box::new(err))
+    }
+}
+
+impl From<crate::markdown::reference::ReferenceError> for MarkdownError {
+    fn from(err: crate::markdown::reference::ReferenceError) -> Self {
+        MarkdownError::Reference(Box::new(err))
+    }
+}
+
 /// Result type for markdown operations.
 pub type MarkdownResult<T> = Result<T, MarkdownError>;
+
+impl BlockError for MarkdownError {
+    fn status_block(&self, term: &Terminal) -> StatusBlock {
+        match self {
+            // Delegating variants: surface the sub-error's block directly.
+            MarkdownError::Transclusion(inner) => inner.status_block(term),
+            MarkdownError::ShellExpansion(inner) => inner.status_block(term),
+            MarkdownError::PageBlock(inner) => inner.status_block(term),
+            MarkdownError::ShellBlock(inner) => inner.status_block(term),
+            MarkdownError::TocLinking(inner) => inner.status_block(term),
+            MarkdownError::Reference(inner) => inner.status_block(term),
+            MarkdownError::CtxMerge(inner) => inner.status_block(term),
+
+            // Leaf variants own their block shape.
+            MarkdownError::FrontmatterParse { ctx, source } => {
+                blocks::frontmatter_parse_block(ctx.clone(), source)
+            }
+            MarkdownError::FrontmatterMerge(message) => blocks::frontmatter_merge_block(message),
+            MarkdownError::FileLoad(source) => blocks::file_load_block(source),
+            MarkdownError::UrlFetch(source) => blocks::url_fetch_block(source),
+            MarkdownError::ThemeLoad(message) => blocks::theme_load_block(message),
+            MarkdownError::AstParse(message) => blocks::ast_parse_block(message),
+            MarkdownError::InvalidLineRange(message) => blocks::invalid_line_range_block(message),
+            MarkdownError::Serialization(source) => blocks::serialization_block(source),
+            MarkdownError::Transform(message) => blocks::transform_block(message),
+        }
+    }
+
+    fn block_source(&self) -> Option<&(dyn BlockError + 'static)> {
+        // Delegating variants already return the inner block from
+        // `status_block`, so returning `Some(inner)` here would double-render
+        // the same block under a "Caused by:" caption. Only leaf variants
+        // that wrap a foreign error type and have no sub-block would surface
+        // a cause — none of today's leaf variants do.
+        None
+    }
+}

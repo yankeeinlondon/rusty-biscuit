@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-use super::provider::PROVIDERS_DISPLAY_ORDER;
+use crate::provider::PROVIDERS_DISPLAY_ORDER;
 
 /// Normalized event names across all supported agentic CLI providers.
 ///
@@ -86,6 +86,28 @@ impl AgenticEvent {
             AgenticEvent::BeforeCompact => "before_compact",
             AgenticEvent::Notification => "notification",
             AgenticEvent::HumanInTheLoop => "human_in_the_loop",
+        }
+    }
+
+    /// Returns a human-readable display name for terminal presentation.
+    pub const fn human_name(&self) -> &'static str {
+        match self {
+            AgenticEvent::SessionStart => "Session Start",
+            AgenticEvent::SessionEnd => "Session End",
+            AgenticEvent::BeforePrompt => "Before Prompt",
+            AgenticEvent::BeforeTool => "Before Tool",
+            AgenticEvent::AfterTool => "After Tool",
+            AgenticEvent::ToolError => "Tool Error",
+            AgenticEvent::PermissionRequest => "Permission Request",
+            AgenticEvent::TurnComplete => "Turn Complete",
+            AgenticEvent::TurnError => "Turn Error",
+            AgenticEvent::SubagentStart => "Subagent Start",
+            AgenticEvent::SubagentStop => "Subagent Stop",
+            AgenticEvent::BeforeModel => "Before Model",
+            AgenticEvent::AfterModel => "After Model",
+            AgenticEvent::BeforeCompact => "Before Compact",
+            AgenticEvent::Notification => "Notification",
+            AgenticEvent::HumanInTheLoop => "HITL (human in the loop)",
         }
     }
 
@@ -303,7 +325,7 @@ mod tests {
     #[test]
     fn round_trip_json() {
         let event = AgenticEvent::BeforeTool;
-        let json = serde_json::to_value(&event).unwrap();
+        let json = serde_json::to_value(event).unwrap();
         assert_eq!(json, serde_json::json!("before_tool"));
         let back: AgenticEvent = serde_json::from_value(json).unwrap();
         assert_eq!(back, AgenticEvent::BeforeTool);
@@ -330,7 +352,7 @@ mod tests {
             (AgenticEvent::Notification, "notification"),
         ];
         for (variant, expected) in cases {
-            let json = serde_json::to_value(&variant).unwrap();
+            let json = serde_json::to_value(variant).unwrap();
             assert_eq!(json.as_str().unwrap(), expected, "Failed for {variant:?}");
         }
     }
@@ -387,7 +409,7 @@ mod tests {
             let abbr = event.abbrev();
             let char_count = abbr.chars().count();
             assert!(
-                char_count >= 1 && char_count <= 6,
+                (1..=6).contains(&char_count),
                 "Event {:?} abbreviation '{}' should be 1-6 chars (got {})",
                 event,
                 abbr,

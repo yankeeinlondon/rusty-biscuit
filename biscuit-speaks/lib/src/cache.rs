@@ -241,12 +241,12 @@ fn write_cache_atomically(
 // Cache Population Functions
 // ============================================================================
 
-use sniff::programs::InstalledTtsClients;
+use sniff::programs::{InstalledTtsClients, TtsClient};
 
 use crate::providers::cloud::ElevenLabsProvider;
-use crate::providers::host::{
-    ESpeakProvider, EchogardenProvider, GttsProvider, KokoroTtsProvider, SayProvider,
-};
+#[cfg(target_os = "macos")]
+use crate::providers::host::SayProvider;
+use crate::providers::host::{ESpeakProvider, EchogardenProvider, GttsProvider, KokoroTtsProvider};
 
 #[cfg(target_os = "windows")]
 use crate::providers::host::SapiProvider;
@@ -318,7 +318,7 @@ pub async fn populate_cache_for_all_providers() -> Result<(), TtsError> {
 
     // macOS Say provider
     #[cfg(target_os = "macos")]
-    if installed.say() {
+    if installed.is_installed(TtsClient::Say) {
         let provider = SayProvider;
         let provider_type = TtsProvider::Host(crate::types::HostTtsProvider::Say);
         match populate_cache_for_provider(&provider, provider_type).await {
@@ -334,7 +334,7 @@ pub async fn populate_cache_for_all_providers() -> Result<(), TtsError> {
     }
 
     // eSpeak provider
-    if installed.espeak() || installed.espeak_ng() {
+    if installed.is_installed(TtsClient::Espeak) || installed.is_installed(TtsClient::EspeakNg) {
         let provider = ESpeakProvider::new();
         let provider_type = TtsProvider::Host(crate::types::HostTtsProvider::ESpeak);
         match populate_cache_for_provider(&provider, provider_type).await {
@@ -350,7 +350,7 @@ pub async fn populate_cache_for_all_providers() -> Result<(), TtsError> {
     }
 
     // Echogarden provider
-    if installed.echogarden() {
+    if installed.is_installed(TtsClient::Echogarden) {
         let provider = EchogardenProvider::new();
         let provider_type = TtsProvider::Host(crate::types::HostTtsProvider::EchoGarden);
         match populate_cache_for_provider(&provider, provider_type).await {
@@ -366,7 +366,7 @@ pub async fn populate_cache_for_all_providers() -> Result<(), TtsError> {
     }
 
     // gTTS provider
-    if installed.gtts_cli() {
+    if installed.is_installed(TtsClient::GttsCli) {
         let provider = GttsProvider::new();
         let provider_type = TtsProvider::Host(crate::types::HostTtsProvider::Gtts);
         match populate_cache_for_provider(&provider, provider_type).await {
@@ -382,7 +382,7 @@ pub async fn populate_cache_for_all_providers() -> Result<(), TtsError> {
     }
 
     // Kokoro TTS provider
-    if installed.kokoro_tts() {
+    if installed.is_installed(TtsClient::KokoroTts) {
         let provider = KokoroTtsProvider::new();
         let provider_type = TtsProvider::Host(crate::types::HostTtsProvider::KokoroTts);
         match populate_cache_for_provider(&provider, provider_type).await {
@@ -399,7 +399,7 @@ pub async fn populate_cache_for_all_providers() -> Result<(), TtsError> {
 
     // Windows SAPI provider
     #[cfg(target_os = "windows")]
-    if installed.windows_sapi {
+    if installed.is_installed(TtsClient::WindowsSapi) {
         let provider = SapiProvider::new();
         let provider_type = TtsProvider::Host(crate::types::HostTtsProvider::Sapi);
         match populate_cache_for_provider(&provider, provider_type).await {

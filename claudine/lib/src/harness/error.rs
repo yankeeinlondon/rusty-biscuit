@@ -2,7 +2,7 @@
 
 use std::path::PathBuf;
 
-use crate::harness::model::ValidationFailure;
+use crate::harness::failure::ValidationFailure;
 
 /// All errors that can occur within the harness subsystem.
 #[derive(Debug, thiserror::Error)]

@@ -1,5 +1,5 @@
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use chrono::Utc;
 use serde_json::{Map, Value, json};
@@ -7,7 +7,8 @@ use serde_json::{Map, Value, json};
 use crate::config::atomic::atomic_write;
 use crate::config::backup::create_backup;
 use crate::error::{ClaudineError, Result};
-use crate::events::Provider;
+use crate::provider::Provider;
+use crate::provider::provider_info;
 
 use super::catalog::McpCatalogStore;
 use super::state::{McpProviderStateStore, Scope};
@@ -30,11 +31,19 @@ pub struct SyncReport {
     pub applied: bool,
 }
 
+/// A server prepared for export to a provider's native MCP config.
+///
+/// Carries the catalog ID, the native (per-provider) server name resolved
+/// from provider state, and a reference to the canonical [`McpServer`]
+/// definition.
 #[derive(Debug, Clone)]
-struct ExportServer<'a> {
-    catalog_id: &'a str,
-    native_name: String,
-    server: &'a McpServer,
+pub struct ExportServer<'a> {
+    /// Canonical catalog ID.
+    pub catalog_id: &'a str,
+    /// Provider-native server name (may differ from `catalog_id`).
+    pub native_name: String,
+    /// Reference to the catalog's canonical server definition.
+    pub server: &'a McpServer,
 }
 
 // ---------------------------------------------------------------------------
@@ -63,8 +72,14 @@ impl<'a> McpExporter<'a> {
         servers: &[McpServer],
         apply: bool,
     ) -> Result<SyncReport> {
-        let config_path = native_config_path(provider, scope)?;
-        let existing = read_existing_native_servers(provider, &config_path)?;
+        let info = provider_info(provider);
+        let config_path = info.mcp.native_config_path(scope).ok_or_else(|| {
+            ClaudineError::McpProviderNotSupported {
+                provider,
+                reason: "no config path for scope".into(),
+            }
+        })?;
+        let existing = info.mcp.read_existing_native_servers(&config_path)?;
         let managed_entries: Vec<_> = self
             .state
             .managed_entries_for_provider(provider, scope)
@@ -111,21 +126,8 @@ impl<'a> McpExporter<'a> {
             create_backup(&config_path, provider)?;
         }
 
-        match provider {
-            Provider::Claude => write_claude_mcp(&export_servers, &config_path, &managed_names)?,
-            Provider::Codex => write_codex_mcp(&export_servers, &config_path, &managed_names)?,
-            Provider::Gemini => write_gemini_mcp(&export_servers, &config_path, &managed_names)?,
-            Provider::OpenCode => {
-                write_opencode_mcp(&export_servers, &config_path, &managed_names)?
-            }
-            Provider::RooCode => write_roo_mcp(&export_servers, &config_path, &managed_names)?,
-            _ => {
-                return Err(ClaudineError::McpProviderNotSupported {
-                    provider,
-                    reason: "export not implemented".into(),
-                });
-            }
-        }
+        info.mcp
+            .write_native_config(&export_servers, &config_path, &managed_names)?;
 
         let source = config_path.to_string_lossy().to_string();
         for removed in managed_entries
@@ -154,32 +156,6 @@ impl<'a> McpExporter<'a> {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Native config path resolution
-// ---------------------------------------------------------------------------
-
-fn native_config_path(provider: Provider, scope: &Scope) -> Result<PathBuf> {
-    let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
-
-    match (provider, scope) {
-        (Provider::Claude, Scope::User) => Ok(home.join(".claude.json")),
-        (Provider::Claude, Scope::Repo(root)) => Ok(root.join(".mcp.json")),
-        (Provider::Codex, Scope::User) => Ok(home.join(".codex").join("config.toml")),
-        (Provider::Codex, Scope::Repo(root)) => Ok(root.join(".codex").join("config.toml")),
-        (Provider::Gemini, Scope::User) => Ok(home.join(".gemini").join("settings.json")),
-        (Provider::Gemini, Scope::Repo(root)) => Ok(root.join(".gemini").join("settings.json")),
-        (Provider::OpenCode, Scope::User) => {
-            Ok(home.join(".config").join("opencode").join("opencode.json"))
-        }
-        (Provider::OpenCode, Scope::Repo(root)) => Ok(root.join("opencode.json")),
-        (Provider::RooCode, Scope::Repo(root)) => Ok(root.join(".roo").join("mcp.json")),
-        _ => Err(ClaudineError::McpProviderNotSupported {
-            provider,
-            reason: "no config path for scope".into(),
-        }),
-    }
-}
-
 fn build_export_servers<'a>(
     provider: Provider,
     scope: &Scope,
@@ -203,41 +179,48 @@ fn build_export_servers<'a>(
 // Read existing native servers (names only)
 // ---------------------------------------------------------------------------
 
-fn read_existing_native_servers(provider: Provider, config_path: &Path) -> Result<Vec<String>> {
+/// Helper for behavior trait implementations: read MCP server names from a
+/// config file with a top-level `mcpServers` JSON object (Claude, Gemini, Roo).
+pub(crate) fn read_existing_json_mcp_servers(config_path: &Path) -> Result<Vec<String>> {
     if !config_path.exists() {
         return Ok(Vec::new());
     }
+    let content = fs::read_to_string(config_path)?;
+    let doc: Value = serde_json::from_str(&content)?;
+    Ok(doc
+        .get("mcpServers")
+        .and_then(|v| v.as_object())
+        .map(|obj| obj.keys().cloned().collect())
+        .unwrap_or_default())
+}
 
-    match provider {
-        Provider::Claude | Provider::Gemini | Provider::RooCode => {
-            let content = fs::read_to_string(config_path)?;
-            let doc: Value = serde_json::from_str(&content)?;
-            Ok(doc
-                .get("mcpServers")
-                .and_then(|v| v.as_object())
-                .map(|obj| obj.keys().cloned().collect())
-                .unwrap_or_default())
-        }
-        Provider::Codex => {
-            let content = fs::read_to_string(config_path)?;
-            let doc: toml_edit::DocumentMut = content.parse().map_err(ClaudineError::TomlParse)?;
-            Ok(doc
-                .get("mcp_servers")
-                .and_then(|v| v.as_table())
-                .map(|t| t.iter().map(|(k, _)| k.to_string()).collect())
-                .unwrap_or_default())
-        }
-        Provider::OpenCode => {
-            let content = fs::read_to_string(config_path)?;
-            let doc: Value = serde_json::from_str(&content)?;
-            Ok(doc
-                .get("mcp")
-                .and_then(|v| v.as_object())
-                .map(|obj| obj.keys().cloned().collect())
-                .unwrap_or_default())
-        }
-        _ => Ok(Vec::new()),
+/// Helper: read MCP server names from a TOML config file with `[mcp_servers]`
+/// (Codex).
+pub(crate) fn read_existing_codex_mcp_servers(config_path: &Path) -> Result<Vec<String>> {
+    if !config_path.exists() {
+        return Ok(Vec::new());
     }
+    let content = fs::read_to_string(config_path)?;
+    let doc: toml_edit::DocumentMut = content.parse().map_err(ClaudineError::TomlParse)?;
+    Ok(doc
+        .get("mcp_servers")
+        .and_then(|v| v.as_table())
+        .map(|t| t.iter().map(|(k, _)| k.to_string()).collect())
+        .unwrap_or_default())
+}
+
+/// Helper: read MCP server names from an OpenCode JSON config (`mcp` key).
+pub(crate) fn read_existing_opencode_mcp_servers(config_path: &Path) -> Result<Vec<String>> {
+    if !config_path.exists() {
+        return Ok(Vec::new());
+    }
+    let content = fs::read_to_string(config_path)?;
+    let doc: Value = serde_json::from_str(&content)?;
+    Ok(doc
+        .get("mcp")
+        .and_then(|v| v.as_object())
+        .map(|obj| obj.keys().cloned().collect())
+        .unwrap_or_default())
 }
 
 // ---------------------------------------------------------------------------
@@ -247,7 +230,7 @@ fn read_existing_native_servers(provider: Provider, config_path: &Path) -> Resul
 /// Write MCP servers to Claude config.
 ///
 /// Preserves non-MCP parts of the config; only removes managed entries.
-fn write_claude_mcp(
+pub(crate) fn write_claude_mcp(
     servers: &[ExportServer<'_>],
     config_path: &Path,
     managed_names: &[String],
@@ -308,7 +291,7 @@ fn write_claude_mcp(
 }
 
 /// Write MCP servers to Codex config (TOML).
-fn write_codex_mcp(
+pub(crate) fn write_codex_mcp(
     servers: &[ExportServer<'_>],
     config_path: &Path,
     managed_names: &[String],
@@ -411,7 +394,7 @@ fn write_codex_mcp(
 }
 
 /// Write MCP servers to Gemini config (JSON).
-fn write_gemini_mcp(
+pub(crate) fn write_gemini_mcp(
     servers: &[ExportServer<'_>],
     config_path: &Path,
     managed_names: &[String],
@@ -469,7 +452,7 @@ fn write_gemini_mcp(
 }
 
 /// Write MCP servers to OpenCode config (JSON).
-fn write_opencode_mcp(
+pub(crate) fn write_opencode_mcp(
     servers: &[ExportServer<'_>],
     config_path: &Path,
     managed_names: &[String],
@@ -533,7 +516,7 @@ fn write_opencode_mcp(
 }
 
 /// Write MCP servers to Roo Code config (JSON).
-fn write_roo_mcp(
+pub(crate) fn write_roo_mcp(
     servers: &[ExportServer<'_>],
     config_path: &Path,
     managed_names: &[String],

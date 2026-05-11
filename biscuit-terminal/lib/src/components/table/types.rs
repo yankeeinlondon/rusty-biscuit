@@ -1,4 +1,5 @@
-use crate::utils::layout::{Alignment, WordWrap};
+use crate::utils::layout::Alignment;
+use crate::utils::wrap_policy::WordWrap;
 
 /// Vertical alignment for table cells with multi-line content.
 ///
@@ -151,7 +152,7 @@ impl ColumnType {
 /// ```
 ///
 /// ```
-/// use biscuit_terminal::components::table::table::TableColumn;
+/// use biscuit_terminal::components::table::TableColumn;
 /// use biscuit_terminal::components::table::types::{Currency, ColumnType};
 ///
 /// // Create a currency column for prices
@@ -213,7 +214,7 @@ mod tests {
     #[test]
     fn vertical_align_derives_debug_clone_copy() {
         let align = VerticalAlign::Middle;
-        let cloned = align.clone();
+        let cloned = align;
         let copied = align;
         assert_eq!(format!("{:?}", align), "Middle");
         assert_eq!(cloned, copied);

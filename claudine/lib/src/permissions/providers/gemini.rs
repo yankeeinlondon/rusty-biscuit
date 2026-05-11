@@ -1,12 +1,12 @@
 use std::collections::BTreeMap;
-use std::fs;
 use std::path::PathBuf;
 
-use serde_json::{Map, Value, json};
+use async_trait::async_trait;
+use serde_json::{Value, json};
+use tokio::fs;
 use toml_edit::{DocumentMut, Item};
 
 use crate::error::{ClaudineError, Result};
-use crate::events::Provider;
 use crate::permissions::backend::{BackendCapabilities, BackendFidelity, ProviderPolicyBackend};
 use crate::permissions::canonical::{
     CanonicalApprovalMode, CanonicalPolicy, CanonicalRuleProvenance, CanonicalSandboxMode,
@@ -17,12 +17,14 @@ use crate::permissions::change::{
     CommandPattern, PolicyChange, PolicyChangeOp, PolicyChangeTarget, PolicyPersistence,
 };
 use crate::permissions::context::{CliPolicyInput, PolicyContext};
+use crate::permissions::json_utils::ensure_json_value;
 use crate::permissions::mutation::{
     ConfigEditPlan, OneShotMutationPlan, PersistentMutationPlan, PolicyMutationPlan,
 };
 use crate::permissions::native::{
     NativeEffectivePolicy, NativePolicyLayer, PolicySource, PolicySourceKind, ProviderCliOverrides,
 };
+use crate::provider::Provider;
 
 #[derive(Debug, Clone, Default)]
 struct GeminiSettings {
@@ -62,6 +64,7 @@ struct GeminiState {
 #[derive(Debug, Default)]
 pub(crate) struct GeminiPolicyBackend;
 
+#[async_trait]
 impl ProviderPolicyBackend for GeminiPolicyBackend {
     fn provider(&self) -> Provider {
         Provider::Gemini
@@ -80,12 +83,12 @@ impl ProviderPolicyBackend for GeminiPolicyBackend {
         }
     }
 
-    fn discover_sources(&self, ctx: &PolicyContext) -> Result<Vec<PolicySource>> {
+    async fn discover_sources(&self, ctx: &PolicyContext) -> Result<Vec<PolicySource>> {
         let mut sources = Vec::new();
 
         if let Some(system_root) = &ctx.system_root {
             let settings = system_root.join("etc/gemini-cli/settings.json");
-            if settings.exists() {
+            if fs::try_exists(&settings).await.unwrap_or(false) {
                 sources.push(PolicySource {
                     id: "gemini-system-settings".to_owned(),
                     kind: PolicySourceKind::SystemConfig,
@@ -95,9 +98,9 @@ impl ProviderPolicyBackend for GeminiPolicyBackend {
                 });
             }
             let policy_dir = system_root.join("etc/gemini-cli/policies");
-            if policy_dir.exists() {
-                for entry in fs::read_dir(policy_dir)? {
-                    let entry = entry?;
+            if fs::try_exists(&policy_dir).await.unwrap_or(false) {
+                let mut entries = fs::read_dir(&policy_dir).await?;
+                while let Some(entry) = entries.next_entry().await? {
                     if entry.path().extension().and_then(|ext| ext.to_str()) == Some("toml") {
                         sources.push(PolicySource {
                             id: format!(
@@ -116,7 +119,7 @@ impl ProviderPolicyBackend for GeminiPolicyBackend {
 
         if let Some(home) = &ctx.home_dir {
             let settings = home.join(".gemini/settings.json");
-            if settings.exists() {
+            if fs::try_exists(&settings).await.unwrap_or(false) {
                 sources.push(PolicySource {
                     id: "gemini-user-settings".to_owned(),
                     kind: PolicySourceKind::UserConfig,
@@ -126,9 +129,9 @@ impl ProviderPolicyBackend for GeminiPolicyBackend {
                 });
             }
             let policy_dir = home.join(".gemini/policies");
-            if policy_dir.exists() {
-                for entry in fs::read_dir(policy_dir)? {
-                    let entry = entry?;
+            if fs::try_exists(&policy_dir).await.unwrap_or(false) {
+                let mut entries = fs::read_dir(&policy_dir).await?;
+                while let Some(entry) = entries.next_entry().await? {
                     if entry.path().extension().and_then(|ext| ext.to_str()) == Some("toml") {
                         sources.push(PolicySource {
                             id: format!(
@@ -149,7 +152,7 @@ impl ProviderPolicyBackend for GeminiPolicyBackend {
             && let Some(repo_root) = &ctx.repo_root
         {
             let settings = repo_root.join(".gemini/settings.json");
-            if settings.exists() {
+            if fs::try_exists(&settings).await.unwrap_or(false) {
                 sources.push(PolicySource {
                     id: "gemini-repo-settings".to_owned(),
                     kind: PolicySourceKind::RepoConfig,
@@ -159,9 +162,9 @@ impl ProviderPolicyBackend for GeminiPolicyBackend {
                 });
             }
             let policy_dir = repo_root.join(".gemini/policies");
-            if policy_dir.exists() {
-                for entry in fs::read_dir(policy_dir)? {
-                    let entry = entry?;
+            if fs::try_exists(&policy_dir).await.unwrap_or(false) {
+                let mut entries = fs::read_dir(&policy_dir).await?;
+                while let Some(entry) = entries.next_entry().await? {
                     if entry.path().extension().and_then(|ext| ext.to_str()) == Some("toml") {
                         sources.push(PolicySource {
                             id: format!(
@@ -182,7 +185,7 @@ impl ProviderPolicyBackend for GeminiPolicyBackend {
         Ok(sources)
     }
 
-    fn load_native_layers(
+    async fn load_native_layers(
         &self,
         _ctx: &PolicyContext,
         sources: &[PolicySource],
@@ -195,7 +198,7 @@ impl ProviderPolicyBackend for GeminiPolicyBackend {
                     source.id
                 ))
             })?;
-            let content = fs::read_to_string(path)?;
+            let content = fs::read_to_string(path).await?;
             let data = if path.extension().and_then(|ext| ext.to_str()) == Some("json") {
                 let value: Value = serde_json::from_str(&content).map_err(|error| {
                     ClaudineError::PolicyNativeParse {
@@ -323,7 +326,7 @@ impl ProviderPolicyBackend for GeminiPolicyBackend {
         ))
     }
 
-    fn canonicalize(
+    async fn canonicalize(
         &self,
         ctx: &PolicyContext,
         native: &NativeEffectivePolicy,
@@ -508,7 +511,7 @@ impl ProviderPolicyBackend for GeminiPolicyBackend {
             ),
         });
 
-        if ctx.trust.is_trusted.is_none() && repo_policy_exists(ctx) {
+        if ctx.trust.is_trusted.is_none() && repo_policy_exists(ctx).await {
             policy.warnings.push(PolicyWarning {
                 code: "gemini.trust_unknown".to_owned(),
                 message: "Gemini repo settings are trust-gated and trust was not supplied."
@@ -520,7 +523,7 @@ impl ProviderPolicyBackend for GeminiPolicyBackend {
         Ok(policy)
     }
 
-    fn plan_change(
+    async fn plan_change(
         &self,
         ctx: &PolicyContext,
         current: &NativeEffectivePolicy,
@@ -529,12 +532,12 @@ impl ProviderPolicyBackend for GeminiPolicyBackend {
         let (settings_source, settings_path, policy_source, policy_path) =
             choose_targets(ctx, current, change.target)?;
 
-        let settings_before = fs::read_to_string(&settings_path).ok();
+        let settings_before = fs::read_to_string(&settings_path).await.ok();
         let mut settings_value = settings_before
             .as_deref()
             .and_then(|text| serde_json::from_str::<Value>(text).ok())
             .unwrap_or_else(|| json!({}));
-        let policy_before = fs::read_to_string(&policy_path).ok();
+        let policy_before = fs::read_to_string(&policy_path).await.ok();
         let mut generated_rules = String::new();
 
         for operation in &change.operations {
@@ -837,21 +840,6 @@ fn build_one_shot_plan(change: &PolicyChange) -> Option<OneShotMutationPlan> {
     })
 }
 
-fn ensure_json_value<'a>(root: &'a mut Value, path: &[&str]) -> &'a mut Value {
-    let mut current = root;
-    for key in path {
-        if !current.is_object() {
-            *current = Value::Object(Map::new());
-        }
-        current = current
-            .as_object_mut()
-            .expect("object")
-            .entry((*key).to_owned())
-            .or_insert(Value::Null);
-    }
-    current
-}
-
 fn first_source_id(native: &NativeEffectivePolicy) -> String {
     native
         .sources
@@ -864,25 +852,32 @@ fn has_cli(cli: &GeminiCliOverrides) -> bool {
     cli.approval_mode.is_some() || cli.sandbox.is_some() || !cli.allowed_tools.is_empty()
 }
 
-fn repo_policy_exists(ctx: &PolicyContext) -> bool {
+async fn repo_policy_exists(ctx: &PolicyContext) -> bool {
     let Some(repo_root) = &ctx.repo_root else {
         return false;
     };
 
     let settings = repo_root.join(".gemini/settings.json");
-    if settings.exists() {
+    if fs::try_exists(&settings).await.unwrap_or(false) {
         return true;
     }
 
     let policy_dir = repo_root.join(".gemini/policies");
-    policy_dir.exists()
-        && fs::read_dir(policy_dir)
-            .map(|entries| {
-                entries.flatten().any(|entry| {
-                    entry.path().extension().and_then(|ext| ext.to_str()) == Some("toml")
-                })
-            })
-            .unwrap_or(false)
+    if !fs::try_exists(&policy_dir).await.unwrap_or(false) {
+        return false;
+    }
+
+    match fs::read_dir(&policy_dir).await {
+        Ok(mut entries) => {
+            while let Ok(Some(entry)) = entries.next_entry().await {
+                if entry.path().extension().and_then(|ext| ext.to_str()) == Some("toml") {
+                    return true;
+                }
+            }
+            false
+        }
+        Err(_) => false,
+    }
 }
 
 #[cfg(test)]
@@ -894,8 +889,8 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let home = dir.path().join("home");
         let repo = dir.path().join("repo");
-        fs::create_dir_all(home.join(".gemini/policies")).unwrap();
-        fs::create_dir_all(repo.join(".gemini/policies")).unwrap();
+        std::fs::create_dir_all(home.join(".gemini/policies")).unwrap();
+        std::fs::create_dir_all(repo.join(".gemini/policies")).unwrap();
         (
             dir,
             PolicyContext::new(repo.clone())
@@ -908,10 +903,10 @@ mod tests {
         )
     }
 
-    #[test]
-    fn gemini_backend_queries_policy_rules() {
+    #[tokio::test]
+    async fn gemini_backend_queries_policy_rules() {
         let (_dir, ctx) = setup_ctx();
-        fs::write(
+        tokio::fs::write(
             ctx.repo_root
                 .as_ref()
                 .unwrap()
@@ -923,8 +918,9 @@ mod tests {
             }))
             .unwrap(),
         )
+        .await
         .unwrap();
-        fs::write(
+        tokio::fs::write(
             ctx.repo_root
                 .as_ref()
                 .unwrap()
@@ -942,13 +938,14 @@ decision = "deny"
 priority = 100
 "#,
         )
+        .await
         .unwrap();
 
         let backend = GeminiPolicyBackend;
-        let sources = backend.discover_sources(&ctx).unwrap();
-        let layers = backend.load_native_layers(&ctx, &sources).unwrap();
+        let sources = backend.discover_sources(&ctx).await.unwrap();
+        let layers = backend.load_native_layers(&ctx, &sources).await.unwrap();
         let native = backend.compose_native_policy(&ctx, &layers, None).unwrap();
-        let canonical = backend.canonicalize(&ctx, &native).unwrap();
+        let canonical = backend.canonicalize(&ctx, &native).await.unwrap();
         let snapshot =
             ConfiguredPolicySnapshot::from_parts(Provider::Gemini, native, canonical, &ctx);
 
@@ -962,8 +959,8 @@ priority = 100
         assert!(snapshot.can_spawn_subagent(Some("reviewer")).is_denied());
     }
 
-    #[test]
-    fn gemini_mutation_plan_builds_settings_and_policy_files() {
+    #[tokio::test]
+    async fn gemini_mutation_plan_builds_settings_and_policy_files() {
         let (_dir, ctx) = setup_ctx();
         let backend = GeminiPolicyBackend;
         let current = NativeEffectivePolicy::new(
@@ -979,7 +976,7 @@ priority = 100
             PolicyChangeOp::AllowCommand(CommandPattern::new("npm test")),
         ]);
 
-        let plan = backend.plan_change(&ctx, &current, &change).unwrap();
+        let plan = backend.plan_change(&ctx, &current, &change).await.unwrap();
         assert_eq!(plan.persistent_plan.as_ref().unwrap().edits.len(), 2);
         assert!(
             plan.one_shot_plan
@@ -990,13 +987,13 @@ priority = 100
         );
     }
 
-    #[test]
-    fn gemini_unknown_trust_skips_repo_sources_and_queries_are_unknown() {
+    #[tokio::test]
+    async fn gemini_unknown_trust_skips_repo_sources_and_queries_are_unknown() {
         let (_dir, mut ctx) = setup_ctx();
         ctx.trust.is_trusted = None;
         ctx.trust.source = crate::permissions::TrustSource::Unknown;
 
-        fs::write(
+        tokio::fs::write(
             ctx.repo_root
                 .as_ref()
                 .unwrap()
@@ -1006,25 +1003,27 @@ priority = 100
             }))
             .unwrap(),
         )
+        .await
         .unwrap();
-        fs::write(
+        tokio::fs::write(
             ctx.home_dir.as_ref().unwrap().join(".gemini/settings.json"),
             serde_json::to_string_pretty(&json!({
                 "general": { "defaultApprovalMode": "default" }
             }))
             .unwrap(),
         )
+        .await
         .unwrap();
 
         let backend = GeminiPolicyBackend;
-        let sources = backend.discover_sources(&ctx).unwrap();
+        let sources = backend.discover_sources(&ctx).await.unwrap();
 
         assert_eq!(sources.len(), 1);
         assert_eq!(sources[0].id, "gemini-user-settings");
 
-        let layers = backend.load_native_layers(&ctx, &sources).unwrap();
+        let layers = backend.load_native_layers(&ctx, &sources).await.unwrap();
         let native = backend.compose_native_policy(&ctx, &layers, None).unwrap();
-        let canonical = backend.canonicalize(&ctx, &native).unwrap();
+        let canonical = backend.canonicalize(&ctx, &native).await.unwrap();
         let snapshot =
             ConfiguredPolicySnapshot::from_parts(Provider::Gemini, native, canonical, &ctx);
         let result = snapshot.can_write("src/main.rs");
@@ -1038,8 +1037,8 @@ priority = 100
         );
     }
 
-    #[test]
-    fn gemini_round_trip_mutation_changes_query_result() {
+    #[tokio::test]
+    async fn gemini_round_trip_mutation_changes_query_result() {
         let (_dir, ctx) = setup_ctx();
         let backend = GeminiPolicyBackend;
         let current = NativeEffectivePolicy::new(
@@ -1056,16 +1055,20 @@ priority = 100
             PolicyChangeOp::AllowMcpServer("filesystem".to_owned()),
         ]);
 
-        let plan = backend.plan_change(&ctx, &current, &change).unwrap();
+        let plan = backend.plan_change(&ctx, &current, &change).await.unwrap();
         for edit in &plan.persistent_plan.as_ref().unwrap().edits {
-            fs::create_dir_all(edit.path.parent().unwrap()).unwrap();
-            fs::write(&edit.path, edit.after_preview.as_bytes()).unwrap();
+            tokio::fs::create_dir_all(edit.path.parent().unwrap())
+                .await
+                .unwrap();
+            tokio::fs::write(&edit.path, edit.after_preview.as_bytes())
+                .await
+                .unwrap();
         }
 
-        let sources = backend.discover_sources(&ctx).unwrap();
-        let layers = backend.load_native_layers(&ctx, &sources).unwrap();
+        let sources = backend.discover_sources(&ctx).await.unwrap();
+        let layers = backend.load_native_layers(&ctx, &sources).await.unwrap();
         let native = backend.compose_native_policy(&ctx, &layers, None).unwrap();
-        let canonical = backend.canonicalize(&ctx, &native).unwrap();
+        let canonical = backend.canonicalize(&ctx, &native).await.unwrap();
         let snapshot =
             ConfiguredPolicySnapshot::from_parts(Provider::Gemini, native, canonical, &ctx);
 
@@ -1084,8 +1087,8 @@ priority = 100
         );
     }
 
-    #[test]
-    fn gemini_local_override_target_returns_error() {
+    #[tokio::test]
+    async fn gemini_local_override_target_returns_error() {
         let (_dir, ctx) = setup_ctx();
         let backend = GeminiPolicyBackend;
         let current = NativeEffectivePolicy::new(
@@ -1102,7 +1105,7 @@ priority = 100
             persistence: crate::permissions::PolicyPersistence::Persistent,
         };
 
-        let result = backend.plan_change(&ctx, &current, &change);
+        let result = backend.plan_change(&ctx, &current, &change).await;
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
         assert!(err.contains("LocalOverride"));

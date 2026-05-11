@@ -60,6 +60,21 @@ sniff repo is-current-package-area-dirty && { echo "Commit your changes first"; 
     fi
 ```
 
+## JSON Output (`--json`)
+
+```bash
+sniff --json repo is-current-package-area-dirty
+```
+
+Returns a `{ dirty: bool }` object alongside the exit code, so JSON
+consumers always get a stable shape regardless of state. Exit code
+mirrors the boolean: `0` when `true` (dirty), `1` when `false` (clean
+or outside any package area).
+
+```json
+{ "dirty": true }
+```
+
 ## Related Subcommands
 
 | Subcommand | Output |

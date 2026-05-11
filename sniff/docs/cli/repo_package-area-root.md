@@ -63,6 +63,20 @@ cd "$(sniff repo package-area-root)"
 cd "$(sniff repo package-area-root)" && just test
 ```
 
+## JSON Output (`--json`)
+
+```bash
+sniff --json repo package-area-root
+```
+
+Returns a `{ root: "<abs-path>" }` object. When the current directory
+is outside any package area, `root` is the empty string and the
+process still exits with code `1` to mirror the text-mode behaviour.
+
+```json
+{ "root": "/Users/ken/projects/rusty-biscuit/sniff" }
+```
+
 ## Related Subcommands
 
 | Subcommand | Returns |

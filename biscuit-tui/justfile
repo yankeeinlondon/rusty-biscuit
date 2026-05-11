@@ -1,0 +1,173 @@
+set dotenv-load
+set positional-arguments
+set shell := ["bash", "-eu", "-o", "pipefail", "-c"]
+
+import "../just/notify.just"
+import "../just/ai.just"
+import "../just/devops.just"
+import "../just/spec.just"
+import "../just/lifecycle.just"
+import "../just/review.just"
+import "../just/plan.just"
+
+BOLD := '\033[1m'
+DIM := '\033[2m'
+ITALIC := '\033[3m'
+RESET := '\033[0m'
+RED := '\033[31m'
+
+LIBRARY := "tui-chrome"
+CLI := "tui-chrome-cli"
+CLI_PATH := "./cli"
+
+default:
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    if command -v md &> /dev/null; then
+        md just.md
+    fi
+    echo "tui-chrome Library & CLI (binary: question)"
+    echo "==========================================="
+    echo
+    just --list | grep -v 'default'
+
+# build library and CLI
+build *args="":
+    @just _build {{LIBRARY}} "tui-chrome Library" {{args}}
+    @just _build {{CLI}} "tui-chrome CLI" {{args}}
+
+# test library and CLI (levels 1 & 2)
+test *args="":
+    @echo
+    @echo "Level 1 Tests"
+    @just _test {{LIBRARY}} {{args}}
+    @just _test {{CLI}} --test keyboard_protocol {{args}}
+    @echo
+    @echo "Level 2 Tests (with real terminal render)"
+    @echo "- Note: this will be skipped if the required tools are not available on host"
+    @echo "    - tmux on PATH, and/or"
+    @echo "    - WEZTERM_UNIX_SOCKET + wezterm, and/or"
+    @echo "    - Kitty_LISTEN_ON + remove_control enabled"
+    @echo
+    @just _test {{CLI}} --test real_terminal_render
+    @echo
+    @echo "Note: Level 3 testing must be run with {{BLUE}}just test-level-3{{RESET}}"
+    @echo
+# Run Level-3 tests (OS keyboard injection via cliclick).
+test-level-3:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    # `--test-threads=1` is required: both Level-3 tests spawn their own
+    # WezTerm window, and parallel runs guarantee one steals focus from
+    # the other before cliclick finishes injecting.
+    #
+    # We also auto-detect a WezTerm parent and relaunch inside a
+    # non-WezTerm host (iTerm2 if available, else Terminal.app). macOS
+    # routes app-activation across all windows of the same app, so a
+    # parent WezTerm process competes with the spawned WezTerm child for
+    # focus mid-test and most key events get dropped. Hosting the test
+    # in iTerm2/Terminal.app puts the parent in a different application
+    # so the spawned WezTerm window keeps focus during cliclick injection.
+
+    cmd='RUN_LEVEL3=1 cargo test -p {{CLI}} --test real_terminal_render level3_ -- --test-threads=1 --nocapture'
+
+    if [[ "$(uname -s)" == "Darwin" && "${TERM_PROGRAM:-}" == "WezTerm" ]]; then
+        echo
+        echo "Detected WezTerm as the parent terminal."
+        echo "Re-running Level-3 tests inside a non-WezTerm host so cliclick"
+        echo "key injection isn't disrupted by parent-window focus events."
+        echo
+
+        # Prefer iTerm2 if installed; fall back to Terminal.app.
+        if osascript -e 'tell application "iTerm" to version' >/dev/null 2>&1; then
+            host=iTerm
+        else
+            host=Terminal
+        fi
+        echo "Hosting the run in: ${host}"
+        echo "Test output will appear in the new ${host} window."
+        echo
+
+        # Self-deleting wrapper script the new host will execute.
+        script=$(mktemp -t biscuit_tui_level3.XXXXXX)
+        printf '%s\n' \
+            '#!/usr/bin/env bash' \
+            "cd $(printf '%q' "$PWD")" \
+            "$cmd" \
+            'code=$?' \
+            'echo' \
+            'echo "(level-3 run exited $code) — press Enter to close this window."' \
+            'read' \
+            'rm -f "$0"' \
+            > "$script"
+        chmod +x "$script"
+
+        if [[ "$host" == iTerm ]]; then
+            osascript \
+                -e 'tell application "iTerm"' \
+                -e '  activate' \
+                -e '  create window with default profile' \
+                -e '  tell current session of current window' \
+                -e "    write text \"bash '$script'\"" \
+                -e '  end tell' \
+                -e 'end tell'
+        else
+            osascript \
+                -e "tell application \"Terminal\" to do script \"bash '$script'\"" \
+                -e 'tell application "Terminal" to activate'
+        fi
+
+        echo "Dispatched. Switch to ${host} to watch progress; do not move focus"
+        echo "back to this WezTerm window during the run."
+        exit 0
+    fi
+
+    echo
+    echo "Level 3 Testing"
+    eval "$cmd"
+    echo
+
+
+# Run the env-gated PTY/shell verification suites
+# (keyboard protocol, completions shell, choose-cli PTY).
+# Requires bash + zsh on the host. macOS/Linux only.
+test-pty:
+    @RUN_PTY_TESTS=1 cargo test -p {{CLI}} --test keyboard_protocol -- --nocapture
+    @RUN_SHELL_TESTS=1 cargo test -p {{CLI}} --test completions_shell -- --nocapture
+    @QUESTION_INTERACTIVE_PTY=1 cargo test -p {{CLI}} --test choose_cli pty:: -- --nocapture
+
+# Lint both the library and CLI
+lint:
+    @just _lint {{LIBRARY}}
+    @just _lint {{CLI}}
+
+# Lint (and fix) both the library and CLI
+lint-fix:
+    @just _lint {{LIBRARY}} || just _fix_lint {{LIBRARY}}
+    @just _lint {{CLI}} || just _fix_lint {{CLI}}
+
+# install CLI binary
+install *args="":
+    @just build --release
+    @just _install "{{CLI_PATH}}" "tui-chrome" "question" {{args}}
+
+# Validate the source code without doing a full build
+check:
+    @cargo check -p {{LIBRARY}} -p {{CLI}}
+
+# build and show the docs for the library code
+docs:
+    @echo "Build and then show latest docs for the tui-chrome library code"
+    @echo ""
+    @cargo doc -p {{LIBRARY}} --open
+
+# run CLI in development mode
+cli *args="":
+    @cargo run -p {{CLI}} -- {{args}}
+
+
+# No-op recipe: reference color vars so linters won't report them as unused.
+# Run `just _colors` if you want to exercise this (it does nothing).
+_colors:
+    @: {{BOLD}} {{ITALIC}} {{RESET}} {{BLACK}} {{RED}} {{GREEN}} {{YELLOW}} {{BLUE}} {{MAGENTA}} {{CYAN}} {{WHITE}} {{DIM}} >/dev/null || true

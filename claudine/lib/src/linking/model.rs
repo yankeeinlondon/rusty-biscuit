@@ -2,8 +2,7 @@ use std::collections::BTreeMap;
 use std::fmt;
 use std::path::PathBuf;
 
-use crate::events::Provider;
-
+use crate::provider::Provider;
 /// Scope classification for a detected resource.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ResourceScope {
@@ -146,7 +145,7 @@ mod tests {
     #[test]
     fn provider_method_maps_all_variants() {
         let definition = sample_definition(Provider::Claude);
-        let refs = vec![
+        let refs = [
             ResourceReference::Source(definition.clone()),
             ResourceReference::PartialSource(definition.clone(), vec!["name".to_string()]),
             ResourceReference::Isolated(definition),

@@ -96,6 +96,19 @@ pub(crate) fn describe_source(source: &SystemPromptSource) -> String {
             };
             format!("{} (explicit {})", path.display(), mode_label)
         }
+        SystemPromptSource::NonInteractiveFile { path, scope } => {
+            let scope_label = match scope {
+                StandardPromptScope::Package => "package",
+                StandardPromptScope::PackageArea => "package-area",
+                StandardPromptScope::Repo => "repo",
+                StandardPromptScope::User => "user",
+                StandardPromptScope::CurrentDirectory => "cwd",
+            };
+            format!("{} (non-interactive {})", path.display(), scope_label)
+        }
+        SystemPromptSource::BuiltInNonInteractive => {
+            "built-in non-interactive fallback".to_string()
+        }
     }
 }
 
@@ -115,6 +128,16 @@ pub(crate) fn describe_effective(effective: &EffectiveSystemPrompt) -> Option<Ve
             Some(vec![
                 format!("source: {}", describe_source(&prepared.source)),
                 format!("mode: {}", mode_label),
+                prepared
+                    .non_interactive_appendix
+                    .as_ref()
+                    .map(|appendix| {
+                        format!(
+                            "non-interactive appendix: {}",
+                            describe_source(&appendix.source)
+                        )
+                    })
+                    .unwrap_or_else(|| "non-interactive appendix: none".to_string()),
                 format!(
                     "composed length: {} chars",
                     prepared.composed_markdown.len()

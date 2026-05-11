@@ -15,6 +15,7 @@ pub mod change;
 pub mod context;
 pub mod engine;
 pub mod explain;
+pub mod json_utils;
 pub mod matchers;
 pub mod mutation;
 pub mod native;

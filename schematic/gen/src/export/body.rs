@@ -1,6 +1,6 @@
 //! Normalized request body for export.
 
-use schematic_define::request::ApiRequest;
+use schematic_define::request::{ApiRequest, FormFieldKind};
 
 /// Normalized request body for export formats.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -38,6 +38,41 @@ pub struct FormField {
     pub required: bool,
     /// Human-readable description.
     pub description: Option<String>,
+    /// Field kind discriminator preserved from the source definition.
+    ///
+    /// Carries through whether the original `schematic_define::FormField`
+    /// was a text, file, files, or JSON-part field so downstream exporters
+    /// (Postman, OpenAPI, etc.) can emit format-appropriate output without
+    /// re-deriving the kind from the field name.
+    pub kind: FormFieldExportKind,
+}
+
+/// Discriminator for export-side form fields.
+///
+/// Mirrors [`schematic_define::FormFieldKind`] but is decoupled from the
+/// source enum so the export layer is free to evolve independently. JSON
+/// metadata parts collapse to a unit variant here because exporters only
+/// need to know "this is a JSON-typed part", not the full schema.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FormFieldExportKind {
+    /// Plain text field.
+    Text,
+    /// Single file upload field with optional MIME accept patterns.
+    File {
+        /// Accepted MIME type patterns (empty = any type).
+        accept: Vec<String>,
+    },
+    /// Multiple files sharing one field name with optional count constraints.
+    Files {
+        /// Accepted MIME type patterns (empty = any type).
+        accept: Vec<String>,
+        /// Minimum number of files required, if any.
+        min: Option<u32>,
+        /// Maximum number of files allowed, if any.
+        max: Option<u32>,
+    },
+    /// Structured JSON part embedded in the form.
+    Json,
 }
 
 /// Maps a schematic `ApiRequest` to an `ExportBody`.
@@ -77,6 +112,26 @@ fn map_form_field(field: &schematic_define::request::FormField) -> FormField {
         name: field.name.clone(),
         required: field.required,
         description: field.description.clone(),
+        kind: map_form_field_kind(&field.kind),
+    }
+}
+
+fn map_form_field_kind(kind: &FormFieldKind) -> FormFieldExportKind {
+    match kind {
+        FormFieldKind::Text => FormFieldExportKind::Text,
+        FormFieldKind::File { accept } => FormFieldExportKind::File {
+            accept: accept.clone(),
+        },
+        FormFieldKind::Files { accept, min, max } => FormFieldExportKind::Files {
+            accept: accept.clone(),
+            min: *min,
+            max: *max,
+        },
+        FormFieldKind::Json(_) => FormFieldExportKind::Json,
+        // FormFieldKind is #[non_exhaustive]; future variants fall back
+        // to plain text so exporters keep working until explicit support
+        // is added.
+        _ => FormFieldExportKind::Text,
     }
 }
 
@@ -132,8 +187,10 @@ mod tests {
                 assert_eq!(fields[0].name, "name");
                 assert!(fields[0].required);
                 assert_eq!(fields[0].description.as_deref(), Some("User name"));
+                assert_eq!(fields[0].kind, FormFieldExportKind::Text);
                 assert_eq!(fields[1].name, "avatar");
                 assert!(!fields[1].required);
+                assert_eq!(fields[1].kind, FormFieldExportKind::File { accept: vec![] });
             }
             _ => panic!("Expected FormData"),
         }
@@ -149,8 +206,106 @@ mod tests {
             ExportBody::UrlEncoded { fields } => {
                 assert_eq!(fields.len(), 1);
                 assert_eq!(fields[0].name, "grant_type");
+                assert_eq!(fields[0].kind, FormFieldExportKind::Text);
             }
             _ => panic!("Expected UrlEncoded"),
+        }
+    }
+
+    #[test]
+    fn map_body_form_data_preserves_file_kind() {
+        let request = ApiRequest::FormData {
+            fields: vec![schematic_define::request::FormField::file("audio")],
+        };
+        let body = map_body(&request);
+        match body {
+            ExportBody::FormData { fields } => {
+                assert_eq!(fields.len(), 1);
+                assert_eq!(fields[0].name, "audio");
+                assert_eq!(fields[0].kind, FormFieldExportKind::File { accept: vec![] });
+            }
+            _ => panic!("Expected FormData"),
+        }
+    }
+
+    #[test]
+    fn map_body_form_data_preserves_file_accept_patterns() {
+        let request = ApiRequest::FormData {
+            fields: vec![schematic_define::request::FormField::file_accept(
+                "audio",
+                vec!["audio/*".into()],
+            )],
+        };
+        let body = map_body(&request);
+        match body {
+            ExportBody::FormData { fields } => {
+                assert_eq!(
+                    fields[0].kind,
+                    FormFieldExportKind::File {
+                        accept: vec!["audio/*".to_string()]
+                    }
+                );
+            }
+            _ => panic!("Expected FormData"),
+        }
+    }
+
+    #[test]
+    fn map_body_form_data_preserves_files_constraints() {
+        let request = ApiRequest::FormData {
+            fields: vec![
+                schematic_define::request::FormField::files_with_constraints(
+                    "samples",
+                    vec!["audio/*".into()],
+                    Some(1),
+                    Some(10),
+                ),
+            ],
+        };
+        let body = map_body(&request);
+        match body {
+            ExportBody::FormData { fields } => {
+                assert_eq!(
+                    fields[0].kind,
+                    FormFieldExportKind::Files {
+                        accept: vec!["audio/*".to_string()],
+                        min: Some(1),
+                        max: Some(10),
+                    }
+                );
+            }
+            _ => panic!("Expected FormData"),
+        }
+    }
+
+    #[test]
+    fn map_body_form_data_preserves_text_for_text() {
+        let request = ApiRequest::FormData {
+            fields: vec![schematic_define::request::FormField::text("name")],
+        };
+        let body = map_body(&request);
+        match body {
+            ExportBody::FormData { fields } => {
+                assert_eq!(fields[0].kind, FormFieldExportKind::Text);
+            }
+            _ => panic!("Expected FormData"),
+        }
+    }
+
+    #[test]
+    fn map_body_form_data_preserves_json_part() {
+        let request = ApiRequest::FormData {
+            fields: vec![schematic_define::request::FormField::json(
+                "metadata",
+                Schema::new("MetadataRequest"),
+            )],
+        };
+        let body = map_body(&request);
+        match body {
+            ExportBody::FormData { fields } => {
+                assert_eq!(fields[0].kind, FormFieldExportKind::Json);
+            }
+            _ => panic!("Expected FormData"),
         }
     }
 }

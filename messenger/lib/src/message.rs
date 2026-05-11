@@ -5,6 +5,7 @@ use crate::attachment::{Attachment, AttachmentKind, AttachmentSource};
 /// Portable message content, independent of any destination.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Message {
+    pub title: Option<String>,
     pub body: Option<MessageBody>,
     pub attachments: Vec<Attachment>,
     pub location: Option<Location>,
@@ -16,6 +17,13 @@ pub struct Message {
 pub enum MessageBody {
     Plain(String),
     Markdown(String),
+    /// Plain summary paired with rich Markdown body.
+    ///
+    /// Providers with a notification surface distinct from a rich-rendering
+    /// surface (Discord) place `summary` in the notification field and render
+    /// `markdown` in the rich field. Providers without that split fall back
+    /// to whichever half is appropriate for their feature set.
+    Summarized { summary: String, markdown: String },
 }
 
 /// A geographic location.
@@ -50,6 +58,7 @@ impl Message {
     /// Create a plain-text message.
     pub fn text(text: impl Into<String>) -> Self {
         Self {
+            title: None,
             body: Some(MessageBody::Plain(text.into())),
             attachments: Vec::new(),
             location: None,
@@ -60,6 +69,7 @@ impl Message {
     /// Create a Markdown message.
     pub fn markdown(md: impl Into<String>) -> Self {
         Self {
+            title: None,
             body: Some(MessageBody::Markdown(md.into())),
             attachments: Vec::new(),
             location: None,
@@ -67,9 +77,38 @@ impl Message {
         }
     }
 
+    /// Create a message with a plain notification summary and a rich Markdown body.
+    pub fn summarized(
+        summary: impl Into<String>,
+        markdown: impl Into<String>,
+    ) -> Self {
+        Self {
+            title: None,
+            body: Some(MessageBody::Summarized {
+                summary: summary.into(),
+                markdown: markdown.into(),
+            }),
+            attachments: Vec::new(),
+            location: None,
+            metadata: BTreeMap::new(),
+        }
+    }
+
+    /// Create a Plain-body message by stripping Markdown formatting from `md`.
+    ///
+    /// Equivalent to `Message::text(plain)` where `plain` is the result of
+    /// rendering `md` to plain text.
+    pub fn markdown_stripped(md: impl Into<String>) -> Self {
+        let md = md.into();
+        let nodes = crate::markdown::parse::parse_markdown(&md);
+        let plain = crate::markdown::plain_text::render_plain_text(&nodes);
+        Self::text(plain)
+    }
+
     /// Create a location-only message.
     pub fn location(lat: f64, lon: f64) -> Self {
         Self {
+            title: None,
             body: None,
             attachments: Vec::new(),
             location: Some(Location {
@@ -80,6 +119,15 @@ impl Message {
             }),
             metadata: BTreeMap::new(),
         }
+    }
+
+    /// Set the portable title for this message.
+    ///
+    /// The title is used by providers that distinguish a summary line from the body,
+    /// such as desktop notifications. Providers without a native title concept ignore it.
+    pub fn title(mut self, title: impl Into<String>) -> Self {
+        self.title = Some(title.into());
+        self
     }
 
     /// Attach a location to the message.

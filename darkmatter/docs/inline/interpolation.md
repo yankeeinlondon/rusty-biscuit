@@ -13,7 +13,7 @@ Body interpolation runs after text replacement and page blocks have been applied
     - this default is suitable for some situations but not others so you are allowed to express a fallback you'd like to use instead with the following syntax:
 
       ```md
-      Bob's favorite color is {{ color | "unknown" }}.
+      Bob's favorite color is {{ color || "unknown" }}.
       ```
 
 - **Boolean Switch**
@@ -25,6 +25,21 @@ Body interpolation runs after text replacement and page blocks have been applied
       ```
 
     - in this example if the frontmatter property `color` is _truthy_ then we'll replace with `known` otherwise `unknown`.
+
+- **Nested Ternary**
+
+    - ternary expressions can be nested in either branch without extra parentheses:
+
+      ```md
+      {{ show_details ? has_name ? name : "unnamed" : "hidden" }}
+      ```
+
+    - the expression above is parsed as `show_details ? (has_name ? name : "unnamed") : "hidden"`
+    - parentheses may still be used for visual clarity when desired:
+
+      ```md
+      {{ show_details ? (has_name ? name : "unnamed") : "hidden" }}
+      ```
 
 - **Comparison Switch**
 
@@ -47,7 +62,7 @@ Body interpolation runs after text replacement and page blocks have been applied
     - NOTE: if a string value of "6" is used in a numeric comparison we will automatically convert it to the number 6 for the comparison.
 
       ```md
-      Bob's favorite color is {{ color | blue == "blue" ? blue (how original) : nice choice! }}
+      Bob's favorite color is {{ color || blue == "blue" ? blue (how original) : nice choice! }}
       ```
 
 - **Context Variables**
@@ -61,7 +76,7 @@ Body interpolation runs after text replacement and page blocks have been applied
     - for example:
 
         ```md
-        Bob's favorite color is {{ env.FAVORITE_COLOR | "unknown" }}
+        Bob's favorite color is {{ env.FAVORITE_COLOR || "unknown" }}
         ```
 
 - **Quoting**
@@ -86,7 +101,7 @@ Body interpolation runs after text replacement and page blocks have been applied
 
 The current implementation uses a source-first scanner approach (single-pass rewrite):
 
-- A scanner finds `{{ ... }}` spans in the document body (skipping inline code and fenced code blocks)
+- A scanner finds `{{ ... }}` spans in the document body. Inline code spans (single backticks) are interpolated by default, since the templating pattern `` `var_{{ phase }}` `` is a common use case. Fenced and indented code blocks are skipped.
 - Each expression is parsed with a dedicated tokenizer and evaluator
 - The interpolation context is built from the effective state (frontmatter + external state), `ctx.*` runtime values, and `env.*` environment variables
 - Replacements are applied from the end of the string backward to preserve offsets

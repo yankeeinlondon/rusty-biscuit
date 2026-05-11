@@ -93,8 +93,8 @@ fn test_color_depth_fallback_to_terminfo() {
 fn test_supports_setting_foreground() {
     // This test depends on the system's terminfo database
     // We just verify that the function returns a boolean without panicking
-    let supports = supports_setting_foreground();
-    assert!(supports || !supports); // Tautology to verify it returns a bool
+    let _supports = supports_setting_foreground();
+    // Function completes without panic, which is the test goal
 }
 
 #[test]
@@ -126,8 +126,19 @@ fn test_color_depth_invalid_colorterm() {
 #[test]
 fn test_supports_italics_returns_bool() {
     // Just verify the function works and returns a boolean
-    let supports = supports_italics();
-    assert!(supports || !supports);
+    let _supports = supports_italics();
+    // Function completes without panic, which is the test goal
+}
+
+// =============================================================================
+// Dim support tests
+// =============================================================================
+
+#[test]
+fn test_supports_dim_returns_bool() {
+    // Just verify the function works and returns a boolean
+    let _supports = supports_dim();
+    // Function completes without panic, which is the test goal
 }
 
 // =============================================================================
@@ -136,22 +147,14 @@ fn test_supports_italics_returns_bool() {
 
 #[test]
 fn test_supports_underline_returns_struct() {
-    let support = supports_underline();
-    // Verify the struct has the expected fields
-    assert!(support.basic || !support.basic);
-    assert!(support.colored || !support.colored);
+    let _support = supports_underline();
+    // Verify the struct has the expected fields - function completes without panic
 }
 
 #[test]
 fn test_supported_underline_variants_returns_struct() {
-    let variants = supported_underline_variants();
-    // Verify all expected fields exist
-    assert!(variants.straight || !variants.straight);
-    assert!(variants.double || !variants.double);
-    assert!(variants.curly || !variants.curly);
-    assert!(variants.dotted || !variants.dotted);
-    assert!(variants.dashed || !variants.dashed);
-    assert!(variants.colored || !variants.colored);
+    let _variants = supported_underline_variants();
+    // Verify all expected fields exist - function completes without panic
 }
 
 // =============================================================================

@@ -1,12 +1,9 @@
 use serde_json::Value;
 
-use crate::actions::HookResponse;
-use crate::events::{AgenticEvent, EventMeta, Provider};
-use crate::services::ProtectObservation;
-use crate::services::protect::intent::ProtectIntent;
-use crate::services::protect::observe::default_observe_protect;
-
 use super::{AdapterError, ProviderAdapter, str_field};
+use crate::actions::HookResponse;
+use crate::events::{AgenticEvent, EventMeta};
+use crate::provider::Provider;
 
 pub(crate) struct GooseAdapter;
 
@@ -49,23 +46,6 @@ impl ProviderAdapter for GooseAdapter {
         Ok((event, meta))
     }
 
-    fn observe_protect(
-        &self,
-        event: &AgenticEvent,
-        meta: &EventMeta,
-    ) -> Option<ProtectObservation> {
-        let mut obs = default_observe_protect(event, meta)?;
-
-        // Goose mode changes → SwitchMode intent.
-        if let Some(Value::String(mode)) = meta.extra.get("goose_mode") {
-            obs.intents.push(ProtectIntent::SwitchMode {
-                target: Some(mode.clone()),
-            });
-        }
-
-        Some(obs)
-    }
-
     fn can_block(&self, _event: &AgenticEvent) -> bool {
         false
     }
@@ -84,17 +64,6 @@ impl ProviderAdapter for GooseAdapter {
 
     fn exit_code(&self, _event: &AgenticEvent, _response: &HookResponse) -> Option<i32> {
         None
-    }
-
-    fn map_protect_outcome(
-        &self,
-        _event: &AgenticEvent,
-        decision: &crate::services::ProtectDecision,
-    ) -> Result<HookResponse, AdapterError> {
-        Ok(self.map_non_blocking_protect_outcome(
-            decision,
-            "goose: no blocking hook channel, advisory fallback",
-        ))
     }
 }
 

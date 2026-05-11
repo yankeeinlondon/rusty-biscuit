@@ -35,7 +35,7 @@ lazy_static = "1.5"
 regex = "1.11"
 tempfile = "3.8"
 globset = "0.4"
-chrono = "0.4"
+chrono = { version = "0.4", default-features = false, features = ["std", "clock", "now"] }
 which = "7"
 dirs = "6"
 
@@ -68,7 +68,7 @@ biscuit-hash = { path = "../../biscuit-hash/lib" }
 
 # System detection (OS, hardware, repo, docs)
 sniff = { path = "../../sniff/lib" }
-serde_yaml = "0.9.34"
+serde_yaml_ng = "0.10"
 
 [dev-dependencies]
 tokio = { version = "1.48", features = ["full", "test-util"] }

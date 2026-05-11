@@ -1,16 +1,17 @@
 use super::{
-    Agent, AgentCapabilities, AgentDefinitionFormat, AgentId, CapabilityStatus, CommandFormat,
-    ConfigFormat, agent_for, all_agents, parse_agent_id,
+    Agent, AgentCapabilities, AgentDefinitionFormat, CapabilityStatus, CommandFormat, ConfigFormat,
+    agent_for, all_agents, parse_agent_id,
 };
+use crate::provider::{PROVIDERS_DISPLAY_ORDER, Provider};
 
 #[derive(Debug)]
 struct StubAgent {
-    id: AgentId,
+    id: Provider,
     caps: AgentCapabilities,
 }
 
 impl Agent for StubAgent {
-    fn id(&self) -> AgentId {
+    fn id(&self) -> Provider {
         self.id
     }
 
@@ -20,12 +21,12 @@ impl Agent for StubAgent {
 }
 
 fn baseline_caps() -> AgentCapabilities {
-    agent_for(AgentId::Codex).capabilities().clone()
+    agent_for(Provider::Codex).capabilities().clone()
 }
 
 #[derive(Debug, PartialEq, Eq)]
 struct CapabilitySnapshot {
-    id: AgentId,
+    id: Provider,
     config_format: Option<ConfigFormat>,
     skill_status: CapabilityStatus,
     skill_user_paths: Vec<String>,
@@ -78,20 +79,20 @@ fn capability_snapshot(agent: &dyn Agent) -> CapabilitySnapshot {
 #[test]
 fn all_agents_are_registered() {
     let agents = all_agents();
-    assert_eq!(agents.len(), AgentId::ALL.len());
+    assert_eq!(agents.len(), PROVIDERS_DISPLAY_ORDER.len());
 
-    let mut ids: Vec<AgentId> = agents.iter().map(|agent| agent.id()).collect();
-    ids.sort_by_key(|id| id.as_str());
+    let mut ids: Vec<Provider> = agents.iter().map(|agent| agent.id()).collect();
+    ids.sort_by_key(|id| id.as_slug());
     ids.dedup();
 
-    assert_eq!(ids.len(), AgentId::ALL.len());
+    assert_eq!(ids.len(), PROVIDERS_DISPLAY_ORDER.len());
 }
 
 #[test]
 fn parse_agent_id_accepts_common_aliases() {
-    assert_eq!(parse_agent_id("claude"), Some(AgentId::ClaudeCode));
-    assert_eq!(parse_agent_id("qwen-code"), Some(AgentId::QwenCli));
-    assert_eq!(parse_agent_id("open code"), Some(AgentId::OpenCode));
+    assert_eq!(parse_agent_id("claude"), Some(Provider::Claude));
+    assert_eq!(parse_agent_id("qwen-code"), Some(Provider::QwenCode));
+    assert_eq!(parse_agent_id("open code"), Some(Provider::OpenCode));
     assert_eq!(parse_agent_id("unknown"), None);
 }
 
@@ -101,7 +102,7 @@ fn all_agents_pass_default_validation() {
         assert!(
             agent.validate().is_empty(),
             "{} reported validation issues: {:?}",
-            agent.id().as_str(),
+            agent.id().as_slug(),
             agent.validate()
         );
     }
@@ -113,7 +114,7 @@ fn validate_reports_empty_binary() {
     caps.meta.binary = "";
 
     let agent = StubAgent {
-        id: AgentId::Codex,
+        id: Provider::Codex,
         caps,
     };
 
@@ -133,7 +134,7 @@ fn validate_reports_missing_skill_paths_when_supported() {
     caps.skills.paths.project_paths.clear();
 
     let agent = StubAgent {
-        id: AgentId::Codex,
+        id: Provider::Codex,
         caps,
     };
 
@@ -152,7 +153,7 @@ fn validate_reports_unknown_subagent_format_when_supported() {
     caps.subagents.definition_format = AgentDefinitionFormat::Unknown;
 
     let agent = StubAgent {
-        id: AgentId::Codex,
+        id: Provider::Codex,
         caps,
     };
 
@@ -167,9 +168,9 @@ fn validate_reports_unknown_subagent_format_when_supported() {
 #[test]
 fn snapshot_claude_code_paths_formats_and_permissions() {
     assert_eq!(
-        capability_snapshot(agent_for(AgentId::ClaudeCode)),
+        capability_snapshot(agent_for(Provider::Claude)),
         CapabilitySnapshot {
-            id: AgentId::ClaudeCode,
+            id: Provider::Claude,
             config_format: Some(ConfigFormat::Json),
             skill_status: CapabilityStatus::Supported,
             skill_user_paths: vec!["~/.claude/skills".to_string()],
@@ -194,9 +195,9 @@ fn snapshot_claude_code_paths_formats_and_permissions() {
 #[test]
 fn snapshot_codex_paths_formats_and_permissions() {
     assert_eq!(
-        capability_snapshot(agent_for(AgentId::Codex)),
+        capability_snapshot(agent_for(Provider::Codex)),
         CapabilitySnapshot {
-            id: AgentId::Codex,
+            id: Provider::Codex,
             config_format: Some(ConfigFormat::Toml),
             skill_status: CapabilityStatus::Supported,
             skill_user_paths: vec![
@@ -227,9 +228,9 @@ fn snapshot_codex_paths_formats_and_permissions() {
 #[test]
 fn snapshot_gemini_paths_formats_and_permissions() {
     assert_eq!(
-        capability_snapshot(agent_for(AgentId::GeminiCli)),
+        capability_snapshot(agent_for(Provider::Gemini)),
         CapabilitySnapshot {
-            id: AgentId::GeminiCli,
+            id: Provider::Gemini,
             config_format: Some(ConfigFormat::Json),
             skill_status: CapabilityStatus::Supported,
             skill_user_paths: vec![
@@ -260,9 +261,9 @@ fn snapshot_gemini_paths_formats_and_permissions() {
 #[test]
 fn snapshot_goose_paths_formats_and_permissions() {
     assert_eq!(
-        capability_snapshot(agent_for(AgentId::Goose)),
+        capability_snapshot(agent_for(Provider::Goose)),
         CapabilitySnapshot {
-            id: AgentId::Goose,
+            id: Provider::Goose,
             config_format: Some(ConfigFormat::Yaml),
             skill_status: CapabilityStatus::Supported,
             skill_user_paths: vec![
@@ -281,7 +282,7 @@ fn snapshot_goose_paths_formats_and_permissions() {
                 "approve".to_string(),
                 "chat".to_string(),
             ],
-            yolo_equivalent: Some("auto mode".to_string()),
+            yolo_equivalent: Some("GOOSE_MODE=auto".to_string()),
             sandbox_modes: vec![],
         }
     );
@@ -290,9 +291,9 @@ fn snapshot_goose_paths_formats_and_permissions() {
 #[test]
 fn snapshot_kimi_paths_formats_and_permissions() {
     assert_eq!(
-        capability_snapshot(agent_for(AgentId::KimiCode)),
+        capability_snapshot(agent_for(Provider::KimiCode)),
         CapabilitySnapshot {
-            id: AgentId::KimiCode,
+            id: Provider::KimiCode,
             config_format: Some(ConfigFormat::Toml),
             skill_status: CapabilityStatus::Supported,
             skill_user_paths: vec![
@@ -317,9 +318,9 @@ fn snapshot_kimi_paths_formats_and_permissions() {
 #[test]
 fn snapshot_opencode_paths_formats_and_permissions() {
     assert_eq!(
-        capability_snapshot(agent_for(AgentId::OpenCode)),
+        capability_snapshot(agent_for(Provider::OpenCode)),
         CapabilitySnapshot {
-            id: AgentId::OpenCode,
+            id: Provider::OpenCode,
             config_format: Some(ConfigFormat::Jsonc),
             skill_status: CapabilityStatus::Supported,
             skill_user_paths: vec![
@@ -333,7 +334,7 @@ fn snapshot_opencode_paths_formats_and_permissions() {
             subagent_status: CapabilityStatus::Supported,
             subagent_format: AgentDefinitionFormat::MarkdownFrontmatter,
             permission_modes: vec!["allow".to_string(), "ask".to_string(), "deny".to_string()],
-            yolo_equivalent: None,
+            yolo_equivalent: Some("--dangerously-skip-permissions".to_string()),
             sandbox_modes: vec![],
         }
     );
@@ -342,9 +343,9 @@ fn snapshot_opencode_paths_formats_and_permissions() {
 #[test]
 fn snapshot_qwen_paths_formats_and_permissions() {
     assert_eq!(
-        capability_snapshot(agent_for(AgentId::QwenCli)),
+        capability_snapshot(agent_for(Provider::QwenCode)),
         CapabilitySnapshot {
-            id: AgentId::QwenCli,
+            id: Provider::QwenCode,
             config_format: Some(ConfigFormat::Json),
             skill_status: CapabilityStatus::Supported,
             skill_user_paths: vec!["~/.qwen/skills".to_string()],
@@ -368,9 +369,9 @@ fn snapshot_qwen_paths_formats_and_permissions() {
 #[test]
 fn snapshot_roo_paths_formats_and_permissions() {
     assert_eq!(
-        capability_snapshot(agent_for(AgentId::RooCode)),
+        capability_snapshot(agent_for(Provider::RooCode)),
         CapabilitySnapshot {
-            id: AgentId::RooCode,
+            id: Provider::RooCode,
             config_format: Some(ConfigFormat::Mixed),
             skill_status: CapabilityStatus::Supported,
             skill_user_paths: vec![
@@ -386,7 +387,7 @@ fn snapshot_roo_paths_formats_and_permissions() {
                 "auto-approve (default)".to_string(),
                 "manual approval (--require-approval)".to_string(),
             ],
-            yolo_equivalent: Some("default auto-approve behavior".to_string()),
+            yolo_equivalent: None,
             sandbox_modes: vec![],
         }
     );

@@ -20,7 +20,7 @@ pub(crate) use resolver::{
     is_file_like_reference, is_url_like, normalize_reference_token, resolve_path, resolve_target,
 };
 pub use types::{
-    BlockDirective, BlockOptions, DependencyNode, DirectiveKind, FrontmatterRefs, ReplaceOption,
-    ResolvedTarget, SourceContext, TransclusionError, TransclusionRuntime,
+    BlockDirective, BlockOptions, DeferredSetError, DependencyNode, DirectiveKind, FrontmatterRefs,
+    ReplaceOption, ResolvedTarget, TransclusionError, TransclusionRuntime, TransclusionSource,
 };
 pub use wrappers::{wrap_disclosure, wrap_quotation};

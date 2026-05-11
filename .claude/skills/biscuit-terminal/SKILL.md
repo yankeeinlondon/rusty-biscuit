@@ -1,6 +1,6 @@
 ---
 name: biscuit-terminal
-description: Expert knowledge for the biscuit-terminal Rust library - the authority for terminal capability detection (13+ emulators) and rich terminal rendering. Provides inline image rendering (Kitty/iTerm2 protocols), terminal-facing Mermaid and graph adapters backed by biscuit-visualized, OS/font detection, escape code analysis, color system (BasicColor, WebColor, Tailwind), and composable rendering components. Use when building CLI apps with terminal-aware features, rendering images or diagrams inline, detecting color/underline support, or querying terminal environment. Darkmatter depends on this for terminal Mermaid rendering.
+description: Expert knowledge for the biscuit-terminal Rust library - the authority for terminal capability detection (13+ emulators) and rich terminal rendering. Provides inline image rendering (Kitty/iTerm2 protocols), terminal-facing Mermaid and graph adapters backed by biscuit-visualized, OS/font detection, escape code analysis, color system (BasicColor, WebColor, Tailwind), and composable rendering components. The `Prose` component supports three input grammars — atomic tokens (`{{bold}}`), block tags (`<bold>...</bold>`), and a Markdown subset (`**bold**`, `_italics_`, `[desc](url)`) with intra-word flanking rules so identifiers like `OPENCODE_CONFIG_CONTENT` pass through unmangled. Use when building CLI apps with terminal-aware features, rendering images or diagrams inline, detecting color/underline/italics/dim support, or querying terminal environment. Darkmatter depends on this for terminal Mermaid rendering.
 ---
 
 # biscuit-terminal
@@ -37,14 +37,14 @@ if term.supports_italic { println!("\x1b[3mItalic\x1b[0m"); }
 | Topic | Description |
 |-------|-------------|
 | [Terminal Struct](./terminal-struct.md) | Main struct, static vs dynamic properties, enums |
-| [Components](./components.md) | All renderable components: BlockQuote, Compose, FileSystem, GraphExpression, InlineContent, MermaidDiagram, OrderedList, UnorderedList, PadLeft, PadRight, Progress, Prose, Section, Status, Table, TerminalImage, TextBlock, Todo, TwoColumn |
+| [Components](./components.md) | All renderable components: BlockQuote, Compose, FileSystem, GraphExpression, HorizontalRule, InlineContent, MermaidDiagram, OrderedList, UnorderedList, PadLeft, PadRight, Progress, Prose, Section, Status, StatusBlock, Table, TerminalImage, TextBlock, Todo, TwoColumn |
 | [Image Rendering](./image-rendering.md) | Kitty/iTerm2 protocols, width parsing, cursor behavior, policy controls |
 | [Mermaid Diagrams](./mermaid-diagrams.md) | Terminal-facing `MermaidDiagram` adapter backed by biscuit-visualized |
 | [Color System](./color-system.md) | BasicColor, RgbColor, WebColor, Tailwind, HdrColor with TermColor trait |
-| [Detection Functions](./discovery.md) | App, color, underline, multiplex detection |
+| [Detection Functions](./discovery.md) | App, color, underline, italics, dim, multiplex detection |
 | [OS & Environment](./os-environment.md) | OS, distro, CI, fonts, locale |
 | [Escape Codes](./escape-codes.md) | Strip, analyze, visual width calculation |
-| [Styling](./styling.md) | Terminal-aware styling, Prose component, TextBlock |
+| [Styling](./styling.md) | Terminal-aware styling, Prose component (atomic tokens, block tags, Markdown subset with flanking rules), TextBlock |
 | [bt Command](./cli.md) | CLI tool: 17 commands for inspection, diagrams, text, and filesystem |
 
 ## Common Patterns
@@ -96,6 +96,71 @@ let fg = match Terminal::color_mode() {
     ColorMode::Dark | ColorMode::Unknown => "white",
 };
 ```
+
+### Status Blocks
+
+```rust
+use biscuit_terminal::prelude::{Prose, StatusBlock, StatusState};
+
+let block = StatusBlock::new(StatusState::Error)
+    .header("<b>Shell Expansion Failed</b>")
+    .body(Prose::new("Missing closing brace in `${...}` directive."))
+    .hint("Check the template syntax and retry.");
+```
+
+Use `StatusBlock` when you need the common Claudine-style `Status` header plus a colored
+`BlockQuote` body and optional hint as one renderable. It defaults to a `┃ ` border,
+`left_margin = 0`, `right_margin = 5`, and `WordWrap::WrapProse(Some(8), None)` so the
+body border lines up with the preceding `Status` icon/header line.
+
+### Horizontal Rules
+
+```rust
+use biscuit_terminal::prelude::*;  // HorizontalRule, RuleStyle, RuleAlignment, RuleWeight, BrowserRenderable
+
+let rule = HorizontalRule::new()
+    .style(RuleStyle::Waves)
+    .alignment(RuleAlignment::Centered)
+    .weight(RuleWeight::Medium)
+    .width("75%");
+
+// Terminal rendering — honors color_depth and width from the passed `Terminal`
+let output = rule.render(&terminal);
+
+// Browser rendering — default SVG declares --hr-weight / --hr-color / --hr-width
+let svg = rule.render_to_browser();
+
+// Browser rendering with per-instance CSS variable overrides
+use std::collections::HashMap;
+let mut overrides = HashMap::new();
+overrides.insert("hr-weight".to_string(), "12".to_string());
+let svg_override = rule.render_to_browser_with_inline_variables(&overrides);
+```
+
+The `HorizontalRule` component implements both `Renderable` (terminal output) and `BrowserRenderable` (HTML/SVG output).
+
+**Supported attributes:**
+
+- `style`: `dashes` (default), `dots`, `waves`, `line-star`, `line-circle`, `inset-line`, `curtain-rod`
+- `alignment`: `full` (default), `centered`, `left`, `right`
+- `weight`: `thin`, `medium` (default), `thick` — heavy Unicode glyphs in Tier 2, 2/4/8px stroke in browser
+- `width`: CSS-like string (e.g. `"75%"`, `"200px"`)
+- `color`: CSS color name or `#rrggbb` — emits ANSI escapes in terminal when `color_depth` supports it
+
+**Terminal rendering tiers:**
+
+1. **Tier 1 (SVG → PNG via `resvg` + `TerminalImage`):** primary path when the terminal advertises Kitty-compatible image support.
+2. **Tier 2 (Unicode):** fallback; gated on `locale::env_says_utf8()`.
+3. **Tier 3 (ASCII):** fallback when the locale does not signal UTF-8.
+
+All four main types (`HorizontalRule`, `RuleStyle`, `RuleAlignment`, `RuleWeight`) plus the `BrowserRenderable` trait are re-exported through `biscuit_terminal::prelude`.
+
+`StatusState::Error` is now the canonical error severity. `StatusState::Failure` remains as a
+deprecated compatibility variant, and persisted JSON `"Failure"` still deserializes as
+`StatusState::Error`. Prefer `StatusState::default_color()` when you want the canonical border
+or accent color for a severity instead of re-encoding the Tailwind mapping yourself. See
+[`biscuit-terminal/README.md`](../../../biscuit-terminal/README.md) for the full severity table
+and override knobs.
 
 ## Terminal Support Matrix
 
@@ -177,6 +242,7 @@ biscuit_terminal/
 │   ├── section.rs        # Section with heading levels (h1-h6)
 │   ├── block_quote.rs    # BlockQuote with attribution
 │   ├── prose.rs          # Styled text with tokens
+│   ├── status_block.rs   # Status + BlockQuote + hint composite
 │   ├── text_block.rs     # Uniform block styling
 │   ├── inline_content.rs # Inline concatenation without newlines
 │   ├── list.rs           # OrderedList, UnorderedList
@@ -190,7 +256,8 @@ biscuit_terminal/
 │   ├── mermaid.rs        # Terminal-facing Mermaid adapter
 │   └── graph_expression.rs # Terminal-facing graph adapter
 └── utils/
-    ├── layout.rs         # Layout, Margin, WordWrap, Alignment
+    ├── layout.rs         # Layout, Margin, Alignment
+    ├── wrap_policy.rs    # WordWrap enum
     ├── color.rs          # Color, BasicColor, RgbColor, WebColor, Tailwind, HdrColor
     ├── styling.rs        # Stylist trait, FontWeight, Style
     ├── escape_codes.rs   # ANSI escape code generation
@@ -200,6 +267,141 @@ biscuit_terminal/
     ├── truncate.rs       # Text truncation
     └── multiplex.rs      # Multiplexing detection
 ```
+
+## NO_COLOR Support
+
+The `bt` CLI respects the `NO_COLOR` environment variable. When set, the
+following commands strip SGR (color/style) sequences from their output
+while preserving structural sequences such as OSC8 hyperlinks:
+
+- `bt prose` — strips `\x1b[…m` sequences from rendered prose
+- `bt quote`, `bt list`, `bt columns`, `bt padleft`, `bt padright`
+
+The default `bt` terminal-inspection output also respects `NO_COLOR`.
+
+## Testing
+
+biscuit-terminal follows the Level 1 / 2 / 3 testing vocabulary from the
+`cli` skill (see `cli` skill → "Test Rigor: Level 1 / Level 2 / Level 3"):
+
+- **Level 1** — PTY-based tests in `lib/tests/` using `expectrl` and a
+  thin `discovery_probe` example binary. These exercise library code
+  through a pseudo-terminal without requiring a real terminal emulator.
+- **Level 2** — Real-terminal tests in `cli/tests/level2_*.rs` using the
+  shared `biscuit-test-harness` crate (WezTerm, Kitty, tmux). These
+  validate escape-sequence output, glyph widths, scroll behaviour, and
+  image protocol bytes against the actual terminal's display path.
+- **Level 3** — Not applicable (biscuit-terminal has no interactive input).
+
+### biscuit-test-harness (shared crate)
+
+The `biscuit-test-harness` workspace member provides:
+
+- `TerminalHarness` trait — `spawn`, `send_text`, `capture`, `settle`.
+- `WezTermHarness`, `KittyHarness`, `TmuxHarness`, `AppleTerminalHarness`
+  implementations.
+- `CapturedFrame { raw, plain }` plus a robust ECMA-48 `strip_ansi` helper.
+- `available()` probes that check the binary on `$PATH` plus required env
+  (`WEZTERM_UNIX_SOCKET`, `KITTY_LISTEN_ON`, `TMUX`). `AppleTerminalHarness`
+  additionally returns false in CI (`CI=1`) and off-macOS.
+- `skip_with_reason()` for clean test skips.
+
+Level-2 tests skip cleanly when the required terminal emulator is
+unavailable; no `#[ignore]` markers are used.
+
+#### `AppleTerminalHarness` capture limitation
+
+Terminal.app's AppleScript interface exposes only the **plain visible
+text** of a tab — there is no API to retrieve the raw ANSI/SGR byte
+stream. `CapturedFrame::raw` and `CapturedFrame::plain` therefore hold
+the same string. Use this harness for "no escape garbage is visible"
+assertions; use Level-1 PTY tests for byte-level negative assertions
+(e.g. "no OSC8 bytes were emitted").
+
+#### macOS focus-restore trap (AppleScript)
+
+Harnesses that snapshot the frontmost app via System Events
+(`name of first process whose frontmost is true`) and then restore it
+with `tell application <name> to activate` will pop a modal "Choose
+Application — Where is X?" dialog whenever the captured *process* name
+differs from any installed `.app` bundle name (WezTerm → `wezterm-gui`,
+all Electron apps, Slack/Discord/etc.). The dialog blocks the test
+until a human dismisses it. Always restore via System Events instead:
+`tell application "System Events" to set frontmost of (first process
+whose name is prevApp) to true`. See the **cli** skill →
+"Restoring focus after a test spawns a GUI window (macOS)" for the
+full rationale and the affected-app table.
+
+### Adding new Level-1 tests
+
+1. Create `lib/tests/level1_<topic>.rs`.
+2. Spawn the `discovery_probe` example binary via `expectrl` inside a PTY.
+3. Manufacture terminal replies (e.g., OSC 11 for bg color) and assert on
+   parsed output.
+4. Use the helpers in `lib/tests/common/pty.rs` for standardized env setup
+   (`CI=1`, `NO_COLOR=1`).
+
+### Adding new Level-2 tests
+
+1. Create `cli/tests/level2_<topic>.rs` with the skip-clean contract note
+   at the top of the file.
+2. Import `biscuit_test_harness::{skip_with_reason, TerminalHarness}` and
+   `common::send_bt_command`.
+3. Check `Harness::available()` and early-return with `skip_with_reason`
+   if the terminal is absent.
+4. Spawn a fresh shell per test: `harness.spawn_shell()`.
+5. Send `bt` commands via `send_bt_command(&mut harness, "...")`.
+6. Capture and assert on `frame.raw` (with ANSI) or `frame.plain` (stripped).
+
+### Level-2 assertion strategies
+
+| Terminal | Image protocol in capture? | Recommended assertion |
+|----------|---------------------------|----------------------|
+| WezTerm | No — `get-text --escapes` strips OSC/APC image sequences | Use `bt image --debug` and assert on debug output (e.g., `app: Wezterm`, `--- image debug ---`). For diagrams, use `--meta` and assert on JSON metadata. |
+| Kitty | Yes — `kitty @ get-text --ansi` preserves `�_G` | Assert `frame.raw.contains("\x1b_G")` for Kitty graphics protocol bytes. |
+| tmux | N/A — no image protocols | Assert fenced code block fallback: `frame.plain.contains("```mermaid")`. |
+
+### Practical patterns for Level-2 tests
+
+**Join wrapped JSON before searching:**
+Terminal wrapping splits long JSON lines. Join lines before substring assertions:
+```rust
+let joined: String = frame.plain.lines().collect();
+assert!(joined.contains("\"filename\"") && joined.contains("\"render_time_ms\""));
+```
+
+**Position the cursor predictably:**
+Use `tput cup` to avoid racing shell initialization and unpredictable prompt heights:
+```rust
+harness.send_text(b"clear\n").expect("send_text failed");
+harness.settle();
+harness.send_text(b"tput cup 5 0\n").expect("send_text failed");
+harness.settle();
+send_bt_command(&mut harness, "image --debug fixtures/tiny.png");
+```
+
+**Add shell-ready delay for custom prompts:**
+Custom prompts (e.g., starship, powerlevel10k) take time to initialize. Add ~1.5 s after `spawn_shell` before sending commands:
+```rust
+harness.spawn_shell().expect("spawn_shell failed");
+std::thread::sleep(Duration::from_millis(1500));
+```
+
+**Use `--debug` for images and `--meta` for diagrams in WezTerm:**
+Since WezTerm strips image protocol bytes from `get-text`, rely on stderr output:
+- `bt image --debug fixtures/tiny.png` — prints cursor math, scroll predictions, and app detection.
+- `bt flowchart --meta "A --> B"` — prints JSON with `filename`, `cache_hit`, `render_time_ms`.
+
+**Test scroll compensation at bottom margin:**
+Position cursor near bottom with `tput cup 22 0`, then run `bt image --debug`. Assert on `SCROLL needed` in the debug output.
+
+**Test Warp floor rounding:**
+Spoof Warp detection with `export TERM_PROGRAM=WarpTerminal`, then run `bt image --debug`. Assert on `app: Warp` and `floor=` in debug output.
+
+**Balanced save/restore sequences:**
+When testing components that use cursor save/restore (images, horizontal
+rules, two-column layouts), assert that `\x1b[s` and `\x1b[u` counts match
+in `frame.raw` to catch orphan sequences.
 
 ## Key Dependencies
 

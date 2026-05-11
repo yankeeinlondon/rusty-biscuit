@@ -278,6 +278,44 @@ pub struct PullRequestSummary {
     /// Head branch info.
     #[serde(default)]
     pub head: Option<PullRef>,
+
+    /// Labels applied to the PR.
+    ///
+    /// Gitea returns the same `Label` shape on PRs as on issues. The list
+    /// endpoint includes this field by default, but `#[serde(default)]`
+    /// keeps responses (or fixtures) that omit it deserializable.
+    #[serde(default)]
+    pub labels: Option<Vec<Label>>,
+}
+
+/// A label applied to a Gitea issue or pull request.
+///
+/// Gitea uses a single `Label` shape for both issues and PRs.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct Label {
+    /// Label ID.
+    #[serde(default)]
+    pub id: Option<i64>,
+
+    /// Label name (e.g. "bug", "enhancement").
+    #[serde(default)]
+    pub name: Option<String>,
+
+    /// Label color (hex without `#`, e.g. "ff0000").
+    #[serde(default)]
+    pub color: Option<String>,
+
+    /// Optional human-readable description.
+    #[serde(default)]
+    pub description: Option<String>,
+
+    /// Whether the label is exclusive within its scope.
+    #[serde(default)]
+    pub exclusive: Option<bool>,
+
+    /// Optional API URL for the label resource.
+    #[serde(default)]
+    pub url: Option<String>,
 }
 
 /// A file changed in a pull request.
@@ -683,6 +721,39 @@ mod tests {
         assert_eq!(pr.number, Some(42));
         assert_eq!(pr.state, Some("open".to_string()));
         assert_eq!(pr.draft, Some(false));
+        // Labels field defaults to None when omitted from the payload.
+        assert!(pr.labels.is_none());
+    }
+
+    #[test]
+    fn pull_request_summary_with_labels_deserialization() {
+        let json = r#"{
+            "id": 1,
+            "number": 42,
+            "state": "open",
+            "title": "Add new feature",
+            "draft": false,
+            "mergeable": true,
+            "created_at": "2026-01-15T10:00:00Z",
+            "updated_at": "2026-01-15T12:00:00Z",
+            "html_url": "https://gitea.example.com/owner/repo/pulls/42",
+            "user": {"login": "author"},
+            "base": {"ref": "main", "sha": "abc"},
+            "head": {"ref": "feature", "sha": "def"},
+            "labels": [
+                {"id": 10, "name": "bug", "color": "ee0701"},
+                {"name": "good first issue"}
+            ]
+        }"#;
+
+        let pr: PullRequestSummary = serde_json::from_str(json).unwrap();
+        let labels = pr.labels.expect("labels field present");
+        assert_eq!(labels.len(), 2);
+        assert_eq!(labels[0].id, Some(10));
+        assert_eq!(labels[0].name.as_deref(), Some("bug"));
+        assert_eq!(labels[0].color.as_deref(), Some("ee0701"));
+        assert_eq!(labels[1].name.as_deref(), Some("good first issue"));
+        assert!(labels[1].color.is_none());
     }
 
     #[test]

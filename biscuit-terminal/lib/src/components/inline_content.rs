@@ -315,7 +315,8 @@ impl Renderable for InlineContent {
 mod tests {
     use super::*;
     use crate::components::compose::Compose;
-    use crate::utils::layout::{Alignment, Margin, RowFill, WordWrap};
+    use crate::utils::layout::{Alignment, Margin, RowFill};
+    use crate::utils::wrap_policy::WordWrap;
 
     // =====================================================================
     // Construction

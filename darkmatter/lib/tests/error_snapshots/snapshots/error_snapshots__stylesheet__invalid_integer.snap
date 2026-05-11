@@ -1,0 +1,7 @@
+---
+source: darkmatter/lib/tests/error_snapshots/stylesheet.rs
+expression: out
+---
+⨫ StylesheetError: invalid integer value
+┃ Value: 1.5
+Use a whole number, e.g. 0, 1, or -3.

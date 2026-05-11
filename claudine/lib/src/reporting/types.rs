@@ -2,8 +2,9 @@ use chrono::{DateTime, NaiveDate, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 
-use crate::events::{AgenticEvent, Provider};
+use crate::events::AgenticEvent;
 
+use crate::provider::Provider;
 /// Common provider/repository filters shared by reporting queries.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ReportingFilters {

@@ -4,6 +4,7 @@ use clap::{ArgAction, CommandFactory, Parser, Subcommand};
 use clap_complete::CompleteEnv;
 use color_eyre::eyre::{Result, eyre};
 use secrecy::SecretString;
+use serde::Serialize;
 use tracing_subscriber::EnvFilter;
 
 const COMPLETIONS_HELP: &str = r#"
@@ -25,11 +26,9 @@ Examples:
   COMPLETE=0
 "#;
 
-mod config;
-mod receipt_store;
-mod setup;
+use messenger_cli::{config, info, install, receipt_store, setup};
 
-use config::{Config, RouteConfig, RouteProvider};
+use config::{Config, RouteConfig, RouteProvider, RouteUrgency};
 
 #[derive(Parser)]
 #[command(name = "messenger", about = "Send messages to any platform")]
@@ -39,17 +38,25 @@ struct Cli {
     #[arg(long, action = ArgAction::Count, global = true)]
     debug: u8,
 
+    /// Suppress success output (JSON response and compatibility warnings).
+    /// Errors are still reported.
+    #[arg(long, global = true)]
+    quiet: bool,
+
     #[command(subcommand)]
     command: Commands,
 }
 
 #[derive(Subcommand)]
 #[command(disable_help_subcommand = true)]
+#[allow(clippy::large_enum_variant)]
 enum Commands {
     /// Send a message.
     Send {
         /// The message text to send (Markdown supported unless --plain is used).
-        message: String,
+        ///
+        /// Optional: desktop notifications accept a title-only send via `--title`.
+        message: Option<String>,
 
         /// Provider to use for an ad-hoc route.
         #[arg(long)]
@@ -84,12 +91,132 @@ enum Commands {
         strict: bool,
 
         /// Send as plain text (disable Markdown rendering).
-        #[arg(long)]
+        #[arg(long, conflicts_with = "summary")]
         plain: bool,
+
+        /// Plain notification summary paired with a Markdown body.
+        ///
+        /// On providers with a notification surface distinct from the rendered
+        /// surface (Discord), the summary becomes the notification banner text and
+        /// the message argument becomes a rich embed. Implies Markdown body —
+        /// cannot combine with --plain.
+        #[arg(long, conflicts_with = "plain")]
+        summary: Option<String>,
+
+        /// Strip Markdown formatting from the message body before sending.
+        ///
+        /// Mutually exclusive with --plain (redundant) and --summary (incoherent).
+        #[arg(long, conflicts_with_all = ["plain", "summary"])]
+        strip_markdown: bool,
 
         /// Attach a geographic location (format: "LAT,LON").
         #[arg(long, value_name = "LAT,LON")]
         location: Option<String>,
+
+        /// Title for providers that distinguish a summary line (desktop notifications).
+        #[arg(long)]
+        title: Option<String>,
+
+        /// Subtitle (desktop notifications only).
+        #[arg(long)]
+        subtitle: Option<String>,
+
+        /// Icon name or path (desktop notifications).
+        #[arg(long)]
+        icon: Option<String>,
+
+        /// Category / thread identifier (desktop notifications).
+        #[arg(long)]
+        category: Option<String>,
+
+        /// Urgency level (desktop notifications).
+        #[arg(long, value_enum)]
+        urgency: Option<RouteUrgency>,
+
+        /// Expiry timeout in milliseconds (desktop notifications).
+        #[arg(long, value_name = "MS")]
+        timeout_ms: Option<u32>,
+
+        /// Replace an existing desktop notification by its ID.
+        #[arg(long, value_name = "ID")]
+        replace_id: Option<String>,
+
+        /// Group identifier for desktop notifications that support grouping.
+        #[arg(long, value_name = "ID")]
+        group_id: Option<String>,
+
+        /// Progress current value (desktop notifications).
+        #[arg(long, value_name = "N")]
+        progress_current: Option<u32>,
+
+        /// Progress total value (desktop notifications).
+        #[arg(long, value_name = "N")]
+        progress_total: Option<u32>,
+
+        /// Badge count for app icon (desktop notifications).
+        #[arg(long, value_name = "N")]
+        badge_count: Option<u32>,
+
+        /// Action button in "id:label" format (desktop notifications). Repeatable.
+        #[arg(long, value_name = "ID:LABEL")]
+        action: Vec<String>,
+    },
+    /// Replace an existing desktop notification using a saved receipt.
+    Replace {
+        /// Path to a saved receipt from a prior desktop send.
+        receipt: String,
+
+        /// Updated message text.
+        message: Option<String>,
+
+        /// Updated title.
+        #[arg(long)]
+        title: Option<String>,
+
+        /// Use plain text instead of Markdown.
+        #[arg(long)]
+        plain: bool,
+
+        /// Updated subtitle.
+        #[arg(long)]
+        subtitle: Option<String>,
+
+        /// Updated icon name or path.
+        #[arg(long)]
+        icon: Option<String>,
+
+        /// Updated category.
+        #[arg(long)]
+        category: Option<String>,
+
+        /// Updated urgency.
+        #[arg(long, value_enum)]
+        urgency: Option<RouteUrgency>,
+
+        /// Updated timeout in milliseconds.
+        #[arg(long, value_name = "MS")]
+        timeout_ms: Option<u32>,
+
+        /// Updated progress current value.
+        #[arg(long, value_name = "N")]
+        progress_current: Option<u32>,
+
+        /// Updated progress total value.
+        #[arg(long, value_name = "N")]
+        progress_total: Option<u32>,
+
+        /// Updated badge count.
+        #[arg(long, value_name = "N")]
+        badge_count: Option<u32>,
+
+        /// Path to an image to attach.
+        #[arg(long)]
+        image: Option<PathBuf>,
+    },
+    /// Dismiss a delivered desktop notification using a saved receipt.
+    Dismiss {
+        /// Path to a saved receipt from a prior desktop send.
+        receipt: String,
     },
     /// Interactive provider configuration.
     Setup {
@@ -100,6 +227,25 @@ enum Commands {
     Init {
         /// Provider to configure.
         provider: Option<RouteProvider>,
+    },
+    /// Show host detection, notification helpers, and configured routes.
+    Info {
+        /// Emit a JSON record instead of styled terminal output.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Install one or more notification helpers via the host package manager.
+    Install {
+        /// Skip interactive selection — install every uninstalled helper that
+        /// applies to the host (or every helper named via `--helper`).
+        #[arg(long)]
+        yes: bool,
+        /// Restrict the install set to the named helpers. Repeatable.
+        #[arg(long, value_name = "NAME")]
+        helper: Vec<String>,
+        /// Show what would be installed without executing the commands.
+        #[arg(long)]
+        dry_run: bool,
     },
     /// Show shell completions setup instructions.
     #[command(after_help = COMPLETIONS_HELP)]
@@ -119,6 +265,7 @@ async fn main() -> Result<()> {
     color_eyre::install()?;
     let cli = Cli::parse();
     init_tracing(cli.debug)?;
+    let quiet = cli.quiet;
 
     match cli.command {
         Commands::Send {
@@ -132,16 +279,104 @@ async fn main() -> Result<()> {
             silent,
             strict,
             plain,
+            summary,
+            strip_markdown,
             location,
+            title,
+            subtitle,
+            icon,
+            category,
+            urgency,
+            timeout_ms,
+            replace_id,
+            group_id,
+            progress_current,
+            progress_total,
+            badge_count,
+            action,
         } => {
-            send_message(
-                &message, provider, channel, route, reply_to, image, file, silent, strict, plain,
+            send_message(SendArgs {
+                message,
+                provider,
+                channel,
+                route,
+                reply_to,
+                image,
+                file,
+                silent,
+                strict,
+                plain,
+                summary,
+                strip_markdown,
                 location,
-            )
+                title,
+                subtitle,
+                icon,
+                category,
+                urgency,
+                timeout_ms,
+                replace_id,
+                group_id,
+                progress_current,
+                progress_total,
+                badge_count,
+                action,
+                quiet,
+            })
             .await?;
+        }
+        Commands::Replace {
+            receipt,
+            message,
+            title,
+            plain,
+            subtitle,
+            icon,
+            category,
+            urgency,
+            timeout_ms,
+            progress_current,
+            progress_total,
+            badge_count,
+            image,
+        } => {
+            replace_notification(ReplaceArgs {
+                receipt,
+                message,
+                title,
+                plain,
+                subtitle,
+                icon,
+                category,
+                urgency,
+                timeout_ms,
+                progress_current,
+                progress_total,
+                badge_count,
+                image,
+                quiet,
+            })
+            .await?;
+        }
+        Commands::Dismiss { receipt } => {
+            dismiss_notification(receipt, quiet).await?;
         }
         Commands::Setup { provider } | Commands::Init { provider } => {
             setup::run(provider)?;
+        }
+        Commands::Info { json } => {
+            info::run(json)?;
+        }
+        Commands::Install {
+            yes,
+            helper,
+            dry_run,
+        } => {
+            install::run(install::InstallArgs {
+                yes,
+                helpers: helper,
+                dry_run,
+            })?;
         }
         Commands::Completions => {
             print!("{}", COMPLETIONS_HELP.trim_start());
@@ -194,21 +429,122 @@ fn init_tracing(debug_level: u8) -> Result<()> {
     Ok(())
 }
 
-#[allow(clippy::too_many_arguments)]
-#[tracing::instrument(skip_all, fields(route = tracing::field::Empty, provider = tracing::field::Empty))]
-async fn send_message(
-    message_text: &str,
-    provider_opt: Option<RouteProvider>,
-    channel_opt: Option<String>,
-    route_opt: Option<String>,
+struct SendArgs {
+    message: Option<String>,
+    provider: Option<RouteProvider>,
+    channel: Option<String>,
+    route: Option<String>,
     reply_to: Option<String>,
     image: Option<PathBuf>,
     file: Option<PathBuf>,
     silent: bool,
     strict: bool,
     plain: bool,
+    summary: Option<String>,
+    strip_markdown: bool,
     location: Option<String>,
+    title: Option<String>,
+    subtitle: Option<String>,
+    icon: Option<String>,
+    category: Option<String>,
+    urgency: Option<RouteUrgency>,
+    timeout_ms: Option<u32>,
+    replace_id: Option<String>,
+    group_id: Option<String>,
+    progress_current: Option<u32>,
+    progress_total: Option<u32>,
+    badge_count: Option<u32>,
+    action: Vec<String>,
+    quiet: bool,
+}
+
+/// Machine-readable response emitted on stdout after a successful send or
+/// replace.
+///
+/// Suppressed entirely when `--quiet` is passed.
+#[derive(Debug, Serialize)]
+struct SendResponse {
+    /// Provider-native identifier from the [`messenger::SendReceipt`].
+    id: String,
+    /// Absolute path to the saved receipt JSON file.
+    receipt: String,
+    /// Helper program that delivered the notification, when applicable.
+    ///
+    /// Present for desktop sends served by a third-party helper (e.g.
+    /// `alerter`, `terminal-notifier`, `dunstify`, `snoretoast`). Absent for
+    /// non-desktop providers, the native desktop backend, or when the field
+    /// is not recorded.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    helper: Option<String>,
+    /// Host operating system label.
+    os: &'static str,
+}
+
+/// Map [`std::env::consts::OS`] onto the labels documented in the response
+/// schema. Unknown platforms fall through with the raw value.
+fn host_os_label() -> &'static str {
+    match std::env::consts::OS {
+        "macos" => "macOS",
+        "linux" => "Linux",
+        "windows" => "Windows",
+        other => other,
+    }
+}
+
+/// Print a [`SendResponse`] to stdout as pretty JSON, unless suppressed.
+fn emit_send_response(
+    receipt: &messenger::SendReceipt,
+    receipt_path: &std::path::Path,
+    quiet: bool,
 ) -> Result<()> {
+    if quiet {
+        return Ok(());
+    }
+    let response = SendResponse {
+        id: receipt.raw_id.clone(),
+        receipt: receipt_path.display().to_string(),
+        helper: receipt.helper_used().map(str::to_string),
+        os: host_os_label(),
+    };
+    let json = serde_json::to_string_pretty(&response)
+        .map_err(|error| eyre!("failed to serialize response: {error}"))?;
+    println!("{json}");
+    Ok(())
+}
+
+#[tracing::instrument(skip_all, fields(route = tracing::field::Empty, provider = tracing::field::Empty))]
+async fn send_message(args: SendArgs) -> Result<()> {
+    let SendArgs {
+        message: message_text,
+        provider: provider_opt,
+        channel: channel_opt,
+        route: route_opt,
+        reply_to,
+        image,
+        file,
+        silent,
+        strict,
+        plain,
+        summary,
+        strip_markdown,
+        location,
+        title,
+        subtitle,
+        icon,
+        category,
+        urgency,
+        timeout_ms,
+        replace_id,
+        group_id,
+        progress_current,
+        progress_total,
+        badge_count,
+        action,
+        quiet,
+    } = args;
+
+    let message_text = message_text.as_deref().map(unescape);
+
     let config = Config::load()?;
     let resolved_route = resolve_route(provider_opt, channel_opt, route_opt, &config)?;
     let route_label = resolved_route.name.as_deref().unwrap_or("<ad-hoc>");
@@ -224,18 +560,37 @@ async fn send_message(
         strict,
         plain,
         has_location = location.is_some(),
+        has_title = title.is_some(),
         "building message from CLI arguments"
     );
 
     let mut messenger = messenger::Messenger::new();
     register_provider(&mut messenger, &resolved_route.route)?;
 
-    let mut message = if plain {
-        messenger::Message::text(message_text)
-    } else {
-        messenger::Message::markdown(message_text)
+    let mut message = match message_text.as_deref() {
+        Some(text) if !text.is_empty() => {
+            if strip_markdown {
+                messenger::Message::markdown_stripped(text)
+            } else if let Some(summary_text) = summary.as_deref() {
+                messenger::Message::summarized(summary_text, text)
+            } else if plain {
+                messenger::Message::text(text)
+            } else {
+                messenger::Message::markdown(text)
+            }
+        }
+        _ => messenger::Message {
+            title: None,
+            body: None,
+            attachments: Vec::new(),
+            location: None,
+            metadata: std::collections::BTreeMap::new(),
+        },
     };
 
+    if let Some(t) = title {
+        message = message.title(t);
+    }
     if let Some(ref loc) = location {
         let (lat, lon) = parse_location(loc)?;
         message = message.with_location(lat, lon);
@@ -260,8 +615,27 @@ async fn send_message(
         dispatch = dispatch.strict();
     }
 
+    if provider_kind == RouteProvider::Desktop {
+        let overrides = build_desktop_overrides(DesktopOverrideInputs {
+            subtitle,
+            icon,
+            category,
+            urgency,
+            timeout_ms,
+            replace_id,
+            group_id,
+            progress_current,
+            progress_total,
+            badge_count,
+            action,
+        });
+        if !overrides_is_empty(&overrides) {
+            dispatch = dispatch.with_overrides(messenger::ProviderOverrides::Desktop(overrides));
+        }
+    }
+
     let plan = messenger.plan_send(dispatch, &message)?;
-    emit_compatibility_warnings(&plan.warnings);
+    emit_compatibility_warnings(&plan.warnings, quiet);
 
     let receipt = messenger.send_planned(plan).await?;
     let receipt_path = receipt_store::save_receipt(&receipt, resolved_route.name.as_deref())?;
@@ -271,19 +645,319 @@ async fn send_message(
         receipt_path = %receipt_path.display(),
         "CLI send complete"
     );
-    eprintln!(
-        "Sent via {} (id: {})\nReceipt: {}",
-        receipt.provider,
-        receipt.raw_id,
-        receipt_path.display()
-    );
+    emit_send_response(&receipt, &receipt_path, quiet)?;
 
     Ok(())
 }
 
-fn emit_compatibility_warnings(warnings: &[messenger::CompatibilityWarning]) {
+struct DesktopOverrideInputs {
+    subtitle: Option<String>,
+    icon: Option<String>,
+    category: Option<String>,
+    urgency: Option<RouteUrgency>,
+    timeout_ms: Option<u32>,
+    replace_id: Option<String>,
+    group_id: Option<String>,
+    progress_current: Option<u32>,
+    progress_total: Option<u32>,
+    badge_count: Option<u32>,
+    action: Vec<String>,
+}
+
+fn build_desktop_overrides(inputs: DesktopOverrideInputs) -> messenger::DesktopOverrides {
+    let progress = match (inputs.progress_current, inputs.progress_total) {
+        (Some(current), Some(total)) => Some(messenger::NotificationProgress { current, total }),
+        _ => None,
+    };
+
+    let actions = inputs
+        .action
+        .into_iter()
+        .filter_map(|s| {
+            let parts: Vec<&str> = s.splitn(2, ':').collect();
+            if parts.len() == 2 {
+                Some(messenger::NotificationAction {
+                    id: parts[0].to_string(),
+                    label: parts[1].to_string(),
+                })
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    messenger::DesktopOverrides {
+        subtitle: inputs.subtitle,
+        app_name: None,
+        category: inputs.category,
+        urgency: inputs.urgency.map(route_urgency_to_messenger),
+        timeout_ms: inputs.timeout_ms,
+        icon: inputs.icon.map(icon_string_to_messenger),
+        replace_id: inputs.replace_id,
+        group_id: inputs.group_id,
+        actions,
+        progress,
+        badge_count: inputs.badge_count,
+    }
+}
+
+fn overrides_is_empty(o: &messenger::DesktopOverrides) -> bool {
+    o.subtitle.is_none()
+        && o.app_name.is_none()
+        && o.category.is_none()
+        && o.urgency.is_none()
+        && o.timeout_ms.is_none()
+        && o.icon.is_none()
+        && o.replace_id.is_none()
+        && o.group_id.is_none()
+        && o.actions.is_empty()
+        && o.progress.is_none()
+        && o.badge_count.is_none()
+}
+
+fn route_urgency_to_messenger(urgency: RouteUrgency) -> messenger::NotificationUrgency {
+    match urgency {
+        RouteUrgency::Low => messenger::NotificationUrgency::Low,
+        RouteUrgency::Normal => messenger::NotificationUrgency::Normal,
+        RouteUrgency::Critical => messenger::NotificationUrgency::Critical,
+    }
+}
+
+fn icon_string_to_messenger(value: String) -> messenger::NotificationIcon {
+    if value.contains(std::path::MAIN_SEPARATOR) || value.starts_with('.') {
+        messenger::NotificationIcon::Path(PathBuf::from(value))
+    } else {
+        messenger::NotificationIcon::Named(value)
+    }
+}
+
+/// Emit compatibility warnings to stderr.
+///
+/// The "Desktop will drop any Markdown formatting" warning is suppressed
+/// unconditionally — desktop providers always strip Markdown and the notice
+/// is noise. All other warnings are emitted unless `quiet` is set.
+fn emit_compatibility_warnings(warnings: &[messenger::CompatibilityWarning], quiet: bool) {
+    if quiet {
+        return;
+    }
     for warning in warnings {
+        if warning.provider == messenger::ProviderKind::Desktop
+            && warning.feature == "markdown rendering"
+        {
+            continue;
+        }
         eprintln!("{warning}");
+    }
+}
+
+struct ReplaceArgs {
+    receipt: String,
+    message: Option<String>,
+    title: Option<String>,
+    plain: bool,
+    subtitle: Option<String>,
+    icon: Option<String>,
+    category: Option<String>,
+    urgency: Option<RouteUrgency>,
+    timeout_ms: Option<u32>,
+    progress_current: Option<u32>,
+    progress_total: Option<u32>,
+    badge_count: Option<u32>,
+    image: Option<PathBuf>,
+    quiet: bool,
+}
+
+#[tracing::instrument(skip_all)]
+async fn replace_notification(args: ReplaceArgs) -> Result<()> {
+    let message_text = args.message.as_deref().map(unescape);
+
+    let receipt = receipt_store::load_receipt(&args.receipt)?;
+    if receipt.provider != messenger::ProviderKind::Desktop {
+        return Err(eyre!(
+            "replace only supports Desktop receipts; got {}",
+            receipt.provider
+        ));
+    }
+
+    let config = Config::load()?;
+    let route_name = config
+        .routes
+        .iter()
+        .find(|(_, route)| route.provider() == RouteProvider::Desktop)
+        .map(|(name, _)| name.clone());
+
+    let route = route_name
+        .as_ref()
+        .and_then(|name| config.routes.get(name).cloned())
+        .unwrap_or_else(RouteConfig::desktop_default);
+
+    let mut message = match message_text.as_deref() {
+        Some(text) if !text.is_empty() => {
+            if args.plain {
+                messenger::Message::text(text)
+            } else {
+                messenger::Message::markdown(text)
+            }
+        }
+        _ => messenger::Message {
+            title: None,
+            body: None,
+            attachments: Vec::new(),
+            location: None,
+            metadata: std::collections::BTreeMap::new(),
+        },
+    };
+
+    if let Some(t) = args.title {
+        message = message.title(t);
+    }
+    if let Some(image_path) = args.image {
+        message = message.image(image_path);
+    }
+
+    let dispatch = messenger::Dispatch::to(messenger::Target::desktop());
+    let overrides = build_desktop_overrides(DesktopOverrideInputs {
+        subtitle: args.subtitle,
+        icon: args.icon,
+        category: args.category,
+        urgency: args.urgency,
+        timeout_ms: args.timeout_ms,
+        replace_id: None,
+        group_id: None,
+        progress_current: args.progress_current,
+        progress_total: args.progress_total,
+        badge_count: args.badge_count,
+        action: Vec::new(),
+    });
+    let dispatch = if overrides_is_empty(&overrides) {
+        dispatch
+    } else {
+        dispatch.with_overrides(messenger::ProviderOverrides::Desktop(overrides))
+    };
+
+    let prepared = messenger::PreparedMessage::new(&message);
+
+    // Build a standalone DesktopNotificationProvider from route config.
+    let desktop_provider = build_desktop_provider_from_route(&route)?;
+
+    let new_receipt = desktop_provider
+        .replace(&receipt, &dispatch, &prepared)
+        .await?;
+    let receipt_path = receipt_store::save_receipt(&new_receipt, route_name.as_deref())?;
+    tracing::info!(
+        provider = %new_receipt.provider,
+        raw_id = %new_receipt.raw_id,
+        receipt_path = %receipt_path.display(),
+        "CLI replace complete"
+    );
+    emit_send_response(&new_receipt, &receipt_path, args.quiet)?;
+
+    Ok(())
+}
+
+async fn dismiss_notification(receipt_spec: String, quiet: bool) -> Result<()> {
+    let receipt = receipt_store::load_receipt(&receipt_spec)?;
+    if receipt.provider != messenger::ProviderKind::Desktop {
+        return Err(eyre!(
+            "dismiss only supports Desktop receipts; got {}",
+            receipt.provider
+        ));
+    }
+
+    let config = Config::load()?;
+    let route = config
+        .routes
+        .iter()
+        .find(|(_, route)| route.provider() == RouteProvider::Desktop)
+        .map(|(_, route)| route.clone())
+        .unwrap_or_else(RouteConfig::desktop_default);
+
+    let desktop_provider = build_desktop_provider_from_route(&route)?;
+
+    desktop_provider.dismiss(&receipt).await?;
+    tracing::info!(raw_id = %receipt.raw_id, "CLI dismiss complete");
+    if !quiet {
+        eprintln!("Dismissed notification {}", receipt.raw_id);
+    }
+
+    Ok(())
+}
+
+fn build_desktop_provider_from_route(
+    route: &RouteConfig,
+) -> Result<messenger::DesktopNotificationProvider> {
+    match route {
+        RouteConfig::Desktop { .. } => {
+            let config = build_desktop_config_from_route(route)?;
+            Ok(messenger::DesktopNotificationProvider::new(config))
+        }
+        _ => Err(eyre!("expected Desktop route")),
+    }
+}
+
+/// Convert a CLI `RouteConfig::Desktop` into the library's `DesktopConfig`.
+///
+/// Centralises the field mapping (including helper preference resolution
+/// from the per-OS config plus the `MESSENGER_DESKTOP_PREFER_HELPERS`
+/// env override) so both `register_provider` and the standalone provider
+/// builder agree on the resolved configuration.
+fn build_desktop_config_from_route(route: &RouteConfig) -> Result<messenger::DesktopConfig> {
+    match route {
+        RouteConfig::Desktop {
+            app_name,
+            default_title,
+            icon,
+            category,
+            urgency,
+            timeout_ms,
+            actions,
+            progress,
+            badge_count,
+            windows,
+            macos,
+            linux,
+        } => Ok(messenger::DesktopConfig {
+            app_name: app_name.clone(),
+            default_title: default_title.clone(),
+            category: category.clone(),
+            urgency: route_urgency_to_messenger(*urgency),
+            timeout_ms: *timeout_ms,
+            icon: icon.clone().map(icon_string_to_messenger),
+            actions: actions
+                .iter()
+                .map(|a| messenger::NotificationAction {
+                    id: a.id.clone(),
+                    label: a.label.clone(),
+                })
+                .collect(),
+            progress: progress.map(|p| messenger::NotificationProgress {
+                current: p.current,
+                total: p.total,
+            }),
+            badge_count: *badge_count,
+            windows: messenger::WindowsDesktopConfig {
+                app_id: windows.app_id.clone(),
+                prefer_helpers: config::resolve_prefer_helpers(&windows.prefer_helpers),
+            },
+            macos: messenger::MacOsDesktopConfig {
+                bundle_id: macos.bundle_id.clone(),
+                strategy: match macos.strategy {
+                    config::RouteMacOsStrategy::Auto => messenger::MacOsNotificationStrategy::Auto,
+                    config::RouteMacOsStrategy::NativeUserNotifications => {
+                        messenger::MacOsNotificationStrategy::NativeUserNotifications
+                    }
+                    config::RouteMacOsStrategy::AppleScript => {
+                        messenger::MacOsNotificationStrategy::AppleScript
+                    }
+                },
+                prefer_helpers: config::resolve_prefer_helpers(&macos.prefer_helpers),
+            },
+            linux: messenger::LinuxDesktopConfig {
+                desktop_entry: linux.desktop_entry.clone(),
+                prefer_helpers: config::resolve_prefer_helpers(&linux.prefer_helpers),
+            },
+        }),
+        _ => Err(eyre!("expected Desktop route")),
     }
 }
 
@@ -294,13 +968,25 @@ fn resolve_route(
     config: &Config,
 ) -> Result<ResolvedRoute> {
     if let Some(provider) = provider_opt {
-        let channel = channel_opt
-            .as_deref()
-            .ok_or_else(|| eyre!("--channel is required when using --provider"))?;
-        tracing::debug!(provider = %provider, channel = %channel, "using ad-hoc route");
+        if provider.requires_target() {
+            let channel = channel_opt
+                .as_deref()
+                .ok_or_else(|| eyre!("--channel is required when using --provider {provider}"))?;
+            tracing::debug!(provider = %provider, channel = %channel, "using ad-hoc route");
+            return Ok(ResolvedRoute {
+                name: None,
+                route: RouteConfig::from_provider_and_target(provider, channel),
+            });
+        }
+        if channel_opt.is_some() {
+            return Err(eyre!(
+                "--channel is not supported for provider {provider}; desktop notifications target the local host"
+            ));
+        }
+        tracing::debug!(provider = %provider, "using ad-hoc targetless route");
         return Ok(ResolvedRoute {
             name: None,
-            route: RouteConfig::from_provider_and_target(provider, channel),
+            route: RouteConfig::from_provider_and_target(provider, String::new()),
         });
     }
 
@@ -352,6 +1038,18 @@ fn register_provider(messenger: &mut messenger::Messenger, route: &RouteConfig) 
                 ),
             ));
         }
+        RouteConfig::DiscordWebhook {
+            webhook_url,
+            webhook_url_env,
+        } => {
+            let url = resolve_secret(webhook_url.as_deref(), webhook_url_env)?;
+            let provider = messenger::provider::discord_webhook::DiscordWebhookProvider::try_new(
+                messenger::provider::discord_webhook::DiscordWebhookConfig {
+                    webhook_url: SecretString::from(url),
+                },
+            )?;
+            messenger.register(Box::new(provider));
+        }
         RouteConfig::Slack {
             bot_token,
             bot_token_env,
@@ -364,6 +1062,18 @@ fn register_provider(messenger: &mut messenger::Messenger, route: &RouteConfig) 
                     api_base_url: None,
                 },
             )));
+        }
+        RouteConfig::SlackWebhook {
+            webhook_url,
+            webhook_url_env,
+        } => {
+            let url = resolve_secret(webhook_url.as_deref(), webhook_url_env)?;
+            let provider = messenger::provider::slack_webhook::SlackWebhookProvider::try_new(
+                messenger::provider::slack_webhook::SlackWebhookConfig {
+                    webhook_url: SecretString::from(url),
+                },
+            )?;
+            messenger.register(Box::new(provider));
         }
         RouteConfig::Signal {
             rpc_url,
@@ -413,6 +1123,12 @@ fn register_provider(messenger: &mut messenger::Messenger, route: &RouteConfig) 
                 ),
             ));
         }
+        RouteConfig::Desktop { .. } => {
+            let config = build_desktop_config_from_route(route)?;
+            messenger.register(Box::new(messenger::DesktopNotificationProvider::new(
+                config,
+            )));
+        }
     }
     Ok(())
 }
@@ -423,7 +1139,11 @@ fn build_target(route: &RouteConfig) -> Result<messenger::Target> {
         RouteConfig::Discord { channel_id, .. } => {
             Ok(messenger::Target::discord_channel(channel_id))
         }
+        // TODO: Support thread_id for Discord webhook routes when the CLI
+        // introduces a thread-routing flag (e.g. `--thread <id>`).
+        RouteConfig::DiscordWebhook { .. } => Ok(messenger::Target::discord_webhook()),
         RouteConfig::Slack { channel_id, .. } => Ok(messenger::Target::slack_channel(channel_id)),
+        RouteConfig::SlackWebhook { .. } => Ok(messenger::Target::slack_webhook()),
         RouteConfig::Signal { recipient, .. } => {
             if recipient.starts_with('+') {
                 Ok(messenger::Target::signal_user(
@@ -444,12 +1164,21 @@ fn build_target(route: &RouteConfig) -> Result<messenger::Target> {
             };
             Ok(messenger::Target::telegram_chat(chat_id))
         }
+        RouteConfig::Desktop { .. } => Ok(messenger::Target::desktop()),
     }
 }
 
-/// Resolve a secret: use the direct value if present, otherwise look up the env var.
+/// Resolve a secret: use the direct value if present and non-empty, otherwise
+/// look up the env var.
+///
+/// Empty and whitespace-only direct values fall through to the env var lookup
+/// so that a config entry like `"webhook_url": ""` does not shadow a valid env
+/// var. This matches the secret-resolution precedence described in the
+/// `messenger/features/2026-04-19-slack-webhook/spec.md` CLI requirements.
 fn resolve_secret(value: Option<&str>, env_name: &str) -> Result<String> {
-    if let Some(v) = value {
+    if let Some(v) = value
+        && !v.trim().is_empty()
+    {
         tracing::trace!("using direct config value");
         return Ok(v.to_string());
     }
@@ -460,6 +1189,35 @@ fn resolve_secret(value: Option<&str>, env_name: &str) -> Result<String> {
              Either store the value in your route config or set {env_name}."
         )
     })
+}
+
+/// Replace common backslash escape sequences with their actual characters.
+///
+/// Supports `\n`, `\t`, `\r`, and `\\`. All other backslash-letter
+/// combinations are left untouched.
+fn unescape(s: &str) -> String {
+    let mut result = String::with_capacity(s.len());
+    let mut chars = s.chars().peekable();
+
+    while let Some(c) = chars.next() {
+        if c == '\\' {
+            match chars.next() {
+                Some('n') => result.push('\n'),
+                Some('t') => result.push('\t'),
+                Some('r') => result.push('\r'),
+                Some('\\') => result.push('\\'),
+                Some(other) => {
+                    result.push('\\');
+                    result.push(other);
+                }
+                None => result.push('\\'),
+            }
+        } else {
+            result.push(c);
+        }
+    }
+
+    result
 }
 
 /// Parse a "LAT,LON" string into (f64, f64).
@@ -486,6 +1244,54 @@ mod tests {
     use std::collections::HashMap;
 
     use super::*;
+
+    #[test]
+    fn unescape_converts_backslash_n_to_newline() {
+        assert_eq!(unescape("hello\\nworld"), "hello\nworld");
+    }
+
+    #[test]
+    fn unescape_converts_backslash_t_to_tab() {
+        assert_eq!(unescape("col1\\tcol2"), "col1\tcol2");
+    }
+
+    #[test]
+    fn unescape_converts_backslash_r_to_cr() {
+        assert_eq!(unescape("line1\\rline2"), "line1\rline2");
+    }
+
+    #[test]
+    fn unescape_converts_double_backslash_to_single() {
+        assert_eq!(unescape("path\\\\to\\\\file"), "path\\to\\file");
+    }
+
+    #[test]
+    fn unescape_leaves_unknown_escapes_intact() {
+        assert_eq!(unescape("hello\\xworld"), "hello\\xworld");
+    }
+
+    #[test]
+    fn unescape_leaves_trailing_backslash_intact() {
+        assert_eq!(unescape("ends with \\"), "ends with \\");
+    }
+
+    #[test]
+    fn unescape_handles_empty_string() {
+        assert_eq!(unescape(""), "");
+    }
+
+    #[test]
+    fn unescape_handles_no_escapes() {
+        assert_eq!(unescape("plain text"), "plain text");
+    }
+
+    #[test]
+    fn unescape_handles_mixed_escapes() {
+        assert_eq!(
+            unescape("line1\\nline2\\tcol1\\tcol2\\\\end"),
+            "line1\nline2\tcol1\tcol2\\end"
+        );
+    }
 
     #[test]
     fn resolve_route_builds_ad_hoc_provider_route() {
@@ -563,6 +1369,296 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial]
+    fn resolve_secret_prefers_direct_value_over_env() {
+        unsafe {
+            std::env::remove_var("DISCORD_WEBHOOK_URL");
+        }
+        let resolved = resolve_secret(
+            Some("https://discord.com/api/v10/webhooks/1/direct"),
+            "DISCORD_WEBHOOK_URL",
+        )
+        .unwrap();
+        assert_eq!(resolved, "https://discord.com/api/v10/webhooks/1/direct");
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn resolve_secret_falls_back_to_env_var() {
+        unsafe {
+            std::env::set_var(
+                "DISCORD_WEBHOOK_URL",
+                "https://discord.com/api/v10/webhooks/1/from-env",
+            );
+        }
+        let resolved = resolve_secret(None, "DISCORD_WEBHOOK_URL").unwrap();
+        assert_eq!(resolved, "https://discord.com/api/v10/webhooks/1/from-env");
+        unsafe {
+            std::env::remove_var("DISCORD_WEBHOOK_URL");
+        }
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn resolve_secret_errors_when_neither_value_nor_env_is_set() {
+        unsafe {
+            std::env::remove_var("DISCORD_WEBHOOK_URL");
+        }
+        let err = resolve_secret(None, "DISCORD_WEBHOOK_URL").unwrap_err();
+        let msg = format!("{err}");
+        assert!(
+            msg.contains("DISCORD_WEBHOOK_URL"),
+            "error should mention the missing env var, got: {msg}"
+        );
+    }
+
+    #[test]
+    fn build_target_maps_discord_webhook_route_to_webhook_target() {
+        let target = build_target(&RouteConfig::DiscordWebhook {
+            webhook_url: Some("https://discord.com/api/v10/webhooks/1/abc".into()),
+            webhook_url_env: "DISCORD_WEBHOOK_URL".into(),
+        })
+        .unwrap();
+
+        assert!(matches!(target, messenger::Target::DiscordWebhook(_)));
+    }
+
+    #[test]
+    fn resolve_route_builds_discord_webhook_ad_hoc_route() {
+        let resolved = resolve_route(
+            Some(RouteProvider::DiscordWebhook),
+            Some("https://discord.com/api/v10/webhooks/1/abc".into()),
+            None,
+            &Config::default(),
+        )
+        .unwrap();
+
+        assert_eq!(resolved.name, None);
+        assert_eq!(
+            resolved.route,
+            RouteConfig::DiscordWebhook {
+                webhook_url: Some("https://discord.com/api/v10/webhooks/1/abc".into()),
+                webhook_url_env: "DISCORD_WEBHOOK_URL".into(),
+            }
+        );
+    }
+
+    // Setup-flow smoke test: the interactive `inquire` prompt chain cannot run
+    // unattended, so we verify the non-interactive postcondition — a pre-built
+    // RouteConfig::DiscordWebhook is preserved through a save/load cycle and
+    // reports the correct provider kind. The interactive walkthrough is
+    // covered by the setup section of the user guide.
+    #[test]
+    fn discord_webhook_route_survives_config_save_load_cycle() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("messenger.json");
+
+        let route = RouteConfig::DiscordWebhook {
+            webhook_url: Some("https://discord.com/api/v10/webhooks/1/abc".into()),
+            webhook_url_env: "DISCORD_WEBHOOK_URL".into(),
+        };
+
+        let mut config = Config {
+            default_route: Some("discord.webhook.alerts".into()),
+            routes: HashMap::new(),
+        };
+        config
+            .routes
+            .insert("discord.webhook.alerts".into(), route.clone());
+
+        config.save_to_path(&path).unwrap();
+        let loaded = Config::load_from_path(&path).unwrap();
+
+        assert_eq!(loaded, config);
+        let stored = loaded.routes.get("discord.webhook.alerts").unwrap();
+        assert_eq!(stored, &route);
+        assert_eq!(stored.provider(), RouteProvider::DiscordWebhook);
+    }
+
+    #[test]
+    fn register_provider_returns_error_for_malformed_discord_webhook_url() {
+        let route = RouteConfig::DiscordWebhook {
+            webhook_url: Some("not a url".into()),
+            webhook_url_env: "DISCORD_WEBHOOK_URL".into(),
+        };
+
+        let mut messenger = messenger::Messenger::new();
+        let err = register_provider(&mut messenger, &route).unwrap_err();
+
+        let msg = format!("{err}");
+        assert!(
+            msg.contains("Discord webhook URL"),
+            "error should surface webhook URL validation, got: {msg}"
+        );
+    }
+
+    #[test]
+    fn build_target_maps_slack_webhook_route_to_webhook_target() {
+        let target = build_target(&RouteConfig::SlackWebhook {
+            webhook_url: Some("https://hooks.slack.com/services/T000/B000/XXXXX".into()),
+            webhook_url_env: "SLACK_WEBHOOK_URL".into(),
+        })
+        .unwrap();
+
+        assert!(matches!(target, messenger::Target::SlackWebhook(_)));
+    }
+
+    #[test]
+    fn resolve_route_builds_slack_webhook_ad_hoc_route() {
+        let resolved = resolve_route(
+            Some(RouteProvider::SlackWebhook),
+            Some("https://hooks.slack.com/services/T000/B000/XXXXX".into()),
+            None,
+            &Config::default(),
+        )
+        .unwrap();
+
+        assert_eq!(resolved.name, None);
+        assert_eq!(
+            resolved.route,
+            RouteConfig::SlackWebhook {
+                webhook_url: Some("https://hooks.slack.com/services/T000/B000/XXXXX".into()),
+                webhook_url_env: "SLACK_WEBHOOK_URL".into(),
+            }
+        );
+    }
+
+    // Setup-flow smoke test: the interactive `inquire` prompt chain cannot run
+    // unattended, so we verify the non-interactive postcondition — a pre-built
+    // RouteConfig::SlackWebhook is preserved through a save/load cycle and
+    // reports the correct provider kind.
+    #[test]
+    fn slack_webhook_route_survives_config_save_load_cycle() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("messenger.json");
+
+        let route = RouteConfig::SlackWebhook {
+            webhook_url: Some("https://hooks.slack.com/services/T000/B000/XXXXX".into()),
+            webhook_url_env: "SLACK_WEBHOOK_URL".into(),
+        };
+
+        let mut config = Config {
+            default_route: Some("slack.webhook.alerts".into()),
+            routes: HashMap::new(),
+        };
+        config
+            .routes
+            .insert("slack.webhook.alerts".into(), route.clone());
+
+        config.save_to_path(&path).unwrap();
+        let loaded = Config::load_from_path(&path).unwrap();
+
+        assert_eq!(loaded, config);
+        let stored = loaded.routes.get("slack.webhook.alerts").unwrap();
+        assert_eq!(stored, &route);
+        assert_eq!(stored.provider(), RouteProvider::SlackWebhook);
+    }
+
+    #[test]
+    fn register_provider_returns_error_for_malformed_slack_webhook_url() {
+        let route = RouteConfig::SlackWebhook {
+            webhook_url: Some("not a url".into()),
+            webhook_url_env: "SLACK_WEBHOOK_URL".into(),
+        };
+
+        let mut messenger = messenger::Messenger::new();
+        let err = register_provider(&mut messenger, &route).unwrap_err();
+
+        let msg = format!("{err}");
+        assert!(
+            msg.contains("Slack webhook"),
+            "error should surface webhook URL validation, got: {msg}"
+        );
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn resolve_secret_empty_direct_value_falls_back_to_env() {
+        unsafe {
+            std::env::set_var(
+                "SLACK_WEBHOOK_URL",
+                "https://hooks.slack.com/services/T000/B000/FROM-ENV",
+            );
+        }
+        let resolved = resolve_secret(Some(""), "SLACK_WEBHOOK_URL").unwrap();
+        assert_eq!(
+            resolved,
+            "https://hooks.slack.com/services/T000/B000/FROM-ENV"
+        );
+        unsafe {
+            std::env::remove_var("SLACK_WEBHOOK_URL");
+        }
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn resolve_secret_whitespace_only_direct_value_falls_back_to_env() {
+        unsafe {
+            std::env::set_var(
+                "SLACK_WEBHOOK_URL",
+                "https://hooks.slack.com/services/T000/B000/FROM-ENV",
+            );
+        }
+        let resolved = resolve_secret(Some("   "), "SLACK_WEBHOOK_URL").unwrap();
+        assert_eq!(
+            resolved,
+            "https://hooks.slack.com/services/T000/B000/FROM-ENV"
+        );
+        unsafe {
+            std::env::remove_var("SLACK_WEBHOOK_URL");
+        }
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn resolve_secret_falls_back_to_default_env_name_for_slack_webhook() {
+        // Deserializing `{"provider":"slack-webhook"}` with both fields absent
+        // populates `webhook_url_env` via `default_slack_webhook_url_env()`,
+        // which must be `"SLACK_WEBHOOK_URL"` so env-only routes work out of
+        // the box.
+        unsafe {
+            std::env::set_var(
+                "SLACK_WEBHOOK_URL",
+                "https://hooks.slack.com/services/T000/B000/DEFAULT-ENV",
+            );
+        }
+        let parsed: RouteConfig = serde_json::from_str(r#"{"provider":"slack-webhook"}"#).unwrap();
+        let env_name = match parsed {
+            RouteConfig::SlackWebhook {
+                webhook_url,
+                webhook_url_env,
+            } => {
+                assert!(webhook_url.is_none());
+                webhook_url_env
+            }
+            other => panic!("unexpected route: {other:?}"),
+        };
+        assert_eq!(env_name, "SLACK_WEBHOOK_URL");
+        let resolved = resolve_secret(None, &env_name).unwrap();
+        assert_eq!(
+            resolved,
+            "https://hooks.slack.com/services/T000/B000/DEFAULT-ENV"
+        );
+        unsafe {
+            std::env::remove_var("SLACK_WEBHOOK_URL");
+        }
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn resolve_secret_errors_when_neither_direct_value_nor_env_for_slack_webhook() {
+        unsafe {
+            std::env::remove_var("SLACK_WEBHOOK_URL");
+        }
+        let err = resolve_secret(None, "SLACK_WEBHOOK_URL").unwrap_err();
+        let msg = format!("{err}");
+        assert!(
+            msg.contains("SLACK_WEBHOOK_URL"),
+            "error should mention the missing env var, got: {msg}"
+        );
+    }
+
+    #[test]
     fn compatibility_warning_format_matches_cli_output() {
         let warning = messenger::CompatibilityWarning {
             provider: messenger::ProviderKind::Slack,
@@ -573,5 +1669,513 @@ mod tests {
             warning.to_string(),
             "⚠️ the attachments feature is not supported on Slack and will be dropped"
         );
+    }
+
+    #[test]
+    fn host_os_label_recognizes_supported_platforms() {
+        let label = host_os_label();
+        assert!(
+            ["macOS", "Linux", "Windows"].contains(&label) || label == std::env::consts::OS,
+            "unexpected host_os_label: {label}"
+        );
+    }
+
+    #[test]
+    fn send_response_serializes_with_helper_when_present() {
+        let response = SendResponse {
+            id: "abc-123".into(),
+            receipt: "/tmp/receipt.json".into(),
+            helper: Some("alerter".into()),
+            os: "macOS",
+        };
+        let json = serde_json::to_value(&response).unwrap();
+        assert_eq!(json["id"], "abc-123");
+        assert_eq!(json["receipt"], "/tmp/receipt.json");
+        assert_eq!(json["helper"], "alerter");
+        assert_eq!(json["os"], "macOS");
+    }
+
+    #[test]
+    fn send_response_omits_helper_when_absent() {
+        let response = SendResponse {
+            id: "abc-123".into(),
+            receipt: "/tmp/receipt.json".into(),
+            helper: None,
+            os: "Linux",
+        };
+        let json = serde_json::to_value(&response).unwrap();
+        assert!(
+            json.get("helper").is_none(),
+            "helper field should be omitted when None: {json:?}"
+        );
+    }
+
+    #[test]
+    fn resolve_route_builds_desktop_ad_hoc_route_without_channel() {
+        let resolved =
+            resolve_route(Some(RouteProvider::Desktop), None, None, &Config::default()).unwrap();
+
+        assert_eq!(resolved.name, None);
+        assert_eq!(resolved.route.provider(), RouteProvider::Desktop);
+        assert!(matches!(resolved.route, RouteConfig::Desktop { .. }));
+    }
+
+    #[test]
+    fn resolve_route_rejects_channel_for_desktop_provider() {
+        let err = resolve_route(
+            Some(RouteProvider::Desktop),
+            Some("ignored".into()),
+            None,
+            &Config::default(),
+        )
+        .unwrap_err();
+
+        let msg = format!("{err}");
+        assert!(
+            msg.contains("--channel is not supported"),
+            "expected --channel rejection for desktop, got: {msg}"
+        );
+    }
+
+    #[test]
+    fn resolve_route_still_requires_channel_for_chat_provider() {
+        let err =
+            resolve_route(Some(RouteProvider::Slack), None, None, &Config::default()).unwrap_err();
+
+        let msg = format!("{err}");
+        assert!(
+            msg.contains("--channel is required"),
+            "expected --channel required for Slack, got: {msg}"
+        );
+    }
+
+    #[test]
+    fn build_target_maps_desktop_route_to_desktop_target() {
+        let target = build_target(&RouteConfig::desktop_default()).unwrap();
+        assert!(matches!(target, messenger::Target::Desktop(_)));
+    }
+
+    #[test]
+    fn desktop_route_survives_config_save_load_cycle() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("messenger.json");
+
+        let route = RouteConfig::Desktop {
+            app_name: "Messenger".into(),
+            default_title: Some("Build Status".into()),
+            icon: Some("dialog-information".into()),
+            category: Some("im.received".into()),
+            urgency: config::RouteUrgency::Critical,
+            timeout_ms: Some(5000),
+            actions: Vec::new(),
+            progress: None,
+            badge_count: None,
+            windows: config::DesktopWindowsConfig {
+                app_id: Some("RustyBiscuit.Messenger".into()),
+                prefer_helpers: Vec::new(),
+            },
+            macos: config::DesktopMacOsConfig {
+                bundle_id: Some("com.rustybiscuit.messenger".into()),
+                strategy: config::RouteMacOsStrategy::NativeUserNotifications,
+                prefer_helpers: Vec::new(),
+            },
+            linux: config::DesktopLinuxConfig {
+                desktop_entry: Some("messenger".into()),
+                prefer_helpers: Vec::new(),
+            },
+        };
+
+        let mut config = Config {
+            default_route: Some("desktop.local".into()),
+            routes: HashMap::new(),
+        };
+        config.routes.insert("desktop.local".into(), route.clone());
+
+        config.save_to_path(&path).unwrap();
+        let loaded = Config::load_from_path(&path).unwrap();
+
+        assert_eq!(loaded, config);
+        let stored = loaded.routes.get("desktop.local").unwrap();
+        assert_eq!(stored, &route);
+        assert_eq!(stored.provider(), RouteProvider::Desktop);
+    }
+
+    #[test]
+    fn desktop_route_parses_spec_example_config() {
+        let raw = r#"{
+            "provider": "desktop",
+            "app_name": "Messenger",
+            "default_title": "Messenger",
+            "icon": "dialog-information",
+            "category": "im.received",
+            "urgency": "normal",
+            "timeout_ms": 5000,
+            "windows": { "app_id": "RustyBiscuit.Messenger" },
+            "macos": { "bundle_id": "com.rustybiscuit.messenger", "strategy": "auto" },
+            "linux": { "desktop_entry": "messenger" }
+        }"#;
+
+        let parsed: RouteConfig = serde_json::from_str(raw).unwrap();
+        assert_eq!(parsed.provider(), RouteProvider::Desktop);
+        match parsed {
+            RouteConfig::Desktop {
+                app_name,
+                default_title,
+                icon,
+                category,
+                urgency,
+                timeout_ms,
+                actions,
+                progress,
+                badge_count,
+                windows,
+                macos,
+                linux,
+            } => {
+                assert_eq!(app_name, "Messenger");
+                assert_eq!(default_title.as_deref(), Some("Messenger"));
+                assert_eq!(icon.as_deref(), Some("dialog-information"));
+                assert_eq!(category.as_deref(), Some("im.received"));
+                assert_eq!(urgency, config::RouteUrgency::Normal);
+                assert_eq!(timeout_ms, Some(5000));
+                assert!(actions.is_empty());
+                assert!(progress.is_none());
+                assert!(badge_count.is_none());
+                assert_eq!(windows.app_id.as_deref(), Some("RustyBiscuit.Messenger"));
+                assert_eq!(
+                    macos.bundle_id.as_deref(),
+                    Some("com.rustybiscuit.messenger")
+                );
+                assert_eq!(macos.strategy, config::RouteMacOsStrategy::Auto);
+                assert_eq!(linux.desktop_entry.as_deref(), Some("messenger"));
+            }
+            other => panic!("expected RouteConfig::Desktop, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn desktop_route_applies_defaults_when_minimal() {
+        let raw = r#"{ "provider": "desktop" }"#;
+        let parsed: RouteConfig = serde_json::from_str(raw).unwrap();
+        match parsed {
+            RouteConfig::Desktop {
+                app_name,
+                default_title,
+                icon,
+                category,
+                urgency,
+                timeout_ms,
+                actions,
+                progress,
+                badge_count,
+                windows,
+                macos,
+                linux,
+            } => {
+                assert_eq!(app_name, "Messenger");
+                assert!(default_title.is_none());
+                assert!(icon.is_none());
+                assert!(category.is_none());
+                assert_eq!(urgency, config::RouteUrgency::Normal);
+                assert!(timeout_ms.is_none());
+                assert!(actions.is_empty());
+                assert!(progress.is_none());
+                assert!(badge_count.is_none());
+                assert!(windows.app_id.is_none());
+                assert!(macos.bundle_id.is_none());
+                assert_eq!(macos.strategy, config::RouteMacOsStrategy::Auto);
+                assert!(linux.desktop_entry.is_none());
+            }
+            other => panic!("expected RouteConfig::Desktop, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn requires_target_reports_desktop_as_targetless() {
+        assert!(!RouteProvider::Desktop.requires_target());
+        for other in RouteProvider::ALL
+            .iter()
+            .filter(|p| **p != RouteProvider::Desktop)
+        {
+            assert!(
+                other.requires_target(),
+                "chat provider {other} must still require a target"
+            );
+        }
+    }
+
+    #[test]
+    fn icon_string_routes_absolute_path_to_path_variant() {
+        let icon = icon_string_to_messenger(format!(
+            "{}tmp{}icon.png",
+            std::path::MAIN_SEPARATOR,
+            std::path::MAIN_SEPARATOR
+        ));
+        assert!(matches!(icon, messenger::NotificationIcon::Path(_)));
+    }
+
+    #[test]
+    fn icon_string_routes_name_to_named_variant() {
+        let icon = icon_string_to_messenger("dialog-information".into());
+        assert_eq!(
+            icon,
+            messenger::NotificationIcon::Named("dialog-information".into())
+        );
+    }
+
+    #[test]
+    fn send_cli_parses_desktop_flags() {
+        use clap::Parser;
+        let cli = Cli::try_parse_from([
+            "messenger",
+            "send",
+            "--provider",
+            "desktop",
+            "--title",
+            "Build",
+            "--urgency",
+            "critical",
+            "--timeout-ms",
+            "3500",
+            "Green across the board",
+        ])
+        .unwrap();
+
+        match cli.command {
+            Commands::Send {
+                message,
+                provider,
+                channel,
+                title,
+                urgency,
+                timeout_ms,
+                ..
+            } => {
+                assert_eq!(message.as_deref(), Some("Green across the board"));
+                assert_eq!(provider, Some(RouteProvider::Desktop));
+                assert_eq!(channel, None);
+                assert_eq!(title.as_deref(), Some("Build"));
+                assert_eq!(urgency, Some(config::RouteUrgency::Critical));
+                assert_eq!(timeout_ms, Some(3500));
+            }
+            _ => panic!("expected Send subcommand"),
+        }
+    }
+
+    #[test]
+    fn send_cli_allows_desktop_send_without_body() {
+        use clap::Parser;
+        let cli = Cli::try_parse_from([
+            "messenger",
+            "send",
+            "--provider",
+            "desktop",
+            "--title",
+            "Alert",
+        ])
+        .unwrap();
+
+        match cli.command {
+            Commands::Send { message, title, .. } => {
+                assert!(message.is_none());
+                assert_eq!(title.as_deref(), Some("Alert"));
+            }
+            _ => panic!("expected Send subcommand"),
+        }
+    }
+
+    #[test]
+    fn desktop_listed_in_provider_value_enum() {
+        use clap::ValueEnum;
+        let parsed = RouteProvider::from_str("desktop", true).unwrap();
+        assert_eq!(parsed, RouteProvider::Desktop);
+    }
+
+    #[test]
+    fn send_cli_parses_replace_id_flag() {
+        use clap::Parser;
+        let cli = Cli::try_parse_from([
+            "messenger",
+            "send",
+            "--provider",
+            "desktop",
+            "--replace-id",
+            "notif-123",
+            "Updated status",
+        ])
+        .unwrap();
+
+        match cli.command {
+            Commands::Send {
+                message,
+                provider,
+                replace_id,
+                ..
+            } => {
+                assert_eq!(message.as_deref(), Some("Updated status"));
+                assert_eq!(provider, Some(RouteProvider::Desktop));
+                assert_eq!(replace_id.as_deref(), Some("notif-123"));
+            }
+            _ => panic!("expected Send subcommand"),
+        }
+    }
+
+    #[test]
+    fn send_cli_parses_group_id_flag() {
+        use clap::Parser;
+        let cli = Cli::try_parse_from([
+            "messenger",
+            "send",
+            "--provider",
+            "desktop",
+            "--group-id",
+            "build-alerts",
+            "Build failed",
+        ])
+        .unwrap();
+
+        match cli.command {
+            Commands::Send {
+                message,
+                provider,
+                group_id,
+                ..
+            } => {
+                assert_eq!(message.as_deref(), Some("Build failed"));
+                assert_eq!(provider, Some(RouteProvider::Desktop));
+                assert_eq!(group_id.as_deref(), Some("build-alerts"));
+            }
+            _ => panic!("expected Send subcommand"),
+        }
+    }
+
+    #[test]
+    fn send_cli_parses_progress_flags() {
+        use clap::Parser;
+        let cli = Cli::try_parse_from([
+            "messenger",
+            "send",
+            "--provider",
+            "desktop",
+            "--progress-current",
+            "42",
+            "--progress-total",
+            "100",
+            "Uploading",
+        ])
+        .unwrap();
+
+        match cli.command {
+            Commands::Send {
+                message,
+                progress_current,
+                progress_total,
+                ..
+            } => {
+                assert_eq!(message.as_deref(), Some("Uploading"));
+                assert_eq!(progress_current, Some(42));
+                assert_eq!(progress_total, Some(100));
+            }
+            _ => panic!("expected Send subcommand"),
+        }
+    }
+
+    #[test]
+    fn send_cli_parses_badge_count_flag() {
+        use clap::Parser;
+        let cli = Cli::try_parse_from([
+            "messenger",
+            "send",
+            "--provider",
+            "desktop",
+            "--badge-count",
+            "5",
+            "New alerts",
+        ])
+        .unwrap();
+
+        match cli.command {
+            Commands::Send {
+                message,
+                badge_count,
+                ..
+            } => {
+                assert_eq!(message.as_deref(), Some("New alerts"));
+                assert_eq!(badge_count, Some(5));
+            }
+            _ => panic!("expected Send subcommand"),
+        }
+    }
+
+    #[test]
+    fn send_cli_parses_action_flags() {
+        use clap::Parser;
+        let cli = Cli::try_parse_from([
+            "messenger",
+            "send",
+            "--provider",
+            "desktop",
+            "--action",
+            "ok:Approve",
+            "--action",
+            "reject:Reject",
+            "Approval needed",
+        ])
+        .unwrap();
+
+        match cli.command {
+            Commands::Send {
+                message, action, ..
+            } => {
+                assert_eq!(message.as_deref(), Some("Approval needed"));
+                assert_eq!(action, vec!["ok:Approve", "reject:Reject"]);
+            }
+            _ => panic!("expected Send subcommand"),
+        }
+    }
+
+    #[test]
+    fn replace_cli_parses_basic_args() {
+        use clap::Parser;
+        let cli = Cli::try_parse_from([
+            "messenger",
+            "replace",
+            "/tmp/receipt.json",
+            "Updated message",
+            "--title",
+            "Updated",
+            "--badge-count",
+            "3",
+        ])
+        .unwrap();
+
+        match cli.command {
+            Commands::Replace {
+                receipt,
+                message,
+                title,
+                badge_count,
+                ..
+            } => {
+                assert_eq!(receipt, "/tmp/receipt.json");
+                assert_eq!(message.as_deref(), Some("Updated message"));
+                assert_eq!(title.as_deref(), Some("Updated"));
+                assert_eq!(badge_count, Some(3));
+            }
+            _ => panic!("expected Replace subcommand"),
+        }
+    }
+
+    #[test]
+    fn dismiss_cli_parses_receipt_arg() {
+        use clap::Parser;
+        let cli = Cli::try_parse_from(["messenger", "dismiss", "/tmp/receipt.json"]).unwrap();
+
+        match cli.command {
+            Commands::Dismiss { receipt } => {
+                assert_eq!(receipt, "/tmp/receipt.json");
+            }
+            _ => panic!("expected Dismiss subcommand"),
+        }
     }
 }

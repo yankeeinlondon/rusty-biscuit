@@ -5,20 +5,26 @@
 //!
 //! **Inline Pre** (serial):
 //! 1. **Frontmatter Interpolation** - Resolve `{{variable}}` in frontmatter values
-//! 2. **Text Replacement** - Replace literal strings from frontmatter `replace` map
-//! 3. **Page Blocks** - Evaluate `::block`/`::end-block` conditional regions
-//! 4. **Interpolation** - Expand `{{variable}}` expressions in body content
-//! 5. **Shell Expansion** - Execute `::shell` directives with security controls
+//! 2. **Frontmatter Shell Expansion** - Execute shell commands in frontmatter values
+//! 3. **Text Replacement** - Replace literal strings from frontmatter `replace` map
+//! 4. **Page Blocks** - Evaluate `::block`/`::end-block` conditional regions
+//! 5. **Interpolation** - Expand `{{variable}}` expressions in body content
+//! 6. **Shell Expansion** - Execute `::shell` directives with security controls
+//! 7. **Shell Blocks** - Execute `::shell-block` directives with security controls
+//! 8. **Link Resolve** - Resolve local links to absolute paths
 //!
 //! **Transclusion** (concurrent execution after serial preparation):
-//! 6. **Block Transclusion** - Include `::file`/`::url` referenced documents
-//! 7. **Frontmatter Transclusion** - Prepend/append `prologue`/`epilogue` documents
-//! 8. **Code Transclusion** - Include `::code` file content as fenced blocks
-//! 9. **TOC Linking** - Expand `::toc-linking` directives into heading link lists
+//! 9. **Block Transclusion** - Include `::file`/`::url` referenced documents
+//! 10. **Frontmatter Transclusion** - Prepend/append `prologue`/`epilogue` documents
+//! 11. **Code Transclusion** - Include `::code` file content as fenced blocks
+//! 12. **TOC Linking** - Expand `::toc-linking` directives into heading link lists
 //!
 //! **Inline Post** (serial):
-//! 10. **Cleanup** - Normalize markdown formatting
-//! 11. **Normalization** - Adjust heading levels
+//! 13. **Cleanup** - Normalize markdown formatting
+//! 14. **Normalization** - Adjust heading levels
+//!
+//! **Finalization** (root-only serial):
+//! 15. **Link Normalization** - Convert absolute paths back to portable forms
 //!
 //! ## Examples
 //!
@@ -43,14 +49,20 @@ pub(crate) mod cache;
 pub mod conditions;
 pub mod context;
 mod frontmatter_interpolation;
+pub(crate) mod frontmatter_shell_expansion;
 pub(crate) mod parse_utils;
 pub(crate) mod perf;
 mod state;
 mod types;
 
+pub mod block_pairs;
+pub mod expression;
 pub mod interpolation;
+pub(crate) mod link_normalization;
+pub(crate) mod link_resolve;
 pub mod page_blocks;
 pub mod replacement;
+pub mod shell_blocks;
 pub mod shell_expansion;
 pub mod toc_linking;
 pub mod transclusion;
@@ -58,7 +70,10 @@ pub mod transclusion;
 pub use biscuit_file::PathPosition;
 pub use cache::{CacheAccessMode, CacheFreshnessMode, CacheStats};
 pub use context::ContextMergeDiagnostic;
+pub use shell_blocks::ShellBlockError;
+pub use shell_expansion::ShellCommandOrigin;
 pub use shell_expansion::ShellExpansionError;
+pub use shell_expansion::ShellTimeoutBehavior;
 pub use state::{EffectiveState, EffectiveStateBuilder};
 pub use toc_linking::TocLinkingError;
 pub use transclusion::TransclusionError;
@@ -81,7 +96,7 @@ use std::path::{Path, PathBuf};
 use tracing::{debug, info, instrument, trace, warn};
 
 use cache::operation::CacheableOperation;
-use shell_expansion::{apply_replacements_in_reverse, execute_directive};
+use shell_expansion::{apply_replacements_in_reverse, execute_directive_detailed};
 
 /// Shorten an absolute path for display in diagnostics.
 ///
@@ -109,7 +124,7 @@ fn abbreviate_path(path: &Path) -> String {
 
 /// Walk up from `start` (or its parent if it's a file) looking for a `.git`
 /// directory, returning the repo root if found.
-fn find_git_root_from(start: &Path) -> Option<PathBuf> {
+pub(crate) fn find_git_root_from(start: &Path) -> Option<PathBuf> {
     let mut dir = if start.is_dir() {
         start.to_path_buf()
     } else {
@@ -123,6 +138,168 @@ fn find_git_root_from(start: &Path) -> Option<PathBuf> {
             return None;
         }
     }
+}
+
+/// Helper to find target range within content.
+pub(crate) fn find_target_range(
+    content: &str,
+    record: &crate::markdown::reference::ReferenceRecord,
+    raw_target: &str,
+) -> Option<(usize, usize)> {
+    let span = &record.origin.span;
+    if span.end > content.len() {
+        trace!(
+            "find_target_range: span.end {} > content.len {}",
+            span.end,
+            content.len()
+        );
+        return None;
+    }
+    let outer_text = &content[span.clone()];
+
+    // Try attribute-aware search for HTML syntax first
+    if let Some(attr_name) = get_attribute_name_for_syntax(&record.origin.syntax) {
+        // Try searching for attr="target" or attr = "target" (with optional whitespace)
+        let patterns = [
+            format!(r#"{}="{}""#, attr_name, raw_target),
+            format!("{}='{}'", attr_name, raw_target),
+        ];
+        for pattern in &patterns {
+            if let Some(idx) = outer_text.find(pattern) {
+                let mut actual_idx = idx + attr_name.len() + 1; // skip past attr_name=
+                // Skip optional whitespace after =
+                while actual_idx < outer_text.len() && outer_text[actual_idx..].starts_with(' ') {
+                    actual_idx += 1;
+                }
+                let start = span.start + actual_idx + 1; // skip past quote
+                let end = start + raw_target.len();
+                trace!(
+                    "find_target_range: attribute-aware match for '{}' in {:?} at {}",
+                    raw_target, record.origin.syntax, start
+                );
+                return Some((start, end));
+            }
+        }
+
+        // Try HTML-encoded form (for entities like &amp;)
+        let encoded = html_escape::encode_quoted_attribute(raw_target);
+        if encoded != raw_target {
+            let patterns = [
+                format!(r#"{}="{}""#, attr_name, encoded),
+                format!("{}='{}'", attr_name, encoded),
+            ];
+            for pattern in &patterns {
+                if let Some(idx) = outer_text.find(pattern.as_str()) {
+                    let actual_idx = idx + attr_name.len() + 1;
+                    // Skip optional whitespace after =
+                    let mut quote_start = actual_idx;
+                    while quote_start < outer_text.len()
+                        && outer_text[quote_start..].starts_with(' ')
+                    {
+                        quote_start += 1;
+                    }
+                    let start = span.start + quote_start + 1; // skip past quote
+                    let end = start + encoded.len();
+                    trace!(
+                        "find_target_range: HTML-encoded match for '{}' in {:?} at {}",
+                        raw_target, record.origin.syntax, start
+                    );
+                    return Some((start, end));
+                }
+            }
+        }
+    }
+
+    // Fallback: search for raw target string with context check
+    let mut start_idx = 0;
+    while let Some(idx) = outer_text[start_idx..].find(raw_target) {
+        let actual_idx = start_idx + idx;
+
+        if actual_idx > 0 {
+            let prev_char = outer_text[..actual_idx].chars().next_back();
+            trace!(
+                "find_target_range: found '{}' at {}, prev_char: {:?}",
+                raw_target, actual_idx, prev_char
+            );
+            if matches!(prev_char, Some('(' | '=' | '"' | '\'' | '<')) {
+                let start = span.start + actual_idx;
+                let end = start + raw_target.len();
+                return Some((start, end));
+            }
+        } else {
+            trace!("find_target_range: found '{}' at 0", raw_target);
+            // Edge case: if raw_target is the exact span, match it.
+            let start = span.start + actual_idx;
+            let end = start + raw_target.len();
+            return Some((start, end));
+        }
+
+        start_idx = actual_idx + 1;
+    }
+    trace!(
+        "find_target_range: failed to find '{}' in '{}'",
+        raw_target, outer_text
+    );
+    None
+}
+
+/// Maps a ReferenceSyntax to its target attribute name for HTML-aware matching.
+fn get_attribute_name_for_syntax(
+    syntax: &crate::markdown::reference::ReferenceSyntax,
+) -> Option<&'static str> {
+    use crate::markdown::reference::ReferenceSyntax;
+    match syntax {
+        ReferenceSyntax::HtmlAnchor | ReferenceSyntax::HtmlLinkTag => Some("href"),
+        ReferenceSyntax::HtmlImage
+        | ReferenceSyntax::HtmlVideoTag
+        | ReferenceSyntax::HtmlAudioTag
+        | ReferenceSyntax::HtmlSourceTag
+        | ReferenceSyntax::HtmlIframeTag
+        | ReferenceSyntax::HtmlScriptTag => Some("src"),
+        _ => None,
+    }
+}
+
+/// Applies pre-effective-state frontmatter preparation shared by runtime
+/// compose and shell-command discovery.
+///
+/// This mutates frontmatter with external-state defaults and `--set`
+/// overrides using the same rules the real compose pipeline uses. When
+/// requested, it also captures the post-merge/pre-interpolation string
+/// snapshot used for frontmatter shell executable provenance checks.
+pub(crate) fn prepare_frontmatter_for_compose(
+    markdown: &mut Markdown,
+    options: &ComposeOptions,
+    capture_pre_interpolation_snapshot: bool,
+) -> Option<HashMap<String, String>> {
+    // Apply external state as defaults using deep-merge: nested keys
+    // from external state fill in missing values at every level, not
+    // just top-level keys. Frontmatter values take precedence.
+    if let Some(external) = options.external_state.as_ref() {
+        let fm = markdown.frontmatter_mut().as_map_mut();
+        let current = Value::Object(fm.iter().map(|(k, v)| (k.clone(), v.clone())).collect());
+        let merged = state::deep_merge(external, &current);
+        if let Value::Object(map) = merged {
+            *fm = map.into_iter().collect();
+        }
+    }
+
+    // Apply set overrides: unconditionally overwrite frontmatter keys.
+    if let Some(overrides) = options.set_overrides.as_ref().and_then(Value::as_object) {
+        let fm = markdown.frontmatter_mut().as_map_mut();
+        for (key, value) in overrides {
+            fm.insert(key.clone(), value.clone());
+        }
+    }
+
+    capture_pre_interpolation_snapshot.then(|| {
+        markdown
+            .frontmatter()
+            .as_map()
+            .iter()
+            .filter_map(|(key, value)| value.as_str().map(|s| (key.clone(), s.to_string())))
+            .collect()
+    })
 }
 
 #[derive(Clone)]
@@ -271,7 +448,7 @@ impl Markdown {
     /// Internal recursive pipeline runner shared by root and child documents.
     ///
     /// Executes operations in three phases:
-    /// 1. **Inline Pre** (serial): TextReplacement, PageBlocks, Interpolation, ShellExpansion
+    /// 1. **Inline Pre** (serial): TextReplacement, PageBlocks, Interpolation, ShellExpansion, ShellBlocks
     /// 2. **Transclusion** (prepared serially, resolved concurrently): BlockTransclusion,
     ///    FrontmatterTransclusion, CodeTransclusion, TocLinking
     /// 3. **Inline Post** (serial): Cleanup, Normalization
@@ -293,33 +470,23 @@ impl Markdown {
         };
 
         if let Some(id) = source_id.clone() {
-            runtime.transclusion.enter(id)?;
+            let path = match &options.source {
+                ComposeSource::File(p) => p.clone(),
+                ComposeSource::Url(u) => std::path::PathBuf::from(u.to_string()),
+                ComposeSource::Unknown => std::path::PathBuf::from("<unknown>"),
+            };
+            runtime.transclusion.enter(id, path, 1)?;
         }
 
         let result = (|| {
             let mut report = ComposeReport::new();
             let mut perf = perf::PerfCollector::new(options.perf_enabled);
 
-            // Apply external state as defaults using deep-merge: nested keys
-            // from external state fill in missing values at every level, not
-            // just top-level keys. Frontmatter values take precedence.
-            if let Some(external) = options.external_state.as_ref() {
-                let fm = self.frontmatter_mut().as_map_mut();
-                let current =
-                    Value::Object(fm.iter().map(|(k, v)| (k.clone(), v.clone())).collect());
-                let merged = state::deep_merge(external, &current);
-                if let Value::Object(map) = merged {
-                    *fm = map.into_iter().collect();
-                }
-            }
-
-            // Apply set overrides: unconditionally overwrite frontmatter keys.
-            if let Some(overrides) = options.set_overrides.as_ref().and_then(Value::as_object) {
-                let fm = self.frontmatter_mut().as_map_mut();
-                for (key, value) in overrides {
-                    fm.insert(key.clone(), value.clone());
-                }
-            }
+            let pre_interpolation_snapshot = prepare_frontmatter_for_compose(
+                self,
+                &options,
+                options.is_enabled(ComposeOperation::FrontmatterShellExpansion),
+            );
 
             // Frontmatter Interpolation: resolve {{ }} in frontmatter values
             // before EffectiveState is built, since it mutates frontmatter
@@ -336,6 +503,30 @@ impl Markdown {
                 if let Some(start) = fm_start {
                     perf.record(
                         perf::PerfMetricKind::FrontmatterInterpolation,
+                        start.elapsed(),
+                    );
+                }
+            }
+
+            // Frontmatter Shell Expansion: execute $(cmd) in frontmatter values
+            // before EffectiveState is built, since the expanded values must be
+            // visible to all later stages.
+            if options.is_enabled(ComposeOperation::FrontmatterShellExpansion) {
+                let fse_start = perf.is_enabled().then(std::time::Instant::now);
+                let fse_ctx = self.source_context_for_errors();
+                let fse_report = frontmatter_shell_expansion::execute_frontmatter_shell_expansion(
+                    self.frontmatter_mut(),
+                    &options,
+                    runtime,
+                    pre_interpolation_snapshot.as_ref(),
+                    &fse_ctx,
+                )?;
+                report.frontmatter_shell_expansions_applied = fse_report.replacements;
+                report.shell_approvals_used += fse_report.approvals_used;
+                report.warnings.extend(fse_report.warnings);
+                if let Some(start) = fse_start {
+                    perf.record(
+                        perf::PerfMetricKind::FrontmatterShellExpansion,
                         start.elapsed(),
                     );
                 }
@@ -424,21 +615,34 @@ impl Markdown {
                         if let Some(start) = op_start {
                             let kind = match operation {
                                 ComposeOperation::FrontmatterInterpolation => {
-                                    perf::PerfMetricKind::FrontmatterInterpolation
+                                    Some(perf::PerfMetricKind::FrontmatterInterpolation)
+                                }
+                                ComposeOperation::FrontmatterShellExpansion => {
+                                    Some(perf::PerfMetricKind::FrontmatterShellExpansion)
                                 }
                                 ComposeOperation::TextReplacement => {
-                                    perf::PerfMetricKind::TextReplacement
+                                    Some(perf::PerfMetricKind::TextReplacement)
                                 }
-                                ComposeOperation::PageBlocks => perf::PerfMetricKind::PageBlocks,
+                                ComposeOperation::PageBlocks => {
+                                    Some(perf::PerfMetricKind::PageBlocks)
+                                }
                                 ComposeOperation::Interpolation => {
-                                    perf::PerfMetricKind::Interpolation
+                                    Some(perf::PerfMetricKind::Interpolation)
                                 }
                                 ComposeOperation::ShellExpansion => {
-                                    perf::PerfMetricKind::ShellExpansion
+                                    Some(perf::PerfMetricKind::ShellExpansion)
+                                }
+                                ComposeOperation::ShellBlocks => {
+                                    Some(perf::PerfMetricKind::ShellBlocks)
+                                }
+                                ComposeOperation::LinkResolve => {
+                                    Some(perf::PerfMetricKind::LinkResolve)
                                 }
                                 _ => unreachable!(),
                             };
-                            perf.record(kind, start.elapsed());
+                            if let Some(kind) = kind {
+                                perf.record(kind, start.elapsed());
+                            }
                         }
                     }
                     ComposePhase::Transclusion => {
@@ -478,6 +682,21 @@ impl Markdown {
                             perf.record(kind, start.elapsed());
                         }
                     }
+                    ComposePhase::Finalization => {
+                        if runtime.transclusion.depth() <= 1 {
+                            let op_start = perf.is_enabled().then(std::time::Instant::now);
+                            self.run_finalization_operation(*operation, &options, &mut report)?;
+                            if let Some(start) = op_start {
+                                let kind = match operation {
+                                    ComposeOperation::LinkNormalization => {
+                                        perf::PerfMetricKind::LinkNormalization
+                                    }
+                                    _ => unreachable!(),
+                                };
+                                perf.record(kind, start.elapsed());
+                            }
+                        }
+                    }
                 }
             }
 
@@ -505,18 +724,33 @@ impl Markdown {
             // FrontmatterInterpolation is handled before EffectiveState build,
             // not in the generic operation loop.
             ComposeOperation::FrontmatterInterpolation => Ok(()),
+            // FrontmatterShellExpansion is handled before EffectiveState build,
+            // not in the generic operation loop.
+            ComposeOperation::FrontmatterShellExpansion => Ok(()),
             ComposeOperation::TextReplacement => {
                 report.replacements_applied = self.run_replacement_stage(state, options);
                 Ok(())
             }
             ComposeOperation::PageBlocks => self.run_page_blocks_stage(state, report),
             ComposeOperation::Interpolation => {
-                report.interpolations_applied = self.run_interpolation_stage(state, options)?;
+                report.interpolations_applied =
+                    self.run_interpolation_stage(state, options, report)?;
                 Ok(())
             }
             ComposeOperation::ShellExpansion => {
                 self.run_shell_expansion_stage(options, runtime, report)
             }
+            ComposeOperation::ShellBlocks => {
+                let sb_ctx = self.source_context_for_errors();
+                shell_blocks::run_shell_blocks_stage_for_markdown(
+                    &mut self.content,
+                    options,
+                    &mut runtime.shell,
+                    report,
+                    &sb_ctx,
+                )
+            }
+            ComposeOperation::LinkResolve => link_resolve::link_resolve(self, options, report),
             _ => Ok(()),
         }
     }
@@ -571,6 +805,20 @@ impl Markdown {
         }
     }
 
+    fn run_finalization_operation(
+        &mut self,
+        operation: ComposeOperation,
+        options: &ComposeOptions,
+        report: &mut ComposeReport,
+    ) -> MarkdownResult<()> {
+        match operation {
+            ComposeOperation::LinkNormalization => {
+                link_normalization::normalize_links(self, options, report)
+            }
+            _ => Ok(()),
+        }
+    }
+
     fn run_transclusion_phase(
         &mut self,
         operations: &[ComposeOperation],
@@ -595,7 +843,10 @@ impl Markdown {
                 ComposeOperation::BlockTransclusion | ComposeOperation::CodeTransclusion
             )
         }) {
-            Some(transclusion::parse_directives(&self.content)?)
+            Some(transclusion::parse_directives(
+                &self.content,
+                self.source_context_for_errors(),
+            )?)
         } else {
             None
         };
@@ -603,6 +854,7 @@ impl Markdown {
         let frontmatter_refs = if operations.contains(&ComposeOperation::FrontmatterTransclusion) {
             Some(transclusion::parse_frontmatter_refs(
                 self.frontmatter().as_map(),
+                self.source_context_for_errors(),
             )?)
         } else {
             None
@@ -719,10 +971,12 @@ impl Markdown {
                 Err(error) => {
                     let is_structural = matches!(
                         error,
-                        MarkdownError::Transclusion(
-                            transclusion::TransclusionError::CycleDetected { .. }
-                                | transclusion::TransclusionError::MaxDepthExceeded { .. }
-                        )
+                        MarkdownError::Transclusion(ref inner)
+                            if matches!(
+                                inner.as_ref(),
+                                transclusion::TransclusionError::CycleDetected { .. }
+                                    | transclusion::TransclusionError::MaxDepthExceeded { .. }
+                            )
                     );
                     if is_structural || options.fail_fast {
                         return Err(error);
@@ -847,18 +1101,19 @@ impl Markdown {
     /// Runs the interpolation stage.
     ///
     /// Finds `{{ expression }}` patterns in content and evaluates them
-    /// against the effective state. By default, expressions inside code
-    /// spans and fenced code blocks are skipped. When
-    /// `interpolate_code_spans` is enabled (via options or frontmatter),
-    /// all expressions are processed regardless of surrounding code markup.
+    /// against the effective state. Inline code spans (single backticks)
+    /// are always scanned. Fenced and indented code blocks are skipped
+    /// by default; set `interpolate_code_blocks` (via options or
+    /// frontmatter) to scan them too.
     fn run_interpolation_stage(
         &mut self,
         state: &EffectiveState,
         options: &ComposeOptions,
+        report: &mut ComposeReport,
     ) -> MarkdownResult<usize> {
         use interpolation::{Evaluator, ScanMode, interpolate_text};
 
-        let scan_mode = if self.resolve_interpolate_code_spans(options) {
+        let scan_mode = if self.resolve_interpolate_code_blocks(options) {
             ScanMode::Plain
         } else {
             ScanMode::MarkdownAware
@@ -876,6 +1131,7 @@ impl Markdown {
         if result.replacements > 0 {
             self.content = result.output;
         }
+        report.warnings.extend(result.warnings);
         debug!(
             count = result.replacements,
             "compose: interpolations applied"
@@ -903,7 +1159,8 @@ impl Markdown {
         runtime: &mut shell_expansion::types::PipelineRuntime,
         report: &mut ComposeReport,
     ) -> MarkdownResult<()> {
-        let directives = shell_expansion::parse_directives(&self.content)?;
+        let directives =
+            shell_expansion::parse_directives(&self.content, self.source_context_for_errors())?;
         debug!(
             directive_count = directives.len(),
             "compose: shell expansion directives found"
@@ -919,9 +1176,10 @@ impl Markdown {
         let mut replacements = Vec::new();
 
         for directive in directives {
-            let replacement =
-                execute_directive(&directive, options, &policy_paths, &mut runtime.shell)?;
-            replacements.push((directive.span.clone(), replacement));
+            let execution =
+                execute_directive_detailed(&directive, options, &policy_paths, &mut runtime.shell)?;
+            replacements.push((directive.span.clone(), execution.combined_output()));
+            report.warnings.extend(execution.warnings);
             report.shell_expansions_applied += 1;
         }
 
@@ -937,7 +1195,8 @@ impl Markdown {
         report: &mut ComposeReport,
     ) -> MarkdownResult<()> {
         debug!("compose: running page blocks");
-        let regions = page_blocks::parser::parse_page_blocks(&self.content)?;
+        let source = self.source_context_for_errors();
+        let regions = page_blocks::parser::parse_page_blocks(&self.content, source.clone())?;
         if regions.is_empty() {
             return Ok(());
         }
@@ -961,8 +1220,13 @@ impl Markdown {
             warn_unknown_options(region, report);
         }
 
-        self.content =
-            page_blocks::engine::render_page_blocks(&self.content, &regions, state, report)?;
+        self.content = page_blocks::engine::render_page_blocks(
+            &self.content,
+            &regions,
+            state,
+            report,
+            source,
+        )?;
         Ok(())
     }
 
@@ -1000,8 +1264,70 @@ impl Markdown {
                 );
             }
 
+            for error in &directive.options.deferred_set_errors {
+                match error {
+                    transclusion::DeferredSetError::InvalidAssignment { raw, reason, line } => {
+                        if options.allow_invalid_frontmatter_assignment {
+                            report.add_warning(
+                                ComposeWarning::new(
+                                    "transclusion",
+                                    format!(
+                                        "Invalid frontmatter assignment on ::{} directive at line {}: {} (value: {})",
+                                        directive.kind.as_str(),
+                                        line,
+                                        reason,
+                                        raw
+                                    ),
+                                )
+                                .at_line(*line),
+                            );
+                        } else {
+                            return Err(
+                                transclusion::TransclusionError::InvalidFrontmatterAssignment {
+                                    ctx: Box::new(self.source_context_for_errors()),
+                                    line: *line,
+                                    raw: raw.clone(),
+                                    reason: reason.clone(),
+                                }
+                                .into(),
+                            );
+                        }
+                    }
+                    transclusion::DeferredSetError::ReassignedProperty { name } => {
+                        if options.allow_reassigned_frontmatter_property {
+                            report.add_warning(
+                                ComposeWarning::new(
+                                    "transclusion",
+                                    format!(
+                                        "Duplicate set property '{}' on ::{} directive at line {}; rightmost assignment wins",
+                                        name,
+                                        directive.kind.as_str(),
+                                        directive.line
+                                    ),
+                                )
+                                .at_line(directive.line),
+                            );
+                        } else {
+                            return Err(
+                                transclusion::TransclusionError::InvalidReassignedFrontmatterProperty {
+                                    ctx: Box::new(self.source_context_for_errors()),
+                                    line: directive.line,
+                                    name: name.clone(),
+                                }
+                                .into(),
+                            );
+                        }
+                    }
+                }
+            }
+
             if let Some(expr) = &directive.options.when_expr {
-                let should_include = transclusion::evaluate_condition(expr, state, directive.line)?;
+                let should_include = transclusion::evaluate_condition(
+                    expr,
+                    state,
+                    directive.line,
+                    self.source_context_for_errors(),
+                )?;
                 if !should_include {
                     let mut fixed_report = ComposeReport::new();
                     fixed_report.transclusions_skipped = 1;
@@ -1023,6 +1349,7 @@ impl Markdown {
                 &transclusion_opts,
                 &options.source,
                 directive.line,
+                self.source_context_for_errors(),
             ) {
                 Ok(resolved) => resolved,
                 Err(err) if ignore_invalid => {
@@ -1165,6 +1492,7 @@ impl Markdown {
             &transclusion_opts,
             &options.source,
             0,
+            self.source_context_for_errors(),
         ) {
             Ok(resolved) => resolved,
             Err(err) if ignore_invalid => {
@@ -1349,6 +1677,7 @@ impl Markdown {
                         &directive,
                         &options.source,
                         &transclusion_opts,
+                        self.source_context_for_errors(),
                     )? {
                     let cache_handle = {
                         let runtime = runtime_mutex.lock().unwrap();
@@ -1392,6 +1721,8 @@ impl Markdown {
                                 &headings,
                                 &options_clone,
                                 line,
+                                &directive.indent,
+                                directive.inferred_indent.as_deref(),
                             )
                             .map_err(crate::markdown::types::MarkdownError::TocLinking)?;
                             Ok(cache::OperationResult { content })
@@ -1422,6 +1753,14 @@ impl Markdown {
         }
     }
 
+    // NOTE: `::file` and `::code` directives share the same indentation
+    // preservation bug as `::toc-linking` (see spec.md for 2026-05-07).
+    // Unlike `::toc-linking`, the fix is not trivially co-located here:
+    // `PreparedTransclusion::Markdown` and `PreparedTransclusion::Code`
+    // do not capture directive indentation, and the underlying
+    // `transclusion::Directive` struct lacks indent fields. Fixing this
+    // would require structural changes across the transclusion pipeline.
+    // Tracked as part of the same feature but deferred to a follow-up.
     #[allow(clippy::too_many_arguments)]
     fn render_markdown_transclusion(
         &self,
@@ -1434,18 +1773,27 @@ impl Markdown {
         report: &mut ComposeReport,
     ) -> MarkdownResult<String> {
         // ── Core compose (cacheable via single-flight) ─────────────
+        let overlay_hash = cache::hashing::set_overlay_hash(
+            directive_options.set_object.as_ref(),
+            &directive_options.set_properties,
+        );
+        let options_hash = cache::hashing::combine_options_overlay_hash(
+            cache::hashing::options_hash(options),
+            overlay_hash,
+        );
         let persistent_ctx = cache::PersistentContext {
             source_id: cache::hashing::source_id_hash(&cache::compose_cache_key_for_path(path)),
             state_hash: cache::hashing::effective_state_hash(state),
             context_hash: cache::hashing::context_hash(state.context()),
-            options_hash: cache::hashing::options_hash(options),
+            options_hash,
         };
         let cache_key = format!(
-            "compose:{:016x}:{:016x}:{:016x}:{:016x}",
+            "compose:{:016x}:{:016x}:{:016x}:{:016x}:{:016x}",
             persistent_ctx.source_id,
             persistent_ctx.state_hash,
             persistent_ctx.context_hash,
-            persistent_ctx.options_hash
+            persistent_ctx.options_hash,
+            overlay_hash,
         );
         let cache_handle = runtime.cache.clone();
 
@@ -1459,6 +1807,13 @@ impl Markdown {
             _ => None,
         };
         let path_buf = path.to_path_buf();
+
+        // Snapshot the per-directive set overlay. The overlay is applied to
+        // the child's authored frontmatter before any of the child's pre-op
+        // stages run; it does NOT propagate through `child_options` so
+        // grandchildren do not inherit it.
+        let set_object = directive_options.set_object.clone();
+        let set_properties = directive_options.set_properties.clone();
 
         let cached = cache_handle.get_or_compute_compose(
             &cache_key,
@@ -1474,6 +1829,21 @@ impl Markdown {
 
                 let mut compose_runtime = runtime.clone_for_child();
                 let mut child = compose_runtime.load_markdown(path)?;
+
+                // Apply the three-layer set overlay on the child's frontmatter
+                // before any of its pre-op stages observe it. Keeping this
+                // scoped inside the closure preserves the rule that
+                // grandchildren referenced by the child's own `::file`
+                // directives do NOT inherit this parent-applied overlay.
+                if set_object.is_some() || !set_properties.is_empty() {
+                    let base_indexmap = std::mem::take(child.frontmatter_mut().as_map_mut());
+                    let base_map: serde_json::Map<String, Value> =
+                        base_indexmap.into_iter().collect();
+                    let overlaid =
+                        state::apply_set_overrides(&base_map, set_object.as_ref(), &set_properties);
+                    *child.frontmatter_mut().as_map_mut() = overlaid.into_iter().collect();
+                }
+
                 let child_report =
                     child.run_compose_pipeline_internal(child_options, &mut compose_runtime)?;
                 runtime.merge_child(&compose_runtime);
@@ -1670,17 +2040,20 @@ impl Markdown {
             .unwrap_or(false)
     }
 
-    /// Resolves whether interpolation should process code spans.
+    /// Resolves whether interpolation should process fenced/indented code blocks.
+    ///
+    /// Inline code spans are always interpolated; this only governs
+    /// fenced and indented code blocks.
     ///
     /// Checks (in priority order):
-    /// 1. `ComposeOptions::interpolate_code_spans`
-    /// 2. Frontmatter `interpolate_code_spans` key
-    fn resolve_interpolate_code_spans(&self, options: &ComposeOptions) -> bool {
-        if options.interpolate_code_spans {
+    /// 1. `ComposeOptions::interpolate_code_blocks`
+    /// 2. Frontmatter `interpolate_code_blocks` key
+    fn resolve_interpolate_code_blocks(&self, options: &ComposeOptions) -> bool {
+        if options.interpolate_code_blocks {
             return true;
         }
 
-        if let Ok(Some(value)) = self.fm_get::<bool>("interpolate_code_spans") {
+        if let Ok(Some(value)) = self.fm_get::<bool>("interpolate_code_blocks") {
             return value;
         }
 
@@ -2104,7 +2477,7 @@ mod tests {
 
     #[test]
     fn test_interpolation_fallback_uses_default() {
-        let content = "---\ntitle: Test\n---\nColor: {{ color | \"unknown\" }}";
+        let content = "---\ntitle: Test\n---\nColor: {{ color || \"unknown\" }}";
         let md: Markdown = content.into();
 
         let options = ComposeOptions::new().only(&[ComposeOperation::Interpolation]);
@@ -2116,8 +2489,21 @@ mod tests {
     }
 
     #[test]
+    fn test_interpolation_fallback_missing_variable_renders_default() {
+        let content = "---\ntitle: Test\n---\nValue: {{ missing || \"default\" }}";
+        let md: Markdown = content.into();
+
+        let options = ComposeOptions::new().only(&[ComposeOperation::Interpolation]);
+
+        let (composed, report) = md.compose_with(options).unwrap();
+
+        assert_eq!(composed.content(), "Value: default");
+        assert_eq!(report.interpolations_applied, 1);
+    }
+
+    #[test]
     fn test_interpolation_fallback_uses_primary() {
-        let content = "---\ncolor: blue\n---\nColor: {{ color | \"unknown\" }}";
+        let content = "---\ncolor: blue\n---\nColor: {{ color || \"unknown\" }}";
         let md: Markdown = content.into();
 
         let options = ComposeOptions::new().only(&[ComposeOperation::Interpolation]);
@@ -2194,7 +2580,9 @@ mod tests {
     }
 
     #[test]
-    fn test_interpolation_skips_code_span() {
+    fn test_interpolation_scans_inline_code_spans() {
+        // Inline code spans (single backticks) are interpolated by default —
+        // common templating pattern e.g. `var_{{ phase }}`.
         let content = "---\nname: Alice\n---\nHello {{ name }}! Code: `{{ name }}`";
         let md: Markdown = content.into();
 
@@ -2202,30 +2590,31 @@ mod tests {
 
         let (composed, report) = md.compose_with(options).unwrap();
 
-        // Only the first expression is expanded, code span preserved
-        assert_eq!(composed.content(), "Hello Alice! Code: `{{ name }}`");
-        assert_eq!(report.interpolations_applied, 1);
-    }
-
-    #[test]
-    fn test_interpolation_code_spans_via_option() {
-        let content = "---\nname: Alice\n---\nHello {{ name }}! Code: `{{ name }}`";
-        let md: Markdown = content.into();
-
-        let options = ComposeOptions::new()
-            .only(&[ComposeOperation::Interpolation])
-            .with_interpolate_code_spans(true);
-
-        let (composed, report) = md.compose_with(options).unwrap();
-
-        // Both expressions expanded when interpolate_code_spans is enabled
         assert_eq!(composed.content(), "Hello Alice! Code: `Alice`");
         assert_eq!(report.interpolations_applied, 2);
     }
 
     #[test]
-    fn test_interpolation_code_spans_via_frontmatter() {
-        let content = "---\nname: Alice\ninterpolate_code_spans: true\n---\nHello {{ name }}! Code: `{{ name }}`";
+    fn test_interpolation_code_blocks_via_option() {
+        // Fenced code blocks are skipped unless explicitly opted in.
+        let content = "---\nname: Alice\n---\nHello {{ name }}!\n\n```\n{{ name }}\n```";
+        let md: Markdown = content.into();
+
+        let options = ComposeOptions::new()
+            .only(&[ComposeOperation::Interpolation])
+            .with_interpolate_code_blocks(true);
+
+        let (composed, report) = md.compose_with(options).unwrap();
+
+        // Both expressions expanded when interpolate_code_blocks is enabled
+        assert!(composed.content().contains("Hello Alice!"));
+        assert!(composed.content().contains("```\nAlice\n```"));
+        assert_eq!(report.interpolations_applied, 2);
+    }
+
+    #[test]
+    fn test_interpolation_code_blocks_via_frontmatter() {
+        let content = "---\nname: Alice\ninterpolate_code_blocks: true\n---\nHello {{ name }}!\n\n```\n{{ name }}\n```";
         let md: Markdown = content.into();
 
         let options = ComposeOptions::new().only(&[ComposeOperation::Interpolation]);
@@ -2233,7 +2622,8 @@ mod tests {
         let (composed, report) = md.compose_with(options).unwrap();
 
         // Both expressions expanded when frontmatter flag is set
-        assert_eq!(composed.content(), "Hello Alice! Code: `Alice`");
+        assert!(composed.content().contains("Hello Alice!"));
+        assert!(composed.content().contains("```\nAlice\n```"));
         assert_eq!(report.interpolations_applied, 2);
     }
 
@@ -2246,7 +2636,7 @@ mod tests {
 
         let (composed, report) = md.compose_with(options).unwrap();
 
-        // Only the first expression is expanded, code block preserved
+        // Only the first expression is expanded, fenced block preserved
         assert!(composed.content().contains("Hello Alice!"));
         assert!(composed.content().contains("```\n{{ name }}\n```"));
         assert_eq!(report.interpolations_applied, 1);
@@ -2298,7 +2688,7 @@ mod tests {
 
     #[test]
     fn test_interpolation_chained_fallback() {
-        let content = "---\nbackup: second\n---\nValue: {{ missing | backup | \"default\" }}";
+        let content = "---\nbackup: second\n---\nValue: {{ missing || backup || \"default\" }}";
         let md: Markdown = content.into();
 
         let options = ComposeOptions::new().only(&[ComposeOperation::Interpolation]);
@@ -2337,6 +2727,41 @@ mod tests {
 
         let err = md.compose_with(options).unwrap_err();
         assert!(matches!(err, MarkdownError::Transform(_)));
+    }
+
+    #[test]
+    fn test_interpolation_bare_pipe_produces_parse_error() {
+        // Bare `|` in interpolation should produce a clear lexer error
+        let content = "---\nname: Alice\n---\nHello {{ name | \"default\" }}!";
+        let md: Markdown = content.into();
+
+        let options = ComposeOptions::new()
+            .only(&[ComposeOperation::Interpolation])
+            .with_fail_fast(false);
+
+        let (composed, report) = md.compose_with(options).unwrap();
+
+        // Invalid expression left unchanged
+        assert_eq!(composed.content(), "Hello {{ name | \"default\" }}!");
+        assert_eq!(report.interpolations_applied, 0);
+    }
+
+    #[test]
+    fn test_interpolation_bare_pipe_fail_fast_error_message() {
+        let content = "---\nname: Alice\n---\nHello {{ name | \"default\" }}!";
+        let md: Markdown = content.into();
+
+        let options = ComposeOptions::new()
+            .only(&[ComposeOperation::Interpolation])
+            .with_fail_fast(true);
+
+        let err = md.compose_with(options).unwrap_err();
+        let err_string = format!("{}", err);
+        assert!(
+            err_string.contains("Unexpected '|'") || err_string.contains("parse"),
+            "Expected bare pipe error, got: {}",
+            err_string
+        );
     }
 
     #[test]
@@ -2552,7 +2977,8 @@ Rounded: {{ round(pi) }}"#;
 
         assert!(matches!(
             err,
-            MarkdownError::Transclusion(transclusion::TransclusionError::CycleDetected { .. })
+            MarkdownError::Transclusion(ref inner)
+                if matches!(inner.as_ref(), transclusion::TransclusionError::CycleDetected { .. })
         ));
     }
 
@@ -2678,9 +3104,11 @@ Rounded: {{ round(pi) }}"#;
         let err = md.compose().unwrap_err();
         assert!(matches!(
             err,
-            MarkdownError::Transclusion(
-                transclusion::TransclusionError::MissingSourceContext { .. }
-            )
+            MarkdownError::Transclusion(ref inner)
+                if matches!(
+                    inner.as_ref(),
+                    transclusion::TransclusionError::MissingSourceContext { .. }
+                )
         ));
     }
 
@@ -3514,13 +3942,17 @@ Rounded: {{ round(pi) }}"#;
             .unwrap();
 
         assert_eq!(report.frontmatter_interpolations_applied, 0);
-        // body interpolation sees the raw templated value
-        assert!(composed.content().contains("{{base}}/spec.md"));
+        // body interpolation resolves {{spec}} to {{base}}/spec.md and then
+        // recursively resolves {{base}} in the same pass.
+        assert!(composed.content().contains("/path/spec.md"));
     }
 
     #[test]
-    fn test_frontmatter_interpolation_body_still_skips_code() {
-        let content = "---\nname: World\n---\nHello {{ name }}! Code: `{{ name }}`";
+    fn test_frontmatter_interpolation_body_still_skips_fenced_code() {
+        // Inline code spans interpolate, but fenced blocks remain untouched
+        // unless `interpolate_code_blocks` is set.
+        let content =
+            "---\nname: World\n---\nHello {{ name }}! Code: `{{ name }}`\n\n```\n{{ name }}\n```";
         let md: Markdown = content.into();
         let (composed, _) = md
             .compose_with(ComposeOptions::new().only(&[
@@ -3530,7 +3962,8 @@ Rounded: {{ round(pi) }}"#;
             .unwrap();
 
         assert!(composed.content().contains("Hello World!"));
-        assert!(composed.content().contains("`{{ name }}`"));
+        assert!(composed.content().contains("Code: `World`"));
+        assert!(composed.content().contains("```\n{{ name }}\n```"));
     }
 
     #[test]
@@ -3750,5 +4183,337 @@ Rounded: {{ round(pi) }}"#;
             composed.content()
         );
         assert!(composed.content().contains("After"));
+    }
+
+    mod frontmatter_shell_expansion_integration {
+        use super::*;
+        use crate::markdown::compose::shell_expansion::types::{
+            ShellApprovalDecision, ShellApprovalHandler, ShellApprovalRequest, ShellExpansionError,
+            ShellExpansionOptions,
+        };
+        use std::sync::Arc;
+        use std::time::Duration;
+        use tempfile::TempDir;
+
+        struct MockApproval;
+        impl ShellApprovalHandler for MockApproval {
+            fn approve(
+                &self,
+                _req: ShellApprovalRequest,
+            ) -> Result<ShellApprovalDecision, ShellExpansionError> {
+                Ok(ShellApprovalDecision::AllowOnce)
+            }
+        }
+
+        #[test]
+        fn frontmatter_shell_output_visible_to_body_interpolation() {
+            let temp_dir = TempDir::new().unwrap();
+            let content = "---\ngreeting: \"$(echo hello)\"\n---\nMessage: {{greeting}}\n";
+            let md: Markdown = content.into();
+
+            let options = ComposeOptions::new()
+                .only(&[
+                    ComposeOperation::FrontmatterInterpolation,
+                    ComposeOperation::FrontmatterShellExpansion,
+                    ComposeOperation::Interpolation,
+                ])
+                .with_shell(ShellExpansionOptions {
+                    policy_root: Some(temp_dir.path().to_path_buf()),
+                    approval_handler: Some(Arc::new(MockApproval)),
+                    ..Default::default()
+                });
+
+            let (composed, report) = md.compose_with(options).unwrap();
+            assert!(
+                composed.content().contains("Message: hello"),
+                "Expected 'Message: hello' in:\n{}",
+                composed.content()
+            );
+            assert_eq!(report.frontmatter_shell_expansions_applied, 1);
+        }
+
+        #[test]
+        fn frontmatter_interpolation_feeds_into_shell_expansion() {
+            let temp_dir = TempDir::new().unwrap();
+            let content = "---\nfile: README.md\ndir: \"$(dirname {{file}})\"\n---\nDir: {{dir}}\n";
+            let md: Markdown = content.into();
+
+            let options = ComposeOptions::new()
+                .only(&[
+                    ComposeOperation::FrontmatterInterpolation,
+                    ComposeOperation::FrontmatterShellExpansion,
+                    ComposeOperation::Interpolation,
+                ])
+                .with_shell(ShellExpansionOptions {
+                    policy_root: Some(temp_dir.path().to_path_buf()),
+                    approval_handler: Some(Arc::new(MockApproval)),
+                    ..Default::default()
+                });
+
+            let (composed, report) = md.compose_with(options).unwrap();
+            // dirname README.md returns "."
+            assert!(
+                composed.content().contains("Dir: ."),
+                "Expected 'Dir: .' in:\n{}",
+                composed.content()
+            );
+            assert_eq!(report.frontmatter_shell_expansions_applied, 1);
+        }
+
+        #[test]
+        fn body_and_frontmatter_shell_coexist() {
+            let temp_dir = TempDir::new().unwrap();
+            let content =
+                "---\nfm_val: \"$(echo from-frontmatter)\"\n---\n::shell echo from-body\n";
+            let md: Markdown = content.into();
+
+            let options = ComposeOptions::new()
+                .only(&[
+                    ComposeOperation::FrontmatterShellExpansion,
+                    ComposeOperation::ShellExpansion,
+                ])
+                .with_shell(ShellExpansionOptions {
+                    policy_root: Some(temp_dir.path().to_path_buf()),
+                    approval_handler: Some(Arc::new(MockApproval)),
+                    ..Default::default()
+                });
+
+            let (composed, report) = md.compose_with(options).unwrap();
+            assert_eq!(report.frontmatter_shell_expansions_applied, 1);
+            assert_eq!(report.shell_expansions_applied, 1);
+            assert!(composed.content().contains("from-body"));
+        }
+
+        #[test]
+        fn frontmatter_shell_with_no_candidates_is_noop() {
+            let content = "---\ntitle: Hello\n---\nBody text\n";
+            let md: Markdown = content.into();
+
+            let options =
+                ComposeOptions::new().only(&[ComposeOperation::FrontmatterShellExpansion]);
+
+            let (composed, report) = md.compose_with(options).unwrap();
+            assert_eq!(report.frontmatter_shell_expansions_applied, 0);
+            assert!(composed.content().contains("Body text"));
+        }
+
+        #[test]
+        fn frontmatter_shell_timeout_empty_emits_warning() {
+            let temp_dir = TempDir::new().unwrap();
+            let content = "---\nval: \"$(sleep 1)\"\n---\nValue: {{val}}\n";
+            let md: Markdown = content.into();
+
+            let options = ComposeOptions::new()
+                .only(&[
+                    ComposeOperation::FrontmatterShellExpansion,
+                    ComposeOperation::Interpolation,
+                ])
+                .with_shell(ShellExpansionOptions {
+                    timeout: Duration::from_millis(100),
+                    timeout_behavior: super::ShellTimeoutBehavior::EmptyString,
+                    policy_root: Some(temp_dir.path().to_path_buf()),
+                    approval_handler: Some(Arc::new(MockApproval)),
+                    ..Default::default()
+                });
+
+            let (composed, report) = md.compose_with(options).unwrap();
+            assert!(composed.content().contains("Value: "));
+            assert_eq!(report.frontmatter_shell_expansions_applied, 1);
+            assert_eq!(report.warnings.len(), 1);
+            assert!(report.warnings[0].message.contains("timed out"));
+        }
+
+        #[test]
+        fn frontmatter_shell_rejects_interpolated_executable() {
+            let content = "---\ncmd_name: echo\nval: \"$({{cmd_name}} hello)\"\n---\n";
+            let md: Markdown = content.into();
+
+            let options = ComposeOptions::new().only(&[
+                ComposeOperation::FrontmatterInterpolation,
+                ComposeOperation::FrontmatterShellExpansion,
+            ]);
+
+            let err = md.compose_with(options).unwrap_err();
+            assert!(
+                err.to_string()
+                    .contains("Frontmatter shell executable may not come from interpolation")
+            );
+        }
+
+        #[test]
+        fn frontmatter_shell_rejects_pipe_in_command() {
+            let temp_dir = TempDir::new().unwrap();
+            let content = "---\nval: \"$(echo a | cat)\"\n---\n";
+            let md: Markdown = content.into();
+
+            let options = ComposeOptions::new()
+                .only(&[ComposeOperation::FrontmatterShellExpansion])
+                .with_shell(ShellExpansionOptions {
+                    policy_root: Some(temp_dir.path().to_path_buf()),
+                    approval_handler: Some(Arc::new(MockApproval)),
+                    ..Default::default()
+                });
+
+            let err = md.compose_with(options).unwrap_err();
+            assert!(
+                err.to_string().contains("pipes") || err.to_string().contains("Shell pipes"),
+                "Expected shell pipe rejection, got: {}",
+                err
+            );
+        }
+
+        #[test]
+        fn frontmatter_shell_or_chain_works() {
+            let temp_dir = TempDir::new().unwrap();
+            let content = "---\nval: \"$(false || echo fallback)\"\n---\n";
+            let md: Markdown = content.into();
+
+            let options = ComposeOptions::new()
+                .only(&[ComposeOperation::FrontmatterShellExpansion])
+                .with_shell(ShellExpansionOptions {
+                    policy_root: Some(temp_dir.path().to_path_buf()),
+                    approval_handler: Some(Arc::new(MockApproval)),
+                    ..Default::default()
+                });
+
+            let (composed, _report) = md.compose_with(options).unwrap();
+            assert_eq!(
+                composed.frontmatter().as_map().get("val"),
+                Some(&serde_json::json!("fallback"))
+            );
+        }
+    }
+
+    mod infix_logic_conditions {
+        use super::*;
+
+        fn compose_with_page_blocks(content: &str) -> (String, ComposeReport) {
+            let md: Markdown = content.into();
+            let options = ComposeOptions::new().only(&[ComposeOperation::PageBlocks]);
+            let (composed, report) = md.compose_with(options).unwrap();
+            (composed.content().to_string(), report)
+        }
+
+        #[test]
+        fn page_block_with_infix_and_true() {
+            let content =
+                "---\na: true\nb: true\n---\n::block when=\"a && b\"\ninside\n::end-block\n";
+            let (output, report) = compose_with_page_blocks(content);
+            assert!(output.contains("inside"));
+            assert_eq!(report.page_blocks_rendered, 1);
+            assert_eq!(report.page_blocks_skipped, 0);
+        }
+
+        #[test]
+        fn page_block_with_infix_and_false() {
+            let content =
+                "---\na: true\nb: false\n---\n::block when=\"a && b\"\ninside\n::end-block\n";
+            let (output, report) = compose_with_page_blocks(content);
+            assert!(!output.contains("inside"));
+            assert_eq!(report.page_blocks_rendered, 0);
+            assert_eq!(report.page_blocks_skipped, 1);
+        }
+
+        #[test]
+        fn page_block_with_infix_or_one_true() {
+            let content =
+                "---\na: false\nb: true\n---\n::block when=\"a || b\"\ninside\n::end-block\n";
+            let (output, report) = compose_with_page_blocks(content);
+            assert!(output.contains("inside"));
+            assert_eq!(report.page_blocks_rendered, 1);
+        }
+
+        #[test]
+        fn page_block_with_infix_or_both_false() {
+            let content =
+                "---\na: false\nb: false\n---\n::block when=\"a || b\"\ninside\n::end-block\n";
+            let (output, _report) = compose_with_page_blocks(content);
+            assert!(!output.contains("inside"));
+        }
+
+        #[test]
+        fn page_block_with_grouped_precedence() {
+            // (a || b) && c — grouping overrides default precedence
+            let content = "---\na: false\nb: true\nc: true\n---\n::block when=\"(a || b) && c\"\ninside\n::end-block\n";
+            let (output, _report) = compose_with_page_blocks(content);
+            assert!(output.contains("inside"));
+
+            let content_false = "---\na: false\nb: true\nc: false\n---\n::block when=\"(a || b) && c\"\ninside\n::end-block\n";
+            let (output, _report) = compose_with_page_blocks(content_false);
+            assert!(!output.contains("inside"));
+        }
+
+        #[test]
+        fn page_block_with_chained_or() {
+            // Chained `||` in condition mode evaluates as logical OR
+            let content = "---\na: false\nb: false\nc: true\n---\n::block when=\"a || b || c\"\ninside\n::end-block\n";
+            let (output, _report) = compose_with_page_blocks(content);
+            assert!(output.contains("inside"));
+        }
+
+        #[test]
+        fn transclusion_directive_with_mixed_infix_logic() {
+            let dir = tempfile::tempdir().unwrap();
+            let root = dir.path().join("root.md");
+            let child = dir.path().join("child.md");
+
+            // Child loaded only if (enabled || fallback) && !skip
+            std::fs::write(&child, "child body").unwrap();
+            std::fs::write(
+                &root,
+                "---\nenabled: true\nskip: false\n---\nbefore\n\n::file child.md when=\"enabled && !skip\"\n\nafter\n",
+            )
+            .unwrap();
+
+            let options = ComposeOptions::new()
+                .with_source_file(&root)
+                .only(&[ComposeOperation::BlockTransclusion]);
+
+            let (composed, _) = Markdown::try_from(root.as_path())
+                .unwrap()
+                .compose_with(options)
+                .unwrap();
+            assert!(composed.content().contains("child body"));
+        }
+
+        #[test]
+        fn transclusion_skipped_when_infix_condition_false() {
+            let dir = tempfile::tempdir().unwrap();
+            let root = dir.path().join("root.md");
+            let child = dir.path().join("child.md");
+
+            std::fs::write(&child, "child body").unwrap();
+            std::fs::write(
+                &root,
+                "---\nenabled: true\nskip: true\n---\nbefore\n\n::file child.md when=\"enabled && !skip\"\n\nafter\n",
+            )
+            .unwrap();
+
+            let options = ComposeOptions::new()
+                .with_source_file(&root)
+                .only(&[ComposeOperation::BlockTransclusion]);
+
+            let (composed, _) = Markdown::try_from(root.as_path())
+                .unwrap()
+                .compose_with(options)
+                .unwrap();
+            assert!(!composed.content().contains("child body"));
+        }
+
+        #[test]
+        fn page_block_with_bare_pipe_fails_parse() {
+            // Bare `|` in condition expressions should produce a parse error
+            let content = "---\na: true\n---\n::block when=\"a | b\"\ninside\n::end-block\n";
+            let md: Markdown = content.into();
+            let options = ComposeOptions::new().only(&[ComposeOperation::PageBlocks]);
+            let err = md.compose_with(options).unwrap_err();
+
+            let err_string = format!("{}", err);
+            assert!(
+                err_string.contains("Unexpected '|'") || err_string.contains("logical OR"),
+                "Expected bare pipe error in condition, got: {}",
+                err_string
+            );
+        }
     }
 }

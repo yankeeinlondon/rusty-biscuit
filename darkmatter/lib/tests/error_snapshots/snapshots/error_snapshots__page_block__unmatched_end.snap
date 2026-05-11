@@ -1,0 +1,11 @@
+---
+source: darkmatter/lib/tests/error_snapshots/page_block.rs
+expression: out
+---
+⨫ PageBlockError: unmatched ::end-block
+┃ This end-block has no matching start:
+┃ 
+┃     19 │ line 19
+┃   > 20 │ line 20
+┃     21 │ line 21
+Add a matching ::block directive above this closing line.

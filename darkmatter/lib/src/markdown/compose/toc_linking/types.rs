@@ -47,6 +47,113 @@ impl From<CursorError> for TocLinkingError {
     }
 }
 
+impl biscuit_terminal::errors::BlockError for TocLinkingError {
+    fn status_block(
+        &self,
+        _term: &biscuit_terminal::terminal::Terminal,
+    ) -> biscuit_terminal::components::status_block::StatusBlock {
+        use biscuit_terminal::components::status::StatusState;
+        use biscuit_terminal::components::status_block::StatusBlock;
+        use biscuit_terminal::errors::{ErrorHeader, StatusBlockExt};
+
+        match self {
+            TocLinkingError::ParseDirective { line, message } => StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new(
+                    "TocLinkingError",
+                    "directive parse failed",
+                ))
+                .body(format!(
+                    "<dim>Line:</dim> {line}\n<dim>Message:</dim> {message}"
+                ))
+                .hint("Syntax: <cyan>::toc-linking ./doc.md levels=2,3 cleanup=number,capitalize</cyan>."),
+
+            TocLinkingError::InvalidCleanupService { service, line } => {
+                let valid = CleanupService::all()
+                    .iter()
+                    .map(|service| {
+                        let descriptor = cleanup_service_descriptor(service);
+                        format!(
+                            "  <cyan>{}</cyan> - {}",
+                            descriptor.name, descriptor.description
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                StatusBlock::new(StatusState::Error)
+                    .error_header(ErrorHeader::new(
+                        "TocLinkingError",
+                        "invalid cleanup service",
+                    ))
+                    .body(format!(
+                        "<dim>Service:</dim> <cyan>{service}</cyan>\n<dim>Line:</dim> {line}\n<dim>Valid services:</dim>\n{valid}"
+                    ))
+                    .hint("Pass a comma-separated list of valid service names to <cyan>cleanup=</cyan>.")
+            }
+
+            TocLinkingError::InvalidLevel { level, line } => StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new("TocLinkingError", "invalid heading level"))
+                .body(format!(
+                    "<dim>Level:</dim> <cyan>{level}</cyan>\n<dim>Line:</dim> {line}"
+                ))
+                .hint("Heading levels must be integers between <cyan>1</cyan> and <cyan>6</cyan>."),
+
+            TocLinkingError::FileNotFound { path, line } => StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new("TocLinkingError", "file not found"))
+                .body(format!(
+                    "<dim>Path:</dim> <cyan>{path}</cyan>\n<dim>Line:</dim> {line}"
+                ))
+                .hint("Add a <cyan>| fallback.md</cyan> option or end the chain with <cyan>| false</cyan> to allow missing files."),
+
+            TocLinkingError::InvalidGlob { pattern, line, message } => StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new("TocLinkingError", "invalid glob pattern"))
+                .body(format!(
+                    "<dim>Pattern:</dim> <cyan>{pattern}</cyan>\n<dim>Line:</dim> {line}\n<dim>Message:</dim> {message}"
+                ))
+                .hint("See the globset crate docs for supported pattern syntax."),
+
+            TocLinkingError::Io(source) => StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new("TocLinkingError", "I/O error"))
+                .body(format!(
+                    "<dim>Kind:</dim> {:?}\n{source}",
+                    source.kind()
+                ))
+                .hint("Confirm the referenced file exists and is readable."),
+        }
+    }
+}
+
+/// Name/description pair for a cleanup service.
+struct CleanupServiceDescriptor {
+    name: &'static str,
+    description: &'static str,
+}
+
+/// Canonical CLI token and user-facing description for a cleanup service.
+fn cleanup_service_descriptor(service: &CleanupService) -> CleanupServiceDescriptor {
+    match service {
+        CleanupService::EmojiLeader => CleanupServiceDescriptor {
+            name: "emoji_leader",
+            description: "Strip leading emoji and any following space.",
+        },
+        CleanupService::EmojiTrailing => CleanupServiceDescriptor {
+            name: "emoji_trailing",
+            description: "Strip trailing emoji and any preceding space.",
+        },
+        CleanupService::Emoji => CleanupServiceDescriptor {
+            name: "emoji",
+            description: "Remove emoji sequences anywhere in the heading.",
+        },
+        CleanupService::Number => CleanupServiceDescriptor {
+            name: "number",
+            description: "Remove a leading numeric outline like `1.2.3`.",
+        },
+        CleanupService::Capitalize => CleanupServiceDescriptor {
+            name: "capitalize",
+            description: "Uppercase the first alphanumeric character.",
+        },
+    }
+}
+
 /// A cleanup service that transforms heading text for display.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CleanupService {
@@ -147,4 +254,8 @@ pub struct TocLinkingDirective {
     pub span: Range<usize>,
     /// 1-indexed line number.
     pub line: usize,
+    /// Leading whitespace of the directive line.
+    pub indent: String,
+    /// Inferred container indentation when directive is at column 1.
+    pub inferred_indent: Option<String>,
 }

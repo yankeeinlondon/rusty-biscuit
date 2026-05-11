@@ -1,18 +1,9 @@
 {
     "folders": [
         {
-            "name": "ai",
+            "name": "shared",
             "path": ".ai"
         },
-        {
-            "name": "Monorepo Docs",
-            "path": "docs"
-        },
-        {
-            "name": "Monorepo Prompts",
-            "path": "prompts"
-        },
-
         {
             "name": "worktree",
             "path": "worktree"

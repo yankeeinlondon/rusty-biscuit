@@ -1386,6 +1386,384 @@ fn test_columns_snapshot() {
     insta::assert_snapshot!(stdout);
 }
 
+// ---------------------------------------------------------------------------
+// Verbosity flag tests
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_verbose_flag_shows_environment_section() {
+    cargo_bin_cmd!("bt")
+        .arg("-v")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Environment"))
+        .stdout(predicate::str::contains("TERM:"))
+        .stdout(predicate::str::contains("COLORTERM:"));
+}
+
+#[test]
+fn test_very_verbose_shows_raw_detection() {
+    cargo_bin_cmd!("bt")
+        .arg("-vv")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Environment"))
+        .stdout(predicate::str::contains("Raw Detection"))
+        .stdout(predicate::str::contains("LANG:"))
+        .stdout(predicate::str::contains("TMUX:"));
+}
+
+#[test]
+fn test_default_no_environment_section() {
+    cargo_bin_cmd!("bt")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Environment").not())
+        .stdout(predicate::str::contains("Raw Detection").not());
+}
+
+#[test]
+fn test_quiet_suppresses_output() {
+    let output = cargo_bin_cmd!("bt")
+        .arg("--quiet")
+        .output()
+        .expect("Failed to execute command");
+
+    assert!(output.status.success());
+    // --quiet suppresses the default metadata output entirely
+    assert!(
+        output.stdout.is_empty(),
+        "stdout should be empty with --quiet, got: {}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+}
+
+#[test]
+fn test_silent_suppresses_all_output() {
+    let output = cargo_bin_cmd!("bt")
+        .arg("--silent")
+        .output()
+        .expect("Failed to execute command");
+
+    assert!(output.status.success());
+    assert!(
+        output.stdout.is_empty(),
+        "stdout should be empty with --silent, got: {}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+}
+
+#[test]
+fn test_silent_suppresses_json_output() {
+    let output = cargo_bin_cmd!("bt")
+        .arg("--silent")
+        .arg("--json")
+        .output()
+        .expect("Failed to execute command");
+
+    assert!(output.status.success());
+    assert!(
+        output.stdout.is_empty(),
+        "stdout should be empty with --silent --json, got: {}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+}
+
+#[test]
+fn test_quiet_short_flag() {
+    let output = cargo_bin_cmd!("bt")
+        .arg("-q")
+        .output()
+        .expect("Failed to execute command");
+
+    assert!(output.status.success());
+    assert!(output.stdout.is_empty(), "stdout should be empty with -q");
+}
+
+// ---------------------------------------------------------------------------
+// STDERR error output and exit code tests
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_prose_empty_errors_to_stderr() {
+    let output = cargo_bin_cmd!("bt")
+        .arg("prose")
+        .output()
+        .expect("Failed to execute command");
+
+    assert!(!output.status.success(), "should fail with no content");
+    assert!(
+        output.stdout.is_empty(),
+        "stdout should be empty on error, got: {}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("No content provided"),
+        "stderr should contain error message, got: {}",
+        stderr
+    );
+}
+
+/// Verifies that `bt prose --force-color` emits SGR sequences to a
+/// non-TTY pipe.
+///
+/// Without `--force-color`, `bt` would correctly suppress colors when
+/// stdout is not a TTY. With the flag, the renderer constructs a
+/// forced-color [`Terminal`] regardless of detection, so the output
+/// must contain `\x1b[3` (the SGR foreground prefix). This is the
+/// Level-1 unit-test-shaped proof that the flag works without any
+/// terminal harness.
+#[test]
+fn test_prose_force_color_flag_emits_sgr_to_pipe() {
+    let output = cargo_bin_cmd!("bt")
+        .arg("prose")
+        .arg("--force-color")
+        .arg("<red>x</red>")
+        .env_remove("NO_COLOR")
+        .output()
+        .expect("Failed to execute command");
+
+    assert!(
+        output.status.success(),
+        "bt prose --force-color should succeed, stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let has_red = stdout.contains("\x1b[31m") || stdout.contains("\x1b[91m");
+    assert!(
+        has_red,
+        "expected stdout to contain SGR red (\\x1b[31m or \\x1b[91m); got bytes: {:?}",
+        output.stdout
+    );
+}
+
+/// Verifies that `bt prose --print-bytes` emits a hex dump of the
+/// rendered byte stream to stderr.
+///
+/// The dump is delimited by a `--- prose debug ---` header line and
+/// followed by a single line of lowercase hex digits. Combined with
+/// `--force-color` this gives Level-2 tests a deterministic signal
+/// that the renderer produced SGR red regardless of any terminal
+/// capture filtering.
+#[test]
+fn test_prose_print_bytes_flag_dumps_hex_to_stderr() {
+    let output = cargo_bin_cmd!("bt")
+        .arg("prose")
+        .arg("--force-color")
+        .arg("--print-bytes")
+        .arg("<red>x</red>")
+        .env_remove("NO_COLOR")
+        .output()
+        .expect("Failed to execute command");
+
+    assert!(
+        output.status.success(),
+        "bt prose --print-bytes should succeed, stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("--- prose debug ---"),
+        "expected stderr to contain '--- prose debug ---' header; got: {stderr}"
+    );
+    // \x1b[31m hex == 1b5b33316d ; \x1b[91m hex == 1b5b39316d
+    let has_red_hex = stderr.contains("1b5b33316d") || stderr.contains("1b5b39316d");
+    assert!(
+        has_red_hex,
+        "expected stderr hex dump to contain SGR red bytes (1b5b33316d or 1b5b39316d); \
+         got: {stderr}"
+    );
+}
+
+#[test]
+fn test_quote_empty_errors_to_stderr() {
+    let output = cargo_bin_cmd!("bt")
+        .arg("quote")
+        .output()
+        .expect("Failed to execute command");
+
+    assert!(!output.status.success(), "should fail with no content");
+    assert!(
+        output.stdout.is_empty(),
+        "stdout should be empty on error, got: {}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("No content provided"),
+        "stderr should contain error message, got: {}",
+        stderr
+    );
+}
+
+#[test]
+fn test_list_empty_errors_to_stderr() {
+    cargo_bin_cmd!("bt")
+        .arg("list")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("required"))
+        .stdout(predicate::str::is_empty());
+}
+
+#[test]
+fn test_padleft_missing_args_errors_to_stderr() {
+    cargo_bin_cmd!("bt")
+        .arg("padleft")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("required"))
+        .stdout(predicate::str::is_empty());
+}
+
+#[test]
+fn test_padright_missing_args_errors_to_stderr() {
+    cargo_bin_cmd!("bt")
+        .arg("padright")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("required"))
+        .stdout(predicate::str::is_empty());
+}
+
+#[test]
+fn test_image_nonexistent_file_errors_to_stderr() {
+    let output = cargo_bin_cmd!("bt")
+        .arg("image")
+        .arg("/tmp/nonexistent_file_12345.png")
+        .output()
+        .expect("Failed to execute command");
+
+    assert!(
+        !output.status.success(),
+        "should fail with nonexistent file"
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(!stderr.is_empty(), "stderr should contain an error message");
+}
+
+#[test]
+fn test_bar_chart_invalid_data_errors_to_stderr() {
+    let output = cargo_bin_cmd!("bt")
+        .arg("bar-chart")
+        .arg("not_a_number")
+        .output()
+        .expect("Failed to execute command");
+
+    assert!(!output.status.success(), "should fail with invalid data");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("Invalid number"),
+        "stderr should contain error about invalid number, got: {}",
+        stderr
+    );
+}
+
+#[test]
+fn test_timeline_bad_format_errors_to_stderr() {
+    let output = cargo_bin_cmd!("bt")
+        .arg("timeline")
+        .arg("no colon here")
+        .output()
+        .expect("Failed to execute command");
+
+    assert!(!output.status.success(), "should fail with bad format");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("Invalid event format"),
+        "stderr should contain format error, got: {}",
+        stderr
+    );
+}
+
+#[test]
+fn test_error_exit_code_is_nonzero() {
+    // Verify the actual exit code is non-zero (not just failure)
+    let output = cargo_bin_cmd!("bt")
+        .arg("prose")
+        .output()
+        .expect("Failed to execute command");
+
+    let code = output.status.code().expect("should have exit code");
+    assert_ne!(code, 0, "exit code should be non-zero on error");
+}
+
+// ---------------------------------------------------------------------------
+// Snapshot tests
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_prose_styled_snapshot() {
+    let output = cargo_bin_cmd!("bt")
+        .arg("prose")
+        .arg("<b>Error:</b> something went <red>wrong</red> in the <i>module</i>")
+        .env("NO_COLOR", "1")
+        .output()
+        .expect("Failed to execute command");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    insta::assert_snapshot!(stdout);
+}
+
+#[test]
+fn test_quote_snapshot() {
+    let output = cargo_bin_cmd!("bt")
+        .arg("quote")
+        .arg("To be or not to be, that is the question.")
+        .arg("--attribution")
+        .arg("Shakespeare")
+        .env("NO_COLOR", "1")
+        .output()
+        .expect("Failed to execute command");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    insta::assert_snapshot!(stdout);
+}
+
+#[test]
+fn test_list_snapshot() {
+    let output = cargo_bin_cmd!("bt")
+        .arg("list")
+        .arg("First item")
+        .arg("Second item with <b>bold</b>")
+        .arg("Third item")
+        .env("NO_COLOR", "1")
+        .output()
+        .expect("Failed to execute command");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    insta::assert_snapshot!(stdout);
+}
+
+#[test]
+fn test_padleft_snapshot() {
+    let output = cargo_bin_cmd!("bt")
+        .arg("padleft")
+        .arg("30")
+        .arg("hello")
+        .env("NO_COLOR", "1")
+        .output()
+        .expect("Failed to execute command");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    insta::assert_snapshot!(stdout);
+}
+
+#[test]
+fn test_padright_snapshot() {
+    let output = cargo_bin_cmd!("bt")
+        .arg("padright")
+        .arg("30")
+        .arg("hello")
+        .env("NO_COLOR", "1")
+        .output()
+        .expect("Failed to execute command");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    insta::assert_snapshot!(stdout);
+}
+
 #[test]
 fn test_actual_terminal_query_integration() {
     use expectrl::{Expect, Session};

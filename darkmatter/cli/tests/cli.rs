@@ -455,6 +455,112 @@ fn test_compose_strips_frontmatter() {
         .stdout(predicate::str::contains("---").not());
 }
 
+/// Regression test for silent YAML parse failure when frontmatter values
+/// contain shell substitutions with nested double quotes.
+///
+/// Before the fix, `"$(cmd "arg")"` broke the YAML parser and the
+/// `impl From<String> for Markdown` fallback left the entire `---...---`
+/// block inside `content()`, so default compose output leaked the raw
+/// frontmatter block.
+#[test]
+fn test_compose_strips_frontmatter_when_values_contain_shell_substitution() {
+    let temp_dir = tempfile::TempDir::new().unwrap();
+    let md_path = temp_dir.path().join("test.md");
+    std::fs::write(
+        &md_path,
+        "---\nreview: \"\"\ndir: \"$(dirname \"{{review}}\")\"\n---\nBody: {{review}}\n",
+    )
+    .unwrap();
+
+    // Approve shell commands so the pipeline runs to completion.
+    let whitelist_path = temp_dir.path().join(".darkmatter-shell-whitelist");
+    std::fs::write(&whitelist_path, "prefix dirname\n").unwrap();
+
+    md_cmd()
+        .current_dir(temp_dir.path())
+        .arg("compose")
+        .arg(&md_path)
+        .arg("review=docs/foo.md")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Body: docs/foo.md"))
+        .stdout(predicate::str::contains("---").not());
+}
+
+/// Regression test for double-frontmatter output.
+///
+/// Before the fix, `--frontmatter` emitted the state-populated frontmatter
+/// on top of a raw, unparsed frontmatter block that still lived in
+/// `content()`, producing two `---...---` fences. The fix makes parsing
+/// succeed so exactly one frontmatter block is emitted.
+#[test]
+fn test_compose_frontmatter_flag_emits_single_block_with_nested_quotes() {
+    let temp_dir = tempfile::TempDir::new().unwrap();
+    let md_path = temp_dir.path().join("test.md");
+    std::fs::write(
+        &md_path,
+        "---\nreview: \"\"\ndir: \"$(dirname \"{{review}}\")\"\n---\nBody\n",
+    )
+    .unwrap();
+
+    let whitelist_path = temp_dir.path().join(".darkmatter-shell-whitelist");
+    std::fs::write(&whitelist_path, "prefix dirname\n").unwrap();
+
+    let output = md_cmd()
+        .current_dir(temp_dir.path())
+        .arg("compose")
+        .arg("--frontmatter")
+        .arg(&md_path)
+        .arg("review=docs/foo.md")
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let stdout = String::from_utf8(output).unwrap();
+
+    // Count frontmatter fence pairs: each frontmatter block has two `---`
+    // lines. Before the fix we saw four (two fences). Expect exactly two.
+    let fence_count = stdout.lines().filter(|line| line.trim() == "---").count();
+    assert_eq!(
+        fence_count, 2,
+        "expected exactly one frontmatter block (two fences), got {fence_count}.\nstdout:\n{stdout}"
+    );
+    assert!(
+        stdout.contains("review: docs/foo.md"),
+        "state-populated review should appear in frontmatter.\nstdout:\n{stdout}"
+    );
+}
+
+/// Regression test for silent shell-expansion skip.
+///
+/// Before the fix, malformed frontmatter meant `$(...)` in values was
+/// never discovered for execution. This test proves shell expansion runs
+/// on frontmatter values authored with nested quotes by observing the
+/// expanded result in the `--frontmatter` output.
+#[test]
+fn test_compose_runs_frontmatter_shell_with_nested_quotes() {
+    let temp_dir = tempfile::TempDir::new().unwrap();
+    let md_path = temp_dir.path().join("test.md");
+    std::fs::write(
+        &md_path,
+        "---\npath: \"docs/foo.md\"\ndir: \"$(dirname \"{{path}}\")\"\n---\nok\n",
+    )
+    .unwrap();
+
+    let whitelist_path = temp_dir.path().join(".darkmatter-shell-whitelist");
+    std::fs::write(&whitelist_path, "prefix dirname\n").unwrap();
+
+    md_cmd()
+        .current_dir(temp_dir.path())
+        .arg("compose")
+        .arg("--frontmatter")
+        .arg(&md_path)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("dir: docs"));
+}
+
 #[test]
 fn test_compose_invalid_state() {
     md_cmd()
@@ -520,6 +626,177 @@ fn test_compose_set_and_state_combined() {
         .stdout(predicate::str::contains("Hi Bob"));
 }
 
+// =============================================================================
+//              COMPOSE SHORTHAND SETTER TESTS
+// =============================================================================
+
+#[test]
+fn test_compose_shorthand_basic_file_input() {
+    let tmp = md_file("# Hello {{ iteration }}\n");
+    md_cmd()
+        .args(["compose"])
+        .arg(tmp.path())
+        .arg("iteration=1")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Hello 1"));
+}
+
+#[test]
+fn test_compose_shorthand_basic_stdin() {
+    md_cmd()
+        .args(["compose", "iteration=1"])
+        .write_stdin("# Hello {{ iteration }}")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Hello 1"));
+}
+
+#[test]
+fn test_compose_shorthand_multiple_setters_mixed_types() {
+    md_cmd()
+        .args(["compose", "iteration=1", "draft=false", "name=Alice"])
+        .write_stdin("{{ iteration }} {{ draft }} {{ name }}")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("1 false Alice"));
+}
+
+#[test]
+fn test_compose_shorthand_json5_value() {
+    md_cmd()
+        .args(["compose", r#"meta={author:"Alice"}"#])
+        .write_stdin("{{ meta.author }}")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Alice"));
+}
+
+#[test]
+fn test_compose_shorthand_participates_in_validation() {
+    let temp_dir = tempfile::TempDir::new().unwrap();
+    std::fs::create_dir(temp_dir.path().join("features")).unwrap();
+    std::fs::write(
+        temp_dir.path().join("features/my-plan.md"),
+        "# My Plan\n\nPlan content here.",
+    )
+    .unwrap();
+
+    let template_path = temp_dir.path().join("template.md");
+    std::fs::write(&template_path, "# Task\n\n::file features/{{plan}}\n").unwrap();
+
+    md_cmd()
+        .arg("compose")
+        .arg(&template_path)
+        .arg("plan=my-plan.md")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Plan content here."));
+}
+
+#[test]
+fn test_compose_shorthand_wins_over_state() {
+    md_cmd()
+        .args([
+            "compose",
+            "-",
+            "--state",
+            r#"{"iteration":0}"#,
+            "iteration=1",
+        ])
+        .write_stdin("{{ iteration }}")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("1"));
+}
+
+#[test]
+fn test_compose_shorthand_wins_over_set() {
+    md_cmd()
+        .args(["compose", "-", "--set", r#"{"iteration":1}"#, "iteration=2"])
+        .write_stdin("{{ iteration }}")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("2"));
+}
+
+#[test]
+fn test_compose_shorthand_duplicate_keys_last_write_wins() {
+    md_cmd()
+        .args(["compose", "iteration=1", "iteration=2"])
+        .write_stdin("{{ iteration }}")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("2"));
+}
+
+#[test]
+fn test_compose_shorthand_empty_value() {
+    md_cmd()
+        .args(["compose", "empty="])
+        .write_stdin("'{{ empty }}'")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("''"));
+}
+
+#[test]
+fn test_compose_shorthand_empty_key_errors() {
+    md_cmd()
+        .args(["compose", "=value"])
+        .write_stdin("# Test")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("Invalid setter '=value'"));
+}
+
+#[test]
+fn test_compose_shorthand_numeric_leading_key_is_treated_as_input_path() {
+    md_cmd()
+        .args(["compose", "9key=value"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("Failed to load"))
+        .stderr(predicate::str::contains("9key=value"));
+}
+
+#[test]
+fn test_compose_shorthand_setter_before_file_input() {
+    let tmp = md_file("# Hello {{ iteration }}\n");
+    md_cmd()
+        .args(["compose", "iteration=1"])
+        .arg(tmp.path())
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Hello 1"));
+}
+
+#[test]
+fn test_compose_shorthand_multiple_non_setter_tokens_error() {
+    let tmp = md_file("# Test\n");
+    md_cmd()
+        .args(["compose"])
+        .arg(tmp.path())
+        .arg("other.md")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("expected at most one input path"));
+}
+
+#[test]
+fn test_compose_shorthand_path_escape_hatch() {
+    let tmp = md_file("# Content\n");
+    let path_str = format!("./{}", tmp.path().file_name().unwrap().to_string_lossy());
+    md_cmd()
+        .args(["compose"])
+        .arg(&path_str)
+        .arg("key=val")
+        .current_dir(tmp.path().parent().unwrap())
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Content"));
+}
+
 #[test]
 fn test_compose_set_invalid_json() {
     md_cmd()
@@ -538,6 +815,114 @@ fn test_compose_set_requires_json_object() {
         .assert()
         .failure()
         .stderr(predicate::str::contains("expected a JSON object"));
+}
+
+// =============================================================================
+//              SET OVERLAY TRANCLUSION CLI TESTS
+// =============================================================================
+
+#[test]
+fn test_set_overlay_child_interpolation() {
+    let dir = tempfile::TempDir::new().unwrap();
+    std::fs::write(
+        dir.path().join("parent.md"),
+        r#"::file child.md set.name="Bob""#,
+    )
+    .unwrap();
+    std::fs::write(
+        dir.path().join("child.md"),
+        "---\nname: Alice\n---\n\nHello {{ name }}\n",
+    )
+    .unwrap();
+
+    md_cmd()
+        .arg("compose")
+        .arg(dir.path().join("parent.md"))
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Hello Bob"))
+        .stdout(predicate::str::contains("Alice").not());
+}
+
+#[test]
+fn test_set_overlay_strict_rejects_invalid() {
+    let dir = tempfile::TempDir::new().unwrap();
+    std::fs::write(dir.path().join("parent.md"), r#"::file child.md set=42"#).unwrap();
+    std::fs::write(dir.path().join("child.md"), "body\n").unwrap();
+
+    md_cmd()
+        .arg("compose")
+        .arg(dir.path().join("parent.md"))
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("invalid frontmatter assignment"));
+}
+
+#[test]
+fn test_set_overlay_permissive_invalid_warns() {
+    let dir = tempfile::TempDir::new().unwrap();
+    std::fs::write(
+        dir.path().join("parent.md"),
+        r#"::file child.md set=42 set.name="Bob""#,
+    )
+    .unwrap();
+    std::fs::write(
+        dir.path().join("child.md"),
+        "---\nname: Alice\n---\n\n{{ name }}\n",
+    )
+    .unwrap();
+
+    md_cmd()
+        .arg("compose")
+        .arg(dir.path().join("parent.md"))
+        .arg("--allow-invalid-frontmatter-assignment")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Bob"))
+        .stdout(predicate::str::contains("Alice").not());
+}
+
+#[test]
+fn test_set_overlay_strict_rejects_reassigned() {
+    let dir = tempfile::TempDir::new().unwrap();
+    std::fs::write(
+        dir.path().join("parent.md"),
+        r#"::file child.md set.name="Bob" set.name="Mary""#,
+    )
+    .unwrap();
+    std::fs::write(dir.path().join("child.md"), "---\n---\nbody\n").unwrap();
+
+    md_cmd()
+        .arg("compose")
+        .arg(dir.path().join("parent.md"))
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("duplicate frontmatter property"));
+}
+
+#[test]
+fn test_set_overlay_permissive_reassigned_warns_and_rightmost_wins() {
+    let dir = tempfile::TempDir::new().unwrap();
+    std::fs::write(
+        dir.path().join("parent.md"),
+        r#"::file child.md set.name="Bob" set.name="Mary""#,
+    )
+    .unwrap();
+    std::fs::write(
+        dir.path().join("child.md"),
+        "---\nname: Alice\n---\n\n{{ name }}\n",
+    )
+    .unwrap();
+
+    md_cmd()
+        .arg("compose")
+        .arg(dir.path().join("parent.md"))
+        .arg("--allow-reassigned-frontmatter-property")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Mary"))
+        .stdout(predicate::str::contains("Bob").not())
+        .stdout(predicate::str::contains("Alice").not());
 }
 
 // =============================================================================
@@ -699,13 +1084,13 @@ fn test_compose_state_variables_available_during_validation() {
 
 #[test]
 fn test_compose_scalar_ctx_without_allow_override_fails() {
-    // A document with scalar ctx should fail by default
     md_cmd()
         .args(["compose", "-"])
         .write_stdin("---\nctx: hello\n---\n# Test {{ ctx.today }}")
         .assert()
         .failure()
-        .stderr(predicate::str::contains("must be a JSON object"));
+        .stderr(predicate::str::contains("CtxMergeError"))
+        .stderr(predicate::str::contains("JSON object"));
 }
 
 #[test]
@@ -1147,6 +1532,25 @@ fn test_get_no_frontmatter_returns_empty_string() {
         .assert()
         .success()
         .stdout(predicate::str::contains("\"\""));
+}
+
+/// Regression: malformed frontmatter (a quoted scalar followed by trailing
+/// unquoted text) used to be silently treated as "no frontmatter", so
+/// `md get phases` returned `""` even when the file clearly defined `phases`.
+/// The fix surfaces a `MarkdownError::FrontmatterParse` with the offending
+/// YAML line in the rendered StatusBlock.
+#[test]
+fn test_get_malformed_frontmatter_renders_status_block_with_offending_line() {
+    let yaml = "---\nphases: 5\nfindings:\n  - id: '@' magic lookup emits results\n---\n# Doc\n";
+
+    md_cmd()
+        .args(["get", "-", "phases"])
+        .write_stdin(yaml)
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("MarkdownError"))
+        .stderr(predicate::str::contains("frontmatter parse failed"))
+        .stderr(predicate::str::contains("'@' magic lookup emits results"));
 }
 
 #[test]
@@ -1649,6 +2053,82 @@ fn test_compose_with_nonexistent_command_fails() {
         .stderr(predicate::str::contains("Command not found"));
 }
 
+#[test]
+fn test_compose_timeout_flag_fails_timed_out_shell() {
+    let temp_dir = tempfile::TempDir::new().unwrap();
+    let md_path = temp_dir.path().join("test.md");
+    let whitelist_path = temp_dir.path().join(".darkmatter-shell-whitelist");
+
+    std::fs::write(&md_path, "# Test\n::shell sleep 2\n").unwrap();
+    std::fs::write(&whitelist_path, "prefix sleep\n").unwrap();
+
+    md_cmd()
+        .arg("compose")
+        .arg(&md_path)
+        .arg("--timeout")
+        .arg("1")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("timed out"));
+}
+
+#[test]
+fn test_compose_allow_shell_timeout_emits_warning() {
+    let temp_dir = tempfile::TempDir::new().unwrap();
+    let md_path = temp_dir.path().join("test.md");
+    let whitelist_path = temp_dir.path().join(".darkmatter-shell-whitelist");
+
+    std::fs::write(&md_path, "# Test\n::shell sleep 2\nAfter\n").unwrap();
+    std::fs::write(&whitelist_path, "prefix sleep\n").unwrap();
+
+    md_cmd()
+        .arg("compose")
+        .arg(&md_path)
+        .arg("--timeout")
+        .arg("1")
+        .arg("--allow-shell-timeout")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("# Test"))
+        .stdout(predicate::str::contains("After"))
+        .stderr(predicate::str::contains("timed out"))
+        .stderr(predicate::str::contains("replaced with an empty"));
+}
+
+#[test]
+fn test_compose_shell_reports_discovered_commands_without_executing() {
+    let temp_dir = tempfile::TempDir::new().unwrap();
+    let root_path = temp_dir.path().join("root.md");
+    let child_path = temp_dir.path().join("child.md");
+
+    std::fs::write(
+        &root_path,
+        "---\nroot_cmd: \"$(echo root-frontmatter)\"\n---\n# Root\n::shell echo root-body\n::file ./child.md\n",
+    )
+    .unwrap();
+    std::fs::write(
+        &child_path,
+        "---\nchild_cmd: \"$(echo child-frontmatter)\"\n---\n# Child\n::shell echo child-body\n",
+    )
+    .unwrap();
+
+    md_cmd()
+        .arg("compose")
+        .arg(&root_path)
+        .arg("--shell")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Shell commands discovered: 4"))
+        .stdout(predicate::str::contains("echo root-frontmatter"))
+        .stdout(predicate::str::contains("frontmatter.root_cmd"))
+        .stdout(predicate::str::contains("echo root-body"))
+        .stdout(predicate::str::contains("echo child-frontmatter"))
+        .stdout(predicate::str::contains("frontmatter.child_cmd"))
+        .stdout(predicate::str::contains("echo child-body"))
+        .stdout(predicate::str::contains("root-frontmatter\n").not())
+        .stdout(predicate::str::contains("child-frontmatter\n").not());
+}
+
 // =============================================================================
 //                     VALIDATE REFS CLI TESTS (rec #15)
 // =============================================================================
@@ -2058,4 +2538,234 @@ fn test_graph_json_output() {
         .stdout(predicate::str::contains("{"))
         .stdout(predicate::str::contains("\"references\""))
         .stdout(predicate::str::contains("example.com"));
+}
+
+// =============================================================================
+//                  BLOCK RENDERING END-TO-END TESTS
+// =============================================================================
+
+/// End-to-end test for the CLI block rendering path.
+///
+/// Creates a transclusion cycle (A includes B, B includes A), runs
+/// `md compose`, and asserts that the CLI:
+/// - exits with a non-zero code,
+/// - emits the error type name (`TransclusionError`) on stderr,
+/// - emits a human-readable summary (`cycle detected`),
+/// - emits a hint-tagged token from the rendered block.
+#[test]
+fn test_block_rendering_transclusion_cycle_tty() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let a = dir.path().join("a.md");
+    let b = dir.path().join("b.md");
+    std::fs::write(&a, "# A\n\n::file b.md\n").unwrap();
+    std::fs::write(&b, "# B\n\n::file a.md\n").unwrap();
+
+    md_cmd()
+        .arg("compose")
+        .arg(&a)
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("TransclusionError"))
+        .stderr(predicate::str::contains("cycle detected"))
+        .stderr(predicate::str::contains("Break the cycle"));
+}
+
+/// Non-TTY block rendering: the same cycle error must still produce
+/// readable plain text (optimistic 80-column render) when stderr is
+/// piped. `assert_cmd` runs commands with piped stdio by default, so
+/// this test naturally exercises the non-TTY branch in `main.rs`.
+#[test]
+fn test_block_rendering_transclusion_cycle_non_tty() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let a = dir.path().join("a.md");
+    let b = dir.path().join("b.md");
+    std::fs::write(&a, "# A\n\n::file b.md\n").unwrap();
+    std::fs::write(&b, "# B\n\n::file a.md\n").unwrap();
+
+    let output = md_cmd().arg("compose").arg(&a).output().unwrap();
+
+    assert!(!output.status.success(), "expected non-zero exit code");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("cycle detected"),
+        "stderr should contain human-readable summary in non-TTY mode\nstderr:\n{stderr}"
+    );
+    assert!(
+        stderr.contains("Break the cycle"),
+        "stderr should contain hint from rendered block in non-TTY mode\nstderr:\n{stderr}"
+    );
+}
+
+// =============================================================================
+//              FILEPATH INTERPOLATION CLI TESTS
+// =============================================================================
+
+#[test]
+fn test_compose_link_relative_same_repo() {
+    let dir = tempfile::tempdir().unwrap();
+    let repo = dir.path().join("repo");
+    std::fs::create_dir_all(repo.join(".git")).unwrap();
+    let docs = repo.join("docs");
+    let assets = repo.join("assets");
+    std::fs::create_dir_all(&docs).unwrap();
+    std::fs::create_dir_all(&assets).unwrap();
+
+    let source_file = docs.join("source.md");
+    let logo_file = assets.join("logo.png");
+    std::fs::write(&source_file, "# Source\n\n![img](../assets/logo.png)\n").unwrap();
+    std::fs::write(&logo_file, "png").unwrap();
+
+    let output = md_cmd().arg("compose").arg(&source_file).output().unwrap();
+
+    assert!(output.status.success(), "command should succeed");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    assert!(
+        stdout.contains("../assets/logo.png"),
+        "stdout should contain relative path, got:\n{stdout}"
+    );
+    // Should not contain absolute path
+    assert!(
+        !stdout.contains(assets.to_string_lossy().as_ref()),
+        "stdout should not contain absolute asset path, got:\n{stdout}"
+    );
+    // No diagnostics in stdout
+    assert!(
+        !stdout.contains("Total records"),
+        "stdout should not contain diagnostics, got:\n{stdout}"
+    );
+    assert!(
+        !stdout.contains("Record kind"),
+        "stdout should not contain diagnostics, got:\n{stdout}"
+    );
+    // No unexpected stderr
+    assert!(
+        !stderr.contains("link_normalization"),
+        "stderr should not contain raw warning tokens, got:\n{stderr}"
+    );
+}
+
+#[test]
+fn test_compose_link_transcluded_child() {
+    let dir = tempfile::tempdir().unwrap();
+    let repo = dir.path().join("repo");
+    std::fs::create_dir_all(repo.join(".git")).unwrap();
+
+    let docs = repo.join("docs");
+    let components = repo.join("components");
+    std::fs::create_dir_all(&docs).unwrap();
+    std::fs::create_dir_all(&components).unwrap();
+
+    let parent_file = docs.join("parent.md");
+    let child_file = components.join("child.md");
+    let sibling_file = components.join("sibling.md");
+
+    std::fs::write(&parent_file, "# Parent\n\n::file ../components/child.md\n").unwrap();
+    std::fs::write(&child_file, "[link](./sibling.md)\n").unwrap();
+    std::fs::write(&sibling_file, "sibling content\n").unwrap();
+
+    let output = md_cmd().arg("compose").arg(&parent_file).output().unwrap();
+
+    assert!(output.status.success(), "command should succeed");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    assert!(
+        stdout.contains("../components/sibling.md"),
+        "stdout should contain normalized sibling path relative to parent, got:\n{stdout}"
+    );
+    // Should not contain absolute path
+    let abs_sibling = std::fs::canonicalize(&sibling_file).unwrap();
+    assert!(
+        !stdout.contains(abs_sibling.to_string_lossy().as_ref()),
+        "stdout should not contain absolute path, got:\n{stdout}"
+    );
+}
+
+#[test]
+fn test_compose_env_var_substitution_one_warning() {
+    let dir = tempfile::tempdir().unwrap();
+    let project_root = dir.path().join("project");
+    std::fs::create_dir_all(&project_root).unwrap();
+    let target_file = project_root.join("config.json");
+    std::fs::write(&target_file, "{}").unwrap();
+
+    let abs_target = std::fs::canonicalize(&target_file).unwrap();
+    let abs_root = std::fs::canonicalize(&project_root).unwrap();
+
+    let md_file = dir.path().join("test.md");
+    std::fs::write(&md_file, format!("[config]({})\n", abs_target.display())).unwrap();
+
+    let output = md_cmd()
+        .env("PROJECT_ROOT", &abs_root)
+        .arg("compose")
+        .arg(&md_file)
+        .output()
+        .unwrap();
+
+    assert!(output.status.success(), "command should succeed");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    eprintln!("DEBUG stdout:\n{stdout}");
+    eprintln!("DEBUG stderr:\n{stderr}");
+
+    assert!(
+        stdout.contains("${PROJECT_ROOT}/config.json"),
+        "stdout should contain env-var abstraction, got:\n{stdout}"
+    );
+    // Warning text should NOT be in stdout
+    assert!(
+        !stdout.contains("environment variable"),
+        "stdout should not contain warning text, got:\n{stdout}"
+    );
+
+    // stderr should contain exactly one warning about the env var
+    let warning_count = stderr.matches("environment variable").count();
+    assert_eq!(
+        warning_count, 1,
+        "stderr should contain exactly one env-var warning, got {warning_count} occurrences:\n{stderr}"
+    );
+}
+
+#[test]
+fn test_compose_html_spaced_attributes() {
+    let dir = tempfile::tempdir().unwrap();
+    let repo = dir.path().join("repo");
+    std::fs::create_dir_all(repo.join(".git")).unwrap();
+
+    let page_file = repo.join("page.md");
+    let other_file = repo.join("other.md");
+    let img_file = repo.join("img.png");
+
+    std::fs::write(
+        &page_file,
+        "# Page\n\n<a href = \"./other.md\">link</a>\n\n<img src = \"./img.png\">\n",
+    )
+    .unwrap();
+    std::fs::write(&other_file, "other content\n").unwrap();
+    std::fs::write(&img_file, "png").unwrap();
+
+    let output = md_cmd().arg("compose").arg(&page_file).output().unwrap();
+
+    assert!(output.status.success(), "command should succeed");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    assert!(
+        stdout.contains("other.md"),
+        "stdout should contain normalized other.md path, got:\n{stdout}"
+    );
+    assert!(
+        stdout.contains("img.png"),
+        "stdout should contain normalized img.png path, got:\n{stdout}"
+    );
+    // Should not contain the spaced attribute syntax unprocessed
+    assert!(
+        !stdout.contains("href = \"./other.md\""),
+        "stdout should not contain unprocessed spaced href, got:\n{stdout}"
+    );
+    assert!(
+        !stdout.contains("src = \"./img.png\""),
+        "stdout should not contain unprocessed spaced src, got:\n{stdout}"
+    );
 }

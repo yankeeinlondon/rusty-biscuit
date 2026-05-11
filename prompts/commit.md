@@ -1,5 +1,8 @@
 ---
-lessons_learned: "@docs/knowledge/commits.md"
+lessons_learned: "@.claudine/memory/commits.md"
+timeout: 12m
+step_timeout: 8m
+show_system_prompt: false
 ---
 # Commit Staged Files
 
@@ -31,7 +34,7 @@ Of these packages, the following ones appear to have changes _staged_ for commit
 
 ## Orchestration
 
-We will act as an aggregator when we can see opportunities to do so effectively. This will be done to allow for concurrent activity as well as to preserve the context window as much as possible. 
+We will act as an aggregator when we can see opportunities to do so effectively. This will be done to allow for concurrent activity as well as to preserve the context window as much as possible.
 
 > **IMPORTANT:** when you spawn a sub-agent always reinforce that they CAN NOT ask the user for feedback or permissions as they are in a non-interactive session!
 
@@ -64,14 +67,12 @@ Your task is to:
 3. evaluate all the _staged_ files in this monorepo,
 4. organize the work into **semantic groups**
    - each group will have an "operation" and "scope" in addition to the set of files representing the group
-   - every group must have a minimum of 1 file associated to it 
+   - every group must have a minimum of 1 file associated to it
    - a file can only be in one group
 5. act as an orchestrator and concurrently execute a subagent for every semantic group:
    - provide the subagent the grouped files and the delta's in these files
    - provide the subagent the "operation" and "scope" (including no scope if that's the determination)
-      - tell the subagent to run `sniff git commits` for examples of real commits in this repo
-      - **CRITICAL - File Limiting:** Git does NOT limit a commit to specific files when you use `git commit -- path`. If other files are staged, git will commit ALL staged files! To commit only specific files:
-          - use `git commit -m "message" -- path1 path2` ONLY when you are certain only those files are staged
+      - tell the subagent to run `git log --oneline -20` for examples of real commits in this repo
       - **Commit Message Format:** Messages must follow this structure:
           - First line: Brief summary (under 72 chars)
           - Blank line
@@ -88,12 +89,12 @@ Your task is to:
 
       - the subagent is then responsible for:
           - reviewing the changes and drafting a useful commit message following the format above,
-          - committing ONLY the files assigned to them (using the file-limiting technique above),
+          - committing ONLY the files assigned to them (using `git commit --only -m "message" -- path1 path2`),
+          - **retrying on git lock contention.** Because multiple subagents commit in parallel against the same worktree, `git commit` can fail with `fatal: Unable to create '.git/index.lock': File exists.` (or the equivalent `refs/heads/<branch>.lock` variant). This is not corruption — git's locks are fail-fast, not queuing. On such a failure, wait 1–3 seconds and retry the same `git commit --only …` command. Retry up to 5 times with short backoff before giving up and reporting failure to the orchestrator.
           - and finally, to let the orchestrator know of any problems they ran into and how they were able to overcome these issues
    - NOTE: if the subagent is not able to make a commit for any reason then this needs to be communicated back to the orchestrator with details on why they weren't able to commit.
    - the subagent SHOULD NOT push commits to any remote!
    - the subagent SHOULD be reminded that they are running in a non-interactive session so there is no way to get feedback from the user and attempts should be made to achieve the goals without asking for additional context
-   - the subagent, if it ran into any problems while trying to commit
 6. once all the subagents have completed their tasks, you will run `sniff repo` to provide the user a summary of the state of the repo
 7. then you will review the "lessons learned" that the subagents provided to you and determine if these are both:
    1. important and worthy of saving to the lessons learned memory file, and
@@ -101,7 +102,7 @@ Your task is to:
 
    If both criteria are met then you should add a new entry into the lessons-learned file: {{lessons_learned}}
 
-**IMPORTANT:** 
+**IMPORTANT:**
 
 - you must follow these steps exactly
 - remember that you are running in a non-interactive mode so you can not ask the user questions and expect a reply!

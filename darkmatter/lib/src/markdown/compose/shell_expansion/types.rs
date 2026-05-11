@@ -11,15 +11,223 @@ use crate::markdown::compose::ComposeSource;
 use crate::markdown::toc::MarkdownTocNode;
 use crate::markdown::types::MarkdownResult;
 
-/// Parsed `::shell` directive with raw command, executable, args, span, and line.
+/// Where a shell command originates in a document.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ShellCommandOrigin {
+    /// Body `::shell` directive at the given 1-indexed line.
+    Body { line: usize },
+    /// Frontmatter property with a `$(...)` shell expression.
+    Frontmatter { key: String },
+    /// Command inside a `::shell-block` / `::end-block` region.
+    ///
+    /// `start_line` is the 1-indexed line of the `::shell-block` opener.
+    /// `command_line` is the 1-indexed line of the specific command within
+    /// the block that would execute.
+    ShellBlock {
+        start_line: usize,
+        command_line: usize,
+    },
+}
+
+impl fmt::Display for ShellCommandOrigin {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Body { line } => write!(f, "line {line}"),
+            Self::Frontmatter { key } => write!(f, "frontmatter.{key}"),
+            Self::ShellBlock {
+                start_line,
+                command_line,
+            } => write!(
+                f,
+                "shell block starting at line {start_line}, command at line {command_line}"
+            ),
+        }
+    }
+}
+
+impl ShellCommandOrigin {
+    /// Returns the line number if this is a body or shell-block origin,
+    /// or 0 for frontmatter.
+    pub fn line_number(&self) -> usize {
+        match self {
+            Self::Body { line } => *line,
+            Self::Frontmatter { .. } => 0,
+            Self::ShellBlock { command_line, .. } => *command_line,
+        }
+    }
+}
+
+/// Parsed `::shell` directive with raw command, executable, args, span, and origin.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ShellDirective {
     pub raw_command: String,
     pub executable: String,
     pub args: Vec<String>,
     pub span: std::ops::Range<usize>,
-    pub line: usize,
+    pub origin: ShellCommandOrigin,
     pub error_handling: ErrorHandling,
+    /// Per-command timeout override. When Some, takes precedence over the global timeout.
+    pub timeout_override: Option<std::time::Duration>,
+    /// Parsed pipeline (supports chaining with && and ||).
+    pub pipeline: Option<ShellPipeline>,
+    /// Source context used for diagnostic rendering when execution fails.
+    pub ctx: SourceContext,
+}
+
+impl ShellDirective {
+    /// Returns the first executable in the directive (for backward compatibility).
+    pub fn first_executable(&self) -> &str {
+        if let Some(ref pipeline) = self.pipeline {
+            &pipeline.actions[0].command.executable
+        } else {
+            &self.executable
+        }
+    }
+
+    pub fn first_args(&self) -> &[String] {
+        if let Some(ref pipeline) = self.pipeline {
+            &pipeline.actions[0].command.args
+        } else {
+            &self.args
+        }
+    }
+
+    /// Returns true if this directive contains a chain (multiple actions).
+    pub fn is_chain(&self) -> bool {
+        self.pipeline.as_ref().is_some_and(|p| p.actions.len() > 1)
+    }
+}
+
+/// A parsed pipeline of commands connected by chain operators.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ShellPipeline {
+    /// Ordered list of actions with their preceding operators.
+    /// The first action always has `ChainOperator::None`.
+    pub actions: Vec<PipelineAction>,
+}
+
+impl ShellPipeline {
+    /// Creates a simple single-command pipeline.
+    pub fn single(executable: String, args: Vec<String>) -> Self {
+        Self {
+            actions: vec![PipelineAction {
+                operator: ChainOperator::None,
+                command: CommandAction {
+                    executable,
+                    args,
+                    redirection: RedirectionConfig::default(),
+                },
+            }],
+        }
+    }
+
+    /// Returns all executables in the pipeline.
+    pub fn executables(&self) -> Vec<&str> {
+        self.actions
+            .iter()
+            .map(|a| a.command.executable.as_str())
+            .collect()
+    }
+
+    /// Returns a display string for the whole pipeline including chain
+    /// operators and redirection tokens.
+    pub fn display_string(&self) -> String {
+        let mut parts = Vec::new();
+        for action in &self.actions {
+            let op_str = match action.operator {
+                ChainOperator::None => "",
+                ChainOperator::And => " && ",
+                ChainOperator::Or => " || ",
+            };
+            let mut cmd = action.command.executable.clone();
+            for arg in &action.command.args {
+                if arg.contains(' ') || arg.contains('"') || arg.contains('\'') {
+                    cmd.push_str(&format!(" \"{}\"", arg.replace('"', "\\\"")));
+                } else {
+                    cmd.push_str(&format!(" {arg}"));
+                }
+            }
+            cmd.push_str(&render_redirection(&action.command.redirection));
+            parts.push(format!("{op_str}{cmd}"));
+        }
+        parts.join("")
+    }
+}
+
+/// A single action in a pipeline, with its chain operator.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PipelineAction {
+    /// The chain operator preceding this action (None for the first).
+    pub operator: ChainOperator,
+    /// The command to execute.
+    pub command: CommandAction,
+}
+
+/// Chain operator connecting pipeline actions.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ChainOperator {
+    /// First command in the pipeline (no preceding operator).
+    None,
+    /// `&&` — execute next only if previous succeeded.
+    And,
+    /// `||` — execute next only if previous failed.
+    Or,
+}
+
+/// A single command with its redirection configuration.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CommandAction {
+    pub executable: String,
+    pub args: Vec<String>,
+    pub redirection: RedirectionConfig,
+}
+
+/// Configures stdout/stderr redirection for a command action.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct RedirectionConfig {
+    pub stdout: StdoutTarget,
+    pub stderr: StderrTarget,
+}
+
+/// Where stdout should be directed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum StdoutTarget {
+    /// Capture stdout normally (default).
+    #[default]
+    Capture,
+    /// Discard stdout (`> /dev/null`).
+    Null,
+    /// Route stdout to stderr (`>&2`).
+    ToStderr,
+}
+
+/// Renders a [`RedirectionConfig`] as the trailing redirection tokens that
+/// would appear after a command (with a leading space when non-empty).
+fn render_redirection(redir: &RedirectionConfig) -> String {
+    let mut out = String::new();
+    match redir.stdout {
+        StdoutTarget::Capture => {}
+        StdoutTarget::Null => out.push_str(" > /dev/null"),
+        StdoutTarget::ToStderr => out.push_str(" >&2"),
+    }
+    match redir.stderr {
+        StderrTarget::Capture => {}
+        StderrTarget::Null => out.push_str(" 2> /dev/null"),
+        StderrTarget::ToStdout => out.push_str(" 2>&1"),
+    }
+    out
+}
+
+/// Where stderr should be directed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum StderrTarget {
+    /// Capture stderr normally (default).
+    #[default]
+    Capture,
+    /// Discard stderr (`2> /dev/null`).
+    Null,
+    /// Merge stderr into stdout (`2>&1`).
+    ToStdout,
 }
 
 /// A shell command discovered during document graph analysis.
@@ -39,8 +247,8 @@ pub struct ShellCommandEntry {
     pub normalized: String,
     /// Source file where this directive was found.
     pub source_file: PathBuf,
-    /// Line number in the source file.
-    pub line: usize,
+    /// Where this command originates (body line or frontmatter key).
+    pub origin: ShellCommandOrigin,
 }
 
 /// Error handling options parsed from `::shell` directive flags.
@@ -162,9 +370,20 @@ impl ErrorHandling {
     }
 }
 
+/// What happens when a shell command exceeds its timeout.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ShellTimeoutBehavior {
+    /// Compose aborts with a shell-expansion error (default).
+    #[default]
+    Error,
+    /// The shell result is replaced with an empty string and a warning is emitted.
+    EmptyString,
+}
+
 /// Options for shell expansion behavior.
 pub struct ShellExpansionOptions {
     pub timeout: std::time::Duration,
+    pub timeout_behavior: ShellTimeoutBehavior,
     pub policy_root: Option<PathBuf>,
     pub working_directory: Option<PathBuf>,
     pub approval_handler: Option<Arc<dyn ShellApprovalHandler>>,
@@ -176,6 +395,7 @@ impl Clone for ShellExpansionOptions {
     fn clone(&self) -> Self {
         Self {
             timeout: self.timeout,
+            timeout_behavior: self.timeout_behavior,
             policy_root: self.policy_root.clone(),
             working_directory: self.working_directory.clone(),
             approval_handler: self.approval_handler.clone(),
@@ -188,6 +408,7 @@ impl fmt::Debug for ShellExpansionOptions {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("ShellExpansionOptions")
             .field("timeout", &self.timeout)
+            .field("timeout_behavior", &self.timeout_behavior)
             .field("policy_root", &self.policy_root)
             .field("working_directory", &self.working_directory)
             .field(
@@ -207,6 +428,7 @@ impl Default for ShellExpansionOptions {
     fn default() -> Self {
         Self {
             timeout: std::time::Duration::from_secs(10),
+            timeout_behavior: ShellTimeoutBehavior::Error,
             policy_root: None,
             working_directory: None,
             approval_handler: None,
@@ -227,7 +449,7 @@ pub trait ShellApprovalHandler: Send + Sync {
 #[derive(Debug, Clone)]
 pub struct ShellApprovalRequest {
     pub source: ComposeSource,
-    pub line: usize,
+    pub origin: ShellCommandOrigin,
     pub raw_command: String,
     pub executable: String,
     pub args: Vec<String>,
@@ -236,6 +458,11 @@ pub struct ShellApprovalRequest {
     pub blacklist_path: PathBuf,
     /// If the command was resolved from a shell alias, the original alias name.
     pub alias_name: Option<String>,
+    /// When the request covers a chained command (e.g. `a && b`), this lists
+    /// the unique executables in the chain in the order they first appear.
+    /// For non-chained requests this is empty; the CLI prompt should fall
+    /// back to `executable` in that case.
+    pub chain_executables: Vec<String>,
 }
 
 /// Possible decisions from approval handler.
@@ -248,57 +475,75 @@ pub enum ShellApprovalDecision {
     BlacklistPersist,
 }
 
-/// Errors from shell expansion operations.
+use biscuit_terminal::errors::SourceContext;
+
 #[derive(Error, Debug)]
 pub enum ShellExpansionError {
-    #[error("Shell directive parse error on line {line}: {message}")]
-    ParseDirective { line: usize, message: String },
-
-    #[error("Command not found: '{command}' on line {line}")]
-    CommandNotFound { command: String, line: usize },
-
-    #[error("Blacklisted command '{command}' on line {line}: {reason}")]
-    Blacklisted {
-        command: String,
-        reason: String,
-        line: usize,
+    #[error("Shell directive parse error at {origin}: {message}")]
+    ParseDirective {
+        ctx: Box<SourceContext>,
+        origin: ShellCommandOrigin,
+        message: String,
     },
 
-    #[error("Approval required for '{command}' on line {line}")]
+    #[error("Command not found: '{command}' at {origin}")]
+    CommandNotFound {
+        ctx: Box<SourceContext>,
+        command: String,
+        origin: ShellCommandOrigin,
+    },
+
+    #[error("Blacklisted command '{command}' at {origin}: {reason}")]
+    Blacklisted {
+        ctx: Box<SourceContext>,
+        command: String,
+        reason: String,
+        origin: ShellCommandOrigin,
+    },
+
+    #[error("Approval required for '{command}' at {origin}")]
     ApprovalRequired {
+        ctx: Box<SourceContext>,
         command: String,
         whitelist_path: PathBuf,
         blacklist_path: PathBuf,
-        line: usize,
+        origin: ShellCommandOrigin,
     },
 
-    #[error("Command denied: '{command}' on line {line}")]
-    Denied { command: String, line: usize },
+    #[error("Command denied: '{command}' at {origin}")]
+    Denied {
+        ctx: Box<SourceContext>,
+        command: String,
+        origin: ShellCommandOrigin,
+    },
 
     #[error(
-        "Command '{command}' on line {line} was not pre-approved{source_desc}. \
+        "Command '{command}' at {origin} was not pre-approved{source_desc}. \
          This is a bug in the pre-flight scanner -- please report it."
     )]
     NotPreApproved {
+        ctx: Box<SourceContext>,
         command: String,
-        line: usize,
+        origin: ShellCommandOrigin,
         source_desc: String,
     },
 
-    #[error("Command timed out after {timeout:?}: '{command}' on line {line}")]
+    #[error("Command timed out after {timeout:?}: '{command}' at {origin}")]
     Timeout {
+        ctx: Box<SourceContext>,
         command: String,
         timeout: std::time::Duration,
-        line: usize,
+        origin: ShellCommandOrigin,
     },
 
-    #[error("Command failed (exit {code}): '{command}' on line {line}")]
+    #[error("Command failed (exit {code}): '{command}' at {origin}")]
     ExecutionFailed {
+        ctx: Box<SourceContext>,
         command: String,
         code: i32,
         stdout: String,
         stderr: String,
-        line: usize,
+        origin: ShellCommandOrigin,
     },
 
     #[error("Policy I/O error for {path}: {source}")]
@@ -306,6 +551,196 @@ pub enum ShellExpansionError {
         path: PathBuf,
         source: std::io::Error,
     },
+}
+
+impl biscuit_terminal::errors::BlockError for ShellExpansionError {
+    fn status_block(
+        &self,
+        _term: &biscuit_terminal::terminal::Terminal,
+    ) -> biscuit_terminal::components::status_block::StatusBlock {
+        use biscuit_terminal::components::prose::Prose;
+        use biscuit_terminal::components::status::StatusState;
+        use biscuit_terminal::components::status_block::StatusBlock;
+        use biscuit_terminal::errors::{ErrorHeader, StatusBlockExt};
+
+        match self {
+            ShellExpansionError::ParseDirective {
+                ctx,
+                origin,
+                message,
+            } => StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new(
+                    "ShellExpansionError",
+                    "directive parse failed",
+                ))
+                .body(vec![
+                    Prose::new(format!("<dim>Origin:</dim> {origin}\n<dim>Message:</dim> {message}")),
+                    ctx.excerpt_prose(origin.line_number(), 1, "md"),
+                ])
+                .hint("Body syntax: <cyan>::shell \"command\"</cyan>. Frontmatter syntax: <cyan>key: $(command)</cyan>."),
+
+            ShellExpansionError::CommandNotFound {
+                ctx,
+                command,
+                origin,
+            } => StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new("ShellExpansionError", "command not found"))
+                .body(vec![
+                    Prose::new(format!(
+                        "<dim>Command:</dim> <cyan>{command}</cyan>\n<dim>Origin:</dim> {origin}"
+                    )),
+                    ctx.excerpt_prose(origin.line_number(), 1, "md"),
+                ])
+                .hint("Install the binary or update <cyan>$PATH</cyan> so it is discoverable."),
+
+            ShellExpansionError::Blacklisted {
+                ctx,
+                command,
+                reason,
+                origin,
+            } => StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new("ShellExpansionError", "command blacklisted"))
+                .body(vec![
+                    Prose::new(format!(
+                        "<dim>Command:</dim> <cyan>{command}</cyan>\n<dim>Origin:</dim> {origin}\n<dim>Reason:</dim> {reason}"
+                    )),
+                    ctx.excerpt_prose(origin.line_number(), 1, "md"),
+                ])
+                .hint("Remove the entry from your blacklist file if you trust this command."),
+
+            ShellExpansionError::ApprovalRequired {
+                ctx,
+                command,
+                whitelist_path,
+                blacklist_path,
+                origin,
+            } => StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new("ShellExpansionError", "approval required"))
+                .body(vec![
+                    Prose::new(format!(
+                        "<dim>Command:</dim> <cyan>{command}</cyan>\n<dim>Origin:</dim> {origin}\n<dim>Whitelist:</dim> {}\n<dim>Blacklist:</dim> {}",
+                        whitelist_path.display(),
+                        blacklist_path.display()
+                    )),
+                    ctx.excerpt_prose(origin.line_number(), 1, "md"),
+                ])
+                .hint("Re-run with <cyan>--approve-shell</cyan> or add the command to your whitelist."),
+
+            ShellExpansionError::Denied {
+                ctx,
+                command,
+                origin,
+            } => StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new("ShellExpansionError", "command denied"))
+                .body(vec![
+                    Prose::new(format!(
+                        "<dim>Command:</dim> <cyan>{command}</cyan>\n<dim>Origin:</dim> {origin}"
+                    )),
+                    ctx.excerpt_prose(origin.line_number(), 1, "md"),
+                ])
+                .hint("The user declined to approve this shell expansion."),
+
+            ShellExpansionError::NotPreApproved {
+                ctx,
+                command,
+                origin,
+                source_desc,
+            } => StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new(
+                    "ShellExpansionError",
+                    "command not pre-approved",
+                ))
+                .body(vec![
+                    Prose::new(format!(
+                        "<dim>Command:</dim> <cyan>{command}</cyan>\n<dim>Origin:</dim> {origin}\n<dim>Source:</dim> {source_desc}"
+                    )),
+                    ctx.excerpt_prose(origin.line_number(), 1, "md"),
+                ])
+                .hint("This is a bug in the pre-flight scanner — please report it."),
+
+            ShellExpansionError::Timeout {
+                ctx,
+                command,
+                timeout,
+                origin,
+            } => StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new("ShellExpansionError", "command timed out"))
+                .body(vec![
+                    Prose::new(format!(
+                        "<dim>Command:</dim> <cyan>{command}</cyan>\n<dim>Origin:</dim> {origin}\n<dim>Timeout:</dim> {timeout:?}"
+                    )),
+                    ctx.excerpt_prose(origin.line_number(), 1, "md"),
+                ])
+                .hint("Raise the timeout, or pass <cyan>--allow-shell-timeout</cyan> to warn instead of fail."),
+
+            ShellExpansionError::ExecutionFailed {
+                ctx,
+                command,
+                code,
+                stdout,
+                stderr,
+                origin,
+            } => {
+                let stdout_section = if stdout.trim().is_empty() {
+                    String::new()
+                } else {
+                    format!("\n<dim>stdout:</dim>\n{}", truncate_output(stdout))
+                };
+                let stderr_section = if stderr.trim().is_empty() {
+                    String::new()
+                } else {
+                    format!("\n<dim>stderr:</dim>\n{}", truncate_output(stderr))
+                };
+                StatusBlock::new(StatusState::Error)
+                    .error_header(ErrorHeader::new("ShellExpansionError", "execution failed"))
+                    .body(vec![
+                        Prose::new(format!(
+                            "<dim>Command:</dim> <cyan>{command}</cyan>\n<dim>Origin:</dim> {origin}\n<dim>Exit code:</dim> {code}{stdout_section}{stderr_section}"
+                        )),
+                        ctx.excerpt_prose(origin.line_number(), 1, "md"),
+                    ])
+                    .hint("Run the command directly to reproduce the failure.")
+            }
+
+            ShellExpansionError::PolicyIo { path, source } => StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new("ShellExpansionError", "policy I/O error"))
+                .body(format!(
+                    "<dim>Path:</dim> {}\n<dim>Kind:</dim> {:?}\n{source}",
+                    path.display(),
+                    source.kind()
+                ))
+                .hint("Verify the policy file exists and the process can read it."),
+        }
+    }
+}
+
+/// Truncate output to a maximum number of lines/bytes for block rendering.
+fn truncate_output(text: &str) -> String {
+    const MAX_LINES: usize = 20;
+    const MAX_BYTES: usize = 2048;
+
+    let truncated_bytes = if text.len() > MAX_BYTES {
+        let cut = text
+            .char_indices()
+            .map(|(i, _)| i)
+            .take_while(|&i| i <= MAX_BYTES)
+            .last()
+            .unwrap_or(0);
+        format!("{}\n<dim>… output truncated</dim>", &text[..cut])
+    } else {
+        text.to_string()
+    };
+
+    let lines: Vec<&str> = truncated_bytes.lines().collect();
+    if lines.len() > MAX_LINES {
+        let head = lines[..MAX_LINES].join("\n");
+        format!(
+            "{head}\n<dim>… {} more lines</dim>",
+            lines.len() - MAX_LINES
+        )
+    } else {
+        truncated_bytes
+    }
 }
 
 /// Paths to whitelist and blacklist policy files.
@@ -354,6 +789,7 @@ pub struct ShellExpansionRuntime {
 #[derive(Debug, Clone, Default)]
 struct SharedShellExpansionRuntime {
     allow_once: HashSet<String>,
+    pending_allow_once: HashSet<String>,
     whitelist: ShellRuleSet,
     user_blacklist: ShellRuleSet,
     policy_paths: Option<ShellPolicyPaths>,
@@ -364,6 +800,19 @@ pub(crate) struct ShellRuntimeSnapshot {
     pub allow_once: HashSet<String>,
     pub whitelist: ShellRuleSet,
     pub user_blacklist: ShellRuleSet,
+}
+
+/// Result of attempting to reserve a normalized command for allow-once
+/// approval via [`ShellExpansionRuntime::try_reserve_allow_once`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ReserveOutcome {
+    /// Caller now owns the reservation and must release it via
+    /// `complete_allow_once` once the approval flow resolves.
+    Reserved,
+    /// Command is already in the `allow_once` set; no caller action required.
+    AlreadyAllowed,
+    /// Another thread holds a pending reservation for this exact command.
+    Pending,
 }
 
 impl Default for ShellExpansionRuntime {
@@ -417,10 +866,41 @@ impl ShellExpansionRuntime {
         }
     }
 
-    pub(crate) fn allow_once(&mut self, normalized: String) {
+    /// Attempts to reserve a command for allow-once approval.
+    ///
+    /// ## Returns
+    ///
+    /// - [`ReserveOutcome::Reserved`] when the caller now owns the reservation
+    ///   and must call [`Self::complete_allow_once`] after the approval handler
+    ///   resolves.
+    /// - [`ReserveOutcome::AlreadyAllowed`] when the command is already in the
+    ///   `allow_once` set; the caller need not prompt or release anything for
+    ///   this command.
+    /// - [`ReserveOutcome::Pending`] when another thread is currently approving
+    ///   this exact command. The caller MUST NOT implicitly approve other
+    ///   un-reserved commands in the same chain.
+    pub(crate) fn try_reserve_allow_once(&mut self, normalized: &str) -> ReserveOutcome {
         let mut shared = self.shared.lock().unwrap();
-        shared.allow_once.insert(normalized);
-        self.approvals_used += 1;
+        if shared.allow_once.contains(normalized) {
+            return ReserveOutcome::AlreadyAllowed;
+        }
+        if shared.pending_allow_once.insert(normalized.to_string()) {
+            ReserveOutcome::Reserved
+        } else {
+            ReserveOutcome::Pending
+        }
+    }
+
+    /// Completes an allow-once reservation.
+    ///
+    /// Removes the command from the pending set. If `approved` is `true`, also
+    /// inserts it into the allow-once set.
+    pub(crate) fn complete_allow_once(&mut self, normalized: &str, approved: bool) {
+        let mut shared = self.shared.lock().unwrap();
+        shared.pending_allow_once.remove(normalized);
+        if approved {
+            shared.allow_once.insert(normalized.to_string());
+        }
     }
 
     pub(crate) fn persist_whitelist_exact(&mut self, normalized: String) {
@@ -731,5 +1211,65 @@ mod tests {
             }
             .is_empty()
         );
+    }
+
+    #[test]
+    fn shell_timeout_behavior_default_is_error() {
+        assert_eq!(ShellTimeoutBehavior::default(), ShellTimeoutBehavior::Error);
+    }
+
+    #[test]
+    fn shell_expansion_options_default_timeout_behavior_is_error() {
+        let opts = ShellExpansionOptions::default();
+        assert_eq!(opts.timeout_behavior, ShellTimeoutBehavior::Error);
+    }
+
+    #[test]
+    fn shell_command_origin_body_display() {
+        let origin = ShellCommandOrigin::Body { line: 42 };
+        assert_eq!(format!("{origin}"), "line 42");
+    }
+
+    #[test]
+    fn shell_command_origin_frontmatter_display() {
+        let origin = ShellCommandOrigin::Frontmatter {
+            key: "files".to_string(),
+        };
+        assert_eq!(format!("{origin}"), "frontmatter.files");
+    }
+
+    #[test]
+    fn shell_command_origin_shell_block_display() {
+        let origin = ShellCommandOrigin::ShellBlock {
+            start_line: 10,
+            command_line: 12,
+        };
+        assert_eq!(
+            format!("{origin}"),
+            "shell block starting at line 10, command at line 12"
+        );
+    }
+
+    #[test]
+    fn shell_command_origin_line_number_body() {
+        let origin = ShellCommandOrigin::Body { line: 42 };
+        assert_eq!(origin.line_number(), 42);
+    }
+
+    #[test]
+    fn shell_command_origin_line_number_frontmatter() {
+        let origin = ShellCommandOrigin::Frontmatter {
+            key: "x".to_string(),
+        };
+        assert_eq!(origin.line_number(), 0);
+    }
+
+    #[test]
+    fn shell_command_origin_line_number_shell_block() {
+        let origin = ShellCommandOrigin::ShellBlock {
+            start_line: 10,
+            command_line: 12,
+        };
+        assert_eq!(origin.line_number(), 12);
     }
 }

@@ -6,12 +6,16 @@ The darkmatter compose pipeline provides document preparation through three phas
 
 **Inline Pre** (serial):
 
-1. **Text Replacement** - `replace:` frontmatter replaces literal strings
-2. **Page Blocks** - `::block`/`::end-block` conditional regions
-3. **Interpolation** - `{{ variable }}` expressions expand to values
-4. **Shell Expansion** - `::shell` directives execute commands
+1. **Frontmatter Interpolation** - `{{ variable }}` in frontmatter resolves before effective state is built
+2. **Frontmatter Shell Expansion** - top-level `$(cmd)` frontmatter values execute after interpolation and write trimmed `stdout` back into frontmatter
+3. **Text Replacement** - `replace:` frontmatter replaces literal strings
+4. **Page Blocks** - `::block`/`::end-block` conditional regions
+5. **Interpolation** - `{{ variable }}` expressions expand to values
+6. **Shell Expansion** - Execute `::shell` directives execute approved commands and inject combined `stdout` + `stderr`
+7. **Link Resolve** - Resolve all local link targets (Markdown hyperlinks/images and supported HTML embeds) to absolute paths
 
 **Transclusion** (prepared serially, resolved concurrently via Rayon):
+
 
 - `::file ./doc.md` - Include markdown with recursive processing
 - `::code ./main.rs` - Include as fenced code block
@@ -24,6 +28,13 @@ The darkmatter compose pipeline provides document preparation through three phas
 
 - **Cleanup** - Normalizes markdown formatting
 - **Normalization** - Adjusts heading levels
+
+**Finalization** (root-only serial):
+
+- **Link Normalization** - Converts absolute path links back into portable forms:
+    - **Same-repo**: Paths inside the same git repository are made relative to the document
+    - **Home-dir**: Paths under the user's home directory use the `~/` prefix
+    - **ENV-var**: Paths under whitelisted environment variables (e.g. `PROJECT_ROOT`) use `${VAR}/` prefix
 
 ## API
 
@@ -111,8 +122,8 @@ Expressions between `{{ }}` are evaluated and replaced with values.
 ### Fallback Expressions
 
 ```handlebars
-{{ color | "unknown" }}
-{{ primary | secondary | "default" }}
+{{ color || "unknown" }}
+{{ primary || secondary || "default" }}
 ```
 
 Uses first truthy value, or the fallback.
@@ -150,13 +161,19 @@ Numeric strings auto-convert for comparisons.
 
 ### Code Region Protection
 
-Expressions inside code spans and fenced code blocks are NOT processed:
+Inline code spans (single backticks) ARE interpolated — the common
+templating pattern `` `var_{{ phase }}` `` works without any opt-in.
+
+Fenced and indented code blocks are skipped by default to preserve
+literal code samples. Set `interpolate_code_blocks: true` (frontmatter)
+or call `ComposeOptions::with_interpolate_code_blocks(true)` to opt
+fenced blocks back into the scan.
 
 ```markdown
-Inline: `{{ not_evaluated }}`
+Inline: `{{ evaluated }}`             # always interpolated
 
 ```
-{{ also_not_evaluated }}
+{{ not_evaluated_by_default }}        # skipped unless opted in
 ```
 ```
 
@@ -173,6 +190,8 @@ pub struct ComposeReport {
     pub page_blocks_skipped: usize,
     pub transclusions_applied: usize,
     pub transclusions_skipped: usize,
+    pub link_resolves_applied: usize,
+    pub link_normalizations_applied: usize,
     pub max_transclusion_depth: usize,
     pub cleanup_changed: bool,
     pub normalization_report: Option<NormalizationReport>,
@@ -243,6 +262,8 @@ darkmatter/lib/src/markdown/compose/
 ├── types.rs         # ComposeOperation, ComposeOptions, ComposeReport, etc.
 ├── state.rs         # EffectiveState, merge logic
 ├── replacement.rs   # Text replacement engine
+├── link_resolve.rs  # Link resolution (absolute paths)
+├── link_normalization.rs # Link normalization (portable paths)
 └── interpolation/
     ├── mod.rs       # Module exports
     ├── lexer.rs     # Tokenizer, expression finder

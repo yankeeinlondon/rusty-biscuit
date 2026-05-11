@@ -3,9 +3,9 @@
 //! Tests composed graph behavior (rec #13) and validation (rec #14)
 //! with real filesystem documents using `tempfile`.
 
-use darkmatter::markdown::normalize::HeadingLevel;
 use darkmatter::markdown::Markdown;
 use darkmatter::markdown::compose::{ComposeOptions, ComposeSource};
+use darkmatter::markdown::normalize::HeadingLevel;
 use darkmatter::markdown::reference::types::{
     ReferenceGraphOptions, ReferenceKind, ReferenceSyntax, ReferenceTarget,
 };
@@ -188,9 +188,8 @@ fn depth_limit_respected() {
 
     let md = load_md(&dir, "a.md");
     // Set a depth limit of 2
-    let options = ReferenceGraphOptions::with_compose(
-        ComposeOptions::new().with_max_transclusion_depth(2),
-    );
+    let options =
+        ReferenceGraphOptions::with_compose(ComposeOptions::new().with_max_transclusion_depth(2));
     let graph = md.reference_graph(options).unwrap();
 
     // Should not reach all 5 levels
@@ -808,7 +807,10 @@ fn section_context_populated_in_graph() {
         Some("Intro"),
         "expected section heading 'Intro' for ::file directive in the Intro section"
     );
-    assert_eq!(insertion.context.section_heading_level, Some(HeadingLevel::H2));
+    assert_eq!(
+        insertion.context.section_heading_level,
+        Some(HeadingLevel::H2)
+    );
     assert_eq!(
         insertion.context.directive_kind,
         Some(ReferenceSyntax::DirectiveFile)

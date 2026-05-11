@@ -2,57 +2,104 @@
 
 ## High Level Flow
 
+```mermaid
+block-beta
+    columns 3
 
 
-| Inline Pre (serial)                                       | Transclusion (concurrent)                                        | Inline Post (serial)                                            | 
-| -------------                                             | -------------                                                    | ---------------                                                 | 
-| [1. Frontmatter Interpolation](./inline/fm-interpolation.md)    | [Block Transclusion 🏁](./transclusion/block-transclusion.md)     | [1. Cleaning 🏁](./inline/cleaning.md)                             |
-| [2. Text Replacement 🏁](./inline/text-replacement.md)    | [Frontmatter Transclusion 🏁](./transclusion/fm-transclusion.md)  | [2. Normalization 🏁](./inline/normalization-and-releveling.md)    |
-| [3. Page Blocks 🏁](./inline/page-blocks.md)              | [Code Block Transclusion 🏁](./transclusion/code-transclusion.md) |                                                                 |
-| [4. Interpolation 🏁](./inline/interpolation.md)          | [TOC Linking 🏁](./inline/toc-linking.md)                         |                                                                 |
-| [5. Shell Expansion 🏁](./inline/shell-expansion.md)                                                            | [AI Prompt Expansion](./transclusion/prompt-expansion.md)         |                                                                 |
-|                                                           | [AI Summarization](./transclusion/summarization.md)               |                                                                 |
-|                                                           | [AI Consolidation](./transclusion/consolidation.md)               |                                                                 |
+    block:pre
+        columns 1
+        preTitle["<b>Inline Pre</b> (<i>serial</i>)"]
+        preFlightChecks("<a href='./inline/preflight-checks.md'>0. Pre-flight checks 🏁</a>")
+        fmInterpolate("<a href='./inline/fm-interpolation.md'>1. Frontmatter Interpolation 🏁</a>")
+        shellExp("<a href='./inline/fm-shell-expansion.md'>2. Frontmatter Shell Expansion 🏁</a>")
+        textReplacement("<a href='./inline/text-replacement.md'>3. Text Replacement 🏁</a>")
+        pageBlocks("<a href='./inline/page-blocks.md'>4. Page Blocks 🏁</a>")
+        interpolation("<a href='./inline/interpolation.md'>5. Interpolation 🏁</a>")
+        shellExpansion("<a href='./inline/shell-expansion.md'>6. Shell Expansion 🏁</a>")
+        shellBlocks("<a href='./inline/shell-blocks.md'>7. Shell Blocks 🏁</a>")
+        linkResolve("<a href='./operations/link-resolve.md'>8. Link Resolve (abs) 🏁</a>")
+    end
+
+    block:transclusion
+        columns 1
+        transTitle["<b>Transclusion</b> (<i>parallel</i>)"]
+        blockTransclusion("<a href='./transclusion/block-transclusion.md'>Block Transclusion 🏁</a>")
+        fmTransclusion("<a href='./transclusion/fm-transclusion.md'>Frontmatter Transclusion 🏁</a>")
+        codeBlockTransclusion("<a href='./transclusion/code-transclusion.md'>Code Block Transclusion 🏁</a>")
+        tocLinking("<a href='./inline/toc-linking.md'>TOC Linking 🏁</a>")
+        promptExpansion("<a href='./transclusion/prompt-expansion.md'>🧠 Prompt Expansion</a>")
+        summarization("<a href='./transclusion/summarization.md'>🧠 Summarization</a>")
+        consolidation("<a href='./transclusion/consolidation.md'>🧠 Consolidation</a>")
+
+        ts1[" "]
+        ts2[" "]
+    end
+
+    block:post
+        columns 1
+        postTitle["<b>Inline Post</b> (<dim><i>serial</i></dim>)"]
+        cleaning("<a href='./inline/cleaning.md'>1. Cleaning 🏁</a>")
+        structural("<a href='./inline/structural-normalization.md'>2. Structural Normalization 🏁</a>")
+
+        s1[" "]
+        s2[" "]
+        s3[" "]
+        s4[" "]
+        s5[" "]
+        s6[" "]
+        s7[" "]
+    end
+
+    block:final
+        columns 1
+        finalTitle["<b>Finalization</b> (<dim><i>serial</i></dim>)"]
+        links("<a href='./operations/link-normalization.md'>Link Normalization 🏁</a>")
+
+        fs1[" "]
+        fs2[" "]
+        fs3[" "]
+        fs4[" "]
+        fs5[" "]
+        fs6[" "]
+        fs7[" "]
+    end
+
+
+
+    pre --> transclusion
+    transclusion --> post
+    post --> final
+
+    style preTitle fill:transparent,stroke:transparent
+    style transTitle fill:transparent,stroke:transparent
+    style postTitle fill:transparent,stroke:transparent
+    style finalTitle fill:transparent,stroke:transparent
+
+    classDef spacer fill:transparent,stroke:transparent,color:transparent
+    class s1,s2,s3,s4,s5,s6,s7,ts1,ts2,fs1,fs2,fs3,fs4,fs5,fs6,fs7 spacer
+
+    classDef notReady font-weight:100,font-family:sans-serif,stroke:gray
+    class promptExpansion,summarization,consolidation notReady
+```
 
 > **Note:** items marked with `🏁` are implemented
 
-
 ## Pipeline Stages
 
-### Inline Mutation
+### 1. Inline Pre
 
-What defines the _inline mutation_ group is that the updates on a document are isolated to the document at hand. In this group, however,
-we have two subset groups:
+The **Pre Transclusion** group are a set operations run in a serial process, one operation after another. These operations take place _before_ any transclusions take place and allow the document to become stable before the transclusion process is executed.
 
-1. Pre Transclusion
-2. Post Transclusion
+Being run serial is important so that one operation can _setup_ or _effect_ the next operation. Rather then be a side effect, this is intentional and often adds useful power to the pipeline. It does mean, however, that the ordering of these operations must be considered and organized in a way to provide maximum value.
 
-For the **Pre Transclusion** group, these operations are run in a serial process, one operation after another. During these early steps we
-have the potential for one operation to _setup_ or _effect_ the next operation. Rather then be a side effect, this is intentional and often adds useful power to the
-pipeline.
-
-> As a example, if a conditional page block is evaluated to _false_ (aka, do not render this page), the identifying this first means any
+> **Example:** if a conditional page block is evaluated to _false_ (aka, do not render this page), then identifying this first means any
 shell expansion commands (or any other inline mutation) contained within the block will now be ignored because this part of the page has
 been removed.
+>
+> **Note:** in this example, even though we will not execute the shell expansion, when we do the pre-flight checks we will require that ALL shell commands are whitelisted before starting the 
 
-In contrast the **Post Transclusion** group of operations -- which are also run serially -- are focused on finalizing output and structure
-into the most valid form we can deterministically reach.
-
-#### Pre Ops
-
-- [Frontmatter Interpolation](./inline/fm-interpolation.md) - resolves `{{ variable }}` expressions inside frontmatter values using non-templated (seed) values, `ctx.*`, and `env.*` as inputs. Runs before the effective state is built so downstream stages see resolved values.
-- [Text Replacement](./inline/text-replacement.md) - when `replace` property in frontmatter is a key/value dictionary we will replace all instances of the _keys_ with the _values_ in the body of the document
-- [Page Blocks](./inline/page-blocks.md) - allow for blocks in the page to be defined, often with _conditional_ logic to determine whether the block should be rendered or removed
-- [Interpolation](./inline/interpolation.md) - looks for handlebars template markers in the page's body and replaces the template markers with data from frontmatter, ENV variables, or [context variables](./topics/context-variables.md).
-- [Shell Expansion](./inline/shell-expansion.md) - allows _approved_ commands to be run and have the STDOUT replace the directive
-- Link Validation is deferred and not part of the shipped compose pipeline yet.
-
-#### Post Ops
-
-- [Cleaning](./inline/cleaning.md) - makes the markdown as standard bearing and consistent as possible                    
-- [Normalization](./inline/normalization-and-releveling.md) - ensures that the heading structure is valid and fixes where it is not
-
-### Transclusion
+### 2. Transclusion
 
 The **transclusion** stage is typified by recursive operations which have the potential to be time consuming (and more dependent on 
 [caching](./topics/caching.md)) then those found in the inline steps. 
@@ -61,37 +108,17 @@ The **transclusion** stage is typified by recursive operations which have the po
 doesn't have it's own transclusions this operation will be lightning fast and no slower than any of the the inline mutation operations.
 However, even in this example, we don't know how expensive the operation is until the graph dependency has been traversed
 
+### 3. Inline Post
 
+- [Cleaning](./inline/cleaning.md) - makes the markdown as standard bearing and consistent as possible                    
+- [Normalization](./inline/structural-normalization.md) - ensures that the heading structure is valid and fixes where it is not
 
-### Rendering
+### 4. Finalization
 
-- mutates the document for one of the [supported output formats](./topics/output-formats.md)
+The **finalization** stage is _only_ performed in the root document of the compose operation and does any adjustments on the fully transposed document before passing it back to the caller.
 
+- [Link Normalization](./operations/link-normalization.md) - converts absolute paths back to portable forms (relative, `~/`, or `${ENV}`)
 
-## Ordering and Concurrency
-
-The macro flow for execution is as follows:
-
-```mermaid title="Pipeline Flow"
-flowchart LR
-
-  InlinePre["Inline (pre)"]
-  Transclusion[Transclusion]
-  InlinePost["Inline (post)"]
-  InlinePre --> Transclusion --> InlinePost
-```
-
-- Both the `Inline` stages of the workflow process content serially but that is **NOT** true for transclusion:
-
-    - transclusion starts by serially preparing the work items in `ComposeOperation::default_order()`
-    - block/file transclusion, frontmatter transclusion, code transclusion, and TOC-linking are then resolved concurrently
-    - `::toc-linking` reads headings from the referenced file's raw markdown source rather than recursively composed output
-    - ancestry repetition is treated as a cycle; shared DAG dependencies across sibling branches are allowed
-    - the base document's transclusion is done when all prepared work items are complete
-
-- Only after these concurrent transclusions complete do we move to the final `Inline (post)` process.
-- After we conclude the Inline post processing we optionally will move into rendering
-    - the default output for the compose pipeline is plain text output so no rendering support is needed
 
 ## Rendering
 
@@ -126,4 +153,4 @@ The key things to remember are:
     - in the case of receiving a Markdown document _without_ any Darkmatter directives, only very mild formatting changes from operations like 
 - the [Rendering Pipeline](./darkmatter-render-pipeline.md) expects to receive Markdown content not Darkmatter and it returns one of the supported [output formats](./topics/output-formats.md).
 
-##### For more details on the **rendering pipeline** always refer to: [Rendering Pipeline](./darkmatter-rendering-pipeline.md)
+> For more details on the **rendering pipeline** always refer to: [Rendering Pipeline](./darkmatter-rendering-pipeline.md)

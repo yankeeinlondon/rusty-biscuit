@@ -11,8 +11,8 @@
 //! Run with: cargo run -p biscuit-terminal --example table_showcase
 
 use biscuit_terminal::components::renderable::Renderable;
-use biscuit_terminal::components::table::table::{Table, TableCellContent, TableColumn};
 use biscuit_terminal::components::table::types::{ColumnType, Currency};
+use biscuit_terminal::components::table::{Table, TableCellContent, TableColumn};
 use biscuit_terminal::utils::layout::Alignment;
 
 fn main() {

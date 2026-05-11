@@ -10,6 +10,7 @@ blast_radius:
   - darkmatter/lib/src/markdown/compose/interpolation/evaluator.rs
   - darkmatter/lib/src/markdown/compose/interpolation/lexer.rs
   - darkmatter/lib/src/markdown/compose/context/capture.rs
+  - darkmatter/lib/src/markdown/compose/context/mod.rs
   - darkmatter/cli/src/commands.rs
 ---
 
@@ -87,6 +88,24 @@ In this example:
 - `spec` is templated
 - `metadata` is templated because one nested string contains `{{ ... }}`
 
+
+### Multipass Requirements
+
+> **NEW REQUIREMENT**
+
+Because we always run Frontmatter Shell expansion _before_ Frontmatter Interpolation we have a guarantee that all shell expansion will have been resolved and it's presence will **not** ever force us to use a multi-pass interpolation but even though we'd prefer to complete all interpolation in one pass there are cases where that might not be possible.
+
+1. Recursive Interpolation
+    
+    Here's an example:
+
+    ```yaml
+    area: "{{ctx.current_package_area}}"
+    
+    ```
+
+
+
 ## Available Variables
 
 Frontmatter interpolation resolves against three sources:
@@ -94,7 +113,7 @@ Frontmatter interpolation resolves against three sources:
 | Prefix | Source | Example |
 |---|---|---|
 | *(none)* | Non-templated frontmatter seed values | `{{ base }}` |
-| `ctx.` | Runtime context | `{{ ctx.today }}` |
+| `ctx.` | Runtime context (demand-driven) | `{{ ctx.today }}` |
 | `env.` | Environment variables | `{{ env.HOME }}` |
 
 Dotted access into nested seed values is supported:
@@ -107,6 +126,23 @@ meta:
 path: "{{meta.owner.name}}"
 ---
 ```
+
+### Context Variable Groups
+
+The `ctx.*` namespace provides 70+ runtime variables organized into demand-driven groups. Only groups whose variables are actually referenced in the document are captured, avoiding unnecessary work (e.g., git queries, subprocess calls).
+
+| Group | Variables (examples) |
+|---|---|
+| DateTime | `today`, `yesterday`, `tomorrow`, `now`, `now_utc`, `year`, `month`, `month_name`, `day`, `day_abbr`, `time`, `timezone`, `season`, `timestamp` |
+| Repo | `repo`, `repo_root`, `is_monorepo`, `packages`, `current_package`, `current_package_area` |
+| FileChanges | `dirty_files`, `staged_files`, `untracked_files`, `dirty_packages`, `staged_packages` |
+| Languages | `programming_language`, `programming_languages_in_repo`, `package_manager` |
+| Documents | `docs_readme`, `docs_blast_radius`, `docs_drift`, `docs_skill` |
+| Os | `os`, `os_distro`, `os_version`, `os_package_manager` |
+| Hardware | `memory_total`, `memory_used`, `memory_avail`, `cpu_cores`, `cpu_arch` |
+| Gpu | `gpu` |
+
+Each group also provides `_list` variants (markdown bullet list) alongside CSV variants where applicable (e.g., `dirty_files` vs `dirty_files_list`). DateTime variables have `_utc` counterparts.
 
 ## Supported Value Shapes
 
@@ -180,7 +216,7 @@ Frontmatter interpolation uses the same expression grammar and evaluator as body
 That means:
 
 - missing variables resolve to the empty string
-- fallbacks work: `{{ color | "unknown" }}`
+- fallbacks work: `{{ color || "unknown" }}`
 - ternaries work: `{{ enabled ? "yes" : "no" }}`
 - helper functions work: `{{ length(items) }}`
 
@@ -247,4 +283,5 @@ This document may need review when any of these files change:
 - `darkmatter/lib/src/markdown/compose/interpolation/evaluator.rs`
 - `darkmatter/lib/src/markdown/compose/interpolation/lexer.rs`
 - `darkmatter/lib/src/markdown/compose/context/capture.rs`
+- `darkmatter/lib/src/markdown/compose/context/mod.rs`
 - `darkmatter/cli/src/commands.rs`

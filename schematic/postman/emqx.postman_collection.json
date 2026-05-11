@@ -9,27 +9,29 @@
       "key": "baseUrl",
       "value": "http://localhost:18083/api/v5",
       "description": "Base URL for EmqxBasic"
+    },
+    {
+      "key": "username",
+      "value": "",
+      "description": "Username for Basic authentication"
+    },
+    {
+      "key": "password",
+      "value": "",
+      "description": "Password for Basic authentication"
+    },
+    {
+      "key": "bearerToken",
+      "value": "",
+      "description": "Bearer token for Authorization header"
     }
   ],
-  "auth": {
-    "type": "basic",
-    "basic": [
-      {
-        "key": "username",
-        "value": "{{username}}"
-      },
-      {
-        "key": "password",
-        "value": "{{password}}"
-      }
-    ]
-  },
   "item": [
     {
       "name": "Alarms",
       "item": [
         {
-          "name": "ListAlarms",
+          "name": "ListAlarms (EmqxBasic)",
           "request": {
             "method": "GET",
             "url": {
@@ -41,11 +43,24 @@
                 "alarms"
               ]
             },
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{username}}"
+                },
+                {
+                  "key": "password",
+                  "value": "{{password}}"
+                }
+              ]
+            },
             "description": "List active alarms"
           }
         },
         {
-          "name": "ListAlarms",
+          "name": "ListAlarms (EmqxBearer)",
           "request": {
             "method": "GET",
             "url": {
@@ -55,6 +70,15 @@
               ],
               "path": [
                 "alarms"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{bearerToken}}"
+                }
               ]
             },
             "description": "List active alarms"
@@ -66,7 +90,7 @@
       "name": "Authentication",
       "item": [
         {
-          "name": "ListAuthenticators",
+          "name": "ListAuthenticators (EmqxBasic)",
           "request": {
             "method": "GET",
             "url": {
@@ -78,11 +102,24 @@
                 "authentication"
               ]
             },
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{username}}"
+                },
+                {
+                  "key": "password",
+                  "value": "{{password}}"
+                }
+              ]
+            },
             "description": "List all configured authentication providers"
           }
         },
         {
-          "name": "GetAuthenticator",
+          "name": "GetAuthenticator (EmqxBasic)",
           "request": {
             "method": "GET",
             "url": {
@@ -101,11 +138,24 @@
                 }
               ]
             },
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{username}}"
+                },
+                {
+                  "key": "password",
+                  "value": "{{password}}"
+                }
+              ]
+            },
             "description": "Get details of a specific authenticator"
           }
         },
         {
-          "name": "ListAuthUsers",
+          "name": "ListAuthUsers (EmqxBasic)",
           "request": {
             "method": "GET",
             "url": {
@@ -125,11 +175,24 @@
                 }
               ]
             },
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{username}}"
+                },
+                {
+                  "key": "password",
+                  "value": "{{password}}"
+                }
+              ]
+            },
             "description": "List users in a built-in database authenticator"
           }
         },
         {
-          "name": "CreateAuthUser",
+          "name": "CreateAuthUser (EmqxBasic)",
           "request": {
             "method": "POST",
             "url": {
@@ -149,6 +212,19 @@
                 }
               ]
             },
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{username}}"
+                },
+                {
+                  "key": "password",
+                  "value": "{{password}}"
+                }
+              ]
+            },
             "body": {
               "mode": "raw",
               "raw": "{}",
@@ -162,7 +238,7 @@
           }
         },
         {
-          "name": "DeleteAuthUser",
+          "name": "DeleteAuthUser (EmqxBasic)",
           "request": {
             "method": "DELETE",
             "url": {
@@ -184,6 +260,19 @@
                 {
                   "key": "user_id",
                   "value": "<user_id>"
+                }
+              ]
+            },
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{username}}"
+                },
+                {
+                  "key": "password",
+                  "value": "{{password}}"
                 }
               ]
             },
@@ -191,7 +280,7 @@
           }
         },
         {
-          "name": "ListAuthenticators",
+          "name": "ListAuthenticators (EmqxBearer)",
           "request": {
             "method": "GET",
             "url": {
@@ -203,11 +292,20 @@
                 "authentication"
               ]
             },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{bearerToken}}"
+                }
+              ]
+            },
             "description": "List all configured authentication providers"
           }
         },
         {
-          "name": "GetAuthenticator",
+          "name": "GetAuthenticator (EmqxBearer)",
           "request": {
             "method": "GET",
             "url": {
@@ -226,11 +324,20 @@
                 }
               ]
             },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{bearerToken}}"
+                }
+              ]
+            },
             "description": "Get details of a specific authenticator"
           }
         },
         {
-          "name": "ListAuthUsers",
+          "name": "ListAuthUsers (EmqxBearer)",
           "request": {
             "method": "GET",
             "url": {
@@ -250,11 +357,20 @@
                 }
               ]
             },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{bearerToken}}"
+                }
+              ]
+            },
             "description": "List users in a built-in database authenticator"
           }
         },
         {
-          "name": "CreateAuthUser",
+          "name": "CreateAuthUser (EmqxBearer)",
           "request": {
             "method": "POST",
             "url": {
@@ -274,6 +390,15 @@
                 }
               ]
             },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{bearerToken}}"
+                }
+              ]
+            },
             "body": {
               "mode": "raw",
               "raw": "{}",
@@ -287,7 +412,7 @@
           }
         },
         {
-          "name": "DeleteAuthUser",
+          "name": "DeleteAuthUser (EmqxBearer)",
           "request": {
             "method": "DELETE",
             "url": {
@@ -309,6 +434,15 @@
                 {
                   "key": "user_id",
                   "value": "<user_id>"
+                }
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{bearerToken}}"
                 }
               ]
             },
@@ -321,7 +455,7 @@
       "name": "Authorization",
       "item": [
         {
-          "name": "ListAuthzSources",
+          "name": "ListAuthzSources (EmqxBasic)",
           "request": {
             "method": "GET",
             "url": {
@@ -334,11 +468,24 @@
                 "sources"
               ]
             },
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{username}}"
+                },
+                {
+                  "key": "password",
+                  "value": "{{password}}"
+                }
+              ]
+            },
             "description": "List all authorization sources"
           }
         },
         {
-          "name": "ListAuthzSources",
+          "name": "ListAuthzSources (EmqxBearer)",
           "request": {
             "method": "GET",
             "url": {
@@ -349,6 +496,15 @@
               "path": [
                 "authorization",
                 "sources"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{bearerToken}}"
+                }
               ]
             },
             "description": "List all authorization sources"
@@ -360,7 +516,7 @@
       "name": "Banned",
       "item": [
         {
-          "name": "ListBanned",
+          "name": "ListBanned (EmqxBasic)",
           "request": {
             "method": "GET",
             "url": {
@@ -372,11 +528,24 @@
                 "banned"
               ]
             },
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{username}}"
+                },
+                {
+                  "key": "password",
+                  "value": "{{password}}"
+                }
+              ]
+            },
             "description": "List all banned clients, usernames, and hosts"
           }
         },
         {
-          "name": "CreateBan",
+          "name": "CreateBan (EmqxBasic)",
           "request": {
             "method": "POST",
             "url": {
@@ -386,6 +555,19 @@
               ],
               "path": [
                 "banned"
+              ]
+            },
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{username}}"
+                },
+                {
+                  "key": "password",
+                  "value": "{{password}}"
+                }
               ]
             },
             "body": {
@@ -401,7 +583,7 @@
           }
         },
         {
-          "name": "DeleteBan",
+          "name": "DeleteBan (EmqxBasic)",
           "request": {
             "method": "DELETE",
             "url": {
@@ -422,6 +604,19 @@
                 {
                   "key": "who",
                   "value": "<who>"
+                }
+              ]
+            },
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{username}}"
+                },
+                {
+                  "key": "password",
+                  "value": "{{password}}"
                 }
               ]
             },
@@ -429,7 +624,7 @@
           }
         },
         {
-          "name": "ListBanned",
+          "name": "ListBanned (EmqxBearer)",
           "request": {
             "method": "GET",
             "url": {
@@ -441,11 +636,20 @@
                 "banned"
               ]
             },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{bearerToken}}"
+                }
+              ]
+            },
             "description": "List all banned clients, usernames, and hosts"
           }
         },
         {
-          "name": "CreateBan",
+          "name": "CreateBan (EmqxBearer)",
           "request": {
             "method": "POST",
             "url": {
@@ -455,6 +659,15 @@
               ],
               "path": [
                 "banned"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{bearerToken}}"
+                }
               ]
             },
             "body": {
@@ -470,7 +683,7 @@
           }
         },
         {
-          "name": "DeleteBan",
+          "name": "DeleteBan (EmqxBearer)",
           "request": {
             "method": "DELETE",
             "url": {
@@ -491,6 +704,15 @@
                 {
                   "key": "who",
                   "value": "<who>"
+                }
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{bearerToken}}"
                 }
               ]
             },
@@ -503,7 +725,7 @@
       "name": "Clients",
       "item": [
         {
-          "name": "ListClients",
+          "name": "ListClients (EmqxBasic)",
           "request": {
             "method": "GET",
             "url": {
@@ -515,11 +737,24 @@
                 "clients"
               ]
             },
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{username}}"
+                },
+                {
+                  "key": "password",
+                  "value": "{{password}}"
+                }
+              ]
+            },
             "description": "List connected MQTT clients with pagination"
           }
         },
         {
-          "name": "GetClient",
+          "name": "GetClient (EmqxBasic)",
           "request": {
             "method": "GET",
             "url": {
@@ -538,11 +773,24 @@
                 }
               ]
             },
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{username}}"
+                },
+                {
+                  "key": "password",
+                  "value": "{{password}}"
+                }
+              ]
+            },
             "description": "Get detailed information about a specific client"
           }
         },
         {
-          "name": "DisconnectClient",
+          "name": "DisconnectClient (EmqxBasic)",
           "request": {
             "method": "DELETE",
             "url": {
@@ -561,11 +809,24 @@
                 }
               ]
             },
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{username}}"
+                },
+                {
+                  "key": "password",
+                  "value": "{{password}}"
+                }
+              ]
+            },
             "description": "Forcefully disconnect a client from the broker"
           }
         },
         {
-          "name": "SubscribeClient",
+          "name": "SubscribeClient (EmqxBasic)",
           "request": {
             "method": "POST",
             "url": {
@@ -585,6 +846,19 @@
                 }
               ]
             },
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{username}}"
+                },
+                {
+                  "key": "password",
+                  "value": "{{password}}"
+                }
+              ]
+            },
             "body": {
               "mode": "raw",
               "raw": "{}",
@@ -598,7 +872,7 @@
           }
         },
         {
-          "name": "UnsubscribeClient",
+          "name": "UnsubscribeClient (EmqxBasic)",
           "request": {
             "method": "POST",
             "url": {
@@ -615,6 +889,19 @@
                 {
                   "key": "clientid",
                   "value": "<clientid>"
+                }
+              ]
+            },
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{username}}"
+                },
+                {
+                  "key": "password",
+                  "value": "{{password}}"
                 }
               ]
             },
@@ -631,7 +918,7 @@
           }
         },
         {
-          "name": "ListClients",
+          "name": "ListClients (EmqxBearer)",
           "request": {
             "method": "GET",
             "url": {
@@ -643,11 +930,20 @@
                 "clients"
               ]
             },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{bearerToken}}"
+                }
+              ]
+            },
             "description": "List connected MQTT clients with pagination"
           }
         },
         {
-          "name": "GetClient",
+          "name": "GetClient (EmqxBearer)",
           "request": {
             "method": "GET",
             "url": {
@@ -666,11 +962,20 @@
                 }
               ]
             },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{bearerToken}}"
+                }
+              ]
+            },
             "description": "Get detailed information about a specific client"
           }
         },
         {
-          "name": "DisconnectClient",
+          "name": "DisconnectClient (EmqxBearer)",
           "request": {
             "method": "DELETE",
             "url": {
@@ -689,11 +994,20 @@
                 }
               ]
             },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{bearerToken}}"
+                }
+              ]
+            },
             "description": "Forcefully disconnect a client from the broker"
           }
         },
         {
-          "name": "SubscribeClient",
+          "name": "SubscribeClient (EmqxBearer)",
           "request": {
             "method": "POST",
             "url": {
@@ -713,6 +1027,15 @@
                 }
               ]
             },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{bearerToken}}"
+                }
+              ]
+            },
             "body": {
               "mode": "raw",
               "raw": "{}",
@@ -726,7 +1049,7 @@
           }
         },
         {
-          "name": "UnsubscribeClient",
+          "name": "UnsubscribeClient (EmqxBearer)",
           "request": {
             "method": "POST",
             "url": {
@@ -743,6 +1066,15 @@
                 {
                   "key": "clientid",
                   "value": "<clientid>"
+                }
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{bearerToken}}"
                 }
               ]
             },
@@ -764,7 +1096,7 @@
       "name": "Cluster",
       "item": [
         {
-          "name": "GetCluster",
+          "name": "GetCluster (EmqxBasic)",
           "request": {
             "method": "GET",
             "url": {
@@ -776,11 +1108,24 @@
                 "cluster"
               ]
             },
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{username}}"
+                },
+                {
+                  "key": "password",
+                  "value": "{{password}}"
+                }
+              ]
+            },
             "description": "Get cluster status and node membership"
           }
         },
         {
-          "name": "GetCluster",
+          "name": "GetCluster (EmqxBearer)",
           "request": {
             "method": "GET",
             "url": {
@@ -790,6 +1135,15 @@
               ],
               "path": [
                 "cluster"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{bearerToken}}"
+                }
               ]
             },
             "description": "Get cluster status and node membership"
@@ -801,7 +1155,7 @@
       "name": "Listeners",
       "item": [
         {
-          "name": "ListListeners",
+          "name": "ListListeners (EmqxBasic)",
           "request": {
             "method": "GET",
             "url": {
@@ -813,11 +1167,24 @@
                 "listeners"
               ]
             },
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{username}}"
+                },
+                {
+                  "key": "password",
+                  "value": "{{password}}"
+                }
+              ]
+            },
             "description": "List all configured listeners"
           }
         },
         {
-          "name": "GetListener",
+          "name": "GetListener (EmqxBasic)",
           "request": {
             "method": "GET",
             "url": {
@@ -836,11 +1203,24 @@
                 }
               ]
             },
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{username}}"
+                },
+                {
+                  "key": "password",
+                  "value": "{{password}}"
+                }
+              ]
+            },
             "description": "Get details of a specific listener"
           }
         },
         {
-          "name": "ListListeners",
+          "name": "ListListeners (EmqxBearer)",
           "request": {
             "method": "GET",
             "url": {
@@ -852,11 +1232,20 @@
                 "listeners"
               ]
             },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{bearerToken}}"
+                }
+              ]
+            },
             "description": "List all configured listeners"
           }
         },
         {
-          "name": "GetListener",
+          "name": "GetListener (EmqxBearer)",
           "request": {
             "method": "GET",
             "url": {
@@ -872,6 +1261,15 @@
                 {
                   "key": "id",
                   "value": "<id>"
+                }
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{bearerToken}}"
                 }
               ]
             },
@@ -894,6 +1292,15 @@
               ],
               "path": [
                 "login"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{bearerToken}}"
+                }
               ]
             },
             "body": {
@@ -926,6 +1333,15 @@
                 "logout"
               ]
             },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{bearerToken}}"
+                }
+              ]
+            },
             "description": "Invalidate the current bearer token"
           }
         }
@@ -935,7 +1351,7 @@
       "name": "Metrics",
       "item": [
         {
-          "name": "ListMetrics",
+          "name": "ListMetrics (EmqxBasic)",
           "request": {
             "method": "GET",
             "url": {
@@ -947,11 +1363,24 @@
                 "metrics"
               ]
             },
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{username}}"
+                },
+                {
+                  "key": "password",
+                  "value": "{{password}}"
+                }
+              ]
+            },
             "description": "Get broker metrics for all nodes"
           }
         },
         {
-          "name": "ListMetrics",
+          "name": "ListMetrics (EmqxBearer)",
           "request": {
             "method": "GET",
             "url": {
@@ -961,6 +1390,15 @@
               ],
               "path": [
                 "metrics"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{bearerToken}}"
+                }
               ]
             },
             "description": "Get broker metrics for all nodes"
@@ -972,7 +1410,7 @@
       "name": "Nodes",
       "item": [
         {
-          "name": "ListNodes",
+          "name": "ListNodes (EmqxBasic)",
           "request": {
             "method": "GET",
             "url": {
@@ -984,11 +1422,24 @@
                 "nodes"
               ]
             },
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{username}}"
+                },
+                {
+                  "key": "password",
+                  "value": "{{password}}"
+                }
+              ]
+            },
             "description": "List all nodes in the EMQX cluster"
           }
         },
         {
-          "name": "GetNode",
+          "name": "GetNode (EmqxBasic)",
           "request": {
             "method": "GET",
             "url": {
@@ -1007,11 +1458,24 @@
                 }
               ]
             },
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{username}}"
+                },
+                {
+                  "key": "password",
+                  "value": "{{password}}"
+                }
+              ]
+            },
             "description": "Get detailed information about a specific node"
           }
         },
         {
-          "name": "ListNodes",
+          "name": "ListNodes (EmqxBearer)",
           "request": {
             "method": "GET",
             "url": {
@@ -1023,11 +1487,20 @@
                 "nodes"
               ]
             },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{bearerToken}}"
+                }
+              ]
+            },
             "description": "List all nodes in the EMQX cluster"
           }
         },
         {
-          "name": "GetNode",
+          "name": "GetNode (EmqxBearer)",
           "request": {
             "method": "GET",
             "url": {
@@ -1043,6 +1516,15 @@
                 {
                   "key": "node",
                   "value": "<node>"
+                }
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{bearerToken}}"
                 }
               ]
             },
@@ -1055,7 +1537,7 @@
       "name": "Prometheus",
       "item": [
         {
-          "name": "GetPrometheus",
+          "name": "GetPrometheus (EmqxBasic)",
           "request": {
             "method": "GET",
             "url": {
@@ -1068,11 +1550,24 @@
                 "stats"
               ]
             },
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{username}}"
+                },
+                {
+                  "key": "password",
+                  "value": "{{password}}"
+                }
+              ]
+            },
             "description": "Get metrics in Prometheus format"
           }
         },
         {
-          "name": "GetPrometheus",
+          "name": "GetPrometheus (EmqxBearer)",
           "request": {
             "method": "GET",
             "url": {
@@ -1083,6 +1578,15 @@
               "path": [
                 "prometheus",
                 "stats"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{bearerToken}}"
+                }
               ]
             },
             "description": "Get metrics in Prometheus format"
@@ -1094,7 +1598,7 @@
       "name": "Publish",
       "item": [
         {
-          "name": "Publish",
+          "name": "Publish (EmqxBasic)",
           "request": {
             "method": "POST",
             "url": {
@@ -1104,6 +1608,19 @@
               ],
               "path": [
                 "publish"
+              ]
+            },
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{username}}"
+                },
+                {
+                  "key": "password",
+                  "value": "{{password}}"
+                }
               ]
             },
             "body": {
@@ -1119,7 +1636,7 @@
           }
         },
         {
-          "name": "PublishBulk",
+          "name": "PublishBulk (EmqxBasic)",
           "request": {
             "method": "POST",
             "url": {
@@ -1130,6 +1647,19 @@
               "path": [
                 "publish",
                 "bulk"
+              ]
+            },
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{username}}"
+                },
+                {
+                  "key": "password",
+                  "value": "{{password}}"
+                }
               ]
             },
             "body": {
@@ -1145,7 +1675,7 @@
           }
         },
         {
-          "name": "Publish",
+          "name": "Publish (EmqxBearer)",
           "request": {
             "method": "POST",
             "url": {
@@ -1155,6 +1685,15 @@
               ],
               "path": [
                 "publish"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{bearerToken}}"
+                }
               ]
             },
             "body": {
@@ -1170,7 +1709,7 @@
           }
         },
         {
-          "name": "PublishBulk",
+          "name": "PublishBulk (EmqxBearer)",
           "request": {
             "method": "POST",
             "url": {
@@ -1181,6 +1720,15 @@
               "path": [
                 "publish",
                 "bulk"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{bearerToken}}"
+                }
               ]
             },
             "body": {
@@ -1201,7 +1749,7 @@
       "name": "Retainer",
       "item": [
         {
-          "name": "ListRetained",
+          "name": "ListRetained (EmqxBasic)",
           "request": {
             "method": "GET",
             "url": {
@@ -1214,11 +1762,24 @@
                 "messages"
               ]
             },
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{username}}"
+                },
+                {
+                  "key": "password",
+                  "value": "{{password}}"
+                }
+              ]
+            },
             "description": "List retained messages with pagination"
           }
         },
         {
-          "name": "GetRetained",
+          "name": "GetRetained (EmqxBasic)",
           "request": {
             "method": "GET",
             "url": {
@@ -1238,11 +1799,24 @@
                 }
               ]
             },
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{username}}"
+                },
+                {
+                  "key": "password",
+                  "value": "{{password}}"
+                }
+              ]
+            },
             "description": "Get a specific retained message by topic"
           }
         },
         {
-          "name": "DeleteRetained",
+          "name": "DeleteRetained (EmqxBasic)",
           "request": {
             "method": "DELETE",
             "url": {
@@ -1259,6 +1833,19 @@
                 {
                   "key": "topic",
                   "value": "<topic>"
+                }
+              ]
+            },
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{username}}"
+                },
+                {
+                  "key": "password",
+                  "value": "{{password}}"
                 }
               ]
             },
@@ -1266,7 +1853,7 @@
           }
         },
         {
-          "name": "ListRetained",
+          "name": "ListRetained (EmqxBearer)",
           "request": {
             "method": "GET",
             "url": {
@@ -1279,11 +1866,20 @@
                 "messages"
               ]
             },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{bearerToken}}"
+                }
+              ]
+            },
             "description": "List retained messages with pagination"
           }
         },
         {
-          "name": "GetRetained",
+          "name": "GetRetained (EmqxBearer)",
           "request": {
             "method": "GET",
             "url": {
@@ -1303,11 +1899,20 @@
                 }
               ]
             },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{bearerToken}}"
+                }
+              ]
+            },
             "description": "Get a specific retained message by topic"
           }
         },
         {
-          "name": "DeleteRetained",
+          "name": "DeleteRetained (EmqxBearer)",
           "request": {
             "method": "DELETE",
             "url": {
@@ -1324,6 +1929,15 @@
                 {
                   "key": "topic",
                   "value": "<topic>"
+                }
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{bearerToken}}"
                 }
               ]
             },
@@ -1336,7 +1950,7 @@
       "name": "Rules",
       "item": [
         {
-          "name": "ListRules",
+          "name": "ListRules (EmqxBasic)",
           "request": {
             "method": "GET",
             "url": {
@@ -1348,11 +1962,24 @@
                 "rules"
               ]
             },
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{username}}"
+                },
+                {
+                  "key": "password",
+                  "value": "{{password}}"
+                }
+              ]
+            },
             "description": "List all rules in the rules engine"
           }
         },
         {
-          "name": "CreateRule",
+          "name": "CreateRule (EmqxBasic)",
           "request": {
             "method": "POST",
             "url": {
@@ -1362,6 +1989,19 @@
               ],
               "path": [
                 "rules"
+              ]
+            },
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{username}}"
+                },
+                {
+                  "key": "password",
+                  "value": "{{password}}"
+                }
               ]
             },
             "body": {
@@ -1377,7 +2017,7 @@
           }
         },
         {
-          "name": "GetRule",
+          "name": "GetRule (EmqxBasic)",
           "request": {
             "method": "GET",
             "url": {
@@ -1396,11 +2036,24 @@
                 }
               ]
             },
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{username}}"
+                },
+                {
+                  "key": "password",
+                  "value": "{{password}}"
+                }
+              ]
+            },
             "description": "Get details of a specific rule"
           }
         },
         {
-          "name": "UpdateRule",
+          "name": "UpdateRule (EmqxBasic)",
           "request": {
             "method": "PUT",
             "url": {
@@ -1419,6 +2072,19 @@
                 }
               ]
             },
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{username}}"
+                },
+                {
+                  "key": "password",
+                  "value": "{{password}}"
+                }
+              ]
+            },
             "body": {
               "mode": "raw",
               "raw": "{}",
@@ -1432,7 +2098,7 @@
           }
         },
         {
-          "name": "DeleteRule",
+          "name": "DeleteRule (EmqxBasic)",
           "request": {
             "method": "DELETE",
             "url": {
@@ -1451,11 +2117,24 @@
                 }
               ]
             },
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{username}}"
+                },
+                {
+                  "key": "password",
+                  "value": "{{password}}"
+                }
+              ]
+            },
             "description": "Delete a rule from the rules engine"
           }
         },
         {
-          "name": "TestRule",
+          "name": "TestRule (EmqxBasic)",
           "request": {
             "method": "POST",
             "url": {
@@ -1472,6 +2151,19 @@
                 {
                   "key": "id",
                   "value": "<id>"
+                }
+              ]
+            },
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{username}}"
+                },
+                {
+                  "key": "password",
+                  "value": "{{password}}"
                 }
               ]
             },
@@ -1488,7 +2180,7 @@
           }
         },
         {
-          "name": "ListRules",
+          "name": "ListRules (EmqxBearer)",
           "request": {
             "method": "GET",
             "url": {
@@ -1500,11 +2192,20 @@
                 "rules"
               ]
             },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{bearerToken}}"
+                }
+              ]
+            },
             "description": "List all rules in the rules engine"
           }
         },
         {
-          "name": "CreateRule",
+          "name": "CreateRule (EmqxBearer)",
           "request": {
             "method": "POST",
             "url": {
@@ -1514,6 +2215,15 @@
               ],
               "path": [
                 "rules"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{bearerToken}}"
+                }
               ]
             },
             "body": {
@@ -1529,7 +2239,7 @@
           }
         },
         {
-          "name": "GetRule",
+          "name": "GetRule (EmqxBearer)",
           "request": {
             "method": "GET",
             "url": {
@@ -1548,11 +2258,20 @@
                 }
               ]
             },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{bearerToken}}"
+                }
+              ]
+            },
             "description": "Get details of a specific rule"
           }
         },
         {
-          "name": "UpdateRule",
+          "name": "UpdateRule (EmqxBearer)",
           "request": {
             "method": "PUT",
             "url": {
@@ -1571,6 +2290,15 @@
                 }
               ]
             },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{bearerToken}}"
+                }
+              ]
+            },
             "body": {
               "mode": "raw",
               "raw": "{}",
@@ -1584,7 +2312,7 @@
           }
         },
         {
-          "name": "DeleteRule",
+          "name": "DeleteRule (EmqxBearer)",
           "request": {
             "method": "DELETE",
             "url": {
@@ -1603,11 +2331,20 @@
                 }
               ]
             },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{bearerToken}}"
+                }
+              ]
+            },
             "description": "Delete a rule from the rules engine"
           }
         },
         {
-          "name": "TestRule",
+          "name": "TestRule (EmqxBearer)",
           "request": {
             "method": "POST",
             "url": {
@@ -1624,6 +2361,15 @@
                 {
                   "key": "id",
                   "value": "<id>"
+                }
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{bearerToken}}"
                 }
               ]
             },
@@ -1645,7 +2391,7 @@
       "name": "Stats",
       "item": [
         {
-          "name": "ListStats",
+          "name": "ListStats (EmqxBasic)",
           "request": {
             "method": "GET",
             "url": {
@@ -1657,11 +2403,24 @@
                 "stats"
               ]
             },
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{username}}"
+                },
+                {
+                  "key": "password",
+                  "value": "{{password}}"
+                }
+              ]
+            },
             "description": "Get broker statistics for all nodes"
           }
         },
         {
-          "name": "ListStats",
+          "name": "ListStats (EmqxBearer)",
           "request": {
             "method": "GET",
             "url": {
@@ -1671,6 +2430,15 @@
               ],
               "path": [
                 "stats"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{bearerToken}}"
+                }
               ]
             },
             "description": "Get broker statistics for all nodes"
@@ -1682,7 +2450,7 @@
       "name": "Subscriptions",
       "item": [
         {
-          "name": "ListSubscriptions",
+          "name": "ListSubscriptions (EmqxBasic)",
           "request": {
             "method": "GET",
             "url": {
@@ -1694,11 +2462,24 @@
                 "subscriptions"
               ]
             },
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{username}}"
+                },
+                {
+                  "key": "password",
+                  "value": "{{password}}"
+                }
+              ]
+            },
             "description": "List all subscriptions across the cluster"
           }
         },
         {
-          "name": "ListSubscriptions",
+          "name": "ListSubscriptions (EmqxBearer)",
           "request": {
             "method": "GET",
             "url": {
@@ -1708,6 +2489,15 @@
               ],
               "path": [
                 "subscriptions"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{bearerToken}}"
+                }
               ]
             },
             "description": "List all subscriptions across the cluster"
@@ -1719,7 +2509,7 @@
       "name": "Topics",
       "item": [
         {
-          "name": "ListTopics",
+          "name": "ListTopics (EmqxBasic)",
           "request": {
             "method": "GET",
             "url": {
@@ -1731,11 +2521,24 @@
                 "topics"
               ]
             },
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{username}}"
+                },
+                {
+                  "key": "password",
+                  "value": "{{password}}"
+                }
+              ]
+            },
             "description": "List active topics in the broker"
           }
         },
         {
-          "name": "ListTopics",
+          "name": "ListTopics (EmqxBearer)",
           "request": {
             "method": "GET",
             "url": {
@@ -1745,6 +2548,15 @@
               ],
               "path": [
                 "topics"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{bearerToken}}"
+                }
               ]
             },
             "description": "List active topics in the broker"

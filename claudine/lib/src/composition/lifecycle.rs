@@ -46,6 +46,9 @@ pub struct LifecycleNotification {
 
     /// Message to write to stderr.
     pub stderr: Option<String>,
+
+    /// Title for a local desktop notification.
+    pub notify: Option<String>,
 }
 
 /// Complete lifecycle configuration for a composition.
@@ -136,6 +139,9 @@ pub trait LifecycleEmitter {
 
     /// Play a named sound effect.
     fn emit_effect(&self, name: &str);
+
+    /// Fire a local desktop notification.
+    fn emit_notification(&self, title: &str);
 }
 
 /// Production emitter that performs real side effects.
@@ -172,6 +178,10 @@ impl LifecycleEmitter for DefaultLifecycleEmitter {
 
     fn emit_effect(&self, name: &str) {
         play_effect_blocking(name);
+    }
+
+    fn emit_notification(&self, title: &str) {
+        crate::messaging::execute_notification(title);
     }
 }
 
@@ -294,6 +304,9 @@ impl<'a> LifecycleRunGuard<'a> {
                 self.ctx.repo_root,
                 self.ctx.messaging,
             );
+        }
+        if let Some(notify_title) = &notification.notify {
+            self.emitter.emit_notification(notify_title);
         }
 
         // --- Audio phases (sequential, blocking, lazy TTS config) ---
@@ -422,14 +435,14 @@ impl LifecycleSignal {
     /// # use biscuit_terminal::components::status::StatusState;
     /// assert_eq!(LifecycleSignal::Start.status_state(), StatusState::Info);
     /// assert_eq!(LifecycleSignal::Success.status_state(), StatusState::Success);
-    /// assert_eq!(LifecycleSignal::Blocked.status_state(), StatusState::Failure);
-    /// assert_eq!(LifecycleSignal::Failure.status_state(), StatusState::Failure);
+    /// assert_eq!(LifecycleSignal::Blocked.status_state(), StatusState::Error);
+    /// assert_eq!(LifecycleSignal::Failure.status_state(), StatusState::Error);
     /// ```
     pub fn status_state(&self) -> StatusState {
         match self {
             Self::Start => StatusState::Info,
             Self::Success => StatusState::Success,
-            Self::Blocked | Self::Failure => StatusState::Failure,
+            Self::Blocked | Self::Failure => StatusState::Error,
         }
     }
 }
@@ -496,11 +509,12 @@ impl LifecycleConfig {
 ///         "message": "Starting..."
 ///     }
 /// });
-/// let config = parse_lifecycle_config(&frontmatter).unwrap();
+/// let config = parse_lifecycle_config(&frontmatter, std::path::Path::new("test.md")).unwrap();
 /// assert!(config.start.is_some());
 /// ```
 pub fn parse_lifecycle_config(
     frontmatter: &serde_json::Value,
+    source_file: &Path,
 ) -> Result<LifecycleConfig, CompositionError> {
     // Non-object frontmatter returns default
     let Some(fm_obj) = frontmatter.as_object() else {
@@ -528,7 +542,14 @@ pub fn parse_lifecycle_config(
         // Deserialize the notification
         let mut notification: LifecycleNotification = serde_json::from_value(value.clone())
             .map_err(|e| {
-                CompositionError::ComposeFailed(format!("invalid {}: {}", property_name, e))
+                let (unknown_field, expected_fields) = parse_serde_unknown_field(&e);
+                CompositionError::LifecycleInvalid {
+                    property: property_name.to_string(),
+                    message: e.to_string(),
+                    source_file: source_file.to_path_buf(),
+                    unknown_field,
+                    expected_fields,
+                }
             })?;
 
         // Normalize empty strings to None
@@ -537,6 +558,7 @@ pub fn parse_lifecycle_config(
         normalize_empty_string(&mut notification.effect);
         normalize_empty_string(&mut notification.message);
         normalize_empty_string(&mut notification.stderr);
+        normalize_empty_string(&mut notification.notify);
 
         // Validate mutual exclusivity of say and say_first
         if notification.say.is_some() && notification.say_first.is_some() {
@@ -567,6 +589,85 @@ fn normalize_empty_string(field: &mut Option<String>) {
         if s.trim().is_empty() {
             *field = None;
         }
+    }
+}
+
+/// Parse a `serde_json` "unknown field" error to extract the field name
+/// and the list of expected fields.
+///
+/// Serde's message format is:
+/// `unknown field `X`, expected one of `A`, `B`, `C``
+///
+/// Returns `(Some("X"), vec!["A", "B", "C"])` on match, or
+/// `(None, LIFECYCLE_NOTIFICATION_FIELDS)` as a fallback.
+fn parse_serde_unknown_field(err: &serde_json::Error) -> (Option<String>, Vec<String>) {
+    let msg = err.to_string();
+
+    // Extract unknown field name between first pair of backticks.
+    let unknown_field = extract_backtick_value(&msg, 0);
+
+    // Extract expected fields from "expected one of `A`, `B`, `C`"
+    // or "expected `A`" (single field).
+    let expected = if let Some(idx) = msg.find("expected") {
+        collect_backtick_values(&msg[idx..])
+    } else {
+        LIFECYCLE_NOTIFICATION_FIELDS
+            .iter()
+            .map(|s| (*s).to_string())
+            .collect()
+    };
+
+    (unknown_field, expected)
+}
+
+/// The canonical field names for [`LifecycleNotification`].
+pub(crate) const LIFECYCLE_NOTIFICATION_FIELDS: &[&str] =
+    &["say", "say_first", "effect", "message", "stderr", "notify"];
+
+/// Extract the text inside the `n`th pair of backticks in `s`.
+fn extract_backtick_value(s: &str, nth: usize) -> Option<String> {
+    let mut start = 0;
+    for i in 0..=nth {
+        let open = s[start..].find('`')?;
+        let abs_open = start + open;
+        let close = s[abs_open + 1..].find('`')?;
+        if i == nth {
+            return Some(s[abs_open + 1..abs_open + 1 + close].to_string());
+        }
+        start = abs_open + 1 + close + 1;
+    }
+    None
+}
+
+/// Collect all backtick-delimited values from `s`.
+fn collect_backtick_values(s: &str) -> Vec<String> {
+    let mut vals = Vec::new();
+    let mut chars = s.char_indices().peekable();
+    while let Some(&(i, ch)) = chars.peek() {
+        if ch == '`' {
+            chars.next();
+            let start = i + 1;
+            let mut end = start;
+            for (j, c) in chars.by_ref() {
+                if c == '`' {
+                    end = j;
+                    break;
+                }
+            }
+            if end > start {
+                vals.push(s[start..end].to_string());
+            }
+        } else {
+            chars.next();
+        }
+    }
+    if vals.is_empty() {
+        LIFECYCLE_NOTIFICATION_FIELDS
+            .iter()
+            .map(|s| (*s).to_string())
+            .collect()
+    } else {
+        vals
     }
 }
 
@@ -677,6 +778,10 @@ pub fn emit_lifecycle_signal(
             ctx.messaging,
         );
     }
+    // notify
+    if let Some(notify_title) = &notification.notify {
+        crate::messaging::execute_notification(notify_title);
+    }
 
     // --- Audio phases (sequential, blocking, lazy TTS config) ---
 
@@ -701,6 +806,10 @@ mod tests {
     use super::*;
     use serde_json::json;
 
+    fn dummy_path() -> &'static Path {
+        Path::new("test.md")
+    }
+
     #[test]
     fn parses_valid_lifecycle_config() {
         let frontmatter = json!({
@@ -713,7 +822,7 @@ mod tests {
             }
         });
 
-        let config = parse_lifecycle_config(&frontmatter).unwrap();
+        let config = parse_lifecycle_config(&frontmatter, dummy_path()).unwrap();
         assert!(config.start.is_some());
         assert_eq!(
             config.start.as_ref().unwrap().message.as_deref(),
@@ -735,7 +844,7 @@ mod tests {
             }
         });
 
-        let result = parse_lifecycle_config(&frontmatter);
+        let result = parse_lifecycle_config(&frontmatter, dummy_path());
         assert!(matches!(
             result,
             Err(CompositionError::LifecycleSayConflict(_))
@@ -751,7 +860,7 @@ mod tests {
             }
         });
 
-        let config = parse_lifecycle_config(&frontmatter).unwrap();
+        let config = parse_lifecycle_config(&frontmatter, dummy_path()).unwrap();
         let start = config.start.as_ref().unwrap();
         assert!(start.message.is_none());
         assert!(start.say.is_none());
@@ -766,7 +875,7 @@ mod tests {
             }
         });
 
-        let result = parse_lifecycle_config(&frontmatter);
+        let result = parse_lifecycle_config(&frontmatter, dummy_path());
         assert!(result.is_err());
     }
 
@@ -778,7 +887,7 @@ mod tests {
             }
         });
 
-        let result = parse_lifecycle_config(&frontmatter);
+        let result = parse_lifecycle_config(&frontmatter, dummy_path());
         assert!(matches!(
             result,
             Err(CompositionError::LifecycleUnknownEffect(_, _))
@@ -794,7 +903,7 @@ mod tests {
             }
         });
 
-        let config = parse_lifecycle_config(&frontmatter).unwrap();
+        let config = parse_lifecycle_config(&frontmatter, dummy_path()).unwrap();
         let success = config.success.as_ref().unwrap();
         assert_eq!(success.say.as_deref(), Some("Done!"));
         assert_eq!(success.effect.as_deref(), Some("confirmation"));
@@ -809,7 +918,7 @@ mod tests {
             }
         });
 
-        let config = parse_lifecycle_config(&frontmatter).unwrap();
+        let config = parse_lifecycle_config(&frontmatter, dummy_path()).unwrap();
         let success = config.success.as_ref().unwrap();
         assert_eq!(success.say_first.as_deref(), Some("Starting now"));
         assert_eq!(success.effect.as_deref(), Some("confirmation"));
@@ -818,14 +927,14 @@ mod tests {
     #[test]
     fn empty_frontmatter_returns_default() {
         let frontmatter = json!({});
-        let config = parse_lifecycle_config(&frontmatter).unwrap();
+        let config = parse_lifecycle_config(&frontmatter, dummy_path()).unwrap();
         assert!(config.is_empty());
     }
 
     #[test]
     fn non_object_frontmatter_returns_default() {
         let frontmatter = json!("not an object");
-        let config = parse_lifecycle_config(&frontmatter).unwrap();
+        let config = parse_lifecycle_config(&frontmatter, dummy_path()).unwrap();
         assert!(config.is_empty());
     }
 
@@ -838,7 +947,7 @@ mod tests {
             }
         });
 
-        let config = parse_lifecycle_config(&frontmatter).unwrap();
+        let config = parse_lifecycle_config(&frontmatter, dummy_path()).unwrap();
         assert!(config.start.is_none());
         assert!(config.success.is_some());
     }
@@ -853,7 +962,7 @@ mod tests {
             }
         });
 
-        let config = parse_lifecycle_config(&frontmatter).unwrap();
+        let config = parse_lifecycle_config(&frontmatter, dummy_path()).unwrap();
         assert!(config.start.is_some());
     }
 
@@ -922,14 +1031,8 @@ mod tests {
             LifecycleSignal::Success.status_state(),
             StatusState::Success
         );
-        assert_eq!(
-            LifecycleSignal::Blocked.status_state(),
-            StatusState::Failure
-        );
-        assert_eq!(
-            LifecycleSignal::Failure.status_state(),
-            StatusState::Failure
-        );
+        assert_eq!(LifecycleSignal::Blocked.status_state(), StatusState::Error);
+        assert_eq!(LifecycleSignal::Failure.status_state(), StatusState::Error);
     }
 
     #[test]
@@ -946,7 +1049,7 @@ mod tests {
             "start": { "stderr": "Starting" },
             "failure": { "stderr": "Failed" }
         });
-        let config = parse_lifecycle_config(&fm).unwrap();
+        let config = parse_lifecycle_config(&fm, dummy_path()).unwrap();
         assert!(config.get(LifecycleSignal::Start).is_some());
         assert!(config.get(LifecycleSignal::Success).is_none());
         assert!(config.get(LifecycleSignal::Blocked).is_none());
@@ -959,7 +1062,7 @@ mod tests {
         assert!(empty.is_empty());
 
         let fm = json!({ "start": { "stderr": "Go" } });
-        let non_empty = parse_lifecycle_config(&fm).unwrap();
+        let non_empty = parse_lifecycle_config(&fm, dummy_path()).unwrap();
         assert!(!non_empty.is_empty());
     }
 
@@ -983,6 +1086,9 @@ mod tests {
         },
         Message {
             text: String,
+        },
+        Notification {
+            title: String,
         },
         Speech {
             text: String,
@@ -1051,15 +1157,27 @@ mod tests {
                 name: name.to_string(),
             });
         }
+
+        fn emit_notification(&self, title: &str) {
+            self.actions
+                .lock()
+                .unwrap()
+                .push(EmittedAction::Notification {
+                    title: title.to_string(),
+                });
+        }
     }
 
     fn test_config() -> LifecycleConfig {
-        parse_lifecycle_config(&json!({
-            "start":   { "stderr": "starting" },
-            "success": { "stderr": "done" },
-            "blocked": { "stderr": "blocked" },
-            "failure": { "stderr": "failed" },
-        }))
+        parse_lifecycle_config(
+            &json!({
+                "start":   { "stderr": "starting" },
+                "success": { "stderr": "done" },
+                "blocked": { "stderr": "blocked" },
+                "failure": { "stderr": "failed" },
+            }),
+            dummy_path(),
+        )
         .unwrap()
     }
 
@@ -1305,14 +1423,18 @@ mod tests {
 
     #[test]
     fn guard_non_audio_before_audio() {
-        let config = parse_lifecycle_config(&json!({
-            "start": {
-                "stderr": "starting",
-                "message": "msg",
-                "say": "hello",
-                "effect": "confirmation",
-            }
-        }))
+        let config = parse_lifecycle_config(
+            &json!({
+                "start": {
+                    "stderr": "starting",
+                    "message": "msg",
+                    "notify": "notify-msg",
+                    "say": "hello",
+                    "effect": "confirmation",
+                }
+            }),
+            dummy_path(),
+        )
         .unwrap();
         let (settings, messaging, term) = test_ctx();
         let ctx = LifecycleRuntimeContext {
@@ -1328,23 +1450,27 @@ mod tests {
         guard.defuse();
 
         let actions = emitter.actions();
-        assert_eq!(actions.len(), 4);
+        assert_eq!(actions.len(), 5);
         // Non-audio first
         assert!(matches!(actions[0], EmittedAction::Stderr { .. }));
         assert!(matches!(actions[1], EmittedAction::Message { .. }));
+        assert!(matches!(actions[2], EmittedAction::Notification { .. }));
         // Audio: effect before say (default order)
-        assert!(matches!(actions[2], EmittedAction::Effect { .. }));
-        assert!(matches!(actions[3], EmittedAction::Speech { .. }));
+        assert!(matches!(actions[3], EmittedAction::Effect { .. }));
+        assert!(matches!(actions[4], EmittedAction::Speech { .. }));
     }
 
     #[test]
     fn guard_say_first_ordering() {
-        let config = parse_lifecycle_config(&json!({
-            "start": {
-                "say_first": "hello",
-                "effect": "confirmation",
-            }
-        }))
+        let config = parse_lifecycle_config(
+            &json!({
+                "start": {
+                    "say_first": "hello",
+                    "effect": "confirmation",
+                }
+            }),
+            dummy_path(),
+        )
         .unwrap();
         let (settings, messaging, term) = test_ctx();
         let ctx = LifecycleRuntimeContext {
@@ -1364,5 +1490,238 @@ mod tests {
         // say_first → speech before effect
         assert!(matches!(actions[0], EmittedAction::Speech { .. }));
         assert!(matches!(actions[1], EmittedAction::Effect { .. }));
+    }
+
+    // =====================================================================
+    // notify parsing and emission (Phase 3)
+    // =====================================================================
+
+    #[test]
+    fn parses_notify_for_all_signals() {
+        let fm = json!({
+            "start": { "notify": "Starting" },
+            "success": { "notify": "Done" },
+            "blocked": { "notify": "Blocked" },
+            "failure": { "notify": "Failed" }
+        });
+        let config = parse_lifecycle_config(&fm, dummy_path()).unwrap();
+
+        assert_eq!(
+            config.start.as_ref().unwrap().notify.as_deref(),
+            Some("Starting")
+        );
+        assert_eq!(
+            config.success.as_ref().unwrap().notify.as_deref(),
+            Some("Done")
+        );
+        assert_eq!(
+            config.blocked.as_ref().unwrap().notify.as_deref(),
+            Some("Blocked")
+        );
+        assert_eq!(
+            config.failure.as_ref().unwrap().notify.as_deref(),
+            Some("Failed")
+        );
+    }
+
+    #[test]
+    fn parses_message_and_notify_independently() {
+        let fm = json!({
+            "start": {
+                "message": "Remote message",
+                "notify": "Local notification"
+            }
+        });
+        let config = parse_lifecycle_config(&fm, dummy_path()).unwrap();
+        let start = config.start.as_ref().unwrap();
+        assert_eq!(start.message.as_deref(), Some("Remote message"));
+        assert_eq!(start.notify.as_deref(), Some("Local notification"));
+    }
+
+    #[test]
+    fn blank_notify_is_normalized_to_none() {
+        let fm = json!({
+            "start": { "notify": "   " },
+            "success": { "notify": "" }
+        });
+        let config = parse_lifecycle_config(&fm, dummy_path()).unwrap();
+        assert!(config.start.as_ref().unwrap().notify.is_none());
+        assert!(config.success.as_ref().unwrap().notify.is_none());
+    }
+
+    #[test]
+    fn notify_emits_without_active_route() {
+        let config = parse_lifecycle_config(
+            &json!({
+                "start": { "notify": "Hello desktop" }
+            }),
+            dummy_path(),
+        )
+        .unwrap();
+        let (settings, messaging, term) = test_ctx();
+        let ctx = LifecycleRuntimeContext {
+            settings: &settings,
+            messaging: &messaging,
+            term: &term,
+            source_path: Path::new("/tmp/test.md"),
+            repo_root: None,
+        };
+        let emitter = RecordingEmitter::new();
+        let mut guard = make_guard(&config, &ctx, &emitter);
+        guard.emit_start_once();
+        guard.defuse();
+
+        let actions = emitter.actions();
+        assert_eq!(actions.len(), 1);
+        assert_eq!(
+            actions[0],
+            EmittedAction::Notification {
+                title: "Hello desktop".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn notify_emits_before_audio_phases() {
+        let config = parse_lifecycle_config(
+            &json!({
+                "start": {
+                    "notify": "Desktop first",
+                    "say": "hello",
+                    "effect": "confirmation",
+                }
+            }),
+            dummy_path(),
+        )
+        .unwrap();
+        let (settings, messaging, term) = test_ctx();
+        let ctx = LifecycleRuntimeContext {
+            settings: &settings,
+            messaging: &messaging,
+            term: &term,
+            source_path: Path::new("/tmp/test.md"),
+            repo_root: None,
+        };
+        let emitter = RecordingEmitter::new();
+        let mut guard = make_guard(&config, &ctx, &emitter);
+        guard.emit_start_once();
+        guard.defuse();
+
+        let actions = emitter.actions();
+        assert_eq!(actions.len(), 3);
+        assert!(matches!(actions[0], EmittedAction::Notification { .. }));
+        assert!(matches!(actions[1], EmittedAction::Effect { .. }));
+        assert!(matches!(actions[2], EmittedAction::Speech { .. }));
+    }
+
+    #[test]
+    fn notify_alone_no_other_outputs() {
+        let config = parse_lifecycle_config(
+            &json!({
+                "success": { "notify": "Only notify" }
+            }),
+            dummy_path(),
+        )
+        .unwrap();
+        let (settings, messaging, term) = test_ctx();
+        let ctx = LifecycleRuntimeContext {
+            settings: &settings,
+            messaging: &messaging,
+            term: &term,
+            source_path: Path::new("/tmp/test.md"),
+            repo_root: None,
+        };
+        let emitter = RecordingEmitter::new();
+        let mut guard = make_guard(&config, &ctx, &emitter);
+        guard.emit_terminal(LifecycleSignal::Success);
+
+        let actions = emitter.actions();
+        assert_eq!(actions.len(), 1);
+        assert_eq!(
+            actions[0],
+            EmittedAction::Notification {
+                title: "Only notify".to_string()
+            }
+        );
+    }
+
+    #[tokio::test]
+    async fn default_lifecycle_emitter_emit_notification_does_not_panic() {
+        let emitter = DefaultLifecycleEmitter;
+        // Fire-and-forget: should return immediately without panic
+        emitter.emit_notification("test notification title");
+        // Give the spawned task a moment to start
+        tokio::task::yield_now().await;
+    }
+
+    #[test]
+    fn lifecycle_invalid_error_renders_as_block_error() {
+        use biscuit_terminal::errors::BlockError;
+        use biscuit_terminal::utils::escape_codes::strip_escape_codes;
+
+        let frontmatter = json!({
+            "success": {
+                "speak": "hello"
+            }
+        });
+
+        let err =
+            parse_lifecycle_config(&frontmatter, Path::new("prompts/sentrux.md")).unwrap_err();
+        let CompositionError::LifecycleInvalid {
+            property,
+            unknown_field,
+            expected_fields,
+            source_file,
+            ..
+        } = &err
+        else {
+            panic!("expected LifecycleInvalid, got {err:?}");
+        };
+
+        assert_eq!(property, "success");
+        assert_eq!(unknown_field.as_deref(), Some("speak"));
+        assert_eq!(source_file, Path::new("prompts/sentrux.md"));
+        assert!(expected_fields.contains(&"say".to_string()));
+        assert!(expected_fields.contains(&"say_first".to_string()));
+        assert!(expected_fields.contains(&"effect".to_string()));
+
+        let rendered = strip_escape_codes(err.report_block_error_optimistic(Some(80)));
+        assert!(
+            rendered.contains("success.speak"),
+            "dotted property should appear: {rendered}"
+        );
+        assert!(
+            rendered.contains("sentrux.md"),
+            "file name should appear: {rendered}"
+        );
+        assert!(
+            rendered.contains("say"),
+            "expected fields should list 'say': {rendered}"
+        );
+    }
+
+    #[test]
+    fn parse_serde_unknown_field_extracts_field_and_expected() {
+        let frontmatter = json!({
+            "failure": {
+                "bogus_field": true
+            }
+        });
+
+        let err = parse_lifecycle_config(&frontmatter, dummy_path()).unwrap_err();
+        let CompositionError::LifecycleInvalid {
+            property,
+            unknown_field,
+            expected_fields,
+            ..
+        } = &err
+        else {
+            panic!("expected LifecycleInvalid, got {err:?}");
+        };
+
+        assert_eq!(property, "failure");
+        assert_eq!(unknown_field.as_deref(), Some("bogus_field"));
+        assert!(!expected_fields.is_empty());
+        assert!(expected_fields.contains(&"say".to_string()));
     }
 }

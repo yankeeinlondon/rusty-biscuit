@@ -6,9 +6,13 @@
 use serde::{Deserialize, Serialize};
 use std::hash::Hash;
 use std::path::{Path, PathBuf};
+use std::time::Instant;
+use tracing::trace;
 
 use super::OsType;
 use super::distro::LinuxFamily;
+use crate::executable_index::ExecutableIndex;
+use crate::performance;
 
 // ============================================================================
 // Package Manager Detection Infrastructure
@@ -336,11 +340,39 @@ pub struct SystemPackageManagers {
 ///
 /// A vector of `PathBuf` for each directory in PATH that exists.
 /// Returns an empty vector if PATH is not set or contains no valid directories.
+#[cfg(not(test))]
+use std::sync::OnceLock;
+
+/// Cache for PATH directories to avoid repeated filesystem scans.
+/// PATH rarely changes during process lifetime.
+#[cfg(not(test))]
+static PATH_DIRS_CACHE: OnceLock<Vec<PathBuf>> = OnceLock::new();
+
 #[must_use]
 pub fn get_path_dirs() -> Vec<PathBuf> {
+    // In tests, always re-read PATH to avoid stale cache when env is modified
+    #[cfg(test)]
+    {
+        compute_path_dirs()
+    }
+    #[cfg(not(test))]
+    {
+        PATH_DIRS_CACHE.get_or_init(compute_path_dirs).clone()
+    }
+}
+
+fn compute_path_dirs() -> Vec<PathBuf> {
+    let started = Instant::now();
     let path_var = match std::env::var("PATH") {
         Ok(p) => p,
-        Err(_) => return Vec::new(),
+        Err(_) => {
+            performance::record_logged_stage(
+                "os.path_dirs",
+                started.elapsed(),
+                tracing::Level::DEBUG,
+            );
+            return Vec::new();
+        }
     };
 
     #[cfg(target_os = "windows")]
@@ -348,12 +380,15 @@ pub fn get_path_dirs() -> Vec<PathBuf> {
     #[cfg(not(target_os = "windows"))]
     let separator = ':';
 
-    path_var
+    let dirs: Vec<PathBuf> = path_var
         .split(separator)
         .filter(|s| !s.is_empty())
         .map(PathBuf::from)
         .filter(|p| p.is_dir())
-        .collect()
+        .collect();
+    performance::increment_counter("os.path.directories_available", dirs.len() as u64);
+    performance::record_logged_stage("os.path_dirs", started.elapsed(), tracing::Level::DEBUG);
+    dirs
 }
 
 /// Checks if a command exists in the given PATH directories.
@@ -387,24 +422,86 @@ pub fn get_path_dirs() -> Vec<PathBuf> {
 /// `Some(PathBuf)` with the full path if found, `None` otherwise.
 #[must_use]
 pub fn command_exists_in_path(cmd: &str, path_dirs: &[PathBuf]) -> Option<PathBuf> {
+    let started = Instant::now();
+    performance::increment_counter("os.path.command_checks", 1);
     #[cfg(target_os = "windows")]
     {
-        command_exists_in_path_windows(cmd, path_dirs)
+        let (result, checked_dirs) = command_exists_in_path_windows(cmd, path_dirs);
+        let duration = started.elapsed();
+        record_command_probe(
+            cmd,
+            path_dirs.len(),
+            checked_dirs,
+            result.is_some(),
+            duration,
+        );
+        result
     }
     #[cfg(not(target_os = "windows"))]
     {
-        command_exists_in_path_unix(cmd, path_dirs)
+        let (result, checked_dirs) = command_exists_in_path_unix(cmd, path_dirs);
+        let duration = started.elapsed();
+        record_command_probe(
+            cmd,
+            path_dirs.len(),
+            checked_dirs,
+            result.is_some(),
+            duration,
+        );
+        result
     }
+}
+
+fn record_command_probe(
+    cmd: &str,
+    path_dir_count: usize,
+    checked_dirs: usize,
+    found: bool,
+    duration: std::time::Duration,
+) {
+    performance::record_stage_dynamic(format!("os.command_exists_in_path.{cmd}"), duration);
+    performance::increment_counter("os.path.directories_scanned", checked_dirs as u64);
+    performance::increment_counter(
+        if found {
+            "os.path.command_hits"
+        } else {
+            "os.path.command_misses"
+        },
+        1,
+    );
+    trace!(
+        command = cmd,
+        path_dir_count,
+        checked_dirs,
+        found,
+        duration_ms = performance::duration_ms(duration),
+        "PATH command probe complete"
+    );
+}
+
+fn executable_path_from_index(index: &ExecutableIndex, executable: &str) -> Option<PathBuf> {
+    let started = Instant::now();
+    let result = index.find(executable);
+    record_command_probe(
+        executable,
+        index.path_dir_count(),
+        index.path_dir_count(),
+        result.is_some(),
+        started.elapsed(),
+    );
+    result
 }
 
 /// Unix implementation of command existence check.
 ///
 /// Checks if the file exists and has the executable bit set.
 #[cfg(not(target_os = "windows"))]
-fn command_exists_in_path_unix(cmd: &str, path_dirs: &[PathBuf]) -> Option<PathBuf> {
+fn command_exists_in_path_unix(cmd: &str, path_dirs: &[PathBuf]) -> (Option<PathBuf>, usize) {
     use std::os::unix::fs::PermissionsExt;
 
+    let mut checked_dirs = 0;
     for dir in path_dirs {
+        checked_dirs += 1;
         let candidate = dir.join(cmd);
         if candidate.is_file() {
             // Check executable permission
@@ -412,23 +509,25 @@ fn command_exists_in_path_unix(cmd: &str, path_dirs: &[PathBuf]) -> Option<PathB
                 let mode = metadata.permissions().mode();
                 // Check if any execute bit is set (owner, group, or other)
                 if mode & 0o111 != 0 {
-                    return Some(candidate);
+                    return (Some(candidate), checked_dirs);
                 }
             }
         }
     }
-    None
+    (None, checked_dirs)
 }
 
 /// Windows implementation of command existence check.
 ///
 /// Checks for the command with common executable extensions.
 #[cfg(target_os = "windows")]
-fn command_exists_in_path_windows(cmd: &str, path_dirs: &[PathBuf]) -> Option<PathBuf> {
+fn command_exists_in_path_windows(cmd: &str, path_dirs: &[PathBuf]) -> (Option<PathBuf>, usize) {
     // Windows executable extensions in priority order
     const EXTENSIONS: &[&str] = &[".exe", ".cmd", ".bat", ".com", ""];
 
+    let mut checked_dirs = 0;
     for dir in path_dirs {
+        checked_dirs += 1;
         for ext in EXTENSIONS {
             let filename = if ext.is_empty() {
                 cmd.to_string()
@@ -437,11 +536,11 @@ fn command_exists_in_path_windows(cmd: &str, path_dirs: &[PathBuf]) -> Option<Pa
             };
             let candidate = dir.join(&filename);
             if candidate.is_file() {
-                return Some(candidate);
+                return (Some(candidate), checked_dirs);
             }
         }
     }
-    None
+    (None, checked_dirs)
 }
 
 /// Returns the command database entry for a package manager.
@@ -774,6 +873,8 @@ const AUR_HELPERS: &[SystemPackageManager] = &[
 /// * `linux_family` - Optional Linux distribution family hint. When provided,
 ///   helps determine which package manager should be marked as primary.
 ///   If `None`, the primary is inferred from which managers are found.
+/// * `index` - Optional shared `ExecutableIndex` to avoid redundant PATH scans.
+///   When `None`, a new index is built internally.
 ///
 /// ## Examples
 ///
@@ -781,7 +882,7 @@ const AUR_HELPERS: &[SystemPackageManager] = &[
 /// use sniff::os::{detect_linux_package_managers, LinuxFamily};
 ///
 /// // With family hint (recommended on Linux)
-/// let managers = detect_linux_package_managers(Some(LinuxFamily::Debian));
+/// let managers = detect_linux_package_managers(Some(LinuxFamily::Debian), None);
 /// if let Some(primary) = managers.primary {
 ///     println!("Primary package manager: {}", primary);
 /// }
@@ -790,7 +891,7 @@ const AUR_HELPERS: &[SystemPackageManager] = &[
 /// }
 ///
 /// // Without family hint
-/// let managers = detect_linux_package_managers(None);
+/// let managers = detect_linux_package_managers(None, None);
 /// ```
 ///
 /// ## Primary Package Manager Selection
@@ -816,13 +917,16 @@ const AUR_HELPERS: &[SystemPackageManager] = &[
 /// - Cross-distro managers (snap, flatpak, guix, nix) are only primary on NixOS
 /// - This function does not spawn any processes; it only checks file existence
 #[must_use]
-pub fn detect_linux_package_managers(linux_family: Option<LinuxFamily>) -> SystemPackageManagers {
-    let path_dirs = get_path_dirs();
+pub fn detect_linux_package_managers(
+    linux_family: Option<LinuxFamily>,
+    index: Option<&ExecutableIndex>,
+) -> SystemPackageManagers {
+    let index = index.map_or_else(ExecutableIndex::build_path_only, |idx| idx.clone());
     let mut detected: Vec<DetectedPackageManager> = Vec::new();
 
     // Scan for all known package managers
     for &(manager, executable) in LINUX_PACKAGE_MANAGERS {
-        if let Some(path) = command_exists_in_path(executable, &path_dirs) {
+        if let Some(path) = executable_path_from_index(&index, executable) {
             detected.push(DetectedPackageManager {
                 manager,
                 path: path.to_string_lossy().to_string(),
@@ -1006,7 +1110,7 @@ const SOFTWAREUPDATE_PATH: &str = "/usr/sbin/softwareupdate";
 /// ```no_run
 /// use sniff::os::detect_macos_package_managers;
 ///
-/// let managers = detect_macos_package_managers();
+/// let managers = detect_macos_package_managers(None);
 /// println!("Primary: {:?}", managers.primary);
 /// for m in &managers.managers {
 ///     println!("  {} at {}", m.manager, m.path);
@@ -1019,8 +1123,8 @@ const SOFTWAREUPDATE_PATH: &str = "/usr/sbin/softwareupdate";
 /// `#[cfg(target_os)]` attributes to allow the caller to control platform
 /// selection logic.
 #[must_use]
-pub fn detect_macos_package_managers() -> SystemPackageManagers {
-    let path_dirs = get_path_dirs();
+pub fn detect_macos_package_managers(index: Option<&ExecutableIndex>) -> SystemPackageManagers {
+    let index = index.map_or_else(ExecutableIndex::build_path_only, |idx| idx.clone());
     let mut managers = Vec::new();
     let mut primary: Option<SystemPackageManager> = None;
 
@@ -1045,7 +1149,7 @@ pub fn detect_macos_package_managers() -> SystemPackageManagers {
     }
 
     // Check for MacPorts
-    if let Some(path) = command_exists_in_path("port", &path_dirs) {
+    if let Some(path) = executable_path_from_index(&index, "port") {
         managers.push(DetectedPackageManager {
             manager: SystemPackageManager::MacPorts,
             path: path.to_string_lossy().to_string(),
@@ -1055,7 +1159,7 @@ pub fn detect_macos_package_managers() -> SystemPackageManagers {
     }
 
     // Check for Fink
-    if let Some(path) = command_exists_in_path("fink", &path_dirs) {
+    if let Some(path) = executable_path_from_index(&index, "fink") {
         managers.push(DetectedPackageManager {
             manager: SystemPackageManager::Fink,
             path: path.to_string_lossy().to_string(),
@@ -1109,7 +1213,7 @@ pub fn detect_macos_package_managers() -> SystemPackageManagers {
 /// ```no_run
 /// use sniff::os::detect_windows_package_managers;
 ///
-/// let managers = detect_windows_package_managers();
+/// let managers = detect_windows_package_managers(None);
 /// if let Some(primary) = managers.primary {
 ///     println!("Primary package manager: {}", primary);
 /// }
@@ -1123,16 +1227,16 @@ pub fn detect_macos_package_managers() -> SystemPackageManagers {
 /// - This function should only be called on Windows systems
 /// - The caller is responsible for platform checking via `#[cfg(target_os = "windows")]`
 /// - DISM is always detected if present at the standard Windows system path
-/// - MSYS2 pacman is distinguished from native pacman by checking the known
-///   MSYS2 installation path (`C:\msys64\usr\bin\pacman.exe`)
+/// - MSYS2 pacman is detected at known install paths (`C:\msys64`, `C:\msys32`)
+///   and via PATH if the resolved path contains "msys"
 #[must_use]
-pub fn detect_windows_package_managers() -> SystemPackageManagers {
-    let path_dirs = get_path_dirs();
+pub fn detect_windows_package_managers(index: Option<&ExecutableIndex>) -> SystemPackageManagers {
+    let index = index.map_or_else(ExecutableIndex::build_path_only, |idx| idx.clone());
     let mut managers: Vec<DetectedPackageManager> = Vec::new();
     let mut primary: Option<SystemPackageManager> = None;
 
     // Check for winget (primary on modern Windows)
-    if let Some(path) = command_exists_in_path("winget", &path_dirs) {
+    if let Some(path) = executable_path_from_index(&index, "winget") {
         let manager = SystemPackageManager::Winget;
         managers.push(DetectedPackageManager {
             manager,
@@ -1160,7 +1264,7 @@ pub fn detect_windows_package_managers() -> SystemPackageManagers {
     }
 
     // Check for Chocolatey
-    if let Some(path) = command_exists_in_path("choco", &path_dirs) {
+    if let Some(path) = executable_path_from_index(&index, "choco") {
         let manager = SystemPackageManager::Chocolatey;
         let is_primary = primary.is_none();
         managers.push(DetectedPackageManager {
@@ -1175,7 +1279,7 @@ pub fn detect_windows_package_managers() -> SystemPackageManagers {
     }
 
     // Check for Scoop
-    if let Some(path) = command_exists_in_path("scoop", &path_dirs) {
+    if let Some(path) = executable_path_from_index(&index, "scoop") {
         let manager = SystemPackageManager::Scoop;
         let is_primary = primary.is_none();
         managers.push(DetectedPackageManager {
@@ -1189,14 +1293,26 @@ pub fn detect_windows_package_managers() -> SystemPackageManagers {
         }
     }
 
-    // Check for MSYS2 pacman at known location
-    // MSYS2 typically installs to C:\msys64 and provides a Unix-like environment
-    let msys2_pacman_path = PathBuf::from(r"C:\msys64\usr\bin\pacman.exe");
-    if msys2_pacman_path.is_file() {
+    // Check for MSYS2 pacman at known locations, then fall back to PATH
+    let msys2_known_paths = [
+        PathBuf::from(r"C:\msys64\usr\bin\pacman.exe"),
+        PathBuf::from(r"C:\msys32\usr\bin\pacman.exe"),
+    ];
+    let msys2_pacman_path = msys2_known_paths
+        .iter()
+        .find(|p| p.is_file())
+        .cloned()
+        .or_else(|| {
+            // Fall back to PATH — only treat as MSYS2 if the resolved path
+            // contains "msys" (distinguishes from native Arch/WSL pacman)
+            executable_path_from_index(&index, "pacman")
+                .filter(|p| p.to_string_lossy().to_ascii_lowercase().contains("msys"))
+        });
+    if let Some(path) = msys2_pacman_path {
         let manager = SystemPackageManager::Msys2Pacman;
         managers.push(DetectedPackageManager {
             manager,
-            path: msys2_pacman_path.to_string_lossy().to_string(),
+            path: path.to_string_lossy().to_string(),
             is_primary: false,
             commands: get_commands_for_manager(manager),
         });
@@ -1239,7 +1355,7 @@ pub fn detect_windows_package_managers() -> SystemPackageManagers {
 /// ```no_run
 /// use sniff::os::{detect_bsd_package_managers, OsType};
 ///
-/// let managers = detect_bsd_package_managers(OsType::FreeBSD);
+/// let managers = detect_bsd_package_managers(OsType::FreeBSD, None);
 /// assert_eq!(managers.primary, Some(sniff::os::SystemPackageManager::Pkg));
 /// ```
 ///
@@ -1258,15 +1374,18 @@ pub fn detect_windows_package_managers() -> SystemPackageManagers {
 /// - The caller is responsible for platform checking
 /// - For non-BSD `OsType` values, returns an empty `SystemPackageManagers`
 #[must_use]
-pub fn detect_bsd_package_managers(os_type: OsType) -> SystemPackageManagers {
-    let path_dirs = get_path_dirs();
+pub fn detect_bsd_package_managers(
+    os_type: OsType,
+    index: Option<&ExecutableIndex>,
+) -> SystemPackageManagers {
+    let index = index.map_or_else(ExecutableIndex::build_path_only, |idx| idx.clone());
     let mut managers: Vec<DetectedPackageManager> = Vec::new();
     let mut primary: Option<SystemPackageManager> = None;
 
     match os_type {
         OsType::FreeBSD => {
             // FreeBSD: pkg is primary, ports is secondary
-            if let Some(path) = command_exists_in_path("pkg", &path_dirs) {
+            if let Some(path) = executable_path_from_index(&index, "pkg") {
                 let manager = SystemPackageManager::Pkg;
                 managers.push(DetectedPackageManager {
                     manager,
@@ -1281,7 +1400,7 @@ pub fn detect_bsd_package_managers(os_type: OsType) -> SystemPackageManagers {
             let ports_dir = Path::new("/usr/ports");
             if ports_dir.is_dir() {
                 // Ports uses make, verify make exists
-                if let Some(make_path) = command_exists_in_path("make", &path_dirs) {
+                if let Some(make_path) = executable_path_from_index(&index, "make") {
                     let manager = SystemPackageManager::Ports;
                     managers.push(DetectedPackageManager {
                         manager,
@@ -1295,7 +1414,7 @@ pub fn detect_bsd_package_managers(os_type: OsType) -> SystemPackageManagers {
 
         OsType::OpenBSD => {
             // OpenBSD: pkg_add is the primary and only package manager
-            if let Some(path) = command_exists_in_path("pkg_add", &path_dirs) {
+            if let Some(path) = executable_path_from_index(&index, "pkg_add") {
                 let manager = SystemPackageManager::PkgAdd;
                 managers.push(DetectedPackageManager {
                     manager,
@@ -1309,7 +1428,7 @@ pub fn detect_bsd_package_managers(os_type: OsType) -> SystemPackageManagers {
 
         OsType::NetBSD => {
             // NetBSD: pkgin is primary, pkg_add is secondary
-            if let Some(path) = command_exists_in_path("pkgin", &path_dirs) {
+            if let Some(path) = executable_path_from_index(&index, "pkgin") {
                 let manager = SystemPackageManager::Pkgin;
                 managers.push(DetectedPackageManager {
                     manager,
@@ -1321,7 +1440,7 @@ pub fn detect_bsd_package_managers(os_type: OsType) -> SystemPackageManagers {
             }
 
             // Also check for pkg_add as secondary
-            if let Some(path) = command_exists_in_path("pkg_add", &path_dirs) {
+            if let Some(path) = executable_path_from_index(&index, "pkg_add") {
                 let manager = SystemPackageManager::PkgAdd;
                 let is_primary = primary.is_none();
                 managers.push(DetectedPackageManager {
@@ -1550,42 +1669,8 @@ mod tests {
 
     mod path_parsing_tests {
         use super::*;
-        use std::sync::Mutex;
+        use crate::test_helpers::{ENV_MUTEX, ScopedEnv};
         use tempfile::TempDir;
-
-        // Mutex to ensure env var tests don't interfere with each other
-        static ENV_MUTEX: Mutex<()> = Mutex::new(());
-
-        /// RAII guard for temporarily setting environment variables in tests.
-        struct ScopedEnv {
-            vars: Vec<(String, Option<String>)>,
-        }
-
-        impl ScopedEnv {
-            fn new() -> Self {
-                Self { vars: Vec::new() }
-            }
-
-            fn set(&mut self, key: &str, value: &str) -> &mut Self {
-                let original = std::env::var(key).ok();
-                self.vars.push((key.to_string(), original));
-                // SAFETY: Tests are run single-threaded with ENV_MUTEX protection
-                unsafe { std::env::set_var(key, value) };
-                self
-            }
-        }
-
-        impl Drop for ScopedEnv {
-            fn drop(&mut self) {
-                for (key, original) in self.vars.iter().rev() {
-                    // SAFETY: Restoring original values; tests are single-threaded
-                    match original {
-                        Some(value) => unsafe { std::env::set_var(key, value) },
-                        None => unsafe { std::env::remove_var(key) },
-                    }
-                }
-            }
-        }
 
         #[test]
         fn test_get_path_dirs_parses_valid_dirs() {
@@ -1803,16 +1888,16 @@ mod tests {
         #[test]
         fn test_detect_linux_package_managers_does_not_panic() {
             // Should not panic regardless of what's in PATH
-            let _ = detect_linux_package_managers(None);
-            let _ = detect_linux_package_managers(Some(LinuxFamily::Debian));
-            let _ = detect_linux_package_managers(Some(LinuxFamily::RedHat));
-            let _ = detect_linux_package_managers(Some(LinuxFamily::Arch));
-            let _ = detect_linux_package_managers(Some(LinuxFamily::Other));
+            let _ = detect_linux_package_managers(None, None);
+            let _ = detect_linux_package_managers(Some(LinuxFamily::Debian), None);
+            let _ = detect_linux_package_managers(Some(LinuxFamily::RedHat), None);
+            let _ = detect_linux_package_managers(Some(LinuxFamily::Arch), None);
+            let _ = detect_linux_package_managers(Some(LinuxFamily::Other), None);
         }
 
         #[test]
         fn test_detect_linux_package_managers_returns_valid_structure() {
-            let result = detect_linux_package_managers(None);
+            let result = detect_linux_package_managers(None, None);
 
             // Verify structure is valid
             for mgr in &result.managers {
@@ -1837,7 +1922,7 @@ mod tests {
 
         #[test]
         fn test_detect_linux_package_managers_primary_consistency() {
-            let result = detect_linux_package_managers(None);
+            let result = detect_linux_package_managers(None, None);
 
             // If primary is set, it should be in the managers list
             if let Some(primary) = result.primary {
@@ -1847,7 +1932,7 @@ mod tests {
                 // The primary manager should have is_primary = true
                 let primary_entry = result.managers.iter().find(|m| m.manager == primary);
                 assert!(
-                    primary_entry.map_or(false, |e| e.is_primary),
+                    primary_entry.is_some_and(|e| e.is_primary),
                     "Primary manager should have is_primary=true"
                 );
             }
@@ -2124,12 +2209,12 @@ mod tests {
         #[test]
         fn test_detect_macos_package_managers_does_not_panic() {
             // Should not panic regardless of what's installed
-            let _ = detect_macos_package_managers();
+            let _ = detect_macos_package_managers(None);
         }
 
         #[test]
         fn test_detect_macos_package_managers_always_includes_softwareupdate() {
-            let result = detect_macos_package_managers();
+            let result = detect_macos_package_managers(None);
 
             // softwareupdate should always be present
             let has_softwareupdate = result
@@ -2152,7 +2237,7 @@ mod tests {
 
         #[test]
         fn test_detect_macos_package_managers_always_has_primary() {
-            let result = detect_macos_package_managers();
+            let result = detect_macos_package_managers(None);
 
             // There should always be a primary (at minimum softwareupdate)
             assert!(
@@ -2163,7 +2248,7 @@ mod tests {
 
         #[test]
         fn test_detect_macos_package_managers_primary_consistency() {
-            let result = detect_macos_package_managers();
+            let result = detect_macos_package_managers(None);
 
             // If primary is set, it should be in the managers list
             if let Some(primary) = result.primary {
@@ -2173,7 +2258,7 @@ mod tests {
                 // The primary manager should have is_primary = true
                 let primary_entry = result.managers.iter().find(|m| m.manager == primary);
                 assert!(
-                    primary_entry.map_or(false, |e| e.is_primary),
+                    primary_entry.is_some_and(|e| e.is_primary),
                     "Primary manager should have is_primary=true"
                 );
             }
@@ -2188,7 +2273,7 @@ mod tests {
 
         #[test]
         fn test_detect_macos_package_managers_valid_structure() {
-            let result = detect_macos_package_managers();
+            let result = detect_macos_package_managers(None);
 
             for mgr in &result.managers {
                 // Path should not be empty
@@ -2219,7 +2304,7 @@ mod tests {
         #[test]
         #[cfg(target_os = "macos")]
         fn test_detect_macos_package_managers_on_macos() {
-            let result = detect_macos_package_managers();
+            let result = detect_macos_package_managers(None);
 
             // On actual macOS, we expect softwareupdate to exist at its path
             let softwareupdate = result
@@ -2254,12 +2339,12 @@ mod tests {
         #[test]
         fn test_detect_windows_package_managers_does_not_panic() {
             // Should not panic even on non-Windows systems
-            let _ = detect_windows_package_managers();
+            let _ = detect_windows_package_managers(None);
         }
 
         #[test]
         fn test_detect_windows_package_managers_returns_valid_structure() {
-            let result = detect_windows_package_managers();
+            let result = detect_windows_package_managers(None);
 
             // Verify that all detected managers have valid commands
             for manager in &result.managers {
@@ -2281,7 +2366,7 @@ mod tests {
 
         #[test]
         fn test_detect_windows_package_managers_primary_consistency() {
-            let result = detect_windows_package_managers();
+            let result = detect_windows_package_managers(None);
 
             // If a primary is set, exactly one manager should have is_primary = true
             if let Some(primary) = result.primary {
@@ -2313,7 +2398,7 @@ mod tests {
 
         #[test]
         fn test_detect_windows_package_managers_correct_managers_detected() {
-            let result = detect_windows_package_managers();
+            let result = detect_windows_package_managers(None);
 
             // All detected managers should be Windows-specific managers
             let valid_windows_managers = [
@@ -2336,7 +2421,7 @@ mod tests {
         #[test]
         #[cfg(target_os = "windows")]
         fn test_detect_windows_package_managers_on_windows() {
-            let result = detect_windows_package_managers();
+            let result = detect_windows_package_managers(None);
 
             // On actual Windows, we expect to find at least DISM (system utility)
             // Note: DISM might not be found if the test runs in a non-standard environment
@@ -2364,7 +2449,7 @@ mod tests {
 
         #[test]
         fn test_detect_bsd_package_managers_freebsd() {
-            let result = detect_bsd_package_managers(OsType::FreeBSD);
+            let result = detect_bsd_package_managers(OsType::FreeBSD, None);
 
             // Verify that if any managers are detected, they're FreeBSD-appropriate
             let valid_freebsd_managers = [SystemPackageManager::Pkg, SystemPackageManager::Ports];
@@ -2390,7 +2475,7 @@ mod tests {
 
         #[test]
         fn test_detect_bsd_package_managers_openbsd() {
-            let result = detect_bsd_package_managers(OsType::OpenBSD);
+            let result = detect_bsd_package_managers(OsType::OpenBSD, None);
 
             // Verify that if any managers are detected, they're OpenBSD-appropriate
             let valid_openbsd_managers = [SystemPackageManager::PkgAdd];
@@ -2416,7 +2501,7 @@ mod tests {
 
         #[test]
         fn test_detect_bsd_package_managers_netbsd() {
-            let result = detect_bsd_package_managers(OsType::NetBSD);
+            let result = detect_bsd_package_managers(OsType::NetBSD, None);
 
             // Verify that if any managers are detected, they're NetBSD-appropriate
             let valid_netbsd_managers = [SystemPackageManager::Pkgin, SystemPackageManager::PkgAdd];
@@ -2446,7 +2531,7 @@ mod tests {
             let non_bsd_types = [OsType::Linux, OsType::MacOS, OsType::Windows, OsType::Other];
 
             for os_type in non_bsd_types {
-                let result = detect_bsd_package_managers(os_type);
+                let result = detect_bsd_package_managers(os_type, None);
                 assert!(
                     result.managers.is_empty(),
                     "Non-BSD OS type {:?} should return empty managers",
@@ -2463,7 +2548,7 @@ mod tests {
         #[test]
         fn test_detect_bsd_package_managers_primary_consistency() {
             for os_type in [OsType::FreeBSD, OsType::OpenBSD, OsType::NetBSD] {
-                let result = detect_bsd_package_managers(os_type);
+                let result = detect_bsd_package_managers(os_type, None);
 
                 // If a primary is set, exactly one manager should have is_primary = true
                 if let Some(primary) = result.primary {
@@ -2500,7 +2585,7 @@ mod tests {
         #[test]
         fn test_detect_bsd_package_managers_commands_populated() {
             for os_type in [OsType::FreeBSD, OsType::OpenBSD, OsType::NetBSD] {
-                let result = detect_bsd_package_managers(os_type);
+                let result = detect_bsd_package_managers(os_type, None);
 
                 for manager in &result.managers {
                     let cmds = &manager.commands;

@@ -62,6 +62,140 @@ pub enum StylesheetError {
     InvalidCustomProperty { name: String },
 }
 
+impl biscuit_terminal::errors::BlockError for StylesheetError {
+    fn status_block(
+        &self,
+        _term: &biscuit_terminal::terminal::Terminal,
+    ) -> biscuit_terminal::components::status_block::StatusBlock {
+        use biscuit_terminal::components::status::StatusState;
+        use biscuit_terminal::components::status_block::StatusBlock;
+        use biscuit_terminal::errors::{ErrorHeader, StatusBlockExt};
+
+        match self {
+            Self::InvalidDeclaration { declaration } => StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new("StylesheetError", "invalid declaration"))
+                .body(format!(
+                    "<dim>Declaration:</dim> <cyan>{declaration}</cyan>"
+                ))
+                .hint("Each declaration must be of the form <cyan>property: value;</cyan>."),
+
+            Self::InvalidPropertyName { name } => StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new(
+                    "StylesheetError",
+                    "invalid property name",
+                ))
+                .body(format!("<dim>Property:</dim> <cyan>{name}</cyan>"))
+                .hint(
+                    "CSS property names must start with a letter (or `--` for custom properties) and contain only letters, digits, and hyphens.",
+                ),
+
+            Self::PropertyValueTypeMismatch {
+                property,
+                expected,
+                actual,
+                value,
+            } => {
+                let example = CssProp::from_css_name(property)
+                    .ok()
+                    .map(|prop| examples_for_property(&prop))
+                    .unwrap_or(example_for_kind(*expected));
+                StatusBlock::new(StatusState::Error)
+                    .error_header(ErrorHeader::new(
+                        "StylesheetError",
+                        "property/value type mismatch",
+                    ))
+                    .body(format!(
+                        "<dim>Property:</dim> <cyan>{property}</cyan>\n<dim>Expected:</dim> <b>{expected}</b>\n<dim>Actual:</dim> {actual}\n<dim>Value:</dim> <cyan>{value}</cyan>"
+                    ))
+                    .hint(format!(
+                        "Use a <cyan>{expected}</cyan> value (e.g., <cyan>{example}</cyan>)."
+                    ))
+            }
+
+            Self::InvalidSizing { value } => StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new("StylesheetError", "invalid sizing value"))
+                .body(format!("<dim>Value:</dim> <cyan>{value}</cyan>"))
+                .hint(
+                    "Accepted sizing tokens: <cyan>0</cyan>, <cyan>42px</cyan>, <cyan>1.5rem</cyan>, <cyan>50%</cyan>, <cyan>auto</cyan>, <cyan>min-content</cyan>, or a <cyan>calc(...)</cyan> expression.",
+                ),
+
+            Self::InvalidSizingMulti { value } => StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new(
+                    "StylesheetError",
+                    "invalid multi-sizing value",
+                ))
+                .body(format!("<dim>Value:</dim> <cyan>{value}</cyan>"))
+                .hint(
+                    "Use 1 to 4 sizing tokens separated by spaces, e.g. <cyan>8px 16px</cyan> or <cyan>4px 8px 12px 16px</cyan>.",
+                ),
+
+            Self::InvalidColor { value } => StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new("StylesheetError", "invalid color value"))
+                .body(format!("<dim>Value:</dim> <cyan>{value}</cyan>"))
+                .hint(
+                    "Accepted color tokens: <cyan>#rgb</cyan>, <cyan>#rrggbb</cyan>, <cyan>rgb(r,g,b)</cyan>, <cyan>rgba(r,g,b,a)</cyan>, a named color, or one of <cyan>transparent</cyan> / <cyan>currentColor</cyan>.",
+                ),
+
+            Self::InvalidInteger { value } => StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new("StylesheetError", "invalid integer value"))
+                .body(format!("<dim>Value:</dim> <cyan>{value}</cyan>"))
+                .hint("Use a whole number, e.g. <cyan>0</cyan>, <cyan>1</cyan>, or <cyan>-3</cyan>."),
+
+            Self::InvalidRawValue { value } => StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new("StylesheetError", "invalid raw value"))
+                .body(format!("<dim>Value:</dim> <cyan>{value}</cyan>"))
+                .hint(
+                    "Raw CSS values must not be empty and must not contain <cyan>;</cyan>.",
+                ),
+
+            Self::InvalidCustomProperty { name } => StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new(
+                    "StylesheetError",
+                    "invalid custom property",
+                ))
+                .body(format!("<dim>Property:</dim> <cyan>{name}</cyan>"))
+                .hint(
+                    "Custom properties must start with <cyan>--</cyan> followed by a non-empty identifier (letters, digits, hyphens, underscores).",
+                ),
+        }
+    }
+}
+
+fn example_for_kind(kind: CssValueKind) -> &'static str {
+    match kind {
+        CssValueKind::Sizing => "12px",
+        CssValueKind::SizingMulti => "8px 16px",
+        CssValueKind::Color => "#336699",
+        CssValueKind::Integer => "40",
+        CssValueKind::Raw => "var(--token)",
+    }
+}
+
+fn examples_for_property(prop: &CssProp) -> &'static str {
+    match prop {
+        CssProp::FontSize => "16px",
+        CssProp::Width | CssProp::MinWidth | CssProp::MaxWidth => "320px",
+        CssProp::Height | CssProp::MinHeight | CssProp::MaxHeight => "240px",
+        CssProp::Margin | CssProp::Padding => "8px 16px",
+        CssProp::BorderRadius => "12px 12px 0 0",
+        CssProp::Color
+        | CssProp::BackgroundColor
+        | CssProp::BorderColor
+        | CssProp::OutlineColor
+        | CssProp::TextDecorationColor => "#336699",
+        CssProp::ZIndex => "10",
+        CssProp::Order | CssProp::FlexGrow | CssProp::FlexShrink => "1",
+        CssProp::Other(_) => prop
+            .expected_kind()
+            .map(example_for_kind)
+            .unwrap_or("var(--token)"),
+        _ => prop
+            .expected_kind()
+            .map(example_for_kind)
+            .unwrap_or("var(--token)"),
+    }
+}
+
 /// High-level category for a CSS property's accepted value type.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CssValueKind {
@@ -1771,9 +1905,12 @@ fn prose_style_text(term: &Terminal, template: &str, text: &str) -> String {
 }
 
 fn unique_placeholder(text: &str) -> String {
+    // Avoid characters Prose interprets as inline markdown (notably `_`, which
+    // pairs as italics/bold). The placeholder must survive `Prose::render`
+    // unchanged so we can swap in the original text afterwards.
     let mut idx = 0usize;
     loop {
-        let candidate = format!("__DM_STYLESHEET_TEXT_{idx}__");
+        let candidate = format!("XDMSTYLESHEETTEXT{idx}XEND");
         if !text.contains(&candidate) {
             return candidate;
         }

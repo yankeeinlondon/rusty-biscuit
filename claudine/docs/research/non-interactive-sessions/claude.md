@@ -4,7 +4,7 @@ schema_type: typescript
 data_format: NDJSON
 docs: https://code.claude.com/docs/en/headless
 created: 2026-04-06
-last_updated: 2026-04-06
+last_updated: 2026-04-18
 ---
 
 # Claude Code: Non-Interactive Structured Output
@@ -415,39 +415,47 @@ The hook system provides richer metadata (e.g., `session_id`, `cwd`, `permission
 **Detection:** Via `rate_limit_event` messages in the stream.
 
 ```jsonl
-{"type":"rate_limit_event","rate_limit_info":{"status":"approaching_limit","resetsAt":1712000000,"rateLimitType":"usage","overageStatus":"allowed"}}
+{"type":"rate_limit_event","rate_limit_info":{"status":"allowed_warning","resetsAt":1712000000,"rateLimitType":"five_hour","overageStatus":"allowed"}}
 ```
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `rate_limit_info.status` | string | `"allowed"`, `"approaching_limit"`, `"limited"` |
+| `rate_limit_info.status` | string | Current official SDK docs model this as `"allowed"`, `"allowed_warning"`, or `"rejected"` |
 | `rate_limit_info.resetsAt` | number | Unix timestamp (seconds) when the cap window resets |
-| `rate_limit_info.rateLimitType` | string | Type of limit (e.g., `"usage"`) |
-| `rate_limit_info.overageStatus` | string | Whether overage is `"allowed"` or `"blocked"` |
+| `rate_limit_info.rateLimitType` | string | Which usage window applies (official docs list `five_hour`, `seven_day`, `seven_day_opus`, `seven_day_sonnet`, `overage`) |
+| `rate_limit_info.overageStatus` | string | Pay-as-you-go overage status when present; current SDK docs use the same status enum as the primary limit |
 
-**Distinguishing from other events:** Only `rate_limit_event` carries rate-limit data. Check `status == "approaching_limit"`.
+**Distinguishing from other events:** Only `rate_limit_event` carries rate-limit data. In current Claude Code docs, `status == "allowed_warning"` means the limit is being approached.
 
-**Remaining capacity:** The stream does not expose a percentage or token count for remaining capacity. Only the reset timestamp is available.
+**Remaining capacity:** The stream itself still does not document a token count. The current SDK docs do model a `utilization` fraction on the rate-limit object, and the Claude Code status-line JSON exposes `rate_limits.five_hour.used_percentage` / `rate_limits.seven_day.used_percentage` plus corresponding reset timestamps.
 
 **Reset timeframe:** `resetsAt` is a Unix timestamp in seconds. Convert to determine when the cap resets.
+
+**Current user-facing wording:** Anthropic's current Help Center describes the warning text as `Approaching 5-hour limit.`
 
 **Hook equivalent:** No direct hook. Rate-limit information is only available in the stream, not via hooks.
 
 **Subscription-only:** This event is never emitted for API key users.
 
+**Version drift note:** Earlier Claude Code builds and earlier local research in this repo used `approaching_limit` / `limited` naming. Current official Claude Code SDK docs use `allowed_warning` / `rejected`. Consumers should be prepared to handle both while the wire format remains version-sensitive.
+
 ---
 
 ### Plan Capped
 
-**Detection:** When `rate_limit_info.status == "limited"` or when `overageStatus == "blocked"`.
+**Detection:** In current Claude Code docs, when `rate_limit_info.status == "rejected"`. In older observed payloads, some builds used `status == "limited"` and/or `overageStatus == "blocked"`.
 
 ```jsonl
-{"type":"rate_limit_event","rate_limit_info":{"status":"limited","resetsAt":1712000000,"rateLimitType":"usage","overageStatus":"blocked"}}
+{"type":"rate_limit_event","rate_limit_info":{"status":"rejected","resetsAt":1712000000,"rateLimitType":"five_hour","overageStatus":"allowed"}}
 ```
 
-**Distinguishing from approaching:** `status: "limited"` (capped) vs `status: "approaching_limit"` (warning).
+**Distinguishing from approaching:** Current docs describe `status: "rejected"` as the hard-stop state and `status: "allowed_warning"` as the warning state.
 
 **Reset timeframe:** Same `resetsAt` field as approaching cap.
+
+**Current user-facing wording:** Anthropic's current Help Center describes the blocking message as `5-hour limit reached - resets [time].`
+
+**Extra-usage variant:** If extra usage is enabled, Anthropic documents a different post-limit message: `5-hour limit resets [time] - continuing with extra usage.`
 
 **Behavior when capped:** Claude Code may automatically fall back to a smaller model (e.g., Opus → Sonnet) rather than failing outright. The `init.model` and `assistant.message.model` fields may show different models when this fallback occurs.
 

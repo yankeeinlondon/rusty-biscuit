@@ -107,6 +107,23 @@ sniff repo [filter...]
 - Matching is case-insensitive
 - Example: `sniff repo @sniff biscuit` shows packages in the sniff area OR whose name contains "biscuit"
 
+## Scoping to a Package or Package Area
+
+Two flags layer on top of the positional filter:
+
+| Flag | Match Semantics |
+|------|-----------------|
+| `-p/--package <PKG>` | Exact (case-insensitive) match on `Package.name` |
+| `--package-area <AREA>` | Case-insensitive prefix match on `Package.package_area` (so `--package-area homelab` matches `homelab` and `homelab/server`) |
+
+```bash
+sniff repo structure -p sniff-cli                      # Only the sniff-cli package
+sniff repo structure --package-area homelab            # All homelab/* packages
+sniff repo structure -p sniff-cli --package-area sniff # Intersection
+```
+
+Passing both flags requires the resolved package to live inside the resolved area; otherwise the command fails with an error like `error: Package 'sniff-lib' is in area 'sniff', not 'homelab'`. Unknown values for either flag fail with an error listing the valid names.
+
 ## The `--latest-versions` Flag
 
 Queries package registries (crates.io, npm, PyPI, etc.) for each dependency to check for updates. Version checks run in parallel with bounded concurrency.

@@ -63,6 +63,11 @@ fn detect_storage_impl() -> Vec<StorageInfo> {
         let entries = std::slice::from_raw_parts(mntbuf, count as usize);
         let mut storage = Vec::new();
 
+        // Collect unique device names for batched diskutil query
+        let mut device_names: Vec<String> = Vec::new();
+        let mut device_to_kind: std::collections::HashMap<String, StorageKind> =
+            std::collections::HashMap::new();
+
         for entry in entries {
             let fstype = CStr::from_ptr(entry.f_fstypename.as_ptr()).to_string_lossy();
             let mount_point = CStr::from_ptr(entry.f_mntonname.as_ptr()).to_string_lossy();
@@ -94,18 +99,134 @@ fn detect_storage_impl() -> Vec<StorageInfo> {
             let total_bytes = entry.f_blocks * block_size;
             let available_bytes = entry.f_bavail * block_size;
 
+            // Collect unique device names for batched diskutil query
+            let dev_name = std::path::Path::new(device_name.as_ref())
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("");
+            if !dev_name.is_empty() && !device_to_kind.contains_key(dev_name) {
+                device_names.push(dev_name.to_string());
+            }
+
             storage.push(StorageInfo {
                 name: device_name.into_owned(),
                 mount_point: PathBuf::from(mount_point.as_ref()),
                 total_bytes,
                 available_bytes,
                 file_system: fstype.into_owned(),
-                kind: StorageKind::Unknown,
+                kind: StorageKind::Unknown, // Will be filled in after batch query
                 is_removable: false,
             });
         }
 
+        // Batch query all unique devices with a single diskutil call
+        if !device_names.is_empty() {
+            let mut args = vec!["info"];
+            for name in &device_names {
+                args.push(name.as_str());
+            }
+            if let Ok(output) = std::process::Command::new("diskutil").args(&args).output() {
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                let mut current_device: Option<&str> = None;
+                for line in stdout.lines() {
+                    let trimmed = line.trim();
+                    // diskutil info output separates devices with blank lines and headers
+                    if trimmed.starts_with("Device Identifier:") {
+                        // Extract device identifier like "disk0s1"
+                        if let Some(id) = trimmed.split(':').nth(1) {
+                            let id = id.trim();
+                            current_device =
+                                device_names.iter().find(|n| *n == id).map(|s| s.as_str());
+                        }
+                    }
+                    if trimmed.starts_with("Solid State:") {
+                        let kind = if trimmed.contains("Yes") {
+                            StorageKind::Ssd
+                        } else if trimmed.contains("No") {
+                            StorageKind::Hdd
+                        } else {
+                            StorageKind::Unknown
+                        };
+                        if let Some(dev) = current_device {
+                            device_to_kind.insert(dev.to_string(), kind);
+                        }
+                    }
+                }
+            }
+        }
+
+        // Fill in the kinds from the batch query
+        for info in &mut storage {
+            let dev_name = std::path::Path::new(&info.name)
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("");
+            if let Some(kind) = device_to_kind.get(dev_name) {
+                info.kind = *kind;
+            }
+        }
+
         storage
+    }
+}
+
+#[cfg(target_os = "macos")]
+#[allow(dead_code)]
+fn detect_storage_kind_macos(device: &str) -> StorageKind {
+    let dev_name = std::path::Path::new(device)
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("");
+    if dev_name.is_empty() {
+        return StorageKind::Unknown;
+    }
+    let output = match std::process::Command::new("diskutil")
+        .args(["info", dev_name])
+        .output()
+    {
+        Ok(o) => o,
+        Err(_) => return StorageKind::Unknown,
+    };
+    parse_diskutil_info_output(&output.stdout)
+}
+
+#[cfg(target_os = "macos")]
+#[allow(dead_code)]
+fn parse_diskutil_info_output(stdout: &[u8]) -> StorageKind {
+    let stdout = String::from_utf8_lossy(stdout);
+    for line in stdout.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with("Solid State:") {
+            if trimmed.contains("Yes") {
+                return StorageKind::Ssd;
+            } else if trimmed.contains("No") {
+                return StorageKind::Hdd;
+            }
+        }
+    }
+    StorageKind::Unknown
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_diskutil_info_output_detects_ssd() {
+        let output = b"Device Identifier: disk0s1\nSolid State: Yes\n";
+        assert_eq!(parse_diskutil_info_output(output), StorageKind::Ssd);
+    }
+
+    #[test]
+    fn parse_diskutil_info_output_detects_hdd() {
+        let output = b"Device Identifier: disk1s1\nSolid State: No\n";
+        assert_eq!(parse_diskutil_info_output(output), StorageKind::Hdd);
+    }
+
+    #[test]
+    fn parse_diskutil_info_output_returns_unknown_when_missing() {
+        let output = b"Device Identifier: disk0s1\n";
+        assert_eq!(parse_diskutil_info_output(output), StorageKind::Unknown);
     }
 }
 
@@ -180,6 +301,7 @@ fn detect_storage_impl() -> Vec<StorageInfo> {
         let block_size = stat.f_frsize as u64;
         let total_bytes = stat.f_blocks * block_size;
         let available_bytes = stat.f_bavail * block_size;
+        let kind = detect_storage_kind_linux(device);
 
         storage.push(StorageInfo {
             name: device.to_string(),
@@ -187,12 +309,29 @@ fn detect_storage_impl() -> Vec<StorageInfo> {
             total_bytes,
             available_bytes,
             file_system: fstype.to_string(),
-            kind: StorageKind::Unknown,
+            kind,
             is_removable: false,
         });
     }
 
     storage
+}
+
+#[cfg(target_os = "linux")]
+fn detect_storage_kind_linux(device: &str) -> StorageKind {
+    let dev_name = std::path::Path::new(device)
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("");
+    if dev_name.is_empty() {
+        return StorageKind::Unknown;
+    }
+    let rotational_path = format!("/sys/block/{dev_name}/queue/rotational");
+    match std::fs::read_to_string(&rotational_path) {
+        Ok(s) if s.trim() == "0" => StorageKind::Ssd,
+        Ok(s) if s.trim() == "1" => StorageKind::Hdd,
+        _ => StorageKind::Unknown,
+    }
 }
 
 #[cfg(not(any(target_os = "macos", target_os = "linux")))]

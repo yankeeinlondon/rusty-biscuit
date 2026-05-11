@@ -26,6 +26,8 @@ An area is included if any package within it has files in the git index.
 | Argument | Description |
 |----------|-------------|
 | `[filter...]` | Optional substring filters to narrow the area scope |
+| `-p/--package <PKG>` | Restrict output to the area that contains the named package (exact match on `Package.name`) |
+| `--package-area <AREA>` | Restrict output to a specific package area (prefix match) |
 
 ## Exit Codes
 
@@ -42,16 +44,33 @@ sniff repo staged-package-areas @homelab     # Only homelab area (if staged)
 sniff repo staged-package-areas !biscuit     # All staged areas except biscuit
 ```
 
+## Scoping to a Package or Package Area
+
+`-p/--package` reduces the result to the area containing the resolved package; `--package-area` applies a case-insensitive prefix filter on the area name. Both can be combined with the positional filter (AND).
+
+```bash
+sniff repo staged-package-areas -p sniff-cli            # The area sniff-cli lives in (when staged)
+sniff repo staged-package-areas --package-area homelab  # Staged homelab/* areas
+```
+
+Passing both flags requires the resolved package to live inside the resolved area; otherwise the command fails with an explicit error. Unknown values for either flag fail with an error listing the valid names.
+
 ## JSON Output (`--json`)
 
 ```
 sniff --json repo staged-package-areas
 ```
 
-Returns a JSON array of area name strings:
+Returns a `{ scope, kind, names }` object. `scope` is `"staged"`, `kind`
+is `"package_areas"`, and `names` is an array of area name strings
+(empty when the repo is not a monorepo):
 
 ```json
-["sniff"]
+{
+  "scope": "staged",
+  "kind": "package_areas",
+  "names": ["sniff"]
+}
 ```
 
 ## Related Subcommands

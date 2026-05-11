@@ -10,6 +10,11 @@ use crate::receipt::ProviderKind;
 use crate::target::Target;
 
 /// Validate that a message has content.
+///
+/// Uses the conservative rule: body, attachments, or location must be
+/// present. The `title` field alone is **not** enough for non-desktop
+/// providers. Use [`validate_message_for_provider`] in provider-aware
+/// flows that allow title-only messages for the desktop provider.
 pub fn validate_message(message: &Message) -> Result<(), MessengerError> {
     if message.is_empty() {
         return Err(MessengerError::InvalidMessage(
@@ -17,6 +22,41 @@ pub fn validate_message(message: &Message) -> Result<(), MessengerError> {
         ));
     }
     Ok(())
+}
+
+/// Provider-aware message validity check.
+///
+/// Matches [`validate_message`] for every provider except
+/// [`ProviderKind::Desktop`], [`ProviderKind::Apns`], and [`ProviderKind::Fcm`],
+/// where a title-only message is permitted. Desktop notifications and mobile
+/// push notifications treat `title` as first-class content: a "Deploy finished"
+/// toast or "New Message" push with no body is valid and should not error out
+/// before a backend ever sees it.
+pub fn validate_message_for_provider(
+    message: &Message,
+    provider: ProviderKind,
+) -> Result<(), MessengerError> {
+    #[cfg(feature = "desktop")]
+    if provider == ProviderKind::Desktop {
+        if message.is_empty() && message.title.is_none() {
+            return Err(MessengerError::InvalidMessage(
+                "message has no title, body, attachments, or location".into(),
+            ));
+        }
+        return Ok(());
+    }
+
+    // Mobile push providers allow title-only messages
+    if provider == ProviderKind::Apns || provider == ProviderKind::Fcm {
+        if message.is_empty() && message.title.is_none() {
+            return Err(MessengerError::InvalidMessage(
+                "message has no title, body, attachments, or location".into(),
+            ));
+        }
+        return Ok(());
+    }
+
+    validate_message(message)
 }
 
 /// A best-effort compatibility warning emitted when a feature is dropped.
@@ -78,6 +118,20 @@ pub fn normalize_dispatch(
         }
     }
 
+    // Discord webhooks cannot carry a reply context. Enforce this before
+    // normalization so `BestEffort` mode does not silently drop the field and
+    // so `plan_send()` never issues a network call for this misuse.
+    if provider == ProviderKind::DiscordWebhook && dispatch.reply_to.is_some() {
+        tracing::warn!(
+            feature = "replies",
+            "Discord webhooks do not support replies; failing plan-time"
+        );
+        return Err(MessengerError::UnsupportedFeature {
+            provider,
+            feature: "replies",
+        });
+    }
+
     let mut normalized_dispatch = dispatch.clone();
     let mut normalized_message = message.clone();
     let mut warnings = Vec::new();
@@ -85,6 +139,7 @@ pub fn normalize_dispatch(
     let has_markdown = matches!(
         normalized_message.body,
         Some(crate::message::MessageBody::Markdown(_))
+            | Some(crate::message::MessageBody::Summarized { .. })
     );
     if has_markdown && !capabilities.supports_markdown_rendering {
         if dispatch.options.compatibility == CompatibilityMode::Strict {
@@ -107,23 +162,38 @@ pub fn normalize_dispatch(
         });
     }
 
-    if !normalized_message.attachments.is_empty() && !capabilities.supports_attachments {
-        if dispatch.options.compatibility == CompatibilityMode::Strict {
-            tracing::warn!(
+    if !normalized_message.attachments.is_empty() {
+        let has_unsupported_attachment = normalized_message.attachments.iter().any(|attachment| {
+            !capabilities
+                .supported_attachment_kinds
+                .contains(&attachment.kind)
+        });
+
+        if has_unsupported_attachment {
+            if dispatch.options.compatibility == CompatibilityMode::Strict {
+                tracing::warn!(
+                    feature = "attachments",
+                    "strict mode rejected unsupported feature"
+                );
+                return Err(MessengerError::UnsupportedFeature {
+                    provider,
+                    feature: "attachments",
+                });
+            }
+            tracing::debug!(
                 feature = "attachments",
-                "strict mode rejected unsupported feature"
+                "dropping unsupported attachment kinds"
             );
-            return Err(MessengerError::UnsupportedFeature {
+            normalized_message.attachments.retain(|attachment| {
+                capabilities
+                    .supported_attachment_kinds
+                    .contains(&attachment.kind)
+            });
+            warnings.push(CompatibilityWarning {
                 provider,
                 feature: "attachments",
             });
         }
-        tracing::debug!(feature = "attachments", "dropping unsupported feature");
-        normalized_message.attachments.clear();
-        warnings.push(CompatibilityWarning {
-            provider,
-            feature: "attachments",
-        });
     }
 
     if normalized_message.location.is_some() && !capabilities.supports_location {
@@ -216,7 +286,7 @@ pub fn normalize_dispatch(
         validate_attachment_source(attachment, provider)?;
     }
 
-    if normalized_message.is_empty() {
+    if is_undeliverable_after_normalization(&normalized_message, provider) {
         tracing::warn!("normalization dropped all deliverable content");
         return Err(MessengerError::InvalidMessage(format!(
             "{provider} cannot deliver this message after dropping unsupported features"
@@ -228,6 +298,23 @@ pub fn normalize_dispatch(
         message: normalized_message,
         warnings,
     })
+}
+
+fn is_undeliverable_after_normalization(message: &Message, provider: ProviderKind) -> bool {
+    #[cfg(feature = "desktop")]
+    if provider == ProviderKind::Desktop {
+        return message.is_empty() && message.title.is_none();
+    }
+    #[cfg(feature = "apns")]
+    if provider == ProviderKind::Apns {
+        return message.is_empty() && message.title.is_none();
+    }
+    #[cfg(feature = "fcm")]
+    if provider == ProviderKind::Fcm {
+        return message.is_empty() && message.title.is_none();
+    }
+    let _ = provider;
+    message.is_empty()
 }
 
 fn validate_attachment_source(
@@ -298,14 +385,24 @@ pub fn target_provider_kind(target: &Target) -> ProviderKind {
     match target {
         #[cfg(feature = "discord")]
         Target::Discord(_) => ProviderKind::Discord,
+        #[cfg(feature = "discord")]
+        Target::DiscordWebhook(_) => ProviderKind::DiscordWebhook,
         #[cfg(feature = "slack")]
         Target::Slack(_) => ProviderKind::Slack,
+        #[cfg(feature = "slack")]
+        Target::SlackWebhook(_) => ProviderKind::SlackWebhook,
         #[cfg(feature = "signal")]
         Target::Signal(_) => ProviderKind::Signal,
         #[cfg(feature = "whatsapp")]
         Target::WhatsApp(_) => ProviderKind::WhatsApp,
         #[cfg(feature = "telegram")]
         Target::Telegram(_) => ProviderKind::Telegram,
+        #[cfg(feature = "desktop")]
+        Target::Desktop(_) => ProviderKind::Desktop,
+        #[cfg(feature = "apns")]
+        Target::Apns(_) => ProviderKind::Apns,
+        #[cfg(feature = "fcm")]
+        Target::Fcm(_) => ProviderKind::Fcm,
         _ => unreachable!("no provider features enabled"),
     }
 }

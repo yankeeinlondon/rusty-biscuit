@@ -1,652 +1,16 @@
-//! Type definitions for program detection and installation.
+//! Type definitions for program detection.
 //!
-//! This module provides:
-//! - `ExecutableSource`: Describes where a program executable was discovered
-//! - `ProgramDetector`: Trait for structs that detect and manage installed programs
-//! - `InstallationMethod`: Enum describing how to install a program
-//! - `CategoryDetector<E>`: Generic detector for any category enum
+//! This module defines the `ProgramDetector` trait used by all category
+//! detectors. The concrete generic detector lives in
+//! [`crate::programs::category_detector`]; the contract types
+//! (`ExecutableSource`, `InstallationMethod`, `SystemPrerequisite`,
+//! `PrereqProbe`, `ProgramError`) live in [`crate::programs::contract`].
 
-use std::collections::HashMap;
-use std::marker::PhantomData;
 use std::path::PathBuf;
 
-use serde::{Deserialize, Serialize};
-
-use crate::programs::enums::CategoryEnum;
-use crate::programs::find_program::{
-    ExecutableIndex, find_programs_with_source_from_index, find_programs_with_source_parallel,
-};
-use crate::programs::schema::{ProgramError, ProgramMetadata};
 use crate::error::SniffInstallationError;
-
-/// Describes where a program executable was discovered.
-///
-/// This enum distinguishes between traditional PATH-based executables and
-/// macOS application bundles, enabling appropriate invocation strategies.
-///
-/// ## Variants
-///
-/// - `Path` - Found in system PATH (traditional executable)
-/// - `MacOsAppBundle` - Found as a macOS `.app` bundle
-///
-/// ## Examples
-///
-/// ```
-/// use sniff::programs::ExecutableSource;
-///
-/// let source = ExecutableSource::Path;
-/// assert!(!source.is_app_bundle());
-///
-/// let bundle = ExecutableSource::MacOsAppBundle;
-/// assert!(bundle.is_app_bundle());
-/// ```
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ExecutableSource {
-    /// Found via PATH lookup (traditional executable).
-    Path,
-    /// Found as a macOS `.app` bundle.
-    MacOsAppBundle,
-}
-
-impl ExecutableSource {
-    /// Returns true if this source is a macOS app bundle.
-    ///
-    /// ## Examples
-    ///
-    /// ```
-    /// use sniff::programs::ExecutableSource;
-    ///
-    /// assert!(!ExecutableSource::Path.is_app_bundle());
-    /// assert!(ExecutableSource::MacOsAppBundle.is_app_bundle());
-    /// ```
-    #[must_use]
-    pub fn is_app_bundle(&self) -> bool {
-        matches!(self, Self::MacOsAppBundle)
-    }
-}
-
-impl std::fmt::Display for ExecutableSource {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            ExecutableSource::Path => write!(f, "PATH"),
-            ExecutableSource::MacOsAppBundle => write!(f, "macOS App Bundle"),
-        }
-    }
-}
-
-/// Describes an installation method for installing some piece of software.
-///
-/// This installation takes two broad forms:
-///
-/// 1. Using a package manager (OS level _or_ Language specific)
-/// 2. Downloading a bash script and executing it locally
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum InstallationMethod {
-    // Language Package Managers
-    /// Default Node.js package manager. [Website](https://www.npmjs.com)
-    Npm(&'static str),
-    /// Disk-efficient Node.js package manager. [Website](https://pnpm.io)
-    Pnpm(&'static str),
-    /// Alternative Node.js package manager. [Website](https://yarnpkg.com)
-    Yarn(&'static str),
-    /// All-in-one JS runtime with built-in package manager. [Website](https://bun.sh)
-    Bun(&'static str),
-    /// Official Rust package manager and build tool. [Website](https://doc.rust-lang.org/cargo)
-    Cargo(&'static str),
-    /// Built-in Go dependency system. [Website](https://go.dev/ref/mod)
-    GoModules(&'static str),
-    /// Dependency manager for modern PHP applications. [Website](https://getcomposer.org)
-    Composer(&'static str),
-    /// Official Swift dependency manager. [Website](https://www.swift.org/package-manager)
-    SwiftPm(&'static str),
-    /// Standard package manager for Lua modules. [Website](https://luarocks.org)
-    LuaRocks(&'static str),
-    /// Cross-platform C/C++ dependency manager. [Website](https://vcpkg.io)
-    VcPkg(&'static str),
-    /// Decentralized C/C++ package manager. [Website](https://conan.io)
-    Conan(&'static str),
-    /// Official package manager for .NET and C#. [Website](https://www.nuget.org)
-    Nuget(&'static str),
-    /// Package manager for the BEAM ecosystem. [Website](https://hex.pm)
-    Hex(&'static str),
-    /// Traditional Python package installer. [Website](https://pip.pypa.io)
-    Pip(&'static str),
-    /// High-performance Python package manager. [Website](https://astral.sh/uv)
-    Uv(&'static str),
-    /// Python dependency manager with lockfile support. [Website](https://python-poetry.org)
-    Poetry(&'static str),
-    /// Canonical archive and installer for Perl modules. [Website](https://www.cpan.org)
-    Cpan(&'static str),
-    /// Lightweight, scriptable CPAN client. [Website](https://metacpan.org/pod/App::cpanminus)
-    Cpanm(&'static str),
-
-    // OS Package Managers
-    /// Debian/Ubuntu primary package manager. [Website](https://tracker.debian.org/pkg/apt)
-    Apt(&'static str),
-    /// Modern apt frontend with parallel downloads. [Website](https://github.com/volitank/nala)
-    Nala(&'static str),
-    /// macOS/Linux community package manager. [Website](https://brew.sh)
-    Brew(&'static str),
-    /// Fedora/RHEL primary package manager. [Website](https://github.com/rpm-software-management/dnf)
-    Dnf(&'static str),
-    /// Arch Linux package manager. [Website](https://archlinux.org/pacman/)
-    Pacman(&'static str),
-    /// Windows Package Manager. [Website](https://github.com/microsoft/winget-cli)
-    Winget(&'static str),
-    /// Windows community package manager. [Website](https://chocolatey.org)
-    Chocolatey(&'static str),
-    /// Windows command-line installer. [Website](https://scoop.sh)
-    Scoop(&'static str),
-    /// Nix package manager. [Website](https://nixos.org)
-    Nix(&'static str),
-
-    /// Install by downloading a bash script from a URL and then
-    /// piping it to the host's `bash` command for installation.
-    RemoteBash(&'static str),
-}
-
-impl InstallationMethod {
-    /// Returns the package name for this installation method.
-    pub fn package_name(&self) -> &'static str {
-        match self {
-            // Language package managers
-            InstallationMethod::Npm(pkg) => pkg,
-            InstallationMethod::Pnpm(pkg) => pkg,
-            InstallationMethod::Yarn(pkg) => pkg,
-            InstallationMethod::Bun(pkg) => pkg,
-            InstallationMethod::Cargo(pkg) => pkg,
-            InstallationMethod::GoModules(pkg) => pkg,
-            InstallationMethod::Composer(pkg) => pkg,
-            InstallationMethod::SwiftPm(pkg) => pkg,
-            InstallationMethod::LuaRocks(pkg) => pkg,
-            InstallationMethod::VcPkg(pkg) => pkg,
-            InstallationMethod::Conan(pkg) => pkg,
-            InstallationMethod::Nuget(pkg) => pkg,
-            InstallationMethod::Hex(pkg) => pkg,
-            InstallationMethod::Pip(pkg) => pkg,
-            InstallationMethod::Uv(pkg) => pkg,
-            InstallationMethod::Poetry(pkg) => pkg,
-            InstallationMethod::Cpan(pkg) => pkg,
-            InstallationMethod::Cpanm(pkg) => pkg,
-            // OS package managers
-            InstallationMethod::Apt(pkg) => pkg,
-            InstallationMethod::Nala(pkg) => pkg,
-            InstallationMethod::Brew(pkg) => pkg,
-            InstallationMethod::Dnf(pkg) => pkg,
-            InstallationMethod::Pacman(pkg) => pkg,
-            InstallationMethod::Winget(pkg) => pkg,
-            InstallationMethod::Chocolatey(pkg) => pkg,
-            InstallationMethod::Scoop(pkg) => pkg,
-            InstallationMethod::Nix(pkg) => pkg,
-            // Remote bash
-            InstallationMethod::RemoteBash(url) => url,
-        }
-    }
-
-    /// Returns the package manager name for this installation method.
-    pub fn manager_name(&self) -> &'static str {
-        match self {
-            InstallationMethod::Npm(_) => "npm",
-            InstallationMethod::Pnpm(_) => "pnpm",
-            InstallationMethod::Yarn(_) => "yarn",
-            InstallationMethod::Bun(_) => "bun",
-            InstallationMethod::Cargo(_) => "cargo",
-            InstallationMethod::GoModules(_) => "go",
-            InstallationMethod::Composer(_) => "composer",
-            InstallationMethod::SwiftPm(_) => "swift",
-            InstallationMethod::LuaRocks(_) => "luarocks",
-            InstallationMethod::VcPkg(_) => "vcpkg",
-            InstallationMethod::Conan(_) => "conan",
-            InstallationMethod::Nuget(_) => "nuget",
-            InstallationMethod::Hex(_) => "mix",
-            InstallationMethod::Pip(_) => "pip",
-            InstallationMethod::Uv(_) => "uv",
-            InstallationMethod::Poetry(_) => "poetry",
-            InstallationMethod::Cpan(_) => "cpan",
-            InstallationMethod::Cpanm(_) => "cpanm",
-            InstallationMethod::Apt(_) => "apt",
-            InstallationMethod::Nala(_) => "nala",
-            InstallationMethod::Brew(_) => "brew",
-            InstallationMethod::Dnf(_) => "dnf",
-            InstallationMethod::Pacman(_) => "pacman",
-            InstallationMethod::Winget(_) => "winget",
-            InstallationMethod::Chocolatey(_) => "choco",
-            InstallationMethod::Scoop(_) => "scoop",
-            InstallationMethod::Nix(_) => "nix",
-            InstallationMethod::RemoteBash(_) => "bash",
-        }
-    }
-
-    /// Returns true if this is an OS-level package manager.
-    pub fn is_os_package_manager(&self) -> bool {
-        matches!(
-            self,
-            InstallationMethod::Apt(_)
-                | InstallationMethod::Nala(_)
-                | InstallationMethod::Brew(_)
-                | InstallationMethod::Dnf(_)
-                | InstallationMethod::Pacman(_)
-                | InstallationMethod::Winget(_)
-                | InstallationMethod::Chocolatey(_)
-                | InstallationMethod::Scoop(_)
-                | InstallationMethod::Nix(_)
-        )
-    }
-
-    /// Returns true if this is a remote bash installation.
-    pub fn is_remote_bash(&self) -> bool {
-        matches!(self, InstallationMethod::RemoteBash(_))
-    }
-
-    /// Returns the binary name of the package manager executable.
-    ///
-    /// This is the executable that must be present on the system
-    /// to use this installation method.
-    pub fn manager_binary(&self) -> &'static str {
-        match self {
-            InstallationMethod::Npm(_) => "npm",
-            InstallationMethod::Pnpm(_) => "pnpm",
-            InstallationMethod::Yarn(_) => "yarn",
-            InstallationMethod::Bun(_) => "bun",
-            InstallationMethod::Cargo(_) => "cargo",
-            InstallationMethod::GoModules(_) => "go",
-            InstallationMethod::Composer(_) => "composer",
-            InstallationMethod::SwiftPm(_) => "swift",
-            InstallationMethod::LuaRocks(_) => "luarocks",
-            InstallationMethod::VcPkg(_) => "vcpkg",
-            InstallationMethod::Conan(_) => "conan",
-            InstallationMethod::Nuget(_) => "nuget",
-            InstallationMethod::Hex(_) => "mix",
-            InstallationMethod::Pip(_) => "pip",
-            InstallationMethod::Uv(_) => "uv",
-            InstallationMethod::Poetry(_) => "poetry",
-            InstallationMethod::Cpan(_) => "cpan",
-            InstallationMethod::Cpanm(_) => "cpanm",
-            InstallationMethod::Apt(_) => "apt",
-            InstallationMethod::Nala(_) => "nala",
-            InstallationMethod::Brew(_) => "brew",
-            InstallationMethod::Dnf(_) => "dnf",
-            InstallationMethod::Pacman(_) => "pacman",
-            InstallationMethod::Winget(_) => "winget",
-            InstallationMethod::Chocolatey(_) => "choco",
-            InstallationMethod::Scoop(_) => "scoop",
-            InstallationMethod::Nix(_) => "nix",
-            InstallationMethod::RemoteBash(_) => "bash",
-        }
-    }
-}
-
-/// Generic program detector for any category enum.
-///
-/// Stores detection results (path + source) indexed by enum variant ordinal.
-/// Replaces the per-category `InstalledEditors`, `InstalledUtilities`, etc.
-/// structs with a single generic implementation.
-#[derive(Debug, Clone)]
-pub struct CategoryDetector<E: CategoryEnum> {
-    results: Vec<Option<(PathBuf, ExecutableSource)>>,
-    _phantom: PhantomData<E>,
-}
-
-impl<E: CategoryEnum> Default for CategoryDetector<E> {
-    fn default() -> Self {
-        Self {
-            results: vec![None; E::COUNT],
-            _phantom: PhantomData,
-        }
-    }
-}
-
-impl<E: CategoryEnum> PartialEq for CategoryDetector<E> {
-    fn eq(&self, other: &Self) -> bool {
-        self.results == other.results
-    }
-}
-
-impl<E: CategoryEnum> Eq for CategoryDetector<E> {}
-
-impl<E: CategoryEnum> Serialize for CategoryDetector<E> {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        use serde::ser::SerializeMap;
-        let mut map = serializer.serialize_map(Some(E::COUNT))?;
-        for variant in E::iter() {
-            let key = variant.serde_key();
-            let info = variant.info();
-            let entry = match self.path_with_source(variant) {
-                Some((path, source)) => {
-                    crate::programs::schema::ProgramEntry::installed(info, path, source)
-                }
-                None => crate::programs::schema::ProgramEntry::not_installed(info),
-            };
-            map.serialize_entry(key, &entry)?;
-        }
-        map.end()
-    }
-}
-
-/// Helper for deserializing both boolean and ProgramEntry values.
-#[derive(Deserialize)]
-#[serde(untagged)]
-enum BoolOrEntry {
-    Bool(bool),
-    Entry { installed: bool },
-}
-
-impl<'de, E: CategoryEnum> Deserialize<'de> for CategoryDetector<E> {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        deserializer.deserialize_map(CategoryDetectorVisitor::<E>(PhantomData))
-    }
-}
-
-struct CategoryDetectorVisitor<E>(PhantomData<E>);
-
-impl<'de, E: CategoryEnum> serde::de::Visitor<'de> for CategoryDetectorVisitor<E> {
-    type Value = CategoryDetector<E>;
-
-    fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(
-            formatter,
-            "a map of program names to booleans or program entries"
-        )
-    }
-
-    fn visit_map<M>(self, mut map: M) -> Result<Self::Value, M::Error>
-    where
-        M: serde::de::MapAccess<'de>,
-    {
-        // Build key -> variant index lookup
-        let key_to_index: HashMap<&'static str, usize> = E::iter()
-            .map(|v| (v.serde_key(), v.variant_index()))
-            .collect();
-
-        let mut results = vec![None; E::COUNT];
-
-        while let Some(key) = map.next_key::<String>()? {
-            if let Some(&idx) = key_to_index.get(key.as_str()) {
-                let value: BoolOrEntry = map.next_value()?;
-                let installed = match value {
-                    BoolOrEntry::Bool(b) => b,
-                    BoolOrEntry::Entry { installed } => installed,
-                };
-                if installed {
-                    results[idx] = Some((PathBuf::new(), ExecutableSource::Path));
-                }
-            } else {
-                let _: serde::de::IgnoredAny = map.next_value()?;
-            }
-        }
-
-        Ok(CategoryDetector {
-            results,
-            _phantom: PhantomData,
-        })
-    }
-}
-
-impl<E: CategoryEnum> CategoryDetector<E> {
-    /// Detect installed programs by scanning PATH.
-    pub fn new() -> Self {
-        let mut names_to_search: Vec<&'static str> = Vec::new();
-        for variant in E::iter() {
-            let info = variant.info();
-            names_to_search.push(info.binary_name);
-            names_to_search.extend_from_slice(info.alternate_binary_names);
-        }
-
-        let found = find_programs_with_source_parallel(&names_to_search);
-        Self::from_search_results(&found)
-    }
-
-    /// Detect installed programs using a pre-built executable index.
-    pub fn new_with_index(index: &ExecutableIndex) -> Self {
-        let mut names_to_search: Vec<&'static str> = Vec::new();
-        for variant in E::iter() {
-            let info = variant.info();
-            names_to_search.push(info.binary_name);
-            names_to_search.extend_from_slice(info.alternate_binary_names);
-        }
-
-        let found = find_programs_with_source_from_index(index, &names_to_search);
-        Self::from_search_results(&found)
-    }
-
-    /// Construct from search results HashMap.
-    fn from_search_results(found: &HashMap<String, Option<(PathBuf, ExecutableSource)>>) -> Self {
-        let mut results = vec![None; E::COUNT];
-
-        for variant in E::iter() {
-            let idx = variant.variant_index();
-
-            // Check platform override first (e.g., Windows SAPI)
-            if let Some(override_result) = variant.platform_override() {
-                results[idx] = Some(override_result);
-                continue;
-            }
-
-            // Try primary binary name
-            let info = variant.info();
-            if let Some(result) = found.get(info.binary_name).and_then(|r| r.clone()) {
-                results[idx] = Some(result);
-                continue;
-            }
-
-            // Try alternate binary names
-            for alt in info.alternate_binary_names {
-                if let Some(result) = found.get(*alt).and_then(|r| r.clone()) {
-                    results[idx] = Some(result);
-                    break;
-                }
-            }
-        }
-
-        Self {
-            results,
-            _phantom: PhantomData,
-        }
-    }
-
-    /// Re-check program availability and update internal state.
-    pub fn refresh(&mut self) {
-        *self = Self::new();
-    }
-
-    /// Returns true if the specified program is installed.
-    pub fn is_installed(&self, program: E) -> bool {
-        self.results[program.variant_index()].is_some()
-    }
-
-    /// Returns the path to the specified program's binary if installed.
-    pub fn path(&self, program: E) -> Option<PathBuf> {
-        self.results[program.variant_index()]
-            .as_ref()
-            .map(|(p, _)| p.clone())
-    }
-
-    /// Returns the path and source of the specified program if installed.
-    pub fn path_with_source(&self, program: E) -> Option<(PathBuf, ExecutableSource)> {
-        self.results[program.variant_index()].clone()
-    }
-
-    /// Returns the version of the specified program if available.
-    ///
-    /// ## Errors
-    ///
-    /// Returns an error if the program is not installed or version detection fails.
-    pub fn version(&self, program: E) -> Result<String, ProgramError> {
-        if !self.is_installed(program) {
-            return Err(ProgramError::NotFound(program.binary_name().to_string()));
-        }
-        program.version()
-    }
-
-    /// Returns the official website URL for the specified program.
-    pub fn website(&self, program: E) -> &'static str {
-        program.website()
-    }
-
-    /// Returns a one-line description of the specified program.
-    pub fn description(&self, program: E) -> &'static str {
-        program.description()
-    }
-
-    /// Returns a list of all installed programs in this category.
-    pub fn installed(&self) -> Vec<E> {
-        E::iter().filter(|p| self.is_installed(*p)).collect()
-    }
-
-    /// Builder method: mark a program as installed with given path and source.
-    ///
-    /// Useful for testing.
-    pub fn with_program(mut self, program: E, path: PathBuf, source: ExecutableSource) -> Self {
-        self.results[program.variant_index()] = Some((path, source));
-        self
-    }
-}
-
-impl<E: CategoryEnum> ProgramDetector for CategoryDetector<E> {
-    type Program = E;
-
-    fn refresh(&mut self) {
-        *self = Self::new();
-    }
-
-    fn is_installed(&self, program: E) -> bool {
-        CategoryDetector::is_installed(self, program)
-    }
-
-    fn path(&self, program: E) -> Option<PathBuf> {
-        CategoryDetector::path(self, program)
-    }
-
-    fn path_with_source(&self, program: E) -> Option<(PathBuf, ExecutableSource)> {
-        CategoryDetector::path_with_source(self, program)
-    }
-
-    fn version(&self, program: E) -> Result<String, crate::programs::ProgramError> {
-        CategoryDetector::version(self, program)
-    }
-
-    fn website(&self, program: E) -> &'static str {
-        CategoryDetector::website(self, program)
-    }
-
-    fn description(&self, program: E) -> &'static str {
-        CategoryDetector::description(self, program)
-    }
-
-    fn installed(&self) -> Vec<E> {
-        CategoryDetector::installed(self)
-    }
-
-    fn installable(&self, program: E) -> bool {
-        let info = program.info();
-        if info.installation_methods.is_empty() {
-            return false;
-        }
-
-        let os_availability = info.os_availability;
-        if !os_availability.is_empty() {
-            let os_type = crate::os::detect_os_type();
-            if !os_availability.contains(&os_type) {
-                return false;
-            }
-        }
-
-        let os_pkg_mgrs = crate::programs::pkg_mngrs::InstalledOsPackageManagers::new();
-        let lang_pkg_mgrs = crate::programs::pkg_mngrs::InstalledLanguagePackageManagers::new();
-
-        info.installation_methods.iter().any(|method| {
-            crate::programs::installer::method_available(method, &os_pkg_mgrs, &lang_pkg_mgrs)
-        })
-    }
-
-    fn install(&self, program: E) -> Result<(), SniffInstallationError> {
-        let info = program.info();
-
-        if info.installation_methods.is_empty() {
-            return Err(SniffInstallationError::NotInstallableOnOs {
-                pkg: program.display_name().to_string(),
-                os: "unknown".to_string(),
-            });
-        }
-
-        let os_availability = info.os_availability;
-        if !os_availability.is_empty() {
-            let os_type = crate::os::detect_os_type();
-            if !os_availability.contains(&os_type) {
-                return Err(SniffInstallationError::NotInstallableOnOs {
-                    pkg: program.display_name().to_string(),
-                    os: os_type.to_string(),
-                });
-            }
-        }
-
-        let os_pkg_mgrs = crate::programs::pkg_mngrs::InstalledOsPackageManagers::new();
-        let lang_pkg_mgrs = crate::programs::pkg_mngrs::InstalledLanguagePackageManagers::new();
-        let method = crate::programs::installer::select_best_method(
-            info.installation_methods,
-            &os_pkg_mgrs,
-            &lang_pkg_mgrs,
-        )
-        .ok_or_else(|| SniffInstallationError::MissingPackageManager {
-            pkg: program.display_name().to_string(),
-            manager: "package manager".to_string(),
-        })?;
-
-        let _result = crate::programs::installer::execute_install(
-            method,
-            &crate::programs::installer::InstallOptions::default(),
-        )?;
-        Ok(())
-    }
-
-    fn install_version(&self, program: E, version: &str) -> Result<(), SniffInstallationError> {
-        let info = program.info();
-
-        if info.installation_methods.is_empty() {
-            return Err(SniffInstallationError::NotInstallableOnOs {
-                pkg: program.display_name().to_string(),
-                os: "unknown".to_string(),
-            });
-        }
-
-        let os_availability = info.os_availability;
-        if !os_availability.is_empty() {
-            let os_type = crate::os::detect_os_type();
-            if !os_availability.contains(&os_type) {
-                return Err(SniffInstallationError::NotInstallableOnOs {
-                    pkg: program.display_name().to_string(),
-                    os: os_type.to_string(),
-                });
-            }
-        }
-
-        let os_pkg_mgrs = crate::programs::pkg_mngrs::InstalledOsPackageManagers::new();
-        let lang_pkg_mgrs = crate::programs::pkg_mngrs::InstalledLanguagePackageManagers::new();
-        let method = crate::programs::installer::select_best_method(
-            info.installation_methods,
-            &os_pkg_mgrs,
-            &lang_pkg_mgrs,
-        )
-        .ok_or_else(|| SniffInstallationError::MissingPackageManager {
-            pkg: program.display_name().to_string(),
-            manager: "package manager".to_string(),
-        })?;
-
-        let _result = crate::programs::installer::execute_versioned_install(
-            method,
-            version,
-            &crate::programs::installer::InstallOptions::default(),
-        )?;
-        Ok(())
-    }
-}
+use crate::programs::contract::{ExecutableSource, InstallationMethod};
+use crate::programs::schema::ProgramMetadata;
 
 /// Trait for structs that detect and manage programs of a specific category.
 ///
@@ -793,12 +157,51 @@ pub trait ProgramDetector {
         program: Self::Program,
         version: &str,
     ) -> Result<(), SniffInstallationError>;
+
+    /// Returns every installation method the program declares, ignoring host
+    /// constraints. This is the static metadata.
+    fn known_methods(&self, program: Self::Program) -> &'static [InstallationMethod] {
+        program.info().installation_methods
+    }
+
+    /// Returns the subset of known methods whose required package manager is
+    /// actually installed on this host and whose program is permitted on the
+    /// current OS.
+    fn available_methods(&self, program: Self::Program) -> Vec<InstallationMethod> {
+        use crate::programs::host_capability::HostCapabilities;
+        use crate::programs::install::method_available;
+
+        let info = program.info();
+        let host = HostCapabilities::load_or_detect();
+
+        let os_ok = info.os_availability.is_empty() || info.os_availability.contains(&host.os_type);
+        if !os_ok {
+            return Vec::new();
+        }
+
+        info.installation_methods
+            .iter()
+            .filter(|m| method_available(m, &host))
+            .cloned()
+            .collect()
+    }
+
+    /// Returns a full install plan for this program against cached host
+    /// capabilities.
+    fn install_plan(&self, program: Self::Program) -> crate::programs::install::InstallPlan {
+        use crate::programs::host_capability::HostCapabilities;
+        use crate::programs::install::build_install_plan;
+
+        let host = HostCapabilities::load_or_detect();
+        build_install_plan(&program, &host)
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::programs::schema::{ProgramError, ProgramInfo, ProgramMetadata};
+    use crate::programs::contract::ProgramError;
+    use crate::programs::schema::{ProgramInfo, ProgramMetadata};
 
     // ============================================
     // Mock implementation for testing ProgramDetector trait
@@ -951,7 +354,7 @@ mod tests {
     #[test]
     fn test_executable_source_clone_and_copy() {
         let source = ExecutableSource::Path;
-        let cloned = source.clone();
+        let cloned = source;
         let copied = source; // Copy
         assert_eq!(source, cloned);
         assert_eq!(source, copied);
@@ -973,11 +376,15 @@ mod tests {
         let mut set = HashSet::new();
         set.insert(ExecutableSource::Path);
         set.insert(ExecutableSource::MacOsAppBundle);
+        set.insert(ExecutableSource::WindowsAppPaths);
+        set.insert(ExecutableSource::WindowsInstallRoot);
         set.insert(ExecutableSource::Path); // Duplicate
 
-        assert_eq!(set.len(), 2);
+        assert_eq!(set.len(), 4);
         assert!(set.contains(&ExecutableSource::Path));
         assert!(set.contains(&ExecutableSource::MacOsAppBundle));
+        assert!(set.contains(&ExecutableSource::WindowsAppPaths));
+        assert!(set.contains(&ExecutableSource::WindowsInstallRoot));
     }
 
     #[test]
@@ -1003,11 +410,66 @@ mod tests {
 
     #[test]
     fn test_executable_source_roundtrip() {
-        for source in [ExecutableSource::Path, ExecutableSource::MacOsAppBundle] {
+        for source in [
+            ExecutableSource::Path,
+            ExecutableSource::MacOsAppBundle,
+            ExecutableSource::WindowsAppPaths,
+            ExecutableSource::WindowsInstallRoot,
+        ] {
             let json = serde_json::to_string(&source).unwrap();
             let deserialized: ExecutableSource = serde_json::from_str(&json).unwrap();
             assert_eq!(source, deserialized);
         }
+    }
+
+    #[test]
+    fn test_executable_source_windows_variants_serialize() {
+        let app_paths = ExecutableSource::WindowsAppPaths;
+        let install_root = ExecutableSource::WindowsInstallRoot;
+
+        assert_eq!(
+            serde_json::to_string(&app_paths).unwrap(),
+            "\"windows_app_paths\""
+        );
+        assert_eq!(
+            serde_json::to_string(&install_root).unwrap(),
+            "\"windows_install_root\""
+        );
+    }
+
+    #[test]
+    fn test_executable_source_windows_variants_deserialize() {
+        let ap: ExecutableSource = serde_json::from_str("\"windows_app_paths\"").unwrap();
+        let ir: ExecutableSource = serde_json::from_str("\"windows_install_root\"").unwrap();
+
+        assert_eq!(ap, ExecutableSource::WindowsAppPaths);
+        assert_eq!(ir, ExecutableSource::WindowsInstallRoot);
+    }
+
+    #[test]
+    fn test_executable_source_windows_variants_display() {
+        assert_eq!(
+            ExecutableSource::WindowsAppPaths.to_string(),
+            "Windows App Paths"
+        );
+        assert_eq!(
+            ExecutableSource::WindowsInstallRoot.to_string(),
+            "Windows Install Root"
+        );
+    }
+
+    #[test]
+    fn test_executable_source_windows_variants_not_app_bundle() {
+        assert!(!ExecutableSource::WindowsAppPaths.is_app_bundle());
+        assert!(!ExecutableSource::WindowsInstallRoot.is_app_bundle());
+    }
+
+    #[test]
+    fn test_executable_source_is_fallback() {
+        assert!(!ExecutableSource::Path.is_fallback());
+        assert!(ExecutableSource::MacOsAppBundle.is_fallback());
+        assert!(ExecutableSource::WindowsAppPaths.is_fallback());
+        assert!(ExecutableSource::WindowsInstallRoot.is_fallback());
     }
 
     // ============================================
@@ -1038,11 +500,26 @@ mod tests {
     fn test_installation_method_manager_binary() {
         assert_eq!(InstallationMethod::Brew("vim").manager_binary(), "brew");
         assert_eq!(InstallationMethod::Apt("vim").manager_binary(), "apt");
-        assert_eq!(InstallationMethod::Cargo("ripgrep").manager_binary(), "cargo");
-        assert_eq!(InstallationMethod::Npm("typescript").manager_binary(), "npm");
-        assert_eq!(InstallationMethod::RemoteBash("url").manager_binary(), "bash");
-        assert_eq!(InstallationMethod::Chocolatey("vim").manager_binary(), "choco");
-        assert_eq!(InstallationMethod::Hex("hex_package").manager_binary(), "mix");
+        assert_eq!(
+            InstallationMethod::Cargo("ripgrep").manager_binary(),
+            "cargo"
+        );
+        assert_eq!(
+            InstallationMethod::Npm("typescript").manager_binary(),
+            "npm"
+        );
+        assert_eq!(
+            InstallationMethod::RemoteBash("url").manager_binary(),
+            "bash"
+        );
+        assert_eq!(
+            InstallationMethod::Chocolatey("vim").manager_binary(),
+            "choco"
+        );
+        assert_eq!(
+            InstallationMethod::Hex("hex_package").manager_binary(),
+            "mix"
+        );
     }
 
     #[test]
@@ -1163,6 +640,7 @@ mod tests {
             InstallationMethod::Scoop("x"),
             InstallationMethod::Nix("x"),
             InstallationMethod::RemoteBash("x"),
+            InstallationMethod::UvWithInstall("x"),
         ];
 
         for method in &all_methods {
@@ -1173,6 +651,16 @@ mod tests {
                 method
             );
         }
+    }
+
+    #[test]
+    fn test_uv_with_install_package_name_and_manager() {
+        let method = InstallationMethod::UvWithInstall("aider-chat");
+        assert_eq!(method.package_name(), "aider-chat");
+        assert_eq!(method.manager_name(), "uv");
+        assert_eq!(method.manager_binary(), "uv");
+        assert!(!method.is_os_package_manager());
+        assert!(!method.is_remote_bash());
     }
 
     // ============================================
@@ -1188,16 +676,25 @@ mod tests {
 
     #[test]
     fn test_executable_source_pattern_matching() {
-        // Test that match exhaustiveness is enforced by the compiler
         fn describe_source(source: ExecutableSource) -> &'static str {
             match source {
                 ExecutableSource::Path => "path",
                 ExecutableSource::MacOsAppBundle => "bundle",
+                ExecutableSource::WindowsAppPaths => "app_paths",
+                ExecutableSource::WindowsInstallRoot => "install_root",
             }
         }
 
         assert_eq!(describe_source(ExecutableSource::Path), "path");
         assert_eq!(describe_source(ExecutableSource::MacOsAppBundle), "bundle");
+        assert_eq!(
+            describe_source(ExecutableSource::WindowsAppPaths),
+            "app_paths"
+        );
+        assert_eq!(
+            describe_source(ExecutableSource::WindowsInstallRoot),
+            "install_root"
+        );
     }
 
     #[test]
@@ -1208,175 +705,30 @@ mod tests {
     }
 
     // ============================================
-    // CategoryDetector tests
+    // InstallationMethod Serialize tests
     // ============================================
 
-    use crate::programs::enums::Editor;
-
     #[test]
-    fn test_category_detector_default_has_nothing_installed() {
-        let detector = CategoryDetector::<Editor>::default();
-        assert!(detector.installed().is_empty());
-        assert!(!detector.is_installed(Editor::Vim));
-        assert!(detector.path(Editor::Vim).is_none());
-        assert!(detector.path_with_source(Editor::Vim).is_none());
+    fn test_installation_method_serializes_with_manager_target_shape() {
+        let method = InstallationMethod::Brew("ripgrep");
+        let json = serde_json::to_string(&method).unwrap();
+        assert_eq!(json, r#"{"manager":"brew","target":"ripgrep"}"#);
     }
 
     #[test]
-    fn test_category_detector_with_program_marks_installed() {
-        let detector = CategoryDetector::<Editor>::default().with_program(
-            Editor::Vim,
-            PathBuf::from("/usr/bin/vim"),
-            ExecutableSource::Path,
-        );
-        assert!(detector.is_installed(Editor::Vim));
-        assert!(!detector.is_installed(Editor::Neovim));
+    fn test_installation_method_serializes_remote_bash_as_tagged_shape() {
+        let method = InstallationMethod::RemoteBash("https://sh.rustup.rs");
+        let json = serde_json::to_string(&method).unwrap();
         assert_eq!(
-            detector.path(Editor::Vim),
-            Some(PathBuf::from("/usr/bin/vim"))
+            json,
+            r#"{"manager":"remote_bash","target":"https://sh.rustup.rs"}"#
         );
     }
 
     #[test]
-    fn test_category_detector_installed_returns_only_installed() {
-        let detector = CategoryDetector::<Editor>::default()
-            .with_program(
-                Editor::Vim,
-                PathBuf::from("/usr/bin/vim"),
-                ExecutableSource::Path,
-            )
-            .with_program(
-                Editor::Neovim,
-                PathBuf::from("/usr/bin/nvim"),
-                ExecutableSource::Path,
-            );
-        let installed = detector.installed();
-        assert_eq!(installed.len(), 2);
-        assert!(installed.contains(&Editor::Vim));
-        assert!(installed.contains(&Editor::Neovim));
-    }
-
-    // ============================================
-    // CategoryDetector Serialization/Deserialization tests
-    // ============================================
-
-    #[test]
-    fn test_category_detector_serialize_produces_program_entries() {
-        let detector = CategoryDetector::<Editor>::default();
-        let json = serde_json::to_string(&detector).unwrap();
-        // Should produce ProgramEntry objects with full metadata
-        assert!(json.contains("\"installed\":false"));
-        assert!(json.contains("\"vim\":{"));
-        assert!(json.contains("\"name\":\"Vim\""));
-    }
-
-    #[test]
-    fn test_category_detector_deserialize_from_booleans() {
-        let json = r#"{"vim": true, "vscode": false}"#;
-        let detector: CategoryDetector<Editor> = serde_json::from_str(json).unwrap();
-        assert!(detector.is_installed(Editor::Vim));
-        assert!(!detector.is_installed(Editor::VSCode));
-    }
-
-    #[test]
-    fn test_category_detector_deserialize_partial_json() {
-        let json = r#"{"vim": true}"#;
-        let detector: CategoryDetector<Editor> = serde_json::from_str(json).unwrap();
-        assert!(detector.is_installed(Editor::Vim));
-        assert!(!detector.is_installed(Editor::Neovim));
-    }
-
-    #[test]
-    fn test_category_detector_serialize_includes_path_and_source() {
-        let detector = CategoryDetector::<Editor>::default().with_program(
-            Editor::Vim,
-            PathBuf::from("/usr/bin/vim"),
-            ExecutableSource::Path,
-        );
-        let json = serde_json::to_string(&detector).unwrap();
-        // Vim should be installed
-        assert!(json.contains("\"vim\":{"));
-        assert!(json.contains("\"installed\":true"));
-        assert!(json.contains("\"path\":\"/usr/bin/vim\""));
-        assert!(json.contains("\"source\":\"path\""));
-        // VSCode should not be installed
-        assert!(json.contains("\"vscode\":{"));
-        // Should contain at least one installed:false
-        assert!(json.contains("\"installed\":false"));
-    }
-
-    #[test]
-    fn test_category_detector_roundtrip_serialization() {
-        let detector1 = CategoryDetector::<Editor>::default()
-            .with_program(
-                Editor::Vim,
-                PathBuf::from("/usr/bin/vim"),
-                ExecutableSource::Path,
-            )
-            .with_program(
-                Editor::Neovim,
-                PathBuf::from("/usr/bin/nvim"),
-                ExecutableSource::Path,
-            );
-
-        let json = serde_json::to_string(&detector1).unwrap();
-        let detector2: CategoryDetector<Editor> = serde_json::from_str(&json).unwrap();
-
-        assert_eq!(
-            detector1.is_installed(Editor::Vim),
-            detector2.is_installed(Editor::Vim)
-        );
-        assert_eq!(
-            detector1.is_installed(Editor::Neovim),
-            detector2.is_installed(Editor::Neovim)
-        );
-        assert_eq!(
-            detector1.is_installed(Editor::VSCode),
-            detector2.is_installed(Editor::VSCode)
-        );
-    }
-
-    #[test]
-    fn test_category_detector_deserialize_from_program_entries() {
-        let json = r#"{
-            "vim": {
-                "installed": true,
-                "name": "Vim",
-                "description": "Classic modal text editor",
-                "website": "https://www.vim.org",
-                "path": "/usr/bin/vim",
-                "source": "path"
-            },
-            "vscode": {
-                "installed": false,
-                "name": "Visual Studio Code",
-                "description": "Modern code editor by Microsoft",
-                "website": "https://code.visualstudio.com"
-            }
-        }"#;
-        let detector: CategoryDetector<Editor> = serde_json::from_str(json).unwrap();
-        assert!(detector.is_installed(Editor::Vim));
-        assert!(!detector.is_installed(Editor::VSCode));
-    }
-
-    // ============================================
-    // CategoryDetector ProgramDetector trait tests
-    // ============================================
-
-    #[test]
-    fn test_category_detector_program_detector_trait() {
-        let detector = CategoryDetector::<Editor>::default().with_program(
-            Editor::Vim,
-            PathBuf::from("/usr/bin/vim"),
-            ExecutableSource::Path,
-        );
-
-        // Test through ProgramDetector trait interface
-        let pd: &dyn ProgramDetector<Program = Editor> = &detector;
-        assert!(pd.is_installed(Editor::Vim));
-        assert!(!pd.is_installed(Editor::Neovim));
-        assert_eq!(pd.path(Editor::Vim), Some(PathBuf::from("/usr/bin/vim")));
-        let installed = pd.installed();
-        assert_eq!(installed, vec![Editor::Vim]);
+    fn test_installation_method_serializes_cargo_as_tagged_shape() {
+        let method = InstallationMethod::Cargo("bat");
+        let json = serde_json::to_string(&method).unwrap();
+        assert_eq!(json, r#"{"manager":"cargo","target":"bat"}"#);
     }
 }

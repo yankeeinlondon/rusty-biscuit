@@ -7,6 +7,7 @@ Markdown parsing, rendering, and Mermaid diagram support for terminal and HTML o
 - **Rendering**
     - **Multi-format output**: Terminal (ANSI), HTML, [MDAST](https://github.com/syntax-tree/mdast) JSON, and Regular or Enriched Markdown
     - **Syntax highlighting**: 200+ languages via `syntect` and `two-face` with curated theme pairs
+    - **Inline formatting extensions**: `==highlighted==` (mark) and `⌄dimmed⌄` (faint/dim) syntax beyond standard CommonMark/GFM
     - **Mermaid Diagrams:** Render [Mermaid](https://mermaid.js.org/) code blocks into both HTML (using dynamic runtime engine) and Markdown (as inline images)
     - **Visualization of Graph Structures:** Render [DOT](https://graphviz.org/doc/info/lang.html) based graph schemas as vector or raster based images.
     - **Tables:** Richly formatted tables with dynamic sizing and business logic; renders to both HTML and Terminal
@@ -18,13 +19,15 @@ Markdown parsing, rendering, and Mermaid diagram support for terminal and HTML o
 - **Composition**
     - **Frontmatter support**: YAML parsing with typed access, merge strategies, and insertion-order preservation
     - **Interpolation:** interpolate frontmatter, ENV vars, and context variables into Markdown body
+    - **Frontmatter Shell Expansion:** execute top-level `$(...)` frontmatter values before effective-state construction, storing trimmed `stdout` back into frontmatter
     - **Normalization:** fix heading hierarchy violations, re-level documents
+    - **Link Normalization:** convert absolute paths back to portable forms (relative, `~/`, or `${ENV}`)
     - **TOC Linking:** hyperlink to each of the headings of another page as a strategy for progressive disclosure
     - **Text Replacement:** Dictionary replacement of terms on a page
     - **Conditional Block Rendering:** Conditionally render parts of a Markdown document based on frontmatter, ENV, and context
     - **Transclusion:** 
         - **Local Documents:** compose your Markdown by transcluding local Markdown files into the structure of a base document in real time (automatic heading rationalization built in)
-        - **Shell Expansion:** provide dynamic content from shell commands with a built-in security solution
+        - **Shell Expansion:** provide dynamic content from body `::shell` commands with a built-in security solution
         - **Document Summarization (future):** summarize a Markdown, PDF, or word document into a section of a Markdown document
         - **Website Summarization (future):** summarize the contents of a particular website and inject into a section of a Markdown document
         - **Website PPT (future):** identify the people, places, and things on a particular website
@@ -59,12 +62,14 @@ Composition is probably the most powerful feature that Darkmatter has to offer. 
 The types of composition each Darkmatter document employs varies considerably but in _all cases_ we run the Markdown through the same well defined Markdown pipeline which will:
 
 - **Inline Pre** prepares the document by mutating the body based on "state" or some external and measurable property
-    - _this includes operations like text replacement, page blocks, interpolation, and shell expansion_
+    - _this includes frontmatter interpolation, frontmatter shell expansion, text replacement, page blocks, interpolation, body shell expansion, and **link resolve** (absolute path conversion)_
 - Perform **Transclusions**
     - _there are many types of transclusions a document can employ with directives_
     - _however, the key consistency of transclusion operations regardless of the variant employed, is that transclusion is a **recursive** action!_
         - If the base document, transcludes documents A, B, and C then all three documents can in turn transclude their own set of external resources.
 - **Inline Post** normalizes the fully combined markdown
+- **Finalization** performs root-only adjustments
+    - _this includes **link normalization** (converting absolute paths back to portable forms)_
 - and **Render** the combined document parts as a single document
     - by default rendering during the **compose** operation will return regular Markdown as plain text (no ANSI escape codes, no HTML/CSS, minimal to no inline HTML)
     - but of course that plain text Markdown can then be immediately transformed into any of the other output formats by leveraging Darkmatter's 
@@ -135,6 +140,7 @@ This results in a document which:
 - The [composition](../docs/topics/what-is-composition.md) lifecycle goes through three major **stages**: inline mutation, transclusion, and finally rendering. 
 - Each of these stages has numerous operations which are executed
 - These stages, the operations within these stages, along with concerns like ordering, concurrency and more are covered in detail in the [Darkmatter Composition Pipeline](../docs/darkmatter-compose-pipeline.md) document.
+- Shell expansion details are split across [body shell expansion](../docs/inline/shell-expansion.md) and [frontmatter shell expansion](../docs/inline/fm-shell-expansion.md).
 
 
 ### Rendering Details
@@ -266,6 +272,10 @@ The Darkmatter library also exposes some useful utilities for callers to be awar
     - A `Renderable` terminal component that visualizes a Markdown file's dependency surface
     - Shows references above the file line and transclusions below, with optional recursive expansion and validation overlays
     - Used by the `md graph` CLI command
+- **YamlBlock:**
+    - A validated, renderable YAML payload that produces syntax-highlighted `yaml` code blocks in both terminal and browser output
+    - Construct from raw YAML strings, YAML files, or Markdown frontmatter
+    - Reuses the same `syntect` / `two-face` highlighting pipeline as Markdown `yaml` fences
 
 ## Darkmatter Dependencies
 
@@ -581,6 +591,50 @@ let output = render_visual_diff_str(original, updated, &VisualDiffOptions::defau
 println!("{}", output);
 ```
 
+### YamlBlock
+
+`YamlBlock` validates YAML at construction time and renders it as a syntax-highlighted `yaml` code block through the same terminal and browser paths used by Markdown fences.
+
+```rust
+use darkmatter::markdown::YamlBlock;
+
+// From raw YAML
+let block = YamlBlock::new("foo: 1\nbar: 2")?;
+println!("{}", block.yaml());
+
+// From a YAML file
+let block = YamlBlock::from_yaml_file("config.yaml")?;
+
+// From Markdown frontmatter (body is ignored)
+let block = YamlBlock::from_markdown_content("---\ntitle: Hello\n---\n# Body")?;
+// block.yaml() contains "title: Hello" only
+
+// From a Markdown file on disk
+let block = YamlBlock::from_markdown_file("README.md")?;
+```
+
+Once constructed, `YamlBlock` renders through both the terminal and browser pipelines via the [`biscuit-terminal`](../../biscuit-terminal/) traits:
+
+```rust
+use biscuit_terminal::components::renderable::{BrowserRenderable, Renderable};
+use biscuit_terminal::terminal::Terminal;
+use darkmatter::markdown::YamlBlock;
+
+let block = YamlBlock::new("foo: 1\nbar: 2")?;
+
+// Terminal rendering — ANSI-highlighted `yaml` code block, styled identically
+// to a Markdown ```yaml fence under the same theme/color-mode.
+let term = Terminal::default();
+print!("{}", Renderable::render(&block, &term));
+
+// Browser rendering — <pre><code class="language-yaml">…</code></pre>
+// inside the standard darkmatter <div class="code-block"> wrapper.
+let html = BrowserRenderable::render_to_browser(&block);
+assert!(html.contains("language-yaml"));
+```
+
+`YamlBlock` stores the raw YAML text after validation. It does not retain the parsed `serde_yaml_ng::Value`, keeping the public API small.
+
 ### Heading Normalization
 
 ```rust
@@ -687,3 +741,5 @@ For command-line usage, see the [darkmatter-cli](../cli/) package which provides
 - **biscuit-terminal**: Terminal detection, image rendering, mermaid diagrams, table rendering
 - **biscuit-hash**: Content hashing (xxHash) for TOC, delta, and mermaid caching
 - **serde**: Frontmatter serialization
+- **chrono**: Date/time handling for expression validators (reused; no new dependency added)
+- **sniff**: System detection for timezone-aware date validators (reused; no new dependency added)

@@ -313,6 +313,9 @@ schematic/
 ├── openapi/          # OpenAPI 3.0.3 specs (JSON)
 │   ├── openai.json
 │   ├── ollama.json   # Grouped
+│   ├── emqx.json     # Grouped
+│   ├── huggingface.json
+│   ├── samsung_smart_tv.json
 │   └── ...
 └── postman/          # Postman v2.1.0 collections
     ├── openai.postman_collection.json

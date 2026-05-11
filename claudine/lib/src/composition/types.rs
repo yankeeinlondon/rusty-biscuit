@@ -7,11 +7,12 @@ use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 
 use darkmatter::markdown::Markdown;
+use darkmatter::markdown::compose::ComposePerfReport;
 use serde::{Deserialize, Serialize};
 
 use super::lifecycle::LifecycleConfig;
-use crate::events::Provider;
 use crate::harness::shell::CachedApprovalDecision;
+use crate::provider::Provider;
 
 /// Shared approval cache that can be reused across composition runs
 /// (e.g. steps of one sequence) so that previously approved commands
@@ -40,13 +41,112 @@ pub struct ResolvedCompositionSource {
     pub markdown: Markdown,
 }
 
+/// Validated loop configuration parsed from a prompt's `loop` frontmatter.
+#[derive(Debug, Clone, PartialEq)]
+pub struct LoopConfig {
+    /// The condition that decides whether loop execution continues.
+    pub condition: LoopCondition,
+    /// Actions applied to frontmatter after each completed iteration.
+    pub actions: Vec<LoopAction>,
+    /// Optional per-document positive iteration cap.
+    pub max_iterations: Option<usize>,
+    /// Optional per-document failure behavior.
+    pub fail_fast: Option<bool>,
+}
+
+/// A loop condition. `while` continues while truthy; `until` continues until truthy.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LoopCondition {
+    /// Continue while this expression evaluates to true.
+    While(String),
+    /// Continue until this expression evaluates to true.
+    Until(String),
+}
+
+/// A frontmatter mutation action executed between loop iterations.
+#[derive(Debug, Clone, PartialEq)]
+pub enum LoopAction {
+    /// Increment a numeric property by one.
+    Increment(String),
+    /// Decrement a numeric property by one.
+    Decrement(String),
+    /// Set a property to the provided value.
+    Set {
+        /// Frontmatter property to update.
+        prop: String,
+        /// New value.
+        value: serde_json::Value,
+    },
+    /// Append a value to a property.
+    Append {
+        /// Frontmatter property to update.
+        prop: String,
+        /// Value to append.
+        value: serde_json::Value,
+    },
+    /// Prepend a value to a property.
+    Prepend {
+        /// Frontmatter property to update.
+        prop: String,
+        /// Value to prepend.
+        value: serde_json::Value,
+    },
+    /// Shallow-merge an object into a property.
+    Merge {
+        /// Frontmatter property to update.
+        prop: String,
+        /// Object value to merge.
+        value: serde_json::Value,
+    },
+}
+
+/// Ambient loop variables injected into each loop iteration.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AmbientVariable {
+    /// 1-based loop iteration number.
+    Iteration,
+    /// Whether the current iteration is the first.
+    IsFirst,
+    /// Whether the current iteration is expected to be the last.
+    IsLast,
+    /// Captured output from the previous iteration.
+    LastOutput,
+    /// Exit code from the previous iteration.
+    LastExitCode,
+}
+
+impl AmbientVariable {
+    /// Reserved ambient variable names.
+    pub const NAMES: &[&str] = &[
+        "iteration",
+        "is_first",
+        "is_last",
+        "last_output",
+        "last_exit_code",
+    ];
+
+    /// Returns true when `name` is a reserved ambient variable.
+    pub fn is_reserved(name: &str) -> bool {
+        Self::NAMES.contains(&name)
+    }
+
+    /// Return the frontmatter/template key for this ambient variable.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Iteration => "iteration",
+            Self::IsFirst => "is_first",
+            Self::IsLast => "is_last",
+            Self::LastOutput => "last_output",
+            Self::LastExitCode => "last_exit_code",
+        }
+    }
+}
+
 /// Why a particular provider was selected.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SelectionReason {
     /// The caller explicitly specified the provider (wrapper subcommand).
     ExplicitProvider,
-    /// Only one installed provider remained after exclusion filtering.
-    SingleInstalled,
     /// The source document's `agent` frontmatter selected the provider.
     FrontmatterHint,
     /// The user's config favorite (`settings.linking.preference[0]`).
@@ -62,6 +162,161 @@ pub struct SelectedProvider {
     pub provider: Provider,
     /// Why this provider was selected.
     pub reason: SelectionReason,
+}
+
+/// Whether the current session is interactive (TTY) or non-interactive.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ResolutionMode {
+    /// Interactive terminal session — picker may be shown.
+    Tty,
+    /// Non-interactive session — picker is forbidden; only resolving signals.
+    NonTty,
+}
+
+impl fmt::Display for ResolutionMode {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Tty => write!(f, "TTY"),
+            Self::NonTty => write!(f, "non-TTY"),
+        }
+    }
+}
+
+/// Snapshot of installed providers at command start.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InstalledProviderSnapshot {
+    /// Providers that are installed and not excluded.
+    pub runnable: Vec<Provider>,
+    /// Providers explicitly excluded by `--exclude`.
+    pub excluded: BTreeSet<Provider>,
+    /// All installed providers (including excluded ones).
+    pub all_installed: Vec<Provider>,
+}
+
+/// Why a provider was chosen.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProviderResolutionReason {
+    /// Explicit `--<provider>` CLI flag.
+    ExplicitFlag,
+    /// Single frontmatter `agent` value resolved directly.
+    FrontmatterSingle,
+    /// Frontmatter `agent` list resolved to first installed match.
+    FrontmatterList,
+    /// Configured favorite agent resolved directly.
+    FavoriteAgent,
+    /// User confirmed via interactive picker.
+    InteractivePicker,
+    /// User confirmed via sequence review screen.
+    SequenceReview,
+}
+
+/// Why a model was chosen.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ModelResolutionReason {
+    /// Explicit `--model` CLI flag.
+    ExplicitCli,
+    /// Provider-specific environment variable (e.g. `OPENCODE_MODEL`).
+    ProviderEnv(&'static str),
+    /// Generic `MODEL` environment variable.
+    GenericEnv,
+    /// Single frontmatter `model` value validated against catalog.
+    FrontmatterSingle,
+    /// Frontmatter `model` list resolved to first valid match.
+    FrontmatterList,
+    /// Provider's built-in default (no explicit model chosen).
+    ProviderDefault,
+    /// User confirmed via sequence review screen.
+    SequenceReview,
+}
+
+/// Fully resolved provider and model for a composition run.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResolvedExecutionTarget {
+    /// The selected provider.
+    pub provider: Provider,
+    /// Why this provider was selected.
+    pub provider_reason: ProviderResolutionReason,
+    /// The selected model, if any (`None` means use provider default).
+    pub model: Option<String>,
+    /// Why this model was selected.
+    pub model_reason: ModelResolutionReason,
+}
+
+/// What influenced a picker's default or ordering for a given option.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PickerInfluence {
+    /// This option matches a singular frontmatter `agent` hint.
+    FrontmatterSingle,
+    /// This option appears in a list-valued frontmatter `agent` hint.
+    FrontmatterList,
+    /// This option matches the configured favorite agent.
+    FavoriteAgent,
+}
+
+/// One row in the provider picker.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProviderPickerOption {
+    /// The provider for this row.
+    pub provider: Provider,
+    /// What signal caused this provider to be ranked here, if any.
+    pub rank_reason: Option<PickerInfluence>,
+}
+
+/// A plan for showing the one-shot provider picker.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProviderPickerPlan {
+    /// Options in display order (installed providers, reordered by frontmatter).
+    pub options: Vec<ProviderPickerOption>,
+    /// Index of the initially-highlighted option.
+    pub default_index: usize,
+}
+
+/// Per-step draft for sequence review.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SequenceStepDraft {
+    /// Zero-based step index.
+    pub step_index: usize,
+    /// Display name for the step.
+    pub step_name: String,
+    /// Provider picker plan for this step.
+    pub provider_plan: ProviderPickerPlan,
+    /// Proposed model for this step (may be `None`).
+    pub proposed_model: Option<String>,
+    /// Why the proposed model was chosen.
+    pub model_reason: ModelResolutionReason,
+    /// Whether the provider is locked by an explicit CLI flag.
+    pub provider_locked: bool,
+    /// Whether the model is locked by an explicit CLI flag.
+    pub model_locked: bool,
+    /// The resolved provider when locked (`provider_locked=true`), otherwise `None`.
+    pub resolved_provider: Option<Provider>,
+}
+
+/// A typed hint for which agent(s) to use, parsed from frontmatter `agent`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AgentHint {
+    /// A single provider.
+    Single(Provider),
+    /// An ordered list of providers (author preference order).
+    List(Vec<Provider>),
+}
+
+/// A typed hint for which model(s) to use, parsed from frontmatter `model`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ModelHint {
+    /// A single model identifier.
+    Single(String),
+    /// An ordered list of model identifiers (author preference order).
+    List(Vec<String>),
+}
+
+/// Typed selection hints parsed from effective frontmatter.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct EffectiveSelectionHints {
+    /// Parsed `agent` frontmatter property.
+    pub agent: Option<AgentHint>,
+    /// Parsed `model` frontmatter property.
+    pub model: Option<ModelHint>,
 }
 
 /// A composition prepared with effective (composed) frontmatter.
@@ -85,12 +340,14 @@ pub struct PreparedComposition {
     pub prompt: String,
     /// Full frontmatter after Darkmatter composition.
     pub effective_frontmatter: serde_json::Value,
-    /// The `agent` value from effective frontmatter, if present.
-    pub effective_agent_hint: Option<serde_json::Value>,
+    /// Typed selection hints parsed from effective frontmatter.
+    pub selection_hints: EffectiveSelectionHints,
     /// Closure plan for post-execution file updates.
     pub closure: CompositionClosurePlan,
     /// Parsed lifecycle notification config from effective frontmatter.
     pub lifecycle: LifecycleConfig,
+    /// Darkmatter composition performance report, when enabled.
+    pub compose_perf: Option<ComposePerfReport>,
 }
 
 /// How the composition result should be applied after provider execution.
@@ -155,6 +412,10 @@ pub struct CompositionExecutionRequest {
     pub file_ref: String,
     /// The prepared composition with effective frontmatter.
     pub prepared: PreparedComposition,
+    /// Resolved provider and model, when pre-computed (e.g. by sequence
+    /// review or non-TTY resolution). When `Some`, the executor skips
+    /// resolution and uses this target directly.
+    pub resolved_target: Option<ResolvedExecutionTarget>,
     /// Explicitly chosen provider (from `--claude`, `--codex`, etc.).
     pub explicit_provider: Option<Provider>,
     /// Providers to exclude from automatic selection.
@@ -169,8 +430,15 @@ pub struct CompositionExecutionRequest {
     pub output: Option<OutputFormat>,
     /// Parsed system prompt CLI args for the session.
     pub system_prompt_args: crate::system_prompt::SystemPromptArgs,
-    /// Timeout in seconds for non-interactive mode.
-    pub timeout: Option<u64>,
+    /// Wall-clock timeout as a duration string (e.g. `30s`, `5m`, `2h`).
+    /// Parsed by the composition executor. Only valid in non-interactive mode.
+    pub timeout: Option<String>,
+    /// Step-silence timeout as a duration string (e.g. `30s`, `5m`).
+    ///
+    /// Resets on every stream event; when silence exceeds this budget the
+    /// child is killed with `TimedOut`. Ignored in capture and passthrough
+    /// modes (warning emitted). `None` means no silence deadline is applied.
+    pub step_timeout: Option<String>,
     /// OPERATION env var value for the composed session.
     pub operation: Option<String>,
     /// Enable provider-specific sandboxing.

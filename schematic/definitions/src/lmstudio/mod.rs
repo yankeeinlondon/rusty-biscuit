@@ -54,6 +54,11 @@ use schematic_define::{
 #[must_use]
 pub fn openapi_registry() -> SchemaRegistry {
     SchemaRegistry::new()
+        .register::<ChatBody>("ChatBody")
+        .register::<LoadModelBody>("LoadModelBody")
+        .register::<UnloadModelBody>("UnloadModelBody")
+        .register::<DownloadModelBody>("DownloadModelBody")
+        .register::<DownloadStatusBody>("DownloadStatusBody")
         .register::<ListModelsResponse>("ListModelsResponse")
         .register::<ModelInfo>("ModelInfo")
         .register::<Quantization>("Quantization")

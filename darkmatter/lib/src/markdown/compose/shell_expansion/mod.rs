@@ -44,11 +44,42 @@ pub use policy::{
 pub use store::resolve_policy_paths;
 pub use types::{
     ErrorHandling, ErrorHandlingOutcome, ShellApprovalDecision, ShellApprovalHandler,
-    ShellApprovalRequest, ShellCommandEntry, ShellDirective, ShellExpansionError,
-    ShellExpansionOptions, ShellExpansionRuntime, ShellPolicyPaths, ShellRuleSet,
+    ShellApprovalRequest, ShellCommandEntry, ShellCommandOrigin, ShellDirective,
+    ShellExpansionError, ShellExpansionOptions, ShellExpansionRuntime, ShellPolicyPaths,
+    ShellRuleSet, ShellTimeoutBehavior,
 };
 
 use crate::markdown::compose::ComposeOptions;
+use crate::markdown::compose::types::ComposeWarning;
+
+/// A directive that has passed alias resolution, policy checks, and approval.
+#[derive(Debug, Clone)]
+pub(crate) struct PreparedShellDirective {
+    pub effective: ShellDirective,
+    pub display_command: String,
+}
+
+/// Detailed output from executing a prepared shell directive.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct DirectiveExecutionResult {
+    pub stdout: String,
+    pub stderr: String,
+    pub warnings: Vec<ComposeWarning>,
+}
+
+impl DirectiveExecutionResult {
+    /// Returns stdout and stderr combined using the body-shell contract.
+    pub fn combined_output(&self) -> String {
+        let mut output = self.stdout.clone();
+        if !self.stderr.is_empty() {
+            if !output.is_empty() {
+                output.push('\n');
+            }
+            output.push_str(&self.stderr);
+        }
+        output
+    }
+}
 
 /// Executes a shell directive with policy enforcement and approval flow.
 ///
@@ -66,17 +97,22 @@ use crate::markdown::compose::ComposeOptions;
 /// ## Examples
 ///
 /// ```no_run
-/// use darkmatter::markdown::compose::shell_expansion::{execute_directive, types::{ErrorHandling, ShellDirective, ShellExpansionRuntime, ShellPolicyPaths}};
+/// use biscuit_terminal::errors::SourceContext;
+/// use darkmatter::markdown::compose::shell_expansion::{execute_directive, types::{ErrorHandling, ShellCommandOrigin, ShellDirective, ShellExpansionRuntime, ShellPolicyPaths}};
 /// use darkmatter::markdown::compose::ComposeOptions;
 /// use std::path::PathBuf;
 ///
+/// let ctx = SourceContext::new(PathBuf::from("/t"), PathBuf::from("t"), "");
 /// let directive = ShellDirective {
 ///     raw_command: "echo hello".to_string(),
 ///     executable: "echo".to_string(),
 ///     args: vec!["hello".to_string()],
 ///     span: 0..10,
-///     line: 1,
+///     origin: ShellCommandOrigin::Body { line: 1 },
 ///     error_handling: ErrorHandling::default(),
+///     timeout_override: None,
+///     pipeline: None,
+///     ctx,
 /// };
 /// let options = ComposeOptions::new();
 /// let policy_paths = ShellPolicyPaths {
@@ -92,121 +128,289 @@ pub fn execute_directive(
     policy_paths: &ShellPolicyPaths,
     shell_runtime: &mut ShellExpansionRuntime,
 ) -> Result<String, ShellExpansionError> {
-    // Resolve alias if the executable is not found on PATH
-    let (effective, alias_name) = resolve_or_passthrough(directive);
+    Ok(
+        execute_directive_detailed(directive, options, policy_paths, shell_runtime)?
+            .combined_output(),
+    )
+}
 
-    let normalized = normalize_command(&effective.executable, &effective.args);
+/// Executes a shell directive with policy enforcement and returns stdout,
+/// stderr, and any non-fatal warnings.
+pub(crate) fn execute_directive_detailed(
+    directive: &ShellDirective,
+    options: &ComposeOptions,
+    policy_paths: &ShellPolicyPaths,
+    shell_runtime: &mut ShellExpansionRuntime,
+) -> Result<DirectiveExecutionResult, ShellExpansionError> {
+    let prepared = prepare_directive(directive, options, policy_paths, shell_runtime)?;
+    execute_prepared_directive(&prepared, options)
+}
+
+/// Resolves aliases, applies policy checks, and records approval decisions
+/// without executing the command yet.
+pub(crate) fn prepare_directive(
+    directive: &ShellDirective,
+    options: &ComposeOptions,
+    policy_paths: &ShellPolicyPaths,
+    shell_runtime: &mut ShellExpansionRuntime,
+) -> Result<PreparedShellDirective, ShellExpansionError> {
+    let (effective, alias_name) = resolve_or_passthrough(directive);
+    let display_command = display_command(directive, alias_name.as_deref());
+
+    // Collect all normalized commands from the pipeline (or single command)
+    let normalized_commands = collect_normalized_commands(&effective);
 
     // ── Pre-approved fast path ───────────────────────────────────────
-    // When a pre-approved set is provided, skip the entire approval flow.
-    // The caller (Claudine) has already verified every command.
     if let Some(ref approved) = options.pre_approved_commands {
-        if approved.contains(&normalized) {
-            return execute_and_handle_errors(&effective, options, &directive.error_handling);
-        } else {
-            return Err(ShellExpansionError::NotPreApproved {
-                command: display_command(directive, alias_name.as_deref()),
-                line: directive.line,
-                source_desc: match &options.source {
-                    crate::markdown::compose::ComposeSource::File(p) => {
-                        format!(" (in {})", p.display())
-                    }
-                    _ => String::new(),
-                },
-            });
+        for normalized in &normalized_commands {
+            if !approved.contains(normalized) {
+                return Err(ShellExpansionError::NotPreApproved {
+                    ctx: Box::new(directive.ctx.clone()),
+                    command: display_command.clone(),
+                    origin: directive.origin.clone(),
+                    source_desc: match &options.source {
+                        crate::markdown::compose::ComposeSource::File(p) => {
+                            format!(" (in {})", p.display())
+                        }
+                        _ => String::new(),
+                    },
+                });
+            }
         }
+        return Ok(PreparedShellDirective {
+            effective,
+            display_command,
+        });
     }
 
     let runtime_snapshot = shell_runtime.snapshot();
 
-    // 1. Check built-in blacklist (against resolved command)
-    if let Some(reason) = check_builtin_blacklist(&effective.executable, &effective.args) {
-        return Err(ShellExpansionError::Blacklisted {
-            command: display_command(directive, alias_name.as_deref()),
-            reason,
-            line: directive.line,
+    // 1. Check built-in blacklist for all commands
+    for (exe, args) in executables_with_args(&effective) {
+        if let Some(reason) = check_builtin_blacklist(&exe, &args) {
+            return Err(ShellExpansionError::Blacklisted {
+                ctx: Box::new(directive.ctx.clone()),
+                command: display_command.clone(),
+                reason,
+                origin: directive.origin.clone(),
+            });
+        }
+    }
+
+    // 2. Check user blacklist for all commands
+    for (i, normalized) in normalized_commands.iter().enumerate() {
+        let (exe, args) = executable_and_args_at(&effective, i);
+        if check_user_blacklist(&runtime_snapshot.user_blacklist, &exe, &args, normalized) {
+            return Err(ShellExpansionError::Blacklisted {
+                ctx: Box::new(directive.ctx.clone()),
+                command: display_command.clone(),
+                reason: "user blacklist".to_string(),
+                origin: directive.origin.clone(),
+            });
+        }
+    }
+
+    // 3. Check whitelist for all commands
+    let all_whitelisted = normalized_commands
+        .iter()
+        .enumerate()
+        .all(|(i, normalized)| {
+            let (exe, _) = executable_and_args_at(&effective, i);
+            check_whitelist(&runtime_snapshot.whitelist, &exe, normalized)
+                || runtime_snapshot.allow_once.contains(normalized)
+        });
+
+    if all_whitelisted {
+        return Ok(PreparedShellDirective {
+            effective,
+            display_command,
         });
     }
 
-    // 2. Check user blacklist (against resolved command)
-    if check_user_blacklist(
-        &runtime_snapshot.user_blacklist,
-        &effective.executable,
-        &effective.args,
-        &normalized,
-    ) {
-        return Err(ShellExpansionError::Blacklisted {
-            command: display_command(directive, alias_name.as_deref()),
-            reason: "user blacklist".to_string(),
-            line: directive.line,
-        });
-    }
-
-    // 3. Check whitelist (against resolved command)
-    if check_whitelist(
-        &runtime_snapshot.whitelist,
-        &effective.executable,
-        &normalized,
-    ) {
-        return execute_and_handle_errors(&effective, options, &directive.error_handling);
-    }
-
-    // 4. Check allow-once
-    if runtime_snapshot.allow_once.contains(&normalized) {
-        return execute_and_handle_errors(&effective, options, &directive.error_handling);
-    }
-
-    // 5. Request approval or fail
+    // 5. Request approval for the entire chain
     if let Some(ref handler) = options.shell_approval_handler {
+        // Reserve only the commands that are not already authorized. Commands
+        // already in the snapshot whitelist or already in `allow_once` are
+        // skipped. If another thread holds a pending reservation for any
+        // command in this chain, treat it as a conflict and require fresh
+        // approval rather than implicitly approving the unrelated commands.
+        let mut reserved: Vec<String> = Vec::new();
+        let mut pending_conflict = false;
+
+        for (i, normalized) in normalized_commands.iter().enumerate() {
+            let (exe, _) = executable_and_args_at(&effective, i);
+            if check_whitelist(&runtime_snapshot.whitelist, &exe, normalized) {
+                continue;
+            }
+            match shell_runtime.try_reserve_allow_once(normalized) {
+                types::ReserveOutcome::Reserved => reserved.push(normalized.clone()),
+                types::ReserveOutcome::AlreadyAllowed => {}
+                types::ReserveOutcome::Pending => {
+                    pending_conflict = true;
+                    break;
+                }
+            }
+        }
+
+        if pending_conflict {
+            // Release reservations we just made so the conflicting thread can
+            // make progress, then surface the conflict as an approval-required
+            // error instead of silently approving the rest of the chain.
+            for normalized in &reserved {
+                shell_runtime.complete_allow_once(normalized, false);
+            }
+            return Err(ShellExpansionError::ApprovalRequired {
+                ctx: Box::new(directive.ctx.clone()),
+                command: display_command,
+                whitelist_path: policy_paths.whitelist.clone(),
+                blacklist_path: policy_paths.blacklist.clone(),
+                origin: directive.origin.clone(),
+            });
+        }
+
+        if reserved.is_empty() {
+            // Every command in the chain is now authorized (whitelist or a
+            // concurrently-completed allow-once). No prompt is needed.
+            return Ok(PreparedShellDirective {
+                effective,
+                display_command,
+            });
+        }
+
+        // Build the unique list of chain executables for the prompt. Empty
+        // when the request is a single command.
+        let chain_executables = if effective.is_chain() {
+            let mut seen = std::collections::HashSet::new();
+            executables_with_args(&effective)
+                .into_iter()
+                .filter_map(|(exe, _)| seen.insert(exe.clone()).then_some(exe))
+                .collect::<Vec<_>>()
+        } else {
+            Vec::new()
+        };
+
+        // Present the entire chain for approval
         let request = ShellApprovalRequest {
             source: options.source.clone(),
-            line: directive.line,
+            origin: directive.origin.clone(),
             raw_command: effective.raw_command.clone(),
             executable: effective.executable.clone(),
             args: effective.args.clone(),
-            normalized_exact: normalized.clone(),
+            normalized_exact: normalized_commands.join(" && "),
             whitelist_path: policy_paths.whitelist.clone(),
             blacklist_path: policy_paths.blacklist.clone(),
             alias_name: alias_name.clone(),
+            chain_executables,
         };
 
         match handler.approve(request)? {
             ShellApprovalDecision::AllowExactPersist => {
-                store::append_whitelist_exact(policy_paths, &normalized)?;
-                shell_runtime.persist_whitelist_exact(normalized);
-                execute_and_handle_errors(&effective, options, &directive.error_handling)
+                for normalized in &normalized_commands {
+                    shell_runtime.complete_allow_once(normalized, false);
+                    store::append_whitelist_exact(policy_paths, normalized)?;
+                    shell_runtime.persist_whitelist_exact(normalized.clone());
+                }
+                Ok(PreparedShellDirective {
+                    effective,
+                    display_command,
+                })
             }
             ShellApprovalDecision::AllowCommandPersist => {
-                store::append_whitelist_prefix(policy_paths, &effective.executable)?;
-                shell_runtime.persist_whitelist_prefix(effective.executable.clone());
-                execute_and_handle_errors(&effective, options, &directive.error_handling)
+                for normalized in &normalized_commands {
+                    shell_runtime.complete_allow_once(normalized, false);
+                }
+                // Persist a prefix entry for every unique executable in the
+                // chain so the next run does not re-prompt for later actions.
+                let mut persisted = std::collections::HashSet::new();
+                for (exe, _) in executables_with_args(&effective) {
+                    if persisted.insert(exe.clone()) {
+                        store::append_whitelist_prefix(policy_paths, &exe)?;
+                        shell_runtime.persist_whitelist_prefix(exe);
+                    }
+                }
+                Ok(PreparedShellDirective {
+                    effective,
+                    display_command,
+                })
             }
             ShellApprovalDecision::AllowOnce => {
-                shell_runtime.allow_once(normalized);
-                execute_and_handle_errors(&effective, options, &directive.error_handling)
+                for normalized in &normalized_commands {
+                    shell_runtime.complete_allow_once(normalized, true);
+                }
+                shell_runtime.approvals_used += 1;
+                Ok(PreparedShellDirective {
+                    effective,
+                    display_command,
+                })
             }
-            ShellApprovalDecision::Deny => Err(ShellExpansionError::Denied {
-                command: display_command(directive, alias_name.as_deref()),
-                line: directive.line,
-            }),
+            ShellApprovalDecision::Deny => {
+                for normalized in &normalized_commands {
+                    shell_runtime.complete_allow_once(normalized, false);
+                }
+                Err(ShellExpansionError::Denied {
+                    ctx: Box::new(directive.ctx.clone()),
+                    command: display_command,
+                    origin: directive.origin.clone(),
+                })
+            }
             ShellApprovalDecision::BlacklistPersist => {
-                store::append_blacklist_exact(policy_paths, &normalized)?;
-                shell_runtime.persist_blacklist_exact(normalized);
+                for normalized in &normalized_commands {
+                    shell_runtime.complete_allow_once(normalized, false);
+                    store::append_blacklist_exact(policy_paths, normalized)?;
+                    shell_runtime.persist_blacklist_exact(normalized.clone());
+                }
                 Err(ShellExpansionError::Blacklisted {
-                    command: display_command(directive, alias_name.as_deref()),
+                    ctx: Box::new(directive.ctx.clone()),
+                    command: display_command,
                     reason: "user blacklisted".to_string(),
-                    line: directive.line,
+                    origin: directive.origin.clone(),
                 })
             }
         }
     } else {
         Err(ShellExpansionError::ApprovalRequired {
-            command: display_command(directive, alias_name.as_deref()),
+            ctx: Box::new(directive.ctx.clone()),
+            command: display_command,
             whitelist_path: policy_paths.whitelist.clone(),
             blacklist_path: policy_paths.blacklist.clone(),
-            line: directive.line,
+            origin: directive.origin.clone(),
         })
     }
+}
+
+/// Executes a previously prepared directive and converts timeout fallbacks into
+/// compose warnings.
+pub(crate) fn execute_prepared_directive(
+    prepared: &PreparedShellDirective,
+    options: &ComposeOptions,
+) -> Result<DirectiveExecutionResult, ShellExpansionError> {
+    let execution = execute_and_handle_errors(
+        &prepared.effective,
+        options,
+        &prepared.effective.error_handling,
+    )?;
+
+    let mut warnings = Vec::new();
+    if let Some(timeout) = execution.timeout_fallback {
+        let warning = ComposeWarning::new(
+            "shell_expansion",
+            format!(
+                "Shell command timed out after {timeout:?} at {}: '{}'; replaced with an empty string",
+                prepared.effective.origin, prepared.display_command
+            ),
+        );
+        warnings.push(match prepared.effective.origin {
+            ShellCommandOrigin::Body { line } => warning.at_line(line),
+            ShellCommandOrigin::Frontmatter { .. } => warning,
+            ShellCommandOrigin::ShellBlock { command_line, .. } => warning.at_line(command_line),
+        });
+    }
+
+    Ok(DirectiveExecutionResult {
+        stdout: execution.stdout,
+        stderr: execution.stderr,
+        warnings,
+    })
 }
 
 /// Executes a command and applies error handling rules to `ExecutionFailed` errors.
@@ -218,9 +422,9 @@ fn execute_and_handle_errors(
     effective: &ShellDirective,
     options: &ComposeOptions,
     error_handling: &types::ErrorHandling,
-) -> Result<String, ShellExpansionError> {
+) -> Result<executor::CommandExecution, ShellExpansionError> {
     let shell_opts = options.shell_options();
-    let result = executor::execute_command(effective, &shell_opts, &options.source);
+    let result = executor::execute_directive_impl(effective, &shell_opts, &options.source);
 
     // Fast path: no error handling configured or command succeeded
     if error_handling.is_empty() || result.is_ok() {
@@ -236,16 +440,19 @@ fn execute_and_handle_errors(
         }) => {
             let outcome = error_handling.resolve(*code, stderr);
             match outcome {
-                types::ErrorHandlingOutcome::Replace(text) => Ok(text),
+                types::ErrorHandlingOutcome::Replace(text) => Ok(
+                    executor::CommandExecution::from_streams(text, String::new()),
+                ),
                 types::ErrorHandlingOutcome::Enrich(enrichment) => {
                     // Re-construct the error with enrichment appended to stderr
                     match result {
                         Err(ShellExpansionError::ExecutionFailed {
+                            ctx,
                             command,
                             code,
                             stdout,
                             stderr,
-                            line,
+                            origin,
                         }) => {
                             let enriched_stderr = if stderr.is_empty() {
                                 enrichment
@@ -253,11 +460,12 @@ fn execute_and_handle_errors(
                                 format!("{stderr}\n{enrichment}")
                             };
                             Err(ShellExpansionError::ExecutionFailed {
+                                ctx,
                                 command,
                                 code,
                                 stdout,
                                 stderr: enriched_stderr,
-                                line,
+                                origin,
                             })
                         }
                         _ => unreachable!(),
@@ -278,12 +486,56 @@ fn execute_and_handle_errors(
 /// If it resolves as a shell alias, returns a new directive with the resolved
 /// command and merged arguments.
 fn resolve_or_passthrough(directive: &ShellDirective) -> (ShellDirective, Option<String>) {
-    // If the executable is on PATH, use as-is
+    // For pipeline chains, resolve each action's executable independently
+    if let Some(ref pipeline) = directive.pipeline
+        && (pipeline.actions.len() > 1
+            || (pipeline.actions.len() == 1
+                && pipeline.actions[0].command.redirection != types::RedirectionConfig::default()))
+    {
+        let mut any_resolved = false;
+        let mut alias_name: Option<String> = None;
+        let mut new_pipeline = pipeline.clone();
+
+        for action in &mut new_pipeline.actions {
+            if which::which(&action.command.executable).is_ok() {
+                continue;
+            }
+            if let Some(resolved) = alias::resolve_alias(&action.command.executable) {
+                let mut merged_args = resolved.args;
+                merged_args.extend_from_slice(&action.command.args);
+                action.command.executable = resolved.executable;
+                action.command.args = merged_args;
+                if alias_name.is_none() {
+                    alias_name = Some(resolved.alias_name);
+                }
+                any_resolved = true;
+            }
+        }
+
+        if any_resolved || alias_name.is_some() {
+            let raw = new_pipeline.display_string();
+            let exe = new_pipeline.actions[0].command.executable.clone();
+            let args = new_pipeline.actions[0].command.args.clone();
+            let effective = ShellDirective {
+                raw_command: raw,
+                executable: exe,
+                args,
+                span: directive.span.clone(),
+                origin: directive.origin.clone(),
+                error_handling: directive.error_handling.clone(),
+                timeout_override: directive.timeout_override,
+                pipeline: Some(new_pipeline),
+                ctx: directive.ctx.clone(),
+            };
+            return (effective, alias_name);
+        }
+    }
+
+    // Standard single-command path
     if which::which(&directive.executable).is_ok() {
         return (directive.clone(), None);
     }
 
-    // Try to resolve as a shell alias
     if let Some(resolved) = alias::resolve_alias(&directive.executable) {
         let mut merged_args = resolved.args;
         merged_args.extend_from_slice(&directive.args);
@@ -294,19 +546,29 @@ fn resolve_or_passthrough(directive: &ShellDirective) -> (ShellDirective, Option
             format!("{} {}", resolved.definition, directive.args.join(" "))
         };
 
+        let mut new_pipeline = None;
+        if let Some(ref pipeline) = directive.pipeline {
+            let mut p = pipeline.clone();
+            p.actions[0].command.executable = resolved.executable.clone();
+            p.actions[0].command.args = merged_args.clone();
+            new_pipeline = Some(p);
+        }
+
         let effective = ShellDirective {
             raw_command: raw,
             executable: resolved.executable,
             args: merged_args,
             span: directive.span.clone(),
-            line: directive.line,
+            origin: directive.origin.clone(),
             error_handling: directive.error_handling.clone(),
+            timeout_override: directive.timeout_override,
+            pipeline: new_pipeline,
+            ctx: directive.ctx.clone(),
         };
 
         return (effective, Some(resolved.alias_name));
     }
 
-    // Not found and not an alias — will fail later at execute_command
     (directive.clone(), None)
 }
 
@@ -340,10 +602,48 @@ pub fn apply_replacements_in_reverse(
     content: &mut String,
     mut replacements: Vec<(std::ops::Range<usize>, String)>,
 ) {
-    replacements.sort_by(|a, b| b.0.start.cmp(&a.0.start));
+    replacements.sort_by_key(|b| std::cmp::Reverse(b.0.start));
     for (span, replacement) in replacements {
         content.replace_range(span, &replacement);
     }
+}
+
+/// Collects normalized command strings for all actions in the pipeline.
+fn collect_normalized_commands(directive: &ShellDirective) -> Vec<String> {
+    if let Some(ref pipeline) = directive.pipeline {
+        pipeline
+            .actions
+            .iter()
+            .map(|a| normalize_command(&a.command.executable, &a.command.args))
+            .collect()
+    } else {
+        vec![normalize_command(&directive.executable, &directive.args)]
+    }
+}
+
+/// Returns (executable, args) pairs for all actions in the pipeline.
+fn executables_with_args(directive: &ShellDirective) -> Vec<(String, Vec<String>)> {
+    if let Some(ref pipeline) = directive.pipeline {
+        pipeline
+            .actions
+            .iter()
+            .map(|a| (a.command.executable.clone(), a.command.args.clone()))
+            .collect()
+    } else {
+        vec![(directive.executable.clone(), directive.args.clone())]
+    }
+}
+
+fn executable_and_args_at(directive: &ShellDirective, index: usize) -> (String, Vec<String>) {
+    if let Some(ref pipeline) = directive.pipeline
+        && let Some(action) = pipeline.actions.get(index)
+    {
+        return (
+            action.command.executable.clone(),
+            action.command.args.clone(),
+        );
+    }
+    (directive.executable.clone(), directive.args.clone())
 }
 
 #[cfg(test)]
@@ -418,6 +718,31 @@ mod integration_tests {
         assert!(!composed.content().contains("::shell"));
         assert_eq!(report.shell_expansions_applied, 1);
         assert_eq!(report.shell_approvals_used, 1);
+    }
+
+    #[test]
+    fn pipeline_timeout_fallback_emits_warning() {
+        let temp_dir = TempDir::new().unwrap();
+        let content = "::shell sleep 1 && echo after\n";
+        let md: Markdown = content.into();
+
+        let options = ComposeOptions::new()
+            .only(&[ComposeOperation::ShellExpansion])
+            .with_shell(ShellExpansionOptions {
+                timeout: std::time::Duration::from_millis(100),
+                timeout_behavior: ShellTimeoutBehavior::EmptyString,
+                policy_root: Some(temp_dir.path().to_path_buf()),
+                approval_handler: Some(Arc::new(MockApprovalHandler {
+                    decision: ShellApprovalDecision::AllowOnce,
+                })),
+                ..Default::default()
+            });
+
+        let (composed, report) = md.compose_with(options).unwrap();
+
+        assert!(composed.content().contains("after"));
+        assert_eq!(report.warnings.len(), 1);
+        assert!(report.warnings[0].message.contains("timed out"));
     }
 
     #[test]
@@ -718,6 +1043,163 @@ name: world
 
         let err = md.compose_with(options).unwrap_err();
         assert!(err.to_string().contains("denied") || err.to_string().contains("Denied"));
+    }
+
+    /// Regression for review-6: a chain whose first action was previously
+    /// approved as allow-once must NOT bypass approval for the remaining
+    /// un-approved actions in the chain. Every command in the chain must be
+    /// presented to the approval handler.
+    #[test]
+    fn pipeline_partial_allow_once_overlap_in_chain_re_prompts() {
+        let temp_dir = TempDir::new().unwrap();
+        let content = "# Test\n\n::shell echo allowed\n\n::shell echo allowed && echo unapproved\n";
+        let md: Markdown = content.into();
+
+        let handler = Arc::new(CountingApprovalHandler::new(
+            ShellApprovalDecision::AllowOnce,
+        ));
+
+        let options = ComposeOptions::new()
+            .only(&[ComposeOperation::ShellExpansion])
+            .with_shell(ShellExpansionOptions {
+                policy_root: Some(temp_dir.path().to_path_buf()),
+                approval_handler: Some(handler.clone()),
+                ..Default::default()
+            });
+
+        let (composed, report) = md.compose_with(options).unwrap();
+
+        // Both directives produced their output.
+        assert!(composed.content().contains("allowed"));
+        assert!(composed.content().contains("unapproved"));
+
+        // The handler must have been called for BOTH directives — once for the
+        // first single-action directive, and once for the second chain because
+        // it contains an un-approved action ("echo unapproved"). Prior to the
+        // fix, the second chain silently approved itself because "echo allowed"
+        // was already in `allow_once`.
+        assert_eq!(handler.approvals(), 2);
+        assert_eq!(report.shell_approvals_used, 2);
+    }
+
+    /// AllowCommandPersist on a chain writes a prefix entry for every unique
+    /// executable in the chain so later runs do not re-prompt. Regression for
+    /// review-3.
+    #[test]
+    fn pipeline_allow_command_persist_writes_each_chain_executable() {
+        let temp_dir = TempDir::new().unwrap();
+        let content = "# Test\n::shell echo ok && pwd\n";
+        let md: Markdown = content.into();
+
+        let options = ComposeOptions::new()
+            .only(&[ComposeOperation::ShellExpansion])
+            .with_shell(ShellExpansionOptions {
+                policy_root: Some(temp_dir.path().to_path_buf()),
+                approval_handler: Some(Arc::new(MockApprovalHandler {
+                    decision: ShellApprovalDecision::AllowCommandPersist,
+                })),
+                ..Default::default()
+            });
+
+        let (composed, _) = md.compose_with(options).unwrap();
+        assert!(composed.content().contains("ok"));
+
+        let whitelist =
+            std::fs::read_to_string(temp_dir.path().join(".darkmatter-shell-whitelist")).unwrap();
+        assert!(
+            whitelist.contains("prefix echo"),
+            "whitelist missing 'prefix echo': {whitelist:?}"
+        );
+        assert!(
+            whitelist.contains("prefix pwd"),
+            "whitelist missing 'prefix pwd': {whitelist:?}"
+        );
+    }
+
+    /// Repeated executables in a chain are only persisted once.
+    #[test]
+    fn pipeline_allow_command_persist_dedupes_repeated_chain_executables() {
+        let temp_dir = TempDir::new().unwrap();
+        let content = "# Test\n::shell echo a && echo b\n";
+        let md: Markdown = content.into();
+
+        let options = ComposeOptions::new()
+            .only(&[ComposeOperation::ShellExpansion])
+            .with_shell(ShellExpansionOptions {
+                policy_root: Some(temp_dir.path().to_path_buf()),
+                approval_handler: Some(Arc::new(MockApprovalHandler {
+                    decision: ShellApprovalDecision::AllowCommandPersist,
+                })),
+                ..Default::default()
+            });
+
+        let _ = md.compose_with(options).unwrap();
+
+        let whitelist =
+            std::fs::read_to_string(temp_dir.path().join(".darkmatter-shell-whitelist")).unwrap();
+        let count = whitelist.matches("prefix echo").count();
+        assert_eq!(
+            count, 1,
+            "expected exactly one 'prefix echo' line: {whitelist:?}"
+        );
+    }
+
+    /// The approval request exposes every unique executable in the chain so
+    /// the CLI prompt can describe option 2 accurately.
+    #[test]
+    fn approval_request_exposes_chain_executables() {
+        let temp_dir = TempDir::new().unwrap();
+        let content = "::shell echo a && pwd && echo b\n";
+        let md: Markdown = content.into();
+
+        let handler = Arc::new(RecordingApprovalHandler::new(
+            ShellApprovalDecision::AllowOnce,
+        ));
+
+        let options = ComposeOptions::new()
+            .only(&[ComposeOperation::ShellExpansion])
+            .with_shell(ShellExpansionOptions {
+                policy_root: Some(temp_dir.path().to_path_buf()),
+                approval_handler: Some(handler.clone()),
+                ..Default::default()
+            });
+
+        let _ = md.compose_with(options).unwrap();
+
+        let requests = handler.requests();
+        assert_eq!(requests.len(), 1);
+        // Chain is a, pwd, b — unique entries in first-occurrence order.
+        assert_eq!(
+            requests[0].chain_executables,
+            vec!["echo".to_string(), "pwd".to_string()]
+        );
+    }
+
+    /// Single-command requests leave `chain_executables` empty so the CLI
+    /// keeps the original wording.
+    #[test]
+    fn approval_request_chain_executables_empty_for_single_command() {
+        let temp_dir = TempDir::new().unwrap();
+        let content = "::shell echo hi\n";
+        let md: Markdown = content.into();
+
+        let handler = Arc::new(RecordingApprovalHandler::new(
+            ShellApprovalDecision::AllowOnce,
+        ));
+
+        let options = ComposeOptions::new()
+            .only(&[ComposeOperation::ShellExpansion])
+            .with_shell(ShellExpansionOptions {
+                policy_root: Some(temp_dir.path().to_path_buf()),
+                approval_handler: Some(handler.clone()),
+                ..Default::default()
+            });
+
+        let _ = md.compose_with(options).unwrap();
+
+        let requests = handler.requests();
+        assert_eq!(requests.len(), 1);
+        assert!(requests[0].chain_executables.is_empty());
     }
 
     /// AllowExactPersist writes the normalized command to the whitelist file.
@@ -1061,5 +1543,583 @@ name: world
                 .ok()
                 .map(|p| p.to_string_lossy().to_string())
         })
+    }
+
+    /// Approval handler that records the requests it receives so tests can
+    /// inspect what the user would have seen.
+    struct RecordingApprovalHandler {
+        decision: ShellApprovalDecision,
+        requests: std::sync::Mutex<Vec<ShellApprovalRequest>>,
+    }
+
+    impl RecordingApprovalHandler {
+        fn new(decision: ShellApprovalDecision) -> Self {
+            Self {
+                decision,
+                requests: std::sync::Mutex::new(Vec::new()),
+            }
+        }
+
+        fn requests(&self) -> Vec<ShellApprovalRequest> {
+            self.requests.lock().unwrap().clone()
+        }
+    }
+
+    impl ShellApprovalHandler for RecordingApprovalHandler {
+        fn approve(
+            &self,
+            request: ShellApprovalRequest,
+        ) -> Result<ShellApprovalDecision, ShellExpansionError> {
+            self.requests.lock().unwrap().push(request);
+            Ok(self.decision.clone())
+        }
+    }
+
+    /// Regression test: when a whitelist contains only a prefix entry for the
+    /// FIRST command in a chain, later commands in the same chain must still
+    /// require approval. Previously, the check used the first executable for
+    /// every action, allowing later commands to slip through.
+    #[test]
+    fn pipeline_whitelist_prefix_does_not_authorize_later_chain_actions() {
+        let temp_dir = TempDir::new().unwrap();
+        let whitelist_path = temp_dir.path().join(".darkmatter-shell-whitelist");
+        std::fs::write(&whitelist_path, "prefix echo\n").unwrap();
+
+        // Whitelist allows `echo`, but `pwd` must trigger approval.
+        let content = "::shell echo ok && pwd\n";
+        let md: Markdown = content.into();
+
+        let options = ComposeOptions::new()
+            .only(&[ComposeOperation::ShellExpansion])
+            .with_shell(ShellExpansionOptions {
+                policy_root: Some(temp_dir.path().to_path_buf()),
+                approval_handler: None, // No approval handler -- must error
+                ..Default::default()
+            });
+
+        let err = md.compose_with(options).unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.contains("Approval required") || msg.contains("approval"),
+            "expected approval-required error for `pwd`, got: {msg}"
+        );
+    }
+
+    /// When every action in a chain is independently whitelisted, the chain
+    /// runs without prompting for approval.
+    #[test]
+    fn pipeline_whitelist_authorizes_chain_when_each_action_matches() {
+        let temp_dir = TempDir::new().unwrap();
+        let whitelist_path = temp_dir.path().join(".darkmatter-shell-whitelist");
+        std::fs::write(&whitelist_path, "prefix echo\nprefix pwd\n").unwrap();
+
+        let content = "::shell echo ok && pwd\n";
+        let md: Markdown = content.into();
+
+        let options = ComposeOptions::new()
+            .only(&[ComposeOperation::ShellExpansion])
+            .with_shell(ShellExpansionOptions {
+                policy_root: Some(temp_dir.path().to_path_buf()),
+                approval_handler: None,
+                ..Default::default()
+            });
+
+        let (composed, report) = md.compose_with(options).unwrap();
+        assert!(composed.content().contains("ok"));
+        assert_eq!(report.shell_approvals_used, 0);
+    }
+
+    /// Approval request preserves redirection tokens in the displayed command.
+    #[test]
+    fn approval_request_preserves_redirections() {
+        let temp_dir = TempDir::new().unwrap();
+        let content = "::shell echo hidden > /dev/null\n";
+        let md: Markdown = content.into();
+
+        let handler = Arc::new(RecordingApprovalHandler::new(
+            ShellApprovalDecision::AllowOnce,
+        ));
+
+        let options = ComposeOptions::new()
+            .only(&[ComposeOperation::ShellExpansion])
+            .with_shell(ShellExpansionOptions {
+                policy_root: Some(temp_dir.path().to_path_buf()),
+                approval_handler: Some(handler.clone()),
+                ..Default::default()
+            });
+
+        let _ = md.compose_with(options).unwrap();
+
+        let requests = handler.requests();
+        assert_eq!(requests.len(), 1);
+        assert!(
+            requests[0].raw_command.contains("> /dev/null"),
+            "expected raw_command to include redirection, got: {}",
+            requests[0].raw_command
+        );
+    }
+
+    /// Approval request shows every command in a chain, joined by `&&` for
+    /// the normalized form.
+    #[test]
+    fn approval_request_includes_full_chain() {
+        let temp_dir = TempDir::new().unwrap();
+        let content = "::shell echo a && echo b\n";
+        let md: Markdown = content.into();
+
+        let handler = Arc::new(RecordingApprovalHandler::new(
+            ShellApprovalDecision::AllowOnce,
+        ));
+
+        let options = ComposeOptions::new()
+            .only(&[ComposeOperation::ShellExpansion])
+            .with_shell(ShellExpansionOptions {
+                policy_root: Some(temp_dir.path().to_path_buf()),
+                approval_handler: Some(handler.clone()),
+                ..Default::default()
+            });
+
+        let _ = md.compose_with(options).unwrap();
+
+        let requests = handler.requests();
+        assert_eq!(requests.len(), 1);
+        assert!(requests[0].raw_command.contains("&&"));
+        assert!(requests[0].normalized_exact.contains("&&"));
+        assert!(requests[0].normalized_exact.contains("echo a"));
+        assert!(requests[0].normalized_exact.contains("echo b"));
+    }
+
+    /// `A && B` runs B when A succeeds; combined output reflects both commands.
+    #[test]
+    fn chain_and_runs_second_when_first_succeeds() {
+        let temp_dir = TempDir::new().unwrap();
+        let content = "::shell echo first && echo second\n";
+        let md: Markdown = content.into();
+
+        let options = ComposeOptions::new()
+            .only(&[ComposeOperation::ShellExpansion])
+            .with_shell(ShellExpansionOptions {
+                policy_root: Some(temp_dir.path().to_path_buf()),
+                approval_handler: Some(Arc::new(MockApprovalHandler {
+                    decision: ShellApprovalDecision::AllowOnce,
+                })),
+                ..Default::default()
+            });
+
+        let (composed, _) = md.compose_with(options).unwrap();
+        assert!(composed.content().contains("first"));
+        assert!(composed.content().contains("second"));
+    }
+
+    /// `A && B` skips B when A fails -- but the chain still propagates the
+    /// failure.
+    #[test]
+    fn chain_and_skips_second_when_first_fails() {
+        let temp_dir = TempDir::new().unwrap();
+        let content = "::shell false && echo unreachable\n";
+        let md: Markdown = content.into();
+
+        let options = ComposeOptions::new()
+            .only(&[ComposeOperation::ShellExpansion])
+            .with_shell(ShellExpansionOptions {
+                policy_root: Some(temp_dir.path().to_path_buf()),
+                approval_handler: Some(Arc::new(MockApprovalHandler {
+                    decision: ShellApprovalDecision::AllowOnce,
+                })),
+                ..Default::default()
+            });
+
+        // No `||` recovery, so the chain should fail
+        let result = md.compose_with(options);
+        assert!(result.is_err());
+    }
+
+    /// `A || B` runs B when A fails; B's output is rendered.
+    #[test]
+    fn chain_or_runs_second_when_first_fails() {
+        let temp_dir = TempDir::new().unwrap();
+        let content = "::shell false || echo recovered\n";
+        let md: Markdown = content.into();
+
+        let options = ComposeOptions::new()
+            .only(&[ComposeOperation::ShellExpansion])
+            .with_shell(ShellExpansionOptions {
+                policy_root: Some(temp_dir.path().to_path_buf()),
+                approval_handler: Some(Arc::new(MockApprovalHandler {
+                    decision: ShellApprovalDecision::AllowOnce,
+                })),
+                ..Default::default()
+            });
+
+        let (composed, _) = md.compose_with(options).unwrap();
+        assert!(composed.content().contains("recovered"));
+    }
+
+    /// `A || B` skips B when A succeeds.
+    #[test]
+    fn chain_or_skips_second_when_first_succeeds() {
+        let temp_dir = TempDir::new().unwrap();
+        let content = "::shell echo primary || echo fallback\n";
+        let md: Markdown = content.into();
+
+        let options = ComposeOptions::new()
+            .only(&[ComposeOperation::ShellExpansion])
+            .with_shell(ShellExpansionOptions {
+                policy_root: Some(temp_dir.path().to_path_buf()),
+                approval_handler: Some(Arc::new(MockApprovalHandler {
+                    decision: ShellApprovalDecision::AllowOnce,
+                })),
+                ..Default::default()
+            });
+
+        let (composed, _) = md.compose_with(options).unwrap();
+        assert!(composed.content().contains("primary"));
+        assert!(!composed.content().contains("fallback"));
+    }
+
+    /// Complex `A && B || C` chain: when A fails, C executes (not B).
+    #[test]
+    fn chain_and_or_runs_recovery_branch() {
+        let temp_dir = TempDir::new().unwrap();
+        let content = "::shell false && echo middle || echo tail\n";
+        let md: Markdown = content.into();
+
+        let options = ComposeOptions::new()
+            .only(&[ComposeOperation::ShellExpansion])
+            .with_shell(ShellExpansionOptions {
+                policy_root: Some(temp_dir.path().to_path_buf()),
+                approval_handler: Some(Arc::new(MockApprovalHandler {
+                    decision: ShellApprovalDecision::AllowOnce,
+                })),
+                ..Default::default()
+            });
+
+        let (composed, _) = md.compose_with(options).unwrap();
+        assert!(composed.content().contains("tail"));
+        assert!(!composed.content().contains("middle"));
+    }
+
+    /// `> /dev/null` discards stdout: nothing is captured for substitution.
+    #[test]
+    fn redirection_stdout_null_drops_captured_output() {
+        let temp_dir = TempDir::new().unwrap();
+        let content = "Before\n::shell echo silenced > /dev/null\nAfter\n";
+        let md: Markdown = content.into();
+
+        let options = ComposeOptions::new()
+            .only(&[ComposeOperation::ShellExpansion])
+            .with_shell(ShellExpansionOptions {
+                policy_root: Some(temp_dir.path().to_path_buf()),
+                approval_handler: Some(Arc::new(MockApprovalHandler {
+                    decision: ShellApprovalDecision::AllowOnce,
+                })),
+                ..Default::default()
+            });
+
+        let (composed, _) = md.compose_with(options).unwrap();
+        assert!(!composed.content().contains("silenced"));
+        assert!(composed.content().contains("Before"));
+        assert!(composed.content().contains("After"));
+    }
+
+    /// `2> /dev/null` suppresses stderr but keeps stdout.
+    #[test]
+    fn redirection_stderr_null_drops_stderr() {
+        let temp_dir = TempDir::new().unwrap();
+        let python = find_test_python();
+        let Some(ref python) = python else { return };
+        let content = format!(
+            "::shell {python} -c \"import sys; sys.stdout.write('OUT'); sys.stderr.write('ERR')\" 2> /dev/null\n"
+        );
+        let md: Markdown = content.as_str().into();
+
+        let options = ComposeOptions::new()
+            .only(&[ComposeOperation::ShellExpansion])
+            .with_shell(ShellExpansionOptions {
+                policy_root: Some(temp_dir.path().to_path_buf()),
+                approval_handler: Some(Arc::new(MockApprovalHandler {
+                    decision: ShellApprovalDecision::AllowOnce,
+                })),
+                ..Default::default()
+            });
+
+        let (composed, _) = md.compose_with(options).unwrap();
+        assert!(composed.content().contains("OUT"));
+        assert!(!composed.content().contains("ERR"));
+    }
+
+    /// `2>&1` merges stderr into stdout: both streams appear in captured
+    /// output.
+    #[test]
+    fn redirection_stderr_to_stdout_merges_streams() {
+        let temp_dir = TempDir::new().unwrap();
+        let python = find_test_python();
+        let Some(ref python) = python else { return };
+        let content = format!(
+            "::shell {python} -c \"import sys; sys.stdout.write('OUT'); sys.stderr.write('ERR')\" 2>&1\n"
+        );
+        let md: Markdown = content.as_str().into();
+
+        let options = ComposeOptions::new()
+            .only(&[ComposeOperation::ShellExpansion])
+            .with_shell(ShellExpansionOptions {
+                policy_root: Some(temp_dir.path().to_path_buf()),
+                approval_handler: Some(Arc::new(MockApprovalHandler {
+                    decision: ShellApprovalDecision::AllowOnce,
+                })),
+                ..Default::default()
+            });
+
+        let (composed, _) = md.compose_with(options).unwrap();
+        assert!(composed.content().contains("OUT"));
+        assert!(composed.content().contains("ERR"));
+    }
+
+    /// `2>&1` preserves emission order: a child that writes ERR before OUT
+    /// must surface as `ERROUT`, not `OUTERR`. Regression for review-3.
+    #[test]
+    fn redirection_stderr_to_stdout_preserves_emission_order() {
+        let temp_dir = TempDir::new().unwrap();
+        let python = find_test_python();
+        let Some(ref python) = python else { return };
+        // Write ERR first, flush, then OUT — both go to the merged pipe.
+        let content = format!(
+            "::shell {python} -c \"import sys; sys.stderr.write('ERR'); sys.stderr.flush(); sys.stdout.write('OUT'); sys.stdout.flush()\" 2>&1\n"
+        );
+        let md: Markdown = content.as_str().into();
+
+        let options = ComposeOptions::new()
+            .only(&[ComposeOperation::ShellExpansion])
+            .with_shell(ShellExpansionOptions {
+                policy_root: Some(temp_dir.path().to_path_buf()),
+                approval_handler: Some(Arc::new(MockApprovalHandler {
+                    decision: ShellApprovalDecision::AllowOnce,
+                })),
+                ..Default::default()
+            });
+
+        let (composed, _) = md.compose_with(options).unwrap();
+        // The merged stream must contain ERR before OUT in source order.
+        let body = composed.content();
+        let err_pos = body.find("ERR").expect("expected ERR in merged output");
+        let out_pos = body.find("OUT").expect("expected OUT in merged output");
+        assert!(
+            err_pos < out_pos,
+            "expected ERR to precede OUT under 2>&1, got: {body:?}"
+        );
+    }
+
+    /// `>&2` preserves emission order in the merged stream and the body-shell
+    /// contract still surfaces both pieces.
+    #[test]
+    fn redirection_stdout_to_stderr_preserves_emission_order() {
+        let temp_dir = TempDir::new().unwrap();
+        let python = find_test_python();
+        let Some(ref python) = python else { return };
+        let content = format!(
+            "::shell {python} -c \"import sys; sys.stdout.write('A'); sys.stdout.flush(); sys.stderr.write('B'); sys.stderr.flush()\" >&2\n"
+        );
+        let md: Markdown = content.as_str().into();
+
+        let options = ComposeOptions::new()
+            .only(&[ComposeOperation::ShellExpansion])
+            .with_shell(ShellExpansionOptions {
+                policy_root: Some(temp_dir.path().to_path_buf()),
+                approval_handler: Some(Arc::new(MockApprovalHandler {
+                    decision: ShellApprovalDecision::AllowOnce,
+                })),
+                ..Default::default()
+            });
+
+        let (composed, _) = md.compose_with(options).unwrap();
+        let body = composed.content();
+        let a_pos = body.find('A').expect("expected A in merged output");
+        let b_pos = body.find('B').expect("expected B in merged output");
+        assert!(
+            a_pos < b_pos,
+            "expected A to precede B under >&2, got: {body:?}"
+        );
+    }
+
+    /// `>&2` routes stdout to stderr; combined output still surfaces it via
+    /// the body shell contract that concatenates stdout and stderr.
+    #[test]
+    fn redirection_stdout_to_stderr_routes_output() {
+        let temp_dir = TempDir::new().unwrap();
+        let content = "::shell echo routed >&2\n";
+        let md: Markdown = content.into();
+
+        let options = ComposeOptions::new()
+            .only(&[ComposeOperation::ShellExpansion])
+            .with_shell(ShellExpansionOptions {
+                policy_root: Some(temp_dir.path().to_path_buf()),
+                approval_handler: Some(Arc::new(MockApprovalHandler {
+                    decision: ShellApprovalDecision::AllowOnce,
+                })),
+                ..Default::default()
+            });
+
+        let (composed, _) = md.compose_with(options).unwrap();
+        // body-shell contract concatenates stdout + stderr, so the line is
+        // still present even after redirection
+        assert!(composed.content().contains("routed"));
+    }
+
+    /// `> /dev/null 2>&1` suppresses BOTH stdout and stderr.
+    ///
+    /// Per shell semantics, `2>&1` after `>/dev/null` dups stderr to the
+    /// already-redirected stdout (now /dev/null), so both streams vanish.
+    #[test]
+    fn redirection_stdout_null_then_merge_suppresses_both_streams() {
+        let temp_dir = TempDir::new().unwrap();
+        let python = find_test_python();
+        let Some(ref python) = python else { return };
+        let content = format!(
+            "Before\n::shell {python} -c \"import sys; sys.stdout.write('OUT'); sys.stderr.write('ERR')\" > /dev/null 2>&1\nAfter\n"
+        );
+        let md: Markdown = content.as_str().into();
+
+        let options = ComposeOptions::new()
+            .only(&[ComposeOperation::ShellExpansion])
+            .with_shell(ShellExpansionOptions {
+                policy_root: Some(temp_dir.path().to_path_buf()),
+                approval_handler: Some(Arc::new(MockApprovalHandler {
+                    decision: ShellApprovalDecision::AllowOnce,
+                })),
+                ..Default::default()
+            });
+
+        let (composed, _) = md.compose_with(options).unwrap();
+        let body = composed.content();
+        assert!(body.contains("Before"));
+        assert!(body.contains("After"));
+        assert!(
+            !body.contains("OUT"),
+            "stdout should be suppressed: {body:?}"
+        );
+        assert!(
+            !body.contains("ERR"),
+            "stderr should be suppressed: {body:?}"
+        );
+    }
+
+    /// `2>&1 > /dev/null` differs from `> /dev/null 2>&1`: stderr keeps a
+    /// reference to the ORIGINAL stdout (capture), so only stdout is
+    /// suppressed and stderr remains visible.
+    #[test]
+    fn redirection_merge_then_stdout_null_only_suppresses_stdout() {
+        let temp_dir = TempDir::new().unwrap();
+        let python = find_test_python();
+        let Some(ref python) = python else { return };
+        let content = format!(
+            "::shell {python} -c \"import sys; sys.stdout.write('OUT'); sys.stderr.write('ERR')\" 2>&1 > /dev/null\n"
+        );
+        let md: Markdown = content.as_str().into();
+
+        let options = ComposeOptions::new()
+            .only(&[ComposeOperation::ShellExpansion])
+            .with_shell(ShellExpansionOptions {
+                policy_root: Some(temp_dir.path().to_path_buf()),
+                approval_handler: Some(Arc::new(MockApprovalHandler {
+                    decision: ShellApprovalDecision::AllowOnce,
+                })),
+                ..Default::default()
+            });
+
+        let (composed, _) = md.compose_with(options).unwrap();
+        let body = composed.content();
+        assert!(
+            !body.contains("OUT"),
+            "stdout should be suppressed: {body:?}"
+        );
+        assert!(
+            body.contains("ERR"),
+            "stderr should remain visible: {body:?}"
+        );
+    }
+
+    /// `> /dev/null 2> /dev/null` independently nulls both streams.
+    #[test]
+    fn redirection_both_streams_null_suppresses_both() {
+        let temp_dir = TempDir::new().unwrap();
+        let python = find_test_python();
+        let Some(ref python) = python else { return };
+        let content = format!(
+            "Before\n::shell {python} -c \"import sys; sys.stdout.write('OUT'); sys.stderr.write('ERR')\" > /dev/null 2> /dev/null\nAfter\n"
+        );
+        let md: Markdown = content.as_str().into();
+
+        let options = ComposeOptions::new()
+            .only(&[ComposeOperation::ShellExpansion])
+            .with_shell(ShellExpansionOptions {
+                policy_root: Some(temp_dir.path().to_path_buf()),
+                approval_handler: Some(Arc::new(MockApprovalHandler {
+                    decision: ShellApprovalDecision::AllowOnce,
+                })),
+                ..Default::default()
+            });
+
+        let (composed, _) = md.compose_with(options).unwrap();
+        let body = composed.content();
+        assert!(body.contains("Before"));
+        assert!(body.contains("After"));
+        assert!(!body.contains("OUT"));
+        assert!(!body.contains("ERR"));
+    }
+
+    /// `2> /dev/null >&2` first nulls stderr, then routes stdout to the
+    /// already-nulled stderr — both streams vanish.
+    #[test]
+    fn redirection_stderr_null_then_route_stdout_to_stderr_suppresses_both() {
+        let temp_dir = TempDir::new().unwrap();
+        let python = find_test_python();
+        let Some(ref python) = python else { return };
+        let content = format!(
+            "Before\n::shell {python} -c \"import sys; sys.stdout.write('OUT'); sys.stderr.write('ERR')\" 2> /dev/null >&2\nAfter\n"
+        );
+        let md: Markdown = content.as_str().into();
+
+        let options = ComposeOptions::new()
+            .only(&[ComposeOperation::ShellExpansion])
+            .with_shell(ShellExpansionOptions {
+                policy_root: Some(temp_dir.path().to_path_buf()),
+                approval_handler: Some(Arc::new(MockApprovalHandler {
+                    decision: ShellApprovalDecision::AllowOnce,
+                })),
+                ..Default::default()
+            });
+
+        let (composed, _) = md.compose_with(options).unwrap();
+        let body = composed.content();
+        assert!(body.contains("Before"));
+        assert!(body.contains("After"));
+        assert!(!body.contains("OUT"));
+        assert!(!body.contains("ERR"));
+    }
+
+    /// Trailing chain operator at the body level produces a parse error.
+    #[test]
+    fn body_directive_trailing_operator_is_rejected() {
+        let temp_dir = TempDir::new().unwrap();
+        let content = "::shell echo ok &&\n";
+        let md: Markdown = content.into();
+
+        let options = ComposeOptions::new()
+            .only(&[ComposeOperation::ShellExpansion])
+            .with_shell(ShellExpansionOptions {
+                policy_root: Some(temp_dir.path().to_path_buf()),
+                approval_handler: Some(Arc::new(MockApprovalHandler {
+                    decision: ShellApprovalDecision::AllowOnce,
+                })),
+                ..Default::default()
+            });
+
+        let result = md.compose_with(options);
+        assert!(result.is_err());
+        let msg = result.unwrap_err().to_string();
+        assert!(
+            msg.contains("Missing command after chain operator"),
+            "got: {msg}"
+        );
     }
 }

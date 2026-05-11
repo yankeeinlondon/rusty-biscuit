@@ -3,7 +3,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::components::renderable::Renderable;
-use biscuit_terminal::discovery::detection::ColorDepth;
+use biscuit_terminal::discovery::detection::{ColorDepth, ColorMode};
 use biscuit_terminal::terminal::Terminal;
 
 static PLAIN: AtomicBool = AtomicBool::new(false);
@@ -18,6 +18,29 @@ pub fn is_plain() -> bool {
     PLAIN.load(Ordering::Relaxed)
 }
 
+fn colors_disabled() -> bool {
+    is_plain() || std::env::var_os("NO_COLOR").is_some()
+}
+
+fn force_color_enabled() -> bool {
+    !colors_disabled()
+        && std::env::var_os("FORCE_COLOR")
+            .map(|value| value != "0")
+            .unwrap_or(false)
+}
+
+fn forced_width(default: u32) -> u32 {
+    std::env::var("TERM_WIDTH")
+        .ok()
+        .and_then(|value| value.parse::<u32>().ok())
+        .or_else(|| {
+            std::env::var("COLUMNS")
+                .ok()
+                .and_then(|value| value.parse::<u32>().ok())
+        })
+        .unwrap_or(default)
+}
+
 /// Returns a [`Terminal`] appropriate for the current mode.
 ///
 /// In plain mode, returns a terminal with `is_tty: false` and
@@ -25,12 +48,12 @@ pub fn is_plain() -> bool {
 /// but no ANSI escape codes. In normal mode, returns a standard
 /// detected terminal.
 pub fn terminal() -> Terminal {
-    if is_plain() {
-        Terminal::builder()
-            .is_tty(false)
-            .color_depth(ColorDepth::None)
-            .build()
+    if colors_disabled() {
+        plain_terminal(forced_width(80))
+    } else if force_color_enabled() {
+        Terminal::new_optimistic(forced_width(80))
     } else {
+        // Normal mode - let Terminal::new() detect, but it will now cache
         Terminal::new()
     }
 }
@@ -42,14 +65,19 @@ pub fn terminal() -> Terminal {
 /// terminal at the given width (or 80 columns if `None`).
 pub fn optimistic_terminal(width: Option<u32>) -> Terminal {
     let w = width.unwrap_or(80);
-    if is_plain() {
-        Terminal::builder()
-            .is_tty(false)
-            .color_depth(ColorDepth::None)
-            .build()
+    if colors_disabled() {
+        plain_terminal(w)
     } else {
         Terminal::new_optimistic(w)
     }
+}
+
+fn plain_terminal(width: u32) -> Terminal {
+    let mut term = Terminal::new_optimistic(width);
+    term.is_tty = false;
+    term.color_depth = ColorDepth::None;
+    term.color_mode = ColorMode::Dark;
+    term
 }
 
 /// Strip ANSI escape codes if plain mode is active, otherwise return as-is.
@@ -103,4 +131,69 @@ pub fn error(msg: &str) {
     let term = terminal();
     let rendered = Prose::new(format!("<red><bold>Error:</bold></red> {msg}")).render(&term);
     let _ = writeln!(std::io::stderr(), "\n{rendered}");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serial_test::serial;
+
+    #[test]
+    #[serial]
+    fn no_color_disables_terminal_styling() {
+        set_plain(false);
+        unsafe {
+            std::env::set_var("NO_COLOR", "1");
+            std::env::remove_var("FORCE_COLOR");
+        }
+
+        let term = terminal();
+        assert!(!term.is_tty);
+        assert_eq!(term.color_depth, ColorDepth::None);
+        assert!(matches!(term.color_mode, ColorMode::Dark));
+
+        unsafe {
+            std::env::remove_var("NO_COLOR");
+        }
+    }
+
+    #[test]
+    #[serial]
+    fn force_color_enables_optimistic_terminal_for_non_tty_runs() {
+        set_plain(false);
+        unsafe {
+            std::env::remove_var("NO_COLOR");
+            std::env::set_var("FORCE_COLOR", "1");
+            std::env::set_var("TERM_WIDTH", "120");
+        }
+
+        let term = terminal();
+        assert!(term.is_tty);
+        assert_eq!(term.color_depth, ColorDepth::TrueColor);
+        assert_eq!(term.width(), 120);
+
+        unsafe {
+            std::env::remove_var("FORCE_COLOR");
+            std::env::remove_var("TERM_WIDTH");
+        }
+    }
+
+    #[test]
+    #[serial]
+    fn plain_mode_overrides_force_color() {
+        set_plain(true);
+        unsafe {
+            std::env::set_var("FORCE_COLOR", "1");
+        }
+
+        let term = optimistic_terminal(Some(100));
+        assert!(!term.is_tty);
+        assert_eq!(term.color_depth, ColorDepth::None);
+        assert!(matches!(term.color_mode, ColorMode::Dark));
+
+        set_plain(false);
+        unsafe {
+            std::env::remove_var("FORCE_COLOR");
+        }
+    }
 }

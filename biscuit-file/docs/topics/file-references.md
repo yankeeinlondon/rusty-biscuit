@@ -20,35 +20,53 @@ access occurs until `resolve()` is called.
 
 ## Quick Reference
 
-| Prefix                | Kind         | Resolves against                                            | Example                        |
-|-----------------------|--------------|-------------------------------------------------------------|--------------------------------|
-| _(none)_ or `./`     | **Relative** | Current working directory                                   | `README.md`, `./src/main.rs`  |
-| `/`                   | **Absolute** | Used verbatim                                               | `/etc/config.toml`            |
-| `@`                   | **Magic**    | Configurable search roots (git root, HOME, custom paths)    | `@docs/spec.md`               |
-| `!`                   | **Package**  | Cargo workspace package area (or git root fallback)         | `!README.md`                  |
-| `vault:` or `vault::` | **Vault**   | Configured vault root directories                           | `vault:notes/today.md`        |
+| Prefix                | Kind                  | Resolves against                                         | Example                      |
+|-----------------------|-----------------------|----------------------------------------------------------|------------------------------|
+| `./` or `../`         | **Relative**          | Current working directory                                | `./src/main.rs`, `../a.md`   |
+| _(none)_              | **Implicit Relative** | CWD, then git repository root                            | `README.md`, `docs/spec.md`  |
+| `/`                   | **Absolute**          | Used verbatim                                            | `/etc/config.toml`           |
+| `@`                   | **Magic**             | Configurable search roots (git root, HOME, custom paths) | `@docs/spec.md`              |
+| `!`                   | **Package**           | Cargo workspace package area (or git root fallback)      | `!README.md`                 |
+| `vault:` or `vault::` | **Vault**             | Configured vault root directories                        | `vault:notes/today.md`       |
 
 Any reference can be prefixed with `%` to enable recursive directory search,
 and any path segment can contain `{{VAR}}` environment variable interpolation.
 
-## Relative References (no prefix)
+## Relative References
 
-The simplest form. The path is joined to the current working directory:
+There are two kinds of relative reference, distinguished by whether the path
+*explicitly* starts with `./` or `../`:
+
+### Explicit Relative (`./`, `../`)
+
+A leading `./` or `../` pins the lookup to the current working directory.
+No fallback search is performed.
 
 ```text
-README.md           → <CWD>/README.md
-./src/main.rs       → <CWD>/src/main.rs
-../sibling/foo.md   → <CWD>/../sibling/foo.md  (normalized)
+./README.md         → <CWD>/README.md
+../sibling/foo.md   → <CWD>/../sibling/foo.md   (normalized)
 ```
 
-Both bare paths (`README.md`) and explicit dot-relative paths (`./README.md`)
-are treated identically -- both resolve against CWD.
+### Implicit Relative (bare path, no prefix)
+
+A bare path with no recognized prefix is treated as *implicitly* relative.
+It is first checked against the CWD and, if not found there, against the
+root of the enclosing git repository (when one is present).
+
+```text
+foo.md              → <CWD>/foo.md, then <git_root>/foo.md
+docs/spec.md        → <CWD>/docs/spec.md, then <git_root>/docs/spec.md
+```
+
+If the reference is not found in either location, `resolve()` returns
+`Ok(None)`. If no git repository is discoverable, only the CWD is searched.
 
 ```rust,no_run
 use biscuit_file::FileReference;
 
+// From <repo>/biscuit-file/lib/src, resolves to <repo>/README.md
 let file_ref = FileReference::new("README.md")?;
-let path = file_ref.resolve()?;        // checks <CWD>/README.md
+let path = file_ref.resolve()?;
 # Ok::<(), biscuit_file::FileReferenceError>(())
 ```
 
@@ -147,9 +165,10 @@ For example, in the `rusty-biscuit` monorepo with CWD at
 ### Fallback Behavior
 
 - If no workspace member matches (e.g., a single-crate repo), the **git root**
-  is used instead.
+    is used instead.
+
 - If no git repository is found, no candidates are generated and resolution
-  returns `Ok(None)`.
+    returns `Ok(None)`.
 
 ### Examples
 
@@ -221,11 +240,14 @@ files.
 
 1. The same search roots as the underlying kind are used as traversal starting
    points (not join targets)
+
 2. Every file under each root is checked against the **filename** (last path
    component)
+
 3. If the reference includes subdirectory components (e.g., `%docs/spec.md`),
    the match is further filtered: the entry's parent path must end with those
    components
+
 4. All matches are sorted lexicographically; the first is returned
 
 ### Examples
@@ -287,16 +309,16 @@ if let Some(path) = resolved {
 
 #### Methods
 
-| Method                                  | Returns                                       | Description                                                              |
-|-----------------------------------------|-----------------------------------------------|--------------------------------------------------------------------------|
-| `new(raw: &str)`                        | `Result<FileReference, FileReferenceError>`   | Parse a reference string                                                 |
-| `raw()`                                 | `&str`                                        | The original reference string                                            |
-| `add_magic_path(path, position)`        | `Self`                                        | Add a search root for `@` references (builder pattern)                   |
-| `with_package_area_magic_path()`        | `Self`                                        | Prepend Cargo package area to `@` search roots (builder pattern)         |
-| `add_vault(path)`                       | `Self`                                        | Add a vault root for `vault:` references (builder pattern)               |
-| `resolve()`                             | `Result<Option<PathBuf>, FileReferenceError>` | Resolve to an absolute path using ambient CWD                            |
-| `resolve_from(base)`                    | `Result<Option<PathBuf>, FileReferenceError>` | Resolve using `base` as the working directory instead of ambient CWD     |
-| `resolve_relative(base)`               | `Result<Option<PathBuf>, FileReferenceError>` | Resolve and return a path relative to `base` (or CWD if `None`)         |
+| Method                           | Returns                                       | Description                                                          |
+|----------------------------------|-----------------------------------------------|----------------------------------------------------------------------|
+| `new(raw: &str)`                 | `Result<FileReference, FileReferenceError>`   | Parse a reference string                                             |
+| `raw()`                          | `&str`                                        | The original reference string                                        |
+| `add_magic_path(path, position)` | `Self`                                        | Add a search root for `@` references (builder pattern)               |
+| `with_package_area_magic_path()` | `Self`                                        | Prepend Cargo package area to `@` search roots (builder pattern)     |
+| `add_vault(path)`                | `Self`                                        | Add a vault root for `vault:` references (builder pattern)           |
+| `resolve()`                      | `Result<Option<PathBuf>, FileReferenceError>` | Resolve to an absolute path using ambient CWD                        |
+| `resolve_from(base)`             | `Result<Option<PathBuf>, FileReferenceError>` | Resolve using `base` as the working directory instead of ambient CWD |
+| `resolve_relative(base)`         | `Result<Option<PathBuf>, FileReferenceError>` | Resolve and return a path relative to `base` (or CWD if `None`)      |
 
 All builder methods consume and return `self`, enabling chained usage.
 
@@ -379,13 +401,14 @@ variable. If any variable is missing, resolution fails immediately.
 For **non-recursive** references, a list of candidate absolute paths is
 constructed by joining each search root with the interpolated path:
 
-| Kind     | Search Roots                                                        |
-|----------|---------------------------------------------------------------------|
-| Relative | `[CWD]`                                                             |
-| Absolute | `[interpolated path directly]`                                      |
-| Magic    | `magic_paths.prepend` → `git_root` → `HOME` → `magic_paths.append` |
-| Package  | `[package_area or git_root]`                                        |
-| Vault    | `vault_roots` → `$VAULT` env var split paths                        |
+| Kind              | Search Roots                                                       |
+|-------------------|--------------------------------------------------------------------|
+| Relative          | `[CWD]`                                                            |
+| Implicit Relative | `[CWD, git_root]` (git_root omitted when equal to CWD or absent)   |
+| Absolute          | `[interpolated path directly]`                                     |
+| Magic             | `magic_paths.prepend` → `git_root` → `HOME` → `magic_paths.append` |
+| Package           | `[package_area or git_root]`                                       |
+| Vault             | `vault_roots` → `$VAULT` env var split paths                       |
 
 For **recursive** references, the same search roots are used as traversal
 starting points rather than join targets.

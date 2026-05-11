@@ -1,7 +1,7 @@
 {
   "openapi": "3.0.3",
   "info": {
-    "title": "GitHub",
+    "title": "github",
     "description": "GitHub REST API v2022-11-28 for repository, PR, issue, and release workflows",
     "version": "0.1.0"
   },
@@ -925,6 +925,58 @@
           "default_branch"
         ]
       },
+      "LicenseInfo": {
+        "description": "License information for a repository.",
+        "type": "object",
+        "properties": {
+          "key": {
+            "description": "SPDX license identifier.",
+            "type": "string"
+          },
+          "name": {
+            "description": "License name.",
+            "type": "string"
+          },
+          "spdx_id": {
+            "description": "SPDX ID."
+          },
+          "url": {
+            "description": "URL to license details."
+          }
+        },
+        "required": [
+          "key",
+          "name"
+        ]
+      },
+      "UserSummary": {
+        "description": "A GitHub user summary (common across many responses).",
+        "type": "object",
+        "properties": {
+          "avatar_url": {
+            "description": "URL to the user's avatar image."
+          },
+          "html_url": {
+            "description": "HTML URL to the user's profile."
+          },
+          "id": {
+            "description": "The user's unique ID."
+          },
+          "login": {
+            "description": "The user's login handle.",
+            "type": "string"
+          },
+          "type": {
+            "description": "User type (e.g., \"User\", \"Organization\", \"Bot\")."
+          },
+          "url": {
+            "description": "API URL for the user resource."
+          }
+        },
+        "required": [
+          "login"
+        ]
+      },
       "GitTreeResponse": {
         "title": "GitTreeResponse",
         "description": "Response from `GET /repos/{owner}/{repo}/git/trees/{tree_sha}`.",
@@ -958,6 +1010,36 @@
           "sha",
           "url",
           "tree"
+        ]
+      },
+      "GitTreeEntry": {
+        "description": "A single entry in a Git tree.",
+        "type": "object",
+        "properties": {
+          "mode": {
+            "description": "Git file mode (e.g., \"100644\" for regular file)."
+          },
+          "path": {
+            "description": "File or directory path.",
+            "type": "string"
+          },
+          "sha": {
+            "description": "SHA of the entry."
+          },
+          "size": {
+            "description": "Size in bytes (only for blobs)."
+          },
+          "type": {
+            "description": "Entry type: \"blob\" (file), \"tree\" (directory), or \"commit\" (submodule).",
+            "type": "string"
+          },
+          "url": {
+            "description": "API URL for the entry."
+          }
+        },
+        "required": [
+          "path",
+          "type"
         ]
       },
       "PullRequestSummary": {
@@ -1002,6 +1084,17 @@
           "issue_url": {
             "description": "API URL for issue resource.",
             "type": "string"
+          },
+          "labels": {
+            "description": "Labels applied to the PR.\n\nGitHub returns labels on PRs through the same `labels` array shape\nused by issues. The list endpoint includes this field by default,\nbut `#[serde(default)]` keeps older fixtures (or alternative APIs\nthat omit it) deserializable.",
+            "type": "array",
+            "items": {
+              "allOf": [
+                {
+                  "$ref": "#/components/schemas/IssueLabel"
+                }
+              ]
+            }
           },
           "merged_at": {
             "description": "Merge timestamp (if merged).",
@@ -1051,6 +1144,46 @@
           "updated_at",
           "html_url",
           "url"
+        ]
+      },
+      "BranchRef": {
+        "description": "Branch reference for PR head/base.",
+        "type": "object",
+        "properties": {
+          "ref": {
+            "description": "Branch name.",
+            "type": "string"
+          },
+          "repo": {
+            "description": "Repository the branch belongs to."
+          },
+          "sha": {
+            "description": "Commit SHA.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "ref",
+          "sha"
+        ]
+      },
+      "IssueLabel": {
+        "description": "A label on an issue.",
+        "type": "object",
+        "properties": {
+          "color": {
+            "description": "Label color (hex without #)."
+          },
+          "description": {
+            "description": "Label description."
+          },
+          "name": {
+            "description": "Label name.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
         ]
       },
       "Vec<PullRequestSummary>": {
@@ -1237,6 +1370,33 @@
           "html_url"
         ]
       },
+      "Milestone": {
+        "description": "A milestone on an issue.",
+        "type": "object",
+        "properties": {
+          "description": {
+            "description": "Milestone description."
+          },
+          "number": {
+            "description": "Milestone number.",
+            "type": "integer",
+            "format": "uint64"
+          },
+          "state": {
+            "description": "Milestone state: \"open\", \"closed\".",
+            "type": "string"
+          },
+          "title": {
+            "description": "Milestone title.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "number",
+          "title",
+          "state"
+        ]
+      },
       "Vec<IssueSummary>": {
         "title": "Array_of_IssueSummary",
         "type": "array",
@@ -1367,6 +1527,24 @@
           "zipball_url"
         ]
       },
+      "TagCommit": {
+        "description": "Commit info embedded in a tag.",
+        "type": "object",
+        "properties": {
+          "sha": {
+            "description": "Commit SHA.",
+            "type": "string"
+          },
+          "url": {
+            "description": "API URL for the commit.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "sha",
+          "url"
+        ]
+      },
       "Vec<RepoTag>": {
         "title": "Array_of_RepoTag",
         "type": "array",
@@ -1450,6 +1628,37 @@
           "html_url"
         ]
       },
+      "ReleaseAsset": {
+        "description": "An asset attached to a release.",
+        "type": "object",
+        "properties": {
+          "browser_download_url": {
+            "description": "Download URL."
+          },
+          "content_type": {
+            "description": "Asset content type."
+          },
+          "download_count": {
+            "description": "Download count."
+          },
+          "id": {
+            "description": "Asset ID.",
+            "type": "integer",
+            "format": "uint64"
+          },
+          "name": {
+            "description": "Asset filename.",
+            "type": "string"
+          },
+          "size": {
+            "description": "Asset size in bytes."
+          }
+        },
+        "required": [
+          "id",
+          "name"
+        ]
+      },
       "Vec<Release>": {
         "title": "Array_of_Release",
         "type": "array",
@@ -1486,6 +1695,29 @@
           "ref",
           "url",
           "object"
+        ]
+      },
+      "GitRefObject": {
+        "description": "Object pointed to by a Git reference.",
+        "type": "object",
+        "properties": {
+          "sha": {
+            "description": "Object SHA.",
+            "type": "string"
+          },
+          "type": {
+            "description": "Object type: \"commit\" (lightweight tag) or \"tag\" (annotated tag).",
+            "type": "string"
+          },
+          "url": {
+            "description": "API URL for the object.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "sha",
+          "url"
         ]
       },
       "AnnotatedTagObject": {
@@ -1530,6 +1762,79 @@
           "object"
         ]
       },
+      "AnnotatedTagger": {
+        "description": "Tagger information for annotated tags.",
+        "type": "object",
+        "properties": {
+          "date": {
+            "description": "Tagging timestamp (ISO 8601).",
+            "type": "string"
+          },
+          "email": {
+            "description": "Tagger's email.",
+            "type": "string"
+          },
+          "name": {
+            "description": "Tagger's name.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "email",
+          "date"
+        ]
+      },
+      "TagObjectRef": {
+        "description": "Object reference from an annotated tag.",
+        "type": "object",
+        "properties": {
+          "sha": {
+            "description": "Object SHA.",
+            "type": "string"
+          },
+          "type": {
+            "description": "Object type (usually \"commit\").",
+            "type": "string"
+          },
+          "url": {
+            "description": "API URL.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "sha",
+          "url"
+        ]
+      },
+      "TagVerification": {
+        "description": "GPG signature verification for tags.",
+        "type": "object",
+        "properties": {
+          "payload": {
+            "description": "Payload that was signed."
+          },
+          "reason": {
+            "description": "Verification reason/status.",
+            "type": "string"
+          },
+          "signature": {
+            "description": "Signature data."
+          },
+          "verified": {
+            "description": "Whether the signature is verified.",
+            "type": "boolean"
+          },
+          "verified_at": {
+            "description": "Verification timestamp."
+          }
+        },
+        "required": [
+          "verified",
+          "reason"
+        ]
+      },
       "WorkflowRunsResponse": {
         "title": "WorkflowRunsResponse",
         "description": "Response from `GET /repos/{owner}/{repo}/actions/runs`.\n\nContains a total count and a list of workflow runs.",
@@ -1552,6 +1857,65 @@
             }
           }
         }
+      },
+      "WorkflowRun": {
+        "description": "A single workflow run from GitHub Actions.",
+        "type": "object",
+        "properties": {
+          "actor": {
+            "description": "The actor who triggered the run."
+          },
+          "conclusion": {
+            "description": "Run conclusion (e.g., \"success\", \"failure\", \"cancelled\", \"skipped\")."
+          },
+          "created_at": {
+            "description": "Creation timestamp (ISO 8601)."
+          },
+          "event": {
+            "description": "The event that triggered the workflow (e.g., \"push\", \"pull_request\")."
+          },
+          "head_branch": {
+            "description": "The branch or tag ref that triggered the run."
+          },
+          "head_sha": {
+            "description": "The commit SHA at the head of the run."
+          },
+          "html_url": {
+            "description": "HTML URL to the workflow run."
+          },
+          "id": {
+            "description": "Workflow run ID.",
+            "type": "integer",
+            "format": "uint64"
+          },
+          "name": {
+            "description": "Run display name."
+          },
+          "run_attempt": {
+            "description": "Run attempt number."
+          },
+          "run_number": {
+            "description": "Run number (incrementing per workflow)."
+          },
+          "status": {
+            "description": "Run status (e.g., \"queued\", \"in_progress\", \"completed\")."
+          },
+          "triggering_actor": {
+            "description": "The actor who triggered the re-run (if applicable)."
+          },
+          "updated_at": {
+            "description": "Last update timestamp (ISO 8601)."
+          },
+          "url": {
+            "description": "API URL."
+          },
+          "workflow_id": {
+            "description": "The workflow ID this run belongs to."
+          }
+        },
+        "required": [
+          "id"
+        ]
       },
       "Vec<RepositoryInfo>": {
         "title": "Array_of_RepositoryInfo",
@@ -1610,5 +1974,8 @@
       ]
     ],
     "module_path": "github"
-  }
+  },
+  "x-schematic-grouped-from": [
+    "GitHub"
+  ]
 }

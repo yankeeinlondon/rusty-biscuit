@@ -46,6 +46,7 @@ fn new_terminal() -> Terminal {
         osc_link_support: osc8_link_support(),
         is_tty: is_tty(),
         color_depth: color_depth(),
+        color_mode: color_mode(),
         os: detect_os_type(),
         distro: detect_linux_distro(),
         config_file,
@@ -67,6 +68,9 @@ fn new_terminal() -> Terminal {
         // raw tty responses into normal CLI rendering paths before a caller
         // has asked for image or geometry-aware output.
         cell_size: None,
+        // Default to the locale-derived answer, falling back to `true` for
+        // unknown environments (modern terminals all advertise UTF-8).
+        supports_unicode: crate::discovery::locale::env_says_utf8().unwrap_or(true),
     };
 
     tracing::debug!(
@@ -177,6 +181,8 @@ pub struct Terminal {
     pub is_tty: bool,
     /// The color depth supported by the terminal
     pub color_depth: ColorDepth,
+    /// Whether the terminal is in light or dark mode
+    pub color_mode: ColorMode,
 
     /// The operating system type
     pub os: OsType,
@@ -234,6 +240,18 @@ pub struct Terminal {
     /// normal detection so ordinary rendering does not perform live `/dev/tty`
     /// queries unless a caller explicitly asks for cell dimensions.
     pub cell_size: Option<CellSize>,
+
+    /// Whether the terminal is expected to render Unicode glyphs correctly.
+    ///
+    /// Components that choose between Unicode and ASCII fallbacks (e.g.,
+    /// [`crate::components::horizontal_rule::HorizontalRule`]) consult this
+    /// flag before consulting the `LC_ALL`/`LC_CTYPE`/`LANG` environment.
+    /// The default value mirrors
+    /// [`crate::discovery::locale::env_says_utf8`] with a `true` fallback for
+    /// unknown locales — every modern terminal advertises UTF-8 when asked.
+    /// Callers that need to force ASCII fallbacks can set
+    /// `supports_unicode = false` via [`TerminalBuilder::supports_unicode`].
+    pub supports_unicode: bool,
 }
 
 impl Default for Terminal {
@@ -252,6 +270,7 @@ impl From<&Terminal> for Terminal {
             osc_link_support: value.osc_link_support,
             is_tty: value.is_tty,
             color_depth: value.color_depth.clone(),
+            color_mode: value.color_mode.clone(),
             os: value.os,
             distro: value.distro.clone(),
             config_file: value.config_file.clone(),
@@ -270,6 +289,7 @@ impl From<&Terminal> for Terminal {
             fixed_width: value.fixed_width,
             fixed_height: value.fixed_height,
             cell_size: value.cell_size,
+            supports_unicode: value.supports_unicode,
         }
     }
 }
@@ -306,6 +326,44 @@ impl Terminal {
         Terminal {
             is_tty: true,
             ..Terminal::default()
+        }
+    }
+
+    /// Creates a new [`Terminal`] with detection-derived `app`/`os`
+    /// fields but with color, TTY, OSC8 link, and italic capabilities
+    /// forced on regardless of what detection reports.
+    ///
+    /// This is the runtime escape hatch honored by `bt` when
+    /// `FORCE_COLOR=1` or `CLICOLOR_FORCE=1` is set in the environment.
+    /// Detection still happens (so `app`, `os`, image protocol, etc.
+    /// remain accurate), but anything that would otherwise gate styling
+    /// behind a heuristic — `color_depth`, `is_tty`, `osc_link_support`,
+    /// `supports_italic` — is set to its enabled value.
+    ///
+    /// Unlike [`Terminal::new_optimistic`], this does **not** hard-code
+    /// the terminal width, app, or OS. Use this when you want detection
+    /// to drive layout but explicit env vars to drive styling.
+    ///
+    /// ## Examples
+    ///
+    /// ```
+    /// use biscuit_terminal::terminal::Terminal;
+    /// use biscuit_terminal::discovery::detection::ColorDepth;
+    ///
+    /// let term = Terminal::new_forced();
+    /// assert_eq!(term.color_depth, ColorDepth::TrueColor);
+    /// assert!(term.is_tty);
+    /// assert!(term.osc_link_support);
+    /// assert!(term.supports_italic);
+    /// ```
+    pub fn new_forced() -> Terminal {
+        let detected = new_terminal();
+        Terminal {
+            color_depth: ColorDepth::TrueColor,
+            is_tty: true,
+            osc_link_support: true,
+            supports_italic: true,
+            ..detected
         }
     }
 
@@ -355,6 +413,7 @@ impl Terminal {
             osc_link_support: true,
             is_tty: true,
             color_depth: ColorDepth::TrueColor,
+            color_mode: ColorMode::Dark,
             os: OsType::Unknown,
             distro: None,
             config_file: None,
@@ -373,6 +432,7 @@ impl Terminal {
             fixed_width: Some(width),
             fixed_height: None,
             cell_size: None,
+            supports_unicode: true,
         }
     }
 
@@ -422,13 +482,10 @@ impl Terminal {
         self.cell_size.or_else(cell_size)
     }
 
-    /// Detect whether the terminal is in "light" or "dark" mode.
+    /// Returns the cached color mode for this terminal instance.
     ///
-    /// Detection strategy:
-    /// 1. Query background color luminance via OSC heuristics
-    /// 2. Check `DARK_MODE` environment variable
-    /// 3. On macOS, check system `AppleInterfaceStyle`
-    /// 4. Default to Dark (most common for terminal users)
+    /// The value was detected once during construction via OSC heuristics
+    /// and is cached to avoid repeated terminal queries.
     ///
     /// ## Examples
     ///
@@ -436,14 +493,15 @@ impl Terminal {
     /// use biscuit_terminal::terminal::Terminal;
     /// use biscuit_terminal::discovery::detection::ColorMode;
     ///
-    /// match Terminal::color_mode() {
+    /// let term = Terminal::new();
+    /// match term.color_mode() {
     ///     ColorMode::Light => println!("Light mode - use dark colors"),
     ///     ColorMode::Dark => println!("Dark mode - use light colors"),
     ///     ColorMode::Unknown => println!("Unknown mode"),
     /// }
     /// ```
-    pub fn color_mode() -> ColorMode {
-        color_mode()
+    pub fn color_mode(&self) -> ColorMode {
+        self.color_mode.clone()
     }
 
     /// Render content to the terminal with default layout.
@@ -521,11 +579,13 @@ pub struct TerminalBuilder {
     osc_link_support: Option<bool>,
     is_tty: Option<bool>,
     color_depth: Option<ColorDepth>,
+    color_mode: Option<ColorMode>,
     is_ci: Option<bool>,
     is_nerd_font: Option<Option<bool>>,
     fixed_width: Option<u32>,
     fixed_height: Option<u32>,
     cell_size: Option<CellSize>,
+    supports_unicode: Option<bool>,
 }
 
 impl TerminalBuilder {
@@ -568,6 +628,12 @@ impl TerminalBuilder {
     /// Set the color depth.
     pub fn color_depth(mut self, value: ColorDepth) -> Self {
         self.color_depth = Some(value);
+        self
+    }
+
+    /// Set the color mode (light/dark).
+    pub fn color_mode(mut self, value: ColorMode) -> Self {
+        self.color_mode = Some(value);
         self
     }
 
@@ -617,6 +683,15 @@ impl TerminalBuilder {
         self
     }
 
+    /// Set whether the terminal renders Unicode glyphs correctly.
+    ///
+    /// Overrides the locale-derived default; see
+    /// [`Terminal::supports_unicode`] for details.
+    pub fn supports_unicode(mut self, value: bool) -> Self {
+        self.supports_unicode = Some(value);
+        self
+    }
+
     /// Build the Terminal, using auto-detected values for unset fields.
     pub fn build(self) -> Terminal {
         let detected = new_terminal();
@@ -628,6 +703,7 @@ impl TerminalBuilder {
             osc_link_support: self.osc_link_support.unwrap_or(detected.osc_link_support),
             is_tty: self.is_tty.unwrap_or(detected.is_tty),
             color_depth: self.color_depth.unwrap_or(detected.color_depth),
+            color_mode: self.color_mode.unwrap_or(detected.color_mode),
             is_ci: self.is_ci.unwrap_or(detected.is_ci),
             is_nerd_font: self.is_nerd_font.unwrap_or(detected.is_nerd_font),
             fixed_width: self.fixed_width,
@@ -647,6 +723,7 @@ impl TerminalBuilder {
             char_encoding: detected.char_encoding,
             locale: detected.locale,
             cell_size: self.cell_size.or(detected.cell_size),
+            supports_unicode: self.supports_unicode.unwrap_or(detected.supports_unicode),
         }
     }
 }
@@ -854,6 +931,25 @@ mod tests {
         assert!(!term.in_monorepo);
         assert!(term.repo_root.is_none());
         assert!(term.package_root.is_none());
+    }
+
+    #[test]
+    fn new_forced_returns_truecolor_tty() {
+        let term = Terminal::new_forced();
+        assert_eq!(
+            term.color_depth,
+            ColorDepth::TrueColor,
+            "new_forced must set TrueColor regardless of detection"
+        );
+        assert!(term.is_tty, "new_forced must set is_tty=true");
+        assert!(
+            term.osc_link_support,
+            "new_forced must set osc_link_support=true"
+        );
+        assert!(
+            term.supports_italic,
+            "new_forced must set supports_italic=true"
+        );
     }
 
     #[test]

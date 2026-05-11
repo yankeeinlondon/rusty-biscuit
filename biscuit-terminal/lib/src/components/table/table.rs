@@ -1,568 +1,19 @@
 use crate::{
-    components::prose::Prose,
     components::renderable::Renderable,
     terminal::Terminal,
     utils::{
         block_constraint::{sanitize_wrapped_lines, split_lines, visible_width, wrap_lines},
-        layout::{Alignment, Layout, RowFill, WordWrap},
+        layout::{Alignment, Layout, RowFill},
+        wrap_policy::WordWrap,
     },
 };
-use thiserror::Error;
 
-use super::types::{ColumnType, Currency, VerticalAlign};
+pub use super::cell::TableCellContent;
+use super::cell::pad_cell;
+pub use super::column::TableColumn;
+use super::types::VerticalAlign;
+use super::width::{MeasuredColumn, TableWidthError, TableWidthMeasurements, TableWidthPlan};
 use crate::discovery::detection::{ColorDepth, ColorMode};
-
-/// Content for a table cell.
-///
-/// This enum supports four cell types that each have distinct rendering behavior:
-///
-/// - **Text**: Renders as-is, supports word wrapping and alignment
-/// - **Integer**: Formats with thousands separators (e.g., `1,234,567`)
-/// - **Float**: Formats with two decimal places (e.g., `12,345.67`)
-/// - **Currency**: Formats with currency symbol prefix and two decimal places (e.g., `$1,234.56`)
-///
-/// ## Examples
-///
-/// ```
-/// use biscuit_terminal::components::table::table::TableCellContent;
-/// use biscuit_terminal::components::table::types::Currency;
-///
-/// // Different cell content types
-/// let text = TableCellContent::Text("Hello World".into());
-/// let integer = TableCellContent::Integer(1234567);
-/// let float = TableCellContent::Float(12345.678);
-/// let currency = TableCellContent::Currency(Currency::USD, 1234.56);
-///
-/// // Display formatting
-/// assert_eq!(format!("{}", text), "Hello World");
-/// assert_eq!(format!("{}", integer), "1,234,567");
-/// assert_eq!(format!("{}", float), "12,345.68");
-/// assert_eq!(format!("{}", currency), "$1,234.56");
-/// ```
-///
-/// ## Type Conversions
-///
-/// Convenience `From` implementations allow using primitive types directly:
-///
-/// ```
-/// use biscuit_terminal::components::table::table::TableCellContent;
-///
-/// let text: TableCellContent = "hello".into();
-/// let num: TableCellContent = 42i64.into();
-/// let decimals: TableCellContent = 3.14f64.into();
-/// ```
-#[derive(Debug, Clone)]
-pub enum TableCellContent {
-    /// Text (which can include escape characters)
-    Text(String),
-    /// Signed integer, formatted with thousands separators
-    Integer(i64),
-    /// Floating-point number, formatted with two decimal places
-    Float(f64),
-    /// Currency value with symbol prefix
-    Currency(Currency, f64),
-}
-
-impl From<String> for TableCellContent {
-    fn from(value: String) -> Self {
-        TableCellContent::Text(value)
-    }
-}
-
-impl From<&str> for TableCellContent {
-    fn from(value: &str) -> Self {
-        TableCellContent::Text(value.to_string())
-    }
-}
-
-impl From<i64> for TableCellContent {
-    fn from(value: i64) -> Self {
-        TableCellContent::Integer(value)
-    }
-}
-
-impl From<f64> for TableCellContent {
-    fn from(value: f64) -> Self {
-        TableCellContent::Float(value)
-    }
-}
-
-impl std::fmt::Display for TableCellContent {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            TableCellContent::Text(s) => write!(f, "{}", s),
-            TableCellContent::Integer(n) => write!(f, "{}", format_integer(*n)),
-            TableCellContent::Float(n) => write!(f, "{}", format_float(*n)),
-            TableCellContent::Currency(c, amt) => write!(f, "{}", format_currency(c, *amt)),
-        }
-    }
-}
-
-/// Inserts commas as thousands separators into a numeric string of digits.
-fn insert_thousands_separators(s: &str) -> String {
-    let chars: Vec<char> = s.chars().collect();
-    let len = chars.len();
-    let mut result = String::with_capacity(len + len / 3);
-    for (i, ch) in chars.iter().enumerate() {
-        if i > 0 && (len - i).is_multiple_of(3) {
-            result.push(',');
-        }
-        result.push(*ch);
-    }
-    result
-}
-
-/// Formats an integer with thousands separators.
-fn format_integer(value: i64) -> String {
-    let negative = value < 0;
-    let s = value.unsigned_abs().to_string();
-    let with_commas = insert_thousands_separators(&s);
-    if negative {
-        format!("-{}", with_commas)
-    } else {
-        with_commas
-    }
-}
-
-/// Formats a float with two decimal places and thousands separators on the
-/// integer part.
-fn format_float(value: f64) -> String {
-    if value.is_nan() {
-        return "NaN".to_string();
-    }
-    if value.is_infinite() {
-        return if value.is_sign_negative() {
-            "-\u{221e}".to_string()
-        } else {
-            "\u{221e}".to_string()
-        };
-    }
-
-    let negative = value.is_sign_negative() && value != 0.0;
-    let formatted = format!("{:.2}", value.abs());
-    // Split at the decimal point to apply thousands separators to integer part
-    let (int_part, dec_part) = formatted.split_once('.').unwrap_or((&formatted, "00"));
-    let with_commas = insert_thousands_separators(int_part);
-
-    if negative {
-        format!("-{}.{}", with_commas, dec_part)
-    } else {
-        format!("{}.{}", with_commas, dec_part)
-    }
-}
-
-/// Formats a currency value with symbol and thousands separators.
-fn format_currency(currency: &Currency, value: f64) -> String {
-    let formatted = format_float(value);
-    if value.is_sign_negative() && value != 0.0 && !value.is_nan() {
-        // Move negative sign before symbol: -$1,234.56
-        format!("-{}{}", currency.symbol(), &formatted[1..])
-    } else {
-        format!("{}{}", currency.symbol(), formatted)
-    }
-}
-
-/// Pads cell content to the given width, respecting escape codes.
-///
-/// Standard `format!("{:width$}", ...)` counts bytes, not visible characters.
-/// This function computes the visible width (skipping ANSI escape sequences
-/// and using Unicode character widths) and adds the correct number of spaces.
-///
-/// If `width_for_alignment` is provided, alignment offsets use this width instead
-/// of the actual content width. This ensures consistent alignment across rows with
-/// mixed-width content (e.g., emoji vs symbols).
-fn pad_cell(
-    content: &str,
-    width: usize,
-    alignment: Alignment,
-    width_for_alignment: Option<usize>,
-) -> String {
-    let visible = visible_width(content) as usize;
-    let align_width = width_for_alignment.unwrap_or(visible);
-    match alignment {
-        Alignment::Left => {
-            // Left align: content at start, padding at end
-            let padding = width.saturating_sub(visible);
-            format!("{}{}", content, " ".repeat(padding))
-        }
-        Alignment::Right => {
-            // Right align: use align_width for offset calculation
-            let offset = width.saturating_sub(align_width);
-            let content_padding = offset.saturating_sub(0); // Spaces before content
-            let end_padding = width.saturating_sub(offset + visible);
-            format!(
-                "{}{}{}",
-                " ".repeat(content_padding),
-                content,
-                " ".repeat(end_padding)
-            )
-        }
-        Alignment::Center => {
-            // Center align: use align_width for offset calculation
-            let total_space = width.saturating_sub(align_width);
-            let left_offset = total_space / 2;
-            let end_padding = width.saturating_sub(left_offset + visible);
-            format!(
-                "{}{}{}",
-                " ".repeat(left_offset),
-                content,
-                " ".repeat(end_padding)
-            )
-        }
-    }
-}
-
-/// Controls whether a table column is visible based on terminal width.
-///
-/// Columns default to `Always` (unconditionally visible). Use the width
-/// variants to hide columns that don't fit in narrow terminals while
-/// keeping them visible in wider ones.
-///
-/// The width checked is the **renderable width** — the terminal width
-/// minus any layout margins.
-///
-/// ## Examples
-///
-/// ```
-/// use biscuit_terminal::components::table::table::{Conditional, TableColumn};
-///
-/// // Always visible
-/// let name = TableColumn::new("Name");
-///
-/// // Only visible when terminal is wider than 80 columns
-/// let notes = TableColumn::new("Notes")
-///     .with_when(Conditional::WidthGreaterThan(80));
-/// ```
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub enum Conditional {
-    /// Column is always visible.
-    #[default]
-    Always,
-    /// Column is visible when the renderable width is greater than the
-    /// specified value.
-    WidthGreaterThan(u32),
-    /// Column is visible when the renderable width is less than or equal
-    /// to the specified value.
-    LessThanOrEqual(u32),
-}
-
-impl Conditional {
-    /// Returns `true` when the condition is satisfied for the given width.
-    pub fn is_satisfied(&self, available_width: u32) -> bool {
-        match self {
-            Conditional::Always => true,
-            Conditional::WidthGreaterThan(threshold) => available_width > *threshold,
-            Conditional::LessThanOrEqual(threshold) => available_width <= *threshold,
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
-enum DropBehavior {
-    #[default]
-    Keep,
-    DropSilently,
-    DropWithMessage(String),
-}
-
-/// Column definition for a table.
-///
-/// A `TableColumn` defines the header, data type, width constraints, alignment,
-/// word wrapping, and vertical alignment for a column in a [`Table`].
-///
-/// ## Width Constraints
-///
-/// - `fixed_width`: Exact column width (overrides auto-calculation)
-/// - `min_width`: Minimum width constraint
-/// - `max_width`: Maximum width constraint (triggers word wrap for text)
-///
-/// ## Examples
-///
-/// ```
-/// use biscuit_terminal::components::table::table::{Conditional, TableColumn};
-/// use biscuit_terminal::components::table::types::{ColumnType, Currency, VerticalAlign};
-/// use biscuit_terminal::utils::layout::{Alignment, WordWrap};
-///
-/// // Simple text column with default settings
-/// let name_col = TableColumn::new("Name");
-///
-/// // Bold header column
-/// let header_col = TableColumn::new_with_bold("Status");
-///
-/// // Numeric column with currency formatting and minimum width
-/// let price_col = TableColumn::new("Price")
-///     .with_type(ColumnType::Currency(Currency::USD))
-///     .with_min_width(12)
-///     .with_alignment(Alignment::Right);
-///
-/// // Text column with word wrap and max width
-/// let desc_col = TableColumn::new("Description")
-///     .with_max_width(40)
-///     .with_word_wrap(WordWrap::WrapProse(Some(4), None))
-///     .with_vertical_align(VerticalAlign::Top);
-///
-/// // Column that hides on narrow terminals
-/// let details_col = TableColumn::new("Details")
-///     .with_when(Conditional::WidthGreaterThan(80));
-/// ```
-///
-/// ## Conditional Visibility
-///
-/// Use [`TableColumn::with_when`] to control visibility based on terminal width:
-///
-/// ```
-/// use biscuit_terminal::components::table::table::{Conditional, TableColumn};
-///
-/// // Only visible when terminal > 60 columns
-/// let narrow_col = TableColumn::new("Notes")
-///     .with_when(Conditional::WidthGreaterThan(60));
-///
-/// // Only visible when terminal <= 40 columns
-/// let compact_col = TableColumn::new("Summary")
-///     .with_when(Conditional::LessThanOrEqual(40));
-/// ```
-#[derive(Debug, Clone)]
-pub struct TableColumn {
-    /// Header text for the column
-    pub header: String,
-    /// Optional styled header using Prose (takes precedence over `header` when rendering)
-    pub header_prose: Option<Prose>,
-    /// Fixed width for the column (overrides header/data widths when set)
-    pub fixed_width: Option<usize>,
-    /// Minimum width for the column (optional)
-    pub min_width: Option<usize>,
-    /// Maximum width for the column (optional)
-    pub max_width: Option<usize>,
-    /// The data type of this column, which drives default alignment and word wrap
-    pub column_type: ColumnType,
-    /// Explicit horizontal alignment override (None = use column_type default)
-    pub alignment: Option<Alignment>,
-    /// Word wrap strategy override (None = use column_type default).
-    ///
-    /// This is ignored for numeric columns (Integer, Float, Currency) which
-    /// force `WordWrap::None` to preserve number formatting.
-    pub word_wrap: Option<WordWrap>,
-    /// Vertical alignment for multi-line cells in this column
-    pub vertical_align: VerticalAlign,
-    /// When true, all cells in this column align at the same position regardless
-    /// of individual content width. Useful for columns with mixed-width characters
-    /// (e.g., emoji ✅ width 2 and symbols ⤫ width 1) that should visually align.
-    /// Default is false (traditional alignment where each cell is positioned
-    /// based on its own content width).
-    pub uniform_alignment: bool,
-    /// Controls whether this column is visible based on terminal width.
-    ///
-    /// Defaults to `Conditional::Always`. Use [`TableColumn::with_when`] to
-    /// make a column appear only when the terminal is wide enough.
-    pub when: Conditional,
-    /// Controls whether this column may be dropped when the table cannot fit.
-    drop_behavior: DropBehavior,
-}
-
-impl TableColumn {
-    /// Create a new column with a header.
-    pub fn new<T: Into<String>>(header: T) -> Self {
-        TableColumn {
-            header: header.into(),
-            header_prose: None,
-            fixed_width: None,
-            min_width: None,
-            max_width: None,
-            column_type: ColumnType::default(),
-            alignment: None,
-            word_wrap: None,
-            vertical_align: VerticalAlign::default(),
-            uniform_alignment: false,
-            when: Conditional::default(),
-            drop_behavior: DropBehavior::Keep,
-        }
-    }
-
-    /// Create a new column with a bold header.
-    pub fn new_with_bold<T: Into<String>>(header: T) -> Self {
-        let text = header.into();
-        let prose = Prose::new(format!("<bold>{text}</bold>"));
-        TableColumn {
-            header: text,
-            header_prose: Some(prose),
-            fixed_width: None,
-            min_width: None,
-            max_width: None,
-            column_type: ColumnType::default(),
-            alignment: None,
-            word_wrap: None,
-            vertical_align: VerticalAlign::default(),
-            uniform_alignment: false,
-            when: Conditional::default(),
-            drop_behavior: DropBehavior::Keep,
-        }
-    }
-
-    /// Set a fixed width for the column.
-    pub fn with_fixed_width(mut self, width: usize) -> Self {
-        self.fixed_width = Some(width);
-        self
-    }
-
-    /// Set minimum width for the column.
-    pub fn with_min_width(mut self, width: usize) -> Self {
-        self.min_width = Some(width);
-        self
-    }
-
-    /// Set maximum width for the column.
-    pub fn with_max_width(mut self, width: usize) -> Self {
-        self.max_width = Some(width);
-        self
-    }
-
-    /// Set the column data type.
-    pub fn with_type(mut self, column_type: ColumnType) -> Self {
-        self.column_type = column_type;
-        self
-    }
-
-    /// Set an explicit alignment override.
-    pub fn with_alignment(mut self, alignment: Alignment) -> Self {
-        self.alignment = Some(alignment);
-        self
-    }
-
-    /// Set the word wrap strategy for this column.
-    ///
-    /// Controls how long text is wrapped when it exceeds the column width.
-    /// Text columns default to `WrapProse` for natural word boundaries.
-    ///
-    /// ## Notes
-    ///
-    /// This setting is **ignored** for numeric columns (Integer, Float, Currency)
-    /// which always use `WordWrap::None` to preserve number formatting and
-    /// decimal alignment.
-    ///
-    /// ## Examples
-    ///
-    /// ```
-    /// use biscuit_terminal::components::table::table::TableColumn;
-    /// use biscuit_terminal::utils::layout::WordWrap;
-    ///
-    /// // Truncate long text with ellipsis
-    /// let col = TableColumn::new("Notes")
-    ///     .with_max_width(20)
-    ///     .with_word_wrap(WordWrap::Truncate(Some("...".into())));
-    /// ```
-    pub fn with_word_wrap(mut self, word_wrap: WordWrap) -> Self {
-        self.word_wrap = Some(word_wrap);
-        self
-    }
-
-    /// Set the vertical alignment for multi-line cells in this column.
-    ///
-    /// When a row contains cells with different numbers of lines, shorter
-    /// cells need to be vertically positioned within the row height.
-    ///
-    /// ## Examples
-    ///
-    /// ```
-    /// use biscuit_terminal::components::table::table::TableColumn;
-    /// use biscuit_terminal::components::table::types::VerticalAlign;
-    ///
-    /// // Bottom-align numeric values with multi-line descriptions
-    /// let amount_col = TableColumn::new("Amount")
-    ///     .with_vertical_align(VerticalAlign::Bottom);
-    /// ```
-    pub fn with_vertical_align(mut self, vertical_align: VerticalAlign) -> Self {
-        self.vertical_align = vertical_align;
-        self
-    }
-
-    /// Enable uniform alignment for this column.
-    ///
-    /// When enabled, all cells in this column align at the same horizontal
-    /// position regardless of individual content width. This is useful for
-    /// columns containing mixed-width characters (e.g., emoji ✅ width 2 and
-    /// symbols ⤫ width 1) that should visually align in a vertical line.
-    ///
-    /// Default is `false` (traditional alignment where each cell is positioned
-    /// based on its own content width, so numbers right-align properly).
-    ///
-    /// ## Examples
-    ///
-    /// ```
-    /// use biscuit_terminal::components::table::table::TableColumn;
-    /// use biscuit_terminal::utils::layout::Alignment;
-    ///
-    /// // Emoji column where ✅ and ⤫ should align vertically
-    /// let status_col = TableColumn::new("Status")
-    ///     .with_alignment(Alignment::Center)
-    ///     .with_uniform_alignment(true);
-    /// ```
-    pub fn with_uniform_alignment(mut self, uniform: bool) -> Self {
-        self.uniform_alignment = uniform;
-        self
-    }
-
-    /// Set a visibility condition for this column.
-    ///
-    /// When the condition is not satisfied at render time, the column (and
-    /// its corresponding data cells) are excluded from the output.
-    ///
-    /// ## Examples
-    ///
-    /// ```
-    /// use biscuit_terminal::components::table::table::{Conditional, TableColumn};
-    ///
-    /// // Only show this column when terminal is wider than 60
-    /// let col = TableColumn::new("Details")
-    ///     .with_when(Conditional::WidthGreaterThan(60));
-    /// ```
-    pub fn with_when(mut self, when: Conditional) -> Self {
-        self.when = when;
-        self
-    }
-
-    /// Allow this column to be dropped when the table cannot fit.
-    ///
-    /// Passing `Some(message)` records a note that is appended after the
-    /// rendered table if this column is dropped. Passing `None` drops the
-    /// column silently.
-    pub fn drop_when_space_is_limited<T: Into<String>>(mut self, msg: Option<T>) -> Self {
-        self.drop_behavior = match msg {
-            Some(message) => DropBehavior::DropWithMessage(message.into()),
-            None => DropBehavior::DropSilently,
-        };
-        self
-    }
-
-    /// Returns the effective alignment: explicit override or column type default.
-    pub fn effective_alignment(&self) -> Alignment {
-        self.alignment
-            .unwrap_or_else(|| self.column_type.default_alignment())
-    }
-
-    /// Returns the effective word wrap strategy.
-    ///
-    /// For numeric columns, always returns `WordWrap::None` regardless of override.
-    /// For text columns, returns the explicit override or the column type default.
-    pub fn effective_word_wrap(&self) -> WordWrap {
-        if !self.column_type.allows_word_wrap_override() {
-            return WordWrap::None;
-        }
-        self.word_wrap
-            .clone()
-            .unwrap_or_else(|| self.column_type.default_word_wrap())
-    }
-
-    fn drop_note(&self) -> Option<String> {
-        match &self.drop_behavior {
-            DropBehavior::DropWithMessage(message) => Some(message.clone()),
-            DropBehavior::Keep | DropBehavior::DropSilently => None,
-        }
-    }
-
-    fn is_droppable(&self) -> bool {
-        !matches!(self.drop_behavior, DropBehavior::Keep)
-    }
-}
 
 /// A table component for rendering tabular data.
 ///
@@ -575,7 +26,7 @@ impl TableColumn {
 /// ## Basic Usage
 ///
 /// ```
-/// use biscuit_terminal::components::table::table::{Table, TableColumn, TableCellContent};
+/// use biscuit_terminal::components::table::{Table, TableColumn, TableCellContent};
 /// use biscuit_terminal::components::table::types::{ColumnType, Currency};
 /// use biscuit_terminal::components::renderable::Renderable;
 ///
@@ -609,7 +60,7 @@ impl TableColumn {
 /// Enable alternating row colors for improved readability:
 ///
 /// ```
-/// use biscuit_terminal::components::table::table::{Table, TableColumn, TableCellContent};
+/// use biscuit_terminal::components::table::{Table, TableColumn, TableCellContent};
 ///
 /// let table = Table::new()
 ///     .with_columns(vec![
@@ -629,7 +80,7 @@ impl TableColumn {
 /// Cells can contain newlines for multi-line content:
 ///
 /// ```
-/// use biscuit_terminal::components::table::table::{Table, TableColumn, TableCellContent};
+/// use biscuit_terminal::components::table::{Table, TableColumn, TableCellContent};
 /// use biscuit_terminal::utils::layout::WordWrap;
 ///
 /// let table = Table::new()
@@ -664,119 +115,6 @@ pub struct Table {
     /// so the second, fourth, etc. rows get the tint). Requires true color
     /// support; silently ignored otherwise.
     alternate_text_color: bool,
-}
-
-/// Measured width facts for a single visible table column.
-#[derive(Debug, Clone, PartialEq)]
-pub struct MeasuredColumn {
-    pub original_index: usize,
-    pub header_width: usize,
-    pub header_line_width: usize,
-    pub cell_max_width: usize,
-    pub cell_line_max_width: usize,
-    pub columnar_width_requirement: usize,
-    pub fixed_width: Option<usize>,
-    pub min_width: Option<usize>,
-    pub max_width: Option<usize>,
-    pub effective_word_wrap: WordWrap,
-    pub natural_break_width: usize,
-    pub resolved_width: usize,
-    pub is_non_wrapping: bool,
-    pub is_shrinkable: bool,
-    pub drop_note: Option<String>,
-    pub header_lines: Vec<String>,
-}
-
-/// Table-level measurements captured before a final width fit is resolved.
-#[derive(Debug, Clone, PartialEq)]
-pub struct TableWidthMeasurements {
-    pub available_render_width: usize,
-    pub border_overhead: usize,
-    pub content_budget: usize,
-    pub fixed_width_consumption: usize,
-    pub non_wrapping_consumption: usize,
-    pub working_width: usize,
-    pub word_wrap_needed: bool,
-    pub columns: Vec<MeasuredColumn>,
-}
-
-/// Final table width plan shared by all rendering paths.
-#[derive(Debug, Clone, PartialEq)]
-pub struct TableWidthPlan {
-    pub available_render_width: usize,
-    pub visible_column_indices: Vec<usize>,
-    pub dropped_column_indices: Vec<usize>,
-    pub columns: Vec<MeasuredColumn>,
-    pub table_width: usize,
-    pub dropped_notes: Vec<String>,
-}
-
-/// Structured width planning errors for tables.
-#[derive(Debug, Clone, PartialEq, Error)]
-pub enum TableWidthError {
-    #[error("Table could not be rendered because no columns are visible.")]
-    NoVisibleColumns,
-    #[error(
-        "Table could not be rendered in {available_render_width} columns. Fixed-width columns require {required_width} content columns before borders."
-    )]
-    InsufficientWidthForFixedColumns {
-        available_render_width: usize,
-        border_overhead: usize,
-        content_budget: usize,
-        fixed_width_consumption: usize,
-        non_wrapping_consumption: usize,
-        required_width: usize,
-        blocking_column_indices: Vec<usize>,
-        droppable_columns_available: bool,
-    },
-    #[error(
-        "Table could not be rendered in {available_render_width} columns. Fixed and non-wrapping columns require {required_width} content columns before borders."
-    )]
-    InsufficientWidthForNonWrappingColumns {
-        available_render_width: usize,
-        border_overhead: usize,
-        content_budget: usize,
-        fixed_width_consumption: usize,
-        non_wrapping_consumption: usize,
-        required_width: usize,
-        blocking_column_indices: Vec<usize>,
-        droppable_columns_available: bool,
-    },
-    #[error(
-        "Table could not be rendered in {available_render_width} columns. Wrapping columns need at least {required_width} content columns after fixed and non-wrapping columns are reserved."
-    )]
-    InsufficientWidthForWrappingColumns {
-        available_render_width: usize,
-        border_overhead: usize,
-        content_budget: usize,
-        fixed_width_consumption: usize,
-        non_wrapping_consumption: usize,
-        required_width: usize,
-        blocking_column_indices: Vec<usize>,
-        droppable_columns_available: bool,
-    },
-    #[error(
-        "Table could not be rendered in {available_render_width} columns even after dropping eligible columns."
-    )]
-    InsufficientWidthAfterDropping {
-        available_render_width: usize,
-        border_overhead: usize,
-        content_budget: usize,
-        fixed_width_consumption: usize,
-        non_wrapping_consumption: usize,
-        required_width: usize,
-        blocking_column_indices: Vec<usize>,
-        dropped_column_indices: Vec<usize>,
-    },
-}
-
-impl TableWidthPlan {
-    fn content_widths(&self) -> Vec<usize> {
-        self.columns
-            .iter()
-            .map(|column| column.resolved_width)
-            .collect()
-    }
 }
 
 impl Table {
@@ -1979,12 +1317,12 @@ impl Renderable for Table {
         let width = term_width.unwrap_or(80);
         // Opportunistic render assumes full capability; stripe if requested
         let stripe = if self.alternate_background_color {
-            Some(Terminal::color_mode())
+            Some(ColorMode::Dark)
         } else {
             None
         };
         let text_tint = if self.alternate_text_color {
-            Some(Terminal::color_mode())
+            Some(ColorMode::Dark)
         } else {
             None
         };
@@ -2002,12 +1340,12 @@ impl Renderable for Table {
         let has_true_color = term.color_depth == ColorDepth::TrueColor;
         // Only stripe when the terminal actually supports true color
         let stripe = if self.alternate_background_color && has_true_color {
-            Some(Terminal::color_mode())
+            Some(term.color_mode())
         } else {
             None
         };
         let text_tint = if self.alternate_text_color && has_true_color {
-            Some(Terminal::color_mode())
+            Some(term.color_mode())
         } else {
             None
         };
@@ -2632,6 +1970,11 @@ fn build_border(widths: &[usize], left: char, junction: char, right: char) -> St
 
 #[cfg(test)]
 mod tests {
+    use super::super::cell::{
+        format_currency, format_float, format_integer, insert_thousands_separators,
+    };
+    use super::super::column::Conditional;
+    use super::super::types::{ColumnType, Currency};
     use super::*;
 
     // ── Existing tests ────────────────────────────────────────────
@@ -2706,7 +2049,7 @@ mod tests {
     #[test]
     fn test_format_float_normal() {
         assert_eq!(format_float(1234.5), "1,234.50");
-        assert_eq!(format_float(3.14), "3.14");
+        assert_eq!(format_float(3.15), "3.15");
         assert_eq!(format_float(0.5), "0.50");
     }
 
@@ -2754,7 +2097,7 @@ mod tests {
     #[test]
     fn test_display_impl() {
         assert_eq!(TableCellContent::Integer(42).to_string(), "42");
-        assert_eq!(TableCellContent::Float(3.14).to_string(), "3.14");
+        assert_eq!(TableCellContent::Float(3.15).to_string(), "3.15");
         assert_eq!(
             TableCellContent::Currency(Currency::USD, 9.99).to_string(),
             "$9.99"
@@ -2773,8 +2116,8 @@ mod tests {
 
     #[test]
     fn test_from_f64() {
-        let cell = TableCellContent::from(3.14f64);
-        assert!(matches!(cell, TableCellContent::Float(v) if (v - 3.14).abs() < f64::EPSILON));
+        let cell = TableCellContent::from(3.15f64);
+        assert!(matches!(cell, TableCellContent::Float(v) if (v - 3.15).abs() < f64::EPSILON));
     }
 
     // ── pad_cell tests ────────────────────────────────────────────
@@ -3100,10 +2443,10 @@ mod tests {
                 // Extract the column number from \x1b[NNG pattern
                 if let Some(start) = line.find("\x1b[") {
                     let rest = &line[start + 2..];
-                    if let Some(end) = rest.find('G') {
-                        if let Ok(col) = rest[..end].parse::<u32>() {
-                            return col > 30;
-                        }
+                    if let Some(end) = rest.find('G')
+                        && let Ok(col) = rest[..end].parse::<u32>()
+                    {
+                        return col > 30;
                     }
                 }
                 false
@@ -3132,10 +2475,10 @@ mod tests {
             .map(|line| {
                 if let Some(start) = line.find("\x1b[") {
                     let rest = &line[start + 2..];
-                    if let Some(end) = rest.find('G') {
-                        if let Ok(col) = rest[..end].parse::<u32>() {
-                            return col > 70;
-                        }
+                    if let Some(end) = rest.find('G')
+                        && let Ok(col) = rest[..end].parse::<u32>()
+                    {
+                        return col > 70;
                     }
                 }
                 false

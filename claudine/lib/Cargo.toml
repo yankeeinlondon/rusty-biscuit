@@ -7,15 +7,19 @@ license = "AGPL-3.0-only"
 [lib]
 name = "claudine"
 
+[[bench]]
+name = "runtime_hot_paths"
+harness = false
+
 [dependencies]
 # Internal
 sniff = { path = "../../sniff/lib" }
 biscuit-hash = { path = "../../biscuit-hash/lib", features = ["xx_hash", "blake3"] }
-biscuit-file = { path = "../../biscuit-file/lib", features = ["yaml"] }
+biscuit-file = { path = "../../biscuit-file/lib", features = ["yaml", "json5"] }
 darkmatter = { path = "../../darkmatter/lib" }
 playa = { path = "../../playa/lib", features = ["sound-effects", "async"] }
 biscuit-speaks = { path = "../../biscuit-speaks/lib", features = ["playa"] }
-messenger = { path = "../../messenger/lib", default-features = false, features = ["discord", "slack", "signal", "whatsapp"] }
+messenger = { path = "../../messenger/lib", default-features = false, features = ["discord", "slack", "signal", "whatsapp", "desktop"] }
 secrecy = "0.10"
 biscuit-terminal = { path = "../../biscuit-terminal/lib" }
 
@@ -24,13 +28,16 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 
 # Date/time
-chrono = { version = "0.4", features = ["serde"] }
+chrono = { version = "0.4", default-features = false, features = ["clock", "serde", "std"] }
+chrono-tz = "0.10"
+iana-time-zone = "0.1"
 
 # Error handling
 thiserror = "2.0"
 
 # Async runtime
-tokio = { version = "1.48.0", features = ["rt-multi-thread", "macros"] }
+tokio = { version = "1.48.0", features = ["rt-multi-thread", "macros", "process", "time", "fs"] }
+async-trait = "0.1"
 
 # Regex for matcher engine
 regex = "1.11"
@@ -56,11 +63,11 @@ toml = "1.0"
 # Structured logging
 tracing = "0.1"
 
-# File locking
-fs2 = "0.4"
+# Atomic file writes via unique temp file + rename
+tempfile = "3"
 
 # SQLite reporting index
-rusqlite = { version = "0.31", features = ["chrono", "serde_json"] }
+rusqlite = { version = "0.31", features = ["bundled", "chrono", "serde_json"] }
 
 # Directory traversal
 walkdir = "2.5"
@@ -68,8 +75,12 @@ walkdir = "2.5"
 # Executable lookup
 which = "7"
 
+# Shell-words parsing for bash params
+shell-words = "1"
+
 [dev-dependencies]
 tokio = { version = "1.48.0", features = ["rt-multi-thread", "macros"] }
-tempfile = "3"
 serial_test = "3"
 serde_json = "1.0"
+criterion = "0.5"
+proptest = "1.6"

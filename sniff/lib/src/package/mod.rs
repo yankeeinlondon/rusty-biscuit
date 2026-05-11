@@ -20,6 +20,7 @@
 //! println!("Language manager: {}", lang_mgr);
 //! ```
 
+pub mod dependency;
 mod language;
 mod manager;
 mod network;
@@ -29,6 +30,7 @@ mod stubs;
 mod versioning;
 
 // Re-export all public types for API stability
+pub use dependency::{DependencyEntry, DependencyKind};
 pub use language::LanguagePackageManager;
 pub use manager::{BoxFuture, PackageManager, PackageManagerShape};
 pub use network::{

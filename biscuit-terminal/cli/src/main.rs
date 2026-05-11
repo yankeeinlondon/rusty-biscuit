@@ -7,72 +7,29 @@
 //! - Multiplexing status
 //! - OS and distribution information
 
-use std::path::Path;
-
-#[allow(unused_imports)] // layout is re-exported via `use crate::*` for args.rs
 use biscuit_terminal::{
-    components::{
-        mermaid::QuadrantTheme,
-        renderable::Renderable,
-        terminal_image::{ImageWidth, parse_filepath_and_width},
-        two_column::TwoColumn,
-    },
     discovery::{clipboard, eval, fonts, mode_2027, osc_queries},
     terminal::Terminal,
-    utils::{escape_codes, layout},
+    utils::escape_codes,
 };
+
 pub mod args;
 pub mod commands;
 pub mod output;
 pub mod types;
+
 use args::*;
-use commands::*;
+use commands::{CliContext, Run};
 use output::*;
 
 use clap::{CommandFactory, Parser};
 use clap_complete::Shell;
 use clap_complete::engine::{CompletionCandidate, PathCompleter};
 
-/// Brief pause after image rendering.
-///
-/// This is a minimal delay to ensure the terminal has finished processing
-/// image data before we print any following text.
-fn settle_terminal() {
-    use std::io::Write;
-    let _ = std::io::stdout().flush();
-    // Small delay for terminal processing
-    std::thread::sleep(std::time::Duration::from_millis(10));
-}
-
-/// Emit rendered image output and flush immediately.
-fn emit_image_output(output: &str) -> color_eyre::Result<()> {
-    use std::io::Write;
-
-    if output.is_empty() {
-        return Ok(());
-    }
-
-    print!("{}", output);
-    std::io::stdout().flush()?;
-    Ok(())
-}
-
-/// Prints the command used to generate an example diagram.
-///
-/// Uses bold text for header and dim text for command.
-/// Avoids terminal color mode queries which can interfere with Kitty graphics protocol.
-fn print_example_command(cmd: &str) {
-    let s = crate::types::CliStyles::detect();
-    println!();
-    println!("{}Command:{}", s.bold, s.reset);
-    println!("{}{}{}", s.dim, cmd, s.reset);
-}
-
 fn main() -> color_eyre::Result<()> {
     color_eyre::install()?;
 
     // Handle dynamic completions (COMPLETE env var)
-    // This must run before any other initialization
     clap_complete::CompleteEnv::with_factory(Args::command).complete();
 
     // Setup logging if RUST_LOG is set
@@ -89,447 +46,15 @@ fn main() -> color_eyre::Result<()> {
         return handle_completions(shell_arg);
     }
 
+    let ctx = CliContext { json: args.json };
+
     // Handle subcommands
-    match args.command {
-        Some(Command::Image {
-            ref filepath,
-            ref width,
-            ref layout,
-            meta,
-            debug,
-        }) => {
-            tracing::debug!(command = "image", filepath, width = ?width, "Dispatching subcommand");
-            let width_str = width.as_ref().map(|w| w.to_string());
-            return render_image(filepath, width_str.as_deref(), layout, meta, debug);
-        }
-        Some(Command::Flowchart {
-            vertical,
-            inverse,
-            ref title,
-            ref width,
-            ref layout,
-            example,
-            meta,
-            ref content,
-        }) => {
-            tracing::debug!(
-                command = "flowchart",
-                vertical,
-                inverse,
-                example,
-                "Dispatching subcommand"
-            );
-            let width_str = width.as_ref().map(|w| w.to_string());
-            return render_flowchart(
-                vertical,
-                inverse,
-                title.as_deref(),
-                width_str.as_deref(),
-                layout,
-                example,
-                meta,
-                content,
-                args.json,
-            );
-        }
-        Some(Command::Quadrant {
-            ref x_axis,
-            ref y_axis,
-            ref title,
-            ref top_left,
-            ref top_right,
-            ref bottom_left,
-            ref bottom_right,
-            inverse,
-            ref width,
-            ref layout,
-            point_radius,
-            label_size,
-            ref theme,
-            ref q1_fill,
-            ref q2_fill,
-            ref q3_fill,
-            ref q4_fill,
-            example,
-            meta,
-            ref points,
-        }) => {
-            tracing::debug!(
-                command = "quadrant",
-                inverse,
-                example,
-                "Dispatching subcommand"
-            );
-            let width_str = width.as_ref().map(|w| w.to_string());
-            return render_quadrant(
-                x_axis.as_deref(),
-                y_axis.as_deref(),
-                title.as_deref(),
-                top_left.as_deref(),
-                top_right.as_deref(),
-                bottom_left.as_deref(),
-                bottom_right.as_deref(),
-                inverse,
-                width_str.as_deref(),
-                layout,
-                point_radius,
-                label_size,
-                *theme,
-                q1_fill.as_ref().map(|c| c.as_str()),
-                q2_fill.as_ref().map(|c| c.as_str()),
-                q3_fill.as_ref().map(|c| c.as_str()),
-                q4_fill.as_ref().map(|c| c.as_str()),
-                example,
-                meta,
-                points,
-                args.json,
-            );
-        }
-        Some(Command::PieChart {
-            inverse,
-            ref title,
-            ref width,
-            ref layout,
-            show_data,
-            example,
-            meta,
-            ref data,
-        }) => {
-            tracing::debug!(
-                command = "pie-chart",
-                inverse,
-                example,
-                "Dispatching subcommand"
-            );
-            let width_str = width.as_ref().map(|w| w.to_string());
-            return render_pie_chart(
-                inverse,
-                title.as_deref(),
-                width_str.as_deref(),
-                layout,
-                show_data,
-                example,
-                meta,
-                data,
-                args.json,
-            );
-        }
-        Some(Command::GitGraph {
-            inverse,
-            ref title,
-            ref width,
-            ref layout,
-            example,
-            meta,
-            ref commands,
-        }) => {
-            tracing::debug!(
-                command = "git-graph",
-                inverse,
-                example,
-                "Dispatching subcommand"
-            );
-            let width_str = width.as_ref().map(|w| w.to_string());
-            return render_git_graph(
-                inverse,
-                title.as_deref(),
-                width_str.as_deref(),
-                layout,
-                example,
-                meta,
-                commands,
-                args.json,
-            );
-        }
-        Some(Command::BarChart {
-            ref title,
-            ref x_axis,
-            ref y_axis,
-            ref width,
-            ref layout,
-            horizontal,
-            show_data_label,
-            aspect_ratio,
-            line,
-            inverse,
-            example,
-            meta,
-            ref data,
-        }) => {
-            tracing::debug!(
-                command = "bar-chart",
-                inverse,
-                horizontal,
-                example,
-                "Dispatching subcommand"
-            );
-            let width_str = width.as_ref().map(|w| w.to_string());
-            return render_xy_chart(
-                XyChartType::Bar,
-                title.as_deref(),
-                x_axis.as_deref(),
-                y_axis.as_deref(),
-                width_str.as_deref(),
-                layout,
-                horizontal,
-                show_data_label,
-                aspect_ratio.map(|a| a.value()),
-                line,  // add_line for bar chart
-                false, // add_bar is false since we're a bar chart
-                inverse,
-                example,
-                meta,
-                data,
-                args.json,
-            );
-        }
-        Some(Command::LineChart {
-            ref title,
-            ref x_axis,
-            ref y_axis,
-            ref width,
-            ref layout,
-            horizontal,
-            show_data_label,
-            aspect_ratio,
-            bar,
-            inverse,
-            example,
-            meta,
-            ref data,
-        }) => {
-            tracing::debug!(
-                command = "line-chart",
-                inverse,
-                horizontal,
-                example,
-                "Dispatching subcommand"
-            );
-            let width_str = width.as_ref().map(|w| w.to_string());
-            return render_xy_chart(
-                XyChartType::Line,
-                title.as_deref(),
-                x_axis.as_deref(),
-                y_axis.as_deref(),
-                width_str.as_deref(),
-                layout,
-                horizontal,
-                show_data_label,
-                aspect_ratio.map(|a| a.value()),
-                false, // add_line is false since we're a line chart
-                bar,   // add_bar for line chart
-                inverse,
-                example,
-                meta,
-                data,
-                args.json,
-            );
-        }
-        Some(Command::Timeline {
-            ref title,
-            ref width,
-            ref layout,
-            ref section,
-            inverse,
-            example,
-            meta,
-            ref events,
-        }) => {
-            tracing::debug!(
-                command = "timeline",
-                inverse,
-                example,
-                "Dispatching subcommand"
-            );
-            let width_str = width.as_ref().map(|w| w.to_string());
-            return render_timeline(
-                title.as_deref(),
-                width_str.as_deref(),
-                layout,
-                section,
-                inverse,
-                example,
-                meta,
-                events,
-                args.json,
-            );
-        }
-        Some(Command::StateDiagram {
-            ref title,
-            ref width,
-            ref layout,
-            inverse,
-            example,
-            meta,
-            ref transitions,
-        }) => {
-            tracing::debug!(
-                command = "state-diagram",
-                inverse,
-                example,
-                "Dispatching subcommand"
-            );
-            let width_str = width.as_ref().map(|w| w.to_string());
-            return render_state_diagram(
-                title.as_deref(),
-                width_str.as_deref(),
-                layout,
-                inverse,
-                example,
-                meta,
-                transitions,
-                args.json,
-            );
-        }
-        Some(Command::GraphExpression {
-            example,
-            ref syntax,
-            ref title,
-            ref width,
-            inverse,
-            ref font,
-            ref orientation,
-            ref layout,
-            meta,
-            ref content,
-        }) => {
-            tracing::debug!(command = "graph-expression", inverse, example, syntax = ?syntax, "Dispatching subcommand");
-            let width_str = width.as_ref().map(|w| w.to_string());
-            return render_graph_expression(
-                example,
-                syntax.clone(),
-                title.as_deref(),
-                width_str.as_deref(),
-                inverse,
-                font.as_deref(),
-                orientation.clone(),
-                layout,
-                meta,
-                content,
-                args.json,
-            );
-        }
-        Some(Command::Erd {
-            ref title,
-            ref width,
-            ref layout,
-            ref entity,
-            inverse,
-            example,
-            meta,
-            ref relationships,
-        }) => {
-            tracing::debug!(command = "erd", inverse, example, "Dispatching subcommand");
-            let width_str = width.as_ref().map(|w| w.to_string());
-            return render_erd(
-                title.as_deref(),
-                width_str.as_deref(),
-                layout,
-                entity,
-                inverse,
-                example,
-                meta,
-                relationships,
-                args.json,
-            );
-        }
-        Some(Command::PadLeft {
-            width,
-            ref text,
-            truncate,
-        }) => {
-            tracing::debug!(
-                command = "pad-left",
-                width,
-                truncate,
-                "Dispatching subcommand"
-            );
-            return render_pad_left(text, width, truncate);
-        }
-        Some(Command::PadRight {
-            width,
-            ref text,
-            truncate,
-        }) => {
-            tracing::debug!(
-                command = "pad-right",
-                width,
-                truncate,
-                "Dispatching subcommand"
-            );
-            return render_pad_right(text, width, truncate);
-        }
-        Some(Command::Prose {
-            ref content,
-            no_wrap,
-            ref layout,
-        }) => {
-            tracing::debug!(command = "prose", no_wrap, "Dispatching subcommand");
-            return render_prose(content, no_wrap, layout);
-        }
-        Some(Command::Quote {
-            ref content,
-            ref attribution,
-            ref layout,
-        }) => {
-            tracing::debug!(command = "quote", "Dispatching subcommand");
-            return render_quote(content, attribution.as_deref(), layout);
-        }
-        Some(Command::List {
-            ref items,
-            ref bullet,
-            no_hanging_indent,
-            ref layout,
-        }) => {
-            tracing::debug!(
-                command = "list",
-                items = items.len(),
-                "Dispatching subcommand"
-            );
-            return render_list(items, bullet, no_hanging_indent, layout);
-        }
-        Some(Command::Columns {
-            ref left,
-            ref right,
-            gap,
-            ref left_width,
-            ref layout,
-        }) => {
-            tracing::debug!(command = "columns", gap, left_width = ?left_width, "Dispatching subcommand");
-            let left_width_str = left_width.as_ref().map(|w| w.to_string());
-            return render_columns(left, right, gap, left_width_str.as_deref(), layout);
-        }
-        Some(Command::Dir {
-            ref path,
-            depth,
-            ref filter,
-            skip_root,
-            size,
-            tokens,
-            modified,
-            updated,
-            ref layout,
-        }) => {
-            let options = commands::DirOptions {
-                show_size: size,
-                show_token: tokens,
-                show_modified: modified,
-                show_updated: updated,
-            };
-            tracing::debug!(
-                command = "dir",
-                ?path,
-                depth,
-                ?filter,
-                "Dispatching subcommand"
-            );
-            return render_dir(path, depth, filter, skip_root, layout, &options);
-        }
-        None => {
-            tracing::debug!(json = args.json, "No subcommand, showing terminal metadata");
-        }
+    if let Some(cmd) = args.command {
+        tracing::debug!(command = ?std::mem::discriminant(&cmd), "Dispatching subcommand");
+        return cmd.run(&ctx);
     }
 
+    // No subcommand: handle positional content or print default metadata
     let content = if args.content.is_empty() {
         None
     } else {
@@ -546,10 +71,15 @@ fn main() -> color_eyre::Result<()> {
         return Ok(());
     }
 
+    // --silent implies --quiet
+    let quiet = args.quiet || args.silent;
+
     let metadata = collect_metadata();
     if args.json {
-        println!("{}", serde_json::to_string_pretty(&metadata)?);
-    } else {
+        if !args.silent {
+            println!("{}", serde_json::to_string_pretty(&metadata)?);
+        }
+    } else if !quiet {
         print_pretty(&metadata, args.verbose);
     }
 
@@ -598,12 +128,10 @@ pub fn font_completer(current: &std::ffi::OsStr) -> Vec<CompletionCandidate> {
 /// Also completes directories to allow navigation.
 pub fn image_completer() -> PathCompleter {
     PathCompleter::any().filter(|path| {
-        // Always allow directories for navigation
         if path.is_dir() {
             return true;
         }
 
-        // Check for image extensions
         path.extension()
             .and_then(|ext| ext.to_str())
             .is_some_and(|ext| {
@@ -611,4 +139,29 @@ pub fn image_completer() -> PathCompleter {
                 matches!(ext_lower.as_str(), "png" | "jpg" | "jpeg" | "gif")
             })
     })
+}
+
+impl Run for Command {
+    fn run(self, ctx: &CliContext) -> color_eyre::Result<()> {
+        match self {
+            Command::Image(args) => args.run(ctx),
+            Command::Flowchart(args) => args.run(ctx),
+            Command::Quadrant(args) => args.run(ctx),
+            Command::PieChart(args) => args.run(ctx),
+            Command::GitGraph(args) => args.run(ctx),
+            Command::BarChart(args) => args.run(ctx),
+            Command::LineChart(args) => args.run(ctx),
+            Command::Timeline(args) => args.run(ctx),
+            Command::StateDiagram(args) => args.run(ctx),
+            Command::GraphExpression(args) => args.run(ctx),
+            Command::Erd(args) => args.run(ctx),
+            Command::Prose(args) => args.run(ctx),
+            Command::Quote(args) => args.run(ctx),
+            Command::List(args) => args.run(ctx),
+            Command::PadLeft(args) => args.run(ctx),
+            Command::PadRight(args) => args.run(ctx),
+            Command::Columns(args) => args.run(ctx),
+            Command::Dir(args) => args.run(ctx),
+        }
+    }
 }

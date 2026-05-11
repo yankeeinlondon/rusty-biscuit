@@ -1,0 +1,5 @@
+---
+source: biscuit-terminal/cli/tests/integration_test.rs
+expression: stdout
+---
+Error: something went wrong in the module

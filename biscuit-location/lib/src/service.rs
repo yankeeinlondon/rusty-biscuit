@@ -25,13 +25,21 @@ impl LocationService {
     /// Create a new location service from configuration.
     ///
     /// If a MaxMind database path resolves successfully, the IP lookup reader
-    /// is opened eagerly. If the path does not exist, IP lookups will return
-    /// `DatabasePathNotFound` at call time.
-    pub fn new(config: LocationConfig) -> crate::Result<Self> {
+    /// is opened eagerly. If the path does not exist but `MAXMIND_LICENSE_KEY`
+    /// is set, the database will be auto-downloaded before opening.
+    pub async fn new(config: LocationConfig) -> crate::Result<Self> {
         let db_path = resolve_maxmind_path(config.maxmind_db_path.as_ref());
         let ip_lookup = match db_path {
             Some(ref p) if p.exists() => Some(IpLookup::open(p)?),
-            _ => None,
+            Some(ref p) => {
+                let downloaded = crate::maxmind::maybe_download_if_missing(p).await?;
+                if let Some(actual) = downloaded {
+                    Some(IpLookup::open(&actual)?)
+                } else {
+                    None
+                }
+            }
+            None => None,
         };
 
         #[cfg(feature = "reverse")]
@@ -115,28 +123,28 @@ impl LocationService {
 mod tests {
     use super::*;
 
-    #[test]
-    fn service_without_maxmind_db() {
+    #[tokio::test]
+    async fn service_without_maxmind_db() {
         let config = LocationConfig::default();
-        let svc = LocationService::new(config).unwrap();
+        let svc = LocationService::new(config).await.unwrap();
         let result = svc.ip("8.8.8.8".parse().unwrap());
         assert!(result.is_err());
     }
 
-    #[test]
-    fn service_distance() {
+    #[tokio::test]
+    async fn service_distance() {
         let config = LocationConfig::default();
-        let svc = LocationService::new(config).unwrap();
+        let svc = LocationService::new(config).await.unwrap();
         let la = Coordinates::new(34.0522, -118.2437).unwrap();
         let nyc = Coordinates::new(40.7128, -74.0060).unwrap();
         let km = svc.distance(la, nyc, DistanceUnit::Kilometers).unwrap();
         assert!(km > 3900.0 && km < 4000.0);
     }
 
-    #[test]
-    fn service_google_maps_url() {
+    #[tokio::test]
+    async fn service_google_maps_url() {
         let config = LocationConfig::default();
-        let svc = LocationService::new(config).unwrap();
+        let svc = LocationService::new(config).await.unwrap();
         let coords = Coordinates::new(34.0522, -118.2437).unwrap();
         let url = svc.google_maps_url(coords).unwrap();
         assert!(url.as_str().contains("google.com/maps"));
@@ -151,7 +159,7 @@ mod tests {
     #[tokio::test]
     async fn resolve_ip_input_without_db_returns_path_error() {
         let config = LocationConfig::default();
-        let svc = LocationService::new(config).unwrap();
+        let svc = LocationService::new(config).await.unwrap();
         let input = LocationInput::Ip("8.8.8.8".parse().unwrap());
         let result = svc.resolve_input(input).await;
         assert!(matches!(
@@ -163,7 +171,7 @@ mod tests {
     #[tokio::test]
     async fn resolve_coordinate_literal() {
         let config = LocationConfig::default();
-        let svc = LocationService::new(config).unwrap();
+        let svc = LocationService::new(config).await.unwrap();
         let coords = Coordinates::new(51.5074, -0.1278).unwrap();
         let loc = svc
             .resolve_input(LocationInput::Coordinates(coords))

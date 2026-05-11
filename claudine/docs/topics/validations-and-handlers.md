@@ -184,14 +184,6 @@ These checks are about whether the expected input or output files exist and are 
 
 The typed file checks matter because "the file exists" is often too weak. A JSON file that exists but is malformed is not a usable prerequisite. Claudine treats those as distinct validation concerns so the error is closer to the real problem.
 
-### Repository State Checks
-
-These checks look at dirty source state:
-
-- `no_dirty_source_code`
-- `has_dirty_source_code`
-
-These are useful when a prompt is intended to work from a clean baseline, or when a prompt is only meaningful if the user has already made local edits that the agent is supposed to inspect.
 
 ### Shell-Based Checks
 
@@ -203,10 +195,10 @@ That flexibility is useful, but Claudine does not treat it as a free-form escape
 
 These checks only make sense after the agent has run:
 
-- `file_changed`
-- `file_unchanged`
-- `frontmatter_prop_changed`
-- `frontmatter_prop_unchanged`
+- `file_changed` (only available for _post_ validations)
+- `file_unchanged` (only available for _post_ validations)
+- `frontmatter_prop_changed` (only available for _post_ validations)
+- `frontmatter_prop_unchanged` (only available for _post_ validations)
 - `frontmatter_prop_equals`
 
 These are especially helpful for document-maintenance workflows. If a prompt is supposed to update a body but keep frontmatter stable, Claudine can check both conditions explicitly instead of assuming the provider followed instructions.
@@ -224,6 +216,19 @@ The important implementation detail is that Claudine evaluates these against the
 
 This matters most on legacy non-structured runs, where Claudine now captures the real final response text before applying response validations.
 
+## Validation Message Templates
+
+Validation messages support the same `{{...}}` expression syntax used by dispatch templates. The variable map is intentionally narrow — it contains only the fields populated by `build_vars` for the current rule (`file`, `dir`, `command`, `prop`, `length`, `expected`, etc.). Within that map, authors can reach for the same Darkmatter features available elsewhere:
+
+- simple lookups: `{{file}}`, `{{prop}}`
+- fallbacks: `{{file || "n/a"}}`
+- ternaries: `{{file ? "present" : "missing"}}`
+- helper functions: `{{length(file) > 5 ? "long" : "short"}}`
+
+Bare-variable references that are not present in the validation variable map are preserved unchanged rather than rendered as the empty string. This is intentional: validation output must remain best-effort and cannot mask the underlying pass/fail result. Tokens that fail to parse (for example `{{a + b}}`, since `+` is not a supported operator) are likewise preserved.
+
+The pre-check and post-check status indicators continue to come from `StatusState`; message templates are not expected to embed pass/fail glyphs themselves.
+
 ## Path Resolution Is Document-Centric
 
 One subtle but important design choice is how paths inside validations are resolved.
@@ -240,19 +245,27 @@ That makes authored documents more portable and easier to move around inside a r
 
 ## Timeouts Are Part Of The Failure Model
 
-Timeouts are declared in frontmatter with the `timeout` property:
+Claudine supports two independent timeout properties in frontmatter:
 
 ```yaml
 timeout: 5m
+step_timeout: 30s
 ```
 
-Claudine accepts seconds, minutes, and hours in a few natural spellings. The more important point is not the syntax, though. The important point is that a timeout is treated as a first-class failure event.
+- **`timeout`** is a wall-clock deadline for the whole provider run.
+- **`step_timeout`** is a silence deadline that resets on every `SemanticEvent` observed on the provider's structured stream. When silence exceeds this budget, Claudine terminates the child.
 
-That means a timeout can be:
+Both accept the same human-readable duration syntax (seconds, minutes, and hours in a few natural spellings). The more important point is not the syntax. The important point is that a timeout is treated as a first-class failure event.
+
+A timeout — whether wall-clock or step-silence — can be:
 
 - reported clearly
 - matched by `handle_timeout`
 - recovered with `retry`, `resume`, or `redirect`
+
+Both timeouts produce the same `FailureEvent::Timeout` variant so a single `handle_timeout` handler can recover either case.
+
+`step_timeout` is enforced only in structured-stream mode. Capture-mode and passthrough runs ignore the field after emitting a warning, because the enforcement mechanism depends on the per-event reset driven by the structured event pipeline. When both properties are set, `step_timeout` must be less than or equal to `timeout`; documents that violate this invariant fail parse-time validation.
 
 This is why the timeout logic lives inside the harness model rather than being a separate wrapper concern.
 

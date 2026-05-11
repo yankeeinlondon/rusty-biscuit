@@ -78,7 +78,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
-See [Ratatui Architecture](./ratatui-architecture.md) for the full app pattern with event loop and state management.
+- see [Ratatui Architecture](./ratatui-architecture.md) for the full app pattern with event loop and state management.
+- see [Ratatui Testing Tools](./testing-tools.md) for an overview of the most commonly used crates/tools for testing Ratatui TUI applications
+
 
 ## Bubble Tea Quick Start
 
@@ -140,6 +142,10 @@ See [Bubble Tea Architecture](./bubble-tea-architecture.md) for commands, async,
 - [Prompts and Forms](./prompts.md) -- tui-prompts, multi-field forms, validation, autocomplete
 - [Widget Collections](./widget-collections.md) -- tui-popup, tui-big-text, tui-scrollview, edtui, tui-logger
 - [Web Deployment](./web-deployment.md) -- Ratzilla WASM backends (WebGL2, Canvas, DOM), Trunk, GitHub Pages
+
+### Validation & Testing
+
+- [Testing TUI Applications](./testing-a-tui.md) -- architectural separation, TestBackend, snapshot testing (insta), input simulation, CI/CD best practices
 
 ### Bubble Tea (Go)
 

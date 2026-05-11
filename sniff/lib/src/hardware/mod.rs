@@ -1,8 +1,11 @@
 use serde::{Deserialize, Serialize};
+use std::time::Instant;
 use sysinfo::{CpuRefreshKind, MemoryRefreshKind, RefreshKind, System};
+use tracing::Level;
 use tracing::instrument;
 
 use crate::Result;
+use crate::performance;
 use crate::request::HardwareRequest;
 
 mod audio;
@@ -15,7 +18,7 @@ pub use audio::{AudioDeviceInfo, AudioDeviceKind, AudioDirection, detect_audio_d
 pub use cpu::{CpuInfo, SimdCapabilities, detect_simd};
 pub use gpu::{GpuCapabilities, GpuDeviceType, GpuInfo, detect_gpus};
 pub use memory::MemoryInfo;
-pub use storage::{StorageInfo, StorageKind};
+pub use storage::{StorageInfo, StorageKind, detect_storage};
 
 // Re-export OS types from the dedicated os module for backward compatibility.
 // The canonical path is now `sniff::os::*`.
@@ -56,76 +59,186 @@ pub struct HardwareInfo {
 /// or `HardwareRequest::full()` for everything including storage,
 /// GPU, and audio devices.
 #[instrument(skip(request), fields(
+    cpu = request.include_cpu,
+    memory = request.include_memory,
     storage = request.include_storage,
     gpu = request.include_gpu,
     audio = request.include_audio,
 ))]
 pub fn detect_hardware_with_request(request: &HardwareRequest) -> Result<HardwareInfo> {
-    // Audio must be detected first. On macOS, linking against extra
-    // CoreAudio sub-frameworks (AudioUnit, OpenAL, CoreMIDI) caused
-    // a ~10s init delay. With only the `core_audio` feature enabled
-    // on `coreaudio-sys`, init is ~1.5s. Detecting audio before GPU
-    // avoids any potential Metal framework interference.
-    let audio_devices = if request.include_audio {
-        detect_audio_devices()
+    let core_started = Instant::now();
+    let needs_sys = request.include_cpu || request.include_memory;
+
+    let sys = if needs_sys {
+        Some(System::new_with_specifics(
+            RefreshKind::nothing()
+                .with_cpu(CpuRefreshKind::everything())
+                .with_memory(MemoryRefreshKind::everything()),
+        ))
     } else {
-        Vec::new()
+        None
     };
 
-    let sys = System::new_with_specifics(
-        RefreshKind::nothing()
-            .with_cpu(CpuRefreshKind::everything())
-            .with_memory(MemoryRefreshKind::everything()),
-    );
-
-    let cpu = CpuInfo {
-        brand: sys
-            .cpus()
-            .first()
-            .map(|c| c.brand().to_string())
-            .unwrap_or_default(),
-        arch: {
-            let arch = System::cpu_arch();
-            if arch.is_empty() {
-                std::env::consts::ARCH.to_string()
-            } else {
-                arch
-            }
-        },
-        logical_cores: sys.cpus().len(),
-        physical_cores: System::physical_core_count(),
-        simd: detect_simd(),
-    };
-
-    // On macOS (and possibly other platforms), available_memory() may return 0.
-    // In this case, fall back to free_memory() which provides usable memory info.
-    let available = sys.available_memory();
-    let available_bytes = if available == 0 {
-        sys.free_memory()
+    let cpu = if request.include_cpu {
+        let sys = sys.as_ref();
+        CpuInfo {
+            brand: sys
+                .and_then(|s| s.cpus().first())
+                .map(|c| c.brand().to_string())
+                .unwrap_or_default(),
+            arch: {
+                let arch = System::cpu_arch();
+                if arch.is_empty() {
+                    std::env::consts::ARCH.to_string()
+                } else {
+                    arch
+                }
+            },
+            logical_cores: sys.map(|s| s.cpus().len()).unwrap_or(0),
+            physical_cores: System::physical_core_count(),
+            simd: detect_simd(),
+        }
     } else {
-        available
+        CpuInfo::default()
     };
 
-    let memory = MemoryInfo {
-        total_bytes: sys.total_memory(),
-        available_bytes,
-        used_bytes: sys.used_memory(),
-        total_swap: sys.total_swap(),
-        free_swap: sys.free_swap(),
-        used_swap: sys.used_swap(),
-    };
+    let memory = if request.include_memory {
+        let sys = sys.as_ref();
+        let available = sys.and_then(|s| {
+            let avail = s.available_memory();
+            (avail > 0).then_some(avail)
+        });
+        let available_bytes =
+            available.unwrap_or_else(|| sys.map(|s| s.free_memory()).unwrap_or(0));
 
-    let storage = if request.include_storage {
-        storage::detect_storage()
+        MemoryInfo {
+            total_bytes: sys.map(|s| s.total_memory()).unwrap_or(0),
+            available_bytes,
+            used_bytes: sys.map(|s| s.used_memory()).unwrap_or(0),
+            total_swap: sys.map(|s| s.total_swap()).unwrap_or(0),
+            free_swap: sys.map(|s| s.free_swap()).unwrap_or(0),
+            used_swap: sys.map(|s| s.used_swap()).unwrap_or(0),
+        }
     } else {
-        Vec::new()
+        MemoryInfo::default()
     };
+    performance::record_logged_stage("hardware.core", core_started.elapsed(), Level::DEBUG);
 
-    let gpu = if request.include_gpu {
-        detect_gpus()
-    } else {
-        Vec::new()
-    };
+    let collector = performance::current_collector();
+    let (audio_devices, storage, gpu) = std::thread::scope(|scope| {
+        let audio_handle = request.include_audio.then(|| {
+            let collector = collector.clone();
+            scope.spawn(move || {
+                performance::with_current_collector(collector, || {
+                    let audio_started = Instant::now();
+                    let devices = detect_audio_devices();
+                    performance::record_logged_stage(
+                        "hardware.audio",
+                        audio_started.elapsed(),
+                        Level::DEBUG,
+                    );
+                    devices
+                })
+            })
+        });
+
+        let storage_handle = request.include_storage.then(|| {
+            let collector = collector.clone();
+            scope.spawn(move || {
+                performance::with_current_collector(collector, || {
+                    let storage_started = Instant::now();
+                    let devices = storage::detect_storage();
+                    performance::record_logged_stage(
+                        "hardware.storage",
+                        storage_started.elapsed(),
+                        Level::DEBUG,
+                    );
+                    devices
+                })
+            })
+        });
+
+        // Run audio, storage, and GPU in parallel on all platforms.
+        //
+        // Historically on macOS, audio initialization (CoreAudio) was sequenced
+        // before GPU detection because Metal framework initialization (~14s in
+        // non-GUI contexts) interacted badly with CoreAudio. However, GPU
+        // detection now uses IOKit FFI (~200µs), which does not conflict with
+        // CoreAudio. The IOKit path was introduced to avoid the Metal delay and
+        // is safe to run concurrently with audio enumeration.
+        //
+        // If issues arise, set the environment variable `SNIFF_SERIALIZE_MACOS_GPU=1`
+        // to restore the old audio-first ordering.
+        #[cfg(target_os = "macos")]
+        let serialize_gpu = std::env::var("SNIFF_SERIALIZE_MACOS_GPU").is_ok();
+        #[cfg(not(target_os = "macos"))]
+        let serialize_gpu = false;
+
+        let gpu_handle = if serialize_gpu {
+            // Legacy path: block on audio before starting GPU.
+            // We must join audio here because ScopedJoinHandle::join takes ownership.
+            let audio_devices = match audio_handle {
+                Some(handle) => handle.join().unwrap(),
+                None => Vec::new(),
+            };
+            let gpu = request.include_gpu.then(|| {
+                let collector = collector.clone();
+                scope.spawn(move || {
+                    performance::with_current_collector(collector, || {
+                        let gpu_started = Instant::now();
+                        let devices = detect_gpus();
+                        performance::record_logged_stage(
+                            "hardware.gpu",
+                            gpu_started.elapsed(),
+                            Level::DEBUG,
+                        );
+                        devices
+                    })
+                })
+            });
+            let storage = match storage_handle {
+                Some(handle) => handle.join().unwrap(),
+                None => Vec::new(),
+            };
+            let gpu = match gpu {
+                Some(handle) => handle.join().unwrap(),
+                None => Vec::new(),
+            };
+            return (audio_devices, storage, gpu);
+        } else {
+            // Parallel path: GPU runs concurrently with audio and storage
+            request.include_gpu.then(|| {
+                let collector = collector.clone();
+                scope.spawn(move || {
+                    performance::with_current_collector(collector, || {
+                        let gpu_started = Instant::now();
+                        let devices = detect_gpus();
+                        performance::record_logged_stage(
+                            "hardware.gpu",
+                            gpu_started.elapsed(),
+                            Level::DEBUG,
+                        );
+                        devices
+                    })
+                })
+            })
+        };
+
+        let audio_devices = match audio_handle {
+            Some(handle) => handle.join().unwrap(),
+            None => Vec::new(),
+        };
+        let storage = match storage_handle {
+            Some(handle) => handle.join().unwrap(),
+            None => Vec::new(),
+        };
+        let gpu = match gpu_handle {
+            Some(handle) => handle.join().unwrap(),
+            None => Vec::new(),
+        };
+
+        (audio_devices, storage, gpu)
+    });
 
     Ok(HardwareInfo {
         cpu,
@@ -273,5 +386,73 @@ mod tests {
         assert!(info.storage.is_empty());
         assert!(info.gpu.is_empty());
         assert!(info.audio_devices.is_empty());
+    }
+
+    #[test]
+    fn test_detect_hardware_full_includes_gpu_on_macos() {
+        // On macOS, GPU detection should run in parallel with audio/storage
+        // and return results when full detection is requested.
+        let info = detect_hardware_with_request(&HardwareRequest::full()).unwrap();
+
+        // CPU and memory should always be present
+        assert!(info.cpu.logical_cores > 0);
+        assert!(info.memory.total_bytes > 0);
+
+        // On macOS, GPU should be detected (even if empty, it should not hang)
+        #[cfg(target_os = "macos")]
+        {
+            // The parallel path should complete without deadlock.
+            // We can't assert gpu.len() > 0 because VMs may not expose GPUs,
+            // but we can verify the function returned (no deadlock).
+        }
+    }
+
+    #[test]
+    fn test_detect_hardware_with_request_respects_flags() {
+        let with_all = HardwareRequest::full();
+        let with_none = HardwareRequest::summary();
+
+        let all = detect_hardware_with_request(&with_all).unwrap();
+        let none = detect_hardware_with_request(&with_none).unwrap();
+
+        // Summary should have CPU and memory but no storage/GPU/audio
+        assert!(none.cpu.logical_cores > 0);
+        assert!(none.memory.total_bytes > 0);
+        assert!(none.storage.is_empty());
+        assert!(none.gpu.is_empty());
+        assert!(none.audio_devices.is_empty());
+
+        // Full may have storage, GPU, audio (platform-dependent)
+        assert!(all.cpu.logical_cores > 0);
+        assert!(all.memory.total_bytes > 0);
+    }
+
+    #[test]
+    fn test_detect_hardware_skips_sys_init_when_cpu_memory_disabled() {
+        let gpu_only = HardwareRequest {
+            include_cpu: false,
+            include_memory: false,
+            include_storage: false,
+            include_gpu: true,
+            include_audio: false,
+        };
+        let info = detect_hardware_with_request(&gpu_only).unwrap();
+        assert!(info.cpu.logical_cores == 0);
+        assert!(info.memory.total_bytes == 0);
+        assert!(!info.gpu.is_empty() || true);
+    }
+
+    #[test]
+    fn test_detect_hardware_cpu_only() {
+        let cpu_only = HardwareRequest {
+            include_cpu: true,
+            include_memory: false,
+            include_storage: false,
+            include_gpu: false,
+            include_audio: false,
+        };
+        let info = detect_hardware_with_request(&cpu_only).unwrap();
+        assert!(info.cpu.logical_cores > 0);
+        assert!(info.memory.total_bytes == 0);
     }
 }

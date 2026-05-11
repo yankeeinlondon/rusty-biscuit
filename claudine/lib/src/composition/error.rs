@@ -2,7 +2,15 @@
 
 use std::path::PathBuf;
 
-use crate::events::Provider;
+use biscuit_terminal::components::status::StatusState;
+use biscuit_terminal::components::status_block::StatusBlock;
+use biscuit_terminal::errors::{BlockError, ErrorHeader, StatusBlockExt};
+use biscuit_terminal::terminal::Terminal;
+use darkmatter::markdown::MarkdownError;
+use darkmatter::markdown::compose::shell_expansion::ShellExpansionError;
+
+use super::types::ResolutionMode;
+use crate::provider::Provider;
 use thiserror::Error;
 
 /// Errors that can occur during composition workflows.
@@ -32,9 +40,31 @@ pub enum CompositionError {
     #[error("frontmatter `prompt` must be a string, got {0}")]
     PromptPropertyWrongType(String),
 
-    /// Darkmatter composition failed.
+    /// Darkmatter composition failed for a reason other than a known
+    /// structured shell-expansion failure.
+    ///
+    /// Carries the typed `MarkdownError` so the CLI's top-level walker can
+    /// render a rich `BlockError` report (transclusion cycles, reference
+    /// errors, etc.) instead of a flat string.
     #[error("compose failed: {0}")]
-    ComposeFailed(String),
+    ComposeFailed(#[source] MarkdownError),
+
+    /// A shell expansion directive inside the composed document failed in a
+    /// structurally-known way. Carries the underlying `ShellExpansionError`
+    /// so the CLI layer can render a rich, source-aware error report.
+    ///
+    /// The `Display` impl of this variant intentionally matches the legacy
+    /// `ComposeFailed` wrapper so callers that only use `to_string()` stay
+    /// compatible, while callers that want structured data can `match` on
+    /// the variant itself.
+    #[error("compose failed: Shell expansion failed: {error}")]
+    ShellExpansionFailed {
+        /// The file being composed when the shell expansion error fired.
+        source_path: PathBuf,
+        /// The underlying structured shell expansion error.
+        #[source]
+        error: Box<ShellExpansionError>,
+    },
 
     /// No installed providers can run composition.
     #[error("no runnable providers available (all excluded or uninstalled)")]
@@ -44,6 +74,14 @@ pub enum CompositionError {
     #[error("agent hint `{0}` does not match any known provider")]
     AgentHintInvalid(String),
 
+    /// The `agent` frontmatter property is not a valid type.
+    #[error("frontmatter `agent` must be a string or array of strings, got {0}")]
+    AgentHintWrongType(String),
+
+    /// The `model` frontmatter property is not a valid type.
+    #[error("frontmatter `model` must be a string or array of strings, got {0}")]
+    ModelHintWrongType(String),
+
     /// The `agent` frontmatter hint matches multiple providers.
     #[error("agent hint `{hint}` is ambiguous; matches: {matches}")]
     AgentHintAmbiguous {
@@ -52,6 +90,22 @@ pub enum CompositionError {
         /// The matched providers for interactive disambiguation.
         providers: Vec<Provider>,
     },
+
+    /// Provider selection could not resolve in the current mode.
+    #[error(
+        "could not resolve provider in {mode} mode; installed: {installed:?}, \
+         favorite_agent: {favorite_agent:?}, frontmatter_agent_present: {frontmatter_agent_present}"
+    )]
+    SelectionUnavailable {
+        mode: ResolutionMode,
+        installed: Vec<Provider>,
+        favorite_agent: Option<Provider>,
+        frontmatter_agent_present: bool,
+    },
+
+    /// A model is required but none was resolved.
+    #[error("model selection failed for {provider}: {reason}")]
+    ModelSelectionFailed { provider: Provider, reason: String },
 
     /// Interactive selection is required but no TTY is available.
     #[error(
@@ -79,8 +133,13 @@ pub enum CompositionError {
     InsufficientFilePermissions(String),
 
     /// Pre-flight shell command discovery failed.
+    ///
+    /// Carries the typed `MarkdownError` so the CLI's top-level walker can
+    /// render a rich `BlockError` report (e.g. transclusion cycles or
+    /// reference errors encountered while walking the document graph) instead
+    /// of a flat string.
     #[error("pre-flight discovery failed: {0}")]
-    PreFlightDiscoveryFailed(String),
+    PreFlightDiscoveryFailed(#[source] MarkdownError),
 
     /// A general pre-flight failure (blacklisted command, missing handler, etc.).
     #[error("pre-flight shell approval failed: {0}")]
@@ -95,6 +154,21 @@ pub enum CompositionError {
         command: String,
         source_file: PathBuf,
         line: usize,
+    },
+
+    /// A lifecycle notification property failed to deserialize.
+    #[error("invalid lifecycle property `{property}`: {message}")]
+    LifecycleInvalid {
+        /// The frontmatter property that failed to parse (e.g. `"success"`).
+        property: String,
+        /// The underlying deserialization error message.
+        message: String,
+        /// The source file whose frontmatter contained the invalid property.
+        source_file: PathBuf,
+        /// The unknown field name extracted from the serde error (e.g. `"speak"`).
+        unknown_field: Option<String>,
+        /// The list of valid field names for the lifecycle notification.
+        expected_fields: Vec<String>,
     },
 
     /// A lifecycle notification property has both `say` and `say_first`.
@@ -141,4 +215,158 @@ pub enum CompositionError {
     /// A template key collides with a reserved sequence overlay key.
     #[error("sequence template key `{0}` collides with reserved sequence key")]
     SequenceReservedTemplateKey(String),
+
+    /// One or more sequence steps failed provider/model resolution in non-TTY mode.
+    #[error("sequence selection failed for {failure_count} step(s): {failures:?}")]
+    SequenceSelectionFailed {
+        failures: Vec<SequenceSelectionFailure>,
+        failure_count: usize,
+    },
+
+    // -- Loop errors -----------------------------------------------------------
+    /// The `loop` frontmatter value is invalid.
+    #[error("invalid loop definition: {0}")]
+    LoopInvalid(String),
+
+    /// Loop execution exceeded its configured safety cap.
+    #[error(
+        "loop limit exceeded for {prompt_path} at iteration {iteration}; cap is {cap}",
+        prompt_path = prompt_path.display()
+    )]
+    LoopLimitExceeded {
+        /// Maximum allowed iteration count.
+        cap: usize,
+        /// Prompt file being executed.
+        prompt_path: PathBuf,
+        /// 1-based iteration that exceeded the limit.
+        iteration: usize,
+    },
+
+    /// A loop action failed validation or execution.
+    #[error(
+        "invalid loop action at iteration {iteration}, action {action_index} of {total_actions}: {message}"
+    )]
+    InvalidAction {
+        /// 1-based iteration index.
+        iteration: usize,
+        /// 1-based action index.
+        action_index: usize,
+        /// Total actions in this iteration.
+        total_actions: usize,
+        /// Human-readable failure reason.
+        message: String,
+    },
+
+    /// Increment targeted a property with an unsupported type.
+    #[error(
+        "invalid increment at iteration {iteration}, action {action_index} of {total_actions}: property `{property}` has type {found}"
+    )]
+    InvalidIncrementType {
+        /// 1-based iteration index.
+        iteration: usize,
+        /// 1-based action index.
+        action_index: usize,
+        /// Total actions in this iteration.
+        total_actions: usize,
+        /// Property that was targeted.
+        property: String,
+        /// Actual property type.
+        found: String,
+    },
+
+    /// Decrement targeted a property with an unsupported type.
+    #[error(
+        "invalid decrement at iteration {iteration}, action {action_index} of {total_actions}: property `{property}` has type {found}"
+    )]
+    InvalidDecrementType {
+        /// 1-based iteration index.
+        iteration: usize,
+        /// 1-based action index.
+        action_index: usize,
+        /// Total actions in this iteration.
+        total_actions: usize,
+        /// Property that was targeted.
+        property: String,
+        /// Actual property type.
+        found: String,
+    },
+}
+
+/// Per-step failure information for sequence selection errors.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SequenceSelectionFailure {
+    /// 1-based step number.
+    pub step: usize,
+    /// Display name of the step.
+    pub step_name: String,
+    /// Why the step failed resolution.
+    pub reason: String,
+    /// Providers that were installed at the time of resolution.
+    pub installed: Vec<Provider>,
+}
+
+impl BlockError for CompositionError {
+    fn status_block(&self, _term: &Terminal) -> StatusBlock {
+        match self {
+            CompositionError::LifecycleInvalid {
+                property,
+                source_file,
+                unknown_field,
+                expected_fields,
+                ..
+            } => {
+                let dotted_property = match unknown_field {
+                    Some(field) => format!("{property}.{field}"),
+                    None => property.clone(),
+                };
+
+                let file_display = source_file.display().to_string();
+                let escaped = escape_prose_path(&file_display);
+                let file_link = format!(
+                    "<a href=\"{escaped}\">{}</a>",
+                    escape_prose_path(&source_file.file_name().map_or_else(
+                        || file_display.to_string(),
+                        |n| n.to_string_lossy().to_string()
+                    ))
+                );
+
+                let mut body =
+                    format!("Unknown property <cyan>`{dotted_property}`</cyan> in {file_link}");
+                if !expected_fields.is_empty() {
+                    body.push_str("\n\n<b>Expected one of:</b>");
+                    for field in expected_fields {
+                        body.push_str(&format!("\n- <cyan>`{field}`</cyan>"));
+                    }
+                }
+
+                StatusBlock::new(StatusState::Error)
+                    .error_header(ErrorHeader::new(
+                        "CompositionError",
+                        "invalid lifecycle property",
+                    ))
+                    .body(body)
+                    .hint("Check the lifecycle frontmatter section in your prompt file.")
+            }
+            _ => {
+                let msg = self.to_string();
+                StatusBlock::new(StatusState::Error)
+                    .error_header(ErrorHeader::new("CompositionError", "composition failed"))
+                    .body(msg)
+            }
+        }
+    }
+}
+
+fn escape_prose_path(input: &str) -> String {
+    let mut out = String::with_capacity(input.len());
+    for ch in input.chars() {
+        match ch {
+            '\\' | '<' | '>' | '{' | '"' => {
+                out.push('\\');
+                out.push(ch);
+            }
+            other => out.push(other),
+        }
+    }
+    out
 }

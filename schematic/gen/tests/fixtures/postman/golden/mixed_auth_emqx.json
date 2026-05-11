@@ -1,0 +1,163 @@
+{
+  "info": {
+    "description": "EmqxBasic: EmqxBasic test API\nEmqxBearer: EmqxBearer test API",
+    "name": "Emqx",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "item": [
+        {
+          "name": "ListAlarms (EmqxBasic)",
+          "request": {
+            "auth": {
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{username}}"
+                },
+                {
+                  "key": "password",
+                  "value": "{{password}}"
+                }
+              ],
+              "type": "basic"
+            },
+            "description": "List active alarms (basic auth)",
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "alarms"
+              ],
+              "raw": "{{baseUrl}}/alarms"
+            }
+          }
+        },
+        {
+          "name": "ListAlarms (EmqxBearer)",
+          "request": {
+            "auth": {
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{bearerToken}}"
+                }
+              ],
+              "type": "bearer"
+            },
+            "description": "List active alarms (bearer auth)",
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "alarms"
+              ],
+              "raw": "{{baseUrl}}/alarms"
+            }
+          }
+        }
+      ],
+      "name": "Alarms"
+    },
+    {
+      "item": [
+        {
+          "name": "Login",
+          "request": {
+            "auth": {
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{bearerToken}}"
+                }
+              ],
+              "type": "bearer"
+            },
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{}"
+            },
+            "description": "Exchange credentials for a bearer token",
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "login"
+              ],
+              "raw": "{{baseUrl}}/login"
+            }
+          }
+        }
+      ],
+      "name": "Login"
+    },
+    {
+      "item": [
+        {
+          "name": "GetSettings",
+          "request": {
+            "auth": {
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{username}}"
+                },
+                {
+                  "key": "password",
+                  "value": "{{password}}"
+                }
+              ],
+              "type": "basic"
+            },
+            "description": "Read EMQX settings",
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "settings"
+              ],
+              "raw": "{{baseUrl}}/settings"
+            }
+          }
+        }
+      ],
+      "name": "Settings"
+    }
+  ],
+  "variable": [
+    {
+      "description": "Base URL for EmqxBasic",
+      "key": "baseUrl",
+      "value": "http://localhost:18083/api/v5"
+    },
+    {
+      "description": "Username for Basic authentication",
+      "key": "username",
+      "value": ""
+    },
+    {
+      "description": "Password for Basic authentication",
+      "key": "password",
+      "value": ""
+    },
+    {
+      "description": "Bearer token for Authorization header",
+      "key": "bearerToken",
+      "value": ""
+    }
+  ]
+}

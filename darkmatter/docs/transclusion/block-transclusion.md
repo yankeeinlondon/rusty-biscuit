@@ -122,35 +122,62 @@ The syntax we've covered so far for block file transclusion is just `::file <fil
             - a match is achieved when
         - or equal `!prelude` - any content _before_ the first heading tag (of any level)
 
+5. `set`
+
+    The `set` option allows the parent document to override frontmatter properties on the transcluded child document. This is useful for parameterizing transcluded content — the child's interpolation, page blocks, replace rules, and shell directives all observe the overridden values.
+
+    There are two forms:
+
+    **Object form** — pass a JSON5 dictionary that deep-merges onto the child's frontmatter:
+
+    ```md
+    ::file child.md set='{name: "Bob", age: 42}'
+    ```
+
+    **Property form** — set individual properties using dot-free identifiers:
+
+    ```md
+    ::file child.md set.name="Bob" set.age=42
+    ```
+
+    Both forms can coexist on the same directive; property-form values take precedence over the object form when keys overlap.
+
+    The merge uses a **three-layer precedence** model:
+
+    1. **Base** — the child's own frontmatter
+    2. **Middle** — the object-form `set=<dict>` payload (deep-merged onto the base)
+    3. **Top** — each `set.NAME=<value>` property (overrides both layers above)
+
+    Dict values deep-merge (union of keys, higher layer wins on leaf conflicts). Arrays and scalars (including `null`) hard-override. For example, `set.x=null` sets `x` to the literal null value — it does **not** delete the key.
+
+    The overlay is applied **before** any of the child's pre-op pipeline stages run, so child interpolation (`{{ name }}`), page blocks (`::block when="role == 'admin'"`), replace rules, and shell directives all see the overridden values. The overlay does **not** propagate to grandchildren — only the direct child sees it.
+
+    **Error handling:**
+
+    - `set=42` (non-object JSON5) raises `InvalidFrontmatterAssignment`. Use `--allow-invalid-frontmatter-assignment` to downgrade to a warning; sibling valid set clauses still apply.
+    - `set.name="Bob" set.name="Mary"` raises `InvalidReassignedFrontmatterProperty`. Use `--allow-reassigned-frontmatter-property` to downgrade to a warning; the rightmost assignment wins.
+
 And then finally the maybe most powerful option/key is `when` which provides _conditional_ transclusion.
 
 #### Conditional Transclusion
 
-The `when` option allows you to express a condition which must equal `true` for the transclusion to be included. When a condition reaches a `false` outcome then nothing is rendered (and the transclusion reference is removed).
+The `when` option allows you to express a condition which must evaluate to `true` for the transclusion to be included. When the condition is false, nothing is rendered and the directive is removed.
 
-The conditional logic provided for is based on the values of frontmatter and in the same way that the [interpolation](./interpolation.md) stage got some helpful utility properties injected into the frontmatter for interpolation, we get that SAME `ctx` and `env` based frontmatter dictionaries made available here.
+Transclusion uses Darkmatter's shared [Darkmatter Expressions](../topics/darkmatter-expressions.md) evaluator. That same evaluator is also used by page blocks, so `when=` behaves consistently across both features.
 
-Logic operations include:
+Conditions can read from:
 
-- `{property} == {property}` equality
-- `{property} != {property}` not equal
-- `{property} > {property}` - greater than (_properties which are unable to be converted to a number are converted to 0_)
-- `{property} >= {property}` - greater than or equal (_properties which are unable to be converted to a number are converted to 0_)
-- `{property} < {property}` - less than (_properties which are unable to be converted to a number are converted to 0_)
-- Unary ops
-    - `{property}` truthy evaluation
-    - `!{property}` falsy evaluation
-- Functions
-    - `HasKey({property}, key)` - _tests whether property is a dictionary and "has" the specified "key"_
-    - `Contains({property}, value)`  - _tests whether a property is an array or an object and whether one of it's elements/values is the value specified_
-    - `Length({property})`
-        - if the property is an array then the numeric value represents the length of the array
-        - if the property is a dictionary then the numeric value represents the number _keys_ in the dictionary
-        - in both numeric and string values it returns the character length
-        - in boolean values it return 0
-- Combinators
-    - `And(a,b,c)` - _a tuple of properties or operations which are each evaluated to a true/false value and if ALL are `true` then the resultant value is `true`_
-    - `Or(a,b,c)` - _a tuple of properties or operations which are each evaluated to a true/false value and if ANY are `true` then the resultant value is `true`_
+- frontmatter and inherited compose state
+- `ctx.*` runtime context variables
+- `env.*` environment variables
+
+Common patterns include:
+
+- equality checks like `stage == 'draft'`
+- env gates like `env.AGENT == 'claude'`
+- truthy checks like `draft`
+- negation like `!env.AGENT`
+- compound conditions like `And(release.enabled, env.CI)`
 
 Example:
 
@@ -160,8 +187,10 @@ Example:
 
 in this example:
 
-- the two frontmatter variables are evaluated to see if they are _truthy_
+- the two environment variables are evaluated to see if they are _truthy_
 - if either one is then the condition result in a `true` outcome and the transclusion is executed
+
+For the full grammar, truthiness rules, supported operators, functions, and edge cases, see [Darkmatter Expressions](../topics/darkmatter-expressions.md).
 
 ## Non Markdown Local Files
 

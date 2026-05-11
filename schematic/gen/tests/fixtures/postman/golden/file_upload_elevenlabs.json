@@ -1,0 +1,83 @@
+{
+  "auth": {
+    "apikey": [
+      {
+        "key": "key",
+        "value": "xi-api-key"
+      },
+      {
+        "key": "value",
+        "value": "{{apiKey}}"
+      },
+      {
+        "key": "in",
+        "value": "header"
+      }
+    ],
+    "type": "apikey"
+  },
+  "info": {
+    "description": "ElevenLabs test API",
+    "name": "ElevenLabs",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "item": [
+        {
+          "name": "UploadSample",
+          "request": {
+            "body": {
+              "formdata": [
+                {
+                  "description": "Audio file (any audio MIME type)",
+                  "key": "audio",
+                  "type": "file"
+                },
+                {
+                  "description": "Optional sample name",
+                  "key": "name",
+                  "type": "text",
+                  "value": ""
+                }
+              ],
+              "mode": "formdata"
+            },
+            "description": "Upload a voice sample for cloning",
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "voices",
+                ":voice_id",
+                "samples"
+              ],
+              "raw": "{{baseUrl}}/voices/:voice_id/samples",
+              "variable": [
+                {
+                  "key": "voice_id",
+                  "value": "<voice_id>"
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "name": "Voices"
+    }
+  ],
+  "variable": [
+    {
+      "description": "Base URL for all requests",
+      "key": "baseUrl",
+      "value": "https://api.elevenlabs.io/v1"
+    },
+    {
+      "description": "API key value",
+      "key": "apiKey",
+      "value": ""
+    }
+  ]
+}

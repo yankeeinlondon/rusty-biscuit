@@ -83,26 +83,66 @@ The optional positional `filter` argument controls which packages are included. 
 
 When a filter is active, text mode shows all matched packages (including isolated ones). Visual mode only draws edges for packages present in the filtered set — cross-area edges to packages outside the filter are silently dropped.
 
+## Scoping to a Package or Package Area
+
+Two flags layer on top of the positional filter:
+
+| Flag | Match Semantics |
+|------|-----------------|
+| `-p/--package <PKG>` | Exact (case-insensitive) match on `Package.name` |
+| `--package-area <AREA>` | Case-insensitive prefix match on `Package.package_area` |
+
+```bash
+sniff repo deps -p sniff-cli                # Focus on a single package
+sniff repo deps --package-area homelab      # All homelab/* packages
+```
+
+Passing both flags requires the resolved package to live inside the resolved area; otherwise the command fails with an error. Unknown values for either flag fail with an error listing the valid names. Edges referencing packages outside the resolved scope are pruned from both text and `--ui` output.
+
 ## JSON Output
 
 ```
 sniff --json repo deps [filter]
 ```
 
-Returns the full repo data at the top level, equivalent to `sniff --json repo`. Each package object in the `packages` array includes:
+Returns a focused `{ packages: [...] }` object — **not** the full
+`RepoInfo` blob. Each entry uses a deliberately narrow allowlist of
+fields so future additions to the `Package` struct (languages,
+documentation, configuration, etc.) cannot silently leak into the
+public `deps --json` contract:
 
 ```json
 {
-  "name": "sniff-cli",
-  "package_area": "sniff",
-  "relative": "sniff/cli",
-  "depends_on": ["sniff-lib"],
-  "used_by": [],
-  ...
+  "packages": [
+    {
+      "name": "sniff-lib",
+      "depends_on": [],
+      "used_by": ["sniff-cli"],
+      "dependencies": [
+        { "name": "serde", "targeted_version": "1.0", "actual_version": "1.0.210" }
+      ],
+      "dev_dependencies": [
+        { "name": "tempfile", "targeted_version": "3.0", "actual_version": "3.12.0" }
+      ]
+    },
+    {
+      "name": "sniff-cli",
+      "depends_on": ["sniff-lib"],
+      "used_by": [],
+      "dependencies": [
+        { "name": "clap", "targeted_version": "4.4", "actual_version": "4.5.13" },
+        { "name": "sniff-lib", "targeted_version": "0.1", "actual_version": null }
+      ],
+      "dev_dependencies": []
+    }
+  ]
 }
 ```
 
-The `depends_on` and `used_by` fields are omitted from JSON when they are empty (controlled by `#[serde(default, skip_serializing_if = "Vec::is_empty")]`). The `--ui` flag has no effect on JSON output.
+`depends_on` and `used_by` always appear (as arrays, possibly empty).
+`peer_dependencies` and `optional_dependencies` are omitted when empty
+to keep Cargo-only output uncluttered. The `--ui` flag has no effect
+on JSON output.
 
 ## Plain Output
 

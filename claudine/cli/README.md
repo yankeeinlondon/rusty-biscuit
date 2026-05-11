@@ -57,9 +57,44 @@ Re-apply hook registrations to match the current config.
 
 Process an incoming event from a provider hook (hidden from help). Reads JSON payload from stdin, auto-detects the provider from payload structure (or accepts `--provider` override), resolves environment context, and dispatches through the event pipeline.
 
+**Execution Deadline.** To prevent hook handlers from blocking the parent agent session, `claudine handle` enforces a hard **5-second deadline** by default (overridable via `CLAUDINE_HANDLE_DEADLINE_SECONDS`). When exceeded, the handler aborts with a diagnostic message to stderr and exits 124. Individual bash and messenger actions also have tighter 3s timeouts when running inside a hook handler.
+
 ### `claudine actions`
 
 Show which actions are configured and for which events across the user and repo configs.
+
+### Dispatch Expressions
+
+Hook action templates, conditional `when` clauses, event binding matchers, and harness validation messages all share a single expression evaluator backed by Darkmatter's parser (see `claudine/lib/src/dispatch/expression.rs`). The same paths exposed by `claudine hooks --variables` are available everywhere expressions are evaluated.
+
+**Template Interpolation.** Speak messages, bash params, report templates, and message bodies pass through `{{...}}` interpolation. In addition to simple variable references, authors can use:
+
+- Fallbacks: `{{env.CI || "local"}}`
+- Ternaries: `{{git.is_dirty ? "dirty" : "clean"}}`
+- Comparisons: `{{hardware.cores > 8 ? "fast" : "slow"}}`
+- Helper functions: `{{length(git.branch) > 30 ? "long-branch" : git.branch}}`
+
+Booleans render as `true`/`false`. Unknown bare-variable references like `{{unknown_field}}` are preserved verbatim so misspellings stay visible. Composite expressions that fail to parse are also preserved unchanged. Legacy single-brace placeholders such as `{tool_name}` are still rewritten to `{{tool_name}}` for one compatibility cycle and emit a deprecation warning.
+
+**Action `when` Clauses.** Every hook action variant accepts an optional `when` boolean expression. When it evaluates to false (or fails to parse), the action is skipped without short-circuiting the rest of the binding. A skipped `Call` action cannot replace a previously selected blocking response.
+
+```json
+{ "type": "speak", "message": "Bash on {{git.branch}}", "when": "tool_name == 'Bash'" }
+{ "type": "bash",  "command": "say done", "when": "git.is_dirty" }
+{ "type": "call",  "command": "/usr/local/bin/check", "when": "provider == 'claude' && tool_name == 'Bash'" }
+{ "type": "message", "message": "build red on {{git.branch}}", "when": "event == 'tool_error'" }
+```
+
+**Matcher Modes.** Event binding matchers accept either a Darkmatter condition or a regex (legacy mode). Matcher strings are first attempted as conditions; bare-variable strings like `Bash|Edit` deliberately fall through to regex compilation so historical configurations keep their original semantics. Examples:
+
+| Matcher | Mode | Behavior |
+|---------|------|----------|
+| `Bash\|Edit` | Regex | Matches `tool_name` for tool events, `notification_type` for notifications |
+| `tool_name == 'Bash' && git.branch == 'main'` | Expression | Evaluated against full `EventMeta` |
+| `provider == 'claude' && !git.is_dirty` | Expression | Multi-field condition |
+| `[invalid(regex` | Neither | Warned and skipped (binding fires unconditionally) |
+
+Expression matchers that fail to evaluate at runtime log a warning and are treated as non-matches.
 
 ### `claudine skills`
 
@@ -127,7 +162,7 @@ Shared wrapper flags:
 | `-i, --interactive` | Force interactive mode even when a prompt string is provided |
 | `-m, --model <MODEL>` | Override the model used by the provider |
 | `-s, --system-prompt <PROMPT\|FILE>` | Set or append a system prompt (string or file path) |
-| `-t, --timeout <SECONDS>` | Timeout in seconds (non-interactive only) |
+| `-t, --timeout <DURATION>` | Wall-clock timeout like 30s, 5m, 2h (non-interactive only) |
 | `-o, --output <FORMAT>` | Set output format (json, text, stream) |
 | `--include <ENV_NAME>` | Keep a sensitive env var name that would otherwise be filtered |
 | `--mcp` | Compose a Claudine-managed MCP session from the effective defaults |
@@ -135,6 +170,7 @@ Shared wrapper flags:
 | `--sandbox` | Enable provider-specific sandboxing |
 | `--repo` | Use only repo-scoped skills, commands, and agents via a shadow HOME |
 | `--dry-run` | Show what would be executed without launching the child |
+| `--perf` | Emit a detailed performance report to stderr after execution |
 | `-q, --quiet` | Show only the header line; suppress env details |
 | `--silent` | Suppress all Claudine preflight output |
 | `-- ...` | Force all remaining args to passthrough unchanged |
@@ -143,8 +179,13 @@ Wrapper behavior:
 
 - **Interactivity default**: providing a prompt string implies non-interactive mode. Use `-i`/`--interactive` to override back to interactive when providing a startup prompt.
 - **Execution line**: displays `Claudine ▸ {provider} {badges} {prompt}` — only the user's prompt text is shown (provider-specific switches are not leaked). Truncated to one terminal line.
-- **Structured streaming**: non-interactive runs use provider-native structured output (stream-json, JSONL, NDJSON) as the internal control plane. Claudine parses the stream live, reconstructs clean assistant text for stdout, and emits metadata summaries to stderr.
-- **Stderr summaries**: session-start info (session ID, model), completion summary (duration, tokens, cost, tool calls), and verbose details (tools used, turns, stop reason).
+- **Structured streaming**: non-interactive runs use provider-native structured output (stream-json, JSONL, NDJSON, or JSON-RPC 2.0 for Kimi) as the internal control plane. Claudine deserializes each line into a strongly typed `*Event` / `*Envelope` enum from `claudine::stream::protocol` (one module per provider), reconstructs clean assistant text for stdout, and emits metadata summaries to stderr. Every run follows a **9-section model** (execution line, env, system prompt, agent prompt, session ID, thinking prose, tool/info events, final STDOUT, and metadata) with strictly enforced spacing (at most one blank line between sections).
+- **Kimi wire mode**: non-interactive `claudine kimi` and Kimi-resolved composition runs launch the Kimi child with `--wire` and drive a JSON-RPC 2.0 line transport (`claudine/cli/src/commands/wrap/wire_io.rs`). Claudine sends `initialize` (declaring `supports_question: false` and `supports_plan_mode: false`) and a `prompt` request whose `params.user_input` carries the resolved prompt body. `ApprovalRequest` envelopes are auto-approved and surface as visible `auto_approved` info lines; `QuestionRequest` envelopes (which should not arrive given the declared capabilities) are answered with empty synthetic answers and a warning; `ToolCallRequest` is rejected with `-32601 method not found`; `HookRequest` is forwarded through Claudine's existing dispatch pipeline. Cancellation (Ctrl+C / deadline) sends a `cancel` JSON-RPC request before tearing down the child. The legacy `--print --output-format stream-json` Kimi path was removed — that mode emitted OpenAI-shaped envelopes with no top-level `type` field, so every event silently dropped to `ProviderExtension`.
+- **Thinking prose**: reasoning and thinking content from providers (Claude, Codex, OpenCode, etc.) is rendered on stderr in `Section::Thinking` as a `BlockQuote` with the wider `▌ ` border (matching System Prompt and Agent Prompt) and dim-italic gray text, ensuring continuous feedback during long turns. OpenCode reasoning (`{"type":"reasoning","text":"…"}`, including nested `part.text`) routes through `SemanticEvent::Reasoning` like every other provider rather than falling through `ProviderExtension`. Claude assistant prose that appears in the same `assistant` envelope as a `tool_use` is also promoted to `Reasoning`, so "Let me investigate..." tool-preface narration no longer leaks onto stdout or creates extra section breaks between tool calls.
+- **Stderr status lines**: `LiveSemanticSink` renders tool/subagent/info/warning/error status lines. Tool calls use a canonical humanized contract — `→ {Name}({summary})` for outgoing and `← {Name}({slot})` for incoming — that reads like a function call. Shell tools (`Bash`, `bash`, `run_command`, Codex `shell`) prepend the canonical shell name to the command (`bash ls -la`) so the user can see how the line would actually execute. `Task` summaries prefer `description → subject → prompt → task` so the agent's task body wins over arbitrary fields like `subagent_type`. Unknown event types fall through to a silent skip so provider format drift never turns into a hard failure. Raw JSON is never dumped to the terminal for known tools.
+- **Typed error blocks**: `SemanticEvent::Error` now carries a `SemanticErrorKind` (`Configuration`, `AgentNative`, `ApiRemote`, `Interrupted`, `Unknown`) and renders as a colored `BlockQuote` with `▌ ` border instead of a single failure status line. Border colors and labels are: orange `Configuration Error`, red `Agent Error`, red `API Error`, yellow `Interrupted`, red `Error`. Replays of older JSONL streams without a `kind` field default to `Unknown` via `#[serde(default)]`. The kind maps directly onto `AgentErrorCategory` for end-of-run reports via `From<SemanticErrorKind> for AgentErrorCategory`. Dispatch behavior remains keyed off `terminal: bool`; `kind` is classificatory metadata, not a new dispatch switch.
+- **Idle output flush**: `StreamTextRenderer` records when the block buffer last grew. When the heartbeat thread runs, it calls `flush_if_idle(silence_window)` (default **30 s**) before emitting its own status line, so a dangling final paragraph from a slow-to-close provider becomes visible within the silence window even if the provider never closes stdout. Buffered content always appears above the next heartbeat.
+- **Unified timeout watchdog** (OpenCode stability): the wrapper enforces exactly two timeouts via a single ticker — `timeout` (wall-clock budget from child spawn, opt-in, no default) and `step_timeout` (stream-silence since the last parent-stream event, default **30m**). Both can be set via CLI flags (`--timeout`, `--step-timeout`), markdown frontmatter (`timeout:`, `step_timeout:`), or env-var defaults (`CLAUDINE_TIMEOUT`, `CLAUDINE_STEP_TIMEOUT`); precedence is CLI > frontmatter > env > built-in. Setting an env var to `0s` disables that rule. Watchdog cadence and SIGTERM→SIGKILL grace are tunable via `CLAUDINE_WATCHDOG_INTERVAL` (default **5s**) and `CLAUDINE_KILL_GRACE` (default **10s**). On breach, the watchdog renders an `Agent Error` `BlockQuote` on stderr (enumerating any outstanding subagents for `step_timeout`) and the synthesised summary records `error_kind: "timeout"` or `"step_timeout"`. See [`docs/topics/timeouts.md`](../docs/topics/timeouts.md) for the canonical reference.
 - **Verbosity**: `--quiet` shows only a compact completion line; `--silent` suppresses all Claudine output; `-v` adds detailed human-facing metadata on the second summary line.
 - **Diagnostics**: `--debug <level>` controls Claudine tracing (`trace`, `debug`, `info`, `warn`, `error`). `RUST_LOG` takes precedence and supports per-module targeting such as `RUST_LOG=claudine::dispatch=trace,claudine::stream=debug`.
 - Validates provider binary availability before spawn (with provider docs URL in errors).
@@ -164,13 +205,36 @@ Wrapper behavior:
 
 Composition turns a Markdown document with frontmatter into a provider session, optionally merging the result back into the source file or running a sequence of steps. All three commands reuse the wrapper pipeline (env setup, harness detection, structured streaming, handler-driven recovery).
 
-- **`claudine compose <file-ref> [flags]`** — compose a Markdown file (Darkmatter transclusion/interpolation/conditionals/`::shell`) and send the result as a prompt. No file mutation.
-- **`claudine inline-compose <file-ref> [flags]`** — compose the frontmatter `prompt` property and replace the document body with the provider's response. Original frontmatter is preserved byte-for-byte; `last_updated` is set to today's date; new frontmatter keys added by the provider are merged in.
-- **`claudine sequence <file-ref> [flags]`** — run a serial sequence of composition steps declared in a single document, with a shared approval cache across steps and `FAIL_FAST` propagation on failure.
+- **`claudine compose [flags] <file-ref> [key=value ...]`** — compose a Markdown file (Darkmatter transclusion/interpolation/conditionals/`::shell`) and send the result as a prompt. No file mutation.
+- **`claudine inline-compose [flags] <file-ref> [key=value ...]`** — compose the frontmatter `prompt` property and replace the document body with the provider's response. Original frontmatter is preserved byte-for-byte; `last_updated` is set to today's date; new frontmatter keys added by the provider are merged in.
+- **`claudine sequence [flags] <file-ref> [key=value ...]`** — run a serial sequence of composition steps declared in a single document, with a shared approval cache across steps and `FAIL_FAST` propagation on failure.
+
+Positional arguments include exactly one file reference plus zero or more `key=value` setters in any order:
+
+```sh
+claudine compose @prompts/review.md review=review.md
+claudine inline-compose draft=false @notes/update.md
+claudine sequence @research.md topic="async traits" retries=3
+```
+
+Setter values are parsed as JSON5 first and fall back to strings. Inline setters override `--set` on overlapping keys; `sequence` reserved overlay keys still win over both.
 
 Shared composition flags include provider selectors (`--claude`, `--codex`, `--gemini`, `--opencode`, `--qwen`, `--goose`, `--kimi`), `--exclude <provider>`, `-i` / `--interactive`, `-m` / `--model`, `-s` / `--system-prompt`, `-t` / `--timeout`, `--dry-run`, `-q` / `--quiet`, and `--silent`. The file reference supports `@` magic paths, repo-relative, monorepo-package-relative, and absolute paths via `biscuit-file::FileReference`.
 
-Provider selection precedence: explicit flag → single installed remaining after `--exclude` → `agent` frontmatter hint (fuzzy-matched) → `settings.linking.preference[0]` config favorite → interactive chooser (TTY only).
+Provider selection follows a TTY/non-TTY split. In **TTY mode** with no explicit flag, an interactive `tui-chrome` picker is always shown. In **non-TTY mode**, resolution follows a strict chain: explicit flag → singular frontmatter `agent` → list-valued frontmatter `agent` (first installed match) → configured `favorite_agent` → structured hard error. The old "single installed" auto-selection shortcut has been removed.
+
+Model resolution is independent of TTY mode: CLI `--model` → provider-specific env var (`CODEX_MODEL`, `CLAUDE_MODEL`, etc.) → generic `MODEL` env → frontmatter `model` → provider default. OpenCode requires a model in non-interactive mode and fails hard if none is resolved.
+
+Set or clear the favorite agent with:
+
+```sh
+claudine config set favorite-agent codex
+claudine config set favorite-agent none
+```
+
+**Consistent Rendering (2026-04-16).** `compose` and `inline-compose` are unified into one `execute_without_harness` function parameterized by `CompositionExecutionMode::{Direct, Inline}`. Structured stream execution runs through a single `run_structured_composition` helper, and summary emission goes through a single `emit_composition_summary` function with a `defer_section_separator` flag that picks between immediate emission (compose) and post-closure deferred emission (inline-compose). Non-structured runs (Goose) call `emit_minimal_composition_summary` to produce the same stderr summary block as structured runs — no more JSONL-only silence on the legacy path. The `"agent did not provide a summarized message"` warning has been removed; the empty-text case is already recorded in the JSONL `SessionEnd` event. The only permitted stderr divergence between the two modes is the four inline-only surfaces: closure validation messages, file-write status, partial-body report on interruption, and writability pre-check.
+
+**Performance Reporting.** All three composition commands support `--perf`, which emits a post-execution performance report to stderr. `sequence` produces a single aggregated report covering all steps; `compose` and `inline-compose` produce one report per invocation. See the main README for report layout details.
 
 ## Module Structure
 

@@ -11,11 +11,12 @@ pub enum SessionId {
     /// macOS: The default output endpoint (virtual master volume).
     MacEndpoint,
 
-    /// Windows: A WASAPI audio session identified by process ID and session key.
+    /// Windows: A WASAPI audio session identified by process ID and session
+    /// instance identifier (`GetSessionInstanceIdentifier`).
     WasapiSession {
         /// The process ID owning this session.
         pid: u32,
-        /// Session identifier key.
+        /// Session instance identifier from `IAudioSessionControl2::GetSessionInstanceIdentifier`.
         key: String,
     },
 

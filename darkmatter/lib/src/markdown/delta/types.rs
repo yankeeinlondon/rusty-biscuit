@@ -753,7 +753,12 @@ mod tests {
 
     #[test]
     fn test_content_change_added() {
-        let change = ContentChange::added(vec!["New Section".to_string()], HeadingLevel::H2, 10, "New Section");
+        let change = ContentChange::added(
+            vec!["New Section".to_string()],
+            HeadingLevel::H2,
+            10,
+            "New Section",
+        );
         assert!(matches!(change.action, ChangeAction::Added));
         assert!(change.original_path.is_none());
         assert!(change.new_path.is_some());
@@ -761,7 +766,12 @@ mod tests {
 
     #[test]
     fn test_content_change_removed() {
-        let change = ContentChange::removed(vec!["Old Section".to_string()], HeadingLevel::H2, 5, "Old Section");
+        let change = ContentChange::removed(
+            vec!["Old Section".to_string()],
+            HeadingLevel::H2,
+            5,
+            "Old Section",
+        );
         assert!(matches!(change.action, ChangeAction::Removed));
         assert!(change.original_path.is_some());
         assert!(change.new_path.is_none());
@@ -820,9 +830,11 @@ mod tests {
 
     #[test]
     fn test_document_change_content_minor() {
-        let mut stats = DeltaStatistics::default();
-        stats.content_change_ratio = 0.05;
-        stats.content_only_changes = 1;
+        let stats = DeltaStatistics {
+            content_change_ratio: 0.05,
+            content_only_changes: 1,
+            ..Default::default()
+        };
         assert!(matches!(
             DocumentChange::from_statistics(&stats),
             DocumentChange::ContentMinor
@@ -831,9 +843,11 @@ mod tests {
 
     #[test]
     fn test_document_change_content_moderate() {
-        let mut stats = DeltaStatistics::default();
-        stats.content_change_ratio = 0.25;
-        stats.content_only_changes = 1;
+        let stats = DeltaStatistics {
+            content_change_ratio: 0.25,
+            content_only_changes: 1,
+            ..Default::default()
+        };
         assert!(matches!(
             DocumentChange::from_statistics(&stats),
             DocumentChange::ContentModerate
@@ -842,9 +856,11 @@ mod tests {
 
     #[test]
     fn test_document_change_rewritten() {
-        let mut stats = DeltaStatistics::default();
-        stats.content_change_ratio = 0.85;
-        stats.content_only_changes = 1;
+        let stats = DeltaStatistics {
+            content_change_ratio: 0.85,
+            content_only_changes: 1,
+            ..Default::default()
+        };
         assert!(matches!(
             DocumentChange::from_statistics(&stats),
             DocumentChange::Rewritten

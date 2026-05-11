@@ -136,6 +136,7 @@ pub mod auth;
 pub mod headers;
 pub mod models;
 pub mod oauth;
+pub mod pagination;
 pub mod params;
 pub mod prelude;
 pub mod request;
@@ -157,9 +158,8 @@ pub use models::{
     TypeRef,
 };
 pub use oauth::{OAuth2ClientAuthMethod, OAuth2Config, OAuth2GrantType, PkceRequirement};
-pub use params::{
-    EndpointParams, PaginationResponse, PaginationStyle, ParamDef, ParamStyle, QueryParamType,
-};
+pub use pagination::{PaginationResponse, PaginationStyle};
+pub use params::{EndpointParams, ParamDef, ParamStyle, QueryParamType};
 pub use request::{ApiRequest, FormField, FormFieldKind};
 pub use response::ApiResponse;
 pub use schema::{Schema, SchemaObject};
@@ -169,3 +169,33 @@ pub use websocket::{
     HeartbeatHints, MessageDirection, MessageSchema, ParamType, RequestIdType, WebSocketApi,
     WebSocketEndpoint, WebSocketEndpointHints, WebSocketRuntimeHints,
 };
+
+/// Core API definition types.
+///
+/// This module groups the fundamental types for defining REST API structures,
+/// authentication, requests, and responses.
+pub mod core {
+    pub use crate::auth::*;
+    pub use crate::request::*;
+    pub use crate::response::*;
+    pub use crate::schema::*;
+    pub use crate::types::*;
+}
+
+/// Transport-layer types for HTTP headers, parameters, and WebSocket APIs.
+///
+/// This module groups types related to the transport layer of API communication.
+pub mod transport {
+    pub use crate::headers::*;
+    pub use crate::pagination::*;
+    pub use crate::params::*;
+    pub use crate::websocket::*;
+}
+
+/// Model definition types for API schema import.
+///
+/// This module groups types used to define data models (structs, enums, type aliases)
+/// when importing API specifications.
+pub mod model {
+    pub use crate::models::*;
+}

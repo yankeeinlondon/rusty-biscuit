@@ -147,7 +147,7 @@ pub(crate) fn find_package_area(
 }
 
 /// Get the user's home directory.
-fn home_dir() -> Option<PathBuf> {
+pub(crate) fn home_dir() -> Option<PathBuf> {
     std::env::var_os("HOME").map(PathBuf::from)
 }
 

@@ -1,9 +1,8 @@
 use std::path::{Path, PathBuf};
 
+use super::trait_def::{AgentConfigurator, ProviderHookPlan, RegistrationResult, SkipReason};
 use crate::error::Result;
-use crate::events::{HookerConfig, Provider};
-
-use super::trait_def::{AgentConfigurator, RegistrationResult, SkipReason};
+use crate::provider::Provider;
 
 pub(crate) struct KimiCodeConfigurator;
 
@@ -14,7 +13,7 @@ impl AgentConfigurator for KimiCodeConfigurator {
 
     fn register(
         &self,
-        _config: &HookerConfig,
+        _plan: &ProviderHookPlan,
         _config_dir: Option<&Path>,
     ) -> Result<RegistrationResult> {
         // Kimi Code doesn't support hooks via config files.
@@ -66,13 +65,12 @@ mod tests {
         // KimiCode always returns NoHookSupport since it doesn't support config-based hooks
         let tmp = TempDir::new().unwrap();
         let configurator = KimiCodeConfigurator;
-        let config = crate::events::HookerConfig {
-            version: "1.0".to_string(),
-            settings: Default::default(),
-            providers: Default::default(),
+        let plan = ProviderHookPlan {
+            events: vec![],
+            canonical_for: None,
         };
 
-        let result = configurator.register(&config, Some(tmp.path())).unwrap();
+        let result = configurator.register(&plan, Some(tmp.path())).unwrap();
         assert!(matches!(
             result,
             RegistrationResult::Skipped(SkipReason::NoHookSupport)

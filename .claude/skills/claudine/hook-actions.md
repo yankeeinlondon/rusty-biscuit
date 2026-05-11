@@ -12,7 +12,7 @@ Play an embedded sound effect from the `playa` library.
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `name` | `string` | (required) | Effect name from playa's 88 embedded effects |
+| `effect` | `string` | (required) | Effect name from playa's 88 embedded effects |
 | `volume` | `f32` | `1.0` | Playback volume (0.0 to 1.0) |
 | `speed` | `f32` | `1.0` | Playback speed multiplier |
 
@@ -22,7 +22,7 @@ Play an embedded sound effect from the `playa` library.
 
 **Example:**
 ```json
-{ "type": "sound_effect", "name": "success", "volume": 0.8, "speed": 1.2 }
+{ "type": "sound_effect", "effect": "success", "volume": 0.8, "speed": 1.2 }
 ```
 
 ---
@@ -36,6 +36,8 @@ Speak a message aloud using biscuit-speaks TTS. The message supports Handlebars-
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `message` | `string` | (required) | Template message with `{{variable}}` placeholders |
+| `voice` | `string?` | None | Optional voice override for this action |
+| `gender` | `string?` | None | Optional gender preference (`male` or `female`) |
 
 **Behavior:** Fire-and-forget (`tokio::spawn`). TTS playback is async and does not block the event pipeline. Empty messages after interpolation are silently skipped.
 
@@ -48,53 +50,50 @@ Speak a message aloud using biscuit-speaks TTS. The message supports Handlebars-
 
 ---
 
-### `log`
+### `bash`
 
-Write the event payload to a configured log target (file or HTTP server).
+Execute a shell command asynchronously without waiting for a result. Command and params support template interpolation.
 
 **Fields:**
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `target` | `LogTarget` | File (daily rotation) | Destination for log records |
+| `command` | `string` | (required) | Shell command string |
+| `params` | `string` | `""` | Template-interpolated parameters appended to the command |
 
-**LogTarget variants:**
+**Behavior:** Fire-and-forget (`tokio::spawn`). The command is spawned as a child process. Failures are logged as warnings.
 
-**`file`** -- Append JSONL records to a local file.
-
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `path` | `string?` | `~/.claudine/logs/<date>.jsonl` | Explicit file path (supports `~` expansion) |
-| `rotate_daily` | `bool` | `true` | Rotate log file by local day boundary |
-
-**`server`** -- POST structured hook records to an HTTP endpoint.
-
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `url` | `string` | (required) | Endpoint URL |
-| `timeout_ms` | `u64` | `10000` | Request timeout in milliseconds |
-| `headers` | `map?` | None | Optional additional HTTP headers |
-
-**Behavior:** Synchronous for file targets (creates parent directories as needed). Non-fatal for server targets -- POST failures are logged as warnings but do not halt execution. When the target is a file with no explicit path, falls back to the global `settings.default_log_target` if configured.
+**Hook Handler Timeout:** When running inside `claudine handle`, bash actions have a hard **3-second timeout** by default (overridable via `CLAUDINE_BASH_ACTION_TIMEOUT_SECONDS`).
 
 **Return payload:** None.
 
-**Example (file):**
+**Example:**
 ```json
-{ "type": "log" }
+{ "type": "bash", "command": "notify-send", "params": "Claudine {{event}} fired" }
 ```
 
-**Example (server):**
+---
+
+### `message`
+
+Send a message to the configured messaging destination (Discord, Slack, Signal, or WhatsApp).
+
+**Fields:**
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `message` | `string` | (required) | Markdown message with template interpolation |
+| `image` | `string?` | None | Path to an image to attach (Discord only) |
+
+**Behavior:** Fire-and-forget (`tokio::spawn`). Outbound send is async and does not block the event pipeline.
+
+**Hook Handler Timeout:** When running inside `claudine handle`, messenger actions have a hard **3-second timeout** by default (overridable via `CLAUDINE_MESSENGER_TIMEOUT_SECONDS`).
+
+**Return payload:** None.
+
+**Example:**
 ```json
-{
-  "type": "log",
-  "target": {
-    "type": "server",
-    "url": "https://hooks.example.com/events",
-    "timeout_ms": 5000,
-    "headers": { "Authorization": "Bearer tok_xxx" }
-  }
-}
+{ "type": "message", "message": "Agent finished turn on **{{git.repo_name}}**" }
 ```
 
 ---
@@ -137,28 +136,6 @@ When `handler` is omitted, defaults to: `[EVENT] tool_name (provider)`.
     "template": "[TOOL] {{tool_name}}: executing on {{os.type}}"
   }
 }
-```
-
----
-
-### `fire_and_forget`
-
-Execute an external command asynchronously without waiting for it to complete or inspecting its output. Command and args support template interpolation.
-
-**Fields:**
-
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `command` | `string` | (required) | Command name or path to executable |
-| `args` | `string[]?` | None | Optional arguments |
-
-**Behavior:** Fire-and-forget (`tokio::spawn`). The command is spawned as a child process. Failures are logged as warnings. The command must be findable on `PATH` (verified via `sniff::programs::find_program`).
-
-**Return payload:** None.
-
-**Example:**
-```json
-{ "type": "fire_and_forget", "command": "notify-send", "args": ["Claudine", "{{event}} fired"] }
 ```
 
 ---
@@ -260,7 +237,7 @@ Use these in speak messages and report templates: `"Tool {{tool_name}} failed: {
 
 ### Environment Variables
 
-Shell environment variables are supported via `{{env.VAR_NAME}}` with optional defaults: `{{env.MY_VAR | "fallback"}}`.
+Shell environment variables are supported via `{{env.VAR_NAME}}` with optional defaults: `{{env.MY_VAR || "fallback"}}`. The legacy single-pipe `|` form is no longer supported.
 
 ### Example
 
@@ -268,5 +245,38 @@ Shell environment variables are supported via `{{env.VAR_NAME}}` with optional d
 {
   "type": "speak",
   "message": "Tool {{tool_name}} failed on {{git.branch}}: {{error}}"
+}
+```
+
+## Conditional Execution (`when`)
+
+Every action variant supports an optional `when` field containing a Darkmatter condition expression. When present, the expression is evaluated against the active `EventMeta` before the action runs; if the result is falsy or the expression is invalid, the action is skipped without aborting the rest of the binding.
+
+### Path Resolution
+
+Path resolution inside `when` is identical to dispatch templates and event binding matchers:
+
+- `env.NAME`, `extra.<path>`, `tool_input.<path>`, `tool_response.<path>`
+- `os.*`, `hardware.*`, `git.*`, `project.*`
+- Top-level event fields: `provider`, `event`, `tool_name`, etc.
+
+`ctx.*` (e.g. `ctx.today`, `ctx.year`) is the **only** `when`-exclusive surface. It is deliberately unresolved in templates, matchers, and harness validation.
+
+### Example
+
+```json
+{
+  "type": "speak",
+  "when": "git.branch == 'main'",
+  "message": "Running on main branch"
+}
+```
+
+```json
+{
+  "type": "call",
+  "when": "ctx.today != ''",
+  "command": "daily-check",
+  "mapper": { "type": "exit_code" }
 }
 ```

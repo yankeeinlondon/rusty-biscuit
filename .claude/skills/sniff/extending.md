@@ -6,27 +6,28 @@ Adding new detection capabilities.
 
 ```
 sniff/lib/src/
-├── lib.rs        # Public API: detect(), SniffConfig
-├── os.rs         # OS detection (distribution, locale, timezone)
-├── hardware.rs   # CPU, GPU, memory, storage
-├── network.rs    # Interface enumeration
-├── filesystem/   # Git, repo, languages, docs, formatting
-├── package/      # Package manager abstraction
-├── programs/     # Installed program detection (8 categories)
+├── lib.rs        # Public API: detect(), SniffConfig, DetectionPlan
+├── request.rs    # Fine-grained detection control types
+├── error.rs      # Error types
+├── os/           # OS detection (distro, locale, time, package managers)
+├── hardware/     # CPU, GPU, memory, storage, audio devices
+├── network/      # Interface enumeration
+├── filesystem/   # Git, repo, languages, docs, file types, blast radius, just
+├── package/      # Package manager abstraction (110+)
+├── programs/     # Installed program detection and install (8 categories)
+├── remote/       # Remote repo inspection (GitHub, GitLab, Gitea, Bitbucket)
 └── services/     # Init system and service detection
 
 sniff/cli/src/
-├── main.rs       # CLI parsing, config, enrichment
+├── main.rs       # Entry point, tracing initialization
+├── args.rs       # Clap subcommands and argument parsing
+├── commands.rs   # Command execution logic
+├── install.rs    # Program installation interface
 └── output/       # Text/JSON rendering with per-topic modules
     ├── mod.rs
-    ├── filesystem.rs
-    ├── hardware.rs
-    ├── network.rs
-    ├── os.rs
-    ├── programs.rs
-    ├── services.rs
-    ├── structure.rs
-    └── topics.rs
+    ├── filesystem.rs, hardware.rs, network.rs, os.rs
+    ├── programs.rs, services.rs, remote.rs, recent_commits.rs
+    └── topics.rs, just.rs
 ```
 
 ## Adding a Program Category
@@ -63,7 +64,7 @@ pub fn detect_my_programs() -> Vec<MyProgram> {
 ```
 
 4. Add field to `ProgramsInfo` in `programs/mod.rs`
-5. Add CLI subcommand variant in `cli/src/main.rs`
+5. Add CLI subcommand variant in `cli/src/args.rs`
 6. Add output handling in `cli/src/output/programs.rs`
 
 ## Adding an Init System
@@ -75,17 +76,18 @@ pub fn detect_my_programs() -> Vec<MyProgram> {
 
 ## Adding a CLI Subcommand
 
-1. Add variant to `Commands` enum in `cli/src/main.rs`
-2. Add rendering in the appropriate `cli/src/output/*.rs` module
-3. Wire up in the match statement in `main()`
+1. Add variant to `Commands` enum in `cli/src/args.rs`
+2. Add `OutputFilter` variant and mapping in `cli/src/output/mod.rs`
+3. Add rendering in the appropriate `cli/src/output/*.rs` module
+4. Wire up execution in `cli/src/commands.rs`
 
 ## Testing
 
 ```bash
-cargo test -p sniff-lib              # All lib tests
+cargo test -p sniff                  # All lib tests
 cargo test -p sniff-cli              # All CLI tests
-cargo test -p sniff-lib programs::   # Program module
-cargo test -p sniff-lib services::   # Services module
+cargo test -p sniff programs::       # Program module
+cargo test -p sniff services::       # Services module
 ```
 
 ## Common Issues

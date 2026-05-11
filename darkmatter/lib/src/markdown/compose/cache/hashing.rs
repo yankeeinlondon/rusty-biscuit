@@ -195,6 +195,55 @@ pub(crate) fn options_hash(options: &ComposeOptions) -> u64 {
     xx_hash(&parts.join("\0"))
 }
 
+/// Combines the base options hash with a directive's set-overlay hash.
+///
+/// Returns `base` unchanged when `overlay` is `0` so the no-overlay path
+/// remains neutral against pre-existing cache entries. Otherwise produces
+/// a derived hash that cleanly distinguishes distinct overlay payloads.
+pub(crate) fn combine_options_overlay_hash(base: u64, overlay: u64) -> u64 {
+    if overlay == 0 {
+        return base;
+    }
+    let mut data = [0u8; 16];
+    data[..8].copy_from_slice(&base.to_le_bytes());
+    data[8..].copy_from_slice(&overlay.to_le_bytes());
+    xx_hash_bytes(&data)
+}
+
+/// Hash of the per-directive set overlay applied during markdown transclusion.
+///
+/// The returned hash is stable across ordering variations inside the object
+/// overlay (keys are canonicalized) and across equivalent values, but
+/// preserves the ordering of the property list because the spec treats
+/// property-form ordering as semantically significant under permissive
+/// duplicate-handling. Returns `0` when both inputs are empty so the
+/// no-overlay path remains neutral inside composed cache keys.
+pub(crate) fn set_overlay_hash(
+    set_object: Option<&Map<String, Value>>,
+    set_properties: &[(String, Value)],
+) -> u64 {
+    let object_empty = set_object.is_none_or(Map::is_empty);
+    if object_empty && set_properties.is_empty() {
+        return 0;
+    }
+
+    let mut parts = Vec::with_capacity(1 + set_properties.len());
+
+    if let Some(map) = set_object {
+        let canonical = canonical_json_sorted(&Value::Object(map.clone()));
+        parts.push(format!("obj={}", canonical));
+    } else {
+        parts.push("obj=".to_string());
+    }
+
+    for (index, (name, value)) in set_properties.iter().enumerate() {
+        let canonical = canonical_json_sorted(value);
+        parts.push(format!("p{}:{}={}", index, name, canonical));
+    }
+
+    xx_hash(&parts.join("\0"))
+}
+
 // ── Merkle closure hash ────────────────────────────────────────────
 
 /// Computes a Merkle-style closure hash from a self-hash and dependency hashes.
@@ -497,5 +546,67 @@ mod tests {
         let end = ComposeOptions::new().with_magic_path("/path", biscuit_file::PathPosition::End);
 
         assert_ne!(options_hash(&start), options_hash(&end));
+    }
+
+    #[test]
+    fn set_overlay_hash_empty_inputs_return_zero() {
+        assert_eq!(set_overlay_hash(None, &[]), 0);
+        let empty = Map::new();
+        assert_eq!(set_overlay_hash(Some(&empty), &[]), 0);
+    }
+
+    #[test]
+    fn set_overlay_hash_sensitive_to_object_overlay() {
+        let mut m = Map::new();
+        m.insert("name".to_string(), Value::from("Bob"));
+        let with_object = set_overlay_hash(Some(&m), &[]);
+        assert_ne!(with_object, 0);
+        assert_ne!(with_object, set_overlay_hash(None, &[]));
+    }
+
+    #[test]
+    fn set_overlay_hash_sensitive_to_property_value() {
+        let a = set_overlay_hash(None, &[("name".to_string(), Value::from("Bob"))]);
+        let b = set_overlay_hash(None, &[("name".to_string(), Value::from("Mary"))]);
+        assert_ne!(a, b);
+    }
+
+    #[test]
+    fn set_overlay_hash_stable_for_equivalent_object_key_order() {
+        let mut m1 = Map::new();
+        m1.insert("a".to_string(), Value::from(1));
+        m1.insert("b".to_string(), Value::from(2));
+
+        let mut m2 = Map::new();
+        m2.insert("b".to_string(), Value::from(2));
+        m2.insert("a".to_string(), Value::from(1));
+
+        assert_eq!(
+            set_overlay_hash(Some(&m1), &[]),
+            set_overlay_hash(Some(&m2), &[])
+        );
+    }
+
+    #[test]
+    fn set_overlay_hash_distinguishes_object_vs_property() {
+        let mut m = Map::new();
+        m.insert("name".to_string(), Value::from("Bob"));
+        let obj_form = set_overlay_hash(Some(&m), &[]);
+        let prop_form = set_overlay_hash(None, &[("name".to_string(), Value::from("Bob"))]);
+        assert_ne!(obj_form, prop_form);
+    }
+
+    #[test]
+    fn combine_options_overlay_hash_neutral_when_overlay_zero() {
+        assert_eq!(combine_options_overlay_hash(0xDEAD_BEEF, 0), 0xDEAD_BEEF);
+    }
+
+    #[test]
+    fn combine_options_overlay_hash_distinguishes_payloads() {
+        let base = 0xABCD_EF01_u64;
+        let h1 = combine_options_overlay_hash(base, 0x1111);
+        let h2 = combine_options_overlay_hash(base, 0x2222);
+        assert_ne!(h1, h2);
+        assert_ne!(h1, base);
     }
 }

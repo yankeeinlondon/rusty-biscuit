@@ -1,20 +1,44 @@
 pub mod atomic;
 pub(crate) mod backup;
-mod claude;
-mod codex;
-mod gemini;
-mod goose;
-mod kimicode;
-mod opencode;
-mod qwen;
-mod roo;
+pub(crate) mod claude;
+pub mod claudine_config;
+pub(crate) mod codex;
+pub(crate) mod gemini;
+pub(crate) mod goose;
+pub(crate) mod kimicode;
+pub mod merge;
+pub mod messaging_block;
+pub mod migration;
+pub(crate) mod opencode;
+pub(crate) mod qwen;
+pub(crate) mod roo;
 mod trait_def;
+pub mod tts;
 
-pub use trait_def::{AgentConfigurator, RegistrationResult, SkipReason};
+pub use trait_def::{AgentConfigurator, ProviderHookPlan, RegistrationResult, SkipReason};
+
+// Re-exports for convenient access and backward compatibility
+pub use claudine_config::{
+    ClaudineConfig, DefaultSounds, DetailedModelOverride, ModelOverrideMode, ProviderModelOverride,
+    RepoOverrideConfig,
+};
+pub use messaging_block::{ClaudineMessengerConfig, MessengerProviderConfig};
+pub use tts::{Gender, TtsConfigSettings, TtsValue, VoiceSelection};
+
+pub(crate) use claude::ClaudeConfigurator;
+pub(crate) use codex::CodexConfigurator;
+pub(crate) use gemini::GeminiConfigurator;
+pub(crate) use goose::GooseConfigurator;
+pub(crate) use kimicode::KimiCodeConfigurator;
+pub(crate) use opencode::OpenCodeConfigurator;
+pub(crate) use qwen::QwenConfigurator;
+pub(crate) use roo::RooConfigurator;
 
 use std::path::PathBuf;
 
-use sniff::programs::{AiCli, InstalledAiClients, ProgramMetadata, find_program::find_program};
+use sniff::programs::{InstalledAiClients, ProgramMetadata, find_program::find_program};
+
+use crate::provider::{PROVIDERS_DISPLAY_ORDER, Provider, provider_info};
 
 /// Resolve the full path to the claudine executable.
 ///
@@ -35,17 +59,6 @@ pub(crate) fn claudine_handle_command(provider: Provider) -> impl Fn(&str) -> St
     let provider = provider.as_slug().to_string();
     move |event| format!("{claudine_bin} handle {event} --provider {provider}")
 }
-
-use crate::events::Provider;
-
-use claude::ClaudeConfigurator;
-use codex::CodexConfigurator;
-use gemini::GeminiConfigurator;
-use goose::GooseConfigurator;
-use kimicode::KimiCodeConfigurator;
-use opencode::OpenCodeConfigurator;
-use qwen::QwenConfigurator;
-use roo::RooConfigurator;
 
 /// Rich information about a detected agent.
 #[derive(Debug, Clone)]
@@ -73,73 +86,36 @@ impl AgentInfo {
 
 /// Discover all supported agents with rich availability information.
 ///
-/// Returns information about all supported providers, including whether
-/// their config exists and whether their binary is on PATH.
+/// Returns one [`AgentInfo`] per entry in
+/// [`crate::provider::PROVIDERS_DISPLAY_ORDER`]. All static facts —
+/// display name, binary name, sniff binding, and the primary user-level
+/// config path — are sourced from the central provider catalog via
+/// [`provider_info`]. The first element of `info.config_paths` is treated
+/// as the primary user-level config path; consult the field documentation
+/// on [`crate::provider::ProviderInfo::config_paths`] for the convention.
 pub fn discover_agents_full() -> Vec<AgentInfo> {
     let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("~"));
     let ai_clients = InstalledAiClients::new();
 
-    // Provider configs: (Provider, config_path, AiCli)
-    let providers = [
-        (
-            Provider::Claude,
-            home.join(".claude").join("settings.json"),
-            AiCli::Claude,
-        ),
-        (
-            Provider::Codex,
-            home.join(".codex").join("config.toml"),
-            AiCli::Codex,
-        ),
-        (
-            Provider::Gemini,
-            home.join(".gemini").join("settings.json"),
-            AiCli::GeminiCli,
-        ),
-        (
-            Provider::Goose,
-            home.join(".config").join("goose").join("config.yaml"),
-            AiCli::Goose,
-        ),
-        (
-            Provider::KimiCode,
-            home.join(".kimi").join("config.json"),
-            AiCli::KimiCli,
-        ),
-        (
-            Provider::OpenCode,
-            home.join(".config").join("opencode").join("opencode.json"),
-            AiCli::Opencode,
-        ),
-        (
-            Provider::QwenCode,
-            home.join(".qwen").join("settings.json"),
-            AiCli::QwenCli,
-        ),
-        (
-            Provider::RooCode,
-            home.join(".roo").join("settings.json"),
-            AiCli::Roo,
-        ),
-    ];
-
-    providers
+    PROVIDERS_DISPLAY_ORDER
         .into_iter()
-        .map(|(provider, config_path, ai_cli)| {
-            let config_exists = config_path.exists();
-            let on_path = ai_clients.is_installed(ai_cli);
+        .map(|provider| {
+            let info = provider_info(provider);
+            let primary = info
+                .config_paths
+                .first()
+                .expect("every provider must declare at least one config path")
+                .resolve_with_home(&home);
+            let config_exists = primary.exists();
+            let on_path = ai_clients.is_installed(info.sniff_binding);
 
             AgentInfo {
                 provider,
                 config_exists,
                 on_path,
-                display_name: ai_cli.display_name(),
-                binary_name: ai_cli.binary_name(),
-                config_path: if config_exists {
-                    Some(config_path)
-                } else {
-                    None
-                },
+                display_name: info.sniff_binding.display_name(),
+                binary_name: info.sniff_binding.binary_name(),
+                config_path: if config_exists { Some(primary) } else { None },
             }
         })
         .collect()
@@ -151,16 +127,9 @@ pub fn discover_agents_full() -> Vec<AgentInfo> {
 /// config file exists. Use this when you want to register hooks for a provider
 /// that may not have been set up yet.
 pub fn get_configurator(provider: Provider) -> Box<dyn AgentConfigurator> {
-    match provider {
-        Provider::Claude => Box::new(ClaudeConfigurator),
-        Provider::Codex => Box::new(CodexConfigurator),
-        Provider::Gemini => Box::new(GeminiConfigurator),
-        Provider::Goose => Box::new(GooseConfigurator),
-        Provider::KimiCode => Box::new(KimiCodeConfigurator),
-        Provider::OpenCode => Box::new(OpenCodeConfigurator),
-        Provider::QwenCode => Box::new(QwenConfigurator),
-        Provider::RooCode => Box::new(RooConfigurator),
-    }
+    crate::provider::provider_info(provider)
+        .configurator
+        .agent_configurator()
 }
 
 /// Detect available agents by checking for their config files.
@@ -168,63 +137,11 @@ pub fn get_configurator(provider: Provider) -> Box<dyn AgentConfigurator> {
 /// Returns a list of `(Provider, Configurator)` pairs for every provider
 /// whose config directory exists on the current system.
 pub fn detect_agents() -> Vec<(Provider, Box<dyn AgentConfigurator>)> {
-    let mut agents: Vec<(Provider, Box<dyn AgentConfigurator>)> = Vec::new();
-    let home = match dirs::home_dir() {
-        Some(h) => h,
-        None => return agents,
-    };
-
-    // Claude: ~/.claude/settings.json
-    if home.join(".claude").join("settings.json").exists() {
-        agents.push((Provider::Claude, Box::new(ClaudeConfigurator)));
-    }
-
-    // Gemini: ~/.gemini/settings.json
-    if home.join(".gemini").join("settings.json").exists() {
-        agents.push((Provider::Gemini, Box::new(GeminiConfigurator)));
-    }
-
-    // Codex: ~/.codex/config.toml
-    if home.join(".codex").join("config.toml").exists() {
-        agents.push((Provider::Codex, Box::new(CodexConfigurator)));
-    }
-
-    // OpenCode: ~/.config/opencode/opencode.json
-    if home
-        .join(".config")
-        .join("opencode")
-        .join("opencode.json")
-        .exists()
-    {
-        agents.push((Provider::OpenCode, Box::new(OpenCodeConfigurator)));
-    }
-
-    // Qwen Code: ~/.qwen/settings.json
-    if home.join(".qwen").join("settings.json").exists() {
-        agents.push((Provider::QwenCode, Box::new(QwenConfigurator)));
-    }
-
-    // Goose: ~/.config/goose/config.yaml
-    if home
-        .join(".config")
-        .join("goose")
-        .join("config.yaml")
-        .exists()
-    {
-        agents.push((Provider::Goose, Box::new(GooseConfigurator)));
-    }
-
-    // Kimi Code: ~/.kimi/config.json
-    if home.join(".kimi").join("config.json").exists() {
-        agents.push((Provider::KimiCode, Box::new(KimiCodeConfigurator)));
-    }
-
-    // Roo Code: ~/.roo/settings.json
-    if home.join(".roo").join("settings.json").exists() {
-        agents.push((Provider::RooCode, Box::new(RooConfigurator)));
-    }
-
-    agents
+    discover_agents_full()
+        .into_iter()
+        .filter(|info| info.config_exists)
+        .map(|info| (info.provider, get_configurator(info.provider)))
+        .collect()
 }
 
 #[cfg(test)]
@@ -264,6 +181,57 @@ mod tests {
             .unwrap();
         assert_eq!(claude.display_name, "Claude Code");
         assert_eq!(claude.binary_name, "claude");
+    }
+
+    #[test]
+    fn discover_agents_full_uses_catalog_sniff_binding() {
+        let agents = discover_agents_full();
+        for agent in &agents {
+            let info = provider_info(agent.provider);
+            assert_eq!(
+                agent.display_name,
+                info.sniff_binding.display_name(),
+                "{:?}: display_name must come from catalog sniff binding",
+                agent.provider,
+            );
+            assert_eq!(
+                agent.binary_name,
+                info.sniff_binding.binary_name(),
+                "{:?}: binary_name must come from catalog sniff binding",
+                agent.provider,
+            );
+        }
+    }
+
+    #[test]
+    fn discover_agents_full_covers_every_catalog_provider_exactly_once() {
+        let agents = discover_agents_full();
+        let observed: std::collections::HashSet<_> = agents.iter().map(|a| a.provider).collect();
+        let expected: std::collections::HashSet<_> = PROVIDERS_DISPLAY_ORDER.into_iter().collect();
+        assert_eq!(observed, expected);
+        assert_eq!(agents.len(), crate::provider::PROVIDER_COUNT);
+    }
+
+    #[test]
+    fn discover_agents_full_primary_config_path_matches_catalog_template() {
+        let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("~"));
+        let agents = discover_agents_full();
+        for agent in &agents {
+            let info = provider_info(agent.provider);
+            let expected = info
+                .config_paths
+                .first()
+                .expect("every provider must declare at least one config path")
+                .resolve_with_home(&home);
+            // `config_path` is `None` when the file does not exist; in
+            // that case we still want the resolution to match the catalog,
+            // so reconstruct it from the same source.
+            let actual = agent
+                .config_path
+                .clone()
+                .unwrap_or_else(|| expected.clone());
+            assert_eq!(actual, expected, "{:?}", agent.provider);
+        }
     }
 
     #[test]

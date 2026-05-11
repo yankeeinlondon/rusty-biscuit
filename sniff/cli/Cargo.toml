@@ -24,6 +24,7 @@ strum = { version = "0.28", features = ["derive"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+url = "2"
 
 [dev-dependencies]
 assert_cmd = "2"

@@ -5,6 +5,7 @@ use crate::system_prompt::context::LaunchContext;
 use crate::system_prompt::types::*;
 
 const STANDARD_FILENAME: &str = "system-prompt.md";
+const NON_INTERACTIVE_FILENAME: &str = "non-interactive.md";
 
 /// Resolve the effective system prompt source.
 ///
@@ -112,6 +113,49 @@ fn discover_standard_file(
     Ok(None)
 }
 
+/// Resolve candidate prompt texts for non-interactive safety instructions.
+///
+/// The returned list is ordered by precedence and always ends with the
+/// built-in fallback instructions.
+pub fn resolve_non_interactive_candidates(
+    context: &LaunchContext,
+) -> Result<Vec<(SystemPromptSource, String)>, crate::error::ClaudineError> {
+    let mut candidates = Vec::with_capacity(3);
+
+    if let Some(repo_root) = &context.repo_root {
+        let repo_path = repo_root.join(".claudine").join(NON_INTERACTIVE_FILENAME);
+        if repo_path.is_file() {
+            candidates.push((
+                SystemPromptSource::NonInteractiveFile {
+                    path: repo_path.clone(),
+                    scope: StandardPromptScope::Repo,
+                },
+                std::fs::read_to_string(&repo_path)?,
+            ));
+        }
+    }
+
+    if let Some(home_path) =
+        dirs::home_dir().map(|h| h.join(".claudine").join(NON_INTERACTIVE_FILENAME))
+        && home_path.is_file()
+    {
+        candidates.push((
+            SystemPromptSource::NonInteractiveFile {
+                path: home_path.clone(),
+                scope: StandardPromptScope::User,
+            },
+            std::fs::read_to_string(&home_path)?,
+        ));
+    }
+
+    candidates.push((
+        SystemPromptSource::BuiltInNonInteractive,
+        DEFAULT_NON_INTERACTIVE_SYSTEM_PROMPT.to_string(),
+    ));
+
+    Ok(candidates)
+}
+
 /// Build the local scope search list from the launch context.
 ///
 /// When inside a repo/monorepo, returns package -> package-area -> repo.
@@ -160,6 +204,7 @@ fn resolve_file_ref(file_ref: &str, cwd: &Path) -> Result<PathBuf, crate::error:
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serial_test::serial;
     use tempfile::TempDir;
 
     #[test]
@@ -512,5 +557,97 @@ mod tests {
             _ => panic!("Expected StandardDiscovered source"),
         }
         assert_eq!(text, "# CWD Prompt");
+    }
+
+    #[test]
+    #[serial]
+    fn non_interactive_candidates_prefer_repo_then_home_then_builtin() {
+        let tmp = TempDir::new().unwrap();
+        let repo = tmp.path().join("repo");
+        let home = tmp.path().join("home");
+        std::fs::create_dir_all(repo.join(".claudine")).unwrap();
+        std::fs::create_dir_all(home.join(".claudine")).unwrap();
+        std::fs::write(
+            repo.join(".claudine").join("non-interactive.md"),
+            "Repo appendix",
+        )
+        .unwrap();
+        std::fs::write(
+            home.join(".claudine").join("non-interactive.md"),
+            "Home appendix",
+        )
+        .unwrap();
+
+        unsafe {
+            std::env::set_var("HOME", &home);
+        }
+
+        let context = LaunchContext {
+            cwd: repo.clone(),
+            repo_root: Some(repo.clone()),
+            package_area_root: None,
+            package_root: None,
+        };
+
+        let candidates = resolve_non_interactive_candidates(&context).unwrap();
+
+        unsafe {
+            std::env::remove_var("HOME");
+        }
+
+        assert_eq!(candidates.len(), 3);
+        assert!(matches!(
+            candidates[0].0,
+            SystemPromptSource::NonInteractiveFile {
+                scope: StandardPromptScope::Repo,
+                ..
+            }
+        ));
+        assert_eq!(candidates[0].1, "Repo appendix");
+        assert!(matches!(
+            candidates[1].0,
+            SystemPromptSource::NonInteractiveFile {
+                scope: StandardPromptScope::User,
+                ..
+            }
+        ));
+        assert_eq!(candidates[1].1, "Home appendix");
+        assert!(matches!(
+            candidates[2].0,
+            SystemPromptSource::BuiltInNonInteractive
+        ));
+        assert_eq!(candidates[2].1, DEFAULT_NON_INTERACTIVE_SYSTEM_PROMPT);
+    }
+
+    #[test]
+    #[serial]
+    fn non_interactive_candidates_use_builtin_when_no_files_exist() {
+        let tmp = TempDir::new().unwrap();
+        let home = tmp.path().join("home");
+        std::fs::create_dir_all(&home).unwrap();
+
+        unsafe {
+            std::env::set_var("HOME", &home);
+        }
+
+        let context = LaunchContext {
+            cwd: tmp.path().to_path_buf(),
+            repo_root: None,
+            package_area_root: None,
+            package_root: None,
+        };
+
+        let candidates = resolve_non_interactive_candidates(&context).unwrap();
+
+        unsafe {
+            std::env::remove_var("HOME");
+        }
+
+        assert_eq!(candidates.len(), 1);
+        assert!(matches!(
+            candidates[0].0,
+            SystemPromptSource::BuiltInNonInteractive
+        ));
+        assert_eq!(candidates[0].1, DEFAULT_NON_INTERACTIVE_SYSTEM_PROMPT);
     }
 }

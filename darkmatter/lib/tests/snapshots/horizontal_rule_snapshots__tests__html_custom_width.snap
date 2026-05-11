@@ -1,0 +1,62 @@
+---
+source: darkmatter/lib/tests/horizontal_rule_snapshots.rs
+expression: result
+---
+<style>
+.code-block {
+    background-color: #111b27;
+    border-radius: 6px;
+    margin: 1em 0;
+    overflow-x: auto;
+}
+
+.code-block-title {
+    background-color: #07111d;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    padding: 0.5em 1em;
+    font-weight: bold;
+    border-radius: 6px 6px 0 0;
+}
+
+.code-table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+.ln-gutter {
+    padding: 0.25em 0.5em;
+    text-align: right;
+    user-select: none;
+    color: #636d83;
+    border-right: 1px solid rgba(255, 255, 255, 0.1);
+    width: 1%;
+}
+
+.code-content {
+    padding: 0.25em 1em;
+}
+
+.highlighted {
+    background-color: rgba(255, 255, 100, 0.1);
+}
+
+pre {
+    margin: 0;
+    padding: 1em;
+}
+
+code {
+    font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+    font-size: 0.9em;
+}
+
+mark {
+    background-color: var(--highlight-bg, #fff3b8);
+    color: var(--highlight-fg, inherit);
+    padding: 0.1em 0.2em;
+    border-radius: 2px;
+}
+</style>
+<svg width="50%" height="40" xmlns="http://www.w3.org/2000/svg" style="display: block; margin: 0 auto 0 auto; --hr-weight: 4; --hr-color: currentColor; --hr-width: 50%;">
+  <path d="M0 20 Q 10 10 20 20 T 40 20 T 60 20 T 80 20 T 100 20 T 120 20 T 140 20 T 160 20 T 180 20 T 200 20" stroke="var(--hr-color, currentColor)" stroke-width="var(--hr-weight, 4)" fill="none" stroke-linecap="round"/>
+</svg>

@@ -4,8 +4,8 @@
 
 ## Features
 
-- **OS Detection**: Distribution, kernel, architecture, hostname, package managers, locale, timezone, and NTP status
-- **Hardware Detection**: CPU (with SIMD capabilities), GPU (with Metal/Vulkan support), memory, and storage
+- **OS Detection**: Distribution, kernel, architecture, hostname, package managers, locale, timezone, and NTP synchronization status
+- **Hardware Detection**: CPU (with SIMD capabilities), GPU (with Metal/Vulkan support), memory, storage, and audio devices
 - **Network Detection**: Network interfaces with IPv4/IPv6 addresses, status flags, and WAN IP lookup
 - **Filesystem Detection**: Git repository status, monorepo detection, programming language analysis, broad file associations, and EditorConfig formatting rules
 - **Scoped Enrichment**: Refresh git remotes with `--refresh-remotes` and check registries with `--latest-versions`
@@ -26,8 +26,11 @@ cargo install --path sniff/cli
 ### Basic Usage
 
 ```bash
-# Detect everything (JSON output, no subcommand)
+# Show help (no subcommand, no flags)
 sniff
+
+# Full system info as JSON (requires --json without subcommand)
+sniff --json
 
 # Detect with a specific base directory
 sniff --base /path/to/project
@@ -43,12 +46,16 @@ The CLI has two output modes depending on whether a subcommand is used:
 
 | Mode | Output | Use Case |
 |------|--------|----------|
-| No subcommand (`sniff`) | JSON (all data) | Programmatic consumption, piping to `jq` |
+| No subcommand (`sniff`) | Help text | Shows available commands |
+| No subcommand + `--json` (`sniff --json`) | JSON (all data) | Programmatic consumption, piping to `jq` |
 | With subcommand (`sniff cpu`) | Text (default) | Human-readable output |
 
 ```bash
-# Full system info as JSON (no subcommand)
+# Show help
 sniff
+
+# Full system info as JSON
+sniff --json
 
 # Subcommand with text output (default)
 sniff cpu
@@ -80,16 +87,16 @@ sniff structure   # Structural overview of sniff output
 **Hardware Details:**
 
 ```bash
-sniff cpu         # CPU information
-sniff gpu         # GPU information
-sniff memory      # Memory information
-sniff storage     # Storage/disk information
+sniff cpu             # CPU information
+sniff gpu             # GPU information
+sniff memory          # Memory information
+sniff storage         # Storage/disk information
+sniff audio-devices   # Audio input/output devices
 ```
 
 **Filesystem Details:**
 
 ```bash
-sniff git         # Git repository information
 sniff repo        # Repository/monorepo structure
 sniff language    # Programming language results
 sniff files       # Broad file association results
@@ -112,6 +119,71 @@ sniff repo staged-source-code    # Staged source code files
 sniff repo unstaged-source-code  # Unstaged source code files
 sniff repo dirty-files           # All dirty files
 sniff repo staged-files          # All staged files
+sniff repo unstaged-files        # Unstaged modified files
+sniff repo untracked-files       # Untracked files
+```
+
+**Repository Queries:**
+
+```bash
+sniff repo git-status                # Git status with commit history
+sniff repo git-status --history 20   # Show more commits
+sniff repo git-status --compact      # Show only the Status section
+sniff repo hash HEAD                 # Show latest commit details
+sniff repo remote origin             # Inspect remote repository
+sniff repo pr                        # List open pull requests
+sniff repo pr --status merged        # List merged pull requests
+sniff repo pr --status draft --json  # Draft PRs as JSON
+sniff repo pr -v                     # Verbose PR block output
+sniff repo deps                      # Text dependency list
+sniff repo deps --ui                 # Mermaid dependency diagram
+sniff repo packages                  # List all package names (CSV)
+sniff repo packages --md             # Markdown unordered list
+sniff repo packages --list           # Raw list (one per line)
+sniff repo packages --package-area A # Restrict to a single area
+sniff repo packages --verbose        # Annotate each entry with its root dir
+sniff repo package                   # Package name for current directory
+sniff repo package-area              # Package area for current directory
+sniff repo dirty-packages            # Packages with uncommitted changes
+sniff repo has-merge-conflict        # Check for merge conflicts
+```
+
+**Recent Commits and Changes:**
+
+```bash
+sniff repo recent-commits             # Commits from last 3 days (default)
+sniff repo recent-commits 1w          # Commits from last week
+sniff repo recent-commits today       # Today's commits
+sniff repo recent-commits 10          # The last 10 commits
+sniff repo source-code-changes 1w     # Source code changes in last week
+sniff repo documentation-changes 1w   # Documentation changes in last week
+# Filter by scope:
+sniff repo recent-commits --package sniff
+sniff repo recent-commits --package-area sniff
+```
+
+**Justfile Detection:**
+
+```bash
+sniff just                         # Detect justfiles and recipes
+sniff just sniff                   # Filter to justfiles with "sniff" in path
+sniff just --with build            # Show justfiles containing a "build" recipe
+sniff just --with build --grouped  # Group justfiles sharing identical recipe bodies
+sniff just -v                      # Show justfiles with recipe details
+```
+
+**File List Formatting:**
+
+File-listing commands (`dirty-source-code`, `staged-files`, `blast-radius`, etc.) support:
+
+```bash
+--list           # Bullet list (one item per line with `- ` prefix)
+--csv            # Comma-separated on a single line
+--no-path        # Show only basename
+--no-error       # Exit 0 with no output when no results (default: exit 1)
+--on-error MSG   # Custom message when no results found
+--package PKG    # Scope to a specific package
+--package-area A # Scope to a specific package area
 ```
 
 **Programs Subcommands:**
@@ -126,6 +198,16 @@ sniff tts-clients                # TTS clients (say, espeak, piper, etc.)
 sniff terminal-apps              # Terminal apps (alacritty, wezterm, etc.)
 sniff audio                      # Headless audio players (afplay, pacat, etc.)
 sniff agents                     # AI agent/CLI tools (claude, kimi, etc.)
+```
+
+**Program Installation:**
+
+Each program category supports an `install` subcommand:
+
+```bash
+sniff editors install          # Interactive picker
+sniff editors install nvim     # Install a specific program
+sniff programs install         # Pick from all categories
 ```
 
 **Programs Output:**
@@ -154,7 +236,7 @@ actually report the extra data:
 
 ```bash
 # Refresh local remote-tracking data before reporting git sync status
-sniff git --refresh-remotes -v
+sniff repo git-status --refresh-remotes
 
 # Query registries for latest dependency versions
 sniff repo --latest-versions -v
@@ -163,7 +245,7 @@ sniff repo --latest-versions -v
 sniff filesystem --refresh-remotes --latest-versions
 ```
 
-- `sniff git --refresh-remotes` and `sniff filesystem --refresh-remotes` add:
+- `sniff repo git-status --refresh-remotes` and `sniff filesystem --refresh-remotes` add:
 
 - Remote branch lists for each git remote
 - Commit synchronization status across remotes
@@ -174,6 +256,27 @@ sniff filesystem --refresh-remotes --latest-versions
 - Latest version information for dependencies from package registries
 - Package-level update summaries in text output
 - `latest_version`, `is_updatable`, and `has_major_update` fields in JSON output
+
+### Performance Reporting
+
+The `--perf` flag appends structured performance timings to any command:
+
+```bash
+# Rich terminal output: perf appended to stdout
+sniff programs --perf
+sniff repo --perf
+
+# Scriptable text output: perf emitted to stderr (stdout stays clean)
+sniff repo packages --perf        # CSV names on stdout, timings on stderr
+sniff repo package-area --perf    # Area name on stdout, timings on stderr
+sniff repo root --perf            # Path on stdout, timings on stderr
+
+# JSON output: perf embedded in the JSON object
+sniff repo packages --perf --json
+```
+
+Performance data includes total wall-clock time, per-stage timings (calls, total,
+max, last), and aggregated counters (cache hits/misses, etc.).
 
 ## Output Examples
 
@@ -325,6 +428,46 @@ Returns init system and service list:
 }
 ```
 
+### Repo Subcommand JSON Shapes
+
+Every `sniff repo` subcommand emits a focused JSON shape that mirrors
+its text-mode output — no two subcommands return identical JSON. The
+table summarises the contract; see the per-subcommand docs under
+`sniff/docs/cli/` for full schemas and examples.
+
+| Subcommand | JSON shape |
+|---|---|
+| `repo` / `repo structure` | Full `RepoInfo` blob (`is_monorepo`, `packages`, `dependencies`, ...) |
+| `repo git-status` | `GitInfo` object directly (`repo_root`, `status`, `recent`, `branches`, ...) |
+| `repo deps` | `{ packages: [{ name, depends_on, used_by, dependencies, dev_dependencies, ... }] }` |
+| `repo dirty-packages` | `{ scope: "dirty", kind: "packages", names: [...] }` |
+| `repo dirty-package-areas` | `{ scope: "dirty", kind: "package_areas", names: [...] }` |
+| `repo staged-packages` | `{ scope: "staged", kind: "packages", names: [...] }` |
+| `repo staged-package-areas` | `{ scope: "staged", kind: "package_areas", names: [...] }` |
+| `repo unstaged-packages` | `{ scope: "unstaged", kind: "packages", names: [...] }` |
+| `repo unstaged-package-areas` | `{ scope: "unstaged", kind: "package_areas", names: [...] }` |
+| `repo dirty-files` / `staged-files` / `staged-source-code` / `unstaged-source-code` / `dirty-source-code` | `{ scope, kind, paths: [...] }` |
+| `repo packages` | `["pkg-a", "pkg-b", ...]` (array of strings) |
+| `repo package-areas` | `["area-a", "area-b", ...]` (array of strings) |
+| `repo package` / `package-area` | `{ name: "<value>" }` |
+| `repo package-root` / `package-area-root` | `{ root: "<abs-path>" }` (empty string + exit 1 when not in scope) |
+| `repo is-current-package-area-dirty` | `{ dirty: bool }` (exit 0 when true, 1 when false) |
+| `repo package-area-has-source-code-changes` | `{ has_source_code_changes: bool }` (exit 0/1 mirror) |
+| `repo has-merge-conflict` | `{ has_merge_conflict: bool }` (exit 0/1 mirror) |
+| `repo recent-commits <period>` | Full `CommitDescSet` (no `filter` field) |
+| `repo source-code-changes <period>` | Filtered `CommitDescSet` with `"filter": "source_code"` |
+| `repo documentation-changes <period>` | Filtered `CommitDescSet` with `"filter": "documentation"` |
+| `repo hash <ref>` | `{ commit: {...}, files: [...] }` |
+| `repo root` | `{ root: "<abs-path>" }` |
+| `repo remote <url-or-name>` | `RemoteReport` JSON |
+| `repo pr` | Array of `PullRequest` JSON objects |
+| `repo unstaged-files` / `untracked-files` | Array of `FileChange` objects |
+
+`--perf --json` injects a top-level `performance` field into any
+object-shaped output (everything above except the array shapes); for
+array outputs (`packages`, `package-areas`, `pr`, file lists) the
+array is wrapped in `{ data: [...], performance: {...} }`.
+
 ## Architecture
 
 ### CLI Layer (`sniff/cli`)
@@ -351,7 +494,7 @@ The library provides modular detection across six domains:
 - Distribution and version detection
 - Package manager discovery (apt, homebrew, pacman, etc.)
 - Locale and timezone information
-- NTP synchronization status
+- NTP synchronization status (macOS: `sntp`, Windows: `w32tm`, Linux: `timedatectl`)
 
 **Hardware Module:**
 
@@ -359,6 +502,7 @@ The library provides modular detection across six domains:
 - GPU: Metal/Vulkan backend detection, capabilities (raytracing, mesh shaders)
 - Memory: Total, available, and used bytes
 - Storage: Disk type (SSD/HDD), filesystem, mount points
+- Audio: Input/output device enumeration with sample rates (macOS/Linux/Windows)
 
 **Network Module:**
 
@@ -368,7 +512,7 @@ The library provides modular detection across six domains:
 
 **Filesystem Module:**
 
-1. **Git Detection** (`filesystem/git.rs`):
+1. **Git Detection** (`filesystem/git/`):
    - Repository root and current branch
    - Commit history with author/message
    - Dirty file tracking with diffs
@@ -376,7 +520,7 @@ The library provides modular detection across six domains:
    - Remote provider detection (GitHub, GitLab, etc.)
    - Optional remote refresh: branch inventory, default branch, behind status, commit containment
 
-2. **Repository Detection** (`filesystem/repo.rs`):
+2. **Repository Detection** (`filesystem/repo/`):
    - Monorepo tool detection (Cargo workspaces, pnpm, npm, yarn, Nx, Turborepo, Lerna)
    - Package enumeration with glob pattern expansion
    - Per-package language detection
@@ -388,7 +532,19 @@ The library provides modular detection across six domains:
    - Percentage breakdown by file count
    - Primary language identification (excludes markup/config)
 
-4. **Dependency Enrichment** (`package/network.rs`):
+4. **File Type Classification** (`filesystem/file_types/`):
+   - Broad file association (programming, framework, config, styling, docs, data, image, etc.)
+   - Registry-based classification with framework detection
+
+5. **Blast Radius Analysis** (`filesystem/blast_radius.rs`):
+   - Impact analysis: which docs are affected by source code changes
+   - Supports dirty, staged, and last-commit scopes
+
+6. **Justfile Detection** (`filesystem/just.rs`):
+   - Discovers justfiles across the repository
+   - Parses recipe names and bodies
+
+7. **Dependency Enrichment** (`package/network.rs`):
    - Async queries to package registries (crates.io, npm, PyPI)
    - Latest version resolution for `--latest-versions`
    - Manager-specific network implementations (Cargo, npm, pnpm, Yarn, Bun)
@@ -437,18 +593,30 @@ Unified type system for package managers:
 
 ## Technical Details
 
-### Configuration Builder Pattern
+### Detection Plan API
 
-The library uses a builder pattern for flexible configuration:
+The library provides three levels of API for detection control:
 
 ```rust
+// Tier 1: Convenience (all defaults)
+let result = sniff::detect()?;
+
+// Tier 2: Plan-based (fine-grained control)
+use sniff::{detect_with_plan, request::*};
+let plan = DetectionPlan::new()
+    .os(OsRequest::summary())
+    .hardware(HardwareRequest::summary())
+    .without_network();
+let result = detect_with_plan(plan)?;
+
+// Legacy: SniffConfig (coarser boolean toggles, still supported)
 let config = SniffConfig::new()
     .base_dir(PathBuf::from("."))
-    .deep(true)
     .skip_network();
-
-let result = detect_with_config(config)?;
+let result = sniff::detect_with_config(config)?;
 ```
+
+See [../docs/sniff-library-architecture.md](../docs/sniff-library-architecture.md) for the per-subsection cost table, shared-work strategies, and common caller profiles.
 
 ### Verbosity Levels
 
@@ -509,36 +677,42 @@ Remote-aware git inspection (`--refresh-remotes`) refreshes local remote-trackin
 
 ### Remote Repository Inspection
 
-The `sniff git <remote>` flow inspects remote repositories via hosting provider APIs:
+The `sniff repo remote` subcommand inspects remote repositories via hosting provider APIs:
 
 ```bash
 # Inspect a GitHub repository
-sniff git https://github.com/rust-lang/cargo
+sniff repo remote https://github.com/rust-lang/cargo
 
 # SSH URLs also work
-sniff git git@github.com:rust-lang/cargo.git
+sniff repo remote git@github.com:rust-lang/cargo.git
 
 # GitLab (including nested groups)
-sniff git https://gitlab.com/inkscape/inkscape
+sniff repo remote https://gitlab.com/inkscape/inkscape
 
 # Gitea/Codeberg
-sniff git https://codeberg.org/forgejo/forgejo
+sniff repo remote https://codeberg.org/forgejo/forgejo
 
 # Bitbucket
-sniff git https://bitbucket.org/atlassian/python-bitbucket
+sniff repo remote https://bitbucket.org/atlassian/python-bitbucket
 
 # JSON output
-sniff git https://github.com/rust-lang/cargo --json
+sniff repo remote https://github.com/rust-lang/cargo --json
 ```
 
-**From within a repository**, use `sniff git <name>` to inspect a configured remote by name:
+**From within a repository**, inspect a configured remote by name:
 
 ```bash
 # Fetch remote info for 'origin'
-sniff git origin
+sniff repo remote origin
 
 # Or specify a URL directly
-sniff git https://github.com/rust-lang/cargo
+sniff repo remote https://github.com/rust-lang/cargo
+
+# List pull requests
+sniff repo pr
+sniff repo pr --status merged
+sniff repo pr --status draft --json
+sniff repo pr -v
 ```
 
 **Output includes:**
@@ -559,11 +733,39 @@ sniff git https://github.com/rust-lang/cargo
 | Gitea | `GITEA_TOKEN` (or `CODEBERG_TOKEN` for Codeberg) |
 | Bitbucket | `BITBUCKET_USERNAME` + `BITBUCKET_APP_PASSWORD` |
 
+### Authentication Strategy
+
+Sniff uses an **attempt-unauthenticated-first** strategy for remote repository
+inspection (`sniff repo remote`, `sniff repo pr`):
+
+1. The CLI first issues the API request **anonymously**, with no credentials
+   attached — even if relevant token environment variables happen to be set
+   on the calling shell. This lets public-repo lookups succeed without any
+   configuration.
+2. Only if the unauthenticated request is rejected with a `401 Unauthorized`,
+   `403 Forbidden`, or rate-limit error does the CLI surface a
+   `MissingCredentials` error advising the user which environment variable
+   to set.
+3. If credentials *are* provided but the API rejects them, a separate
+   `InvalidCredentials` error is shown.
+
+This means the typical user never has to provide a token to query a public
+repository, and only sees the credential prompt when the resource genuinely
+requires one (private repos, rate limits, etc.).
+
+### Pull Request Limitations by Provider
+
+| Limitation | Affects | Notes |
+|---|---|---|
+| Draft PR filter (`--status draft`) | **Bitbucket Cloud** | Returns an empty list. Bitbucket Cloud has no native concept of draft pull requests. |
+| Verbose body / description | **Bitbucket Cloud** | The list-pull-requests endpoint does not return PR descriptions. The `body` field is `None` for Bitbucket PRs in both default and verbose output. (A per-PR follow-up fetch is a planned enhancement.) |
+| Labels | **Bitbucket Cloud** | The Bitbucket Cloud PR API does not expose labels (labels exist on Issues only). The `labels` field is always empty for Bitbucket PRs. |
+
 ### Error Handling
 
 - Library uses `thiserror` for structured error types
 - CLI displays user-friendly error messages
-- Network errors in `--refresh-remotes` and `--latest-versions` are graceful (shows available data)
+- Network errors with `--refresh-remotes` and `--latest-versions` are graceful (shows available data)
 - Permission denials for network interfaces are handled explicitly
 
 ## Development
@@ -574,59 +776,55 @@ sniff git https://github.com/rust-lang/cargo
 sniff/
 ├── cli/              # Binary crate (this package)
 │   ├── src/
-│   │   ├── main.rs   # CLI argument parsing, config, enrichment
-│   │   └── output.rs # Text and JSON output rendering
+│   │   ├── main.rs       # Entry point, tracing initialization
+│   │   ├── args.rs       # Clap subcommands and argument parsing
+│   │   ├── commands.rs   # Command execution logic
+│   │   ├── install.rs    # Program installation interface
+│   │   └── output/       # Text/JSON rendering with per-topic modules
+│   │       ├── mod.rs, os.rs, hardware.rs, network.rs, filesystem.rs
+│   │       ├── programs.rs, services.rs, remote.rs, recent_commits.rs
+│   │       └── topics.rs, just.rs
 │   └── Cargo.toml
-└── lib/              # Library crate
-    ├── src/
-    │   ├── lib.rs                    # Public API, SniffConfig, detect()
-    │   ├── os.rs                     # OS detection
-    │   ├── hardware.rs               # CPU, GPU, memory, storage
-    │   ├── network.rs                # Network interfaces
-    │   ├── filesystem/
-    │   │   ├── mod.rs                # Filesystem module
-    │   │   ├── git.rs                # Git repository detection
-    │   │   ├── repo.rs               # Monorepo and package detection
-    │   │   └── languages.rs          # Language analysis
-    │   ├── package/
-    │   │   ├── mod.rs                # Package manager types
-    │   │   ├── registry.rs           # Manager registry
-    │   │   ├── network.rs            # Async version resolution
-    │   │   └── stubs.rs              # PackageInfo type
-    │   ├── programs/
-    │   │   ├── mod.rs                # ProgramsInfo coordination
-    │   │   ├── editors.rs            # Editor detection
-    │   │   ├── utilities.rs          # CLI utility detection
-    │   │   ├── pkg_mngrs.rs          # Package manager detection
-    │   │   ├── tts_clients.rs        # TTS client detection
-    │   │   ├── terminal_apps.rs      # Terminal emulator detection
-    │   │   ├── headless_audio.rs     # Audio player detection
-    │   │   ├── ai_cli.rs             # AI CLI tools detection
-    │   │   ├── macos_bundle.rs       # macOS app bundle detection
-    │   │   └── enums.rs              # Program enum definitions
-    │   └── services/
-    │       └── mod.rs                # Init system and service detection
-    └── Cargo.toml
+├── lib/              # Library crate
+│   ├── src/
+│   │   ├── lib.rs            # Public API: detect(), SniffConfig, DetectionPlan
+│   │   ├── request.rs        # Fine-grained detection control types
+│   │   ├── error.rs          # Error types
+│   │   ├── os/               # OS detection (distro, locale, time, package managers)
+│   │   ├── hardware/         # CPU, GPU, memory, storage, audio devices
+│   │   ├── network/          # Network interfaces
+│   │   ├── filesystem/       # Git, repo, languages, docs, blast radius, file types, just
+│   │   │   ├── git/          # Git repo detection, recent commits
+│   │   │   ├── repo/         # Monorepo and package detection
+│   │   │   ├── file_types/   # Broad file type classification
+│   │   │   └── ...           # languages, docs, formatting, blast_radius, just
+│   │   ├── package/          # Package manager abstraction (110+)
+│   │   ├── programs/         # Program detection and install (8 categories)
+│   │   ├── remote/           # Remote repo inspection (GitHub, GitLab, Gitea, Bitbucket)
+│   │   └── services/         # Init system and service detection
+│   └── Cargo.toml
+└── docs/             # Package documentation
 ```
 
 ### Key Dependencies
 
-- **`clap`** (4.5): Command-line argument parsing
+- **`clap`** (4): Command-line argument parsing with derive API
+- **`clap_complete`** (4): Dynamic shell completions
 - **`serde/serde_json`** (1.0): Serialization for JSON output and parsing
-- **`tokio`** (1.48): Async runtime for network operations
-- **`sysinfo`** (0.33): Cross-platform system information
-- **`wgpu`** (23.0): GPU detection and capabilities
-- **`git2`** (0.19): Git repository inspection
-- **`toml`** (0.8): Cargo.toml parsing
-- **`serde_yaml`** (0.9): pnpm-workspace.yaml parsing
-- **`reqwest`** (0.12): HTTP client for registry queries
+- **`tokio`** (1): Async runtime for network operations
+- **`sniff`** (workspace): Core detection library with network and remote features
+- **`biscuit-terminal`** (workspace): Terminal capability detection and styled rendering
+- **`darkmatter`** (workspace): Graph/visualization for dependency diagrams
+- **`strum`** (0.28): Enum iteration for program categories
+- **`inquire`** (0.9): Interactive prompts for program installation
+- **`tracing/tracing-subscriber`**: Structured logging with verbosity levels
 
 ### Testing
 
 ```bash
 # Run all tests
 cargo test -p sniff-cli
-cargo test -p sniff-lib
+cargo test -p sniff
 
 # Test CLI parsing
 cargo test -p sniff-cli cli_parsing
@@ -637,8 +835,8 @@ cargo test -p sniff-cli cli_parsing
 ### CI/CD Integration
 
 ```bash
-# Capture build environment metadata (JSON output by default)
-sniff > build-context.json
+# Capture build environment metadata as JSON
+sniff --json > build-context.json
 
 # Check if running in a monorepo
 if sniff repo --json | jq -e '.is_monorepo'; then
@@ -660,7 +858,7 @@ sniff gpu --json | jq '.[0].capabilities'
 
 ```bash
 # Full system report as JSON
-sniff > system-report.json
+sniff --json > system-report.json
 
 # Quick hardware summary (text output)
 sniff hardware
@@ -673,30 +871,52 @@ sniff hardware
 sniff language -v
 
 # Refresh remote tracking state before printing git status
-sniff git --refresh-remotes -v
+sniff repo git-status --refresh-remotes
 
 # Inspect dependencies with latest versions
 sniff repo --latest-versions --json | jq '.packages[].dependencies'
+
+# Recent commits and changes
+sniff repo recent-commits 1w
+sniff repo source-code-changes today
+
+# Find docs affected by current changes
+sniff blast-radius
 ```
+
+## Shell Completions
+
+Dynamic shell completions are supported for bash, zsh, fish, powershell, and elvish:
+
+```bash
+# Bash (add to ~/.bashrc)
+source <(COMPLETE=bash sniff)
+
+# Zsh (add to ~/.zshrc)
+source <(COMPLETE=zsh sniff)
+
+# Fish (add to ~/.config/fish/config.fish)
+COMPLETE=fish sniff | source
+```
+
+Completions include subcommand names, flag values, package names, and program names.
 
 ## Limitations
 
 - **Network detection** requires appropriate permissions (may fail on restricted systems)
-- **`--latest-versions`** requires network access to package registries
-- **`--refresh-remotes`** may contact configured git remotes and can be slow on large or private repos
+- **`--latest-versions`** requires network access to package registries (scoped to `repo` and `filesystem` subcommands)
+- **`--refresh-remotes`** may contact configured git remotes (scoped to `repo git-status` and `filesystem` subcommands)
 - **Monorepo detection** is limited to known tools (Cargo, npm, pnpm, yarn, Nx, Turborepo, Lerna)
 - **Language detection** is file extension-based (no content analysis)
 
 ## Future Enhancements
 
-See `.ai/plans/2026-01-14.plan-for-sniff-package-roundout.md` for planned features:
+Planned features:
 
 - Lockfile-based resolved version extraction for npm/pnpm/yarn
-- Lockfile resolution for actual versions
-- Package registry abstraction layer
-- Additional workspace standards beyond current built-in detectors
+- GPU detection for Windows (D3D12) and Linux (Vulkan)
 - Runtime environment detection (Docker, VM, cloud providers)
 
 ## License
 
-Part of the Dockhand monorepo. See top-level LICENSE file.
+Part of the Rusty Biscuit monorepo. See top-level LICENSE file.

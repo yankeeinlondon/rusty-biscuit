@@ -5,11 +5,12 @@
 - **Markdown**
     - This is plain Markdown content with no _rendering_ applied
     - This is a plain text file and should be readable in any text or Markdown viewer
-- **Terminal** 
-    - The markdown content is rendered to a Terminal friendly environment 
+- **Terminal**
+    - The markdown content is rendered to a Terminal friendly environment
     - Uses colors themes based on dark/light mode (with manual overrides to a different theme)
     - Uses a variant color theme for code blocks so that the code blocks can stand out from the Markdown prose
     - No inline-HTML added during rendering
+    - Supports the `⌄dim⌄` inline syntax extension, rendering dimmed text with ANSI SGR `2` when the terminal supports it
 - **Enriched Markdown** 
     - Enriches the Markdown with more inline HTML during the rendering stage 
     - The additional inline HTML provide more features but makes the document less ergonomic to edit

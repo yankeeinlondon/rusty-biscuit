@@ -7,6 +7,7 @@
 
 use std::fs;
 use std::path::Path;
+use tracing::warn;
 
 /// Relative path (from repo root) to the user-customisable guardrails file.
 const GUARDRAILS_RELATIVE_PATH: &str = ".claudine/inline-compose.md";
@@ -41,10 +42,21 @@ pub fn load_or_create_guardrails(repo_root: Option<&Path>) -> String {
     }
 
     // Create .claudine/ directory if needed, then write the default template
-    if let Some(parent) = guardrails_path.parent() {
-        let _ = fs::create_dir_all(parent);
+    if let Some(parent) = guardrails_path.parent()
+        && let Err(e) = fs::create_dir_all(parent)
+    {
+        warn!(
+            "failed to create guardrails directory {}: {e}",
+            parent.display()
+        );
+        return DEFAULT_GUARDRAILS.to_string();
     }
-    let _ = fs::write(&guardrails_path, DEFAULT_GUARDRAILS);
+    if let Err(e) = fs::write(&guardrails_path, DEFAULT_GUARDRAILS) {
+        warn!(
+            "failed to write guardrails file {}: {e}",
+            guardrails_path.display()
+        );
+    }
 
     DEFAULT_GUARDRAILS.to_string()
 }

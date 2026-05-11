@@ -10,6 +10,7 @@ base64 = "0.22"
 biscuit-file = { path = "../../biscuit-file/lib", features = ["toml", "yaml"] }
 biscuit-hash = { path = "../../biscuit-hash/lib" }
 chrono = { version = "0.4", features = ["serde"] }
+dirs = "6"
 ec4rs = "1"
 futures = { version = "0.3", optional = true }
 getifaddrs = "0.6.0"
@@ -17,23 +18,27 @@ git2 = "0.20.3"
 hyperpolyglot = "0.1.7"
 ignore = "0.4"
 libc = "0.2"
+metrics = { version = "0.24", optional = true }
 rayon = "1.11.0"
 regex = "1.11"
-reqwest = { version = "0.13", features = ["json"], default-features = false, optional = true }
+reqwest = { version = "0.13", features = ["json", "blocking"], default-features = false, optional = true }
+schematic-define = { path = "../../schematic/define" }
 schematic-schema = { path = "../../schematic/schema" }
-serde = { version = "1.0", features = ["derive"] }
+serde = { version = "1.0", features = ["derive", "rc"] }
 serde_json = "1.0"
 strum = { version = "0.28", features = ["derive"] }
 sysinfo = "0.38.2"
 thiserror = "2.0"
 tracing = "0.1"
 tokio = { version = "1", features = ["rt"], optional = true }
+url = "2"
 urlencoding = "2.1"
 walkdir = "2.5"
-which = { version = "8.0.0", features = ["regex", "tracing"] }
+which = { version = "8.0.0", default-features = false, features = ["real-sys"] }
 
 [features]
 default = []
+metrics = ["dep:metrics"]
 network = ["dep:reqwest", "dep:tokio", "dep:futures", "reqwest/rustls"]
 remote = ["network"]
 
@@ -41,8 +46,25 @@ remote = ["network"]
 coreaudio-sys = { version = "0.2", default-features = false, features = ["core_audio"] }
 core-foundation = "0.10"
 
+[target.'cfg(target_os = "linux")'.dependencies]
+zbus = "5"
+
+[target.'cfg(target_os = "windows")'.dependencies]
+windows = { version = "0.62", features = [
+    "Win32_Foundation",
+    "Win32_System_Services",
+    "Win32_System_Environment",
+] }
+winreg = "0.55"
+
 [dev-dependencies]
+criterion = { version = "0.5", features = ["html_reports"] }
 proptest = "1"
+serial_test = "3"
 tempfile = "3"
 tokio = { version = "1", features = ["rt", "macros"] }
 wiremock = "0.6"
+
+[[bench]]
+name = "perf"
+harness = false

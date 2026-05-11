@@ -14,7 +14,15 @@ pub fn render_toc_links(
     file_path: &str,
     options: &TocLinkingOptions,
     filter: &HeadingFilter,
+    indent: &str,
+    inferred_indent: Option<&str>,
 ) -> String {
+    let effective_indent = if indent.is_empty() {
+        inferred_indent.unwrap_or("")
+    } else {
+        indent
+    };
+
     let links: Vec<String> = headings
         .iter()
         .filter(|h| options.levels.includes(h.level))
@@ -25,12 +33,27 @@ pub fn render_toc_links(
             } else {
                 apply_cleanup(&h.title, &options.cleanup_services)
             };
-            format!("- [{}]({}#{})", display, file_path, h.slug)
+            format!(
+                "{}- [{}]({}#{})",
+                effective_indent, display, file_path, h.slug
+            )
         })
         .collect();
 
     if links.is_empty() {
-        options.empty_text.clone().unwrap_or_default()
+        match &options.empty_text {
+            Some(text) => {
+                if text.contains('\n') {
+                    text.lines()
+                        .map(|line| format!("{}{}", effective_indent, line))
+                        .collect::<Vec<_>>()
+                        .join("\n")
+                } else {
+                    format!("{}{}", effective_indent, text)
+                }
+            }
+            None => String::new(),
+        }
     } else {
         links.join("\n")
     }
@@ -44,7 +67,13 @@ mod tests {
     use crate::markdown::toc::MarkdownTocNode;
 
     fn make_heading(level: u8, title: &str, slug: &str) -> MarkdownTocNode {
-        MarkdownTocNode::new(HeadingLevel::new(level).unwrap(), title.to_string(), slug.to_string(), (0, 0), (0, 0))
+        MarkdownTocNode::new(
+            HeadingLevel::new(level).unwrap(),
+            title.to_string(),
+            slug.to_string(),
+            (0, 0),
+            (0, 0),
+        )
     }
 
     fn default_filter() -> HeadingFilter {
@@ -58,7 +87,7 @@ mod tests {
         let headings: Vec<&MarkdownTocNode> = vec![&h1, &h2];
         let options = TocLinkingOptions::default();
 
-        let result = render_toc_links(&headings, "./doc.md", &options, &default_filter());
+        let result = render_toc_links(&headings, "./doc.md", &options, &default_filter(), "", None);
         assert_eq!(
             result,
             "- [Getting Started](./doc.md#getting-started)\n- [Usage](./doc.md#usage)"
@@ -74,7 +103,7 @@ mod tests {
         let mut options = TocLinkingOptions::default();
         options.levels.levels.insert(HeadingLevel::H2);
 
-        let result = render_toc_links(&headings, "./doc.md", &options, &default_filter());
+        let result = render_toc_links(&headings, "./doc.md", &options, &default_filter(), "", None);
         assert_eq!(result, "- [Section](./doc.md#section)");
     }
 
@@ -83,17 +112,19 @@ mod tests {
         let headings: Vec<&MarkdownTocNode> = vec![];
         let options = TocLinkingOptions::default();
 
-        let result = render_toc_links(&headings, "./doc.md", &options, &default_filter());
+        let result = render_toc_links(&headings, "./doc.md", &options, &default_filter(), "", None);
         assert_eq!(result, "");
     }
 
     #[test]
     fn empty_result_with_text() {
         let headings: Vec<&MarkdownTocNode> = vec![];
-        let mut options = TocLinkingOptions::default();
-        options.empty_text = Some("no results".to_string());
+        let options = TocLinkingOptions {
+            empty_text: Some("no results".to_string()),
+            ..Default::default()
+        };
 
-        let result = render_toc_links(&headings, "./doc.md", &options, &default_filter());
+        let result = render_toc_links(&headings, "./doc.md", &options, &default_filter(), "", None);
         assert_eq!(result, "no results");
     }
 
@@ -102,10 +133,12 @@ mod tests {
         let h = make_heading(2, "🚀 Getting Started", "getting-started");
         let headings: Vec<&MarkdownTocNode> = vec![&h];
 
-        let mut options = TocLinkingOptions::default();
-        options.cleanup_services = vec![CleanupService::EmojiLeader];
+        let options = TocLinkingOptions {
+            cleanup_services: vec![CleanupService::EmojiLeader],
+            ..Default::default()
+        };
 
-        let result = render_toc_links(&headings, "./doc.md", &options, &default_filter());
+        let result = render_toc_links(&headings, "./doc.md", &options, &default_filter(), "", None);
         // Display text has emoji stripped, but slug is unchanged
         assert_eq!(result, "- [Getting Started](./doc.md#getting-started)");
     }
@@ -121,7 +154,59 @@ mod tests {
             "../relative/path.md",
             &options,
             &default_filter(),
+            "",
+            None,
         );
         assert!(result.contains("../relative/path.md#test"));
+    }
+
+    #[test]
+    fn indented_output_two_levels() {
+        let h1 = make_heading(2, "Getting Started", "getting-started");
+        let h2 = make_heading(2, "Usage", "usage");
+        let headings: Vec<&MarkdownTocNode> = vec![&h1, &h2];
+        let options = TocLinkingOptions::default();
+
+        let result = render_toc_links(
+            &headings,
+            "./doc.md",
+            &options,
+            &default_filter(),
+            "    ",
+            None,
+        );
+        assert_eq!(
+            result,
+            "    - [Getting Started](./doc.md#getting-started)\n    - [Usage](./doc.md#usage)"
+        );
+    }
+
+    #[test]
+    fn indented_output_empty_text() {
+        let headings: Vec<&MarkdownTocNode> = vec![];
+        let options = TocLinkingOptions {
+            empty_text: Some("no results".to_string()),
+            ..Default::default()
+        };
+
+        let result = render_toc_links(
+            &headings,
+            "./doc.md",
+            &options,
+            &default_filter(),
+            "  ",
+            None,
+        );
+        assert_eq!(result, "  no results");
+    }
+
+    #[test]
+    fn no_indent_at_root() {
+        let h1 = make_heading(2, "Getting Started", "getting-started");
+        let headings: Vec<&MarkdownTocNode> = vec![&h1];
+        let options = TocLinkingOptions::default();
+
+        let result = render_toc_links(&headings, "./doc.md", &options, &default_filter(), "", None);
+        assert_eq!(result, "- [Getting Started](./doc.md#getting-started)");
     }
 }

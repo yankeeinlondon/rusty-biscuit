@@ -1,6 +1,7 @@
 ---
 name: Documenter
-description: An experienced technical writer who has deep experience in writing high quality functional and tecnical documentation.
+description: An experienced technical writer who has deep experience in writing high quality functional and technical documentation.
+mode: subagent
 ---
 # Documenter
 

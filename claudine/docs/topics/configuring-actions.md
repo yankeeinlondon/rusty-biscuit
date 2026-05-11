@@ -157,7 +157,7 @@ Spawn an external command asynchronously without waiting for completion or inspe
 
 ### `message`
 
-Send a message to the configured messaging destination (Slack, Discord, Signal, or WhatsApp). Fire-and-forget -- delivery is async and does not block the pipeline. Empty messages after template interpolation are silently skipped.
+Send a message to the configured messaging destination (Slack, Discord, Signal, WhatsApp, or webhooks). Fire-and-forget -- delivery is async and does not block the pipeline. Empty messages after template interpolation are silently skipped.
 
 Requires messaging configuration in `settings.messaging` (see [Messaging Configuration](#messaging-configuration) below).
 
@@ -231,6 +231,49 @@ When multiple `call` actions appear in a binding, the last non-`continue` decisi
 }
 ```
 
+## Conditional Execution (`when`)
+
+Every action supports an optional `when` field that controls whether the action runs for a given event. The `when` value is a Darkmatter condition expression evaluated against the live event payload. If the condition evaluates to truthy, the action runs; if falsy or invalid, the action is skipped non-fatally and the rest of the binding continues.
+
+### Available Paths
+
+The following paths can be referenced in `when` expressions:
+
+| Path Prefix | Description |
+|-------------|-------------|
+| `env.*` | Shell environment variables (e.g. `env.CI`) |
+| `extra.*` | Arbitrary extra data attached to the event |
+| `tool_input.*` | Nested fields from the tool input JSON |
+| `tool_response.*` | Nested fields from the tool response JSON |
+| `os.*` | Operating system context (`os.name`, `os.type`, `os.version`, `os.hostname`) |
+| `hardware.*` | Hardware context (`hardware.arch`, `hardware.cpu`, `hardware.cores`) |
+| `git.*` | Git context (`git.branch`, `git.is_dirty`, `git.head_sha`, etc.) |
+| `project.*` | Project context (`project.language`, `project.is_monorepo`, `project.monorepo_tool`) |
+| `ctx.*` | Auto-captured runtime context (`ctx.today`, `ctx.year`, etc.) |
+| Top-level fields | `provider`, `event`, `timestamp`, `session_id`, `cwd`, `tool_name`, `error`, `prompt`, `agent_type`, `notification_type`, `notification_message` |
+
+### Examples
+
+Only speak when on the `main` branch:
+
+```json
+{
+  "type": "speak",
+  "message": "Deploying to production",
+  "when": "git.branch == 'main'"
+}
+```
+
+Only call a policy engine when `ctx.today` is available:
+
+```json
+{
+  "type": "call",
+  "command": "policy-engine",
+  "when": "ctx.today != ''"
+}
+```
+
 ## Template Variables
 
 All string fields in actions (`message`, `template`, `command`, `args`) support Handlebars-style interpolation.
@@ -279,8 +322,10 @@ Shell environment variables are available via `{{env.VAR_NAME}}` with optional d
 
 ```
 {{env.SLACK_WEBHOOK}}
-{{env.MY_VAR | "fallback_value"}}
+{{env.MY_VAR || "fallback_value"}}
 ```
+
+The single-pipe `|` form is no longer supported (see the migration note in unified-events.md §3.7).
 
 ## Messaging Configuration
 
@@ -316,6 +361,26 @@ Secrets can be provided inline (e.g., `bot_token`) or via an environment variabl
 }
 ```
 
+**Discord Webhook:**
+
+```json
+{
+  "provider": "discord_webhook",
+  "webhook_url": "https://discord.com/api/webhooks/123456789/abcdef...",
+  "webhook_url_env": "DISCORD_WEBHOOK_URL"
+}
+```
+
+**Slack Webhook:**
+
+```json
+{
+  "provider": "slack_webhook",
+  "webhook_url": "https://hooks.slack.com/services/T00/B00/XXXX",
+  "webhook_url_env": "SLACK_WEBHOOK_URL"
+}
+```
+
 **Signal:**
 
 ```json
@@ -340,6 +405,23 @@ Recipients starting with `+` are treated as phone numbers; other values are trea
 }
 ```
 
+### Env-Only Webhook Configuration
+
+Webhook routes can omit the inline `webhook_url` and rely solely on an environment variable:
+
+```json
+{
+  "provider": "slack_webhook",
+  "webhook_url_env": "DEPLOY_SLACK_WEBHOOK_URL"
+}
+```
+
+This is useful for shared repo configs where the webhook secret should not be committed.
+
+### Desktop Notifications
+
+Desktop notifications are **zero-config** and are not managed through `claudine config`. They are triggered via the `notify` field in composition lifecycle frontmatter only. See [Lifecycle Notifications](lifecycle.md).
+
 ### Example Settings Block
 
 ```json
@@ -357,6 +439,14 @@ Recipients starting with `+` are treated as phone numbers; other values are trea
           "provider": "discord",
           "channel_id": "123456789012345678",
           "bot_token_env": "DISCORD_BOT_TOKEN"
+        },
+        "deploy-webhook": {
+          "provider": "slack_webhook",
+          "webhook_url_env": "DEPLOY_SLACK_WEBHOOK_URL"
+        },
+        "alerts-webhook": {
+          "provider": "discord_webhook",
+          "webhook_url_env": "DISCORD_WEBHOOK_URL"
         }
       }
     }

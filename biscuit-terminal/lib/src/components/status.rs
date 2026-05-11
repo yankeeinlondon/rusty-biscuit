@@ -7,8 +7,9 @@ use crate::components::prose::Prose;
 use crate::components::renderable::Renderable;
 use crate::discovery::detection::{ColorDepth, ColorMode};
 use crate::terminal::Terminal;
-use crate::utils::color::{Tailwind, TailwindColorWrapper};
-use crate::utils::layout::{Layout, RenderableWrapper, WordWrap};
+use crate::utils::color::{Color, Tailwind, TailwindColorWrapper};
+use crate::utils::layout::{Layout, RenderableWrapper};
+use crate::utils::wrap_policy::WordWrap;
 
 // ── Nerd Font icons ── Circular theme ──────────────────────────────────────
 
@@ -19,6 +20,7 @@ const NERD_CIRCULAR_FAILURE: &str = "\u{f057}";
 const NERD_CIRCULAR_WARNING: &str = "\u{f0028}";
 const NERD_CIRCULAR_INFO: &str = "\u{f449}";
 const NERD_CIRCULAR_TOOL_USE: &str = "\u{f425}";
+const NERD_CIRCULAR_SUBAGENT: &str = "\u{f0012}";
 
 // ── Nerd Font icons ── Rounded theme ───────────────────────────────────────
 
@@ -29,6 +31,7 @@ const NERD_ROUNDED_FAILURE: &str = "\u{f136e}";
 const NERD_ROUNDED_WARNING: &str = "\u{f0af}";
 const NERD_ROUNDED_INFO: &str = "\u{f0bd4}";
 const NERD_ROUNDED_TOOL_USE: &str = "\u{f425}";
+const NERD_ROUNDED_SUBAGENT: &str = "\u{f0012}";
 
 // ── Nerd Font icons ── Timeline theme ──────────────────────────────────────
 
@@ -39,6 +42,7 @@ const NERD_TIMELINE_FAILURE: &str = "\u{f1537}";
 const NERD_TIMELINE_WARNING: &str = "\u{f0f95}";
 const NERD_TIMELINE_INFO: &str = "\u{f0bd4}";
 const NERD_TIMELINE_TOOL_USE: &str = "\u{f425}";
+const NERD_TIMELINE_SUBAGENT: &str = "\u{f0012}";
 
 // ── Unicode fallback icons (shared across all themes) ──────────────────────
 
@@ -49,6 +53,7 @@ const FB_FAILURE: &str = "\u{2a2b}"; // ⤫
 const FB_WARNING: &str = "\u{26a0}"; // ⚠
 const FB_INFO: &str = "\u{2139}"; // ℹ
 const FB_TOOL_USE: &str = "\u{1f527}"; // 🔧
+const FB_SUBAGENT: &str = "\u{1f916}"; // 🤖
 
 /// The state of a status item.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -56,10 +61,33 @@ pub enum StatusState {
     NotStarted,
     Active,
     Success,
+    #[serde(alias = "Failure")]
+    Error,
+    #[serde(skip_deserializing)]
+    #[deprecated(note = "use StatusState::Error instead")]
     Failure,
     Warning,
     Info,
     ToolUse,
+    Subagent,
+}
+
+impl StatusState {
+    /// Canonical Tailwind color for this variant.
+    pub fn default_color(&self) -> Color {
+        match self {
+            Self::NotStarted => Color::Tailwind(Tailwind::Gray500),
+            Self::Active => Color::Tailwind(Tailwind::Gray600),
+            Self::Success => Color::Tailwind(Tailwind::Green500),
+            Self::Error => Color::Tailwind(Tailwind::Red500),
+            #[allow(deprecated)]
+            Self::Failure => Color::Tailwind(Tailwind::Red500),
+            Self::Warning => Color::Tailwind(Tailwind::Orange500),
+            Self::Info => Color::Tailwind(Tailwind::Blue500),
+            Self::ToolUse => Color::Tailwind(Tailwind::Purple700),
+            Self::Subagent => Color::Tailwind(Tailwind::Violet500),
+        }
+    }
 }
 
 /// Visual theme controlling the icon set used by [`Status`].
@@ -84,10 +112,10 @@ struct StatusIconDef {
     color_alt: Option<Tailwind>,
 }
 
-/// Lookup table for all 21 (theme, state) icon definitions.
+/// Lookup table for all 24 (theme, state) icon definitions.
 static ICON_LOOKUP: LazyLock<HashMap<(StatusTheme, StatusState), StatusIconDef>> =
     LazyLock::new(|| {
-        let mut m = HashMap::with_capacity(21);
+        let mut m = HashMap::with_capacity(24);
 
         // ── Circular ───────────────────────────────────────────────────
         m.insert(
@@ -117,6 +145,16 @@ static ICON_LOOKUP: LazyLock<HashMap<(StatusTheme, StatusState), StatusIconDef>>
                 color_alt: None,
             },
         );
+        m.insert(
+            (StatusTheme::Circular, StatusState::Error),
+            StatusIconDef {
+                nerd: NERD_CIRCULAR_FAILURE,
+                fallback: FB_FAILURE,
+                color: Tailwind::Red500,
+                color_alt: None,
+            },
+        );
+        #[allow(deprecated)]
         m.insert(
             (StatusTheme::Circular, StatusState::Failure),
             StatusIconDef {
@@ -149,7 +187,16 @@ static ICON_LOOKUP: LazyLock<HashMap<(StatusTheme, StatusState), StatusIconDef>>
             StatusIconDef {
                 nerd: NERD_CIRCULAR_TOOL_USE,
                 fallback: FB_TOOL_USE,
-                color: Tailwind::Purple500,
+                color: Tailwind::Purple700,
+                color_alt: None,
+            },
+        );
+        m.insert(
+            (StatusTheme::Circular, StatusState::Subagent),
+            StatusIconDef {
+                nerd: NERD_CIRCULAR_SUBAGENT,
+                fallback: FB_SUBAGENT,
+                color: Tailwind::Violet500,
                 color_alt: None,
             },
         );
@@ -183,6 +230,16 @@ static ICON_LOOKUP: LazyLock<HashMap<(StatusTheme, StatusState), StatusIconDef>>
             },
         );
         m.insert(
+            (StatusTheme::Rounded, StatusState::Error),
+            StatusIconDef {
+                nerd: NERD_ROUNDED_FAILURE,
+                fallback: FB_FAILURE,
+                color: Tailwind::Red500,
+                color_alt: None,
+            },
+        );
+        #[allow(deprecated)]
+        m.insert(
             (StatusTheme::Rounded, StatusState::Failure),
             StatusIconDef {
                 nerd: NERD_ROUNDED_FAILURE,
@@ -214,7 +271,16 @@ static ICON_LOOKUP: LazyLock<HashMap<(StatusTheme, StatusState), StatusIconDef>>
             StatusIconDef {
                 nerd: NERD_ROUNDED_TOOL_USE,
                 fallback: FB_TOOL_USE,
-                color: Tailwind::Purple500,
+                color: Tailwind::Purple700,
+                color_alt: None,
+            },
+        );
+        m.insert(
+            (StatusTheme::Rounded, StatusState::Subagent),
+            StatusIconDef {
+                nerd: NERD_ROUNDED_SUBAGENT,
+                fallback: FB_SUBAGENT,
+                color: Tailwind::Violet500,
                 color_alt: None,
             },
         );
@@ -248,6 +314,16 @@ static ICON_LOOKUP: LazyLock<HashMap<(StatusTheme, StatusState), StatusIconDef>>
             },
         );
         m.insert(
+            (StatusTheme::Timeline, StatusState::Error),
+            StatusIconDef {
+                nerd: NERD_TIMELINE_FAILURE,
+                fallback: FB_FAILURE,
+                color: Tailwind::Red500,
+                color_alt: None,
+            },
+        );
+        #[allow(deprecated)]
+        m.insert(
             (StatusTheme::Timeline, StatusState::Failure),
             StatusIconDef {
                 nerd: NERD_TIMELINE_FAILURE,
@@ -279,7 +355,16 @@ static ICON_LOOKUP: LazyLock<HashMap<(StatusTheme, StatusState), StatusIconDef>>
             StatusIconDef {
                 nerd: NERD_TIMELINE_TOOL_USE,
                 fallback: FB_TOOL_USE,
-                color: Tailwind::Purple500,
+                color: Tailwind::Purple700,
+                color_alt: None,
+            },
+        );
+        m.insert(
+            (StatusTheme::Timeline, StatusState::Subagent),
+            StatusIconDef {
+                nerd: NERD_TIMELINE_SUBAGENT,
+                fallback: FB_SUBAGENT,
+                color: Tailwind::Violet500,
                 color_alt: None,
             },
         );
@@ -326,7 +411,8 @@ static ICON_LOOKUP: LazyLock<HashMap<(StatusTheme, StatusState), StatusIconDef>>
 /// | Failure    | ⤫        | red-500    |
 /// | Warning    | ⚠        | orange-500 |
 /// | Info       | ℹ        | blue-500   |
-/// | ToolUse    | 🔧        | purple-500 |
+/// | ToolUse    | 🔧        | purple-700 |
+/// | Subagent   | 🤖        | violet-500 |
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Status {
     state: StatusState,
@@ -420,7 +506,7 @@ impl Status {
         let should_colorize = self.color_icons && has_color;
 
         let icon = if should_colorize {
-            let tw_color = match (Terminal::color_mode(), icon_def.color_alt) {
+            let tw_color = match (term.color_mode(), icon_def.color_alt) {
                 (ColorMode::Light, Some(alt)) => alt,
                 _ => icon_def.color,
             };
@@ -467,6 +553,7 @@ impl Renderable for Status {
 }
 
 #[cfg(test)]
+#[allow(deprecated)]
 mod tests {
     use super::*;
 
@@ -695,5 +782,19 @@ mod tests {
         let status = Status::new("Newline test");
         let result = status.display(&term);
         assert!(result.ends_with('\n'));
+    }
+
+    #[test]
+    fn default_color_error_is_red500() {
+        assert_eq!(
+            StatusState::Error.default_color(),
+            Color::Tailwind(Tailwind::Red500)
+        );
+    }
+
+    #[test]
+    fn failure_alias_deserializes_as_error() {
+        let state = serde_json::from_str::<StatusState>("\"Failure\"").unwrap();
+        assert_eq!(state, StatusState::Error);
     }
 }

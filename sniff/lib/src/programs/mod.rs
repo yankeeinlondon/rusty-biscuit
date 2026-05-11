@@ -14,6 +14,7 @@
 //! - **Terminal Apps**: Terminal emulators (alacritty, kitty, wezterm, etc.)
 //! - **Headless Audio**: Background audio players (afplay, pacat, aplay, etc.)
 //! - **AI CLI Tools**: AI-powered coding assistants (claude, aider, goose, etc.)
+//! - **Notification Helpers**: Desktop notification utilities (terminal-notifier, alerter, snoretoast, burnttoast, dunstify, notify-send)
 //!
 //! ## Usage
 //!
@@ -83,6 +84,8 @@
 //!     match source {
 //!         ExecutableSource::Path => println!("Found in PATH: {}", path.display()),
 //!         ExecutableSource::MacOsAppBundle => println!("Found as macOS app: {}", path.display()),
+//!         ExecutableSource::WindowsAppPaths => println!("Found via App Paths: {}", path.display()),
+//!         ExecutableSource::WindowsInstallRoot => println!("Found under install root: {}", path.display()),
 //!     }
 //! }
 //! ```
@@ -92,47 +95,59 @@
 //! - **macOS**: Full bundle detection support
 //! - **Linux/Windows**: Bundle detection returns `None` (PATH-only)
 
-pub mod ai_cli;
-pub mod editors;
+pub mod categories;
+pub mod category_detector;
+pub mod contract;
 pub mod enums;
 pub mod find_program;
-pub mod headless_audio;
-pub mod installer;
+pub mod host_capability;
+pub mod install;
 pub mod inventory;
 pub mod macos_bundle;
-pub mod pkg_mngrs;
+pub mod notification_helpers;
 pub mod schema;
-pub mod terminal_apps;
-pub mod tts_clients;
 pub mod types;
-pub mod utilities;
+#[cfg(target_os = "windows")]
+pub(crate) mod windows_apps;
 
 use serde::{Deserialize, Serialize};
 use tracing::{info_span, instrument};
 
-pub use ai_cli::InstalledAiClients;
-pub use editors::InstalledEditors;
+pub use crate::executable_index::{ExecutableIndex, find_programs_with_source_from_index};
+pub use categories::{
+    InstalledAiClients, InstalledEditors, InstalledHeadlessAudio, InstalledLanguagePackageManagers,
+    InstalledOsPackageManagers, InstalledTerminalApps, InstalledTtsClients, InstalledUtilities,
+};
+pub use category_detector::CategoryDetector;
+pub use contract::{
+    ExecutableSource, InstallationMethod, PrereqProbe, ProgramError, SystemPrerequisite,
+};
 pub use enums::{
-    AiCli, CategoryEnum, Editor, HeadlessAudio, LanguagePackageManager, OsPackageManager,
-    TerminalApp, TtsClient, Utility,
+    AiCli, CategoryEnum, Editor, HeadlessAudio, LanguagePackageManager, NotificationHelper,
+    OsPackageManager, TerminalApp, TtsClient, Utility,
 };
 pub use find_program::{
-    ExecutableIndex, find_program, find_program_with_source, find_programs_parallel,
-    find_programs_with_source_from_index, find_programs_with_source_parallel,
+    find_program, find_program_with_source, find_programs_parallel,
+    find_programs_with_source_parallel,
 };
-pub use headless_audio::InstalledHeadlessAudio;
-pub use installer::{
-    InstallOptions, InstallResult, execute_install, execute_versioned_install, get_install_command,
-    get_versioned_install_command,
+pub use host_capability::{
+    CACHE_SCHEMA_VERSION, HostCapabilities, HostCapabilityCacheFile, default_cache_path,
+    load_host_capabilities_from, save_host_capabilities_to,
+};
+pub use install::{
+    InstallCapturedOutcome, InstallCapturedResult, InstallInterviewDelegate, InstallInterviewEvent,
+    InstallInterviewInput, InstallInterviewOptions, InstallInterviewOutcome, InstallOptions,
+    InstallOutputStream, InstallPlan, InstallPlanOption, InstallPlanReason, InstallResult,
+    InstallStatusKind, RetryChoice, RetryPrompt, RetryPromptChoice, build_install_announcement,
+    build_install_failure_status, build_install_plan, build_install_success_status,
+    build_retry_choice_prose, build_retry_quit_prose, execute_install, execute_versioned_install,
+    get_install_command, get_versioned_install_command, run_install_interview,
 };
 pub use inventory::Program;
 pub use macos_bundle::{find_macos_app_bundle, get_app_bundle_name};
-pub use pkg_mngrs::{InstalledLanguagePackageManagers, InstalledOsPackageManagers};
-pub use schema::{ProgramError, ProgramInfo, ProgramMetadata, VersionFlag, VersionParseStrategy};
-pub use terminal_apps::InstalledTerminalApps;
-pub use tts_clients::InstalledTtsClients;
-pub use types::{CategoryDetector, ExecutableSource, InstallationMethod, ProgramDetector};
-pub use utilities::InstalledUtilities;
+pub use notification_helpers::InstalledNotificationHelpers;
+pub use schema::{ProgramInfo, ProgramMetadata, VersionFlag, VersionParseStrategy};
+pub use types::ProgramDetector;
 
 /// Complete programs detection result.
 ///
@@ -164,6 +179,9 @@ pub struct ProgramsInfo {
 
     /// AI-powered CLI coding tools installed on the system.
     pub ai_clients: InstalledAiClients,
+
+    /// Desktop notification helper utilities installed on the system.
+    pub notification_helpers: InstalledNotificationHelpers,
 }
 
 impl ProgramsInfo {
@@ -183,10 +201,12 @@ impl ProgramsInfo {
     pub fn detect() -> Self {
         use std::sync::Arc;
 
-        // Build the shared executable index once
+        // Build the shared executable index once. Bulk detection benefits from
+        // an eager PATH scan so per-program lookups become O(1) HashMap probes
+        // instead of repeated PATH traversals via `which`.
         let index = {
             let _span = info_span!("build_executable_index").entered();
-            Arc::new(ExecutableIndex::build())
+            Arc::new(ExecutableIndex::build_eager_path())
         };
 
         // Parallelize category detection in pairs using rayon::join
@@ -210,6 +230,8 @@ impl ProgramsInfo {
             || InstalledAiClients::new_with_index(&index),
         );
 
+        let notification_helpers = InstalledNotificationHelpers::new_with_index(&index);
+
         Self {
             editors,
             utilities,
@@ -219,6 +241,7 @@ impl ProgramsInfo {
             terminal_apps,
             headless_audio,
             ai_clients,
+            notification_helpers,
         }
     }
 

@@ -9,9 +9,10 @@ use crate::types::Coordinates;
 pub fn google_maps_url(coords: &Coordinates) -> crate::Result<Url> {
     let mut url = Url::parse("https://www.google.com/maps/search/")
         .map_err(|e| crate::LocationError::GoogleMapsUrl(e.to_string()))?;
-    url.query_pairs_mut()
-        .append_pair("api", "1")
-        .append_pair("query", &format!("{},{}", coords.latitude, coords.longitude));
+    url.query_pairs_mut().append_pair("api", "1").append_pair(
+        "query",
+        &format!("{},{}", coords.latitude, coords.longitude),
+    );
     Ok(url)
 }
 

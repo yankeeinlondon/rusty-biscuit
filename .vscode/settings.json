@@ -160,6 +160,7 @@
         "jeffquast",
         "justfiles",
         "kakoune",
+        "keepalive",
         "keybind",
         "Khronos",
         "Kokoro",
@@ -169,6 +170,7 @@
         "Kwaipilot",
         "Lanczos",
         "langid",
+        "lhga",
         "libalac",
         "libasound",
         "libcanberra",
@@ -251,10 +253,13 @@
         "Nousresearch",
         "nsstr",
         "nsstring",
+        "nvfp",
         "objc",
         "oextended",
         "OKLCH",
         "olmo",
+        "omlx",
+        "oneline",
         "onnx",
         "openapiv",
         "opencode",
@@ -268,6 +273,7 @@
         "paplay",
         "Parsera",
         "Paru",
+        "pathspec",
         "pdfium",
         "peekable",
         "Pico",
@@ -276,6 +282,7 @@
         "pipewire",
         "pixtral",
         "Pkgin",
+        "pkgs",
         "Pkgtool",
         "premade",
         "prettyplease",
@@ -294,6 +301,7 @@
         "Qwen",
         "Raifle",
         "ratatui",
+        "realpath",
         "rebornos",
         "referrerpolicy",
         "Regedit",
@@ -420,5 +428,28 @@
     ],
     "editor.tabSize": 4,
     "editor.detectIndentation": false,
-    "extensions.verifySignature": false
+    "extensions.verifySignature": false,
+    "git.autoRepositoryDetection": false,
+    "git.scanRepositories": [],
+    "git.repositoryScanMaxDepth": 0,
+    "[markdown]": {
+        "editor.unicodeHighlight.ambiguousCharacters": false,
+        "editor.unicodeHighlight.invisibleCharacters": false,
+        "diffEditor.ignoreTrimWhitespace": false,
+        "editor.quickSuggestions": {
+            "comments": "off",
+            "strings": "off",
+            "other": "off"
+        },
+        "togglequotes.chars": [
+            "\"",
+            "'",
+            "`"
+        ],
+        "cSpell.fixSpellingWithRenameProvider": true,
+        "cSpell.advanced.feature.useReferenceProviderWithRename": true,
+        "cSpell.advanced.feature.useReferenceProviderRemove": "/^#+\\s/",
+        "editor.wordWrapColumn": 300,
+        "editor.wordWrap": "bounded"
+    }
 }

@@ -2,6 +2,7 @@
 
 use super::types::{DirectiveKind, ResolvedTarget, TransclusionError};
 use crate::markdown::compose::{ComposeSource, TransclusionOptions};
+use biscuit_terminal::errors::SourceContext;
 use biscuit_file::FileReference;
 use std::path::{Path, PathBuf};
 use tracing::{debug, instrument, trace};
@@ -14,12 +15,13 @@ pub(crate) fn resolve_target(
     options: &TransclusionOptions,
     source: &ComposeSource,
     line: usize,
+    ctx: SourceContext,
 ) -> Result<ResolvedTarget, TransclusionError> {
     debug!("transclusion: resolving target");
     match kind {
         DirectiveKind::Url => resolve_url_target(raw_target, options),
         DirectiveKind::File | DirectiveKind::Code => {
-            let path = resolve_path(raw_target, options, source, line)?;
+            let path = resolve_path(raw_target, kind, options, source, line, ctx)?;
             validate_local_target(kind, &path, options)?;
             Ok(ResolvedTarget::File {
                 id: path.to_string_lossy().to_string(),
@@ -55,9 +57,11 @@ fn resolve_url_target(
 /// since transclusion context is file-relative.
 pub(crate) fn resolve_path(
     raw_target: &str,
+    kind: DirectiveKind,
     options: &TransclusionOptions,
     source: &ComposeSource,
     line: usize,
+    ctx: SourceContext,
 ) -> Result<PathBuf, TransclusionError> {
     trace!(raw_target = %raw_target, "transclusion: resolving path");
     if raw_target.starts_with("http://") || raw_target.starts_with("https://") {
@@ -94,8 +98,10 @@ pub(crate) fn resolve_path(
     if is_file_reference_target(raw_target) {
         if raw_target.starts_with('@') && !options.resolve_repo_root {
             return Err(TransclusionError::InvalidReference {
+                ctx: Box::new(ctx),
                 reference: raw_target.to_string(),
                 line,
+                directive_kind: kind,
             });
         }
 
@@ -286,10 +292,19 @@ pub fn normalize_reference_token(raw: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serial_test::serial;
     use tempfile::tempdir;
 
     fn default_options() -> TransclusionOptions {
         TransclusionOptions::default()
+    }
+
+    fn dummy_ctx(content: &str) -> SourceContext {
+        SourceContext::new(
+            PathBuf::from("/test.md"),
+            PathBuf::from("test.md"),
+            content,
+        )
     }
 
     #[test]
@@ -304,9 +319,11 @@ mod tests {
 
         let resolved = resolve_path(
             "./child.md",
+            DirectiveKind::File,
             &default_options(),
-            &ComposeSource::File(source_path),
+            &ComposeSource::File(source_path.clone()),
             1,
+            dummy_ctx("# root"),
         )
         .unwrap();
 
@@ -315,8 +332,15 @@ mod tests {
 
     #[test]
     fn relative_requires_source_context() {
-        let err =
-            resolve_path("./child.md", &default_options(), &ComposeSource::Unknown, 2).unwrap_err();
+        let err = resolve_path(
+            "./child.md",
+            DirectiveKind::File,
+            &default_options(),
+            &ComposeSource::Unknown,
+            2,
+            dummy_ctx(""),
+        )
+        .unwrap_err();
         assert!(matches!(
             err,
             TransclusionError::MissingSourceContext { .. }
@@ -324,6 +348,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn resolves_repo_root_reference() {
         let dir = tempdir().unwrap();
         // Canonicalize the tempdir root to resolve macOS /var -> /private/var symlink
@@ -347,9 +372,11 @@ mod tests {
 
         let resolved = resolve_path(
             "@/shared.md",
+            DirectiveKind::File,
             &default_options(),
             &ComposeSource::File(source_path),
             1,
+            dummy_ctx("# root"),
         );
 
         std::env::set_current_dir(&original_dir).unwrap();
@@ -363,7 +390,15 @@ mod tests {
         let mut opts = default_options();
         opts.resolve_repo_root = false;
 
-        let err = resolve_path("@/shared.md", &opts, &ComposeSource::Unknown, 1).unwrap_err();
+        let err = resolve_path(
+            "@/shared.md",
+            DirectiveKind::File,
+            &opts,
+            &ComposeSource::Unknown,
+            1,
+            dummy_ctx(""),
+        )
+        .unwrap_err();
 
         assert!(matches!(err, TransclusionError::InvalidReference { .. }));
     }
@@ -396,6 +431,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn resolves_magic_path_prepended() {
         let dir = tempdir().unwrap();
         let root = std::fs::canonicalize(dir.path()).unwrap();
@@ -420,7 +456,14 @@ mod tests {
         opts.magic_paths
             .push((magic_dir.clone(), biscuit_file::PathPosition::Start));
 
-        let resolved = resolve_path("@/special.md", &opts, &ComposeSource::File(source_path), 1);
+        let resolved = resolve_path(
+            "@/special.md",
+            DirectiveKind::File,
+            &opts,
+            &ComposeSource::File(source_path),
+            1,
+            dummy_ctx("# root"),
+        );
 
         std::env::set_current_dir(&original_dir).unwrap();
 
@@ -443,6 +486,7 @@ mod tests {
             &default_options(),
             &ComposeSource::File(source),
             1,
+            dummy_ctx("# root"),
         )
         .unwrap_err();
 

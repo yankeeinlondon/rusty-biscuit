@@ -1,7 +1,32 @@
-# Unified Hooks: Events, Providers, and Dispatch
+# Unified Hooks: Events, Provider Surfaces, and Canonical Actions
 
-Reference for the claudine events module (`claudine/lib/src/events/`), covering the
-unified event model, provider mappings, support levels, and hook resolution pipeline.
+Reference for Claudine's unified event model, covering canonical event names,
+provider-native mappings, support levels, and the current dispatch pipeline.
+
+## Current Model: "Hooks" vs "Actions"
+
+After the configuration refactor, these terms mean different things:
+
+- **Hooks** are the provider-side ingress surfaces Claudine uses to receive lifecycle events.
+  Depending on the provider, that may mean native config-file hooks, a notify command,
+  stream parsing, wire/RPC traffic, or wrapper-managed capture.
+- **Actions** are the user-configured responses Claudine executes when a canonical
+  `AgenticEvent` fires. These live in `ClaudineConfig.actions`, keyed only by canonical
+  event, not by provider.
+
+The old per-provider config model built around `HookerConfig`, `ProviderConfig`, and a
+provider-scoped `events` map has been removed. The current persisted config is centered on:
+
+- `ClaudineConfig` for user scope (`~/.claudine/config.json`)
+- `RepoOverrideConfig` for repo scope (`<repo>/.claudine/config.json`)
+- `actions: HashMap<AgenticEvent, Vec<HookAction>>` as the canonical event-to-action map
+
+Important implications:
+
+- `claudine hooks` is about provider support and registration state.
+- `claudine actions` is about which canonical events have configured actions.
+- Logging and Protect are no longer modeled as hook actions. They are global services
+  applied by the dispatch pipeline.
 
 ## Event Mapping to Providers
 
@@ -9,7 +34,7 @@ Each provider uses its own native event names. Claudine normalizes them into a s
 `AgenticEvent` enum. The tables below show how each canonical event maps to
 provider-native identifiers.
 
-```
+```txt
 Table 1: Claude, Codex, Gemini, Goose
 
 Event              Claude            Codex              Gemini       Goose
@@ -58,7 +83,7 @@ Blank = not supported or no specific native name.
 
 ## Event Support by Provider
 
-Support level indicates _how_ an event can be captured from a given provider.
+Support level indicates how Claudine can capture an event from a provider.
 
 | Event | Claude | Codex | Gemini | Goose | Kimi Code | OpenCode | Qwen Code | Roo Code |
 |---|---|---|---|---|---|---|---|---|
@@ -80,19 +105,20 @@ Support level indicates _how_ an event can be captured from a given provider.
 | notification | Hook | NonHook | Hook | NonHook | NonHook | Hook | NonHook | NonHook |
 
 **Legend:**
-- **Hook** -- Event can be registered via config-file modification (settings.json hooks, opencode.json plugins, config.toml notify).
-- **NonHook** -- Event requires alternative capture (wrapper script, wire-mode JSON-RPC proxy, JSONL stream parsing).
-- **--** -- Not supported by this provider.
+
+- **Hook**: provider has a native registration surface Claudine can install into.
+- **NonHook**: event is observable through wrappers, streams, RPC, SDK callbacks, or other
+  non-config registration surfaces.
+- **--**: not supported by this provider.
 
 ## Key Types and Structures
 
 ### `AgenticEvent` enum
 
-**File:** `agentic_event.rs`
+**File:** `claudine/lib/src/events/agentic_event.rs`
 
-Normalized event names across all 8 supported agentic CLI providers. Each variant
-represents a lifecycle moment that at least 2 providers expose. Provider adapters
-map their native events to the appropriate variant.
+Normalized event names across all supported providers. Each variant represents a
+lifecycle moment Claudine can observe or react to.
 
 **Derives:** `Debug`, `Clone`, `Copy`, `PartialEq`, `Eq`, `Hash`, `Serialize`, `Deserialize`
 
@@ -109,67 +135,62 @@ map their native events to the appropriate variant.
 | `AfterTool` | `after_tool` | Tool call completed successfully |
 | `ToolError` | `tool_error` | Tool call failed |
 | `PermissionRequest` | `permission_request` | Agent is requesting user permission |
-| `HumanInTheLoop` | `human_in_the_loop` | Agent is asking user a clarifying question |
-| `TurnComplete` | `turn_complete` | Agent turn (request/response cycle) completed |
-| `TurnError` | `turn_error` | Agent turn failed with an error |
+| `HumanInTheLoop` | `human_in_the_loop` | Agent is asking the user for input or clarification |
+| `TurnComplete` | `turn_complete` | Agent turn completed |
+| `TurnError` | `turn_error` | Agent turn failed |
 | `SubagentStart` | `subagent_start` | Sub-agent spawned |
 | `SubagentStop` | `subagent_stop` | Sub-agent finished |
 | `BeforeModel` | `before_model` | Before sending prompt to the model |
 | `AfterModel` | `after_model` | After receiving response from the model |
-| `BeforeCompact` | `before_compact` | Before context compaction/summarization |
+| `BeforeCompact` | `before_compact` | Before context compaction or summarization |
 | `Notification` | `notification` | Provider-specific notification |
 
 **Key methods:**
 
-- `ALL: [AgenticEvent; 16]` -- Constant array of all variants in display order.
-- `from_slug(name: &str) -> Option<Self>` -- Parse a canonical `snake_case` event name.
-- `parse_name_or_alias(input: &str) -> Option<Self>` -- Parse from canonical name _or_ any provider-native alias. Case-insensitive, tolerant of `-`/`_`/camelCase separators. Tries canonical first, then shared native mappings, then all providers' native names.
-- `abbrev(&self) -> &'static str` -- Short emoji abbreviation for table column headers.
-- `description(&self) -> &'static str` -- Human-readable description.
-- `response_schema(&self) -> &'static str` -- Describes fields available in the event payload.
-- `return_schema(&self) -> &'static str` -- Describes what a hook can return to influence agent behavior.
+- `ALL: [AgenticEvent; 16]` returns all variants in display order.
+- `from_slug(name: &str) -> Option<Self>` parses a canonical `snake_case` event name.
+- `parse_name_or_alias(input: &str) -> Option<Self>` parses canonical names and provider-native aliases.
+- `description(&self) -> &'static str` returns human-readable descriptions.
+- `response_schema(&self) -> &'static str` describes payload fields available to actions.
+- `return_schema(&self) -> &'static str` describes what a blocking response can return.
 
 ### `EventMeta` struct
 
-**File:** `event_meta.rs`
+**File:** `claudine/lib/src/events/event_meta.rs`
 
-Normalized metadata attached to every fired event. Provider adapters populate this
-from their native event payloads. The `extra` map carries provider-specific fields
-that do not fit the common schema.
+Normalized metadata attached to every incoming event. Provider adapters populate this
+from native payloads; provider-specific fields that do not fit the shared schema are
+stored in `extra`.
 
 **Fields:**
 
 | Field | Type | Description |
 |---|---|---|
-| `provider` | `Provider` | Which agent provider fired the event |
-| `event` | `AgenticEvent` | The shared event that was matched |
+| `provider` | `Provider` | Which provider fired the event |
+| `event` | `AgenticEvent` | Shared canonical event |
 | `timestamp` | `DateTime<Utc>` | UTC timestamp of when the event was received |
 | `session_id` | `Option<String>` | Session or thread identifier |
 | `cwd` | `Option<String>` | Current working directory at event time |
-| `tool_name` | `Option<String>` | Tool name (for tool-related events) |
-| `tool_input` | `Option<Value>` | Tool input/arguments |
-| `tool_response` | `Option<Value>` | Tool output/response (post-tool events) |
-| `error` | `Option<String>` | Error message (failure events) |
-| `prompt` | `Option<String>` | User's prompt text (prompt-related events) |
-| `agent_type` | `Option<String>` | Agent/subagent type or identifier |
+| `tool_name` | `Option<String>` | Tool name for tool-related events |
+| `tool_input` | `Option<Value>` | Tool input or arguments |
+| `tool_response` | `Option<Value>` | Tool output or response |
+| `error` | `Option<String>` | Error text |
+| `prompt` | `Option<String>` | Prompt text |
+| `agent_type` | `Option<String>` | Agent or subagent type |
 | `notification_type` | `Option<String>` | Notification type string |
-| `notification_message` | `Option<String>` | Notification message text |
+| `notification_message` | `Option<String>` | Notification body |
 | `extra` | `HashMap<String, Value>` | Provider-specific fields |
-| `env` | `EnvironmentContext` | Snapshot of host and repository environment |
+| `env` | `EnvironmentContext` | Snapshot of host and repo environment |
 
-**Key methods:**
+**Key method:**
 
-- `dummy_with_env(env: EnvironmentContext) -> Self` -- Create a minimal `EventMeta` with only environment context populated, useful for resolving context variables without a real event.
+- `dummy_with_env(env: EnvironmentContext) -> Self` creates a minimal metadata value with environment attached.
 
 ### `Provider` enum
 
-**File:** `provider.rs`
+**File:** `claudine/lib/src/events/provider.rs`
 
 Supported agentic CLI providers. Serialized as `snake_case`.
-
-**Derives:** `Debug`, `Clone`, `Copy`, `PartialEq`, `Eq`, `Hash`, `Serialize`, `Deserialize`
-
-**Attributes:** `#[serde(rename_all = "snake_case")]`, `#[non_exhaustive]`
 
 **Variants (8):**
 
@@ -186,269 +207,318 @@ Supported agentic CLI providers. Serialized as `snake_case`.
 
 **Key methods:**
 
-- `as_slug(&self) -> &'static str` -- Stable snake_case identifier for file paths and config keys.
-- `cli_aliases(&self) -> &'static [&'static str]` -- Common CLI aliases accepted for this provider.
-- `parse_cli_name(input: &str) -> Option<Self>` -- Parse from a CLI-facing name or alias (case-insensitive, separator-tolerant).
-- `fuzzy_match_cli_name(input: &str) -> Option<Self>` -- Fuzzy match via exact, prefix, then contains strategies.
-- `detect_from_payload(raw: &Value) -> Option<Self>` -- Detect provider from raw JSON payload shape (checks for `hook_event_name`, `type`+`thread_id`, `event_type`, `event_name`, `method`).
-- `event_support_level(&self, event: &AgenticEvent) -> EventSupportLevel` -- Returns Hook, NonHook, or NotSupported for each event.
-- `supports_event(&self, event: &AgenticEvent) -> bool` -- Whether the provider supports the event via any method.
-- `supports_event_via_hook(&self, event: &AgenticEvent) -> bool` -- Whether the provider supports the event via native hooks (config-file based).
-- `native_event_name(&self, event: &AgenticEvent) -> Option<&'static str>` -- Returns the provider-native event name. `None` if unsupported, `Some("")` if supported but no specific name.
-- `supports_skills(&self) -> bool` -- Whether the provider supports skill discovery (Claude, Codex, Gemini, OpenCode, QwenCode, RooCode).
-- `docs_url(&self) -> &'static str` -- Documentation URL for the provider.
-- `sniff_ai_cli(&self) -> AiCli` -- Corresponding `sniff::programs::AiCli` variant for install detection.
-
-**Constants:**
-
-- `PROVIDERS_DISPLAY_ORDER: [Provider; 8]` -- Canonical display order for matrix-style reporting.
+- `as_slug(&self) -> &'static str` returns the stable identifier used in CLI/config paths.
+- `parse_cli_name(input: &str) -> Option<Self>` parses user-facing names or aliases.
+- `fuzzy_match_cli_name(input: &str) -> Option<Self>` resolves exact, prefix, then contains matches.
+- `detect_from_payload(raw: &Value) -> Option<Self>` detects provider from raw payload shape.
+- `event_support_level(&self, event: &AgenticEvent) -> EventSupportLevel` returns Hook, NonHook, or NotSupported.
+- `supports_event_via_hook(&self, event: &AgenticEvent) -> bool` indicates whether native hook registration exists.
+- `native_event_name(&self, event: &AgenticEvent) -> Option<&'static str>` returns the provider-native name when one exists.
 
 ### `EventSupportLevel` enum
 
-**File:** `provider.rs`
+**File:** `claudine/lib/src/events/provider.rs`
 
-Describes the level of support a provider has for a given event.
-
-**Variants:**
+Describes the capture surface Claudine has for a provider/event pair.
 
 | Variant | Meaning |
 |---|---|
-| `Hook` | Event is supported via native hooks (config-file based). Claudine can register handlers by modifying the provider's config file. |
-| `NonHook` | Event is supported via non-hook methods (wrapper scripts, wire-mode proxy, JSONL stream parsing). Not yet fully implemented. |
-| `NotSupported` | Event is not available from this provider. |
-
-**Key methods:**
-
-- `is_supported(&self) -> bool` -- Returns `true` for `Hook` or `NonHook`.
-- `is_hook(&self) -> bool` -- Returns `true` only for `Hook`.
+| `Hook` | Supported through native provider registration |
+| `NonHook` | Supported through a wrapper, stream, RPC, SDK callback, or similar surface |
+| `NotSupported` | Event concept is unavailable on that provider |
 
 ### `ResolvedHook` struct
 
-**File:** `resolved_hook.rs`
+**File:** `claudine/lib/src/events/resolved_hook.rs`
 
-A resolved hook binding ready for execution. This is the output of matching an
-incoming event against the user's configuration -- it bundles together the normalized
-event, the full metadata, and the list of actions to execute.
+A resolved canonical event ready for action execution.
 
 **Fields:**
 
 | Field | Type | Description |
 |---|---|---|
-| `event` | `AgenticEvent` | The normalized event that fired |
-| `meta` | `EventMeta` | Normalized metadata extracted from the native payload |
-| `provider` | `Provider` | The provider that originated this event |
+| `event` | `AgenticEvent` | Canonical event that fired |
+| `meta` | `EventMeta` | Normalized metadata |
+| `provider` | `Provider` | Provider that originated the event |
 | `actions` | `Vec<HookAction>` | Actions to execute in declaration order |
-| `can_block` | `bool` | Whether this hook's event supports blocking the originating CLI |
+| `can_block` | `bool` | Whether the originating provider/event supports a blocking response |
 
 ### `EnvironmentContext` struct
 
-**File:** `environment.rs`
+**File:** `claudine/lib/src/events/environment.rs`
 
-Host and repository environment snapshot. Detected once at session start via
-`sniff::detect_with_config` and cached for the session lifetime. Attached to
-every `EventMeta`.
+Host and repository environment snapshot, detected once and attached to each `EventMeta`.
 
 **Fields:**
 
 | Field | Type | Description |
 |---|---|---|
-| `os` | `OsContext` | OS family, name, version, kernel, hostname, linux family, package managers |
-| `hardware` | `HardwareContext` | CPU arch, brand, cores, total/available memory |
-| `git` | `Option<GitContext>` | Git repo state: root, branch, dirty status, staged/unstaged/untracked counts, HEAD commit, user info, remote info, hosting provider, org/repo names |
-| `repo` | `Option<RepoContext>` | Monorepo detection: tool, root path, package names |
-| `primary_language` | `Option<String>` | Primary programming language detected in the project |
+| `os` | `OsContext` | OS family, version, kernel, hostname, package managers |
+| `hardware` | `HardwareContext` | CPU architecture, model, cores, memory |
+| `git` | `Option<GitContext>` | Git root, branch, dirty state, commit, remote, owner/repo |
+| `repo` | `Option<RepoContext>` | Monorepo detection and root/package information |
+| `primary_language` | `Option<String>` | Primary language detected in the project |
 
 **Key function:**
 
-- `detect_environment(cwd: &Path) -> EnvironmentContext` -- Runs `sniff` with a fast configuration (no network, single commit, no deep inspection) to populate the context.
+- `detect_environment(cwd: &Path) -> EnvironmentContext` builds a full environment snapshot.
+- `detect_environment_fast(cwd: &Path) -> EnvironmentContext` is the lighter-weight path used by `claudine handle`.
 
-### `HookerConfig` and related config types
+## Current Configuration and Runtime Types
 
-**File:** `config.rs`
+### `ClaudineConfig`
 
-Root configuration loaded from `~/.claudine/config.json`. Organized per-provider,
-each with its own set of event bindings.
+**File:** `claudine/lib/src/config/claudine_config.rs`
 
-- **`HookerConfig`** -- Root: `version`, `settings` (GlobalSettings), `providers` (HashMap<Provider, ProviderConfig>).
-- **`ProviderConfig`** -- Contains `events: HashMap<AgenticEvent, EventBinding>`.
-- **`EventBinding`** -- An event's configuration: `enabled` (bool, default true), `actions` (Vec<HookAction>), `matcher` (optional regex filter on tool name, notification type, etc.).
-- **`GlobalSettings`** -- `default_log_target`, `tts` (TtsSettings), `linking` (LinkingSettings).
-- **`TtsSettings`** -- TTS provider, voice, and rate forwarded to biscuit-speaks.
-- **`LinkingSettings`** -- Provider preference ordering and canonical provider slots for skill/command/agent/script linking.
+User-scope Claudine configuration. This is now the primary persisted config model.
 
-### Matrix types
+**Relevant fields:**
 
-**File:** `matrix.rs`
+| Field | Type | Description |
+|---|---|---|
+| `tts` | `TtsValue` | Global TTS defaults or explicit provider/voice config |
+| `messenger` | `Option<ClaudineMessengerConfig>` | Messaging route configuration for `Message` actions |
+| `logging` | `bool` | Enables global JSONL logging for handled events |
+| `protect` | `ProtectConfig` | Enables and configures Protect |
+| `actions` | `HashMap<AgenticEvent, Vec<HookAction>>` | Canonical event-to-action map |
+| `preferred_agent` | `Provider` | Default provider for lazy composition workflows |
+| `canonical_provider` | `Option<Provider>` | Scope-level canonical provider override |
+| `default_sounds` | `DefaultSounds` | Outcome sounds used by the dispatch pipeline |
 
-Structured types for generating support and mapping matrices used by CLI reporting:
+Notes:
 
-- **`EventSupportCell`** -- A (provider, support level) pair.
-- **`EventSupportRow`** -- An event plus a vector of support cells.
-- **`EventNativeMappingCell`** -- A (provider, native event name) pair.
-- **`EventNativeMappingRow`** -- An event plus a vector of mapping cells.
-- **`NativeEventName`** -- Enum: `Unsupported`, `NoSpecificName`, `Named(&'static str)`.
+- Actions are keyed by canonical event only. They are not nested under providers.
+- A missing event key means "no configured actions for that event."
+- Logging and Protect are independent of the `actions` map.
 
-**Key functions:**
+### `RepoOverrideConfig`
 
-- `event_support_matrix(providers: &[Provider]) -> Vec<EventSupportRow>` -- Build the full support matrix.
-- `event_native_mapping_matrix(providers: &[Provider]) -> Vec<EventNativeMappingRow>` -- Build the native-name mapping matrix.
+**File:** `claudine/lib/src/config/claudine_config.rs`
 
-### `SharedNativeEventMapping` struct
+Repo-scope override model loaded from `<repo>/.claudine/config.json`.
 
-**File:** `provider.rs` (crate-internal)
+**Relevant fields:**
 
-Deduplicates the mapping between canonical events and provider-native event names.
-Used by both configurators (to register hooks) and adapters (to parse incoming events).
+| Field | Type | Description |
+|---|---|---|
+| `canonical_provider` | `Option<Provider>` | Repo override for canonical provider |
+| `actions` | `HashMap<AgenticEvent, Vec<HookAction>>` | Per-event replacement of user actions |
+| `active_messenger` | `Option<Option<String>>` | Repo override for active messenger config |
 
-**Fields:** `event: AgenticEvent`, `native_name: &'static str`, `parse_aliases: &'static [&'static str]`
+Merge rule for actions:
 
-Currently defined for Claude, Gemini, and OpenCode (the three providers with hook-based support that use shared mappings).
+- If the repo config defines actions for an event, that vector fully replaces the user-scope vector for the same event.
 
-### `ProviderAdapter` trait
+### `CanonicalRuntimeConfig`
 
-**File:** `adapters/mod.rs`
+**File:** `claudine/lib/src/dispatch/loader.rs`
 
-Trait for provider-specific event adapters. One static singleton per provider.
+Compiled runtime form of `ClaudineConfig`.
+
+**Fields:**
+
+| Field | Type | Description |
+|---|---|---|
+| `config` | `ClaudineConfig` | Effective merged config |
+| `messaging` | `RuntimeMessagingSettings` | Bridged runtime messaging settings |
+| `protect_service` | `Option<ProtectService>` | Cached Protect service instance |
+| `events` | `HashMap<AgenticEvent, RuntimeEventBinding>` | Compiled event bindings keyed by canonical event |
+
+### `RuntimeEventBinding`
+
+**File:** `claudine/lib/src/dispatch/loader.rs`
+
+Dispatch-ready action binding for a canonical event.
+
+**Fields:**
+
+| Field | Type | Description |
+|---|---|---|
+| `enabled` | `bool` | Whether the binding is active |
+| `actions` | `Vec<HookAction>` | Actions to execute |
+| `matcher` | `Option<Regex>` | Optional runtime regex filter |
+| `compiled_mappers` | `Vec<Option<CompiledMapper>>` | Precompiled mapper metadata for `Call` actions |
+
+Current behavior:
+
+- `compile_canonical_runtime()` builds these bindings from `ClaudineConfig.actions`.
+- The current canonical config schema does not expose per-event matchers, so compiled bindings are created with `matcher: None`.
+- Mapper compilation is an internal runtime optimization for `Call` actions.
+
+### Legacy bridge types that still exist
+
+**File:** `claudine/lib/src/events/config.rs`
+
+`GlobalSettings`, `TtsSettings`, `LinkingSettings`, `CanonicalProviderSettings`, and `EventBinding`
+still exist in the codebase as supporting or bridge types. They are not the primary persisted
+"hooks config" model anymore and should not be used to describe current user configuration.
+
+## Matrix Types
+
+**File:** `claudine/lib/src/events/matrix.rs`
+
+Used by `claudine hooks --support` and `claudine hooks --mapping`.
+
+- `EventSupportCell`
+- `EventSupportRow`
+- `EventNativeMappingCell`
+- `EventNativeMappingRow`
+- `NativeEventName`
+
+Key functions:
+
+- `event_support_matrix(providers: &[Provider]) -> Vec<EventSupportRow>`
+- `event_native_mapping_matrix(providers: &[Provider]) -> Vec<EventNativeMappingRow>`
+
+## `ProviderAdapter` trait
+
+**File:** `claudine/lib/src/adapters/mod.rs`
+
+Provider-specific adapter interface used to normalize native payloads and format blocking responses.
 
 **Methods:**
 
 | Method | Signature | Description |
 |---|---|---|
-| `provider()` | `-> Provider` | Which provider this adapter handles |
-| `parse_event()` | `(&self, raw: &Value) -> Result<(AgenticEvent, EventMeta), AdapterError>` | Parse raw provider JSON into normalized event + metadata |
-| `can_block()` | `(&self, event: &AgenticEvent) -> bool` | Whether this provider/event pair supports blocking response semantics |
-| `format_response()` | `(&self, event: &AgenticEvent, response: &HookResponse) -> Result<Value, AdapterError>` | Convert unified hook response into provider-native response payload |
+| `provider()` | `-> Provider` | Which provider the adapter handles |
+| `parse_event()` | `(&self, raw: &Value) -> Result<(AgenticEvent, EventMeta), AdapterError>` | Parse native JSON into canonical event + metadata |
+| `can_block()` | `(&self, event: &AgenticEvent) -> bool` | Whether this event supports a blocking response on this provider |
+| `format_response()` | `(&self, event: &AgenticEvent, response: &HookResponse) -> Result<Value, AdapterError>` | Convert canonical response back to provider-native JSON |
 | `exit_code()` | `(&self, event: &AgenticEvent, response: &HookResponse) -> Option<i32>` | Exit code for shell-driven providers |
 
-**Factory:** `adapter_for(provider: Provider) -> &'static dyn ProviderAdapter`
+Factory:
 
-### `HookAction` enum
+- `adapter_for(provider: Provider) -> &'static dyn ProviderAdapter`
 
-**File:** `actions/hook_action.rs`
+## `HookAction` enum
 
-Actions that can be attached to an event binding. Tagged union serialized as `{ "type": "..." }`.
+**File:** `claudine/lib/src/actions/hook_action.rs`
 
-**Variants:**
+Actions attached to canonical events in `ClaudineConfig.actions`.
+
+**Current variants:**
 
 | Variant | Fields | Description |
 |---|---|---|
-| `SoundEffect` | `name`, `volume`, `speed` | Play an embedded sound effect from playa |
-| `Speak` | `message` | Speak a message aloud using biscuit-speaks TTS |
-| `Log` | `target` | Write the event to a configured log target |
-| `FireAndForget` | `command`, `args` | Execute a command asynchronously without waiting |
-| `Call` | `command`, `args`, `timeout_ms`, `mapper` | Execute a command synchronously, map output to hook response |
-| `Report` | `handler` | Report the event into the agent's output stream |
+| `SoundEffect` | `effect`, `volume`, `speed` | Play an embedded sound effect via `playa` |
+| `Speak` | `message`, `voice`, `gender` | Speak a templated message via biscuit-speaks |
+| `Bash` | `command`, `params` | Spawn a shell command asynchronously |
+| `Call` | `command`, `args`, `timeout_ms`, `mapper` | Run a command synchronously and optionally produce a `HookResponse` |
+| `Report` | `handler` | Emit structured human-readable output into the agent stream |
+| `Message` | `message`, `image` | Send a message through the configured messenger route |
 
-### Init defaults
+Important changes versus the pre-refactor model:
 
-**File:** `init_defaults.rs`
+- There is no `HookAction::Log`. Event logging is controlled by `ClaudineConfig.logging`.
+- There is no `HookAction::FireAndForget`. The current async shell action is `Bash`.
+- `Message` is now a first-class action.
 
-Constants and functions supporting the `claudine init` wizard:
+## CLI Surfaces
 
-- `INIT_EVENT_DISPLAY_ORDER` -- All 16 events in UI display order.
-- `INIT_RECOMMENDED_EVENTS` -- 4 pre-selected events: SessionStart, TurnComplete, ToolError, PermissionRequest.
-- `INIT_TTS_PROVIDERS` -- TTS options: macOS Say, eSpeak, ElevenLabs, Kokoro.
-- `recommended_sound(event) -> &str` -- Default sound effect for each event.
-- `default_speak_template(event) -> &str` -- Default TTS message template (supports `{{tool_name}}` etc.).
-- `quick_start_supported_providers() -> Vec<Provider>` -- Providers that support at least one recommended event via hooks (Claude, Codex, Gemini, OpenCode).
+The current CLI splits hook registration from action configuration:
+
+- `claudine hooks` shows provider hook support, native event mappings, and registration state.
+- `claudine actions` shows which canonical events have configured actions.
+- `claudine sync` re-applies native provider registrations where supported.
+- `claudine uninstall` removes registered provider hooks.
+- `claudine handle [event] [--provider]` is the hidden ingress command used by registered hooks and wrappers.
 
 ## How It Works
 
-The unified hook system translates provider-native event payloads into a canonical
-event model, matches them against user configuration, and dispatches actions. The
-flow proceeds through these stages:
+### 1. Event ingress
 
-### 1. Provider Detection
+An event reaches Claudine through one of these surfaces:
 
-When an event payload arrives (as raw JSON), the system first determines which
-provider sent it. `Provider::detect_from_payload()` inspects the JSON shape for
-provider-specific marker fields:
+- native provider hook registration
+- notify-style hook commands
+- wrapper-managed structured stream parsing
+- wire/RPC or SDK callback surfaces
 
-- `hook_event_name` present --> Claude
-- `type` + `thread_id` present --> Codex
-- `event_type` present --> OpenCode
-- `event_name` present --> Gemini
-- `method` present --> Kimi Code
+`claudine handle` reads the raw JSON payload from stdin. The provider is resolved in this order:
 
-For providers that register via config-file hooks (Claude, Gemini, OpenCode, Codex),
-the payload arrives because claudine was registered as the hook handler during
-`claudine init` or `claudine register`.
+1. explicit `--provider`
+2. wrapper environment hint
+3. `Provider::detect_from_payload(raw)`
 
-### 2. Event Parsing and Normalization
+### 2. Event normalization
 
-Once the provider is identified, the corresponding `ProviderAdapter` singleton is
-retrieved via `adapter_for(provider)`. Each adapter implements `parse_event()`, which:
+`adapter_for(provider).parse_event(raw)` converts the provider-native payload into:
 
-1. Extracts the provider-native event name from the raw JSON.
-2. Maps it to a canonical `AgenticEvent` variant using `SharedNativeEventMapping`
-   tables (for Claude, Gemini, OpenCode) or provider-specific match logic.
-3. Populates an `EventMeta` struct with normalized fields extracted from the payload
-   (session_id, tool_name, tool_input, error, prompt, etc.).
-4. Stashes any unrecognized fields into `EventMeta.extra`.
+- a canonical `AgenticEvent`
+- an `EventMeta` populated with normalized fields and provider-specific `extra` data
 
-The `SharedNativeEventMapping` tables serve as a single source of truth used by both
-the adapter parse logic (`native_name -> AgenticEvent`) and the configurator
-registration logic (`AgenticEvent -> native_name`), preventing drift between the two.
+### 3. Environment enrichment
 
-### 3. Environment Enrichment
+`detect_environment_fast()` builds the environment snapshot attached to the event metadata.
+This makes host, git, and repo context available to action templates.
 
-At session start, `detect_environment(cwd)` runs `sniff` to capture a snapshot of the
-host environment (OS, hardware, git state, repo structure, primary language). This
-`EnvironmentContext` is attached to every `EventMeta.env` for the session lifetime,
-making it available to templates and action handlers without repeated detection.
+### 4. Config load and merge
 
-### 4. Configuration Matching
+Dispatch loads the effective config by:
 
-The `HookerConfig` (loaded from `~/.claudine/config.json`) is consulted to find the
-matching `EventBinding` for the (provider, event) pair:
+1. reading user config into `ClaudineConfig`
+2. reading repo config into `RepoOverrideConfig` when present
+3. applying repo overrides, including per-event action replacement
 
-1. Look up `config.providers[provider].events[event]`.
-2. If found and `enabled == true`, check the optional `matcher` regex against the
-   relevant event field (tool_name for tool events, notification_type for notifications).
-3. If the matcher passes (or is absent), the binding's `actions` list is used.
+There is no provider-scoped hook lookup anymore. The canonical action map is global.
 
-### 5. Hook Resolution
+### 5. Runtime compilation
 
-The matched binding is assembled into a `ResolvedHook`:
+`compile_canonical_runtime()` converts the merged config into `CanonicalRuntimeConfig`:
 
-- `event`: The canonical `AgenticEvent`.
-- `meta`: The fully populated `EventMeta`.
-- `provider`: The originating provider.
-- `actions`: The `Vec<HookAction>` from the `EventBinding`.
-- `can_block`: Determined by querying `adapter.can_block(event)` -- whether the
-  provider supports synchronous response semantics for this event (e.g., Claude's
-  `PreToolUse` can return allow/deny, while `Stop` cannot).
+- builds one `RuntimeEventBinding` per configured canonical event
+- precompiles `Call` mappers
+- constructs the runtime messenger bridge
+- constructs `ProtectService` when enabled
 
-### 6. Action Dispatch
+### 6. Canonical binding lookup
 
-Each `HookAction` in the resolved hook is executed in declaration order:
+`dispatch_canonical_with_runtime()` looks up the event by canonical event only:
 
-- **SoundEffect** -- Plays an embedded audio clip via playa.
-- **Speak** -- Renders a Handlebars-style template against `EventMeta` fields and
-  speaks it via biscuit-speaks TTS.
-- **Log** -- Serializes the event metadata to a configured log target (file, stdout).
-- **FireAndForget** -- Spawns a command asynchronously without waiting.
-- **Call** -- Executes a command synchronously and optionally maps its output to a
-  hook response (for blocking events).
-- **Report** -- Writes event information into the agent's output stream.
+1. `runtime.get_binding(&event)`
+2. if a binding exists and is enabled, execute its actions in declaration order
+3. if no binding exists, dispatch still continues with logging/protect/default-sound behavior
 
-### 7. Response Formatting
+When a binding is executed, Claudine materializes a `ResolvedHook` with:
 
-For blocking events (where `can_block == true`), if a `Call` action produces a
-response, it is converted back to the provider-native format via
-`adapter.format_response(event, response)`. The adapter also determines the
-appropriate exit code via `adapter.exit_code(event, response)` for shell-driven
-providers like Claude (where exit code 0 = allow, exit code 2 = deny for
-`PreToolUse`).
+- the canonical event
+- normalized metadata
+- originating provider
+- ordered actions
+- whether the provider/event supports blocking
 
-### Support Level Implications
+### 7. Action dispatch and cross-cutting services
 
-The three-tier `EventSupportLevel` system determines what claudine can do:
+`runner::execute_actions()` runs configured actions in order.
 
-- **Hook providers** (Claude, Gemini, OpenCode, and Codex for `turn_complete`): Full
-  support. Claudine registers itself in the provider's config file, receives events
-  as JSON payloads, and can return blocking responses.
-- **NonHook providers** (Goose, Kimi Code, Qwen Code, Roo Code, and most Codex events):
-  Events are available but require alternative capture methods (wrapper scripts, wire-mode
-  proxy, stream parsing) that are tracked but not yet fully implemented.
-- **NotSupported**: The event concept does not exist in the provider's architecture.
+Separately from configured actions:
+
+- global JSONL logging runs when `config.logging` is true
+- Protect runs both before and after selected events
+- default sounds may still play based on outcome
+
+This means "no configured actions" does not imply "nothing happens."
+
+### 8. Response formatting
+
+If the provider/event supports blocking and a `Call` action returns a response:
+
+- the adapter formats the canonical `HookResponse` into the provider-native payload
+- shell-based providers may also receive an exit code
+
+On non-blocking events, `Call` can still run, but any response it produces is informational only.
+
+## Hook Handler Deadlines
+
+To prevent hook handlers from blocking the parent agent session indefinitely (e.g., during a 30s hang), `claudine handle` enforces a hard execution deadline.
+
+- **Global Deadline:** 5 seconds (default), overridable via `CLAUDINE_HANDLE_DEADLINE_SECONDS`.
+- **Exit Code:** Exits `124` when the deadline is exceeded.
+- **Action Timeouts:** `Bash` and `Message` actions have a tighter **3s timeout** when running inside `claudine handle`.
+- **Tracing:** Phase-level spans (`handle_stdin_read`, `handle_dispatch_canonical`, `load_config`, `run_bindings`, etc.) ensure that any hang can be diagnosed via `RUST_LOG=claudine=debug`.
+
+## Support Level Implications
+
+- **Hook providers** have a native registration surface Claudine can install into. This is what `claudine sync` manages.
+- **NonHook providers** can still participate in the canonical event model, but their events arrive through wrappers, streams, wire protocols, or SDK callbacks rather than config-file hook registration.
+- **NotSupported** means the provider does not expose the lifecycle moment at all, so Claudine cannot synthesize a canonical event for it.

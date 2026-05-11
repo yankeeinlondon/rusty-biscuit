@@ -9,6 +9,7 @@
 
 use super::super::normalize::NormalizationReport;
 use super::cache::{CacheAccessMode, CacheFreshnessMode, CacheStats};
+use super::shell_expansion::types::ShellTimeoutBehavior;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -27,6 +28,10 @@ pub enum ComposeOperation {
     /// Runs before the final effective state is built.
     FrontmatterInterpolation,
 
+    /// Executes shell commands embedded in frontmatter values.
+    /// Runs before the final effective state is built.
+    FrontmatterShellExpansion,
+
     /// Applies the frontmatter `replace` map to substitute text
     /// patterns throughout the document body.
     TextReplacement,
@@ -42,6 +47,10 @@ pub enum ComposeOperation {
     /// Executes approved `::shell` directives and replaces them
     /// with the command's stdout output.
     ShellExpansion,
+
+    /// Executes approved `::shell-block` directives and replaces them
+    /// with the combined output of the block's commands.
+    ShellBlocks,
 
     /// Resolves `::file` and `::url` directives by including the
     /// referenced markdown document (recursively composed).
@@ -66,6 +75,16 @@ pub enum ComposeOperation {
     /// Adjusts heading levels to ensure a valid hierarchy
     /// (e.g., no H3 before an H2).
     Normalization,
+
+    /// Resolves all local link targets (Markdown hyperlinks/images and
+    /// supported HTML embeds) to absolute paths during the Inline-Pre stage.
+    LinkResolve,
+
+    /// Converts absolute path links back into portable forms during the
+    /// Finalization stage (relative paths within the same repo, `~/` for
+    /// home-relative paths, `${VAR}` for whitelisted environment-relative
+    /// paths).
+    LinkNormalization,
 }
 
 /// Fixed-size operation set keyed by [`ComposeOperation`] discriminants.
@@ -142,26 +161,33 @@ pub enum ComposePhase {
     Transclusion,
     /// Serial operations after transclusion.
     InlinePost,
+    /// Root-only finalization stage. Runs after Inline-Post completes on the
+    /// outermost document and is skipped on transcluded children.
+    Finalization,
 }
 
 impl ComposeOperation {
     /// Total number of compose operations.
-    pub const COUNT: usize = 11;
+    pub const COUNT: usize = 15;
 
     /// Stable discriminant index for fixed-size operation sets.
     pub const fn index(self) -> usize {
         match self {
             Self::FrontmatterInterpolation => 0,
-            Self::TextReplacement => 1,
-            Self::PageBlocks => 2,
-            Self::Interpolation => 3,
-            Self::ShellExpansion => 4,
-            Self::BlockTransclusion => 5,
-            Self::FrontmatterTransclusion => 6,
-            Self::CodeTransclusion => 7,
-            Self::TocLinking => 8,
-            Self::Cleanup => 9,
-            Self::Normalization => 10,
+            Self::FrontmatterShellExpansion => 1,
+            Self::TextReplacement => 2,
+            Self::PageBlocks => 3,
+            Self::Interpolation => 4,
+            Self::ShellExpansion => 5,
+            Self::ShellBlocks => 6,
+            Self::BlockTransclusion => 7,
+            Self::FrontmatterTransclusion => 8,
+            Self::CodeTransclusion => 9,
+            Self::TocLinking => 10,
+            Self::Cleanup => 11,
+            Self::Normalization => 12,
+            Self::LinkResolve => 13,
+            Self::LinkNormalization => 14,
         }
     }
 
@@ -169,10 +195,13 @@ impl ComposeOperation {
     pub fn phase(&self) -> ComposePhase {
         match self {
             Self::FrontmatterInterpolation
+            | Self::FrontmatterShellExpansion
             | Self::TextReplacement
             | Self::PageBlocks
             | Self::Interpolation
-            | Self::ShellExpansion => ComposePhase::InlinePre,
+            | Self::ShellExpansion
+            | Self::ShellBlocks
+            | Self::LinkResolve => ComposePhase::InlinePre,
 
             Self::BlockTransclusion
             | Self::FrontmatterTransclusion
@@ -180,6 +209,8 @@ impl ComposeOperation {
             | Self::TocLinking => ComposePhase::Transclusion,
 
             Self::Cleanup | Self::Normalization => ComposePhase::InlinePost,
+
+            Self::LinkNormalization => ComposePhase::Finalization,
         }
     }
 
@@ -188,10 +219,13 @@ impl ComposeOperation {
         &[
             // Inline Pre (serial)
             Self::FrontmatterInterpolation,
+            Self::FrontmatterShellExpansion,
             Self::TextReplacement,
             Self::PageBlocks,
             Self::Interpolation,
             Self::ShellExpansion,
+            Self::ShellBlocks,
+            Self::LinkResolve,
             // Transclusion (concurrent)
             Self::BlockTransclusion,
             Self::FrontmatterTransclusion,
@@ -200,6 +234,8 @@ impl ComposeOperation {
             // Inline Post (serial)
             Self::Cleanup,
             Self::Normalization,
+            // Finalization (root-only)
+            Self::LinkNormalization,
         ]
     }
 
@@ -213,16 +249,20 @@ impl std::fmt::Display for ComposeOperation {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::FrontmatterInterpolation => write!(f, "FrontmatterInterpolation"),
+            Self::FrontmatterShellExpansion => write!(f, "Frontmatter Shell Expansion"),
             Self::TextReplacement => write!(f, "TextReplacement"),
             Self::PageBlocks => write!(f, "PageBlocks"),
             Self::Interpolation => write!(f, "Interpolation"),
             Self::ShellExpansion => write!(f, "ShellExpansion"),
+            Self::ShellBlocks => write!(f, "ShellBlocks"),
             Self::BlockTransclusion => write!(f, "BlockTransclusion"),
             Self::FrontmatterTransclusion => write!(f, "FrontmatterTransclusion"),
             Self::CodeTransclusion => write!(f, "CodeTransclusion"),
             Self::TocLinking => write!(f, "TocLinking"),
             Self::Cleanup => write!(f, "Cleanup"),
             Self::Normalization => write!(f, "Normalization"),
+            Self::LinkResolve => write!(f, "LinkResolve"),
+            Self::LinkNormalization => write!(f, "LinkNormalization"),
         }
     }
 }
@@ -233,6 +273,7 @@ impl std::fmt::Display for ComposePhase {
             Self::InlinePre => write!(f, "InlinePre"),
             Self::Transclusion => write!(f, "Transclusion"),
             Self::InlinePost => write!(f, "InlinePost"),
+            Self::Finalization => write!(f, "finalization"),
         }
     }
 }
@@ -283,6 +324,18 @@ pub struct ComposeOptions {
     /// When `true`, non-object `ctx` frontmatter is downgraded from an error
     /// to a warning and the runtime context is used instead.
     pub(crate) allow_ctx_override: bool,
+
+    // ── Transclusion set-override permissive flags ─────────────────
+    /// When `true`, a `::file` directive whose `set=<value>` RHS fails
+    /// to parse as a JSON5 object is downgraded from `InvalidFrontmatterAssignment`
+    /// to a `ComposeWarning`; sibling valid set clauses still apply.
+    pub(crate) allow_invalid_frontmatter_assignment: bool,
+
+    /// When `true`, a `::file` directive that reassigns the same set
+    /// property (or duplicates the object form) is downgraded from
+    /// `InvalidReassignedFrontmatterProperty` to a `ComposeWarning`; the
+    /// rightmost assignment wins.
+    pub(crate) allow_reassigned_frontmatter_property: bool,
 
     // ── Source context ─────────────────────────────────────────────
     /// Source location of the document being composed.
@@ -349,6 +402,10 @@ pub struct ComposeOptions {
     /// Maximum execution time for a single `::shell` command.
     /// Default: 10 seconds.
     pub(crate) shell_timeout: std::time::Duration,
+
+    /// What happens when a shell command exceeds its timeout.
+    /// Default: `Error` (abort compose).
+    pub(crate) shell_timeout_behavior: ShellTimeoutBehavior,
 
     /// Root directory for shell expansion policy files.
     ///
@@ -434,15 +491,27 @@ pub struct ComposeOptions {
 
     // ── Interpolation ─────────────────────────────────────────────
     /// When `true`, body interpolation processes `{{ }}` expressions
-    /// inside inline code spans and fenced code blocks.
+    /// inside fenced and indented code blocks.
     ///
-    /// By default (`false`), the interpolation scanner skips code
-    /// regions to preserve literal code examples. Set this to `true`
-    /// for template documents where backtick-wrapped expressions
-    /// should still be interpolated.
+    /// Inline code spans (single-backticks) are always interpolated —
+    /// this flag only governs fenced/indented code blocks, which by
+    /// default (`false`) are skipped to preserve literal code examples.
     ///
-    /// Can also be set via frontmatter: `interpolate_code_spans: true`.
-    pub(crate) interpolate_code_spans: bool,
+    /// Can also be set via frontmatter: `interpolate_code_blocks: true`.
+    pub(crate) interpolate_code_blocks: bool,
+
+    // ── Link normalization ────────────────────────────────────────
+    /// Environment variables that may be used as path-prefix abstractions
+    /// during the Finalization stage's Link Normalization operation.
+    ///
+    /// Acts as a strict allowlist: only variables present in this list (or
+    /// the built-in default set when this list is empty) are considered
+    /// when collapsing absolute paths to portable `${VAR}/...` form.
+    ///
+    /// Defaults to an empty vector; the Link Normalization operation
+    /// applies a built-in default whitelist (`PROJECT_ROOT`, `DOCS_BASE`)
+    /// when this field is empty.
+    pub(crate) env_path_whitelist: Vec<String>,
 }
 
 impl std::fmt::Debug for ComposeOptions {
@@ -488,7 +557,16 @@ impl std::fmt::Debug for ComposeOptions {
             .field("perf_enabled", &self.perf_enabled)
             .field("replace_parent_wins", &self.replace_parent_wins)
             .field("one_off_replace", &self.one_off_replace)
-            .field("interpolate_code_spans", &self.interpolate_code_spans)
+            .field("interpolate_code_blocks", &self.interpolate_code_blocks)
+            .field("env_path_whitelist", &self.env_path_whitelist)
+            .field(
+                "allow_invalid_frontmatter_assignment",
+                &self.allow_invalid_frontmatter_assignment,
+            )
+            .field(
+                "allow_reassigned_frontmatter_property",
+                &self.allow_reassigned_frontmatter_property,
+            )
             .field("context", &self.context)
             .finish()
     }
@@ -514,6 +592,8 @@ impl ComposeOptions {
             enabled_operations: ComposeOperation::all(),
             fail_fast: false,
             allow_ctx_override: false,
+            allow_invalid_frontmatter_assignment: false,
+            allow_reassigned_frontmatter_property: false,
             source: ComposeSource::Unknown,
             external_state: None,
             set_overrides: None,
@@ -526,6 +606,7 @@ impl ComposeOptions {
             resolve_repo_root: true,
             magic_paths: Vec::new(),
             shell_timeout: std::time::Duration::from_secs(10),
+            shell_timeout_behavior: ShellTimeoutBehavior::Error,
             shell_policy_root: None,
             shell_working_directory: None,
             shell_approval_handler: None,
@@ -540,8 +621,9 @@ impl ComposeOptions {
             context,
             replace_parent_wins: false,
             one_off_replace: None,
-            interpolate_code_spans: false,
+            interpolate_code_blocks: false,
             shell_strip_ansi: true,
+            env_path_whitelist: Vec::new(),
         }
     }
 
@@ -653,24 +735,86 @@ impl ComposeOptions {
         self
     }
 
-    /// Enables interpolation inside code spans and fenced code blocks.
+    /// Downgrades `InvalidFrontmatterAssignment` to a compose warning.
     ///
-    /// When set, `{{ }}` expressions inside backticks and code fences
-    /// are evaluated instead of being skipped. Useful for template
-    /// documents where code formatting wraps interpolation targets.
+    /// When `true`, a `::file` directive whose `set=<value>` RHS is not
+    /// a JSON5 object is dropped with a warning instead of failing the
+    /// pipeline. Sibling `set.NAME=<value>` clauses on the same directive
+    /// line are unaffected and still apply.
     #[must_use]
-    pub fn with_interpolate_code_spans(mut self, enabled: bool) -> Self {
-        self.interpolate_code_spans = enabled;
+    pub fn with_allow_invalid_frontmatter_assignment(mut self, allow: bool) -> Self {
+        self.allow_invalid_frontmatter_assignment = allow;
         self
+    }
+
+    /// Downgrades `InvalidReassignedFrontmatterProperty` to a compose warning.
+    ///
+    /// When `true`, a duplicate `set.NAME=` assignment (or duplicate
+    /// `set=<object>`) on the same `::file` directive emits a warning
+    /// instead of failing the pipeline. The rightmost assignment wins.
+    #[must_use]
+    pub fn with_allow_reassigned_frontmatter_property(mut self, allow: bool) -> Self {
+        self.allow_reassigned_frontmatter_property = allow;
+        self
+    }
+
+    /// Enables interpolation inside fenced and indented code blocks.
+    ///
+    /// Inline code spans (single-backticks) are always interpolated —
+    /// this option only opts fenced/indented code blocks into the
+    /// interpolation scan, which is otherwise skipped to preserve
+    /// literal code examples.
+    #[must_use]
+    pub fn with_interpolate_code_blocks(mut self, enabled: bool) -> Self {
+        self.interpolate_code_blocks = enabled;
+        self
+    }
+
+    /// Sets the strict allowlist of environment variables that the
+    /// Finalization stage may use as path-prefix abstractions.
+    ///
+    /// Each entry is the bare variable name (e.g. `"PROJECT_ROOT"`); the
+    /// Link Normalization operation reads the corresponding value from the
+    /// process environment at evaluation time. Passing an empty vector
+    /// restores the built-in default whitelist.
+    #[must_use]
+    pub fn with_env_path_whitelist(mut self, paths: Vec<String>) -> Self {
+        self.env_path_whitelist = paths;
+        self
+    }
+
+    /// Returns the effective environment-variable allowlist used by Link
+    /// Normalization.
+    ///
+    /// When the user-supplied list (`with_env_path_whitelist`) is empty,
+    /// returns the built-in default fallback set (`PROJECT_ROOT`,
+    /// `DOCS_BASE`); otherwise returns the user-supplied list.
+    pub fn effective_env_path_whitelist(&self) -> Vec<String> {
+        if self.env_path_whitelist.is_empty() {
+            Self::default_env_path_whitelist()
+                .iter()
+                .map(|s| (*s).to_string())
+                .collect()
+        } else {
+            self.env_path_whitelist.clone()
+        }
+    }
+
+    /// Returns the built-in default environment-variable allowlist used
+    /// when the caller has not supplied an explicit whitelist.
+    pub const fn default_env_path_whitelist() -> &'static [&'static str] {
+        &["PROJECT_ROOT", "DOCS_BASE"]
     }
 
     /// Sets shell expansion options from a `ShellExpansionOptions` struct.
     #[must_use]
     pub fn with_shell(mut self, shell: super::shell_expansion::ShellExpansionOptions) -> Self {
         self.shell_timeout = shell.timeout;
+        self.shell_timeout_behavior = shell.timeout_behavior;
         self.shell_policy_root = shell.policy_root;
         self.shell_working_directory = shell.working_directory;
         self.shell_approval_handler = shell.approval_handler;
+        self.shell_strip_ansi = shell.strip_ansi;
         self
     }
 
@@ -678,6 +822,27 @@ impl ComposeOptions {
     #[must_use]
     pub fn with_shell_timeout(mut self, timeout: std::time::Duration) -> Self {
         self.shell_timeout = timeout;
+        self
+    }
+
+    /// Sets the shell timeout behavior directly on flat compose options.
+    #[must_use]
+    pub fn with_shell_timeout_behavior(mut self, behavior: ShellTimeoutBehavior) -> Self {
+        self.shell_timeout_behavior = behavior;
+        self
+    }
+
+    /// Sets whether to allow shell commands to timeout without aborting compose.
+    ///
+    /// When `true`, sets `shell_timeout_behavior` to `EmptyString`.
+    /// When `false`, sets it to `Error` (default).
+    #[must_use]
+    pub fn with_allow_shell_timeout(mut self, allow: bool) -> Self {
+        self.shell_timeout_behavior = if allow {
+            ShellTimeoutBehavior::EmptyString
+        } else {
+            ShellTimeoutBehavior::Error
+        };
         self
     }
 
@@ -814,6 +979,7 @@ impl ComposeOptions {
     pub(crate) fn shell_options(&self) -> super::shell_expansion::ShellExpansionOptions {
         super::shell_expansion::ShellExpansionOptions {
             timeout: self.shell_timeout,
+            timeout_behavior: self.shell_timeout_behavior,
             policy_root: self.shell_policy_root.clone(),
             working_directory: self.shell_working_directory.clone(),
             approval_handler: self.shell_approval_handler.clone(),
@@ -1269,15 +1435,19 @@ pub struct ComposePerfReport {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ComposeStage {
     FrontmatterInterpolation,
+    FrontmatterShellExpansion,
     EffectiveStateBuild,
     TextReplacement,
     PageBlocks,
     Interpolation,
     ShellExpansion,
+    ShellBlocks,
     TransclusionParse,
     TransclusionPrepare,
     TransclusionResolve,
     TransclusionApply,
+    LinkResolve,
+    LinkNormalization,
     Cleanup,
     Normalization,
 }
@@ -1286,15 +1456,19 @@ impl std::fmt::Display for ComposeStage {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(match self {
             Self::FrontmatterInterpolation => "frontmatter interpolation",
+            Self::FrontmatterShellExpansion => "frontmatter shell expansion",
             Self::EffectiveStateBuild => "effective state build",
             Self::TextReplacement => "text replacement",
             Self::PageBlocks => "page blocks",
             Self::Interpolation => "interpolation",
             Self::ShellExpansion => "shell expansion",
+            Self::ShellBlocks => "shell blocks",
             Self::TransclusionParse => "transclusion parse",
             Self::TransclusionPrepare => "transclusion prepare",
             Self::TransclusionResolve => "transclusion resolve",
             Self::TransclusionApply => "transclusion apply",
+            Self::LinkResolve => "link resolve",
+            Self::LinkNormalization => "link normalization",
             Self::Cleanup => "cleanup",
             Self::Normalization => "normalization",
         })
@@ -1345,6 +1519,9 @@ pub struct ComposeReport {
     /// Number of frontmatter interpolation expressions resolved.
     pub frontmatter_interpolations_applied: usize,
 
+    /// Number of frontmatter shell expansions applied.
+    pub frontmatter_shell_expansions_applied: usize,
+
     /// Number of text replacements applied.
     pub replacements_applied: usize,
 
@@ -1356,6 +1533,9 @@ pub struct ComposeReport {
 
     /// Number of shell expansions applied.
     pub shell_expansions_applied: usize,
+
+    /// Number of shell blocks applied.
+    pub shell_blocks_applied: usize,
 
     /// Number of shell approvals used.
     pub shell_approvals_used: usize,
@@ -1377,6 +1557,12 @@ pub struct ComposeReport {
 
     /// Number of transclusions skipped (conditions/invalid ignored).
     pub transclusions_skipped: usize,
+
+    /// Number of local links resolved to absolute paths.
+    pub link_resolves_applied: usize,
+
+    /// Number of absolute paths normalized to portable forms.
+    pub link_normalizations_applied: usize,
 
     /// Maximum recursive transclusion depth observed.
     pub max_transclusion_depth: usize,
@@ -1419,10 +1605,14 @@ impl ComposeReport {
     /// Returns true if any changes were made by any stage.
     pub fn has_changes(&self) -> bool {
         self.frontmatter_interpolations_applied > 0
+            || self.frontmatter_shell_expansions_applied > 0
             || self.replacements_applied > 0
             || self.interpolations_applied > 0
             || self.toc_links_generated > 0
             || self.shell_expansions_applied > 0
+            || self.shell_blocks_applied > 0
+            || self.link_resolves_applied > 0
+            || self.link_normalizations_applied > 0
             || self.cleanup_changed
             || self.page_blocks_rendered > 0
             || self.transclusions_applied > 0
@@ -1447,6 +1637,13 @@ impl ComposeReport {
             ));
         }
 
+        if self.frontmatter_shell_expansions_applied > 0 {
+            parts.push(format!(
+                "{} frontmatter shell expansion(s)",
+                self.frontmatter_shell_expansions_applied
+            ));
+        }
+
         if self.replacements_applied > 0 {
             parts.push(format!("{} replacement(s)", self.replacements_applied));
         }
@@ -1466,8 +1663,23 @@ impl ComposeReport {
             ));
         }
 
+        if self.shell_blocks_applied > 0 {
+            parts.push(format!("{} shell block(s)", self.shell_blocks_applied));
+        }
+
         if self.shell_approvals_used > 0 {
             parts.push(format!("{} shell approval(s)", self.shell_approvals_used));
+        }
+
+        if self.link_resolves_applied > 0 {
+            parts.push(format!("{} link resolve(s)", self.link_resolves_applied));
+        }
+
+        if self.link_normalizations_applied > 0 {
+            parts.push(format!(
+                "{} link normalization(s)",
+                self.link_normalizations_applied
+            ));
         }
 
         if self.cleanup_changed {
@@ -1525,11 +1737,15 @@ impl ComposeReport {
     /// Merges another report into this one.
     pub fn merge(&mut self, mut other: ComposeReport) {
         self.frontmatter_interpolations_applied += other.frontmatter_interpolations_applied;
+        self.frontmatter_shell_expansions_applied += other.frontmatter_shell_expansions_applied;
         self.replacements_applied += other.replacements_applied;
         self.interpolations_applied += other.interpolations_applied;
         self.toc_links_generated += other.toc_links_generated;
         self.shell_expansions_applied += other.shell_expansions_applied;
+        self.shell_blocks_applied += other.shell_blocks_applied;
         self.shell_approvals_used += other.shell_approvals_used;
+        self.link_resolves_applied += other.link_resolves_applied;
+        self.link_normalizations_applied += other.link_normalizations_applied;
         self.cleanup_changed |= other.cleanup_changed;
         self.page_blocks_rendered += other.page_blocks_rendered;
         self.page_blocks_skipped += other.page_blocks_skipped;
@@ -1681,16 +1897,20 @@ mod tests {
             ComposeOperation::default_order(),
             &[
                 ComposeOperation::FrontmatterInterpolation,
+                ComposeOperation::FrontmatterShellExpansion,
                 ComposeOperation::TextReplacement,
                 ComposeOperation::PageBlocks,
                 ComposeOperation::Interpolation,
                 ComposeOperation::ShellExpansion,
+                ComposeOperation::ShellBlocks,
+                ComposeOperation::LinkResolve,
                 ComposeOperation::BlockTransclusion,
                 ComposeOperation::FrontmatterTransclusion,
                 ComposeOperation::CodeTransclusion,
                 ComposeOperation::TocLinking,
                 ComposeOperation::Cleanup,
                 ComposeOperation::Normalization,
+                ComposeOperation::LinkNormalization,
             ]
         );
     }
@@ -1702,10 +1922,15 @@ mod tests {
                 ComposeOperation::FrontmatterInterpolation,
                 ComposePhase::InlinePre,
             ),
+            (
+                ComposeOperation::FrontmatterShellExpansion,
+                ComposePhase::InlinePre,
+            ),
             (ComposeOperation::TextReplacement, ComposePhase::InlinePre),
             (ComposeOperation::PageBlocks, ComposePhase::InlinePre),
             (ComposeOperation::Interpolation, ComposePhase::InlinePre),
             (ComposeOperation::ShellExpansion, ComposePhase::InlinePre),
+            (ComposeOperation::ShellBlocks, ComposePhase::InlinePre),
             (
                 ComposeOperation::BlockTransclusion,
                 ComposePhase::Transclusion,
@@ -1721,6 +1946,11 @@ mod tests {
             (ComposeOperation::TocLinking, ComposePhase::Transclusion),
             (ComposeOperation::Cleanup, ComposePhase::InlinePost),
             (ComposeOperation::Normalization, ComposePhase::InlinePost),
+            (ComposeOperation::LinkResolve, ComposePhase::InlinePre),
+            (
+                ComposeOperation::LinkNormalization,
+                ComposePhase::Finalization,
+            ),
         ];
 
         for (operation, expected_phase) in expectations {
@@ -2070,5 +2300,118 @@ mod tests {
         assert_eq!(perf.total, Duration::from_millis(17));
         assert_eq!(perf.metrics[0].elapsed, Duration::from_millis(5));
         assert_eq!(perf.metrics[0].calls, 2);
+    }
+
+    #[test]
+    fn compose_options_default_timeout_behavior_is_error() {
+        let options = ComposeOptions::new();
+        assert_eq!(options.shell_timeout_behavior, ShellTimeoutBehavior::Error);
+    }
+
+    #[test]
+    fn with_shell_timeout_behavior_sets_value() {
+        let options =
+            ComposeOptions::new().with_shell_timeout_behavior(ShellTimeoutBehavior::EmptyString);
+        assert_eq!(
+            options.shell_timeout_behavior,
+            ShellTimeoutBehavior::EmptyString
+        );
+    }
+
+    #[test]
+    fn with_allow_shell_timeout_sets_empty_string() {
+        let options = ComposeOptions::new().with_allow_shell_timeout(true);
+        assert_eq!(
+            options.shell_timeout_behavior,
+            ShellTimeoutBehavior::EmptyString
+        );
+    }
+
+    #[test]
+    fn with_allow_shell_timeout_false_keeps_error() {
+        let options = ComposeOptions::new().with_allow_shell_timeout(false);
+        assert_eq!(options.shell_timeout_behavior, ShellTimeoutBehavior::Error);
+    }
+
+    #[test]
+    fn frontmatter_shell_expansion_is_inline_pre() {
+        assert_eq!(
+            ComposeOperation::FrontmatterShellExpansion.phase(),
+            ComposePhase::InlinePre
+        );
+    }
+
+    #[test]
+    fn frontmatter_shell_expansion_follows_interpolation_in_default_order() {
+        let order = ComposeOperation::default_order();
+        let fm_interp_pos = order
+            .iter()
+            .position(|op| *op == ComposeOperation::FrontmatterInterpolation)
+            .unwrap();
+        let fm_shell_pos = order
+            .iter()
+            .position(|op| *op == ComposeOperation::FrontmatterShellExpansion)
+            .unwrap();
+        assert_eq!(fm_shell_pos, fm_interp_pos + 1);
+    }
+
+    #[test]
+    fn compose_report_tracks_frontmatter_shell_expansions() {
+        let report = ComposeReport::new();
+        assert_eq!(report.frontmatter_shell_expansions_applied, 0);
+    }
+
+    #[test]
+    fn default_order_has_fifteen_operations() {
+        assert_eq!(ComposeOperation::default_order().len(), 15);
+    }
+
+    #[test]
+    fn link_resolve_is_last_inline_pre_operation() {
+        let order = ComposeOperation::default_order();
+        let inline_pre = order
+            .iter()
+            .copied()
+            .filter(|op| op.phase() == ComposePhase::InlinePre)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            inline_pre.last().copied(),
+            Some(ComposeOperation::LinkResolve)
+        );
+    }
+
+    #[test]
+    fn link_normalization_is_sole_finalization_operation() {
+        let finalization = ComposeOperation::default_order()
+            .iter()
+            .copied()
+            .filter(|op| op.phase() == ComposePhase::Finalization)
+            .collect::<Vec<_>>();
+        assert_eq!(finalization, vec![ComposeOperation::LinkNormalization]);
+    }
+
+    #[test]
+    fn finalization_phase_displays_lowercase() {
+        assert_eq!(format!("{}", ComposePhase::Finalization), "finalization");
+    }
+
+    #[test]
+    fn env_path_whitelist_default_is_empty_with_known_fallbacks() {
+        let options = ComposeOptions::new();
+        assert!(options.env_path_whitelist.is_empty());
+        assert_eq!(
+            options.effective_env_path_whitelist(),
+            vec!["PROJECT_ROOT".to_string(), "DOCS_BASE".to_string()]
+        );
+    }
+
+    #[test]
+    fn with_env_path_whitelist_overrides_default() {
+        let options = ComposeOptions::new()
+            .with_env_path_whitelist(vec!["MY_VAR".to_string(), "OTHER".to_string()]);
+        assert_eq!(
+            options.effective_env_path_whitelist(),
+            vec!["MY_VAR".to_string(), "OTHER".to_string()]
+        );
     }
 }
