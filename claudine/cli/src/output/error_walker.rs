@@ -72,7 +72,13 @@ mod tests {
 
     #[test]
     fn walks_past_wrapper_error_to_typed_inner() {
+        let ctx = biscuit_terminal::errors::SourceContext::new(
+            PathBuf::from("<test>"),
+            PathBuf::from("<test>"),
+            "gh repo list".to_string(),
+        );
         let shell = ShellExpansionError::ApprovalRequired {
+            ctx: Box::new(ctx),
             command: "gh repo list".into(),
             whitelist_path: PathBuf::from("/tmp/wl"),
             blacklist_path: PathBuf::from("/tmp/bl"),
