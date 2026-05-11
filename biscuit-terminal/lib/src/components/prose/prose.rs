@@ -115,6 +115,64 @@ impl Prose {
         self
     }
 
+    /// Escape text so it renders literally in Prose markup.
+    ///
+    /// Escapes characters that have special meaning in the Prose grammar
+    /// (`<`, `>`, `{`, `*`, `_`, `[`, `]`, `(`, `)`, `\`) by prefixing them
+    /// with a backslash. Use this for any user-controlled string that is
+    /// interpolated into Prose content.
+    ///
+    /// ## Examples
+    ///
+    /// ```rust
+    /// use biscuit_terminal::components::prose::Prose;
+    ////// Path with angle brackets stays literal
+    /// let escaped = Prose::escape_text("path/<weird>");
+    /// assert_eq!(escaped, r"path/\<weird\>");
+    /// ```
+    pub fn escape_text(s: &str) -> String {
+        let mut result = String::with_capacity(s.len());
+        for c in s.chars() {
+            match c {
+                '<' | '>' | '{' | '*' | '_' | '[' | ']' | '(' | ')' | '\\' => {
+                    result.push('\\');
+                    result.push(c);
+                }
+                _ => result.push(c),
+            }
+        }
+        result
+    }
+
+    /// Build a safely-quoted attribute value for Prose block tags.
+    ///
+    /// Escapes the value with [`escape_text`] and wraps it in single or
+    /// double quotes, choosing the quote character that does not appear in
+    /// the escaped value so the attribute parser never mis-identifies the
+    /// end of the value.
+    ///
+    /// ## Examples
+    ///
+    /// ```rust
+    /// use biscuit_terminal::components::prose::Prose;
+    ///
+    /// // Default: double quotes
+    /// let attr = Prose::quoted_attr("/normal/path");
+    /// assert_eq!(attr, "\"/normal/path\"");
+    ///
+    /// // Switches to single quotes when value contains double quotes
+    /// let attr = Prose::quoted_attr(r#"path/with"quotes"#);
+    /// assert_eq!(attr, "'path/with\"quotes'");
+    /// ```
+    pub fn quoted_attr(value: &str) -> String {
+        let escaped = Self::escape_text(value);
+        if escaped.contains('"') && !escaped.contains('\'') {
+            format!("'{}'", escaped)
+        } else {
+            format!("\"{}\"", escaped)
+        }
+    }
+
     /// Parse and render the content, replacing tokens with ANSI escape codes.
     ///
     /// Pre-processes the raw content for the supported Markdown subset

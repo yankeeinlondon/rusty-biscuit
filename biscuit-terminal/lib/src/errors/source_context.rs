@@ -56,12 +56,18 @@ impl SourceContext {
 
     /// Render a `<blue><a href=ABSOLUTE>RELATIVE</a></blue>` Prose segment
     /// for use in error headers.
+    ///
+    /// User-controlled path segments are escaped so they render literally
+    /// even when they contain Prose-significant characters (`<`, `>`, `"`,
+    /// `{`, etc.).
     pub fn linked_path_prose(&self) -> Prose {
         let abs = self.absolute.to_string_lossy();
         let display = self.display.to_string_lossy();
+        let abs_attr = Prose::quoted_attr(&abs);
+        let display_escaped = Prose::escape_text(&display);
         Prose::new(format!(
-            "<blue><a href=\"{}\">{}</a></blue>",
-            abs, display
+            "<blue><a href={}>{}</a></blue>",
+            abs_attr, display_escaped
         ))
     }
 
@@ -102,31 +108,47 @@ impl SourceContext {
 }
 
 /// Detect the byte range of YAML frontmatter delimited by `---` lines.
+///
+/// Handles both LF (`\n`) and CRLF (`\r\n`) line endings, and correctly
+/// bounds the returned range to `content.len()` when the file ends
+/// immediately after the closing `---` delimiter.
 fn detect_frontmatter_range(content: &str) -> Option<std::ops::Range<usize>> {
-    let mut lines = content.lines().enumerate().peekable();
+    // Use `split_inclusive('\n')` so each yielded segment contains its
+    // trailing newline (if any). This naturally accounts for CRLF because
+    // the `\r` remains part of the segment, and the segment length reflects
+    // the actual byte count consumed.
+    let mut lines = content.split_inclusive('\n').enumerate().peekable();
 
-    // First line must be exactly `---`
+    // First line must be exactly `---` (ignoring line endings)
     let (first_idx, first_line) = lines.next()?;
-    if first_line.trim() != "---" {
+    let first_trimmed = first_line
+        .trim_end_matches('\n')
+        .trim_end_matches('\r')
+        .trim();
+    if first_trimmed != "---" {
         return None;
     }
 
     // Find closing `---`
     let mut closing_idx = None;
     for (idx, line) in lines {
-        if line.trim() == "---" {
+        let trimmed = line
+            .trim_end_matches('\n')
+            .trim_end_matches('\r')
+            .trim();
+        if trimmed == "---" {
             closing_idx = Some(idx);
             break;
         }
     }
     let closing_idx = closing_idx?;
 
-    // Calculate byte positions
+    // Calculate byte positions from the same split iterator
     let mut pos = 0usize;
     let mut start_byte = None;
     let mut end_byte = None;
 
-    for (idx, line) in content.lines().enumerate() {
+    for (idx, line) in content.split_inclusive('\n').enumerate() {
         let line_start = pos;
         let line_end = pos + line.len();
 
@@ -134,12 +156,11 @@ fn detect_frontmatter_range(content: &str) -> Option<std::ops::Range<usize>> {
             start_byte = Some(line_start);
         }
         if idx == closing_idx {
-            // Include the newline after the closing delimiter
-            end_byte = Some(line_end + 1);
+            end_byte = Some(line_end);
             break;
         }
 
-        pos = line_end + 1; // +1 for '\n'
+        pos = line_end;
     }
 
     Some(start_byte?..end_byte?)
@@ -228,5 +249,59 @@ mod tests {
         assert!(text.contains("> 1 │ line 1"));
         assert!(text.contains("  2 │ line 2"));
         assert!(text.contains("  3 │ line 3"));
+    }
+
+    #[test]
+    fn frontmatter_detection_ends_at_eof() {
+        // File ends immediately after the closing `---` with no trailing newline.
+        let content = "---\ntitle: Test\n---";
+        let ctx = SourceContext::new(
+            PathBuf::from("/test.md"),
+            PathBuf::from("test.md"),
+            content,
+        );
+        assert!(ctx.frontmatter.is_some());
+        let range = ctx.frontmatter.as_ref().unwrap().clone();
+        assert_eq!(&content[range], content);
+        // frontmatter_prose must not panic
+        let prose = ctx.frontmatter_prose().unwrap();
+        assert!(prose.content().starts_with("```yaml"));
+        assert!(prose.content().contains("title: Test"));
+    }
+
+    #[test]
+    fn frontmatter_detection_crlf() {
+        let content = "---\r\ntitle: Test\r\n---\r\n# Body\r\n";
+        let ctx = SourceContext::new(
+            PathBuf::from("/test.md"),
+            PathBuf::from("test.md"),
+            content,
+        );
+        assert!(ctx.frontmatter.is_some());
+        let range = ctx.frontmatter.unwrap();
+        assert_eq!(&content[range], "---\r\ntitle: Test\r\n---\r\n");
+    }
+
+    #[test]
+    fn linked_path_prose_escapes_special_chars() {
+        let ctx = SourceContext::new(
+            PathBuf::from("/abs/path\u{003c}weird\u{003e}"),
+            PathBuf::from("path\u{003c}weird\u{003e}.md"),
+            "content",
+        );
+        let prose = ctx.linked_path_prose();
+        let text = prose.content();
+        // `>` in path must be escaped so it doesn't close the <a> tag early
+        assert!(
+            text.contains("path\\<weird\\>.md"),
+            "expected escaped angle brackets in display text, got: {text}"
+        );
+        // `>` in href must be escaped too
+        assert!(
+            text.contains("/abs/path\\<weird\\>"),
+            "expected escaped angle brackets in href, got: {text}"
+        );
+        // The tag structure must remain intact
+        assert!(text.contains("<a href="), "tag structure broken: {text}");
     }
 }
