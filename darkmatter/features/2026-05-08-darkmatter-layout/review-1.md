@@ -1,7 +1,7 @@
 ---
 agent: codex
 model: ""
-ready: false
+ready: true
 ---
 
 # Review: Darkmatter Layout
@@ -129,3 +129,57 @@ below the required verification level.
 I attempted `cargo test -p darkmatter layout --color=never`, but compilation was
 still in progress after roughly 60 seconds, so I stopped it per the
 non-interactive session constraints.
+
+## Remediation (2026-05-11)
+
+All findings addressed in the same branch:
+
+- **High — list/blockquote width bug.** `LineWrapper::effective_max_width()`
+  now returns `self.max_width` (the active value) and `width_stack` was
+  renamed to `previous_widths` to make the push/pop contract obvious
+  (`darkmatter/lib/src/markdown/output/terminal.rs:2298-2360`). The
+  `render_blockquote_with_indent_fill` and `render_list_with_max_fill` unit
+  tests were strengthened to use long content and assert the actual wrap cap
+  (70 cols / 50 cols respectively) — they fail without the fix
+  (`darkmatter/lib/src/layout/page.rs:1374-1442`).
+
+- **High — Level 2 coverage for tables/images/blockquotes/lists.** Added
+  real-terminal captures via the existing WezTerm harness in
+  `darkmatter/cli/tests/level2_layout.rs`:
+  - `level2_table_max_fill_constrains_visible_width`
+  - `level2_table_center_alignment_indents_more_than_left`
+  - `level2_blockquote_indent_fill_caps_wrap_width`
+  - `level2_blockquote_center_alignment_indents_more_than_left`
+  - `level2_list_max_fill_caps_wrap_width`
+  - `level2_list_center_alignment_indents_more_than_left`
+  - `level2_image_fallback_text_respects_alignment`
+  - `level2_end_to_end_layout_dimensions` (margin rows + max row width +
+    component presence)
+
+- **High — Level 2 silent-skip CI gap.** The harness now honours
+  `DARKMATTER_LEVEL2_REQUIRED=1`; when set, missing WezTerm panics instead of
+  silently skipping. CI jobs that provision WezTerm should set this so
+  Level 2 is actually enforced
+  (`darkmatter/cli/tests/level2_layout.rs:21-44`).
+
+- **Medium — zero-config equivalence under captured Terminal width.**
+  `DarkmatterPage::render()` now passes `None` to the underlying renderer
+  when `is_default_layout()` is true, so component width resolution doesn’t
+  leak the captured terminal width
+  (`darkmatter/lib/src/layout/page.rs:433-447`). Added
+  `zero_config_render_ignores_captured_terminal_width`, which constructs a
+  page from `Terminal::new_optimistic(40 | 100 | 200)` and verifies
+  byte-for-byte equivalence with `for_terminal(.., default())`.
+
+- **Ergonomics — CLI precedence asserts resolved behavior.** Added
+  `layout_resolved_*` tests in `darkmatter/cli/tests/cli.rs` that drive
+  `apply_cli_layout_flags` and assert the resolved `DarkmatterPage` state
+  (margin sides, padding sides, global-vs-component fill, global-vs-component
+  alignment, max width). The previous tests only checked parse success.
+
+### Verification
+
+- `cargo test -p darkmatter --lib layout::` — 85 passed.
+- `cargo test -p darkmatter-cli --test cli layout_` — 30 passed.
+- `cargo test -p darkmatter-cli --test level2_layout` — 17 passed (all 17,
+  real WezTerm captures, including the 8 new component/end-to-end tests).
