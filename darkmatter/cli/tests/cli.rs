@@ -3101,3 +3101,158 @@ fn layout_combined_margin_padding_bg() {
 
     assert!(output.status.success());
 }
+
+// =============================================================================
+//                          RESOLVED LAYOUT PRECEDENCE TESTS
+// =============================================================================
+//
+// These tests assert that CLI precedence rules produce the documented
+// observable resolved page state — not just that the CLI parses successfully.
+// They drive `apply_cli_layout_flags` against parsed `Cli` values and verify
+// the final `DarkmatterPage` getters (`margin()`, `padding()`, `fill_for()`,
+// `alignment_for()`, `max_width()`, `line_numbers()`).
+
+use biscuit_terminal::terminal::Terminal;
+use clap::Parser;
+use darkmatter::layout::{
+    DarkmatterPage, PageAlignment, PageComponent, PageFill, WidthUnit,
+};
+use darkmatter_cli::Cli;
+use darkmatter_cli::output::apply_cli_layout_flags;
+
+fn parse_cli(args: &[&str]) -> Cli {
+    let mut full = vec!["md"];
+    full.extend_from_slice(args);
+    Cli::try_parse_from(full).expect("CLI args must parse")
+}
+
+fn resolved_page(args: &[&str]) -> DarkmatterPage {
+    let cli = parse_cli(args);
+    let term = Terminal::new_optimistic(120);
+    apply_cli_layout_flags(DarkmatterPage::new(&term), &cli)
+}
+
+#[test]
+fn layout_resolved_margin_shorthand_then_top_override() {
+    // `-m 2 --mt 0`: shorthand sets all sides to 2, then --mt clears just the
+    // top. The reviewer specifically called this out: precedence checks
+    // should assert observable resolved behavior, not parse success.
+    let page = resolved_page(&["fixture.md", "-m", "2", "--mt", "0"]);
+    let m = page.margin();
+    assert_eq!(m.top, 0, "--mt 0 must override -m 2 on the top edge");
+    assert_eq!(m.bottom, 2, "-m 2 must apply to the bottom edge");
+    assert_eq!(m.left, 2, "-m 2 must apply to the left edge");
+    assert_eq!(m.right, 2, "-m 2 must apply to the right edge");
+}
+
+#[test]
+fn layout_resolved_margin_axis_then_side() {
+    // `-m 4 --mx 2 --mt 1`: shorthand 4 everywhere, then horizontal axis to 2,
+    // then top to 1.
+    let page = resolved_page(&["fixture.md", "-m", "4", "--mx", "2", "--mt", "1"]);
+    let m = page.margin();
+    assert_eq!(m.top, 1, "--mt 1 overrides axis and shorthand on top");
+    assert_eq!(m.bottom, 4, "shorthand survives on bottom (no override)");
+    assert_eq!(m.left, 2, "--mx 2 overrides shorthand on left");
+    assert_eq!(m.right, 2, "--mx 2 overrides shorthand on right");
+}
+
+#[test]
+fn layout_resolved_padding_axis_then_side() {
+    let page = resolved_page(&["fixture.md", "--padding", "4", "--px", "2", "--pt", "1"]);
+    let p = page.padding();
+    assert_eq!(p.top, 1);
+    assert_eq!(p.bottom, 4);
+    assert_eq!(p.left, 2);
+    assert_eq!(p.right, 2);
+}
+
+#[test]
+fn layout_resolved_fill_global_then_component_specific() {
+    // `--fill max=40 --fill-code-blocks max=30`: global fill applies to all
+    // components, then code-block-specific fill overrides only that one.
+    let page = resolved_page(&[
+        "fixture.md",
+        "--fill",
+        "max=40",
+        "--fill-code-blocks",
+        "max=30",
+    ]);
+    assert_eq!(
+        page.fill_for(PageComponent::CodeBlocks),
+        PageFill::Max(WidthUnit::Fixed(30)),
+        "code-block-specific fill must override global"
+    );
+    assert_eq!(
+        page.fill_for(PageComponent::Lists),
+        PageFill::Max(WidthUnit::Fixed(40)),
+        "lists must still see the global fill"
+    );
+    assert_eq!(
+        page.fill_for(PageComponent::Tables),
+        PageFill::Max(WidthUnit::Fixed(40)),
+        "tables must still see the global fill"
+    );
+}
+
+#[test]
+fn layout_resolved_alignment_global_then_component_specific() {
+    let page = resolved_page(&[
+        "fixture.md",
+        "--alignment",
+        "center",
+        "--align-code-blocks",
+        "left",
+    ]);
+    assert_eq!(
+        page.alignment_for(PageComponent::CodeBlocks),
+        PageAlignment::Left,
+        "code-block-specific alignment must override global"
+    );
+    assert_eq!(
+        page.alignment_for(PageComponent::Lists),
+        PageAlignment::Center,
+        "lists must still see the global alignment"
+    );
+    assert_eq!(
+        page.alignment_for(PageComponent::BlockQuotes),
+        PageAlignment::Center,
+        "blockquotes must still see the global alignment"
+    );
+}
+
+#[test]
+fn layout_resolved_max_width() {
+    let page = resolved_page(&["fixture.md", "--max-width", "80"]);
+    assert_eq!(page.max_width(), Some(80));
+}
+
+#[test]
+fn layout_parsed_line_numbers_flag_values() {
+    // `--line-numbers` (no value) defaults to true; `--line-numbers false`
+    // explicitly disables. Verified against the parsed CLI struct since the
+    // CLI's `render_terminal_output` applies this flag separately from the
+    // layout-flag pipeline.
+    assert_eq!(parse_cli(&["fixture.md", "--line-numbers"]).line_numbers, Some(true));
+    assert_eq!(
+        parse_cli(&["fixture.md", "--line-numbers", "true"]).line_numbers,
+        Some(true)
+    );
+    assert_eq!(
+        parse_cli(&["fixture.md", "--line-numbers", "false"]).line_numbers,
+        Some(false)
+    );
+    assert_eq!(parse_cli(&["fixture.md"]).line_numbers, None);
+}
+
+#[test]
+fn layout_resolved_mt_alone_does_not_set_other_sides() {
+    // `--mt 3` alone must leave other edges at default (0); no implicit
+    // bleed from shorthand.
+    let page = resolved_page(&["fixture.md", "--mt", "3"]);
+    let m = page.margin();
+    assert_eq!(m.top, 3);
+    assert_eq!(m.bottom, 0);
+    assert_eq!(m.left, 0);
+    assert_eq!(m.right, 0);
+}

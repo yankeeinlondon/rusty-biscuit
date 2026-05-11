@@ -2295,10 +2295,11 @@ struct LineWrapper {
     /// Left padding (in columns) to apply at the start of each line for
     /// component alignment (e.g. centering a blockquote).
     alignment_offset: usize,
-    /// Stack of max-width overrides pushed by page-component fill settings.
-    /// The top of the stack (if any) temporarily reduces `max_width` while
-    /// rendering a component such as a blockquote or list.
-    width_stack: Vec<usize>,
+    /// Stack of *previous* max-width values saved when a component-specific
+    /// width override is pushed (e.g. a blockquote or list narrowing the
+    /// wrap width). The active wrap width is always `self.max_width`; this
+    /// stack only exists so `pop_component_width` can restore the prior value.
+    previous_widths: Vec<usize>,
 }
 
 impl LineWrapper {
@@ -2313,26 +2314,30 @@ impl LineWrapper {
             supports_hyperlinks,
             indent_stack: Vec::new(),
             alignment_offset: 0,
-            width_stack: Vec::new(),
+            previous_widths: Vec::new(),
         }
     }
 
     /// Push a component-specific max-width override.
     fn push_component_width(&mut self, width: usize) {
-        self.width_stack.push(self.max_width);
+        self.previous_widths.push(self.max_width);
         self.max_width = width;
     }
 
     /// Pop the most recent component-specific max-width override.
     fn pop_component_width(&mut self) {
-        if let Some(w) = self.width_stack.pop() {
+        if let Some(w) = self.previous_widths.pop() {
             self.max_width = w;
         }
     }
 
     /// Current effective max width, accounting for any component overrides.
+    ///
+    /// `self.max_width` is always the active wrap width — component overrides
+    /// assign to it directly via [`Self::push_component_width`]. The
+    /// `previous_widths` stack only stores values to restore on pop.
     fn effective_max_width(&self) -> usize {
-        self.width_stack.last().copied().unwrap_or(self.max_width)
+        self.max_width
     }
 
     /// Pushes a new indentation width onto the stack.

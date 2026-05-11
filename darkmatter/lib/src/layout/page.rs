@@ -430,11 +430,18 @@ impl DarkmatterPage {
         options.include_line_numbers = self.line_numbers;
         options.color_mode = ctx.render_color_mode;
 
-        // Delegate to the existing terminal renderer, passing the layout context
-        // so per-component alignment and fill are honoured.
-        let body = md
-            .as_terminal_with_layout(options, Some(&ctx))
-            .map_err(|e| PageRenderError::Render(e.to_string()))?;
+        // Delegate to the existing terminal renderer. When no layout builder
+        // has been called we must NOT thread a layout context — doing so leaks
+        // the page's captured terminal width into component width resolution
+        // and breaks byte-for-byte equivalence with
+        // `for_terminal(&md, TerminalOptions::default())`, which performs its
+        // own width auto-detection.
+        let body = if self.is_default_layout() {
+            md.as_terminal_with_layout(options, None)
+        } else {
+            md.as_terminal_with_layout(options, Some(&ctx))
+        }
+        .map_err(|e| PageRenderError::Render(e.to_string()))?;
 
         if !ctx.needs_decoration() {
             return Ok(body);
@@ -1104,6 +1111,34 @@ mod tests {
     }
 
     #[test]
+    fn zero_config_render_ignores_captured_terminal_width() {
+        // Construct a DarkmatterPage from a Terminal whose captured width
+        // differs from TerminalOptions::default() auto-detection. The page
+        // must NOT leak that captured width into component width resolution;
+        // output must remain byte-for-byte identical to `for_terminal()` with
+        // default options. Without the `is_default_layout()` short-circuit in
+        // `render`, image/list/blockquote/table/code component paths would
+        // resolve widths against the captured Terminal width and diverge.
+        for width in [40u32, 100, 200] {
+            let term = Terminal::new_optimistic(width);
+            let page = DarkmatterPage::new(&term);
+            let md: Markdown = "# Heading\n\n- List item\n\n> Quoted prose\n\n```rust\nfn main() {}\n```\n\n| A | B |\n| - | - |\n| 1 | 2 |\n".into();
+
+            let page_out = page.render(&md).unwrap();
+            let direct_out = crate::markdown::output::terminal::for_terminal(
+                &md,
+                TerminalOptions::default(),
+            )
+            .unwrap();
+
+            assert_eq!(
+                page_out, direct_out,
+                "zero-config render with captured_width={width} must equal for_terminal default",
+            );
+        }
+    }
+
+    #[test]
     fn zero_config_render_with_list_matches_for_terminal() {
         let term = Terminal::new();
         let page = DarkmatterPage::new(&term);
@@ -1380,17 +1415,33 @@ mod tests {
                 PageFill::Indent(WidthUnit::Fixed(10)),
             )
             .use_alignment(PageComponent::BlockQuotes, PageAlignment::Left);
-        let md: Markdown = "> A quoted paragraph that should wrap with reduced width.\n".into();
+        // Long content so the wrap point is observable. Without the active
+        // width override, this line would render in a single 80-col span.
+        let md: Markdown = "> This is a very long quoted paragraph that should be forced to wrap once the component-specific width override is applied, leaving the remaining text on subsequent lines below.\n".into();
 
         let out = page.render(&md).unwrap();
         let plain = crate::testing::strip_ansi_codes(&out);
-        // The blockquote line should wrap at 70 cols (80 - 10 indent).
-        let lines: Vec<&str> = plain.lines().collect();
+        // Strip the blockquote prefix `▐   ` (4 visible cols) from each line.
+        // With Indent(10) at 80 cols, prose wraps at 70 cols. The blockquote
+        // prefix consumes 4 cols, so the final line content widths should not
+        // exceed 70 visible columns.
+        let lines: Vec<String> = plain
+            .lines()
+            .filter(|l| l.contains('▐'))
+            .map(|l| l.trim_end().to_string())
+            .collect();
+        assert!(
+            lines.len() >= 2,
+            "blockquote should wrap onto multiple lines under Indent(10); got {} line(s):\n{}",
+            lines.len(),
+            plain
+        );
         let max_len = lines.iter().map(|l| l.chars().count()).max().unwrap_or(0);
         assert!(
-            max_len <= 80,
-            "blockquote lines should not exceed terminal width, got max={}",
-            max_len
+            max_len <= 70,
+            "blockquote lines should be capped to 70 cols by Indent(10), got max={}:\n{}",
+            max_len,
+            plain
         );
     }
 
@@ -1399,7 +1450,9 @@ mod tests {
         let term = Terminal::new_optimistic(80);
         let page = DarkmatterPage::new(&term)
             .with_fill(PageComponent::Lists, PageFill::Max(WidthUnit::Fixed(50)));
-        let md: Markdown = "- Item one\n- Item two\n".into();
+        // Long list item so wrap is observable. Without the active width
+        // override, this would render at the page width (80) on a single line.
+        let md: Markdown = "- This is an unusually long bullet item that ought to be forced to wrap once Max(50) constrains the list rendering width to fifty columns.\n- Short follow-up.\n".into();
 
         let out = page.render(&md).unwrap();
         let plain = crate::testing::strip_ansi_codes(&out);
@@ -1407,8 +1460,21 @@ mod tests {
         let max_len = lines.iter().map(|l| l.chars().count()).max().unwrap_or(0);
         assert!(
             max_len <= 50,
-            "list lines should be capped to 50 cols, got max={}",
-            max_len
+            "list lines should be capped to 50 cols, got max={}:\n{}",
+            max_len,
+            plain
+        );
+        // Confirm wrap actually occurred: the long item must span >=2 visible
+        // lines so the test would fail without the active width override.
+        let content_lines = plain
+            .lines()
+            .filter(|l| !l.trim().is_empty())
+            .count();
+        assert!(
+            content_lines >= 3,
+            "expected the long item to wrap (>=3 non-empty lines incl. second item), got {}:\n{}",
+            content_lines,
+            plain
         );
     }
 

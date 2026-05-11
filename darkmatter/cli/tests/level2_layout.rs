@@ -11,11 +11,26 @@
 //!
 //! Tests skip silently when `WEZTERM_UNIX_SOCKET` is not set or the
 //! `wezterm` binary is missing, matching the pattern in `level2_errors.rs`.
+//!
+//! ## CI enforcement
+//!
+//! Set `DARKMATTER_LEVEL2_REQUIRED=1` in the environment to convert a missing
+//! WezTerm into a hard failure rather than a silent skip. CI jobs that
+//! provision WezTerm should always set this so Level 2 coverage is
+//! actually enforced, not just nominally present.
 
 use biscuit_test_harness::{CapturedFrame, TerminalHarness, skip_with_reason};
 use serial_test::serial;
 use std::fs;
 use tempfile::tempdir;
+
+/// Returns `true` when the environment requires Level 2 tests to run (CI mode).
+fn level2_required() -> bool {
+    matches!(
+        std::env::var("DARKMATTER_LEVEL2_REQUIRED").as_deref(),
+        Ok("1") | Ok("true") | Ok("TRUE")
+    )
+}
 
 /// Helper: write a markdown fixture, run `md` with the given flags inside the
 /// harness, and return the captured frame.
@@ -23,6 +38,12 @@ fn run_md(file_body: &str, extra_args: &str) -> Option<(CapturedFrame, std::path
     use biscuit_test_harness::wezterm::WezTermHarness;
 
     if !WezTermHarness::available() {
+        if level2_required() {
+            panic!(
+                "DARKMATTER_LEVEL2_REQUIRED=1 set but WezTerm is unavailable. \
+                 Provision WezTerm in this environment or unset the variable."
+            );
+        }
         skip_with_reason("WezTerm CLI (set WEZTERM_UNIX_SOCKET)");
         return None;
     }
@@ -306,4 +327,361 @@ fn level2_align_code_block_center_indents_more_than_left() {
         center_indent > left_indent,
         "center alignment should indent more than left: left={left_indent}, center={center_indent}\nleft header: {left_header:?}\ncenter header: {center_header:?}"
     );
+}
+
+// =============================================================================
+//                  TABLES / IMAGES / BLOCKQUOTES / LISTS
+// =============================================================================
+//
+// Real-terminal captures for component-specific alignment, fill, and wrapping.
+// These cover the gap called out in review-1: code-block coverage existed
+// already, but tables, images, blockquotes, and lists were Level 1 only.
+
+#[test]
+#[serial(level2_terminal)]
+fn level2_table_max_fill_constrains_visible_width() {
+    // Use unique sentinel column values so we can anchor on a single body row
+    // regardless of header/separator framing. The table needs enough render
+    // width to keep all columns; we cap at 50 (well under page width 80) and
+    // assert the rendered row never exceeds that cap.
+    let body = "\
+| ColA | ColB | ColC |\n\
+| ---- | ---- | ---- |\n\
+| sentinel_alpha | beta | gamma |\n";
+
+    let Some((frame, _)) = run_md(body, "--fill-tables max=50 --max-width 80") else {
+        return;
+    };
+
+    // Locate the body row by sentinel (it's only present in rendered output,
+    // never in the shell command echo).
+    let row = frame
+        .plain
+        .lines()
+        .find(|l| l.contains("sentinel_alpha"))
+        .unwrap_or_else(|| {
+            panic!(
+                "expected a table row containing 'sentinel_alpha' in:\n{}",
+                frame.plain
+            )
+        });
+    let visible = rtrim(row).chars().count();
+    assert!(
+        visible <= 50,
+        "table row visible width should be capped to 50 cols, got {visible}: {row:?}"
+    );
+    // Also ensure the cap actually constrains (visible < page width).
+    assert!(
+        visible < 80,
+        "table row should be narrower than the page (80 cols), got {visible}"
+    );
+}
+
+#[test]
+#[serial(level2_terminal)]
+fn level2_table_center_alignment_indents_more_than_left() {
+    let body = "\
+| A | B |\n\
+| - | - |\n\
+| 1 | 2 |\n";
+
+    let Some((left, _)) = run_md(body, "--align-tables left --fill-tables max=20 --max-width 60")
+    else {
+        return;
+    };
+    let Some((center, _)) = run_md(
+        body,
+        "--align-tables center --fill-tables max=20 --max-width 60",
+    ) else {
+        return;
+    };
+
+    let row_left = left
+        .plain
+        .lines()
+        .find(|l| l.contains('1') && l.contains('2'))
+        .expect("left: data row");
+    let row_center = center
+        .plain
+        .lines()
+        .find(|l| l.contains('1') && l.contains('2'))
+        .expect("center: data row");
+    let left_indent = row_left.chars().take_while(|c| *c == ' ').count();
+    let center_indent = row_center.chars().take_while(|c| *c == ' ').count();
+    assert!(
+        center_indent > left_indent,
+        "center alignment must indent more than left: left={left_indent}, center={center_indent}"
+    );
+}
+
+#[test]
+#[serial(level2_terminal)]
+fn level2_blockquote_indent_fill_caps_wrap_width() {
+    // Long quoted prose so the wrap point is observable in the captured pane.
+    let body = "> This is a fairly long quoted paragraph that should wrap onto a second visible line once Indent(20) forces the blockquote render width below the page width.\n";
+
+    let Some((frame, _)) = run_md(body, "--fill-block-quotes indent=20 --max-width 80") else {
+        return;
+    };
+
+    // Strip ANSI-stripped, trim trailing background fill. Blockquote lines are
+    // prefixed with the `▐` indicator glyph.
+    let quote_lines: Vec<String> = frame
+        .plain
+        .lines()
+        .filter(|l| l.contains('▐'))
+        .map(|l| rtrim(l).to_string())
+        .collect();
+    assert!(
+        quote_lines.len() >= 2,
+        "blockquote should wrap onto multiple lines under Indent(20). plain:\n{}",
+        frame.plain
+    );
+    let max_len = quote_lines.iter().map(|l| l.chars().count()).max().unwrap();
+    assert!(
+        max_len <= 60,
+        "blockquote lines should be capped to 60 cols (80 - 20 indent), got max={max_len}. plain:\n{}",
+        frame.plain
+    );
+}
+
+#[test]
+#[serial(level2_terminal)]
+fn level2_blockquote_center_alignment_indents_more_than_left() {
+    let body = "> Centered quoted line.\n";
+    let Some((left, _)) = run_md(
+        body,
+        "--align-block-quotes left --fill-block-quotes max=20 --max-width 60",
+    ) else {
+        return;
+    };
+    let Some((center, _)) = run_md(
+        body,
+        "--align-block-quotes center --fill-block-quotes max=20 --max-width 60",
+    ) else {
+        return;
+    };
+
+    let left_quote = left
+        .plain
+        .lines()
+        .find(|l| l.contains('▐'))
+        .expect("left: blockquote line");
+    let center_quote = center
+        .plain
+        .lines()
+        .find(|l| l.contains('▐'))
+        .expect("center: blockquote line");
+    let left_indent = left_quote.chars().take_while(|c| *c == ' ').count();
+    let center_indent = center_quote.chars().take_while(|c| *c == ' ').count();
+    assert!(
+        center_indent > left_indent,
+        "center alignment should indent more than left: left={left_indent}, center={center_indent}"
+    );
+}
+
+#[test]
+#[serial(level2_terminal)]
+fn level2_list_max_fill_caps_wrap_width() {
+    // Long bullet so wrap is observable.
+    let body = "- This is a notably long list item that has to wrap to a second visible row once Max(40) constrains the list render width to forty columns.\n- Follow-up.\n";
+
+    let Some((frame, _)) = run_md(body, "--fill-lists max=40 --max-width 80") else {
+        return;
+    };
+
+    // Locate the start of list output via a stable anchor, then collect the
+    // list region until the next blank line. This avoids measuring shell
+    // prompt + command-echo lines which span the full pane width.
+    let lines: Vec<&str> = frame.plain.lines().collect();
+    let start = lines
+        .iter()
+        .position(|l| l.trim_start().starts_with("- This is"))
+        .unwrap_or_else(|| panic!("missing list anchor. plain:\n{}", frame.plain));
+    let list_region: Vec<&str> = lines
+        .iter()
+        .skip(start)
+        .take_while(|l| !l.trim().is_empty())
+        .copied()
+        .collect();
+    let max_len = list_region
+        .iter()
+        .map(|l| rtrim(l).chars().count())
+        .max()
+        .unwrap_or(0);
+    assert!(
+        max_len <= 40,
+        "list lines should be capped to 40 cols, got max={max_len}. region:\n{}\nfull plain:\n{}",
+        list_region.join("\n"),
+        frame.plain
+    );
+    // Sanity-check: confirm wrap actually occurred (>= 3 list rows: long line
+    // wraps to multiple rows + the Follow-up item).
+    assert!(
+        list_region.len() >= 3,
+        "expected list to wrap onto multiple rows, got {} rows:\n{}",
+        list_region.len(),
+        list_region.join("\n")
+    );
+}
+
+#[test]
+#[serial(level2_terminal)]
+fn level2_list_center_alignment_indents_more_than_left() {
+    // Use very short items + a wider max so no wrap forces marker/content
+    // onto separate lines. The `xy` / `ab` sentinels are unique to the
+    // rendered output (the shell command echo doesn't contain them).
+    let body = "- xy\n- ab\n";
+    let Some((left, _)) = run_md(
+        body,
+        "--align-lists left --fill-lists max=30 --max-width 60",
+    ) else {
+        return;
+    };
+    let Some((center, _)) = run_md(
+        body,
+        "--align-lists center --fill-lists max=30 --max-width 60",
+    ) else {
+        return;
+    };
+
+    let find_row = |plain: &str, label: &str| -> String {
+        plain
+            .lines()
+            .find(|l| l.trim_start().starts_with("- xy"))
+            .map(|l| l.to_string())
+            .unwrap_or_else(|| panic!("{label}: list item not found. plain:\n{plain}"))
+    };
+    let left_row = find_row(&left.plain, "left");
+    let center_row = find_row(&center.plain, "center");
+    let left_indent = left_row.chars().take_while(|c| *c == ' ').count();
+    let center_indent = center_row.chars().take_while(|c| *c == ' ').count();
+    assert!(
+        center_indent > left_indent,
+        "list center alignment must indent more than left: left={left_indent}, center={center_indent}"
+    );
+}
+
+#[test]
+#[serial(level2_terminal)]
+fn level2_image_fallback_text_respects_alignment() {
+    // Use a non-existent image so the renderer emits its alt-text/path
+    // fallback rather than attempting an inline image protocol — that gives
+    // us a stable plain-text anchor in the captured pane regardless of the
+    // host terminal's image support.
+    let body = "![Alt text fallback](./does-not-exist.png)\n";
+
+    let Some((left, _)) = run_md(
+        body,
+        "--align-images left --fill-images max=20 --max-width 60",
+    ) else {
+        return;
+    };
+    let Some((center, _)) = run_md(
+        body,
+        "--align-images center --fill-images max=20 --max-width 60",
+    ) else {
+        return;
+    };
+
+    // Anchor on the alt text; both captures must contain it.
+    let line_left = left
+        .plain
+        .lines()
+        .find(|l| l.contains("Alt text fallback"))
+        .unwrap_or_else(|| {
+            panic!(
+                "left: expected an alt-text anchor in image fallback. plain:\n{}",
+                left.plain
+            )
+        });
+    let line_center = center
+        .plain
+        .lines()
+        .find(|l| l.contains("Alt text fallback"))
+        .unwrap_or_else(|| {
+            panic!(
+                "center: expected an alt-text anchor in image fallback. plain:\n{}",
+                center.plain
+            )
+        });
+
+    let left_indent = line_left.chars().take_while(|c| *c == ' ').count();
+    let center_indent = line_center.chars().take_while(|c| *c == ' ').count();
+    assert!(
+        center_indent > left_indent,
+        "image fallback center alignment must indent more than left: left={left_indent}, center={center_indent}"
+    );
+}
+
+#[test]
+#[serial(level2_terminal)]
+fn level2_end_to_end_layout_dimensions() {
+    // Cross-component end-to-end capture: a small page with multiple
+    // components rendered under a complete set of layout flags. Verifies
+    // visible row dimensions and the top/bottom margin behavior at once.
+    let body = "\
+# E2E heading\n\
+\n\
+Some prose paragraph.\n\
+\n\
+- list item alpha\n\
+- list item beta\n\
+\n\
+> A quoted observation.\n\
+";
+
+    let Some((frame, _)) = run_md(
+        body,
+        "-m 2 --padding 1 --max-width 40 --page-bg subtle --align-block-quotes left",
+    ) else {
+        return;
+    };
+
+    // Locate the heading anchor.
+    let lines: Vec<&str> = frame.plain.lines().collect();
+    let head_idx = lines
+        .iter()
+        .position(|l| l.contains("E2E heading"))
+        .unwrap_or_else(|| panic!("missing heading anchor in pane:\n{}", frame.plain));
+
+    // Margin top = 2: two blank rows above the (left-padded) heading.
+    assert!(
+        head_idx >= 2,
+        "heading should sit at row index >= 2 to allow 2 margin rows above, got {head_idx}"
+    );
+    assert!(
+        rtrim(lines[head_idx - 1]).is_empty(),
+        "row above heading must be blank (margin), got: {:?}",
+        lines[head_idx - 1]
+    );
+    assert!(
+        rtrim(lines[head_idx - 2]).is_empty(),
+        "two rows above heading must be blank (margin), got: {:?}",
+        lines[head_idx - 2]
+    );
+
+    // Visible content rows should not exceed margin_x(2*2) + padding_x(1*2)
+    // + max_width(40) = 46 columns.
+    let max_visible = lines
+        .iter()
+        .skip(head_idx)
+        .take(10)
+        .map(|l| rtrim(l).chars().count())
+        .max()
+        .unwrap_or(0);
+    assert!(
+        max_visible <= 46,
+        "content rows should fit in 4 margin + 2 padding + 40 max-width = 46 cols, got {max_visible}. plain:\n{}",
+        frame.plain
+    );
+
+    // Every component anchor must be present in the captured pane.
+    for anchor in ["Some prose paragraph", "list item alpha", "list item beta", "A quoted observation"] {
+        assert!(
+            frame.plain.contains(anchor),
+            "expected '{anchor}' in captured plain output. plain:\n{}",
+            frame.plain
+        );
+    }
 }
