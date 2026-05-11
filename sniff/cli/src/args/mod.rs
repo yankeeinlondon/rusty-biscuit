@@ -752,6 +752,8 @@ impl Commands {
                     package_area,
                     md,
                     list,
+                    no_error,
+                    on_error,
                 }) => RepoAction::Packages {
                     filter: if sub_filter.is_empty() {
                         filter.clone()
@@ -767,6 +769,8 @@ impl Commands {
                     } else {
                         PackagesFormat::Csv
                     },
+                    no_error: *no_error,
+                    on_error: on_error.clone(),
                 },
                 Some(RepoSubcommand::PackageAreas {
                     filter: sub_filter,
@@ -774,6 +778,8 @@ impl Commands {
                     package_area,
                     md,
                     list,
+                    no_error,
+                    on_error,
                 }) => RepoAction::PackageAreas {
                     filter: if sub_filter.is_empty() {
                         filter.clone()
@@ -789,6 +795,8 @@ impl Commands {
                     } else {
                         PackagesFormat::Csv
                     },
+                    no_error: *no_error,
+                    on_error: on_error.clone(),
                 },
                 Some(RepoSubcommand::Package { no_error, on_error }) => RepoAction::Package {
                     no_error: *no_error,

@@ -46,12 +46,16 @@ pub enum RepoAction {
         package: Option<String>,
         package_area: Option<String>,
         format: PackagesFormat,
+        no_error: bool,
+        on_error: Option<String>,
     },
     PackageAreas {
         filter: Vec<String>,
         package: Option<String>,
         package_area: Option<String>,
         format: PackagesFormat,
+        no_error: bool,
+        on_error: Option<String>,
     },
     Package {
         no_error: bool,
@@ -289,6 +293,12 @@ pub enum RepoSubcommand {
         /// Render as a raw list (one name per line, no bullet)
         #[arg(long, conflicts_with = "md")]
         list: bool,
+        /// Exit 0 with no output when no results found (default is exit 1)
+        #[arg(long)]
+        no_error: bool,
+        /// Message to display when no results found
+        #[arg(long, value_name = "MESSAGE")]
+        on_error: Option<String>,
     },
     /// Output only package area names as a comma-separated list
     #[command(name = "package-areas")]
@@ -307,6 +317,12 @@ pub enum RepoSubcommand {
         /// Render as a raw list (one entry per line, no bullet)
         #[arg(long, conflicts_with = "md")]
         list: bool,
+        /// Exit 0 with no output when no results found (default is exit 1)
+        #[arg(long)]
+        no_error: bool,
+        /// Message to display when no results found
+        #[arg(long, value_name = "MESSAGE")]
+        on_error: Option<String>,
     },
     /// Output the package name for the current directory
     Package {
