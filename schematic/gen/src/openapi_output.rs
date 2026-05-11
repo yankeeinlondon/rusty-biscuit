@@ -8,5 +8,10 @@
 //! `RestApi` definitions share that module). [`write_openapi`] remains for
 //! the single-API case and now also derives its filename from the resolved
 //! module name rather than from `api.name`.
+//!
+//! # Deprecated
+//!
+//! This module is deprecated. Use `schematic_gen::export::openapi` instead.
 
+#[deprecated(since = "0.4.0", note = "Use `schematic_gen::export::openapi` instead")]
 pub use crate::export::openapi::*;

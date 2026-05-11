@@ -1,0 +1,46 @@
+//! Shared module assembly (shared.rs).
+
+use proc_macro2::TokenStream;
+use quote::quote;
+
+use crate::codegen::{
+    generate_error_type, generate_paginated_trait, generate_request_parts_type,
+    generate_variant_types,
+};
+
+/// Assembles the shared module code (shared.rs).
+///
+/// This function generates code for the shared module, containing:
+/// - Module documentation
+/// - Common error type used by all API clients
+/// - Common type aliases (e.g., `RequestParts`)
+/// - Re-export of reqwest for downstream crates
+/// - `Paginated` marker trait for paginated request types
+///
+/// ## Returns
+///
+/// A TokenStream containing the shared module code.
+pub fn assemble_shared_module() -> TokenStream {
+    let request_parts_type = generate_request_parts_type();
+    let error_type = generate_error_type();
+    let variant_types = generate_variant_types();
+    let paginated_trait = generate_paginated_trait();
+
+    quote! {
+        //! Shared types and utilities for generated API clients.
+
+        /// Re-export reqwest for downstream crates that need to make custom requests.
+        ///
+        /// This allows consumers to use the same HTTP client types without adding
+        /// reqwest as a direct dependency.
+        pub use reqwest;
+
+        #request_parts_type
+
+        #error_type
+
+        #variant_types
+
+        #paginated_trait
+    }
+}
