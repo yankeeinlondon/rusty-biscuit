@@ -40,14 +40,14 @@
 //! | Pipelines | `ListProjectPipelines` |
 //! | Groups | `ListGroupProjects` |
 
+mod endpoints;
 mod types;
 
 pub use types::*;
 
 use crate::registry::SchemaRegistry;
 use schematic_define::{
-    ApiKeyEnv, ApiResponse, AuthStrategy, Endpoint, EnvList, EnvMapping, RestApi, RestMethod,
-    params::{EndpointParams, PaginationStyle, QueryParamType},
+    ApiKeyEnv, AuthStrategy, Endpoint, EnvList, EnvMapping, RestApi, RestMethod,
 };
 
 /// Creates a schema registry containing all GitLab response types.
@@ -136,6 +136,17 @@ pub fn openapi_registry() -> SchemaRegistry {
 /// assert_eq!(api.endpoints.len(), 18);
 /// ```
 pub fn define_gitlab_api() -> RestApi {
+    let endpoints: Vec<Endpoint> = vec![
+        endpoints::projects::all(),
+        endpoints::merge_requests::all(),
+        endpoints::issues::all(),
+        endpoints::releases::all(),
+        endpoints::pipelines::all(),
+    ]
+    .into_iter()
+    .flatten()
+    .collect();
+
     RestApi {
         name: "GitLab".to_string(),
         description: "GitLab REST API v4 for repository, MR, issue, and release workflows"
@@ -155,368 +166,7 @@ pub fn define_gitlab_api() -> RestApi {
             "User-Agent".to_string(),
             "schematic-gitlab-client".to_string(),
         )],
-        endpoints: vec![
-            // =================================================================
-            // Repository Tree & Files
-            // =================================================================
-            Endpoint {
-                id: "ListRepositoryTree".to_string(),
-                method: RestMethod::Get,
-                path: "/projects/{id}/repository/tree".to_string(),
-                description: "List repository tree recursively (files and directories)".to_string(),
-                request: None,
-                response: ApiResponse::json_vec_type("TreeItem"),
-                headers: vec![],
-                params: Some(
-                    EndpointParams::default()
-                        .with_pagination(PaginationStyle::gitlab())
-                        .with_query_param(
-                            "recursive",
-                            QueryParamType::Boolean,
-                            false,
-                            Some("Include files from subdirectories recursively"),
-                        )
-                        .with_query_param(
-                            "git_ref",
-                            QueryParamType::String,
-                            false,
-                            Some("Branch, tag, or commit SHA to list tree for"),
-                        )
-                        .with_query_param(
-                            "path",
-                            QueryParamType::String,
-                            false,
-                            Some("Subdirectory path to list"),
-                        ),
-                ),
-                oauth_scopes: None,
-            },
-            Endpoint {
-                id: "GetRepositoryFile".to_string(),
-                method: RestMethod::Get,
-                path: "/projects/{id}/repository/files/{file_path}?ref={git_ref}".to_string(),
-                description: "Get file content (Base64 encoded, provide git_ref for branch/tag)"
-                    .to_string(),
-                request: None,
-                response: ApiResponse::json_type("FileContent"),
-                headers: vec![],
-                params: None,
-                oauth_scopes: None,
-            },
-            // =================================================================
-            // Merge Requests
-            // =================================================================
-            Endpoint {
-                id: "ListMergeRequests".to_string(),
-                method: RestMethod::Get,
-                path: "/projects/{id}/merge_requests".to_string(),
-                description: "List merge requests with metadata".to_string(),
-                request: None,
-                response: ApiResponse::json_vec_type("MergeRequest"),
-                headers: vec![],
-                params: Some(
-                    EndpointParams::default()
-                        .with_pagination(PaginationStyle::gitlab())
-                        .with_query_param(
-                            "state",
-                            QueryParamType::Enum(vec![
-                                "opened".to_string(),
-                                "closed".to_string(),
-                                "merged".to_string(),
-                                "all".to_string(),
-                            ]),
-                            false,
-                            Some("Filter by merge request state"),
-                        ),
-                ),
-                oauth_scopes: None,
-            },
-            Endpoint {
-                id: "GetMergeRequest".to_string(),
-                method: RestMethod::Get,
-                path: "/projects/{id}/merge_requests/{merge_request_iid}".to_string(),
-                description: "Get a single merge request by IID".to_string(),
-                request: None,
-                response: ApiResponse::json_type("MergeRequest"),
-                headers: vec![],
-                params: None,
-                oauth_scopes: None,
-            },
-            Endpoint {
-                id: "ListMergeRequestCommits".to_string(),
-                method: RestMethod::Get,
-                path: "/projects/{id}/merge_requests/{merge_request_iid}/commits".to_string(),
-                description: "List commits in a merge request".to_string(),
-                request: None,
-                response: ApiResponse::json_vec_type("Commit"),
-                headers: vec![],
-                params: Some(
-                    EndpointParams::default().with_pagination(PaginationStyle::gitlab()),
-                ),
-                oauth_scopes: None,
-            },
-            Endpoint {
-                id: "ListMergeRequestChanges".to_string(),
-                method: RestMethod::Get,
-                path: "/projects/{id}/merge_requests/{merge_request_iid}/changes".to_string(),
-                description: "Get merge request with file changes/diffs".to_string(),
-                request: None,
-                response: ApiResponse::json_type("MergeRequestChanges"),
-                headers: vec![],
-                params: None,
-                oauth_scopes: None,
-            },
-            // =================================================================
-            // Issues
-            // =================================================================
-            Endpoint {
-                id: "ListIssues".to_string(),
-                method: RestMethod::Get,
-                path: "/projects/{id}/issues".to_string(),
-                description: "List issues".to_string(),
-                request: None,
-                response: ApiResponse::json_vec_type("Issue"),
-                headers: vec![],
-                params: Some(
-                    EndpointParams::default()
-                        .with_pagination(PaginationStyle::gitlab())
-                        .with_query_param(
-                            "state",
-                            QueryParamType::Enum(vec![
-                                "opened".to_string(),
-                                "closed".to_string(),
-                                "all".to_string(),
-                            ]),
-                            false,
-                            Some("Filter by issue state"),
-                        ),
-                ),
-                oauth_scopes: None,
-            },
-            Endpoint {
-                id: "GetIssue".to_string(),
-                method: RestMethod::Get,
-                path: "/projects/{id}/issues/{issue_iid}".to_string(),
-                description: "Get a single issue by IID".to_string(),
-                request: None,
-                response: ApiResponse::json_type("Issue"),
-                headers: vec![],
-                params: None,
-                oauth_scopes: None,
-            },
-            Endpoint {
-                id: "ListIssueNotes".to_string(),
-                method: RestMethod::Get,
-                path: "/projects/{id}/issues/{issue_iid}/notes".to_string(),
-                description: "List comments/notes on an issue".to_string(),
-                request: None,
-                response: ApiResponse::json_vec_type("Note"),
-                headers: vec![],
-                params: Some(
-                    EndpointParams::default().with_pagination(PaginationStyle::gitlab()),
-                ),
-                oauth_scopes: None,
-            },
-            Endpoint {
-                id: "ListIssueParticipants".to_string(),
-                method: RestMethod::Get,
-                path: "/projects/{id}/issues/{issue_iid}/participants".to_string(),
-                description: "List participants on an issue".to_string(),
-                request: None,
-                response: ApiResponse::json_vec_type("User"),
-                headers: vec![],
-                params: None,
-                oauth_scopes: None,
-            },
-            // =================================================================
-            // Tags and Releases
-            // =================================================================
-            Endpoint {
-                id: "ListTags".to_string(),
-                method: RestMethod::Get,
-                path: "/projects/{id}/repository/tags".to_string(),
-                description: "List repository tags (check `release` field for release tags)"
-                    .to_string(),
-                request: None,
-                response: ApiResponse::json_vec_type("Tag"),
-                headers: vec![],
-                params: Some(
-                    EndpointParams::default().with_pagination(PaginationStyle::gitlab()),
-                ),
-                oauth_scopes: None,
-            },
-            Endpoint {
-                id: "GetTag".to_string(),
-                method: RestMethod::Get,
-                path: "/projects/{id}/repository/tags/{tag_name}".to_string(),
-                description: "Get a single tag by name".to_string(),
-                request: None,
-                response: ApiResponse::json_type("Tag"),
-                headers: vec![],
-                params: None,
-                oauth_scopes: None,
-            },
-            Endpoint {
-                id: "ListReleases".to_string(),
-                method: RestMethod::Get,
-                path: "/projects/{id}/releases".to_string(),
-                description: "List releases".to_string(),
-                request: None,
-                response: ApiResponse::json_vec_type("Release"),
-                headers: vec![],
-                params: Some(
-                    EndpointParams::default().with_pagination(PaginationStyle::gitlab()),
-                ),
-                oauth_scopes: None,
-            },
-            Endpoint {
-                id: "GetRelease".to_string(),
-                method: RestMethod::Get,
-                path: "/projects/{id}/releases/{tag_name}".to_string(),
-                description: "Get a single release by tag name".to_string(),
-                request: None,
-                response: ApiResponse::json_type("Release"),
-                headers: vec![],
-                params: None,
-                oauth_scopes: None,
-            },
-            Endpoint {
-                id: "GetLatestRelease".to_string(),
-                method: RestMethod::Get,
-                path: "/projects/{id}/releases/permalink/latest".to_string(),
-                description: "Get the latest release".to_string(),
-                request: None,
-                response: ApiResponse::json_type("Release"),
-                headers: vec![],
-                params: None,
-                oauth_scopes: None,
-            },
-            // =================================================================
-            // Project Metadata
-            // =================================================================
-            Endpoint {
-                id: "GetProject".to_string(),
-                method: RestMethod::Get,
-                path: "/projects/{id}".to_string(),
-                description: "Get project metadata (use URL-encoded path or numeric ID)".to_string(),
-                request: None,
-                response: ApiResponse::json_type("Project"),
-                headers: vec![],
-                params: None,
-                oauth_scopes: None,
-            },
-            // =================================================================
-            // Pipelines (CI/CD)
-            // =================================================================
-            Endpoint {
-                id: "ListProjectPipelines".to_string(),
-                method: RestMethod::Get,
-                path: "/projects/{id}/pipelines".to_string(),
-                description: "List CI/CD pipelines for a project".to_string(),
-                request: None,
-                response: ApiResponse::json_vec_type("Pipeline"),
-                headers: vec![],
-                params: Some(
-                    EndpointParams::default()
-                        .with_pagination(PaginationStyle::gitlab())
-                        .with_query_param(
-                            "status",
-                            QueryParamType::Enum(vec![
-                                "created".to_string(),
-                                "waiting_for_resource".to_string(),
-                                "preparing".to_string(),
-                                "pending".to_string(),
-                                "running".to_string(),
-                                "success".to_string(),
-                                "failed".to_string(),
-                                "canceled".to_string(),
-                                "skipped".to_string(),
-                                "manual".to_string(),
-                                "scheduled".to_string(),
-                            ]),
-                            false,
-                            Some("Filter by pipeline status"),
-                        )
-                        .with_query_param(
-                            "source",
-                            QueryParamType::String,
-                            false,
-                            Some("Filter by pipeline source (e.g., push, merge_request_event, schedule)"),
-                        )
-                        .with_query_param(
-                            "git_ref",
-                            QueryParamType::String,
-                            false,
-                            Some("Filter by branch or tag name"),
-                        )
-                        .with_query_param(
-                            "sha",
-                            QueryParamType::String,
-                            false,
-                            Some("Filter by commit SHA"),
-                        ),
-                ),
-                oauth_scopes: None,
-            },
-            // =================================================================
-            // Group Projects
-            // =================================================================
-            Endpoint {
-                id: "ListGroupProjects".to_string(),
-                method: RestMethod::Get,
-                path: "/groups/{id}/projects".to_string(),
-                description: "List projects in a group".to_string(),
-                request: None,
-                response: ApiResponse::json_vec_type("Project"),
-                headers: vec![],
-                params: Some(
-                    EndpointParams::default()
-                        .with_pagination(PaginationStyle::gitlab())
-                        .with_query_param(
-                            "archived",
-                            QueryParamType::Boolean,
-                            false,
-                            Some("Filter by archived status"),
-                        )
-                        .with_query_param(
-                            "visibility",
-                            QueryParamType::Enum(vec![
-                                "public".to_string(),
-                                "internal".to_string(),
-                                "private".to_string(),
-                            ]),
-                            false,
-                            Some("Filter by visibility level"),
-                        )
-                        .with_query_param(
-                            "order_by",
-                            QueryParamType::Enum(vec![
-                                "id".to_string(),
-                                "name".to_string(),
-                                "path".to_string(),
-                                "created_at".to_string(),
-                                "updated_at".to_string(),
-                                "last_activity_at".to_string(),
-                            ]),
-                            false,
-                            Some("Sort field"),
-                        )
-                        .with_query_param(
-                            "sort",
-                            QueryParamType::Enum(vec!["asc".to_string(), "desc".to_string()]),
-                            false,
-                            Some("Sort direction"),
-                        )
-                        .with_query_param(
-                            "include_subgroups",
-                            QueryParamType::Boolean,
-                            false,
-                            Some("Include projects from subgroups"),
-                        ),
-                ),
-                oauth_scopes: None,
-            },
-        ],
+        endpoints,
         module_path: Some("gitlab".to_string()),
         request_suffix: None,
         version: None,
@@ -647,7 +297,7 @@ mod tests {
         );
         assert!(endpoint.request.is_none());
         match &endpoint.response {
-            ApiResponse::Json(schema) => {
+            schematic_define::ApiResponse::Json(schema) => {
                 assert!(schema.type_name.starts_with("Vec<"));
             }
             _ => panic!("Expected JSON response"),
@@ -838,7 +488,7 @@ mod tests {
         for id in list_endpoints {
             let endpoint = api.endpoints.iter().find(|e| e.id == id).unwrap();
             match &endpoint.response {
-                ApiResponse::Json(schema) => {
+                schematic_define::ApiResponse::Json(schema) => {
                     assert!(
                         schema.type_name.starts_with("Vec<"),
                         "Endpoint {} should return Vec type, got {}",
@@ -869,7 +519,7 @@ mod tests {
         for id in single_endpoints {
             let endpoint = api.endpoints.iter().find(|e| e.id == id).unwrap();
             match &endpoint.response {
-                ApiResponse::Json(schema) => {
+                schematic_define::ApiResponse::Json(schema) => {
                     assert!(
                         !schema.type_name.starts_with("Vec<"),
                         "Endpoint {} should return single item, not Vec",
@@ -949,7 +599,7 @@ mod tests {
         assert_eq!(endpoint.path, "/projects/{id}");
 
         match &endpoint.response {
-            ApiResponse::Json(schema) => {
+            schematic_define::ApiResponse::Json(schema) => {
                 assert_eq!(schema.type_name, "Project");
             }
             _ => panic!("Expected JSON response"),
@@ -969,7 +619,7 @@ mod tests {
         assert_eq!(endpoint.path, "/projects/{id}/pipelines");
 
         match &endpoint.response {
-            ApiResponse::Json(schema) => {
+            schematic_define::ApiResponse::Json(schema) => {
                 assert!(schema.type_name.starts_with("Vec<"));
             }
             _ => panic!("Expected JSON response"),
@@ -995,7 +645,7 @@ mod tests {
         assert_eq!(endpoint.path, "/groups/{id}/projects");
 
         match &endpoint.response {
-            ApiResponse::Json(schema) => {
+            schematic_define::ApiResponse::Json(schema) => {
                 assert!(schema.type_name.starts_with("Vec<"));
             }
             _ => panic!("Expected JSON response"),

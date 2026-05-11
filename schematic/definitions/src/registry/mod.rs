@@ -19,6 +19,11 @@
 //! assert!(registry.get("Model").is_some());
 //! ```
 
+mod conversion;
+mod lookup;
+
+pub use lookup::*;
+
 use indexmap::IndexMap;
 use schemars::generate::SchemaSettings;
 use schemars::{JsonSchema, Schema};
@@ -136,7 +141,7 @@ impl SchemaRegistry {
         let mut result = IndexMap::new();
 
         for (name, schema) in &self.types {
-            let openapi_schema = convert_schema_to_openapi(schema);
+            let openapi_schema = conversion::convert_schema_to_openapi(schema);
             result.insert(name.clone(), openapi_schema);
 
             // Recursively extract all nested $defs from the schemars JSON.
@@ -158,7 +163,7 @@ impl SchemaRegistry {
             if let Some(defs) = obj.get("$defs").and_then(|v| v.as_object()) {
                 for (def_name, def_schema) in defs {
                     if !result.contains_key(def_name) {
-                        result.insert(def_name.clone(), convert_json_schema_to_openapi(def_schema));
+                        result.insert(def_name.clone(), conversion::convert_json_schema_to_openapi(def_schema));
                         // Recurse into the def itself
                         Self::extract_defs_recursive(def_schema, result);
                     }
@@ -173,7 +178,7 @@ impl SchemaRegistry {
                     if !result.contains_key(schema_name) {
                         result.insert(
                             schema_name.clone(),
-                            convert_json_schema_to_openapi(schema_value),
+                            conversion::convert_json_schema_to_openapi(schema_value),
                         );
                         // Recurse into the schema itself
                         Self::extract_defs_recursive(schema_value, result);
@@ -263,366 +268,6 @@ impl SchemaRegistry {
 impl schematic_define::openapi::SchemaRegistryLike for SchemaRegistry {
     fn to_openapi_schemas(&self) -> IndexMap<String, openapiv3::Schema> {
         self.to_openapi_schemas()
-    }
-}
-
-/// Returns the OpenAPI schema registry for the specified API.
-///
-/// This function provides a central lookup for all available API schema registries.
-/// OpenAI and Samsung Smart TV currently have complete registries with
-/// `JsonSchema` derives on their REST response types.
-///
-/// ## Arguments
-///
-/// * `api_name` - The name of the API (case-insensitive). Supported values:
-///   - `"openai"` - OpenAI Models API registry
-///   - `"samsung-smart-tv"` - Samsung Smart TV REST registry
-///
-/// ## Returns
-///
-/// `Some(SchemaRegistry)` if the API has a complete schema registry, `None` otherwise.
-///
-/// ## Examples
-///
-/// ```
-/// use schematic_definitions::registry::get_registry;
-///
-/// let registry = get_registry("openai");
-/// assert!(registry.is_some());
-///
-/// let unknown = get_registry("unknown-api");
-/// assert!(unknown.is_none());
-/// ```
-#[must_use]
-pub fn get_registry(api_name: &str) -> Option<SchemaRegistry> {
-    match api_name.to_lowercase().as_str() {
-        "anthropic" => Some(crate::anthropic::openapi_registry()),
-        "bitbucket" => Some(crate::bitbucket::openapi_registry()),
-        "elevenlabs" => Some(crate::elevenlabs::openapi_registry()),
-        "artificial-analysis-data" | "artificial-analysis-critpt" => {
-            Some(crate::artificial_analysis::openapi_registry())
-        }
-        "emqx-basic" | "emqx-bearer" => Some(crate::emqx::openapi_registry()),
-        "eversolo" => Some(crate::eversolo::openapi_registry()),
-        "gitea" => Some(crate::gitea::openapi_registry()),
-        "github" => Some(crate::github::openapi_registry()),
-        "gitlab" => Some(crate::gitlab::openapi_registry()),
-        "huggingface" => Some(crate::huggingface::openapi_registry()),
-        "lmstudio" => Some(crate::lmstudio::openapi_registry()),
-        "ollama-native" | "ollama-openai" => Some(crate::ollama::openapi_registry()),
-        "openai" => Some(crate::openai::openapi_registry()),
-        "samsung-smart-tv" => Some(crate::samsung_smart_tv::openapi_registry()),
-        "unfolded-circle-core-rest" => Some(crate::unfolded_circle::core_rest::openapi_registry()),
-        _ => None,
-    }
-}
-
-/// Returns the canonical registry-lookup key for a given API name.
-///
-/// `RestApi::name` uses the API's struct-style name (e.g. `"OllamaNative"`),
-/// but [`get_registry`] is keyed by kebab-cased identifiers
-/// (e.g. `"ollama-native"`). This function bridges the two so callers do not
-/// need to maintain their own translation table.
-///
-/// ## Returns
-///
-/// The kebab-case key suitable for [`get_registry`] when `api_name` is a
-/// known API; otherwise returns the lowercased input as a best-effort
-/// fallback.
-///
-/// ## Examples
-///
-/// ```
-/// use schematic_definitions::registry::{get_registry, registry_key_for};
-///
-/// assert_eq!(registry_key_for("OllamaNative"), "ollama-native");
-/// assert_eq!(registry_key_for("HuggingFaceHub"), "huggingface");
-/// assert!(get_registry(&registry_key_for("OpenAI")).is_some());
-/// ```
-#[must_use]
-pub fn registry_key_for(api_name: &str) -> String {
-    match api_name {
-        "Anthropic" => "anthropic".to_string(),
-        "ArtificialAnalysisData" => "artificial-analysis-data".to_string(),
-        "ArtificialAnalysisCritPt" => "artificial-analysis-critpt".to_string(),
-        "Bitbucket" => "bitbucket".to_string(),
-        "OpenAI" => "openai".to_string(),
-        "ElevenLabs" => "elevenlabs".to_string(),
-        "Gitea" => "gitea".to_string(),
-        "GitHub" => "github".to_string(),
-        "GitLab" => "gitlab".to_string(),
-        "HuggingFaceHub" => "huggingface".to_string(),
-        "LmStudio" => "lmstudio".to_string(),
-        "OllamaNative" => "ollama-native".to_string(),
-        "OllamaOpenAI" => "ollama-openai".to_string(),
-        "EmqxBasic" => "emqx-basic".to_string(),
-        "EmqxBearer" => "emqx-bearer".to_string(),
-        "Eversolo" => "eversolo".to_string(),
-        "SamsungSmartTv" => "samsung-smart-tv".to_string(),
-        "UnfoldedCircleCoreRest" => "unfolded-circle-core-rest".to_string(),
-        other => other.to_lowercase(),
-    }
-}
-
-/// Returns the merged OpenAPI schema registry for every API in a module.
-///
-/// Module-grouped OpenAPI export emits a single document per resolved module
-/// path (e.g. `ollama.json` covers both `OllamaNative` and `OllamaOpenAI`).
-/// This helper looks up each member API's per-API registry and merges them
-/// into one [`SchemaRegistry`] suitable for that grouped export.
-///
-/// The merge uses `IndexMap` insertion semantics: identical schemas
-/// registered under the same name collapse to a single entry, while distinct
-/// schemas are unioned in insertion order.
-///
-/// ## Returns
-///
-/// `Some(SchemaRegistry)` containing the union of every member API's
-/// registry when the module is known **and** at least one member API has a
-/// registered schema registry. `None` is returned only when:
-///
-/// - the module name is unknown to [`crate::apis_by_module`], **or**
-/// - every member API in the module has no registry available via
-///   [`get_registry`].
-///
-/// ## Examples
-///
-/// ```
-/// use schematic_definitions::registry::get_registries_for_module;
-///
-/// let ollama = get_registries_for_module("ollama").expect("ollama module");
-/// assert!(!ollama.is_empty());
-///
-/// assert!(get_registries_for_module("unknown-module").is_none());
-/// ```
-#[must_use]
-pub fn get_registries_for_module(module_name: &str) -> Option<SchemaRegistry> {
-    let normalized = module_name.to_lowercase();
-    let grouped = crate::apis_by_module();
-
-    // Find the matching module bucket case-insensitively.
-    let module_apis = grouped
-        .iter()
-        .find(|(name, _)| name.to_lowercase() == normalized)
-        .map(|(_, apis)| apis)?;
-
-    let mut merged = SchemaRegistry::new();
-    let mut found_any = false;
-
-    for api in module_apis {
-        let key = registry_key_for(&api.name);
-        if let Some(reg) = get_registry(&key) {
-            merged.extend(reg);
-            found_any = true;
-        }
-    }
-
-    if found_any { Some(merged) } else { None }
-}
-
-/// Converts a schemars `Schema` to an `openapiv3::Schema`.
-///
-/// This function handles the conversion from schemars JSON Schema format
-/// to OpenAPI 3.0 schema format. The conversion preserves:
-/// - Type information (string, number, object, array, etc.)
-/// - Property definitions
-/// - Required fields
-/// - Descriptions from doc comments
-fn convert_schema_to_openapi(schema: &Schema) -> openapiv3::Schema {
-    // Get the underlying JSON value
-    let json_value = schema.as_value();
-    convert_json_schema_to_openapi(json_value)
-}
-
-/// Converts a JSON Schema value to an OpenAPI schema.
-fn convert_json_schema_to_openapi(value: &serde_json::Value) -> openapiv3::Schema {
-    use openapiv3::{ObjectType, Schema, SchemaData, SchemaKind, Type};
-
-    // Handle boolean schemas
-    if let Some(b) = value.as_bool() {
-        return if b {
-            // true = any schema
-            Schema {
-                schema_data: SchemaData::default(),
-                schema_kind: SchemaKind::Any(openapiv3::AnySchema::default()),
-            }
-        } else {
-            // false = never matches (we'll represent as object with no valid values)
-            Schema {
-                schema_data: SchemaData::default(),
-                schema_kind: SchemaKind::Not {
-                    not: Box::new(openapiv3::ReferenceOr::Item(Schema {
-                        schema_data: SchemaData::default(),
-                        schema_kind: SchemaKind::Any(openapiv3::AnySchema::default()),
-                    })),
-                },
-            }
-        };
-    }
-
-    let obj = match value.as_object() {
-        Some(obj) => obj,
-        None => {
-            return Schema {
-                schema_data: SchemaData::default(),
-                schema_kind: SchemaKind::Any(openapiv3::AnySchema::default()),
-            };
-        }
-    };
-
-    // Extract schema data (metadata)
-    let data = SchemaData {
-        title: obj.get("title").and_then(|v| v.as_str()).map(String::from),
-        description: obj
-            .get("description")
-            .and_then(|v| v.as_str())
-            .map(String::from),
-        ..Default::default()
-    };
-
-    // Handle $ref (references to definitions)
-    if let Some(ref_value) = obj.get("$ref")
-        && let Some(ref_str) = ref_value.as_str()
-    {
-        // Convert schemars $ref format to OpenAPI $ref format
-        let openapi_ref = ref_str.replace("#/$defs/", "#/components/schemas/");
-        let openapi_ref = openapi_ref.replace("#/definitions/", "#/components/schemas/");
-        return Schema {
-            schema_data: data,
-            schema_kind: SchemaKind::AllOf {
-                all_of: vec![openapiv3::ReferenceOr::Reference {
-                    reference: openapi_ref,
-                }],
-            },
-        };
-    }
-
-    // Determine the schema kind from type
-    let schema_kind = if let Some(type_value) = obj.get("type") {
-        match type_value.as_str() {
-            Some("object") => {
-                let properties = obj
-                    .get("properties")
-                    .and_then(|p| p.as_object())
-                    .map(|props| {
-                        props
-                            .iter()
-                            .map(|(k, v)| {
-                                let prop_schema = convert_json_schema_to_openapi(v);
-                                (
-                                    k.clone(),
-                                    openapiv3::ReferenceOr::Item(Box::new(prop_schema)),
-                                )
-                            })
-                            .collect()
-                    })
-                    .unwrap_or_default();
-
-                let required = obj
-                    .get("required")
-                    .and_then(|r| r.as_array())
-                    .map(|arr| {
-                        arr.iter()
-                            .filter_map(|v| v.as_str().map(String::from))
-                            .collect()
-                    })
-                    .unwrap_or_default();
-
-                SchemaKind::Type(Type::Object(ObjectType {
-                    properties,
-                    required,
-                    ..Default::default()
-                }))
-            }
-            Some("array") => {
-                let items = obj.get("items").map(|items_schema| {
-                    let item_schema = convert_json_schema_to_openapi(items_schema);
-                    openapiv3::ReferenceOr::Item(Box::new(item_schema))
-                });
-                SchemaKind::Type(Type::Array(openapiv3::ArrayType {
-                    items,
-                    min_items: None,
-                    max_items: None,
-                    unique_items: false,
-                }))
-            }
-            Some("string") => {
-                let format = obj
-                    .get("format")
-                    .and_then(|f| f.as_str())
-                    .map(|s| openapiv3::VariantOrUnknownOrEmpty::Unknown(s.to_string()))
-                    .unwrap_or(openapiv3::VariantOrUnknownOrEmpty::Empty);
-                SchemaKind::Type(Type::String(openapiv3::StringType {
-                    format,
-                    ..Default::default()
-                }))
-            }
-            Some("integer") => {
-                let format = obj
-                    .get("format")
-                    .and_then(|f| f.as_str())
-                    .map(|s| openapiv3::VariantOrUnknownOrEmpty::Unknown(s.to_string()))
-                    .unwrap_or(openapiv3::VariantOrUnknownOrEmpty::Empty);
-                SchemaKind::Type(Type::Integer(openapiv3::IntegerType {
-                    format,
-                    ..Default::default()
-                }))
-            }
-            Some("number") => {
-                let format = obj
-                    .get("format")
-                    .and_then(|f| f.as_str())
-                    .map(|s| openapiv3::VariantOrUnknownOrEmpty::Unknown(s.to_string()))
-                    .unwrap_or(openapiv3::VariantOrUnknownOrEmpty::Empty);
-                SchemaKind::Type(Type::Number(openapiv3::NumberType {
-                    format,
-                    ..Default::default()
-                }))
-            }
-            Some("boolean") => SchemaKind::Type(Type::Boolean(openapiv3::BooleanType::default())),
-            _ => SchemaKind::Any(openapiv3::AnySchema::default()),
-        }
-    } else if obj.contains_key("properties") {
-        // Treat as object if it has properties but no explicit type
-        let properties = obj
-            .get("properties")
-            .and_then(|p| p.as_object())
-            .map(|props| {
-                props
-                    .iter()
-                    .map(|(k, v)| {
-                        let prop_schema = convert_json_schema_to_openapi(v);
-                        (
-                            k.clone(),
-                            openapiv3::ReferenceOr::Item(Box::new(prop_schema)),
-                        )
-                    })
-                    .collect()
-            })
-            .unwrap_or_default();
-
-        let required = obj
-            .get("required")
-            .and_then(|r| r.as_array())
-            .map(|arr| {
-                arr.iter()
-                    .filter_map(|v| v.as_str().map(String::from))
-                    .collect()
-            })
-            .unwrap_or_default();
-
-        SchemaKind::Type(Type::Object(ObjectType {
-            properties,
-            required,
-            ..Default::default()
-        }))
-    } else {
-        SchemaKind::Any(openapiv3::AnySchema::default())
-    };
-
-    Schema {
-        schema_data: data,
-        schema_kind,
     }
 }
 
@@ -979,7 +624,7 @@ mod tests {
 
     #[test]
     fn get_registry_returns_openai() {
-        use super::get_registry;
+        use super::lookup::get_registry;
 
         let registry = get_registry("openai");
         assert!(registry.is_some());
@@ -992,7 +637,7 @@ mod tests {
 
     #[test]
     fn get_registry_returns_samsung_smart_tv() {
-        use super::get_registry;
+        use super::lookup::get_registry;
 
         let registry = get_registry("samsung-smart-tv");
         assert!(registry.is_some());
@@ -1004,7 +649,7 @@ mod tests {
 
     #[test]
     fn get_registry_case_insensitive() {
-        use super::get_registry;
+        use super::lookup::get_registry;
 
         assert!(get_registry("OpenAI").is_some());
         assert!(get_registry("OPENAI").is_some());
@@ -1014,7 +659,7 @@ mod tests {
 
     #[test]
     fn get_registry_unknown_api_returns_none() {
-        use super::get_registry;
+        use super::lookup::get_registry;
 
         assert!(get_registry("unknown-api").is_none());
         assert!(get_registry("nonexistent").is_none());
@@ -1022,7 +667,7 @@ mod tests {
 
     #[test]
     fn get_registry_validates_against_api() {
-        use super::get_registry;
+        use super::lookup::get_registry;
 
         let registry = get_registry("openai").unwrap();
         let api = define_openai_api();
@@ -1033,7 +678,7 @@ mod tests {
 
     #[test]
     fn get_registry_validates_against_samsung_api() {
-        use super::get_registry;
+        use super::lookup::get_registry;
 
         let registry = get_registry("samsung-smart-tv").unwrap();
         let api = define_samsung_smart_tv_api();
