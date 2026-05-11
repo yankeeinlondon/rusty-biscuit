@@ -380,10 +380,13 @@ fn level2_table_max_fill_constrains_visible_width() {
 #[test]
 #[serial(level2_terminal)]
 fn level2_table_center_alignment_indents_more_than_left() {
+    // Use a unique sentinel cell value so we anchor on the rendered body row
+    // and never accidentally match the shell command echo (which contains the
+    // temp file path and CLI numerics like `max=20`/`60`).
     let body = "\
 | A | B |\n\
 | - | - |\n\
-| 1 | 2 |\n";
+| sentinelA | sentinelB |\n";
 
     let Some((left, _)) = run_md(body, "--align-tables left --fill-tables max=20 --max-width 60")
     else {
@@ -399,12 +402,12 @@ fn level2_table_center_alignment_indents_more_than_left() {
     let row_left = left
         .plain
         .lines()
-        .find(|l| l.contains('1') && l.contains('2'))
+        .find(|l| l.contains("sentinelA"))
         .expect("left: data row");
     let row_center = center
         .plain
         .lines()
-        .find(|l| l.contains('1') && l.contains('2'))
+        .find(|l| l.contains("sentinelA"))
         .expect("center: data row");
     let left_indent = row_left.chars().take_while(|c| *c == ' ').count();
     let center_indent = row_center.chars().take_while(|c| *c == ' ').count();
