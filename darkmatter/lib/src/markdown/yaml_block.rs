@@ -198,6 +198,7 @@ impl Renderable for YamlBlock {
             &options,
             &meta,
             color_mode,
+            None,
         )
         .unwrap_or_else(|_| {
             // Fallback: plain text with minimal escaping

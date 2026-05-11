@@ -27,7 +27,7 @@
 //! // Output contains ANSI escape codes for terminal display
 //! ```
 
-use crate::layout::{LayoutContext, PageAlignment, PageComponent};
+use crate::layout::{LayoutContext, PageAlignment, PageComponent, PageFill};
 use crate::markdown::{
     Markdown, MarkdownError,
     block::{RuleProcessor, build_rule_with_defaults, hr_defaults_from_frontmatter},
@@ -1091,6 +1091,7 @@ pub(crate) fn write_terminal_with_layout<W: std::io::Write>(
                                 &options,
                                 &meta,
                                 options.color_mode,
+                                None,
                             )?;
                             wrapper.push_with_newlines(&highlighted);
                             wrapper.push_with_newlines("\n\n");
@@ -1152,6 +1153,7 @@ pub(crate) fn write_terminal_with_layout<W: std::io::Write>(
                                     &options,
                                     &meta,
                                     options.color_mode,
+                                    None,
                                 )?;
                                 wrapper.push_with_newlines(&highlighted);
                                 wrapper.push_with_newlines("\n\n");
@@ -1195,7 +1197,19 @@ pub(crate) fn write_terminal_with_layout<W: std::io::Write>(
                     wrapper.push_with_newlines(&header);
                     wrapper.newline();
 
-                    // Highlight and render code
+                    // Highlight and render code. When a layout context actually
+                    // constrains code-block width below the terminal width, pass
+                    // the resolved width so the body pads to the same width as
+                    // the header instead of clearing to the terminal edge with
+                    // `\x1b[K`. When the layout is at defaults (zero-config or
+                    // `PageFill::Full` with no margins), `code_width` equals
+                    // `terminal_width` and we keep `None` so the output stays
+                    // byte-for-byte equivalent to the legacy path.
+                    let body_width = if code_width < terminal_width {
+                        Some(code_width)
+                    } else {
+                        None
+                    };
                     let highlighted = highlight_code(
                         &code_buffer,
                         &code_language,
@@ -1203,6 +1217,7 @@ pub(crate) fn write_terminal_with_layout<W: std::io::Write>(
                         &options,
                         &meta,
                         options.color_mode,
+                        body_width,
                     )?;
                     let highlighted = if let Some(ctx) = layout_ctx {
                         apply_component_layout(&highlighted, PageComponent::CodeBlocks, ctx)
@@ -2774,31 +2789,43 @@ fn write_horizontal_rule(
 /// Apply page-level alignment and fill to a rendered component string.
 ///
 /// When `layout_ctx` is present and carries non-default alignment or fill for
-/// `component`, the rendered text is padded on the left (and optionally right)
-/// so it positions correctly inside the page content rectangle.
+/// `component`, the rendered text is padded on the left so it positions
+/// correctly inside the page content rectangle.
 ///
-/// For [`PageFill::Pad`] and [`PageFill::Indent`] the component width is
-/// reduced by the resolved padding *before* alignment is applied. For
-/// [`PageFill::Max`] and [`PageFill::Explicit`] the component is rendered at
-/// the resolved width and then aligned.
+/// For [`PageFill::Pad`] and [`PageFill::Indent`] the left-side padding comes
+/// from [`LayoutContext::component_side_padding`] — symmetric for `Pad`,
+/// one-sided for `Indent` (based on alignment). This applies for every
+/// alignment including `Left`, which is the default.
+///
+/// For [`PageFill::Full`], [`PageFill::Max`] and [`PageFill::Explicit`] the
+/// component renders at the resolved width and is then aligned within the
+/// effective page width via [`LayoutContext::alignment_padding`].
 fn apply_component_layout(
     text: &str,
     component: PageComponent,
     layout_ctx: &LayoutContext,
 ) -> String {
+    let fill = layout_ctx.component_fill(component);
     let alignment = layout_ctx.component_alignment(component);
-    if alignment == PageAlignment::Left {
-        return text.to_string();
-    }
 
-    // Measure the visible width of the already-rendered component.
-    let max_visible_width = text
-        .lines()
-        .map(biscuit_terminal::utils::block_constraint::visible_width)
-        .max()
-        .unwrap_or(0) as u16;
-
-    let left_pad = layout_ctx.alignment_padding(component, max_visible_width);
+    let left_pad = match fill {
+        PageFill::Pad(_) | PageFill::Indent(_) => layout_ctx
+            .component_side_padding(component)
+            .map(|(l, _)| l)
+            .unwrap_or(0),
+        PageFill::Full | PageFill::Max(_) | PageFill::Explicit(_) => {
+            if alignment == PageAlignment::Left {
+                0
+            } else {
+                let max_visible_width = text
+                    .lines()
+                    .map(biscuit_terminal::utils::block_constraint::visible_width)
+                    .max()
+                    .unwrap_or(0) as u16;
+                layout_ctx.alignment_padding(component, max_visible_width)
+            }
+        }
+    };
 
     if left_pad == 0 {
         return text.to_string();
@@ -3447,7 +3474,7 @@ fn main() {}
         let meta = crate::markdown::dsl::CodeBlockMeta::default();
 
         let code = "fn main() {}";
-        let result = highlight_code(code, "rust", &highlighter, &options, &meta, ColorMode::Dark);
+        let result = highlight_code(code, "rust", &highlighter, &options, &meta, ColorMode::Dark, None);
 
         assert!(result.is_ok());
         let output = result.unwrap();
@@ -3463,7 +3490,7 @@ fn main() {}
         let meta = crate::markdown::dsl::CodeBlockMeta::default();
 
         let code = "fn main() {}";
-        let result = highlight_code(code, "rust", &highlighter, &options, &meta, ColorMode::Dark);
+        let result = highlight_code(code, "rust", &highlighter, &options, &meta, ColorMode::Dark, None);
 
         assert!(result.is_ok());
         let output = result.unwrap();
@@ -3493,7 +3520,7 @@ fn main() {}
         let meta = crate::markdown::dsl::CodeBlockMeta::default();
 
         let code = "fn main() {}";
-        let result = highlight_code(code, "rust", &highlighter, &options, &meta, ColorMode::Dark);
+        let result = highlight_code(code, "rust", &highlighter, &options, &meta, ColorMode::Dark, None);
 
         assert!(result.is_ok());
         let output = result.unwrap();
@@ -3518,7 +3545,7 @@ fn main() {}
         let meta = crate::markdown::dsl::CodeBlockMeta::default();
 
         let code = "test";
-        let result = highlight_code(code, "rust", &highlighter, &options, &meta, ColorMode::Dark);
+        let result = highlight_code(code, "rust", &highlighter, &options, &meta, ColorMode::Dark, None);
 
         assert!(result.is_ok());
         let output = result.unwrap();
@@ -3551,7 +3578,7 @@ fn main() {}
         meta.highlight.add_line(2);
 
         let code = "line 1\nline 2\nline 3";
-        let result = highlight_code(code, "rust", &highlighter, &options, &meta, ColorMode::Dark);
+        let result = highlight_code(code, "rust", &highlighter, &options, &meta, ColorMode::Dark, None);
 
         assert!(result.is_ok());
         let output = result.unwrap();
@@ -3586,7 +3613,7 @@ fn main() {}
         meta.highlight.add_range(2, 4).unwrap();
 
         let code = "line 1\nline 2\nline 3\nline 4\nline 5";
-        let result = highlight_code(code, "rust", &highlighter, &options, &meta, ColorMode::Dark);
+        let result = highlight_code(code, "rust", &highlighter, &options, &meta, ColorMode::Dark, None);
 
         assert!(result.is_ok());
         let output = result.unwrap();
@@ -3617,7 +3644,7 @@ fn main() {}
         meta.highlight.add_range(4, 6).unwrap();
 
         let code = "line 1\nline 2\nline 3\nline 4\nline 5\nline 6";
-        let result = highlight_code(code, "rust", &highlighter, &options, &meta, ColorMode::Dark);
+        let result = highlight_code(code, "rust", &highlighter, &options, &meta, ColorMode::Dark, None);
 
         assert!(result.is_ok());
         let output = result.unwrap();
@@ -3653,7 +3680,7 @@ fn main() {}
         meta.highlight.add_line(2);
 
         let code = "line 1\nline 2\nline 3";
-        let result = highlight_code(code, "rust", &highlighter, &options, &meta, ColorMode::Dark);
+        let result = highlight_code(code, "rust", &highlighter, &options, &meta, ColorMode::Dark, None);
 
         assert!(result.is_ok());
         let output = result.unwrap();
@@ -3690,7 +3717,7 @@ fn main() {}
 
         let code =
             "line 1\nline 2\nline 3\nline 4\nline 5\nline 6\nline 7\nline 8\nline 9\nline 10";
-        let result = highlight_code(code, "rust", &highlighter, &options, &meta, ColorMode::Dark);
+        let result = highlight_code(code, "rust", &highlighter, &options, &meta, ColorMode::Dark, None);
 
         assert!(result.is_ok());
         let output = result.unwrap();
@@ -3723,7 +3750,7 @@ fn main() {}
         let meta = crate::markdown::dsl::CodeBlockMeta::default();
 
         let code = "let x = 1;";
-        let result = highlight_code(code, "rust", &highlighter, &options, &meta, ColorMode::Dark);
+        let result = highlight_code(code, "rust", &highlighter, &options, &meta, ColorMode::Dark, None);
 
         assert!(result.is_ok());
         let output = result.unwrap();
@@ -3773,7 +3800,7 @@ fn main() {}
         meta.highlight.add_line(0); // Line 0 should be ignored (1-indexed)
 
         let code = "line 1\nline 2\nline 3";
-        let result = highlight_code(code, "rust", &highlighter, &options, &meta, ColorMode::Dark);
+        let result = highlight_code(code, "rust", &highlighter, &options, &meta, ColorMode::Dark, None);
 
         assert!(result.is_ok());
         let output = result.unwrap();
@@ -3810,7 +3837,7 @@ fn main() {}
         meta.highlight.add_line(100); // Line 100 on 5-line code should be ignored
 
         let code = "line 1\nline 2\nline 3\nline 4\nline 5";
-        let result = highlight_code(code, "rust", &highlighter, &options, &meta, ColorMode::Dark);
+        let result = highlight_code(code, "rust", &highlighter, &options, &meta, ColorMode::Dark, None);
 
         assert!(result.is_ok());
         let output = result.unwrap();
