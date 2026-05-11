@@ -146,10 +146,16 @@ impl Prose {
 
     /// Build a safely-quoted attribute value for Prose block tags.
     ///
-    /// Escapes the value with [`escape_text`] and wraps it in single or
-    /// double quotes, choosing the quote character that does not appear in
-    /// the escaped value so the attribute parser never mis-identifies the
-    /// end of the value.
+    /// Escapes only the characters that would break tag-level parsing
+    /// (`<`, `>`, `\`) and wraps the result in single or double quotes,
+    /// choosing the quote character that does not appear in the value so
+    /// the attribute parser never mis-identifies the end of the value.
+    ///
+    /// Markdown-emphasis characters (`_`, `*`, `[`, `]`, `(`, `)`, `{`)
+    /// are passed through verbatim: the markdown pre-processor treats tag
+    /// declarations opaquely, and the attribute parser does not unescape
+    /// backslash sequences, so escaping them here would leak literal
+    /// backslashes into href URLs and other consumers.
     ///
     /// ## Examples
     ///
@@ -160,12 +166,25 @@ impl Prose {
     /// let attr = Prose::quoted_attr("/normal/path");
     /// assert_eq!(attr, "\"/normal/path\"");
     ///
+    /// // Underscores pass through verbatim
+    /// let attr = Prose::quoted_attr("/tmp/path_with_underscores");
+    /// assert_eq!(attr, "\"/tmp/path_with_underscores\"");
+    ///
     /// // Switches to single quotes when value contains double quotes
     /// let attr = Prose::quoted_attr(r#"path/with"quotes"#);
     /// assert_eq!(attr, "'path/with\"quotes'");
     /// ```
     pub fn quoted_attr(value: &str) -> String {
-        let escaped = Self::escape_text(value);
+        let mut escaped = String::with_capacity(value.len());
+        for c in value.chars() {
+            match c {
+                '<' | '>' | '\\' => {
+                    escaped.push('\\');
+                    escaped.push(c);
+                }
+                _ => escaped.push(c),
+            }
+        }
         if escaped.contains('"') && !escaped.contains('\'') {
             format!("'{}'", escaped)
         } else {
