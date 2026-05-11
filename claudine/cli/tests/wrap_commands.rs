@@ -5434,6 +5434,38 @@ fn compose_codex_dry_run_does_not_call_opencode_models() {
 
 #[cfg(unix)]
 #[test]
+fn inline_compose_codex_dry_run_does_not_call_opencode_models() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+    seed_minimal_config(workspace.path());
+
+    let md_file = workspace.path().join("fast.md");
+    fs::write(
+        &md_file,
+        "---\ntitle: test\nprompt: rewrite\n---\nPrompt body\n",
+    )
+    .unwrap();
+
+    write_failing_opencode_models(&path_dir);
+    write_executable(&path_dir.join("codex"), "#!/bin/sh\nexit 0\n");
+
+    cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
+        .env("PATH", augmented_path(&path_dir))
+        .args([
+            "inline-compose",
+            "--codex",
+            "--dry-run",
+            md_file.to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+}
+
+#[cfg(unix)]
+#[test]
 fn compose_opencode_dry_run_calls_opencode_models_and_fails_with_test_double() {
     let workspace = tempdir().unwrap();
     let path_dir = workspace.path().join("bin");
@@ -5594,17 +5626,31 @@ exit 0
     // Give the child a moment to enter prep and reach the slow `opencode
     // models` call, then deliver SIGINT.
     std::thread::sleep(std::time::Duration::from_millis(300));
+    let interrupt_sent_at = std::time::Instant::now();
     unsafe {
         libc::kill(pid, libc::SIGINT);
     }
 
     let output = child.wait_with_output().unwrap();
+    let interrupt_to_exit = interrupt_sent_at.elapsed();
 
     // Exit code 130 = 128 + SIGINT(2)
     assert_eq!(
         output.status.code(),
         Some(130),
         "SIGINT during prep must yield exit code 130"
+    );
+
+    // Bounded interrupt latency: the cancellable refresh path must return
+    // within ~50 ms of the interrupt poll, so a generous 2-second budget
+    // catches any regression where prep continues to block on the slow
+    // subprocess. The fake `opencode models` sleeps for 5s; if we hit
+    // anywhere near that we have regressed back to the uncancellable
+    // `refresh_provider_blocking` path.
+    assert!(
+        interrupt_to_exit < std::time::Duration::from_secs(2),
+        "SIGINT-to-exit latency exceeded 2s ({:?}); blocked-prep regression",
+        interrupt_to_exit,
     );
 
     let stderr = String::from_utf8_lossy(&output.stderr);
