@@ -1,4 +1,4 @@
-At times Claude servers/capacity can become overloaded and they start returning a 529/overloaded_error. I recently encountered that and our current behavior is to immediately fail and exit:
+At times an Agent's servers/capacity can become overloaded and they start returning a 529/overloaded_error. I recently encountered that and our current behavior is to immediately fail and exit:
 
 ```sh
 ┃ API Error
