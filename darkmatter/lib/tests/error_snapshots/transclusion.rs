@@ -5,7 +5,7 @@ use std::path::PathBuf;
 
 use darkmatter::markdown::compose::TransclusionError;
 
-use crate::helpers::{assert_contains_all, render, test_ctx, test_ctx_lines};
+use crate::helpers::{assert_contains_all, render, test_ctx_lines};
 
 #[test]
 fn parse_directive_has_syntax_hint() {
@@ -297,4 +297,49 @@ fn json_error_includes_position() {
         ],
     );
     insta::assert_snapshot!("json_error", out);
+}
+
+#[test]
+fn file_reference_shows_hint() {
+    let err = TransclusionError::FileReference(biscuit_file::FileReferenceError::InvalidSyntax(
+        "unclosed brace".into(),
+    ));
+    let out = render(&err);
+    assert_contains_all(
+        &out,
+        &[
+            "TransclusionError",
+            "file reference failure",
+            "unclosed brace",
+            "@/",
+            "!",
+        ],
+    );
+    insta::assert_snapshot!("file_reference", out);
+}
+
+#[test]
+fn unsupported_reference_type_escapes_markup() {
+    // Adversarial: reference string contains Prose-significant characters.
+    let err = TransclusionError::UnsupportedReferenceType {
+        reference: "ftp://host/<script>alert(1)</script>".into(),
+    };
+    let out = render(&err);
+    // The literal angle brackets must appear in the plain-text output,
+    // not be swallowed by the Prose parser as malformed tags.
+    assert_contains_all(&out, &["TransclusionError", "<script>", "alert(1)", "</script>"]);
+    insta::assert_snapshot!("unsupported_reference_type_markup", out);
+}
+
+#[test]
+fn missing_source_context_escapes_markup() {
+    // Adversarial: path contains characters that look like Prose tokens.
+    let err = TransclusionError::MissingSourceContext {
+        reference: "./{{bold}}evil.md".into(),
+        line: 1,
+    };
+    let out = render(&err);
+    // The literal {{bold}} must appear, not be interpreted as a styling token.
+    assert_contains_all(&out, &["TransclusionError", "{{bold}}", "evil.md"]);
+    insta::assert_snapshot!("missing_source_context_markup", out);
 }
