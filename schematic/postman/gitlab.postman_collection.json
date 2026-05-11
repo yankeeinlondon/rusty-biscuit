@@ -196,6 +196,35 @@
           }
         },
         {
+          "name": "GetProject",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/projects/:id",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "projects",
+                ":id"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "<id>"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "User-Agent",
+                "value": "schematic-gitlab-client"
+              }
+            ],
+            "description": "Get project metadata (use URL-encoded path or numeric ID)"
+          }
+        },
+        {
           "name": "ListMergeRequests",
           "request": {
             "method": "GET",
@@ -699,35 +728,6 @@
               }
             ],
             "description": "Get the latest release"
-          }
-        },
-        {
-          "name": "GetProject",
-          "request": {
-            "method": "GET",
-            "url": {
-              "raw": "{{baseUrl}}/projects/:id",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "projects",
-                ":id"
-              ],
-              "variable": [
-                {
-                  "key": "id",
-                  "value": "<id>"
-                }
-              ]
-            },
-            "header": [
-              {
-                "key": "User-Agent",
-                "value": "schematic-gitlab-client"
-              }
-            ],
-            "description": "Get project metadata (use URL-encoded path or numeric ID)"
           }
         },
         {
