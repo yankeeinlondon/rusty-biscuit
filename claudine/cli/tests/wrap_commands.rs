@@ -5168,14 +5168,20 @@ done
 ///   `task_started` for its `task` subagent tool, so the wrapper's in-flight
 ///   tracking is never populated.
 /// - A final parent-text event (the model's closing prose).
-/// - Silence slightly longer than `step_timeout`, after which the fake
-///   OpenCode binary exits 0 cleanly.
+/// - Silence shorter than `step_timeout`, after which the fake OpenCode
+///   binary exits 0 cleanly.
 ///
-/// Under the regression the wrapper misclassifies the legitimate post-fan-out
-/// silence as a hang and kills the child mid-sleep with `step_timeout`. Under
-/// the fix (byte heartbeat in Phase 2 + OpenCode `provider_status` grace in
-/// Phase 3) the wrapper waits for the child to exit cleanly and the run
-/// succeeds.
+/// Under the regression the wrapper misclassified even *short* legitimate
+/// silence as a hang because in-flight tracking was empty. Under the fix
+/// (byte heartbeat in Phase 2 + OpenCode per-step grace in Phase 3) the
+/// wrapper waits for the child to exit cleanly and the run succeeds.
+///
+/// **Note (2026-05-11):** the silence window here is intentionally bounded
+/// below `step_timeout`. The per-step grace was tightened so that mid-step
+/// silence with BOTH the event clock and byte clock stale beyond the budget
+/// *does* fire — that case is now the
+/// `opencode_step_started_but_never_finished_fires_on_stale_clocks` unit
+/// test in [`watchdog.rs`](../src/commands/wrap/exec/watchdog.rs).
 #[cfg(unix)]
 #[test]
 #[serial_test::serial]
@@ -5214,7 +5220,7 @@ printf '%s\n' '{"type":"tool_use","part":{"id":"t1","tool":"bash","state":{"stat
 printf '%s\n' '{"type":"tool_use","part":{"id":"t2","tool":"read","state":{"status":"completed","input":{"path":"README.md"},"output":"..."}}}'
 printf '%s\n' '{"type":"tool_use","part":{"id":"t3","tool":"bash","state":{"status":"completed","input":{"command":"just lint"},"output":"ok"}}}'
 printf '%s\n' '{"type":"text","text":"Now running sniff repo to show the final state:"}'
-/bin/sleep 4
+/bin/sleep 1
 exit 0
 "#,
     );
@@ -5224,8 +5230,10 @@ exit 0
         .env("HOME", workspace.path())
         .env("PATH", &path_dir)
         .env("OPENCODE_MODEL", "test-model")
-        // step_timeout shorter than the post-text silence above.
-        .env("CLAUDINE_STEP_TIMEOUT", "2s")
+        // step_timeout longer than the post-text silence above so the
+        // grace can apply and the child exits cleanly before the budget
+        // would elapse.
+        .env("CLAUDINE_STEP_TIMEOUT", "3s")
         .env("CLAUDINE_WATCHDOG_INTERVAL", "1s")
         .env("CLAUDINE_KILL_GRACE", "1s")
         .args(["compose", "--opencode", md_file.to_str().unwrap()])

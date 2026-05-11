@@ -511,16 +511,23 @@ pub(crate) fn evaluate_timeout_tick(
         // `tool_start` or `task_started` events, so `in_flight` /
         // `in_flight_subagents` stay empty during legitimate work and
         // the stuck-aware suppression above has nothing to suppress
-        // against. Two conditions suppress the silence rule:
+        // against. Two distinct conditions suppress the silence rule:
         //
-        // 1. `step_in_flight` is true — a step is currently open between
-        //    `step_start` and the next `step_finish`. Mid-step silence is
-        //    expected while subagents work.  However, if BOTH the
-        //    structured-event clock and the raw-byte clock are stale
-        //    beyond the budget, the breach still fires — the per-step
-        //    grace must not override the byte-heartbeat backstop.
-        // 2. `provider_status` is None — no `step_finish` has ever been
-        //    observed, protecting slow startup / slow first turns.
+        // 1. **Cold start** — `step_in_flight` is false AND
+        //    `provider_status` is None: no `step_start` and no
+        //    `step_finish` have been observed yet. Suppress
+        //    unconditionally so slow startup / slow first turns are not
+        //    misclassified as a hang.
+        // 2. **Mid-step with recent activity** — `step_in_flight` is
+        //    true (a step is open between `step_start` and the next
+        //    `step_finish`) AND at least one of the structured-event
+        //    clock or the raw-byte clock is still within the budget.
+        //    Mid-step silence is expected while subagents work, but if
+        //    BOTH clocks are stale beyond the budget the breach still
+        //    fires — the per-step grace must not override the
+        //    byte-heartbeat backstop, otherwise an OpenCode session
+        //    that emits `step_start` and then dies silently (the
+        //    `2026-05-10` ndjson hang) is suppressed forever.
         //
         // The wall-clock `timeout` rule above remains the unconditional
         // backstop in both cases.
@@ -531,8 +538,10 @@ pub(crate) fn evaluate_timeout_tick(
             }
             _ => false,
         };
+        let is_cold_start = !step_in_flight && !provider_status_seen;
+        let mid_step_with_recent_activity = step_in_flight && !both_clocks_stale;
         if config.provider == Some(claudine::provider::Provider::OpenCode)
-            && ((step_in_flight && !both_clocks_stale) || !provider_status_seen)
+            && (is_cold_start || mid_step_with_recent_activity)
         {
             return WatchdogTickResult::Ok;
         }
@@ -1941,6 +1950,50 @@ mod tests {
             }
             other => panic!(
                 "expected StepTimeout breach when both byte and event clocks are stale, even with step_in_flight; got: {other:?}"
+            ),
+        }
+        assert!(fired.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn opencode_step_started_but_never_finished_fires_on_stale_clocks() {
+        // Regression for the 2026-05-10 ndjson capture where OpenCode
+        // emitted `step_start` and a handful of `text` + `tool_use` events
+        // (~7.5s), then went totally silent — no `step_finish` ever. With
+        // the old `(step_in_flight && !both_stale) || !provider_status_seen`
+        // condition the `!provider_status_seen` arm suppressed the breach
+        // indefinitely because no step had ever finished. The fix scopes
+        // the cold-start grace to `step_in_flight=false` so an open step
+        // with both clocks stale falls through to the byte-heartbeat
+        // backstop and fires.
+        let config = TimeoutConfig {
+            timeout: None,
+            step_timeout: Some(Duration::from_secs(5)),
+            provider: Some(claudine::provider::Provider::OpenCode),
+            ..Default::default()
+        };
+        let state = Arc::new(std::sync::Mutex::new(WatchdogState::default()));
+        let metrics = claudine::stream::progress::new_live_metrics();
+        let fired = AtomicBool::new(false);
+        let stale = Instant::now() - Duration::from_secs(10);
+
+        {
+            let mut m = metrics.lock().unwrap();
+            m.last_event_at = Some(stale);
+            m.last_byte_at = Some(stale);
+            m.step_in_flight = true;
+            // provider_status intentionally None — step_start arrived but
+            // step_finish never did, mirroring the captured hang.
+            assert!(m.provider_status.is_none());
+        }
+
+        let result = evaluate_timeout_tick(&config, Instant::now(), stale, &state, &metrics, &fired);
+        match result {
+            WatchdogTickResult::Breach(ref w) => {
+                assert_eq!(w.reason, WatchdogTerminationReason::StepTimeout);
+            }
+            other => panic!(
+                "expected StepTimeout breach when step_start arrived but step_finish never did and both clocks are stale; got: {other:?}"
             ),
         }
         assert!(fired.load(Ordering::SeqCst));
