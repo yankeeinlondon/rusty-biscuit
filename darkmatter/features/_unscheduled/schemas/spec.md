@@ -36,6 +36,9 @@ $schema:
 The types which `SimplifiedSchema` provides are:
 
 - `string` - any string value
+- `date` - an ISO Date of the format YYYY-MM-DD
+- `datetime` - any valid ISO Datetime
+- `time` - any valid ISO time representation in the form of `hh:mm{TZ}`, `hh:mm:ss{TZ}`, `hh:mm:ss.ms{TZ}` where TZ can be included or excluded but when included must be `Z` or `{+-}{##}:{##}`
 - `number` - any numeric value
 - `numberlike` - allows numeric values or string representations of a number (e.g., "4", "-13", etc.)
 - `boolean` - any boolean value
@@ -47,7 +50,7 @@ The types which `SimplifiedSchema` provides are:
 
 In addition we represent arrays of each of these types with a trailing `[]`.
 
-### Type Constraints
+## Type Constraints
 
 All types allow constraints to be used to further _constrain_ the valid types. The type of constraints allowed vary by type
 but all type allow for the `required` constraint:
@@ -58,55 +61,64 @@ $schema:
     age: number
 ```
 
-> makes the `name` property required
+> makes the `name` property required while keeping `age` as optional (the default)
 
-#### Enumerations
+The parser/lexor ignores whitespace in Constraint strings giving users the freedom to add whitespace to increase visual clarity. In the example above, the constraint was `string(required)` but defining it as `"string( required )"` would have been equally as valid. 
 
-An enumeration by definition is an enumerated set of potential values. To represent an **enum** type we therefore _must_ define the enumerated list that it represents:
+> **Note:** when you include whitespace you will need to single or double quote the type's value so that it remains a valid YAML string.
+
+Finally, for types which have more than just one constraint type, the `;` character will be used to delimit one constraint definition from the next.
+
+#### Enumeration Constraints
+
+- An enumeration is the only type which REQUIRES that it have constraints defined because it needs to express the elements of the enumeration! 
+- In addition to defining it's own elements it allows specifying the enumeration as required
+
+Here's an example:
 
 ```yaml
-color: "enum(red,blue,' green', yellow)"
+$schema:
+    color: enum(red,green,blue;required)
 ```
-
-The comma is used to separate elements and by default all exterior whitespace is removed. That means that in the example above:
-
-- the color green preserves a leading space because it explicitly used quotes to express that,
-- by contract the color yellow's leading space is removed which is the default behavior
-- we only support the definition of string values for enumerations but you can use a _number-like_ enumeration like:
-
-```yaml
-tier: "enum(1,2,3)"
-```
-
-This represents the string values "1", "2", and "3" as elements in the enumerated set.
 
 #### Numbers
 
-A numeric type does not need to be constrained at all but can be by the following dimensions:
+Numeric types offer the following constrains (in addition to `required`):
 
 - max(#)
 - min(#)
-- integer (aka, _not float_)
+- integer
 
-To illustrate this here are some example definitions:
+Example:
 
 ```yaml
-some_number: number
-positive_int: "number(min(0), integer)"
+$schema:
+    opt_number: number
+    req_positive_int: "number(min(0); integer; required)"
 ```
 
 #### Strings
 
-A string, like numbers, offers a few ways to constrain the type:
+String types offer the following constrains (in addition to `required`):
 
 - min(#) - _(minimum length)_
 - max(#) - _(maximum length)_
-- date - enforces `YYYY-MM-DD` ISO format
-- datetime - enforces `YYYY-MM-DD hh:mm:(ss).(ms)Z(offset)`
+- not-empty - _do not allow empty strings (including just whitespace)_
+
+Example:
+
+```yaml
+$schema:
+    name: string(not-empty;required)
+    favorite_expression: string(min(5))
+```
 
 #### Files
 
-A file type is a string representation of a file path. It allows for magic paths which lead with `@` and all other path variants that the `FileReference` struct provides for but it there is no need to constrain the type to express this. There is, however, a set dimensions that file types can be constrained on:
+- A **file** type is a string representation of a file path. 
+- The _validity_ of the **file** type is that the 
+
+- It allows for magic paths which lead with `@` and all other path variants that the `FileReference` struct provides for but it there is no need to constrain the type to express this. There is, however, a set dimensions that file types can be constrained on:
 
 - ext([file-extension])
 - path([paths])
