@@ -4,8 +4,12 @@
 //! for running operations in three phases:
 //!
 //! **Inline Pre** (serial):
-//! 1. **Frontmatter Interpolation** - Resolve `{{variable}}` in frontmatter values
-//! 2. **Frontmatter Shell Expansion** - Execute shell commands in frontmatter values
+//! 1. **Frontmatter Interpolation** - Resolve `{{variable}}` in frontmatter values.
+//!    When shell expansion is enabled, templated keys that reference
+//!    shell-pending values (top-level `$(...)`) are deferred for a second
+//!    interpolation pass after step 2 completes.
+//! 2. **Frontmatter Shell Expansion** - Execute shell commands in frontmatter
+//!    values, then re-run interpolation to resolve any keys deferred above.
 //! 3. **Text Replacement** - Replace literal strings from frontmatter `replace` map
 //! 4. **Page Blocks** - Evaluate `::block`/`::end-block` conditional regions
 //! 5. **Interpolation** - Expand `{{variable}}` expressions in body content
@@ -488,15 +492,24 @@ impl Markdown {
                 options.is_enabled(ComposeOperation::FrontmatterShellExpansion),
             );
 
+            let shell_expansion_enabled =
+                options.is_enabled(ComposeOperation::FrontmatterShellExpansion);
+
             // Frontmatter Interpolation: resolve {{ }} in frontmatter values
             // before EffectiveState is built, since it mutates frontmatter
             // inputs that drive later stages.
+            //
+            // When shell expansion is also enabled, defer any templated key
+            // that references a shell-pending value (top-level `$(...)`). A
+            // second interpolation pass after shell expansion will resolve
+            // those keys against the shell-expanded values.
             if options.is_enabled(ComposeOperation::FrontmatterInterpolation) {
                 let fm_start = perf.is_enabled().then(std::time::Instant::now);
                 let fm_report = frontmatter_interpolation::interpolate_frontmatter(
                     self.frontmatter_mut(),
                     options.context(),
                     options.fail_fast,
+                    shell_expansion_enabled,
                 )?;
                 report.frontmatter_interpolations_applied = fm_report.replacements;
                 report.warnings.extend(fm_report.warnings);
@@ -511,7 +524,7 @@ impl Markdown {
             // Frontmatter Shell Expansion: execute $(cmd) in frontmatter values
             // before EffectiveState is built, since the expanded values must be
             // visible to all later stages.
-            if options.is_enabled(ComposeOperation::FrontmatterShellExpansion) {
+            if shell_expansion_enabled {
                 let fse_start = perf.is_enabled().then(std::time::Instant::now);
                 let fse_ctx = self.source_context_for_errors();
                 let fse_report = frontmatter_shell_expansion::execute_frontmatter_shell_expansion(
@@ -529,6 +542,29 @@ impl Markdown {
                         perf::PerfMetricKind::FrontmatterShellExpansion,
                         start.elapsed(),
                     );
+                }
+
+                // Second interpolation pass: templated keys that referenced
+                // shell-pending values were deferred above. Now that shell
+                // expansion has produced concrete values, resolve them.
+                if options.is_enabled(ComposeOperation::FrontmatterInterpolation)
+                    && fse_report.replacements > 0
+                {
+                    let fm_start = perf.is_enabled().then(std::time::Instant::now);
+                    let fm_report = frontmatter_interpolation::interpolate_frontmatter(
+                        self.frontmatter_mut(),
+                        options.context(),
+                        options.fail_fast,
+                        false,
+                    )?;
+                    report.frontmatter_interpolations_applied += fm_report.replacements;
+                    report.warnings.extend(fm_report.warnings);
+                    if let Some(start) = fm_start {
+                        perf.record(
+                            perf::PerfMetricKind::FrontmatterInterpolation,
+                            start.elapsed(),
+                        );
+                    }
                 }
             }
 
