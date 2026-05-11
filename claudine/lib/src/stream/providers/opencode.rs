@@ -24,6 +24,7 @@
 //! - Anything else → [`SemanticEvent::ProviderExtension`].
 
 use std::collections::HashMap;
+use std::time::Instant;
 
 use serde_json::{Map, Value};
 use tracing::debug;
@@ -311,6 +312,23 @@ impl<S: SemanticEventSink> OpenCodeSemanticStreamParser<S> {
     /// does not emit a paired request-side event, so we emit only a
     /// `ToolResult` (no synthesized `ToolCall`). The `tool_calls` counter
     /// still increments so trailer metadata matches the rendered line count.
+    ///
+    /// When the resolved tool name is `"task"` (case-insensitive) we
+    /// additionally synthesize `SubagentStart` → `SubagentStop` around the
+    /// `ToolResult` so that `LiveMetricsState` and `WatchdogState` observe
+    /// subagent lifecycle even though OpenCode never emits native
+    /// `task_started` / `task_completed` events on the NDJSON stream.
+    ///
+    /// ## Notes
+    ///
+    /// The synthesized `SubagentStart` and `SubagentStop` are emitted
+    /// atomically within the same `feed_line` call (and the same parser
+    /// tick). `LiveMetricsState.in_flight_subagents` therefore briefly
+    /// contains the entry and then immediately drops it on the same
+    /// observation pass — it is not a useful observation window for
+    /// synthesized subagents. The breach diagnostic relies on
+    /// `subagent_done_count` and `WatchdogState.recent_subagents`, not on
+    /// in-flight visibility.
     fn handle_tool_use_completed(&mut self, tool: OpenCodeTool, raw_kind: &str) {
         self.tool_calls += 1;
         let resolved = tool.resolve();
@@ -337,14 +355,108 @@ impl<S: SemanticEventSink> OpenCodeSemanticStreamParser<S> {
             result_extra.insert("input".into(), input.clone());
         }
 
+        let is_task = resolved
+            .name
+            .as_deref()
+            .map(|n| n.eq_ignore_ascii_case("task"))
+            .unwrap_or(false);
+
+        let task_display_name = if is_task {
+            resolved
+                .input
+                .as_ref()
+                .and_then(|input| {
+                    input
+                        .get("description")
+                        .and_then(Value::as_str)
+                        .or_else(|| input.get("subagent_type").and_then(Value::as_str))
+                        .or_else(|| input.get("prompt").and_then(Value::as_str))
+                })
+                .map(|s| {
+                    if s.len() > 60 {
+                        format!("{}...", &s[..57])
+                    } else {
+                        s.to_string()
+                    }
+                })
+                .or_else(|| resolved.name.clone())
+        } else {
+            None
+        };
+
+        let task_subagent_id = if is_task {
+            resolved
+                .metadata
+                .as_ref()
+                .and_then(|m| m.session_id.clone())
+                .or_else(|| resolved.id.clone())
+        } else {
+            None
+        };
+
+        let task_subagent_type = if is_task {
+            resolved
+                .input
+                .as_ref()
+                .and_then(|input| input.get("subagent_type").and_then(Value::as_str))
+                .map(String::from)
+        } else {
+            None
+        };
+
+        if is_task {
+            let mut start_extra = self.base_extra(raw_kind);
+            start_extra.insert("synthesized".into(), Value::from(true));
+            if let Some(ref name) = task_display_name {
+                start_extra.insert("description".into(), Value::from(name.as_str()));
+            }
+            if let Some(ref ty) = task_subagent_type {
+                start_extra.insert("subagent_type".into(), Value::from(ty.as_str()));
+            }
+            if let Some(epoch_ms) = resolved.time.as_ref().and_then(|t| t.start) {
+                start_extra.insert("started_at_epoch_ms".into(), Value::from(epoch_ms));
+            }
+
+            debug!(
+                provider = "opencode",
+                subagent_id = ?task_subagent_id,
+                name = ?task_display_name,
+                "synthesizing SubagentStart from task tool completion"
+            );
+
+            self.sink.on_semantic_event(SemanticEvent::SubagentStart {
+                id: task_subagent_id.clone(),
+                name: task_display_name.clone(),
+                extra: Value::Object(start_extra),
+            });
+        }
+
         self.sink.on_semantic_event(SemanticEvent::ToolResult {
-            name: resolved.name,
-            id: resolved.id,
-            status: resolved.status,
+            name: resolved.name.clone(),
+            id: resolved.id.clone(),
+            status: resolved.status.clone(),
             exit_code: None,
-            output: resolved.output,
+            output: resolved.output.clone(),
             extra: Value::Object(result_extra),
         });
+
+        if is_task {
+            let mut stop_extra = self.base_extra(raw_kind);
+            stop_extra.insert("synthesized".into(), Value::from(true));
+            if let Some(ref name) = task_display_name {
+                stop_extra.insert("description".into(), Value::from(name.as_str()));
+            }
+            if let Some(ref ty) = task_subagent_type {
+                stop_extra.insert("subagent_type".into(), Value::from(ty.as_str()));
+            }
+
+            self.sink.on_semantic_event(SemanticEvent::SubagentStop {
+                id: task_subagent_id,
+                name: task_display_name,
+                status: resolved.status,
+                extra: Value::Object(stop_extra),
+            });
+        }
     }
 
     fn handle_tool_result(&mut self, tool: OpenCodeTool, raw_kind: &str) {
@@ -605,6 +717,7 @@ mod tests {
     use std::sync::{Arc, Mutex};
 
     use super::*;
+    use crate::stream::progress::LiveMetricsState;
 
     struct Recording {
         events: Arc<Mutex<Vec<SemanticEvent>>>,
@@ -1070,5 +1183,161 @@ mod tests {
             SemanticEvent::Info { message, .. } => assert_eq!(message, "working"),
             other => panic!("expected Info, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn opencode_task_completion_synthesizes_subagent_lifecycle() {
+        let (events, mut parser) = new_parser();
+        parser
+            .feed_line(r#"{"type":"step_start","sessionID":"ses_1"}"#)
+            .unwrap();
+        parser
+            .feed_line(
+                r#"{"type":"tool_use","part":{"id":"t1","tool":"task",
+                 "state":{"status":"completed",
+                          "input":{"description":"Commit wrap CLI refactor","subagent_type":"coder"},
+                          "metadata":{"sessionId":"child-ses-1"},
+                          "time":{"start":1715340000000},
+                          "output":"ok"}}}"#,
+            )
+            .unwrap();
+
+        let collected = events.lock().unwrap().clone();
+        let ks: Vec<&str> = collected.iter().map(|e| e.kind_str()).collect();
+        assert_eq!(
+            ks,
+            vec!["session_start", "info", "subagent_start", "tool_result", "subagent_stop"],
+            "task tool completion must synthesize SubagentStart -> ToolResult -> SubagentStop"
+        );
+
+        // Verify SubagentStart has the right id, name, and extra.synthesized
+        match &collected[2] {
+            SemanticEvent::SubagentStart { id, name, extra } => {
+                assert_eq!(id.as_deref(), Some("child-ses-1"), "subagent id from metadata.sessionId");
+                assert_eq!(name.as_deref(), Some("Commit wrap CLI refactor"), "name from input.description");
+                assert_eq!(extra.get("synthesized"), Some(&Value::from(true)));
+                assert_eq!(
+                    extra.get("started_at_epoch_ms"),
+                    Some(&Value::from(1715340000000u64))
+                );
+            }
+            other => panic!("expected SubagentStart, got {other:?}"),
+        }
+
+        // Verify SubagentStop has the right status and extra.synthesized
+        match &collected[4] {
+            SemanticEvent::SubagentStop { id, name, status, extra } => {
+                assert_eq!(id.as_deref(), Some("child-ses-1"));
+                assert_eq!(name.as_deref(), Some("Commit wrap CLI refactor"));
+                assert_eq!(status.as_deref(), Some("completed"));
+                assert_eq!(extra.get("synthesized"), Some(&Value::from(true)));
+            }
+            other => panic!("expected SubagentStop, got {other:?}"),
+        }
+
+        // Verify subagent_done_count incremented via LiveMetricsState
+        let mut metrics = LiveMetricsState::default();
+        let now = Instant::now();
+        for event in &collected {
+            metrics.observe_event(event, now);
+        }
+        assert_eq!(
+            metrics.subagent_done_count, 1,
+            "synthesized SubagentStop must increment subagent_done_count"
+        );
+    }
+
+    #[test]
+    fn opencode_task_error_completion_still_synthesizes_subagent_lifecycle_with_error_status() {
+        // Guards the resolved open question from the plan: a `task` tool that
+        // completes with status="error" must still synthesize a full
+        // SubagentStart -> ToolResult -> SubagentStop trio, with the error
+        // status propagated to SubagentStop so subagent_done_count still
+        // increments and the recent-subagents ring-buffer captures failed
+        // subagents distinctly.
+        let (events, mut parser) = new_parser();
+        parser
+            .feed_line(r#"{"type":"step_start","sessionID":"ses_1"}"#)
+            .unwrap();
+        parser
+            .feed_line(
+                r#"{"type":"tool_use","part":{"id":"t-err","tool":"task",
+                 "state":{"status":"error",
+                          "input":{"description":"Failed subagent","subagent_type":"coder"},
+                          "metadata":{"sessionId":"child-ses-err"},
+                          "error":"agent crashed",
+                          "output":""}}}"#,
+            )
+            .unwrap();
+
+        let collected = events.lock().unwrap().clone();
+        let ks: Vec<&str> = collected.iter().map(|e| e.kind_str()).collect();
+        assert_eq!(
+            ks,
+            vec!["session_start", "info", "subagent_start", "tool_result", "subagent_stop"],
+            "task tool error completion must still synthesize SubagentStart -> ToolResult -> SubagentStop"
+        );
+
+        match &collected[4] {
+            SemanticEvent::SubagentStop { id, name, status, extra } => {
+                assert_eq!(id.as_deref(), Some("child-ses-err"));
+                assert_eq!(name.as_deref(), Some("Failed subagent"));
+                assert_eq!(
+                    status.as_deref(),
+                    Some("error"),
+                    "error status must propagate to SubagentStop"
+                );
+                assert_eq!(extra.get("synthesized"), Some(&Value::from(true)));
+                assert_eq!(
+                    extra.get("subagent_type"),
+                    Some(&Value::from("coder")),
+                    "subagent_type must be preserved separately from description"
+                );
+            }
+            other => panic!("expected SubagentStop, got {other:?}"),
+        }
+
+        // subagent_done_count must still increment on error completion
+        let mut metrics = LiveMetricsState::default();
+        let now = Instant::now();
+        for event in &collected {
+            metrics.observe_event(event, now);
+        }
+        assert_eq!(
+            metrics.subagent_done_count, 1,
+            "synthesized SubagentStop must increment subagent_done_count even on error"
+        );
+    }
+
+    #[test]
+    fn opencode_non_task_tool_does_not_synthesize_subagent_lifecycle() {
+        let (events, mut parser) = new_parser();
+        parser
+            .feed_line(r#"{"type":"step_start","sessionID":"ses_1"}"#)
+            .unwrap();
+        parser
+            .feed_line(
+                r#"{"type":"tool_use","part":{"id":"t1","tool":"bash",
+                 "state":{"status":"completed","input":{"command":"ls -la"},"output":"file.txt"}}}"#,
+            )
+            .unwrap();
+
+        let collected = events.lock().unwrap().clone();
+        let ks: Vec<&str> = collected.iter().map(|e| e.kind_str()).collect();
+        let n_subagent_starts = ks.iter().filter(|k| **k == "subagent_start").count();
+        let n_subagent_stops = ks.iter().filter(|k| **k == "subagent_stop").count();
+        assert_eq!(
+            n_subagent_starts, 0,
+            "non-task tool must not synthesize SubagentStart; got {ks:?}"
+        );
+        assert_eq!(
+            n_subagent_stops, 0,
+            "non-task tool must not synthesize SubagentStop; got {ks:?}"
+        );
+        assert_eq!(
+            ks,
+            vec!["session_start", "info", "tool_result"],
+            "bash tool must emit only Info + ToolResult"
+        );
     }
 }

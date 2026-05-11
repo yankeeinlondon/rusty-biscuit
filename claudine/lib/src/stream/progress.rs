@@ -86,6 +86,10 @@ pub struct LiveMetricsState {
     /// that has not yet crossed any step boundary cannot trip
     /// `step_timeout` during slow startup or a slow first turn.
     pub provider_status: Option<String>,
+    /// Whether a provider step is currently in flight (between
+    /// `step_start` and the next `step_finish`). OpenCode-specific:
+    /// the silence rule is suppressed while this flag is true.
+    pub step_in_flight: bool,
 }
 
 impl LiveMetricsState {
@@ -272,8 +276,14 @@ impl LiveMetricsState {
                 }
             }
             SemanticEvent::Info { extra, .. }
+                if extra.get("step_phase").and_then(|v| v.as_str()) == Some("start") =>
+            {
+                self.step_in_flight = true;
+            }
+            SemanticEvent::Info { extra, .. }
                 if extra.get("step_phase").and_then(|v| v.as_str()) == Some("finish") =>
             {
+                self.step_in_flight = false;
                 let reason = extra
                     .get("reason")
                     .and_then(|v| v.as_str())
@@ -720,7 +730,7 @@ mod tests {
         }
 
         #[test]
-        fn info_step_finish_records_provider_status_from_reason() {
+        fn info_step_finish_records_provider_status_from_reason_and_clears_step_in_flight() {
             // OpenCode's `step_finish` is parsed into
             // `SemanticEvent::Info { extra: { step_phase: "finish", reason: ... } }`.
             // The watchdog OpenCode-grace check keys off `provider_status`,
@@ -738,10 +748,11 @@ mod tests {
                 now,
             );
             assert_eq!(state.provider_status.as_deref(), Some("tool-calls"));
+            assert!(!state.step_in_flight, "step_finish must set step_in_flight = false");
         }
 
         #[test]
-        fn info_step_start_does_not_set_provider_status() {
+        fn info_step_start_sets_step_in_flight_and_does_not_set_provider_status() {
             let mut state = LiveMetricsState::default();
             let now = Instant::now();
             state.observe_event(
@@ -752,6 +763,7 @@ mod tests {
                 now,
             );
             assert_eq!(state.provider_status, None);
+            assert!(state.step_in_flight, "step_start must set step_in_flight = true");
         }
 
         #[test]
@@ -766,6 +778,7 @@ mod tests {
                 now,
             );
             assert_eq!(state.provider_status.as_deref(), Some("finish"));
+            assert!(!state.step_in_flight, "step_finish must clear step_in_flight even without reason");
         }
     }
 }
