@@ -34,7 +34,7 @@ next:
 # Implement Phase {{phase}}
 ::end-block
 
-Your task is to implement phase {{phase}} of the plan found in {{area}}/{{plan}}.
+Your task is to implement phase {{phase}} of the plan found in '@{{area}}/{{plan}}'.
 
 ::block when="memory"
 > **NOTE:** for context you should read the lessons learned discovered in earlier stages of this plan. You will find these lessons learned in memory/{{memory}}.md. 

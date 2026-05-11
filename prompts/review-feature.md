@@ -14,7 +14,7 @@ dir: "$(pwd)"
 iteration: 1
 area: "{{ctx.current_package_area}}"
 start:
-    message: "🏃‍♂️ starting the feature review of `{{dir}}` -- _in the **{{ctx.current_package_area}}** package area_ -- at {{ctx.now}}"
+    message: "👓 starting the feature review of `{{dir}}` -- _in the **{{ctx.current_package_area}}** package area_ -- at {{ctx.now}}"
 success:
     stderr: "Feature review {{iteration}} in the {{ctx.current_package_area}} package area has completed"
     message: "✅ the Feature Review #{{iteration}} for `{{dir}}` in the **{{ctx.current_package_area}}** package area has completed. The review can be found at: {{area}}/{{dir}}/review-{{iteration}}.md"

@@ -508,3 +508,57 @@ async fn messenger_routes_to_discord_webhook_provider() {
     let receipt = messenger.send(dispatch, &message).await.unwrap();
     assert_eq!(receipt.provider, ProviderKind::DiscordWebhook);
 }
+
+#[tokio::test]
+async fn webhook_summarized_body_splits_into_content_and_embed() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path(format!(
+            "/api/v10/webhooks/{WEBHOOK_ID}/{WEBHOOK_TOKEN}"
+        )))
+        .and(query_param("wait", "true"))
+        .and(body_json(serde_json::json!({
+            "content": "plain banner",
+            "embeds": [{ "description": "**rich** body" }]
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(webhook_message_response()))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let provider = webhook_provider(&server.uri());
+    let dispatch = Dispatch::to(Target::discord_webhook());
+    let message = Message::summarized("plain banner", "**rich** body");
+
+    let receipt = provider.send(&dispatch, &message).await.unwrap();
+    assert_eq!(receipt.provider, ProviderKind::DiscordWebhook);
+    assert_eq!(receipt.raw_id, "987654321098765432");
+}
+
+#[tokio::test]
+async fn webhook_markdown_body_does_not_include_embeds() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path(format!(
+            "/api/v10/webhooks/{WEBHOOK_ID}/{WEBHOOK_TOKEN}"
+        )))
+        .and(query_param("wait", "true"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(webhook_message_response()))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let provider = webhook_provider(&server.uri());
+    let dispatch = Dispatch::to(Target::discord_webhook());
+    let message = Message::markdown("**bold**");
+
+    provider.send(&dispatch, &message).await.unwrap();
+
+    let received = server.received_requests().await.unwrap();
+    let body: serde_json::Value = serde_json::from_slice(&received[0].body).unwrap();
+    assert_eq!(body.get("content").and_then(|v| v.as_str()), Some("**bold**"));
+    assert!(
+        body.get("embeds").is_none(),
+        "legacy Markdown body must not produce an embeds field"
+    );
+}

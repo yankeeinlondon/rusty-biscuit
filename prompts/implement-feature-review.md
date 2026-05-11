@@ -46,7 +46,7 @@ has just gone through a review cycle and the _suggestions_ from that review were
 The plan has {{total_phases}} phases, but your task is to focus EXCLUSIVELY on implementing phase #{{phase}}. 
 
 - the other phases can be used for context but should should never be implemented
-- if there is something in phase #{{phase}} that you realize is dependant on a phase of the plan which has not been implemented yet then:
+- if there is something in phase #{{phase}} that you realize is dependent on a phase of the plan which has not been implemented yet then:
     - Update the plan file at '{{plan}}' to move the task to a phase where it is addressable
     - if you notice anything novel or surprising about the misplaced task in the plan
         - if `## Lessons Learned` section exists in the plan:
@@ -55,7 +55,7 @@ The plan has {{total_phases}} phases, but your task is to focus EXCLUSIVELY on i
             - Create a section in the plan called `## Lessons Learned` at the bottom of the plan document
             - add an unordered list item under this section describing what you learned and why it happened
 - once the fixes have been made and all tests are passing, evaluate what _additional_ tests should be added to fully test the gaps that the review found
-- once all tests (pre-existing and new tests) are passing, do one more quick pass over the fixes you made in phase #{{phase}} and make sure everything has been truely fixed.
+- once all tests (pre-existing and new tests) are passing, do one more quick pass over the fixes you made in phase #{{phase}} and make sure everything has been truly fixed.
     - If you notice gaps, fix those gaps and add new tests where current testing was not detecting the gap
 - When you believe you are fully done with phase #{{phase}}, run `just check` on the packages you touched to be sure that there are no problems in compiling these packages
 - Then update the plan's frontmatter properties:
@@ -65,13 +65,16 @@ The plan has {{total_phases}} phases, but your task is to focus EXCLUSIVELY on i
     ::block when="iteration != 1"
     - look at the `blast_radius` property in the plan and make sure all of the source code files you modified during this phase are included in the list of files. Add them if they're missing.
     ::end-block
-    - if you updated or changed any Markdown documentation then add those documents to the `docs` frontmatter property of the plan; be sure not to overight documents which may already be in the `docs` property (and do not duplicate a document name twice)
+    - if you updated or changed any Markdown documentation then add those documents to the `docs` frontmatter property of the plan; be sure not to overwrite documents which may already be in the `docs` property (and do not duplicate a document name twice)
     - set the `phase_{{phase}}` frontmatter property to "{{ctx.now}}"
 - Validate that all frontmatter properties are set and saved to "{{plan}}"
 - Validate that the Markdown content/body has been saved to "{{plan}}"
 
 ## **IMPORTANT:**
 
+- do NOT modify the `ready` property in the review file after implementing
+    - you may feel that everything in that review was fixed but the review's assessment at that time should not change
+    - furthermore, we will be running another review _after_ you've completed here to validate that everything is fixed
 ::block when="ctx.current_package_area"
 - use the '{{ctx.current_package_area}}' skill during the task
 - do not commit your work to git (this will be done as an independent process which you are not responsible for)

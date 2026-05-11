@@ -17,6 +17,13 @@ pub struct Message {
 pub enum MessageBody {
     Plain(String),
     Markdown(String),
+    /// Plain summary paired with rich Markdown body.
+    ///
+    /// Providers with a notification surface distinct from a rich-rendering
+    /// surface (Discord) place `summary` in the notification field and render
+    /// `markdown` in the rich field. Providers without that split fall back
+    /// to whichever half is appropriate for their feature set.
+    Summarized { summary: String, markdown: String },
 }
 
 /// A geographic location.
@@ -68,6 +75,34 @@ impl Message {
             location: None,
             metadata: BTreeMap::new(),
         }
+    }
+
+    /// Create a message with a plain notification summary and a rich Markdown body.
+    pub fn summarized(
+        summary: impl Into<String>,
+        markdown: impl Into<String>,
+    ) -> Self {
+        Self {
+            title: None,
+            body: Some(MessageBody::Summarized {
+                summary: summary.into(),
+                markdown: markdown.into(),
+            }),
+            attachments: Vec::new(),
+            location: None,
+            metadata: BTreeMap::new(),
+        }
+    }
+
+    /// Create a Plain-body message by stripping Markdown formatting from `md`.
+    ///
+    /// Equivalent to `Message::text(plain)` where `plain` is the result of
+    /// rendering `md` to plain text.
+    pub fn markdown_stripped(md: impl Into<String>) -> Self {
+        let md = md.into();
+        let nodes = crate::markdown::parse::parse_markdown(&md);
+        let plain = crate::markdown::plain_text::render_plain_text(&nodes);
+        Self::text(plain)
     }
 
     /// Create a location-only message.

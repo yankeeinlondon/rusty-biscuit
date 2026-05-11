@@ -235,6 +235,10 @@ impl super::Provider for TelegramProvider {
                 message.render_body_for_provider(ProviderKind::Telegram),
                 Some("HTML"),
             ),
+            Some(MessageBody::Summarized { .. }) => (
+                message.render_body_for_provider(ProviderKind::Telegram),
+                Some("HTML"),
+            ),
             Some(MessageBody::Plain(_)) => (
                 message.render_body_for_provider(ProviderKind::Telegram),
                 None,

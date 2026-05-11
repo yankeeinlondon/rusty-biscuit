@@ -5,80 +5,10 @@
 //! files are present and that the SKILL.md frontmatter is correctly formatted.
 
 use super::frontmatter::parse_and_validate_frontmatter;
-use crate::list::types::ResearchOutput;
+use crate::list::types::{ResearchOutput, TopicType};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
-use std::str::FromStr;
 use thiserror::Error;
-
-/// Research topic type categories
-///
-/// Represents the different types of research topics supported by the research library.
-/// This enum provides type safety and ensures only valid research types are used.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum ResearchType {
-    /// Software library (npm package, Rust crate, Python package, etc.)
-    Library,
-    /// Command-line tool or utility
-    Tool,
-    /// Software application or system
-    Software,
-    /// Software framework or platform
-    Framework,
-}
-
-impl ResearchType {
-    /// Returns the string representation of this research type
-    ///
-    /// This is used for directory names and display purposes.
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            Self::Library => "library",
-            Self::Tool => "tool",
-            Self::Software => "software",
-            Self::Framework => "framework",
-        }
-    }
-
-    /// Returns all valid research type variants
-    pub fn all() -> &'static [ResearchType] {
-        &[
-            ResearchType::Library,
-            ResearchType::Tool,
-            ResearchType::Software,
-            ResearchType::Framework,
-        ]
-    }
-}
-
-impl FromStr for ResearchType {
-    type Err = ValidationError;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s.to_lowercase().as_str() {
-            "library" => Ok(Self::Library),
-            "tool" => Ok(Self::Tool),
-            "software" => Ok(Self::Software),
-            "framework" => Ok(Self::Framework),
-            _ => Err(ValidationError::InvalidResearchType {
-                provided: s.to_string(),
-                valid_types: vec![
-                    "library".to_string(),
-                    "tool".to_string(),
-                    "software".to_string(),
-                    "framework".to_string(),
-                ],
-            }),
-        }
-    }
-}
-
-impl std::fmt::Display for ResearchType {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.as_str())
-    }
-}
 
 /// Health status for a research topic
 ///
@@ -88,8 +18,8 @@ impl std::fmt::Display for ResearchType {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ResearchHealth {
-    /// The type of research (library, tool, software, framework)
-    pub research_type: ResearchType,
+    /// The type of research topic
+    pub research_type: TopicType,
 
     /// The topic name
     pub topic: String,
@@ -134,7 +64,7 @@ impl ResearchHealth {
     ///
     /// The `ok` field is automatically set based on whether there are any issues.
     pub fn new(
-        research_type: ResearchType,
+        research_type: TopicType,
         topic: String,
         missing_underlying: Vec<String>,
         missing_deliverables: Vec<ResearchOutput>,
@@ -167,15 +97,9 @@ pub enum ValidationError {
     #[error("Research topic not found at path: {}", path.display())]
     TopicNotFound { path: PathBuf },
 
-    /// An invalid research type string was provided
-    #[error(
-        "Invalid research type: '{provided}'. Valid types are: {}",
-        valid_types.join(", ")
-    )]
-    InvalidResearchType {
-        provided: String,
-        valid_types: Vec<String>,
-    },
+    /// An invalid topic type string was provided
+    #[error("Invalid topic type: '{0}'")]
+    InvalidTopicType(String),
 
     /// File I/O error occurred
     #[error("I/O error: {0}")]
@@ -213,9 +137,10 @@ const STANDARD_PROMPTS: &[(&str, &str)] = &[
 /// # Examples
 ///
 /// ```no_run
-/// use research::validation::health::{research_health, ResearchType};
+/// use research::validation::health::research_health;
+/// use research::list::types::TopicType;
 ///
-/// let health = research_health(ResearchType::Library, "pulldown-cmark")?;
+/// let health = research_health(TopicType::Library, "pulldown-cmark")?;
 /// if health.ok {
 ///     println!("Topic is healthy!");
 /// } else {
@@ -224,7 +149,7 @@ const STANDARD_PROMPTS: &[(&str, &str)] = &[
 /// # Ok::<(), Box<dyn std::error::Error>>(())
 /// ```
 pub fn research_health(
-    research_type: ResearchType,
+    research_type: TopicType,
     topic: &str,
 ) -> Result<ResearchHealth, ValidationError> {
     // Determine base path from environment or default location
@@ -372,81 +297,67 @@ This is the skill content.
     }
 
     #[test]
-    fn test_research_type_from_str_valid() {
+    fn test_topic_type_from_str_valid() {
+        assert_eq!("library".parse::<TopicType>().unwrap(), TopicType::Library);
+        assert_eq!("tool".parse::<TopicType>().unwrap(), TopicType::Tool);
+        assert_eq!("software".parse::<TopicType>().unwrap(), TopicType::Software);
         assert_eq!(
-            ResearchType::from_str("library").unwrap(),
-            ResearchType::Library
-        );
-        assert_eq!(ResearchType::from_str("tool").unwrap(), ResearchType::Tool);
-        assert_eq!(
-            ResearchType::from_str("software").unwrap(),
-            ResearchType::Software
-        );
-        assert_eq!(
-            ResearchType::from_str("framework").unwrap(),
-            ResearchType::Framework
+            "framework".parse::<TopicType>().unwrap(),
+            TopicType::Framework
         );
     }
 
     #[test]
-    fn test_research_type_from_str_case_insensitive() {
+    fn test_topic_type_from_str_case_insensitive() {
         assert_eq!(
-            ResearchType::from_str("LIBRARY").unwrap(),
-            ResearchType::Library
+            "LIBRARY".parse::<TopicType>().unwrap(),
+            TopicType::Library
         );
         assert_eq!(
-            ResearchType::from_str("Library").unwrap(),
-            ResearchType::Library
+            "Library".parse::<TopicType>().unwrap(),
+            TopicType::Library
         );
         assert_eq!(
-            ResearchType::from_str("LiBrArY").unwrap(),
-            ResearchType::Library
+            "LiBrArY".parse::<TopicType>().unwrap(),
+            TopicType::Library
         );
     }
 
     #[test]
-    fn test_research_type_from_str_invalid() {
-        let result = ResearchType::from_str("invalid");
+    fn test_topic_type_from_str_invalid() {
+        let result = "invalid".parse::<TopicType>();
         assert!(result.is_err());
-        match result {
-            Err(ValidationError::InvalidResearchType {
-                provided,
-                valid_types,
-            }) => {
-                assert_eq!(provided, "invalid");
-                assert_eq!(valid_types.len(), 4);
-            }
-            _ => panic!("Expected InvalidResearchType error"),
-        }
+        let err = result.unwrap_err();
+        assert!(err.contains("invalid"), "Error should mention the bad value");
     }
 
     #[test]
-    fn test_research_type_display() {
-        assert_eq!(ResearchType::Library.to_string(), "library");
-        assert_eq!(ResearchType::Tool.to_string(), "tool");
-        assert_eq!(ResearchType::Software.to_string(), "software");
-        assert_eq!(ResearchType::Framework.to_string(), "framework");
+    fn test_topic_type_display() {
+        assert_eq!(TopicType::Library.to_string(), "library");
+        assert_eq!(TopicType::Tool.to_string(), "tool");
+        assert_eq!(TopicType::Software.to_string(), "software");
+        assert_eq!(TopicType::Framework.to_string(), "framework");
     }
 
     #[test]
-    fn test_research_type_as_str() {
-        assert_eq!(ResearchType::Library.as_str(), "library");
-        assert_eq!(ResearchType::Tool.as_str(), "tool");
-        assert_eq!(ResearchType::Software.as_str(), "software");
-        assert_eq!(ResearchType::Framework.as_str(), "framework");
+    fn test_topic_type_as_str() {
+        assert_eq!(TopicType::Library.as_str(), "library");
+        assert_eq!(TopicType::Tool.as_str(), "tool");
+        assert_eq!(TopicType::Software.as_str(), "software");
+        assert_eq!(TopicType::Framework.as_str(), "framework");
     }
 
     #[test]
-    fn test_research_type_serde_serialization() {
-        let rt = ResearchType::Library;
+    fn test_topic_type_serde_serialization() {
+        let rt = TopicType::Library;
         let json = serde_json::to_string(&rt).unwrap();
         assert_eq!(json, r#""library""#);
     }
 
     #[test]
-    fn test_research_type_serde_deserialization() {
-        let rt: ResearchType = serde_json::from_str(r#""library""#).unwrap();
-        assert_eq!(rt, ResearchType::Library);
+    fn test_topic_type_serde_deserialization() {
+        let rt: TopicType = serde_json::from_str(r#""library""#).unwrap();
+        assert_eq!(rt, TopicType::Library);
     }
 
     #[test]
@@ -462,13 +373,13 @@ This is the skill content.
             std::env::set_var("RESEARCH_DIR", temp.path());
         }
 
-        let health = research_health(ResearchType::Library, "test-lib").unwrap();
+        let health = research_health(TopicType::Library, "test-lib").unwrap();
 
         assert!(health.ok, "Health should be OK");
         assert!(health.missing_underlying.is_empty());
         assert!(health.missing_deliverables.is_empty());
         assert!(health.skill_structure_valid);
-        assert_eq!(health.research_type, ResearchType::Library);
+        assert_eq!(health.research_type, TopicType::Library);
         assert_eq!(health.topic, "test-lib");
         assert_eq!(health.version, 1);
 
@@ -493,7 +404,7 @@ This is the skill content.
             std::env::set_var("RESEARCH_DIR", temp.path());
         }
 
-        let health = research_health(ResearchType::Library, "incomplete-lib").unwrap();
+        let health = research_health(TopicType::Library, "incomplete-lib").unwrap();
 
         assert!(!health.ok, "Health should not be OK");
         assert_eq!(health.missing_underlying.len(), 4); // 6 total - 2 created = 4 missing
@@ -535,7 +446,7 @@ This is the skill content.
             std::env::set_var("RESEARCH_DIR", temp.path());
         }
 
-        let health = research_health(ResearchType::Tool, "incomplete-tool").unwrap();
+        let health = research_health(TopicType::Tool, "incomplete-tool").unwrap();
 
         assert!(!health.ok, "Health should not be OK");
         assert!(health.missing_underlying.is_empty());
@@ -582,7 +493,7 @@ Content
             std::env::set_var("RESEARCH_DIR", temp.path());
         }
 
-        let health = research_health(ResearchType::Software, "bad-skill").unwrap();
+        let health = research_health(TopicType::Software, "bad-skill").unwrap();
 
         assert!(!health.ok, "Health should not be OK");
         assert!(health.missing_underlying.is_empty());
@@ -613,7 +524,7 @@ Content
             std::env::set_var("RESEARCH_DIR", temp.path());
         }
 
-        let health = research_health(ResearchType::Framework, "no-skill").unwrap();
+        let health = research_health(TopicType::Framework, "no-skill").unwrap();
 
         assert!(!health.ok, "Health should not be OK");
         assert!(health.missing_underlying.is_empty());
@@ -636,7 +547,7 @@ Content
             std::env::set_var("RESEARCH_DIR", temp.path());
         }
 
-        let result = research_health(ResearchType::Library, "nonexistent");
+        let result = research_health(TopicType::Library, "nonexistent");
 
         assert!(result.is_err());
         match result {
@@ -654,7 +565,7 @@ Content
     #[test]
     fn test_research_health_serde_serialization() {
         let health = ResearchHealth::new(
-            ResearchType::Library,
+            TopicType::Library,
             "test".to_string(),
             vec!["Overview".to_string()],
             vec![ResearchOutput::Brief],
@@ -675,7 +586,7 @@ Content
     #[test]
     fn test_research_health_empty_vecs_omitted() {
         let health =
-            ResearchHealth::new(ResearchType::Tool, "test".to_string(), vec![], vec![], true);
+            ResearchHealth::new(TopicType::Tool, "test".to_string(), vec![], vec![], true);
 
         let json = serde_json::to_string(&health).unwrap();
 

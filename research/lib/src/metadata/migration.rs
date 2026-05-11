@@ -143,18 +143,19 @@ pub fn get_schema_version(value: &serde_json::Value) -> u32 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::LibraryInfoMetadata;
+    use crate::LibraryInfo;
     use std::collections::HashMap;
 
     fn make_v0_with_library_info() -> MetadataV0 {
         MetadataV0 {
             schema_version: 0,
             kind: ResearchKind::Library,
-            library_info: Some(LibraryInfoMetadata {
+            library_info: Some(LibraryInfo {
                 package_manager: "crates.io".to_string(),
                 language: "Rust".to_string(),
                 url: "https://crates.io/crates/serde".to_string(),
                 repository: Some("https://github.com/serde-rs/serde".to_string()),
+                description: None,
             }),
             additional_files: {
                 let mut map = HashMap::new();

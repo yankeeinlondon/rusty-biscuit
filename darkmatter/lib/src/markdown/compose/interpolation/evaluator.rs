@@ -27,20 +27,24 @@
 //! - **Comparison**: Evaluates to boolean for use in ternary
 //!   - `{{ count > 0 ? "items" : "empty" }}`
 //!   - Equality (`==`, `!=`): compares string representations
-//!   - Ordering (`>`, `>=`, `<`): numeric comparison, false if non-numeric
+//!   - Ordering (`>`, `>=`, `<`, `<=`): numeric comparison, false if non-numeric
 //!
-//! - **Functions**: Helper utilities for value transformation
-//!   - `{{ length(name) }}` - character/array/object length
-//!   - `{{ number("42") }}` - convert to number
-//!   - `{{ round(3.7) }}` - round to integer
+//! - **Arithmetic**: `+`, `-`, `*`, `/`, `%` for numeric operands; `+`
+//!   doubles as string concatenation when either operand is a string.
+//!
+//! - **Member / index access**: `foo.bar`, `items[0]`, `items[-1]`,
+//!   `config["key"]`. Invalid access produces `null` rather than erroring.
+//!
+//! - **Functions**: Helper utilities for value transformation. The library
+//!   includes `length`, `number`, `round`, plus type predicates
+//!   (`IsString`, `IsArray`, …), math helpers (`min`, `max`, `abs`),
+//!   collection helpers (`first`, `last`), string predicates and case
+//!   mutations, and date validators.
 //!
 //! ## Truthiness
 //!
-//! Values are considered falsy if they are:
-//! - Empty string
-//! - Null
-//! - Boolean false
-//! - Number 0
+//! Falsy values: `null`, `false`, `0`, `0.0`, `""`, `[]`, `{}`. Everything
+//! else is truthy.
 //!
 //! ## Examples
 //!
@@ -1799,6 +1803,147 @@ mod tests {
                 EvalResult::Value(v) => assert_eq!(v, "true"),
                 _ => panic!("Expected Value"),
             }
+        }
+    }
+
+    /// Integration coverage for the operators, access forms, and helpers
+    /// added during the expression-syntax expansion. These tests exercise
+    /// the full path from `{{ ... }}` parsing through evaluation to ensure
+    /// new functionality is reachable from interpolation.
+    mod expression_syntax_integration {
+        use super::*;
+
+        fn render(state: &EffectiveState, source: &str) -> String {
+            let evaluator = Evaluator::new(state);
+            let expr = parse(source).unwrap_or_else(|e| panic!("parse {source:?}: {e}"));
+            match evaluator.eval(&expr) {
+                EvalResult::Value(s) => s,
+                EvalResult::Error { message, .. } => {
+                    panic!("eval {source:?} returned error: {message}")
+                }
+            }
+        }
+
+        #[test]
+        fn arithmetic_in_interpolation() {
+            let state = create_test_state(json!({ "count": 10 }));
+            assert_eq!(render(&state, "count + 5"), "15");
+            assert_eq!(render(&state, "count - 4"), "6");
+            assert_eq!(render(&state, "count * 2"), "20");
+            assert_eq!(render(&state, "count / 4"), "2.5");
+            assert_eq!(render(&state, "count % 3"), "1");
+        }
+
+        #[test]
+        fn string_concatenation_via_plus() {
+            let state = create_test_state(json!({ "name": "Alice", "n": 3 }));
+            assert_eq!(render(&state, r#""hello, " + name"#), "hello, Alice");
+            assert_eq!(render(&state, r#"n + " items""#), "3 items");
+        }
+
+        #[test]
+        fn less_than_or_equal_in_ternary() {
+            let state = create_test_state(json!({ "count": 3 }));
+            assert_eq!(render(&state, r#"count <= 3 ? "small" : "big""#), "small");
+            let state = create_test_state(json!({ "count": 4 }));
+            assert_eq!(render(&state, r#"count <= 3 ? "small" : "big""#), "big");
+        }
+
+        #[test]
+        fn bracket_index_access() {
+            let state = create_test_state(json!({ "items": ["a", "b", "c"] }));
+            assert_eq!(render(&state, "items[0]"), "a");
+            assert_eq!(render(&state, "items[-1]"), "c");
+            // out-of-range -> null -> empty string
+            assert_eq!(render(&state, "items[99]"), "");
+        }
+
+        #[test]
+        fn bracket_object_key_access() {
+            let state = create_test_state(json!({ "config": { "theme": "dark" } }));
+            assert_eq!(render(&state, r#"config["theme"]"#), "dark");
+            assert_eq!(render(&state, r#"config["missing"]"#), "");
+        }
+
+        #[test]
+        fn chained_index_and_member_access() {
+            let state = create_test_state(json!({
+                "items": [{ "name": "first" }, { "name": "second" }]
+            }));
+            assert_eq!(render(&state, "items[-1].name"), "second");
+            assert_eq!(render(&state, "items[0].name"), "first");
+        }
+
+        #[test]
+        fn type_predicates_in_interpolation() {
+            let state = create_test_state(json!({
+                "tags": ["one"], "title": "doc", "count": 3
+            }));
+            assert_eq!(render(&state, "IsArray(tags)"), "true");
+            assert_eq!(render(&state, "IsString(title)"), "true");
+            assert_eq!(render(&state, "IsNumber(count)"), "true");
+            assert_eq!(render(&state, "IsEmpty(missing)"), "true");
+            assert_eq!(render(&state, "IsEmpty(tags)"), "false");
+        }
+
+        #[test]
+        fn collection_and_math_helpers() {
+            let state = create_test_state(json!({ "items": [10, 20, 30] }));
+            assert_eq!(render(&state, "first(items)"), "10");
+            assert_eq!(render(&state, "last(items)"), "30");
+            assert_eq!(render(&state, "min(2, 5)"), "2");
+            assert_eq!(render(&state, "max(2, 5)"), "5");
+            assert_eq!(render(&state, "abs(-7)"), "7");
+        }
+
+        #[test]
+        fn string_predicates_and_mutations() {
+            let state = create_test_state(json!({ "title": "Hello World" }));
+            assert_eq!(render(&state, r#"StartsWith(title, "Hello")"#), "true");
+            assert_eq!(render(&state, r#"EndsWith(title, "World")"#), "true");
+            assert_eq!(render(&state, "Lower(title)"), "hello world");
+            assert_eq!(render(&state, "Upper(title)"), "HELLO WORLD");
+            assert_eq!(render(&state, "KebabCase(title)"), "hello-world");
+            assert_eq!(render(&state, "SnakeCase(title)"), "hello_world");
+            assert_eq!(render(&state, "CamelCase(title)"), "helloWorld");
+            assert_eq!(render(&state, "PascalCase(title)"), "HelloWorld");
+        }
+
+        #[test]
+        fn date_validators_in_interpolation() {
+            let state = create_test_state(json!({
+                "good_date": "2024-06-15",
+                "bad_date": "06-15-2024",
+                "good_dt": "2024-06-15T12:30:00Z"
+            }));
+            assert_eq!(render(&state, "IsDate(good_date)"), "true");
+            assert_eq!(render(&state, "IsDate(bad_date)"), "false");
+            assert_eq!(render(&state, "IsDateTime(good_dt)"), "true");
+            assert_eq!(render(&state, "IsDate(missing)"), "false");
+        }
+
+        #[test]
+        fn null_propagation_through_helpers() {
+            let state = create_test_state(json!({}));
+            assert_eq!(render(&state, "min(missing, 5)"), "");
+            assert_eq!(render(&state, "Lower(missing)"), "");
+            assert_eq!(render(&state, "first(missing)"), "");
+        }
+
+        #[test]
+        fn arithmetic_division_by_zero_surfaces_error() {
+            let state = create_test_state(json!({}));
+            let evaluator = Evaluator::new(&state);
+            let expr = parse("10 / 0").unwrap();
+            assert!(evaluator.eval(&expr).is_error());
+        }
+
+        #[test]
+        fn arithmetic_non_numeric_operand_errors() {
+            let state = create_test_state(json!({ "items": [1, 2, 3] }));
+            let evaluator = Evaluator::new(&state);
+            let expr = parse("items - 1").unwrap();
+            assert!(evaluator.eval(&expr).is_error());
         }
     }
 }

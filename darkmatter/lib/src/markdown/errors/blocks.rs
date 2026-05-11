@@ -17,7 +17,7 @@ use biscuit_file::YamlParseError;
 use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::components::status::StatusState;
 use biscuit_terminal::components::status_block::StatusBlock;
-use biscuit_terminal::errors::{ErrorHeader, StatusBlockExt};
+use biscuit_terminal::errors::{ErrorHeader, SourceContext, StatusBlockExt};
 
 /// Build the [`StatusBlock`] for [`MarkdownError::FileLoad`].
 pub(crate) fn file_load_block(source: &std::io::Error) -> StatusBlock {
@@ -57,28 +57,15 @@ pub(crate) fn url_fetch_block(source: &reqwest::Error) -> StatusBlock {
 /// When `serde_yaml_ng` reports a [`Location`](serde_yaml_ng::Location), the
 /// body includes a one-line snippet of the offending YAML so users can see
 /// exactly which line broke parsing without re-running the command.
-pub(crate) fn frontmatter_parse_block(source: &YamlParseError, yaml: &str) -> StatusBlock {
+pub(crate) fn frontmatter_parse_block(ctx: SourceContext, source: &YamlParseError) -> StatusBlock {
     let location = source.location();
-    let location_line = location.map(|loc| (loc.line(), loc.column()));
+    let location_line = location.map(|loc| loc.line());
 
-    let mut body = format!("<dim>YAML:</dim> {source}");
+    let mut body = vec![Prose::new(format!("<dim>YAML:</dim> {source}"))];
 
-    if let Some((line, column)) = location_line {
-        body.push_str(&format!(
-            "\n<dim>Position:</dim> line {line}, column {column}"
-        ));
-
-        if let Some(snippet) = yaml.lines().nth(line.saturating_sub(1)) {
-            let trimmed = snippet.trim_end();
-            body.push_str("\n\n");
-            body.push_str(&format!("<dim>{line:>4} |</dim> {}", escape_prose(trimmed)));
-            // Caret line aligned to the reported column. Column is 1-based;
-            // pad with spaces so the `^` lands beneath the offending column.
-            let caret_pad = " ".repeat(column.saturating_sub(1));
-            body.push_str(&format!(
-                "\n<dim>     |</dim> {caret_pad}<red><b>^</b></red>"
-            ));
-        }
+    if let Some(line) = location_line {
+        body.push(Prose::new("Frontmatter parsing failed here:"));
+        body.push(ctx.excerpt_prose(line, 1, "yaml"));
     }
 
     StatusBlock::new(StatusState::Error)
@@ -86,29 +73,8 @@ pub(crate) fn frontmatter_parse_block(source: &YamlParseError, yaml: &str) -> St
             "MarkdownError",
             "frontmatter parse failed",
         ))
-        .body(Prose::new(body))
+        .body(body)
         .hint("Check the YAML between the leading `---` markers for syntax errors.")
-}
-
-/// Escapes Prose-significant characters in a snippet so user-supplied YAML
-/// content does not get interpreted as Prose markup tags.
-///
-/// Prose uses backslash escapes for `<`, `>`, `{`, `}`, and `\` itself — see
-/// [`Prose`](biscuit_terminal::components::prose::Prose). Backslashes must be
-/// doubled first so an escape we add does not get re-escaped.
-fn escape_prose(input: &str) -> String {
-    let mut out = String::with_capacity(input.len());
-    for ch in input.chars() {
-        match ch {
-            '\\' => out.push_str("\\\\"),
-            '<' => out.push_str("\\<"),
-            '>' => out.push_str("\\>"),
-            '{' => out.push_str("\\{"),
-            '}' => out.push_str("\\}"),
-            other => out.push(other),
-        }
-    }
-    out
 }
 
 /// Build the [`StatusBlock`] for [`MarkdownError::FrontmatterMerge`].
@@ -169,6 +135,8 @@ pub(crate) fn transform_block(message: &str) -> StatusBlock {
 
 #[cfg(test)]
 mod tests {
+    use std::path::PathBuf;
+
     use biscuit_terminal::components::renderable::Renderable;
     use biscuit_terminal::utils::escape_codes::strip_escape_codes;
 
@@ -191,8 +159,9 @@ mod tests {
     #[test]
     fn frontmatter_parse_block_renders_yaml_error() {
         let yaml = ": [broken";
+        let ctx = SourceContext::new(PathBuf::from("/test.md"), PathBuf::from("test.md"), yaml);
         let err = serde_yaml_ng::from_str::<serde_yaml_ng::Value>(yaml).unwrap_err();
-        let out = render_block(&frontmatter_parse_block(&err, yaml));
+        let out = render_block(&frontmatter_parse_block(ctx, &err));
         assert!(out.contains("MarkdownError"), "missing header type: {out}");
         assert!(
             out.contains("frontmatter parse failed"),
@@ -211,15 +180,15 @@ mod tests {
     #[test]
     fn frontmatter_parse_block_includes_offending_line() {
         let yaml = "phases: 5\nfindings:\n  - id: '@' magic lookup emits results\n";
+        let ctx = SourceContext::new(PathBuf::from("/test.md"), PathBuf::from("test.md"), yaml);
         let err = serde_yaml_ng::from_str::<serde_yaml_ng::Value>(yaml).unwrap_err();
-        let out = render_block(&frontmatter_parse_block(&err, yaml));
+        let out = render_block(&frontmatter_parse_block(ctx, &err));
 
-        assert!(out.contains("Position:"), "missing position label: {out}");
         assert!(
             out.contains("'@' magic lookup emits results"),
             "missing offending line snippet: {out}",
         );
-        assert!(out.contains("^"), "missing caret marker: {out}");
+        assert!(out.contains(">"), "missing gutter marker: {out}");
     }
 
     #[test]

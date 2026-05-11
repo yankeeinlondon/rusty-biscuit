@@ -1,0 +1,15 @@
+---
+source: darkmatter/lib/tests/error_snapshots/condition.rs
+expression: out
+---
+⨫ ConditionError: parse failed
+┃ Condition parsing failed for when="a &&& b":
+┃ 
+┃     3 │ line 3
+┃   > 4 │ line 4
+┃     5 │ line 5
+┃ 
+┃     ^ (near position 3)
+┃ 
+┃ Message: unexpected token
+Operators: &&  ||  !  ==  !=  >  >=  <  <=  +  -  *  /  %  []  . | Helpers: HasKey, Contains, Length, number, round, min, max, abs, first, last, IsString, IsNumber, IsArray, IsNull, IsObject, IsEmpty, StartsWith, EndsWith, Lower, Upper, Capitalize, KebabCase, SnakeCase, CamelCase, PascalCase, TitleCase, IsDate, IsDateTime, IsToday, IsYesterday, IsTomorrow, IsThisMonth, IsThisYear

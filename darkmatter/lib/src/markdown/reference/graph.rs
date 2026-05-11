@@ -14,6 +14,8 @@ use crate::markdown::Markdown;
 use crate::markdown::compose::cache::RunLocalCache;
 use crate::markdown::compose::conditions;
 use crate::markdown::compose::toc_linking;
+use biscuit_terminal::errors::SourceContext;
+
 use crate::markdown::compose::transclusion::{
     DirectiveKind, TransclusionRuntime, parse_directives, parse_frontmatter_refs,
 };
@@ -241,6 +243,11 @@ fn build_node(
     // leaf documents with no transclusions.
     let prepared_content = prepare_content(md, source, options)?;
 
+    let ctx = {
+        let base = md.source_context_for_errors();
+        SourceContext::new(base.absolute, base.display, prepared_content.clone())
+    };
+
     // Build heading index for section context on transclusion insertions
     let heading_index = build_heading_index(&prepared_content);
 
@@ -283,13 +290,17 @@ fn build_node(
     };
 
     // Block directives
-    if let Ok(directives) = parse_directives(&prepared_content) {
+    if let Ok(directives) = parse_directives(&prepared_content, ctx.clone()) {
         for directive in &directives {
             // Evaluate `when=` condition — skip directive entirely if false.
             if let Some(ref when_expr) = directive.options.when_expr {
-                let condition_met =
-                    conditions::evaluate_condition(when_expr, &effective_state, directive.line)
-                        .unwrap_or(false);
+                let condition_met = conditions::evaluate_condition(
+                    when_expr,
+                    &effective_state,
+                    directive.line,
+                    ctx.clone(),
+                )
+                .unwrap_or(false);
                 if !condition_met {
                     continue;
                 }
@@ -386,7 +397,7 @@ fn build_node(
                 .unwrap_or((None, None));
 
             if let Some((display_target, path)) =
-                resolve_toc_linking_target(directive, source, &transclusion_options)
+                resolve_toc_linking_target(directive, source, &transclusion_options, ctx.clone())
             {
                 if extract_references {
                     local_references.records.push(ReferenceRecord {
@@ -509,7 +520,7 @@ fn build_node(
     }
 
     // Frontmatter prologue/epilogue
-    if let Ok(fm_refs) = parse_frontmatter_refs(md.frontmatter().as_map()) {
+    if let Ok(fm_refs) = parse_frontmatter_refs(md.frontmatter().as_map(), ctx.clone()) {
         for (idx, prologue) in fm_refs.prologue.iter().enumerate() {
             let is_literal = is_literal_content(prologue);
 
@@ -846,8 +857,9 @@ fn resolve_toc_linking_target(
     directive: &toc_linking::TocLinkingDirective,
     source: &ComposeSource,
     transclusion_options: &crate::markdown::compose::TransclusionOptions,
+    ctx: SourceContext,
 ) -> Option<(String, std::path::PathBuf)> {
-    toc_linking::resolve_target_chain(directive, source, transclusion_options)
+    toc_linking::resolve_target_chain(directive, source, transclusion_options, ctx)
         .ok()
         .flatten()
 }

@@ -23,7 +23,8 @@ sniff, homelab, biscuit-terminal, claudine
 | Argument/Flag | Description |
 |---------------|-------------|
 | `[filter...]` | Optional substring filters to narrow the area list |
-| `--package-area <AREA>` | Restrict output to a specific package area |
+| `-p`, `--package <PKG>` | Restrict output to the area that contains the named package (exact match on `Package.name`) |
+| `--package-area <AREA>` | Restrict output to a specific package area (prefix match) |
 | `--md` | Render as a Markdown unordered list (one `- name` per line) |
 | `--list` | Render as a raw list (one name per line, no bullet) |
 | `-v`, `--verbose` | Append each area's repo-relative root directory in dim italic |
@@ -49,14 +50,23 @@ sniff repo package-areas !test            # All areas except those matching "tes
 
 Multiple filters apply OR logic (an area is included if any filter matches).
 
-### Scoping to a Package Area
+### Scoping to a Package or Package Area
 
-`--package-area <AREA>` applies an exact-match (case-insensitive) filter on the area name:
+`-p/--package <PKG>` restricts output to the area that contains the named package:
+
+```bash
+sniff repo package-areas -p sniff-cli
+# sniff
+```
+
+`--package-area <AREA>` applies a case-insensitive prefix filter on the area name:
 
 ```bash
 sniff repo package-areas --package-area homelab
 # homelab
 ```
+
+Passing both `-p` and `--package-area` produces the AND intersection. If the resolved package does not live within the resolved area, the command fails with an explicit error. Unknown values for either flag fail with an error listing the valid names.
 
 ## Output Formats
 

@@ -5,15 +5,6 @@
             "path": ".ai"
         },
         {
-            "name": "Monorepo Docs",
-            "path": "docs"
-        },
-        {
-            "name": "Monorepo Prompts",
-            "path": "prompts"
-        },
-
-        {
             "name": "research",
             "path": "research"
         },

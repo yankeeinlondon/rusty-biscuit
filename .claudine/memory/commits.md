@@ -29,6 +29,7 @@ description: A record of novel things learned about how to best perform commits 
 - For committing a single file with path-limiting, use `git commit -m "message" -- path` without `--only`. The `--only` flag is mutually exclusive with a single pathspec argument in git.
 - Quote paths that contain spaces when passing them to `git commit`.
 - Be careful with renames. Committing only the new path records an add and leaves the delete staged. Committing only the old path records the delete but leaves the new file staged as an add. To preserve a rename atomically, either commit without path-limiting (let git infer the paths) or include both old and new paths explicitly.
+  - **Recovery:** If you accidentally committed only the new path (leaving old paths staged as deleted), stage those deletions and make a separate cleanup commit: `git commit -m "chore: complete rename" -- <old_path1> <old_path2>`.
 - `git commit --only -m "message" -- path` also works for a newly added file, as long as the file has already been staged.
 
 ## History and Verification
@@ -51,6 +52,10 @@ description: A record of novel things learned about how to best perform commits 
 - Auto-formatting workflows (e.g., rustfmt on save) may pre-commit files before an orchestrator assigns them. If a subagent finds no staged changes for an assigned file, it was likely auto-committed by a formatting hook.
 - **Concurrent `git commit` invocations can hit `.git/index.lock: File exists` (or `refs/heads/<branch>.lock`)** even when each uses `--only`. Git's locks are fail-fast, not queuing. This is not corruption — wait 1–3 seconds and retry the same `git commit --only ...` command. Up to 5 retries with short backoff is a reasonable budget. Always brief subagents on this retry policy when dispatching parallel commits.
 - **`git log -1` after a concurrent commit may show a sibling subagent's commit, not yours.** Verify your own commit landed by capturing the hash from the `git commit` output and using `git show <hash>` or `git log --oneline -N` (with N large enough to span the parallel batch), not by assuming HEAD points at your work.
+
+## Git Path Handling in Workspaces
+
+- When the worktree is a Cargo workspace member (e.g., running from `darkmatter/darkmatter/`), git interprets relative paths as relative to the current working directory, not the repo root. Use paths relative to the workspace member directory when committing from within a package subdirectory, not paths from the repo root like `darkmatter/lib/src/...`.
 
 ## Shell Gotchas
 

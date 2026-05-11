@@ -32,6 +32,27 @@ let mut stdout = std::io::stdout();
 write_terminal(&mut stdout, &md, TerminalOptions::default())?;
 ```
 
+### Page-Level Layout (DarkmatterPage)
+
+`DarkmatterPage` is a page-level layout primitive that owns margin, padding, page background, max-width, line numbers, and per-component alignment/fill settings. It captures terminal capabilities at construction and delegates to the existing terminal renderer, threading a `LayoutContext` through the render pipeline so per-component alignment and fill are applied to images, block quotes, tables, code blocks, and lists.
+
+```rust
+use biscuit_terminal::terminal::Terminal;
+use darkmatter::layout::{DarkmatterPage, PageBackground};
+use darkmatter::markdown::Markdown;
+
+let term = Terminal::new_optimistic(120);
+let md: Markdown = "# Hello\n\nWorld".into();
+let output = DarkmatterPage::new(&term)
+    .with_margin(2)
+    .with_padding(1)
+    .with_page_background(PageBackground::Subtle)
+    .with_max_width(100)
+    .render(&md)?;
+```
+
+`DarkmatterPage` implements `biscuit_terminal::renderable::Renderable` for composition with the biscuit-terminal component ecosystem. With no builder calls, `render` is byte-for-byte equivalent to `for_terminal(&md, TerminalOptions::default())`.
+
 ## Compose Pipeline
 
 Three-phase pipeline for document preparation leveraging the [pulldown-cmark](./pulldown-cmark.md) crate:
@@ -164,6 +185,7 @@ This shortcut resolves:
 - [Terminal Output](./terminal.md) - ANSI rendering, themes, options
 - [Frontmatter](./frontmatter.md) - YAML parsing, merge strategies
 - [Document Comparison](./comparison.md) - Structural diff, change classification
+- [Error Conventions](./errors.md) - `BlockError` body contract, `SourceContext`, snapshot tests
 - [Module Structure](./structure.md) - Package organization and dependencies
 
 ## CLI
@@ -183,6 +205,24 @@ md graph doc.md                  # Dependency graph visualization
 md graph doc.md --follow         # Recurse into transclusions
 md graph doc.md --validate       # Inline validation overlays
 ```
+
+### Layout Flags
+
+Page-level layout is controlled via CLI flags that construct a `DarkmatterPage` internally:
+
+```bash
+md doc.md -m 2 --padding 1 --page-bg subtle --max-width 100
+md doc.md --alignment center --fill pad=4
+md doc.md --align-code-blocks left --fill-code-blocks max=60
+```
+
+- **Margin**: `-m` / `--margin`, `--mx`, `--my`, `--mt`, `--mb`, `--ml`, `--mr`
+- **Padding**: `--padding`, `--px`, `--py`, `--pt`, `--pb`, `--pl`, `--pr`
+- **Page**: `--page-bg` (alias `--page-background`), `--max-width`, `--line-numbers`, `--no-line-numbers`
+- **Alignment**: `--alignment`, `--align-images`, `--align-lists`, `--align-block-quotes`, `--align-tables`, `--align-code-blocks`
+- **Fill**: `--fill`, `--fill-images`, `--fill-lists`, `--fill-block-quotes`, `--fill-tables`, `--fill-code-blocks`
+
+Fill grammar: `full`, `pad=<n|n%>`, `indent=<n|n%>`, `max=<n|n%>`, `explicit=<n|n%>`. Precedence follows the same rules as the builder API (shorthand → axis → side for margin/padding; global → component-specific for alignment and fill).
 
 ### FileTree Component
 

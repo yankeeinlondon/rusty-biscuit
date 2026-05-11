@@ -34,8 +34,16 @@ pub(crate) struct InterpolationRewrite {
     pub warnings: Vec<ComposeWarning>,
 }
 
+/// Maximum number of rescan iterations to prevent infinite loops.
+const MAX_INTERPOLATION_DEPTH: usize = 10;
+
 /// Scans `input` for `{{ }}` expressions, evaluates them, and returns
 /// the rewritten string.
+///
+/// After each pass of replacements, the output is rescanned for newly
+/// introduced `{{ }}` expressions (e.g. from a ternary branch that
+/// contains interpolation placeholders).  Loop-depth protection prevents
+/// runaway recursion when a replacement re-introduces the same expression.
 ///
 /// ## Arguments
 ///
@@ -51,78 +59,97 @@ pub(crate) fn interpolate_text<L: EvaluationLookup>(
     fail_fast: bool,
     warning_stage: &'static str,
 ) -> Result<InterpolationRewrite, MarkdownError> {
-    let locations: Vec<ExpressionLocation> = match scan_mode {
-        ScanMode::MarkdownAware => ExpressionFinder::new(input).find_all(),
-        ScanMode::Plain => ExpressionFinder::find_all_plain(input),
-    };
-
-    if locations.is_empty() {
-        return Ok(InterpolationRewrite {
-            output: input.to_string(),
-            replacements: 0,
-            warnings: vec![],
-        });
-    }
-
     let mut output = input.to_string();
-    let mut count = 0;
-    let mut warnings = Vec::new();
+    let mut total_count = 0;
+    let mut all_warnings = Vec::new();
 
-    for loc in locations.into_iter().rev() {
-        match parse(&loc.expression) {
-            Ok(expr) => match evaluator.eval(&expr) {
-                EvalResult::Value(replacement) => {
-                    // Inherit line indentation for multiline replacements
-                    let replacement = if replacement.contains('\n') {
-                        let line_start =
-                            output[..loc.start].rfind('\n').map(|i| i + 1).unwrap_or(0);
-                        let indent: String = output[line_start..loc.start]
-                            .chars()
-                            .take_while(|c| c.is_whitespace())
-                            .collect();
-                        if indent.is_empty() {
-                            replacement
+    for depth in 0..MAX_INTERPOLATION_DEPTH {
+        let locations: Vec<ExpressionLocation> = match scan_mode {
+            ScanMode::MarkdownAware => ExpressionFinder::new(&output).find_all(),
+            ScanMode::Plain => ExpressionFinder::find_all_plain(&output),
+        };
+
+        if locations.is_empty() {
+            break;
+        }
+
+        let mut count = 0;
+        let mut warnings = Vec::new();
+
+        for loc in locations.into_iter().rev() {
+            match parse(&loc.expression) {
+                Ok(expr) => match evaluator.eval(&expr) {
+                    EvalResult::Value(replacement) => {
+                        // Inherit line indentation for multiline replacements
+                        let replacement = if replacement.contains('\n') {
+                            let line_start =
+                                output[..loc.start].rfind('\n').map(|i| i + 1).unwrap_or(0);
+                            let indent: String = output[line_start..loc.start]
+                                .chars()
+                                .take_while(|c| c.is_whitespace())
+                                .collect();
+                            if indent.is_empty() {
+                                replacement
+                            } else {
+                                replacement.replace('\n', &format!("\n{indent}"))
+                            }
                         } else {
-                            replacement.replace('\n', &format!("\n{indent}"))
-                        }
-                    } else {
-                        replacement
-                    };
-                    output.replace_range(loc.start..loc.end, &replacement);
-                    count += 1;
-                }
-                EvalResult::Error { message, .. } if fail_fast => {
+                            replacement
+                        };
+                        output.replace_range(loc.start..loc.end, &replacement);
+                        count += 1;
+                    }
+                    EvalResult::Error { message, .. } if fail_fast => {
+                        return Err(MarkdownError::Transform(format!(
+                            "Interpolation evaluation failed for '{}': {}",
+                            loc.expression, message
+                        )));
+                    }
+                    EvalResult::Error { message, original } => {
+                        warnings.push(ComposeWarning::new(
+                            warning_stage,
+                            format!("failed to evaluate '{}': {}", original, message),
+                        ));
+                    }
+                },
+                Err(e) if fail_fast => {
                     return Err(MarkdownError::Transform(format!(
-                        "Interpolation evaluation failed for '{}': {}",
-                        loc.expression, message
+                        "Interpolation parse failed for '{}': {}",
+                        loc.expression, e
                     )));
                 }
-                EvalResult::Error { message, original } => {
+                Err(e) => {
                     warnings.push(ComposeWarning::new(
                         warning_stage,
-                        format!("failed to evaluate '{}': {}", original, message),
+                        format!("failed to parse '{}': {}", loc.expression, e),
                     ));
                 }
-            },
-            Err(e) if fail_fast => {
-                return Err(MarkdownError::Transform(format!(
-                    "Interpolation parse failed for '{}': {}",
-                    loc.expression, e
-                )));
             }
-            Err(e) => {
-                warnings.push(ComposeWarning::new(
-                    warning_stage,
-                    format!("failed to parse '{}': {}", loc.expression, e),
-                ));
-            }
+        }
+
+        total_count += count;
+        all_warnings.extend(warnings);
+
+        if count == 0 {
+            break;
+        }
+
+        // If we hit the max depth with replacements still pending, add a warning.
+        if depth == MAX_INTERPOLATION_DEPTH - 1 {
+            all_warnings.push(ComposeWarning::new(
+                warning_stage,
+                format!(
+                    "interpolation depth limit ({}) reached; possible infinite loop",
+                    MAX_INTERPOLATION_DEPTH
+                ),
+            ));
         }
     }
 
     Ok(InterpolationRewrite {
         output,
-        replacements: count,
-        warnings,
+        replacements: total_count,
+        warnings: all_warnings,
     })
 }
 
@@ -309,5 +336,53 @@ mod tests {
         .unwrap();
         assert_eq!(result.output, "2024-06-15");
         assert_eq!(result.replacements, 1);
+    }
+
+    #[test]
+    fn rescans_replacement_text_for_nested_interpolation() {
+        // A ternary branch that contains an interpolation placeholder
+        // should be resolved in a subsequent pass.
+        let state = make_state(json!({"pkg": "darkmatter"}));
+        let evaluator = Evaluator::new(&state);
+        let result = interpolate_text(
+            "{{ pkg ? 'in a package directory: {{pkg}}' : 'not in a package directory' }}",
+            &evaluator,
+            ScanMode::Plain,
+            false,
+            "test",
+        )
+        .unwrap();
+        assert_eq!(result.output, "in a package directory: darkmatter");
+        assert_eq!(result.replacements, 2);
+    }
+
+    #[test]
+    fn rescans_false_branch_for_nested_interpolation() {
+        let state = make_state(json!({"pkg": null, "fallback": "none"}));
+        let evaluator = Evaluator::new(&state);
+        let result = interpolate_text(
+            "{{ pkg ? 'has: {{pkg}}' : 'missing: {{fallback}}' }}",
+            &evaluator,
+            ScanMode::Plain,
+            false,
+            "test",
+        )
+        .unwrap();
+        assert_eq!(result.output, "missing: none");
+        assert_eq!(result.replacements, 2);
+    }
+
+    #[test]
+    fn loop_depth_protection() {
+        // A self-referencing expression would loop forever without depth protection.
+        // We simulate this by having a frontmatter value that resolves to itself.
+        let state = make_state(json!({"self_ref": "{{self_ref}}"}));
+        let evaluator = Evaluator::new(&state);
+        let result =
+            interpolate_text("{{ self_ref }}", &evaluator, ScanMode::Plain, false, "test").unwrap();
+        // After 10 iterations the depth limit is hit and a warning is emitted.
+        assert_eq!(result.replacements, 10);
+        assert_eq!(result.warnings.len(), 1);
+        assert!(result.warnings[0].message.contains("depth limit"));
     }
 }

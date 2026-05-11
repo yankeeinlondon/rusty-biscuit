@@ -15,7 +15,7 @@ pub const DEFAULT_COMMIT_COUNT: usize = 10;
 #[derive(clap::Args, Debug, Clone)]
 pub struct FileListArgs {
     /// Scope to a specific package
-    #[arg(long, value_name = "PKG", add = clap_complete::engine::ArgValueCandidates::new(repo_package_candidates))]
+    #[arg(short, long, value_name = "PKG", add = clap_complete::engine::ArgValueCandidates::new(repo_package_candidates))]
     pub package: Option<String>,
 
     /// Scope to a specific package area
@@ -682,33 +682,51 @@ impl Commands {
                 None => RepoAction::Structure {
                     filter: filter.clone(),
                     latest_versions: *latest_versions,
+                    package: None,
+                    package_area: None,
                 },
-                Some(RepoSubcommand::Structure { filter: sub_filter }) => RepoAction::Structure {
+                Some(RepoSubcommand::Structure {
+                    filter: sub_filter,
+                    package,
+                    package_area,
+                }) => RepoAction::Structure {
                     filter: if sub_filter.is_empty() {
                         filter.clone()
                     } else {
                         sub_filter.clone()
                     },
                     latest_versions: *latest_versions,
+                    package: package.clone(),
+                    package_area: package_area.clone(),
                 },
                 Some(RepoSubcommand::GitStatus {
                     history,
                     refresh_remotes,
                     compact,
                     package,
+                    package_area,
                 }) => RepoAction::GitStatus {
                     history: *history,
                     refresh_remotes: *refresh_remotes,
                     compact: *compact,
                     package: package.clone(),
+                    package_area: package_area.clone(),
                 },
                 Some(RepoSubcommand::Hash { sha }) => RepoAction::Hash { sha: sha.clone() },
                 Some(RepoSubcommand::StagedFiles(args)) => RepoAction::StagedFiles(args.clone()),
-                Some(RepoSubcommand::UnstagedFiles { package }) => RepoAction::UnstagedFiles {
+                Some(RepoSubcommand::UnstagedFiles {
+                    package,
+                    package_area,
+                }) => RepoAction::UnstagedFiles {
                     package: package.clone(),
+                    package_area: package_area.clone(),
                 },
-                Some(RepoSubcommand::UntrackedFiles { package }) => RepoAction::UntrackedFiles {
+                Some(RepoSubcommand::UntrackedFiles {
+                    package,
+                    package_area,
+                }) => RepoAction::UntrackedFiles {
                     package: package.clone(),
+                    package_area: package_area.clone(),
                 },
                 Some(RepoSubcommand::Remote { remote }) => RepoAction::Remote {
                     remote: remote.clone(),
@@ -716,6 +734,8 @@ impl Commands {
                 Some(RepoSubcommand::Deps {
                     ui,
                     filter: sub_filter,
+                    package,
+                    package_area,
                 }) => RepoAction::Deps {
                     filter: if sub_filter.is_empty() {
                         filter.clone()
@@ -723,18 +743,24 @@ impl Commands {
                         sub_filter.clone()
                     },
                     ui: *ui,
+                    package: package.clone(),
+                    package_area: package_area.clone(),
                 },
                 Some(RepoSubcommand::Packages {
                     filter: sub_filter,
+                    package,
                     package_area,
                     md,
                     list,
+                    no_error,
+                    on_error,
                 }) => RepoAction::Packages {
                     filter: if sub_filter.is_empty() {
                         filter.clone()
                     } else {
                         sub_filter.clone()
                     },
+                    package: package.clone(),
                     package_area: package_area.clone(),
                     format: if *md {
                         PackagesFormat::Markdown
@@ -743,18 +769,24 @@ impl Commands {
                     } else {
                         PackagesFormat::Csv
                     },
+                    no_error: *no_error,
+                    on_error: on_error.clone(),
                 },
                 Some(RepoSubcommand::PackageAreas {
                     filter: sub_filter,
+                    package,
                     package_area,
                     md,
                     list,
+                    no_error,
+                    on_error,
                 }) => RepoAction::PackageAreas {
                     filter: if sub_filter.is_empty() {
                         filter.clone()
                     } else {
                         sub_filter.clone()
                     },
+                    package: package.clone(),
                     package_area: package_area.clone(),
                     format: if *md {
                         PackagesFormat::Markdown
@@ -763,6 +795,8 @@ impl Commands {
                     } else {
                         PackagesFormat::Csv
                     },
+                    no_error: *no_error,
+                    on_error: on_error.clone(),
                 },
                 Some(RepoSubcommand::Package { no_error, on_error }) => RepoAction::Package {
                     no_error: *no_error,
@@ -774,60 +808,84 @@ impl Commands {
                         on_error: on_error.clone(),
                     }
                 }
-                Some(RepoSubcommand::DirtyPackages { filter: sub_filter }) => {
-                    RepoAction::DirtyPackages {
-                        filter: if sub_filter.is_empty() {
-                            filter.clone()
-                        } else {
-                            sub_filter.clone()
-                        },
-                    }
-                }
-                Some(RepoSubcommand::DirtyPackageAreas { filter: sub_filter }) => {
-                    RepoAction::DirtyPackageAreas {
-                        filter: if sub_filter.is_empty() {
-                            filter.clone()
-                        } else {
-                            sub_filter.clone()
-                        },
-                    }
-                }
-                Some(RepoSubcommand::StagedPackages { filter: sub_filter }) => {
-                    RepoAction::StagedPackages {
-                        filter: if sub_filter.is_empty() {
-                            filter.clone()
-                        } else {
-                            sub_filter.clone()
-                        },
-                    }
-                }
-                Some(RepoSubcommand::StagedPackageAreas { filter: sub_filter }) => {
-                    RepoAction::StagedPackageAreas {
-                        filter: if sub_filter.is_empty() {
-                            filter.clone()
-                        } else {
-                            sub_filter.clone()
-                        },
-                    }
-                }
-                Some(RepoSubcommand::UnstagedPackages { filter: sub_filter }) => {
-                    RepoAction::UnstagedPackages {
-                        filter: if sub_filter.is_empty() {
-                            filter.clone()
-                        } else {
-                            sub_filter.clone()
-                        },
-                    }
-                }
-                Some(RepoSubcommand::UnstagedPackageAreas { filter: sub_filter }) => {
-                    RepoAction::UnstagedPackageAreas {
-                        filter: if sub_filter.is_empty() {
-                            filter.clone()
-                        } else {
-                            sub_filter.clone()
-                        },
-                    }
-                }
+                Some(RepoSubcommand::DirtyPackages {
+                    filter: sub_filter,
+                    package,
+                    package_area,
+                }) => RepoAction::DirtyPackages {
+                    filter: if sub_filter.is_empty() {
+                        filter.clone()
+                    } else {
+                        sub_filter.clone()
+                    },
+                    package: package.clone(),
+                    package_area: package_area.clone(),
+                },
+                Some(RepoSubcommand::DirtyPackageAreas {
+                    filter: sub_filter,
+                    package,
+                    package_area,
+                }) => RepoAction::DirtyPackageAreas {
+                    filter: if sub_filter.is_empty() {
+                        filter.clone()
+                    } else {
+                        sub_filter.clone()
+                    },
+                    package: package.clone(),
+                    package_area: package_area.clone(),
+                },
+                Some(RepoSubcommand::StagedPackages {
+                    filter: sub_filter,
+                    package,
+                    package_area,
+                }) => RepoAction::StagedPackages {
+                    filter: if sub_filter.is_empty() {
+                        filter.clone()
+                    } else {
+                        sub_filter.clone()
+                    },
+                    package: package.clone(),
+                    package_area: package_area.clone(),
+                },
+                Some(RepoSubcommand::StagedPackageAreas {
+                    filter: sub_filter,
+                    package,
+                    package_area,
+                }) => RepoAction::StagedPackageAreas {
+                    filter: if sub_filter.is_empty() {
+                        filter.clone()
+                    } else {
+                        sub_filter.clone()
+                    },
+                    package: package.clone(),
+                    package_area: package_area.clone(),
+                },
+                Some(RepoSubcommand::UnstagedPackages {
+                    filter: sub_filter,
+                    package,
+                    package_area,
+                }) => RepoAction::UnstagedPackages {
+                    filter: if sub_filter.is_empty() {
+                        filter.clone()
+                    } else {
+                        sub_filter.clone()
+                    },
+                    package: package.clone(),
+                    package_area: package_area.clone(),
+                },
+                Some(RepoSubcommand::UnstagedPackageAreas {
+                    filter: sub_filter,
+                    package,
+                    package_area,
+                }) => RepoAction::UnstagedPackageAreas {
+                    filter: if sub_filter.is_empty() {
+                        filter.clone()
+                    } else {
+                        sub_filter.clone()
+                    },
+                    package: package.clone(),
+                    package_area: package_area.clone(),
+                },
                 Some(RepoSubcommand::PackageRoot) => RepoAction::PackageRoot,
                 Some(RepoSubcommand::PackageAreaRoot) => RepoAction::PackageAreaRoot,
                 Some(RepoSubcommand::Root) => RepoAction::Root,
@@ -1664,6 +1722,7 @@ mod tests {
             if let Some(RepoAction::Structure {
                 filter,
                 latest_versions,
+                ..
             }) = cmd.to_repo_action()
             {
                 assert_eq!(filter, vec!["biscuit".to_string()]);
@@ -1679,9 +1738,11 @@ mod tests {
                 repo_subcommand: Some(RepoSubcommand::Deps {
                     ui: true,
                     filter: vec!["sub-level".to_string()],
+                    package: None,
+                    package_area: None,
                 }),
             };
-            if let Some(RepoAction::Deps { filter, ui }) = cmd.to_repo_action() {
+            if let Some(RepoAction::Deps { filter, ui, .. }) = cmd.to_repo_action() {
                 assert_eq!(filter, vec!["sub-level".to_string()]);
                 assert!(ui);
             } else {
@@ -1695,6 +1756,8 @@ mod tests {
                 repo_subcommand: Some(RepoSubcommand::Deps {
                     ui: false,
                     filter: vec![],
+                    package: None,
+                    package_area: None,
                 }),
             };
             if let Some(RepoAction::Deps { filter, .. }) = cmd.to_repo_action() {
@@ -1814,7 +1877,7 @@ mod tests {
         fn repo_structure_parses() {
             let cli = parse_args(&["repo", "structure"]).unwrap();
             if let Some(Commands::Repo {
-                repo_subcommand: Some(RepoSubcommand::Structure { filter }),
+                repo_subcommand: Some(RepoSubcommand::Structure { filter, .. }),
                 ..
             }) = cli.command
             {
@@ -1828,7 +1891,7 @@ mod tests {
         fn repo_structure_with_filter_parses() {
             let cli = parse_args(&["repo", "structure", "biscuit"]).unwrap();
             if let Some(Commands::Repo {
-                repo_subcommand: Some(RepoSubcommand::Structure { filter }),
+                repo_subcommand: Some(RepoSubcommand::Structure { filter, .. }),
                 ..
             }) = cli.command
             {
@@ -1842,7 +1905,7 @@ mod tests {
         fn repo_structure_with_multiple_filters_parses() {
             let cli = parse_args(&["repo", "structure", "biscuit", "sniff"]).unwrap();
             if let Some(Commands::Repo {
-                repo_subcommand: Some(RepoSubcommand::Structure { filter }),
+                repo_subcommand: Some(RepoSubcommand::Structure { filter, .. }),
                 ..
             }) = cli.command
             {
@@ -1862,6 +1925,7 @@ mod tests {
                         refresh_remotes,
                         compact,
                         package,
+                        ..
                     }),
                 ..
             }) = cli.command
@@ -1895,6 +1959,7 @@ mod tests {
                         refresh_remotes,
                         compact,
                         package,
+                        ..
                     }),
                 ..
             }) = cli.command
@@ -1940,7 +2005,7 @@ mod tests {
             assert!(matches!(
                 cli.command,
                 Some(Commands::Repo {
-                    repo_subcommand: Some(RepoSubcommand::UnstagedFiles { package: None }),
+                    repo_subcommand: Some(RepoSubcommand::UnstagedFiles { package: None, .. }),
                     ..
                 })
             ));
@@ -1952,7 +2017,7 @@ mod tests {
             assert!(matches!(
                 cli.command,
                 Some(Commands::Repo {
-                    repo_subcommand: Some(RepoSubcommand::UntrackedFiles { package: None }),
+                    repo_subcommand: Some(RepoSubcommand::UntrackedFiles { package: None, .. }),
                     ..
                 })
             ));
@@ -2032,6 +2097,7 @@ mod tests {
                 Some(RepoAction::Structure {
                     filter,
                     latest_versions,
+                    ..
                 }) => {
                     assert_eq!(filter, vec!["biscuit".to_string()]);
                     assert!(latest_versions);
@@ -2050,6 +2116,7 @@ mod tests {
                     refresh_remotes: true,
                     compact: true,
                     package: Some("homelab".to_string()),
+                    package_area: None,
                 }),
             };
             match cmd.to_repo_action() {
@@ -2058,6 +2125,7 @@ mod tests {
                     refresh_remotes,
                     compact,
                     package,
+                    ..
                 }) => {
                     assert_eq!(history, 25);
                     assert!(refresh_remotes);
