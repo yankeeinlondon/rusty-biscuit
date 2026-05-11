@@ -23,5 +23,4 @@ tokio-tungstenite = { version = "0.26", default-features = false, features = ["c
 urlencoding = "2.1"
 
 [dev-dependencies]
-serial_test = "3.2"
 wiremock = "0.6"
