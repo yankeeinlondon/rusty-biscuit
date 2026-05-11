@@ -179,7 +179,14 @@ impl ModelCatalogService {
     ///
     /// Never panics; failures are silently ignored so stale cache or
     /// static fallback remains available.
+    ///
+    /// Fast-paths a no-op when the process-scoped user-interrupt flag has
+    /// already been raised, so SIGINT during the prep window does not
+    /// trigger any further dynamic-source subprocess spawns.
     pub fn refresh_provider_blocking(&self, provider: Provider) {
+        if crate::interrupt::interrupted() {
+            return;
+        }
         let self_clone = self.clone();
         let _ = std::thread::spawn(move || {
             let Ok(rt) = tokio::runtime::Runtime::new() else {
@@ -218,6 +225,9 @@ impl ModelCatalogService {
     /// Setting `CLAUDINE_BACKGROUND_REFRESH=0` forces the caller-blocking
     /// path for users who explicitly want the legacy behaviour.
     pub fn refresh_provider_async(&self, provider: Provider) {
+        if crate::interrupt::interrupted() {
+            return;
+        }
         if std::env::var("CLAUDINE_BACKGROUND_REFRESH").as_deref() == Ok("0") {
             self.refresh_provider_blocking(provider);
             return;
