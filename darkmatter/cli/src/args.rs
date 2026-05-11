@@ -487,12 +487,17 @@ pub struct Cli {
     pub max_width: Option<u16>,
 
     /// Include line numbers in code blocks
-    #[arg(long)]
-    pub line_numbers: bool,
-
-    /// Disable line numbers in code blocks (overrides --line-numbers)
-    #[arg(long, conflicts_with = "line_numbers")]
-    pub no_line_numbers: bool,
+    ///
+    /// Accepts `--line-numbers` (defaults to `true`) or
+    /// `--line-numbers <true|false>` for explicit control.
+    #[arg(
+        long,
+        value_name = "BOOL",
+        num_args = 0..=1,
+        default_missing_value = "true",
+        require_equals = false,
+    )]
+    pub line_numbers: Option<bool>,
 
     /// Default alignment for all components
     #[arg(long, value_enum, value_name = "ALIGN")]
@@ -1180,14 +1185,26 @@ mod tests {
     }
 
     #[test]
-    fn cli_line_numbers_flag_parses() {
+    fn cli_line_numbers_bare_flag_parses_as_true() {
         let cli = Cli::try_parse_from(["md", "doc.md", "--line-numbers"]).unwrap();
-        assert!(cli.line_numbers);
+        assert_eq!(cli.line_numbers, Some(true));
     }
 
     #[test]
-    fn cli_no_line_numbers_flag_parses() {
-        let cli = Cli::try_parse_from(["md", "doc.md", "--no-line-numbers"]).unwrap();
-        assert!(cli.no_line_numbers);
+    fn cli_line_numbers_true_parses() {
+        let cli = Cli::try_parse_from(["md", "doc.md", "--line-numbers", "true"]).unwrap();
+        assert_eq!(cli.line_numbers, Some(true));
+    }
+
+    #[test]
+    fn cli_line_numbers_false_parses() {
+        let cli = Cli::try_parse_from(["md", "doc.md", "--line-numbers", "false"]).unwrap();
+        assert_eq!(cli.line_numbers, Some(false));
+    }
+
+    #[test]
+    fn cli_line_numbers_omitted_is_none() {
+        let cli = Cli::try_parse_from(["md", "doc.md"]).unwrap();
+        assert_eq!(cli.line_numbers, None);
     }
 }

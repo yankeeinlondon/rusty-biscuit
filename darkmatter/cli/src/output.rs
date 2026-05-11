@@ -47,10 +47,8 @@ pub fn render_terminal_output(
     page = apply_cli_layout_flags(page, cli);
 
     // Handle line numbers: CLI flag overrides default.
-    if cli.line_numbers {
-        page = page.with_line_numbers(true);
-    } else if cli.no_line_numbers {
-        page = page.with_line_numbers(false);
+    if let Some(on) = cli.line_numbers {
+        page = page.with_line_numbers(on);
     }
 
     let output = page
