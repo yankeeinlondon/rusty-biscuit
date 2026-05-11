@@ -411,7 +411,9 @@ And `::shell echo inline` should also be ignored.
         assert!(result.is_err());
         let err = result.unwrap_err();
         match err {
-            ShellExpansionError::ParseDirective { origin, message, .. } => {
+            ShellExpansionError::ParseDirective {
+                origin, message, ..
+            } => {
                 assert_eq!(origin, ShellCommandOrigin::Body { line: 1 });
                 assert!(message.contains("pipes"));
             }

@@ -67,7 +67,13 @@ pub(crate) fn resolve_target_chain(
     trace!(target = %directive.targets.join(" > "), "toc_linking: resolving target chain");
 
     for target in &directive.targets {
-        match resolve_file(target, transclusion_options, source, directive.line, ctx.clone()) {
+        match resolve_file(
+            target,
+            transclusion_options,
+            source,
+            directive.line,
+            ctx.clone(),
+        ) {
             Ok(path) => return Ok(Some((target.clone(), path))),
             Err(_) => continue,
         }

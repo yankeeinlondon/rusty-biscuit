@@ -349,11 +349,7 @@ mod tests {
     }
 
     fn dummy_ctx() -> SourceContext {
-        SourceContext::new(
-            PathBuf::from("/test.md"),
-            PathBuf::from("test.md"),
-            "",
-        )
+        SourceContext::new(PathBuf::from("/test.md"), PathBuf::from("test.md"), "")
     }
 
     /// Test shim that supplies a dummy `SourceContext` so call sites stay terse.
@@ -522,7 +518,9 @@ mod tests {
     fn infix_or_with_literal() {
         // a || (missing || "default") — Or short-circuits on `a`.
         let state = test_state(json!({ "a": true }));
-        assert!(evaluate_condition(r#"a || (missing || "default")"#, &state, 1, dummy_ctx()).unwrap());
+        assert!(
+            evaluate_condition(r#"a || (missing || "default")"#, &state, 1, dummy_ctx()).unwrap()
+        );
     }
 
     #[test]
@@ -549,13 +547,17 @@ mod tests {
     #[test]
     fn function_and_short_circuits_on_false() {
         let state = test_state(json!({}));
-        assert!(!evaluate_condition("And(false_flag, UnknownFn(x))", &state, 1, dummy_ctx()).unwrap());
+        assert!(
+            !evaluate_condition("And(false_flag, UnknownFn(x))", &state, 1, dummy_ctx()).unwrap()
+        );
     }
 
     #[test]
     fn function_or_short_circuits_on_true() {
         let state = test_state(json!({ "truthy_flag": true }));
-        assert!(evaluate_condition("Or(truthy_flag, UnknownFn(x))", &state, 1, dummy_ctx()).unwrap());
+        assert!(
+            evaluate_condition("Or(truthy_flag, UnknownFn(x))", &state, 1, dummy_ctx()).unwrap()
+        );
     }
 
     #[test]
@@ -571,9 +573,15 @@ mod tests {
     #[test]
     fn infix_with_comparison_operands() {
         let state = test_state(json!({ "count": 5, "name": "alice" }));
-        assert!(evaluate_condition(r#"count > 0 && name == "alice""#, &state, 1, dummy_ctx()).unwrap());
-        assert!(!evaluate_condition(r#"count > 0 && name == "bob""#, &state, 1, dummy_ctx()).unwrap());
-        assert!(evaluate_condition(r#"count > 10 || name == "alice""#, &state, 1, dummy_ctx()).unwrap());
+        assert!(
+            evaluate_condition(r#"count > 0 && name == "alice""#, &state, 1, dummy_ctx()).unwrap()
+        );
+        assert!(
+            !evaluate_condition(r#"count > 0 && name == "bob""#, &state, 1, dummy_ctx()).unwrap()
+        );
+        assert!(
+            evaluate_condition(r#"count > 10 || name == "alice""#, &state, 1, dummy_ctx()).unwrap()
+        );
     }
 
     // ── Shortcut API: evaluate_condition_against ──────────────────────

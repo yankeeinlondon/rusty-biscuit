@@ -279,7 +279,8 @@ mod tests {
         let content = "# Hello\n\nNo blocks here.\n";
         let options = ComposeOptions::new();
         let mut runtime = ShellExpansionRuntime::new();
-        let (result, report) = run_shell_blocks_stage(content, &options, &mut runtime, &test_ctx()).unwrap();
+        let (result, report) =
+            run_shell_blocks_stage(content, &options, &mut runtime, &test_ctx()).unwrap();
         assert_eq!(result, content);
         assert_eq!(report.shell_blocks_applied, 0);
     }
@@ -289,7 +290,8 @@ mod tests {
         let content = "::shell-block\n::end-block\n";
         let options = ComposeOptions::new();
         let mut runtime = ShellExpansionRuntime::new();
-        let (result, report) = run_shell_blocks_stage(content, &options, &mut runtime, &test_ctx()).unwrap();
+        let (result, report) =
+            run_shell_blocks_stage(content, &options, &mut runtime, &test_ctx()).unwrap();
         assert_eq!(result, "");
         assert_eq!(report.shell_blocks_applied, 1);
     }
@@ -299,7 +301,8 @@ mod tests {
         let content = "::shell-block\necho hello\n::end-block\n";
         let (options, _temp) = test_options_with_handler(Arc::new(AllowAllHandler));
         let mut runtime = ShellExpansionRuntime::new();
-        let (result, report) = run_shell_blocks_stage(content, &options, &mut runtime, &test_ctx()).unwrap();
+        let (result, report) =
+            run_shell_blocks_stage(content, &options, &mut runtime, &test_ctx()).unwrap();
         assert_eq!(result.trim(), "hello");
         assert_eq!(report.shell_blocks_applied, 1);
     }
@@ -309,7 +312,8 @@ mod tests {
         let content = "::shell-block\necho hello\necho world\n::end-block\n";
         let (options, _temp) = test_options_with_handler(Arc::new(AllowAllHandler));
         let mut runtime = ShellExpansionRuntime::new();
-        let (result, report) = run_shell_blocks_stage(content, &options, &mut runtime, &test_ctx()).unwrap();
+        let (result, report) =
+            run_shell_blocks_stage(content, &options, &mut runtime, &test_ctx()).unwrap();
         assert_eq!(result, "hello\n\nworld\n");
         assert_eq!(report.shell_blocks_applied, 1);
     }
@@ -319,7 +323,8 @@ mod tests {
         let content = "::shell-block\necho first && echo second\n::end-block\n";
         let (options, _temp) = test_options_with_handler(Arc::new(AllowAllHandler));
         let mut runtime = ShellExpansionRuntime::new();
-        let (result, report) = run_shell_blocks_stage(content, &options, &mut runtime, &test_ctx()).unwrap();
+        let (result, report) =
+            run_shell_blocks_stage(content, &options, &mut runtime, &test_ctx()).unwrap();
         assert_eq!(result, "first\n\nsecond\n");
         assert_eq!(report.shell_blocks_applied, 1);
     }
@@ -329,7 +334,8 @@ mod tests {
         let content = "::shell-block\necho hidden > /dev/null && echo visible\n::end-block\n";
         let (options, _temp) = test_options_with_handler(Arc::new(AllowAllHandler));
         let mut runtime = ShellExpansionRuntime::new();
-        let (result, report) = run_shell_blocks_stage(content, &options, &mut runtime, &test_ctx()).unwrap();
+        let (result, report) =
+            run_shell_blocks_stage(content, &options, &mut runtime, &test_ctx()).unwrap();
         assert_eq!(result, "visible\n");
         assert_eq!(report.shell_blocks_applied, 1);
     }
@@ -368,7 +374,8 @@ mod tests {
         let content = "::shell-block\necho a\n::end-block\n\n::shell-block\necho b\n::end-block\n";
         let (options, _temp) = test_options_with_handler(Arc::new(AllowAllHandler));
         let mut runtime = ShellExpansionRuntime::new();
-        let (result, report) = run_shell_blocks_stage(content, &options, &mut runtime, &test_ctx()).unwrap();
+        let (result, report) =
+            run_shell_blocks_stage(content, &options, &mut runtime, &test_ctx()).unwrap();
         assert_eq!(report.shell_blocks_applied, 2);
         assert!(result.contains("a"));
         assert!(result.contains("b"));
@@ -380,7 +387,8 @@ mod tests {
             "::shell-block when_error=\"fallback\"\necho hello\nfalse\necho world\n::end-block\n";
         let (options, _temp) = test_options_with_handler(Arc::new(AllowAllHandler));
         let mut runtime = ShellExpansionRuntime::new();
-        let (result, report) = run_shell_blocks_stage(content, &options, &mut runtime, &test_ctx()).unwrap();
+        let (result, report) =
+            run_shell_blocks_stage(content, &options, &mut runtime, &test_ctx()).unwrap();
         assert_eq!(report.shell_blocks_applied, 1);
         // "hello" succeeds, "false" fails and is replaced with "fallback", "echo world" runs
         assert!(result.contains("hello"));
@@ -427,7 +435,8 @@ mod tests {
             ..Default::default()
         });
         let mut runtime = ShellExpansionRuntime::new();
-        let (result, report) = run_shell_blocks_stage(content, &options, &mut runtime, &test_ctx()).unwrap();
+        let (result, report) =
+            run_shell_blocks_stage(content, &options, &mut runtime, &test_ctx()).unwrap();
         assert!(result.contains("after"));
         assert_eq!(report.warnings.len(), 1);
         assert!(report.warnings[0].message.contains("timed out"));
@@ -467,7 +476,8 @@ mod tests {
         let content = "::block\n::shell-block\necho nested\n::end-block\n::end-block\n";
         let (options, _temp) = test_options_with_handler(Arc::new(AllowAllHandler));
         let mut runtime = ShellExpansionRuntime::new();
-        let (result, report) = run_shell_blocks_stage(content, &options, &mut runtime, &test_ctx()).unwrap();
+        let (result, report) =
+            run_shell_blocks_stage(content, &options, &mut runtime, &test_ctx()).unwrap();
         assert_eq!(report.shell_blocks_applied, 1);
         assert!(
             result.contains("nested"),
@@ -480,7 +490,8 @@ mod tests {
         let content = "::shell-block\necho -n\necho -n\n::end-block\n";
         let (options, _temp) = test_options_with_handler(Arc::new(AllowAllHandler));
         let mut runtime = ShellExpansionRuntime::new();
-        let (result, report) = run_shell_blocks_stage(content, &options, &mut runtime, &test_ctx()).unwrap();
+        let (result, report) =
+            run_shell_blocks_stage(content, &options, &mut runtime, &test_ctx()).unwrap();
         assert_eq!(report.shell_blocks_applied, 1);
         assert_eq!(result, "", "Expected empty output for all-empty commands");
     }
@@ -490,7 +501,8 @@ mod tests {
         let content = "::shell-block\necho -n\necho hello\necho -n\necho world\n::end-block\n";
         let (options, _temp) = test_options_with_handler(Arc::new(AllowAllHandler));
         let mut runtime = ShellExpansionRuntime::new();
-        let (result, report) = run_shell_blocks_stage(content, &options, &mut runtime, &test_ctx()).unwrap();
+        let (result, report) =
+            run_shell_blocks_stage(content, &options, &mut runtime, &test_ctx()).unwrap();
         assert_eq!(report.shell_blocks_applied, 1);
         // Empty outputs should be omitted; non-empty should have blank line between
         assert_eq!(
@@ -506,7 +518,8 @@ mod tests {
         let content = "::shell-block\necho \\\\\necho hello\n::end-block\n";
         let (options, _temp) = test_options_with_handler(Arc::new(AllowAllHandler));
         let mut runtime = ShellExpansionRuntime::new();
-        let (result, report) = run_shell_blocks_stage(content, &options, &mut runtime, &test_ctx()).unwrap();
+        let (result, report) =
+            run_shell_blocks_stage(content, &options, &mut runtime, &test_ctx()).unwrap();
         assert_eq!(report.shell_blocks_applied, 1);
         assert!(result.contains("\\"), "Expected backslash output: {result}");
         assert!(result.contains("hello"), "Expected hello output: {result}");

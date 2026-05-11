@@ -243,10 +243,8 @@ pub(crate) fn execute_command_detailed(
         match child.try_wait() {
             Ok(Some(status)) => {
                 // Process completed
-                let stdout_bytes =
-                    join_output_thread_raw(stdout_thread, "stdout", &directive.ctx)?;
-                let stderr_bytes =
-                    join_output_thread_raw(stderr_thread, "stderr", &directive.ctx)?;
+                let stdout_bytes = join_output_thread_raw(stdout_thread, "stdout", &directive.ctx)?;
+                let stderr_bytes = join_output_thread_raw(stderr_thread, "stderr", &directive.ctx)?;
                 let stdout_str = String::from_utf8_lossy(&stdout_bytes).to_string();
                 let stderr_str = String::from_utf8_lossy(&stderr_bytes).to_string();
 

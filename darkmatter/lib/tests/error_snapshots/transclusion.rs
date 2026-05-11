@@ -142,10 +142,7 @@ fn cycle_detected_lists_chain() {
 fn max_depth_exceeded_shows_limit() {
     let err = TransclusionError::MaxDepthExceeded { max_depth: 8 };
     let out = render(&err);
-    assert_contains_all(
-        &out,
-        &["TransclusionError", "recursion limit hit", "8"],
-    );
+    assert_contains_all(&out, &["TransclusionError", "recursion limit hit", "8"]);
     insta::assert_snapshot!("max_depth_exceeded", out);
 }
 
@@ -278,7 +275,10 @@ fn url_parse_error_has_scheme_hint() {
     let parse_error = url::Url::parse("not a url").unwrap_err();
     let err = TransclusionError::UrlParse(parse_error);
     let out = render(&err);
-    assert_contains_all(&out, &["TransclusionError", "URL parse failure", "https://"]);
+    assert_contains_all(
+        &out,
+        &["TransclusionError", "URL parse failure", "https://"],
+    );
     insta::assert_snapshot!("url_parse_error", out);
 }
 

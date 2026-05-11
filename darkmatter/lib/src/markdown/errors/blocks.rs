@@ -159,11 +159,7 @@ mod tests {
     #[test]
     fn frontmatter_parse_block_renders_yaml_error() {
         let yaml = ": [broken";
-        let ctx = SourceContext::new(
-            PathBuf::from("/test.md"),
-            PathBuf::from("test.md"),
-            yaml,
-        );
+        let ctx = SourceContext::new(PathBuf::from("/test.md"), PathBuf::from("test.md"), yaml);
         let err = serde_yaml_ng::from_str::<serde_yaml_ng::Value>(yaml).unwrap_err();
         let out = render_block(&frontmatter_parse_block(ctx, &err));
         assert!(out.contains("MarkdownError"), "missing header type: {out}");
@@ -184,11 +180,7 @@ mod tests {
     #[test]
     fn frontmatter_parse_block_includes_offending_line() {
         let yaml = "phases: 5\nfindings:\n  - id: '@' magic lookup emits results\n";
-        let ctx = SourceContext::new(
-            PathBuf::from("/test.md"),
-            PathBuf::from("test.md"),
-            yaml,
-        );
+        let ctx = SourceContext::new(PathBuf::from("/test.md"), PathBuf::from("test.md"), yaml);
         let err = serde_yaml_ng::from_str::<serde_yaml_ng::Value>(yaml).unwrap_err();
         let out = render_block(&frontmatter_parse_block(ctx, &err));
 

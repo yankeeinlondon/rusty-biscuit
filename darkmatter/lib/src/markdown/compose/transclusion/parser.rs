@@ -5,9 +5,7 @@ use super::types::{
     TransclusionError,
 };
 use crate::markdown::FrontmatterMap;
-use crate::markdown::compose::parse_utils::{
-    Cursor, find_code_regions, is_in_code_region,
-};
+use crate::markdown::compose::parse_utils::{Cursor, find_code_regions, is_in_code_region};
 use biscuit_terminal::errors::SourceContext;
 use serde_json::Value;
 
@@ -340,14 +338,13 @@ fn apply_option(
             } else if value.eq_ignore_ascii_case("false") {
                 options.replace = ReplaceOption::InheritDefault;
             } else {
-                let parsed: Value = serde_json::from_str(value).map_err(|_| {
-                    TransclusionError::ParseDirective {
+                let parsed: Value =
+                    serde_json::from_str(value).map_err(|_| TransclusionError::ParseDirective {
                         ctx: Box::new(ctx.clone()),
                         line,
                         message: "replace option must be true/false or a JSON object".to_string(),
                         caret_col: None,
-                    }
-                })?;
+                    })?;
                 let Some(obj) = parsed.as_object() else {
                     return Err(TransclusionError::ParseDirective {
                         ctx: Box::new(ctx.clone()),

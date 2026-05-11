@@ -128,11 +128,7 @@ mod tests {
     }
 
     fn test_ctx() -> SourceContext {
-        SourceContext::new(
-            PathBuf::from("/test"),
-            PathBuf::from("test"),
-            String::new(),
-        )
+        SourceContext::new(PathBuf::from("/test"), PathBuf::from("test"), String::new())
     }
 
     #[test]

@@ -110,7 +110,8 @@ pub(crate) fn parse_shell_value(
     }
 
     // Tokenize the inner command
-    let tokens = tokenize(inner_command, ctx).map_err(|error| remap_parse_error(error, key, ctx))?;
+    let tokens =
+        tokenize(inner_command, ctx).map_err(|error| remap_parse_error(error, key, ctx))?;
 
     // Parse into a pipeline
     let pipeline =
@@ -692,11 +693,7 @@ mod execution_tests {
     }
 
     fn test_ctx() -> SourceContext {
-        SourceContext::new(
-            PathBuf::from("/test"),
-            PathBuf::from("test"),
-            String::new(),
-        )
+        SourceContext::new(PathBuf::from("/test"), PathBuf::from("test"), String::new())
     }
 
     fn execute_frontmatter_shell_expansion(

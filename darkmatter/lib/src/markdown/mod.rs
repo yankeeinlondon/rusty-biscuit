@@ -174,11 +174,7 @@ impl Markdown {
         match &self.source {
             Some(ComposeSource::File(path)) => {
                 let absolute = path.canonicalize().unwrap_or_else(|_| path.clone());
-                biscuit_terminal::errors::SourceContext::new(
-                    absolute,
-                    path.clone(),
-                    content,
-                )
+                biscuit_terminal::errors::SourceContext::new(absolute, path.clone(), content)
             }
             _ => biscuit_terminal::errors::SourceContext::new(
                 std::path::PathBuf::from("unknown"),
@@ -616,6 +612,16 @@ impl Markdown {
     /// Returns an error if terminal rendering fails (e.g. theme loading issues).
     pub fn as_terminal(&self, options: output::TerminalOptions) -> MarkdownResult<String> {
         output::for_terminal(self, options)
+    }
+
+    /// Internal entry point that passes an optional page layout context through
+    /// to the terminal renderer so per-component alignment and fill are honoured.
+    pub(crate) fn as_terminal_with_layout(
+        &self,
+        options: output::TerminalOptions,
+        layout_ctx: Option<&crate::layout::LayoutContext>,
+    ) -> MarkdownResult<String> {
+        output::terminal::for_terminal_with_layout(self, options, layout_ctx)
     }
 
     /// Extracts a Table of Contents from the markdown document.

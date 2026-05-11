@@ -2,8 +2,8 @@
 
 use super::types::{DirectiveKind, ResolvedTarget, TransclusionError};
 use crate::markdown::compose::{ComposeSource, TransclusionOptions};
-use biscuit_terminal::errors::SourceContext;
 use biscuit_file::FileReference;
+use biscuit_terminal::errors::SourceContext;
 use std::path::{Path, PathBuf};
 use tracing::{debug, instrument, trace};
 
@@ -300,11 +300,7 @@ mod tests {
     }
 
     fn dummy_ctx(content: &str) -> SourceContext {
-        SourceContext::new(
-            PathBuf::from("/test.md"),
-            PathBuf::from("test.md"),
-            content,
-        )
+        SourceContext::new(PathBuf::from("/test.md"), PathBuf::from("test.md"), content)
     }
 
     #[test]

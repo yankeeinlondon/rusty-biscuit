@@ -27,6 +27,7 @@
 //! // Output contains ANSI escape codes for terminal display
 //! ```
 
+use crate::layout::{LayoutContext, PageAlignment, PageComponent};
 use crate::markdown::{
     Markdown, MarkdownError,
     block::{RuleProcessor, build_rule_with_defaults, hr_defaults_from_frontmatter},
@@ -812,8 +813,18 @@ fn convert_alignment(align: &pulldown_cmark::Alignment) -> Alignment {
 ///
 /// Returns an error if theme loading fails or syntax highlighting encounters issues.
 pub fn for_terminal(md: &Markdown, options: TerminalOptions) -> Result<String, MarkdownError> {
+    for_terminal_with_layout(md, options, None)
+}
+
+/// Internal entry point that accepts an optional [`LayoutContext`] for
+/// page-level component alignment and fill.
+pub(crate) fn for_terminal_with_layout(
+    md: &Markdown,
+    options: TerminalOptions,
+    layout_ctx: Option<&LayoutContext>,
+) -> Result<String, MarkdownError> {
     let mut output = Vec::new();
-    write_terminal(&mut output, md, options)?;
+    write_terminal_with_layout(&mut output, md, options, layout_ctx)?;
     Ok(String::from_utf8_lossy(&output).into_owned())
 }
 
@@ -842,6 +853,17 @@ pub fn write_terminal<W: std::io::Write>(
     writer: &mut W,
     md: &Markdown,
     options: TerminalOptions,
+) -> Result<(), MarkdownError> {
+    write_terminal_with_layout(writer, md, options, None)
+}
+
+/// Internal entry point that accepts an optional [`LayoutContext`] for
+/// page-level component alignment and fill.
+pub(crate) fn write_terminal_with_layout<W: std::io::Write>(
+    writer: &mut W,
+    md: &Markdown,
+    options: TerminalOptions,
+    layout_ctx: Option<&LayoutContext>,
 ) -> Result<(), MarkdownError> {
     let color_depth = options.color_depth.unwrap_or_else(ColorDepth::auto_detect);
 
@@ -1150,14 +1172,26 @@ pub fn write_terminal<W: std::io::Write>(
                         wrapper.newline();
                     }
 
+                    // Resolve component width when a layout context is present.
+                    let code_width = resolve_component_render_width(
+                        PageComponent::CodeBlocks,
+                        terminal_width,
+                        layout_ctx,
+                    );
+
                     // Add header row with title and language (right-aligned)
                     let header = format_header_row(
                         meta.title.as_deref(),
                         &code_language,
                         bg_color,
                         options.color_mode,
-                        terminal_width,
+                        code_width,
                     );
+                    let header = if let Some(ctx) = layout_ctx {
+                        apply_component_layout(&header, PageComponent::CodeBlocks, ctx)
+                    } else {
+                        header
+                    };
                     wrapper.push_with_newlines(&header);
                     wrapper.newline();
 
@@ -1170,6 +1204,11 @@ pub fn write_terminal<W: std::io::Write>(
                         &meta,
                         options.color_mode,
                     )?;
+                    let highlighted = if let Some(ctx) = layout_ctx {
+                        apply_component_layout(&highlighted, PageComponent::CodeBlocks, ctx)
+                    } else {
+                        highlighted
+                    };
                     wrapper.push_with_newlines(&highlighted);
                     // highlight_code ends with a bottom padding row, add newline after it
                     // then add blank line for separation from following content
@@ -1325,12 +1364,27 @@ pub fn write_terminal<W: std::io::Write>(
                     wrapper.emit_newline_with_prefix();
                 }
 
+                // Apply page-level layout for top-level lists.
+                if list_stack.is_empty()
+                    && let Some(ctx) = layout_ctx
+                {
+                    let component = PageComponent::Lists;
+                    let component_width = ctx
+                        .resolve_component_width(component)
+                        .unwrap_or(terminal_width);
+                    wrapper.push_component_width(component_width as usize);
+                    let pad = ctx.alignment_padding(component, component_width);
+                    wrapper.alignment_offset = pad as usize;
+                }
+
                 list_stack.push(start_num);
             }
             InlineEvent::Standard(Event::End(TagEnd::List(_))) => {
                 list_stack.pop();
                 // Add blank line after top-level list ends
                 if list_stack.is_empty() {
+                    wrapper.pop_component_width();
+                    wrapper.alignment_offset = 0;
                     wrapper.newline();
                 }
             }
@@ -1494,12 +1548,20 @@ pub fn write_terminal<W: std::io::Write>(
             }
             InlineEvent::Standard(Event::End(TagEnd::Table)) => {
                 in_table = false;
-                // Render the buffered table with proper formatting
-                wrapper.push_with_newlines(&render_table(
-                    &table_rows,
-                    &table_alignments,
+                // Resolve component width when a layout context is present.
+                let table_width = resolve_component_render_width(
+                    PageComponent::Tables,
                     terminal_width,
-                ));
+                    layout_ctx,
+                );
+                // Render the buffered table with proper formatting
+                let table_output = render_table(&table_rows, &table_alignments, table_width);
+                let table_output = if let Some(ctx) = layout_ctx {
+                    apply_component_layout(&table_output, PageComponent::Tables, ctx)
+                } else {
+                    table_output
+                };
+                wrapper.push_with_newlines(&table_output);
                 // Add blank line after table for spacing from following content
                 wrapper.push_with_newlines("\n\n");
                 table_rows.clear();
@@ -1557,6 +1619,11 @@ pub fn write_terminal<W: std::io::Write>(
                         // fallback text on failure
                         let result =
                             renderer.render_image(&current_image_path, &parsed_alt, parsed_width);
+                        let result = if let Some(ctx) = layout_ctx {
+                            apply_component_layout(&result, PageComponent::Images, ctx)
+                        } else {
+                            result
+                        };
                         if !result.is_empty() {
                             // Print rendered output (or fallback text on failure)
                             write!(writer, "{}", result).ok();
@@ -1564,15 +1631,20 @@ pub fn write_terminal<W: std::io::Write>(
                         writer.flush().ok();
                         just_rendered_image = true;
                     } else {
-                        wrapper.push_with_newlines(&renderer.render_image(
-                            &current_image_path,
-                            &parsed_alt,
-                            parsed_width,
-                        ));
+                        let mut result =
+                            renderer.render_image(&current_image_path, &parsed_alt, parsed_width);
+                        if let Some(ctx) = layout_ctx {
+                            result = apply_component_layout(&result, PageComponent::Images, ctx);
+                        }
+                        wrapper.push_with_newlines(&result);
                         just_rendered_image = true;
                     }
                 } else {
-                    wrapper.push_with_newlines(&format!("▉ IMAGE[{}]\n", parsed_alt));
+                    let mut result = format!("▉ IMAGE[{}]\n", parsed_alt);
+                    if let Some(ctx) = layout_ctx {
+                        result = apply_component_layout(&result, PageComponent::Images, ctx);
+                    }
+                    wrapper.push_with_newlines(&result);
                     just_rendered_image = true;
                 }
                 in_image = false;
@@ -1588,6 +1660,16 @@ pub fn write_terminal<W: std::io::Write>(
                         } else {
                             wrapper.push_with_newlines("\n\n");
                         }
+                    }
+                    // Apply page-level layout for top-level blockquotes.
+                    if let Some(ctx) = layout_ctx {
+                        let component = PageComponent::BlockQuotes;
+                        let component_width = ctx
+                            .resolve_component_width(component)
+                            .unwrap_or(terminal_width);
+                        wrapper.push_component_width(component_width as usize);
+                        let pad = ctx.alignment_padding(component, component_width);
+                        wrapper.alignment_offset = pad as usize;
                     }
                 } else {
                     // Nested blockquote - end current line with outer prefix, add blank line
@@ -1607,6 +1689,9 @@ pub fn write_terminal<W: std::io::Write>(
                 scope_stack.pop();
                 // Update wrapper's blockquote state
                 if blockquote_depth == 0 {
+                    // Pop any layout overrides applied at blockquote entry.
+                    wrapper.pop_component_width();
+                    wrapper.alignment_offset = 0;
                     blockquote_has_content = false; // Reset only when fully exiting blockquotes
                     wrapper.clear_blockquote();
                     // Add blank line after blockquote (like headings and paragraphs)
@@ -2192,6 +2277,13 @@ struct LineWrapper {
     supports_hyperlinks: bool,
     /// Stack of indentation widths for wrapped continuation lines (e.g. for nested list items)
     indent_stack: Vec<usize>,
+    /// Left padding (in columns) to apply at the start of each line for
+    /// component alignment (e.g. centering a blockquote).
+    alignment_offset: usize,
+    /// Stack of max-width overrides pushed by page-component fill settings.
+    /// The top of the stack (if any) temporarily reduces `max_width` while
+    /// rendering a component such as a blockquote or list.
+    width_stack: Vec<usize>,
 }
 
 impl LineWrapper {
@@ -2205,7 +2297,27 @@ impl LineWrapper {
             blockquote_bg: None,
             supports_hyperlinks,
             indent_stack: Vec::new(),
+            alignment_offset: 0,
+            width_stack: Vec::new(),
         }
+    }
+
+    /// Push a component-specific max-width override.
+    fn push_component_width(&mut self, width: usize) {
+        self.width_stack.push(self.max_width);
+        self.max_width = width;
+    }
+
+    /// Pop the most recent component-specific max-width override.
+    fn pop_component_width(&mut self) {
+        if let Some(w) = self.width_stack.pop() {
+            self.max_width = w;
+        }
+    }
+
+    /// Current effective max width, accounting for any component overrides.
+    fn effective_max_width(&self) -> usize {
+        self.width_stack.last().copied().unwrap_or(self.max_width)
     }
 
     /// Pushes a new indentation width onto the stack.
@@ -2235,6 +2347,13 @@ impl LineWrapper {
     fn ensure_prefix(&mut self) {
         if self.current_col == 0 {
             let mut current_pos = 0;
+
+            // Emit alignment offset for page-component alignment (e.g. centered blockquotes).
+            if self.alignment_offset > 0 {
+                let spaces = " ".repeat(self.alignment_offset);
+                self.output.push_str(&spaces);
+                current_pos += self.alignment_offset;
+            }
 
             if self.blockquote_depth > 0
                 && let Some(bg) = self.blockquote_bg
@@ -2294,17 +2413,18 @@ impl LineWrapper {
     ///
     /// Called before newlines in blockquotes to ensure uniform background width.
     fn pad_to_width(&mut self) {
+        let max = self.effective_max_width();
         if let Some(bg) = self.blockquote_bg
-            && self.current_col < self.max_width
+            && self.current_col < max
             && self.current_col > 0
         {
-            let padding = self.max_width - self.current_col;
+            let padding = max - self.current_col;
             let spaces = " ".repeat(padding);
             self.output.push_str(&format!(
                 "\x1b[48;2;{};{};{}m{}\x1b[0m",
                 bg.r, bg.g, bg.b, spaces
             ));
-            self.current_col = self.max_width;
+            self.current_col = max;
         }
     }
 
@@ -2368,7 +2488,7 @@ impl LineWrapper {
                     if self.current_col > 0 {
                         // Check if space would overflow the line
                         // If at max width, skip the space (next word will wrap anyway)
-                        if self.current_col >= self.max_width {
+                        if self.current_col >= self.effective_max_width() {
                             // At or past max width - don't emit space, let next word trigger wrap
                             continue;
                         }
@@ -2427,8 +2547,9 @@ impl LineWrapper {
         self.ensure_prefix();
 
         // Check if word fits on current line
+        let max = self.effective_max_width();
         if self.current_col > (self.blockquote_depth * 4 + self.current_indent())
-            && self.current_col + word_width > self.max_width
+            && self.current_col + word_width > max
         {
             // Need to wrap - emit newline (with blockquote prefix if applicable)
             self.emit_newline_with_prefix();
@@ -2547,8 +2668,9 @@ impl LineWrapper {
         self.ensure_prefix();
 
         // Check if code fits on current line
+        let max = self.effective_max_width();
         if self.current_col > (self.blockquote_depth * 4 + self.current_indent())
-            && self.current_col + code_width > self.max_width
+            && self.current_col + code_width > max
         {
             // Wrap before inline code (with blockquote prefix if applicable)
             self.emit_newline_with_prefix();
@@ -2646,6 +2768,66 @@ fn write_horizontal_rule(
         for _ in 0..bottom {
             wrapper.newline();
         }
+    }
+}
+
+/// Apply page-level alignment and fill to a rendered component string.
+///
+/// When `layout_ctx` is present and carries non-default alignment or fill for
+/// `component`, the rendered text is padded on the left (and optionally right)
+/// so it positions correctly inside the page content rectangle.
+///
+/// For [`PageFill::Pad`] and [`PageFill::Indent`] the component width is
+/// reduced by the resolved padding *before* alignment is applied. For
+/// [`PageFill::Max`] and [`PageFill::Explicit`] the component is rendered at
+/// the resolved width and then aligned.
+fn apply_component_layout(
+    text: &str,
+    component: PageComponent,
+    layout_ctx: &LayoutContext,
+) -> String {
+    let alignment = layout_ctx.component_alignment(component);
+    if alignment == PageAlignment::Left {
+        return text.to_string();
+    }
+
+    // Measure the visible width of the already-rendered component.
+    let max_visible_width = text
+        .lines()
+        .map(biscuit_terminal::utils::block_constraint::visible_width)
+        .max()
+        .unwrap_or(0) as u16;
+
+    let left_pad = layout_ctx.alignment_padding(component, max_visible_width);
+
+    if left_pad == 0 {
+        return text.to_string();
+    }
+
+    let spaces = " ".repeat(left_pad as usize);
+    text.lines()
+        .map(|line| format!("{}{}", spaces, line))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// Resolve the width to pass to a component renderer (code block, table, etc.)
+/// given an optional [`LayoutContext`].
+///
+/// Returns the smaller of `terminal_width` and the component's resolved fill
+/// width when a layout context is present and the component has a non-default
+/// fill. Otherwise returns `terminal_width` unchanged.
+fn resolve_component_render_width(
+    component: PageComponent,
+    terminal_width: u16,
+    layout_ctx: Option<&LayoutContext>,
+) -> u16 {
+    let Some(ctx) = layout_ctx else {
+        return terminal_width;
+    };
+    match ctx.resolve_component_width(component) {
+        Ok(w) => terminal_width.min(w),
+        Err(_) => terminal_width,
     }
 }
 

@@ -144,8 +144,7 @@ mod tests {
         );
         let regions = parse_page_blocks(content, source.clone()).unwrap();
         let mut report = ComposeReport::default();
-        let output =
-            render_page_blocks(content, &regions, state, &mut report, source).unwrap();
+        let output = render_page_blocks(content, &regions, state, &mut report, source).unwrap();
         (output, report)
     }
 
@@ -205,8 +204,7 @@ mod tests {
         );
         let regions = parse_page_blocks(content, source.clone()).unwrap();
         let mut report = ComposeReport::default();
-        let output =
-            render_page_blocks(content, &regions, &state, &mut report, source).unwrap();
+        let output = render_page_blocks(content, &regions, &state, &mut report, source).unwrap();
         assert_eq!(output, "agent content\n");
     }
 

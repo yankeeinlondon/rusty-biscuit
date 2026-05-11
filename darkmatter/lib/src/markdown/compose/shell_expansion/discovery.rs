@@ -178,8 +178,7 @@ pub fn collect_shell_commands(
 
     // Parse ::shell directives from the fully-resolved content.
     // ShellExpansionError converts into MarkdownError via From impl.
-    let directives =
-        parse_directives(composed.content(), composed.source_context_for_errors())?;
+    let directives = parse_directives(composed.content(), composed.source_context_for_errors())?;
 
     for directive in directives {
         // Look up provenance from the source map (shared by every action)
@@ -347,7 +346,12 @@ fn collect_frontmatter_commands_recursive(
         }
 
         if let Some(expr) = &directive.options.when_expr
-            && !transclusion::evaluate_condition(expr, &state, directive.line, prepared_ctx.clone())?
+            && !transclusion::evaluate_condition(
+                expr,
+                &state,
+                directive.line,
+                prepared_ctx.clone(),
+            )?
         {
             continue;
         }

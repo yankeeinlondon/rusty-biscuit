@@ -73,9 +73,7 @@ fn directive_text_at_line(content: &str, line: usize) -> String {
         .to_string()
 }
 
-fn map_reference_parse_error(
-    err: crate::markdown::compose::TransclusionError,
-) -> ReferenceError {
+fn map_reference_parse_error(err: crate::markdown::compose::TransclusionError) -> ReferenceError {
     match err {
         crate::markdown::compose::TransclusionError::ParseDirective {
             ctx,
@@ -198,9 +196,10 @@ impl Markdown {
         }
 
         // Frontmatter prologue/epilogue
-        if let Ok(fm_refs) =
-            parse_frontmatter_refs(self.frontmatter().as_map(), self.source_context_for_errors())
-        {
+        if let Ok(fm_refs) = parse_frontmatter_refs(
+            self.frontmatter().as_map(),
+            self.source_context_for_errors(),
+        ) {
             for prologue in &fm_refs.prologue {
                 let resolved_target = resolve_transclusion_target(prologue, &source, &[]);
                 refs.push(TransclusionRef {

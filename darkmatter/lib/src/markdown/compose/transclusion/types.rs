@@ -1,7 +1,7 @@
 //! Type definitions for the transclusion phase.
 
-use biscuit_terminal::errors::SourceContext;
 use crate::markdown::compose::ComposeSource;
+use biscuit_terminal::errors::SourceContext;
 use std::ops::Range;
 use std::path::PathBuf;
 use thiserror::Error;
