@@ -1,4 +1,5 @@
 use std::io::Write;
+use std::sync::LazyLock;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use biscuit_terminal::components::prose::Prose;
@@ -41,21 +42,29 @@ fn forced_width(default: u32) -> u32 {
         .unwrap_or(default)
 }
 
+fn compute_terminal() -> Terminal {
+    if colors_disabled() {
+        plain_terminal(forced_width(80))
+    } else if force_color_enabled() {
+        Terminal::new_optimistic(forced_width(80))
+    } else {
+        Terminal::new()
+    }
+}
+
+static TERMINAL: LazyLock<Terminal> = LazyLock::new(compute_terminal);
+
 /// Returns a [`Terminal`] appropriate for the current mode.
 ///
 /// In plain mode, returns a terminal with `is_tty: false` and
 /// `color_depth: None` so components render with correct alignment
 /// but no ANSI escape codes. In normal mode, returns a standard
 /// detected terminal.
+///
+/// The result is memoised per-process via [`LazyLock`] to avoid
+/// repeated capability detection on every call.
 pub fn terminal() -> Terminal {
-    if colors_disabled() {
-        plain_terminal(forced_width(80))
-    } else if force_color_enabled() {
-        Terminal::new_optimistic(forced_width(80))
-    } else {
-        // Normal mode - let Terminal::new() detect, but it will now cache
-        Terminal::new()
-    }
+    TERMINAL.clone()
 }
 
 /// Returns an optimistic [`Terminal`] that respects plain mode.
@@ -147,7 +156,7 @@ mod tests {
             std::env::remove_var("FORCE_COLOR");
         }
 
-        let term = terminal();
+        let term = compute_terminal();
         assert!(!term.is_tty);
         assert_eq!(term.color_depth, ColorDepth::None);
         assert!(matches!(term.color_mode, ColorMode::Dark));
@@ -167,7 +176,7 @@ mod tests {
             std::env::set_var("TERM_WIDTH", "120");
         }
 
-        let term = terminal();
+        let term = compute_terminal();
         assert!(term.is_tty);
         assert_eq!(term.color_depth, ColorDepth::TrueColor);
         assert_eq!(term.width(), 120);
@@ -195,5 +204,15 @@ mod tests {
         unsafe {
             std::env::remove_var("FORCE_COLOR");
         }
+    }
+
+    #[test]
+    fn terminal_is_memoized() {
+        let t1 = terminal();
+        let t2 = terminal();
+        // Clones from the same LazyLock must have identical properties.
+        assert_eq!(t1.is_tty, t2.is_tty);
+        assert_eq!(t1.color_depth, t2.color_depth);
+        assert_eq!(t1.width(), t2.width());
     }
 }

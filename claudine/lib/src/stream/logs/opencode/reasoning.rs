@@ -52,9 +52,8 @@ pub struct StuckSubagentInfo {
 /// Reason the bridge wants `run_child_stream_semantic(...)` to terminate
 /// the child process early.
 ///
-/// Today this fires for pre-stream usage-cap failures, wrapper-driven
-/// post-stop hang recovery in OpenCode's structured non-interactive path,
-/// and the unified two-rule timeout watchdog (`timeout` and `step_timeout`).
+/// Today this fires for pre-stream usage-cap failures and the unified
+/// two-rule timeout watchdog (`timeout` and `step_timeout`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum EarlyTermination {
     /// The provider reported a rate-limit failure before any stdout
@@ -63,11 +62,6 @@ pub enum EarlyTermination {
         message: String,
         reset_at: Option<DateTime<Utc>>,
     },
-    /// OpenCode reported a terminal stop condition (`reason = "stop"`) but
-    /// the process never exited. The wrapper terminates the hung process and
-    /// treats the run as successful because the semantic stream had already
-    /// finished.
-    CompletedButHung { message: String },
     /// The wall-clock budget (`timeout`) elapsed since the child process
     /// was spawned. The wrapper terminates the child process and maps the
     /// outcome to [`crate::harness::ProcessTermination::TimedOut`] so the

@@ -377,6 +377,8 @@ pub fn cargo_bin_dir(bin_name: &str) -> Option<PathBuf> {
 ///
 /// Sets:
 ///
+/// - removes `NO_COLOR` — otherwise crossterm suppresses foreground /
+///   background SGR even when force-color vars are present.
 /// - `FORCE_COLOR=1` — honored by `bt` and most ecosystem crates.
 /// - `CLICOLOR_FORCE=1` — alternative convention (`clicolors`,
 ///   `colored`).
@@ -392,6 +394,7 @@ pub fn cargo_bin_dir(bin_name: &str) -> Option<PathBuf> {
 /// propagate to the spawned shell process, which exports them for
 /// child processes (e.g. `bt`).
 pub fn apply_color_forcing_env(cmd: &mut std::process::Command) {
+    cmd.env_remove("NO_COLOR");
     cmd.env("FORCE_COLOR", "1");
     cmd.env("CLICOLOR_FORCE", "1");
     if std::env::var_os("TERM").is_none() {

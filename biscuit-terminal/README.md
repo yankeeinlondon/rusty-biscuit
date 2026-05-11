@@ -87,6 +87,13 @@ let block = StatusBlock::new(StatusState::Error)
     .hint("Check the template syntax and retry.");
 ```
 
+`StatusBlock::body` accepts a `Vec<Prose>` (or anything `Into<Vec<Prose>>`).
+Each item is rendered through Prose individually and stacked vertically with
+one blank line between items. This guarantees that markup tokens like
+`<dim>`, `<cyan>`, and `<inverse>` are always parsed by Prose rather than
+leaked as literal text. Use `.body_line(...)` for the common single-paragraph
+case, or pass a `vec![Prose::new(...), ...]` for multi-section bodies.
+
 Default behavior:
 
 - `border = "┃ "`
@@ -175,9 +182,16 @@ Supporting helpers live alongside the trait:
 - `StatusBlockExt::error_header(ErrorHeader)` — sets the header in one call.
 - `render_with_causes(&err, &term)` — stacks wrapper + nested-cause blocks
   under a dim `Caused by:` caption.
+- `errors::SourceContext` — resolved file path, full content (`Arc<str>`),
+  and auto-detected frontmatter range. Provides
+  `linked_path_prose()` (OSC 8 hyperlinked header), `frontmatter_prose()`
+  (fenced ```yaml block), and `excerpt_prose(line, context, lang)` (fenced
+  code block with line numbers and a `>` gutter on the offending line). Use
+  this for any error variant whose origin is a file so the rendered block
+  can show a linked path, a frontmatter snapshot, and a source excerpt.
 
 See
-[`darkmatter/docs/error-rendering.md`](../darkmatter/docs/error-rendering.md)
+[`darkmatter/docs/errors/README.md`](../darkmatter/docs/errors/README.md)
 for an end-to-end rendering contract and adoption guide.
 
 Each downstream crate that implements `BlockError` for its own error types is

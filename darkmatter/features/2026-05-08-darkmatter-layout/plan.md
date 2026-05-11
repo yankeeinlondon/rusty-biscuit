@@ -11,6 +11,50 @@ source_files_during_phase_1:
 docs_updated_during_phase_1: []
 docs_created_during_phase_1: []
 skills_files_updated_during_phase_1: []
+source_files_during_phase_2:
+  - darkmatter/lib/src/layout/mod.rs
+  - darkmatter/lib/src/layout/context.rs
+  - darkmatter/lib/src/layout/page.rs
+docs_updated_during_phase_2: []
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2:
+  - .opencode/skill/darkmatter/SKILL.md
+source_files_during_phase_3:
+  - darkmatter/lib/src/layout/mod.rs
+  - darkmatter/lib/src/layout/context.rs
+  - darkmatter/lib/src/layout/page.rs
+  - darkmatter/lib/src/layout/types.rs
+  - darkmatter/lib/src/markdown/mod.rs
+  - darkmatter/lib/src/markdown/output/terminal.rs
+docs_updated_during_phase_3: []
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3:
+  - .claude/skills/darkmatter/SKILL.md
+source_files_during_phase_4:
+  - darkmatter/lib/src/layout/context.rs
+  - darkmatter/lib/src/layout/page.rs
+docs_updated_during_phase_4: []
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4: []
+source_files_during_phase_5:
+  - darkmatter/cli/src/args.rs
+  - darkmatter/cli/src/output.rs
+  - darkmatter/cli/tests/cli.rs
+docs_updated_during_phase_5: []
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5:
+  - .opencode/skill/darkmatter/SKILL.md
+source_files_during_phase_6:
+  - darkmatter/lib/src/layout/mod.rs
+  - darkmatter/lib/src/layout/page.rs
+  - darkmatter/lib/tests/layout_snapshots.rs
+  - darkmatter/lib/tests/snapshots/layout_snapshots__end_to_end_example_snapshot.snap
+  - darkmatter/lib/tests/snapshots/layout_snapshots__pronounced_background_snapshot.snap
+  - darkmatter/lib/tests/snapshots/layout_snapshots__zero_config_prose_snapshot.snap
+docs_updated_during_phase_6:
+  - darkmatter/lib/README.md
+docs_created_during_phase_6: []
+skills_files_updated_during_phase_6: []
 packages:
   - darkmatter
 ---
@@ -36,67 +80,67 @@ Source: `darkmatter/features/2026-05-08-darkmatter-layout/spec.md`
 
 ## Phase 2: Terminal Page Rendering Shell
 
-- [ ] Add a layout context type, internal to darkmatter if possible, that carries effective terminal width, content width, effective render width, page background colors, component alignment, and component fill settings.
-- [ ] Implement `DarkmatterPage::new(&Terminal)` so it captures terminal width, color mode, and capability information by value and does not borrow the terminal.
-- [ ] Implement `DarkmatterPage::render(&self, &Markdown) -> Result<String, PageRenderError>` using the existing terminal renderer as the delegated markdown body renderer.
-- [ ] Derive `TerminalOptions` from the page state before delegation, including `max_width = Some(effective_cols)` and `include_line_numbers` from the page builder.
-- [ ] Implement `PageBackground::Pronounced` color-mode inversion before markdown rendering and keep the page surface color based on the original terminal color mode.
-- [ ] Implement row decoration around delegated terminal output: transparent top and bottom margin rows, background-filled top and bottom padding rows, and left/right margin plus padding per content row.
-- [ ] Preserve byte-for-byte output for zero-config rendering by bypassing row decoration when margin, padding, background, max width, line numbers, alignment, and fill are all at defaults.
-- [ ] Map underlying markdown render failures into `PageRenderError::Render(String)`.
-- [ ] Implement the `biscuit_terminal::renderable::Renderable` trait for `DarkmatterPage` using the same render path and error mapping expected by the trait.
-- [ ] Validation checkpoint: add snapshot or string tests proving zero-config `DarkmatterPage::new(&terminal).render(&md)` matches `for_terminal(&md, TerminalOptions::default())` for representative prose, heading, list, quote, code, table, image-link, and horizontal-rule fixtures.
+- [x] Add a layout context type, internal to darkmatter if possible, that carries effective terminal width, content width, effective render width, page background colors, component alignment, and component fill settings.
+- [x] Implement `DarkmatterPage::new(&Terminal)` so it captures terminal width, color mode, and capability information by value and does not borrow the terminal.
+- [x] Implement `DarkmatterPage::render(&self, &Markdown) -> Result<String, PageRenderError>` using the existing terminal renderer as the delegated markdown body renderer.
+- [x] Derive `TerminalOptions` from the page state before delegation, including `max_width = Some(effective_cols)` and `include_line_numbers` from the page builder.
+- [x] Implement `PageBackground::Pronounced` color-mode inversion before markdown rendering and keep the page surface color based on the original terminal color mode.
+- [x] Implement row decoration around delegated terminal output: transparent top and bottom margin rows, background-filled top and bottom padding rows, and left/right margin plus padding per content row.
+- [x] Preserve byte-for-byte output for zero-config rendering by bypassing row decoration when margin, padding, background, max width, line numbers, alignment, and fill are all at defaults.
+- [x] Map underlying markdown render failures into `PageRenderError::Render(String)`.
+- [x] Implement the `biscuit_terminal::renderable::Renderable` trait for `DarkmatterPage` using the same render path and error mapping expected by the trait.
+- [x] Validation checkpoint: add snapshot or string tests proving zero-config `DarkmatterPage::new(&terminal).render(&md)` matches `for_terminal(&md, TerminalOptions::default())` for representative prose, heading, list, quote, code, table, image-link, and horizontal-rule fixtures.
 
 ## Phase 3: Component Layout Integration
 
-- [ ] Thread the layout context through `darkmatter/lib/src/markdown/output/terminal.rs` alongside `TerminalOptions` without changing the public `for_terminal` API for existing callers.
-- [ ] Add internal render entry points that accept an optional layout context and keep the old entry points delegating with no layout context.
-- [ ] Apply per-component `PageAlignment` to images, block quotes, tables, code blocks, and lists only; leave the main document stream left-aligned.
-- [ ] Apply `PageFill::Full`, `Pad`, `Indent`, `Max`, and `Explicit` semantics to the same component set, resolving `WidthUnit::Percent` against content width and capping by effective width.
-- [ ] Update code block rendering to honor effective component width and fill while preserving existing line-number alignment, top/bottom padding rows, syntax background behavior, and trailing newline behavior.
-- [ ] Ensure `Pad` and `Indent` still reduce component width when the page background is transparent, with reclaimed cells rendered as transparent whitespace.
-- [ ] Ensure explicit text background colors inside content still override page background, then reset back to the page background instead of terminal default when appropriate.
-- [ ] Keep horizontal-rule frontmatter margins additive inside the page content rectangle and verify `Layout::resolve_margin` behavior remains local to each rule.
-- [ ] [parallelizable] Add focused unit tests for `WidthUnit` resolution and `PageFill` width math independent of terminal ANSI rendering.
-- [ ] [parallelizable] Add focused terminal rendering tests for each component kind with left, center, and right alignment.
-- [ ] Validation checkpoint: run the darkmatter lib test subset covering terminal output, code blocks, horizontal rules, and new layout tests.
+- [x] Thread the layout context through `darkmatter/lib/src/markdown/output/terminal.rs` alongside `TerminalOptions` without changing the public `for_terminal` API for existing callers.
+- [x] Add internal render entry points that accept an optional layout context and keep the old entry points delegating with no layout context.
+- [x] Apply per-component `PageAlignment` to images, block quotes, tables, code blocks, and lists only; leave the main document stream left-aligned.
+- [x] Apply `PageFill::Full`, `Pad`, `Indent`, `Max`, and `Explicit` semantics to the same component set, resolving `WidthUnit::Percent` against content width and capping by effective width.
+- [x] Update code block rendering to honor effective component width and fill while preserving existing line-number alignment, top/bottom padding rows, syntax background behavior, and trailing newline behavior.
+- [x] Ensure `Pad` and `Indent` still reduce component width when the page background is transparent, with reclaimed cells rendered as transparent whitespace.
+- [x] Ensure explicit text background colors inside content still override page background, then reset back to the page background instead of terminal default when appropriate.
+- [x] Keep horizontal-rule frontmatter margins additive inside the page content rectangle and verify `Layout::resolve_margin` behavior remains local to each rule.
+- [x] [parallelizable] Add focused unit tests for `WidthUnit` resolution and `PageFill` width math independent of terminal ANSI rendering.
+- [x] [parallelizable] Add focused terminal rendering tests for each component kind with left, center, and right alignment.
+- [x] Validation checkpoint: run the darkmatter lib test subset covering terminal output, code blocks, horizontal rules, and new layout tests.
 
 ## Phase 4: Browser Rendering
 
-- [ ] Implement `BrowserRenderable` for `DarkmatterPage`.
-- [ ] Add or reuse an HTML render path that wraps markdown browser output in a page-level element with `margin`, `padding`, `max-width`, and `background-color` styles using the v1 `ch` unit mapping.
-- [ ] Translate `PageBackground::Transparent`, `Subtle`, and `Pronounced` into named color constants shared with terminal rendering where practical.
-- [ ] Translate per-component alignment into browser wrappers using `text-align` or auto margins, whichever matches the component behavior.
-- [ ] Translate `PageFill::Pad`, `Indent`, `Max`, and `Explicit` into component wrapper CSS padding, `max-width`, or `width` styles.
-- [ ] Preserve existing HTML output when no page layout settings are applied or make the new wrapper opt-in through `DarkmatterPage` only, so existing `md --output html` behavior does not change unless wired intentionally in the CLI.
-- [ ] [parallelizable] Add browser golden tests for margin, padding, max width, background, per-component alignment, and fill CSS output.
-- [ ] Validation checkpoint: run the browser HTML golden tests and confirm the generated styles match the spec's `ch` unit mapping.
+- [x] Implement `BrowserRenderable` for `DarkmatterPage`.
+- [x] Add or reuse an HTML render path that wraps markdown browser output in a page-level element with `margin`, `padding`, `max-width`, and `background-color` styles using the v1 `ch` unit mapping.
+- [x] Translate `PageBackground::Transparent`, `Subtle`, and `Pronounced` into named color constants shared with terminal rendering where practical.
+- [x] Translate per-component alignment into browser wrappers using `text-align` or auto margins, whichever matches the component behavior.
+- [x] Translate `PageFill::Pad`, `Indent`, `Max`, and `Explicit` into component wrapper CSS padding, `max-width`, or `width` styles.
+- [x] Preserve existing HTML output when no page layout settings are applied or make the new wrapper opt-in through `DarkmatterPage` only, so existing `md --output html` behavior does not change unless wired intentionally in the CLI.
+- [x] [parallelizable] Add browser golden tests for margin, padding, max width, background, per-component alignment, and fill CSS output.
+- [x] Validation checkpoint: run the browser HTML golden tests and confirm the generated styles match the spec's `ch` unit mapping.
 
 ## Phase 5: CLI Integration
 
-- [ ] Add CLI margin flags to `darkmatter/cli/src/args.rs`: `-m` / `--margin`, `--mx`, `--my`, `--mt`, `--mb`, `--ml`, and `--mr`, using unsigned parsing so negative numbers fail at parse time.
-- [ ] Add CLI padding flags: `--padding`, `--px`, `--py`, `--pt`, `--pb`, `--pl`, and `--pr`, mirroring margin behavior.
-- [ ] Add CLI page flags: `--page-bg` with `--page-background` alias, `--max-width`, and `--line-numbers <true|false>`, rejecting `--max-width 0` at parse time.
-- [ ] Add CLI alignment flags: `--alignment`, `--align-images`, `--align-lists`, `--align-block-quotes`, `--align-tables`, and `--align-code-blocks`.
-- [ ] Add CLI fill flags: `--fill`, `--fill-images`, `--fill-lists`, `--fill-block-quotes`, `--fill-tables`, and `--fill-code-blocks`.
-- [ ] Implement the fill value parser for `full`, `pad=<n|n%>`, `indent=<n|n%>`, `max=<n|n%>`, and `explicit=<n|n%>`, rejecting unknown kinds, negative numbers, and percentages above `100`.
-- [ ] Implement CLI precedence resolution: margin shorthand, axis shorthand, then side-specific flags; padding shorthand, axis shorthand, then side-specific flags; global alignment then component-specific alignment; global fill then component-specific fill.
-- [ ] Update `darkmatter/cli/src/output.rs` so the default terminal render path constructs a `Terminal`, builds a `DarkmatterPage`, applies existing `TerminalOptions` knobs and new layout flags, and calls `.render(&md)`.
-- [ ] Preserve existing output behavior for `md doc.md` with no new flags.
-- [ ] [parallelizable] Add CLI integration tests for margin precedence, padding precedence, alignment precedence, fill grammar success cases, fill grammar failures, negative numeric rejection, and `--max-width 0` rejection.
-- [ ] Validation checkpoint: run the darkmatter CLI integration tests and manually compare `md doc.md` output before and after with no layout flags for a small fixture.
+- [x] Add CLI margin flags to `darkmatter/cli/src/args.rs`: `-m` / `--margin`, `--mx`, `--my`, `--mt`, `--mb`, `--ml`, and `--mr`, using unsigned parsing so negative numbers fail at parse time.
+- [x] Add CLI padding flags: `--padding`, `--px`, `--py`, `--pt`, `--pb`, `--pl`, and `--pr`, mirroring margin behavior.
+- [x] Add CLI page flags: `--page-bg` with `--page-background` alias, `--max-width`, and `--line-numbers` (with `--no-line-numbers` for explicit disable), rejecting `--max-width 0` at parse time.
+- [x] Add CLI alignment flags: `--alignment`, `--align-images`, `--align-lists`, `--align-block-quotes`, `--align-tables`, and `--align-code-blocks`.
+- [x] Add CLI fill flags: `--fill`, `--fill-images`, `--fill-lists`, `--fill-block-quotes`, `--fill-tables`, and `--fill-code-blocks`.
+- [x] Implement the fill value parser for `full`, `pad=<n|n%>`, `indent=<n|n%>`, `max=<n|n%>`, and `explicit=<n|n%>`, rejecting unknown kinds, negative numbers, and percentages above `100`.
+- [x] Implement CLI precedence resolution: margin shorthand, axis shorthand, then side-specific flags; padding shorthand, axis shorthand, then side-specific flags; global alignment then component-specific alignment; global fill then component-specific fill.
+- [x] Update `darkmatter/cli/src/output.rs` so the default terminal render path constructs a `Terminal`, builds a `DarkmatterPage`, applies existing `TerminalOptions` knobs and new layout flags, and calls `.render(&md)`.
+- [x] Preserve existing output behavior for `md doc.md` with no new flags.
+- [x] [parallelizable] Add CLI integration tests for margin precedence, padding precedence, alignment precedence, fill grammar success cases, fill grammar failures, negative numeric rejection, and `--max-width 0` rejection.
+- [x] Validation checkpoint: run the darkmatter CLI integration tests and manually compare `md doc.md` output before and after with no layout flags for a small fixture.
 
 ## Phase 6: Acceptance, Documentation, And Final Verification
 
-- [ ] Add or update snapshots for the end-to-end example described in the spec, covering transparent margin rows, subtle background padding rows, 100-column content, and bottom padding and margin rows.
-- [ ] Add unit tests proving every `PageRenderError` variant is reachable from public API calls: `MarginsExceedTerminalWidth`, `MaxWidthZero`, `InvalidPercent`, and `Render`.
-- [ ] Add a pronounced-background test on a controlled dark terminal context proving the effective render color mode becomes `Light` and the page surface uses the pronounced dark-terminal contrast color.
-- [ ] Add regression tests proving zero-config equivalence against the pre-existing `for_terminal` path for the representative fixture set.
-- [ ] Update public Rust docs for `darkmatter::layout` and its builder API, following the repo rustdoc convention: summary, `Examples`, `Returns`, `Errors`, `Panics`, `Safety`, `Notes` as applicable, and no `# H1` inside `///` blocks.
-- [ ] Update README or package documentation if the CLI or library public behavior is user-visible there.
-- [ ] Update `docs/dependencies.md` and the per-area dependency docs only if new crates were added or removed.
-- [ ] Update `.claude/skills/darkmatter/SKILL.md` if the new layout architecture changes the authoritative darkmatter workflow summary.
-- [ ] Run formatting for touched Rust and Markdown files with the repo's established commands.
-- [ ] Run targeted tests for `darkmatter` lib and CLI.
-- [ ] Run broader validation through the root `just test` or the relevant curated area test command if the targeted suite passes and runtime is acceptable.
-- [ ] Validation checkpoint: verify all acceptance criteria from the spec are covered by tests or documented manual checks before marking the feature complete.
+- [x] Add or update snapshots for the end-to-end example described in the spec, covering transparent margin rows, subtle background padding rows, 100-column content, and bottom padding and margin rows.
+- [x] Add unit tests proving every `PageRenderError` variant is reachable from public API calls: `MarginsExceedTerminalWidth`, `MaxWidthZero`, `InvalidPercent`, and `Render`.
+- [x] Add a pronounced-background test on a controlled dark terminal context proving the effective render color mode becomes `Light` and the page surface uses the pronounced dark-terminal contrast color.
+- [x] Add regression tests proving zero-config equivalence against the pre-existing `for_terminal` path for the representative fixture set.
+- [x] Update public Rust docs for `darkmatter::layout` and its builder API, following the repo rustdoc convention: summary, `Examples`, `Returns`, `Errors`, `Panics`, `Safety`, `Notes` as applicable, and no `# H1` inside `///` blocks.
+- [x] Update README or package documentation if the CLI or library public behavior is user-visible there.
+- [x] Update `docs/dependencies.md` and the per-area dependency docs only if new crates were added or removed.
+- [x] Update `.claude/skills/darkmatter/SKILL.md` if the new layout architecture changes the authoritative darkmatter workflow summary.
+- [x] Run formatting for touched Rust and Markdown files with the repo's established commands.
+- [x] Run targeted tests for `darkmatter` lib and CLI.
+- [x] Run broader validation through the root `just test` or the relevant curated area test command if the targeted suite passes and runtime is acceptable.
+- [x] Validation checkpoint: verify all acceptance criteria from the spec are covered by tests or documented manual checks before marking the feature complete.

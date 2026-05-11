@@ -237,7 +237,7 @@ pub(super) fn parse_tokens_inner(
                     if let Some(action) = block_tag_to_escape(&tag_name, &attrs, term) {
                         let layer = block_tag_layer(&tag_name);
 
-                        let (open, close) = match action {
+                        match action {
                             BlockTagAction::Suppress => {
                                 // Suppressed tag (e.g., `<double-underline>` on a
                                 // terminal that supports neither double nor
@@ -247,45 +247,46 @@ pub(super) fn parse_tokens_inner(
                                 result.push_str(&parse_tokens_inner(&inner_content, term, state));
                                 continue;
                             }
+                            BlockTagAction::CodeBlock => {
+                                // Fenced code block: dim + 2-space indent,
+                                // no Prose markup parsing inside.
+                                state.used_styles = true;
+                                for (idx, line) in inner_content.lines().enumerate() {
+                                    if idx > 0 {
+                                        result.push('\n');
+                                    }
+                                    result.push_str("\x1b[2m  ");
+                                    result.push_str(line);
+                                    result.push_str("\x1b[0m");
+                                }
+                                continue;
+                            }
                             BlockTagAction::Wrap { open, close } => {
                                 state.used_styles = true;
-                                (open, close)
+                                if let Some(layer) = layer {
+                                    // Styled tag: layer-aware push/pop
+                                    let prev = state.set(layer, open.as_ref());
+                                    result.push_str(open.as_ref());
+                                    result.push_str(&parse_tokens_inner(&inner_content, term, state));
+                                    state.restore(layer, prev);
+                                    result.push_str(state.close_code(layer));
+                                } else {
+                                    // Structural tag (e.g. `<a href>` with OSC8
+                                    // or markdown fallback): emit open/close as-is.
+                                    let rendered_inner = parse_tokens_inner(&inner_content, term, state);
+                                    let is_markdown_link_fallback = open.as_ref() == "["
+                                        && close.as_ref().starts_with("](")
+                                        && close.as_ref().ends_with(')');
+                                    result.push_str(open.as_ref());
+                                    if is_markdown_link_fallback {
+                                        result.push_str(&rendered_inner.replace(']', "\\]"));
+                                    } else {
+                                        result.push_str(&rendered_inner);
+                                    }
+                                    result.push_str(close.as_ref());
+                                }
+                                continue;
                             }
-                        };
-
-                        if let Some(layer) = layer {
-                            // Styled tag: layer-aware push/pop
-                            let prev = state.set(layer, open.as_ref());
-                            result.push_str(open.as_ref());
-                            result.push_str(&parse_tokens_inner(&inner_content, term, state));
-                            state.restore(layer, prev);
-                            result.push_str(state.close_code(layer));
-                        } else {
-                            // Structural tag (e.g. `<a href>` with OSC8
-                            // or markdown fallback): emit open/close as-is.
-                            //
-                            // The `<a>` markdown fallback (`[desc](url)`,
-                            // emitted only when `osc_link_support == false`)
-                            // is recognised by its structural fingerprint
-                            // (`open == "["` plus `close` of the form
-                            // `"](...)"`). For that one path, escape any
-                            // literal `]` in the rendered description so
-                            // downstream CommonMark parsers don't split
-                            // `[array[0]](url)` into `[array[`/`0]](url)`.
-                            // SGR escapes (CSI `\x1b[...m`) never contain
-                            // `]`, so the replace is safe against any
-                            // styling embedded in the description.
-                            let rendered_inner = parse_tokens_inner(&inner_content, term, state);
-                            let is_markdown_link_fallback = open.as_ref() == "["
-                                && close.as_ref().starts_with("](")
-                                && close.as_ref().ends_with(')');
-                            result.push_str(open.as_ref());
-                            if is_markdown_link_fallback {
-                                result.push_str(&rendered_inner.replace(']', "\\]"));
-                            } else {
-                                result.push_str(&rendered_inner);
-                            }
-                            result.push_str(close.as_ref());
                         }
                     } else {
                         // Unknown tag, output as-is

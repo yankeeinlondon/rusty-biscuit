@@ -4,7 +4,7 @@
 //! and discover all research topics, parsing their metadata and checking
 //! for completeness.
 
-use super::types::{ResearchOutput, TopicInfo};
+use super::types::{ResearchOutput, TopicInfo, TopicType};
 use crate::metadata::KindCategory;
 use crate::metadata::inventory::ResearchInventory;
 use serde::Deserialize;
@@ -223,7 +223,11 @@ fn analyze_topic(
             topic.needs_migration = metadata.needs_migration();
             topic.language = metadata.language();
             // Now move the owned fields
-            topic.topic_type = metadata.kind.unwrap_or_else(|| "library".to_string());
+            topic.topic_type = metadata
+                .kind
+                .as_deref()
+                .and_then(|k| k.parse::<TopicType>().ok())
+                .unwrap_or_default();
             topic.description = metadata.brief;
         } else {
             debug!(
@@ -293,23 +297,23 @@ fn apply_inventory_metadata(topic: &mut TopicInfo, metadata: &crate::metadata::T
 
     match metadata.kind() {
         KindCategory::Library(library) => {
-            topic.topic_type = "library".to_string();
+            topic.topic_type = TopicType::Library;
             let language = library.language();
             if !language.is_empty() {
                 topic.language = Some(language.to_string());
             }
         }
         KindCategory::Software(_) => {
-            topic.topic_type = "software".to_string();
+            topic.topic_type = TopicType::Software;
         }
         KindCategory::Person => {
-            topic.topic_type = "person".to_string();
+            topic.topic_type = TopicType::Person;
         }
         KindCategory::SolutionArea => {
-            topic.topic_type = "solution_area".to_string();
+            topic.topic_type = TopicType::SolutionArea;
         }
         KindCategory::ProgrammingLanguage => {
-            topic.topic_type = "language".to_string();
+            topic.topic_type = TopicType::Language;
         }
     }
 }
@@ -467,7 +471,7 @@ mod tests {
 
         let topic = &topics[0];
         assert_eq!(topic.name, "test-lib");
-        assert_eq!(topic.topic_type, "library");
+        assert_eq!(topic.topic_type, TopicType::Library);
         assert_eq!(topic.description, Some("A test library".to_string()));
         assert!(!topic.needs_migration);
         assert!(topic.missing_output.is_empty());
@@ -497,7 +501,7 @@ mod tests {
         assert_eq!(topics.len(), 1);
 
         let topic = &topics[0];
-        assert_eq!(topic.topic_type, "library"); // Default value
+        assert_eq!(topic.topic_type, TopicType::Library); // Default value
         assert_eq!(topic.description, None);
         assert!(!topic.has_issues());
     }
@@ -545,7 +549,7 @@ mod tests {
 
         let topic = &topics[0];
         assert_eq!(topic.name, "test-framework");
-        assert_eq!(topic.topic_type, "framework");
+        assert_eq!(topic.topic_type, TopicType::Framework);
         assert_eq!(topic.missing_output.len(), 2);
         assert!(topic.missing_output.contains(&ResearchOutput::Brief));
         assert!(topic.missing_output.contains(&ResearchOutput::Skill));

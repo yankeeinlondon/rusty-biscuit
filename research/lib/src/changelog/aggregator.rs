@@ -38,6 +38,7 @@ use super::registry::fetch_registry_versions;
 use super::types::{ChangelogError, ChangelogSource, ConfidenceLevel, VersionHistory, VersionInfo};
 use reqwest::Client as HttpClient;
 use std::collections::HashMap;
+use tracing::{debug, instrument};
 
 /// Aggregate changelog information from all available sources.
 ///
@@ -84,6 +85,10 @@ use std::collections::HashMap;
 /// # Ok(())
 /// # }
 /// ```
+#[instrument(skip(client), fields(
+    library_name = %library_name,
+    package_manager = %package_manager,
+))]
 pub async fn aggregate_version_history(
     client: &HttpClient,
     library_name: &str,
@@ -102,6 +107,8 @@ pub async fn aggregate_version_history(
     let mut sources_used: Vec<ChangelogSource> = Vec::new();
 
     // GitHub Releases
+    let github_ok = github_result.is_ok();
+    let github_count = github_result.as_ref().map(|v| v.len()).unwrap_or(0);
     if let Ok(github_versions) = github_result
         && !github_versions.is_empty()
     {
@@ -110,6 +117,8 @@ pub async fn aggregate_version_history(
     }
 
     // Registry Versions
+    let registry_ok = registry_result.is_ok();
+    let registry_count = registry_result.as_ref().map(|v| v.len()).unwrap_or(0);
     if let Ok(registry_versions) = registry_result
         && !registry_versions.is_empty()
     {
@@ -118,6 +127,7 @@ pub async fn aggregate_version_history(
     }
 
     // Changelog File
+    let file_ok = file_result.is_ok();
     if let Ok(Some(changelog_content)) = file_result {
         // Try parsing with different parsers
         let changelog_versions = parse_changelog_file(&changelog_content);
@@ -126,6 +136,15 @@ pub async fn aggregate_version_history(
             sources_used.push(ChangelogSource::ChangelogFile);
         }
     }
+
+    debug!(
+        sources.github_ok = github_ok,
+        sources.github_count = github_count,
+        sources.registry_ok = registry_ok,
+        sources.registry_count = registry_count,
+        sources.file_ok = file_ok,
+        "Aggregation sources completed"
+    );
 
     // Check if we have any sources
     if all_versions.is_empty() {

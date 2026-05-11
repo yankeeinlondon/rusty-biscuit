@@ -166,6 +166,24 @@ impl Markdown {
         &self.source
     }
 
+    /// Build a [`SourceContext`] for error rendering from the document's
+    /// source and content.
+    pub fn source_context_for_errors(&self) -> biscuit_terminal::errors::SourceContext {
+        use std::sync::Arc;
+        let content = Arc::from(self.content.as_str());
+        match &self.source {
+            Some(ComposeSource::File(path)) => {
+                let absolute = path.canonicalize().unwrap_or_else(|_| path.clone());
+                biscuit_terminal::errors::SourceContext::new(absolute, path.clone(), content)
+            }
+            _ => biscuit_terminal::errors::SourceContext::new(
+                std::path::PathBuf::from("unknown"),
+                std::path::PathBuf::from("unknown"),
+                content,
+            ),
+        }
+    }
+
     /// Sets the compose source, returning the modified document.
     pub fn with_source(mut self, source: ComposeSource) -> Self {
         self.source = Some(source);
@@ -192,7 +210,12 @@ impl Markdown {
     /// are still accepted and returned with an empty [`Frontmatter`].
     pub fn try_from_content(content: impl Into<String>) -> MarkdownResult<Self> {
         let content = content.into();
-        let (frontmatter, remaining) = frontmatter::parse_frontmatter(&content)?;
+        let ctx = biscuit_terminal::errors::SourceContext::new(
+            std::path::PathBuf::from("unknown"),
+            std::path::PathBuf::from("unknown"),
+            content.as_str(),
+        );
+        let (frontmatter, remaining) = frontmatter::parse_frontmatter(&content, ctx)?;
         Ok(Self::with_frontmatter(frontmatter, remaining))
     }
 
@@ -591,6 +614,16 @@ impl Markdown {
         output::for_terminal(self, options)
     }
 
+    /// Internal entry point that passes an optional page layout context through
+    /// to the terminal renderer so per-component alignment and fill are honoured.
+    pub(crate) fn as_terminal_with_layout(
+        &self,
+        options: output::TerminalOptions,
+        layout_ctx: Option<&crate::layout::LayoutContext>,
+    ) -> MarkdownResult<String> {
+        output::terminal::for_terminal_with_layout(self, options, layout_ctx)
+    }
+
     /// Extracts a Table of Contents from the markdown document.
     ///
     /// Returns a `MarkdownToc` struct containing:
@@ -791,7 +824,12 @@ impl Markdown {
 
 impl From<String> for Markdown {
     fn from(content: String) -> Self {
-        match frontmatter::parse_frontmatter(&content) {
+        let ctx = biscuit_terminal::errors::SourceContext::new(
+            std::path::PathBuf::from("unknown"),
+            std::path::PathBuf::from("unknown"),
+            content.as_str(),
+        );
+        match frontmatter::parse_frontmatter(&content, ctx) {
             Ok((frontmatter, remaining_content)) => {
                 Self::with_frontmatter(frontmatter, remaining_content)
             }

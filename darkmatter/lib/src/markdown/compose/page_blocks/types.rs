@@ -7,23 +7,36 @@ use std::ops::Range;
 pub enum PageBlockError {
     /// Failed to parse a page block directive.
     #[error("Failed to parse page block at line {line}: {message}")]
-    ParseDirective { line: usize, message: String },
+    ParseDirective {
+        ctx: Box<biscuit_terminal::errors::SourceContext>,
+        line: usize,
+        message: String,
+    },
 
     /// Encountered `::end-block` without a matching `::block`.
     #[error("Unmatched ::end-block at line {line}")]
-    UnmatchedEnd { line: usize },
+    UnmatchedEnd {
+        ctx: Box<biscuit_terminal::errors::SourceContext>,
+        line: usize,
+    },
 
     /// Reached end of file with an unclosed `::block`.
-    #[error("Unterminated ::block starting at line {line} (file ends at line {file_ends_at_line})")]
+    #[error("Unterminated ::block starting at line {opening_line}")]
     UnterminatedBlock {
-        line: usize,
+        ctx: Box<biscuit_terminal::errors::SourceContext>,
+        opening_line: usize,
         opening_text: String,
-        file_ends_at_line: usize,
     },
 
     /// Condition parsing or evaluation failed.
     #[error("{0}")]
-    Condition(#[from] super::super::conditions::ConditionError),
+    Condition(#[from] Box<super::super::conditions::ConditionError>),
+}
+
+impl From<super::super::conditions::ConditionError> for PageBlockError {
+    fn from(err: super::super::conditions::ConditionError) -> Self {
+        PageBlockError::Condition(Box::new(err))
+    }
 }
 
 impl biscuit_terminal::errors::BlockError for PageBlockError {
@@ -31,32 +44,53 @@ impl biscuit_terminal::errors::BlockError for PageBlockError {
         &self,
         term: &biscuit_terminal::terminal::Terminal,
     ) -> biscuit_terminal::components::status_block::StatusBlock {
+        use biscuit_terminal::components::prose::Prose;
         use biscuit_terminal::components::status::StatusState;
         use biscuit_terminal::components::status_block::StatusBlock;
         use biscuit_terminal::errors::{ErrorHeader, StatusBlockExt};
 
         match self {
-            PageBlockError::ParseDirective { line, message } => StatusBlock::new(StatusState::Error)
+            PageBlockError::ParseDirective { ctx, line, message } => StatusBlock::new(StatusState::Error)
                 .error_header(ErrorHeader::new("PageBlockError", "directive parse failed"))
-                .body(format!(
-                    "<dim>Line:</dim> {line}\n<dim>Message:</dim> {message}"
-                ))
+                .body(vec![
+                    Prose::new(format!("<dim>Message:</dim> {message}")),
+                    ctx.excerpt_prose(*line, 1, "md"),
+                ])
                 .hint("Opening syntax: <cyan>::block when=\"expr\"</cyan> — close with <cyan>::end-block</cyan>."),
 
-            PageBlockError::UnmatchedEnd { line } => StatusBlock::new(StatusState::Error)
+            PageBlockError::UnmatchedEnd { ctx, line } => StatusBlock::new(StatusState::Error)
                 .error_header(ErrorHeader::new("PageBlockError", "unmatched ::end-block"))
-                .body(format!("<dim>Line:</dim> {line}"))
+                .body(vec![
+                    Prose::new("This end-block has no matching start:"),
+                    ctx.excerpt_prose(*line, 1, "md"),
+                ])
                 .hint("Add a matching <cyan>::block</cyan> directive above this closing line."),
 
-            PageBlockError::UnterminatedBlock { line, opening_text, file_ends_at_line } => StatusBlock::new(StatusState::Error)
-                .error_header(ErrorHeader::new("PageBlockError", "unterminated ::block"))
-                .body(format!(
-                    "<dim>Opened at line:</dim> {line}\n<dim>Opening directive:</dim> {opening_text}\n<dim>File ends at line:</dim> {file_ends_at_line}"
-                ))
-                .hint("Add a matching <cyan>::end-block</cyan> directive to close the region."),
+            PageBlockError::UnterminatedBlock { ctx, opening_line, .. } => {
+                let mut body = vec![
+                    Prose::new("The opening page block was found here:"),
+                    ctx.excerpt_prose(*opening_line, 2, "md"),
+                ];
+                if let Some(fm) = ctx.frontmatter_prose() {
+                    body.insert(0, fm);
+                    body.insert(0, Prose::new("The Frontmatter of this document was:"));
+                }
+                StatusBlock::new(StatusState::Error)
+                    .error_header(
+                        ErrorHeader::new(
+                            "PageBlockError",
+                            &format!(
+                                "The file {} has an unterminated ::block / ::end-block block definition.",
+                                ctx.linked_path_prose().content()
+                            ),
+                        )
+                    )
+                    .body(body)
+                    .hint("Add a matching <inverse>::end-block</inverse> directive to close the region.")
+            }
 
             PageBlockError::Condition(inner) => {
-                biscuit_terminal::errors::BlockError::status_block(inner, term)
+                inner.status_block(term)
             }
         }
     }

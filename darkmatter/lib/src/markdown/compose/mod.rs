@@ -513,11 +513,13 @@ impl Markdown {
             // visible to all later stages.
             if options.is_enabled(ComposeOperation::FrontmatterShellExpansion) {
                 let fse_start = perf.is_enabled().then(std::time::Instant::now);
+                let fse_ctx = self.source_context_for_errors();
                 let fse_report = frontmatter_shell_expansion::execute_frontmatter_shell_expansion(
                     self.frontmatter_mut(),
                     &options,
                     runtime,
                     pre_interpolation_snapshot.as_ref(),
+                    &fse_ctx,
                 )?;
                 report.frontmatter_shell_expansions_applied = fse_report.replacements;
                 report.shell_approvals_used += fse_report.approvals_used;
@@ -738,12 +740,16 @@ impl Markdown {
             ComposeOperation::ShellExpansion => {
                 self.run_shell_expansion_stage(options, runtime, report)
             }
-            ComposeOperation::ShellBlocks => shell_blocks::run_shell_blocks_stage_for_markdown(
-                &mut self.content,
-                options,
-                &mut runtime.shell,
-                report,
-            ),
+            ComposeOperation::ShellBlocks => {
+                let sb_ctx = self.source_context_for_errors();
+                shell_blocks::run_shell_blocks_stage_for_markdown(
+                    &mut self.content,
+                    options,
+                    &mut runtime.shell,
+                    report,
+                    &sb_ctx,
+                )
+            }
             ComposeOperation::LinkResolve => link_resolve::link_resolve(self, options, report),
             _ => Ok(()),
         }
@@ -837,7 +843,10 @@ impl Markdown {
                 ComposeOperation::BlockTransclusion | ComposeOperation::CodeTransclusion
             )
         }) {
-            Some(transclusion::parse_directives(&self.content)?)
+            Some(transclusion::parse_directives(
+                &self.content,
+                self.source_context_for_errors(),
+            )?)
         } else {
             None
         };
@@ -845,6 +854,7 @@ impl Markdown {
         let frontmatter_refs = if operations.contains(&ComposeOperation::FrontmatterTransclusion) {
             Some(transclusion::parse_frontmatter_refs(
                 self.frontmatter().as_map(),
+                self.source_context_for_errors(),
             )?)
         } else {
             None
@@ -961,10 +971,12 @@ impl Markdown {
                 Err(error) => {
                     let is_structural = matches!(
                         error,
-                        MarkdownError::Transclusion(
-                            transclusion::TransclusionError::CycleDetected { .. }
-                                | transclusion::TransclusionError::MaxDepthExceeded { .. }
-                        )
+                        MarkdownError::Transclusion(ref inner)
+                            if matches!(
+                                inner.as_ref(),
+                                transclusion::TransclusionError::CycleDetected { .. }
+                                    | transclusion::TransclusionError::MaxDepthExceeded { .. }
+                            )
                     );
                     if is_structural || options.fail_fast {
                         return Err(error);
@@ -1147,7 +1159,8 @@ impl Markdown {
         runtime: &mut shell_expansion::types::PipelineRuntime,
         report: &mut ComposeReport,
     ) -> MarkdownResult<()> {
-        let directives = shell_expansion::parse_directives(&self.content)?;
+        let directives =
+            shell_expansion::parse_directives(&self.content, self.source_context_for_errors())?;
         debug!(
             directive_count = directives.len(),
             "compose: shell expansion directives found"
@@ -1182,7 +1195,8 @@ impl Markdown {
         report: &mut ComposeReport,
     ) -> MarkdownResult<()> {
         debug!("compose: running page blocks");
-        let regions = page_blocks::parser::parse_page_blocks(&self.content)?;
+        let source = self.source_context_for_errors();
+        let regions = page_blocks::parser::parse_page_blocks(&self.content, source.clone())?;
         if regions.is_empty() {
             return Ok(());
         }
@@ -1206,8 +1220,13 @@ impl Markdown {
             warn_unknown_options(region, report);
         }
 
-        self.content =
-            page_blocks::engine::render_page_blocks(&self.content, &regions, state, report)?;
+        self.content = page_blocks::engine::render_page_blocks(
+            &self.content,
+            &regions,
+            state,
+            report,
+            source,
+        )?;
         Ok(())
     }
 
@@ -1265,6 +1284,7 @@ impl Markdown {
                         } else {
                             return Err(
                                 transclusion::TransclusionError::InvalidFrontmatterAssignment {
+                                    ctx: Box::new(self.source_context_for_errors()),
                                     line: *line,
                                     raw: raw.clone(),
                                     reason: reason.clone(),
@@ -1290,6 +1310,7 @@ impl Markdown {
                         } else {
                             return Err(
                                 transclusion::TransclusionError::InvalidReassignedFrontmatterProperty {
+                                    ctx: Box::new(self.source_context_for_errors()),
                                     line: directive.line,
                                     name: name.clone(),
                                 }
@@ -1301,7 +1322,12 @@ impl Markdown {
             }
 
             if let Some(expr) = &directive.options.when_expr {
-                let should_include = transclusion::evaluate_condition(expr, state, directive.line)?;
+                let should_include = transclusion::evaluate_condition(
+                    expr,
+                    state,
+                    directive.line,
+                    self.source_context_for_errors(),
+                )?;
                 if !should_include {
                     let mut fixed_report = ComposeReport::new();
                     fixed_report.transclusions_skipped = 1;
@@ -1323,6 +1349,7 @@ impl Markdown {
                 &transclusion_opts,
                 &options.source,
                 directive.line,
+                self.source_context_for_errors(),
             ) {
                 Ok(resolved) => resolved,
                 Err(err) if ignore_invalid => {
@@ -1465,6 +1492,7 @@ impl Markdown {
             &transclusion_opts,
             &options.source,
             0,
+            self.source_context_for_errors(),
         ) {
             Ok(resolved) => resolved,
             Err(err) if ignore_invalid => {
@@ -1649,6 +1677,7 @@ impl Markdown {
                         &directive,
                         &options.source,
                         &transclusion_opts,
+                        self.source_context_for_errors(),
                     )? {
                     let cache_handle = {
                         let runtime = runtime_mutex.lock().unwrap();
@@ -2948,7 +2977,8 @@ Rounded: {{ round(pi) }}"#;
 
         assert!(matches!(
             err,
-            MarkdownError::Transclusion(transclusion::TransclusionError::CycleDetected { .. })
+            MarkdownError::Transclusion(ref inner)
+                if matches!(inner.as_ref(), transclusion::TransclusionError::CycleDetected { .. })
         ));
     }
 
@@ -3074,9 +3104,11 @@ Rounded: {{ round(pi) }}"#;
         let err = md.compose().unwrap_err();
         assert!(matches!(
             err,
-            MarkdownError::Transclusion(
-                transclusion::TransclusionError::MissingSourceContext { .. }
-            )
+            MarkdownError::Transclusion(ref inner)
+                if matches!(
+                    inner.as_ref(),
+                    transclusion::TransclusionError::MissingSourceContext { .. }
+                )
         ));
     }
 

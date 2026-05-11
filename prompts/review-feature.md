@@ -1,4 +1,15 @@
 ---
+description: "Reviews a _feature specification_ to make sure that the specification has been fully implemented. This prompt is also aware of the likelihood of more than one review being necessary and therefore names the reviews `review-{iteration}.md` in the same folder where the feature was specified.\n\nThe caller can pass in the **iteration** number but it should be detected automatically."
+parameters:
+    spec: 
+        type: "optional(file)"
+        desc: "the file path to the specification file"
+    design:
+        type: "optional(file)"
+        desc: "the file path to the technical design file"
+    iteration:
+        type: "optional(number)"
+        desc: "the iteration count of the review"
 dir: "$(pwd)"
 iteration: 1
 area: "{{ctx.current_package_area}}"
@@ -8,8 +19,8 @@ success:
     stderr: "Feature review {{iteration}} in the {{ctx.current_package_area}} package area has completed"
     message: "✅ the Feature Review #{{iteration}} for `{{dir}}` in the **{{ctx.current_package_area}}** package area has completed. The review can be found at: {{area}}/{{dir}}/review-{{iteration}}.md"
 failure:
-    stderr: "Feature review {{iteration}} in the {{ctx.current_package_area}} package area failed to complete!"
-    message: "❌ the Feature Review #{{iteration}} for `{{dir}}` in the **{{ctx.current_package_area}}** package area failed to complete!"
+    stderr: "Feature Review {{iteration}} in the {{ctx.current_package_area}} package area failed to complete!"
+    message: "Feature Review #{{iteration}} for `{{ctx.current_package_area}}/{{dir}}` failed to complete!"
 ---
 
 We have just completed a feature defined in "{{area}}/{{dir}}":
@@ -70,7 +81,7 @@ classify the verification level present and call out any mismatch:
 
 - "Spec requires modifier-press to surface badges" + only Level-1 tests = **gap, not "ready"**.
 - "Spec requires hotkey chord activation" + Level-2 in tmux but no Level-1 chord-byte test = fine.
-- "Spec requires `^X` badges with specific colours" + Level-1 unit tests on style only = needs
+- "Spec requires `^X` badges with specific colors" + Level-1 unit tests on style only = needs
   Level-2 capture verifying real-terminal rendering.
 
 A feature MAY be marked production-ready only when each user-observable requirement has at minimum

@@ -1,12 +1,12 @@
 ---
 loop:
   while: "counter < 5"
-  actions: "increment(counter)"
+  action: "increment(counter)"
 counter: 0
 ---
 
-This is iteration {{iteration}} of the loop.
+This is iteration {{_loop_count}} of the loop.
 
 Current counter value: {{counter}}
-Is first: {{is_first}}
-Is last: {{is_last}}
+Is first: {{_loop_is_first}}
+Is last: {{_loop_is_last}}

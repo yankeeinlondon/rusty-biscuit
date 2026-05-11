@@ -21,6 +21,6 @@ pub(crate) use resolver::{
 };
 pub use types::{
     BlockDirective, BlockOptions, DeferredSetError, DependencyNode, DirectiveKind, FrontmatterRefs,
-    ReplaceOption, ResolvedTarget, SourceContext, TransclusionError, TransclusionRuntime,
+    ReplaceOption, ResolvedTarget, TransclusionError, TransclusionRuntime, TransclusionSource,
 };
 pub use wrappers::{wrap_disclosure, wrap_quotation};

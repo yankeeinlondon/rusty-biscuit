@@ -54,10 +54,17 @@ pub fn resolve_loop_config(
         ))
     })?;
 
+    reject_unknown_loop_keys(loop_map)?;
+
     let condition = parse_condition(loop_map)?;
-    let actions = match loop_map.get("actions") {
-        Some(value) => parse_actions(value)?,
-        None => Vec::new(),
+    let actions = match (loop_map.get("action"), loop_map.get("actions")) {
+        (Some(_), Some(_)) => {
+            return Err(CompositionError::LoopInvalid(
+                "`loop.action` and `loop.actions` are aliases; specify only one".to_string(),
+            ));
+        }
+        (Some(value), None) | (None, Some(value)) => parse_actions(value)?,
+        (None, None) => Vec::new(),
     };
     let max_iterations = match loop_map.get("max") {
         Some(value) => Some(parse_positive_usize("loop.max", value)?),
@@ -80,6 +87,42 @@ pub fn resolve_loop_config(
         max_iterations,
         fail_fast,
     }))
+}
+
+/// Recognized keys under the `loop:` frontmatter object.
+///
+/// `action` is the canonical key for action mutators; `actions` is accepted
+/// as an alias for backwards compatibility. Any other key is rejected at
+/// parse time so silent typos surface as a clear error rather than being
+/// ignored.
+const KNOWN_LOOP_KEYS: &[&str] = &["while", "until", "action", "actions", "max", "fail_fast"];
+
+fn reject_unknown_loop_keys(
+    loop_map: &serde_json::Map<String, serde_json::Value>,
+) -> Result<(), CompositionError> {
+    for key in loop_map.keys() {
+        if !KNOWN_LOOP_KEYS.contains(&key.as_str()) {
+            let suggestion = suggest_loop_key(key);
+            let suggestion_hint = suggestion
+                .map(|s| format!(" (did you mean `{s}`?)"))
+                .unwrap_or_default();
+            return Err(CompositionError::LoopInvalid(format!(
+                "unknown `loop.{key}` key{suggestion_hint}; valid keys are: {}",
+                KNOWN_LOOP_KEYS.join(", ")
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn suggest_loop_key(unknown: &str) -> Option<&'static str> {
+    let lower = unknown.to_ascii_lowercase();
+    match lower.as_str() {
+        "loops" | "iterations" | "max_iterations" | "max-iterations" => Some("max"),
+        "failfast" | "fail-fast" => Some("fail_fast"),
+        "whilst" => Some("while"),
+        _ => None,
+    }
 }
 
 fn parse_condition(
@@ -396,6 +439,67 @@ mod tests {
             original_text,
             markdown,
         }
+    }
+
+    #[test]
+    fn singular_action_key_is_accepted() {
+        let source = make_source(&[(
+            "loop",
+            json!({"until": "done", "action": "increment(counter)"}),
+        )]);
+        let config = resolve_loop_config(&source).unwrap().unwrap();
+        assert_eq!(
+            config.actions,
+            vec![LoopAction::Increment("counter".into())]
+        );
+    }
+
+    #[test]
+    fn plural_actions_key_is_accepted_as_alias() {
+        let source = make_source(&[(
+            "loop",
+            json!({"until": "done", "actions": "increment(counter)"}),
+        )]);
+        let config = resolve_loop_config(&source).unwrap().unwrap();
+        assert_eq!(
+            config.actions,
+            vec![LoopAction::Increment("counter".into())]
+        );
+    }
+
+    #[test]
+    fn action_and_actions_together_are_rejected() {
+        let source = make_source(&[(
+            "loop",
+            json!({
+                "until": "done",
+                "action": "increment(a)",
+                "actions": "increment(b)"
+            }),
+        )]);
+        let err = resolve_loop_config(&source).unwrap_err();
+        let CompositionError::LoopInvalid(message) = err else {
+            panic!("expected LoopInvalid");
+        };
+        assert!(
+            message.contains("aliases; specify only one"),
+            "got: {message}"
+        );
+    }
+
+    #[test]
+    fn unknown_loop_key_without_suggestion_lists_valid_keys() {
+        let source = make_source(&[("loop", json!({"until": "done", "frequency": 5}))]);
+        let err = resolve_loop_config(&source).unwrap_err();
+        let CompositionError::LoopInvalid(message) = err else {
+            panic!("expected LoopInvalid");
+        };
+        assert!(
+            message.contains("unknown `loop.frequency` key"),
+            "got: {message}"
+        );
+        assert!(message.contains("actions"), "got: {message}");
+        assert!(!message.contains("did you mean"), "got: {message}");
     }
 
     #[test]

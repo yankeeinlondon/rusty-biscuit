@@ -54,7 +54,9 @@ members = [
     "messenger/lib",
     "biscuit-visualized/src",
     "worktree/lib",
-    "worktree/cli", "darkmatter/dmls",
+    "worktree/cli",
+    "darkmatter/dmls",
+    "tools/test-toolkit",
 ]
 exclude = ["schematic/schema"]
 

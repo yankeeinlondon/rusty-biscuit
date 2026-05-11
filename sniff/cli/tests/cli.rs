@@ -3262,6 +3262,102 @@ fn test_repo_packages_json_output() {
     );
 }
 
+#[test]
+fn test_repo_packages_no_error_empty_filter() {
+    let (_dir, path) = create_cli_monorepo();
+    // Filter that matches nothing — without --no-error should exit 1
+    cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "repo",
+            "packages",
+            "nonexistent",
+            "--plain",
+        ])
+        .assert()
+        .failure();
+}
+
+#[test]
+fn test_repo_packages_no_error_allows_empty_filter() {
+    let (_dir, path) = create_cli_monorepo();
+    // Filter that matches nothing — with --no-error should exit 0
+    cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "repo",
+            "packages",
+            "nonexistent",
+            "--no-error",
+            "--plain",
+        ])
+        .assert()
+        .success();
+}
+
+#[test]
+fn test_repo_packages_on_error_message() {
+    let (_dir, path) = create_cli_monorepo();
+    let assert = cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "repo",
+            "packages",
+            "nonexistent",
+            "--on-error",
+            "nothing here",
+            "--plain",
+        ])
+        .assert()
+        .failure();
+    let stderr = String::from_utf8_lossy(&assert.get_output().stderr);
+    assert!(stderr.contains("nothing here"), "stderr should contain custom error message, got: {stderr}");
+}
+
+#[test]
+fn test_repo_packages_no_error_json_empty_filter() {
+    let (_dir, path) = create_cli_monorepo();
+    let assert = cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "repo",
+            "packages",
+            "nonexistent",
+            "--json",
+        ])
+        .assert()
+        .failure();
+    let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
+    let json: Value = serde_json::from_str(&stdout).expect("output should be valid JSON");
+    let names = json.as_array().expect("top-level JSON must be an array");
+    assert!(names.is_empty());
+}
+
+#[test]
+fn test_repo_packages_no_error_json_with_flag() {
+    let (_dir, path) = create_cli_monorepo();
+    let assert = cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "repo",
+            "packages",
+            "nonexistent",
+            "--no-error",
+            "--json",
+        ])
+        .assert()
+        .success();
+    let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
+    let json: Value = serde_json::from_str(&stdout).expect("output should be valid JSON");
+    let names = json.as_array().expect("top-level JSON must be an array");
+    assert!(names.is_empty());
+}
+
 // ============================================================================
 // repo package-areas Subcommand Tests
 // ============================================================================
@@ -3529,6 +3625,103 @@ fn test_repo_package_areas_json_perf_stdout_is_valid_json() {
         stderr.contains("Performance") || stderr.contains("Total"),
         "stderr should contain performance timing text, got:\n{stderr}"
     );
+}
+
+#[test]
+fn test_repo_package_areas_no_error_empty_filter() {
+    let (_dir, path) = create_cli_monorepo();
+    cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "repo",
+            "package-areas",
+            "nonexistent",
+            "--plain",
+        ])
+        .assert()
+        .failure();
+}
+
+#[test]
+fn test_repo_package_areas_no_error_allows_empty_filter() {
+    let (_dir, path) = create_cli_monorepo();
+    cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "repo",
+            "package-areas",
+            "nonexistent",
+            "--no-error",
+            "--plain",
+        ])
+        .assert()
+        .success();
+}
+
+#[test]
+fn test_repo_package_areas_on_error_message() {
+    let (_dir, path) = create_cli_monorepo();
+    let assert = cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "repo",
+            "package-areas",
+            "nonexistent",
+            "--on-error",
+            "no areas",
+            "--plain",
+        ])
+        .assert()
+        .failure();
+    let stderr = String::from_utf8_lossy(&assert.get_output().stderr);
+    assert!(
+        stderr.contains("no areas"),
+        "stderr should contain custom error message, got: {stderr}"
+    );
+}
+
+#[test]
+fn test_repo_package_areas_no_error_json_empty_filter() {
+    let (_dir, path) = create_cli_monorepo();
+    let assert = cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "repo",
+            "package-areas",
+            "nonexistent",
+            "--json",
+        ])
+        .assert()
+        .failure();
+    let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
+    let json: Value = serde_json::from_str(&stdout).expect("output should be valid JSON");
+    let names = json.as_array().expect("top-level JSON must be an array");
+    assert!(names.is_empty());
+}
+
+#[test]
+fn test_repo_package_areas_no_error_json_with_flag() {
+    let (_dir, path) = create_cli_monorepo();
+    let assert = cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "repo",
+            "package-areas",
+            "nonexistent",
+            "--no-error",
+            "--json",
+        ])
+        .assert()
+        .success();
+    let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
+    let json: Value = serde_json::from_str(&stdout).expect("output should be valid JSON");
+    let names = json.as_array().expect("top-level JSON must be an array");
+    assert!(names.is_empty());
 }
 
 #[test]

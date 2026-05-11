@@ -733,7 +733,8 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 package,
                 package_area,
                 format,
-                ..
+                no_error,
+                on_error,
             } => {
                 return handle_repo_packages(
                     base_dir.as_deref(),
@@ -742,6 +743,8 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                         package: package.as_deref(),
                         package_area: package_area.as_deref(),
                         format: *format,
+                        no_error: *no_error,
+                        on_error: on_error.clone(),
                     },
                     cli.json,
                     cli.plain,
@@ -754,7 +757,8 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 package,
                 package_area,
                 format,
-                ..
+                no_error,
+                on_error,
             } => {
                 return handle_repo_package_areas(
                     base_dir.as_deref(),
@@ -763,6 +767,8 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                         package: package.as_deref(),
                         package_area: package_area.as_deref(),
                         format: *format,
+                        no_error: *no_error,
+                        on_error: on_error.clone(),
                     },
                     cli.json,
                     cli.plain,

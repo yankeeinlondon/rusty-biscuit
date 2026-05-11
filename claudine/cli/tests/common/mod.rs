@@ -10,6 +10,20 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 static TEST_NONCE: AtomicU64 = AtomicU64::new(0);
 
+/// Initialize the workspace tracing subscriber for this test binary so
+/// `trace_phase!` spans become visible without setting `RUST_LOG` manually.
+///
+/// Idempotent (`test_toolkit::init_test_tracing` uses an internal `Once`),
+/// so all helpers below can call it cheaply on every invocation.
+fn ensure_test_tracing_initialized() {
+    test_toolkit::init_test_tracing();
+}
+
+/// Public re-export so individual tests that bypass the helpers below can
+/// still opt-in explicitly.
+#[allow(unused_imports)]
+pub use test_toolkit::init_test_tracing;
+
 pub struct TestWorkspace {
     root: PathBuf,
 }
@@ -20,6 +34,7 @@ impl TestWorkspace {
     }
 
     pub fn named(prefix: &str) -> Self {
+        ensure_test_tracing_initialized();
         let nonce = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
@@ -43,6 +58,7 @@ impl Drop for TestWorkspace {
 }
 
 pub fn write(path: &Path, content: &str) {
+    ensure_test_tracing_initialized();
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).unwrap();
     }
@@ -54,6 +70,7 @@ pub fn write_json<T: serde::Serialize>(path: &Path, value: &T) {
 }
 
 pub fn init_git_repo(path: &Path) -> bool {
+    ensure_test_tracing_initialized();
     Command::new("git")
         .arg("init")
         .current_dir(path)
@@ -63,6 +80,7 @@ pub fn init_git_repo(path: &Path) -> bool {
 }
 
 pub fn augmented_path(fake_bin: &Path) -> std::ffi::OsString {
+    ensure_test_tracing_initialized();
     let system_path = std::env::var_os("PATH").unwrap_or_default();
     let mut paths: Vec<PathBuf> = vec![fake_bin.to_path_buf()];
     paths.extend(std::env::split_paths(&system_path));
@@ -92,6 +110,7 @@ pub fn strip_ansi(input: &str) -> String {
 }
 
 pub fn write_executable(path: &Path, content: &str) {
+    ensure_test_tracing_initialized();
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;

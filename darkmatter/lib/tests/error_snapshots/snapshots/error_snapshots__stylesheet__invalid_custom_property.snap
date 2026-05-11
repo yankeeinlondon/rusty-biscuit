@@ -1,0 +1,7 @@
+---
+source: darkmatter/lib/tests/error_snapshots/stylesheet.rs
+expression: out
+---
+⨫ StylesheetError: invalid custom property
+┃ Property: foo
+Custom properties must start with -- followed by a non-empty identifier (letters, digits, hyphens, underscores).

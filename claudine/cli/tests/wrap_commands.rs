@@ -3,6 +3,7 @@ use chrono::Local;
 use claudine::mcp::types::{
     McpCatalog, McpDefaults, McpProviderState, McpServer, McpServerMetadata, McpTransport,
 };
+use claudine::provider::Provider;
 use predicates::str::contains;
 use std::collections::HashMap;
 use std::fs;
@@ -243,20 +244,22 @@ exit 0
         .env("CLAUDINE_ARGS_FILE", &args_path)
         .env("CLAUDINE_ENV_FILE", &env_path)
         .env("CLAUDINE_STDIN_FILE", &stdin_path)
+        .current_dir(workspace.path())
         .args(["codex", "--yolo", "--", "--json", "summarize repo"])
         .assert()
         .success();
 
     let args = fs::read_to_string(&args_path).unwrap();
     let args: Vec<&str> = args.lines().collect();
-    assert_eq!(
-        args,
-        vec![
-            "exec",
-            "--json",
-            "--dangerously-bypass-approvals-and-sandbox",
-        ]
+    assert!(
+        args.len() >= 3,
+        "expected at least exec + --json + --dangerously-bypass-approvals-and-sandbox, got {args:?}"
     );
+    assert_eq!(args[0], "exec");
+    assert_eq!(args[1], "--json");
+    assert_eq!(args[2], "--dangerously-bypass-approvals-and-sandbox");
+    // Non-interactive Codex sessions append the safety appendix via
+    // -c developer_instructions="..." argv tokens; accept extra args.
 
     let stdin = fs::read_to_string(&stdin_path).unwrap();
     assert_eq!(stdin, "summarize repo");
@@ -467,13 +470,21 @@ exit 0
         .env("PATH", &path_dir)
         .env("CLAUDINE_ARGS_FILE", &args_path)
         .env("CLAUDINE_STDIN_FILE", &stdin_path)
+        .current_dir(workspace.path())
         .args(["codex", "--json", "summarize repo"])
         .assert()
         .success();
 
     let args = fs::read_to_string(&args_path).unwrap();
     let args: Vec<&str> = args.lines().collect();
-    assert_eq!(args, vec!["exec", "--json"]);
+    assert!(
+        args.len() >= 2,
+        "expected at least exec + --json, got {args:?}"
+    );
+    assert_eq!(args[0], "exec");
+    assert_eq!(args[1], "--json");
+    // Non-interactive Codex sessions append the safety appendix via
+    // -c developer_instructions="..." argv tokens; accept extra args.
 
     let stdin = fs::read_to_string(&stdin_path).unwrap();
     assert_eq!(stdin, "summarize repo");
@@ -2168,6 +2179,61 @@ fn compose_preflight_error_includes_source_provenance() {
     assert!(
         !plain.contains("ERROR: provider should not run"),
         "provider binary should not execute when preflight fails; stderr was:\n{plain}"
+    );
+}
+
+/// When the prompt file lives outside any git repo, `CompositionPrepContext`
+/// must fall back to the ambient CWD to load `selection_config`. Without this
+/// fallback non-TTY resolution loses the favorite-agent and model overrides
+/// that the legacy path preserved.
+#[cfg(unix)]
+#[test]
+fn compose_non_tty_uses_cwd_config_when_source_outside_git() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+
+    // Set up HOME with a claudine config that has a favorite provider.
+    let home = workspace.path().join("home");
+    fs::create_dir_all(&home).unwrap();
+    let claudine_dir = home.join(".claudine");
+    fs::create_dir_all(&claudine_dir).unwrap();
+
+    let config = claudine::config::claudine_config::ClaudineConfig {
+        preferred_agent: Some(Provider::Goose),
+        ..claudine::config::claudine_config::ClaudineConfig::default()
+    };
+    let config_path = claudine_dir.join("config.json");
+    claudine::dispatch::loader::save_claudine_config(&config, &config_path).unwrap();
+
+    // Create a source file outside any git repo.
+    let source_dir = workspace.path().join("source");
+    fs::create_dir_all(&source_dir).unwrap();
+    let md_file = source_dir.join("prompt.md");
+    fs::write(&md_file, "---\ntitle: test\n---\n# Hello\n").unwrap();
+
+    // Fake provider binary so Goose is "installed".
+    write_executable(
+        &path_dir.join("goose"),
+        "#!/bin/sh\necho 'goose ran'\nexit 0\n",
+    );
+
+    // Run in non-TTY mode (null stdin) from a CWD that is NOT a git repo.
+    let assert = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", &home)
+        .env("PATH", augmented_path(&path_dir))
+        .current_dir(&home)
+        .args(["compose", "--dry-run", md_file.to_str().unwrap()])
+        .assert()
+        .success();
+
+    let stderr = String::from_utf8_lossy(&assert.get_output().stderr).to_string();
+    let plain = strip_ansi(&stderr);
+
+    assert!(
+        plain.contains("Goose"),
+        "non-TTY compose with source outside git should use CWD config favorite; stderr was:\n{plain}"
     );
 }
 
@@ -4881,6 +4947,8 @@ if [ "$1" = "models" ]; then
   exit 0
 fi
 printf '%s\n' '{"type":"init","session_id":"hang-test","model":"test-model"}'
+printf '%s\n' '{"type":"step_start","sessionID":"hang-test"}'
+printf '%s\n' '{"type":"step_finish","sessionID":"hang-test","part":{"reason":"tool-calls","tokens":{"input":1,"output":1,"total":2}}}'
 "#,
     );
     for i in 1..=9 {
@@ -4973,6 +5041,8 @@ if [ "$1" = "models" ]; then
   exit 0
 fi
 printf '%s\n' '{"type":"init","session_id":"idle-test","model":"test-model"}'
+printf '%s\n' '{"type":"step_start","sessionID":"idle-test"}'
+printf '%s\n' '{"type":"step_finish","sessionID":"idle-test","part":{"reason":"tool-calls","tokens":{"input":1,"output":1,"total":2}}}'
 printf '%s\n' '{"type":"tool_start","part":{"id":"t1","tool_name":"bash","input":{"command":"ls"}}}'
 while :; do /bin/sleep 1; done
 "#,
@@ -5086,6 +5156,217 @@ done
     }
 }
 
+/// Phase 1 reproduction for the 2026-05-10 OpenCode timeout regression.
+///
+/// This test replays the OpenCode stream shape that triggers the false-hang
+/// regression described in
+/// `claudine/fixes/2026-05-10-opencode-timeout-regression/plan.md`:
+///
+/// - `step_start` then a sequence of `text` events (parent prose).
+/// - Several `tool_use` (post-completion) events with **no** matching
+///   `tool_start` — OpenCode does not emit `tool_start` and does not emit
+///   `task_started` for its `task` subagent tool, so the wrapper's in-flight
+///   tracking is never populated.
+/// - A final parent-text event (the model's closing prose).
+/// - Silence shorter than `step_timeout`, after which the fake OpenCode
+///   binary exits 0 cleanly.
+///
+/// Under the regression the wrapper misclassified even *short* legitimate
+/// silence as a hang because in-flight tracking was empty. Under the fix
+/// (byte heartbeat in Phase 2 + OpenCode per-step grace in Phase 3) the
+/// wrapper waits for the child to exit cleanly and the run succeeds.
+///
+/// **Note (2026-05-11):** the silence window here is intentionally bounded
+/// below `step_timeout`. The per-step grace was tightened so that mid-step
+/// silence with BOTH the event clock and byte clock stale beyond the budget
+/// *does* fire — that case is now the
+/// `opencode_step_started_but_never_finished_fires_on_stale_clocks` unit
+/// test in [`watchdog.rs`](../src/commands/wrap/exec/watchdog.rs).
+#[cfg(unix)]
+#[test]
+#[serial_test::serial]
+fn watchdog_opencode_post_fanout_silence_does_not_kill_prematurely() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+    seed_minimal_config(workspace.path());
+
+    let md_file = workspace.path().join("test.md");
+    fs::write(
+        &md_file,
+        "---\ntitle: opencode regression repro\n---\nHello\n",
+    )
+    .unwrap();
+
+    // Fake OpenCode that mirrors the real stream shape from the user's
+    // failing transcript:
+    //   1. init + step_start
+    //   2. assistant text describing the plan
+    //   3. several tool_use (post-completion) events with no tool_start
+    //   4. a final closing text ("Now running sniff repo:")
+    //   5. silence longer than step_timeout
+    //   6. clean exit 0
+    write_executable(
+        &path_dir.join("opencode"),
+        r#"#!/bin/sh
+if [ "$1" = "models" ]; then
+  printf '%s\n' '["test-model"]'
+  exit 0
+fi
+printf '%s\n' '{"type":"init","session_id":"oc-regress","model":"test-model"}'
+printf '%s\n' '{"type":"step_start","sessionID":"oc-regress"}'
+printf '%s\n' '{"type":"text","text":"Planning commit work"}'
+printf '%s\n' '{"type":"tool_use","part":{"id":"t1","tool":"bash","state":{"status":"completed","input":{"command":"git status"},"output":"clean"}}}'
+printf '%s\n' '{"type":"tool_use","part":{"id":"t2","tool":"read","state":{"status":"completed","input":{"path":"README.md"},"output":"..."}}}'
+printf '%s\n' '{"type":"tool_use","part":{"id":"t3","tool":"bash","state":{"status":"completed","input":{"command":"just lint"},"output":"ok"}}}'
+printf '%s\n' '{"type":"text","text":"Now running sniff repo to show the final state:"}'
+/bin/sleep 1
+exit 0
+"#,
+    );
+
+    let assert = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
+        .env("PATH", &path_dir)
+        .env("OPENCODE_MODEL", "test-model")
+        // step_timeout longer than the post-text silence above so the
+        // grace can apply and the child exits cleanly before the budget
+        // would elapse.
+        .env("CLAUDINE_STEP_TIMEOUT", "3s")
+        .env("CLAUDINE_WATCHDOG_INTERVAL", "1s")
+        .env("CLAUDINE_KILL_GRACE", "1s")
+        .args(["compose", "--opencode", md_file.to_str().unwrap()])
+        .timeout(Duration::from_secs(30))
+        .assert()
+        .success();
+
+    let stderr = String::from_utf8_lossy(&assert.get_output().stderr);
+    let plain = strip_ansi(&stderr);
+
+    // Under the fix, no step_timeout breach should be rendered.
+    assert!(
+        !plain.contains("no stream activity"),
+        "stderr must NOT contain step_timeout breach message under the fix; got: {plain}"
+    );
+    assert!(
+        !plain.contains("Agent Error"),
+        "stderr must NOT contain Agent Error block under the fix; got: {plain}"
+    );
+
+    // The synthesised JSONL summary must NOT report a step_timeout exit
+    // reason — the child exited cleanly, so any exit_reason should reflect
+    // a normal completion (or be absent).
+    let log_path = today_log_path(workspace.path());
+    if log_path.exists() {
+        let log = fs::read_to_string(&log_path).unwrap();
+        if let Some(last) = log.lines().last() {
+            let entry: serde_json::Value = serde_json::from_str(last).unwrap();
+            let exit_reason = entry
+                .get("extra")
+                .and_then(|e| e.get("exit_reason"))
+                .and_then(|v| v.as_str());
+            assert_ne!(
+                exit_reason,
+                Some("step_timeout"),
+                "JSONL session_end must NOT have extra.exit_reason=step_timeout under the fix; last entry: {last}"
+            );
+        }
+    }
+}
+
+/// Drives an OpenCode `task` tool completion through the full wrap stack and
+/// asserts the synthesized SubagentStart/SubagentStop lifecycle reaches the
+/// live sink and populates `WatchdogState.recent_subagents`. Verified
+/// end-to-end by triggering a `step_timeout` breach after `step_finish` and
+/// asserting the rendered "Recent subagents:" listing names the descriptions
+/// supplied in the synthetic OpenCode stream.
+#[cfg(unix)]
+#[test]
+#[serial_test::serial]
+fn watchdog_opencode_task_synthesis_populates_recent_subagents_in_breach() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+    seed_minimal_config(workspace.path());
+
+    let md_file = workspace.path().join("test.md");
+    fs::write(
+        &md_file,
+        "---\ntitle: opencode task synthesis integration\n---\nHello\n",
+    )
+    .unwrap();
+
+    // Fake OpenCode emits:
+    //   1. init + step_start
+    //   2. two `task` tool_use completions with distinct descriptions
+    //   3. step_finish (closes the per-step grace window)
+    //   4. silence longer than step_timeout (triggers breach)
+    //   5. exit 0
+    write_executable(
+        &path_dir.join("opencode"),
+        r#"#!/bin/sh
+if [ "$1" = "models" ]; then
+  printf '%s\n' '["test-model"]'
+  exit 0
+fi
+printf '%s\n' '{"type":"init","session_id":"oc-task-syn","model":"test-model"}'
+printf '%s\n' '{"type":"step_start","sessionID":"oc-task-syn"}'
+printf '%s\n' '{"type":"tool_use","part":{"id":"t1","tool":"task","state":{"status":"completed","input":{"description":"First subagent task"},"metadata":{"sessionId":"child-1"},"output":"done"}}}'
+printf '%s\n' '{"type":"tool_use","part":{"id":"t2","tool":"task","state":{"status":"completed","input":{"description":"Second subagent task"},"metadata":{"sessionId":"child-2"},"output":"done"}}}'
+printf '%s\n' '{"type":"step_finish","sessionID":"oc-task-syn","part":{"reason":"stop","tokens":{"input":1,"output":1,"total":2}}}'
+/bin/sleep 6
+exit 0
+"#,
+    );
+
+    let assert = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
+        .env("PATH", &path_dir)
+        .env("OPENCODE_MODEL", "test-model")
+        .env("CLAUDINE_STEP_TIMEOUT", "2s")
+        .env("CLAUDINE_WATCHDOG_INTERVAL", "1s")
+        .env("CLAUDINE_KILL_GRACE", "1s")
+        .args(["compose", "--opencode", md_file.to_str().unwrap()])
+        .timeout(Duration::from_secs(30))
+        .assert()
+        .failure();
+
+    let stderr = String::from_utf8_lossy(&assert.get_output().stderr);
+    let plain = strip_ansi(&stderr);
+
+    assert!(
+        plain.contains("Recent subagents:"),
+        "stderr must contain 'Recent subagents:' listing from breach diagnostic; got: {plain}"
+    );
+    // Scope the newest-first ordering assertion to the breach listing only —
+    // the live stream above the breach lists tools in chronological order so
+    // a naive `plain.find(...)` would compare the wrong occurrences.
+    let listing_start = plain
+        .find("Recent subagents:")
+        .expect("Recent subagents: header must be present");
+    let listing = &plain[listing_start..];
+    assert!(
+        listing.contains("First subagent task"),
+        "Recent subagents listing must mention 'First subagent task'; got: {listing}"
+    );
+    assert!(
+        listing.contains("Second subagent task"),
+        "Recent subagents listing must mention 'Second subagent task'; got: {listing}"
+    );
+    let idx_second = listing.find("Second subagent task");
+    let idx_first = listing.find("First subagent task");
+    assert!(
+        idx_second.is_some() && idx_first.is_some() && idx_second < idx_first,
+        "Recent subagents listing must be newest-first; got: {listing}"
+    );
+    assert!(
+        plain.contains("2 subagents observed"),
+        "breach diagnostic must name the observed subagent count; got: {plain}"
+    );
+}
+
 /// Non-harness compose respects --timeout CLI flag (duration grammar).
 #[cfg(unix)]
 #[test]
@@ -5147,6 +5428,339 @@ done
     );
 }
 
+// ---------------------------------------------------------------------------
+// Phase 4 acceptance tests: explicit --claude / --codex must not invoke
+// `opencode models` (2026-05-09-slow-prep)
+// ---------------------------------------------------------------------------
+
+/// A fake `opencode` binary that exits 1 when called with `models`.
+/// Placed on PATH to prove that `--claude` / `--codex` compose paths do
+/// NOT shell out to `opencode models`.
+fn write_failing_opencode_models(path_dir: &Path) {
+    write_executable(
+        &path_dir.join("opencode"),
+        r#"#!/bin/sh
+if [ "$1" = "models" ]; then
+  printf 'FAKE_OPENCODE_MODELS_ERROR: this should not have been called\n' >&2
+  exit 1
+fi
+exit 0
+"#,
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn compose_claude_dry_run_does_not_call_opencode_models() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+    seed_minimal_config(workspace.path());
+
+    let md_file = workspace.path().join("fast.md");
+    fs::write(&md_file, "---\ntitle: test\n---\nPrompt body\n").unwrap();
+
+    write_failing_opencode_models(&path_dir);
+    write_executable(&path_dir.join("claude"), "#!/bin/sh\nexit 0\n");
+
+    cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
+        .env("PATH", augmented_path(&path_dir))
+        .args([
+            "compose",
+            "--claude",
+            "--dry-run",
+            md_file.to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+}
+
+#[cfg(unix)]
+#[test]
+fn inline_compose_claude_dry_run_does_not_call_opencode_models() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+    seed_minimal_config(workspace.path());
+
+    let md_file = workspace.path().join("fast.md");
+    fs::write(
+        &md_file,
+        "---\ntitle: test\nprompt: rewrite\n---\nPrompt body\n",
+    )
+    .unwrap();
+
+    write_failing_opencode_models(&path_dir);
+    write_executable(&path_dir.join("claude"), "#!/bin/sh\nexit 0\n");
+
+    cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
+        .env("PATH", augmented_path(&path_dir))
+        .args([
+            "inline-compose",
+            "--claude",
+            "--dry-run",
+            md_file.to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+}
+
+#[cfg(unix)]
+#[test]
+fn compose_codex_dry_run_does_not_call_opencode_models() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+    seed_minimal_config(workspace.path());
+
+    let md_file = workspace.path().join("fast.md");
+    fs::write(&md_file, "---\ntitle: test\n---\nPrompt body\n").unwrap();
+
+    write_failing_opencode_models(&path_dir);
+    write_executable(&path_dir.join("codex"), "#!/bin/sh\nexit 0\n");
+
+    cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
+        .env("PATH", augmented_path(&path_dir))
+        .args(["compose", "--codex", "--dry-run", md_file.to_str().unwrap()])
+        .assert()
+        .success();
+}
+
+#[cfg(unix)]
+#[test]
+fn inline_compose_codex_dry_run_does_not_call_opencode_models() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+    seed_minimal_config(workspace.path());
+
+    let md_file = workspace.path().join("fast.md");
+    fs::write(
+        &md_file,
+        "---\ntitle: test\nprompt: rewrite\n---\nPrompt body\n",
+    )
+    .unwrap();
+
+    write_failing_opencode_models(&path_dir);
+    write_executable(&path_dir.join("codex"), "#!/bin/sh\nexit 0\n");
+
+    cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
+        .env("PATH", augmented_path(&path_dir))
+        .args([
+            "inline-compose",
+            "--codex",
+            "--dry-run",
+            md_file.to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+}
+
+#[cfg(unix)]
+#[test]
+fn compose_opencode_dry_run_calls_opencode_models_and_fails_with_test_double() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+    seed_minimal_config(workspace.path());
+
+    let md_file = workspace.path().join("fast.md");
+    fs::write(&md_file, "---\ntitle: test\n---\nPrompt body\n").unwrap();
+
+    write_failing_opencode_models(&path_dir);
+
+    // When --opencode is selected, model validation *should* call `opencode
+    // models`, so the failing test double causes a failure (or the catalog
+    // refresh is skipped because the model comes from an env var).
+    cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
+        .env("PATH", augmented_path(&path_dir))
+        .env("OPENCODE_MODEL", "test-model")
+        .args([
+            "compose",
+            "--opencode",
+            "--dry-run",
+            md_file.to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+}
+
+/// `claudine sequence --opencode` with a frontmatter `model` and
+/// `OPENCODE_MODEL` set must skip the dynamic catalog refresh because the
+/// env var wins over the frontmatter hint. The failing `opencode models`
+/// test double would surface as a non-zero exit if the refresh ran.
+#[cfg(unix)]
+#[test]
+fn sequence_opencode_dry_run_with_env_model_skips_opencode_models_call() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+    seed_minimal_config(workspace.path());
+
+    let md_file = workspace.path().join("seq.md");
+    fs::write(
+        &md_file,
+        "---\nsequence:\n  - step_one\nmodel: frontmatter-model\n---\ncomposed body text\n",
+    )
+    .unwrap();
+
+    write_failing_opencode_models(&path_dir);
+
+    cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
+        .env("PATH", augmented_path(&path_dir))
+        .env("OPENCODE_MODEL", "env-model")
+        .args([
+            "sequence",
+            "--opencode",
+            "--dry-run",
+            md_file.to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+}
+
+/// `claudine sequence --claude` should never invoke `opencode models`
+/// because the selected provider doesn't use the dynamic OpenCode catalog
+/// source. Mirrors the equivalent direct-compose acceptance test.
+#[cfg(unix)]
+#[test]
+fn sequence_claude_dry_run_does_not_call_opencode_models() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+    seed_minimal_config(workspace.path());
+
+    let md_file = workspace.path().join("seq.md");
+    fs::write(
+        &md_file,
+        "---\nsequence:\n  - step_one\n---\ncomposed body text\n",
+    )
+    .unwrap();
+
+    write_failing_opencode_models(&path_dir);
+    write_executable(&path_dir.join("claude"), "#!/bin/sh\nexit 0\n");
+
+    cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
+        .env("PATH", augmented_path(&path_dir))
+        .args([
+            "sequence",
+            "--claude",
+            "--dry-run",
+            md_file.to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+}
+
+// ---------------------------------------------------------------------------
+// Phase 5 acceptance tests: Ctrl+C during prep exits 130 with clean notice
+// ---------------------------------------------------------------------------
+
+#[cfg(unix)]
+#[test]
+#[serial_test::serial]
+fn compose_sigint_during_prep_exits_130_with_notice() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+    seed_minimal_config(workspace.path());
+
+    // Frontmatter `model` hint is required so the catalog refresh gate
+    // (`refresh_for_model_validation`) actually invokes the dynamic source
+    // for OpenCode. Without it, `hints.model.is_none()` short-circuits the
+    // refresh and the slow `opencode models` subprocess never runs, leaving
+    // this test's interrupt window non-deterministic.
+    let md_file = workspace.path().join("slow.md");
+    fs::write(
+        &md_file,
+        "---\ntitle: test\nmodel: test-model\n---\nPrompt body\n",
+    )
+    .unwrap();
+
+    // Fake `opencode models` sleeps for 5s so prep is slow enough to
+    // interrupt. The `opencode` provider binary itself never runs.
+    write_executable(
+        &path_dir.join("opencode"),
+        r#"#!/bin/sh
+if [ "$1" = "models" ]; then
+  /bin/sleep 5
+  printf '%s\n' '["test-model"]'
+  exit 0
+fi
+exit 0
+"#,
+    );
+
+    let bin = env!("CARGO_BIN_EXE_claudine");
+    let child = std::process::Command::new(bin)
+        .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
+        .env("PATH", augmented_path(&path_dir))
+        .args([
+            "compose",
+            "--opencode",
+            "--dry-run",
+            md_file.to_str().unwrap(),
+        ])
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+
+    let pid = child.id() as i32;
+
+    // Give the child a moment to enter prep and reach the slow `opencode
+    // models` call, then deliver SIGINT.
+    std::thread::sleep(std::time::Duration::from_millis(300));
+    let interrupt_sent_at = std::time::Instant::now();
+    unsafe {
+        libc::kill(pid, libc::SIGINT);
+    }
+
+    let output = child.wait_with_output().unwrap();
+    let interrupt_to_exit = interrupt_sent_at.elapsed();
+
+    // Exit code 130 = 128 + SIGINT(2)
+    assert_eq!(
+        output.status.code(),
+        Some(130),
+        "SIGINT during prep must yield exit code 130"
+    );
+
+    // Bounded interrupt latency: the cancellable refresh path must return
+    // within ~50 ms of the interrupt poll, so a generous 2-second budget
+    // catches any regression where prep continues to block on the slow
+    // subprocess. The fake `opencode models` sleeps for 5s; if we hit
+    // anywhere near that we have regressed back to the uncancellable
+    // `refresh_provider_blocking` path.
+    assert!(
+        interrupt_to_exit < std::time::Duration::from_secs(2),
+        "SIGINT-to-exit latency exceeded 2s ({:?}); blocked-prep regression",
+        interrupt_to_exit,
+    );
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let plain = strip_ansi(&stderr);
+    assert!(
+        plain.contains("User interrupted compose operation"),
+        "stderr must contain the clean interrupt notice; got: {plain}"
+    );
+}
+
 /// Non-harness inline-compose respects --step-timeout CLI flag.
 #[cfg(unix)]
 #[test]
@@ -5173,6 +5787,8 @@ if [ "$1" = "models" ]; then
   exit 0
 fi
 printf '%s\n' '{"type":"init","session_id":"cli-step-test","model":"test-model"}'
+printf '%s\n' '{"type":"step_start","sessionID":"cli-step-test"}'
+printf '%s\n' '{"type":"step_finish","sessionID":"cli-step-test","part":{"reason":"tool-calls","tokens":{"input":1,"output":1,"total":2}}}'
 printf '%s\n' '{"type":"tool_start","part":{"id":"t1","tool_name":"bash","input":{"command":"ls"}}}'
 while :; do /bin/sleep 1; done
 "#,

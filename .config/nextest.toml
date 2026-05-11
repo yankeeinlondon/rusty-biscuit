@@ -1,7 +1,13 @@
 [profile.default]
 # Retry failed tests up to 3 times to mitigate flakiness in PTY tests or timing issues
 retries = 3
+# Mark tests slower than this as slow in nextest output.
+slow-timeout = { period = "5s", terminate-after = 3 }
 
 [profile.ci]
 # Same behavior for CI environment
 retries = 3
+# Stricter slow-test threshold for CI.
+slow-timeout = { period = "10s", terminate-after = 2 }
+# JUnit XML for CI dashboards.
+junit = { path = "test-results.xml" }
