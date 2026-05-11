@@ -117,7 +117,7 @@ impl LayoutContext {
         padding: PagePadding,
         page_background: PageBackground,
         max_width: Option<u16>,
-        _terminal_color_mode: &biscuit_terminal::discovery::detection::ColorMode,
+        terminal_color_mode: &biscuit_terminal::discovery::detection::ColorMode,
         options_color_mode: ColorMode,
         alignments: std::collections::HashMap<PageComponent, PageAlignment>,
         fills: std::collections::HashMap<PageComponent, PageFill>,
@@ -146,18 +146,28 @@ impl LayoutContext {
             || !alignments.is_empty()
             || !fills.is_empty();
 
+        // Per spec, page background resolution uses the *terminal's* detected
+        // color mode (so `Subtle` picks a dark-vs-light surface based on the
+        // actual terminal). When detection is `Unknown`, fall back to the
+        // caller-supplied `options_color_mode` for stability.
+        let surface_mode = match terminal_color_mode {
+            biscuit_terminal::discovery::detection::ColorMode::Dark => ColorMode::Dark,
+            biscuit_terminal::discovery::detection::ColorMode::Light => ColorMode::Light,
+            biscuit_terminal::discovery::detection::ColorMode::Unknown => options_color_mode,
+        };
+
         // Resolve background color and render color mode.
         let (background_color, render_color_mode) = match page_background {
             PageBackground::Transparent => (None, options_color_mode),
             PageBackground::Subtle => {
-                let bg = match options_color_mode {
+                let bg = match surface_mode {
                     ColorMode::Dark => PAGE_BG_SUBTLE_DARK,
                     ColorMode::Light => PAGE_BG_SUBTLE_LIGHT,
                 };
                 (Some(bg), options_color_mode)
             }
             PageBackground::Pronounced => {
-                let (bg, inverted) = match options_color_mode {
+                let (bg, inverted) = match surface_mode {
                     ColorMode::Dark => (PAGE_BG_PRONOUNCED_DARK, ColorMode::Light),
                     ColorMode::Light => (PAGE_BG_PRONOUNCED_LIGHT, ColorMode::Dark),
                 };
@@ -261,7 +271,6 @@ impl LayoutContext {
     /// Returns `(left_pad, right_pad)` in columns. For [`PageFill::Pad`], both sides
     /// get the resolved pad amount. For [`PageFill::Indent`], padding is one-sided
     /// based on alignment (left for left-align, right for right-align, both for center).
-    #[allow(dead_code)]
     pub fn component_side_padding(
         &self,
         component: PageComponent,

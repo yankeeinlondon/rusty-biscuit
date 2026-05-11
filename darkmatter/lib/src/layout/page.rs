@@ -1349,12 +1349,25 @@ mod tests {
 
         let out = page.render(&md).unwrap();
         let plain = crate::testing::strip_ansi_codes(&out);
-        // Pad(4) reduces width by 8 => 72 cols.
-        let first_line = plain.lines().next().unwrap();
+
+        // Pad(4) is symmetric: the component renders at effective_width - 8
+        // = 72 cols, and the apply_component_layout helper shifts the block
+        // right by 4 cols of left padding (even with the default Left
+        // alignment). So lines should be 4 + 72 = 76 visible cols wide.
+        //
+        // The second line of the rendered block is the top padding row
+        // (background fill spanning the full component width), which is the
+        // simplest line to measure since it carries no header text.
+        let padding_row = plain.lines().nth(1).unwrap();
+        assert_eq!(
+            padding_row.len(),
+            76,
+            "padding row should be 4 left pad + 72 content cols, got len={}",
+            padding_row.len()
+        );
         assert!(
-            first_line.len() <= 72,
-            "code block should be padded to 72 cols, got len={}",
-            first_line.len()
+            padding_row.starts_with("    "),
+            "padding row should start with 4 leading spaces (Pad left padding)"
         );
     }
 
