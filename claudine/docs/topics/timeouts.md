@@ -433,12 +433,21 @@ misclassified as a hang:
    partially-buffered output that has not yet parsed into a structured
    `SemanticEvent`. This is the provider-agnostic protection that
    covers OpenCode-style sparse streams.
-2. **`provider_status` grace.** Until OpenCode has produced at least
-   one `step_finish` boundary (recorded as `LiveMetricsState.provider_status`),
-   the `step_timeout` rule is suppressed entirely for this provider so
-   slow startup and slow first turns cannot trip a kill. The wall-clock
-   `timeout` rule remains the unconditional backstop. The guard fires
-   only for OpenCode; richer-stream providers do not need it.
+2. **Per-step `provider_status` grace.** The silence rule is
+   suppressed **while an OpenCode step is in flight** — from
+   `step_start` until the matching `step_finish` — because mid-step
+   silence is expected on this provider. The grace resets for every
+   new step, so multi-step flows that dispatch subagents mid-stream
+   are protected throughout the entire session, not just during the
+   first step. The wall-clock `timeout` rule is **not** suppressed; it
+   remains the unconditional backstop. The guard fires only for
+   OpenCode; richer-stream providers do not need it.
+3. **Synthesized subagent lifecycle.** When OpenCode completes a
+   `task` tool, Claudine synthesizes `SubagentStart` → `SubagentStop`
+   events from the `tool_use` payload so the breach diagnostic can
+   report how many subagents have been observed and when the last one
+   finished, even though OpenCode never emits native `task_started` /
+   `task_completed` events.
 
 This matters most for two flow shapes:
 
@@ -477,35 +486,40 @@ during the closing synthesis. The wrapped process never exited and
 Claudine had no diagnostic surface to terminate the session.
 
 With the unified `step_timeout`, OpenCode's actual stream surface, the
-byte heartbeat, and the OpenCode `provider_status` grace:
+byte heartbeat, and the per-step `provider_status` grace:
 
 ```
 12:00:00  claudine compose ... (step_timeout = 30m)
-12:00:01  parent text: "Launching N subagents..."   last_event_at = 12:00:01
-                                                    last_byte_at  = 12:00:01
-                                                    in_flight_subagents = {}  (no task_started)
-                                                    provider_status = None    (no step_finish yet)
+12:00:01  step_start observed                       step_in_flight = true
+                                                     silence rule suppressed
+12:00:02  parent text: "Launching N subagents..."   last_event_at = 12:00:02
+                                                     last_byte_at  = 12:00:02
+                                                     in_flight_subagents = {}  (no task_started)
 12:14:32  N × task_completed observed               last_event_at = 12:14:32
-                                                    last_byte_at  = 12:14:32
-                                                    provider_status = "stop"  (first step_finish)
-12:14:33  parent text: "All N succeeded..."         last_event_at = 12:14:33
-                                                    last_byte_at  = 12:14:33
-12:14:34  ...closing synthesis streams reasoning bytes (no parsed event)...
-                                                    last_byte_at  advances on each chunk
-                                                    last_event_at remains stale
-                                                    silence = now - last_activity_at < 30m
-                                                    → no kill
+                                                     last_byte_at  = 12:14:32
+                                                     subagent_done_count = N
+12:14:33  step_finish observed                      step_in_flight = false
+                                                     silence rule re-enabled
+12:14:34  parent text: "All N succeeded..."         last_event_at = 12:14:34
+                                                     last_byte_at  = 12:14:34
+12:14:35  ...closing synthesis streams reasoning bytes (no parsed event)...
+                                                     last_byte_at  advances on each chunk
+                                                     last_event_at remains stale
+                                                     silence = now - last_activity_at < 30m
+                                                     → no kill
 
 # A genuinely stuck child (zero bytes for 30m) would fire normally:
-13:14:34  no bytes, no events for 30m              step_timeout fires
-13:14:34  SIGTERM → SIGKILL (10s grace)            session_end → error_kind: "step_timeout"
+13:14:35  no bytes, no events for 30m              step_timeout fires
+13:14:35  SIGTERM → SIGKILL (10s grace)            session_end → error_kind: "step_timeout"
 ```
 
-Note the contrast with the Claude-style worked example earlier: there is
-no stuck-subagent enumeration in the breach message because OpenCode
-never registered subagents as in-flight. The byte heartbeat now
-distinguishes between *the model is silently composing* (bytes still
-flowing) and *the wrapped process is genuinely stuck* (no bytes at all).
+Note the contrast with the Claude-style worked example earlier: the
+breach message for OpenCode includes the count of subagents observed
+in the current step and the elapsed time since the last completion,
+so a timeout during a long subagent fan-out is no longer misreported
+as "no outstanding subagents". The byte heartbeat distinguishes
+between *the model is silently composing* (bytes still flowing) and
+*the wrapped process is genuinely stuck* (no bytes at all).
 
 To kill the same hang faster during incident triage, drop the silence
 budget for the next run:
