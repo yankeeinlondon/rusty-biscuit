@@ -2493,8 +2493,11 @@ fn test_completions_fish() {
 #[test]
 fn test_line_numbers_html_output() {
     let input = "```rust\nfn main() {}\n```";
+    // Use `--line-numbers=true` to avoid the optional-arg ambiguity with the
+    // `-` stdin marker positional. The bare form `--line-numbers -` would let
+    // clap consume `-` as the optional value.
     md_cmd()
-        .args(["--output", "html", "--line-numbers", "-"])
+        .args(["--output", "html", "--line-numbers=true", "-"])
         .write_stdin(input)
         .assert()
         .success()
@@ -3012,33 +3015,34 @@ fn layout_line_numbers_flag_accepted() {
 }
 
 #[test]
-fn layout_no_line_numbers_flag_accepted() {
+fn layout_line_numbers_true_accepted() {
     let tmp = md_file("```rust\nfn main() {}\n```\n");
     let output = md_cmd()
         .arg(tmp.path())
-        .arg("--no-line-numbers")
+        .arg("--line-numbers")
+        .arg("true")
         .output()
         .unwrap();
 
     assert!(
         output.status.success(),
-        "--no-line-numbers flag should be accepted"
+        "--line-numbers true should be accepted"
     );
 }
 
 #[test]
-fn layout_line_numbers_and_no_line_numbers_conflict() {
-    let tmp = md_file("# Hello\n");
+fn layout_line_numbers_false_accepted() {
+    let tmp = md_file("```rust\nfn main() {}\n```\n");
     let output = md_cmd()
         .arg(tmp.path())
         .arg("--line-numbers")
-        .arg("--no-line-numbers")
+        .arg("false")
         .output()
         .unwrap();
 
     assert!(
-        !output.status.success(),
-        "--line-numbers and --no-line-numbers should conflict"
+        output.status.success(),
+        "--line-numbers false should be accepted"
     );
 }
 
