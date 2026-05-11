@@ -1,8 +1,10 @@
 use crate::args::Cli;
+use biscuit_terminal::terminal::Terminal;
 use color_eyre::eyre::{Context, Result};
+use darkmatter::layout::{DarkmatterPage, PageComponent};
 use darkmatter::markdown::highlighting::{ColorMode, ThemePair};
+use darkmatter::markdown::output::MermaidMode;
 use darkmatter::markdown::output::terminal::TerminalImageMode;
-use darkmatter::markdown::output::{HtmlOptions, MermaidMode, TerminalOptions, write_terminal};
 use darkmatter::markdown::{Markdown, MarkdownDelta, MarkdownToc, MarkdownTocNode};
 use std::io::{self, Write};
 use std::path::PathBuf;
@@ -23,33 +25,152 @@ pub fn render_terminal_output(
     code_theme: ThemePair,
     color_mode: ColorMode,
 ) -> Result<()> {
-    let mut options = TerminalOptions::default();
-    options.prose_theme = prose_theme;
-    options.code_theme = code_theme;
-    options.color_mode = color_mode;
-    options.include_line_numbers = cli.line_numbers;
-    options.color_depth = None; // Auto-detect
-    options.image_mode = terminal_image_mode_from_env();
-    options.mermaid_mode = if cli.mermaid {
-        MermaidMode::Image
-    } else {
-        MermaidMode::Off
-    };
+    let term = Terminal::new();
+    let mut page = DarkmatterPage::new(&term)
+        .with_prose_theme(prose_theme.kebab_name())
+        .with_code_theme(code_theme.kebab_name())
+        .with_color_mode(color_mode)
+        .with_image_mode(terminal_image_mode_from_env())
+        .with_mermaid_mode(if cli.mermaid {
+            MermaidMode::Image
+        } else {
+            MermaidMode::Off
+        });
 
-    // Derive base_path from input file for relative image resolution
     if let Some(path) = input_path
         && path.to_str() != Some("-")
     {
-        options.base_path = path.parent().map(|p| p.to_path_buf());
+        page = page.with_base_path(path.parent().map(|p| p.to_path_buf()).unwrap_or_default());
     }
 
-    // Use write_terminal with stdout for proper image rendering
-    // (viuer requires direct stdout access for graphics protocols)
+    // Apply layout flags from CLI.
+    page = apply_cli_layout_flags(page, cli);
+
+    // Handle line numbers: CLI flag overrides default.
+    if cli.line_numbers {
+        page = page.with_line_numbers(true);
+    } else if cli.no_line_numbers {
+        page = page.with_line_numbers(false);
+    }
+
+    let output = page
+        .render(md)
+        .context("Failed to render markdown for terminal")?;
+
     let stdout = io::stdout();
     let mut handle = stdout.lock();
-    write_terminal(&mut handle, md, options).context("Failed to render markdown for terminal")?;
+    handle
+        .write_all(output.as_bytes())
+        .context("Failed to write terminal output")?;
 
     Ok(())
+}
+
+/// Apply CLI layout flags to a [`DarkmatterPage`].
+///
+/// Precedence: margin shorthand → axis → side-specific.
+/// Same for padding. Alignment: global → component-specific.
+/// Fill: global → component-specific.
+pub fn apply_cli_layout_flags(page: DarkmatterPage, cli: &Cli) -> DarkmatterPage {
+    let mut page = page;
+
+    // Margin precedence: all > axis > side
+    if let Some(n) = cli.margin {
+        page = page.with_margin(n);
+    }
+    if let Some(n) = cli.mx {
+        page = page.with_margin_x(n);
+    }
+    if let Some(n) = cli.my {
+        page = page.with_margin_y(n);
+    }
+    if let Some(n) = cli.mt {
+        page = page.with_margin_top(n);
+    }
+    if let Some(n) = cli.mb {
+        page = page.with_margin_bottom(n);
+    }
+    if let Some(n) = cli.ml {
+        page = page.with_margin_left(n);
+    }
+    if let Some(n) = cli.mr {
+        page = page.with_margin_right(n);
+    }
+
+    // Padding precedence: all > axis > side
+    if let Some(n) = cli.padding {
+        page = page.with_padding(n);
+    }
+    if let Some(n) = cli.px {
+        page = page.with_padding_x(n);
+    }
+    if let Some(n) = cli.py {
+        page = page.with_padding_y(n);
+    }
+    if let Some(n) = cli.pt {
+        page = page.with_padding_top(n);
+    }
+    if let Some(n) = cli.pb {
+        page = page.with_padding_bottom(n);
+    }
+    if let Some(n) = cli.pl {
+        page = page.with_padding_left(n);
+    }
+    if let Some(n) = cli.pr {
+        page = page.with_padding_right(n);
+    }
+
+    // Page background
+    if let Some(bg) = cli.page_bg {
+        page = page.with_page_background(bg.into());
+    }
+
+    // Max width
+    if let Some(n) = cli.max_width {
+        page = page.with_max_width(n);
+    }
+
+    // Alignment precedence: global > component-specific
+    if let Some(align) = cli.alignment {
+        page = page.use_alignment_for_all(align.into());
+    }
+    if let Some(align) = cli.align_images {
+        page = page.use_alignment(PageComponent::Images, align.into());
+    }
+    if let Some(align) = cli.align_lists {
+        page = page.use_alignment(PageComponent::Lists, align.into());
+    }
+    if let Some(align) = cli.align_block_quotes {
+        page = page.use_alignment(PageComponent::BlockQuotes, align.into());
+    }
+    if let Some(align) = cli.align_tables {
+        page = page.use_alignment(PageComponent::Tables, align.into());
+    }
+    if let Some(align) = cli.align_code_blocks {
+        page = page.use_alignment(PageComponent::CodeBlocks, align.into());
+    }
+
+    // Fill precedence: global > component-specific
+    if let Some(fill) = cli.fill {
+        page = page.with_fill_for_all(fill);
+    }
+    if let Some(fill) = cli.fill_images {
+        page = page.with_fill(PageComponent::Images, fill);
+    }
+    if let Some(fill) = cli.fill_lists {
+        page = page.with_fill(PageComponent::Lists, fill);
+    }
+    if let Some(fill) = cli.fill_block_quotes {
+        page = page.with_fill(PageComponent::BlockQuotes, fill);
+    }
+    if let Some(fill) = cli.fill_tables {
+        page = page.with_fill(PageComponent::Tables, fill);
+    }
+    if let Some(fill) = cli.fill_code_blocks {
+        page = page.with_fill(PageComponent::CodeBlocks, fill);
+    }
+
+    page
 }
 
 pub fn markdown_artifact(md: &Markdown) -> OutputArtifact {
@@ -65,14 +186,21 @@ pub fn html_artifact(
     prose_theme: ThemePair,
     code_theme: ThemePair,
     color_mode: ColorMode,
+    cli: &Cli,
 ) -> Result<OutputArtifact> {
-    let mut options = HtmlOptions::default();
-    options.prose_theme = prose_theme;
-    options.code_theme = code_theme;
-    options.color_mode = color_mode;
-    options.mermaid_mode = MermaidMode::Image;
+    let term = Terminal::new_optimistic(120);
+    let page = apply_cli_layout_flags(
+        DarkmatterPage::new(&term)
+            .with_prose_theme(prose_theme.kebab_name())
+            .with_code_theme(code_theme.kebab_name())
+            .with_color_mode(color_mode),
+        cli,
+    );
 
-    let content = md.as_html(options).context("Failed to convert to HTML")?;
+    let content = page
+        .render_to_browser(md)
+        .context("Failed to convert to HTML")?;
+
     Ok(OutputArtifact {
         content,
         extension: "html",

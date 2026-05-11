@@ -2,8 +2,8 @@
 
 use biscuit_test_harness::{CapturedFrame, TerminalHarness, skip_with_reason};
 use serial_test::serial;
-use tempfile::tempdir;
 use std::fs;
+use tempfile::tempdir;
 
 #[test]
 #[serial(level2_terminal)]
@@ -26,13 +26,15 @@ fn level2_error_header_contains_osc8_hyperlink() {
 
     // Run `md compose` to trigger page-block parsing
     let cmd = format!("md compose {}", file_path.display());
-    harness.send_command_with_env(&cmd, &[]).expect("send_command_with_env failed");
-    
+    harness
+        .send_command_with_env(&cmd, &[])
+        .expect("send_command_with_env failed");
+
     // Wait for output
     let _ = biscuit_test_harness::wait_for_prompt(&mut harness);
 
     let frame = harness.capture().expect("capture failed");
-    
+
     // Verify OSC 8 hyperlink in the header
     // The header should contain something like \x1b]8;;file:///...unterminated.md\x07unterminated.md\x1b]8;;\x07
     // Use canonicalize because macOS /var is a symlink to /private/var.
@@ -60,14 +62,16 @@ fn level2_error_excerpt_contains_gutter_and_dimming() {
     harness.spawn_shell().expect("spawn_shell failed");
 
     let cmd = format!("md compose {}", file_path.display());
-    harness.send_command_with_env(&cmd, &[]).expect("send_command_with_env failed");
+    harness
+        .send_command_with_env(&cmd, &[])
+        .expect("send_command_with_env failed");
     let _ = biscuit_test_harness::wait_for_prompt(&mut harness);
 
     let frame = harness.capture().expect("capture failed");
-    
+
     // Verify gutter marker and line numbers
     assert!(frame.plain.contains("> 1 │ ::block"));
-    
+
     // Verify dimming (if possible via hex check or similar)
     // <dim> maps to \x1b[2m or \x1b[0;2m depending on context
     let has_dim = frame.raw.contains("\x1b[2m") || frame.raw.contains("\x1b[0;2m");
