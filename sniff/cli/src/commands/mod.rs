@@ -177,14 +177,13 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
         }
 
         // Handle docs mode separately for split-stream output
-        if let Commands::Docs { .. } = cmd {
+        if let Commands::Docs { paths_only, .. } = cmd {
             let base = cli
                 .base
                 .clone()
                 .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| ".".into()));
             let docs_filter = cmd.docs_filter();
 
-            // Discover repo root for detect_docs
             let repo = git2::Repository::discover(&base)
                 .map_err(|e| format!("Not a git repository: {}", e))?;
             let repo_root = repo
@@ -192,7 +191,172 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 .ok_or("Bare repository not supported")?
                 .to_path_buf();
 
-            let all_docs = sniff::filesystem::detect_docs(&repo_root).unwrap_or_default();
+            let has_area_filter = !docs_filter.package_area.is_empty();
+            let has_pkg_filter = !docs_filter.package.is_empty();
+            let needs_full_parse = cli.verbose > 0 || cli.json;
+
+            let target_dirs: Vec<std::path::PathBuf> = if has_area_filter {
+                docs_filter
+                    .package_area
+                    .iter()
+                    .map(|area| repo_root.join(area))
+                    .collect()
+            } else if has_pkg_filter {
+                let pkgs = sniff::filesystem::docs::detect_repo_packages(&repo_root);
+                let lowered: Vec<String> =
+                    docs_filter.package.iter().map(|p| p.to_lowercase()).collect();
+                pkgs.iter()
+                    .filter(|(name, _)| lowered.iter().any(|p| name.eq_ignore_ascii_case(p)))
+                    .map(|(_, rel)| repo_root.join(rel))
+                    .collect()
+            } else {
+                vec![repo_root.to_path_buf()]
+            };
+
+            if *paths_only {
+                let paths = if has_area_filter || has_pkg_filter {
+                    sniff::filesystem::docs::collect_markdown_paths_fast(&target_dirs)
+                } else {
+                    sniff::filesystem::docs::collect_markdown_paths_from_dirs(&target_dirs)
+                };
+                let filtered: Vec<String> = paths
+                    .iter()
+                    .map(|p| {
+                        p.strip_prefix(&repo_root)
+                            .unwrap_or(p)
+                            .to_string_lossy()
+                            .into_owned()
+                    })
+                    .filter(|rel| {
+                        if !docs_filter.filter.is_empty() {
+                            let path_lower = rel.to_lowercase();
+                            return docs_filter
+                                .filter
+                                .iter()
+                                .any(|s| path_lower.contains(&s.to_lowercase()));
+                        }
+                        true
+                    })
+                    .collect();
+
+                if cli.json {
+                    let json_val = serde_json::json!(filtered);
+                    output::print_json_value(json_val, perf.build_report().as_ref());
+                } else {
+                    for path in &filtered {
+                        println!("{}", path);
+                    }
+                }
+                perf.emit_stdout(None);
+                return Ok(());
+            }
+
+            let has_metadata_filter = docs_filter.has_prompt
+                || docs_filter.blast_radius
+                || docs_filter.readme
+                || docs_filter.plan
+                || docs_filter.src;
+
+            let mut all_docs;
+
+            if needs_full_parse && has_metadata_filter {
+                let root_for_pkgs = repo_root.clone();
+                let pkg_handle = std::thread::spawn(move || {
+                    sniff::filesystem::docs::detect_repo_packages(&root_for_pkgs)
+                });
+
+                let phase1 = sniff::filesystem::docs::collect_markdown_files_from_dirs(
+                    &target_dirs,
+                    &repo_root,
+                    &[],
+                    sniff::filesystem::docs::DocParseMode::FrontmatterOnly,
+                    |_| true,
+                );
+
+                let narrowed: Vec<std::path::PathBuf> = output::filter_docs(&phase1, &docs_filter)
+                    .into_iter()
+                    .map(|d| d.filepath.clone())
+                    .collect();
+
+                let packages = if has_area_filter && !has_pkg_filter {
+                    sniff::filesystem::docs::detect_packages_in_dirs(
+                        &repo_root,
+                        &target_dirs,
+                    )
+                } else {
+                    pkg_handle.join().unwrap_or_default()
+                };
+
+                if narrowed.is_empty() {
+                    all_docs = vec![];
+                } else {
+                    all_docs = sniff::filesystem::docs::parse_markdown_files(
+                        &narrowed,
+                        &repo_root,
+                        &packages,
+                        sniff::filesystem::docs::DocParseMode::Full,
+                    );
+                }
+            } else if has_area_filter && !has_pkg_filter {
+                let packages = sniff::filesystem::docs::detect_packages_in_dirs(
+                    &repo_root,
+                    &target_dirs,
+                );
+                let mode = if needs_full_parse {
+                    sniff::filesystem::docs::DocParseMode::Full
+                } else {
+                    sniff::filesystem::docs::DocParseMode::FrontmatterOnly
+                };
+                all_docs = sniff::filesystem::docs::collect_markdown_files_from_dirs(
+                    &target_dirs,
+                    &repo_root,
+                    &packages,
+                    mode,
+                    |_| true,
+                );
+            } else if !has_area_filter && !has_pkg_filter && needs_full_parse {
+                let root_for_pkgs = repo_root.clone();
+                let pkg_handle = std::thread::spawn(move || {
+                    sniff::filesystem::docs::detect_repo_packages(&root_for_pkgs)
+                });
+                all_docs = sniff::filesystem::docs::collect_markdown_files_from_dirs(
+                    &target_dirs,
+                    &repo_root,
+                    &[],
+                    sniff::filesystem::docs::DocParseMode::Full,
+                    |_| true,
+                );
+                let packages = pkg_handle.join().unwrap_or_default();
+                sniff::filesystem::docs::assign_packages(
+                    &mut all_docs,
+                    &packages,
+                    &repo_root,
+                );
+            } else if has_pkg_filter || needs_full_parse {
+                let packages =
+                    sniff::filesystem::docs::detect_repo_packages(&repo_root);
+                let mode = if needs_full_parse {
+                    sniff::filesystem::docs::DocParseMode::Full
+                } else {
+                    sniff::filesystem::docs::DocParseMode::FrontmatterOnly
+                };
+                all_docs = sniff::filesystem::docs::collect_markdown_files_from_dirs(
+                    &target_dirs,
+                    &repo_root,
+                    &packages,
+                    mode,
+                    |_| true,
+                );
+            } else {
+                all_docs = sniff::filesystem::docs::collect_markdown_files_from_dirs(
+                    &target_dirs,
+                    &repo_root,
+                    &[],
+                    sniff::filesystem::docs::DocParseMode::FrontmatterOnly,
+                    |_| true,
+                );
+            }
+
             let filtered = output::filter_docs(&all_docs, &docs_filter);
 
             if cli.json {

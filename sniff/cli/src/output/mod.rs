@@ -138,6 +138,7 @@ pub(crate) use render::{format_bytes, format_number, format_uptime, relative_pat
 /// Apply docs filter flags to a list of markdown documents.
 ///
 /// When multiple flags are combined, results are intersected (AND logic).
+/// Within `--package-area` and `--package`, values are OR'd.
 /// When no flags are set, all documents are returned.
 pub fn filter_docs(
     docs: &[sniff::filesystem::docs::MarkdownMeta],
@@ -148,6 +149,8 @@ pub fn filter_docs(
         && !filter.src
         && !filter.has_prompt
         && !filter.blast_radius
+        && filter.package_area.is_empty()
+        && filter.package.is_empty()
         && filter.filter.is_empty()
     {
         return docs.to_vec();
@@ -170,6 +173,24 @@ pub fn filter_docs(
                 return false;
             }
             if filter.blast_radius && !doc.has_blast_radius {
+                return false;
+            }
+            if !filter.package_area.is_empty()
+                && !filter.package_area.iter().any(|area| {
+                    let area_lower = area.to_lowercase();
+                    let prefix = format!("{}/", area_lower);
+                    path_lower == area_lower || path_lower.starts_with(&prefix)
+                })
+            {
+                return false;
+            }
+            if !filter.package.is_empty()
+                && !filter.package.iter().any(|name| {
+                    doc.package
+                        .as_ref()
+                        .is_some_and(|p| p.eq_ignore_ascii_case(name))
+                })
+            {
                 return false;
             }
             if !filter.filter.is_empty()
@@ -849,14 +870,20 @@ mod tests {
             doc
         }
 
+        fn make_doc_with_package(relative: &str, package: &str) -> MarkdownMeta {
+            let mut doc = make_doc(relative);
+            doc.package = Some(package.to_string());
+            doc
+        }
+
         fn sample_docs() -> Vec<MarkdownMeta> {
             vec![
                 make_doc("README.md"),
                 make_doc("sniff/README.md"),
-                make_doc("sniff/lib/src/notes.md"),
+                make_doc_with_package("sniff/lib/src/notes.md", "sniff-lib"),
                 make_doc(".ai/plans/2026-02-07.plan-for-feature.md"),
                 make_doc("homelab/docs/planning.md"),
-                make_doc("darkmatter/lib/src/README.md"),
+                make_doc_with_package("darkmatter/lib/src/README.md", "darkmatter-lib"),
                 make_doc_with_prompt("research/docs/overview.md", "Summarize this library"),
                 make_doc_with_prompt("homelab/docs/setup.md", "How to configure"),
             ]
@@ -1049,6 +1076,101 @@ mod tests {
             let result = filter_docs(&docs, &filter);
             assert_eq!(result.len(), 1);
             assert_eq!(result[0].relative, "homelab/docs/api.md");
+        }
+
+        #[test]
+        fn package_area_filters_by_path_prefix() {
+            let docs = sample_docs();
+            let filter = DocsFilter {
+                package_area: vec!["sniff".to_string()],
+                ..Default::default()
+            };
+            let result = filter_docs(&docs, &filter);
+            assert_eq!(result.len(), 2);
+            assert!(result.iter().all(|d| d.relative.starts_with("sniff/")));
+        }
+
+        #[test]
+        fn package_area_or_logic_with_multiple_areas() {
+            let docs = sample_docs();
+            let filter = DocsFilter {
+                package_area: vec!["sniff".to_string(), "homelab".to_string()],
+                ..Default::default()
+            };
+            let result = filter_docs(&docs, &filter);
+            assert_eq!(result.len(), 4);
+            assert!(result.iter().all(|d| {
+                d.relative.starts_with("sniff/") || d.relative.starts_with("homelab/")
+            }));
+        }
+
+        #[test]
+        fn package_area_is_case_insensitive() {
+            let docs = sample_docs();
+            let filter = DocsFilter {
+                package_area: vec!["SNIFF".to_string()],
+                ..Default::default()
+            };
+            let result = filter_docs(&docs, &filter);
+            assert_eq!(result.len(), 2);
+        }
+
+        #[test]
+        fn package_filters_by_package_name() {
+            let docs = sample_docs();
+            let filter = DocsFilter {
+                package: vec!["sniff-lib".to_string()],
+                ..Default::default()
+            };
+            let result = filter_docs(&docs, &filter);
+            assert_eq!(result.len(), 1);
+            assert_eq!(result[0].relative, "sniff/lib/src/notes.md");
+        }
+
+        #[test]
+        fn package_or_logic_with_multiple_packages() {
+            let docs = sample_docs();
+            let filter = DocsFilter {
+                package: vec!["sniff-lib".to_string(), "darkmatter-lib".to_string()],
+                ..Default::default()
+            };
+            let result = filter_docs(&docs, &filter);
+            assert_eq!(result.len(), 2);
+        }
+
+        #[test]
+        fn package_is_case_insensitive() {
+            let docs = sample_docs();
+            let filter = DocsFilter {
+                package: vec!["SNIFF-LIB".to_string()],
+                ..Default::default()
+            };
+            let result = filter_docs(&docs, &filter);
+            assert_eq!(result.len(), 1);
+        }
+
+        #[test]
+        fn package_area_intersects_with_readme() {
+            let docs = sample_docs();
+            let filter = DocsFilter {
+                package_area: vec!["sniff".to_string()],
+                readme: true,
+                ..Default::default()
+            };
+            let result = filter_docs(&docs, &filter);
+            assert_eq!(result.len(), 1);
+            assert_eq!(result[0].relative, "sniff/README.md");
+        }
+
+        #[test]
+        fn package_excludes_docs_without_package() {
+            let docs = sample_docs();
+            let filter = DocsFilter {
+                package: vec!["sniff-lib".to_string()],
+                ..Default::default()
+            };
+            let result = filter_docs(&docs, &filter);
+            assert!(result.iter().all(|d| d.package.is_some()));
         }
     }
 

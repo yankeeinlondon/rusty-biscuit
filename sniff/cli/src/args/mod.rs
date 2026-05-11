@@ -39,7 +39,7 @@ pub struct FileListArgs {
     pub no_error: bool,
 
     /// Message to display when no results found
-    #[arg(long, value_name = "MESSAGE")]
+    #[arg(long, value_name = "MESSAGE", allow_hyphen_values = true)]
     pub on_error: Option<String>,
 
     /// Filter paths by substring match (OR logic)
@@ -338,6 +338,18 @@ pub enum Commands {
         #[arg(long)]
         blast_radius: bool,
 
+        /// Output only relative file paths (no metadata, fastest mode)
+        #[arg(long)]
+        paths_only: bool,
+
+        /// Filter to documents in a specific package area (repeatable, OR logic)
+        #[arg(long, value_name = "AREA", add = clap_complete::engine::ArgValueCandidates::new(repo_package_area_candidates))]
+        package_area: Vec<String>,
+
+        /// Filter to documents in a specific package (repeatable, OR logic)
+        #[arg(long, value_name = "PKG", add = clap_complete::engine::ArgValueCandidates::new(repo_package_candidates))]
+        package: Vec<String>,
+
         /// Filter documents by substring match on filepath/filename
         filter: Vec<String>,
     },
@@ -437,7 +449,7 @@ pub enum Commands {
         no_error: bool,
 
         /// Message to display when no results found
-        #[arg(long, value_name = "MESSAGE")]
+        #[arg(long, value_name = "MESSAGE", allow_hyphen_values = true)]
         on_error: Option<String>,
     },
 
@@ -648,13 +660,18 @@ impl Commands {
                 src,
                 has_prompt,
                 blast_radius,
+                package_area,
+                package,
                 filter,
+                ..
             } => DocsFilter {
                 readme: *readme,
                 plan: *plan,
                 src: *src,
                 has_prompt: *has_prompt,
                 blast_radius: *blast_radius,
+                package_area: package_area.clone(),
+                package: package.clone(),
                 filter: filter.clone(),
             },
             _ => DocsFilter::default(),
@@ -973,6 +990,10 @@ pub struct DocsFilter {
     pub has_prompt: bool,
     /// Show only documents that have a blast_radius frontmatter key.
     pub blast_radius: bool,
+    /// Package areas to include (OR logic); empty means no filter.
+    pub package_area: Vec<String>,
+    /// Package names to include (OR logic); empty means no filter.
+    pub package: Vec<String>,
     /// Substring filter on filepath/filename (case-insensitive).
     pub filter: Vec<String>,
 }
@@ -1258,6 +1279,34 @@ mod tests {
                 assert!(readme);
                 assert!(has_prompt);
                 assert_eq!(filter, vec!["research".to_string()]);
+            } else {
+                panic!("Expected Docs command");
+            }
+        }
+
+        #[test]
+        fn docs_package_area_and_package_flags_parse() {
+            let cli = parse_args(&[
+                "docs",
+                "--package-area",
+                "sniff",
+                "--package-area",
+                "claudine",
+                "--package",
+                "sniff-lib",
+            ])
+            .unwrap();
+            if let Some(Commands::Docs {
+                package_area,
+                package,
+                ..
+            }) = cli.command
+            {
+                assert_eq!(
+                    package_area,
+                    vec!["sniff".to_string(), "claudine".to_string()]
+                );
+                assert_eq!(package, vec!["sniff-lib".to_string()]);
             } else {
                 panic!("Expected Docs command");
             }
@@ -1792,12 +1841,17 @@ mod tests {
                 src: true,
                 has_prompt: false,
                 blast_radius: false,
+                paths_only: false,
+                package_area: vec!["sniff".to_string()],
+                package: vec!["sniff-lib".to_string()],
                 filter: vec!["homelab".to_string()],
             };
             let filter = docs.docs_filter();
             assert!(filter.readme);
             assert!(filter.src);
             assert!(!filter.blast_radius);
+            assert_eq!(filter.package_area, vec!["sniff".to_string()]);
+            assert_eq!(filter.package, vec!["sniff-lib".to_string()]);
             assert_eq!(filter.filter, vec!["homelab".to_string()]);
         }
 
