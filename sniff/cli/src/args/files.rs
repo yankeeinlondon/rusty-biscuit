@@ -32,7 +32,7 @@ pub struct FileListArgs {
     pub no_error: bool,
 
     /// Message to display when no results found
-    #[arg(long, value_name = "MESSAGE")]
+    #[arg(long, value_name = "MESSAGE", allow_hyphen_values = true)]
     pub on_error: Option<String>,
 
     /// Filter paths by substring match (OR logic)

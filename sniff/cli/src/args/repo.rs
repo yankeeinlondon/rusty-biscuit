@@ -331,7 +331,7 @@ pub enum RepoSubcommand {
         no_error: bool,
 
         /// Message to display when no results found
-        #[arg(long, value_name = "MESSAGE")]
+        #[arg(long, value_name = "MESSAGE", allow_hyphen_values = true)]
         on_error: Option<String>,
     },
     /// Output the package area for the current directory
@@ -341,7 +341,7 @@ pub enum RepoSubcommand {
         no_error: bool,
 
         /// Message to display when no results found
-        #[arg(long, value_name = "MESSAGE")]
+        #[arg(long, value_name = "MESSAGE", allow_hyphen_values = true)]
         on_error: Option<String>,
     },
     /// Output only package names that have uncommitted changes
@@ -445,7 +445,7 @@ pub enum RepoSubcommand {
         #[arg(long)]
         no_error: bool,
         /// Message to display when no results found
-        #[arg(long, value_name = "MESSAGE")]
+        #[arg(long, value_name = "MESSAGE", allow_hyphen_values = true)]
         on_error: Option<String>,
     },
     /// Show source code changes for a period
@@ -466,7 +466,7 @@ pub enum RepoSubcommand {
         #[arg(long)]
         no_error: bool,
         /// Message to display when no results found
-        #[arg(long, value_name = "MESSAGE")]
+        #[arg(long, value_name = "MESSAGE", allow_hyphen_values = true)]
         on_error: Option<String>,
     },
     /// Show documentation changes for a period
@@ -487,7 +487,7 @@ pub enum RepoSubcommand {
         #[arg(long)]
         no_error: bool,
         /// Message to display when no results found
-        #[arg(long, value_name = "MESSAGE")]
+        #[arg(long, value_name = "MESSAGE", allow_hyphen_values = true)]
         on_error: Option<String>,
     },
     /// List pull requests for the current repository's remote
@@ -509,7 +509,7 @@ pub enum RepoSubcommand {
         no_error: bool,
 
         /// Message to display when no results found
-        #[arg(long, value_name = "MESSAGE")]
+        #[arg(long, value_name = "MESSAGE", allow_hyphen_values = true)]
         on_error: Option<String>,
     },
 }
