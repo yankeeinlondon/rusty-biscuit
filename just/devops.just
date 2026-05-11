@@ -207,7 +207,7 @@ status subject="":
         echo -e "{{ bold }}{{ blue }}{{ underline }}Features{{ reset }}"
         echo
         if [[ -d features ]]; then
-            eza features -lDga -I '_*' || echo -e "  {{ italic }}no features found{{ reset }}"
+            eza features -lhga --git --hyperlink --group -I '_*' || echo -e "  {{ italic }}no features found{{ reset }}"
         else
             echo -e "  {{ italic }}no features directory{{ reset }}"
         fi
@@ -215,7 +215,7 @@ status subject="":
         echo -e "{{ bold }}Unscheduled{{ reset }}"
         echo
         if [[ -d features/_unscheduled ]]; then
-            eza features/_unscheduled -lDga -s name || echo -e "  {{ italic }}no unscheduled features{{ reset }}"
+            eza features/_unscheduled -lhga --git --hyperlink --group -s name || echo -e "  {{ italic }}no unscheduled features{{ reset }}"
         else
             echo -e "  {{ italic }}no unscheduled directory{{ reset }}"
         fi

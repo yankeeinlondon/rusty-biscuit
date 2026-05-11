@@ -79,3 +79,4 @@ Cargo.lock
 .opencode/package-lock.json
 **/lint-*timing.jsonl
 **/test-*timing.jsonl
+.claudine/tmp/
