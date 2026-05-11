@@ -65,8 +65,7 @@ trace/*
 
 ~$*.docx
 **/debug/*
-Cargo.lock
-**/Cargo.lock/*
+**/Cargo.lock
 
 # Insta pending snapshots (transient — should never be committed)
 **/*.snap.new

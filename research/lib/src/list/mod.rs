@@ -12,4 +12,4 @@ pub mod types;
 pub use discovery::{DiscoveryError, discover_topics};
 pub use filter::{FilterError, apply_filters};
 pub use format::{format_json, format_terminal};
-pub use types::{ResearchOutput, TopicInfo};
+pub use types::{ResearchOutput, TopicInfo, TopicType};
