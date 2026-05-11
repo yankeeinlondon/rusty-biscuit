@@ -23,6 +23,7 @@ use biscuit_terminal::components::status::{Status, StatusState};
 use super::super::section::SectionTracker;
 use super::super::stream_io::StreamOutput;
 use super::exit::exit_code_from_status;
+use super::stream_capture::StreamCapture;
 use super::subagent_watchdog::WatchdogState;
 use super::termination::{
     WatchdogTermination, apply_early_termination_to_summary, wait_with_signal_and_early_termination,
@@ -659,6 +660,10 @@ pub(crate) fn run_child_stream_semantic(
     let first_semantic_at_clone = Arc::clone(&first_semantic_at);
     let first_raw_stdout_at_clone = Arc::clone(&first_raw_stdout_at);
     let stdout_byte_metrics = live_metrics.clone();
+    // Opt-in raw NDJSON capture for post-mortem analysis. Activated by
+    // `CLAUDINE_RAW_STREAM_DIR`; `None` (and zero overhead) otherwise.
+    let stream_capture_owned =
+        StreamCapture::open(timeout_config.provider, child.id(), started_at);
     let stdout_handle = thread::spawn(move || {
         let _stream_guard = stream_span.enter();
         let _parse_span = info_span!("stream_parse").entered();
@@ -687,6 +692,7 @@ pub(crate) fn run_child_stream_semantic(
 
         let mut parser: Box<dyn SemanticStreamParser> = build_parser(output_cb, reasoning_cb);
         let mut fallback_mode = false;
+        let mut stream_capture = stream_capture_owned;
 
         for line in reader.lines() {
             let Ok(line) = line else { break };
@@ -706,6 +712,12 @@ pub(crate) fn run_child_stream_semantic(
             // the silence rule honest. Whitespace-only lines are ignored.
             if let Ok(mut g) = stdout_byte_metrics.lock() {
                 g.record_byte_activity(&line, line_at);
+            }
+
+            // Mirror the raw line to the post-mortem capture file when
+            // `CLAUDINE_RAW_STREAM_DIR` is set. No-op otherwise.
+            if let Some(capture) = stream_capture.as_mut() {
+                capture.record_line(&line, line_at);
             }
 
             if fallback_mode {
