@@ -1,10 +1,39 @@
 # Schemas in Darkmatter
 
-Darkmatter brings in the ability to define and evaluate schema's for Frontmatter.
+Darkmatter brings in the ability to define, detect and evaluate schemas for Frontmatter.
 
-## Types
 
-The types which Darkmatter provides are:
+## Schema Definition
+
+There is no formalized spec for schemas in Frontmatter nor in YAML but with YAML there is a strong _informal_ approach of setting
+the `$schema` property as a reference to a JSON-Schema. We will leverage that informal starting point but we want to ensure that also design a solution where non-technical people can easily create a schema easily and not deal with the non-ergonomic nature of
+JSON Schemas.
+
+- **Decision #1** the `$schema` property will be reserved for schema definitions in Darkmatter
+- **Decision #2** the _value_ of `$schema` can point to a URI of a JSON Schema but we will also allow it to be defined in what we'll call **SimplifiedSchema**
+- **Decision #3** all valid `SimplifiedSchema` definitions must be able to efficiently be converted into a JSON schema
+- **Decision #4** all schema validation will be done against JSON Schemas
+
+## SimplifiedSchema Definitions
+
+A `SimplifiedSchema` definition might look something like:
+
+```yaml
+$schema:
+    name: string
+    age: number
+```
+
+- the simplicity of this grammar makes it easily usable by a large set of people and keeps friction low.
+- the syntax is:
+    - `{property}: {type}` 
+    - `{property}: {type}({constraints})`
+    - or `{property}: {type} -> {description}` / `{property}: {type}({constraints}) -> {description}`
+- all properties defined are _optional_ unless constrained to be **required**
+
+### Types
+
+The types which `SimplifiedSchema` provides are:
 
 - `string` - any string value
 - `number` - any numeric value
@@ -14,13 +43,22 @@ The types which Darkmatter provides are:
 - `object` - a dictionary is any object key/value shape
 - `file` - a file reference which follows the conventions put in place by the `biscuit-file` library's `FileReference`
 - `enum` - an enumerated set of values
-- `any` - can represent any type which by itself is not terribly useful as this is what the _type_ of any undefined Frontmatter property is anyway. It most commonly used in conjunction with the array modifier as `any[]` to generically represent an array of any type.
+- `any` - allows any type of value; also allows this to be _constrained_ as **required**
 
 In addition we represent arrays of each of these types with a trailing `[]`.
 
 ### Type Constraints
 
-Of the types above the `enum` type is the only one which _requires_ that constraints be defined:
+All types allow constraints to be used to further _constrain_ the valid types. The type of constraints allowed vary by type
+but all type allow for the `required` constraint:
+
+```yaml
+$schema:
+    name: string(required)
+    age: number
+```
+
+> makes the `name` property required
 
 #### Enumerations
 
