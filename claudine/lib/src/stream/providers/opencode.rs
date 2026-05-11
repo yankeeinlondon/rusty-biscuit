@@ -24,7 +24,6 @@
 //! - Anything else → [`SemanticEvent::ProviderExtension`].
 
 use std::collections::HashMap;
-use std::time::Instant;
 
 use serde_json::{Map, Value};
 use tracing::debug;
@@ -715,6 +714,7 @@ fn classify_error(error_kind: Option<&str>, message: Option<&str>) -> SemanticEr
 #[cfg(test)]
 mod tests {
     use std::sync::{Arc, Mutex};
+    use std::time::Instant;
 
     use super::*;
     use crate::stream::progress::LiveMetricsState;
