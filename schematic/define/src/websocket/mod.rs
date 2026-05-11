@@ -88,436 +88,20 @@
 //! assert_eq!(api.endpoints.len(), 1);
 //! ```
 
+mod hints;
+mod lifecycle;
+mod params;
+
+pub use hints::{
+    AuthFlowHints, CorrelationHints, FrameFormat, HeartbeatHints, RequestIdType,
+    WebSocketEndpointHints, WebSocketRuntimeHints,
+};
+pub use lifecycle::{ConnectionLifecycle, MessageDirection, MessageSchema};
+pub use params::{ConnectionParam, ParamType};
+
 use serde::{Deserialize, Serialize};
-use strum::{Display, EnumIter, EnumString};
 
 use crate::auth::AuthStrategy;
-use crate::schema::Schema;
-
-// ========== Runtime Hint Types ==========
-
-/// Frame format used by the WebSocket API.
-///
-/// Determines how outbound messages are framed and how inbound frames
-/// are decoded by the generated runtime.
-///
-/// ## Examples
-///
-/// ```
-/// use schematic_define::websocket::FrameFormat;
-/// use std::str::FromStr;
-///
-/// assert_eq!(FrameFormat::default(), FrameFormat::JsonText);
-/// assert_eq!(FrameFormat::from_str("json_binary").unwrap(), FrameFormat::JsonBinary);
-/// ```
-#[derive(
-    Debug,
-    Clone,
-    Copy,
-    Default,
-    PartialEq,
-    Eq,
-    Hash,
-    Serialize,
-    Deserialize,
-    Display,
-    EnumIter,
-    EnumString,
-)]
-#[serde(rename_all = "snake_case")]
-#[strum(serialize_all = "snake_case")]
-pub enum FrameFormat {
-    /// JSON payloads sent as text frames (most common).
-    #[default]
-    JsonText,
-    /// JSON payloads sent as binary frames.
-    JsonBinary,
-    /// Raw binary payloads (no JSON envelope).
-    RawBinary,
-    /// Mixed: some messages use text, others use binary.
-    Mixed,
-}
-
-/// Type used for request correlation IDs.
-///
-/// ## Examples
-///
-/// ```
-/// use schematic_define::websocket::RequestIdType;
-/// use std::str::FromStr;
-///
-/// assert_eq!(RequestIdType::default(), RequestIdType::U64);
-/// assert_eq!(RequestIdType::from_str("string").unwrap(), RequestIdType::String);
-/// ```
-#[derive(
-    Debug,
-    Clone,
-    Copy,
-    Default,
-    PartialEq,
-    Eq,
-    Hash,
-    Serialize,
-    Deserialize,
-    Display,
-    EnumIter,
-    EnumString,
-)]
-#[serde(rename_all = "snake_case")]
-#[strum(serialize_all = "snake_case")]
-pub enum RequestIdType {
-    /// 64-bit unsigned integer IDs (monotonic).
-    #[default]
-    U64,
-    /// String-based IDs.
-    String,
-}
-
-/// Correlation hints for request-response matching over WebSocket.
-///
-/// When present, the generator produces `request()` methods that correlate
-/// outbound requests with inbound responses using an ID field.
-///
-/// ## Examples
-///
-/// ```
-/// use schematic_define::websocket::CorrelationHints;
-///
-/// let hints = CorrelationHints {
-///     request_id_field: "id".to_string(),
-///     response_id_field: "id".to_string(),
-///     default_timeout_secs: 30,
-/// };
-/// assert_eq!(hints.request_id_field, "id");
-/// ```
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct CorrelationHints {
-    /// JSON field path for the request ID in outbound messages.
-    pub request_id_field: String,
-    /// JSON field path for the correlation ID in inbound responses.
-    pub response_id_field: String,
-    /// Default timeout in seconds for correlated requests.
-    #[serde(default = "default_correlation_timeout")]
-    pub default_timeout_secs: u64,
-}
-
-fn default_correlation_timeout() -> u64 {
-    30
-}
-
-/// Auth flow hints for WebSocket APIs that use message-based authentication.
-///
-/// When present, the generator produces auth challenge/response handling
-/// in the connection state machine.
-///
-/// ## Examples
-///
-/// ```
-/// use schematic_define::websocket::AuthFlowHints;
-///
-/// let hints = AuthFlowHints {
-///     challenge_message: "auth_required".to_string(),
-///     auth_request_schema: "AuthMessage".to_string(),
-///     success_indicator: Some("authenticated".to_string()),
-///     failure_indicator: Some("authentication_failed".to_string()),
-/// };
-/// ```
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct AuthFlowHints {
-    /// Name of the server message that signals an auth challenge.
-    pub challenge_message: String,
-    /// Schema name for the auth request message the client must send.
-    pub auth_request_schema: String,
-    /// Optional message name or field value indicating auth success.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub success_indicator: Option<String>,
-    /// Optional message name or field value indicating auth failure.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub failure_indicator: Option<String>,
-}
-
-/// Heartbeat configuration hints for WebSocket endpoints.
-///
-/// ## Examples
-///
-/// ```
-/// use schematic_define::websocket::HeartbeatHints;
-///
-/// let hints = HeartbeatHints {
-///     interval_secs: 30,
-///     timeout_secs: Some(10),
-/// };
-/// assert_eq!(hints.interval_secs, 30);
-/// ```
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct HeartbeatHints {
-    /// Interval in seconds between heartbeat messages.
-    pub interval_secs: u64,
-    /// Optional timeout in seconds to wait for heartbeat response.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub timeout_secs: Option<u64>,
-}
-
-/// Runtime hints for a WebSocket API.
-///
-/// These hints guide the code generator to produce runtime-capable clients
-/// with appropriate framing, reconnect, and ID strategies. All fields have
-/// sensible defaults so existing definitions remain valid without changes.
-///
-/// ## Examples
-///
-/// ```
-/// use schematic_define::websocket::{WebSocketRuntimeHints, FrameFormat, RequestIdType};
-///
-/// // All defaults
-/// let hints = WebSocketRuntimeHints::default();
-/// assert_eq!(hints.frame_format, FrameFormat::JsonText);
-/// assert!(hints.supports_reconnect);
-/// assert_eq!(hints.request_id_type, RequestIdType::U64);
-///
-/// // Custom configuration
-/// let hints = WebSocketRuntimeHints {
-///     frame_format: FrameFormat::Mixed,
-///     supports_reconnect: false,
-///     request_id_type: RequestIdType::String,
-/// };
-/// ```
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct WebSocketRuntimeHints {
-    /// Frame format for this API's messages.
-    #[serde(default)]
-    pub frame_format: FrameFormat,
-    /// Whether the API supports client-initiated reconnect.
-    #[serde(default = "default_true")]
-    pub supports_reconnect: bool,
-    /// Type used for request correlation IDs.
-    #[serde(default)]
-    pub request_id_type: RequestIdType,
-}
-
-fn default_true() -> bool {
-    true
-}
-
-impl Default for WebSocketRuntimeHints {
-    fn default() -> Self {
-        Self {
-            frame_format: FrameFormat::default(),
-            supports_reconnect: true,
-            request_id_type: RequestIdType::default(),
-        }
-    }
-}
-
-/// Per-endpoint runtime hints for WebSocket endpoints.
-///
-/// These hints inform the generator about endpoint-specific behavior
-/// like correlation, auth flow, and heartbeat requirements.
-///
-/// ## Examples
-///
-/// ```
-/// use schematic_define::websocket::{WebSocketEndpointHints, CorrelationHints};
-///
-/// // Minimal: no special behavior
-/// let hints = WebSocketEndpointHints::default();
-/// assert!(hints.correlation.is_none());
-/// assert!(hints.auth_flow.is_none());
-/// assert!(hints.heartbeat.is_none());
-///
-/// // With correlation
-/// let hints = WebSocketEndpointHints {
-///     correlation: Some(CorrelationHints {
-///         request_id_field: "id".to_string(),
-///         response_id_field: "id".to_string(),
-///         default_timeout_secs: 30,
-///     }),
-///     ..Default::default()
-/// };
-/// ```
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub struct WebSocketEndpointHints {
-    /// Correlation hints for request-response matching.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub correlation: Option<CorrelationHints>,
-    /// Auth flow hints for message-based authentication.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub auth_flow: Option<AuthFlowHints>,
-    /// Heartbeat configuration hints.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub heartbeat: Option<HeartbeatHints>,
-}
-
-/// Parameter types for WebSocket connection parameters.
-///
-/// These types map to common JSON/query string value types.
-///
-/// ## Examples
-///
-/// ```
-/// use schematic_define::websocket::ParamType;
-/// use std::str::FromStr;
-///
-/// // Display as lowercase
-/// assert_eq!(ParamType::String.to_string(), "string");
-/// assert_eq!(ParamType::Integer.to_string(), "integer");
-///
-/// // Parse from lowercase
-/// assert_eq!(ParamType::from_str("boolean").unwrap(), ParamType::Boolean);
-/// ```
-#[derive(
-    Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Display, EnumIter, EnumString,
-)]
-#[serde(rename_all = "lowercase")]
-#[strum(serialize_all = "lowercase")]
-pub enum ParamType {
-    /// String parameter
-    String,
-    /// Integer parameter (signed 64-bit)
-    Integer,
-    /// Boolean parameter
-    Boolean,
-    /// Floating-point parameter (64-bit)
-    Float,
-}
-
-/// Direction of message flow in a WebSocket connection.
-///
-/// ## Examples
-///
-/// ```
-/// use schematic_define::websocket::MessageDirection;
-/// use std::str::FromStr;
-///
-/// // Display as lowercase
-/// assert_eq!(MessageDirection::Client.to_string(), "client");
-/// assert_eq!(MessageDirection::Server.to_string(), "server");
-/// assert_eq!(MessageDirection::Bidirectional.to_string(), "bidirectional");
-///
-/// // Parse from lowercase
-/// assert_eq!(
-///     MessageDirection::from_str("bidirectional").unwrap(),
-///     MessageDirection::Bidirectional
-/// );
-/// ```
-#[derive(
-    Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Display, EnumIter, EnumString,
-)]
-#[serde(rename_all = "lowercase")]
-#[strum(serialize_all = "lowercase")]
-pub enum MessageDirection {
-    /// Message sent from client to server
-    Client,
-    /// Message sent from server to client
-    Server,
-    /// Message can flow in either direction
-    Bidirectional,
-}
-
-/// A connection parameter for WebSocket endpoints.
-///
-/// Connection parameters are typically passed as query string parameters
-/// when establishing the WebSocket connection.
-///
-/// ## Examples
-///
-/// ```
-/// use schematic_define::websocket::{ConnectionParam, ParamType};
-///
-/// let param = ConnectionParam {
-///     name: "model_id".to_string(),
-///     param_type: ParamType::String,
-///     required: false,
-///     description: Some("The model to use".to_string()),
-/// };
-///
-/// assert_eq!(param.name, "model_id");
-/// assert!(!param.required);
-/// ```
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ConnectionParam {
-    /// Parameter name (used in query string or path).
-    pub name: String,
-    /// Type of the parameter value.
-    pub param_type: ParamType,
-    /// Whether the parameter is required for connection.
-    pub required: bool,
-    /// Human-readable description of the parameter.
-    pub description: Option<String>,
-}
-
-/// A message schema definition for WebSocket communication.
-///
-/// Defines a single message type that can be sent or received
-/// over the WebSocket connection.
-///
-/// ## Examples
-///
-/// ```
-/// use schematic_define::websocket::{MessageSchema, MessageDirection};
-/// use schematic_define::Schema;
-///
-/// let message = MessageSchema {
-///     name: "TextChunk".to_string(),
-///     direction: MessageDirection::Client,
-///     schema: Schema::new("TextChunkMessage"),
-///     description: Some("A chunk of text to process".to_string()),
-/// };
-///
-/// assert_eq!(message.name, "TextChunk");
-/// assert_eq!(message.direction, MessageDirection::Client);
-/// ```
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct MessageSchema {
-    /// Name of this message type (used for generated enum variants).
-    pub name: String,
-    /// Direction this message flows.
-    pub direction: MessageDirection,
-    /// Schema for the message payload.
-    pub schema: Schema,
-    /// Human-readable description of the message.
-    pub description: Option<String>,
-}
-
-/// Lifecycle messages for WebSocket connection management.
-///
-/// Defines optional messages for connection open, close, and keepalive.
-/// These are separate from regular messages as they have special semantics.
-///
-/// ## Examples
-///
-/// ```
-/// use schematic_define::websocket::{ConnectionLifecycle, MessageSchema, MessageDirection};
-/// use schematic_define::Schema;
-///
-/// // Empty lifecycle (no special messages)
-/// let empty = ConnectionLifecycle::default();
-/// assert!(empty.open.is_none());
-/// assert!(empty.close.is_none());
-/// assert!(empty.keepalive.is_none());
-///
-/// // With open/close messages
-/// let lifecycle = ConnectionLifecycle {
-///     open: Some(MessageSchema {
-///         name: "Init".to_string(),
-///         direction: MessageDirection::Client,
-///         schema: Schema::new("InitMessage"),
-///         description: Some("Initialization message".to_string()),
-///     }),
-///     close: None,
-///     keepalive: None,
-/// };
-/// assert!(lifecycle.open.is_some());
-/// ```
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ConnectionLifecycle {
-    /// Message to send when connection is established.
-    pub open: Option<MessageSchema>,
-    /// Message to send before closing the connection.
-    pub close: Option<MessageSchema>,
-    /// Message for keepalive/heartbeat (if required by the API).
-    pub keepalive: Option<MessageSchema>,
-}
 
 /// A single WebSocket endpoint definition.
 ///
@@ -654,6 +238,7 @@ pub struct WebSocketApi {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::Schema;
     use std::str::FromStr;
     use strum::IntoEnumIterator;
 
@@ -915,7 +500,6 @@ mod tests {
 
     #[test]
     fn websocket_api_with_auth_strategy() {
-        // Test that WebSocketApi works with all AuthStrategy variants
         let strategies = vec![
             AuthStrategy::None,
             AuthStrategy::BearerToken { header: None },
@@ -941,7 +525,6 @@ mod tests {
                 runtime: None,
             };
 
-            // Verify it serializes and deserializes correctly
             let serialized = serde_json::to_string(&api).unwrap();
             let deserialized: WebSocketApi = serde_json::from_str(&serialized).unwrap();
             assert_eq!(deserialized.auth, auth);
@@ -1112,7 +695,6 @@ mod tests {
 
     #[test]
     fn websocket_api_without_runtime_deserializes() {
-        // Existing serialized format without runtime field should still work
         let json = r#"{
             "name": "Test",
             "description": "Test API",
@@ -1178,7 +760,6 @@ mod tests {
 
     #[test]
     fn elevenlabs_tts_websocket_example() {
-        // Full example matching the ElevenLabs TTS WebSocket API structure
         let api = WebSocketApi {
             name: "ElevenLabsTTS".to_string(),
             description: "ElevenLabs Text-to-Speech WebSocket API".to_string(),
@@ -1260,7 +841,6 @@ mod tests {
             runtime: None,
         };
 
-        // Verify structure
         assert_eq!(api.name, "ElevenLabsTTS");
         assert_eq!(api.endpoints.len(), 1);
 
@@ -1271,7 +851,6 @@ mod tests {
         assert!(endpoint.lifecycle.close.is_some());
         assert_eq!(endpoint.messages.len(), 3);
 
-        // Verify serde roundtrip
         let serialized = serde_json::to_string_pretty(&api).unwrap();
         let deserialized: WebSocketApi = serde_json::from_str(&serialized).unwrap();
         assert_eq!(deserialized, api);
