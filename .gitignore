@@ -78,3 +78,5 @@ Cargo.lock
 
 .opencode/package-lock.json
 .claudine/tmp/
+open_code-*.meta.json
+open_code-*.ndjson

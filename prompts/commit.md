@@ -31,7 +31,7 @@ This monorepo has the following packages:
 ::block when="ctx.current_package_area"
 However you've started this session in the "{{ctx.current_package_area}}" package area so the most relevant packages to focus on are:
 
-::shell sniff repo packages --package-area "{{ctx.current_package_area}}"
+::shell sniff repo packages --package-area '{{ctx.current_package_area}}'
 
 ::end-block
 
@@ -62,7 +62,7 @@ The lessons learned are found in {{lessons_learned}}
 
 The following files have been staged for commit:
 
-::shell sniff repo staged-files -v --plain --on-error "no staged files; nothing to do!"
+::shell sniff repo staged-files -v --plain --on-error 'no staged files; nothing to do!'
 
 ## Task
 
