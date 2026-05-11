@@ -1,6 +1,6 @@
 ---
 phase: 1
-total_phases: ""
+total_phases: 0
 plan: ""
 dir: "$(dirname '{{plan}}')"
 area: "{{ctx.current_package_area}}"
