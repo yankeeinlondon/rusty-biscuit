@@ -115,8 +115,10 @@ $schema:
 
 #### Files
 
-- A **file** type is a string representation of a file path. 
-- The _validity_ of the **file** type is that the 
+- A **file** _type_ is a string representation of a file path. 
+- The _validity_ of the **file** type is based on:
+    - the FileReference struct can resolve the file reference to a file on the filesystem
+- 
 
 - It allows for magic paths which lead with `@` and all other path variants that the `FileReference` struct provides for but it there is no need to constrain the type to express this. There is, however, a set dimensions that file types can be constrained on:
 
