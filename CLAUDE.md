@@ -45,7 +45,7 @@ Update alongside code changes:
 ## Rules
 
 - **Rule 1** — Think Before Coding.
-    No silent assumptions. State what you're assuming. Surface tradeoffs. Ask before guessing. Push back when a simpler approach exists.
+    No silent assumptions. State what you're assuming. Surface trade-offs. Ask before guessing. Push back when a simpler approach exists.
 - **Rule 2** — Simplicity First.
     Minimum code that solves the problem. No speculative features. No abstractions for single-use code. If a senior engineer would call it overcomplicated — simplify.
 - **Rule 3** — Surgical Changes.

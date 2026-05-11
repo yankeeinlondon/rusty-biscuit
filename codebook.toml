@@ -2,6 +2,7 @@ words = [
     "cliclick",
     "darkmatter",
     "darkmatter's",
+    "doctest",
     "frontmatter",
     "gfm",
     "introducer",
@@ -10,6 +11,7 @@ words = [
     "reflowing",
     "renderable",
     "renderer's",
+    "rustdoc",
     "tmux",
     "wezterm",
 ]
