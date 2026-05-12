@@ -93,13 +93,30 @@ pub fn strip_ansi(input: &str) -> String {
 
     while let Some(ch) = chars.next() {
         if ch == '\u{1b}' {
-            if chars.peek() == Some(&'[') {
-                chars.next();
-                for code in chars.by_ref() {
-                    if ('@'..='~').contains(&code) {
-                        break;
+            match chars.peek() {
+                Some(&'[') => {
+                    chars.next();
+                    for code in chars.by_ref() {
+                        if ('@'..='~').contains(&code) {
+                            break;
+                        }
                     }
                 }
+                Some(&']') => {
+                    chars.next();
+                    for code in chars.by_ref() {
+                        if code == '\u{7}' {
+                            break;
+                        }
+                        if code == '\u{1b}' {
+                            if chars.peek() == Some(&'\\') {
+                                chars.next();
+                            }
+                            break;
+                        }
+                    }
+                }
+                _ => {}
             }
             continue;
         }

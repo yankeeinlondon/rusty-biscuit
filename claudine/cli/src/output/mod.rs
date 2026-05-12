@@ -8,7 +8,6 @@ pub(crate) use api_errors::try_format_api_error;
 pub(crate) use assistant::{render_assistant_markdown, render_assistant_markdown_with_options};
 pub(crate) use switches::{style_cli_switches, truncate_args};
 
-use biscuit_terminal::components::block_quote::BlockQuote;
 use biscuit_terminal::components::list::UnorderedList;
 use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::components::renderable::{Renderable, RenderableContent};
@@ -35,6 +34,7 @@ pub(crate) enum ComposeDisplay {
     InlineCompose,
 }
 
+#[allow(dead_code)]
 fn trim_trailing_blank_rendered_lines(rendered: &str) -> String {
     let mut lines: Vec<&str> = rendered.lines().collect();
     while let Some(last) = lines.last() {
@@ -152,68 +152,30 @@ pub(crate) fn log_wrapper_header(
 ///
 /// In verbose mode the entire prompt is shown. Otherwise the first 10 lines
 /// are rendered with a truncation notice.
-pub(crate) fn log_compose_prompt(prompt: &str, verbose: bool, term: &Terminal) {
-    use biscuit_terminal::utils::color::{Color, Tailwind};
-    use darkmatter::markdown::Markdown;
-    use darkmatter::markdown::output::terminal::{TerminalOptions, for_terminal};
-
-    log::message(&Prose::new("<bold>Agent Prompt:</bold>").render(term));
-
-    let display_text = if verbose {
-        prompt.to_string()
-    } else {
-        let lines: Vec<&str> = prompt.lines().collect();
-        lines
-            .iter()
-            .take(10)
-            .copied()
-            .collect::<Vec<_>>()
-            .join("\n")
+pub(crate) fn log_compose_prompt(
+    prompt: &str,
+    verbose: bool,
+    silent: bool,
+    quiet: bool,
+    term: &Terminal,
+) {
+    use claudine::prompt_reporting::{
+        resolve_user_prompt_report_config, report_user_prompt,
     };
 
-    // Render prompt as Markdown through Darkmatter, constraining width to
-    // account for the block quote border ("▌ " = 2 visible cols) and
-    // margins (2 cols each side).
-    let left_margin: u16 = 2;
-    let right_margin: u16 = 2;
-    let border_width: u16 = 2;
-    let content_width = (term.width() as u16)
-        .saturating_sub(border_width)
-        .saturating_sub(left_margin)
-        .saturating_sub(right_margin);
-    let mut opts = TerminalOptions::default();
-    opts.max_width = Some(content_width);
-    let rendered = match for_terminal(&Markdown::new(display_text.trim()), opts) {
-        Ok(r) => r,
-        Err(_) => display_text.clone(),
-    };
+    let config = resolve_user_prompt_report_config(
+        silent,
+        quiet,
+        verbose,
+        prompt.lines().count(),
+    );
 
-    // Wrap in a BlockQuote with green border, left margin, and no additional
-    // word wrapping (Darkmatter already wrapped to the correct width).
-    let mut block = BlockQuote::new(
-        RenderableContent::from(trim_trailing_blank_rendered_lines(&rendered)),
-        None::<&str>,
-    )
-    .with_left_block_color(Color::Tailwind(Tailwind::Green700))
-    .with_border("▌ ");
-    block.layout_mut().left_margin =
-        biscuit_terminal::utils::layout::Margin::Chars(left_margin as u32);
-    block.layout_mut().right_margin =
-        biscuit_terminal::utils::layout::Margin::Chars(right_margin as u32);
-    log::message(&block.render(term));
-
-    if !verbose && prompt.lines().count() > 10 {
-        log::message(""); // blank line between block quote and bullet
-        log::message(
-            &Prose::new(
-                "- <dim>remaining prompt truncated for brevity, use <blue>--verbose</blue> to show entire prompt</dim>",
-            )
-            .with_word_wrap(WordWrap::WrapProse(None, Some(2)))
-            .render(term),
-        );
+    if let Some(output) = report_user_prompt(prompt, config, term) {
+        log::message(&output);
     }
 }
 
+#[allow(dead_code)]
 pub(crate) fn log_system_prompt(
     effective_sp: &claudine::system_prompt::EffectiveSystemPrompt,
     verbose: bool,
@@ -221,81 +183,70 @@ pub(crate) fn log_system_prompt(
     quiet: bool,
     term: &Terminal,
 ) {
-    use biscuit_terminal::utils::color::{Color, Tailwind};
-    use darkmatter::markdown::Markdown;
-    use darkmatter::markdown::output::terminal::{TerminalOptions, for_terminal};
+    log_system_prompt_with_scope(effective_sp, verbose, silent, quiet, None, term)
+}
+
+pub(crate) fn log_system_prompt_with_scope(
+    effective_sp: &claudine::system_prompt::EffectiveSystemPrompt,
+    verbose: bool,
+    silent: bool,
+    quiet: bool,
+    scope: Option<&Path>,
+    term: &Terminal,
+) {
+    use claudine::prompt_reporting::{
+        parse_frontmatter_verbosity, report_system_prompt_empty,
+        report_system_prompt_with_base, resolve_system_prompt_report_config_with_change,
+        state::check_and_record, PromptVerbosity,
+    };
 
     if silent {
         return;
     }
 
-    match effective_sp {
-        claudine::system_prompt::EffectiveSystemPrompt::None => {
-            if verbose && !quiet {
-                let mut block = BlockQuote::new(
-                    RenderableContent::from("the system prompt has not been modified".to_string()),
-                    None::<&str>,
-                )
-                .with_left_block_color(Color::Tailwind(Tailwind::Orange700))
-                .with_border("▌ ");
-                block.layout_mut().left_margin = biscuit_terminal::utils::layout::Margin::Chars(2);
-                block.layout_mut().right_margin = biscuit_terminal::utils::layout::Margin::Chars(2);
-                log::message(&block.render(term));
-            }
-        }
-        claudine::system_prompt::EffectiveSystemPrompt::Disabled { source: _ } => {
-            if verbose && !quiet {
-                let mut block = BlockQuote::new(
-                    RenderableContent::from("the system prompt has been disabled".to_string()),
-                    None::<&str>,
-                )
-                .with_left_block_color(Color::Tailwind(Tailwind::Orange700))
-                .with_border("▌ ");
-                block.layout_mut().left_margin = biscuit_terminal::utils::layout::Margin::Chars(2);
-                block.layout_mut().right_margin = biscuit_terminal::utils::layout::Margin::Chars(2);
-                log::message(&block.render(term));
-            }
-        }
+    let env_verbosity = std::env::var("CLAUDINE_SYSTEM_PROMPT")
+        .ok()
+        .as_deref()
+        .and_then(PromptVerbosity::parse);
+
+    let (line_count, frontmatter_verbosity, unchanged) = match effective_sp {
         claudine::system_prompt::EffectiveSystemPrompt::Ready(prepared) => {
-            let variant_label = match prepared.mode {
-                claudine::system_prompt::SystemPromptMode::Append => "appended",
-                claudine::system_prompt::SystemPromptMode::Replace => "replaced",
-            };
-            log::message(
-                &Prose::new(format!(
-                    "<bold>System Prompt(<dim><i>{variant_label}</i></dim>):</bold>"
-                ))
-                .render(term),
-            );
-
-            let full_text = &prepared.composed_markdown;
-
-            let left_margin: u16 = 2;
-            let right_margin: u16 = 2;
-            let border_width: u16 = 2;
-            let content_width = (term.width() as u16)
-                .saturating_sub(border_width)
-                .saturating_sub(left_margin)
-                .saturating_sub(right_margin);
-            let mut opts = TerminalOptions::default();
-            opts.max_width = Some(content_width);
-            let rendered = match for_terminal(&Markdown::new(full_text.trim()), opts) {
-                Ok(r) => r,
-                Err(_) => full_text.clone(),
-            };
-
-            let mut block = BlockQuote::new(
-                RenderableContent::from(trim_trailing_blank_rendered_lines(&rendered)),
-                None::<&str>,
+            let frontmatter = parse_frontmatter_verbosity(&prepared.raw_text);
+            let unchanged = scope
+                .map(|s| {
+                    check_and_record(
+                        s,
+                        &prepared.composed_markdown,
+                        prepared
+                            .non_interactive_appendix
+                            .as_ref()
+                            .map(|a| a.composed_markdown.as_str()),
+                    )
+                })
+                .unwrap_or(false);
+            (
+                prepared.composed_markdown.lines().count(),
+                frontmatter,
+                unchanged,
             )
-            .with_left_block_color(Color::Tailwind(Tailwind::Orange700))
-            .with_border("▌ ");
-            block.layout_mut().left_margin =
-                biscuit_terminal::utils::layout::Margin::Chars(left_margin as u32);
-            block.layout_mut().right_margin =
-                biscuit_terminal::utils::layout::Margin::Chars(right_margin as u32);
-            log::message(&block.render(term));
         }
+        _ => (0, None, false),
+    };
+
+    let config = resolve_system_prompt_report_config_with_change(
+        silent,
+        quiet,
+        verbose,
+        env_verbosity,
+        line_count,
+        frontmatter_verbosity,
+        unchanged,
+    );
+
+    if let Some(output) = report_system_prompt_with_base(effective_sp, config, scope, term) {
+        log::message(&output);
+    } else if let Some(output) = report_system_prompt_empty(effective_sp, config, term) {
+        log::message(&output);
     }
 }
 

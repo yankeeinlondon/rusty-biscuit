@@ -1207,7 +1207,7 @@ exit 0
         "Quiet mode should suppress env details but stderr was: {stderr}"
     );
     assert!(
-        stderr_plain.contains("System Prompt(appended):"),
+        stderr_plain.contains("System Prompt(appended)"),
         "Quiet mode should still show the system prompt when set but stderr was: {stderr}"
     );
 

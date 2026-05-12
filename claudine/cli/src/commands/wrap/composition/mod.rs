@@ -1453,7 +1453,15 @@ pub(crate) fn execute_composition_request_inner(
             crate::output::log_wrapper_env_details(&env_plan, None, &term, verbose);
         }
 
-        crate::output::log_system_prompt(&effective_sp, detail_requested, silent, quiet, &term);
+        let scope_for_report = effective_repo_root.unwrap_or(&launch_cwd);
+        crate::output::log_system_prompt_with_scope(
+            &effective_sp,
+            detail_requested,
+            silent,
+            quiet,
+            Some(scope_for_report),
+            &term,
+        );
 
         if matches!(
             effective_sp,
@@ -1464,7 +1472,7 @@ pub(crate) fn execute_composition_request_inner(
         }
 
         if effective_non_interactive {
-            crate::output::log_compose_prompt(&request.prepared.prompt, detail_requested, &term);
+            crate::output::log_compose_prompt(&request.prepared.prompt, detail_requested, silent, quiet, &term);
         }
 
         if !quiet {

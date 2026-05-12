@@ -931,11 +931,16 @@ fn run_provider_wrapper_inner(
             }
         }
 
-        crate::output::log_system_prompt(
+        let scope_for_report = launch_context
+            .repo_root
+            .as_deref()
+            .unwrap_or(&launch_context.cwd);
+        crate::output::log_system_prompt_with_scope(
             &effective_sp,
             detail_requested,
             silent_requested,
             quiet_requested,
+            Some(scope_for_report),
             &term,
         );
 
