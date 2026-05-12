@@ -330,10 +330,23 @@ fn build_arm_validators(
 }
 
 fn positions_for(source: &Markdown) -> PositionMap {
-    // The original frontmatter text is not retained on `Markdown`, so we
-    // re-serialise the parsed map to YAML. Line numbers match the canonical
-    // re-serialised view; this is consistent across runs and good enough for
-    // the CLI's `at line N of frontmatter` hint.
+    // Prefer the original frontmatter text so reported line/column numbers
+    // match the source the user is editing. The raw text is the body
+    // between the leading `---` markers — its line 1 is the file's line 2
+    // (the opening `---` is line 1), so we offset the captured positions
+    // by `LEADING_DELIMITER_LINES`.
+    const LEADING_DELIMITER_LINES: u32 = 1;
+    if let Some(raw) = source.frontmatter().raw_source() {
+        let mut map = validate::build_position_map(raw);
+        for (_, (line, _)) in map.iter_mut() {
+            *line = line.saturating_add(LEADING_DELIMITER_LINES);
+        }
+        return map;
+    }
+
+    // Fall back to re-serialising the parsed map. Used only for
+    // programmatically constructed `Markdown` documents that never went
+    // through the parser; line numbers refer to the canonicalised view.
     let map = source.frontmatter().as_map();
     if map.is_empty() {
         return PositionMap::new();
@@ -395,6 +408,12 @@ fn frontmatter_as_json(source: &Markdown) -> Value {
     let map = source.frontmatter().as_map();
     let mut object = serde_json::Map::with_capacity(map.len());
     for (k, v) in map {
+        // The Darkmatter `$schema` control key is not document data — strip
+        // it before validation so raw JSON Schema baselines with
+        // `additionalProperties: false` don't reject every document.
+        if k == "$schema" {
+            continue;
+        }
         object.insert(k.clone(), v.clone());
     }
     Value::Object(object)

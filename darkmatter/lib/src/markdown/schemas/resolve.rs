@@ -402,6 +402,8 @@ pub fn merge_baseline(
 /// Validates that a baseline JSON Schema is a simple object schema, per the
 /// spec's restriction.
 fn validate_simple_object_schema(schema: &Map<String, Value>) -> Result<(), SchemaError> {
+    // `additionalProperties: true` is permitted (SimplifiedSchema-generated
+    // baselines emit it); `false` and schema-shaped values are not.
     const ALLOWED_KEYS: &[&str] = &[
         "$schema",
         "type",
@@ -435,6 +437,21 @@ fn validate_simple_object_schema(schema: &Map<String, Value>) -> Result<(), Sche
                 ),
                 source: None,
             });
+        }
+    }
+
+    if let Some(ap) = schema.get("additionalProperties") {
+        match ap {
+            Value::Bool(true) => {}
+            _ => {
+                return Err(SchemaError::Baseline {
+                    message: "baseline uses unsupported JSON Schema construct \
+                              `additionalProperties: false`; only simple object \
+                              schemas (properties + required) are allowed"
+                        .into(),
+                    source: None,
+                });
+            }
         }
     }
 
@@ -668,6 +685,51 @@ mod tests {
         let doc = json!({"type":"object","properties":{}});
         let err = merge_baseline(&baseline, doc).unwrap_err();
         assert!(matches!(err, SchemaError::Baseline { .. }));
+    }
+
+    #[test]
+    fn baseline_rejects_additional_properties_false() {
+        let baseline = json!({
+            "type": "object",
+            "properties": { "owner": { "type": "string" } },
+            "additionalProperties": false,
+        });
+        let doc = json!({"type":"object","properties":{}});
+        let err = merge_baseline(&baseline, doc).unwrap_err();
+        match err {
+            SchemaError::Baseline { message, .. } => {
+                assert!(
+                    message.contains("additionalProperties"),
+                    "expected message to mention additionalProperties, got: {message}"
+                );
+            }
+            other => panic!("expected SchemaError::Baseline, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn baseline_rejects_additional_properties_schema() {
+        let baseline = json!({
+            "type": "object",
+            "properties": { "owner": { "type": "string" } },
+            "additionalProperties": { "type": "string" },
+        });
+        let doc = json!({"type":"object","properties":{}});
+        let err = merge_baseline(&baseline, doc).unwrap_err();
+        assert!(matches!(err, SchemaError::Baseline { .. }));
+    }
+
+    #[test]
+    fn baseline_permits_additional_properties_true() {
+        // SimplifiedSchema-generated baselines emit `additionalProperties:
+        // true`; permitting that keeps the generated path working.
+        let baseline = json!({
+            "type": "object",
+            "properties": { "owner": { "type": "string" } },
+            "additionalProperties": true,
+        });
+        let doc = json!({"type":"object","properties":{}});
+        merge_baseline(&baseline, doc).unwrap();
     }
 
     #[test]
