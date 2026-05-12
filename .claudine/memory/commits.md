@@ -28,8 +28,9 @@ description: A record of novel things learned about how to best perform commits 
 - All options must come before the `--` pathspec separator. `git commit --only -- path -m "message"` is wrong because `-m` is then parsed as a path.
 - For committing a single file with path-limiting, use `git commit -m "message" -- path` without `--only`. The `--only` flag is mutually exclusive with a single pathspec argument in git.
 - Quote paths that contain spaces when passing them to `git commit`.
-- Be careful with renames. Committing only the new path records an add and leaves the delete staged. Committing only the old path records the delete but leaves the new file staged as an add. To preserve a rename atomically, either commit without path-limiting (let git infer the paths) or include both old and new paths explicitly.
-  - **Recovery:** If you accidentally committed only the new path (leaving old paths staged as deleted), stage those deletions and make a separate cleanup commit: `git commit -m "chore: complete rename" -- <old_path1> <old_path2>`.
+- Be careful with renames. When files are staged as renamed (R100), `git commit --only` with only the new path can produce incomplete commits that record only the deletion of the old path, not the addition of the new path. To preserve a rename atomically, either commit without path-limiting (let git infer the paths) or include both old and new paths explicitly.
+  - **Recovery:** If a rename commit only recorded deletions (missing the new files), extract the file content from the index blobs directly and create a new commit. Use `git ls-files --stage` to find blob hashes, `git show <hash> > path` to restore content, then `git add` and `git commit` normally.
+  - **Better approach for multi-agent workflows:** Avoid using `--only` with renamed files. Instead, have the orchestrator stage files one group at a time and have subagents commit sequentially, rather than pre-staging all groups and using concurrent `--only` commits.
 - `git commit --only -m "message" -- path` also works for a newly added file, as long as the file has already been staged.
 
 ## History and Verification
