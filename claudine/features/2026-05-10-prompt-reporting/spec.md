@@ -99,10 +99,15 @@ In this release our focus will be on how we're going to _change_ how we report t
             - The system prompt can often be quite long and the user might like _seeing_ it at first but it can become quite repetitive so we will often choose instead prefer the "summary" mode of reporting
             - The summary presents:
                 - if there is a system prompt adjustment:
-                    - `The system prompt was **{action}**; the content was _composed_ from <a href={absolute-path-to-prompt}>{relative-path-to-prompt}</a>. {token-message}`
+                    - `The system prompt was **{action}**; the content was _composed_ from <a href={absolute-path-to-prompt}>{display-label}</a>. {token-message}`
                     - where `{action}` is:
                         - `appended to`
                         - `replaced`
+                    - where `{display-label}` is resolved in this order:
+                        1. **Nerd Font glyph (in-repo only):** when the terminal reports Nerd Font support (`Terminal::is_nerd_font == Some(true)`) **and** the prompt file resolves inside the supplied base directory, render the single glyph **`\u{f02a2}`** (Nerd Font codepoint `f02a2`) as the visible label. The path itself is not shown — the glyph stands in for it, with the absolute path carried by the OSC8 target.
+                        2. **Relative path with `./` prefix:** otherwise, when the prompt file resolves inside the supplied base directory, render the relative path prefixed with `./` (e.g., `./system-prompt.md`, `./.claude/system-prompt.md`, `./prompts/agents/foo.md`). The path is dynamic — any subdirectory depth is supported; only the `./` prefix and the path-from-base are guaranteed.
+                        3. **Absolute path:** when the prompt file is outside the base or no base was supplied, render the absolute path (no `./` prefix).
+                    - **Hyperlink styling:** the visible label is rendered in **blue** (`Tailwind::Blue400`) so the reader gets a visual hint that it is a link. This applies to every `{display-label}` variant above, including the Nerd Font glyph. The OSC8 target is always the absolute `file://` URL. On terminals without OSC8 support, the blue-styled label still renders as plain text (and if Nerd Fonts are also unsupported, variant 1 falls through to variant 2 or 3).
                     - where `{token-message}` is:
                         - token estimation uses **biscuit-terminal's FileTree utility** (not a simple character-count heuristic)
                         - the token count measures the **composed system-prompt.md content** (the portion Claudine has access to)
@@ -138,9 +143,11 @@ In this release our focus will be on how we're going to _change_ how we report t
                     - suggests that only the Summary Report should be presented 
                 - `silent`
                     - suggests that nothing is reported
-    - The **BODY** is rendered as BlockQuote with a orange vertical line
-        - the vertical line should be a centered line which aligns with the center of the icon found in the first line
-        - the content of prompt will be rendered for the terminal using the Darkmatter library to ensure that Markdown content is represented in a user friendly way.
+    - The **BODY** is rendered as a single `biscuit_terminal::components::BlockQuote` with an **orange** vertical line.
+        - **One BlockQuote covers everything below the header.** The Summary sentence (when shown) and any Partial/Full prompt content (when shown) live inside the **same** BlockQuote so the orange bar runs continuously from below the icon to the end of the body. The Summary sentence must never be emitted as a bare `Prose` line.
+        - **Border alignment:** the BlockQuote uses `left_margin = 1` so the `│` glyph lands at column 1 — visually centered beneath the 2-column wide 📕 emoji on the header line above.
+        - **Word-wrap:** the BlockQuote's default `WordWrap::WrapProse` policy is used; the body wraps to the terminal width with no manual line truncation. If a future change to `BlockQuote` defaults removes this, prompt reporting must opt back in explicitly.
+        - the content of the prompt is rendered for the terminal using the `darkmatter` library so Markdown is represented in a user-friendly way.
         - **Markdown rendering constraint:** rendered output must never contain more than two consecutive blank lines. Any larger gaps must be collapsed to at most two blank lines.
     - If no CLI switches, ENV variables, or Frontmatter hints are found the default behavior for the system prompt is to only render the **Summary** view in the body.
 
@@ -154,15 +161,15 @@ The User Prompt uses a simpler reporting model than the System Prompt:
 - **NO `CLAUDINE_USER_PROMPT`** environment variable
 - **NO frontmatter verbosity support** for User Prompt
 - The User Prompt header (`🗣️ Agent Prompt`) is shown by default
-- `--quiet` suppresses the User Prompt **ENTIRELY** (both header and body)
-- `--silent` suppresses everything
+- `--quiet` **does NOT suppress the User Prompt.** It is a no-op for the Agent Prompt; both the header and the body still render. (`--quiet` is a System-Prompt-only control.)
+- `--silent` suppresses everything (header and body).
 - The body is driven by length and the `--verbose` override:
     - by default, the body is shown in full if it is 40 lines or fewer
     - when content surpasses 40 lines, the body uses `FrontBack` truncation (first 20 lines, then an `hr` marker, then the last 10 lines)
     - `--verbose` forces the full body to be shown regardless of length
-    - The body of a User Prompt is rendered as a BlockQuote with a **green** vertical line at the left
+    - The body of a User Prompt is rendered as a single `biscuit_terminal::components::BlockQuote` with a **green** vertical line.
+        - **Border alignment:** the BlockQuote uses `left_margin = 1` so the `│` glyph lands at column 1 — visually centered beneath the 2-column wide 🗣️ emoji on the header line above.
+        - **Word-wrap:** the BlockQuote's default `WordWrap::WrapProse` policy is used; the body wraps to terminal width. If `BlockQuote` defaults ever change, prompt reporting must opt back in explicitly.
         - all leading whitespace should be removed in all cases
         - it's important that FrontBack strategy _not_ have a blank line at the first or last line of its output; when that happens, advance that section (front or back) by one line to get to a valid condition
         - the same markdown rendering constraint applies: output must never contain more than two consecutive blank lines
-
-> **Note:** The User Prompt section may need continuation beyond this point.
