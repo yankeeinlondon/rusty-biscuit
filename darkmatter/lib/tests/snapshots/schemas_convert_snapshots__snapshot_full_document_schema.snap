@@ -1,0 +1,73 @@
+---
+source: darkmatter/lib/tests/schemas_convert_snapshots.rs
+expression: convert_yaml(yaml)
+---
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "properties": {
+    "author": {
+      "anyOf": [
+        {
+          "pattern": "^(?!\\s*$).+",
+          "type": "string"
+        },
+        {
+          "format": "email",
+          "type": "string"
+        }
+      ]
+    },
+    "hero": {
+      "format": "darkmatter-file",
+      "type": "string",
+      "x-darkmatter-match": [
+        "*.png",
+        "*.jpg"
+      ]
+    },
+    "homepage": {
+      "format": "uri",
+      "type": "string",
+      "x-darkmatter-url-scheme": [
+        "https"
+      ]
+    },
+    "rating": {
+      "default": 3,
+      "maximum": 5,
+      "minimum": 0,
+      "type": "number"
+    },
+    "slug": {
+      "pattern": "^[a-z0-9-]+$",
+      "type": "string"
+    },
+    "status": {
+      "default": "draft",
+      "enum": [
+        "draft",
+        "published",
+        "archived"
+      ]
+    },
+    "tags": {
+      "items": {
+        "type": "string"
+      },
+      "maxItems": 5,
+      "minItems": 1,
+      "type": "array",
+      "uniqueItems": true
+    },
+    "title": {
+      "pattern": "^(?!\\s*$).+",
+      "type": "string"
+    }
+  },
+  "required": [
+    "title",
+    "slug"
+  ],
+  "type": "object"
+}

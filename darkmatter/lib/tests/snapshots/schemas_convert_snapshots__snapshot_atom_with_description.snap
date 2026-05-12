@@ -1,0 +1,18 @@
+---
+source: darkmatter/lib/tests/schemas_convert_snapshots.rs
+expression: "convert_atom(\"string(required) -> The author's full name\")"
+---
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "properties": {
+    "field": {
+      "description": "The author's full name",
+      "type": "string"
+    }
+  },
+  "required": [
+    "field"
+  ],
+  "type": "object"
+}

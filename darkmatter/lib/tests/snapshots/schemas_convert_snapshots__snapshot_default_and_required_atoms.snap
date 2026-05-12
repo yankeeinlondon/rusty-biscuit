@@ -1,0 +1,24 @@
+---
+source: darkmatter/lib/tests/schemas_convert_snapshots.rs
+expression: convert_yaml(yaml)
+---
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "properties": {
+    "rating": {
+      "default": 3,
+      "maximum": 5,
+      "minimum": 0,
+      "type": "number"
+    },
+    "slug": {
+      "pattern": "^(?!\\s*$).+",
+      "type": "string"
+    }
+  },
+  "required": [
+    "slug"
+  ],
+  "type": "object"
+}
