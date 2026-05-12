@@ -26,7 +26,9 @@ description: A record of novel things learned about how to best perform commits 
 
 - `git commit --only -m "message" -- path1 path2` is the recommended form when committing a specific subset of staged files. Always use `--only` to explicitly limit the commit to only the named paths.
 - All options must come before the `--` pathspec separator. `git commit --only -- path -m "message"` is wrong because `-m` is then parsed as a path.
-- For committing a single file with path-limiting, use `git commit -m "message" -- path` without `--only`. The `--only` flag is mutually exclusive with a single pathspec argument in git.
+- `git commit -m "message" -- path` WITHOUT `--only` commits ALL staged files, not just the named paths. The paths after `--` are purely to disambiguate `-m` from a path argument; they do not scope the commit. Always use `--only` when committing specific staged files:
+  - `git commit --only -m "message" -- path1 path2` — commits only path1 and path2
+  - `git commit -m "message" -- path1 path2` — commits ALL staged files (the paths are informational only)
 - Quote paths that contain spaces when passing them to `git commit`.
 - Be careful with renames. When files are staged as renamed (R100), `git commit --only` with only the new path can produce incomplete commits that record only the deletion of the old path, not the addition of the new path. To preserve a rename atomically, either commit without path-limiting (let git infer the paths) or include both old and new paths explicitly.
   - **Recovery:** If a rename commit only recorded deletions (missing the new files), extract the file content from the index blobs directly and create a new commit. Use `git ls-files --stage` to find blob hashes, `git show <hash> > path` to restore content, then `git add` and `git commit` normally.
