@@ -1,8 +1,5 @@
 ---
 description: "Creates a multi-phase, high confidence plan from a _feature_ or _fix_"
-parameters:
-    spec: file
-    
 root: "{{ctx.repo_root}}"
 area: "{{ctx.current_package_area}}"
 dir: "$(dirname '{{ spec || design }}')"

@@ -26,21 +26,21 @@ plan-implement-review:
     planning_agent="$(just _choose_agent 'Choose the planning Agent')"
     planning_model=""
     planning_model_param=""
-    if [[ "${agent}" == "opencode" ]]; then
+    if [[ "${planning_agent}" == "opencode" ]]; then
         planning_model="$(just _choose_model_for_agent "${planning_agent}")"
         planning_model_param="--model ${planning_model}"
     fi
     implementing_agent="$(just _choose_agent 'Choose the Implementing Agent')"
     implementing_model=""
     implementing_model_param=""
-    if [[ "${agent}" == "opencode" ]]; then
+    if [[ "${implementing_agent}" == "opencode" ]]; then
         implementing_model="$(just _choose_model_for_agent "${implementing_agent}")"
         implementing_model_param="--model ${implementing_model}"
     fi
     reviewing_agent="$(just _choose_agent 'Choose the reviewing Agent')"
     reviewing_model=""
     reviewing_model_param=""
-    if [[ "${agent}" == "opencode" ]]; then
+    if [[ "${reviewing_agent}" == "opencode" ]]; then
         reviewing_model="$(just _choose_model_for_agent "${reviewing_agent}")"
         reviewing_model_param="--model ${reviewing_model}"
     fi
@@ -58,7 +58,7 @@ plan-implement-review:
     fi
     claudine compose @prompts/plan.md -y spec="$(sniff repo root)/${spec}" plan="${plan}" --${planning_agent} ${planning_model_param}
     claudine compose @prompts/implement-phase.md -y plan="$(sniff repo root)/${dir}/${plan}" --${implementing_agent} ${implementing_model_param}
-    claudine compose @prompts/review-feature.md -y spec="$(sniff repo root)/${spec}" iteration=1
+    claudine compose @prompts/review-feature.md -y spec="$(sniff repo root)/${spec}" iteration=1 --${reviewing_agent} ${reviewing_model_param}
     echo
     echo -e "The specification file {{ blue }}${spec}{{ reset }} drove a plan, implementation, and review."
     echo

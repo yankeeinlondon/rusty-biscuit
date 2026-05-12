@@ -1,6 +1,7 @@
 words = [
     "boolish",
     "cliclick",
+    "conformant",
     "darkmatter",
     "darkmatter's",
     "diagnosability",
@@ -14,6 +15,7 @@ words = [
     "ime",
     "introducer",
     "ipc",
+    "jsonschema",
     "mcp",
     "minimax",
     "misclassifies",
@@ -27,10 +29,12 @@ words = [
     "repo's",
     "rstest",
     "rustdoc",
+    "schemars",
     "subagents",
     "tmux",
     "tokio",
     "undeduplicated",
+    "valico",
     "wez",
     "wezterm",
 ]

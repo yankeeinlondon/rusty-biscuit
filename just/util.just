@@ -109,9 +109,9 @@ _choose_spec filter="":
     #!/usr/bin/env bash
     set -euo pipefail
     if [[ -z "{{ filter }}" ]]; then
-        mapfile -t files < <(fd -g '*spec*\.md')
+        mapfile -t files < <(fd -g '*spec*\.md' --exclude '_completed')
     else
-        mapfile -t files < <(fd -g '*spec*\.md' | rg "{{ filter }}")
+        mapfile -t files < <(fd -g '*spec*\.md' --exclude '_completed' | rg "{{ filter }}")
     fi
     if [[ ${#files[@]} -eq 1 ]]; then
         echo "${files[0]}"
