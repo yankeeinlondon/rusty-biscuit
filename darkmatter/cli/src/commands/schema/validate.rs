@@ -30,11 +30,14 @@ enum FileOutcome {
 
 /// Run `md schema validate`.
 ///
-/// Drives validation of each input file and exits with the appropriate code:
+/// Drives validation of each input file and exits with the appropriate code.
+/// When multiple kinds of failure occur in the same invocation, the more
+/// specific failure wins (parse → schema-load → validation):
 ///
 /// - `0` — all files validated successfully
 /// - `1` — one or more files failed validation
-/// - `2` — schema or baseline could not be loaded
+/// - `2` — schema or baseline could not be loaded (CLI baseline _or_ a
+///         per-document `$schema` reference)
 /// - `3` — at least one file's frontmatter could not be parsed
 pub fn run_validate(
     files: &[PathBuf],
@@ -52,20 +55,20 @@ pub fn run_validate(
 
     let terminal = Terminal::default();
     let mut any_parse_error = false;
-    let mut any_failure = false;
+    let mut any_schema_error = false;
+    let mut any_validation_failure = false;
 
     for file in files {
         let outcome = validate_one(&api, file);
         match &outcome {
             FileOutcome::Validated { report_valid, .. } if !report_valid => {
-                any_failure = true;
+                any_validation_failure = true;
             }
             FileOutcome::ParseError(_) => {
                 any_parse_error = true;
-                any_failure = true;
             }
             FileOutcome::SchemaError(_) => {
-                any_failure = true;
+                any_schema_error = true;
             }
             FileOutcome::Validated { .. } => {}
         }
@@ -75,7 +78,10 @@ pub fn run_validate(
     if any_parse_error {
         std::process::exit(3);
     }
-    if any_failure {
+    if any_schema_error {
+        std::process::exit(2);
+    }
+    if any_validation_failure {
         std::process::exit(1);
     }
     Ok(())
@@ -173,12 +179,21 @@ fn emit_pretty(file: &Path, outcome: &FileOutcome, quiet: bool, terminal: &Termi
             println!("{}", Prose::new(header).render(terminal));
             for problem in problems {
                 let location = format_location(problem);
-                let path_label = if problem.path.is_empty() {
-                    "<root>".to_string()
+                let mut prefix_parts: Vec<String> = Vec::new();
+                if let Some(arm_index) = problem.arm_index {
+                    prefix_parts.push(format!("arm[{arm_index}]:"));
+                }
+                if !problem.path.is_empty() {
+                    prefix_parts.push(escape_prose(&problem.path));
+                } else if problem.arm_index.is_none() {
+                    prefix_parts.push("root".to_string());
+                }
+                let prefix = if prefix_parts.is_empty() {
+                    String::new()
                 } else {
-                    problem.path.clone()
+                    format!("{} ", prefix_parts.join(" "))
                 };
-                let bullet = format!("  • {path_label} {}", escape_prose(&problem.message));
+                let bullet = format!("  • {prefix}{}", escape_prose(&problem.message));
                 println!("{}", Prose::new(bullet).render(terminal));
                 if !location.is_empty() {
                     let loc_line = format!("      <dim>at {location}</dim>");

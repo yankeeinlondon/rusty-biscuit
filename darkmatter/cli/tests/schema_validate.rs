@@ -221,6 +221,107 @@ fn schema_validate_json_reports_arm_index_for_root_union() {
 }
 
 #[test]
+fn schema_validate_unresolved_document_schema_exits_2() {
+    let tmp = TempDir::new().unwrap();
+    let doc = write_file(
+        &tmp,
+        "post.md",
+        "---\n$schema: ./missing.yaml\ntitle: hi\n---\nBody\n",
+    );
+
+    md_cmd()
+        .args(["schema", "validate"])
+        .arg(&doc)
+        .assert()
+        .code(2);
+}
+
+#[test]
+fn schema_validate_unresolved_document_schema_outranks_validation_failure() {
+    let tmp = TempDir::new().unwrap();
+    // One file has a missing `$schema` reference (schema-load error → 2);
+    // the other has a normal validation failure (→ 1). Schema-load errors
+    // outrank validation failures so the overall exit code must be 2.
+    let bad_schema = write_file(
+        &tmp,
+        "bad_schema.md",
+        "---\n$schema: ./missing.yaml\ntitle: hi\n---\nBody\n",
+    );
+    let bad_value = write_file(
+        &tmp,
+        "bad_value.md",
+        "---\n$schema:\n  title: 'string(required)'\nother: stuff\n---\nBody\n",
+    );
+
+    md_cmd()
+        .args(["schema", "validate"])
+        .arg(&bad_schema)
+        .arg(&bad_value)
+        .assert()
+        .code(2);
+}
+
+#[test]
+fn schema_validate_pretty_prefixes_root_union_problems_with_arm_index() {
+    let tmp = TempDir::new().unwrap();
+    let doc = write_file(
+        &tmp,
+        "draft.md",
+        "---\n$schema:\n  - title: 'string(required)'\n  - name: 'string(required)'\nother: value\n---\nBody\n",
+    );
+
+    md_cmd()
+        .args(["schema", "validate"])
+        .arg(&doc)
+        .assert()
+        .code(1)
+        .stdout(predicate::str::contains("arm["));
+}
+
+#[test]
+fn schema_validate_pretty_does_not_render_root_label_as_markup() {
+    let tmp = TempDir::new().unwrap();
+    // Missing-required at the root produced `<root>` markup which the
+    // Prose renderer interpreted as a tag. The rendered output must not
+    // leak a closing `</root>` (or any other angle-bracketed artifact).
+    let doc = write_file(
+        &tmp,
+        "draft.md",
+        "---\n$schema:\n  title: 'string(required)'\nother: stuff\n---\nBody\n",
+    );
+
+    md_cmd()
+        .args(["schema", "validate"])
+        .arg(&doc)
+        .assert()
+        .code(1)
+        .stdout(predicate::str::contains("</root>").not())
+        .stdout(predicate::str::contains("<root>").not());
+}
+
+#[test]
+fn schema_validate_pretty_reports_source_line_for_problem() {
+    let tmp = TempDir::new().unwrap();
+    // The opening `---` is line 1. `$schema:` is line 2, the inline
+    // mapping spans lines 3-4, the blank comment is line 5, and the
+    // invalid `rating: nope` value is on line 6 of the source. The
+    // position must be reported against the original source, not against
+    // a re-serialised view.
+    let doc = write_file(
+        &tmp,
+        "draft.md",
+        "---\n$schema:\n  rating: number\n# important: do not reorder\n\nrating: nope\n---\nBody\n",
+    );
+
+    md_cmd()
+        .args(["schema", "validate", "--format", "json"])
+        .arg(&doc)
+        .assert()
+        .code(1)
+        .stdout(predicate::str::contains("\"line\":6"));
+}
+
+#[test]
 fn schema_validate_multiple_files_aggregates_failure() {
     let tmp = TempDir::new().unwrap();
     let good = write_file(
