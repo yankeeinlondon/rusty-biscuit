@@ -62,7 +62,12 @@ plan-implement-review:
         exit 0
     fi
     claudine compose @prompts/plan.md -y spec="${spec}" plan="${plan}" --${planning_agent} ${planning_model_param}
-    total_phases="$(md get "${fq_path}/${plan}" phases)"
+    plan_path="${fq_path}/${plan}"
+    total_phases="$(md get "${plan_path}" phases)"
+    if [[ -z "${total_phases}" ]] || ! [[ "${total_phases}" =~ ^[0-9]+$ ]]; then
+        echo -e "{{ red }}{{ bold }}ERROR:{{ reset }} Expected a numeric 'phases' frontmatter field in {{ blue }}${plan_path}{{ reset }} but got: '{{ dim }}${total_phases}{{ reset }}'" >&2
+        exit 1
+    fi
     echo
     echo -e "Detected {{ yellow }}${total_phases}{{ reset }} phases in the plan"
     echo
@@ -78,7 +83,7 @@ implement-review:
     #!/usr/bin/env bash
     set -euo pipefail
     plan="$(just _choose_plan)"
-    dir="$(dirname plan)"
+    dir="$(dirname "${plan}")"
 
 
     implementing_agent="$(just _choose_agent 'Choose the Implementing Agent')"
