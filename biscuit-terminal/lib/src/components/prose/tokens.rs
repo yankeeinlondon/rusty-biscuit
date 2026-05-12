@@ -187,6 +187,25 @@ pub(super) fn parse_tokens_inner(
             if found_close && !tag_content.starts_with('/') {
                 // Parse the opening tag
                 if let Some((tag_name, attrs)) = parse_opening_tag(&tag_content) {
+                    // Probe whether this is a recognized tag *before*
+                    // consuming any further input. An unrecognized tag must
+                    // not trigger the inner-content scan: that would slurp
+                    // the rest of the string looking for a closing tag that
+                    // does not exist, and then the legacy fallback would
+                    // synthesize a fictitious `</tag>` in the output. For
+                    // arbitrary user-supplied text like `<root>` or
+                    // `<missing.yaml>` the only correct behaviour is to
+                    // pass `<tag_content>` through as literal text.
+                    let action = match block_tag_to_escape(&tag_name, &attrs, term) {
+                        Some(action) => action,
+                        None => {
+                            result.push('<');
+                            result.push_str(&tag_content);
+                            result.push('>');
+                            continue;
+                        }
+                    };
+
                     // Pre-compute tag patterns once
                     let closing_tag = format!("</{}>", tag_name);
                     let opening_tag_full = format!("<{}>", tag_name);
@@ -234,7 +253,7 @@ pub(super) fn parse_tokens_inner(
                     }
 
                     // Apply the block style
-                    if let Some(action) = block_tag_to_escape(&tag_name, &attrs, term) {
+                    {
                         let layer = block_tag_layer(&tag_name);
 
                         match action {
@@ -288,15 +307,7 @@ pub(super) fn parse_tokens_inner(
                                 continue;
                             }
                         }
-                    } else {
-                        // Unknown tag, output as-is
-                        result.push('<');
-                        result.push_str(&tag_content);
-                        result.push('>');
-                        result.push_str(&parse_tokens_inner(&inner_content, term, state));
-                        result.push_str(&closing_tag);
                     }
-                    continue;
                 }
             }
 

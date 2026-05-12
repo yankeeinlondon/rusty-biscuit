@@ -1,0 +1,4 @@
+$schema:
+  tags: string[]
+  mixed: any[]
+  scores: number(integer)[]
