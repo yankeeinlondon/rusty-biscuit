@@ -51,6 +51,12 @@ pub enum TruncationMode {
 pub struct SystemPromptReportConfig {
     /// Whether to show the header line (e.g. "📕 System Prompt(appended)").
     pub show_header: bool,
+    /// Whether the summary prose line should appear in addition to any body.
+    ///
+    /// In verbose modes the summary is rendered alongside the full prompt
+    /// body; in quiet/summary modes the body is omitted but the summary
+    /// still appears.
+    pub show_summary: bool,
     /// The format to use for the body.
     pub format: PromptReportFormat,
     /// How to truncate when format is `PartialPrompt`.

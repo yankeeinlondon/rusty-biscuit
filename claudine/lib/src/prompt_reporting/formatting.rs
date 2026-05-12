@@ -4,7 +4,10 @@
 //! styled [`BlockQuote`] construction for system and user prompts.
 
 use biscuit_terminal::components::block_quote::BlockQuote;
+use biscuit_terminal::components::renderable::Renderable;
 use biscuit_terminal::utils::color::{Color, Tailwind};
+use biscuit_terminal::utils::layout::Margin;
+use biscuit_terminal::utils::wrap_policy::WordWrap;
 
 /// Renders markdown text to terminal output with blank-line collapsing.
 ///
@@ -98,8 +101,35 @@ pub fn collapse_blank_lines(text: &str, max_consecutive: usize) -> String {
 /// ```
 pub fn create_system_prompt_blockquote(content: &str) -> BlockQuote {
     let rendered = render_markdown_for_terminal(content);
-    BlockQuote::from(rendered)
-        .with_left_block_color(Color::Tailwind(Tailwind::Orange500))
+    style_system_prompt_blockquote(BlockQuote::from(rendered))
+}
+
+/// Wraps an already-rendered (ANSI) string in the orange system-prompt
+/// [`BlockQuote`] without re-running it through the Markdown renderer.
+///
+/// Use this when the content was produced by [`Prose::render`] (for the
+/// summary line) and/or by [`render_markdown_for_terminal`] (for the body)
+/// and the caller just needs the styled border + margin applied.
+///
+/// ## Examples
+///
+/// ```
+/// use biscuit_terminal::components::renderable::Renderable;
+/// use claudine::prompt_reporting::system_prompt_blockquote_styled;
+///
+/// let quote = system_prompt_blockquote_styled("pre-rendered content");
+/// let rendered = quote.render_optimistic(None);
+/// assert!(rendered.contains("pre-rendered content"));
+/// ```
+pub fn system_prompt_blockquote_styled(rendered_content: &str) -> BlockQuote {
+    style_system_prompt_blockquote(BlockQuote::from(rendered_content.to_string()))
+}
+
+fn style_system_prompt_blockquote(mut quote: BlockQuote) -> BlockQuote {
+    quote = quote.with_left_block_color(Color::Tailwind(Tailwind::Orange500));
+    quote.layout_mut().left_margin = Margin::Chars(1);
+    quote.layout_mut().word_wrap = WordWrap::WrapProse(Some(8), None);
+    quote
 }
 
 /// Creates a [`BlockQuote`] styled for the user prompt (green border).
@@ -119,13 +149,17 @@ pub fn create_system_prompt_blockquote(content: &str) -> BlockQuote {
 /// ```
 pub fn create_user_prompt_blockquote(content: &str) -> BlockQuote {
     let rendered = render_markdown_for_terminal(content);
-    BlockQuote::from(rendered)
-        .with_left_block_color(Color::Tailwind(Tailwind::Green500))
+    let mut quote = BlockQuote::from(rendered)
+        .with_left_block_color(Color::Tailwind(Tailwind::Green500));
+    quote.layout_mut().left_margin = Margin::Chars(1);
+    quote.layout_mut().word_wrap = WordWrap::WrapProse(Some(8), None);
+    quote
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use biscuit_terminal::components::renderable::Renderable;
 
     // --- collapse_blank_lines tests ---
 
@@ -225,21 +259,35 @@ mod tests {
     }
 
     #[test]
-    fn system_blockquote_has_border() {
+    fn system_blockquote_has_border_at_column_one() {
+        // left_margin = Margin::Chars(1) places the colored `│` glyph at
+        // column 1 so it aligns visually with the center of the 2-column
+        // 📕 emoji on the header line above.
         let quote = create_system_prompt_blockquote("Test content");
         let rendered = quote.render_optimistic(None);
         let stripped = strip_ansi(&rendered);
-        assert!(stripped.starts_with("│ "));
+        assert!(stripped.starts_with(" │ "), "stripped = {stripped:?}");
         assert!(stripped.contains("Test content"));
     }
 
     #[test]
-    fn user_blockquote_has_border() {
+    fn user_blockquote_has_border_at_column_one() {
         let quote = create_user_prompt_blockquote("Test content");
         let rendered = quote.render_optimistic(None);
         let stripped = strip_ansi(&rendered);
-        assert!(stripped.starts_with("│ "));
+        assert!(stripped.starts_with(" │ "), "stripped = {stripped:?}");
         assert!(stripped.contains("Test content"));
+    }
+
+    #[test]
+    fn system_blockquote_styled_does_not_reprocess_markdown() {
+        // The "styled" helper takes pre-rendered ANSI/text and must not
+        // pass it through the markdown renderer — bold markers should
+        // come through verbatim.
+        let quote = system_prompt_blockquote_styled("**unchanged** literal");
+        let rendered = quote.render_optimistic(None);
+        let stripped = strip_ansi(&rendered);
+        assert!(stripped.contains("**unchanged**"));
     }
 
     #[test]
