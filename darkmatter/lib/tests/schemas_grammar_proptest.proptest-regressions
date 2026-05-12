@@ -1,0 +1,8 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc ecc1faaa80e68efada80c3a7cecf6ceb079159fc998dbe41c611e75d3e01b93c # shrinks to atom = PropertyAtom { ty: File, is_array: false, constraints: [Match(["]"])], array_constraints: [], description: None }
+cc 47586f8cd60fc36aa4656714da06d421588a095dd641fb1df9969c38f8ad0928 # shrinks to atom = PropertyAtom { ty: File, is_array: false, constraints: [Match(["0]"])], array_constraints: [], description: None }

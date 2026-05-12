@@ -27,6 +27,7 @@ use crate::markdown::compose::transclusion::DeferredSetError;
 use crate::markdown::normalize::NormalizationError;
 use crate::markdown::reference::ReferenceError;
 use crate::markdown::reference::file_tree::FileTreeError;
+use crate::markdown::schemas::SchemaError;
 use crate::mermaid::MermaidThemeError;
 use crate::render::image_ref::ImageRefError;
 use crate::render::link::LinkError;
@@ -109,6 +110,9 @@ pub fn as_block_error<'a>(
         return Some(v);
     }
     if let Some(v) = err.downcast_ref::<ImageRefError>() {
+        return Some(v);
+    }
+    if let Some(v) = err.downcast_ref::<SchemaError>() {
         return Some(v);
     }
     None
