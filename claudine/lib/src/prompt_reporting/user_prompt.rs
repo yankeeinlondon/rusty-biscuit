@@ -1,0 +1,421 @@
+//! User prompt reporting for Phase 4.
+//!
+//! Provides header rendering and body rendering (partial/full) inside a
+//! green block quote for the user (agent) prompt.
+
+use biscuit_terminal::components::prose::Prose;
+use biscuit_terminal::components::renderable::Renderable;
+use biscuit_terminal::terminal::Terminal;
+
+use super::{
+    create_user_prompt_blockquote, strip_leading_whitespace, truncate_front_back,
+    PromptReportFormat, TruncationMode, UserPromptReportConfig,
+};
+
+/// Render the user-prompt header line.
+///
+/// Format: `🗣️ <b>Agent Prompt</b>`
+///
+/// ## Examples
+///
+/// ```
+/// use claudine::prompt_reporting::render_user_prompt_header;
+/// use biscuit_terminal::terminal::Terminal;
+///
+/// let term = Terminal::new();
+/// let header = render_user_prompt_header(&term);
+/// assert!(header.contains("Agent Prompt"));
+/// ```
+pub fn render_user_prompt_header(term: &Terminal) -> String {
+    Prose::new("🗣️ <b>Agent Prompt</b>").render(term)
+}
+
+/// Render the user-prompt body according to the selected format.
+///
+/// - `Summary` → empty string (no body).
+/// - `PartialPrompt` → `FrontBack` truncated text inside a green block quote.
+/// - `FullPrompt` → full text inside a green block quote.
+///
+/// The text is first stripped of all leading whitespace before rendering.
+///
+/// ## Examples
+///
+/// ```
+/// use claudine::prompt_reporting::{
+///     render_user_prompt_body, PromptReportFormat, TruncationMode,
+/// };
+/// use biscuit_terminal::terminal::Terminal;
+///
+/// let term = Terminal::new();
+/// let body = render_user_prompt_body(
+///     "  Line 1\n  Line 2\n  Line 3",
+///     PromptReportFormat::FullPrompt,
+///     TruncationMode::FrontBack,
+///     &term,
+/// );
+/// // Strip ANSI escapes for assertion; the body is wrapped in a block quote
+/// // with color codes.
+/// let plain = biscuit_terminal::discovery::eval::strip_ansi_codes(&body);
+/// assert!(plain.contains("Line 1"));
+/// assert!(!plain.contains("  Line"), "leading whitespace should be stripped");
+/// ```
+pub fn render_user_prompt_body(
+    text: &str,
+    format: PromptReportFormat,
+    truncation: TruncationMode,
+    term: &Terminal,
+) -> String {
+    let stripped = strip_leading_whitespace(text);
+
+    match format {
+        PromptReportFormat::Summary => String::new(),
+        PromptReportFormat::PartialPrompt => {
+            let truncated = match truncation {
+                TruncationMode::FrontBack => truncate_front_back(&stripped, 20, 10),
+                TruncationMode::Truncate => {
+                    // Show first 20 lines
+                    let lines: Vec<&str> = stripped.lines().collect();
+                    if lines.len() <= 20 {
+                        stripped
+                    } else {
+                        lines[..20].join("\n")
+                    }
+                }
+            };
+            let quote = create_user_prompt_blockquote(&truncated);
+            quote.render(term)
+        }
+        PromptReportFormat::FullPrompt => {
+            let quote = create_user_prompt_blockquote(&stripped);
+            quote.render(term)
+        }
+    }
+}
+
+/// Top-level user-prompt reporter.
+///
+/// Wires together header rendering and body rendering. Returns `None` when
+/// the config suppresses output (`show_header` is false).
+///
+/// ## Arguments
+///
+/// - `text` — the raw user prompt text.
+/// - `config` — the resolved reporting configuration.
+/// - `term` — terminal for capability-aware rendering.
+///
+/// ## Returns
+///
+/// `Some(String)` with the fully rendered report, or `None` if suppressed.
+///
+/// ## Examples
+///
+/// ```
+/// use claudine::prompt_reporting::{
+///     report_user_prompt, UserPromptReportConfig,
+///     PromptReportFormat, TruncationMode,
+/// };
+/// use biscuit_terminal::terminal::Terminal;
+///
+/// let term = Terminal::new();
+/// let config = UserPromptReportConfig {
+///     show_header: true,
+///     show_body: true,
+///     format: PromptReportFormat::FullPrompt,
+///     truncation: TruncationMode::FrontBack,
+/// };
+/// let output = report_user_prompt("Hello agent", config, &term);
+/// let plain = biscuit_terminal::discovery::eval::strip_ansi_codes(
+///     &output.expect("should produce output"),
+/// );
+/// assert!(plain.contains("Agent Prompt"));
+/// assert!(plain.contains("Hello agent"));
+/// ```
+pub fn report_user_prompt(
+    text: &str,
+    config: UserPromptReportConfig,
+    term: &Terminal,
+) -> Option<String> {
+    if !config.show_header {
+        return None;
+    }
+
+    let mut parts = Vec::new();
+
+    // Header line
+    parts.push(render_user_prompt_header(term));
+
+    // Body
+    if config.show_body {
+        let body = render_user_prompt_body(text, config.format, config.truncation, term);
+        if !body.is_empty() {
+            parts.push(body);
+        }
+    }
+
+    Some(parts.join("\n"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use biscuit_terminal::terminal::Terminal;
+
+    fn test_terminal() -> Terminal {
+        Terminal::new()
+    }
+
+    /// Strip ANSI escape sequences for test assertions.
+    fn strip_ansi_codes(s: &str) -> String {
+        let mut result = String::with_capacity(s.len());
+        let mut in_escape = false;
+        for ch in s.chars() {
+            if in_escape {
+                if ch.is_ascii_alphabetic() {
+                    in_escape = false;
+                }
+            } else if ch == '\x1b' {
+                in_escape = true;
+            } else {
+                result.push(ch);
+            }
+        }
+        result
+    }
+
+    // --- Header tests ---
+
+    #[test]
+    fn header_contains_speaking_head_emoji() {
+        let term = test_terminal();
+        let header = render_user_prompt_header(&term);
+        assert!(header.contains("🗣️"));
+    }
+
+    #[test]
+    fn header_contains_agent_prompt_label() {
+        let term = test_terminal();
+        let header = render_user_prompt_header(&term);
+        assert!(header.contains("Agent Prompt"));
+    }
+
+    // --- Body tests ---
+
+    #[test]
+    fn summary_format_returns_empty_body() {
+        let term = test_terminal();
+        let body = render_user_prompt_body(
+            "some content",
+            PromptReportFormat::Summary,
+            TruncationMode::FrontBack,
+            &term,
+        );
+        assert!(body.is_empty());
+    }
+
+    #[test]
+    fn full_format_renders_content() {
+        let term = test_terminal();
+        let body = render_user_prompt_body(
+            "Hello world",
+            PromptReportFormat::FullPrompt,
+            TruncationMode::FrontBack,
+            &term,
+        );
+        let plain = strip_ansi_codes(&body);
+        assert!(plain.contains("Hello world"));
+    }
+
+    #[test]
+    fn full_format_strips_leading_whitespace() {
+        let term = test_terminal();
+        let body = render_user_prompt_body(
+            "  Hello\n    World",
+            PromptReportFormat::FullPrompt,
+            TruncationMode::FrontBack,
+            &term,
+        );
+        let plain = strip_ansi_codes(&body);
+        assert!(plain.contains("Hello"));
+        assert!(plain.contains("World"));
+        assert!(!plain.contains("  Hello"), "leading whitespace should be stripped");
+    }
+
+    #[test]
+    fn partial_format_truncates_long_text() {
+        let text: String = (1..=50).map(|i| format!("Line {i}")).collect::<Vec<_>>().join("\n");
+        let term = test_terminal();
+        let body = render_user_prompt_body(
+            &text,
+            PromptReportFormat::PartialPrompt,
+            TruncationMode::FrontBack,
+            &term,
+        );
+        let plain = strip_ansi_codes(&body);
+        assert!(plain.contains("Line 1"));
+        // Because of line wrapping, "Line 50" may be split across lines;
+        // check for " 50" (with leading space or newline) instead.
+        assert!(plain.contains(" 50"), "should contain the last line number");
+        // Verify truncation happened by checking that not all lines are present
+        assert!(!plain.contains("Line 25"), "middle lines should be truncated");
+    }
+
+    #[test]
+    fn partial_format_short_text_unchanged() {
+        let text = "Line 1\nLine 2\nLine 3";
+        let term = test_terminal();
+        let body = render_user_prompt_body(
+            text,
+            PromptReportFormat::PartialPrompt,
+            TruncationMode::FrontBack,
+            &term,
+        );
+        let plain = strip_ansi_codes(&body);
+        assert!(plain.contains("Line 1"));
+        assert!(plain.contains("Line 2"));
+        assert!(plain.contains("Line 3"));
+        // Should NOT contain truncation marker for short text
+        assert!(!plain.contains("---"));
+    }
+
+    #[test]
+    fn partial_format_uses_20_10_for_long_text() {
+        // Create text with more than 30 lines to trigger truncation with 20/10
+        let text: String = (1..=50).map(|i| format!("Line {i}")).collect::<Vec<_>>().join("\n");
+        let term = test_terminal();
+        let body = render_user_prompt_body(
+            &text,
+            PromptReportFormat::PartialPrompt,
+            TruncationMode::FrontBack,
+            &term,
+        );
+        let plain = strip_ansi_codes(&body);
+        assert!(plain.contains("Line 1"));
+        assert!(plain.contains("Line 20"));
+        // Because of line wrapping, "Line 50" may be split across lines;
+        // check for " 50" (with leading space or newline) instead.
+        assert!(plain.contains(" 50"), "should contain the last line number");
+        // Middle lines should be truncated
+        assert!(!plain.contains("Line 30"), "middle lines should be truncated");
+    }
+
+    // --- Top-level reporter tests ---
+
+    #[test]
+    fn silent_config_returns_none() {
+        let term = test_terminal();
+        let config = UserPromptReportConfig {
+            show_header: false,
+            show_body: false,
+            format: PromptReportFormat::Summary,
+            truncation: TruncationMode::FrontBack,
+        };
+        let result = report_user_prompt("Test prompt", config, &term);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn quiet_config_returns_none() {
+        let term = test_terminal();
+        let config = UserPromptReportConfig {
+            show_header: false,
+            show_body: false,
+            format: PromptReportFormat::Summary,
+            truncation: TruncationMode::FrontBack,
+        };
+        let result = report_user_prompt("Test prompt", config, &term);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn full_format_renders_header_and_body() {
+        let term = test_terminal();
+        let config = UserPromptReportConfig {
+            show_header: true,
+            show_body: true,
+            format: PromptReportFormat::FullPrompt,
+            truncation: TruncationMode::FrontBack,
+        };
+        let result = report_user_prompt("Full prompt body.", config, &term);
+        let output = result.expect("should produce output");
+        let plain = strip_ansi_codes(&output);
+        assert!(plain.contains("🗣️"));
+        assert!(plain.contains("Agent Prompt"));
+        assert!(plain.contains("Full prompt body"));
+    }
+
+    #[test]
+    fn partial_format_renders_truncated_body() {
+        let text: String = (1..=50).map(|i| format!("Line {i}")).collect::<Vec<_>>().join("\n");
+        let term = test_terminal();
+        let config = UserPromptReportConfig {
+            show_header: true,
+            show_body: true,
+            format: PromptReportFormat::PartialPrompt,
+            truncation: TruncationMode::FrontBack,
+        };
+        let result = report_user_prompt(&text, config, &term);
+        let output = result.expect("should produce output");
+        let plain = strip_ansi_codes(&output);
+        assert!(plain.contains("🗣️"));
+        assert!(plain.contains("Agent Prompt"));
+        assert!(plain.contains("Line 1"));
+        // Because of line wrapping, "Line 50" may be split across lines
+        assert!(plain.contains(" 50"), "should contain the last line number");
+        // Verify truncation happened by checking middle lines are omitted
+        assert!(!plain.contains("Line 25"), "middle lines should be truncated");
+    }
+
+    #[test]
+    fn short_prompt_renders_full_body() {
+        let text = "Line 1\nLine 2\nLine 3";
+        let term = test_terminal();
+        let config = UserPromptReportConfig {
+            show_header: true,
+            show_body: true,
+            format: PromptReportFormat::FullPrompt,
+            truncation: TruncationMode::FrontBack,
+        };
+        let result = report_user_prompt(text, config, &term);
+        let output = result.expect("should produce output");
+        let plain = strip_ansi_codes(&output);
+        assert!(plain.contains("Line 1"));
+        assert!(plain.contains("Line 2"));
+        assert!(plain.contains("Line 3"));
+        assert!(!plain.contains("---"), "short text should not be truncated");
+    }
+
+    #[test]
+    fn show_body_false_suppresses_body() {
+        let term = test_terminal();
+        let config = UserPromptReportConfig {
+            show_header: true,
+            show_body: false,
+            format: PromptReportFormat::FullPrompt,
+            truncation: TruncationMode::FrontBack,
+        };
+        let result = report_user_prompt("This should not appear", config, &term);
+        let output = result.expect("should produce output");
+        let plain = strip_ansi_codes(&output);
+        assert!(plain.contains("Agent Prompt"));
+        assert!(!plain.contains("This should not appear"));
+    }
+
+    #[test]
+    fn strips_leading_whitespace_in_report() {
+        let text = "    Line 1\n      Line 2\n        Line 3";
+        let term = test_terminal();
+        let config = UserPromptReportConfig {
+            show_header: true,
+            show_body: true,
+            format: PromptReportFormat::FullPrompt,
+            truncation: TruncationMode::FrontBack,
+        };
+        let result = report_user_prompt(text, config, &term);
+        let output = result.expect("should produce output");
+        let plain = strip_ansi_codes(&output);
+        assert!(plain.contains("Line 1"));
+        assert!(plain.contains("Line 2"));
+        assert!(plain.contains("Line 3"));
+        assert!(!plain.contains("    Line"), "leading whitespace should be stripped");
+    }
+}
