@@ -5,7 +5,21 @@
 //! tuned for natural-language and code content (≈ 4 characters per token for
 //! prose, ≈ 2.5 for dense formats like JSON/YAML).
 //!
-//! **Note:** This measures only the content Claudine composes (the
+//! ## Alignment with biscuit-terminal
+//!
+//! The spec for this feature originally pointed at
+//! "biscuit-terminal's FileTree utility" for token estimation, but the
+//! `FileTree` component renders Markdown dependency graphs and does not
+//! count tokens. The actual token estimator inside biscuit-terminal lives
+//! in `components::filesystem` (a private `estimate_tokens(path, metadata)`
+//! function) and uses the **same character-count ratios** as this module
+//! (4.0 chars/token for prose/code, 2.5 for dense formats like JSON/YAML).
+//! Cloning that file-based estimator here would not produce different
+//! results — we already match its heuristic byte-for-byte.
+//!
+//! ## Limitation
+//!
+//! This measures only the content Claudine composes (the
 //! `system-prompt.md` body plus any appendix).  The agent platform's own
 //! default/base system prompt is **not** included in the estimate.
 

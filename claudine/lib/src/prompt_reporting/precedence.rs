@@ -52,10 +52,37 @@ pub fn resolve_system_prompt_report_config(
     prompt_line_count: usize,
     frontmatter_verbosity: Option<PromptVerbosity>,
 ) -> SystemPromptReportConfig {
+    resolve_system_prompt_report_config_with_change(
+        cli_silent,
+        cli_quiet,
+        cli_verbose,
+        env_verbosity,
+        prompt_line_count,
+        frontmatter_verbosity,
+        false,
+    )
+}
+
+/// Like [`resolve_system_prompt_report_config`] but with a `prompt_unchanged`
+/// hint that suppresses the header in the default precedence branch.
+///
+/// Per spec: when no CLI flag, ENV variable, or frontmatter selects a body
+/// mode and the composed prompt is unchanged from the previous session at
+/// this scope, the header (and therefore the entire report) is suppressed.
+pub fn resolve_system_prompt_report_config_with_change(
+    cli_silent: bool,
+    cli_quiet: bool,
+    cli_verbose: bool,
+    env_verbosity: Option<PromptVerbosity>,
+    prompt_line_count: usize,
+    frontmatter_verbosity: Option<PromptVerbosity>,
+    prompt_unchanged: bool,
+) -> SystemPromptReportConfig {
     // 1. CLI switches always win.
     if cli_silent {
         return SystemPromptReportConfig {
             show_header: false,
+            show_summary: false,
             format: PromptReportFormat::Summary,
             truncation: TruncationMode::FrontBack,
         };
@@ -63,6 +90,7 @@ pub fn resolve_system_prompt_report_config(
     if cli_quiet {
         return SystemPromptReportConfig {
             show_header: true,
+            show_summary: true,
             format: PromptReportFormat::Summary,
             truncation: TruncationMode::FrontBack,
         };
@@ -70,6 +98,7 @@ pub fn resolve_system_prompt_report_config(
     if cli_verbose {
         return SystemPromptReportConfig {
             show_header: true,
+            show_summary: true,
             format: PromptReportFormat::FullPrompt,
             truncation: TruncationMode::FrontBack,
         };
@@ -84,6 +113,7 @@ pub fn resolve_system_prompt_report_config(
     if prompt_line_count < 10 {
         return SystemPromptReportConfig {
             show_header: true,
+            show_summary: true,
             format: PromptReportFormat::FullPrompt,
             truncation: TruncationMode::FrontBack,
         };
@@ -95,8 +125,22 @@ pub fn resolve_system_prompt_report_config(
     }
 
     // 5. Default.
+    //
+    // Per spec: when no override has been selected, suppress the entire
+    // report if the composed prompt has not changed since the last
+    // observed run at this scope.
+    if prompt_unchanged {
+        return SystemPromptReportConfig {
+            show_header: false,
+            show_summary: false,
+            format: PromptReportFormat::Summary,
+            truncation: TruncationMode::FrontBack,
+        };
+    }
+
     SystemPromptReportConfig {
         show_header: true,
+        show_summary: true,
         format: PromptReportFormat::Summary,
         truncation: TruncationMode::FrontBack,
     }
@@ -107,16 +151,19 @@ fn config_from_verbosity(verbosity: PromptVerbosity) -> SystemPromptReportConfig
     match verbosity {
         PromptVerbosity::Silent => SystemPromptReportConfig {
             show_header: false,
+            show_summary: false,
             format: PromptReportFormat::Summary,
             truncation: TruncationMode::FrontBack,
         },
         PromptVerbosity::Quiet => SystemPromptReportConfig {
             show_header: true,
+            show_summary: true,
             format: PromptReportFormat::Summary,
             truncation: TruncationMode::FrontBack,
         },
         PromptVerbosity::Verbose => SystemPromptReportConfig {
             show_header: true,
+            show_summary: true,
             format: PromptReportFormat::FullPrompt,
             truncation: TruncationMode::FrontBack,
         },
@@ -282,6 +329,56 @@ mod tests {
         );
         assert!(config.show_header);
         assert_eq!(config.format, PromptReportFormat::Summary);
+    }
+
+    #[test]
+    fn unchanged_default_suppresses_header() {
+        let config = resolve_system_prompt_report_config_with_change(
+            false, false, false,
+            None,
+            50,
+            None,
+            true, // unchanged
+        );
+        assert!(!config.show_header);
+        assert!(!config.show_summary);
+    }
+
+    #[test]
+    fn unchanged_overridden_by_verbose() {
+        let config = resolve_system_prompt_report_config_with_change(
+            false, false, true,
+            None,
+            50,
+            None,
+            true, // unchanged but verbose flag wins
+        );
+        assert!(config.show_header);
+        assert_eq!(config.format, PromptReportFormat::FullPrompt);
+    }
+
+    #[test]
+    fn unchanged_overridden_by_env() {
+        let config = resolve_system_prompt_report_config_with_change(
+            false, false, false,
+            Some(PromptVerbosity::Quiet),
+            50,
+            None,
+            true,
+        );
+        assert!(config.show_header);
+    }
+
+    #[test]
+    fn unchanged_overridden_by_frontmatter() {
+        let config = resolve_system_prompt_report_config_with_change(
+            false, false, false,
+            None,
+            50,
+            Some(PromptVerbosity::Verbose),
+            true,
+        );
+        assert!(config.show_header);
     }
 
     #[test]
