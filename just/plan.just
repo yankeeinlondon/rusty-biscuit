@@ -21,7 +21,11 @@ plan-implement-review:
 
     echo -e "Kicking off a {{ bold }}Plan -> Implement -> Review{{ reset }} cycle"
     spec="$(just _choose_spec)"
+    spec_file="$(basename "${spec}")"
+    area="$(sniff repo package-area)"
+    root="$(sniff repo root)"
     dir="$(dirname "${spec}")"
+    fq_path="${root}${area}/${dir}"
     plan="plan.md"
     planning_agent="$(just _choose_agent 'Choose the planning Agent')"
     planning_model=""
@@ -50,6 +54,53 @@ plan-implement-review:
     echo -e "1. we will plan the {{ blue }}${spec}{{ reset }} file (with {{ yellow }}${planning_agent}{{ reset }}); save to {{ blue }}${dir}/${plan}{{ reset }}"
     echo -e "2. we will then {{ italic }}implement{{ reset }} the plan using the {{ yellow }}${implementing_agent}{{ reset }} agent"
     echo -e "3. and finally we will review the implementation with {{ yellow }}${reviewing_agent}{{ reset }} agent"
+    echo -e "path: ${fq_path}"
+    echo
+    if [[ "$(just _confirm "Ready to start?")" == "n" ]]; then
+        echo
+        echo -e "Ok bye"
+        exit 0
+    fi
+    claudine compose @prompts/plan.md -y spec="${spec}" plan="${plan}" --${planning_agent} ${planning_model_param}
+    total_phases="$(md get "${fq_path}/${plan}" phases)"
+    echo
+    echo -e "Detected {{ yellow }}${total_phases}{{ reset }} phases in the plan"
+    echo
+    claudine compose @prompts/implement-phase.md -y plan="${dir}/${plan}" --${implementing_agent} ${implementing_model_param} total_phases="${total_phases}"
+    claudine compose @prompts/review-feature.md -y spec="${spec}" iteration=1 --${reviewing_agent} ${reviewing_model_param}
+    echo
+    echo -e "The specification file {{ blue }}${spec}{{ reset }} drove a plan, implementation, and review."
+    echo
+    echo -e "  - {{ bold }}Review:{{ reset }} $(just _link "${dir}/review-1.md" "$(sniff repo root)/${dir}/review-1.md")"
+    echo
+
+implement-review:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    plan="$(just _choose_plan)"
+    dir="$(dirname plan)"
+
+
+    implementing_agent="$(just _choose_agent 'Choose the Implementing Agent')"
+    implementing_model=""
+    implementing_model_param=""
+    if [[ "${implementing_agent}" == "opencode" ]]; then
+        implementing_model="$(just _choose_model_for_agent "${implementing_agent}")"
+        implementing_model_param="--model ${implementing_model}"
+    fi
+    reviewing_agent="$(just _choose_agent 'Choose the reviewing Agent')"
+    reviewing_model=""
+    reviewing_model_param=""
+    if [[ "${reviewing_agent}" == "opencode" ]]; then
+        reviewing_model="$(just _choose_model_for_agent "${reviewing_agent}")"
+        reviewing_model_param="--model ${reviewing_model}"
+    fi
+    echo
+    echo "{{ bold }}Strategy:{{ reset }}"
+    echo
+    echo -e "1. we will plan the {{ blue }}${spec}{{ reset }} file (with {{ yellow }}${planning_agent}{{ reset }}); save to {{ blue }}${dir}/${plan}{{ reset }}"
+    echo -e "2. we will then {{ italic }}implement{{ reset }} the plan using the {{ yellow }}${implementing_agent}{{ reset }} agent"
+    echo -e "3. and finally we will review the implementation with {{ yellow }}${reviewing_agent}{{ reset }} agent"
     echo
     if [[ "$(just _confirm "Ready to start?")" == "n" ]]; then
         echo
@@ -57,6 +108,7 @@ plan-implement-review:
         exit 0
     fi
     claudine compose @prompts/plan.md -y spec="$(sniff repo root)/${spec}" plan="${plan}" --${planning_agent} ${planning_model_param}
+    total_phases="$(md get "" total_phases)"
     claudine compose @prompts/implement-phase.md -y plan="$(sniff repo root)/${dir}/${plan}" --${implementing_agent} ${implementing_model_param}
     claudine compose @prompts/review-feature.md -y spec="$(sniff repo root)/${spec}" iteration=1 --${reviewing_agent} ${reviewing_model_param}
     echo
