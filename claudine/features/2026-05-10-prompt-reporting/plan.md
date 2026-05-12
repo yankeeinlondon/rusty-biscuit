@@ -2,15 +2,28 @@
 phases: 5
 created: 2026-05-11
 start_phase: 1
+source_files_during_phase_1:
+  - claudine/lib/src/lib.rs
+  - claudine/lib/src/prompt_reporting/mod.rs
+  - claudine/lib/src/prompt_reporting/types.rs
+  - claudine/lib/src/prompt_reporting/frontmatter.rs
+  - claudine/lib/src/prompt_reporting/precedence.rs
+  - claudine/lib/src/prompt_reporting/tokens.rs
+docs_updated_during_phase_1: []
+docs_created_during_phase_1: []
+skills_files_updated_during_phase_1:
+  - .opencode/skill/claudine/SKILL.md
+packages:
+  - claudine
 ---
 # Prompt Reporting Execution Plan
 
 ## Phase 1: Foundation and Types
-- [ ] Define `PromptReportFormat` enum (`Summary`, `PartialPrompt`, `FullPrompt`) and truncation variants (`Truncate`, `FrontBack`).
-- [ ] Add parsing for `verbosity` property in frontmatter of `system-prompt.md` files.
-- [ ] Implement precedence logic for System Prompt resolution: CLI Switches > `CLAUDINE_SYSTEM_PROMPT` env > Prompt Length > Frontmatter > Default (`Summary`).
-- [ ] Implement token estimation using the `FileTree` utility from `biscuit-terminal` (measuring composed content, omitting agent base prompt).
-- [ ] Validation Checkpoint: Unit tests for configuration precedence logic and token count estimation.
+- [x] Define `PromptReportFormat` enum (`Summary`, `PartialPrompt`, `FullPrompt`) and truncation variants (`Truncate`, `FrontBack`).
+- [x] Add parsing for `verbosity` property in frontmatter of `system-prompt.md` files.
+- [x] Implement precedence logic for System Prompt resolution: CLI Switches > `CLAUDINE_SYSTEM_PROMPT` env > Prompt Length > Frontmatter > Default (`Summary`).
+- [x] Implement token estimation using the `FileTree` utility from `biscuit-terminal` (measuring composed content, omitting agent base prompt).
+- [x] Validation Checkpoint: Unit tests for configuration precedence logic and token count estimation.
 
 ## Phase 2: Common Formatting Utilities (Parallelizable)
 - [ ] Implement text truncation utility for `FrontBack` mode (x lines front, 10 lines back with an `hr` marker) ensuring the first/last lines of truncated sections are not blank lines.
