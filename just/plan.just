@@ -49,7 +49,7 @@ plan-implement-review:
     echo
     echo -e "1. we will plan the {{ blue }}${spec}{{ reset }} file (with {{ yellow }}${planning_agent}{{ reset }}); save to {{ blue }}${dir}/${plan}{{ reset }}"
     echo -e "2. we will then {{ italic }}implement{{ reset }} the plan using the {{ yellow }}${implementing_agent}{{ reset }} agent"
-    echo -e "3. and finally we will review the implementation with {{ yellow }}${reviewing_model}{{ reset }} agent"
+    echo -e "3. and finally we will review the implementation with {{ yellow }}${reviewing_agent}{{ reset }} agent"
     echo
     if [[ "$(just _confirm "Ready to start?")" == "n" ]]; then
         echo
