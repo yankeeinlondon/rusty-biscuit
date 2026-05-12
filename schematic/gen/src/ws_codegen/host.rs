@@ -416,6 +416,9 @@ fn generate_accept_and_auth_helpers(
         schematic_define::AuthStrategy::ApiKey { header } => {
             let header_name = header.clone();
             let env_names = env_auth.to_vec();
+            let common_helpers = super::shared::generate_host_common_auth_helpers(&env_names);
+            let validate_fn =
+                super::shared::generate_host_validate_raw_header(&header_name, "Invalid authentication header");
 
             (
                 quote! {
@@ -423,73 +426,8 @@ fn generate_accept_and_auth_helpers(
                         .await
                 },
                 quote! {
-                    fn configured_auth_tokens() -> Vec<String> {
-                        vec![#(#env_names.to_string()),*]
-                            .into_iter()
-                            .filter_map(|env| std::env::var(env).ok())
-                            .filter(|value| !value.trim().is_empty())
-                            .collect()
-                    }
-
-                    fn auth_is_required() -> bool {
-                        !Self::configured_auth_tokens().is_empty()
-                    }
-
-                    fn authentication_success_response() -> serde_json::Value {
-                        serde_json::json!({
-                            "kind": "resp",
-                            "req_id": 0,
-                            "msg": "authentication",
-                            "code": 200,
-                            "msg_data": {}
-                        })
-                    }
-
-                    fn auth_error_response(
-                        status: tokio_tungstenite::tungstenite::http::StatusCode,
-                        message: &str,
-                    ) -> tokio_tungstenite::tungstenite::handshake::server::ErrorResponse {
-                        tokio_tungstenite::tungstenite::http::Response::builder()
-                            .status(status)
-                            .body(Some(message.to_string()))
-                            .unwrap_or_else(|_| {
-                                tokio_tungstenite::tungstenite::http::Response::new(Some("Unauthorized".to_string()))
-                            })
-                    }
-
-                    fn validate_upgrade_request(
-                        request: &tokio_tungstenite::tungstenite::handshake::server::Request,
-                        response: tokio_tungstenite::tungstenite::handshake::server::Response,
-                    ) -> Result<
-                        tokio_tungstenite::tungstenite::handshake::server::Response,
-                        tokio_tungstenite::tungstenite::handshake::server::ErrorResponse,
-                    > {
-                        let expected_values = Self::configured_auth_tokens();
-
-                        if expected_values.is_empty() {
-                            return Ok(response);
-                        }
-
-                        let Some(received) = request
-                            .headers()
-                            .get(#header_name)
-                            .and_then(|value| value.to_str().ok())
-                        else {
-                            return Err(Self::auth_error_response(
-                                tokio_tungstenite::tungstenite::http::StatusCode::UNAUTHORIZED,
-                                "Missing authentication header",
-                            ));
-                        };
-
-                        if expected_values.iter().any(|expected| expected == received) {
-                            Ok(response)
-                        } else {
-                            Err(Self::auth_error_response(
-                                tokio_tungstenite::tungstenite::http::StatusCode::UNAUTHORIZED,
-                                "Invalid authentication header",
-                            ))
-                        }
-                    }
+                    #common_helpers
+                    #validate_fn
                 },
                 quote! { !Self::auth_is_required() },
             )
@@ -499,6 +437,8 @@ fn generate_accept_and_auth_helpers(
                 .clone()
                 .unwrap_or_else(|| "Authorization".to_string());
             let env_names = env_auth.to_vec();
+            let common_helpers = super::shared::generate_host_common_auth_helpers(&env_names);
+            let validate_fn = super::shared::generate_host_validate_bearer_header(&header_name);
 
             (
                 quote! {
@@ -506,74 +446,8 @@ fn generate_accept_and_auth_helpers(
                         .await
                 },
                 quote! {
-                    fn configured_auth_tokens() -> Vec<String> {
-                        vec![#(#env_names.to_string()),*]
-                            .into_iter()
-                            .filter_map(|env| std::env::var(env).ok())
-                            .filter(|value| !value.trim().is_empty())
-                            .collect()
-                    }
-
-                    fn auth_is_required() -> bool {
-                        !Self::configured_auth_tokens().is_empty()
-                    }
-
-                    fn authentication_success_response() -> serde_json::Value {
-                        serde_json::json!({
-                            "kind": "resp",
-                            "req_id": 0,
-                            "msg": "authentication",
-                            "code": 200,
-                            "msg_data": {}
-                        })
-                    }
-
-                    fn auth_error_response(
-                        status: tokio_tungstenite::tungstenite::http::StatusCode,
-                        message: &str,
-                    ) -> tokio_tungstenite::tungstenite::handshake::server::ErrorResponse {
-                        tokio_tungstenite::tungstenite::http::Response::builder()
-                            .status(status)
-                            .body(Some(message.to_string()))
-                            .unwrap_or_else(|_| {
-                                tokio_tungstenite::tungstenite::http::Response::new(Some("Unauthorized".to_string()))
-                            })
-                    }
-
-                    fn validate_upgrade_request(
-                        request: &tokio_tungstenite::tungstenite::handshake::server::Request,
-                        response: tokio_tungstenite::tungstenite::handshake::server::Response,
-                    ) -> Result<
-                        tokio_tungstenite::tungstenite::handshake::server::Response,
-                        tokio_tungstenite::tungstenite::handshake::server::ErrorResponse,
-                    > {
-                        let expected_values = Self::configured_auth_tokens();
-
-                        if expected_values.is_empty() {
-                            return Ok(response);
-                        }
-
-                        let Some(received) = request
-                            .headers()
-                            .get(#header_name)
-                            .and_then(|value| value.to_str().ok())
-                        else {
-                            return Err(Self::auth_error_response(
-                                tokio_tungstenite::tungstenite::http::StatusCode::UNAUTHORIZED,
-                                "Missing authentication header",
-                            ));
-                        };
-
-                        let token = received.strip_prefix("Bearer ").unwrap_or(received);
-                        if expected_values.iter().any(|expected| expected == token) {
-                            Ok(response)
-                        } else {
-                            Err(Self::auth_error_response(
-                                tokio_tungstenite::tungstenite::http::StatusCode::UNAUTHORIZED,
-                                "Invalid bearer token",
-                            ))
-                        }
-                    }
+                    #common_helpers
+                    #validate_fn
                 },
                 quote! { !Self::auth_is_required() },
             )

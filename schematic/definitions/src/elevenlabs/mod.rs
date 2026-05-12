@@ -28,14 +28,15 @@
 //! assert!(api.endpoints.len() >= 35);
 //! ```
 
+mod endpoints;
 mod types;
 
 pub use types::*;
 
 use crate::registry::SchemaRegistry;
 use schematic_define::{
-    ApiKeyEnv, ApiRequest, ApiResponse, AuthStrategy, Endpoint, EnvList, EnvMapping, FormField,
-    RestApi, RestMethod, Schema,
+    ApiKeyEnv, ApiResponse, AuthStrategy, Endpoint, EnvList, EnvMapping,
+    RestApi, Schema,
 };
 
 /// Creates a schema registry containing all ElevenLabs response types.
@@ -127,6 +128,13 @@ pub fn openapi_registry() -> SchemaRegistry {
 /// assert_eq!(api.base_url, "https://api.elevenlabs.io");
 /// ```
 pub fn define_elevenlabs_rest_api() -> RestApi {
+    let mut endpoints: Vec<Endpoint> = vec![];
+    endpoints.extend(endpoints::speech::all());
+    endpoints.extend(endpoints::voices::all());
+    endpoints.extend(endpoints::sound_generation::all());
+    endpoints.extend(endpoints::history::all());
+    endpoints.extend(endpoints::workspace::all());
+
     RestApi {
         name: "ElevenLabs".to_string(),
         description: "ElevenLabs Creative Platform API for text-to-speech, voice management, and sound generation".to_string(),
@@ -142,535 +150,7 @@ pub fn define_elevenlabs_rest_api() -> RestApi {
         ],
         env_username: None,
         headers: vec![],
-        endpoints: vec![
-            // =================================================================
-            // Text-to-Speech Endpoints
-            // =================================================================
-            Endpoint {
-                id: "CreateSpeech".to_string(),
-                method: RestMethod::Post,
-                path: "/v1/text-to-speech/{voice_id}".to_string(),
-                description: "Converts text into speech and returns audio".to_string(),
-                request: Some(ApiRequest::json_type("CreateSpeechBody")),
-                response: ApiResponse::Binary,
-                headers: vec![],
-                    params: None,
-                    oauth_scopes: None,
-            },
-            Endpoint {
-                id: "StreamSpeech".to_string(),
-                method: RestMethod::Post,
-                path: "/v1/text-to-speech/{voice_id}/stream".to_string(),
-                description: "Streams audio as it's generated".to_string(),
-                request: Some(ApiRequest::json_type("CreateSpeechBody")),
-                response: ApiResponse::Binary,
-                headers: vec![],
-                    params: None,
-                    oauth_scopes: None,
-            },
-            Endpoint {
-                id: "CreateSpeechWithTimestamps".to_string(),
-                method: RestMethod::Post,
-                path: "/v1/text-to-speech/{voice_id}/with-timestamps".to_string(),
-                description: "Returns audio with character-level timing information".to_string(),
-                request: Some(ApiRequest::json_type("CreateSpeechBody")),
-                response: ApiResponse::json_type("SpeechWithTimestampsResponse"),
-                headers: vec![],
-                    params: None,
-                    oauth_scopes: None,
-            },
-            Endpoint {
-                id: "StreamSpeechWithTimestamps".to_string(),
-                method: RestMethod::Post,
-                path: "/v1/text-to-speech/{voice_id}/stream/with-timestamps".to_string(),
-                description: "Streams audio chunks with timing information".to_string(),
-                request: Some(ApiRequest::json_type("CreateSpeechBody")),
-                response: ApiResponse::json_type("SpeechWithTimestampsResponse"),
-                headers: vec![],
-                    params: None,
-                    oauth_scopes: None,
-            },
-
-            // =================================================================
-            // Voice Management Endpoints
-            // =================================================================
-            Endpoint {
-                id: "ListVoices".to_string(),
-                method: RestMethod::Get,
-                path: "/v2/voices".to_string(),
-                description: "Lists all available voices".to_string(),
-                request: None,
-                response: ApiResponse::json_type("ListVoicesResponse"),
-                headers: vec![],
-                    params: None,
-                    oauth_scopes: None,
-            },
-            Endpoint {
-                id: "GetVoice".to_string(),
-                method: RestMethod::Get,
-                path: "/v1/voices/{voice_id}".to_string(),
-                description: "Retrieves a voice by ID".to_string(),
-                request: None,
-                response: ApiResponse::json_type("VoiceResponseModel"),
-                headers: vec![],
-                    params: None,
-                    oauth_scopes: None,
-            },
-            Endpoint {
-                id: "DeleteVoice".to_string(),
-                method: RestMethod::Delete,
-                path: "/v1/voices/{voice_id}".to_string(),
-                description: "Deletes a voice".to_string(),
-                request: None,
-                response: ApiResponse::json_type("StatusResponse"),
-                headers: vec![],
-                    params: None,
-                    oauth_scopes: None,
-            },
-
-            // =================================================================
-            // Voice Settings Endpoints
-            // =================================================================
-            Endpoint {
-                id: "GetDefaultVoiceSettings".to_string(),
-                method: RestMethod::Get,
-                path: "/v1/voices/settings/default".to_string(),
-                description: "Gets default voice settings".to_string(),
-                request: None,
-                response: ApiResponse::json_type("VoiceSettings"),
-                headers: vec![],
-                    params: None,
-                    oauth_scopes: None,
-            },
-            Endpoint {
-                id: "GetVoiceSettings".to_string(),
-                method: RestMethod::Get,
-                path: "/v1/voices/{voice_id}/settings".to_string(),
-                description: "Gets voice settings for a specific voice".to_string(),
-                request: None,
-                response: ApiResponse::json_type("VoiceSettings"),
-                headers: vec![],
-                    params: None,
-                    oauth_scopes: None,
-            },
-            Endpoint {
-                id: "UpdateVoiceSettings".to_string(),
-                method: RestMethod::Post,
-                path: "/v1/voices/{voice_id}/settings/edit".to_string(),
-                description: "Updates voice settings".to_string(),
-                request: Some(ApiRequest::json_type("VoiceSettings")),
-                response: ApiResponse::json_type("StatusResponse"),
-                headers: vec![],
-                    params: None,
-                    oauth_scopes: None,
-            },
-
-            // =================================================================
-            // Voice Samples Endpoints
-            // =================================================================
-            Endpoint {
-                id: "GetVoiceSampleAudio".to_string(),
-                method: RestMethod::Get,
-                path: "/v1/voices/{voice_id}/samples/{sample_id}/audio".to_string(),
-                description: "Gets audio for a voice sample".to_string(),
-                request: None,
-                response: ApiResponse::Binary,
-                headers: vec![],
-                    params: None,
-                    oauth_scopes: None,
-            },
-            Endpoint {
-                id: "DeleteVoiceSample".to_string(),
-                method: RestMethod::Delete,
-                path: "/v1/voices/{voice_id}/samples/{sample_id}".to_string(),
-                description: "Deletes a voice sample".to_string(),
-                request: None,
-                response: ApiResponse::json_type("StatusResponse"),
-                headers: vec![],
-                    params: None,
-                    oauth_scopes: None,
-            },
-            Endpoint {
-                id: "AddVoiceSample".to_string(),
-                method: RestMethod::Post,
-                path: "/v1/voices/{voice_id}/samples".to_string(),
-                description: "Upload audio sample for voice cloning".to_string(),
-                request: Some(ApiRequest::form_data(vec![
-                    FormField::file_accept("audio", vec!["audio/*".into()])
-                        .with_description("Audio file (mp3, wav, ogg, m4a)"),
-                    FormField::text("name")
-                        .optional()
-                        .with_description("Name for the sample"),
-                ])),
-                response: ApiResponse::json_type("AddSampleResponse"),
-                headers: vec![],
-                    params: None,
-                    oauth_scopes: None,
-            },
-
-            // =================================================================
-            // Voice Library Endpoints
-            // =================================================================
-            Endpoint {
-                id: "ListSharedVoices".to_string(),
-                method: RestMethod::Get,
-                path: "/v1/shared-voices".to_string(),
-                description: "Lists voices from the public library".to_string(),
-                request: None,
-                response: ApiResponse::json_type("ListSharedVoicesResponse"),
-                headers: vec![],
-                    params: None,
-                    oauth_scopes: None,
-            },
-            Endpoint {
-                id: "AddSharedVoice".to_string(),
-                method: RestMethod::Post,
-                path: "/v1/voices/add/{public_user_id}/{voice_id}".to_string(),
-                description: "Adds a shared voice to your library".to_string(),
-                request: Some(ApiRequest::json_type("AddSharedVoiceBody")),
-                response: ApiResponse::json_type("AddSharedVoiceResponse"),
-                headers: vec![],
-                    params: None,
-                    oauth_scopes: None,
-            },
-
-            // =================================================================
-            // Professional Voice Cloning (PVC) Endpoints
-            // =================================================================
-            Endpoint {
-                id: "CreatePvcVoice".to_string(),
-                method: RestMethod::Post,
-                path: "/v1/voices/pvc".to_string(),
-                description: "Creates a professional voice clone".to_string(),
-                request: Some(ApiRequest::json_type("CreatePvcVoiceBody")),
-                response: ApiResponse::json_type("AddSharedVoiceResponse"),
-                headers: vec![],
-                    params: None,
-                    oauth_scopes: None,
-            },
-            Endpoint {
-                id: "UpdatePvcVoice".to_string(),
-                method: RestMethod::Post,
-                path: "/v1/voices/pvc/{voice_id}".to_string(),
-                description: "Updates a PVC voice".to_string(),
-                request: Some(ApiRequest::json_type("CreatePvcVoiceBody")),
-                response: ApiResponse::json_type("StatusResponse"),
-                headers: vec![],
-                    params: None,
-                    oauth_scopes: None,
-            },
-            Endpoint {
-                id: "TrainPvcVoice".to_string(),
-                method: RestMethod::Post,
-                path: "/v1/voices/pvc/{voice_id}/train".to_string(),
-                description: "Starts training a PVC voice".to_string(),
-                request: Some(ApiRequest::json_type("TrainPvcVoiceBody")),
-                response: ApiResponse::json_type("StatusResponse"),
-                headers: vec![],
-                    params: None,
-                    oauth_scopes: None,
-            },
-
-            // =================================================================
-            // Sound Effects Endpoint
-            // =================================================================
-            Endpoint {
-                id: "CreateSoundEffect".to_string(),
-                method: RestMethod::Post,
-                path: "/v1/sound-generation".to_string(),
-                description: "Generates a sound effect from text".to_string(),
-                request: Some(ApiRequest::json_type("CreateSoundEffectBody")),
-                response: ApiResponse::Binary,
-                headers: vec![],
-                    params: None,
-                    oauth_scopes: None,
-            },
-
-            // =================================================================
-            // Models Endpoint
-            // =================================================================
-            Endpoint {
-                id: "ListModels".to_string(),
-                method: RestMethod::Get,
-                path: "/v1/models".to_string(),
-                description: "Lists all available models".to_string(),
-                request: None,
-                response: ApiResponse::json_vec_type("ModelInfo"),
-                headers: vec![],
-                    params: None,
-                    oauth_scopes: None,
-            },
-
-            // =================================================================
-            // Single-Use Tokens Endpoint
-            // =================================================================
-            Endpoint {
-                id: "CreateSingleUseToken".to_string(),
-                method: RestMethod::Post,
-                path: "/v1/single-use-token/{token_type}".to_string(),
-                description: "Creates a single-use token for WebSocket auth".to_string(),
-                request: None,
-                response: ApiResponse::json_type("SingleUseTokenResponse"),
-                headers: vec![],
-                    params: None,
-                    oauth_scopes: None,
-            },
-
-            // =================================================================
-            // History Endpoints
-            // =================================================================
-            Endpoint {
-                id: "GetHistory".to_string(),
-                method: RestMethod::Get,
-                path: "/v1/history".to_string(),
-                description: "Gets generated items history".to_string(),
-                request: None,
-                response: ApiResponse::json_type("GetHistoryResponse"),
-                headers: vec![],
-                    params: None,
-                    oauth_scopes: None,
-            },
-            Endpoint {
-                id: "GetHistoryItem".to_string(),
-                method: RestMethod::Get,
-                path: "/v1/history/{history_item_id}".to_string(),
-                description: "Gets a specific history item".to_string(),
-                request: None,
-                response: ApiResponse::json_type("SpeechHistoryItemResponseModel"),
-                headers: vec![],
-                    params: None,
-                    oauth_scopes: None,
-            },
-            Endpoint {
-                id: "DeleteHistoryItem".to_string(),
-                method: RestMethod::Delete,
-                path: "/v1/history/{history_item_id}".to_string(),
-                description: "Deletes a history item".to_string(),
-                request: None,
-                response: ApiResponse::json_type("StatusResponse"),
-                headers: vec![],
-                    params: None,
-                    oauth_scopes: None,
-            },
-            Endpoint {
-                id: "GetHistoryItemAudio".to_string(),
-                method: RestMethod::Get,
-                path: "/v1/history/{history_item_id}/audio".to_string(),
-                description: "Gets audio for a history item".to_string(),
-                request: None,
-                response: ApiResponse::Binary,
-                headers: vec![],
-                    params: None,
-                    oauth_scopes: None,
-            },
-            Endpoint {
-                id: "DownloadHistoryItems".to_string(),
-                method: RestMethod::Post,
-                path: "/v1/history/download".to_string(),
-                description: "Downloads multiple history items as ZIP".to_string(),
-                request: Some(ApiRequest::json_type("DownloadHistoryBody")),
-                response: ApiResponse::Binary,
-                headers: vec![],
-                    params: None,
-                    oauth_scopes: None,
-            },
-
-            // =================================================================
-            // Workspace - Usage Statistics
-            // =================================================================
-            Endpoint {
-                id: "GetUsageStats".to_string(),
-                method: RestMethod::Get,
-                path: "/v1/usage/character-stats".to_string(),
-                description: "Gets usage statistics".to_string(),
-                request: None,
-                response: ApiResponse::json_type("UsageStatsResponse"),
-                headers: vec![],
-                    params: None,
-                    oauth_scopes: None,
-            },
-
-            // =================================================================
-            // Workspace - User Information
-            // =================================================================
-            Endpoint {
-                id: "GetUser".to_string(),
-                method: RestMethod::Get,
-                path: "/v1/user".to_string(),
-                description: "Gets current user information".to_string(),
-                request: None,
-                response: ApiResponse::json_type("UserResponse"),
-                headers: vec![],
-                    params: None,
-                    oauth_scopes: None,
-            },
-            Endpoint {
-                id: "GetUserSubscription".to_string(),
-                method: RestMethod::Get,
-                path: "/v1/user/subscription".to_string(),
-                description: "Gets user subscription information".to_string(),
-                request: None,
-                response: ApiResponse::json_type("SubscriptionModel"),
-                headers: vec![],
-                    params: None,
-                    oauth_scopes: None,
-            },
-
-            // =================================================================
-            // Workspace - Resources
-            // =================================================================
-            Endpoint {
-                id: "GetResource".to_string(),
-                method: RestMethod::Get,
-                path: "/v1/workspace/resources/{resource_id}".to_string(),
-                description: "Gets resource information".to_string(),
-                request: None,
-                response: ApiResponse::json_type("ResourceResponse"),
-                headers: vec![],
-                    params: None,
-                    oauth_scopes: None,
-            },
-            Endpoint {
-                id: "ShareResource".to_string(),
-                method: RestMethod::Post,
-                path: "/v1/workspace/resources/{resource_id}/share".to_string(),
-                description: "Shares a resource".to_string(),
-                request: Some(ApiRequest::json_type("ShareResourceBody")),
-                response: ApiResponse::json_type("StatusResponse"),
-                headers: vec![],
-                    params: None,
-                    oauth_scopes: None,
-            },
-            Endpoint {
-                id: "UnshareResource".to_string(),
-                method: RestMethod::Post,
-                path: "/v1/workspace/resources/{resource_id}/unshare".to_string(),
-                description: "Removes sharing for a resource".to_string(),
-                request: Some(ApiRequest::json_type("UnshareResourceBody")),
-                response: ApiResponse::json_type("StatusResponse"),
-                headers: vec![],
-                    params: None,
-                    oauth_scopes: None,
-            },
-            Endpoint {
-                id: "CopyResourceToWorkspace".to_string(),
-                method: RestMethod::Post,
-                path: "/v1/workspace/resources/{resource_id}/copy-to-workspace".to_string(),
-                description: "Copies a resource to another workspace".to_string(),
-                request: Some(ApiRequest::json_type("CopyResourceBody")),
-                response: ApiResponse::json_type("StatusResponse"),
-                headers: vec![],
-                    params: None,
-                    oauth_scopes: None,
-            },
-
-            // =================================================================
-            // Service Accounts Endpoints
-            // =================================================================
-            Endpoint {
-                id: "ListServiceAccounts".to_string(),
-                method: RestMethod::Get,
-                path: "/v1/service-accounts".to_string(),
-                description: "Lists service accounts".to_string(),
-                request: None,
-                response: ApiResponse::json_type("ListServiceAccountsResponse"),
-                headers: vec![],
-                    params: None,
-                    oauth_scopes: None,
-            },
-            Endpoint {
-                id: "ListServiceAccountApiKeys".to_string(),
-                method: RestMethod::Get,
-                path: "/v1/service-accounts/{service_account_user_id}/api-keys".to_string(),
-                description: "Lists API keys for a service account".to_string(),
-                request: None,
-                response: ApiResponse::json_type("ListApiKeysResponse"),
-                headers: vec![],
-                    params: None,
-                    oauth_scopes: None,
-            },
-            Endpoint {
-                id: "CreateApiKey".to_string(),
-                method: RestMethod::Post,
-                path: "/v1/service-accounts/{service_account_user_id}/api-keys".to_string(),
-                description: "Creates an API key for a service account".to_string(),
-                request: Some(ApiRequest::json_type("CreateApiKeyBody")),
-                response: ApiResponse::json_type("CreateApiKeyResponse"),
-                headers: vec![],
-                    params: None,
-                    oauth_scopes: None,
-            },
-            Endpoint {
-                id: "UpdateApiKey".to_string(),
-                method: RestMethod::Patch,
-                path: "/v1/service-accounts/{service_account_user_id}/api-keys/{api_key_id}".to_string(),
-                description: "Updates an API key".to_string(),
-                request: Some(ApiRequest::json_type("UpdateApiKeyBody")),
-                response: ApiResponse::json_type("StatusResponse"),
-                headers: vec![],
-                    params: None,
-                    oauth_scopes: None,
-            },
-            Endpoint {
-                id: "DeleteApiKey".to_string(),
-                method: RestMethod::Delete,
-                path: "/v1/service-accounts/{service_account_user_id}/api-keys/{api_key_id}".to_string(),
-                description: "Deletes an API key".to_string(),
-                request: None,
-                response: ApiResponse::json_type("StatusResponse"),
-                headers: vec![],
-                    params: None,
-                    oauth_scopes: None,
-            },
-
-            // =================================================================
-            // Webhooks Endpoints
-            // =================================================================
-            Endpoint {
-                id: "ListWebhooks".to_string(),
-                method: RestMethod::Get,
-                path: "/v1/workspace/webhooks".to_string(),
-                description: "Lists webhooks".to_string(),
-                request: None,
-                response: ApiResponse::json_type("ListWebhooksResponse"),
-                headers: vec![],
-                    params: None,
-                    oauth_scopes: None,
-            },
-            Endpoint {
-                id: "CreateWebhook".to_string(),
-                method: RestMethod::Post,
-                path: "/v1/workspace/webhooks".to_string(),
-                description: "Creates a webhook".to_string(),
-                request: Some(ApiRequest::json_type("CreateWebhookBody")),
-                response: ApiResponse::json_type("CreateWebhookResponse"),
-                headers: vec![],
-                    params: None,
-                    oauth_scopes: None,
-            },
-            Endpoint {
-                id: "UpdateWebhook".to_string(),
-                method: RestMethod::Patch,
-                path: "/v1/workspace/webhooks/{webhook_id}".to_string(),
-                description: "Updates a webhook".to_string(),
-                request: Some(ApiRequest::json_type("UpdateWebhookBody")),
-                response: ApiResponse::json_type("StatusResponse"),
-                headers: vec![],
-                    params: None,
-                    oauth_scopes: None,
-            },
-            Endpoint {
-                id: "DeleteWebhook".to_string(),
-                method: RestMethod::Delete,
-                path: "/v1/workspace/webhooks/{webhook_id}".to_string(),
-                description: "Deletes a webhook".to_string(),
-                request: None,
-                response: ApiResponse::json_type("StatusResponse"),
-                headers: vec![],
-                    params: None,
-                    oauth_scopes: None,
-            },
-        ],
+        endpoints,
         module_path: None,
         request_suffix: None,
         version: None,
@@ -901,10 +381,6 @@ mod tests {
     use super::*;
     use schematic_define::RestMethod;
 
-    // =========================================================================
-    // REST API Tests
-    // =========================================================================
-
     #[test]
     fn rest_api_has_correct_metadata() {
         let api = define_elevenlabs_rest_api();
@@ -931,7 +407,6 @@ mod tests {
     #[test]
     fn rest_api_has_minimum_endpoints() {
         let api = define_elevenlabs_rest_api();
-        // Plan specifies 35+ endpoints
         assert!(
             api.endpoints.len() >= 35,
             "Expected at least 35 endpoints, got {}",
@@ -1054,26 +529,19 @@ mod tests {
         assert_eq!(add_sample.method, RestMethod::Post);
         assert!(add_sample.path.contains("/samples"));
 
-        // Verify it's a form-data request with file upload
         if let Some(ApiRequest::FormData { fields }) = &add_sample.request {
             assert_eq!(fields.len(), 2);
 
-            // First field should be the audio file
             assert_eq!(fields[0].name, "audio");
             assert!(fields[0].required);
             assert!(matches!(fields[0].kind, FormFieldKind::File { .. }));
 
-            // Second field should be optional name
             assert_eq!(fields[1].name, "name");
             assert!(!fields[1].required);
         } else {
             panic!("AddVoiceSample should have FormData request");
         }
     }
-
-    // =========================================================================
-    // WebSocket API Tests
-    // =========================================================================
 
     #[test]
     fn websocket_api_has_correct_metadata() {

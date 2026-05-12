@@ -6,12 +6,19 @@
 //!
 //! ## Output Structure
 //!
-//! The generator produces per-API module files:
+//! The generator produces per-API module files. Small modules are single files;
+//! large modules (exceeding [`SPLIT_THRESHOLD_LINES`]) are split into directories:
+//!
 //! ```text
 //! schema/src/
-//! ├── lib.rs         # Module declarations and re-exports
-//! ├── openai.rs      # OpenAI API client code
-//! └── prelude.rs     # Common re-exports for consumers
+//! ├── lib.rs              # Module declarations and re-exports
+//! ├── openai.rs           # Small API module (single file)
+//! ├── emqx/               # Large API module (split directory)
+//! │   ├── mod.rs          #   Client structs, re-exports, submodule declarations
+//! │   ├── requests.rs     #   Request structs and request enums
+//! │   ├── responses.rs    #   Definitions re-exports
+//! │   └── client.rs       #   HTTP method impl blocks
+//! └── prelude.rs          # Common re-exports for consumers
 //! ```
 //!
 //! ## Safety Guarantees
@@ -35,9 +42,11 @@ pub mod write;
 pub mod ws_modules;
 
 pub use assemble::{
-    assemble_api_code, assemble_api_module, assemble_api_module_with_options,
-    assemble_combined_api_module, assemble_lib_rs, assemble_lib_rs_with_options, assemble_prelude,
-    assemble_prelude_with_options, assemble_shared_module, get_module_path, get_request_suffix,
+    SplitApiParts, SPLIT_THRESHOLD_LINES, assemble_api_code, assemble_api_module,
+    assemble_api_module_with_options, assemble_combined_api_module, assemble_lib_rs,
+    assemble_lib_rs_with_options, assemble_prelude, assemble_prelude_with_options,
+    assemble_shared_module, assemble_split_api_module, assemble_split_combined_api_module,
+    get_module_path, get_request_suffix,
 };
 pub use format::{format_code, validate_code};
 pub use options::OutputOptions;
@@ -45,10 +54,7 @@ pub use write::write_atomic;
 
 /// Generates and writes all API code to the output directory.
 ///
-/// This is the main entry point for code generation. It produces:
-/// - `lib.rs` - Module declarations and crate documentation
-/// - `prelude.rs` - Convenient re-exports
-/// - `{api_name}.rs` - Per-API module files
+/// Convenience wrapper around [`generate_and_write_all`] for a single API.
 ///
 /// ## Arguments
 ///
@@ -74,13 +80,32 @@ pub fn generate_and_write(
     generate_and_write_all(&apis, output_dir, dry_run)
 }
 
-/// Generates and writes code for multiple APIs to the output directory.
+/// Represents generated output for a single API module.
 ///
-/// This function produces a complete schema crate with:
-/// - `lib.rs` - Module declarations for all APIs
-/// - `shared.rs` - Shared types (error type, etc.)
-/// - `prelude.rs` - Re-exports from all APIs
-/// - `{api_name}.rs` - One module file per API
+/// A module is either a single `.rs` file or a directory of submodules.
+enum GeneratedModule {
+    /// Single-file module: `{module_path}.rs`
+    SingleFile { filename: String, content: String },
+    /// Directory module: `{module_path}/mod.rs` + submodules
+    Directory {
+        module_path: String,
+        mod_rs: String,
+        requests_rs: String,
+        responses_rs: String,
+        client_rs: String,
+    },
+}
+
+/// Generates and writes all API code to the output directory.
+///
+/// This is the main entry point for code generation. It produces:
+/// - `lib.rs` - Module declarations and crate documentation
+/// - `prelude.rs` - Convenient re-exports
+/// - `{api_name}.rs` or `{api_name}/` - Per-API module files
+///
+/// Modules whose generated code exceeds [`SPLIT_THRESHOLD_LINES`] are split into
+/// a directory with `mod.rs`, `requests.rs`, `responses.rs`, and `client.rs`.
+/// Smaller modules remain as single files.
 ///
 /// ## Arguments
 ///
@@ -120,7 +145,7 @@ pub fn generate_and_write_all(
         module_groups.entry(path).or_default().push(api);
     }
 
-    let mut api_modules: Vec<(String, String)> = Vec::new();
+    let mut generated: Vec<GeneratedModule> = Vec::new();
     for (module_path, group) in &module_groups {
         let tokens = if group.len() == 1 {
             assemble_api_module(group[0])
@@ -129,61 +154,173 @@ pub fn generate_and_write_all(
         };
         let file = validate_code(&tokens)?;
         let formatted = format_code(&file);
-        let filename = format!("{}.rs", module_path);
-        api_modules.push((filename, formatted));
-    }
-    let (ws_shared_filename, ws_shared_content) = ws_modules::generate_ws_shared_module()?;
-    api_modules.push((ws_shared_filename, ws_shared_content));
+        let line_count = formatted.lines().count();
 
-    api_modules.extend(ws_modules::generate_ws_definition_modules()?);
+        if line_count > SPLIT_THRESHOLD_LINES {
+            let parts = if group.len() == 1 {
+                assemble_split_api_module(group[0], &OutputOptions::default())
+            } else {
+                assemble_split_combined_api_module(group)
+            };
+
+            let mod_rs_file = validate_code(&parts.mod_rs)?;
+            let requests_file = validate_code(&parts.requests_rs)?;
+            let responses_file = validate_code(&parts.responses_rs)?;
+            let client_file = validate_code(&parts.client_rs)?;
+
+            generated.push(GeneratedModule::Directory {
+                module_path: module_path.clone(),
+                mod_rs: format_code(&mod_rs_file),
+                requests_rs: format_code(&requests_file),
+                responses_rs: format_code(&responses_file),
+                client_rs: format_code(&client_file),
+            });
+        } else {
+            let filename = format!("{}.rs", module_path);
+            generated.push(GeneratedModule::SingleFile {
+                filename,
+                content: formatted,
+            });
+        }
+    }
+
+    let (ws_shared_filename, ws_shared_content) = ws_modules::generate_ws_shared_module()?;
+    let ws_modules_list = ws_modules::generate_ws_definition_modules()?;
 
     if dry_run {
         println!("=== lib.rs ===\n{}\n", lib_formatted);
         println!("=== shared.rs ===\n{}\n", shared_formatted);
         println!("=== prelude.rs ===\n{}\n", prelude_formatted);
-        for (filename, content) in &api_modules {
+        for module in &generated {
+            match module {
+                GeneratedModule::SingleFile { filename, content } => {
+                    println!("=== {} ===\n{}\n", filename, content);
+                }
+                GeneratedModule::Directory {
+                    module_path,
+                    mod_rs,
+                    requests_rs,
+                    responses_rs,
+                    client_rs,
+                } => {
+                    println!("=== {}/mod.rs ===\n{}\n", module_path, mod_rs);
+                    println!(
+                        "=== {}/requests.rs ===\n{}\n",
+                        module_path, requests_rs
+                    );
+                    println!(
+                        "=== {}/responses.rs ===\n{}\n",
+                        module_path, responses_rs
+                    );
+                    println!("=== {}/client.rs ===\n{}\n", module_path, client_rs);
+                }
+            }
+        }
+        println!("=== {} ===\n{}\n", ws_shared_filename, ws_shared_content);
+        for (filename, content) in &ws_modules_list {
             println!("=== {} ===\n{}\n", filename, content);
         }
     } else {
+        remove_conflicting_paths(output_dir, &generated);
+
         write_atomic(&output_dir.join("lib.rs"), &lib_formatted)?;
 
         write_atomic(&output_dir.join("shared.rs"), &shared_formatted)?;
 
         write_atomic(&output_dir.join("prelude.rs"), &prelude_formatted)?;
 
-        for (filename, content) in &api_modules {
+        for module in &generated {
+            match module {
+                GeneratedModule::SingleFile { filename, content } => {
+                    write_atomic(&output_dir.join(filename), content)?;
+                }
+                GeneratedModule::Directory {
+                    module_path,
+                    mod_rs,
+                    requests_rs,
+                    responses_rs,
+                    client_rs,
+                } => {
+                    let dir = output_dir.join(module_path);
+                    write_atomic(&dir.join("mod.rs"), mod_rs)?;
+                    write_atomic(&dir.join("requests.rs"), requests_rs)?;
+                    write_atomic(&dir.join("responses.rs"), responses_rs)?;
+                    write_atomic(&dir.join("client.rs"), client_rs)?;
+                }
+            }
+        }
+
+        write_atomic(&output_dir.join(&ws_shared_filename), &ws_shared_content)?;
+        for (filename, content) in &ws_modules_list {
             write_atomic(&output_dir.join(filename), content)?;
         }
 
-        let expected_files: HashSet<String> = {
-            let mut files = HashSet::new();
-            files.insert("lib.rs".to_string());
-            files.insert("shared.rs".to_string());
-            files.insert("prelude.rs".to_string());
-            for (filename, _) in &api_modules {
+        let stale_names = collect_expected_files(&generated, &ws_shared_filename, &ws_modules_list);
+        cleanup_stale_files(output_dir, &stale_names);
+    }
+
+    Ok(generated
+        .into_iter()
+        .next()
+        .map(|m| match m {
+            GeneratedModule::SingleFile { content, .. } => content,
+            GeneratedModule::Directory { mod_rs, .. } => mod_rs,
+        })
+        .unwrap_or_default())
+}
+
+/// Collects the set of expected filenames (and directory names) that should
+/// exist after generation.
+fn collect_expected_files(
+    generated: &[GeneratedModule],
+    ws_shared_filename: &str,
+    ws_modules: &[(String, String)],
+) -> HashSet<String> {
+    let mut files = HashSet::new();
+    files.insert("lib.rs".to_string());
+    files.insert("shared.rs".to_string());
+    files.insert("prelude.rs".to_string());
+    files.insert(ws_shared_filename.to_string());
+    for (filename, _) in ws_modules {
+        files.insert(filename.clone());
+    }
+    for module in generated {
+        match module {
+            GeneratedModule::SingleFile { filename, .. } => {
                 files.insert(filename.clone());
             }
-            files
-        };
+            GeneratedModule::Directory { module_path, .. } => {
+                files.insert(module_path.clone());
+            }
+        }
+    }
+    files
+}
 
-        if let Ok(entries) = fs::read_dir(output_dir) {
-            for entry in entries.flatten() {
-                let path = entry.path();
-                if path.extension().is_some_and(|ext| ext == "rs")
-                    && let Some(name) = path.file_name().and_then(|n| n.to_str())
-                    && !expected_files.contains(name)
-                {
-                    let _ = fs::remove_file(&path);
+/// Removes files or directories that would conflict with new module output.
+///
+/// When a module transitions from single-file to directory (or vice versa),
+/// the old artifact must be removed before the new one is written, because
+/// a file and directory cannot share the same path.
+fn remove_conflicting_paths(output_dir: &Path, generated: &[GeneratedModule]) {
+    for module in generated {
+        match module {
+            GeneratedModule::SingleFile { filename, .. } => {
+                let dir_name = filename.strip_suffix(".rs").unwrap_or(filename);
+                let dir_path = output_dir.join(dir_name);
+                if dir_path.is_dir() {
+                    let _ = fs::remove_dir_all(&dir_path);
+                }
+            }
+            GeneratedModule::Directory { module_path, .. } => {
+                let rs_filename = format!("{}.rs", module_path);
+                let rs_path = output_dir.join(&rs_filename);
+                if rs_path.is_file() {
+                    let _ = fs::remove_file(&rs_path);
                 }
             }
         }
     }
-
-    Ok(api_modules
-        .into_iter()
-        .next()
-        .map(|(_, content)| content)
-        .unwrap_or_default())
 }
 
 /// Generates and writes standalone API code (for imported OpenAPI specs).
@@ -254,6 +391,33 @@ pub fn generate_and_write_standalone(
     }
 
     Ok(api_formatted)
+}
+
+/// Removes stale `.rs` files and module directories from the output directory
+/// that are not part of the current generation set.
+///
+/// For single-file modules, removes `{name}.rs` if no longer expected.
+/// For directory modules, the directory itself is expected; stale `.rs`
+/// files at the top level are also removed.
+fn cleanup_stale_files(output_dir: &Path, expected: &HashSet<String>) {
+    if let Ok(entries) = fs::read_dir(output_dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_file()
+                && path.extension().is_some_and(|ext| ext == "rs")
+                && let Some(name) = path.file_name().and_then(|n| n.to_str())
+                && !expected.contains(name)
+            {
+                let _ = fs::remove_file(&path);
+            }
+            if path.is_dir()
+                && let Some(name) = path.file_name().and_then(|n| n.to_str())
+                && !expected.contains(name)
+            {
+                let _ = fs::remove_dir_all(&path);
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -891,6 +1055,167 @@ mod tests {
         assert!(
             code.contains("FooCompatRequest"),
             "Missing FooCompatRequest in prelude"
+        );
+    }
+
+    fn make_large_api() -> RestApi {
+        let endpoints: Vec<Endpoint> = (0..500)
+            .map(|i| Endpoint {
+                id: format!("Endpoint{}", i),
+                method: if i % 5 == 0 {
+                    RestMethod::Post
+                } else {
+                    RestMethod::Get
+                },
+                path: if i % 3 == 0 {
+                    format!("/endpoint/{}/{{param}}", i)
+                } else {
+                    format!("/endpoint/{}", i)
+                },
+                description: format!("Endpoint {} description with enough text to add some length to the generated documentation comments", i),
+                request: if i % 5 == 0 {
+                    Some(ApiRequest::json_type(&format!("Endpoint{}Body", i)))
+                } else {
+                    None
+                },
+                response: ApiResponse::json_type("TestResponse"),
+                headers: vec![],
+                params: None,
+                oauth_scopes: None,
+            })
+            .collect();
+
+        RestApi {
+            name: "LargeApi".to_string(),
+            description: "A large API for testing split output".to_string(),
+            base_url: "https://api.large.com/v1".to_string(),
+            docs_url: Some("https://docs.large.com".to_string()),
+            auth: AuthStrategy::BearerToken { header: None },
+            auth_policy: None,
+            env_auth: vec!["LARGE_API_KEY".to_string()],
+            env_username: None,
+            env_mapping: None,
+            headers: vec![],
+            endpoints,
+            module_path: None,
+            request_suffix: None,
+            version: None,
+        }
+    }
+
+    #[test]
+    fn large_api_produces_split_directory() {
+        let api = make_large_api();
+        let temp_dir = TempDir::new().unwrap();
+        generate_and_write(&api, temp_dir.path(), false).unwrap();
+
+        let single_file = temp_dir.path().join("large.rs");
+        let dir = temp_dir.path().join("large");
+
+        if single_file.exists() && !dir.is_dir() {
+            let content = fs::read_to_string(&single_file).unwrap();
+            let line_count = content.lines().count();
+            panic!(
+                "Generated as single file ({} lines, threshold is {}). \
+                 Increase endpoint count in make_large_api().",
+                line_count,
+                SPLIT_THRESHOLD_LINES
+            );
+        }
+
+        assert!(dir.is_dir(), "large should be a directory");
+        assert!(
+            dir.join("mod.rs").exists(),
+            "large/mod.rs should exist"
+        );
+        assert!(
+            dir.join("requests.rs").exists(),
+            "large/requests.rs should exist"
+        );
+        assert!(
+            dir.join("responses.rs").exists(),
+            "large/responses.rs should exist"
+        );
+        assert!(
+            dir.join("client.rs").exists(),
+            "large/client.rs should exist"
+        );
+
+        assert!(
+            !temp_dir.path().join("large.rs").exists(),
+            "large.rs should NOT exist (directory takes precedence)"
+        );
+
+        let mod_rs = fs::read_to_string(dir.join("mod.rs")).unwrap();
+        assert!(
+            mod_rs.contains("pub struct LargeApi"),
+            "mod.rs should contain struct definition"
+        );
+        assert!(
+            mod_rs.contains("pub mod requests;"),
+            "mod.rs should declare requests submodule"
+        );
+        assert!(
+            mod_rs.contains("pub use requests::*;"),
+            "mod.rs should re-export requests"
+        );
+
+        let requests = fs::read_to_string(dir.join("requests.rs")).unwrap();
+        assert!(
+            requests.contains("pub struct Endpoint0Request"),
+            "requests.rs should contain request structs"
+        );
+        assert!(
+            requests.contains("pub enum LargeApiRequest"),
+            "requests.rs should contain request enum"
+        );
+
+        let client = fs::read_to_string(dir.join("client.rs")).unwrap();
+        assert!(
+            client.contains("impl LargeApi"),
+            "client.rs should contain impl block"
+        );
+    }
+
+    #[test]
+    fn split_module_public_api_is_accessible() {
+        let api = make_large_api();
+        let temp_dir = TempDir::new().unwrap();
+        generate_and_write(&api, temp_dir.path(), false).unwrap();
+
+        let dir = temp_dir.path().join("large");
+
+        let mod_rs = fs::read_to_string(dir.join("mod.rs")).unwrap();
+        assert!(
+            mod_rs.contains("pub use client::*;"),
+            "mod.rs should re-export client items"
+        );
+
+        let responses = fs::read_to_string(dir.join("responses.rs")).unwrap();
+        assert!(
+            responses.contains("pub use"),
+            "responses.rs should have pub use for definitions"
+        );
+    }
+
+    #[test]
+    fn split_to_single_file_transition_cleans_up() {
+        let large_api = make_large_api();
+        let mut small_api = make_simple_api();
+        small_api.name = "LargeApi".to_string();
+        let temp_dir = TempDir::new().unwrap();
+
+        generate_and_write(&large_api, temp_dir.path(), false).unwrap();
+        assert!(temp_dir.path().join("large").is_dir());
+
+        generate_and_write(&small_api, temp_dir.path(), false).unwrap();
+        assert!(
+            temp_dir.path().join("large.rs").exists(),
+            "Should now be a single file"
+        );
+        assert!(
+            !temp_dir.path().join("large").is_dir(),
+            "Directory should be cleaned up"
         );
     }
 }

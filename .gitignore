@@ -75,7 +75,7 @@ trace/*
 **/lint-*-timing.jsonl
 **/test-*-timing.jsonl
 
-.opencode/package-lock.json
+**/lint-*timing.jsonl
+**/test-*timing.jsonl
 .claudine/tmp/
-open_code-*.meta.json
-open_code-*.ndjson
+**/tmp-stream*

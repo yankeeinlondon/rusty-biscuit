@@ -1112,29 +1112,20 @@
     "schemas": {
       "CreateRepoBody": {
         "title": "CreateRepoBody",
-        "description": "Request to create a new repository.",
         "type": "object",
         "properties": {
-          "hardware": {
-            "description": "Hardware tier for Spaces."
-          },
+          "hardware": {},
           "name": {
-            "description": "Repository name (without org prefix).",
             "type": "string"
           },
           "organization": {
-            "description": "Organization to create in (optional, uses user namespace otherwise).",
             "type": "string"
           },
           "private": {
-            "description": "Whether the repo should be private.",
             "type": "boolean"
           },
-          "sdk": {
-            "description": "Whether to create an SDK-specific repo (for Spaces)."
-          },
+          "sdk": {},
           "secrets": {
-            "description": "Secrets for Spaces.",
             "type": "array",
             "items": {
               "allOf": [
@@ -1145,19 +1136,14 @@
             }
           },
           "sleepTimeSeconds": {
-            "description": "Sleep timeout in seconds (Spaces).",
             "type": "integer",
             "format": "uint64"
           },
           "storage": {
-            "description": "Storage tier for Spaces.",
             "type": "string"
           },
-          "type": {
-            "description": "Repository type."
-          },
+          "type": {},
           "variables": {
-            "description": "Environment variables for Spaces.",
             "type": "array",
             "items": {
               "allOf": [
@@ -1173,46 +1159,35 @@
         ]
       },
       "RepoType": {
-        "description": "Repository type on Hugging Face Hub."
+        "type": "string"
       },
       "SpaceHardware": {
-        "description": "Space hardware tier."
+        "type": "string"
       },
       "SpaceSdk": {
-        "description": "Space SDK type."
+        "type": "string"
       },
       "SpaceSecret": {
-        "description": "Space secret configuration.",
         "type": "object",
         "properties": {
-          "description": {
-            "description": "Description."
-          },
+          "description": {},
           "key": {
-            "description": "Secret key name.",
             "type": "string"
           },
-          "value": {
-            "description": "Secret value."
-          }
+          "value": {}
         },
         "required": [
           "key"
         ]
       },
       "SpaceVariable": {
-        "description": "Space environment variable.",
         "type": "object",
         "properties": {
-          "description": {
-            "description": "Description."
-          },
+          "description": {},
           "key": {
-            "description": "Variable key name.",
             "type": "string"
           },
           "value": {
-            "description": "Variable value.",
             "type": "string"
           }
         },
@@ -1223,20 +1198,15 @@
       },
       "DeleteRepoBody": {
         "title": "DeleteRepoBody",
-        "description": "Request to delete a repository.",
         "type": "object",
         "properties": {
           "organization": {
-            "description": "Organization (if deleting org repo).",
             "type": "string"
           },
           "repoId": {
-            "description": "Repository ID to delete.",
             "type": "string"
           },
-          "type": {
-            "description": "Repository type."
-          }
+          "type": {}
         },
         "required": [
           "repoId"
@@ -1244,20 +1214,15 @@
       },
       "MoveRepoBody": {
         "title": "MoveRepoBody",
-        "description": "Request to move/rename a repository.",
         "type": "object",
         "properties": {
           "fromRepo": {
-            "description": "Source repository ID.",
             "type": "string"
           },
           "toRepo": {
-            "description": "Destination repository ID.",
             "type": "string"
           },
-          "type": {
-            "description": "Repository type."
-          }
+          "type": {}
         },
         "required": [
           "fromRepo",
@@ -1266,20 +1231,16 @@
       },
       "UpdateRepoSettingsBody": {
         "title": "UpdateRepoSettingsBody",
-        "description": "Request to update repository settings.",
         "type": "object",
         "properties": {
-          "gated": {
-            "description": "Change gated status."
-          },
+          "gated": {},
           "private": {
-            "description": "Change private status.",
             "type": "boolean"
           }
         }
       },
       "GatedStatus": {
-        "description": "Gated model access status.\n\nControls how access requests are handled."
+        "type": "string"
       },
       "Vec<ModelInfo>": {
         "title": "Array_of_ModelInfo",
@@ -1293,102 +1254,60 @@
         }
       },
       "CardData": {
-        "description": "Model card metadata.",
         "type": "object",
         "properties": {
-          "base_model": {
-            "description": "Base model this was fine-tuned from."
-          },
-          "co2_eq_emissions": {
-            "description": "Co2 emissions data."
-          },
+          "base_model": {},
+          "co2_eq_emissions": {},
           "datasets": {
-            "description": "Datasets used for training.",
             "type": "array",
             "items": {
               "type": "string"
             }
           },
           "language": {
-            "description": "Supported languages (ISO codes).",
             "type": "array",
             "items": {
               "type": "string"
             }
           },
-          "library_name": {
-            "description": "Library name."
-          },
-          "license": {
-            "description": "License identifier."
-          },
-          "license_link": {
-            "description": "License URL."
-          },
-          "license_name": {
-            "description": "License name/description."
-          },
+          "library_name": {},
+          "license": {},
+          "license_link": {},
+          "license_name": {},
           "metrics": {
-            "description": "Evaluation metrics.",
             "type": "array",
             "items": {
               "type": "string"
             }
           },
-          "model-index": {
-            "description": "Model index entries."
-          },
-          "pipeline_tag": {
-            "description": "Pipeline task tag."
-          },
+          "model-index": {},
+          "pipeline_tag": {},
           "tags": {
-            "description": "Tags/keywords.",
             "type": "array",
             "items": {
               "type": "string"
             }
           },
-          "widget": {
-            "description": "Custom widget configuration."
-          }
+          "widget": {}
         }
       },
       "Co2Emissions": {
-        "description": "CO2 emissions information.",
         "type": "object",
         "properties": {
-          "emissions": {
-            "description": "Emissions in grams."
-          },
-          "geographical_location": {
-            "description": "Geographical location of training."
-          },
-          "hardware_used": {
-            "description": "Hardware used for training."
-          },
-          "source": {
-            "description": "Source of emissions data."
-          },
-          "training_type": {
-            "description": "Training type (e.g., \"fine-tuning\")."
-          }
+          "emissions": {},
+          "geographical_location": {},
+          "hardware_used": {},
+          "source": {},
+          "training_type": {}
         }
       },
       "DatasetRef": {
-        "description": "Dataset reference for evaluation.",
         "type": "object",
         "properties": {
-          "config": {
-            "description": "Dataset configuration."
-          },
-          "name": {
-            "description": "Dataset display name."
-          },
-          "split": {
-            "description": "Dataset split."
-          },
+          "config": {},
+          "name": {},
+          "split": {},
           "type": {
-            "description": "Dataset type/name.",
             "type": "string"
           }
         },
@@ -1397,14 +1316,10 @@
         ]
       },
       "EvaluationResult": {
-        "description": "Evaluation result on a benchmark.",
         "type": "object",
         "properties": {
-          "dataset": {
-            "description": "Dataset used for evaluation."
-          },
+          "dataset": {},
           "metrics": {
-            "description": "Metrics and scores.",
             "type": "array",
             "items": {
               "allOf": [
@@ -1414,27 +1329,20 @@
               ]
             }
           },
-          "task": {
-            "description": "Task type."
-          }
+          "task": {}
         }
       },
       "InferenceStatus": {
-        "description": "Inference API status for a model."
+        "type": "string"
       },
       "LfsInfo": {
-        "description": "LFS (Large File Storage) information.",
         "type": "object",
         "properties": {
-          "pointerSize": {
-            "description": "Pointer size."
-          },
+          "pointerSize": {},
           "sha256": {
-            "description": "SHA256 hash of the file.",
             "type": "string"
           },
           "size": {
-            "description": "File size in bytes.",
             "type": "integer",
             "format": "uint64"
           }
@@ -1445,22 +1353,14 @@
         ]
       },
       "MetricResult": {
-        "description": "Metric result from evaluation.",
         "type": "object",
         "properties": {
-          "name": {
-            "description": "Display name."
-          },
+          "name": {},
           "type": {
-            "description": "Metric type/name.",
             "type": "string"
           },
-          "value": {
-            "description": "Metric value/score."
-          },
-          "verified": {
-            "description": "Whether this is verified."
-          }
+          "value": {},
+          "verified": {}
         },
         "required": [
           "type",
@@ -1468,15 +1368,12 @@
         ]
       },
       "ModelIndexEntry": {
-        "description": "Model index entry for evaluation results.",
         "type": "object",
         "properties": {
           "name": {
-            "description": "Model name.",
             "type": "string"
           },
           "results": {
-            "description": "Evaluation results.",
             "type": "array",
             "items": {
               "allOf": [
@@ -1493,63 +1390,45 @@
       },
       "ModelInfo": {
         "title": "ModelInfo",
-        "description": "Complete model information from the Hub API.",
         "type": "object",
         "properties": {
           "author": {
-            "description": "Author/organization name.",
             "type": "string"
           },
-          "cardData": {
-            "description": "Model card data (parsed YAML frontmatter)."
-          },
+          "cardData": {},
           "config": {
-            "description": "config.json contents.",
             "type": "object"
           },
           "createdAt": {
-            "description": "Creation timestamp (ISO 8601).",
             "type": "string"
           },
           "disabled": {
-            "description": "Whether the repository is disabled.",
             "type": "boolean"
           },
           "downloads": {
-            "description": "Total download count.",
             "type": "integer",
             "format": "uint64"
           },
           "downloadsAllTime": {
-            "description": "Downloads in the last month.",
             "type": "integer",
             "format": "uint64"
           },
-          "gated": {
-            "description": "Gated access status."
-          },
-          "inference": {
-            "description": "Inference API status."
-          },
+          "gated": {},
+          "inference": {},
           "lastModified": {
-            "description": "Last modified timestamp (ISO 8601).",
             "type": "string"
           },
           "library_name": {
-            "description": "Library/framework name.",
             "type": "string"
           },
           "likes": {
-            "description": "Number of likes.",
             "type": "integer",
             "format": "uint64"
           },
           "mask_token": {
-            "description": "Mask token for masked LM models.",
             "type": "string"
           },
           "model-index": {
-            "description": "Model index with evaluation results.",
             "type": "array",
             "items": {
               "allOf": [
@@ -1560,26 +1439,19 @@
             }
           },
           "modelId": {
-            "description": "Model identifier (e.g., \"bert-base-uncased\" or \"org/model\").",
             "type": "string"
           },
           "pipeline_tag": {
-            "description": "Pipeline task tag.",
             "type": "string"
           },
           "private": {
-            "description": "Whether the repository is private.",
             "type": "boolean"
           },
-          "safetensors": {
-            "description": "Safetensors metadata."
-          },
+          "safetensors": {},
           "sha": {
-            "description": "SHA of the current commit.",
             "type": "string"
           },
           "siblings": {
-            "description": "Files in the repository.",
             "type": "array",
             "items": {
               "allOf": [
@@ -1590,29 +1462,23 @@
             }
           },
           "spaces": {
-            "description": "Spaces using this model.",
             "type": "array",
             "items": {
               "type": "string"
             }
           },
           "tags": {
-            "description": "All tags attached to the model.",
             "type": "array",
             "items": {
               "type": "string"
             }
           },
-          "transformersInfo": {
-            "description": "Transformers configuration."
-          },
+          "transformersInfo": {},
           "trendingScore": {
-            "description": "Trending score.",
             "type": "number",
             "format": "double"
           },
           "widgetData": {
-            "description": "Widget data for the model.",
             "type": "array",
             "items": {
               "allOf": [
@@ -1628,51 +1494,32 @@
         ]
       },
       "RepoFile": {
-        "description": "Repository file/sibling entry.\n\nRepresents a single file within a repository.",
         "type": "object",
         "properties": {
-          "blobId": {
-            "description": "Blob ID (Git SHA)."
-          },
-          "lfs": {
-            "description": "LFS pointer information."
-          },
+          "blobId": {},
+          "lfs": {},
           "rfilename": {
-            "description": "Relative filename within the repository.",
             "type": "string"
           },
-          "size": {
-            "description": "File size in bytes."
-          }
+          "size": {}
         },
         "required": [
           "rfilename"
         ]
       },
       "SafetensorsInfo": {
-        "description": "Safetensors metadata for a model.",
         "type": "object",
         "properties": {
-          "parameters": {
-            "description": "Parameter count by dtype."
-          },
-          "sharded": {
-            "description": "Sharding information."
-          },
-          "total": {
-            "description": "Total model size in bytes."
-          }
+          "parameters": {},
+          "sharded": {},
+          "total": {}
         }
       },
       "TaskInfo": {
-        "description": "Task information for evaluation.",
         "type": "object",
         "properties": {
-          "name": {
-            "description": "Task display name."
-          },
+          "name": {},
           "type": {
-            "description": "Task type name.",
             "type": "string"
           }
         },
@@ -1681,33 +1528,19 @@
         ]
       },
       "TransformersInfo": {
-        "description": "Transform/processor configuration.",
         "type": "object",
         "properties": {
-          "auto_map": {
-            "description": "Auto class mappings."
-          },
-          "custom_class": {
-            "description": "Custom pipeline class."
-          },
-          "processor": {
-            "description": "Processor class."
-          }
+          "auto_map": {},
+          "custom_class": {},
+          "processor": {}
         }
       },
       "WidgetConfig": {
-        "description": "Widget configuration for model demos.",
         "type": "object",
         "properties": {
-          "example_title": {
-            "description": "Example label/title."
-          },
-          "src": {
-            "description": "Example source URL (for images/audio)."
-          },
-          "text": {
-            "description": "Example text/input."
-          }
+          "example_title": {},
+          "src": {},
+          "text": {}
         }
       },
       "Vec<RepoFile>": {
@@ -1723,24 +1556,19 @@
       },
       "FileMetadata": {
         "title": "FileMetadata",
-        "description": "File metadata in a repository.\n\nTODO: Define proper fields based on HuggingFace API docs.",
         "type": "object",
         "properties": {
           "oid": {
-            "description": "File blob ID (git SHA).",
             "type": "string"
           },
           "path": {
-            "description": "File path.",
             "type": "string"
           },
           "size": {
-            "description": "File size in bytes.",
             "type": "integer",
             "format": "uint64"
           },
           "type": {
-            "description": "MIME type.",
             "type": "string"
           }
         },
@@ -1760,22 +1588,14 @@
         }
       },
       "CommitInfo": {
-        "description": "Git commit information.",
         "type": "object",
         "properties": {
-          "date": {
-            "description": "Commit date (ISO 8601)."
-          },
+          "date": {},
           "id": {
-            "description": "Commit SHA hash.",
             "type": "string"
           },
-          "message": {
-            "description": "Commit message body."
-          },
-          "title": {
-            "description": "Commit title/message."
-          }
+          "message": {},
+          "title": {}
         },
         "required": [
           "id"
@@ -1783,16 +1603,13 @@
       },
       "DiscussionList": {
         "title": "DiscussionList",
-        "description": "List of discussions response.",
         "type": "object",
         "properties": {
           "count": {
-            "description": "Total count.",
             "type": "integer",
             "format": "uint64"
           },
           "discussions": {
-            "description": "List of discussions.",
             "type": "array",
             "items": {
               "allOf": [
@@ -1808,17 +1625,11 @@
         ]
       },
       "Author": {
-        "description": "Author/user information for commits and discussions.",
         "type": "object",
         "properties": {
-          "avatarUrl": {
-            "description": "User avatar URL."
-          },
-          "email": {
-            "description": "Email address."
-          },
+          "avatarUrl": {},
+          "email": {},
           "name": {
-            "description": "Username or full name.",
             "type": "string"
           }
         },
@@ -1827,40 +1638,28 @@
         ]
       },
       "Discussion": {
-        "description": "Discussion thread on a repository.",
         "type": "object",
         "properties": {
-          "author": {
-            "description": "Author information."
-          },
-          "createdAt": {
-            "description": "Creation timestamp."
-          },
+          "author": {},
+          "createdAt": {},
           "isPullRequest": {
-            "description": "Discussion type (discussion or pull_request).",
             "type": "boolean"
           },
           "labels": {
-            "description": "Labels/tags.",
             "type": "array",
             "items": {
               "type": "string"
             }
           },
           "num": {
-            "description": "Discussion number.",
             "type": "integer",
             "format": "uint64"
           },
-          "numComments": {
-            "description": "Number of comments."
-          },
+          "numComments": {},
           "pinned": {
-            "description": "Whether pinned.",
             "type": "boolean"
           },
           "status": {
-            "description": "Discussion status.",
             "allOf": [
               {
                 "$ref": "#/components/schemas/DiscussionStatus"
@@ -1868,7 +1667,6 @@
             ]
           },
           "title": {
-            "description": "Discussion title.",
             "type": "string"
           }
         },
@@ -1879,7 +1677,7 @@
         ]
       },
       "DiscussionStatus": {
-        "description": "Discussion/pull request status."
+        "type": "string"
       },
       "Vec<DatasetInfo>": {
         "title": "Array_of_DatasetInfo",
@@ -1893,11 +1691,9 @@
         }
       },
       "DatasetCardData": {
-        "description": "Dataset-specific card data.",
         "type": "object",
         "properties": {
           "configs": {
-            "description": "Dataset features/configs.",
             "type": "array",
             "items": {
               "allOf": [
@@ -1908,41 +1704,32 @@
             }
           },
           "language": {
-            "description": "Supported languages.",
             "type": "array",
             "items": {
               "type": "string"
             }
           },
-          "license": {
-            "description": "License identifier."
-          },
-          "pretty_name": {
-            "description": "Pretty name."
-          },
+          "license": {},
+          "pretty_name": {},
           "size_categories": {
-            "description": "Size category.",
             "type": "array",
             "items": {
               "type": "string"
             }
           },
           "tags": {
-            "description": "Tags/keywords.",
             "type": "array",
             "items": {
               "type": "string"
             }
           },
           "task_categories": {
-            "description": "Task categories.",
             "type": "array",
             "items": {
               "type": "string"
             }
           },
           "task_ids": {
-            "description": "Task IDs.",
             "type": "array",
             "items": {
               "type": "string"
@@ -1951,17 +1738,11 @@
         }
       },
       "DatasetConfig": {
-        "description": "Dataset configuration/split information.",
         "type": "object",
         "properties": {
-          "config_name": {
-            "description": "Configuration name."
-          },
-          "data_files": {
-            "description": "Data files patterns."
-          },
+          "config_name": {},
+          "data_files": {},
           "splits": {
-            "description": "Default split.",
             "type": "array",
             "items": {
               "allOf": [
@@ -1975,63 +1756,46 @@
       },
       "DatasetInfo": {
         "title": "DatasetInfo",
-        "description": "Complete dataset information from the Hub API.",
         "type": "object",
         "properties": {
           "author": {
-            "description": "Author/organization name.",
             "type": "string"
           },
-          "cardData": {
-            "description": "Card data (parsed frontmatter)."
-          },
+          "cardData": {},
           "citation": {
-            "description": "Citation text.",
             "type": "string"
           },
           "createdAt": {
-            "description": "Creation timestamp.",
             "type": "string"
           },
           "description": {
-            "description": "Description text.",
             "type": "string"
           },
           "disabled": {
-            "description": "Whether disabled.",
             "type": "boolean"
           },
           "downloads": {
-            "description": "Download count.",
             "type": "integer",
             "format": "uint64"
           },
-          "gated": {
-            "description": "Gated access status."
-          },
+          "gated": {},
           "id": {
-            "description": "Dataset identifier (e.g., \"squad\" or \"org/dataset\").",
             "type": "string"
           },
           "lastModified": {
-            "description": "Last modified timestamp.",
             "type": "string"
           },
           "likes": {
-            "description": "Like count.",
             "type": "integer",
             "format": "uint64"
           },
           "private": {
-            "description": "Whether private.",
             "type": "boolean"
           },
           "sha": {
-            "description": "SHA of the current commit.",
             "type": "string"
           },
           "siblings": {
-            "description": "Files in the repository.",
             "type": "array",
             "items": {
               "allOf": [
@@ -2042,14 +1806,12 @@
             }
           },
           "tags": {
-            "description": "All tags.",
             "type": "array",
             "items": {
               "type": "string"
             }
           },
           "trendingScore": {
-            "description": "Trending score.",
             "type": "number",
             "format": "double"
           }
@@ -2059,19 +1821,13 @@
         ]
       },
       "DatasetSplit": {
-        "description": "Dataset split information.",
         "type": "object",
         "properties": {
           "name": {
-            "description": "Split name (train, test, validation).",
             "type": "string"
           },
-          "num_bytes": {
-            "description": "Number of bytes."
-          },
-          "num_examples": {
-            "description": "Number of examples."
-          }
+          "num_bytes": {},
+          "num_examples": {}
         },
         "required": [
           "name"
@@ -2089,155 +1845,103 @@
         }
       },
       "SpaceCardData": {
-        "description": "Space-specific card data.",
         "type": "object",
         "properties": {
-          "app_file": {
-            "description": "Application file path."
-          },
-          "app_port": {
-            "description": "Application port."
-          },
-          "colorFrom": {
-            "description": "Color theme start."
-          },
-          "colorTo": {
-            "description": "Color theme end."
-          },
+          "app_file": {},
+          "app_port": {},
+          "colorFrom": {},
+          "colorTo": {},
           "datasets": {
-            "description": "Datasets used.",
             "type": "array",
             "items": {
               "type": "string"
             }
           },
-          "emoji": {
-            "description": "Emoji icon."
-          },
-          "license": {
-            "description": "License."
-          },
+          "emoji": {},
+          "license": {},
           "models": {
-            "description": "Models used.",
             "type": "array",
             "items": {
               "type": "string"
             }
           },
           "pinned": {
-            "description": "Pinned spaces.",
             "type": "boolean"
           },
-          "sdk": {
-            "description": "SDK type."
-          },
-          "sdk_version": {
-            "description": "SDK version."
-          },
-          "short_description": {
-            "description": "Short description."
-          },
-          "suggested_hardware": {
-            "description": "Suggested hardware."
-          },
-          "suggested_storage": {
-            "description": "Suggested storage."
-          },
+          "sdk": {},
+          "sdk_version": {},
+          "short_description": {},
+          "suggested_hardware": {},
+          "suggested_storage": {},
           "tags": {
-            "description": "Tags.",
             "type": "array",
             "items": {
               "type": "string"
             }
           },
-          "title": {
-            "description": "Title."
-          }
+          "title": {}
         }
       },
       "SpaceInfo": {
         "title": "SpaceInfo",
-        "description": "Complete Space information from the Hub API.",
         "type": "object",
         "properties": {
           "author": {
-            "description": "Author/organization.",
             "type": "string"
           },
-          "cardData": {
-            "description": "Card data (parsed frontmatter)."
-          },
+          "cardData": {},
           "colorFrom": {
-            "description": "Color theme.",
             "type": "string"
           },
           "colorTo": {
-            "description": "Color theme (end).",
             "type": "string"
           },
           "createdAt": {
-            "description": "Creation timestamp.",
             "type": "string"
           },
           "datasets": {
-            "description": "Datasets used by this space.",
             "type": "array",
             "items": {
               "type": "string"
             }
           },
           "disabled": {
-            "description": "Whether disabled.",
             "type": "boolean"
           },
           "emoji": {
-            "description": "Emoji icon.",
             "type": "string"
           },
           "id": {
-            "description": "Space identifier (e.g., \"org/space-name\").",
             "type": "string"
           },
           "lastModified": {
-            "description": "Last modified timestamp.",
             "type": "string"
           },
           "likes": {
-            "description": "Like count.",
             "type": "integer",
             "format": "uint64"
           },
           "models": {
-            "description": "Models used by this space.",
             "type": "array",
             "items": {
               "type": "string"
             }
           },
           "pinned": {
-            "description": "Pinned status.",
             "type": "boolean"
           },
           "private": {
-            "description": "Whether private.",
             "type": "boolean"
           },
-          "runtime": {
-            "description": "Runtime information."
-          },
-          "sdk": {
-            "description": "SDK type (gradio, streamlit, etc.)."
-          },
+          "runtime": {},
+          "sdk": {},
           "sdk_version": {
-            "description": "SDK version.",
             "type": "string"
           },
           "sha": {
-            "description": "SHA of the current commit.",
             "type": "string"
           },
           "siblings": {
-            "description": "Files in the repository.",
             "type": "array",
             "items": {
               "allOf": [
@@ -2248,14 +1952,12 @@
             }
           },
           "tags": {
-            "description": "All tags.",
             "type": "array",
             "items": {
               "type": "string"
             }
           },
           "trendingScore": {
-            "description": "Trending score.",
             "type": "number",
             "format": "double"
           }
@@ -2265,42 +1967,25 @@
         ]
       },
       "SpaceRuntime": {
-        "description": "Space runtime status and configuration.",
         "type": "object",
         "properties": {
-          "errorMessage": {
-            "description": "Error message if any."
-          },
-          "gcTimeout": {
-            "description": "Sleep time in seconds (0 = never)."
-          },
-          "hardware": {
-            "description": "Hardware tier."
-          },
-          "replicas": {
-            "description": "Number of replicas."
-          },
-          "requestedHardware": {
-            "description": "Requested hardware."
-          },
-          "stage": {
-            "description": "Current stage/status."
-          },
-          "storage": {
-            "description": "Storage mount path."
-          }
+          "errorMessage": {},
+          "gcTimeout": {},
+          "hardware": {},
+          "replicas": {},
+          "requestedHardware": {},
+          "stage": {},
+          "storage": {}
         }
       },
       "SpaceStage": {
-        "description": "Space runtime stage."
+        "type": "string"
       },
       "RepoUrl": {
         "title": "RepoUrl",
-        "description": "Repository URL after creation/modification.\n\nTODO: Define proper fields based on HuggingFace API docs.",
         "type": "object",
         "properties": {
           "url": {
-            "description": "Full URL to the repository.",
             "type": "string"
           }
         },
@@ -2310,72 +1995,57 @@
       },
       "StatusResponse": {
         "title": "StatusResponse",
-        "description": "Status response for mutation operations.\n\nTODO: Define proper fields based on HuggingFace API docs.",
         "type": "object",
         "properties": {
           "message": {
-            "description": "Optional message.",
             "type": "string"
           },
           "ok": {
-            "description": "Operation success status.",
             "type": "boolean"
           }
         }
       },
       "UserInfo": {
         "title": "UserInfo",
-        "description": "User information.",
         "type": "object",
         "properties": {
           "avatarUrl": {
-            "description": "Avatar URL.",
             "type": "string"
           },
           "fullname": {
-            "description": "Full display name.",
             "type": "string"
           },
           "isPro": {
-            "description": "Whether this is a pro user.",
             "type": "boolean"
           },
           "name": {
-            "description": "Username.",
             "type": "string"
           },
           "numDatasets": {
-            "description": "Number of datasets.",
             "type": "integer",
             "format": "uint64"
           },
           "numFollowers": {
-            "description": "Number of followers.",
             "type": "integer",
             "format": "uint64"
           },
           "numFollowing": {
-            "description": "Number following.",
             "type": "integer",
             "format": "uint64"
           },
           "numLikes": {
-            "description": "Number of likes given.",
             "type": "integer",
             "format": "uint64"
           },
           "numModels": {
-            "description": "Number of models.",
             "type": "integer",
             "format": "uint64"
           },
           "numSpaces": {
-            "description": "Number of spaces.",
             "type": "integer",
             "format": "uint64"
           },
           "type": {
-            "description": "User type (user or org).",
             "type": "string"
           }
         },
@@ -2395,19 +2065,13 @@
         }
       },
       "RepoInfo": {
-        "description": "Repository information summary.\n\nTODO: Define proper fields based on HuggingFace API docs.",
         "type": "object",
         "properties": {
           "id": {
-            "description": "Repository ID (owner/name).",
             "type": "string"
           },
-          "private": {
-            "description": "Whether private."
-          },
-          "type": {
-            "description": "Repository type."
-          }
+          "private": {},
+          "type": {}
         },
         "required": [
           "id"
@@ -2425,17 +2089,11 @@
         }
       },
       "Collection": {
-        "description": "Collection (curated list of repos).",
         "type": "object",
         "properties": {
-          "createdAt": {
-            "description": "Creation timestamp."
-          },
-          "description": {
-            "description": "Collection description."
-          },
+          "createdAt": {},
+          "description": {},
           "items": {
-            "description": "Items in the collection.",
             "type": "array",
             "items": {
               "allOf": [
@@ -2445,32 +2103,20 @@
               ]
             }
           },
-          "lastUpdated": {
-            "description": "Last updated timestamp."
-          },
-          "owner": {
-            "description": "Owner/author."
-          },
-          "position": {
-            "description": "Position/order."
-          },
+          "lastUpdated": {},
+          "owner": {},
+          "position": {},
           "private": {
-            "description": "Whether private.",
             "type": "boolean"
           },
           "slug": {
-            "description": "Collection slug/ID.",
             "type": "string"
           },
-          "theme": {
-            "description": "Theme/emoji."
-          },
+          "theme": {},
           "title": {
-            "description": "Collection title.",
             "type": "string"
           },
           "upvotes": {
-            "description": "Number of upvotes.",
             "type": "integer",
             "format": "uint64"
           }
@@ -2481,24 +2127,15 @@
         ]
       },
       "CollectionItem": {
-        "description": "Item in a collection.",
         "type": "object",
         "properties": {
           "id": {
-            "description": "Item ID (repo ID).",
             "type": "string"
           },
-          "note": {
-            "description": "Note/description."
-          },
-          "position": {
-            "description": "Position in collection."
-          },
-          "title": {
-            "description": "Display title."
-          },
+          "note": {},
+          "position": {},
+          "title": {},
           "type": {
-            "description": "Item type.",
             "allOf": [
               {
                 "$ref": "#/components/schemas/RepoType"
