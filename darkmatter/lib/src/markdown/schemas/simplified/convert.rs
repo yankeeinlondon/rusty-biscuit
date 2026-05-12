@@ -280,10 +280,12 @@ fn string_fragment(name: &str, constraints: &[Constraint]) -> Result<Value, Sche
                 m.insert("maxLength".into(), json!(*n));
             }
             Constraint::NotEmpty => {
-                m.insert(
-                    "pattern".into(),
-                    Value::String(r"^(?!\s*$).+".into()),
-                );
+                // Anchored, lookaround-free: any string containing at least
+                // one non-whitespace character. The Rust `regex` crate (used
+                // by jsonschema for ReDoS-safe pattern evaluation) rejects
+                // `(?!...)` lookahead, so the previous `^(?!\s*$).+` form is
+                // not portable.
+                m.insert("pattern".into(), Value::String(r"\S".into()));
             }
             Constraint::Pattern(p) => {
                 m.insert("pattern".into(), Value::String(p.clone()));
@@ -541,7 +543,7 @@ mod tests {
     #[test]
     fn not_empty_emits_pattern() {
         let v = atom_value("string(not-empty)");
-        assert_eq!(v["pattern"], r"^(?!\s*$).+");
+        assert_eq!(v["pattern"], r"\S");
     }
 
     #[test]
@@ -695,7 +697,7 @@ title:
         let arms = title["anyOf"].as_array().unwrap();
         assert_eq!(arms.len(), 2);
         // not-empty stays on the string arm
-        assert_eq!(arms[0]["pattern"], r"^(?!\s*$).+");
+        assert_eq!(arms[0]["pattern"], r"\S");
         // required is NOT emitted on the arm
         assert!(arms[0].get("required").is_none());
     }

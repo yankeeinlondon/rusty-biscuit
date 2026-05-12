@@ -293,6 +293,7 @@ pub fn merge_baseline(
 ) -> Result<Value, SchemaError> {
     let baseline_obj = baseline.as_object().ok_or_else(|| SchemaError::Baseline {
         message: "baseline must be an object schema".into(),
+        source: None,
     })?;
     validate_simple_object_schema(baseline_obj)?;
 
@@ -315,6 +316,7 @@ pub fn merge_baseline(
         _ => {
             return Err(SchemaError::Baseline {
                 message: "document schema must be an object".into(),
+                source: None,
             });
         }
     };
@@ -414,11 +416,13 @@ fn validate_simple_object_schema(schema: &Map<String, Value>) -> Result<(), Sche
         if ty != "object" {
             return Err(SchemaError::Baseline {
                 message: format!("baseline root must be type=object, got {ty}"),
+                source: None,
             });
         }
     } else {
         return Err(SchemaError::Baseline {
             message: "baseline root must declare type=object".into(),
+            source: None,
         });
     }
 
@@ -429,6 +433,7 @@ fn validate_simple_object_schema(schema: &Map<String, Value>) -> Result<(), Sche
                     "baseline uses unsupported JSON Schema construct `{key}`; only \
                      simple object schemas (properties + required) are allowed"
                 ),
+                source: None,
             });
         }
     }

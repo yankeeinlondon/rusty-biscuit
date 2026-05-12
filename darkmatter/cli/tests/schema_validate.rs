@@ -185,6 +185,42 @@ fn schema_validate_unparseable_frontmatter_exits_3() {
 }
 
 #[test]
+fn schema_validate_pretty_reports_line_for_type_mismatch() {
+    let tmp = TempDir::new().unwrap();
+    // `rating` lands on line 3 of the canonical re-serialised frontmatter.
+    let doc = write_file(
+        &tmp,
+        "draft.md",
+        "---\n$schema:\n  rating: number\nrating: nope\n---\nBody\n",
+    );
+
+    md_cmd()
+        .args(["schema", "validate"])
+        .arg(&doc)
+        .assert()
+        .code(1)
+        .stdout(predicate::str::contains("at line"))
+        .stdout(predicate::str::contains("of frontmatter"));
+}
+
+#[test]
+fn schema_validate_json_reports_arm_index_for_root_union() {
+    let tmp = TempDir::new().unwrap();
+    let doc = write_file(
+        &tmp,
+        "draft.md",
+        "---\n$schema:\n  - title: 'string(required)'\n  - name: 'string(required)'\nother: value\n---\nBody\n",
+    );
+
+    md_cmd()
+        .args(["schema", "validate", "--format", "json"])
+        .arg(&doc)
+        .assert()
+        .code(1)
+        .stdout(predicate::str::contains("\"arm_index\":0"));
+}
+
+#[test]
 fn schema_validate_multiple_files_aggregates_failure() {
     let tmp = TempDir::new().unwrap();
     let good = write_file(

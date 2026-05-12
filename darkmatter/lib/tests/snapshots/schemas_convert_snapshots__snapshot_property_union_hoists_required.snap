@@ -9,7 +9,7 @@ expression: convert_yaml(yaml)
     "title": {
       "anyOf": [
         {
-          "pattern": "^(?!\\s*$).+",
+          "pattern": "\\S",
           "type": "string"
         },
         {

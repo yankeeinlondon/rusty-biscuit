@@ -22,11 +22,17 @@ use std::{
     sync::{Arc, Mutex, OnceLock},
 };
 
-use jsonschema::{Draft, Validator};
+use indexmap::IndexMap;
+use jsonschema::{Draft, PatternOptions, Validator, error::ValidationErrorKind};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 
 use super::{ValidationProblem, errors::SchemaError, format};
+
+/// Map of top-level frontmatter key → 1-based `(line, column)` within the
+/// serialised frontmatter YAML, used to annotate [`ValidationProblem`] sites
+/// with source coordinates.
+pub type PositionMap = IndexMap<String, (u32, u32)>;
 
 /// Environment variable for overriding the validator-cache bound.
 pub const CACHE_SIZE_ENV: &str = "DARKMATTER_SCHEMA_CACHE_SIZE";
@@ -152,7 +158,9 @@ impl ValidatorCache {
 /// Builds a `Validator` configured with darkmatter's custom format and
 /// keywords.
 fn build_validator(schema: &Value) -> Result<Validator, SchemaError> {
-    let opts = jsonschema::options().with_draft(Draft::Draft202012);
+    let opts = jsonschema::options()
+        .with_draft(Draft::Draft202012)
+        .with_pattern_options(PatternOptions::regex());
     let opts = format::register_darkmatter_formats(opts)
         .should_validate_formats(true)
         .with_keyword(format::DARKMATTER_MATCH_KEYWORD, format::match_keyword_factory)
@@ -166,20 +174,142 @@ fn build_validator(schema: &Value) -> Result<Validator, SchemaError> {
 }
 
 /// Maps `jsonschema::ValidationError` into the public `ValidationProblem`
-/// shape (JSON pointer + plain message). Line/column are unresolved at this
-/// layer; the resolver fills them in if a frontmatter source map is
-/// available.
-pub fn collect_problems(validator: &Validator, instance: &Value) -> Vec<ValidationProblem> {
+/// shape (JSON pointer + plain message). Line/column come from `positions`,
+/// which the caller is expected to derive from the frontmatter source via
+/// [`build_position_map`].
+pub fn collect_problems(
+    validator: &Validator,
+    instance: &Value,
+    positions: &PositionMap,
+) -> Vec<ValidationProblem> {
     validator
         .iter_errors(instance)
-        .map(|err| ValidationProblem {
-            path: err.instance_path().as_str().to_string(),
-            message: err.to_string(),
-            line: None,
-            column: None,
-            arm_index: None,
-        })
+        .map(|err| build_problem(&err, positions, None))
         .collect()
+}
+
+/// Per-arm validation of a root-union schema.
+///
+/// Each `arm_validator` is the compiled validator for the corresponding
+/// `anyOf` arm of the document schema. The arm producing the fewest problems
+/// "wins"; its problems are returned with `arm_index` populated. When every
+/// arm validates successfully (which should not happen for a failed instance)
+/// the empty problem list is returned with no arm tag.
+pub fn collect_root_union_problems(
+    arm_validators: &[Arc<Validator>],
+    instance: &Value,
+    positions: &PositionMap,
+) -> Vec<ValidationProblem> {
+    if arm_validators.is_empty() {
+        return Vec::new();
+    }
+    let mut per_arm: Vec<Vec<ValidationProblem>> = Vec::with_capacity(arm_validators.len());
+    for (idx, validator) in arm_validators.iter().enumerate() {
+        let problems: Vec<ValidationProblem> = validator
+            .iter_errors(instance)
+            .map(|err| build_problem(&err, positions, Some(idx)))
+            .collect();
+        if problems.is_empty() {
+            // Instance satisfies this arm — overall validation passes.
+            return Vec::new();
+        }
+        per_arm.push(problems);
+    }
+    // Closest-matching arm: the one with the fewest problems. Ties broken by
+    // arm order (stable: smaller index wins).
+    per_arm
+        .into_iter()
+        .enumerate()
+        .min_by_key(|(idx, problems)| (problems.len(), *idx))
+        .map(|(_, problems)| problems)
+        .unwrap_or_default()
+}
+
+fn build_problem(
+    err: &jsonschema::ValidationError<'_>,
+    positions: &PositionMap,
+    arm_index: Option<usize>,
+) -> ValidationProblem {
+    let path = err.instance_path().as_str().to_string();
+    let key = identify_key(&path, err.kind());
+    let (line, column) = key
+        .as_deref()
+        .and_then(|k| positions.get(k).copied())
+        .map(|(l, c)| (Some(l), Some(c)))
+        .unwrap_or((None, None));
+    ValidationProblem {
+        path,
+        message: err.to_string(),
+        line,
+        column,
+        arm_index,
+    }
+}
+
+/// Picks the top-level frontmatter key to attribute a problem to.
+///
+/// - For `Required` failures the key comes from the error kind (the path
+///   points at the parent object, not the missing property).
+/// - Otherwise the first JSON-pointer segment of `path` is used.
+fn identify_key(path: &str, kind: &ValidationErrorKind) -> Option<String> {
+    if let ValidationErrorKind::Required { property } = kind
+        && let Some(name) = property.as_str()
+    {
+        return Some(name.to_string());
+    }
+    let trimmed = path.trim_start_matches('/');
+    if trimmed.is_empty() {
+        return None;
+    }
+    let segment = trimmed.split('/').next()?;
+    Some(unescape_pointer_segment(segment))
+}
+
+fn unescape_pointer_segment(segment: &str) -> String {
+    segment.replace("~1", "/").replace("~0", "~")
+}
+
+/// Builds a top-level YAML key → (line, column) map by scanning the
+/// serialised frontmatter line by line.
+///
+/// Only top-level keys (column 1, not part of a comment or list item) are
+/// captured. Returned coordinates are 1-based. Quoted keys (`"foo"`,
+/// `'foo'`) are normalised to the bare key string.
+pub fn build_position_map(yaml: &str) -> PositionMap {
+    let mut out: PositionMap = PositionMap::new();
+    for (idx, line) in yaml.lines().enumerate() {
+        let Some(first) = line.chars().next() else {
+            continue;
+        };
+        if first.is_whitespace() || first == '#' || first == '-' || first == '.' {
+            continue;
+        }
+        let Some(colon) = line.find(':') else {
+            continue;
+        };
+        let raw = line[..colon].trim();
+        let key = raw
+            .trim_start_matches(['"', '\''])
+            .trim_end_matches(['"', '\''])
+            .to_string();
+        if !key.is_empty() {
+            out.insert(key, (idx as u32 + 1, 1));
+        }
+    }
+    out
+}
+
+/// Adds the canonical `$schema` URI to an `anyOf` arm so the cache can
+/// compile it as a standalone validator.
+pub fn wrap_arm_as_root_schema(arm: &Value) -> Value {
+    let mut map = arm.as_object().cloned().unwrap_or_default();
+    if !map.contains_key("$schema") {
+        map.insert(
+            "$schema".into(),
+            Value::String(super::simplified::DRAFT_2020_12.to_string()),
+        );
+    }
+    Value::Object(map)
 }
 
 fn default_capacity() -> usize {
@@ -307,9 +437,99 @@ mod tests {
         });
         let v = build_validator(&schema).unwrap();
         let instance = json!({ "n": "not-a-number" });
-        let problems = collect_problems(&v, &instance);
+        let positions = PositionMap::new();
+        let problems = collect_problems(&v, &instance, &positions);
         assert_eq!(problems.len(), 1);
         assert_eq!(problems[0].path, "/n");
         assert!(!problems[0].message.is_empty());
+    }
+
+    #[test]
+    fn collect_problems_populates_line_for_type_mismatch() {
+        let schema = json!({
+            "type": "object",
+            "properties": {
+                "n": { "type": "number" }
+            }
+        });
+        let v = build_validator(&schema).unwrap();
+        let instance = json!({ "n": "nope" });
+        let mut positions = PositionMap::new();
+        positions.insert("n".into(), (3, 1));
+        let problems = collect_problems(&v, &instance, &positions);
+        assert_eq!(problems[0].line, Some(3));
+        assert_eq!(problems[0].column, Some(1));
+    }
+
+    #[test]
+    fn collect_problems_populates_line_for_missing_required() {
+        let schema = json!({
+            "type": "object",
+            "properties": {
+                "title": { "type": "string" }
+            },
+            "required": ["title"]
+        });
+        let v = build_validator(&schema).unwrap();
+        let instance = json!({});
+        let mut positions = PositionMap::new();
+        positions.insert("title".into(), (5, 1));
+        let problems = collect_problems(&v, &instance, &positions);
+        assert_eq!(problems[0].line, Some(5));
+    }
+
+    #[test]
+    fn build_position_map_captures_top_level_keys() {
+        let yaml = "title: hi\nbody: stuff\n  nested: skip\n";
+        let map = build_position_map(yaml);
+        assert_eq!(map.get("title"), Some(&(1, 1)));
+        assert_eq!(map.get("body"), Some(&(2, 1)));
+        assert!(map.get("nested").is_none());
+    }
+
+    #[test]
+    fn root_union_picks_closest_arm() {
+        // Arm 0 needs `a` and `b`; arm 1 needs only `c`. An instance with
+        // only `c` produces 0 problems against arm 1 but 2 against arm 0 —
+        // arm 1 wins.
+        let arm0 = json!({
+            "$schema": super::super::simplified::DRAFT_2020_12,
+            "type":"object",
+            "properties": {"a":{"type":"string"},"b":{"type":"string"}},
+            "required":["a","b"]
+        });
+        let arm1 = json!({
+            "$schema": super::super::simplified::DRAFT_2020_12,
+            "type":"object",
+            "properties": {"c":{"type":"string"}},
+            "required":["c"]
+        });
+        let v0 = Arc::new(build_validator(&arm0).unwrap());
+        let v1 = Arc::new(build_validator(&arm1).unwrap());
+        let instance = json!({"c": "x"});
+        let problems =
+            collect_root_union_problems(&[v0, v1], &instance, &PositionMap::new());
+        assert!(problems.is_empty(), "expected match: {problems:?}");
+    }
+
+    #[test]
+    fn root_union_tags_arm_index_when_no_arm_matches() {
+        let arm0 = json!({
+            "type":"object",
+            "properties": {"a":{"type":"string"}},
+            "required":["a"]
+        });
+        let arm1 = json!({
+            "type":"object",
+            "properties": {"b":{"type":"string"}},
+            "required":["b","c"]
+        });
+        let v0 = Arc::new(build_validator(&arm0).unwrap());
+        let v1 = Arc::new(build_validator(&arm1).unwrap());
+        let instance = json!({});
+        let problems =
+            collect_root_union_problems(&[v0, v1], &instance, &PositionMap::new());
+        assert!(!problems.is_empty());
+        assert!(problems.iter().all(|p| p.arm_index == Some(0)));
     }
 }

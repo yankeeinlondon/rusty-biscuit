@@ -13,7 +13,7 @@ expression: convert_yaml(yaml)
       "type": "number"
     },
     "slug": {
-      "pattern": "^(?!\\s*$).+",
+      "pattern": "\\S",
       "type": "string"
     }
   },

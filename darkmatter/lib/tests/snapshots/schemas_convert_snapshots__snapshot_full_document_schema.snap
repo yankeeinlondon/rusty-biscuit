@@ -9,7 +9,7 @@ expression: convert_yaml(yaml)
     "author": {
       "anyOf": [
         {
-          "pattern": "^(?!\\s*$).+",
+          "pattern": "\\S",
           "type": "string"
         },
         {
@@ -61,7 +61,7 @@ expression: convert_yaml(yaml)
       "uniqueItems": true
     },
     "title": {
-      "pattern": "^(?!\\s*$).+",
+      "pattern": "\\S",
       "type": "string"
     }
   },

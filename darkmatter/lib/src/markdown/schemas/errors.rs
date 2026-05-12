@@ -72,8 +72,19 @@ pub enum SchemaError {
 
     /// The baseline schema could not be loaded, parsed, or violates the
     /// "simple object schema" restriction documented in the spec.
+    ///
+    /// When the failure originated in another `SchemaError` (for example a
+    /// parse or conversion error while loading the baseline from disk), the
+    /// underlying error is preserved on `source` so programmatic consumers
+    /// (e.g. `--format json` rendering) can inspect the chain. Structural
+    /// violations of the "simple object schema" restriction have no
+    /// upstream cause and leave `source` as `None`.
     #[error("baseline schema is invalid: {message}")]
-    Baseline { message: String },
+    Baseline {
+        message: String,
+        #[source]
+        source: Option<Box<SchemaError>>,
+    },
 
     /// `jsonschema` rejected a converted schema at validator-construction
     /// time. The detailed message is preserved on the variant because
@@ -199,16 +210,25 @@ impl biscuit_terminal::errors::BlockError for SchemaError {
                 )))
                 .hint("Download the schema locally and reference it with a relative or absolute path."),
 
-            SchemaError::Baseline { message } => StatusBlock::new(StatusState::Error)
-                .error_header(ErrorHeader::new("SchemaError", "baseline schema invalid"))
-                .body(Prose::new(format!(
+            SchemaError::Baseline { message, source } => {
+                let mut body = vec![Prose::new(format!(
                     "<dim>Reason:</dim> {}",
                     Prose::escape_text(message)
-                )))
-                .hint(
-                    "A baseline schema must be a simple object schema (root <cyan>type: object</cyan> \
-                     with only <cyan>properties</cyan> / <cyan>required</cyan>).",
-                ),
+                ))];
+                if let Some(cause) = source {
+                    body.push(Prose::new(format!(
+                        "<dim>Cause:</dim> {}",
+                        Prose::escape_text(&cause.to_string())
+                    )));
+                }
+                StatusBlock::new(StatusState::Error)
+                    .error_header(ErrorHeader::new("SchemaError", "baseline schema invalid"))
+                    .body(body)
+                    .hint(
+                        "A baseline schema must be a simple object schema (root <cyan>type: object</cyan> \
+                         with only <cyan>properties</cyan> / <cyan>required</cyan>).",
+                    )
+            }
 
             SchemaError::BuildValidator { message } => StatusBlock::new(StatusState::Error)
                 .error_header(ErrorHeader::new(
@@ -365,6 +385,7 @@ mod tests {
     fn baseline_block_renders_message() {
         let err = SchemaError::Baseline {
             message: "must be a simple object schema".into(),
+            source: None,
         };
         let out = render(&err);
         assert!(out.contains("SchemaError"), "missing header type: {out}");

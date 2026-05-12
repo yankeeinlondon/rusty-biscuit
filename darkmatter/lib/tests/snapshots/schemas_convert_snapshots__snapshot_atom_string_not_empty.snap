@@ -7,7 +7,7 @@ expression: "convert_atom(\"string(not-empty)\")"
   "additionalProperties": true,
   "properties": {
     "field": {
-      "pattern": "^(?!\\s*$).+",
+      "pattern": "\\S",
       "type": "string"
     }
   },

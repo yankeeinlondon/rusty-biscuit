@@ -68,7 +68,7 @@ pub use simplified::{
     Constraint, DRAFT_2020_12, PropertyAtom, PropertyDef, SchemaArm, SchemaShape,
     SimplifiedSchema, SimplifiedType, parse_yaml_schema, to_json_schema,
 };
-pub use validate::{CACHE_SIZE_ENV, DEFAULT_CACHE_SIZE, ValidatorCache};
+pub use validate::{CACHE_SIZE_ENV, DEFAULT_CACHE_SIZE, PositionMap, ValidatorCache};
 
 /// Top-level entry point for the schemas subsystem.
 ///
@@ -101,7 +101,10 @@ impl DarkmatterSchemas {
     /// is not a simple object schema (rooted at `"type": "object"` with only
     /// `properties` / `required`).
     pub fn with_baseline(mut self, schema: SimplifiedSchema) -> Result<Self, SchemaError> {
-        let json = to_json_schema(&schema)?;
+        let json = to_json_schema(&schema).map_err(|err| SchemaError::Baseline {
+            message: "baseline could not be converted to JSON Schema".into(),
+            source: Some(Box::new(err)),
+        })?;
         self.set_baseline_json(json)?;
         Ok(self)
     }
@@ -123,7 +126,15 @@ impl DarkmatterSchemas {
         // disambiguation matches `$schema` references.
         let yaml_value =
             serde_yaml_ng::Value::String(path.to_string_lossy().into_owned());
-        let resolved = resolve::resolve_yaml_schema(&yaml_value, base)?;
+        let resolved =
+            resolve::resolve_yaml_schema(&yaml_value, base).map_err(|err| match err {
+                SchemaError::Io { .. } => err,
+                SchemaError::AmbiguousReferenced { .. } => err,
+                other => SchemaError::Baseline {
+                    message: format!("could not load baseline from `{}`", path.display()),
+                    source: Some(Box::new(other)),
+                },
+            })?;
         self.set_baseline_json(resolved.json_schema)?;
         Ok(self)
     }
@@ -180,10 +191,12 @@ impl DarkmatterSchemas {
         };
 
         let validator = self.cache.validator_for(&merged_json)?;
+        let arm_validators = build_arm_validators(&merged_json, &self.cache)?;
         Ok(Some(EffectiveSchema {
             simplified: resolved.and_then(|r| r.simplified),
             json_schema: merged_json,
             validator,
+            arm_validators,
         }))
     }
 
@@ -200,8 +213,9 @@ impl DarkmatterSchemas {
     /// [`ValidationReport::problems`] rather than this error path.
     pub fn validate(&self, source: &Markdown) -> Result<ValidationReport, SchemaError> {
         let frontmatter_value = frontmatter_as_json(source);
+        let positions = positions_for(source);
         match self.effective_for(source)? {
-            Some(effective) => Ok(effective.validate(&frontmatter_value)),
+            Some(effective) => Ok(effective.validate_with_positions(&frontmatter_value, &positions)),
             None => Ok(ValidationReport {
                 valid: true,
                 problems: Vec::new(),
@@ -232,12 +246,35 @@ pub struct EffectiveSchema {
     /// The final Draft 2020-12 JSON Schema used by the validator.
     pub json_schema: Value,
     validator: Arc<Validator>,
+    /// Per-arm validators when `json_schema` is a root `anyOf` union.
+    /// `None` for ordinary schemas.
+    arm_validators: Option<Vec<Arc<Validator>>>,
 }
 
 impl EffectiveSchema {
-    /// Validates a frontmatter JSON value against this schema.
+    /// Validates a frontmatter JSON value against this schema. Equivalent to
+    /// [`Self::validate_with_positions`] with an empty position map (problems
+    /// will carry no line/column information).
     pub fn validate(&self, frontmatter: &Value) -> ValidationReport {
-        let problems = validate::collect_problems(&self.validator, frontmatter);
+        self.validate_with_positions(frontmatter, &PositionMap::new())
+    }
+
+    /// Validates a frontmatter JSON value against this schema, annotating
+    /// problems with line/column information drawn from `positions` (see
+    /// [`validate::build_position_map`]). For root unions, problems are
+    /// attributed to the closest-matching arm and carry the corresponding
+    /// `arm_index`.
+    pub fn validate_with_positions(
+        &self,
+        frontmatter: &Value,
+        positions: &PositionMap,
+    ) -> ValidationReport {
+        let problems = match &self.arm_validators {
+            Some(arms) => {
+                validate::collect_root_union_problems(arms, frontmatter, positions)
+            }
+            None => validate::collect_problems(&self.validator, frontmatter, positions),
+        };
         ValidationReport {
             valid: problems.is_empty(),
             problems,
@@ -275,6 +312,73 @@ pub struct ValidationProblem {
     /// Index of the root-union arm under which this problem was raised, when
     /// the schema is a root union.
     pub arm_index: Option<usize>,
+}
+
+fn build_arm_validators(
+    schema: &Value,
+    cache: &ValidatorCache,
+) -> Result<Option<Vec<Arc<Validator>>>, SchemaError> {
+    let Some(arms) = schema.get("anyOf").and_then(Value::as_array) else {
+        return Ok(None);
+    };
+    let mut out = Vec::with_capacity(arms.len());
+    for arm in arms {
+        let arm_schema = validate::wrap_arm_as_root_schema(arm);
+        out.push(cache.validator_for(&arm_schema)?);
+    }
+    Ok(Some(out))
+}
+
+fn positions_for(source: &Markdown) -> PositionMap {
+    // The original frontmatter text is not retained on `Markdown`, so we
+    // re-serialise the parsed map to YAML. Line numbers match the canonical
+    // re-serialised view; this is consistent across runs and good enough for
+    // the CLI's `at line N of frontmatter` hint.
+    let map = source.frontmatter().as_map();
+    if map.is_empty() {
+        return PositionMap::new();
+    }
+    let mut yaml_map = serde_yaml_ng::Mapping::new();
+    for (k, v) in map {
+        yaml_map.insert(serde_yaml_ng::Value::String(k.clone()), json_to_yaml_value(v));
+    }
+    let yaml_value = serde_yaml_ng::Value::Mapping(yaml_map);
+    match serde_yaml_ng::to_string(&yaml_value) {
+        Ok(rendered) => validate::build_position_map(&rendered),
+        Err(_) => PositionMap::new(),
+    }
+}
+
+fn json_to_yaml_value(value: &Value) -> serde_yaml_ng::Value {
+    match value {
+        Value::Null => serde_yaml_ng::Value::Null,
+        Value::Bool(b) => serde_yaml_ng::Value::Bool(*b),
+        Value::Number(n) => {
+            if let Some(i) = n.as_i64() {
+                serde_yaml_ng::Value::Number(serde_yaml_ng::Number::from(i))
+            } else if let Some(u) = n.as_u64() {
+                serde_yaml_ng::Value::Number(serde_yaml_ng::Number::from(u))
+            } else if let Some(f) = n.as_f64() {
+                serde_yaml_ng::Value::Number(serde_yaml_ng::Number::from(f))
+            } else {
+                serde_yaml_ng::Value::Null
+            }
+        }
+        Value::String(s) => serde_yaml_ng::Value::String(s.clone()),
+        Value::Array(items) => {
+            serde_yaml_ng::Value::Sequence(items.iter().map(json_to_yaml_value).collect())
+        }
+        Value::Object(map) => {
+            let mut out = serde_yaml_ng::Mapping::new();
+            for (k, v) in map {
+                out.insert(
+                    serde_yaml_ng::Value::String(k.clone()),
+                    json_to_yaml_value(v),
+                );
+            }
+            serde_yaml_ng::Value::Mapping(out)
+        }
+    }
 }
 
 fn base_dir_for(source: &Markdown) -> PathBuf {

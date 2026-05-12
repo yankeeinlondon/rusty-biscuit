@@ -221,6 +221,13 @@ fn is_url(s: &str) -> bool {
     }
 }
 
+/// Detection asymmetry: resolves the candidate file reference relative to the
+/// **document's** directory (`base_dir`) so that drafts in a project sub-folder
+/// can still infer the `file` type. Validation, on the other hand, resolves
+/// `file`-typed property values from the live process CWD (see
+/// [`crate::markdown::schemas::format`]). A property that detection labels as
+/// `file` may therefore validate only when the consumer runs validation from a
+/// CWD that exposes the same relative path.
 fn resolves_to_existing_file(value: &str, base_dir: &Path) -> bool {
     // Avoid expensive resolution for short / unlikely paths. We require at
     // least one path-like character.
@@ -428,8 +435,7 @@ pub fn schema_to_yaml(schema: &SimplifiedSchema) -> String {
             for arm in arms {
                 match arm {
                     super::simplified::SchemaArm::Inline(shape) => {
-                        out.push_str("  - \n");
-                        write_shape(&mut out, shape, 2);
+                        write_shape_list_item(&mut out, shape, 1);
                     }
                     super::simplified::SchemaArm::FileRef(path) => {
                         out.push_str(&format!("  - {path}\n"));
@@ -446,6 +452,32 @@ fn write_shape(out: &mut String, shape: &SchemaShape, indent_levels: usize) {
     for (name, def) in &shape.properties {
         let value = property_def_to_yaml_scalar(def);
         out.push_str(&format!("{indent}{name}: {value}\n"));
+    }
+}
+
+/// Emits `shape` as a YAML list item:
+///
+/// ```yaml
+/// - first: value
+///   second: value
+/// ```
+///
+/// `indent_levels` is the number of two-space steps preceding the `- ` marker.
+/// Empty shapes produce an `- {}` entry so the surrounding sequence remains
+/// well-formed.
+fn write_shape_list_item(out: &mut String, shape: &SchemaShape, indent_levels: usize) {
+    let marker_indent = "  ".repeat(indent_levels);
+    let body_indent = format!("{marker_indent}  ");
+    let mut iter = shape.properties.iter();
+    let Some((first_name, first_def)) = iter.next() else {
+        out.push_str(&format!("{marker_indent}- {{}}\n"));
+        return;
+    };
+    let first_value = property_def_to_yaml_scalar(first_def);
+    out.push_str(&format!("{marker_indent}- {first_name}: {first_value}\n"));
+    for (name, def) in iter {
+        let value = property_def_to_yaml_scalar(def);
+        out.push_str(&format!("{body_indent}{name}: {value}\n"));
     }
 }
 

@@ -268,11 +268,42 @@ impl Keyword for DarkmatterUrlSchemeKeyword {
 mod tests {
     use super::*;
     use serde_json::json;
-    use std::sync::Mutex;
+    use std::{
+        path::{Path, PathBuf},
+        sync::Mutex,
+    };
 
     // Tests in this module mutate the process CWD; serialise them so they
     // do not race with one another.
     static CWD_LOCK: Mutex<()> = Mutex::new(());
+
+    /// RAII guard that captures the process CWD on construction, switches to
+    /// the requested directory, and restores the captured CWD on drop —
+    /// including on panic. Holds the `CWD_LOCK` for its lifetime so concurrent
+    /// tests do not race.
+    struct CwdGuard {
+        prior: PathBuf,
+        _lock: std::sync::MutexGuard<'static, ()>,
+    }
+
+    impl CwdGuard {
+        fn enter(dir: &Path) -> Self {
+            // Recover from a poisoned lock (a previous test panicked while
+            // holding it) so subsequent tests still serialise correctly.
+            let lock = CWD_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+            let prior = std::env::current_dir().expect("read CWD");
+            std::env::set_current_dir(dir).expect("set CWD");
+            Self { prior, _lock: lock }
+        }
+    }
+
+    impl Drop for CwdGuard {
+        fn drop(&mut self) {
+            // Best-effort restore; a failure here cannot be reported via the
+            // panic path without masking the original test failure.
+            let _ = std::env::set_current_dir(&self.prior);
+        }
+    }
 
     fn temp_dir() -> tempfile::TempDir {
         tempfile::tempdir().expect("create temp dir")
@@ -280,24 +311,18 @@ mod tests {
 
     #[test]
     fn file_format_accepts_existing_file() {
-        let _guard = CWD_LOCK.lock().unwrap();
         let dir = temp_dir();
         let path = dir.path().join("README.md");
         std::fs::write(&path, b"x").unwrap();
-        let prior = std::env::current_dir().unwrap();
-        std::env::set_current_dir(dir.path()).unwrap();
+        let _cwd = CwdGuard::enter(dir.path());
         assert!(validate_file_reference("./README.md"));
-        std::env::set_current_dir(prior).unwrap();
     }
 
     #[test]
     fn file_format_rejects_missing_file() {
-        let _guard = CWD_LOCK.lock().unwrap();
         let dir = temp_dir();
-        let prior = std::env::current_dir().unwrap();
-        std::env::set_current_dir(dir.path()).unwrap();
+        let _cwd = CwdGuard::enter(dir.path());
         assert!(!validate_file_reference("./does-not-exist.md"));
-        std::env::set_current_dir(prior).unwrap();
     }
 
     fn make_match_keyword(globs: Value) -> Box<dyn Keyword> {
@@ -308,41 +333,32 @@ mod tests {
 
     #[test]
     fn match_keyword_positive_only_accepts_match() {
-        let _guard = CWD_LOCK.lock().unwrap();
         let dir = temp_dir();
         let path = dir.path().join("notes.md");
         std::fs::write(&path, b"x").unwrap();
-        let prior = std::env::current_dir().unwrap();
-        std::env::set_current_dir(dir.path()).unwrap();
+        let _cwd = CwdGuard::enter(dir.path());
         let kw = make_match_keyword(json!(["*.md"]));
         assert!(kw.is_valid(&Value::String("./notes.md".into())));
-        std::env::set_current_dir(prior).unwrap();
     }
 
     #[test]
     fn match_keyword_respects_negative_globs() {
-        let _guard = CWD_LOCK.lock().unwrap();
         let dir = temp_dir();
         let bad = dir.path().join("_draft.md");
         std::fs::write(&bad, b"x").unwrap();
-        let prior = std::env::current_dir().unwrap();
-        std::env::set_current_dir(dir.path()).unwrap();
+        let _cwd = CwdGuard::enter(dir.path());
         let kw = make_match_keyword(json!(["*.md", "!_*.md"]));
         assert!(!kw.is_valid(&Value::String("./_draft.md".into())));
-        std::env::set_current_dir(prior).unwrap();
     }
 
     #[test]
     fn match_keyword_negative_only_accepts_unless_excluded() {
-        let _guard = CWD_LOCK.lock().unwrap();
         let dir = temp_dir();
         let good = dir.path().join("ok.md");
         std::fs::write(&good, b"x").unwrap();
-        let prior = std::env::current_dir().unwrap();
-        std::env::set_current_dir(dir.path()).unwrap();
+        let _cwd = CwdGuard::enter(dir.path());
         let kw = make_match_keyword(json!(["!_*.md"]));
         assert!(kw.is_valid(&Value::String("./ok.md".into())));
-        std::env::set_current_dir(prior).unwrap();
     }
 
     #[test]
