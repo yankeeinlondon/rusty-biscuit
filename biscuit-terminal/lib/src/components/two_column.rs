@@ -428,7 +428,9 @@ impl TwoColumn {
         }
 
         let combined = self.render_columns(available, term);
-        self.layout.apply_layout(&combined, term_width)
+        // The column boundary must stay vertical across all rows — align as
+        // a block.
+        self.layout.apply_block_layout(&combined, term_width)
     }
 }
 

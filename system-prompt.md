@@ -3,6 +3,7 @@
 - you are working in the **rusty-biscuit** monorepo
 - this session was started with a focus on the **{{ctx.current_package_area || env.PACKAGE_AREA}}** package area
     - you must use the '{{ctx.current_package_area || env.PACKAGE_AREA }}' agent skill
+- always prefer US English (en-US) over other variants such as UK English (en-GB) when creating symbol names or writing documentation
 
 ## Best Practices
 

@@ -205,7 +205,9 @@ impl GraphExpression {
     /// output and cache metadata instead of silent fallback behavior.
     pub fn try_render(&self, term: &Terminal) -> Result<GraphRenderResult, GraphRenderError> {
         let (output, png_path, cache_hit) = self.render_to_image(term)?;
-        let output = self.layout.apply_layout(&output, term.width());
+        // Graphs are block-cohesive (image escapes or expression fallback) —
+        // align as a block.
+        let output = self.layout.apply_block_layout(&output, term.width());
 
         Ok(GraphRenderResult {
             output,
@@ -372,7 +374,7 @@ impl GraphExpression {
 impl Renderable for GraphExpression {
     fn render(&self, term: &Terminal) -> String {
         let content = self.render_raw(term);
-        self.layout.apply_layout(&content, term.width())
+        self.layout.apply_block_layout(&content, term.width())
     }
 
     fn as_any(&self) -> &dyn Any {

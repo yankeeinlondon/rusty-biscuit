@@ -1331,7 +1331,9 @@ impl Renderable for Table {
         } else {
             let available = self.layout.available_width(width);
             let content = self.render_content(Some(available), stripe.as_ref(), text_tint.as_ref());
-            self.layout.apply_layout(&content, width)
+            // Box-drawing borders and column edges must stay vertically
+            // aligned across all rows — align as a block.
+            self.layout.apply_block_layout(&content, width)
         }
     }
 
@@ -1354,7 +1356,7 @@ impl Renderable for Table {
         } else {
             let available = self.layout.available_width(width);
             let content = self.render_content(Some(available), stripe.as_ref(), text_tint.as_ref());
-            self.layout.apply_layout(&content, width)
+            self.layout.apply_block_layout(&content, width)
         }
     }
 

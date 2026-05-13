@@ -1556,9 +1556,10 @@ impl Renderable for FileSystem {
             &self.root_path,
         );
 
-        // Apply layout (margins, alignment) but NOT word wrap
-        // Word wrap would break tree connectors
-        self.layout.apply_layout(&output, width)
+        // Tree connectors form a cohesive block: align all lines by the same
+        // offset (based on the widest line) so connectors stay visually aligned.
+        // Word wrap is not applied — it would break tree connectors.
+        self.layout.apply_block_layout(&output, width)
     }
 
     /// Renders the filesystem tree using terminal capabilities.
@@ -1635,7 +1636,7 @@ impl Renderable for FileSystem {
             &base_path,
         );
 
-        self.layout.apply_layout(&output, width)
+        self.layout.apply_block_layout(&output, width)
     }
 
     fn layout(&self) -> &Layout {
