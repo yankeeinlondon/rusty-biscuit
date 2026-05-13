@@ -1187,8 +1187,22 @@ mod tests {
 
         let mod_rs = fs::read_to_string(dir.join("mod.rs")).unwrap();
         assert!(
-            mod_rs.contains("pub use client::*;"),
-            "mod.rs should re-export client items"
+            !mod_rs.contains("pub use client::*;"),
+            "mod.rs should not re-export client items (only impl blocks)"
+        );
+        assert!(
+            mod_rs.contains("pub use requests::*;"),
+            "mod.rs should re-export request items"
+        );
+        assert!(
+            mod_rs.contains("pub use responses::*;"),
+            "mod.rs should re-export response items"
+        );
+
+        let client_rs = fs::read_to_string(dir.join("client.rs")).unwrap();
+        assert!(
+            !client_rs.contains("use super::responses::*;"),
+            "client.rs should not import responses (covered by use super::*)"
         );
 
         let responses = fs::read_to_string(dir.join("responses.rs")).unwrap();

@@ -301,7 +301,6 @@ pub fn assemble_split_api_module(api: &RestApi, options: &OutputOptions) -> Spli
 
         pub use requests::*;
         pub use responses::*;
-        pub use client::*;
 
         #api_struct
     };
@@ -325,7 +324,6 @@ pub fn assemble_split_api_module(api: &RestApi, options: &OutputOptions) -> Spli
     let client_rs = quote! {
         use super::*;
         use super::requests::*;
-        use super::responses::*;
         use crate::shared::SchematicError;
 
         #request_method
@@ -415,7 +413,6 @@ pub fn assemble_split_combined_api_module(apis: &[&RestApi]) -> SplitApiParts {
 
         pub use requests::*;
         pub use responses::*;
-        pub use client::*;
 
         #all_structs_and_builders
     };
@@ -439,7 +436,6 @@ pub fn assemble_split_combined_api_module(apis: &[&RestApi]) -> SplitApiParts {
     let client_rs = quote! {
         use super::*;
         use super::requests::*;
-        use super::responses::*;
         use crate::shared::SchematicError;
 
         #all_request_methods

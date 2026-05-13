@@ -86,7 +86,6 @@ pub mod responses;
 pub mod client;
 pub use requests::*;
 pub use responses::*;
-pub use client::*;
 /// ElevenLabs Creative Platform API for text-to-speech, voice management, and sound generation client.
 pub struct ElevenLabs {
     client: reqwest::Client,
