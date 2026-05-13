@@ -146,7 +146,9 @@ fn compose_verbose_shows_full_prompts() {
 
 #[cfg(unix)]
 #[test]
-fn compose_quiet_shows_system_prompt_summary_only() {
+fn compose_quiet_shows_system_summary_and_full_agent_prompt() {
+    // Spec 6.3: `--quiet` forces the System Prompt to Summary mode but is a
+    // no-op for the User Prompt — header and body still render.
     let (workspace, path_dir, md_file, sp_file) = make_workspace_with_goose_and_system_prompt();
 
     let assert = cargo_bin_cmd!("claudine")
@@ -167,22 +169,29 @@ fn compose_quiet_shows_system_prompt_summary_only() {
     let stderr = String::from_utf8_lossy(&assert.get_output().stderr);
     let plain = strip_ansi(&stderr);
 
-    // System prompt header should still appear in quiet mode
+    // System prompt header + summary line.
     assert!(
         plain.contains("System Prompt"),
         "quiet mode should still show system prompt header; stderr:\n{plain}"
     );
-
-    // Token count should appear in summary
     assert!(
         plain.contains("tokens"),
         "quiet mode should show token count in summary; stderr:\n{plain}"
     );
-
-    // User prompt should be suppressed entirely
+    // System body must NOT appear in quiet mode.
     assert!(
-        !plain.contains("Agent Prompt"),
-        "quiet mode should suppress agent prompt; stderr:\n{plain}"
+        !plain.contains("Test System Prompt"),
+        "quiet mode should suppress system prompt body; stderr:\n{plain}"
+    );
+
+    // Agent Prompt MUST still render under --quiet (header + body).
+    assert!(
+        plain.contains("Agent Prompt"),
+        "quiet mode is a no-op for the user prompt and must keep its header; stderr:\n{plain}"
+    );
+    assert!(
+        plain.contains("Hello from compose."),
+        "quiet mode must keep the user prompt body visible; stderr:\n{plain}"
     );
 }
 

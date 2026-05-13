@@ -514,7 +514,9 @@ mod tests {
 
     #[test]
     fn summary_relative_path_when_base_provided() {
-        let term = test_terminal();
+        // Force is_nerd_font = false so we hit the `./relpath` branch
+        // rather than the Nerd Font glyph branch.
+        let term = plain_terminal();
         // Build a path inside the temp dir so canonicalize succeeds.
         let tmp = tempfile::tempdir().unwrap();
         let sp = tmp.path().join("system-prompt.md");
@@ -532,9 +534,129 @@ mod tests {
             &term,
         );
         let plain = strip_ansi_codes(&summary);
-        assert!(plain.contains("system-prompt.md"));
-        // Should NOT contain the full absolute path of the parent
+        assert!(
+            plain.contains("./system-prompt.md"),
+            "expected `./system-prompt.md` in {plain:?}"
+        );
+        // The base directory must NOT appear in the visible text (only in
+        // the OSC8 href, which is stripped by `strip_ansi_codes`).
         assert!(!plain.contains(base.display().to_string().as_str()));
+    }
+
+    // --- resolve_display_label tests ---
+
+    fn nerd_font_terminal() -> Terminal {
+        let mut t = Terminal::builder().osc_link_support(true).build();
+        t.is_nerd_font = Some(true);
+        t
+    }
+
+    fn plain_terminal() -> Terminal {
+        let mut t = Terminal::builder().osc_link_support(true).build();
+        t.is_nerd_font = Some(false);
+        t
+    }
+
+    #[test]
+    fn display_label_nerd_font_in_base_uses_glyph() {
+        let term = nerd_font_terminal();
+        let tmp = tempfile::tempdir().unwrap();
+        let base = tmp.path().canonicalize().unwrap();
+        let path = base.join(".claude").join("system-prompt.md");
+        let label = resolve_display_label(&path, Some(&base), &term);
+        assert_eq!(label, NERD_FONT_REPO_GLYPH.to_string());
+    }
+
+    #[test]
+    fn display_label_no_nerd_font_in_base_uses_relative() {
+        let term = plain_terminal();
+        let tmp = tempfile::tempdir().unwrap();
+        let base = tmp.path().canonicalize().unwrap();
+        // Use a nested path to confirm subdir support.
+        let path = base.join(".claude").join("system-prompt.md");
+        let label = resolve_display_label(&path, Some(&base), &term);
+        assert_eq!(label, "./.claude/system-prompt.md");
+    }
+
+    #[test]
+    fn display_label_outside_base_uses_absolute() {
+        let term = plain_terminal();
+        let tmp = tempfile::tempdir().unwrap();
+        let base = tmp.path().canonicalize().unwrap();
+        // Path that does not share the base prefix.
+        let outside = std::path::PathBuf::from("/etc/hosts");
+        let label = resolve_display_label(&outside, Some(&base), &term);
+        assert_eq!(label, "/etc/hosts");
+    }
+
+    #[test]
+    fn display_label_no_base_uses_absolute() {
+        let term = plain_terminal();
+        let path = std::path::PathBuf::from("/some/abs/path.md");
+        let label = resolve_display_label(&path, None, &term);
+        assert_eq!(label, "/some/abs/path.md");
+    }
+
+    #[test]
+    fn display_label_nerd_font_no_base_uses_absolute() {
+        // Nerd Font support alone should not trigger the glyph — the path
+        // must also resolve inside `base`.
+        let term = nerd_font_terminal();
+        let path = std::path::PathBuf::from("/some/abs/path.md");
+        let label = resolve_display_label(&path, None, &term);
+        assert_eq!(label, "/some/abs/path.md");
+    }
+
+    #[test]
+    fn summary_visible_label_is_blue() {
+        // The visible label (post-OSC-strip) should carry an ANSI sequence
+        // for Tailwind Blue 400 (RGB 96, 165, 250) in 24-bit color mode.
+        let term = Terminal::builder().osc_link_support(true).build();
+        let tmp = tempfile::tempdir().unwrap();
+        let base = tmp.path().canonicalize().unwrap();
+        let sp = base.join("system-prompt.md");
+        std::fs::write(&sp, "x").unwrap();
+        let source = SystemPromptSource::StandardDiscovered {
+            path: sp.clone(),
+            scope: crate::system_prompt::StandardPromptScope::Repo,
+        };
+        let summary = render_system_prompt_summary(
+            &source,
+            SystemPromptMode::Append,
+            10,
+            Some(&base),
+            &term,
+        );
+        // Tailwind Blue 400 in 24-bit color emits ESC[38;2;81;162;255m.
+        assert!(
+            summary.contains("38;2;81;162;255"),
+            "expected Tailwind Blue 400 RGB foreground sequence in {summary:?}"
+        );
+    }
+
+    #[test]
+    fn summary_emits_osc8_for_file_link() {
+        let term = Terminal::builder().osc_link_support(true).build();
+        let tmp = tempfile::tempdir().unwrap();
+        let base = tmp.path().canonicalize().unwrap();
+        let sp = base.join("system-prompt.md");
+        std::fs::write(&sp, "x").unwrap();
+        let source = SystemPromptSource::StandardDiscovered {
+            path: sp.clone(),
+            scope: crate::system_prompt::StandardPromptScope::Repo,
+        };
+        let summary = render_system_prompt_summary(
+            &source,
+            SystemPromptMode::Append,
+            10,
+            Some(&base),
+            &term,
+        );
+        // OSC8 opener: ESC ]8;;
+        assert!(summary.contains("\x1b]8;;file://"));
+        // The absolute path must appear inside the OSC8 href.
+        let abs = sp.canonicalize().unwrap();
+        assert!(summary.contains(&abs.display().to_string()));
     }
 
     // --- Body tests ---
@@ -759,6 +881,46 @@ mod tests {
         assert!(plain.contains("📕"));
         assert!(plain.contains("disabled"));
         assert!(plain.contains("been disabled"));
+    }
+
+    #[test]
+    fn summary_line_lives_inside_blockquote() {
+        // Spec 6.1: the Summary sentence must sit inside the orange
+        // BlockQuote (not as a bare Prose line). After the header line,
+        // every subsequent non-empty line should start with the
+        // BlockQuote's prefix (one-space left margin + `│ `).
+        let term = test_terminal();
+        let prepared = test_prepared(SystemPromptMode::Append, "Body content");
+        let config = SystemPromptReportConfig {
+            show_header: true,
+            show_summary: true,
+            format: PromptReportFormat::Summary,
+            truncation: TruncationMode::FrontBack,
+        };
+        let result = report_system_prompt(
+            &EffectiveSystemPrompt::Ready(prepared),
+            config,
+            &term,
+        );
+        let output = result.expect("should produce output");
+        let plain = strip_ansi_codes(&output);
+        let mut lines = plain.lines();
+        let header = lines.next().expect("header line");
+        assert!(header.contains("📕"), "header line should contain 📕");
+        // At least one subsequent non-empty line must begin with the
+        // BlockQuote prefix.
+        let mut saw_quote = false;
+        for line in lines {
+            if line.trim().is_empty() {
+                continue;
+            }
+            assert!(
+                line.starts_with(" │ "),
+                "expected BlockQuote prefix on body line, got {line:?}"
+            );
+            saw_quote = true;
+        }
+        assert!(saw_quote, "expected at least one BlockQuote-wrapped line");
     }
 
     #[test]

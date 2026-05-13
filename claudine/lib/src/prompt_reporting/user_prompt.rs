@@ -314,16 +314,21 @@ mod tests {
     }
 
     #[test]
-    fn quiet_config_returns_none() {
+    fn quiet_flag_does_not_suppress_user_prompt() {
+        // Per spec 6.3: `--quiet` is a no-op for the user prompt. The
+        // resolved config has show_header=true and show_body=true.
         let term = test_terminal();
-        let config = UserPromptReportConfig {
-            show_header: false,
-            show_body: false,
-            format: PromptReportFormat::Summary,
-            truncation: TruncationMode::FrontBack,
-        };
+        let config = crate::prompt_reporting::resolve_user_prompt_report_config(
+            false, // silent
+            true,  // quiet
+            false, // verbose
+            10,
+        );
         let result = report_user_prompt("Test prompt", config, &term);
-        assert!(result.is_none());
+        let output = result.expect("--quiet should not suppress user prompt");
+        let plain = strip_ansi_codes(&output);
+        assert!(plain.contains("Agent Prompt"));
+        assert!(plain.contains("Test prompt"));
     }
 
     #[test]
@@ -398,6 +403,38 @@ mod tests {
         let plain = strip_ansi_codes(&output);
         assert!(plain.contains("Agent Prompt"));
         assert!(!plain.contains("This should not appear"));
+    }
+
+    #[test]
+    fn user_body_lives_inside_blockquote_at_column_one() {
+        // Spec 6.1: the green BlockQuote should sit at column 1 (one-space
+        // left margin) so the bar visually centers under the 2-column
+        // 🗣️ emoji on the header.
+        let term = test_terminal();
+        let config = UserPromptReportConfig {
+            show_header: true,
+            show_body: true,
+            format: PromptReportFormat::FullPrompt,
+            truncation: TruncationMode::FrontBack,
+        };
+        let result = report_user_prompt("Body line one", config, &term);
+        let output = result.expect("should produce output");
+        let plain = strip_ansi_codes(&output);
+        let mut lines = plain.lines();
+        let header = lines.next().expect("header line");
+        assert!(header.contains("🗣"), "header line should contain 🗣");
+        let mut saw_quote = false;
+        for line in lines {
+            if line.trim().is_empty() {
+                continue;
+            }
+            assert!(
+                line.starts_with(" │ "),
+                "expected BlockQuote prefix on body line, got {line:?}"
+            );
+            saw_quote = true;
+        }
+        assert!(saw_quote, "expected at least one BlockQuote-wrapped line");
     }
 
     #[test]

@@ -174,19 +174,21 @@ fn config_from_verbosity(verbosity: PromptVerbosity) -> SystemPromptReportConfig
 ///
 /// The user prompt follows simpler rules than the system prompt:
 /// - `--silent` suppresses everything.
-/// - `--quiet` suppresses everything.
+/// - `--quiet` is a **no-op** for the user prompt — header and body are
+///   rendered using the same rules as the default case. (`--quiet` is a
+///   system-prompt-only control.)
 /// - `--verbose` forces the full body.
 /// - By default, the full body is shown when ≤ 40 lines.
 /// - When > 40 lines, `FrontBack` truncation is used.
 pub fn resolve_user_prompt_report_config(
     cli_silent: bool,
-    cli_quiet: bool,
+    _cli_quiet: bool,
     cli_verbose: bool,
     prompt_line_count: usize,
 ) -> super::types::UserPromptReportConfig {
     use super::types::UserPromptReportConfig;
 
-    if cli_silent || cli_quiet {
+    if cli_silent {
         return UserPromptReportConfig {
             show_header: false,
             show_body: false,
@@ -402,10 +404,18 @@ mod tests {
     }
 
     #[test]
-    fn user_quiet_suppresses_all() {
-        let config = resolve_user_prompt_report_config(false, true, false, 10);
-        assert!(!config.show_header);
-        assert!(!config.show_body);
+    fn user_quiet_is_noop() {
+        // Per spec 6.3: `--quiet` is a no-op for the user prompt; header
+        // and body still render and length rules apply.
+        let short = resolve_user_prompt_report_config(false, true, false, 10);
+        assert!(short.show_header);
+        assert!(short.show_body);
+        assert_eq!(short.format, PromptReportFormat::FullPrompt);
+
+        let long = resolve_user_prompt_report_config(false, true, false, 100);
+        assert!(long.show_header);
+        assert!(long.show_body);
+        assert_eq!(long.format, PromptReportFormat::PartialPrompt);
     }
 
     #[test]
