@@ -1015,13 +1015,22 @@ pub(crate) fn execute_composition_request_inner(
 
     // -- Yolo ----------------------------------------------------------------
 
+    // `effective_yolo` is the single source of truth for whether the
+    // provider's native bypass actually took effect on this launch.
+    // Reporter / badge surfaces should read this — never `request.yolo`
+    // (intent) on its own, since interactive OpenCode silently suppresses
+    // the flag.
+    let mut effective_yolo = false;
     if request.yolo {
         let mut env_overrides = Vec::new();
-        if let Some(warn) = profile.apply_yolo_for_mode(
+        let outcome = profile.apply_yolo_for_mode(
             &mut child_args,
             &mut env_overrides,
             !effective_non_interactive,
-        )? && !silent
+        )?;
+        effective_yolo = outcome.applied;
+        if let Some(warn) = outcome.warning
+            && !silent
             && !quiet
         {
             log::warn(&warn);
@@ -1029,8 +1038,29 @@ pub(crate) fn execute_composition_request_inner(
         for (key, value) in env_overrides {
             env_plan.env.insert(key.into(), value.into());
         }
-        // Note: yolo support already consumed at env_plan build time
     }
+    // Override the YOLO env var in the child process with the
+    // post-apply truth so the dispatch reporter (which stamps event
+    // metadata from this var) reflects what actually landed, not what
+    // was intended. `build_child_env_with_launch` set this from
+    // `request.yolo` before we knew the outcome — replace it now.
+    env_plan.env.insert(
+        "YOLO".into(),
+        if effective_yolo { "true" } else { "false" }.into(),
+    );
+    // One-shot debug trace of the final argv that goes to the provider
+    // so operators can verify the catalog flag actually landed without
+    // running an external `ps`. Gated by `tracing` (RUST_LOG); never
+    // unconditional output.
+    tracing::debug!(
+        target: "claudine::wrap::yolo",
+        provider = %profile.provider(),
+        request_yolo = request.yolo,
+        effective_yolo,
+        non_interactive = effective_non_interactive,
+        child_args = ?child_args,
+        "yolo applied to provider argv",
+    );
 
     profile.apply_entrypoint(&mut child_args, effective_non_interactive);
 

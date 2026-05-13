@@ -20,7 +20,7 @@ impl WrapperProfile for GeminiWrapper {
         &self,
         args: &mut Vec<String>,
         _env_overrides: &mut Vec<(String, String)>,
-    ) -> Result<Option<String>> {
+    ) -> Result<super::YoloOutcome> {
         // Gemini accepts both `--approval-mode yolo` and
         // `--approval-mode=yolo`, while the typed catalog only records the
         // native setting. Keep this override to preserve conflict checks for
@@ -35,12 +35,12 @@ impl WrapperProfile for GeminiWrapper {
             {
                 bail!("--yolo conflicts with existing '{flag} {existing}' for gemini");
             }
-            return Ok(None);
+            return Ok(super::YoloOutcome::applied());
         }
 
         args.push(flag.to_string());
         args.push(value.to_string());
-        Ok(None)
+        Ok(super::YoloOutcome::applied())
     }
 
     fn reject_direct_yolo(&self, args: &[String]) -> Result<()> {

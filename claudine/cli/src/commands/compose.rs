@@ -85,7 +85,14 @@ pub struct SharedComposeArgs {
     pub exclude: Vec<Provider>,
 
     /// Enable provider-specific YOLO/auto-approval mode.
-    #[arg(short = 'y', long)]
+    ///
+    /// `CLAUDINE_YOLO=true` (or `=1`, `=yes`, `=on`) in the environment
+    /// is equivalent to passing `--yolo` on the command line; both
+    /// activate the same single intent signal that drives the provider's
+    /// native bypass flag. The legacy short `YOLO` env var is no longer
+    /// honored here — the reporter previously read it independently,
+    /// producing diverging signals between launch behavior and reporting.
+    #[arg(short = 'y', long, env = "CLAUDINE_YOLO")]
     pub yolo: bool,
 
     /// Run the provider session in interactive mode.

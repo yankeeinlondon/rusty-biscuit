@@ -503,22 +503,33 @@ fn run_provider_wrapper_inner(
     profile.reject_direct_yolo(&child_args)?;
     flags::reject_retired_composition_flags(&child_args)?;
 
-    if yolo_requested
-        && let Some(warn) = profile.apply_yolo_for_mode(
+    if yolo_requested {
+        let outcome = profile.apply_yolo_for_mode(
             &mut child_args,
             &mut env_overrides,
             !non_interactive_requested,
-        )?
-    {
-        deferred_warnings.push(warn);
-        // A returned warning means yolo was NOT actually applied for this
-        // invocation (e.g. OpenCode interactive mode), so the summary and
-        // header badge should reflect the disabled state.
-        yolo_enabled = false;
+        )?;
+        if let Some(warn) = outcome.warning {
+            deferred_warnings.push(warn);
+        }
+        // `outcome.applied` is the single source of truth. The summary
+        // and header badge should reflect this — not `yolo_requested`
+        // intent on its own — because some launch modes silently
+        // suppress the flag (e.g. OpenCode interactive TUI).
+        yolo_enabled = outcome.applied;
     }
     if yolo_requested && !profile.has_supported_yolo() {
         yolo_enabled = false;
     }
+    tracing::debug!(
+        target: "claudine::wrap::yolo",
+        provider = %profile.provider(),
+        request_yolo = yolo_requested,
+        effective_yolo = yolo_enabled,
+        non_interactive = non_interactive_requested,
+        child_args = ?child_args,
+        "yolo applied to provider argv",
+    );
 
     profile.apply_entrypoint(&mut child_args, non_interactive_requested);
 

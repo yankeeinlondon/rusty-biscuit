@@ -17,7 +17,7 @@ impl WrapperProfile for OpencodeWrapper {
         &self,
         args: &mut Vec<String>,
         env_overrides: &mut Vec<(String, String)>,
-    ) -> Result<Option<String>> {
+    ) -> Result<super::YoloOutcome> {
         // Delegate to the mode-aware variant with `interactive = false` so
         // the non-interactive forwarding path is used when callers have not
         // yet migrated to [`apply_yolo_for_mode`].
@@ -29,20 +29,21 @@ impl WrapperProfile for OpencodeWrapper {
         args: &mut Vec<String>,
         _env_overrides: &mut Vec<(String, String)>,
         interactive: bool,
-    ) -> Result<Option<String>> {
-        // OpenCode only honors this flag under `run`; the typed catalog can
-        // mark it non-interactive-only, but the wrapper still needs to emit a
-        // refined warning and avoid mutating interactive TUI argv.
+    ) -> Result<super::YoloOutcome> {
+        // OpenCode only honors `--dangerously-skip-permissions` under
+        // `opencode run` (the non-interactive entrypoint). In interactive
+        // TUI mode the flag is silently rejected, so emit a refined
+        // warning and report `applied = false` so the badge / reporter
+        // surface reflects the disabled state.
         if interactive {
-            return Ok(Some(
-                "--yolo mode is not supported in OpenCode <i>interactive</i> sessions and was ignored"
-                    .to_string(),
+            return Ok(super::YoloOutcome::not_applied(
+                "--yolo mode is not supported in OpenCode <i>interactive</i> sessions and was ignored",
             ));
         }
         if !args.iter().any(|a| a == "--dangerously-skip-permissions") {
             args.push("--dangerously-skip-permissions".to_string());
         }
-        Ok(None)
+        Ok(super::YoloOutcome::applied())
     }
 
     fn apply_system_prompt(
