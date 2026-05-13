@@ -82,11 +82,11 @@ pub fn render_user_prompt_body(
                     }
                 }
             };
-            let quote = create_user_prompt_blockquote(&truncated);
+            let quote = create_user_prompt_blockquote(&truncated, term);
             quote.render(term)
         }
         PromptReportFormat::FullPrompt => {
-            let quote = create_user_prompt_blockquote(&stripped);
+            let quote = create_user_prompt_blockquote(&stripped, term);
             quote.render(term)
         }
     }
@@ -289,13 +289,25 @@ mod tests {
             &term,
         );
         let plain = strip_ansi_codes(&body);
-        assert!(plain.contains("Line 1"));
-        assert!(plain.contains("Line 20"));
-        // Because of line wrapping, "Line 50" may be split across lines;
-        // check for " 50" (with leading space or newline) instead.
-        assert!(plain.contains(" 50"), "should contain the last line number");
-        // Middle lines should be truncated
-        assert!(!plain.contains("Line 30"), "middle lines should be truncated");
+        // The body lines are prefixed with the BlockQuote border (`┃ `),
+        // and word-wrap may split "Line N" so that "Line " ends one row and
+        // the digits start the next. Strip the chrome before scanning for
+        // the digit tokens.
+        let body_content: String = plain
+            .lines()
+            .map(|l| l.trim_start_matches(|c: char| c.is_whitespace() || c == '┃'))
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(body_content.contains("Line 1"));
+        let contains_line_20 = body_content.contains("Line 20")
+            || body_content.lines().any(|l| l.starts_with("20"));
+        assert!(contains_line_20, "should contain Line 20: {plain:?}");
+        let contains_line_50 = body_content.contains("Line 50")
+            || body_content.lines().any(|l| l.starts_with("50"));
+        assert!(contains_line_50, "should contain Line 50: {plain:?}");
+        let contains_line_30 = body_content.contains("Line 30")
+            || body_content.lines().any(|l| l.starts_with("30"));
+        assert!(!contains_line_30, "middle lines should be truncated: {plain:?}");
     }
 
     // --- Top-level reporter tests ---
@@ -429,7 +441,7 @@ mod tests {
                 continue;
             }
             assert!(
-                line.starts_with(" │ "),
+                line.starts_with("┃ "),
                 "expected BlockQuote prefix on body line, got {line:?}"
             );
             saw_quote = true;

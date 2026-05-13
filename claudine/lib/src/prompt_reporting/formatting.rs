@@ -5,40 +5,98 @@
 
 use biscuit_terminal::components::block_quote::BlockQuote;
 use biscuit_terminal::components::renderable::Renderable;
+use biscuit_terminal::discovery::detection::ImageSupport;
+use biscuit_terminal::terminal::Terminal;
 use biscuit_terminal::utils::color::{Color, Tailwind};
 use biscuit_terminal::utils::layout::Margin;
 use biscuit_terminal::utils::wrap_policy::WordWrap;
 
+/// The heavy vertical-line border (U+2503) used by both the system- and
+/// user-prompt [`BlockQuote`]s.
+///
+/// `┃` is the thickest box-drawing vertical glyph that still renders as a
+/// single, horizontally centered column — visually centered beneath the
+/// 2-cell-wide 📕 / 🗣️ emojis on the header line above. A trailing space
+/// separates the border from the body content.
+pub(crate) const PROMPT_BORDER: &str = "┃ ";
+
+/// The visible cell-width consumed by [`PROMPT_BORDER`] (border glyph plus
+/// the trailing space).
+pub(crate) const PROMPT_BORDER_WIDTH: u32 = 2;
+
+/// The [`Margin::Chars`] value used as the BlockQuote's `left_margin` for both
+/// system- and user-prompt reporting.
+///
+/// Set to **0** so the border glyph lands at column 0 of the BlockQuote's
+/// rendering area — directly under the left edge of the 2-cell `📕` / `🗣️`
+/// emoji on the header line above. Adding a leading space would offset the
+/// bar one column right of the icon and break visual alignment.
+pub(crate) const PROMPT_LEFT_MARGIN: u32 = 0;
+
+/// Total horizontal cells consumed by margin + border before content begins.
+pub(crate) const PROMPT_CHROME_WIDTH: u32 = PROMPT_LEFT_MARGIN + PROMPT_BORDER_WIDTH;
+
+/// Compute the content width available inside a prompt-reporting
+/// [`BlockQuote`] for the given terminal.
+pub(crate) fn prompt_body_width(term: &Terminal) -> u32 {
+    term.width().saturating_sub(PROMPT_CHROME_WIDTH).max(1)
+}
+
 /// Renders markdown text to terminal output with blank-line collapsing.
 ///
-/// Uses `darkmatter` to convert markdown to ANSI-styled terminal output,
-/// then enforces the constraint that no more than two consecutive blank
-/// lines appear in the result.
+/// Uses `darkmatter` to convert markdown to ANSI-styled terminal output at
+/// `max_width`, then enforces the constraint that no more than two
+/// consecutive blank lines appear in the result.
+///
+/// The outer [`Terminal`] is inspected to choose
+/// [`TerminalImageMode`](darkmatter::markdown::output::terminal::TerminalImageMode):
+/// when the caller's terminal advertises Kitty- or iTerm2-compatible image
+/// support, `Force` is passed to darkmatter so that markdown horizontal
+/// rules (`---`) emit Tier 1 inline images (the renderer's own subprocess
+/// terminal detection often loses parent capabilities). Otherwise `Auto`
+/// is used so Unicode / ASCII fallbacks still apply. Width is bounded by
+/// `max_width` so the BlockQuote wrapper does not need to re-wrap the
+/// content.
 ///
 /// ## Examples
 ///
 /// ```
+/// use biscuit_terminal::terminal::Terminal;
 /// use claudine::prompt_reporting::render_markdown_for_terminal;
 ///
+/// let term = Terminal::new();
 /// let markdown = "# Hello\n\n\n\nWorld";
-/// let output = render_markdown_for_terminal(markdown);
+/// let output = render_markdown_for_terminal(markdown, &term, 60);
 /// // Should never contain more than two consecutive newlines
 /// assert!(!output.contains("\n\n\n"));
 /// ```
-pub fn render_markdown_for_terminal(text: &str) -> String {
-    use darkmatter::markdown::output::terminal::{TerminalOptions, TerminalImageMode, for_terminal};
+pub fn render_markdown_for_terminal(text: &str, term: &Terminal, max_width: u32) -> String {
+    use darkmatter::markdown::output::terminal::{for_terminal, TerminalImageMode, TerminalOptions};
     use darkmatter::markdown::Markdown;
 
     if text.trim().is_empty() {
         return String::new();
     }
 
+    let image_mode = if term.is_tty
+        && matches!(term.image_support, ImageSupport::Kitty | ImageSupport::ITerm)
+    {
+        TerminalImageMode::Force
+    } else {
+        TerminalImageMode::Auto
+    };
+
     let md: Markdown = text.into();
     let mut options = TerminalOptions::default();
-    options.image_mode = TerminalImageMode::Never;
+    options.max_width = Some(max_width.clamp(1, u16::MAX as u32) as u16);
+    options.image_mode = image_mode;
     let rendered = for_terminal(&md, options).unwrap_or_else(|_| text.to_string());
 
-    collapse_blank_lines(&rendered, 2)
+    // Cap consecutive blank lines at 1. darkmatter's `HorizontalRule`
+    // writer emits `<rule>\n\n` and the following markdown paragraph adds
+    // its own leading `\n`, so without this cap a rule is followed by two
+    // visible blank rows instead of the expected single separator.
+    collapse_blank_lines(&rendered, 1)
 }
 
 /// Collapses consecutive blank lines to at most `max_consecutive`.
@@ -86,21 +144,25 @@ pub fn collapse_blank_lines(text: &str, max_consecutive: usize) -> String {
 
 /// Creates a [`BlockQuote`] styled for the system prompt (orange border).
 ///
-/// The content is rendered from markdown to terminal output, then wrapped
-/// in a block quote with an orange left border.
+/// The content is rendered from markdown to terminal output at the
+/// terminal's available body width (so the wrapping BlockQuote does not
+/// have to re-wrap), then placed inside a block quote with the heavy
+/// orange left border.
 ///
 /// ## Examples
 ///
 /// ```
 /// use biscuit_terminal::components::renderable::Renderable;
+/// use biscuit_terminal::terminal::Terminal;
 /// use claudine::prompt_reporting::create_system_prompt_blockquote;
 ///
-/// let quote = create_system_prompt_blockquote("**Bold** text");
+/// let term = Terminal::new();
+/// let quote = create_system_prompt_blockquote("**Bold** text", &term);
 /// let rendered = quote.render_optimistic(None);
 /// assert!(rendered.contains("Bold"));
 /// ```
-pub fn create_system_prompt_blockquote(content: &str) -> BlockQuote {
-    let rendered = render_markdown_for_terminal(content);
+pub fn create_system_prompt_blockquote(content: &str, term: &Terminal) -> BlockQuote {
+    let rendered = render_markdown_for_terminal(content, term, prompt_body_width(term));
     style_system_prompt_blockquote(BlockQuote::from(rendered))
 }
 
@@ -126,33 +188,44 @@ pub fn system_prompt_blockquote_styled(rendered_content: &str) -> BlockQuote {
 }
 
 fn style_system_prompt_blockquote(mut quote: BlockQuote) -> BlockQuote {
-    quote = quote.with_left_block_color(Color::Tailwind(Tailwind::Orange500));
-    quote.layout_mut().left_margin = Margin::Chars(1);
-    quote.layout_mut().word_wrap = WordWrap::WrapProse(Some(8), None);
+    quote = quote
+        .with_left_block_color(Color::Tailwind(Tailwind::Orange500))
+        .with_border(PROMPT_BORDER);
+    quote.layout_mut().left_margin = Margin::Chars(PROMPT_LEFT_MARGIN);
+    // Content is already wrapped at `prompt_body_width(term)` by darkmatter,
+    // so re-wrapping inside the BlockQuote would just chop trailing ANSI off
+    // already-fit lines. `WordWrap::None` preserves the rendered geometry.
+    quote.layout_mut().word_wrap = WordWrap::None;
     quote
 }
 
 /// Creates a [`BlockQuote`] styled for the user prompt (green border).
 ///
-/// The content is rendered from markdown to terminal output, then wrapped
-/// in a block quote with a green left border.
+/// The content is rendered from markdown to terminal output at the
+/// terminal's available body width (so the wrapping BlockQuote does not
+/// have to re-wrap), then placed inside a block quote with the heavy
+/// green left border.
 ///
 /// ## Examples
 ///
 /// ```
 /// use biscuit_terminal::components::renderable::Renderable;
+/// use biscuit_terminal::terminal::Terminal;
 /// use claudine::prompt_reporting::create_user_prompt_blockquote;
 ///
-/// let quote = create_user_prompt_blockquote("**Bold** text");
+/// let term = Terminal::new();
+/// let quote = create_user_prompt_blockquote("**Bold** text", &term);
 /// let rendered = quote.render_optimistic(None);
 /// assert!(rendered.contains("Bold"));
 /// ```
-pub fn create_user_prompt_blockquote(content: &str) -> BlockQuote {
-    let rendered = render_markdown_for_terminal(content);
+pub fn create_user_prompt_blockquote(content: &str, term: &Terminal) -> BlockQuote {
+    let rendered = render_markdown_for_terminal(content, term, prompt_body_width(term));
     let mut quote = BlockQuote::from(rendered)
-        .with_left_block_color(Color::Tailwind(Tailwind::Green500));
-    quote.layout_mut().left_margin = Margin::Chars(1);
-    quote.layout_mut().word_wrap = WordWrap::WrapProse(Some(8), None);
+        .with_left_block_color(Color::Tailwind(Tailwind::Green500))
+        .with_border(PROMPT_BORDER);
+    quote.layout_mut().left_margin = Margin::Chars(PROMPT_LEFT_MARGIN);
+    // See note in `style_system_prompt_blockquote`.
+    quote.layout_mut().word_wrap = WordWrap::None;
     quote
 }
 
@@ -220,22 +293,25 @@ mod tests {
 
     #[test]
     fn renders_simple_markdown() {
+        let term = Terminal::new();
         let md = "# Hello\n\nWorld";
-        let output = render_markdown_for_terminal(md);
+        let output = render_markdown_for_terminal(md, &term, 80);
         assert!(output.contains("Hello"));
         assert!(output.contains("World"));
     }
 
     #[test]
     fn collapses_excessive_blank_lines_in_markdown() {
+        let term = Terminal::new();
         let md = "# Hello\n\n\n\n\nWorld";
-        let output = render_markdown_for_terminal(md);
+        let output = render_markdown_for_terminal(md, &term, 80);
         assert!(!output.contains("\n\n\n"));
     }
 
     #[test]
     fn handles_empty_markdown() {
-        let output = render_markdown_for_terminal("");
+        let term = Terminal::new();
+        let output = render_markdown_for_terminal("", &term, 80);
         assert_eq!(output, "");
     }
 
@@ -259,23 +335,26 @@ mod tests {
     }
 
     #[test]
-    fn system_blockquote_has_border_at_column_one() {
-        // left_margin = Margin::Chars(1) places the colored `│` glyph at
-        // column 1 so it aligns visually with the center of the 2-column
-        // 📕 emoji on the header line above.
-        let quote = create_system_prompt_blockquote("Test content");
+    fn system_blockquote_border_starts_at_column_zero() {
+        // left_margin = 0 places the heavy `┃` border at column 0 so it
+        // lines up directly under the left edge of the 2-cell 📕 emoji on
+        // the header line above. A non-zero margin would shift the bar
+        // right of the icon and break visual alignment.
+        let term = Terminal::new();
+        let quote = create_system_prompt_blockquote("Test content", &term);
         let rendered = quote.render_optimistic(None);
         let stripped = strip_ansi(&rendered);
-        assert!(stripped.starts_with(" │ "), "stripped = {stripped:?}");
+        assert!(stripped.starts_with("┃ "), "stripped = {stripped:?}");
         assert!(stripped.contains("Test content"));
     }
 
     #[test]
-    fn user_blockquote_has_border_at_column_one() {
-        let quote = create_user_prompt_blockquote("Test content");
+    fn user_blockquote_border_starts_at_column_zero() {
+        let term = Terminal::new();
+        let quote = create_user_prompt_blockquote("Test content", &term);
         let rendered = quote.render_optimistic(None);
         let stripped = strip_ansi(&rendered);
-        assert!(stripped.starts_with(" │ "), "stripped = {stripped:?}");
+        assert!(stripped.starts_with("┃ "), "stripped = {stripped:?}");
         assert!(stripped.contains("Test content"));
     }
 
@@ -292,7 +371,8 @@ mod tests {
 
     #[test]
     fn system_blockquote_renders_markdown() {
-        let quote = create_system_prompt_blockquote("**bold** and _italic_");
+        let term = Terminal::new();
+        let quote = create_system_prompt_blockquote("**bold** and _italic_", &term);
         let rendered = quote.render_optimistic(None);
         let stripped = strip_ansi(&rendered);
         assert!(stripped.contains("bold"));
@@ -301,7 +381,8 @@ mod tests {
 
     #[test]
     fn user_blockquote_renders_markdown() {
-        let quote = create_user_prompt_blockquote("**bold** and _italic_");
+        let term = Terminal::new();
+        let quote = create_user_prompt_blockquote("**bold** and _italic_", &term);
         let rendered = quote.render_optimistic(None);
         let stripped = strip_ansi(&rendered);
         assert!(stripped.contains("bold"));

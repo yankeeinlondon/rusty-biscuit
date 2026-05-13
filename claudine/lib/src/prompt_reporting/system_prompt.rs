@@ -13,6 +13,7 @@ use crate::system_prompt::{
     EffectiveSystemPrompt, SystemPromptMode, SystemPromptSource,
 };
 
+use super::formatting::prompt_body_width;
 use super::{
     estimate_system_prompt_tokens, render_markdown_for_terminal,
     system_prompt_blockquote_styled, truncate_front_back, PromptReportFormat,
@@ -50,12 +51,13 @@ pub fn render_system_prompt_header(action: &str, term: &Terminal) -> String {
 ///
 /// Three branches, in priority order:
 ///
-/// 1. **Nerd Font glyph** — when the terminal reports Nerd Font support
-///    (`Terminal::is_nerd_font == Some(true)`) **and** `absolute` resolves
-///    inside `base`, return the single glyph [`NERD_FONT_REPO_GLYPH`]
-///    (`\u{F02A2}`).
+/// 1. **Nerd Font glyph + path** — when the terminal reports Nerd Font
+///    support (`Terminal::is_nerd_font == Some(true)`) **and** `absolute`
+///    resolves inside `base`, return `{f02a2}/{rel}` where `{f02a2}` is the
+///    in-repo glyph [`NERD_FONT_REPO_GLYPH`] (`\u{F02A2}`) standing in for
+///    the repo root and `{rel}` is the path inside `base`.
 /// 2. **Relative path with `./` prefix** — when `absolute` resolves inside
-///    `base` but the terminal lacks Nerd Font support, return `./<rel>`.
+///    `base` but the terminal lacks Nerd Font support, return `./{rel}`.
 /// 3. **Absolute path** — when `base` is `None` or `absolute` is outside it,
 ///    return the absolute path.
 ///
@@ -69,7 +71,7 @@ pub(crate) fn resolve_display_label(
 ) -> String {
     let rel = base.and_then(|b| absolute.strip_prefix(b).ok());
     match (rel, term.is_nerd_font) {
-        (Some(_), Some(true)) => NERD_FONT_REPO_GLYPH.to_string(),
+        (Some(rel), Some(true)) => format!("{NERD_FONT_REPO_GLYPH}/{}", rel.display()),
         (Some(rel), _) => format!("./{}", rel.display()),
         (None, _) => absolute.display().to_string(),
     }
@@ -194,8 +196,9 @@ pub fn render_system_prompt_body(
     text: &str,
     format: PromptReportFormat,
     truncation: TruncationMode,
-    _term: &Terminal,
+    term: &Terminal,
 ) -> String {
+    let width = prompt_body_width(term);
     match format {
         PromptReportFormat::Summary => String::new(),
         PromptReportFormat::PartialPrompt => {
@@ -210,9 +213,9 @@ pub fn render_system_prompt_body(
                     }
                 }
             };
-            render_markdown_for_terminal(&truncated)
+            render_markdown_for_terminal(&truncated, term, width)
         }
-        PromptReportFormat::FullPrompt => render_markdown_for_terminal(text),
+        PromptReportFormat::FullPrompt => render_markdown_for_terminal(text, term, width),
     }
 }
 
@@ -558,13 +561,18 @@ mod tests {
     }
 
     #[test]
-    fn display_label_nerd_font_in_base_uses_glyph() {
+    fn display_label_nerd_font_in_base_uses_glyph_with_path() {
         let term = nerd_font_terminal();
         let tmp = tempfile::tempdir().unwrap();
         let base = tmp.path().canonicalize().unwrap();
         let path = base.join(".claude").join("system-prompt.md");
         let label = resolve_display_label(&path, Some(&base), &term);
-        assert_eq!(label, NERD_FONT_REPO_GLYPH.to_string());
+        // The glyph stands in for the repo root, followed by the relative
+        // path inside the repo.
+        assert_eq!(
+            label,
+            format!("{NERD_FONT_REPO_GLYPH}/.claude/system-prompt.md")
+        );
     }
 
     #[test]
@@ -698,11 +706,18 @@ mod tests {
         );
         let plain = strip_ansi_codes(&body);
         assert!(plain.contains("Line 1"));
-        // Because of line wrapping, "Line 50" may be split across lines;
-        // check for " 50" (with leading space or newline) instead.
-        assert!(plain.contains(" 50"), "should contain the last line number");
-        // Verify truncation happened by checking that not all lines are present
-        assert!(!plain.contains("Line 25"), "middle lines should be truncated");
+        // Word-wrap may split "Line 50" so that "Line " ends one row and
+        // "50" starts the next. Tolerate the wrap by scanning lines for "50"
+        // as a standalone token at the start of a row or after a space.
+        let contains_last_line_number = plain
+            .lines()
+            .any(|l| l.trim_start().starts_with("50") || l.contains(" 50"));
+        assert!(contains_last_line_number, "should contain the last line number: {plain:?}");
+        // Verify truncation happened by checking that not all lines are present.
+        // "Line 25" may be wrapped as "Line \n25"; check both forms.
+        let contains_line_25 = plain.contains("Line 25")
+            || plain.lines().any(|l| l.trim_start().starts_with("25"));
+        assert!(!contains_line_25, "middle lines should be truncated: {plain:?}");
     }
 
     #[test]
@@ -915,7 +930,7 @@ mod tests {
                 continue;
             }
             assert!(
-                line.starts_with(" │ "),
+                line.starts_with("┃ "),
                 "expected BlockQuote prefix on body line, got {line:?}"
             );
             saw_quote = true;
