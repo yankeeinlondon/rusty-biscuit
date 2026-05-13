@@ -23,15 +23,28 @@ use crate::stream::logs::opencode::events::{
     AssetType, LogClassification, OpenCodeLogRecord, ParsedOpenCodeStderrLine,
 };
 
-/// Whether an incoming stderr log line was converted into a semantic event
-/// and should therefore be suppressed from raw stderr passthrough.
+/// Whether the bridge took ownership of an incoming stderr log line and
+/// therefore suppresses raw passthrough.
+///
+/// A line is `Consumed` whenever the bridge recognized it as a structured
+/// OpenCode log record — regardless of whether that record produced a
+/// [`SemanticEvent`], was intentionally filtered (e.g. `service=bus`), or
+/// was simply Unclassified. The structured-log format is OpenCode's, so any
+/// line that parses as one is "ours" to interpret; echoing it to the user
+/// proxies internal debug output and is never what we want.
+///
+/// Only truly unstructured stderr (panics, raw `RawText` content, plain
+/// progress preambles) remains `NotConsumed`, preserving the legacy raw
+/// passthrough so genuine error output still reaches the user.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StderrIngestOutcome {
-    /// The bridge classified and emitted a [`SemanticEvent`] for this line.
-    /// Callers should not also echo the raw line to the user.
+    /// The bridge handled this line — either by emitting a [`SemanticEvent`]
+    /// or by parsing it as a structured record we intentionally drop.
+    /// Callers must not echo the raw line.
     Consumed,
-    /// The bridge did not recognize the line as a meaningful diagnostic.
-    /// Callers should keep the existing raw-passthrough behavior.
+    /// The bridge did not recognize the line as a structured OpenCode log
+    /// record (or as a classifiable raw error). Callers should keep the
+    /// existing raw-passthrough behavior.
     NotConsumed,
 }
 
@@ -203,12 +216,13 @@ impl<S: SemanticEventSink> OpenCodeLogBridge<S> {
         // Aggressive noise filter: `service=bus` lines carry internal
         // cross-module chatter that is not meaningful to operators.
         // They are still counted as parsed (so the summary is accurate)
-        // but they do not emit semantic events. The byte-heartbeat
-        // refresh in the stderr reader thread (spawn.rs) already
-        // happened before this line reached the bridge, so the
+        // but they do not emit semantic events. Return `Consumed` so the
+        // raw line is suppressed from the user's terminal — the
+        // byte-heartbeat refresh in the stderr reader thread (spawn.rs)
+        // already happened before this line reached the bridge, so the
         // silence watchdog still sees activity.
         if record.tags.get("service").map(|s| s.as_str()) == Some("bus") {
-            return StderrIngestOutcome::NotConsumed;
+            return StderrIngestOutcome::Consumed;
         }
 
         let classification = classify(&record);
@@ -256,8 +270,9 @@ impl<S: SemanticEventSink> OpenCodeLogBridge<S> {
             }
             // Boot banner is parsed and counted but not promoted to a
             // semantic event in Phase 3; the NDJSON stream's own session
-            // event remains the SessionStart anchor when present.
-            LogClassification::BootBanner { .. } => StderrIngestOutcome::NotConsumed,
+            // event remains the SessionStart anchor when present. Suppress
+            // from raw passthrough — it's a structured log record we own.
+            LogClassification::BootBanner { .. } => StderrIngestOutcome::Consumed,
             LogClassification::SessionCreated { id, parent_id } => {
                 self.on_session_created(&record, id, parent_id)
             }
@@ -282,7 +297,11 @@ impl<S: SemanticEventSink> OpenCodeLogBridge<S> {
                 status,
                 duration_ms,
             } => self.on_http_response(&record, method, url, status, duration_ms),
-            LogClassification::Unclassified => StderrIngestOutcome::NotConsumed,
+            // An Unclassified line still parsed as a well-formed OpenCode
+            // structured log record (level + timestamp + tags + message).
+            // We have already counted it and refreshed the byte heartbeat;
+            // it is ours to drop rather than proxy as raw debug output.
+            LogClassification::Unclassified => StderrIngestOutcome::Consumed,
         }
     }
 
@@ -859,10 +878,14 @@ mod tests {
     }
 
     #[test]
-    fn unclassified_structured_line_returns_not_consumed() {
+    fn unclassified_structured_line_is_consumed_without_emitting_event() {
+        // Structured OpenCode log records are owned by the bridge — even
+        // when they don't classify into a promoted semantic event we
+        // suppress the raw line so it doesn't leak to the user's terminal
+        // as debug output.
         let mut bridge = OpenCodeLogBridge::new(RecordingSink::default(), stdout_seen(), None);
         let outcome = bridge.ingest("INFO 2026-04-15T21:28:30 +0ms service=default msg=hello");
-        assert_eq!(outcome, StderrIngestOutcome::NotConsumed);
+        assert_eq!(outcome, StderrIngestOutcome::Consumed);
         assert_eq!(bridge.sink.events.len(), 0);
         let state = bridge.state.lock().unwrap();
         assert_eq!(state.diagnostics.log_records_parsed, 1);
@@ -1189,11 +1212,16 @@ mod tests {
     }
 
     #[test]
-    fn bus_line_is_not_consumed_but_counts_as_parsed() {
+    fn bus_line_is_consumed_silently_and_counts_as_parsed() {
+        // `service=bus` is the noisiest source on the stderr stream
+        // (~70-75% of INFO volume) and carries nothing the user cares
+        // about. Bus lines are counted in diagnostics but produce no
+        // semantic event and must NEVER leak to the user as raw stderr —
+        // so the bridge returns `Consumed` to suppress raw passthrough.
         let mut bridge = OpenCodeLogBridge::new(RecordingSink::default(), stdout_seen(), None);
         let line = "INFO 2026-04-15T21:28:30 +5ms service=bus msg=internal chatter";
         let outcome = bridge.ingest(line);
-        assert_eq!(outcome, StderrIngestOutcome::NotConsumed);
+        assert_eq!(outcome, StderrIngestOutcome::Consumed);
         assert_eq!(bridge.sink.events.len(), 0, "bus lines must not emit semantic events");
         let state = bridge.state.lock().unwrap();
         assert_eq!(
@@ -1205,9 +1233,10 @@ mod tests {
     #[test]
     fn non_bus_line_classifies_normally_after_bus_filter() {
         let mut bridge = OpenCodeLogBridge::new(RecordingSink::default(), stdout_seen(), None);
-        // First, a bus line that is silently dropped.
+        // First, a bus line that is silently dropped (but still consumed
+        // so it never reaches raw stderr passthrough).
         let bus_line = "INFO 2026-04-15T21:28:30 +5ms service=bus msg=ignored";
-        assert_eq!(bridge.ingest(bus_line), StderrIngestOutcome::NotConsumed);
+        assert_eq!(bridge.ingest(bus_line), StderrIngestOutcome::Consumed);
         // Then, a malformed asset line that should classify normally.
         let real_line = "ERROR 2026-04-15T21:28:30 +315ms service=config command=/tmp/foo.md err=ENOENT failed to load command";
         assert_eq!(bridge.ingest(real_line), StderrIngestOutcome::Consumed);
@@ -1413,10 +1442,15 @@ mod tests {
     }
 
     #[test]
-    fn boot_banner_is_parsed_but_not_consumed() {
+    fn boot_banner_is_parsed_and_consumed_without_emitting_event() {
+        // The boot banner is parsed and counted but Phase 3 deliberately
+        // does not promote it to a `SessionStart` (the NDJSON stream's
+        // own session event remains the anchor). It still must NOT be
+        // proxied to the user's terminal — return `Consumed` so the raw
+        // stderr passthrough does not echo it as debug output.
         let mut bridge = OpenCodeLogBridge::new(RecordingSink::default(), stdout_seen(), None);
         let line = "INFO  2026-05-12T20:00:11 +97ms service=default version=1.14.48 args=[\"run\"] opencode";
-        assert_eq!(bridge.ingest(line), StderrIngestOutcome::NotConsumed);
+        assert_eq!(bridge.ingest(line), StderrIngestOutcome::Consumed);
         assert_eq!(bridge.sink.events.len(), 0);
         let state = bridge.state.lock().unwrap();
         assert_eq!(state.diagnostics.log_records_parsed, 1);

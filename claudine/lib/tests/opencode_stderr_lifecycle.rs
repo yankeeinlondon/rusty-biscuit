@@ -11,6 +11,7 @@
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
 
+use claudine::stream::logs::StderrIngestOutcome;
 use claudine::stream::logs::opencode::OpenCodeLogBridge;
 use claudine::stream::semantic::{SemanticEvent, SemanticEventSink};
 
@@ -172,6 +173,48 @@ fn fixture_replay_emits_info_for_llm_calls_and_http_responses() {
     assert_eq!(
         http_response_count, 1,
         "expected 1 http_response Info event; got events: {events:?}",
+    );
+}
+
+#[test]
+fn structured_log_records_are_always_consumed_even_when_unclassified_or_bus() {
+    // Regression: the bridge used to return `NotConsumed` for structured
+    // records it parsed but did not promote (e.g. `service=bus`,
+    // `service=skill`, boot banner). The reader thread then proxied them
+    // straight to the user's terminal as raw debug output. Any line that
+    // parses as a structured OpenCode log record is owned by the bridge
+    // and must never reach raw stderr passthrough.
+    let events: Arc<Mutex<Vec<SemanticEvent>>> = Arc::new(Mutex::new(Vec::new()));
+    let sink = SharedSink {
+        events: Arc::clone(&events),
+    };
+    let mut bridge = OpenCodeLogBridge::new(sink, Arc::new(AtomicBool::new(false)), None);
+
+    // Each of these is a well-formed structured stderr line that the
+    // previous implementation leaked: `bus` (filtered), `skill`
+    // (Unclassified), and the boot banner (not promoted).
+    let structured_lines = [
+        "INFO  2026-05-13T00:38:57 +0ms service=bus type=session.updated publishing",
+        "WARN  2026-05-13T00:38:57 +0ms service=skill name=foo existing=/a/b duplicate=/c/d duplicate skill name",
+        "INFO  2026-05-13T00:38:57 +0ms service=skill count=132 init",
+        "INFO  2026-05-13T00:38:57 +7ms service=tool.registry status=completed duration=21 skill",
+        "INFO  2026-05-13T00:38:57 +0ms service=default version=0.1.0 opencode",
+    ];
+    for line in structured_lines {
+        assert_eq!(
+            bridge.ingest(line),
+            StderrIngestOutcome::Consumed,
+            "structured log line must be consumed by bridge: {line}",
+        );
+    }
+
+    // Truly unstructured stderr stays NotConsumed so genuine panics /
+    // raw error output still reach the user.
+    let raw_line = "thread 'main' panicked at 'oh no', src/main.rs:1:1";
+    assert_eq!(
+        bridge.ingest(raw_line),
+        StderrIngestOutcome::NotConsumed,
+        "non-structured raw line must remain NotConsumed for passthrough",
     );
 }
 
