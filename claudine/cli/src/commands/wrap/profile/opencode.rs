@@ -149,14 +149,16 @@ impl WrapperProfile for OpencodeWrapper {
 
     fn apply_structured_stream(&self, args: &mut Vec<String>) {
         // OpenCode uses --format json (cataloged) plus --print-logs and
-        // --log-level ERROR for reliable structured streaming. The extra
-        // flags are transport-level concerns not modeled in the output-format
-        // catalog, so this override is kept.
+        // --log-level INFO for reliable structured streaming. INFO provides
+        // enough signal (sessions, LLM calls, step loops, HTTP responses)
+        // for the stderr bridge to detect progress during NDJSON silence
+        // windows, while the aggressive `service=bus` filter in the bridge
+        // keeps noise out of the semantic event stream.
         args.push("--format".to_string());
         args.push("json".to_string());
         args.push("--print-logs".to_string());
         args.push("--log-level".to_string());
-        args.push("ERROR".to_string());
+        args.push("INFO".to_string());
     }
 
     fn stderr_noise_prefixes(&self) -> &'static [&'static str] {

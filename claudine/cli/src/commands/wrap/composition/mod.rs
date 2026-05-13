@@ -134,6 +134,58 @@ pub(crate) struct SingleCompositionOutcome {
     pub provider: Provider,
     /// Execution perf metadata, when `--perf` was enabled.
     pub agent_perf: Option<crate::perf::AgentExecutionPerf>,
+    /// Iteration-level summary signals lifted from the structured stream
+    /// for consumption by the `compose --loop` orchestrator.
+    ///
+    /// Populated for the non-harness structured-stream path (the only
+    /// path that can carry a rate-limit trailer or a watchdog
+    /// `error_kind`). `None` for the dry-run, harness, and legacy paths
+    /// where these signals aren't available at this layer.
+    pub iteration_signals: Option<IterationSummarySignals>,
+}
+
+/// Iteration-level signals lifted from the per-iteration
+/// [`claudine::stream::summary::StreamExecutionSummary`] so the
+/// `compose --loop` orchestrator can drive rate-limit-aware iteration and
+/// build [`claudine::composition::CompositionError::LoopIterationFailed`]
+/// with an honest cause.
+#[derive(Debug, Default, Clone)]
+pub(crate) struct IterationSummarySignals {
+    /// Rate-limit trailer observed during the iteration. May be present on
+    /// both successful and failed iterations.
+    pub rate_limit: Option<claudine::stream::summary::RateLimitInfo>,
+    /// Structured `error_kind` (e.g. `step_timeout`, `wall_clock_timeout`,
+    /// `usage_limit_reached`). Mirrors the JSONL session_end row's
+    /// `extra.exit_reason`.
+    pub exit_reason: Option<String>,
+    /// Human-readable failure detail from the iteration's summary, when
+    /// present (e.g. "no stream activity for 30m; terminating due to
+    /// step_timeout").
+    pub error_message: Option<String>,
+    /// Resolved provider identifier (e.g. `"k2p6"`) from the iteration's
+    /// summary, when known. Carried into [`CompositionError::LoopRateLimited`]
+    /// for honest attribution.
+    pub provider_id: Option<String>,
+    /// Resolved model identifier (e.g. `"kimi-for-coding"`) from the
+    /// iteration's summary, when known.
+    pub model_id: Option<String>,
+}
+
+impl IterationSummarySignals {
+    /// Extract the loop-relevant fields from a fully-built
+    /// [`claudine::stream::summary::StreamExecutionSummary`].
+    pub fn from_summary(summary: &claudine::stream::summary::StreamExecutionSummary) -> Self {
+        Self {
+            rate_limit: summary.rate_limit.clone(),
+            exit_reason: summary.error_kind.clone(),
+            error_message: summary.error_message.clone(),
+            // Use the Provider enum's display form (e.g. "opencode"). The
+            // finer-grained AI-SDK provider (e.g. "k2p6") typically lives
+            // inside `rate_limit.message`.
+            provider_id: Some(summary.provider.to_string()),
+            model_id: summary.model.clone(),
+        }
+    }
 }
 
 /// Result of running a structured composition stream.
@@ -1233,6 +1285,8 @@ pub(crate) fn execute_composition_request_inner(
             exit_code: 0,
             provider,
             agent_perf: None,
+            // Dry-run never produces a per-iteration summary.
+            iteration_signals: None,
         };
         // `--perf` is an explicit opt-in and overrides `--silent`/`--quiet`.
         // The perf report is always emitted to stderr when requested.
@@ -1553,6 +1607,13 @@ pub(crate) fn execute_composition_request_inner(
                 .as_ref()
                 .and_then(|c| c.agent_perf())
                 .or(harness_perf),
+            // The harness loop manages its own per-step summaries
+            // internally; surfacing them through this outer struct is a
+            // future enhancement. For now `compose --loop` against a
+            // harness-enabled provider falls back to the legacy
+            // behavior (no rate-limit-aware pause and no `exit_reason`
+            // pickup at the loop boundary).
+            iteration_signals: None,
         };
         // `--perf` is an explicit opt-in and overrides `--silent`/`--quiet`.
         // The perf report is always emitted to stderr when requested.
@@ -1601,6 +1662,7 @@ pub(crate) fn execute_composition_request_inner(
 
         let mut child_spawned = false;
         let mut agent_perf: Option<crate::perf::AgentExecutionPerf> = None;
+        let mut iteration_signals: Option<IterationSummarySignals> = None;
         let exit_result = execute_without_harness(
             mode,
             provider,
@@ -1623,6 +1685,7 @@ pub(crate) fn execute_composition_request_inner(
             &mut child_spawned,
             prompt_timing,
             &mut agent_perf,
+            &mut iteration_signals,
             timeout_config,
         );
 
@@ -1650,6 +1713,7 @@ pub(crate) fn execute_composition_request_inner(
                 .as_ref()
                 .and_then(|c| c.agent_perf())
                 .or(agent_perf),
+            iteration_signals,
         };
         // `--perf` is an explicit opt-in and overrides `--silent`/`--quiet`.
         // The perf report is always emitted to stderr when requested.
@@ -1701,6 +1765,7 @@ fn execute_without_harness(
     child_spawned: &mut bool,
     prompt_timing: Option<claudine::stream::prompt_timing::PromptTimingContext>,
     agent_perf_out: &mut Option<crate::perf::AgentExecutionPerf>,
+    iteration_signals_out: &mut Option<IterationSummarySignals>,
     timeout_config: super::subagent_watchdog::TimeoutConfig,
 ) -> Result<i32> {
     let is_inline = matches!(mode, CompositionExecutionMode::Inline { .. });
@@ -1748,6 +1813,14 @@ fn execute_without_harness(
     };
 
     let _span = tracing::info_span!("composition_postprocess").entered();
+
+    // Lift loop-relevant signals from the per-iteration summary before
+    // the summary is consumed by the renderer below. The `compose --loop`
+    // orchestrator reads these to apply the rate-limit policy and to
+    // build an honest `LoopIterationFailed` error.
+    if let Some(result) = deferred_summary.as_ref() {
+        *iteration_signals_out = Some(IterationSummarySignals::from_summary(&result.summary));
+    }
 
     match mode {
         CompositionExecutionMode::Direct => {

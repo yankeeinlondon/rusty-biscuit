@@ -21,6 +21,7 @@ Environment Variables:
 - Info: potentially dangerous ENV variables were removed; if you need one of
    these to be included use the --include <ENV> CLI switch
 📕 System Prompt(appended)
-source: /Users/ken/.claudine/worktrees/rusty-biscuit/claudine/system-prompt.md · 251 tokens
+ │ The system prompt was appended to; the content was composed from ./system-
+ │ prompt.md. The composed system prompt is roughly 251 tokens.
 
 ✓ Pre-flight checks have passed
