@@ -100,22 +100,22 @@ This phase implements the four spec revisions added on 2026-05-12 in response to
 
 **Goal:** the entire below-header section of each prompt is rendered as one `BlockQuote` whose `│` border sits at column 1 (centered under the 2-column emoji on the header line).
 
-- [ ] In `formatting.rs`, change `create_system_prompt_blockquote` and `create_user_prompt_blockquote` to set `layout_mut().left_margin = Margin::Chars(1)` so the border lands at column 1. Confirm `WordWrap::WrapProse` remains the default (regression guard: if the BlockQuote default changes, set it explicitly here).
-- [ ] In `system_prompt.rs`, refactor `report_system_prompt_with_base` so the **Summary sentence and the optional Partial/Full body are composed into one string** that is wrapped in a single orange `BlockQuote`. Today (line ~286-320) the summary is pushed as a bare `Prose` and only the partial/full branches construct a `BlockQuote` — this must change so a continuous orange bar runs from beneath the icon to the end of the body.
-- [ ] In `user_prompt.rs`, mirror the same single-BlockQuote pattern (green) so the bar runs from beneath the 🗣️ icon to the end of the body.
-- [ ] **Validation:** add a unit test per crate-side renderer that asserts the rendered output's first body line begins with one space, then the colored `│` glyph (i.e., `left_margin = 1`). Add a test that verifies the summary line is *inside* the BlockQuote rather than emitted as a sibling line.
+- [x] In `formatting.rs`, change `create_system_prompt_blockquote` and `create_user_prompt_blockquote` to set `layout_mut().left_margin = Margin::Chars(1)` so the border lands at column 1. Confirm `WordWrap::WrapProse` remains the default (regression guard: if the BlockQuote default changes, set it explicitly here).
+- [x] In `system_prompt.rs`, refactor `report_system_prompt_with_base` so the **Summary sentence and the optional Partial/Full body are composed into one string** that is wrapped in a single orange `BlockQuote`. Today (line ~286-320) the summary is pushed as a bare `Prose` and only the partial/full branches construct a `BlockQuote` — this must change so a continuous orange bar runs from beneath the icon to the end of the body.
+- [x] In `user_prompt.rs`, mirror the same single-BlockQuote pattern (green) so the bar runs from beneath the 🗣️ icon to the end of the body.
+- [x] **Validation:** add a unit test per crate-side renderer that asserts the rendered output's first body line begins with one space, then the colored `│` glyph (i.e., `left_margin = 1`). Add a test that verifies the summary line is *inside* the BlockQuote rather than emitted as a sibling line.
 
 ### 6.2 — Display-label resolution and blue OSC8 styling
 
 **Goal:** the hyperlink label in the System Prompt summary resolves to one of three forms — a Nerd Font glyph, a `./relpath`, or an absolute path — and is always styled blue.
 
-- [ ] In `system_prompt.rs`, replace `relative_or_absolute` + `path_hyperlink_display` with a `resolve_display_label(absolute, base, term) -> String` helper returning the styled visible label. Logic:
+- [x] In `system_prompt.rs`, replace `relative_or_absolute` + `path_hyperlink_display` with a `resolve_display_label(absolute, base, term) -> String` helper returning the styled visible label. Logic:
     1. If `term.is_nerd_font == Some(true)` **and** `absolute` strips cleanly under `base`, return the single character `'\u{f02a2}'`.
     2. Else if `absolute` strips cleanly under `base`, return `format!("./{}", rel.display())`.
     3. Else return `absolute.display().to_string()`.
-- [ ] Wrap the resolved label in blue styling via `Prose::new(format!("<color=blue-400>{label}</color>")).render(term)` (or the project's idiomatic Tailwind blue token — confirm against `biscuit-terminal::utils::color::Tailwind::Blue400`). The styled label is then embedded inside the OSC8 escape pair so the absolute path remains the link target.
-- [ ] Confirm OSC8 fallback path (when `!term.osc_link_support`) still renders the blue-styled label as plain text.
-- [ ] **Validation:** unit tests for all three label branches, asserting:
+- [x] Wrap the resolved label in blue styling via `Prose::new(format!("<color=blue-400>{label}</color>")).render(term)` (or the project's idiomatic Tailwind blue token — confirm against `biscuit-terminal::utils::color::Tailwind::Blue400`). The styled label is then embedded inside the OSC8 escape pair so the absolute path remains the link target.
+- [x] Confirm OSC8 fallback path (when `!term.osc_link_support`) still renders the blue-styled label as plain text.
+- [x] **Validation:** unit tests for all three label branches, asserting:
     - Nerd Font branch produces the single `\u{f02a2}` glyph and no path text in the visible portion.
     - Relative branch produces `./` + path with at least one subdir example (e.g., `./.claude/system-prompt.md`).
     - Absolute branch produces the absolute path string.
@@ -126,17 +126,17 @@ This phase implements the four spec revisions added on 2026-05-12 in response to
 
 **Goal:** `--quiet` no longer suppresses the Agent Prompt; only `--silent` does.
 
-- [ ] In `precedence.rs` (and any consumer in `mod.rs` / `user_prompt.rs`), locate the User-Prompt-side handling of the `--quiet` flag. Adjust it so `Quiet` maps to the **same configuration as default** for User Prompt (header shown, body driven by length and `--verbose`).
-- [ ] Leave System Prompt `--quiet` semantics untouched (still forces `Summary` mode).
-- [ ] **Validation:** add a CLI integration test (in `claudine/cli/tests/prompt_reporting.rs`) that runs a `compose`-style flow with `--quiet` and asserts the Agent Prompt header (`🗣️ Agent Prompt`) and at least one body line appear in stdout. Re-run the existing `--silent` test to confirm suppression is unchanged.
+- [x] In `precedence.rs` (and any consumer in `mod.rs` / `user_prompt.rs`), locate the User-Prompt-side handling of the `--quiet` flag. Adjust it so `Quiet` maps to the **same configuration as default** for User Prompt (header shown, body driven by length and `--verbose`).
+- [x] Leave System Prompt `--quiet` semantics untouched (still forces `Summary` mode).
+- [x] **Validation:** add a CLI integration test (in `claudine/cli/tests/prompt_reporting.rs`) that runs a `compose`-style flow with `--quiet` and asserts the Agent Prompt header (`🗣️ Agent Prompt`) and at least one body line appear in stdout. Re-run the existing `--silent` test to confirm suppression is unchanged.
 
 ### 6.4 — Snapshot + integration test refresh
 
 **Goal:** existing snapshots and integration tests reflect the new rendering.
 
-- [ ] Re-run the relevant snapshot test(s) and update `claudine/cli/tests/snapshots/wrap_commands__wrapper_reports_removed_sensitive_env_names.snap` (and any other affected snapshots) after manual visual review.
-- [ ] Update or extend `claudine/cli/tests/prompt_reporting.rs` to cover the four behaviors above end-to-end, including a `--quiet` run that still shows the Agent Prompt.
-- [ ] **Validation Checkpoint:** `just test -p claudine` and `just lint -p claudine` are clean; manual visual check inside a Nerd-Font terminal confirms the glyph variant renders; manual visual check inside a non-Nerd-Font terminal confirms the `./relpath` variant renders.
+- [x] Re-run the relevant snapshot test(s) and update `claudine/cli/tests/snapshots/wrap_commands__wrapper_reports_removed_sensitive_env_names.snap` (and any other affected snapshots) after manual visual review.
+- [x] Update or extend `claudine/cli/tests/prompt_reporting.rs` to cover the four behaviors above end-to-end, including a `--quiet` run that still shows the Agent Prompt.
+- [x] **Validation Checkpoint:** `just test -p claudine` and `just lint -p claudine` are clean; manual visual check inside a Nerd-Font terminal confirms the glyph variant renders; manual visual check inside a non-Nerd-Font terminal confirms the `./relpath` variant renders.
 
 ### Dependencies
 
