@@ -242,6 +242,40 @@ mod tests {
     }
 
     #[test]
+    fn test_unknown_unclosed_tag_passes_through_literally() {
+        // Regression: the parser used to greedily consume the rest of the
+        // input looking for a `</root>` closing tag, then synthesize a
+        // fictitious closing tag in the output. Unknown opening tags must
+        // pass through as literal text — callers shouldn't have to escape
+        // angle-bracketed snippets like `<root>` or `<missing.yaml>` that
+        // happen to land in arbitrary content.
+        let prose = Prose::new("<root> \"title\" is a required property");
+        let result = prose.render_optimistic(None);
+        assert_eq!(result, "<root> \"title\" is a required property");
+    }
+
+    #[test]
+    fn test_unknown_tag_does_not_swallow_following_content() {
+        // A sibling unknown tag followed by more text must not be merged
+        // into a single fabricated tag span.
+        let prose = Prose::new("<missing.yaml> not found; check <other.yaml>");
+        let result = prose.render_optimistic(None);
+        assert_eq!(result, "<missing.yaml> not found; check <other.yaml>");
+    }
+
+    #[test]
+    fn test_unknown_tag_does_not_eat_recognized_tag_after_it() {
+        // A recognized tag appearing after an unknown one must still be
+        // styled. Previously the unknown tag would slurp everything
+        // including the recognized `<b>...</b>` into its faux body.
+        let prose = Prose::new("<root> then <b>bold</b>");
+        let result = prose.render_optimistic(None);
+        assert!(result.starts_with("<root> then "), "got: {result:?}");
+        assert!(result.contains("\x1b[1mbold\x1b[22m"), "got: {result:?}");
+        assert!(!result.contains("</root>"), "got: {result:?}");
+    }
+
+    #[test]
     fn test_rgb_tag() {
         // Test RGB color tag parsing
         let prose = Prose::new("<rgb 255,0,0>red text</rgb>");

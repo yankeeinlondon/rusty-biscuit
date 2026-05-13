@@ -70,9 +70,19 @@ biscuit-hash = { path = "../../biscuit-hash/lib" }
 sniff = { path = "../../sniff/lib" }
 serde_yaml_ng = "0.10"
 
+# JSON Schema validation
+jsonschema = { version = "0.42", default-features = false }
+sha2 = "0.10"
+
 [dev-dependencies]
 tokio = { version = "1.48", features = ["full", "test-util"] }
 tracing-test = "0.2"
 insta = "1.41"
 serial_test = "3.0"
 git2 = "0.20"
+proptest = "1.6"
+criterion = { version = "0.5", features = ["html_reports"] }
+
+[[bench]]
+name = "schema_validation"
+harness = false

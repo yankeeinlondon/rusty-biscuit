@@ -62,7 +62,6 @@ pub mod responses;
 pub mod client;
 pub use requests::*;
 pub use responses::*;
-pub use client::*;
 /// Eversolo DMP-A8 local-network HTTP control API (Zidoo lineage) client.
 pub struct Eversolo {
     client: reqwest::Client,

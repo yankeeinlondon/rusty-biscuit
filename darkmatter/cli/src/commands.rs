@@ -1,5 +1,6 @@
 use crate::args::{
-    Cli, Command as CliCommand, GraphFormat, OutputFormat, ValidateOutputFormat, ValidateTarget,
+    Cli, Command as CliCommand, GraphFormat, OutputFormat, SchemaTarget, ValidateOutputFormat,
+    ValidateTarget,
 };
 use crate::output::{
     OutputArtifact, emit_or_show_artifact, html_artifact, json_artifact, markdown_artifact,
@@ -17,6 +18,8 @@ use rayon::prelude::*;
 use std::io::{self, IsTerminal, Read};
 use std::path::PathBuf;
 use tracing::{debug, info, instrument};
+
+pub mod schema;
 
 /// Resolved theme configuration for terminal rendering.
 struct ResolvedTheme {
@@ -311,6 +314,23 @@ pub fn run_subcommand(command: CliCommand, cli: &Cli) -> Result<()> {
         } => {
             run_graph(&input, follow, validate, json)?;
         }
+        CliCommand::Schema { target } => match target {
+            SchemaTarget::Validate {
+                files,
+                schema,
+                format,
+                quiet,
+            } => {
+                schema::run_validate(&files, schema.as_deref(), format, quiet)?;
+            }
+            SchemaTarget::Detect {
+                files,
+                format,
+                merge,
+            } => {
+                schema::run_detect(&files, format, merge)?;
+            }
+        },
     }
 
     Ok(())

@@ -299,6 +299,13 @@ pub enum Command {
         strict: bool,
     },
 
+    /// Schema authoring and validation commands.
+    Schema {
+        /// Schema sub-command
+        #[command(subcommand)]
+        target: SchemaTarget,
+    },
+
     /// Visualize a markdown file's dependency graph.
     Graph {
         /// Input file path or file reference
@@ -364,6 +371,73 @@ pub enum ValidateOutputFormat {
     /// Human-readable text.
     Text,
     /// JSON output.
+    Json,
+}
+
+/// Schema sub-targets.
+#[derive(Clone, Debug, Subcommand)]
+pub enum SchemaTarget {
+    /// Validate markdown frontmatter against a schema.
+    Validate {
+        /// Input markdown files
+        #[arg(
+            value_name = "FILE",
+            required = true,
+            num_args = 1..,
+            add = ArgValueCompleter::new(complete_markdown_files)
+        )]
+        files: Vec<PathBuf>,
+
+        /// Baseline schema path (YAML SimplifiedSchema or JSON Schema)
+        #[arg(long, value_name = "PATH")]
+        schema: Option<PathBuf>,
+
+        /// Output format
+        #[arg(long, value_enum, default_value_t = SchemaValidateFormat::Pretty)]
+        format: SchemaValidateFormat,
+
+        /// Suppress success lines; only failures print
+        #[arg(long)]
+        quiet: bool,
+    },
+
+    /// Detect a SimplifiedSchema from one or more markdown documents.
+    Detect {
+        /// Input markdown files
+        #[arg(
+            value_name = "FILE",
+            required = true,
+            num_args = 1..,
+            add = ArgValueCompleter::new(complete_markdown_files)
+        )]
+        files: Vec<PathBuf>,
+
+        /// Output format
+        #[arg(long, value_enum, default_value_t = SchemaDetectFormat::Yaml)]
+        format: SchemaDetectFormat,
+
+        /// Merge multiple files: widen disagreeing types and mark
+        /// properties required only if present in every input file.
+        #[arg(long)]
+        merge: bool,
+    },
+}
+
+/// Output format for `md schema validate`.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
+pub enum SchemaValidateFormat {
+    /// Pretty (terminal) output.
+    Pretty,
+    /// Newline-delimited JSON, one object per file.
+    Json,
+}
+
+/// Output format for `md schema detect`.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
+pub enum SchemaDetectFormat {
+    /// SimplifiedSchema YAML.
+    Yaml,
+    /// JSON Schema (Draft 2020-12).
     Json,
 }
 

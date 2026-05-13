@@ -1,8 +1,5 @@
 ---
 description: "Creates a multi-phase, high confidence plan from a _feature_ or _fix_"
-parameters:
-    spec: file
-    
 root: "{{ctx.repo_root}}"
 area: "{{ctx.current_package_area}}"
 dir: "$(dirname '{{ spec || design }}')"
@@ -10,12 +7,12 @@ spec: ""
 design: ""
 plan: "plan.md"
 start:
-    message: "🖊️ starting to write the plan for the review suggestions in {{dir}}"
+    message: "🖊️ creating a plan for `{{area}}/{{dir}}`"
 success:
     stderr: "The **{{area}}/{{dir}}/{{plan}}** _plan_ has been created"
-    message: "✅ the **{{area}}/{{dir}}/{{plan}}** _plan_ was created _at_ {{ctx.time}}"
+    message: "✅  the **{{area}}/{{dir}}/{{plan}}** _plan_ was created _at_ {{ctx.time}}"
 failure:
-    message: "❌️ the **{{area}}/{{dir}}/{{plan}}** _plan_ has failed to complete!"
+    message: "❌️  the **{{area}}/{{dir}}/{{plan}}** _plan_ has failed to complete!"
 ---
 
 You are a planning agent. Convert the following documents into a high confidence execution plan:

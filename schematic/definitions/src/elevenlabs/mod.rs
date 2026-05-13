@@ -34,8 +34,10 @@ mod types;
 pub use types::*;
 
 use crate::registry::SchemaRegistry;
+#[cfg(test)]
+use schematic_define::ApiResponse;
 use schematic_define::{
-    ApiKeyEnv, ApiResponse, AuthStrategy, Endpoint, EnvList, EnvMapping,
+    ApiKeyEnv, AuthStrategy, Endpoint, EnvList, EnvMapping,
     RestApi, Schema,
 };
 

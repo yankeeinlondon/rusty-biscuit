@@ -1,0 +1,4 @@
+$schema:
+  published: date
+  homepage: url
+  author: email

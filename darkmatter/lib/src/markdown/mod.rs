@@ -42,6 +42,7 @@ mod inline_html;
 pub mod normalize;
 pub mod output;
 pub mod reference;
+pub mod schemas;
 pub mod toc;
 mod types;
 pub mod yaml_block;

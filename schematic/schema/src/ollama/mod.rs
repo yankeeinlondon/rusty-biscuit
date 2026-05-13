@@ -16,7 +16,6 @@ pub mod responses;
 pub mod client;
 pub use requests::*;
 pub use responses::*;
-pub use client::*;
 /// Ollama native REST API for local LLM inference and model management client.
 pub struct OllamaNative {
     client: reqwest::Client,

@@ -2,7 +2,6 @@
 
 use super::*;
 use super::requests::*;
-use super::responses::*;
 use crate::shared::SchematicError;
 impl Gitea {
     fn auth_is_required(&self) -> bool {
