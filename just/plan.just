@@ -31,25 +31,25 @@ plan-implement-review:
     planning_model=""
     planning_model_param=""
     if [[ "${planning_agent}" == "opencode" ]]; then
-        planning_model="$(just _choose_model_for_agent "${planning_agent}")"
+        planning_model="$(just _choose_model 'Choose the planning Model for opencode')"
         planning_model_param="--model ${planning_model}"
     fi
     implementing_agent="$(just _choose_agent 'Choose the Implementing Agent')"
     implementing_model=""
     implementing_model_param=""
     if [[ "${implementing_agent}" == "opencode" ]]; then
-        implementing_model="$(just _choose_model_for_agent "${implementing_agent}")"
+        implementing_model="$(just _choose_model 'Choose the implementing Model for opencode')"
         implementing_model_param="--model ${implementing_model}"
     fi
     reviewing_agent="$(just _choose_agent 'Choose the reviewing Agent')"
     reviewing_model=""
     reviewing_model_param=""
     if [[ "${reviewing_agent}" == "opencode" ]]; then
-        reviewing_model="$(just _choose_model_for_agent "${reviewing_agent}")"
+        reviewing_model="$(just _choose_model 'Choose the reviewing Model for opencode')"
         reviewing_model_param="--model ${reviewing_model}"
     fi
     echo
-    echo "{{ bold }}Strategy:{{ reset }}"
+    echo -e "{{ bold }}Strategy:{{ reset }}"
     echo
     echo -e "1. we will plan the {{ blue }}${spec}{{ reset }} file (with {{ yellow }}${planning_agent}{{ reset }}); save to {{ blue }}${dir}/${plan}{{ reset }}"
     echo -e "2. we will then {{ italic }}implement{{ reset }} the plan using the {{ yellow }}${implementing_agent}{{ reset }} agent"
@@ -84,40 +84,52 @@ implement-review:
     set -euo pipefail
     plan="$(just _choose_plan)"
     dir="$(dirname "${plan}")"
-
+    spec="$(just _get_spec_doc "${dir}")"
 
     implementing_agent="$(just _choose_agent 'Choose the Implementing Agent')"
     implementing_model=""
     implementing_model_param=""
     if [[ "${implementing_agent}" == "opencode" ]]; then
-        implementing_model="$(just _choose_model_for_agent "${implementing_agent}")"
+        implementing_model="$(just _choose_model 'Choose the implementing Model for opencode')"
         implementing_model_param="--model ${implementing_model}"
     fi
     reviewing_agent="$(just _choose_agent 'Choose the reviewing Agent')"
     reviewing_model=""
     reviewing_model_param=""
     if [[ "${reviewing_agent}" == "opencode" ]]; then
-        reviewing_model="$(just _choose_model_for_agent "${reviewing_agent}")"
+        reviewing_model="$(just _choose_model 'Choose the reviewing Model for opencode')"
         reviewing_model_param="--model ${reviewing_model}"
     fi
     echo
-    echo "{{ bold }}Strategy:{{ reset }}"
+    echo -e "{{ bold }}Strategy:{{ reset }}"
     echo
-    echo -e "1. we will plan the {{ blue }}${spec}{{ reset }} file (with {{ yellow }}${planning_agent}{{ reset }}); save to {{ blue }}${dir}/${plan}{{ reset }}"
-    echo -e "2. we will then {{ italic }}implement{{ reset }} the plan using the {{ yellow }}${implementing_agent}{{ reset }} agent"
-    echo -e "3. and finally we will review the implementation with {{ yellow }}${reviewing_agent}{{ reset }} agent"
+    echo -e "1. we will {{ italic }}implement{{ reset }} the plan {{ blue }}${plan}{{ reset }} using the {{ yellow }}${implementing_agent}{{ reset }} agent"
+    echo -e "2. and then we will review the implementation with {{ yellow }}${reviewing_agent}{{ reset }} agent"
+    echo
+    echo -e "Based on the {{ blue }}${spec}{{ reset }} specification"
     echo
     if [[ "$(just _confirm "Ready to start?")" == "n" ]]; then
         echo
         echo -e "Ok bye"
         exit 0
     fi
-    claudine compose @prompts/plan.md -y spec="$(sniff repo root)/${spec}" plan="${plan}" --${planning_agent} ${planning_model_param}
-    total_phases="$(md get "" total_phases)"
-    claudine compose @prompts/implement-phase.md -y plan="$(sniff repo root)/${dir}/${plan}" --${implementing_agent} ${implementing_model_param}
-    claudine compose @prompts/review-feature.md -y spec="$(sniff repo root)/${spec}" iteration=1 --${reviewing_agent} ${reviewing_model_param}
+    total_phases="$(md get "${plan}" phases)"
+    if [[ -z "${total_phases}" ]] || ! [[ "${total_phases}" =~ ^[0-9]+$ ]]; then
+        echo -e "{{ red }}{{ bold }}ERROR:{{ reset }} Expected a numeric 'phases' frontmatter field in {{ blue }}${plan}{{ reset }} but got: '{{ dim }}${total_phases}{{ reset }}'" >&2
+        exit 1
+    fi
+    memory="$(md get "${plan}" memory)"
+    start_phase="$(md get "${plan}" start_phase)"
+    [[ -z "${start_phase}" ]] && start_phase=1
+    if (( start_phase > total_phases )); then
+        echo -e "{{ red }}start_phase (${start_phase}) exceeds total phases (${total_phases}) — aborting.{{ reset }}"
+        exit 1
+    fi
+    echo -e "Starting at {{ yellow }}phase ${start_phase}{{ reset }} of {{ yellow }}${total_phases}{{ reset }}"
+    claudine compose @prompts/implement-phase.md -y plan="${dir}/plan.md" --${implementing_agent} ${implementing_model_param} phase="${start_phase}" total_phases="${total_phases}" memory="${memory}"
+    claudine compose @prompts/review-feature.md -y spec="${spec}" iteration=1 --${reviewing_agent} ${reviewing_model_param}
     echo
-    echo -e "The specification file {{ blue }}${spec}{{ reset }} drove a plan, implementation, and review."
+    echo -e "The specification file {{ blue }}${spec}{{ reset }} drove implementation and review."
     echo
     echo -e "  - {{ bold }}Review:{{ reset }} $(just _link "${dir}/review-1.md" "$(sniff repo root)/${dir}/review-1.md")"
     echo

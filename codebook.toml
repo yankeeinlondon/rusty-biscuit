@@ -20,6 +20,7 @@ words = [
     "introducer",
     "ipc",
     "jsonschema",
+    "llm",
     "mcp",
     "minimax",
     "misclassifies",
