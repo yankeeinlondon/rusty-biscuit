@@ -169,6 +169,22 @@ pub(crate) fn build_child_env_with_launch(
         }
     }
 
+    // Sync `PWD` to `child_cwd`. The parent shell sets `PWD` to wherever
+    // the user invoked claudine from (often a package subdirectory of the
+    // worktree). Rust's `set_current_dir` calls `chdir(2)` but does not
+    // update `PWD`, so without this override the spawned child inherits
+    // the stale shell `PWD`. Several downstream tools resolve project
+    // directory from `process.env.PWD` before `process.cwd()` (notably
+    // OpenCode's `cli/cmd/run.ts:276`), which is the standard shell
+    // convention. Inject the corrected `PWD` so the child's project /
+    // git resolution agrees with the cwd we chose.
+    set_added_env(
+        &mut env,
+        &mut added,
+        "PWD",
+        launch_ctx.child_cwd.display().to_string(),
+    );
+
     Ok(EnvPlan {
         env,
         removed,
@@ -910,6 +926,48 @@ mod tests {
 
         assert_eq!(ctx.repo_root.as_deref(), Some(source_repo.as_path()));
         assert_eq!(ctx.child_cwd, launch_cwd);
+    }
+
+    /// Regression: the spawned child's `PWD` env var must equal
+    /// `child_cwd`, not whatever the parent shell set as `PWD` before
+    /// invoking claudine. OpenCode (and other shell-aware tooling)
+    /// reads `process.env.PWD` BEFORE falling back to `process.cwd()`
+    /// when resolving its project root; without this sync claudine
+    /// silently leaks the user's pre-invocation shell PWD (often a
+    /// package subdirectory of the worktree) into the child, causing
+    /// git snapshot pathspec mismatches and external_directory false
+    /// positives.
+    #[test]
+    fn build_child_env_overrides_pwd_to_match_child_cwd() {
+        let profile = profile_for_provider(claudine::provider::Provider::OpenCode).unwrap();
+        let cwd = tempfile::tempdir().unwrap();
+
+        let plan = build_child_env(
+            profile,
+            claudine::provider::Provider::OpenCode,
+            &[],
+            false,
+            false,
+            &[],
+            cwd.path(),
+            &[],
+            false,
+            false,
+            None,
+        )
+        .unwrap();
+
+        let pwd = plan
+            .env
+            .get(std::ffi::OsStr::new("PWD"))
+            .map(|v| v.to_string_lossy().into_owned())
+            .expect("env plan must always set PWD for the spawned child");
+        assert_eq!(
+            std::path::PathBuf::from(&pwd),
+            plan.child_cwd,
+            "child PWD must equal child_cwd; got PWD={pwd:?} child_cwd={:?}",
+            plan.child_cwd,
+        );
     }
 
     #[test]
