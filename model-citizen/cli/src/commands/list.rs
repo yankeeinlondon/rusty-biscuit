@@ -45,7 +45,7 @@ pub async fn run(
     }
 
     if sort_by_size {
-        models.sort_by(|a, b| b.size_bytes.cmp(&a.size_bytes));
+        models.sort_by_key(|b| std::cmp::Reverse(b.size_bytes));
     } else if sort_by_app {
         models.sort_by(|a, b| {
             a.source
@@ -54,7 +54,7 @@ pub async fn run(
                 .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
         });
     } else {
-        models.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+        models.sort_by_key(|a| a.name.to_lowercase());
     }
 
     print_models(&models, json_output, verbose, runner_filter.as_deref())
