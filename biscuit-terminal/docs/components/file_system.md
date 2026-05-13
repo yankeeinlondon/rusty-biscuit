@@ -25,7 +25,7 @@ fs.ensure_tree_built();
 let term = Terminal::default();
 print!("{}", fs.display(&term));
 
-// With formatting presets + customisation
+// With formatting presets + customization
 let mut fs = FileSystem::new_with_formatting(".")?
     .depth(5)
     .max_entries(100)
