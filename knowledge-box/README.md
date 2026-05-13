@@ -26,5 +26,4 @@ A library and CLI that tries to capture an individual's core digital footprint i
 
 - About me
     - Website
-    - 
-
+    -
