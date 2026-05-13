@@ -159,10 +159,12 @@ fn fixture_replay_emits_info_for_llm_calls_and_http_responses() {
     let mut http_response_count = 0_usize;
     for event in &events {
         if let SemanticEvent::Info { message, .. } = event {
-            match message.as_str() {
-                "llm_call_start" => llm_call_count += 1,
-                "http_response" => http_response_count += 1,
-                _ => {}
+            // Messages are enriched with inline context (provider/model,
+            // method/url/status), so match on the well-known prefix.
+            if message.starts_with("llm_call_start") {
+                llm_call_count += 1;
+            } else if message.starts_with("http_response") {
+                http_response_count += 1;
             }
         }
     }

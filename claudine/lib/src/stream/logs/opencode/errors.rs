@@ -378,6 +378,10 @@ fn classify_lifecycle(record: &OpenCodeLogRecord) -> Option<LogClassification> {
         "llm" => classify_llm_call(record, message),
         "session.prompt" => classify_session_prompt(record, message),
         "permission" => classify_permission(record, message),
+        "snapshot" => Some(LogClassification::Snapshot {
+            message: message.to_string(),
+            level: record.level,
+        }),
         _ => None,
     }
 }

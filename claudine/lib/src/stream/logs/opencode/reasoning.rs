@@ -20,7 +20,7 @@ use crate::stream::logs::opencode::errors::{
     merge_rate_limit, render_malformed_asset_message, render_rate_limit_message, strip_ansi,
 };
 use crate::stream::logs::opencode::events::{
-    AssetType, LogClassification, OpenCodeLogRecord, ParsedOpenCodeStderrLine,
+    AssetType, LogClassification, LogLevel, OpenCodeLogRecord, ParsedOpenCodeStderrLine,
 };
 
 /// Whether the bridge took ownership of an incoming stderr log line and
@@ -297,6 +297,9 @@ impl<S: SemanticEventSink> OpenCodeLogBridge<S> {
                 status,
                 duration_ms,
             } => self.on_http_response(&record, method, url, status, duration_ms),
+            LogClassification::Snapshot { message, level } => {
+                self.on_snapshot(&record, message, level)
+            }
             // An Unclassified line still parsed as a well-formed OpenCode
             // structured log record (level + timestamp + tags + message).
             // We have already counted it and refreshed the byte heartbeat;
@@ -656,11 +659,12 @@ impl<S: SemanticEventSink> OpenCodeLogBridge<S> {
         }
 
         let mut extra_map = base_extra(record, "llm_call");
-        extra_map.insert("provider_id".into(), Value::String(provider_id));
-        extra_map.insert("model_id".into(), Value::String(model_id));
-        extra_map.insert("mode".into(), Value::String(mode));
+        extra_map.insert("provider_id".into(), Value::String(provider_id.clone()));
+        extra_map.insert("model_id".into(), Value::String(model_id.clone()));
+        extra_map.insert("mode".into(), Value::String(mode.clone()));
         extra_map.insert("is_stream".into(), json!(is_stream));
-        if let Some(agent) = record.tags.get("agent") {
+        let agent = record.tags.get("agent").cloned();
+        if let Some(ref agent) = agent {
             extra_map.insert("agent".into(), Value::String(agent.clone()));
         }
         if let Some(small) = record.tags.get("small") {
@@ -670,8 +674,9 @@ impl<S: SemanticEventSink> OpenCodeLogBridge<S> {
             extra_map.insert("session_id".into(), Value::String(session_id.clone()));
         }
 
+        let rendered_message = format_llm_call_message(&provider_id, &model_id, &mode, agent.as_deref());
         self.sink.on_semantic_event(SemanticEvent::Info {
-            message: "llm_call_start".into(),
+            message: rendered_message,
             extra: Value::Object(extra_map),
         });
         StderrIngestOutcome::Consumed
@@ -684,11 +689,11 @@ impl<S: SemanticEventSink> OpenCodeLogBridge<S> {
         step: u32,
     ) -> StderrIngestOutcome {
         let mut extra_map = base_extra(record, "step_loop");
-        extra_map.insert("session_id".into(), Value::String(session_id));
+        extra_map.insert("session_id".into(), Value::String(session_id.clone()));
         extra_map.insert("step".into(), json!(step));
 
         self.sink.on_semantic_event(SemanticEvent::Info {
-            message: "step_loop".into(),
+            message: format!("step_loop step={step} session={}", short_session(&session_id)),
             extra: Value::Object(extra_map),
         });
         StderrIngestOutcome::Consumed
@@ -703,7 +708,7 @@ impl<S: SemanticEventSink> OpenCodeLogBridge<S> {
         extra_map.insert("session_id".into(), Value::String(session_id.clone()));
 
         self.sink.on_semantic_event(SemanticEvent::Info {
-            message: "exiting_loop".into(),
+            message: format!("exiting_loop session={}", short_session(&session_id)),
             extra: Value::Object(extra_map),
         });
 
@@ -749,12 +754,13 @@ impl<S: SemanticEventSink> OpenCodeLogBridge<S> {
         action: String,
     ) -> StderrIngestOutcome {
         let mut extra_map = base_extra(record, "permission_evaluated");
-        extra_map.insert("permission".into(), Value::String(permission));
-        extra_map.insert("pattern".into(), Value::String(pattern));
-        extra_map.insert("action".into(), Value::String(action));
+        extra_map.insert("permission".into(), Value::String(permission.clone()));
+        extra_map.insert("pattern".into(), Value::String(pattern.clone()));
+        extra_map.insert("action".into(), Value::String(action.clone()));
 
+        let rendered_message = format_permission_message(&permission, &pattern, &action);
         self.sink.on_semantic_event(SemanticEvent::Info {
-            message: "permission_evaluated".into(),
+            message: rendered_message,
             extra: Value::Object(extra_map),
         });
         StderrIngestOutcome::Consumed
@@ -769,13 +775,49 @@ impl<S: SemanticEventSink> OpenCodeLogBridge<S> {
         duration_ms: u64,
     ) -> StderrIngestOutcome {
         let mut extra_map = base_extra(record, "http_response");
-        extra_map.insert("method".into(), Value::String(method));
-        extra_map.insert("url".into(), Value::String(url));
+        extra_map.insert("method".into(), Value::String(method.clone()));
+        extra_map.insert("url".into(), Value::String(url.clone()));
         extra_map.insert("status".into(), json!(status));
         extra_map.insert("duration_ms".into(), json!(duration_ms));
 
+        let rendered_message = format_http_response_message(&method, &url, status, duration_ms);
         self.sink.on_semantic_event(SemanticEvent::Info {
-            message: "http_response".into(),
+            message: rendered_message,
+            extra: Value::Object(extra_map),
+        });
+        StderrIngestOutcome::Consumed
+    }
+
+    /// Emit a Warning describing a `service=snapshot` log line at WARN or
+    /// ERROR level. Tag values such as `file=`, `files=`, `path=`, `error=`,
+    /// and `err=` are surfaced alongside the message so operators have
+    /// enough context to act on snapshot subsystem failures.
+    ///
+    /// INFO and DEBUG snapshot lines (routine maintenance — `taking snapshot`,
+    /// `prune=7.days cleanup`, etc.) are intentionally silent: they're
+    /// counted as parsed structured records and the byte heartbeat fires,
+    /// but no semantic event is emitted because they would dominate the
+    /// rendered output with no user-actionable information.
+    fn on_snapshot(
+        &mut self,
+        record: &OpenCodeLogRecord,
+        message: String,
+        level: LogLevel,
+    ) -> StderrIngestOutcome {
+        if !matches!(level, LogLevel::Warn | LogLevel::Error) {
+            return StderrIngestOutcome::Consumed;
+        }
+
+        let mut extra_map = base_extra(record, "snapshot");
+        let tag_summary = summarize_snapshot_tags(record, &mut extra_map);
+        extra_map.insert(
+            "level".into(),
+            Value::String(format!("{level:?}").to_uppercase()),
+        );
+
+        let rendered_message = format_snapshot_message(&message, &tag_summary);
+        self.sink.on_semantic_event(SemanticEvent::Warning {
+            message: rendered_message,
             extra: Value::Object(extra_map),
         });
         StderrIngestOutcome::Consumed
@@ -796,6 +838,168 @@ impl<S: SemanticEventSink> OpenCodeLogBridge<S> {
             );
         }
     }
+}
+
+/// Compact a session id for inline display: keep the `ses_` prefix and the
+/// last 6 hex characters so a 28-character id like `ses_27262f0abffeUMCCfD7fDPCivR`
+/// renders as `ses_…DPCivR`.
+fn short_session(session_id: &str) -> String {
+    const TAIL_LEN: usize = 6;
+    let body = session_id.strip_prefix("ses_").unwrap_or(session_id);
+    if body.chars().count() <= TAIL_LEN + 4 {
+        return session_id.to_string();
+    }
+    let tail: String = body.chars().rev().take(TAIL_LEN).collect::<Vec<_>>().into_iter().rev().collect();
+    format!("ses_…{tail}")
+}
+
+/// Render the inline message string for a `service=llm ... stream` event.
+/// Example: `llm_call_start anthropic/claude-opus-4-7 (mode=primary, agent=build)`.
+fn format_llm_call_message(
+    provider_id: &str,
+    model_id: &str,
+    mode: &str,
+    agent: Option<&str>,
+) -> String {
+    let identity = match (provider_id, model_id) {
+        ("", "") => "(unknown provider/model)".to_string(),
+        ("", model) => model.to_string(),
+        (provider, "") => provider.to_string(),
+        (provider, model) => format!("{provider}/{model}"),
+    };
+    let mut parts: Vec<String> = Vec::with_capacity(2);
+    if !mode.is_empty() {
+        parts.push(format!("mode={mode}"));
+    }
+    if let Some(agent) = agent.filter(|a| !a.is_empty()) {
+        parts.push(format!("agent={agent}"));
+    }
+    if parts.is_empty() {
+        format!("llm_call_start {identity}")
+    } else {
+        format!("llm_call_start {identity} ({})", parts.join(", "))
+    }
+}
+
+/// Render the inline message string for a permission evaluation. OpenCode
+/// emits the resolved `action` either as a bare value or as a JSON object
+/// of the shape `{"permission": "...", "pattern": "...", "action": "..."}`;
+/// when JSON, we extract the inner `action` ("allow" / "deny") so the
+/// rendered text stays scannable.
+fn format_permission_message(permission: &str, pattern: &str, action: &str) -> String {
+    let action_short = summarize_permission_action(action);
+    let subject = match (permission, pattern) {
+        ("", "") => String::new(),
+        ("", pat) => pat.to_string(),
+        (perm, "") => perm.to_string(),
+        (perm, pat) => format!("{perm}:{pat}"),
+    };
+    match (subject.is_empty(), action_short.is_empty()) {
+        (true, true) => "permission_evaluated".to_string(),
+        (true, false) => format!("permission_evaluated → {action_short}"),
+        (false, true) => format!("permission_evaluated {subject}"),
+        (false, false) => format!("permission_evaluated {subject} → {action_short}"),
+    }
+}
+
+fn summarize_permission_action(action: &str) -> String {
+    let trimmed = action.trim();
+    if trimmed.is_empty() {
+        return String::new();
+    }
+    if trimmed.starts_with('{')
+        && let Ok(Value::Object(map)) = serde_json::from_str::<Value>(trimmed)
+        && let Some(Value::String(inner)) = map.get("action")
+    {
+        return inner.clone();
+    }
+    trimmed.to_string()
+}
+
+/// Render the inline message string for a `Sent HTTP response` event.
+fn format_http_response_message(method: &str, url: &str, status: u16, duration_ms: u64) -> String {
+    let duration = if duration_ms == 0 {
+        String::new()
+    } else {
+        format!(" ({duration_ms}ms)")
+    };
+    let target = match (method.is_empty(), url.is_empty()) {
+        (true, true) => String::new(),
+        (true, false) => url.to_string(),
+        (false, true) => method.to_string(),
+        (false, false) => format!("{method} {url}"),
+    };
+    let status_part = if status == 0 {
+        String::new()
+    } else {
+        format!(" {status}")
+    };
+    if target.is_empty() && status == 0 {
+        "http_response".to_string()
+    } else if target.is_empty() {
+        format!("http_response{status_part}{duration}")
+    } else {
+        format!("http_response {target}{status_part}{duration}")
+    }
+}
+
+/// Render the inline message string for a snapshot subsystem log line.
+/// `tag_summary` is a one-line, comma-joined view of the most informative
+/// non-control tags on the record.
+fn format_snapshot_message(message: &str, tag_summary: &str) -> String {
+    let base = if message.is_empty() {
+        "snapshot".to_string()
+    } else {
+        format!("snapshot: {message}")
+    };
+    if tag_summary.is_empty() {
+        base
+    } else {
+        format!("{base} ({tag_summary})")
+    }
+}
+
+/// Copy snapshot-relevant tags into `extra` and return a comma-joined
+/// `key=value` summary suitable for inline rendering. Falls back to all
+/// non-`service` tags when the well-known keys are absent.
+fn summarize_snapshot_tags(
+    record: &OpenCodeLogRecord,
+    extra: &mut Map<String, Value>,
+) -> String {
+    const PREFERRED: &[&str] = &["file", "files", "path", "id", "session.id", "err", "error"];
+    let mut parts: Vec<String> = Vec::new();
+    let mut seen = std::collections::BTreeSet::new();
+
+    for key in PREFERRED {
+        if let Some(value) = record.tags.get(*key) {
+            extra.insert((*key).into(), Value::String(value.clone()));
+            parts.push(format!("{key}={}", truncate_for_inline(value)));
+            seen.insert((*key).to_string());
+        }
+    }
+
+    if parts.is_empty() {
+        for (key, value) in &record.tags {
+            if key == "service" || seen.contains(key) {
+                continue;
+            }
+            extra.insert(key.clone(), Value::String(value.clone()));
+            parts.push(format!("{key}={}", truncate_for_inline(value)));
+        }
+    }
+
+    parts.join(", ")
+}
+
+/// Clip a tag value for inline display so a single multi-kilobyte
+/// `error=` payload cannot blow up the rendered status line.
+fn truncate_for_inline(value: &str) -> String {
+    const MAX: usize = 80;
+    if value.chars().count() <= MAX {
+        return value.to_string();
+    }
+    let head: String = value.chars().take(MAX).collect();
+    format!("{head}…")
 }
 
 fn base_extra(record: &OpenCodeLogRecord, classification: &str) -> Map<String, Value> {
@@ -1315,7 +1519,10 @@ mod tests {
         assert_eq!(bridge.ingest(line), StderrIngestOutcome::Consumed);
         match &bridge.sink.events[0] {
             SemanticEvent::Info { message, extra } => {
-                assert_eq!(message, "llm_call_start");
+                assert_eq!(
+                    message,
+                    "llm_call_start kimi-for-coding/k2p6 (mode=primary, agent=build)"
+                );
                 assert_string(extra, "provider_id", "kimi-for-coding");
                 assert_string(extra, "model_id", "k2p6");
                 assert_string(extra, "mode", "primary");
@@ -1334,7 +1541,10 @@ mod tests {
         assert_eq!(bridge.ingest(line), StderrIngestOutcome::Consumed);
         match &bridge.sink.events[0] {
             SemanticEvent::Info { message, extra } => {
-                assert_eq!(message, "step_loop");
+                assert!(
+                    message.starts_with("step_loop step=3 session="),
+                    "expected enriched step_loop message, got {message:?}",
+                );
                 assert_string(extra, "session_id", "ses_a");
                 assert_eq!(extra.get("step"), Some(&json!(3)));
             }
@@ -1350,7 +1560,10 @@ mod tests {
         assert_eq!(bridge.sink.events.len(), 1);
         match &bridge.sink.events[0] {
             SemanticEvent::Info { message, extra } => {
-                assert_eq!(message, "exiting_loop");
+                assert!(
+                    message.starts_with("exiting_loop session="),
+                    "expected enriched exiting_loop message, got {message:?}",
+                );
                 assert_string(extra, "session_id", "ses_a");
             }
             other => panic!("expected Info, got {other:?}"),
@@ -1374,7 +1587,12 @@ mod tests {
             other => panic!("expected SubagentStart first, got {other:?}"),
         }
         match &bridge.sink.events[1] {
-            SemanticEvent::Info { message, .. } => assert_eq!(message, "exiting_loop"),
+            SemanticEvent::Info { message, .. } => {
+                assert!(
+                    message.starts_with("exiting_loop session="),
+                    "expected enriched exiting_loop message, got {message:?}",
+                );
+            }
             other => panic!("expected Info second, got {other:?}"),
         }
         match &bridge.sink.events[2] {
@@ -1416,7 +1634,7 @@ mod tests {
         assert_eq!(bridge.ingest(line), StderrIngestOutcome::Consumed);
         match &bridge.sink.events[0] {
             SemanticEvent::Info { message, extra } => {
-                assert_eq!(message, "permission_evaluated");
+                assert_eq!(message, "permission_evaluated task:general → allow");
                 assert_string(extra, "permission", "task");
                 assert_string(extra, "pattern", "general");
             }
@@ -1431,7 +1649,10 @@ mod tests {
         assert_eq!(bridge.ingest(line), StderrIngestOutcome::Consumed);
         match &bridge.sink.events[0] {
             SemanticEvent::Info { message, extra } => {
-                assert_eq!(message, "http_response");
+                assert_eq!(
+                    message,
+                    "http_response POST /session/x/message 500 (99ms)"
+                );
                 assert_string(extra, "method", "POST");
                 assert_string(extra, "url", "/session/x/message");
                 assert_eq!(extra.get("status"), Some(&json!(500)));
@@ -1439,6 +1660,91 @@ mod tests {
             }
             other => panic!("expected Info, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn snapshot_warn_line_emits_warning_with_message_context() {
+        // OpenCode's stderr body parser absorbs trailing message text into
+        // the last bare-valued tag (a known quirk handled elsewhere via
+        // `has_trailing_keyword`). Either shape — a clean trailing message
+        // OR an absorbed tag value — must surface enough context for the
+        // user to know which snapshot subsystem operation failed.
+        let mut bridge = OpenCodeLogBridge::new(RecordingSink::default(), stdout_seen(), None);
+        // JSON-array `files=[…]` form: parser cleanly separates trailing message.
+        let line = r#"WARN  2026-05-12T20:05:26 +0ms service=snapshot session.id=ses_a files=["/repo/.env",".npmrc"] failed to add snapshot files"#;
+        assert_eq!(bridge.ingest(line), StderrIngestOutcome::Consumed);
+        assert_eq!(bridge.sink.events.len(), 1);
+        match &bridge.sink.events[0] {
+            SemanticEvent::Warning { message, extra } => {
+                assert!(
+                    message.starts_with("snapshot: failed to add snapshot files"),
+                    "expected snapshot message prefix, got {message:?}",
+                );
+                assert!(
+                    message.contains("files=") || message.contains("session.id="),
+                    "expected tag summary in message, got {message:?}",
+                );
+                assert_string(extra, "level", "WARN");
+                assert_string(extra, "classification", "snapshot");
+                assert!(
+                    extra.get("files").is_some() || extra.get("session.id").is_some(),
+                    "expected files or session.id in extra, got {extra:?}",
+                );
+            }
+            other => panic!("expected Warning, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn snapshot_warn_line_with_absorbed_trailing_still_carries_context() {
+        // Even when the body parser absorbs the trailing message into a
+        // bare-valued tag (e.g. `file=/repo/.env failed to add snapshot files`),
+        // the rendered Warning must still surface enough information for
+        // the operator to know what was being snapshotted — the file path
+        // and the absorbed diagnostic both ride along in the tag summary.
+        let mut bridge = OpenCodeLogBridge::new(RecordingSink::default(), stdout_seen(), None);
+        let line = "WARN  2026-05-12T20:05:26 +0ms service=snapshot session.id=ses_a file=/repo/.env failed to add snapshot files";
+        assert_eq!(bridge.ingest(line), StderrIngestOutcome::Consumed);
+        match &bridge.sink.events[0] {
+            SemanticEvent::Warning { message, extra } => {
+                assert!(
+                    message.contains("/repo/.env") && message.contains("failed to add snapshot files"),
+                    "expected file path and diagnostic in message, got {message:?}",
+                );
+                assert_string(extra, "level", "WARN");
+            }
+            other => panic!("expected Warning, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn snapshot_info_line_is_silently_consumed() {
+        // Routine snapshot maintenance — INFO/DEBUG `taking snapshot`,
+        // `prune=7.days cleanup`, etc. — is parsed and counted but emits
+        // no semantic event. They dominate snapshot-line volume and
+        // carry no user-actionable signal; only WARN/ERROR-level
+        // snapshot lines (`failed to add snapshot files`, etc.) surface
+        // as Warning events.
+        let mut bridge = OpenCodeLogBridge::new(RecordingSink::default(), stdout_seen(), None);
+        let lines = [
+            r#"INFO  2026-05-12T20:05:26 +0ms service=snapshot id=snap_abc files=["/repo/x.rs"] taking snapshot"#,
+            "INFO  2026-05-12T20:05:27 +0ms service=snapshot prune=7.days cleanup",
+            "DEBUG 2026-05-12T20:05:28 +0ms service=snapshot id=snap_xyz noop",
+        ];
+        for line in lines {
+            assert_eq!(bridge.ingest(line), StderrIngestOutcome::Consumed);
+        }
+        assert_eq!(
+            bridge.sink.events.len(),
+            0,
+            "routine snapshot lines must not emit events; got {:?}",
+            bridge.sink.events,
+        );
+        let state = bridge.state.lock().unwrap();
+        assert_eq!(
+            state.diagnostics.log_records_parsed, 3,
+            "INFO/DEBUG snapshot lines must still count as parsed records"
+        );
     }
 
     #[test]

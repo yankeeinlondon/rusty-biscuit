@@ -127,6 +127,20 @@ pub enum LogClassification {
         status: u16,
         duration_ms: u64,
     },
+    /// A `service=snapshot` log line. OpenCode emits these from the git-based
+    /// file-snapshot subsystem to record success and failure of per-step
+    /// snapshot attempts. Surfaced to operators because the message is the
+    /// only context (e.g. "failed to add snapshot files"); tag values carry
+    /// the file path / reason.
+    Snapshot {
+        /// The trailing log message — e.g. `"failed to add snapshot files"`.
+        /// Empty when the message slot was absorbed into a tag value.
+        message: String,
+        /// Severity from the parsed record header. The bridge maps `WARN` /
+        /// `ERROR` to [`crate::stream::semantic::SemanticEvent::Warning`] and
+        /// every other level to [`crate::stream::semantic::SemanticEvent::Info`].
+        level: LogLevel,
+    },
     Unclassified,
 }
 
