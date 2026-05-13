@@ -82,7 +82,7 @@ mod path_format;
 mod repo;
 
 // Re-exports from submodules
-pub use deps::{render_repo_deps_text, render_repo_deps_visual};
+pub use deps::{render_repo_deps_svg, render_repo_deps_text, render_repo_deps_visual};
 pub use docs::render_docs_output;
 pub(crate) use files::filter_file_breakdown;
 pub use files::{PathListFormat, render_files_section, render_path_list};
@@ -1092,7 +1092,7 @@ fn resolve_dir(base_dir: Option<&Path>) -> PathBuf {
 
 #[cfg(test)]
 mod tests {
-    use super::deps::build_deps_mermaid;
+    use super::deps::build_deps_dot;
     use super::repo::build_area_hierarchy;
     use super::*;
     use chrono::Utc;
@@ -2053,7 +2053,7 @@ mod tests {
         }
     }
 
-    mod deps_mermaid {
+    mod deps_dot {
         use super::*;
 
         #[test]
@@ -2062,19 +2062,20 @@ mod tests {
                 make_package("alpha", "area-a", &[]),
                 make_package("beta", "area-b", &[]),
             ];
-            assert!(build_deps_mermaid(&packages).is_none());
+            assert!(build_deps_dot(&packages, None).is_none());
         }
 
         #[test]
-        fn generates_flowchart_with_edges() {
+        fn generates_digraph_with_edges() {
             let packages = vec![
                 make_package("cli", "sniff", &["lib"]),
                 make_package("lib", "sniff", &[]),
             ];
-            let result = build_deps_mermaid(&packages).unwrap();
-            assert!(result.starts_with("flowchart TD"));
-            assert!(result.contains("subgraph sniff"));
-            assert!(result.contains("n0 --> n1"));
+            let result = build_deps_dot(&packages, None).unwrap();
+            assert!(result.starts_with("digraph G {"));
+            assert!(result.contains("subgraph cluster_"));
+            assert!(result.contains("label=\"sniff\""));
+            assert!(result.contains("n0 -> n1;"));
         }
 
         #[test]
@@ -2085,9 +2086,9 @@ mod tests {
                 make_package("sniff-cli", "sniff", &["sniff-lib"]),
                 make_package("sniff-lib", "sniff", &[]),
             ];
-            let result = build_deps_mermaid(&packages).unwrap();
-            assert!(result.contains("subgraph biscuit-speaks"));
-            assert!(result.contains("subgraph sniff"));
+            let result = build_deps_dot(&packages, None).unwrap();
+            assert!(result.contains("label=\"biscuit-speaks\""));
+            assert!(result.contains("label=\"sniff\""));
         }
 
         #[test]
@@ -2096,8 +2097,69 @@ mod tests {
                 make_package("app", "apps", &["core"]),
                 make_package("core", "libs", &[]),
             ];
-            let result = build_deps_mermaid(&packages).unwrap();
-            assert!(result.contains("n0 --> n1"));
+            let result = build_deps_dot(&packages, None).unwrap();
+            assert!(result.contains("n0 -> n1;"));
+        }
+
+        #[test]
+        fn focus_groups_focus_subgraph_and_floats_external_nodes() {
+            // dm-cli depends on dm-lib (both in darkmatter area);
+            // dm-lib depends on biscuit-terminal (external);
+            // claudine (external) depends on dm-cli.
+            let packages = vec![
+                make_package("dm-cli", "darkmatter", &["dm-lib"]),
+                make_package("dm-lib", "darkmatter", &["biscuit-terminal"]),
+                make_package("biscuit-terminal", "biscuit-terminal", &[]),
+                make_package("claudine", "claudine", &["dm-cli"]),
+            ];
+            let focus: std::collections::HashSet<&str> =
+                ["dm-cli", "dm-lib"].into_iter().collect();
+            let result = build_deps_dot(&packages, Some(&focus)).unwrap();
+
+            // Focus area is the only cluster (count `subgraph cluster_` occurrences).
+            assert_eq!(
+                result.matches("subgraph cluster_").count(),
+                1,
+                "expected exactly one cluster wrapping the focus area"
+            );
+            assert!(result.contains("label=\"darkmatter\""));
+
+            // External packages still appear as bare nodes, drawn dashed
+            assert!(result.contains("n2 [label=\"biscuit-terminal\", style=dashed];"));
+            assert!(result.contains("n3 [label=\"claudine\", style=dashed];"));
+
+            // Edges touching focus are emitted
+            assert!(result.contains("n0 -> n1;"), "dm-cli -> dm-lib edge missing");
+            assert!(
+                result.contains("n1 -> n2;"),
+                "dm-lib -> biscuit-terminal edge missing"
+            );
+            assert!(
+                result.contains("n3 -> n0;"),
+                "claudine -> dm-cli edge missing"
+            );
+        }
+
+        #[test]
+        fn focus_omits_edges_between_external_only() {
+            // Both biscuit-terminal and biscuit-file are 1-hop external context for
+            // the darkmatter focus. Their internal edge must NOT be drawn because
+            // it doesn't touch the focus area.
+            let packages = vec![
+                make_package("dm-lib", "darkmatter", &["biscuit-terminal", "biscuit-file"]),
+                make_package("biscuit-terminal", "biscuit-terminal", &["biscuit-file"]),
+                make_package("biscuit-file", "biscuit-file", &[]),
+            ];
+            let focus: std::collections::HashSet<&str> = ["dm-lib"].into_iter().collect();
+            let result = build_deps_dot(&packages, Some(&focus)).unwrap();
+
+            assert!(result.contains("n0 -> n1;"), "focus -> external edge missing");
+            assert!(result.contains("n0 -> n2;"), "focus -> external edge missing");
+            // External-only edge: biscuit-terminal (n1) -> biscuit-file (n2)
+            assert!(
+                !result.contains("n1 -> n2;"),
+                "external-only edge should not be drawn"
+            );
         }
     }
 }

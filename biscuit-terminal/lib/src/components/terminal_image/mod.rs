@@ -353,31 +353,39 @@ impl TerminalImage {
     ///
     /// `ResolvedDimensions` containing the calculated values for rendering.
     pub fn resolve_dimensions(&self, term_width: u32) -> ResolvedDimensions {
+        Self::resolve_dimensions_for(&self.width, &self.layout, term_width)
+    }
+
+    /// Compute resolved image-area dimensions for an arbitrary `(width, layout)`
+    /// pair without needing an existing image on disk.
+    ///
+    /// Used by callers that want to know the target cell count before
+    /// rasterising the image — for example, `GraphExpression::render_to_image`
+    /// derives a target pixel width from the cell count so the rasterizer can
+    /// render the SVG directly at terminal display resolution.
+    pub fn resolve_dimensions_for(
+        width: &ImageWidth,
+        layout: &Layout,
+        term_width: u32,
+    ) -> ResolvedDimensions {
         let term_width = term_width.max(1);
 
-        // Resolve margins from layout
-        let resolved_left = Layout::resolve_margin(&self.layout.left_margin, term_width);
-        let resolved_right = Layout::resolve_margin(&self.layout.right_margin, term_width);
+        let resolved_left = Layout::resolve_margin(&layout.left_margin, term_width);
+        let resolved_right = Layout::resolve_margin(&layout.right_margin, term_width);
 
-        // Calculate available width after margins
         let available_width = term_width
             .saturating_sub(resolved_left + resolved_right)
             .max(1);
 
-        // Calculate image width based on width specification.
-        // Percentage is resolved against the full terminal width so that
-        // margins affect only position, not size. The result is then
-        // clamped so it still fits within the available space.
-        let image_width = match &self.width {
+        let image_width = match width {
             ImageWidth::Fill => available_width,
             ImageWidth::Percent(pct) => ((term_width as f32) * pct).round() as u32,
             ImageWidth::Characters(chars) => *chars,
         }
         .clamp(1, available_width);
 
-        // Calculate x offset based on alignment
         let slack = available_width.saturating_sub(image_width);
-        let x_offset = match self.layout.alignment {
+        let x_offset = match layout.alignment {
             Alignment::Left => resolved_left,
             Alignment::Center => resolved_left + slack / 2,
             Alignment::Right => resolved_left + slack,

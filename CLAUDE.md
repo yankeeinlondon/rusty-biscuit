@@ -5,6 +5,10 @@
 - 48 workspace members. Source of truth is `cargo metadata --no-deps --format-version 1` — not directory names.
 - `schematic/schema` lives in the repo but is **excluded from the workspace**. Use `--manifest-path schematic/schema/Cargo.toml` to work on it.
 
+## Language 
+
+- always prefer **US English (en-US)** over other English variants such as UK English (en-GB) when creating symbol names or writing documentation
+
 ## Package Area Conventions
 
 - Most areas follow a `{area}/lib` + `{area}/cli` split. Notable exceptions:

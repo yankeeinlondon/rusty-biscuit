@@ -133,6 +133,7 @@ fn mermaid_theme_changes_svg_output() {
     let request = RenderRequest {
         format: OutputFormat::Svg,
         scale: 1,
+        target_width: None,
         transparent_background: false,
     };
 
@@ -164,6 +165,7 @@ fn mermaid_transparent_background_changes_svg_output() {
         .render(&RenderRequest {
             format: OutputFormat::Svg,
             scale: 1,
+            target_width: None,
             transparent_background: false,
         })
         .unwrap();
@@ -171,6 +173,7 @@ fn mermaid_transparent_background_changes_svg_output() {
         .render(&RenderRequest {
             format: OutputFormat::Svg,
             scale: 1,
+            target_width: None,
             transparent_background: true,
         })
         .unwrap();
@@ -202,6 +205,7 @@ fn mermaid_quadrant_config_changes_svg_output() {
         .render(&RenderRequest {
             format: OutputFormat::Svg,
             scale: 1,
+            target_width: None,
             transparent_background: false,
         })
         .unwrap();
@@ -222,6 +226,7 @@ fn mermaid_cache_separates_scale_theme_and_transparency() {
         .render(&RenderRequest {
             format: OutputFormat::Png,
             scale: 1,
+            target_width: None,
             transparent_background: false,
         })
         .unwrap();
@@ -229,6 +234,7 @@ fn mermaid_cache_separates_scale_theme_and_transparency() {
         .render(&RenderRequest {
             format: OutputFormat::Png,
             scale: 3,
+            target_width: None,
             transparent_background: false,
         })
         .unwrap();
@@ -237,6 +243,7 @@ fn mermaid_cache_separates_scale_theme_and_transparency() {
         .render(&RenderRequest {
             format: OutputFormat::Png,
             scale: 1,
+            target_width: None,
             transparent_background: false,
         })
         .unwrap();
@@ -244,6 +251,7 @@ fn mermaid_cache_separates_scale_theme_and_transparency() {
         .render(&RenderRequest {
             format: OutputFormat::Png,
             scale: 1,
+            target_width: None,
             transparent_background: true,
         })
         .unwrap();
@@ -387,6 +395,7 @@ fn mermaid_pie_chart_init_directive_applies_custom_colors() {
         .render(&RenderRequest {
             format: OutputFormat::Svg,
             scale: 1,
+            target_width: None,
             transparent_background: true,
         })
         .unwrap();
@@ -481,6 +490,7 @@ fn mermaid_backend_smoke_renders_supported_cli_diagram_families() {
             .render(&RenderRequest {
                 format: OutputFormat::Svg,
                 scale: 1,
+                target_width: None,
                 transparent_background: true,
             })
             .unwrap_or_else(|err| panic!("{name} should render successfully: {err}"));

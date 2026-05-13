@@ -276,7 +276,7 @@ fn filter_runnable_models(models: Vec<UnifiedModel>) -> Vec<UnifiedModel> {
         .filter(|model| is_runnable_gguf_path(&model.path))
         .collect();
 
-    runnable.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    runnable.sort_by_key(|a| a.name.to_lowercase());
     runnable
 }
 
@@ -355,7 +355,7 @@ fn find_model_matches(models: &[UnifiedModel], query: &str) -> Vec<UnifiedModel>
         .cloned()
         .collect();
 
-    matches.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    matches.sort_by_key(|a| a.name.to_lowercase());
     matches
 }
 

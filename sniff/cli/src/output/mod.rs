@@ -49,7 +49,8 @@ pub(crate) use filesystem::{
     collect_repo_package_area_names, collect_repo_package_names, print_current_package_area_dirty,
     print_package_area_has_source_code_changes, render_dirty_package_areas, render_dirty_packages,
     render_files_section, render_filesystem_section, render_language_section,
-    render_repo_deps_text, render_repo_deps_visual, render_repo_language, render_repo_package,
+    render_repo_deps_svg, render_repo_deps_text, render_repo_deps_visual, render_repo_language,
+    render_repo_package,
     render_repo_package_area, render_repo_package_area_root, render_repo_package_areas_formatted,
     render_repo_package_root, render_repo_packages_formatted, render_repo_root,
     render_repo_section, render_staged_package_areas, render_staged_packages,
@@ -456,19 +457,32 @@ pub fn render_text(
                 }
                 Some(RepoAction::Deps {
                     ui,
+                    svg,
                     filter,
                     package,
                     package_area,
+                    width,
+                    orientation,
                 }) => {
                     if let Some(ref filesystem) = result.filesystem
                         && let Some(ref repo) = filesystem.repo
                     {
-                        if *ui {
+                        if *svg {
+                            out.push_str(&render_repo_deps_svg(
+                                repo,
+                                filter,
+                                package.as_deref(),
+                                package_area.as_deref(),
+                                orientation.as_deref(),
+                            ));
+                        } else if *ui {
                             out.push_str(&render_repo_deps_visual(
                                 repo,
                                 filter,
                                 package.as_deref(),
                                 package_area.as_deref(),
+                                width.as_deref(),
+                                orientation.as_deref(),
                             ));
                         } else {
                             out.push_str(&render_repo_deps_text(

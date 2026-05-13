@@ -271,8 +271,11 @@ pub(crate) fn build_with_outcome(
         Some(RepoAction::Deps {
             filter,
             ui: _,
+            svg: _,
             package,
             package_area,
+            width: _,
+            orientation: _,
         }) => BuildOutcome::pure(build_deps_value(
             result,
             filter,
@@ -1415,9 +1418,12 @@ mod tests {
             };
             let action = RepoAction::Deps {
                 ui: false,
+                svg: false,
                 filter: vec![],
                 package: None,
                 package_area: None,
+                width: None,
+                orientation: None,
             };
             let value = build(&result, Some(&action), None);
             assert!(value.is_object(), "deps value must be object");
@@ -1443,15 +1449,21 @@ mod tests {
             };
             let text_action = RepoAction::Deps {
                 ui: false,
+                svg: false,
                 filter: vec![],
                 package: None,
                 package_area: None,
+                width: None,
+                orientation: None,
             };
             let ui_action = RepoAction::Deps {
                 ui: true,
+                svg: false,
                 filter: vec![],
                 package: None,
                 package_area: None,
+                width: None,
+                orientation: None,
             };
             let text_value = build(&result, Some(&text_action), None);
             let ui_value = build(&result, Some(&ui_action), None);
