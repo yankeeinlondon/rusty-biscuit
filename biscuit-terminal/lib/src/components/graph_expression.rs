@@ -24,7 +24,7 @@ use std::path::PathBuf;
 
 use thiserror::Error;
 
-use crate::components::renderable::Renderable;
+use crate::components::renderable::{BrowserRenderable, Renderable};
 use crate::components::terminal_image::{ImageWidth, TerminalImage};
 use crate::terminal::Terminal;
 use crate::utils::layout::Layout;
@@ -216,6 +216,12 @@ impl GraphExpression {
 
     /// Renders the diagram to a cached PNG file, returning the path and cache hit status.
     ///
+    /// Uses the legacy scale-based rasterization (`scale × svg_native`). When you
+    /// know the *target pixel width* — e.g. for terminal display — prefer
+    /// [`render_to_cached_png_at_width`](Self::render_to_cached_png_at_width)
+    /// so the SVG is rasterized once at the display resolution instead of
+    /// being oversampled and downscaled.
+    ///
     /// ## Errors
     ///
     /// Returns error if diagram rendering or file I/O fails.
@@ -224,6 +230,7 @@ impl GraphExpression {
         let request = biscuit_visualized::artifact::RenderRequest {
             format: biscuit_visualized::artifact::OutputFormat::Png,
             scale: self.scale,
+            target_width: None,
             transparent_background: self.transparent_background,
         };
 
@@ -233,6 +240,42 @@ impl GraphExpression {
             path = ?artifact.path,
             cache_hit = artifact.cache_hit,
             "Rendered graph diagram to PNG"
+        );
+
+        Ok((artifact.path, artifact.cache_hit))
+    }
+
+    /// Renders the diagram to a cached PNG file at the specified target
+    /// pixel width.
+    ///
+    /// Height is derived from the SVG's aspect ratio. The PNG comes out of
+    /// `resvg` rendered fresh at `target_width` pixels — no intermediate
+    /// bitmap, no downstream downscaling — so text and shapes are rasterized
+    /// at the display resolution rather than resampled from an oversized
+    /// source.
+    ///
+    /// ## Errors
+    ///
+    /// Returns error if diagram rendering or file I/O fails.
+    #[tracing::instrument(skip(self))]
+    pub fn render_to_cached_png_at_width(
+        &self,
+        target_width: u32,
+    ) -> Result<(PathBuf, bool), GraphRenderError> {
+        let request = biscuit_visualized::artifact::RenderRequest {
+            format: biscuit_visualized::artifact::OutputFormat::Png,
+            scale: self.scale,
+            target_width: Some(target_width),
+            transparent_background: self.transparent_background,
+        };
+
+        let artifact = self.diagram.render(&request)?;
+
+        tracing::info!(
+            path = ?artifact.path,
+            cache_hit = artifact.cache_hit,
+            target_width,
+            "Rendered graph diagram to PNG at target width"
         );
 
         Ok((artifact.path, artifact.cache_hit))
@@ -255,7 +298,20 @@ impl GraphExpression {
         &self,
         term: &Terminal,
     ) -> Result<(String, PathBuf, bool), GraphRenderError> {
-        let (png_path, cache_hit) = self.render_to_cached_png()?;
+        // Compute the terminal cell area we'll display the image into, then
+        // translate that to pixels using the terminal's detected cell size.
+        // The resulting `target_width_px` is fed to the rasterizer so the PNG
+        // is rendered once at exactly the display resolution — no oversampling,
+        // no downscaling, text rasterised fresh at the terminal's pixel density.
+        let dims =
+            TerminalImage::resolve_dimensions_for(&self.width, &self.layout, term.width());
+        let cell_pixel_width = term
+            .cell_size()
+            .map(|cs| cs.width.max(1))
+            .unwrap_or(8u32);
+        let target_width_px = (dims.image_width.max(1)) * cell_pixel_width;
+
+        let (png_path, cache_hit) = self.render_to_cached_png_at_width(target_width_px)?;
 
         let term_image = TerminalImage::new(&png_path)
             .map_err(|e| GraphRenderError::DisplayError(e.to_string()))?
@@ -330,6 +386,70 @@ impl Renderable for GraphExpression {
     fn layout_mut(&mut self) -> &mut Layout {
         &mut self.layout
     }
+}
+
+impl BrowserRenderable for GraphExpression {
+    /// Render the graph as a raw inline SVG element suitable for embedding
+    /// directly into an HTML document.
+    ///
+    /// Returns the SVG source from `biscuit-visualized`'s caching renderer
+    /// (orientation, theme, title, and post-processing all applied). The
+    /// SVG carries its own `width`/`height` attributes — wrap in a styled
+    /// container if you need to constrain or override sizing.
+    ///
+    /// ## Failure mode
+    ///
+    /// On render failure, returns the fallback code block wrapped in
+    /// `<pre><code class="language-dot">…</code></pre>` so the source is
+    /// still visible to the reader.
+    fn render_to_browser(&self) -> String {
+        let request = biscuit_visualized::artifact::RenderRequest {
+            format: biscuit_visualized::artifact::OutputFormat::Svg,
+            scale: self.scale,
+            // SVG is vector — there's no rasterization step that would benefit
+            // from a pixel target. Leave `target_width` unset.
+            target_width: None,
+            transparent_background: self.transparent_background,
+        };
+
+        match self.diagram.render(&request) {
+            Ok(artifact) => match std::fs::read_to_string(&artifact.path) {
+                Ok(svg) => svg,
+                Err(e) => self.browser_fallback(&format!("read SVG artifact: {e}")),
+            },
+            Err(e) => self.browser_fallback(&format!("render graph: {e}")),
+        }
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+}
+
+impl GraphExpression {
+    fn browser_fallback(&self, error: &str) -> String {
+        let escaped = html_escape(&self.fallback_code_block());
+        format!(
+            "<!-- biscuit-terminal graph render failed: {} -->\n<pre><code class=\"language-dot\">{}</code></pre>",
+            html_escape(error),
+            escaped,
+        )
+    }
+}
+
+fn html_escape(input: &str) -> String {
+    let mut out = String::with_capacity(input.len());
+    for ch in input.chars() {
+        match ch {
+            '&' => out.push_str("&amp;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            '"' => out.push_str("&quot;"),
+            '\'' => out.push_str("&#39;"),
+            c => out.push(c),
+        }
+    }
+    out
 }
 
 impl TryFrom<String> for GraphExpression {
@@ -420,6 +540,33 @@ mod tests {
     }
 
     #[test]
+    fn browser_render_emits_svg() {
+        let graph = GraphExpression::parse("a -> b -> c", GraphInputSyntax::Auto).unwrap();
+        let html = graph.render_to_browser();
+        assert!(
+            html.contains("<svg"),
+            "expected raw SVG output, got: {html}"
+        );
+        assert!(html.contains("</svg>"));
+        assert!(
+            !html.contains("base64"),
+            "browser render must not embed PNG data: {html}"
+        );
+    }
+
+    #[test]
+    fn browser_render_dot_input_emits_svg() {
+        let graph = GraphExpression::parse(
+            "digraph G { A -> B; B -> C; }",
+            GraphInputSyntax::Dot,
+        )
+        .unwrap();
+        let html = graph.render_to_browser();
+        assert!(html.contains("<svg"));
+        assert!(html.contains("</svg>"));
+    }
+
+    #[test]
     fn test_inverted_uses_opposite_theme_surface_color() {
         // Dark mode → inverted uses light theme
         let graph = GraphExpression::parse("a -> b", GraphInputSyntax::Auto)
@@ -432,6 +579,7 @@ mod tests {
             .render(&RenderRequest {
                 format: OutputFormat::Svg,
                 scale: 1,
+                target_width: None,
                 transparent_background: graph.transparent_background,
             })
             .unwrap();
@@ -453,6 +601,7 @@ mod tests {
             .render(&RenderRequest {
                 format: OutputFormat::Svg,
                 scale: 1,
+                target_width: None,
                 transparent_background: graph.transparent_background,
             })
             .unwrap();

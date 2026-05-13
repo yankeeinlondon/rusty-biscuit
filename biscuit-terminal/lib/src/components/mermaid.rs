@@ -296,17 +296,35 @@ impl MermaidRenderer {
     /// println!("Rendered to: {:?} (cache hit: {})", path, cache_hit);
     /// # Ok::<(), biscuit_terminal::components::mermaid::MermaidRenderError>(())
     /// ```
+    /// Renders the diagram to a cached PNG at the specified target pixel width.
+    ///
+    /// Height is derived from the SVG's aspect ratio. The rasterizer renders
+    /// the SVG fresh at `target_width` pixels — no oversampling, no
+    /// downstream downscaling.
+    ///
+    /// ## Errors
+    ///
+    /// Returns error if diagram rendering or file I/O fails.
     #[tracing::instrument(skip(self))]
-    pub fn render_to_cached_png(&self) -> Result<(PathBuf, bool), MermaidRenderError> {
+    pub fn render_to_cached_png_at_width(
+        &self,
+        target_width: u32,
+    ) -> Result<(PathBuf, bool), MermaidRenderError> {
         let request = biscuit_visualized::artifact::RenderRequest {
             format: biscuit_visualized::artifact::OutputFormat::Png,
             scale: self.scale,
+            target_width: Some(target_width),
             transparent_background: self.transparent_background,
         };
 
         let artifact = self.diagram.render(&request)?;
 
-        tracing::info!(path = ?artifact.path, cache_hit = artifact.cache_hit, "Rendered diagram to PNG");
+        tracing::info!(
+            path = ?artifact.path,
+            cache_hit = artifact.cache_hit,
+            target_width,
+            "Rendered diagram to PNG at target width"
+        );
 
         Ok((artifact.path, artifact.cache_hit))
     }
@@ -503,13 +521,29 @@ impl MermaidDiagram {
         &self,
         term: &crate::terminal::Terminal,
     ) -> Result<(String, PathBuf, bool, u32), MermaidRenderError> {
-        let (png_path, cache_hit) = self.renderer.render_to_cached_png()?;
+        // Translate the configured display width (cells) into pixels using the
+        // terminal's detected cell size, and have the rasterizer render the
+        // SVG once at that exact pixel width. No oversampling, no downstream
+        // downscaling — text glyphs are rasterised at the display resolution.
+        let dims = super::terminal_image::TerminalImage::resolve_dimensions_for(
+            &self.width,
+            &self.layout,
+            term.width(),
+        );
+        let cell_pixel_width = term
+            .cell_size()
+            .map(|cs| cs.width.max(1))
+            .unwrap_or(8u32);
+        let target_width_px = (dims.image_width.max(1)) * cell_pixel_width;
+
+        let (png_path, cache_hit) = self
+            .renderer
+            .render_to_cached_png_at_width(target_width_px)?;
 
         let term_image = super::terminal_image::TerminalImage::new(&png_path)
             .map_err(|e| MermaidRenderError::DisplayError(e.to_string()))?
             .with_width(self.width.clone());
 
-        let dims = term_image.resolve_dimensions(term.width());
         let width_cells = dims.image_width;
 
         let output = term_image.render(term);
