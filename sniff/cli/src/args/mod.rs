@@ -750,9 +750,12 @@ impl Commands {
                 },
                 Some(RepoSubcommand::Deps {
                     ui,
+                    svg,
                     filter: sub_filter,
                     package,
                     package_area,
+                    width,
+                    orientation,
                 }) => RepoAction::Deps {
                     filter: if sub_filter.is_empty() {
                         filter.clone()
@@ -760,8 +763,11 @@ impl Commands {
                         sub_filter.clone()
                     },
                     ui: *ui,
+                    svg: *svg,
                     package: package.clone(),
                     package_area: package_area.clone(),
+                    width: width.clone(),
+                    orientation: orientation.clone(),
                 },
                 Some(RepoSubcommand::Packages {
                     filter: sub_filter,
@@ -1786,9 +1792,12 @@ mod tests {
                 filter: vec!["top-level".to_string()],
                 repo_subcommand: Some(RepoSubcommand::Deps {
                     ui: true,
+                    svg: false,
                     filter: vec!["sub-level".to_string()],
                     package: None,
                     package_area: None,
+                    width: None,
+                    orientation: None,
                 }),
             };
             if let Some(RepoAction::Deps { filter, ui, .. }) = cmd.to_repo_action() {
@@ -1804,9 +1813,12 @@ mod tests {
                 filter: vec!["top-level".to_string()],
                 repo_subcommand: Some(RepoSubcommand::Deps {
                     ui: false,
+                    svg: false,
                     filter: vec![],
                     package: None,
                     package_area: None,
+                    width: None,
+                    orientation: None,
                 }),
             };
             if let Some(RepoAction::Deps { filter, .. }) = cmd.to_repo_action() {

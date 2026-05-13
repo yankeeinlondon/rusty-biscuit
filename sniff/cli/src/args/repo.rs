@@ -38,8 +38,17 @@ pub enum RepoAction {
     Deps {
         filter: Vec<String>,
         ui: bool,
+        /// Emit the raw SVG document instead of a terminal-image render.
+        /// Mutually exclusive with `ui`.
+        svg: bool,
         package: Option<String>,
         package_area: Option<String>,
+        /// Width spec for `--ui` rendering. Accepts `75%`, `120` (chars),
+        /// `120ch`, or `fill`. `None` uses the deps-specific default (75%).
+        width: Option<String>,
+        /// Layout direction for `--ui` / `--svg` rendering. Accepts `lr`
+        /// (left-to-right, default) or `tb` (top-to-bottom).
+        orientation: Option<String>,
     },
     Packages {
         filter: Vec<String>,
@@ -265,9 +274,13 @@ pub enum RepoSubcommand {
     },
     /// Render an internal dependency diagram
     Deps {
-        /// Use visual (Mermaid) rendering instead of text
-        #[arg(long)]
+        /// Use visual graph rendering instead of text
+        #[arg(long, conflicts_with = "svg")]
         ui: bool,
+        /// Emit the raw SVG source for the dependency diagram. Useful for
+        /// piping to a file, an HTML page, or a browser-side renderer.
+        #[arg(long, conflicts_with = "ui")]
+        svg: bool,
         /// Filter packages by name (or @area); prefix with ! to exclude
         filter: Vec<String>,
         /// Scope to a specific package
@@ -276,6 +289,12 @@ pub enum RepoSubcommand {
         /// Scope to a specific package area
         #[arg(long, value_name = "AREA", add = clap_complete::engine::ArgValueCandidates::new(repo_package_area_candidates))]
         package_area: Option<String>,
+        /// Width for `--ui` rendering: percentage (`75%`), column count (`120` or `120ch`), or `fill`. Default: 75%.
+        #[arg(long, value_name = "WIDTH", requires = "ui")]
+        width: Option<String>,
+        /// Layout direction for `--ui` / `--svg` rendering: `lr` (left-to-right, default — hub graphs scroll vertically) or `tb` (top-to-bottom — good for deep chains).
+        #[arg(long, value_name = "DIR")]
+        orientation: Option<String>,
     },
     /// Output only package names as a comma-separated list
     Packages {
