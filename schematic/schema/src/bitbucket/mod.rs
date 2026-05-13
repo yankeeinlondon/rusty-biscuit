@@ -53,7 +53,6 @@ pub mod responses;
 pub mod client;
 pub use requests::*;
 pub use responses::*;
-pub use client::*;
 /// Bitbucket Cloud REST API v2.0 for repository, PR, issue, and tag workflows client.
 pub struct Bitbucket {
     client: reqwest::Client,

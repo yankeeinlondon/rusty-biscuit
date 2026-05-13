@@ -70,7 +70,6 @@ pub mod responses;
 pub mod client;
 pub use requests::*;
 pub use responses::*;
-pub use client::*;
 /// Hugging Face Hub API for model discovery, dataset management, spaces, and repository operations client.
 pub struct HuggingFaceHub {
     client: reqwest::Client,

@@ -54,7 +54,6 @@ pub mod responses;
 pub mod client;
 pub use requests::*;
 pub use responses::*;
-pub use client::*;
 /// GitHub REST API v2022-11-28 for repository, PR, issue, and release workflows client.
 pub struct GitHub {
     client: reqwest::Client,

@@ -53,7 +53,6 @@ pub mod responses;
 pub mod client;
 pub use requests::*;
 pub use responses::*;
-pub use client::*;
 /// Gitea REST API v1.25+ for repository, PR, issue, and release workflows client.
 pub struct Gitea {
     client: reqwest::Client,

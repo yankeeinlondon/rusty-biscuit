@@ -101,20 +101,22 @@ pub fn generate_api_struct(api: &RestApi) -> TokenStream {
     // Generate constructors and constants
     let constructors = constructors::generate_constructors(
         &struct_name,
-        base_url,
-        env_auth,
-        &auth_strategy_init,
-        &auth_policy_init,
-        &env_username_init,
-        &headers_init,
-        &docs_url_init,
+        &constructors::ConstructorInit {
+            base_url,
+            env_auth,
+            auth_strategy_init: &auth_strategy_init,
+            auth_policy_init: &auth_policy_init,
+            env_username_init: &env_username_init,
+            headers_init: &headers_init,
+            docs_url_init: &docs_url_init,
+        },
     );
 
     // Generate accessor methods
     let accessors = request_method::generate_accessors(&struct_name);
 
     // Generate variant methods and builder
-    let variant_methods = variant::generate_variant_methods(&struct_name, &builder_name);
+    let variant_methods = variant::generate_variant_methods(&builder_name);
     let variant_builder = variant::generate_variant_builder(&struct_name, &builder_name);
 
     // Generate Default impl

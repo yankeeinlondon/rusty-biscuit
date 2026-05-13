@@ -3,6 +3,16 @@
 use proc_macro2::{Ident, TokenStream};
 use quote::quote;
 
+pub(super) struct ConstructorInit<'a> {
+    pub base_url: &'a str,
+    pub env_auth: &'a [String],
+    pub auth_strategy_init: &'a TokenStream,
+    pub auth_policy_init: &'a TokenStream,
+    pub env_username_init: &'a TokenStream,
+    pub headers_init: &'a TokenStream,
+    pub docs_url_init: &'a TokenStream,
+}
+
 /// Generates the constants and constructor methods for the API struct impl block.
 ///
 /// Produces:
@@ -12,16 +22,15 @@ use quote::quote;
 /// - `with_base_url()` constructor
 /// - `with_client()` constructor
 /// - `with_client_and_base_url()` constructor
-pub(super) fn generate_constructors(
-    _struct_name: &Ident,
-    base_url: &str,
-    env_auth: &[String],
-    auth_strategy_init: &TokenStream,
-    auth_policy_init: &TokenStream,
-    env_username_init: &TokenStream,
-    headers_init: &TokenStream,
-    docs_url_init: &TokenStream,
-) -> TokenStream {
+pub(super) fn generate_constructors(_struct_name: &Ident, init: &ConstructorInit<'_>) -> TokenStream {
+    let base_url = init.base_url;
+    let env_auth = init.env_auth;
+    let auth_strategy_init = init.auth_strategy_init;
+    let auth_policy_init = init.auth_policy_init;
+    let env_username_init = init.env_username_init;
+    let headers_init = init.headers_init;
+    let docs_url_init = init.docs_url_init;
+
     quote! {
         /// Base URL for the API.
         pub const BASE_URL: &'static str = #base_url;
