@@ -473,7 +473,9 @@ impl MermaidDiagram {
         term: &crate::terminal::Terminal,
     ) -> Result<MermaidRenderResult, MermaidRenderError> {
         let (output, png_path, cache_hit, width_cells) = self.render_to_image(term)?;
-        let output = self.layout.apply_layout(&output, term.width());
+        // Diagrams are inherently block-cohesive (image escapes or fenced code
+        // fallback) — align as a block.
+        let output = self.layout.apply_block_layout(&output, term.width());
 
         Ok(MermaidRenderResult {
             output,
@@ -539,14 +541,14 @@ pub struct MermaidRenderResult {
 impl super::renderable::Renderable for MermaidDiagram {
     fn render(&self, term: &crate::terminal::Terminal) -> String {
         let content = self.render_raw(term);
-        self.layout.apply_layout(&content, term.width())
+        self.layout.apply_block_layout(&content, term.width())
     }
 
     fn render_optimistic(&self, term_width: Option<u32>) -> String {
         let width = term_width.unwrap_or(80);
         let term = crate::terminal::Terminal::new_optimistic(width);
         let content = self.render_raw(&term);
-        self.layout.apply_layout(&content, width)
+        self.layout.apply_block_layout(&content, width)
     }
 
     fn is_block_level(&self) -> bool {

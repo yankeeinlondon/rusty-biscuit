@@ -250,14 +250,16 @@ impl Renderable for BlockQuote {
         let width = term_width.unwrap_or(80);
         let available = self.layout.available_width(width);
         let content = self.render_content(None, available);
-        self.layout.apply_layout(&content, width)
+        // BlockQuote has a `┃ ` border on every line — the border must form a
+        // straight vertical bar, so the block must be aligned as a unit.
+        self.layout.apply_block_layout(&content, width)
     }
 
     fn render(&self, term: &Terminal) -> String {
         let width = term.width();
         let available = self.layout.available_width(width);
         let content = self.render_content(Some(term), available);
-        self.layout.apply_layout(&content, width)
+        self.layout.apply_block_layout(&content, width)
     }
 
     fn as_any(&self) -> &dyn std::any::Any {

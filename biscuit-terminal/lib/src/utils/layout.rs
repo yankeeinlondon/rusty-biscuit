@@ -22,6 +22,23 @@ pub trait RenderableWrapper {
 /// horizontal space available (e.g., when the content is shorter than the
 /// container width or when margins create unused space).
 ///
+/// ## Per-line vs. block alignment
+///
+/// `Alignment` only describes *direction* (left/center/right). How it is
+/// applied to multi-line content depends on which `Layout` method is used:
+///
+/// - [`Layout::apply_layout`] aligns each line independently — appropriate for
+///   prose where each wrapped line is logically standalone.
+/// - [`Layout::apply_block_layout`] aligns all lines as a cohesive block using
+///   a single offset derived from the widest line — appropriate for content
+///   with horizontal structure that must be preserved (tree connectors,
+///   borders, column edges, bullet/number columns).
+///
+/// Most structured components in this crate (BlockQuote, OrderedList,
+/// UnorderedList, Table, TwoColumn, Progress, FileSystem, MermaidDiagram,
+/// GraphExpression) use block alignment; only Prose and TextBlock use
+/// per-line alignment.
+///
 /// ## Examples
 ///
 /// ```
@@ -476,7 +493,17 @@ impl Layout {
         result
     }
 
-    /// Apply the layout to content and render.
+    /// Apply the layout to content, aligning each line independently.
+    ///
+    /// Each line is aligned within the available width on its own — useful for
+    /// prose where wrapped lines are logically standalone and a "centered
+    /// paragraph" effect is desired.
+    ///
+    /// For content with horizontal structure that must be preserved across
+    /// lines (tree connectors, borders, column edges, bullet columns), use
+    /// [`apply_block_layout`] instead.
+    ///
+    /// [`apply_block_layout`]: Self::apply_block_layout
     pub fn apply_layout(&self, content: &str, terminal_width: u32) -> String {
         let left = Self::resolve_margin(&self.left_margin, terminal_width);
         let right = Self::resolve_margin(&self.right_margin, terminal_width);

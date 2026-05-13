@@ -116,13 +116,14 @@ impl Renderable for Progress {
     fn render_optimistic(&self, term_width: Option<u32>) -> String {
         let width = term_width.unwrap_or(80);
         let bar_content = self.render_bar();
-        self.layout.apply_layout(&bar_content, width)
+        // Label and bar segments form a single visual unit — align as a block.
+        self.layout.apply_block_layout(&bar_content, width)
     }
 
     fn render(&self, term: &Terminal) -> String {
         let width = term.width();
         let bar_content = self.render_bar();
-        self.layout.apply_layout(&bar_content, width)
+        self.layout.apply_block_layout(&bar_content, width)
     }
 
     fn layout(&self) -> &Layout {
