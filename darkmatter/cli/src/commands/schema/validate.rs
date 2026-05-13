@@ -37,7 +37,7 @@ enum FileOutcome {
 /// - `0` — all files validated successfully
 /// - `1` — one or more files failed validation
 /// - `2` — schema or baseline could not be loaded (CLI baseline _or_ a
-///         per-document `$schema` reference)
+///   per-document `$schema` reference)
 /// - `3` — at least one file's frontmatter could not be parsed
 pub fn run_validate(
     files: &[PathBuf],
