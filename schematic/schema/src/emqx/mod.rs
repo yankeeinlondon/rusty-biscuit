@@ -16,7 +16,6 @@ pub mod responses;
 pub mod client;
 pub use requests::*;
 pub use responses::*;
-pub use client::*;
 /// EMQX Broker REST API with Basic Authentication (API Key + Secret) client.
 pub struct EmqxBasic {
     client: reqwest::Client,

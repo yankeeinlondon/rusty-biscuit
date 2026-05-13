@@ -2,7 +2,6 @@
 
 use super::*;
 use super::requests::*;
-use super::responses::*;
 use crate::shared::SchematicError;
 impl Eversolo {
     fn auth_is_required(&self) -> bool {

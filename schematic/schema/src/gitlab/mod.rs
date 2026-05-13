@@ -56,7 +56,6 @@ pub mod responses;
 pub mod client;
 pub use requests::*;
 pub use responses::*;
-pub use client::*;
 /// GitLab REST API v4 for repository, MR, issue, and release workflows client.
 pub struct GitLab {
     client: reqwest::Client,

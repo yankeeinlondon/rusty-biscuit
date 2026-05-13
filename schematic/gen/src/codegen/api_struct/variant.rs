@@ -10,7 +10,6 @@ use quote::quote;
 /// - `variant_with()` - Convenience method for common variant configurations
 /// - `variant_with_headers()` - Convenience method for header-based variants
 pub(super) fn generate_variant_methods(
-    struct_name: &Ident,
     builder_name: &Ident,
 ) -> TokenStream {
     quote! {
