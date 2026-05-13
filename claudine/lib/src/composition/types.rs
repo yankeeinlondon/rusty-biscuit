@@ -53,6 +53,54 @@ pub struct LoopConfig {
     pub max_iterations: Option<usize>,
     /// Optional per-document failure behavior.
     pub fail_fast: Option<bool>,
+    /// Optional per-document policy for what to do when a completed iteration
+    /// reports a provider rate-limit signal. `None` falls back to
+    /// [`OnRateLimit::Pause`].
+    pub on_rate_limit: Option<OnRateLimit>,
+}
+
+/// Policy for how the loop engine reacts to a rate-limit signal observed on
+/// a completed iteration.
+///
+/// The signal is read from [`crate::stream::summary::RateLimitInfo`] when
+/// `is_throttled == Some(true)`. The policy is resolved from
+/// `LoopExecutionOptions.on_rate_limit` (CLI) > `LoopConfig.on_rate_limit`
+/// (frontmatter) > [`OnRateLimit::Pause`] (default).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum OnRateLimit {
+    /// Sleep until `reset_at` + a small safety margin, then proceed to the
+    /// next iteration. If `reset_at` is missing or already past, behave as
+    /// [`OnRateLimit::Abort`] (no unbounded sleep).
+    #[default]
+    Pause,
+    /// Halt the loop with a structured [`super::error::CompositionError::LoopRateLimited`].
+    Abort,
+    /// Proceed to the next iteration without pausing. Reserved for soft
+    /// per-request limits that won't recur; not recommended.
+    Continue,
+}
+
+impl OnRateLimit {
+    /// Parse from the frontmatter string form.
+    pub fn parse(value: &str) -> Result<Self, String> {
+        match value {
+            "pause" => Ok(Self::Pause),
+            "abort" => Ok(Self::Abort),
+            "continue" => Ok(Self::Continue),
+            other => Err(format!(
+                "must be one of `pause`, `abort`, `continue`, got `{other}`"
+            )),
+        }
+    }
+
+    /// Return the canonical string form (matches the frontmatter accepted form).
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Pause => "pause",
+            Self::Abort => "abort",
+            Self::Continue => "continue",
+        }
+    }
 }
 
 /// A loop condition. `while` continues while truthy; `until` continues until truthy.
