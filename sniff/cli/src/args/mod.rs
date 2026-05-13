@@ -767,7 +767,7 @@ impl Commands {
                     package: package.clone(),
                     package_area: package_area.clone(),
                     width: width.clone(),
-                    orientation: orientation.clone(),
+                    orientation: orientation.map(|o| o.as_str().to_string()),
                 },
                 Some(RepoSubcommand::Packages {
                     filter: sub_filter,

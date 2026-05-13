@@ -3,6 +3,32 @@ use super::{
 };
 use clap::Subcommand;
 
+/// Layout direction for `sniff repo deps` visual rendering.
+///
+/// Maps to `biscuit_visualized::graph::GraphOrientation` in the renderer.
+/// Aliased so users can write the long form (`left-to-right`/`horizontal`,
+/// `top-to-bottom`/`vertical`) at the command line, while shell completions
+/// suggest the short canonical forms.
+#[derive(Debug, Clone, Copy, clap::ValueEnum)]
+pub enum OrientationArg {
+    /// Left-to-right — hub graphs scroll vertically (default for `repo deps`).
+    #[value(name = "lr", alias = "left-to-right", alias = "horizontal")]
+    LeftToRight,
+    /// Top-to-bottom — good for deep chain-like graphs.
+    #[value(name = "tb", alias = "top-to-bottom", alias = "vertical")]
+    TopToBottom,
+}
+
+impl OrientationArg {
+    /// Canonical short form passed through `RepoAction::Deps::orientation`.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::LeftToRight => "lr",
+            Self::TopToBottom => "tb",
+        }
+    }
+}
+
 /// Normalized repo action — decoupled from clap parse shape.
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
@@ -293,8 +319,8 @@ pub enum RepoSubcommand {
         #[arg(long, value_name = "WIDTH", requires = "ui")]
         width: Option<String>,
         /// Layout direction for `--ui` / `--svg` rendering: `lr` (left-to-right, default — hub graphs scroll vertically) or `tb` (top-to-bottom — good for deep chains).
-        #[arg(long, value_name = "DIR")]
-        orientation: Option<String>,
+        #[arg(long, value_name = "DIR", value_enum)]
+        orientation: Option<OrientationArg>,
     },
     /// Output only package names as a comma-separated list
     Packages {
