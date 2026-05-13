@@ -92,17 +92,18 @@ async fn run_fetch_db(force: bool, quiet: bool, mode: OutputMode) -> color_eyre:
     use biscuit_location::resolve_maxmind_path;
 
     let expected = resolve_maxmind_path(None);
-    if let Some(ref path) = expected {
-        if path.exists() && !force {
-            emit(
-                &output::render_info(
-                    &format!("Database already exists at {}", path.display()),
-                    mode,
-                ),
-                quiet,
-            );
-            return Ok(());
-        }
+    if let Some(ref path) = expected
+        && path.exists()
+        && !force
+    {
+        emit(
+            &output::render_info(
+                &format!("Database already exists at {}", path.display()),
+                mode,
+            ),
+            quiet,
+        );
+        return Ok(());
     }
 
     info!("downloading GeoLite2-City database from MaxMind");
