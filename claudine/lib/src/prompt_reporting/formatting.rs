@@ -10,14 +10,15 @@ use biscuit_terminal::utils::color::{Color, Tailwind};
 use biscuit_terminal::utils::layout::Margin;
 use biscuit_terminal::utils::wrap_policy::WordWrap;
 
-/// The heavy vertical-line border (U+2503) used by both the system- and
+/// The full-block vertical border (U+2588) used by both the system- and
 /// user-prompt [`BlockQuote`]s.
 ///
-/// `┃` is the thickest box-drawing vertical glyph that still renders as a
-/// single, horizontally centered column — visually centered beneath the
-/// 2-cell-wide 📕 / 🗣️ emojis on the header line above. A trailing space
-/// separates the border from the body content.
-pub(crate) const PROMPT_BORDER: &str = "┃ ";
+/// `█` fills the entire cell, giving a thick, continuous vertical stripe
+/// that tiles seamlessly across rows (unlike dingbat bars such as `❚`,
+/// which leave hairline gaps). It sits in column 0 — directly under the
+/// left edge of the 2-cell-wide 📕 / 🗣️ emojis on the header line above.
+/// A trailing space separates the border from the body content.
+pub(crate) const PROMPT_BORDER: &str = "█ ";
 
 /// The visible cell-width consumed by [`PROMPT_BORDER`] (border glyph plus
 /// the trailing space).
@@ -323,15 +324,15 @@ mod tests {
 
     #[test]
     fn system_blockquote_border_starts_at_column_zero() {
-        // left_margin = 0 places the heavy `┃` border at column 0 so it
-        // lines up directly under the left edge of the 2-cell 📕 emoji on
-        // the header line above. A non-zero margin would shift the bar
-        // right of the icon and break visual alignment.
+        // left_margin = 0 places the `█` border at column 0 so it lines up
+        // directly under the left edge of the 2-cell 📕 emoji on the
+        // header line above. A non-zero margin would shift the bar right
+        // of the icon and break visual alignment.
         let term = Terminal::new();
         let quote = create_system_prompt_blockquote("Test content", &term);
         let rendered = quote.render_optimistic(None);
         let stripped = strip_ansi(&rendered);
-        assert!(stripped.starts_with("┃ "), "stripped = {stripped:?}");
+        assert!(stripped.starts_with("█ "), "stripped = {stripped:?}");
         assert!(stripped.contains("Test content"));
     }
 
@@ -341,7 +342,7 @@ mod tests {
         let quote = create_user_prompt_blockquote("Test content", &term);
         let rendered = quote.render_optimistic(None);
         let stripped = strip_ansi(&rendered);
-        assert!(stripped.starts_with("┃ "), "stripped = {stripped:?}");
+        assert!(stripped.starts_with("█ "), "stripped = {stripped:?}");
         assert!(stripped.contains("Test content"));
     }
 

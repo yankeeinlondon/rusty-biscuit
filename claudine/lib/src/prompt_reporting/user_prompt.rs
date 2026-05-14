@@ -289,13 +289,13 @@ mod tests {
             &term,
         );
         let plain = strip_ansi_codes(&body);
-        // The body lines are prefixed with the BlockQuote border (`┃ `),
+        // The body lines are prefixed with the BlockQuote border (`█ `),
         // and word-wrap may split "Line N" so that "Line " ends one row and
         // the digits start the next. Strip the chrome before scanning for
         // the digit tokens.
         let body_content: String = plain
             .lines()
-            .map(|l| l.trim_start_matches(|c: char| c.is_whitespace() || c == '┃'))
+            .map(|l| l.trim_start_matches(|c: char| c.is_whitespace() || c == '█'))
             .collect::<Vec<_>>()
             .join("\n");
         assert!(body_content.contains("Line 1"));
@@ -441,7 +441,7 @@ mod tests {
                 continue;
             }
             assert!(
-                line.starts_with("┃ "),
+                line.starts_with("█ "),
                 "expected BlockQuote prefix on body line, got {line:?}"
             );
             saw_quote = true;

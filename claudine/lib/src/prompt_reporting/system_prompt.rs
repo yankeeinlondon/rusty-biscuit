@@ -930,7 +930,7 @@ mod tests {
                 continue;
             }
             assert!(
-                line.starts_with("┃ "),
+                line.starts_with("█ "),
                 "expected BlockQuote prefix on body line, got {line:?}"
             );
             saw_quote = true;
