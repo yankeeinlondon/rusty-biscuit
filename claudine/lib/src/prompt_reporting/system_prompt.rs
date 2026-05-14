@@ -26,8 +26,11 @@ const NERD_FONT_REPO_GLYPH: char = '\u{F02A2}';
 
 /// Render the system-prompt header line.
 ///
-/// Format: `📕 <b>System Prompt(<dim><i>{action}</i></dim>)</b>`
-/// where action is `appended` or `replaced`.
+/// Format: `📔 <bg-orange-500><white><b> System Prompt(<i>{action}</i>) </b></white></bg-orange-500>`
+/// where action is `appended` or `replaced`. The label is rendered as
+/// white text on an orange-500 background — the same orange used by the
+/// vertical bar of the system-prompt BlockQuote below — producing an
+/// inverted "label badge" effect that visually ties the header to its body.
 ///
 /// ## Examples
 ///
@@ -42,7 +45,7 @@ const NERD_FONT_REPO_GLYPH: char = '\u{F02A2}';
 /// ```
 pub fn render_system_prompt_header(action: &str, term: &Terminal) -> String {
     Prose::new(format!(
-        "📕 <b>System Prompt(<dim><i>{action}</i></dim>)</b>"
+        "📔 <bg-orange-500><white><b> System Prompt(<i>{action}</i>) </b></white></bg-orange-500>"
     ))
     .render(term)
 }
@@ -302,7 +305,7 @@ pub fn report_system_prompt_with_base(
 
     // Compose summary + body into one rendered string; both go into a
     // single orange BlockQuote so the bar runs continuously beneath the
-    // 📕 icon.
+    // 📔 icon.
     let mut body_parts: Vec<String> = Vec::new();
 
     if config.show_summary {
@@ -413,7 +416,7 @@ mod tests {
     fn header_contains_book_emoji() {
         let term = test_terminal();
         let header = render_system_prompt_header("appended", &term);
-        assert!(header.contains("📕"));
+        assert!(header.contains("📔"));
     }
 
     #[test]
@@ -774,7 +777,7 @@ mod tests {
             &term,
         );
         let output = result.expect("should produce output");
-        assert!(output.contains("📕"));
+        assert!(output.contains("📔"));
         assert!(output.contains("System Prompt"));
         assert!(output.contains("appended"));
         assert!(output.contains("tokens"));
@@ -797,7 +800,7 @@ mod tests {
         );
         let output = result.expect("should produce output");
         let plain = strip_ansi_codes(&output);
-        assert!(plain.contains("📕"));
+        assert!(plain.contains("📔"));
         assert!(plain.contains("replaced"));
         assert!(plain.contains("Full prompt body"));
     }
@@ -820,7 +823,7 @@ mod tests {
         );
         let output = result.expect("should produce output");
         let plain = strip_ansi_codes(&output);
-        assert!(plain.contains("📕"));
+        assert!(plain.contains("📔"));
         assert!(plain.contains("Line 1"));
         // Because of line wrapping, "Line 50" may be split across lines
         assert!(plain.contains(" 50"), "should contain the last line number");
@@ -871,7 +874,7 @@ mod tests {
         let result = report_system_prompt_empty(&EffectiveSystemPrompt::None, config, &term);
         let output = result.expect("should produce output in full mode");
         let plain = strip_ansi_codes(&output);
-        assert!(plain.contains("📕"));
+        assert!(plain.contains("📔"));
         assert!(plain.contains("none"));
         assert!(plain.contains("not been modified"));
     }
@@ -893,7 +896,7 @@ mod tests {
         );
         let output = result.expect("should produce output in full mode");
         let plain = strip_ansi_codes(&output);
-        assert!(plain.contains("📕"));
+        assert!(plain.contains("📔"));
         assert!(plain.contains("disabled"));
         assert!(plain.contains("been disabled"));
     }
@@ -921,7 +924,7 @@ mod tests {
         let plain = strip_ansi_codes(&output);
         let mut lines = plain.lines();
         let header = lines.next().expect("header line");
-        assert!(header.contains("📕"), "header line should contain 📕");
+        assert!(header.contains("📔"), "header line should contain 📔");
         // At least one subsequent non-empty line must begin with the
         // BlockQuote prefix.
         let mut saw_quote = false;

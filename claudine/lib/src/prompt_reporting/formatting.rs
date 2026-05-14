@@ -16,7 +16,7 @@ use biscuit_terminal::utils::wrap_policy::WordWrap;
 /// `█` fills the entire cell, giving a thick, continuous vertical stripe
 /// that tiles seamlessly across rows (unlike dingbat bars such as `❚`,
 /// which leave hairline gaps). It sits in column 0 — directly under the
-/// left edge of the 2-cell-wide 📕 / 🗣️ emojis on the header line above.
+/// left edge of the 2-cell-wide 📔 / 🗣️ emojis on the header line above.
 /// A trailing space separates the border from the body content.
 pub(crate) const PROMPT_BORDER: &str = "█ ";
 
@@ -28,7 +28,7 @@ pub(crate) const PROMPT_BORDER_WIDTH: u32 = 2;
 /// system- and user-prompt reporting.
 ///
 /// Set to **0** so the border glyph lands at column 0 of the BlockQuote's
-/// rendering area — directly under the left edge of the 2-cell `📕` / `🗣️`
+/// rendering area — directly under the left edge of the 2-cell `📔` / `🗣️`
 /// emoji on the header line above. Adding a leading space would offset the
 /// bar one column right of the icon and break visual alignment.
 pub(crate) const PROMPT_LEFT_MARGIN: u32 = 0;
@@ -325,7 +325,7 @@ mod tests {
     #[test]
     fn system_blockquote_border_starts_at_column_zero() {
         // left_margin = 0 places the `█` border at column 0 so it lines up
-        // directly under the left edge of the 2-cell 📕 emoji on the
+        // directly under the left edge of the 2-cell 📔 emoji on the
         // header line above. A non-zero margin would shift the bar right
         // of the icon and break visual alignment.
         let term = Terminal::new();

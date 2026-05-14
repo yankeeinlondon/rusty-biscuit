@@ -49,7 +49,7 @@ pub enum TruncationMode {
 /// Resolved reporting configuration for a system prompt.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SystemPromptReportConfig {
-    /// Whether to show the header line (e.g. "📕 System Prompt(appended)").
+    /// Whether to show the header line (e.g. "📔 System Prompt(appended)").
     pub show_header: bool,
     /// Whether the summary prose line should appear in addition to any body.
     ///
