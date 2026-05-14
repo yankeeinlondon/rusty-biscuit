@@ -316,12 +316,12 @@ pub fn run_subcommand(command: CliCommand, cli: &Cli) -> Result<()> {
         }
         CliCommand::Schema { target } => match target {
             SchemaTarget::Validate {
-                files,
+                inputs,
                 schema,
                 format,
                 quiet,
             } => {
-                schema::run_validate(&files, schema.as_deref(), format, quiet)?;
+                schema::run_validate(&inputs, schema.as_deref(), format, quiet)?;
             }
             SchemaTarget::Detect {
                 files,
