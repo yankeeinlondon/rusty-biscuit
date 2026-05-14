@@ -265,6 +265,8 @@ fn emit_problem_bullet(problem: &ValidationProblem, terminal: &Terminal) {
             "<inverse>{}</inverse>",
             escape_prose(strip_pointer_prefix(&problem.path))
         ));
+    } else if let Some(property) = problem.property.as_deref() {
+        prefix_parts.push(format!("<inverse>{}</inverse>", escape_prose(property)));
     } else if problem.arm_index.is_none() {
         prefix_parts.push("<inverse>root</inverse>".to_string());
     }
@@ -281,11 +283,24 @@ fn emit_problem_bullet(problem: &ValidationProblem, terminal: &Terminal) {
         format!(" <dim>(at {location})</dim>")
     };
 
+    let message = trim_redundant_property_prefix(&problem.message, problem.property.as_deref());
     let bullet = format!(
         "    - {prefix}{}{location_suffix}",
-        escape_prose(&problem.message)
+        escape_prose(message)
     );
     println!("{}", Prose::new(bullet).render(terminal));
+}
+
+/// When `jsonschema` reports a `Required` failure, the message already starts
+/// with the quoted property name (e.g. `"name" is a required property`). Since
+/// we now surface that name as the bullet prefix, strip the duplicate from the
+/// message so it reads naturally: `name is a required property`.
+fn trim_redundant_property_prefix<'a>(message: &'a str, property: Option<&str>) -> &'a str {
+    let Some(name) = property else {
+        return message;
+    };
+    let quoted = format!("\"{name}\" ");
+    message.strip_prefix(&quoted).unwrap_or(message)
 }
 
 /// Strips the leading `/` from a JSON pointer so the prefix reads as a
@@ -324,6 +339,7 @@ fn emit_json(file: &Path, outcome: &FileOutcome) {
                 .map(|p| {
                     json!({
                         "path": p.path,
+                        "property": p.property,
                         "message": p.message,
                         "line": p.line,
                         "column": p.column,
