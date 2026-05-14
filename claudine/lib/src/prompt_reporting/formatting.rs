@@ -5,7 +5,6 @@
 
 use biscuit_terminal::components::block_quote::BlockQuote;
 use biscuit_terminal::components::renderable::Renderable;
-use biscuit_terminal::discovery::detection::{image_support, ImageSupport};
 use biscuit_terminal::terminal::Terminal;
 use biscuit_terminal::utils::color::{Color, Tailwind};
 use biscuit_terminal::utils::layout::Margin;
@@ -48,24 +47,12 @@ pub(crate) fn prompt_body_width(term: &Terminal) -> u32 {
 /// `max_width`, then enforces the constraint that no more than one
 /// consecutive blank line appears in the result.
 ///
-/// Image-protocol support is detected via biscuit-terminal's standalone
-/// [`image_support`](biscuit_terminal::discovery::detection::image_support)
-/// function rather than reading the passed-in `Terminal`'s cached fields:
-/// callers in claudine commonly construct their `Terminal` via
-/// `Terminal::new_optimistic`, which intentionally does not run image
-/// capability detection, so the struct's `is_tty` / `image_support` would
-/// report no support even on capable terminals. `image_support()`
-/// consults known-terminal env vars (Ghostty, Kitty, WezTerm, Warp,
-/// Konsole, iTerm2, …) and only falls back to runtime probes when no
-/// known terminal is recognized. When Kitty or iTerm2 support is
-/// detected, [`TerminalImageMode::Force`](darkmatter::markdown::output::terminal::TerminalImageMode::Force)
-/// is passed to darkmatter so markdown horizontal rules (`---`) emit
-/// Tier 1 inline images even when darkmatter's own builder loses Kitty
-/// support during its internal detection. Otherwise `Auto` is used so
-/// Unicode / ASCII fallbacks apply.
-///
-/// The `_term` parameter is retained for signature stability and future
-/// per-terminal overrides; image-mode selection deliberately ignores it.
+/// darkmatter delegates terminal capability detection to biscuit-terminal
+/// during its internal `Terminal::builder().build()` call, so the
+/// [`TerminalOptions::image_mode`](darkmatter::markdown::output::terminal::TerminalOptions::image_mode)
+/// is left at its default [`Auto`](darkmatter::markdown::output::terminal::TerminalImageMode::Auto) —
+/// horizontal rules emit as Tier 1 Kitty graphics on capable terminals
+/// and fall back through Tier 2 (Unicode) and Tier 3 (ASCII) otherwise.
 ///
 /// ## Examples
 ///
@@ -80,22 +67,16 @@ pub(crate) fn prompt_body_width(term: &Terminal) -> u32 {
 /// assert!(!output.contains("\n\n\n"));
 /// ```
 pub fn render_markdown_for_terminal(text: &str, _term: &Terminal, max_width: u32) -> String {
-    use darkmatter::markdown::output::terminal::{for_terminal, TerminalImageMode, TerminalOptions};
+    use darkmatter::markdown::output::terminal::{for_terminal, TerminalOptions};
     use darkmatter::markdown::Markdown;
 
     if text.trim().is_empty() {
         return String::new();
     }
 
-    let image_mode = match image_support() {
-        ImageSupport::Kitty | ImageSupport::ITerm => TerminalImageMode::Force,
-        ImageSupport::None => TerminalImageMode::Auto,
-    };
-
     let md: Markdown = text.into();
     let mut options = TerminalOptions::default();
     options.max_width = Some(max_width.clamp(1, u16::MAX as u32) as u16);
-    options.image_mode = image_mode;
     let rendered = for_terminal(&md, options).unwrap_or_else(|_| text.to_string());
 
     // Cap consecutive blank lines at 1. darkmatter's `HorizontalRule`
@@ -394,4 +375,5 @@ mod tests {
         assert!(stripped.contains("bold"));
         assert!(stripped.contains("italic"));
     }
+
 }

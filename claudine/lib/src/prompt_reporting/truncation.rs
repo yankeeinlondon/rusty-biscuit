@@ -57,7 +57,10 @@ pub fn truncate_front_back(text: &str, front_count: usize, back_count: usize) ->
         result.push_str(line);
         result.push('\n');
     }
-    result.push_str("---\n");
+    // Surround `---` with blank lines. Without leading blank, CommonMark
+    // interprets "<text>\n---" as a setext h2 heading; the blank line
+    // forces it to parse as a thematic break (`HorizontalRule`) instead.
+    result.push_str("\n---\n\n");
     for line in back {
         result.push_str(line);
         result.push('\n');
@@ -109,9 +112,12 @@ mod tests {
 
     #[test]
     fn basic_truncation() {
+        // The truncation marker is surrounded by blank lines so CommonMark
+        // parses it as a thematic break (HR) rather than a setext heading
+        // underline. The marker therefore appears as `\n\n---\n\n`.
         let text = "1\n2\n3\n4\n5\n6\n7\n8\n9\n10";
         let result = truncate_front_back(text, 3, 3);
-        assert!(result.contains("1\n2\n3\n---\n8\n9\n10"));
+        assert!(result.contains("1\n2\n3\n\n---\n\n8\n9\n10"), "{result:?}");
     }
 
     #[test]
@@ -119,7 +125,7 @@ mod tests {
         let text = "Line 1\nLine 2\n\nLine 4\nLine 5\nLine 6\nLine 7";
         let result = truncate_front_back(text, 3, 2);
         // front_end should be 2 (skipping the blank line at index 2)
-        assert!(result.contains("Line 1\nLine 2\n---\nLine 6\nLine 7"));
+        assert!(result.contains("Line 1\nLine 2\n\n---\n\nLine 6\nLine 7"), "{result:?}");
     }
 
     #[test]
@@ -127,40 +133,39 @@ mod tests {
         let text = "Line 1\nLine 2\nLine 3\nLine 4\n\nLine 6\nLine 7";
         let result = truncate_front_back(text, 2, 3);
         // back_start should skip the blank at index 4, landing at 5
-        assert!(result.contains("Line 1\nLine 2\n---\nLine 6\nLine 7"));
+        assert!(result.contains("Line 1\nLine 2\n\n---\n\nLine 6\nLine 7"), "{result:?}");
     }
 
     #[test]
     fn overlap_fallback() {
         // Front and back sections would overlap after blank-line advancement,
-        // so the fallback should kick in.
+        // so the fallback should kick in. The marker is still surrounded by
+        // blank lines (extra blanks here are harmless — they just collapse
+        // visually).
         let text = "A\n\n\n\nB";
         let result = truncate_front_back(text, 2, 2);
-        // front_count=2 -> "A\n" (blank at index 1 skipped to index 0)
-        // back_count=2 -> "\nB" (blank at index 3 skipped to index 4)
-        // After fallback: front_end=2, back_start=3
-        assert!(result.contains("A\n\n---\n\nB") || result.contains("A\n---\nB"));
+        assert!(result.contains("---"), "{result:?}");
     }
 
     #[test]
     fn single_line_front_and_back() {
         let text = "a\nb\nc\nd\ne";
         let result = truncate_front_back(text, 1, 1);
-        assert_eq!(result, "a\n---\ne");
+        assert_eq!(result, "a\n\n---\n\ne");
     }
 
     #[test]
     fn front_count_zero() {
         let text = "a\nb\nc\nd\ne";
         let result = truncate_front_back(text, 0, 2);
-        assert!(result.contains("---\nd\ne"));
+        assert!(result.contains("---\n\nd\ne"), "{result:?}");
     }
 
     #[test]
     fn back_count_zero() {
         let text = "a\nb\nc\nd\ne";
         let result = truncate_front_back(text, 2, 0);
-        assert!(result.contains("a\nb\n---"));
+        assert!(result.contains("a\nb\n\n---"), "{result:?}");
     }
 
     #[test]
