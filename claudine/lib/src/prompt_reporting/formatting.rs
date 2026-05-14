@@ -5,7 +5,7 @@
 
 use biscuit_terminal::components::block_quote::BlockQuote;
 use biscuit_terminal::components::renderable::Renderable;
-use biscuit_terminal::discovery::detection::ImageSupport;
+use biscuit_terminal::discovery::detection::{image_support, ImageSupport};
 use biscuit_terminal::terminal::Terminal;
 use biscuit_terminal::utils::color::{Color, Tailwind};
 use biscuit_terminal::utils::layout::Margin;
@@ -45,18 +45,27 @@ pub(crate) fn prompt_body_width(term: &Terminal) -> u32 {
 /// Renders markdown text to terminal output with blank-line collapsing.
 ///
 /// Uses `darkmatter` to convert markdown to ANSI-styled terminal output at
-/// `max_width`, then enforces the constraint that no more than two
-/// consecutive blank lines appear in the result.
+/// `max_width`, then enforces the constraint that no more than one
+/// consecutive blank line appears in the result.
 ///
-/// The outer [`Terminal`] is inspected to choose
-/// [`TerminalImageMode`](darkmatter::markdown::output::terminal::TerminalImageMode):
-/// when the caller's terminal advertises Kitty- or iTerm2-compatible image
-/// support, `Force` is passed to darkmatter so that markdown horizontal
-/// rules (`---`) emit Tier 1 inline images (the renderer's own subprocess
-/// terminal detection often loses parent capabilities). Otherwise `Auto`
-/// is used so Unicode / ASCII fallbacks still apply. Width is bounded by
-/// `max_width` so the BlockQuote wrapper does not need to re-wrap the
-/// content.
+/// Image-protocol support is detected via biscuit-terminal's standalone
+/// [`image_support`](biscuit_terminal::discovery::detection::image_support)
+/// function rather than reading the passed-in `Terminal`'s cached fields:
+/// callers in claudine commonly construct their `Terminal` via
+/// `Terminal::new_optimistic`, which intentionally does not run image
+/// capability detection, so the struct's `is_tty` / `image_support` would
+/// report no support even on capable terminals. `image_support()`
+/// consults known-terminal env vars (Ghostty, Kitty, WezTerm, Warp,
+/// Konsole, iTerm2, …) and only falls back to runtime probes when no
+/// known terminal is recognized. When Kitty or iTerm2 support is
+/// detected, [`TerminalImageMode::Force`](darkmatter::markdown::output::terminal::TerminalImageMode::Force)
+/// is passed to darkmatter so markdown horizontal rules (`---`) emit
+/// Tier 1 inline images even when darkmatter's own builder loses Kitty
+/// support during its internal detection. Otherwise `Auto` is used so
+/// Unicode / ASCII fallbacks apply.
+///
+/// The `_term` parameter is retained for signature stability and future
+/// per-terminal overrides; image-mode selection deliberately ignores it.
 ///
 /// ## Examples
 ///
@@ -70,7 +79,7 @@ pub(crate) fn prompt_body_width(term: &Terminal) -> u32 {
 /// // Should never contain more than two consecutive newlines
 /// assert!(!output.contains("\n\n\n"));
 /// ```
-pub fn render_markdown_for_terminal(text: &str, term: &Terminal, max_width: u32) -> String {
+pub fn render_markdown_for_terminal(text: &str, _term: &Terminal, max_width: u32) -> String {
     use darkmatter::markdown::output::terminal::{for_terminal, TerminalImageMode, TerminalOptions};
     use darkmatter::markdown::Markdown;
 
@@ -78,12 +87,9 @@ pub fn render_markdown_for_terminal(text: &str, term: &Terminal, max_width: u32)
         return String::new();
     }
 
-    let image_mode = if term.is_tty
-        && matches!(term.image_support, ImageSupport::Kitty | ImageSupport::ITerm)
-    {
-        TerminalImageMode::Force
-    } else {
-        TerminalImageMode::Auto
+    let image_mode = match image_support() {
+        ImageSupport::Kitty | ImageSupport::ITerm => TerminalImageMode::Force,
+        ImageSupport::None => TerminalImageMode::Auto,
     };
 
     let md: Markdown = text.into();
