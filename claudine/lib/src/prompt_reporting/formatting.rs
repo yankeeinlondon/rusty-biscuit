@@ -10,15 +10,33 @@ use biscuit_terminal::utils::color::{Color, Tailwind};
 use biscuit_terminal::utils::layout::Margin;
 use biscuit_terminal::utils::wrap_policy::WordWrap;
 
-/// The full-block vertical border (U+2588) used by both the system- and
-/// user-prompt [`BlockQuote`]s.
+/// The full-block vertical border (U+2588) used by the user-prompt
+/// [`BlockQuote`].
 ///
 /// `█` fills the entire cell, giving a thick, continuous vertical stripe
 /// that tiles seamlessly across rows (unlike dingbat bars such as `❚`,
 /// which leave hairline gaps). It sits in column 0 — directly under the
-/// left edge of the 2-cell-wide 📔 / 🗣️ emojis on the header line above.
-/// A trailing space separates the border from the body content.
+/// left edge of the 2-cell-wide 🗣️ emoji on the header line above. A
+/// trailing space separates the border from the body content.
 pub(crate) const PROMPT_BORDER: &str = "█ ";
+
+/// The system-prompt [`BlockQuote`] border, rendered as a bg-colored
+/// space cell rather than a fg-colored `█` glyph.
+///
+/// Using a background-fill cell (`\x1b[48;2;255;105;0m \x1b[49m`) instead
+/// of a foreground `█` glyph guarantees the bar renders as the *exact
+/// same swatch* as the orange-500 background used by the system-prompt
+/// header label above it. A fg-painted glyph is subject to text
+/// antialiasing and font glyph margins, which subtly desaturate the
+/// color versus a solid bg rectangle of the same RGB.
+///
+/// RGB `(255, 105, 0)` = `#ff6900` = [`Tailwind::Orange500`]. Keep in
+/// sync with the `<bg-orange-500>` tag used in the system-prompt header.
+///
+/// The visible width is **2 cells** (one bg-painted space + one plain
+/// space), matching [`PROMPT_BORDER_WIDTH`]; `visible_width()` strips
+/// the embedded SGR escapes.
+pub(crate) const SYSTEM_PROMPT_BORDER: &str = "\x1b[48;2;255;105;0m \x1b[49m ";
 
 /// The visible cell-width consumed by [`PROMPT_BORDER`] (border glyph plus
 /// the trailing space).
@@ -178,7 +196,7 @@ pub fn system_prompt_blockquote_styled(rendered_content: &str) -> BlockQuote {
 fn style_system_prompt_blockquote(mut quote: BlockQuote) -> BlockQuote {
     quote = quote
         .with_left_block_color(Color::Tailwind(Tailwind::Orange500))
-        .with_border(PROMPT_BORDER);
+        .with_border(SYSTEM_PROMPT_BORDER);
     quote.layout_mut().left_margin = Margin::Chars(PROMPT_LEFT_MARGIN);
     // Content is already wrapped at `prompt_body_width(term)` by darkmatter,
     // so re-wrapping inside the BlockQuote would just chop trailing ANSI off
@@ -324,15 +342,24 @@ mod tests {
 
     #[test]
     fn system_blockquote_border_starts_at_column_zero() {
-        // left_margin = 0 places the `█` border at column 0 so it lines up
-        // directly under the left edge of the 2-cell 📔 emoji on the
-        // header line above. A non-zero margin would shift the bar right
-        // of the icon and break visual alignment.
+        // left_margin = 0 places the bg-painted bar at column 0 so it
+        // lines up directly under the left edge of the 2-cell 📔 emoji on
+        // the header line above. A non-zero margin would shift the bar
+        // right of the icon and break visual alignment.
+        //
+        // The system bar is rendered as `\x1b[48;2;…m \x1b[49m ` rather
+        // than `█ `, so after ANSI stripping the prefix is two spaces.
         let term = Terminal::new();
         let quote = create_system_prompt_blockquote("Test content", &term);
         let rendered = quote.render_optimistic(None);
         let stripped = strip_ansi(&rendered);
-        assert!(stripped.starts_with("█ "), "stripped = {stripped:?}");
+        assert!(stripped.starts_with("  "), "stripped = {stripped:?}");
+        // The rendered (ANSI-bearing) output must contain the orange
+        // bg-fill SGR — that's how the bar paints its color.
+        assert!(
+            rendered.contains("\x1b[48;2;255;105;0m"),
+            "rendered = {rendered:?}"
+        );
         assert!(stripped.contains("Test content"));
     }
 

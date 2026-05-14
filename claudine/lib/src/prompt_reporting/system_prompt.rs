@@ -26,11 +26,12 @@ const NERD_FONT_REPO_GLYPH: char = '\u{F02A2}';
 
 /// Render the system-prompt header line.
 ///
-/// Format: `📔 <bg-orange-500><white><b> System Prompt(<i>{action}</i>) </b></white></bg-orange-500>`
-/// where action is `appended` or `replaced`. The label is rendered as
-/// white text on an orange-500 background — the same orange used by the
-/// vertical bar of the system-prompt BlockQuote below — producing an
-/// inverted "label badge" effect that visually ties the header to its body.
+/// Format: `<bg-orange-500><white><b> 📔 System Prompt(<i>{action}</i>) </b></white></bg-orange-500>`
+/// where action is `appended` or `replaced`. The entire header line — icon
+/// included — is rendered as white text on an orange-500 background. The
+/// orange-500 swatch matches the bg-painted vertical bar of the system-
+/// prompt BlockQuote below, producing a continuous "label badge → bar"
+/// visual that ties the header to its body.
 ///
 /// ## Examples
 ///
@@ -45,7 +46,7 @@ const NERD_FONT_REPO_GLYPH: char = '\u{F02A2}';
 /// ```
 pub fn render_system_prompt_header(action: &str, term: &Terminal) -> String {
     Prose::new(format!(
-        "📔 <bg-orange-500><white><b> System Prompt(<i>{action}</i>) </b></white></bg-orange-500>"
+        "<bg-orange-500><white><b> 📔 System Prompt(<i>{action}</i>) </b></white></bg-orange-500>"
     ))
     .render(term)
 }
@@ -932,8 +933,10 @@ mod tests {
             if line.trim().is_empty() {
                 continue;
             }
+            // System bar is rendered as a bg-painted space cell, so after
+            // ANSI stripping the prefix is two spaces.
             assert!(
-                line.starts_with("█ "),
+                line.starts_with("  "),
                 "expected BlockQuote prefix on body line, got {line:?}"
             );
             saw_quote = true;
