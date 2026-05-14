@@ -1373,12 +1373,6 @@ pub(crate) fn write_terminal_with_layout<W: std::io::Write>(
                     }
                 }
 
-                // For top-level lists inside a blockquote, add a blank line before the list
-                // if there is prior content, to match paragraph spacing behavior.
-                if list_stack.is_empty() && blockquote_depth > 0 && blockquote_has_content {
-                    wrapper.emit_newline_with_prefix();
-                }
-
                 // Apply page-level layout for top-level lists.
                 if list_stack.is_empty()
                     && let Some(ctx) = layout_ctx
@@ -8702,14 +8696,15 @@ flowchart LR
         let plain = strip_ansi_codes(&output);
         assert!(!plain.contains("Paragraph one- Item 1"));
 
-        // Split into trimmed lines to ignore the padding
+        // List directly follows paragraph inside a blockquote without an
+        // intervening blank styled line.
         let lines: Vec<&str> = plain.lines().map(|l| l.trim_end()).collect();
         let p_idx = lines
             .iter()
             .position(|l| l.contains("Paragraph one"))
             .unwrap();
-        assert_eq!(lines[p_idx + 1], "▐");
-        assert_eq!(lines[p_idx + 2], "▐   - Item 1");
+        assert_eq!(lines[p_idx + 1], "▐   - Item 1");
+        assert_eq!(lines[p_idx + 2], "▐   - Item 2");
     }
 
     #[test]
