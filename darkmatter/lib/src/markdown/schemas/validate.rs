@@ -232,6 +232,12 @@ fn build_problem(
 ) -> ValidationProblem {
     let path = err.instance_path().as_str().to_string();
     let key = identify_key(&path, err.kind());
+    let property = match err.kind() {
+        ValidationErrorKind::Required { property } => {
+            property.as_str().map(str::to_string)
+        }
+        _ => None,
+    };
     let (line, column) = key
         .as_deref()
         .and_then(|k| positions.get(k).copied())
@@ -240,6 +246,7 @@ fn build_problem(
     ValidationProblem {
         path,
         message: err.to_string(),
+        property,
         line,
         column,
         arm_index,
@@ -459,6 +466,38 @@ mod tests {
         let problems = collect_problems(&v, &instance, &positions);
         assert_eq!(problems[0].line, Some(3));
         assert_eq!(problems[0].column, Some(1));
+    }
+
+    #[test]
+    fn collect_problems_populates_property_for_missing_required() {
+        let schema = json!({
+            "type": "object",
+            "properties": {
+                "title": { "type": "string" }
+            },
+            "required": ["title"]
+        });
+        let v = build_validator(&schema).unwrap();
+        let instance = json!({});
+        let positions = PositionMap::new();
+        let problems = collect_problems(&v, &instance, &positions);
+        assert_eq!(problems[0].path, "");
+        assert_eq!(problems[0].property.as_deref(), Some("title"));
+    }
+
+    #[test]
+    fn collect_problems_leaves_property_none_for_non_required_failures() {
+        let schema = json!({
+            "type": "object",
+            "properties": {
+                "n": { "type": "number" }
+            }
+        });
+        let v = build_validator(&schema).unwrap();
+        let instance = json!({ "n": "not-a-number" });
+        let positions = PositionMap::new();
+        let problems = collect_problems(&v, &instance, &positions);
+        assert_eq!(problems[0].property, None);
     }
 
     #[test]

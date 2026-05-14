@@ -342,3 +342,218 @@ fn schema_validate_multiple_files_aggregates_failure() {
         .assert()
         .code(1);
 }
+
+#[test]
+fn schema_validate_assignment_satisfies_required_property() {
+    let tmp = TempDir::new().unwrap();
+    let doc = write_file(
+        &tmp,
+        "draft.md",
+        "---\n$schema:\n  title: 'string(required)'\n---\nBody\n",
+    );
+
+    md_cmd()
+        .args(["schema", "validate"])
+        .arg(&doc)
+        .arg("title=Hello")
+        .assert()
+        .success();
+}
+
+#[test]
+fn schema_validate_assignment_parses_yaml_scalar_types() {
+    let tmp = TempDir::new().unwrap();
+    let doc = write_file(
+        &tmp,
+        "post.md",
+        "---\n$schema:\n  count: 'number(integer; required)'\n  flag: 'boolean(required)'\n---\n",
+    );
+
+    md_cmd()
+        .args(["schema", "validate"])
+        .arg(&doc)
+        .arg("count=5")
+        .arg("flag=true")
+        .assert()
+        .success();
+}
+
+#[test]
+fn schema_validate_assignment_parses_flow_sequence() {
+    let tmp = TempDir::new().unwrap();
+    let doc = write_file(
+        &tmp,
+        "post.md",
+        "---\n$schema:\n  tags: 'string[](min(2); required)'\n---\n",
+    );
+
+    md_cmd()
+        .args(["schema", "validate"])
+        .arg(&doc)
+        .arg("tags=[a, b, c]")
+        .assert()
+        .success();
+}
+
+#[test]
+fn schema_validate_assignment_overrides_existing_value() {
+    let tmp = TempDir::new().unwrap();
+    let doc = write_file(
+        &tmp,
+        "post.md",
+        "---\n$schema:\n  title: 'string(min(5))'\ntitle: Hi\n---\n",
+    );
+
+    // Without override, "Hi" fails min(5).
+    md_cmd()
+        .args(["schema", "validate"])
+        .arg(&doc)
+        .assert()
+        .code(1);
+
+    // Overriding with a longer value makes the document valid.
+    md_cmd()
+        .args(["schema", "validate"])
+        .arg(&doc)
+        .arg("title=HelloWorld")
+        .assert()
+        .success();
+}
+
+#[test]
+fn schema_validate_assignment_nested_dot_notation() {
+    let tmp = TempDir::new().unwrap();
+    let doc = write_file(
+        &tmp,
+        "post.md",
+        "---\n$schema:\n  user: 'object(required)'\n---\n",
+    );
+
+    md_cmd()
+        .args(["schema", "validate"])
+        .arg(&doc)
+        .arg("user.email=ken@ken.net")
+        .arg("user.name=Ken")
+        .assert()
+        .success();
+}
+
+#[test]
+fn schema_validate_assignment_applies_to_multiple_files() {
+    let tmp = TempDir::new().unwrap();
+    let a = write_file(
+        &tmp,
+        "a.md",
+        "---\n$schema:\n  title: 'string(required)'\n---\n",
+    );
+    let b = write_file(
+        &tmp,
+        "b.md",
+        "---\n$schema:\n  title: 'string(required)'\n---\n",
+    );
+
+    md_cmd()
+        .args(["schema", "validate"])
+        .arg(&a)
+        .arg(&b)
+        .arg("title=shared")
+        .assert()
+        .success();
+}
+
+#[test]
+fn schema_validate_assignment_failing_value_still_exits_1() {
+    let tmp = TempDir::new().unwrap();
+    let doc = write_file(
+        &tmp,
+        "post.md",
+        "---\n$schema:\n  count: 'number(min(10); required)'\n---\n",
+    );
+
+    md_cmd()
+        .args(["schema", "validate"])
+        .arg(&doc)
+        .arg("count=3")
+        .assert()
+        .code(1);
+}
+
+#[test]
+fn schema_validate_invalid_assignment_yaml_returns_usage_error() {
+    let tmp = TempDir::new().unwrap();
+    let doc = write_file(
+        &tmp,
+        "post.md",
+        "---\n$schema:\n  title: 'string'\n---\n",
+    );
+
+    md_cmd()
+        .args(["schema", "validate"])
+        .arg(&doc)
+        // Unclosed flow mapping is invalid YAML and is reported as a usage
+        // error rather than silently treated as a file path.
+        .arg("user={broken")
+        .assert()
+        .code(64);
+}
+
+#[test]
+fn schema_validate_assignment_coerces_to_string_for_string_typed_property() {
+    // Regression: `bar=true` against `bar: string(required)` used to be
+    // parsed as a YAML boolean and fail validation. The CLI now consults
+    // the schema and stores the raw RHS as a string when the property is
+    // declared as a string-shaped scalar.
+    let tmp = TempDir::new().unwrap();
+    let doc = write_file(
+        &tmp,
+        "needs-bar.md",
+        "---\n$schema:\n  bar: 'string(required)'\n---\nBody\n",
+    );
+
+    for rhs in ["true", "false", "42"] {
+        md_cmd()
+            .args(["schema", "validate"])
+            .arg(&doc)
+            .arg(format!("bar={rhs}"))
+            .assert()
+            .success();
+    }
+}
+
+#[test]
+fn schema_validate_assignment_keeps_boolean_for_boolean_typed_property() {
+    // Counterpart to the coercion test: when the schema declares a boolean
+    // property, a bare `flag=true` still parses as a YAML boolean and the
+    // document validates.
+    let tmp = TempDir::new().unwrap();
+    let doc = write_file(
+        &tmp,
+        "needs-flag.md",
+        "---\n$schema:\n  flag: 'boolean(required)'\n---\nBody\n",
+    );
+
+    md_cmd()
+        .args(["schema", "validate"])
+        .arg(&doc)
+        .arg("flag=true")
+        .assert()
+        .success();
+}
+
+#[test]
+fn schema_validate_path_with_equals_disambiguated_by_dot_slash() {
+    // A file literally named `weird=name.md` would otherwise look like an
+    // assignment, but the `./` prefix forces it to be classified as a file
+    // because the LHS-before-`=` is not a valid identifier.
+    let tmp = TempDir::new().unwrap();
+    let path = tmp.path().join("weird=name.md");
+    let mut f = std::fs::File::create(&path).unwrap();
+    f.write_all(b"---\n$schema:\n  title: 'string(required)'\ntitle: ok\n---\n")
+        .unwrap();
+
+    md_cmd()
+        .current_dir(tmp.path())
+        .args(["schema", "validate", "./weird=name.md"])
+        .assert()
+        .success();
+}

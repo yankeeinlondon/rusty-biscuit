@@ -302,9 +302,15 @@ pub struct ValidationReport {
 #[derive(Debug, Clone)]
 pub struct ValidationProblem {
     /// JSON pointer to the failing instance value (e.g. `/tags/2`).
+    ///
+    /// For `Required` failures this points at the *parent* object (empty for
+    /// the document root), since the missing property has no instance value.
+    /// Use [`Self::property`] to recover the missing property's name.
     pub path: String,
     /// Human-readable message; format mirrors `jsonschema`'s default.
     pub message: String,
+    /// Name of the missing property, set only for `Required` failures.
+    pub property: Option<String>,
     /// Source line of the problem in the frontmatter, when available.
     pub line: Option<u32>,
     /// Source column of the problem in the frontmatter, when available.

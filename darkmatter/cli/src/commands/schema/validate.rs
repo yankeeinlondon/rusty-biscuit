@@ -1,6 +1,7 @@
 //! `md schema validate` implementation.
 
 use crate::args::SchemaValidateFormat;
+use crate::commands::schema::assignment::{self, Assignment, PositionalKind};
 use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::components::renderable::Renderable;
 use biscuit_terminal::errors::BlockError;
@@ -40,11 +41,28 @@ enum FileOutcome {
 ///   per-document `$schema` reference)
 /// - `3` — at least one file's frontmatter could not be parsed
 pub fn run_validate(
-    files: &[PathBuf],
+    inputs: &[String],
     schema: Option<&Path>,
     format: SchemaValidateFormat,
     quiet: bool,
 ) -> Result<()> {
+    let terminal = Terminal::default();
+
+    let (files, assignments) = match split_inputs(inputs) {
+        Ok(split) => split,
+        Err(message) => {
+            let line = format!("<red>Error:</red> {}", escape_prose(&message));
+            eprintln!("{}", Prose::new(line).render(&terminal));
+            std::process::exit(64);
+        }
+    };
+
+    if files.is_empty() {
+        let line = "<red>Error:</red> no Markdown files were provided".to_string();
+        eprintln!("{}", Prose::new(line).render(&terminal));
+        std::process::exit(64);
+    }
+
     let api = match load_api(schema) {
         Ok(api) => api,
         Err(err) => {
@@ -53,13 +71,12 @@ pub fn run_validate(
         }
     };
 
-    let terminal = Terminal::default();
     let mut any_parse_error = false;
     let mut any_schema_error = false;
     let mut any_validation_failure = false;
 
-    for file in files {
-        let outcome = validate_one(&api, file);
+    for file in &files {
+        let outcome = validate_one(&api, file, &assignments);
         match &outcome {
             FileOutcome::Validated { report_valid, .. } if !report_valid => {
                 any_validation_failure = true;
@@ -103,11 +120,31 @@ fn load_api(schema: Option<&Path>) -> Result<DarkmatterSchemas, SchemaError> {
 
 /// Validates a single file, capturing parse/schema failures separately so the
 /// caller can map them to the spec's exit codes.
-fn validate_one(api: &DarkmatterSchemas, file: &Path) -> FileOutcome {
-    let md = match Markdown::try_from(file) {
+fn validate_one(
+    api: &DarkmatterSchemas,
+    file: &Path,
+    assignments: &[Assignment],
+) -> FileOutcome {
+    let mut md = match Markdown::try_from(file) {
         Ok(md) => md,
         Err(err) => return FileOutcome::ParseError(err.to_string()),
     };
+
+    if !assignments.is_empty() {
+        // Build the effective schema first so assignment RHS values can be
+        // coerced to the declared property type. `effective_for` only reads
+        // `$schema` (and the configured baseline), so it is unaffected by
+        // the assignments we are about to apply.
+        let effective = match api.effective_for(&md) {
+            Ok(effective) => effective,
+            Err(err) => return FileOutcome::SchemaError(Box::new(err)),
+        };
+        assignment::apply_all(
+            md.frontmatter_mut().as_map_mut(),
+            assignments,
+            effective.as_ref(),
+        );
+    }
 
     let schema_label = schema_label_from(&md);
     let no_schema = md.frontmatter().as_map().get("$schema").is_none();
@@ -121,6 +158,23 @@ fn validate_one(api: &DarkmatterSchemas, file: &Path) -> FileOutcome {
         },
         Err(err) => FileOutcome::SchemaError(Box::new(err)),
     }
+}
+
+/// Splits positional inputs into file paths and parsed assignments. Returns
+/// an error message describing the first invalid assignment encountered.
+fn split_inputs(inputs: &[String]) -> Result<(Vec<PathBuf>, Vec<Assignment>), String> {
+    let mut files = Vec::new();
+    let mut assignments = Vec::new();
+    for raw in inputs {
+        match assignment::classify(raw) {
+            PositionalKind::File(p) => files.push(PathBuf::from(p)),
+            PositionalKind::Assignment(a) => assignments.push(a),
+            PositionalKind::Invalid { raw, message } => {
+                return Err(format!("invalid assignment `{raw}`: {message}"));
+            }
+        }
+    }
+    Ok((files, assignments))
 }
 
 fn schema_label_from(md: &Markdown) -> Option<String> {
@@ -145,25 +199,25 @@ fn emit_outcome(
 }
 
 fn emit_pretty(file: &Path, outcome: &FileOutcome, quiet: bool, terminal: &Terminal) {
-    let display = file.display();
+    let link = document_link(file);
+
     match outcome {
         FileOutcome::Validated {
             report_valid: true,
-            schema_label,
             no_schema,
             ..
         } => {
             if quiet {
                 return;
             }
-            let suffix = if *no_schema {
-                " <dim>(no schema; vacuously valid)</dim>".to_string()
-            } else if let Some(label) = schema_label {
-                format!(" <dim>(schema: {label})</dim>")
+            let tail = if *no_schema {
+                "doesn't have a schema definition so is valid by default."
             } else {
-                String::new()
+                "has a schema definition and is valid."
             };
-            let line = format!("{display}  <green>✓</green> valid{suffix}");
+            let line = format!(
+                "- <green>✔</green> _<dim>the document</dim>_ {link} _<dim>{tail}</dim>_"
+            );
             println!("{}", Prose::new(line).render(terminal));
         }
         FileOutcome::Validated {
@@ -171,49 +225,102 @@ fn emit_pretty(file: &Path, outcome: &FileOutcome, quiet: bool, terminal: &Termi
             problems,
             ..
         } => {
-            let count = problems.len();
             let header = format!(
-                "{display}  <red>✗</red> {count} {}",
-                if count == 1 { "problem" } else { "problems" }
+                "- <red>✗</red> _<dim>the document</dim>_ {link} _<dim>failed schema validation:</dim>_"
             );
             println!("{}", Prose::new(header).render(terminal));
             for problem in problems {
-                let location = format_location(problem);
-                let mut prefix_parts: Vec<String> = Vec::new();
-                if let Some(arm_index) = problem.arm_index {
-                    prefix_parts.push(format!("arm[{arm_index}]:"));
-                }
-                if !problem.path.is_empty() {
-                    prefix_parts.push(escape_prose(&problem.path));
-                } else if problem.arm_index.is_none() {
-                    prefix_parts.push("root".to_string());
-                }
-                let prefix = if prefix_parts.is_empty() {
-                    String::new()
-                } else {
-                    format!("{} ", prefix_parts.join(" "))
-                };
-                let bullet = format!("  • {prefix}{}", escape_prose(&problem.message));
-                println!("{}", Prose::new(bullet).render(terminal));
-                if !location.is_empty() {
-                    let loc_line = format!("      <dim>at {location}</dim>");
-                    println!("{}", Prose::new(loc_line).render(terminal));
-                }
+                emit_problem_bullet(problem, terminal);
             }
         }
         FileOutcome::ParseError(message) => {
-            let header = format!("{display}  <red>✗</red> frontmatter parse error");
+            let header = format!(
+                "- <red>✗</red> _<dim>the document</dim>_ {link} _<dim>has unparseable frontmatter:</dim>_"
+            );
             println!("{}", Prose::new(header).render(terminal));
-            let body = format!("      <dim>{}</dim>", escape_prose(message));
-            println!("{}", Prose::new(body).render(terminal));
+            let bullet = format!("    - {}", escape_prose(message));
+            println!("{}", Prose::new(bullet).render(terminal));
         }
         FileOutcome::SchemaError(err) => {
-            let header = format!("{display}  <red>✗</red> schema error");
+            let header = format!(
+                "- <red>✗</red> _<dim>the document</dim>_ {link} _<dim>has a schema definition error:</dim>_"
+            );
             println!("{}", Prose::new(header).render(terminal));
             let block = err.status_block(terminal);
             println!("{}", block.render(terminal));
         }
     }
+}
+
+/// Renders one `ValidationProblem` as an indented Prose list item, with the
+/// offending property name (or root-union arm) prefix and an optional
+/// source-location suffix.
+fn emit_problem_bullet(problem: &ValidationProblem, terminal: &Terminal) {
+    let mut prefix_parts: Vec<String> = Vec::new();
+    if let Some(arm_index) = problem.arm_index {
+        prefix_parts.push(format!("arm[{arm_index}]:"));
+    }
+    if !problem.path.is_empty() {
+        prefix_parts.push(format!(
+            "<inverse>{}</inverse>",
+            escape_prose(strip_pointer_prefix(&problem.path))
+        ));
+    } else if let Some(property) = problem.property.as_deref() {
+        prefix_parts.push(format!("<inverse>{}</inverse>", escape_prose(property)));
+    } else if problem.arm_index.is_none() {
+        prefix_parts.push("<inverse>root</inverse>".to_string());
+    }
+    let prefix = if prefix_parts.is_empty() {
+        String::new()
+    } else {
+        format!("{} ", prefix_parts.join(" "))
+    };
+
+    let location = format_location(problem);
+    let location_suffix = if location.is_empty() {
+        String::new()
+    } else {
+        format!(" <dim>(at {location})</dim>")
+    };
+
+    let message = trim_redundant_property_prefix(&problem.message, problem.property.as_deref());
+    let bullet = format!(
+        "    - {prefix}{}{location_suffix}",
+        escape_prose(message)
+    );
+    println!("{}", Prose::new(bullet).render(terminal));
+}
+
+/// When `jsonschema` reports a `Required` failure, the message already starts
+/// with the quoted property name (e.g. `"name" is a required property`). Since
+/// we now surface that name as the bullet prefix, strip the duplicate from the
+/// message so it reads naturally: `name is a required property`.
+fn trim_redundant_property_prefix<'a>(message: &'a str, property: Option<&str>) -> &'a str {
+    let Some(name) = property else {
+        return message;
+    };
+    let quoted = format!("\"{name}\" ");
+    message.strip_prefix(&quoted).unwrap_or(message)
+}
+
+/// Strips the leading `/` from a JSON pointer so the prefix reads as a
+/// human-friendly property reference (`age` rather than `/age`,
+/// `tags/2` rather than `/tags/2`).
+fn strip_pointer_prefix(pointer: &str) -> &str {
+    pointer.strip_prefix('/').unwrap_or(pointer)
+}
+
+/// Builds the styled, OSC8-hyperlinked Prose markup for a document. The
+/// visible label is the path the user passed on the CLI; the underlying
+/// `file://` href is the absolute form so terminal-launched openers can
+/// resolve it regardless of the user's current directory.
+fn document_link(file: &Path) -> String {
+    let absolute = std::path::absolute(file).unwrap_or_else(|_| file.to_path_buf());
+    format!(
+        "<blue>[{label}](file://{href})</blue>",
+        label = file.display(),
+        href = absolute.display(),
+    )
 }
 
 fn emit_json(file: &Path, outcome: &FileOutcome) {
@@ -232,6 +339,7 @@ fn emit_json(file: &Path, outcome: &FileOutcome) {
                 .map(|p| {
                     json!({
                         "path": p.path,
+                        "property": p.property,
                         "message": p.message,
                         "line": p.line,
                         "column": p.column,
@@ -267,10 +375,12 @@ fn emit_json(file: &Path, outcome: &FileOutcome) {
 }
 
 fn format_location(problem: &ValidationProblem) -> String {
-    match (problem.line, problem.column) {
-        (Some(line), Some(col)) => format!("line {line}, column {col} of frontmatter"),
-        (Some(line), None) => format!("line {line} of frontmatter"),
-        _ => String::new(),
+    // The position map only ever records column 1 for top-level frontmatter
+    // keys (see `build_position_map` in the schemas validator), so the
+    // column information would always be redundant — line alone is enough.
+    match problem.line {
+        Some(line) => format!("line {line} of frontmatter"),
+        None => String::new(),
     }
 }
 

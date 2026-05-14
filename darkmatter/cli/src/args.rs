@@ -378,15 +378,23 @@ pub enum ValidateOutputFormat {
 #[derive(Clone, Debug, Subcommand)]
 pub enum SchemaTarget {
     /// Validate markdown frontmatter against a schema.
+    ///
+    /// Positional arguments are either Markdown file paths or
+    /// `<prop>=<value>` assignments applied to every document's frontmatter
+    /// before validation. An argument is treated as an assignment when it
+    /// contains `=` and the text before the first `=` is a dot-separated
+    /// property path (e.g. `title=Hello`, `user.email=ken@ken.net`).
+    /// File paths that contain `=` should be disambiguated with `./` —
+    /// e.g. `./weird=name.md`.
     Validate {
-        /// Input markdown files
+        /// Markdown file paths and `<prop>=<value>` assignments
         #[arg(
-            value_name = "FILE",
+            value_name = "FILE_OR_PROP=VALUE",
             required = true,
             num_args = 1..,
-            add = ArgValueCompleter::new(complete_markdown_files)
+            add = ArgValueCompleter::new(complete_compose_args)
         )]
-        files: Vec<PathBuf>,
+        inputs: Vec<String>,
 
         /// Baseline schema path (YAML SimplifiedSchema or JSON Schema)
         #[arg(long, value_name = "PATH")]
