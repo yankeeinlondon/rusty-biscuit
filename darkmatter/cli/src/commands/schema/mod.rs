@@ -1,5 +1,6 @@
 //! `md schema` subcommand implementations.
 
+pub mod assignment;
 pub mod detect;
 pub mod validate;
 
