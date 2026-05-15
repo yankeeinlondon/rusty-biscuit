@@ -11,3 +11,4 @@ path = "src/lib.rs"
 [dependencies]
 thiserror = "2.0"
 tracing = "0.1"
+url = "2.5"
