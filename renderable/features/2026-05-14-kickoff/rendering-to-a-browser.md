@@ -41,6 +41,10 @@ struct HtmlPage {
 >
 > There are also draft definitions of `HtmlStyleSheet`, `LinkTag`, `MetaTag`, `CodeFeature` and `BrowserFragment` in the source code
 
+## CSS Variables
+
+Using CSS variables is a great form of abstraction these days with all evergreen browsers providing full support. We should
+inject CSS variables for the Tailwind colors. Colors in general feel like the area of greatest impact here but what other kinds of things are good candidates for CSS variables?
 
 ## Rendering
 
@@ -116,7 +120,6 @@ let page = HtmlPage::from(&fragment)
 
 In this simple example, we only have a single fragment that will resolve to being a page and that's all we need to complete the 
 
-
 ## Inputs
 
 There are some parameters which describe how a component should relate the page/canvas/terminal which it is to be rendered onto. These parameters are described well by the `Layout` struct defined in 
@@ -139,18 +142,3 @@ I think it is fair to say that the most important thing a caller must have contr
     - inline stylesheets
     - inline javascript
     - etc.
-- 
-
-## Outputs
-
-The lingua franca for browser's is HTML but before we just to the conclusion that a component's output should just be HTML (which is really just a `String`) let's reconsider:
-
-- Arguably a web page consists of Javascript, CSS, and HTML
-- However, it is very easy to embed the Javascript and CSS into a page so that having an HTML/String output type can make a lot of sense
-
-### Where `String` is not Enough
-
-When a component returns just HTML that's really probably not an HTML Page but an HTML fragment. Browser's are fine with loading fragments so that's ok sometimes but when "thinking like a component" we need 
-
-
-On one hand you could imagine this is VERY simple: HTML is what browser's use to render content and HTML is just string content. So why is
