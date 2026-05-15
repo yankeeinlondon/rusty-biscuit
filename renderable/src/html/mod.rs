@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use crate::{
     browser::{BrowserFragment, CodeFeature, HtmlStyleSheet},
     html::{link::LinkTag, meta::MetaTag},
@@ -17,6 +19,7 @@ pub struct HtmlPage {
     title: Option<String>,
     features: Vec<CodeFeature>,
     fragments: Vec<&BrowserFragment>,
+    css_variables: Option<HashMap<String, Stylesheet>>,
 }
 
 impl Default for HtmlPage {
@@ -29,6 +32,7 @@ impl Default for HtmlPage {
             title: None,
             features: vec![],
             fragments: vec![],
+            css_variables: None,
         }
     }
 }
@@ -61,7 +65,7 @@ impl HtmlPage {
     // builder
 
     /// adds microdata key/value pairs
-    pub fn add_metadata(&self, key: MicrodataKey, value: String) -> self {
+    pub fn add_metadata(&mut self, key: MicrodataKey, value: String) -> &mut HtmlPage {
         todo!()
     }
 

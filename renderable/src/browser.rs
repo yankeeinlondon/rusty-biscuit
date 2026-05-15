@@ -113,3 +113,9 @@ impl BrowserFragment {
 /// enumerates all of the reusable code blocks which can be added to a
 /// HTML page.
 pub enum CodeFeature {}
+
+pub struct PageOptions {
+    layout: Option<Layout>, // this is the Layout from biscuit-terminal which hasn't been moved over yet
+    stylesheet: Option<HtmlStyleSheet>,
+    css_variables: Option<HashMap<String, Stylesheet>>, // this is the Stylesheet from darkmatter which hasn't been moved over yet
+}
