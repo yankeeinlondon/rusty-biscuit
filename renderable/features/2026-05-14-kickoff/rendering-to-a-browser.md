@@ -68,6 +68,16 @@ When rendering for _part of the page_ you must ensure that the component can com
 
     - in addition it needs to be able to express a "stylesheet" (aka, classes and their CSS definitions) that map into it's own internal structure
 
+    **Scoping rule (decided):** internal class names registered against a `ComponentStylesheet` are lowered to **descendant selectors** under the component's wrapper class — not concatenated or class-chained.
+
+    For the `simple-table` example below, registering an entry for `"col-string"` produces:
+
+    ```css
+    .simple-table .col-string { /* … */ }
+    ```
+
+    **not** `.simple-table-col-string` (name mangling) and **not** `.simple-table.col-string` (class-chain). The descendant form lets internal elements nest arbitrarily within the wrapper while still being scoped by it.
+
         Using our fictional "simple_table" example again:
 
         ```rust
@@ -118,7 +128,57 @@ let page = HtmlPage::from(&fragment)
     .render();
 ```
 
-In this simple example, we only have a single fragment that will resolve to being a page and that's all we need to complete the 
+In this simple example, we only have a single fragment that will resolve to being a page and that's all we need to complete the
+
+## Render Pipeline
+
+This section pins down the contract for `HtmlPage::render()` so component authors and page assemblers can reason about output without reading the renderer. Detailed policy hooks (inline vs external, theming) are still TBD — see [brainstorming.md](./brainstorming.md) — but the **shape** of the output and the **ordering of `<head>`** are stable decisions.
+
+### `<head>` Ordering
+
+The renderer emits `<head>` children in this fixed order. Browsers tolerate other orderings, but `<meta charset>` *must* appear in the first 1024 bytes for some parsers, and `<title>` placement affects how page previewers (Slack, link unfurlers) extract metadata.
+
+1. `<meta charset="utf-8">` — always first.
+2. `<meta name="viewport" …>` — responsive defaults.
+3. `<title>` — sourced from microdata `Title` only (single path; see brainstorming).
+4. Other microdata-driven `<meta>` tags, grouped by source in the order: HTML, OpenGraph, Twitter, Schema.org. Within each group, registration order is preserved.
+5. `<link>` tags — page-level first, then deduplicated component dependency links in first-seen order (see [Dependency Deduplication](#dependency-deduplication)).
+6. `<style>` blocks (when inlining is chosen):
+    1. `:root { --name: value; … }` — page-level CSS variables, in declaration order.
+    2. Page stylesheet rulesets.
+    3. Component default stylesheets, in fragment-registration order.
+7. `<script>` blocks — page-level first, then per-fragment. Components are expected to mark their scripts `defer` or `async` unless they intentionally need synchronous execution.
+
+### Dependency Deduplication
+
+`<link>` tags can arrive from two sources during page assembly:
+
+- Page-level (added via `HtmlPage::add_link`).
+- Fragment-level (added via `BrowserFragment::add_linked_dependency`, then collected when the fragment is composed into the page).
+
+Both streams pass through a single dedup pass at render time, keyed by `(rel, href)`. First-seen wins for ordering; later duplicates are dropped silently. Page-level links are seen first, so they always win ties against fragment-level ones with the same key.
+
+Differences in `media`, `hreflang`, or `title` are **not** part of the dedup key — the assumption is that if two components reach for the same `(rel, href)`, they want the same stylesheet, and divergent `media` queries indicate a bug or inconsistency that the caller should resolve explicitly.
+
+See `LinkTag::dedup_key()` and `HtmlPage::collect_dedup_links()` for the implementation.
+
+### CSS Variable Emission
+
+Page-level CSS variables are emitted at the top of the first inlined `<style>` block as:
+
+```css
+:root {
+    --color-blue-500: #3b82f6;
+    --space-2: 0.5rem;
+    /* … */
+}
+```
+
+Components reference these via `var(--foo)` in their default stylesheets. Components **consume** variables; the **page** declares them. A component must not emit `:root { … }` blocks of its own.
+
+### Inline vs External — Policy TBD
+
+The decision of whether stylesheets, scripts, and CSS variable blocks are inlined into the page or referenced as external resources is a **render-time policy**, not a component concern. The current draft does not lock this down; see [brainstorming.md](./brainstorming.md#inline-vs-external) for the discussion queue.
 
 ## Inputs
 
