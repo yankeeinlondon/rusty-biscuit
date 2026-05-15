@@ -1,0 +1,397 @@
+use url::Url;
+
+use crate::html::attribute::{
+    ClassDefinition, DomId, HtmlDataAttribute,
+    aria::{AriaAttribute, AriaRole},
+    rel::RelAttribute,
+};
+
+pub mod link;
+pub mod meta;
+
+/// represents all the variants of "void elements" in HTML which
+/// can not have closing tags. These tags can either be represents
+/// solely with their tag name (e.g., `<br>`) or alternatively with
+/// the more explicit `/>` variant (e.g., `<br/>`).
+///
+/// > **Note:** the more explicit format with the `/` character has
+/// no additional meaning. The implicit and explicit are semantically
+/// identical.
+pub enum VoidTag {
+    /// `<area>` — defines a hot-spot region within an image `<map>`,
+    /// optionally linked via `href` to another resource.
+    Area,
+    /// `<base>` — specifies the document-wide base URL and/or default
+    /// target for all relative URLs. Must appear inside `<head>`.
+    Base,
+    /// `<br>` — produces a line break within flow content.
+    Br,
+    /// `<col>` — declares column properties for a `<colgroup>` within
+    /// a `<table>`.
+    Col,
+    /// `<embed>` — embeds an external (typically non-HTML) resource
+    /// such as a plugin or interactive content.
+    Embed,
+    /// `<hr>` — represents a thematic break between paragraph-level
+    /// content (rendered as a horizontal rule by default).
+    Hr,
+    /// `<img>` — embeds an image into the document.
+    Img,
+    /// `<input>` — a typed form control; behavior is selected via the
+    /// `type` attribute (see [`HtmlType`]).
+    Input,
+    /// `<link>` — links the document to an external resource (most
+    /// commonly a stylesheet, icon, or preload hint). Must appear
+    /// inside `<head>`.
+    Link,
+    /// `<meta>` — document-level metadata not expressible via other
+    /// `<head>` elements (charset, viewport, description, etc.).
+    Meta,
+    /// `<param>` — supplies a named parameter to an `<object>`
+    /// element. Deprecated in HTML5.
+    Param,
+    /// `<source>` — declares an alternative media resource for a
+    /// `<picture>`, `<audio>`, or `<video>` parent.
+    Source,
+    /// `<track>` — declares a timed text track (captions, subtitles,
+    /// descriptions, chapters) for an `<audio>` or `<video>` parent.
+    Track,
+    /// `<wbr>` — marks a position where the browser may optionally
+    /// break a line if needed (word-break opportunity).
+    Wbr,
+}
+
+pub enum BlockTag {
+    A,
+    Abbr,
+    Address,
+    Article,
+    Aside,
+    Audio,
+    B,
+    Bdi,
+    Bdo,
+    Blockquote,
+    Body,
+    Button,
+    Canvas,
+    Caption,
+    Cite,
+    Code,
+    Colgroup,
+    Data,
+    Datalist,
+    Dd,
+    Details,
+    Dfn,
+    Dialog,
+    Div,
+    Dl,
+    Dt,
+    Em,
+    Fieldset,
+    FigCaption,
+    Figure,
+    Footer,
+    Form,
+    H1,
+    H2,
+    H3,
+    H4,
+    H5,
+    H6,
+    Head,
+    Header,
+    Hgroup,
+    Html,
+    I,
+    Iframe,
+    Ins,
+    Kbd,
+    Main,
+    Map,
+    Mark,
+    Menu,
+    Meter,
+    Nav,
+    Noscript,
+    Object,
+    Ol,
+    OptGroup,
+    Option,
+    Output,
+    P,
+    Picture,
+    Pre,
+    Progress,
+    Q,
+    Rp,
+    Rt,
+    Ruby,
+    S,
+    Samp,
+    Script,
+    Search,
+    Section,
+    Select,
+    Slot,
+    Small,
+    Span,
+    Strong,
+    Style,
+    Sub,
+    Summary,
+    Sup,
+    Svg,
+    Table,
+    Tbody,
+    Td,
+    Template,
+    Textarea,
+    Tfoot,
+    Th,
+    Thead,
+    Time,
+    Tr,
+    U,
+    Ul,
+    Var,
+    Video,
+}
+
+/// Values for the HTML `type` attribute. Different elements use
+/// `type` with different meanings — most notably the many input
+/// control types for `<input type="...">`, but also `<button>`
+/// behaviors, `<ol>` list numbering styles, `<script>` module
+/// markers, and MIME types on `<link>`, `<style>`, `<source>`,
+/// `<embed>`, `<object>`, and `<a>`.
+///
+/// The `Mime(String)` and `Other(String)` outlets cover values not
+/// represented by a strong variant.
+pub enum HtmlType {
+    // --- <input> control types ---
+    /// `<input type="button">` — generic clickable button with no
+    /// default behavior. Also valid as `<button type="button">`.
+    Button,
+    /// `<input type="checkbox">` — multi-select toggle.
+    Checkbox,
+    /// `<input type="color">` — color picker.
+    Color,
+    /// `<input type="date">` — date picker (no time component).
+    Date,
+    /// `<input type="datetime-local">` — date and time picker without
+    /// timezone information.
+    DatetimeLocal,
+    /// `<input type="email">` — email address field with built-in
+    /// format validation.
+    Email,
+    /// `<input type="file">` — file selector for uploads.
+    File,
+    /// `<input type="hidden">` — value not displayed to the user but
+    /// submitted with the form.
+    Hidden,
+    /// `<input type="image">` — graphical submit button.
+    Image,
+    /// `<input type="month">` — year-and-month picker.
+    Month,
+    /// `<input type="number">` — numeric input with optional min, max,
+    /// and step.
+    Number,
+    /// `<input type="password">` — masked single-line text input.
+    Password,
+    /// `<input type="radio">` — single-select option within a named
+    /// group.
+    Radio,
+    /// `<input type="range">` — slider for selecting an approximate
+    /// numeric value.
+    Range,
+    /// `<input type="reset">` — button that resets the form to its
+    /// initial values. Also valid as `<button type="reset">`.
+    Reset,
+    /// `<input type="search">` — single-line text input intended for
+    /// search queries.
+    Search,
+    /// `<input type="submit">` — button that submits the form. Also
+    /// valid as `<button type="submit">` and is the default `<button>`
+    /// behavior.
+    Submit,
+    /// `<input type="tel">` — telephone number field (no format
+    /// validation by default).
+    Tel,
+    /// `<input type="text">` — single-line free-form text. Default
+    /// type for `<input>`.
+    Text,
+    /// `<input type="time">` — time picker (no date component).
+    Time,
+    /// `<input type="url">` — URL field with built-in format
+    /// validation.
+    Url,
+    /// `<input type="week">` — year-and-week picker.
+    Week,
+
+    // --- <ol> list numbering styles ---
+    /// `<ol type="1">` — decimal numbers (1, 2, 3, ...). Default for
+    /// `<ol>`.
+    Decimal,
+    /// `<ol type="a">` — lowercase letters (a, b, c, ...).
+    LowerAlpha,
+    /// `<ol type="A">` — uppercase letters (A, B, C, ...).
+    UpperAlpha,
+    /// `<ol type="i">` — lowercase Roman numerals (i, ii, iii, ...).
+    LowerRoman,
+    /// `<ol type="I">` — uppercase Roman numerals (I, II, III, ...).
+    UpperRoman,
+
+    // --- <script> module markers ---
+    /// `<script type="module">` — JavaScript with ES module
+    /// semantics.
+    Module,
+    /// `<script type="importmap">` — JSON import map declaring
+    /// module specifier resolution.
+    ImportMap,
+
+    // --- MIME and escape hatches ---
+    /// Arbitrary MIME type (e.g. `text/css`, `image/png`,
+    /// `application/json`). Used with `<link>`, `<style>`, `<source>`,
+    /// `<embed>`, `<object>`, and `<a>` to declare the media type of
+    /// the referenced resource.
+    Mime(String),
+    /// Escape hatch for any `type` value not represented by a strong
+    /// variant.
+    Other(String),
+}
+
+/// Enumerates the most common HTML Attributes, providing
+/// strong types. Allows an `Other((String, Value))` outlet
+/// if a less commonly used attribute is needed.
+pub enum HtmlAttribute {
+    /// `id` — unique document identifier (no spaces allowed).
+    Id(DomId),
+    /// `class` — one or more space-separated class names.
+    Class(ClassDefinition),
+    /// `style` — inline CSS declarations.
+    Style(Stylesheet),
+    /// `title` — advisory tooltip text.
+    Title(String),
+    /// `data-*` — custom user-defined data attribute keyed by the
+    /// `data-{name}` suffix.
+    Data(HtmlDataAttribute, String),
+    /// `hidden` — boolean attribute that removes the element from
+    /// rendering and the accessibility tree.
+    Hidden(bool),
+    /// `role` — ARIA landmark or widget role assigned to the element
+    /// (e.g. `role="button"`, `role="navigation"`).
+    Role(AriaRole),
+    /// `aria-*` — accessibility attribute fitting the
+    /// `aria-{name}="{value}"` pattern (e.g. `aria-label`,
+    /// `aria-describedby`, `aria-expanded`). Each [`AriaAttribute`]
+    /// variant carries the value type required by the WAI-ARIA spec.
+    Aria(AriaAttribute),
+
+    /// `href` — hyperlink reference. Used on `<a>`, `<area>`,
+    /// `<link>`, and `<base>`.
+    Href(Url),
+    /// `src` — resource URL. Used on `<img>`, `<script>`, `<iframe>`,
+    /// `<audio>`, `<video>`, `<source>`, `<embed>`, `<track>`, and
+    /// `<input type="image">`.
+    Src(Url),
+    /// `alt` — text alternative for non-text content. Required on
+    /// `<img>` for accessibility.
+    Alt(String),
+    /// `type` — element type or MIME marker; see [`HtmlType`] for the
+    /// many element-specific meanings.
+    Type(HtmlType),
+    /// `name` — form control or metadata name; the key under which a
+    /// control's value is submitted. Also used on `<meta>`,
+    /// `<iframe>`, `<map>`, and `<param>`.
+    Name(String),
+    /// `value` — current value of a form control, `<option>`, or
+    /// `<meter>`/`<progress>`.
+    Value(Value),
+    /// `placeholder` — hint text shown inside an empty form control.
+    Placeholder(String),
+    /// `disabled` — boolean attribute marking a form control as
+    /// non-interactive and excluded from submission.
+    Disabled(bool),
+    /// `checked` — boolean attribute for `<input type="checkbox">`
+    /// and `<input type="radio">` indicating initial selected state.
+    Checked(bool),
+    /// `selected` — boolean attribute on `<option>` indicating the
+    /// initially selected entry within a `<select>`.
+    Selected(bool),
+    /// `target` — browsing context for hyperlink navigation
+    /// (`_self`, `_blank`, `_parent`, `_top`, or a named frame).
+    Target(String),
+    /// `rel` — relationship between the document and the linked
+    /// resource. Used on `<a>`, `<area>`, `<link>`, and `<form>`.
+    Rel(RelAttribute),
+
+    /// Escape hatch for any attribute not represented by a strong
+    /// variant.
+    Other(String, Value),
+}
+
+/// A single node within an HTML element tree.
+///
+/// `HtmlNode` is the discriminated union used to populate
+/// [`InnerHtml`]. Each variant represents one of the three node
+/// shapes that may appear as a direct child of an element:
+///
+/// - a non-void element with its own attributes and children
+///   ([`BlockTag`](HtmlNode::BlockTag)),
+/// - a void element with attributes but no children
+///   ([`VoidTag`](HtmlNode::VoidTag)), or
+/// - a run of text content ([`TextFragment`](HtmlNode::TextFragment)).
+pub enum HtmlNode {
+    /// A non-void element — a tag with an opening and closing pair
+    /// that may itself contain attributes and nested child nodes
+    /// (e.g. `<div class="foo">…</div>`).
+    BlockTag(HtmlBlockTag),
+    /// A void element — a self-contained tag that carries attributes
+    /// but cannot have children (e.g. `<img src="…" alt="…">`).
+    VoidTag(HtmlVoidTag),
+    /// A run of literal text content placed between sibling elements.
+    ///
+    /// The renderer is responsible for HTML-escaping the contained
+    /// string when emitting output.
+    TextFragment(String),
+}
+
+/// Ordered child content of an HTML element.
+///
+/// Wraps the sequence of [`HtmlNode`] values that appear between an
+/// element's opening and closing tags. Children are rendered in the
+/// order stored.
+pub struct InnerHtml {
+    /// The element's direct children, in document order.
+    children: Vec<HtmlNode>,
+}
+
+/// A non-void HTML element — a tag with an opening and closing pair
+/// that may carry attributes and nested children.
+///
+/// Examples: `<div>`, `<section>`, `<a href="…">…</a>`,
+/// `<button type="submit">…</button>`.
+struct HtmlBlockTag {
+    /// Which non-void tag this element is (e.g. [`BlockTag::Div`]).
+    tag: BlockTag,
+    /// The element's child nodes, in document order.
+    content: InnerHtml,
+    /// Attributes attached to this element's opening tag.
+    attributes: Vec<HtmlAttribute>,
+}
+
+/// A void HTML element — a self-contained tag that may carry
+/// attributes but has no children and no closing tag.
+///
+/// Examples: `<br>`, `<hr>`, `<img src="…" alt="…">`,
+/// `<input type="text" name="…">`.
+///
+/// > **Note:** the trailing-slash form (`<br/>`) is semantically
+/// identical to the bare form (`<br>`); see [`VoidTag`].
+struct HtmlVoidTag {
+    /// Which void tag this element is (e.g. [`VoidTag::Img`]).
+    tag: VoidTag,
+    /// Attributes attached to this element's tag.
+    attributes: Vec<HtmlAttribute>,
+}

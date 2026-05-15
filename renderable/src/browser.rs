@@ -2,18 +2,45 @@ use std::collections::HashMap;
 
 use crate::{html::link::LinkTag, microdata::MicrodataKey};
 
-/// Keys represent the **class** definitions and the values are CSS key/values
-pub struct HtmlStyleSheet(HashMap<String, Stylesheet>);
+/// A collection of CSS rulesets keyed by **selector** in declaration order.
+///
+/// Each entry is a `(selector, Stylesheet)` pair. The order is preserved
+/// because CSS cascade resolves ties in source order, and silently dropping
+/// duplicate selectors (as `HashMap` would) breaks the override model that
+/// lets later rules win.
+///
+/// ## Notes
+///
+/// - Selectors are stored as strings rather than a typed selector model;
+///   the rendering layer is responsible for emitting them verbatim.
+/// - For class-scoped collections produced by [`ComponentStylesheet::as_stylesheet`],
+///   selectors are descendant selectors like `.simple-table .col-string`.
+/// - Page assembly may dedup or merge entries with identical selectors,
+///   but this type does not enforce it.
+pub struct HtmlStyleSheet(Vec<(String, Stylesheet)>);
 
 impl HtmlStyleSheet {
     pub fn new() -> HtmlStyleSheet {
-        HtmlStyleSheet(HashMap::new())
+        HtmlStyleSheet(Vec::new())
+    }
+
+    /// Append a `(selector, Stylesheet)` entry, preserving order.
+    pub fn push(&mut self, selector: impl Into<String>, sheet: Stylesheet) -> &mut Self {
+        self.0.push((selector.into(), sheet));
+        self
+    }
+
+    pub fn entries(&self) -> &[(String, Stylesheet)] {
+        &self.0
     }
 }
 
-/// A component stylesheet must provide a name that
-/// matches the **class** name used on the wrapper/parent
-/// tag of the component's
+/// A scoped collection of CSS rulesets owned by a component.
+///
+/// The `name` is the component's wrapper class (e.g. `simple-table`).
+/// Internal selectors registered via [`ComponentStylesheet::add`] target
+/// elements **within** that wrapper; the rendered output is a descendant
+/// selector (`.<name> .<child>`).
 pub struct ComponentStylesheet {
     name: String,
     style: HtmlStyleSheet,
@@ -27,17 +54,29 @@ impl ComponentStylesheet {
         }
     }
 
-    /// injects the component style sheet's name into the keys
-    /// of the stylesheet and returns as a plain `HtmlStyleSheet`.
+    /// Returns the component's wrapper class name (without the leading `.`).
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    /// Lowers internal class selectors into fully-qualified **descendant**
+    /// selectors scoped under the component's wrapper class.
     ///
-    /// Example:
-    /// - if the component style sheet has a name of `simple-table`
-    /// - and the style sheet has a configuration of: `{ "color": "red" }`
-    /// - running this command will return an HtmlStyleSheet with a
-    ///   configuration of `{ "simple-table color": "red" }
+    /// ## Example
     ///
-    /// This provides namespacing support for the default styles of
+    /// Given:
+    /// - component name `"simple-table"`,
+    /// - an entry mapping the internal class `"col-string"` to a
+    ///   `Stylesheet` of `{ text-align: left; }`,
     ///
+    /// this returns an [`HtmlStyleSheet`] containing:
+    ///
+    /// ```css
+    /// .simple-table .col-string { text-align: left; }
+    /// ```
+    ///
+    /// The original (unscoped) entries are not retained in the output; only
+    /// the scoped selectors. Order is preserved.
     pub fn as_stylesheet(&self) -> HtmlStyleSheet {
         todo!()
     }
@@ -108,14 +147,42 @@ impl BrowserFragment {
         self.dependency_links.push(link);
         self
     }
+
+    /// Renders the fragment as HTML
+    pub fn render(self) -> String {
+        todo!()
+    }
+
+    /// **validate_render_content()**
+    ///
+    /// validates that the content that would be generated via `render()`:
+    /// 1. generate a valid HTML tag
+    /// 2. that the top level tag is a valid tag name
+    /// 3. that the top level tag has a
+    /// 4. all child fragments contain valid render content
+    pub fn validate_render_content(self) -> bool {
+        todo!()
+    }
 }
 
 /// enumerates all of the reusable code blocks which can be added to a
 /// HTML page.
-pub enum CodeFeature {}
+pub enum CodeFeature {
+    CopyToClipboard,
+    PasteFromClipboard,
+    CollapseNestedLists,
+    ExpandNestedLists,
+    ShowDialog,
+}
 
 pub struct PageOptions {
-    layout: Option<Layout>, // this is the Layout from biscuit-terminal which hasn't been moved over yet
+    /// Cross-target layout settings (margins, alignment, page bg color).
+    /// `Layout` will live in `renderable::layout` once the layout-move spec lands.
+    layout: Option<Layout>,
+    /// Page-level stylesheet that wins over component defaults at equal specificity.
     stylesheet: Option<HtmlStyleSheet>,
-    css_variables: Option<HashMap<String, Stylesheet>>, // this is the Stylesheet from darkmatter which hasn't been moved over yet
+    /// Ordered `(variable_name, value)` pairs emitted as `:root { --name: value; … }`.
+    /// `value` is a raw CSS expression string; once the stylesheet-move lands this
+    /// can tighten to a typed `CssValue`.
+    css_variables: Option<Vec<(String, String)>>,
 }
