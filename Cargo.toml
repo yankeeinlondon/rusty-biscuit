@@ -46,6 +46,7 @@ members = [
     "tree-hugger/lib",
     "biscuit-tui/cli",
     "biscuit-tui/lib",
+    "renderable",
     "unchained-ai/cli",
     "unchained-ai/gen",
     "unchained-ai/lib",
