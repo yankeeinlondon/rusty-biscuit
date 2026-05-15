@@ -1125,11 +1125,9 @@ mod tests {
             let md: Markdown = "# Heading\n\n- List item\n\n> Quoted prose\n\n```rust\nfn main() {}\n```\n\n| A | B |\n| - | - |\n| 1 | 2 |\n".into();
 
             let page_out = page.render(&md).unwrap();
-            let direct_out = crate::markdown::output::terminal::for_terminal(
-                &md,
-                TerminalOptions::default(),
-            )
-            .unwrap();
+            let direct_out =
+                crate::markdown::output::terminal::for_terminal(&md, TerminalOptions::default())
+                    .unwrap();
 
             assert_eq!(
                 page_out, direct_out,
@@ -1466,10 +1464,7 @@ mod tests {
         );
         // Confirm wrap actually occurred: the long item must span >=2 visible
         // lines so the test would fail without the active width override.
-        let content_lines = plain
-            .lines()
-            .filter(|l| !l.trim().is_empty())
-            .count();
+        let content_lines = plain.lines().filter(|l| !l.trim().is_empty()).count();
         assert!(
             content_lines >= 3,
             "expected the long item to wrap (>=3 non-empty lines incl. second item), got {}:\n{}",
@@ -1823,7 +1818,7 @@ mod tests {
         );
 
         // Find the last content line and verify padding/margin after it
-        let last_content_idx = lines.len() - 4; // 1 bottom padding + 2 bottom margin + trailing newline handling
+        let _last_content_idx = lines.len() - 4; // 1 bottom padding + 2 bottom margin + trailing newline handling
 
         // Bottom padding row
         let bottom_padding_idx = lines.len() - 3;

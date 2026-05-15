@@ -445,6 +445,7 @@ mod tests {
         super::scan_frontmatter(frontmatter, pre_interpolation_snapshot, &test_ctx())
     }
 
+    #[allow(dead_code)]
     fn execute_frontmatter_shell_expansion(
         frontmatter: &mut Frontmatter,
         options: &ComposeOptions,
