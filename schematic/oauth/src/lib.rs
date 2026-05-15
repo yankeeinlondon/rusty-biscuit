@@ -29,6 +29,6 @@ pub mod types;
 
 pub use error::OAuthError;
 pub use manager::OAuth2Manager;
-pub use prelude::*;
+
 pub use store::{FileTokenStore, MemoryTokenStore, TokenStore};
 pub use types::{AuthorizationSession, OAuth2RuntimeConfig, StoredTokens};
