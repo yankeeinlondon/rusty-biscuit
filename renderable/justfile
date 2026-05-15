@@ -1,0 +1,77 @@
+set dotenv-load := true
+set positional-arguments := true
+
+# set allow-duplicate-recipes
+
+set shell := ["bash", "-eu", "-o", "pipefail", "-c"]
+
+import "../just/lifecycle.just"
+import "../just/plan.just"
+import "../just/review.just"
+import "../just/notify.just"
+import "../just/ai.just"
+import "../just/devops.just"
+import "../just/spec.just"
+import "../just/flow.just"
+
+BOLD := '\033[1m'
+DIM := '\033[2m'
+ITALIC := '\033[3m'
+RESET := '\033[0m'
+RED := '\033[31m'
+GREEN := '\033[32m'
+YELLOW := '\033[33m'
+BLUE := '\033[34m'
+MAGENTA := '\033[35m'
+CYAN := '\033[36m'
+
+default:
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    if command -v md &> /dev/null; then
+        md just.md
+    fi
+
+    echo
+    echo -e "{{ BOLD }}Claudine ({{ RESET }}Library & CLI{{ BOLD }}){{ RESET }}"
+    echo "======================================================================================"
+    echo ""
+    just --list | grep -v 'default'
+    echo
+
+# Build the library and CLI
+build *args="":
+    @just _build renderable "Renderable" {{ args }}
+
+
+# Test both library and CLI.
+test *args="":
+    @just _test renderable {{ args }}
+
+# Lint both the library and CLI
+lint:
+    @just _lint renderable
+
+# Lint (and fix) both the library and CLI
+lint-fix:
+    @just _lint renderable || just _fix_lint renderable
+
+# Validate the source code without doing a full build
+check:
+    @cargo check -p renderable
+
+
+# the directory structure of both CLI and Library
+structure:
+    @echo
+    @echo "{{BOLD}}{{GREEN}}Renderable{{RESET}}"
+    @echo
+    @just _structure renderable
+    @echo
+
+# No-op recipe: reference color vars so linters won't report them as unused.
+
+# Run `just _colors` if you want to exercise this (it does nothing).
+_colors:
+    @: {{ BOLD }} {{ ITALIC }} {{ RESET }} {{ BLACK }} {{ RED }} {{ GREEN }} {{ YELLOW }} {{ BLUE }} {{ MAGENTA }} {{ CYAN }} {{ WHITE }} {{ DIM }} >/dev/null || true

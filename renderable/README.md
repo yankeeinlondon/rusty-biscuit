@@ -18,3 +18,5 @@
     1. `AstRenderable`
 
     > **Note:** the `TerminalRenderable` trait is defined in the `biscuit-terminal` library
+
+## Browser Utilities
