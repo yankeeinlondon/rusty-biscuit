@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use crate::{
     browser::{
-        PageOptions, PageOptionsError,
+        PageOptions, RelativeAssetPath,
         feature::PageFeature,
         fragment::{BrowserFragment, ComposableNode, Ready},
     },
@@ -48,9 +48,9 @@ pub struct HtmlPage {
     /// means the page emits only semantic-token defaults.
     css_variables: Option<Vec<(String, String)>>,
     /// Inline-vs-external CSS choice. `Some(path)` → external `<link>`.
-    external_stylesheet: Option<std::path::PathBuf>,
+    external_stylesheet: Option<RelativeAssetPath>,
     /// Inline-vs-external JS choice. `Some(path)` → external `<script src>`.
-    external_code: Option<std::path::PathBuf>,
+    external_code: Option<RelativeAssetPath>,
 }
 
 impl Default for HtmlPage {
@@ -126,28 +126,11 @@ impl HtmlPage {
     /// Apply a [`PageOptions`] to this page in place.
     ///
     /// Replaces the stylesheet when one is supplied, merges CSS-variable
-    /// overrides, and records the inline-vs-external asset choices.
-    ///
-    /// ## Errors
-    ///
-    /// Returns [`PageOptionsError::AbsoluteAssetPath`] when
-    /// `external_stylesheet` or `external_code` is an absolute path —
-    /// external asset paths must be relative for portable output. On
-    /// error the page is left unmodified.
-    pub fn apply_page_options(
-        &mut self,
-        options: PageOptions,
-    ) -> Result<&mut HtmlPage, PageOptionsError> {
-        if let Some(path) = &options.external_stylesheet
-            && path.is_absolute()
-        {
-            return Err(PageOptionsError::AbsoluteAssetPath(path.clone()));
-        }
-        if let Some(path) = &options.external_code
-            && path.is_absolute()
-        {
-            return Err(PageOptionsError::AbsoluteAssetPath(path.clone()));
-        }
+    /// overrides, and records the inline-vs-external asset choices. This
+    /// is infallible: external asset paths are validated when the
+    /// [`RelativeAssetPath`] is constructed, so by the time `PageOptions`
+    /// reaches this method nothing can be rejected.
+    pub fn apply_page_options(&mut self, options: PageOptions) -> &mut HtmlPage {
         if let Some(stylesheet) = options.stylesheet {
             self.stylesheet = stylesheet;
         }
@@ -156,7 +139,7 @@ impl HtmlPage {
         }
         self.external_stylesheet = options.external_stylesheet;
         self.external_code = options.external_code;
-        Ok(self)
+        self
     }
 
     /// Dedups the page's own `<link>` tags **and** the dependency links
@@ -304,7 +287,7 @@ impl HtmlPage {
         match &self.external_stylesheet {
             Some(path) => head.push_str(&format!(
                 r#"<link rel="stylesheet" href="{}">"#,
-                crate::browser::utils::escape_attribute(&path.display().to_string())
+                crate::browser::utils::escape_attribute(&path.as_path().display().to_string())
             )),
             None => {
                 let css = self.stylesheet();
@@ -317,7 +300,7 @@ impl HtmlPage {
         match &self.external_code {
             Some(path) => head.push_str(&format!(
                 r#"<script src="{}" defer></script>"#,
-                crate::browser::utils::escape_attribute(&path.display().to_string())
+                crate::browser::utils::escape_attribute(&path.as_path().display().to_string())
             )),
             None => {
                 let code = self.inline_code();

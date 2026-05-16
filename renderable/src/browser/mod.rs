@@ -5,7 +5,7 @@ pub mod renderable;
 
 pub use renderable::BrowserRenderable;
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use thiserror::Error;
 
@@ -89,17 +89,49 @@ pub struct PageOptions {
     /// default; names not listed keep their default.
     pub css_variables: Option<Vec<(String, String)>>,
     /// When `Some`, the page's rolled-up CSS is emitted as an external
-    /// `<link href="…">` instead of an inline `<style>`. The path is
-    /// enforced relative so the `href` stays portable.
-    pub external_stylesheet: Option<PathBuf>,
+    /// `<link href="…">` instead of an inline `<style>`. The path type
+    /// guarantees it is relative so the `href` stays portable.
+    pub external_stylesheet: Option<RelativeAssetPath>,
     /// When `Some`, the page's rolled-up JS is emitted as an external
-    /// `<script src="…">` instead of an inline `<script>`. The path is
-    /// enforced relative so the `src` stays portable.
-    pub external_code: Option<PathBuf>,
+    /// `<script src="…">` instead of an inline `<script>`. The path type
+    /// guarantees it is relative so the `src` stays portable.
+    pub external_code: Option<RelativeAssetPath>,
 }
 
-/// Error raised when a [`PageOptions`] value violates a page-assembly
-/// invariant.
+/// A filesystem path guaranteed to be relative.
+///
+/// External page assets (`<link href>`, `<script src>`) must be relative
+/// so the emitted HTML stays portable across hosting locations
+/// (decisions.md item 7). [`RelativeAssetPath::new`] is the single
+/// validation point — once a caller holds a `RelativeAssetPath`, page
+/// assembly and rendering are infallible, so [`PageOptions`] can be
+/// applied without a `Result`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RelativeAssetPath(PathBuf);
+
+impl RelativeAssetPath {
+    /// Wraps a relative path.
+    ///
+    /// ## Errors
+    ///
+    /// Returns [`PageOptionsError::AbsoluteAssetPath`] when `path` is
+    /// absolute — external asset paths must be relative.
+    pub fn new(path: impl Into<PathBuf>) -> Result<RelativeAssetPath, PageOptionsError> {
+        let path = path.into();
+        if path.is_absolute() {
+            return Err(PageOptionsError::AbsoluteAssetPath(path));
+        }
+        Ok(RelativeAssetPath(path))
+    }
+
+    /// The wrapped relative path.
+    pub fn as_path(&self) -> &Path {
+        &self.0
+    }
+}
+
+/// Error raised when constructing a [`RelativeAssetPath`] from an invalid
+/// path.
 #[derive(Debug, Error)]
 pub enum PageOptionsError {
     /// An external asset path was absolute. External `<link href>` /

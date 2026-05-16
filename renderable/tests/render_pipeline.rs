@@ -72,38 +72,34 @@ fn page_options_override_a_css_variable() {
     page.apply_page_options(PageOptions {
         css_variables: Some(vec![("color-bg".to_string(), "#000000".to_string())]),
         ..PageOptions::default()
-    })
-    .unwrap();
+    });
     assert!(page.stylesheet().contains("--color-bg: #000000;"));
 }
 
 #[test]
 fn external_stylesheet_emits_a_link_not_inline_style() {
+    use renderable::browser::RelativeAssetPath;
+
     let body = BrowserFragment::new()
         .define_as_text_fragment("content")
         .finalize();
     let mut page = HtmlPage::from(body);
     page.apply_page_options(PageOptions {
-        external_stylesheet: Some(std::path::PathBuf::from("assets/page.css")),
+        external_stylesheet: Some(RelativeAssetPath::new("assets/page.css").unwrap()),
         ..PageOptions::default()
-    })
-    .unwrap();
+    });
     let html = page.render();
     assert!(html.contains(r#"<link rel="stylesheet" href="assets/page.css">"#));
     assert!(!html.contains("<style>"));
 }
 
 #[test]
-fn apply_page_options_rejects_absolute_external_stylesheet() {
-    let body = BrowserFragment::new()
-        .define_as_text_fragment("content")
-        .finalize();
-    let mut page = HtmlPage::from(body);
-    let result = page.apply_page_options(PageOptions {
-        external_stylesheet: Some(std::path::PathBuf::from("/etc/page.css")),
-        ..PageOptions::default()
-    });
-    assert!(result.is_err());
+fn relative_asset_path_rejects_absolute_paths() {
+    use renderable::browser::RelativeAssetPath;
+
+    assert!(RelativeAssetPath::new("/etc/page.css").is_err());
+    assert!(RelativeAssetPath::new("/var/app.js").is_err());
+    assert!(RelativeAssetPath::new("assets/page.css").is_ok());
 }
 
 #[test]
@@ -240,16 +236,19 @@ fn attribute_values_are_escaped() {
 }
 
 #[test]
-fn apply_page_options_rejects_absolute_external_code() {
+fn external_code_emits_a_script_src() {
+    use renderable::browser::RelativeAssetPath;
+
     let body = BrowserFragment::new()
         .define_as_text_fragment("content")
         .finalize();
     let mut page = HtmlPage::from(body);
-    let result = page.apply_page_options(PageOptions {
-        external_code: Some(std::path::PathBuf::from("/var/app.js")),
+    page.apply_page_options(PageOptions {
+        external_code: Some(RelativeAssetPath::new("assets/app.js").unwrap()),
         ..PageOptions::default()
     });
-    assert!(result.is_err());
+    let html = page.render();
+    assert!(html.contains(r#"<script src="assets/app.js" defer></script>"#), "{html}");
 }
 
 #[test]
@@ -291,8 +290,8 @@ fn page_stylesheet_ships_palette_and_semantic_references() {
 }
 
 #[test]
-fn render_html_page_propagates_invalid_page_options() {
-    use renderable::browser::{BrowserRenderable, PageOptions};
+fn render_html_page_returns_a_page_with_options_applied() {
+    use renderable::browser::{BrowserRenderable, PageOptions, RelativeAssetPath};
     use std::any::Any;
 
     #[derive(Debug)]
@@ -306,13 +305,17 @@ fn render_html_page_propagates_invalid_page_options() {
         }
     }
 
-    assert!(Dummy.render_html_page(None).is_ok());
+    // No options: a plain page.
+    let page = Dummy.render_html_page(None);
+    assert!(page.render().contains("<p>x</p>"));
 
-    let result = Dummy.render_html_page(Some(PageOptions {
-        external_stylesheet: Some(std::path::PathBuf::from("/abs/page.css")),
+    // Valid options apply; the operation is infallible because
+    // RelativeAssetPath already guaranteed the path is relative.
+    let page = Dummy.render_html_page(Some(PageOptions {
+        external_stylesheet: Some(RelativeAssetPath::new("assets/page.css").unwrap()),
         ..PageOptions::default()
     }));
-    assert!(result.is_err());
+    assert!(page.render().contains(r#"href="assets/page.css""#));
 }
 
 #[test]
