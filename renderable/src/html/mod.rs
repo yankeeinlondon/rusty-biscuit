@@ -278,10 +278,10 @@ impl HtmlPage {
     /// this scan (decisions.md item 8B).
     fn first_h1_text(&self) -> Option<String> {
         for fragment in &self.fragments {
-            if let Some(node) = fragment.node() {
-                if let Some(text) = find_first_h1_text(node) {
-                    return Some(text);
-                }
+            if let Some(node) = fragment.node()
+                && let Some(text) = find_first_h1_text(node)
+            {
+                return Some(text);
             }
         }
         None
