@@ -2,7 +2,7 @@ use std::rc::Rc;
 
 use biscuit_terminal::components::list::UnorderedList;
 use biscuit_terminal::components::prose::Prose;
-use biscuit_terminal::components::renderable::{Renderable, RenderableContent};
+use biscuit_terminal::components::renderable::{TerminalRenderable, RenderableTerminalContent};
 use biscuit_terminal::terminal::Terminal;
 use color_eyre::eyre::{Result, eyre};
 use serde_json::{Map, Value, json};
@@ -330,16 +330,16 @@ fn render_terminal(groups: &[(Provider, Vec<ProviderModel>)], verbose: bool) {
 }
 
 fn build_provider_list(models: &[ProviderModel], verbose: bool) -> UnorderedList {
-    let mut items: Vec<RenderableContent> = Vec::with_capacity(models.len() * 2);
+    let mut items: Vec<RenderableTerminalContent> = Vec::with_capacity(models.len() * 2);
 
     for model in models {
-        items.push(RenderableContent::String(model.model_id().to_string()));
+        items.push(RenderableTerminalContent::String(model.model_id().to_string()));
 
         if verbose
             && let Some(meta) = model.metadata()
             && let Some(children) = build_metadata_list(meta)
         {
-            items.push(RenderableContent::Component(Rc::new(children)));
+            items.push(RenderableTerminalContent::Component(Rc::new(children)));
         }
     }
 
