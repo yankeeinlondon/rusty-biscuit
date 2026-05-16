@@ -706,7 +706,7 @@ fn run_provider_wrapper_inner(
 
     if !silent_requested && !quiet_requested {
         use biscuit_terminal::components::status::{Status, StatusState, StatusTheme};
-        use biscuit_terminal::prelude::Renderable as _;
+        use biscuit_terminal::prelude::TerminalRenderable as _;
 
         let status = Status::from_prose("Starting pre-flight checks".to_string())
             .state(StatusState::Info)
@@ -951,7 +951,7 @@ fn run_provider_wrapper_inner(
 
             if let Some(ref source) = opencode_model_source {
                 use biscuit_terminal::components::status::Status;
-                use biscuit_terminal::prelude::Renderable as _;
+                use biscuit_terminal::prelude::TerminalRenderable as _;
                 let status = Status::from_prose(source.status_markup());
                 log::message(&status.render(&term));
             }
@@ -1101,7 +1101,7 @@ fn run_provider_wrapper_inner(
 
     if !silent_requested && !quiet_requested {
         use biscuit_terminal::components::status::{Status, StatusState, StatusTheme};
-        use biscuit_terminal::prelude::Renderable as _;
+        use biscuit_terminal::prelude::TerminalRenderable as _;
 
         let status = Status::from_prose("Pre-flight checks have passed".to_string())
             .state(StatusState::Success)

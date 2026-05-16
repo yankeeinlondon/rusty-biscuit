@@ -10,7 +10,7 @@ pub(crate) use switches::{style_cli_switches, truncate_args};
 
 use biscuit_terminal::components::list::UnorderedList;
 use biscuit_terminal::components::prose::Prose;
-use biscuit_terminal::components::renderable::{Renderable, RenderableContent};
+use biscuit_terminal::components::renderable::{TerminalRenderable, RenderableTerminalContent};
 use biscuit_terminal::components::status::{Status, StatusState, StatusTheme};
 use biscuit_terminal::discovery::eval::strip_ansi_codes;
 use biscuit_terminal::terminal::Terminal;
@@ -264,28 +264,28 @@ pub(crate) fn log_wrapper_env_details(
     {
         log::message(&Prose::new("<bold>Environment Variables:</bold>").render(term));
 
-        let mut items: Vec<RenderableContent> = Vec::new();
+        let mut items: Vec<RenderableTerminalContent> = Vec::new();
         for removed in &env_plan.removed {
-            items.push(RenderableContent::from(Prose::new(format!(
+            items.push(RenderableTerminalContent::from(Prose::new(format!(
                 "<red><strikethrough>{removed}</strikethrough></red>"
             ))));
         }
 
         for included in &env_plan.included {
-            items.push(RenderableContent::from(Prose::new(format!(
+            items.push(RenderableTerminalContent::from(Prose::new(format!(
                 "<orange>{included}</orange>"
             ))));
         }
 
         for (key, value) in &env_plan.added {
-            items.push(RenderableContent::from(Prose::new(format!(
+            items.push(RenderableTerminalContent::from(Prose::new(format!(
                 "<green>{key}</green><dim>={}</dim>",
                 summarize_value(key, value)
             ))));
         }
 
         if items.is_empty() {
-            items.push(RenderableContent::from(Prose::new(
+            items.push(RenderableTerminalContent::from(Prose::new(
                 "<dim>no environment changes</dim>",
             )));
         }
@@ -343,24 +343,24 @@ pub(crate) fn log_dry_run(
 
     // Environment changes
     log::message(&Prose::new("<bold>Environment Changes:</bold>").render(term));
-    let mut items: Vec<RenderableContent> = Vec::new();
+    let mut items: Vec<RenderableTerminalContent> = Vec::new();
     for removed in &env_plan.removed {
-        items.push(RenderableContent::from(Prose::new(format!(
+        items.push(RenderableTerminalContent::from(Prose::new(format!(
             "<red><strikethrough>{removed}</strikethrough></red>"
         ))));
     }
     for included in &env_plan.included {
-        items.push(RenderableContent::from(Prose::new(format!(
+        items.push(RenderableTerminalContent::from(Prose::new(format!(
             "<orange>{included}</orange>"
         ))));
     }
     for (key, value) in &env_plan.added {
-        items.push(RenderableContent::from(Prose::new(format!(
+        items.push(RenderableTerminalContent::from(Prose::new(format!(
             "<green>{key}</green><dim>={value}</dim>"
         ))));
     }
     if items.is_empty() {
-        items.push(RenderableContent::from(Prose::new(
+        items.push(RenderableTerminalContent::from(Prose::new(
             "<dim>no environment changes</dim>",
         )));
     }
@@ -373,9 +373,9 @@ pub(crate) fn log_dry_run(
 
     if let Some(lines) = sp_lines {
         log::message(&Prose::new("<bold>System prompt:</bold>").render(term));
-        let items: Vec<RenderableContent> = lines
+        let items: Vec<RenderableTerminalContent> = lines
             .iter()
-            .map(|l| RenderableContent::from(Prose::new(format!("<dim>{l}</dim>"))))
+            .map(|l| RenderableTerminalContent::from(Prose::new(format!("<dim>{l}</dim>"))))
             .collect();
         let rendered = UnorderedList::from(items).with_bullet("• ").render(term);
         log::message(&rendered);
@@ -443,69 +443,69 @@ pub(crate) fn removed_env_info_message(removed_env: &[String], term: &Terminal) 
 fn log_mcp_runtime(term: &Terminal, mcp_runtime: &McpRuntimeInfo) {
     log::message(&Prose::new("<bold>MCP:</bold>").render(term));
 
-    let mut items: Vec<RenderableContent> = Vec::new();
+    let mut items: Vec<RenderableTerminalContent> = Vec::new();
     if mcp_runtime.servers.is_empty() {
-        items.push(RenderableContent::from(Prose::new(
+        items.push(RenderableTerminalContent::from(Prose::new(
             "<dim>no active MCP servers</dim>",
         )));
     } else {
-        items.push(RenderableContent::from(Prose::new(format!(
+        items.push(RenderableTerminalContent::from(Prose::new(format!(
             "<green>servers</green><dim>={}</dim>",
             mcp_runtime.servers.join(", ")
         ))));
     }
 
     if !mcp_runtime.default_servers.is_empty() {
-        items.push(RenderableContent::from(Prose::new(format!(
+        items.push(RenderableTerminalContent::from(Prose::new(format!(
             "<green>defaults</green><dim>={}</dim>",
             mcp_runtime.default_servers.join(", ")
         ))));
     }
     if !mcp_runtime.explicit_servers.is_empty() {
-        items.push(RenderableContent::from(Prose::new(format!(
+        items.push(RenderableTerminalContent::from(Prose::new(format!(
             "<green>use</green><dim>={}</dim>",
             mcp_runtime.explicit_servers.join(", ")
         ))));
     }
     if !mcp_runtime.tag_servers.is_empty() {
-        items.push(RenderableContent::from(Prose::new(format!(
+        items.push(RenderableTerminalContent::from(Prose::new(format!(
             "<green>tag_servers</green><dim>={}</dim>",
             mcp_runtime.tag_servers.join(", ")
         ))));
     }
 
     if !mcp_runtime.resolved_tags.is_empty() {
-        items.push(RenderableContent::from(Prose::new(format!(
+        items.push(RenderableTerminalContent::from(Prose::new(format!(
             "<green>tags</green><dim>={}</dim>",
             mcp_runtime.resolved_tags.join(", ")
         ))));
     }
     if !mcp_runtime.missing_tags.is_empty() {
-        items.push(RenderableContent::from(Prose::new(format!(
+        items.push(RenderableTerminalContent::from(Prose::new(format!(
             "<orange>missing_tags</orange><dim>={}</dim>",
             mcp_runtime.missing_tags.join(", ")
         ))));
     }
     if !mcp_runtime.ambiguous_tags.is_empty() {
-        items.push(RenderableContent::from(Prose::new(format!(
+        items.push(RenderableTerminalContent::from(Prose::new(format!(
             "<orange>ambiguous_tags</orange><dim>={}</dim>",
             mcp_runtime.ambiguous_tags.join(", ")
         ))));
     }
     if let Some(cleaned_prompt) = &mcp_runtime.cleaned_prompt {
-        items.push(RenderableContent::from(Prose::new(format!(
+        items.push(RenderableTerminalContent::from(Prose::new(format!(
             "<green>cleaned_prompt</green><dim>={}</dim>",
             shell_escape(cleaned_prompt)
         ))));
     }
     if !mcp_runtime.env_vars_set.is_empty() {
-        items.push(RenderableContent::from(Prose::new(format!(
+        items.push(RenderableTerminalContent::from(Prose::new(format!(
             "<green>env</green><dim>={}</dim>",
             mcp_runtime.env_vars_set.join(", ")
         ))));
     }
     if !mcp_runtime.extra_args.is_empty() {
-        items.push(RenderableContent::from(Prose::new(format!(
+        items.push(RenderableTerminalContent::from(Prose::new(format!(
             "<green>extra_args</green><dim>={}</dim>",
             mcp_runtime
                 .extra_args
@@ -516,7 +516,7 @@ fn log_mcp_runtime(term: &Terminal, mcp_runtime: &McpRuntimeInfo) {
         ))));
     }
     if !mcp_runtime.temp_files.is_empty() {
-        items.push(RenderableContent::from(Prose::new(format!(
+        items.push(RenderableTerminalContent::from(Prose::new(format!(
             "<green>files</green><dim>={}</dim>",
             mcp_runtime
                 .temp_files

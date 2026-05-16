@@ -1,4 +1,4 @@
-use biscuit_terminal::components::renderable::Renderable;
+use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::components::table::table::{Table, TableColumn};
 use biscuit_terminal::utils::layout::Margin;
 

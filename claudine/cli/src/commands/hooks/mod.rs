@@ -2,7 +2,7 @@ use clap::Args;
 use color_eyre::eyre::Result;
 
 use biscuit_terminal::components::prose::Prose;
-use biscuit_terminal::components::renderable::Renderable;
+use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::components::table::table::TableColumn;
 use biscuit_terminal::utils::layout::WordWrap;
 use claudine::config::claudine_config::ClaudineConfig;

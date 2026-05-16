@@ -17,7 +17,7 @@ use tracing::{Span, info_span};
 
 use std::sync::Mutex;
 
-use biscuit_terminal::components::renderable::Renderable;
+use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::components::status::{Status, StatusState};
 
 use super::super::section::SectionTracker;

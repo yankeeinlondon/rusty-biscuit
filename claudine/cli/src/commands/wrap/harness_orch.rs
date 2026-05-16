@@ -426,7 +426,7 @@ pub(crate) fn execute_harness_attempt(
     // exist in the structured-stream path. Capture and passthrough attempts
     // drop the value with a warning rather than silently ignoring it.
     let launch = if !use_structured && launch.timeout_config.step_timeout.is_some() {
-        use biscuit_terminal::components::renderable::Renderable;
+        use biscuit_terminal::components::renderable::TerminalRenderable;
         use biscuit_terminal::components::status::{Status, StatusState};
         let rendered = Status::new(
             "step_timeout is only enforced in structured-stream mode; \

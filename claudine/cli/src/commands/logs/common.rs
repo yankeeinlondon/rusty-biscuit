@@ -1,6 +1,6 @@
 use biscuit_terminal::components::list::UnorderedList;
 use biscuit_terminal::components::prose::Prose;
-use biscuit_terminal::components::renderable::{Renderable, RenderableContent};
+use biscuit_terminal::components::renderable::{TerminalRenderable, RenderableTerminalContent};
 use biscuit_terminal::terminal::Terminal;
 use claudine::provider::Provider;
 use claudine::reporting::{LabeledCount, ProviderSplit, UsageTotals};
@@ -97,7 +97,7 @@ pub(super) fn render_repo_entry(repo: &str, compact: bool) -> String {
 }
 
 pub(super) fn render_error_hint(term: &Terminal, window: &str) {
-    let list = UnorderedList::from(vec![RenderableContent::from(Prose::new(
+    let list = UnorderedList::from(vec![RenderableTerminalContent::from(Prose::new(
         error_hint_markup(window),
     ))])
     .with_bullet("  ");

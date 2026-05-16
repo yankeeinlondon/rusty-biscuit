@@ -4,7 +4,7 @@
 //! styled [`BlockQuote`] construction for system and user prompts.
 
 use biscuit_terminal::components::block_quote::BlockQuote;
-use biscuit_terminal::components::renderable::Renderable;
+use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::terminal::Terminal;
 use biscuit_terminal::utils::color::{Color, Tailwind};
 use biscuit_terminal::utils::layout::Margin;
@@ -158,7 +158,7 @@ pub fn collapse_blank_lines(text: &str, max_consecutive: usize) -> String {
 /// ## Examples
 ///
 /// ```
-/// use biscuit_terminal::components::renderable::Renderable;
+/// use biscuit_terminal::components::renderable::TerminalRenderable;
 /// use biscuit_terminal::terminal::Terminal;
 /// use claudine::prompt_reporting::create_system_prompt_blockquote;
 ///
@@ -182,7 +182,7 @@ pub fn create_system_prompt_blockquote(content: &str, term: &Terminal) -> BlockQ
 /// ## Examples
 ///
 /// ```
-/// use biscuit_terminal::components::renderable::Renderable;
+/// use biscuit_terminal::components::renderable::TerminalRenderable;
 /// use claudine::prompt_reporting::system_prompt_blockquote_styled;
 ///
 /// let quote = system_prompt_blockquote_styled("pre-rendered content");
@@ -215,7 +215,7 @@ fn style_system_prompt_blockquote(mut quote: BlockQuote) -> BlockQuote {
 /// ## Examples
 ///
 /// ```
-/// use biscuit_terminal::components::renderable::Renderable;
+/// use biscuit_terminal::components::renderable::TerminalRenderable;
 /// use biscuit_terminal::terminal::Terminal;
 /// use claudine::prompt_reporting::create_user_prompt_blockquote;
 ///
@@ -238,7 +238,7 @@ pub fn create_user_prompt_blockquote(content: &str, term: &Terminal) -> BlockQuo
 #[cfg(test)]
 mod tests {
     use super::*;
-    use biscuit_terminal::components::renderable::Renderable;
+    use biscuit_terminal::components::renderable::TerminalRenderable;
 
     // --- collapse_blank_lines tests ---
 

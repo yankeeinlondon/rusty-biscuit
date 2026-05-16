@@ -336,7 +336,7 @@ fn run_compose_inner(
     // existing execution header's detail rules — which include emitting
     // the brief one-liner — so the banner appears under `--quiet`.
     if !shared.silent {
-        use biscuit_terminal::components::renderable::Renderable;
+        use biscuit_terminal::components::renderable::TerminalRenderable;
         use biscuit_terminal::components::status::Status;
         let term = crate::log::terminal();
         let status = Status::from_prose(format!("→ Composing {file}…"));
@@ -634,7 +634,7 @@ fn run_inline_compose_inner(
     // existing execution header's detail rules — which include emitting
     // the brief one-liner — so the banner appears under `--quiet`.
     if !shared.silent {
-        use biscuit_terminal::components::renderable::Renderable;
+        use biscuit_terminal::components::renderable::TerminalRenderable;
         use biscuit_terminal::components::status::Status;
         let term = crate::log::terminal();
         let status = Status::from_prose(format!("→ Composing {file}…"));
@@ -1184,7 +1184,7 @@ pub(crate) fn install_user_interrupt_guard(prompt_argv: &str) -> UserInterruptGu
 /// canonicalisation fails (path doesn't exist yet, permission denied,
 /// etc.) we fall back to a plain (non-hyperlinked) prose line.
 fn format_user_interrupt_message(prompt_argv: &str) -> String {
-    use biscuit_terminal::components::renderable::Renderable;
+    use biscuit_terminal::components::renderable::TerminalRenderable;
     use biscuit_terminal::components::status::{Status, StatusState};
 
     let absolute = std::env::current_dir()

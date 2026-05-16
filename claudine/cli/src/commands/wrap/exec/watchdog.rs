@@ -5,7 +5,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use biscuit_terminal::components::prose::Prose;
-use biscuit_terminal::components::renderable::Renderable;
+use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::components::status::{Status, StatusState};
 use biscuit_terminal::terminal::Terminal;
 use claudine::stream::progress::LiveMetrics;
@@ -723,7 +723,7 @@ pub(crate) fn render_watchdog_error_to_stream(
     stream_output: &StreamOutput,
 ) {
     use biscuit_terminal::components::prose::Prose;
-    use biscuit_terminal::components::renderable::Renderable;
+    use biscuit_terminal::components::renderable::TerminalRenderable;
     use biscuit_terminal::components::status::StatusState;
     use biscuit_terminal::prelude::StatusBlock;
     use biscuit_terminal::utils::color::{Color, Tailwind};

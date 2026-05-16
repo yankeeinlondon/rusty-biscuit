@@ -7,7 +7,7 @@ use biscuit_terminal::components::compose::Compose;
 use biscuit_terminal::components::filesystem::FileSystem;
 use biscuit_terminal::components::list::UnorderedList;
 use biscuit_terminal::components::prose::Prose;
-use biscuit_terminal::components::renderable::Renderable;
+use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::terminal::Terminal;
 use biscuit_terminal::utils::layout::{Layout, Margin, WordWrap};
 use claudine::badges;

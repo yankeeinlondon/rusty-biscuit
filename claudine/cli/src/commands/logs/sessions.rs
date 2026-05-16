@@ -1,5 +1,5 @@
 use biscuit_terminal::components::prose::Prose;
-use biscuit_terminal::components::renderable::Renderable;
+use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::components::table::table::TableColumn;
 use biscuit_terminal::utils::layout::{Alignment, WordWrap};
 use claudine::reporting::{SessionDetailReport, SessionsReport};
