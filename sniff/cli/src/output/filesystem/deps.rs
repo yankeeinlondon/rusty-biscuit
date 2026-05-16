@@ -9,7 +9,7 @@ use biscuit_terminal::components::graph_expression::{
 };
 use biscuit_terminal::components::list::UnorderedList;
 use biscuit_terminal::components::prose::Prose;
-use biscuit_terminal::components::renderable::{BrowserRenderable, Renderable, RenderableContent};
+use biscuit_terminal::components::renderable::{BrowserRenderable, TerminalRenderable, RenderableTerminalContent};
 use biscuit_terminal::components::terminal_image::{ImageWidth, parse_width_spec};
 use biscuit_terminal::terminal::Terminal;
 use sniff::filesystem::repo::Package;
@@ -385,10 +385,10 @@ pub fn render_repo_deps_text(
     let term = Terminal::default();
     writeln!(out, "\n{}\n", Prose::new(&title).render(&term)).unwrap();
 
-    let mut outer_items: Vec<RenderableContent> = Vec::new();
+    let mut outer_items: Vec<RenderableTerminalContent> = Vec::new();
     for pkg in &relevant {
         let label = Prose::new(format!("<b><blue>{}</blue></b>", pkg.name)).render(&term);
-        outer_items.push(RenderableContent::String(label));
+        outer_items.push(RenderableTerminalContent::String(label));
 
         let mut detail_items: Vec<String> = Vec::new();
         if !pkg.depends_on.is_empty() {
@@ -405,7 +405,7 @@ pub fn render_repo_deps_text(
 
         if !detail_items.is_empty() {
             let detail_list = UnorderedList::new(detail_items).with_bullet("  ");
-            outer_items.push(RenderableContent::Component(Rc::new(detail_list)));
+            outer_items.push(RenderableTerminalContent::Component(Rc::new(detail_list)));
         }
     }
 

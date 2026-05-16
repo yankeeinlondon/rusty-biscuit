@@ -4,8 +4,8 @@ use std::rc::Rc;
 use biscuit_terminal::components::list::UnorderedList;
 use biscuit_terminal::components::pad::PadRight;
 use biscuit_terminal::components::prose::Prose;
-use biscuit_terminal::components::renderable::Renderable;
-use biscuit_terminal::components::renderable::RenderableContent;
+use biscuit_terminal::components::renderable::TerminalRenderable;
+use biscuit_terminal::components::renderable::RenderableTerminalContent;
 use biscuit_terminal::terminal::Terminal;
 use sniff::filesystem::JustfileInfo;
 
@@ -216,7 +216,7 @@ fn render_grouped_by_hash(
         );
 
         // Add the group label as a Prose component so markup is rendered
-        outer_list.add(RenderableContent::Component(Rc::new(Prose::new(
+        outer_list.add(RenderableTerminalContent::Component(Rc::new(Prose::new(
             group_label,
         ))));
 
@@ -225,7 +225,7 @@ fn render_grouped_by_hash(
         for jf in members {
             inner_list.add(render_justfile_item_inner(jf, verbose, false, term));
         }
-        outer_list.add(RenderableContent::Component(Rc::new(inner_list)));
+        outer_list.add(RenderableTerminalContent::Component(Rc::new(inner_list)));
     }
 
     out.push_str(&outer_list.render(term));

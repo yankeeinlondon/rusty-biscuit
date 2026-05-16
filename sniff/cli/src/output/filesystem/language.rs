@@ -3,7 +3,7 @@ use std::path::Path;
 
 use biscuit_terminal::components::list::UnorderedList;
 use biscuit_terminal::components::prose::Prose;
-use biscuit_terminal::components::renderable::{Renderable, RenderableContent};
+use biscuit_terminal::components::renderable::{TerminalRenderable, RenderableTerminalContent};
 use biscuit_terminal::terminal::Terminal;
 use sniff::filesystem::FrameworkStats;
 use sniff::filesystem::repo::{Package, RepoInfo};
@@ -228,12 +228,12 @@ pub fn render_language_section(
             .render(&term);
             writeln!(out, "{}", header).unwrap();
 
-            let mut items: Vec<RenderableContent> = Vec::new();
+            let mut items: Vec<RenderableTerminalContent> = Vec::new();
             for pkg in packages {
                 let title = Prose::new(format!("<b>{}</b>", pkg.name)).render(&term);
                 let body = render_language_table_for_package(pkg, verbose, &term);
-                items.push(RenderableContent::String(title));
-                items.push(RenderableContent::String(body));
+                items.push(RenderableTerminalContent::String(title));
+                items.push(RenderableTerminalContent::String(body));
             }
 
             let list = UnorderedList::from(items).with_indent_children(Some(4));
@@ -256,12 +256,12 @@ pub fn render_language_section(
             .render(&term);
             writeln!(out, "{}", header).unwrap();
 
-            let mut items: Vec<RenderableContent> = Vec::new();
+            let mut items: Vec<RenderableTerminalContent> = Vec::new();
             for pkg in &area_packages {
                 let title = Prose::new(format!("<b>{}</b>", pkg.name)).render(&term);
                 let body = render_language_table_for_package(pkg, verbose, &term);
-                items.push(RenderableContent::String(title));
-                items.push(RenderableContent::String(body));
+                items.push(RenderableTerminalContent::String(title));
+                items.push(RenderableTerminalContent::String(body));
             }
 
             let list = UnorderedList::from(items).with_indent_children(Some(4));
@@ -280,7 +280,7 @@ pub fn render_language_section(
             writeln!(out, "{}", header).unwrap();
 
             let body = render_language_table_for_package(pkg, verbose, &term);
-            let items = vec![RenderableContent::String(body)];
+            let items = vec![RenderableTerminalContent::String(body)];
             let list = UnorderedList::from(items).with_indent_children(Some(4));
             write!(out, "{}", list.render(&term)).unwrap();
         }
@@ -315,7 +315,7 @@ pub fn render_language_section(
                     primary
                 ))
                 .render(&term);
-                let items = vec![RenderableContent::String(line)];
+                let items = vec![RenderableTerminalContent::String(line)];
                 let list = UnorderedList::from(items).with_indent_children(Some(4));
                 write!(out, "{}", list.render(&term)).unwrap();
             }

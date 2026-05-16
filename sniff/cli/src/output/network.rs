@@ -5,7 +5,7 @@ use biscuit_terminal::{
         compose::Compose,
         list::UnorderedList,
         prose::Prose,
-        renderable::{Renderable, RenderableContent},
+        renderable::{TerminalRenderable, RenderableTerminalContent},
     },
     terminal::Terminal,
     utils::layout::Margin,
@@ -161,7 +161,7 @@ fn build_interface_blocks(network: &sniff::NetworkInfo, verbose: u8) -> Vec<Unor
         .collect()
 }
 
-fn indented_line(content: String) -> RenderableContent {
+fn indented_line(content: String) -> RenderableTerminalContent {
     Prose::new(content)
         .with_left_margin(Margin::Chars(2))
         .into()

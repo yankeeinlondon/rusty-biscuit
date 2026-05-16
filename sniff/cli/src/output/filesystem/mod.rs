@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 
 use biscuit_terminal::components::list::UnorderedList;
 use biscuit_terminal::components::prose::Prose;
-use biscuit_terminal::components::renderable::{Renderable, RenderableContent};
+use biscuit_terminal::components::renderable::{TerminalRenderable, RenderableTerminalContent};
 use biscuit_terminal::terminal::Terminal;
 use sniff::filesystem::git::{ConventionalCommit, FileAction, FileStatus, RefKind};
 use sniff::filesystem::repo::Package;
@@ -622,7 +622,7 @@ pub fn render_git_section(
 
     // --- Local ---
     if let Some(ref current) = git.current_branch {
-        let local_header: RenderableContent = Prose::new("<b>Local:</b>").into();
+        let local_header: RenderableTerminalContent = Prose::new("<b>Local:</b>").into();
         if verbose > 0 {
             // Verbose: nested list with current branch + other branches
             let mut local_list = UnorderedList::empty();
@@ -654,7 +654,7 @@ pub fn render_git_section(
                 )));
             }
 
-            let branches_header: RenderableContent = Prose::new("<b>Branches:</b>").into();
+            let branches_header: RenderableTerminalContent = Prose::new("<b>Branches:</b>").into();
             let mut local_wrapper = UnorderedList::empty();
             local_wrapper.add(branches_header);
             local_wrapper.add(local_list);
@@ -696,7 +696,7 @@ pub fn render_git_section(
 
     // --- Remotes ---
     if !git.tracking.is_empty() || !git.remotes.is_empty() {
-        let remotes_header: RenderableContent = Prose::new("<b>Remotes:</b>").into();
+        let remotes_header: RenderableTerminalContent = Prose::new("<b>Remotes:</b>").into();
         let mut remotes_list = UnorderedList::empty();
 
         for remote in &git.remotes {
@@ -770,7 +770,7 @@ pub fn render_git_section(
 
     // --- Config ---
     if git.config.user_name.is_some() {
-        let config_header: RenderableContent = Prose::new("<b>Config:</b>").into();
+        let config_header: RenderableTerminalContent = Prose::new("<b>Config:</b>").into();
         let mut config_list = UnorderedList::empty();
 
         if let Some(ref name) = git.config.user_name {
@@ -788,7 +788,7 @@ pub fn render_git_section(
 
         // Crypto subsection (verbose only)
         if verbose > 0 {
-            let crypto_header: RenderableContent = Prose::new("<b>Crypto</b>").into();
+            let crypto_header: RenderableTerminalContent = Prose::new("<b>Crypto</b>").into();
             let mut crypto_list = UnorderedList::empty();
 
             let agent = git

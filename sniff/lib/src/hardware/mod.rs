@@ -439,7 +439,8 @@ mod tests {
         let info = detect_hardware_with_request(&gpu_only).unwrap();
         assert!(info.cpu.logical_cores == 0);
         assert!(info.memory.total_bytes == 0);
-        assert!(!info.gpu.is_empty() || true);
+        // GPU presence is environment-dependent (absent on headless CI), so it
+        // is intentionally not asserted here.
     }
 
     #[test]
