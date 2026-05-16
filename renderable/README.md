@@ -199,7 +199,3 @@ let page = component.render_html_page(Some(PageOptions {
 
 let html = page.render();
 ```
-
-## Dependencies
-
-This crate is part of the `rusty-biscuit` monorepo. It has no dependencies on `biscuit-terminal` or `darkmatter` — those crates depend on it.
