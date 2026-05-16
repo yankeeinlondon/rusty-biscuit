@@ -39,11 +39,13 @@
 //!   - [`discovery::eval`] - Escape code analysis utilities
 //! - [`components`] - TerminalRenderable terminal components (sections, lists, tables)
 //! - [`errors`] - Public error types
+//! - [`render_tree`] - Terminal renderer for the canonical `renderable` render tree
 //! - [`utils`] - Utility functions (colors, styling, escape codes)
 
 pub mod components;
 pub mod discovery;
 pub mod errors;
 pub mod prelude;
+pub mod render_tree;
 pub mod terminal;
 pub mod utils;
