@@ -299,7 +299,7 @@ status subject="":
 _structure dir:
     @eza -lDTL 4 --icons=always --hyperlink {{ dir }}
 
-# 
+# produce documentation for a package (without dependencies included)
 _doc package open="false":
     #!/usr/bin/env bash
     set -euo pipefail
