@@ -11,8 +11,12 @@
 //! [`Diagnostic`]: crate::tree::Diagnostic
 //! [`RenderError`]: crate::tree::RenderError
 
+pub mod browser;
 pub mod markdown;
 
+pub use browser::{
+    render_browser_document, render_browser_node, BrowserRenderOptions, RawHtmlPolicy,
+};
 pub use markdown::{
     render_markdown_document, render_markdown_node, MarkdownDialect, MarkdownRenderOptions,
     MarkdownStyleOptions,

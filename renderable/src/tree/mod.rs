@@ -36,8 +36,9 @@ pub use document::{Document, DocumentMetadata, Frontmatter, FrontmatterFormat};
 pub use error::{RenderError, RenderStrictness, Rendered};
 pub use node::{ColumnAlign, HeadingDepth, HeadingDepthError, NodeKind, RenderNode};
 pub use render::{
-    render_markdown_document, render_markdown_node, MarkdownDialect, MarkdownRenderOptions,
-    MarkdownStyleOptions,
+    render_browser_document, render_browser_node, render_markdown_document, render_markdown_node,
+    BrowserRenderOptions, MarkdownDialect, MarkdownRenderOptions, MarkdownStyleOptions,
+    RawHtmlPolicy,
 };
 pub use source::{
     Provenance, SourceDescriptor, SourceId, SourceLocation, SourceRegistry, SourceSpan,
