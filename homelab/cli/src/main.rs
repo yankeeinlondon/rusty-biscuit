@@ -1,7 +1,7 @@
 //! Homelab automation CLI.
 
 use biscuit_terminal::prelude::{
-    Prose, Renderable, Table, TableCellContent, TableColumn, Terminal, UnorderedList,
+    Prose, TerminalRenderable, Table, TableCellContent, TableColumn, Terminal, UnorderedList,
 };
 use clap::{CommandFactory, Parser, Subcommand, ValueEnum};
 use clap_complete::CompleteEnv;

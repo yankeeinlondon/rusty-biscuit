@@ -49,7 +49,6 @@ impl DeviceDiscovery for EversoloDiscovery {
                 ]
                 .into_iter()
                 .collect(),
-                ..Default::default()
             })
         })
         .await;
