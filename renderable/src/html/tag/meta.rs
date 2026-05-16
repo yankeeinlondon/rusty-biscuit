@@ -1,7 +1,7 @@
 const UTF8: &str = "utf-8";
 
-/// The <meta> HTML element represents metadata that cannot be represented by other meta-related elements,
-/// such as <base>, <link>, <script>, <style>, or <title>.
+/// The `<meta>` HTML element represents metadata that cannot be represented by other meta-related elements,
+/// such as `<base>`, `<link>`, `<script>`, `<style>`, or `<title>`.
 #[derive(Default)]
 #[allow(dead_code)]
 pub struct MetaTag {

@@ -4,7 +4,7 @@
 //! independent of any single render target. A [`CssStyle`] is a list of
 //! `property: value` pairs that can be emitted as:
 //!
-//! - Plain CSS text (via [`CssStyle::to_css`] or [`Display`])
+//! - Plain CSS text (via [`CssStyle::to_css`] or [`Display`](std::fmt::Display))
 //! - Pretty-printed JSON (via [`CssStyle::to_json`])
 //! - JSON5 with unquoted keys and trailing commas (via [`CssStyle::to_json5`])
 //!

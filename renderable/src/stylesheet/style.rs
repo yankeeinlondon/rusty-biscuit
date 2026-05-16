@@ -19,9 +19,9 @@
 //!
 //! | Method                                | Output                              |
 //! |---------------------------------------|-------------------------------------|
-//! | [`to_css`](Self::to_css) / [`Display`] | Newline-joined `property: value;` declarations |
-//! | [`to_json`](Self::to_json)            | Pretty JSON object (integers preserved) |
-//! | [`to_json5`](Self::to_json5)          | JSON5 with unquoted keys + trailing commas |
+//! | [`to_css`](crate::stylesheet::CssStyle::to_css) / [`Display`] | Newline-joined `property: value;` declarations |
+//! | [`to_json`](crate::stylesheet::CssStyle::to_json)   | Pretty JSON object (integers preserved) |
+//! | [`to_json5`](crate::stylesheet::CssStyle::to_json5) | JSON5 with unquoted keys + trailing commas |
 //!
 //! ## Examples
 //!
@@ -89,9 +89,11 @@ impl CssStyle {
     /// `self` for chaining.
     ///
     /// The signature is constrained by [`CssTypedProperty`]: each typed
-    /// property subset (e.g. [`CssSizingProp`], [`CssColorProp`]) only
+    /// property subset (e.g. [`CssSizingProp`](crate::stylesheet::CssSizingProp),
+    /// [`CssColorProp`](crate::stylesheet::CssColorProp)) only
     /// accepts its matching value type. Trying to pair, say, a
-    /// [`CssSizingProp`] with a [`CssColor`] is a compile-time error.
+    /// [`CssSizingProp`](crate::stylesheet::CssSizingProp) with a [`CssColor`]
+    /// is a compile-time error.
     ///
     /// If a declaration for the same [`CssProp`] already exists, its value is
     /// updated in place (insertion order is preserved). New properties are

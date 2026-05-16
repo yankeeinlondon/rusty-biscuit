@@ -1,6 +1,7 @@
 //! CSS value types for the stylesheet subsystem.
 //!
-//! This module provides the strongly-typed value system used by [`CssStyle`].
+//! This module provides the strongly-typed value system used by
+//! [`CssStyle`](crate::stylesheet::CssStyle).
 //! Values are categorized by [`CssValueKind`] and include dimensional sizing,
 //! colors, integers, and raw CSS expressions.
 
@@ -12,8 +13,9 @@ use crate::stylesheet::error::StylesheetError;
 ///
 /// `CssValueKind` is the coarse classification used by the type system to
 /// pair properties with values. Each [`CssValue`] variant maps to exactly one
-/// kind (see [`CssValue::kind`]), and each known [`CssProp`] reports its
-/// expected kind via [`CssProp::expected_kind`].
+/// kind (see [`CssValue::kind`]), and each known
+/// [`CssProp`](crate::stylesheet::CssProp) reports its
+/// expected kind via [`CssProp::expected_kind`](crate::stylesheet::CssProp::expected_kind).
 ///
 /// The kinds are intentionally narrow — `Sizing` and `SizingMulti` are
 /// distinguished because shorthand properties (`margin`, `padding`,
@@ -796,7 +798,8 @@ impl TryFrom<String> for CssColor {
 /// Validated raw CSS value — the [`CssValueKind::Raw`] payload.
 ///
 /// Used for declarations whose value type is not structurally classified
-/// — primarily custom properties paired via [`CssCustomProp`]. The wrapper
+/// — primarily custom properties paired via
+/// [`CssCustomProp`](crate::stylesheet::CssCustomProp). The wrapper
 /// trims whitespace and rejects values containing `;` so a `CssRaw` is always
 /// safe to embed in a `property: value;` declaration without breaking
 /// downstream parsers.
@@ -865,7 +868,7 @@ impl TryFrom<String> for CssRaw {
 }
 
 /// A type-erased CSS value — the runtime representation stored inside a
-/// [`CssStyle`].
+/// [`CssStyle`](crate::stylesheet::CssStyle).
 ///
 /// Each variant carries a structurally-validated payload and maps 1:1 to a
 /// [`CssValueKind`]:
@@ -879,7 +882,8 @@ impl TryFrom<String> for CssRaw {
 /// | `Raw`           | [`CssValueKind::Raw`]             |
 ///
 /// Use the [`IntoCssValue`] trait to construct a `CssValue` from one of the
-/// strongly-typed value types; this is what [`CssStyle::add`] uses
+/// strongly-typed value types; this is what
+/// [`CssStyle::add`](crate::stylesheet::CssStyle::add) uses
 /// internally.
 #[derive(Debug, Clone, PartialEq)]
 pub enum CssValue {
@@ -899,8 +903,9 @@ impl CssValue {
     /// Returns the coarse [`CssValueKind`] for this value.
     ///
     /// Used by `ensure_valid_property_value_pair` and the debug check in
-    /// [`CssStyle::add`] to verify that a value matches its property's
-    /// [`CssProp::expected_kind`].
+    /// [`CssStyle::add`](crate::stylesheet::CssStyle::add) to verify that a
+    /// value matches its property's
+    /// [`CssProp::expected_kind`](crate::stylesheet::CssProp::expected_kind).
     pub fn kind(&self) -> CssValueKind {
         match self {
             Self::Sizing(_) => CssValueKind::Sizing,
@@ -930,9 +935,11 @@ impl Display for CssValue {
 /// into the runtime [`CssValue`] enum.
 ///
 /// Implemented by every type that may appear on the right-hand side of a
-/// [`CssStyle::add`] call, plus a passthrough impl for [`CssValue`] itself.
+/// [`CssStyle::add`](crate::stylesheet::CssStyle::add) call, plus a passthrough
+/// impl for [`CssValue`] itself.
 ///
-/// This trait exists to make [`CssStyle::add`] generic without requiring
+/// This trait exists to make
+/// [`CssStyle::add`](crate::stylesheet::CssStyle::add) generic without requiring
 /// callers to manually wrap values:
 ///
 /// ```ignore

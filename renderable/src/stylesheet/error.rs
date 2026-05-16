@@ -3,7 +3,7 @@
 //! This is the unified error type for every fallible operation in the
 //! stylesheet module: parsing a stylesheet from a string, constructing a value
 //! via a `try_*` constructor, or adding a dynamic property/value pair through
-//! [`CssStyle::try_add`].
+//! [`CssStyle::try_add`](crate::stylesheet::CssStyle::try_add).
 
 use thiserror::Error;
 
@@ -14,7 +14,7 @@ use crate::stylesheet::value::CssValueKind;
 /// This is the unified error type for every fallible operation in this module:
 /// parsing a stylesheet from a string, constructing a value via a `try_*`
 /// constructor, or adding a dynamic property/value pair through
-/// [`CssStyle::try_add`].
+/// [`CssStyle::try_add`](crate::stylesheet::CssStyle::try_add).
 ///
 /// Each variant carries the offending input so callers can show the user
 /// exactly what went wrong.
@@ -52,9 +52,11 @@ pub enum StylesheetError {
 
     /// A value's type did not match the expected category for the property.
     ///
-    /// Raised by [`CssStyle::try_add`] and string parsing when, for example,
+    /// Raised by [`CssStyle::try_add`](crate::stylesheet::CssStyle::try_add)
+    /// and string parsing when, for example,
     /// a [`CssValueKind::Color`] is supplied for a property whose
-    /// [`CssProp::expected_kind`] is [`CssValueKind::Sizing`].
+    /// [`CssProp::expected_kind`](crate::stylesheet::CssProp::expected_kind) is
+    /// [`CssValueKind::Sizing`].
     #[error("property `{property}` expects `{expected}` values, but got `{actual}` from `{value}`")]
     PropertyValueTypeMismatch {
         /// CSS name of the property (e.g. `"width"`).
@@ -69,7 +71,7 @@ pub enum StylesheetError {
 
     /// A single sizing value was invalid.
     ///
-    /// Returned by [`CssSizing::try_from`] when the input is empty, contains
+    /// Returned by [`CssSizing::try_from`](crate::stylesheet::CssSizing) when the input is empty, contains
     /// `;`, has an unrecognized unit suffix, is a non-finite number, or fails
     /// the function-call shape check for `Expression` variants.
     #[error("invalid CSS sizing value `{value}`")]

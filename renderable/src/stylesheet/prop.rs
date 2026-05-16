@@ -1,6 +1,7 @@
 //! CSS property types for the stylesheet subsystem.
 //!
-//! This module provides the typed property system used by [`CssStyle`],
+//! This module provides the typed property system used by
+//! [`CssStyle`](crate::stylesheet::CssStyle),
 //! including the runtime [`CssProp`] enum and compile-time-checked subsets
 //! ([`CssSizingProp`], [`CssColorProp`], etc.) that pair with their accepted
 //! value types via the [`CssTypedProperty`] trait.
@@ -15,7 +16,7 @@ use crate::stylesheet::value::{
 /// Enumerates known CSS properties plus a custom fallback.
 ///
 /// `CssProp` is the runtime, type-erased property identifier used inside a
-/// [`CssStyle`]. Each known variant corresponds to a fixed CSS name (see
+/// [`CssStyle`](crate::stylesheet::CssStyle). Each known variant corresponds to a fixed CSS name (see
 /// [`CssProp::css_name`]) and reports its expected value category via
 /// [`CssProp::expected_kind`].
 ///
@@ -192,9 +193,9 @@ impl CssProp {
     /// are treated as [`CssValueKind::Raw`] when parsed.
     ///
     /// This drives:
-    /// - Runtime validation in [`CssStyle::try_add`] (via
+    /// - Runtime validation in [`CssStyle::try_add`](crate::stylesheet::CssStyle::try_add) (via
     ///   `ensure_valid_property_value_pair`).
-    /// - The debug-time invariant check in [`CssStyle::add`].
+    /// - The debug-time invariant check in [`CssStyle::add`](crate::stylesheet::CssStyle::add).
     /// - Property-specific parsing dispatch in `parse_value_for_prop`.
     ///
     /// ## Examples
@@ -339,9 +340,12 @@ impl CssProp {
 /// Compile-time-checked subset of [`CssProp`] for properties that accept a
 /// single [`CssSizing`] value.
 ///
-/// Use this with [`CssStyle::add`] to get static guarantees that the value
-/// type matches the property — the alternative ([`CssProp`] + [`CssValue`] via
-/// [`CssStyle::try_add`]) defers checking to runtime.
+/// Use this with [`CssStyle::add`](crate::stylesheet::CssStyle::add) to get
+/// static guarantees that the value
+/// type matches the property — the alternative ([`CssProp`] +
+/// [`CssValue`](crate::stylesheet::CssValue) via
+/// [`CssStyle::try_add`](crate::stylesheet::CssStyle::try_add)) defers checking
+/// to runtime.
 ///
 /// All variants here lower to [`CssValueKind::Sizing`]; see [`CssProp`]'s
 /// property-group table for the full list.
@@ -414,7 +418,7 @@ pub enum CssSizingProp {
 }
 
 /// Lifts a typed sizing property into the runtime [`CssProp`] enum used by
-/// [`CssStyle`] internally.
+/// [`CssStyle`](crate::stylesheet::CssStyle) internally.
 impl From<CssSizingProp> for CssProp {
     fn from(value: CssSizingProp) -> Self {
         match value {
@@ -452,7 +456,8 @@ impl From<CssSizingProp> for CssProp {
 /// Compile-time-checked subset of [`CssProp`] for shorthand sizing
 /// properties that accept 1–4 [`CssSizing`] values.
 ///
-/// Use with [`CssStyle::add`] to pair these with a [`CssSizingMulti`].
+/// Use with [`CssStyle::add`](crate::stylesheet::CssStyle::add) to pair these
+/// with a [`CssSizingMulti`].
 ///
 /// ## Examples
 ///
@@ -644,7 +649,8 @@ impl From<CssCustomProp> for CssProp {
 
 /// Pairs a typed property type with the strongly-typed value it accepts.
 ///
-/// This is the trait that makes [`CssStyle::add`] compile-time-checked: the
+/// This is the trait that makes
+/// [`CssStyle::add`](crate::stylesheet::CssStyle::add) compile-time-checked: the
 /// signature
 ///
 /// ```ignore
