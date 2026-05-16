@@ -28,11 +28,12 @@ pub struct MarkdownOptions {
 
 /// A component capable of rendering itself as Markdown output.
 ///
-/// Markdown is a superset of HTML which means strictly speaking, it can
+/// Markdown is a _superset_ of HTML which means, strictly speaking, it can
 /// contain as much inline HTML as you like but there are good reasons to
 /// keep this to a minimum:
 ///
-/// 1. Every HTML tag makes the authoring experience
+/// 1. Every HTML tag makes the authoring experience less ergonomic
+/// 2. While many renders might render a few inline elements effectively you should expect inconsistent
 pub trait MarkdownRenderable {
     /// Renders the component as a Markdown string.
     fn render_markdown(&self, style: Option<MarkdownOptions>) -> String;
