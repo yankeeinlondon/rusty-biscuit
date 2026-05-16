@@ -1,7 +1,7 @@
 //! `LinkError` variant snapshots.
 
 use darkmatter::render::link::LinkError;
-use darkmatter::render::stylesheet::StylesheetError;
+use darkmatter::render::stylesheet::{StylesheetBlockError, StylesheetError};
 
 use crate::helpers::{assert_contains_all, render, test_ctx};
 
@@ -78,7 +78,7 @@ fn invalid_style_delegates_stylesheet_block() {
     let inner = StylesheetError::InvalidInteger {
         value: "abc".into(),
     };
-    let err = LinkError::InvalidStyle(inner);
+    let err = LinkError::InvalidStyle(StylesheetBlockError(inner));
     let out = render(&err);
     assert_contains_all(&out, &["StylesheetError", "invalid integer value", "abc"]);
     insta::assert_snapshot!("invalid_style_delegates", out);

@@ -53,6 +53,9 @@ two-face = "0.5"
 # CSS parsing
 cssparser = "0.37"
 
+# Type-safe CSS stylesheet declarations (shared, render-target agnostic)
+renderable = { path = "../../renderable" }
+
 # Markdown parsing and rendering
 pulldown-cmark = "0.13"
 pulldown-cmark-to-cmark = "22"

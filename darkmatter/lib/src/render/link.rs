@@ -15,7 +15,7 @@ use biscuit_terminal::errors::SourceContext;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::render::stylesheet::{Stylesheet, StylesheetError};
+use crate::render::stylesheet::{CssStyle, StylesheetBlockError, StylesheetError};
 
 /// BEL character used by OSC 8 hyperlinks.
 const BEL: &str = "\x07";
@@ -58,7 +58,7 @@ pub enum LinkError {
 
     /// Invalid typed style declaration.
     #[error("invalid CSS style: {0}")]
-    InvalidStyle(#[from] StylesheetError),
+    InvalidStyle(StylesheetBlockError),
 
     /// Invalid target value.
     #[error("invalid link target `{value}`")]
@@ -66,6 +66,14 @@ pub enum LinkError {
         /// Received target value.
         value: String,
     },
+}
+
+/// Wraps a stylesheet parse failure so `?` propagates a [`StylesheetError`]
+/// straight into [`LinkError::InvalidStyle`].
+impl From<StylesheetError> for LinkError {
+    fn from(error: StylesheetError) -> Self {
+        Self::InvalidStyle(StylesheetBlockError(error))
+    }
 }
 
 impl biscuit_terminal::errors::BlockError for LinkError {
@@ -279,7 +287,7 @@ pub struct Link {
     display: String,
     link_to: String,
     class: Option<String>,
-    style: Option<Stylesheet>,
+    style: Option<CssStyle>,
     target: Option<LinkTarget>,
     title: Option<String>,
     prompt: Option<String>,
@@ -354,14 +362,14 @@ impl Link {
     }
 
     /// Sets typed inline stylesheet.
-    pub fn with_style(mut self, style: Stylesheet) -> Self {
+    pub fn with_style(mut self, style: CssStyle) -> Self {
         self.style = if style.is_empty() { None } else { Some(style) };
         self
     }
 
     /// Sets inline stylesheet from CSS text.
     pub fn with_style_css(mut self, style: impl Into<String>) -> Result<Self, LinkError> {
-        let parsed = Stylesheet::try_from(style.into().as_str())?;
+        let parsed = CssStyle::try_from(style.into().as_str())?;
         self.style = if parsed.is_empty() {
             None
         } else {
@@ -437,7 +445,7 @@ impl Link {
     }
 
     /// Returns typed style if set.
-    pub fn style(&self) -> Option<&Stylesheet> {
+    pub fn style(&self) -> Option<&CssStyle> {
         self.style.as_ref()
     }
 
@@ -702,7 +710,7 @@ impl Link {
         self.prompt = metadata.prompt.and_then(normalize_optional);
 
         if let Some(style) = metadata.style.and_then(normalize_optional)
-            && let Ok(parsed) = Stylesheet::try_from(style.as_str())
+            && let Ok(parsed) = CssStyle::try_from(style.as_str())
             && !parsed.is_empty()
         {
             self.style = Some(parsed);
@@ -917,7 +925,7 @@ fn parse_html_link(input: &str) -> Result<Link, LinkError> {
     }
 
     if let Some(style) = attrs.get("style")
-        && let Ok(parsed) = Stylesheet::try_from(style.as_str())
+        && let Ok(parsed) = CssStyle::try_from(style.as_str())
         && !parsed.is_empty()
     {
         link.style = Some(parsed);
@@ -1330,7 +1338,7 @@ fn apply_structured_prop(link: &mut Link, key: &str, value: String) {
         "class" => link.class = normalize_optional(value),
         "style" => {
             if let Some(style) = normalize_optional(value)
-                && let Ok(parsed) = Stylesheet::try_from(style.as_str())
+                && let Ok(parsed) = CssStyle::try_from(style.as_str())
                 && !parsed.is_empty()
             {
                 link.style = Some(parsed);
@@ -1441,7 +1449,7 @@ fn parse_css_style(style: &str) -> BTreeMap<String, String> {
     result
 }
 
-fn style_inline_css(style: Option<&Stylesheet>) -> Option<String> {
+fn style_inline_css(style: Option<&CssStyle>) -> Option<String> {
     let style = style?;
     if style.is_empty() {
         return None;
@@ -1702,7 +1710,7 @@ mod tests {
 
     #[test]
     fn typed_style_is_rendered_to_html() {
-        let style = Stylesheet::new().add(CssSizingProp::TopMargin, CssSizing::px(8.0));
+        let style = CssStyle::new().add(CssSizingProp::TopMargin, CssSizing::px(8.0));
         let link = Link::new("Click", "https://example.com")
             .expect("link should build")
             .with_style(style);
@@ -1781,7 +1789,7 @@ mod tests {
     fn markdown_default_is_lossless_and_roundtrips_extended_metadata() {
         let _env = ScopedEnv::remove(LINK_METADATA_ENV);
 
-        let style = Stylesheet::new().add(CssSizingProp::TopMargin, CssSizing::px(10.0));
+        let style = CssStyle::new().add(CssSizingProp::TopMargin, CssSizing::px(10.0));
         let original = Link::new("Example", "https://example.com")
             .expect("link should build")
             .with_class("chip")
