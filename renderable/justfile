@@ -34,7 +34,7 @@ default:
     fi
 
     echo
-    echo -e "{{ BOLD }}renderable Library{{ RESET }}"
+    echo -e "{{ BOLD }}Renderable Library{{ RESET }}"
     echo "======================================================================================"
     echo ""
     just --list | grep -v 'default'
@@ -42,7 +42,7 @@ default:
 
 # Build the library and CLI
 build *args="":
-    @just _build renderable "Renderable" {{ args }}
+    @just _build renderable "Renderable Library" {{ args }}
 
 # Test both library and CLI.
 test *args="":
@@ -63,7 +63,7 @@ check:
 # the directory structure of both CLI and Library
 structure:
     @echo
-    @echo "{{ BOLD }}{{ GREEN }}Renderable{{ RESET }}"
+    @echo "{{ BOLD }}{{ GREEN }}Renderable Library{{ RESET }}"
     @echo
     @just _structure src
     @echo
