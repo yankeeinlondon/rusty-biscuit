@@ -12,6 +12,10 @@ categories = ["text-processing", "visualization"]
 [lib]
 name = "darkmatter"
 path = "src/lib.rs"
+# The crate has no `#[bench]` functions; disabling bench harness here keeps
+# `cargo bench` from running the unit-test harness (and printing a large
+# "N ignored" block) before the Criterion `[[bench]]` targets.
+bench = false
 
 [dependencies]
 # Tracing
@@ -85,4 +89,12 @@ criterion = { version = "0.5", features = ["html_reports"] }
 
 [[bench]]
 name = "schema_validation"
+harness = false
+
+[[bench]]
+name = "compose_pipeline"
+harness = false
+
+[[bench]]
+name = "render_pipeline"
 harness = false
