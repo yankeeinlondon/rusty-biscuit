@@ -10,14 +10,15 @@
 //!
 //! ## Phasing
 //!
-//! The render-tree work is staged. This module currently contains only the
+//! The render-tree work is staged. This module currently contains the
 //! verified parser-event [`inventory`] — the exhaustive, compile-checked
 //! catalog of every [`pulldown_cmark`] 0.13 [`Event`]/[`Tag`] variant and the
-//! disposition the eventual fold must apply to it. The fold itself (the
-//! `pulldown-cmark` event stream walker that builds the
-//! [`renderable::tree::Document`]) is **not** implemented here yet; it arrives
-//! in a later phase and will rely on the dispositions recorded in
-//! [`inventory`].
+//! disposition the fold must apply to it — together with the minimal
+//! Milestone 1 fold ([`fold_markdown_to_document`]), which handles the common
+//! event subset and relies on the dispositions recorded in [`inventory`].
+//! Remaining work — footnotes, custom inline styles, horizontal-rule
+//! attributes, full HTML-block refinement, and frontmatter wiring — is
+//! deferred to a later phase.
 //!
 //! [`Tag`]: pulldown_cmark::Tag
 //!
@@ -30,7 +31,16 @@
 //! parser can emit under darkmatter's chosen options, and degrade predictably
 //! for the rest. The [`inventory`] submodule pins that contract: it documents
 //! each variant's disposition and carries a compile-time exhaustive-match test
-//! that fails to build if `pulldown-cmark` ever changes its enums, forcing the
-//! inventory (and later the fold) to be re-verified.
+//! that fails to build if `pulldown-cmark` ever changes its enums.
+//!
+//! ## Fold
+//!
+//! The [`fold`] submodule implements the Milestone 1 fold itself.
+//! [`fold_markdown_to_document`] is the public entry point: it walks a
+//! `pulldown-cmark` event stream and builds a [`renderable::tree::Document`].
 
+pub mod fold;
 pub mod inventory;
+pub mod source;
+
+pub use fold::fold_markdown_to_document;
