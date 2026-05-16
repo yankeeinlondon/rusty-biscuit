@@ -1,5 +1,5 @@
-set dotenv-load := true
-set positional-arguments := true
+set dotenv-load
+set positional-arguments
 
 # set allow-duplicate-recipes
 
@@ -86,6 +86,11 @@ deps:
 
 readme:
     _readme_files claudine
+
+# produce documentation for biscuit-terminal (without dependencies)
+doc open="false":
+    @just _doc biscuit-terminal "{{ open }}"
+    @just _doc biscuit-terminal-cli "{{ open }}"
 
 # No-op recipe: reference color vars so linters won't report them as unused.
 
