@@ -180,15 +180,12 @@ impl AppleTerminalHarness {
                             .args(["-e", &check])
                             .stdout(Stdio::null())
                             .stderr(Stdio::null());
-                        if let Ok(out) = run_with_timeout(&mut check_cmd, Duration::from_secs(2)) {
-                            if out.status.success() {
-                                if let Ok(s) = std::str::from_utf8(&out.stdout) {
-                                    if s.trim() == "0" {
+                        if let Ok(out) = run_with_timeout(&mut check_cmd, Duration::from_secs(2))
+                            && out.status.success()
+                                && let Ok(s) = std::str::from_utf8(&out.stdout)
+                                    && s.trim() == "0" {
                                         break;
                                     }
-                                }
-                            }
-                        }
                     }
                 }
             }
