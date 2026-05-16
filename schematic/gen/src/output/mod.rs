@@ -1074,7 +1074,7 @@ mod tests {
                 },
                 description: format!("Endpoint {} description with enough text to add some length to the generated documentation comments", i),
                 request: if i % 5 == 0 {
-                    Some(ApiRequest::json_type(&format!("Endpoint{}Body", i)))
+                    Some(ApiRequest::json_type(format!("Endpoint{}Body", i)))
                 } else {
                     None
                 },
