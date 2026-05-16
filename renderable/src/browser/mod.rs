@@ -5,6 +5,8 @@ pub mod renderable;
 
 pub use renderable::BrowserRenderable;
 
+use std::path::PathBuf;
+
 use crate::stylesheet::Stylesheet;
 
 /// A scoped collection of CSS rulesets owned by a component.
@@ -56,13 +58,26 @@ impl ComponentStylesheet {
 }
 
 /// Caller-supplied options that shape page assembly and rendering.
-#[allow(dead_code)]
+///
+/// Per decisions.md item 6, `PageOptions` carries no `Layout`: page
+/// background, margins, and padding are expressed through the page
+/// [`Stylesheet`] (rulesets on `html` / `body`). Per item 7, the
+/// inline-vs-external asset choice lives here — `None` means inline.
+#[derive(Default)]
 pub struct PageOptions {
-    /// Page-level stylesheet that wins over component defaults at equal
-    /// specificity.
-    stylesheet: Option<Stylesheet>,
-    /// Ordered `(variable_name, value)` pairs emitted as
-    /// `:root { --name: value; … }`. Order is preserved because CSS cascade
-    /// resolves ties in source order.
-    css_variables: Option<Vec<(String, String)>>,
+    /// Page-level stylesheet. Wins over component defaults at equal
+    /// specificity. `None` leaves the page with only component styles.
+    pub stylesheet: Option<Stylesheet>,
+    /// Ordered `(variable_name, value)` overrides for the page-level
+    /// `:root` block. A name present here replaces the semantic-token
+    /// default; names not listed keep their default.
+    pub css_variables: Option<Vec<(String, String)>>,
+    /// When `Some`, the page's rolled-up CSS is emitted as an external
+    /// `<link href="…">` instead of an inline `<style>`. The path is
+    /// enforced relative so the `href` stays portable.
+    pub external_stylesheet: Option<PathBuf>,
+    /// When `Some`, the page's rolled-up JS is emitted as an external
+    /// `<script src="…">` instead of an inline `<script>`. The path is
+    /// enforced relative so the `src` stays portable.
+    pub external_code: Option<PathBuf>,
 }

@@ -83,7 +83,10 @@ pub enum ComposableNode {
     /// escaped** by the renderer — the caller owns correctness.
     RawHtml(String),
     /// A nested, fully-rendered component fragment.
-    Component(BrowserFragment<Ready>),
+    ///
+    /// Boxed because `BrowserFragment` itself stores a `ComposableNode`;
+    /// the indirection breaks the otherwise-infinite type recursion.
+    Component(Box<BrowserFragment<Ready>>),
 }
 
 // ---------------------------------------------------------------------------
@@ -248,7 +251,7 @@ impl BrowserFragment<RefineBlock> {
     /// Convenience over `add_child(ComposableNode::Component(child))` —
     /// the recursion point that lets components compose other components.
     pub fn add_component(self, child: BrowserFragment<Ready>) -> Self {
-        self.add_child(ComposableNode::Component(child))
+        self.add_child(ComposableNode::Component(Box::new(child)))
     }
 
     /// Close out the build phase. Transitions to [`Ready`].
@@ -285,6 +288,33 @@ impl BrowserFragment<Ready> {
     /// 3. all descendant fragments are themselves valid.
     pub fn validate_render_content(&self) -> bool {
         todo!()
+    }
+}
+
+impl BrowserFragment<Ready> {
+    /// The fragment's top-level composable node, if set.
+    pub fn node(&self) -> Option<&ComposableNode> {
+        self.node.as_ref()
+    }
+
+    /// The fragment's component stylesheet, if attached.
+    pub fn stylesheet(&self) -> Option<&ComponentStylesheet> {
+        self.stylesheet.as_ref()
+    }
+
+    /// The page-level features this fragment depends on.
+    pub fn features(&self) -> &[PageFeature] {
+        &self.features
+    }
+
+    /// The microdata key/value pairs this fragment contributes.
+    pub fn metadata(&self) -> &HashMap<MicrodataKey, String> {
+        &self.metadata
+    }
+
+    /// The `<link>` dependencies this fragment declares.
+    pub fn dependency_links(&self) -> &[LinkTag] {
+        &self.dependency_links
     }
 }
 
