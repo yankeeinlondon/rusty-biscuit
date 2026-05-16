@@ -61,7 +61,7 @@ pub enum RawHtmlPolicy {
 ///
 /// The [`Default`] uses [`RenderStrictness::Warn`], [`RawHtmlPolicy::Escape`]
 /// (the safe choice — see [`RawHtmlPolicy`]), and no [`PageOptions`].
-#[derive(Default)]
+#[derive(Debug, Default)]
 pub struct BrowserRenderOptions {
     /// How strictly lossy or unsupported content is treated.
     pub strictness: RenderStrictness,
@@ -69,18 +69,6 @@ pub struct BrowserRenderOptions {
     pub raw_html: RawHtmlPolicy,
     /// Optional page options applied by [`render_browser_document`].
     pub page: Option<PageOptions>,
-}
-
-// `PageOptions` is not `Debug`, so `BrowserRenderOptions` cannot derive it;
-// the `page` field is reported only as present/absent.
-impl std::fmt::Debug for BrowserRenderOptions {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("BrowserRenderOptions")
-            .field("strictness", &self.strictness)
-            .field("raw_html", &self.raw_html)
-            .field("page", &self.page.as_ref().map(|_| "PageOptions"))
-            .finish()
-    }
 }
 
 /// Renders a render tree node to a typed [`BrowserFragment<Ready>`].
@@ -147,7 +135,7 @@ pub fn render_browser_document(
     };
 
     let mut page = HtmlPage::from_fragments(fragments);
-    if let Some(page_options) = clone_page_options(&opts.page) {
+    if let Some(page_options) = opts.page.clone() {
         page.apply_page_options(page_options);
     }
     Ok(Rendered {
@@ -196,17 +184,6 @@ fn gate<'a>(
         }
     }
     Ok(writer)
-}
-
-/// `PageOptions` is not `Clone`, so this rebuilds it field by field. The
-/// `RelativeAssetPath` and `Stylesheet` fields are `Clone`.
-fn clone_page_options(page: &Option<PageOptions>) -> Option<PageOptions> {
-    page.as_ref().map(|page| PageOptions {
-        stylesheet: page.stylesheet.clone(),
-        css_variables: page.css_variables.clone(),
-        external_stylesheet: page.external_stylesheet.clone(),
-        external_code: page.external_code.clone(),
-    })
 }
 
 /// Threads render options and accumulating diagnostics through the recursion.
@@ -328,17 +305,8 @@ impl Writer<'_> {
         Ok(fragment.finalize())
     }
 
-    /// Renders a list item. A task item (`checked` is `Some`) gets a leading
-    /// disabled `<input type=checkbox>` and the `task-list-item` class.
-    ///
-    /// ## Notes
-    ///
-    /// The typed [`BlockTag`] enum has no `Li` variant, so the `<li>` wrapper
-    /// element itself is emitted as raw HTML — a documented, unavoidable
-    /// escape. The item's *children* are still rendered through the typed
-    /// pipeline (text escaping intact); only the surrounding `<li>` /
-    /// `</li>` tags and the item's own `id` / `class` attributes are
-    /// hand-serialized here.
+    /// Renders a list item as `<li>`. A task item (`checked` is `Some`) gets a
+    /// leading disabled `<input type=checkbox>` and the `task-list-item` class.
     fn render_list_item(
         &mut self,
         node: &RenderNode,
@@ -350,16 +318,17 @@ impl Writer<'_> {
             attrs.classes.push("task-list-item".to_string());
         }
 
-        let mut inner = String::new();
+        let mut fragment = BrowserFragment::new().define_as_block_tag(BlockTag::Li, "");
+        for attr in node_attributes(&attrs) {
+            fragment = fragment.add_attribute(attr);
+        }
         if let Some(checked) = checked {
-            inner.push_str(&checkbox(checked).render());
+            fragment = fragment.add_component(checkbox(checked));
         }
         for child in children {
-            inner.push_str(&self.render(child)?.render());
+            fragment = fragment.add_component(self.render(child)?);
         }
-
-        let html = format!("<li{}>{inner}</li>", attribute_string(&attrs));
-        Ok(BrowserFragment::new().define_as_raw_html(html).finalize())
+        Ok(fragment.finalize())
     }
 
     /// Renders a fenced code block as `<pre><code>`; a language is carried as
@@ -681,25 +650,6 @@ fn node_attributes(attrs: &NodeAttrs) -> Vec<HtmlAttribute> {
         out.push(HtmlAttribute::Class(ClassDefinition::new(
             attrs.classes.join(" "),
         )));
-    }
-    out
-}
-
-/// Serializes a node's `id` / `class` attributes into a leading-space
-/// `key="value"` string. Used by [`Writer::render_list_item`] for the raw
-/// `<li>` wrapper, which the typed [`BlockTag`] enum cannot express. Values
-/// are escaped with [`escape_attribute`](crate::browser::utils::escape_attribute).
-fn attribute_string(attrs: &NodeAttrs) -> String {
-    use crate::browser::utils::escape_attribute;
-    let mut out = String::new();
-    if let Some(id) = &attrs.id {
-        out.push_str(&format!(r#" id="{}""#, escape_attribute(id)));
-    }
-    if !attrs.classes.is_empty() {
-        out.push_str(&format!(
-            r#" class="{}""#,
-            escape_attribute(&attrs.classes.join(" "))
-        ));
     }
     out
 }

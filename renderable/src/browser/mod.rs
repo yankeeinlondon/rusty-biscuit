@@ -79,7 +79,7 @@ impl ComponentStylesheet {
 /// background, margins, and padding are expressed through the page
 /// [`Stylesheet`] (rulesets on `html` / `body`). Per item 7, the
 /// inline-vs-external asset choice lives here — `None` means inline.
-#[derive(Default)]
+#[derive(Debug, Clone, Default)]
 pub struct PageOptions {
     /// Page-level stylesheet. Wins over component defaults at equal
     /// specificity. `None` leaves the page with only component styles.
