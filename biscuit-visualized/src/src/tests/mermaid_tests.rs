@@ -111,8 +111,10 @@ fn mermaid_renders_to_svg() {
     let _ = cache.clear();
 
     let diagram = MermaidDiagram::new("graph LR; A-->B");
-    let mut request = RenderRequest::default();
-    request.format = OutputFormat::Svg;
+    let request = RenderRequest {
+        format: OutputFormat::Svg,
+        ..RenderRequest::default()
+    };
 
     let artifact = diagram.render(&request).expect("Failed to render diagram");
 
