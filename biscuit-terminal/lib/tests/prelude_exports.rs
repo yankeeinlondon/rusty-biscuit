@@ -12,7 +12,7 @@ fn prelude_exports_horizontal_rule_types() {
         .alignment(RuleAlignment::Full)
         .weight(RuleWeight::Medium);
 
-    // Terminal rendering is reachable via the Renderable trait (also prelude).
+    // Terminal rendering is reachable via the TerminalRenderable trait (also prelude).
     let term = Terminal::default();
     let out = rule.render(&term);
     assert!(!out.is_empty(), "expected non-empty terminal output");

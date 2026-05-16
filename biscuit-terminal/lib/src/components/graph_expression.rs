@@ -1,6 +1,6 @@
 //! Graph expression rendering for terminals.
 //!
-//! This module provides a `Renderable` component that renders graph diagrams
+//! This module provides a `TerminalRenderable` component that renders graph diagrams
 //! in the terminal. It delegates graph layout to `biscuit-visualized` and
 //! uses `TerminalImage` for inline image display.
 //!
@@ -8,7 +8,7 @@
 //!
 //! ```rust,no_run
 //! use biscuit_terminal::components::graph_expression::{GraphExpression, GraphInputSyntax};
-//! use biscuit_terminal::components::renderable::Renderable;
+//! use biscuit_terminal::components::renderable::TerminalRenderable;
 //! use biscuit_terminal::terminal::Terminal;
 //!
 //! fn example() -> Result<(), biscuit_terminal::components::graph_expression::GraphRenderError> {
@@ -24,10 +24,10 @@ use std::path::PathBuf;
 
 use thiserror::Error;
 
-use crate::components::renderable::{BrowserRenderable, Renderable};
+use crate::components::renderable::{BrowserRenderable, TerminalRenderable};
 use crate::components::terminal_image::{ImageWidth, TerminalImage};
 use crate::terminal::Terminal;
-use crate::utils::layout::Layout;
+use crate::utils::layout::{Layout, LayoutTerminalExt};
 
 // Re-export types from biscuit-visualized
 pub use biscuit_visualized::graph::{GraphColorTheme, GraphInputSyntax, GraphOrientation};
@@ -49,7 +49,7 @@ pub enum GraphRenderError {
 
 /// A graph expression component for terminal output.
 ///
-/// Implements `Renderable` so it integrates with the standard layout system
+/// Implements `TerminalRenderable` so it integrates with the standard layout system
 /// (margins, alignment) and can be composed with other components.
 ///
 /// ## Examples
@@ -58,7 +58,7 @@ pub enum GraphRenderError {
 /// use biscuit_terminal::components::graph_expression::{
 ///     GraphExpression, GraphInputSyntax, GraphOrientation,
 /// };
-/// use biscuit_terminal::components::renderable::Renderable;
+/// use biscuit_terminal::components::renderable::TerminalRenderable;
 /// use biscuit_terminal::utils::layout::Margin;
 ///
 /// let graph = GraphExpression::for_terminal("a -> b -> c", GraphInputSyntax::Auto)?
@@ -371,7 +371,7 @@ impl GraphExpression {
     }
 }
 
-impl Renderable for GraphExpression {
+impl TerminalRenderable for GraphExpression {
     fn render(&self, term: &Terminal) -> String {
         let content = self.render_raw(term);
         self.layout.apply_block_layout(&content, term.width())
@@ -537,7 +537,7 @@ mod tests {
     #[test]
     fn test_implements_renderable() {
         let graph = GraphExpression::parse("a -> b", GraphInputSyntax::Auto).unwrap();
-        // Verify it has layout methods from Renderable
+        // Verify it has layout methods from TerminalRenderable
         let _layout = graph.layout();
     }
 

@@ -28,7 +28,7 @@ use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use image::{DynamicImage, ImageFormat, ImageReader};
 
 use crate::{
-    components::renderable::Renderable,
+    components::renderable::TerminalRenderable,
     terminal::Terminal,
     utils::layout::{Alignment, Layout, Margin},
 };
@@ -149,7 +149,7 @@ pub enum TerminalImageError {
 ///
 /// ```rust,no_run
 /// use biscuit_terminal::components::terminal_image::TerminalImage;
-/// use biscuit_terminal::components::renderable::Renderable;
+/// use biscuit_terminal::components::renderable::TerminalRenderable;
 /// use biscuit_terminal::terminal::Terminal;
 /// use std::path::Path;
 ///
@@ -206,7 +206,7 @@ pub struct TerminalImage {
     /// Parsed image width specification.
     pub width: ImageWidth,
 
-    /// Layout configuration for the Renderable trait (authoritative margins/width).
+    /// Layout configuration for the TerminalRenderable trait (authoritative margins/width).
     layout: Layout,
 }
 
@@ -223,7 +223,7 @@ impl Default for TerminalImage {
     }
 }
 
-impl Renderable for TerminalImage {
+impl TerminalRenderable for TerminalImage {
     /// Fallback render using terminal capabilities.
     ///
     /// Attempts inline rendering; if unsupported, returns an empty string (no alt text).
@@ -287,7 +287,7 @@ impl Renderable for TerminalImage {
 ///
 /// ```rust,no_run
 /// use biscuit_terminal::components::terminal_image::{TerminalImage, ImageWidth};
-/// use biscuit_terminal::components::renderable::Renderable;
+/// use biscuit_terminal::components::renderable::TerminalRenderable;
 /// use biscuit_terminal::utils::layout::Margin;
 /// use std::path::Path;
 ///
@@ -308,7 +308,7 @@ impl Renderable for TerminalImage {
 ///
 /// ```rust,no_run
 /// use biscuit_terminal::components::terminal_image::TerminalImage;
-/// use biscuit_terminal::components::renderable::Renderable;
+/// use biscuit_terminal::components::renderable::TerminalRenderable;
 /// use biscuit_terminal::utils::layout::{Alignment, Layout, Margin};
 /// use std::path::Path;
 ///

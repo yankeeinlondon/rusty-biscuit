@@ -1,12 +1,12 @@
 use std::rc::Rc;
 
 use crate::{
-    components::renderable::{Renderable, RenderableContent},
+    components::renderable::{TerminalRenderable, RenderableTerminalContent},
     prelude::Prose,
     terminal::Terminal,
     utils::{
         block_constraint::{split_lines, visible_width, wrap_lines},
-        layout::Layout,
+        layout::{Layout, LayoutTerminalExt},
         wrap_policy::WordWrap,
     },
 };
@@ -16,8 +16,8 @@ use crate::{
 ///
 /// Sets the hanging indent only when one is not already configured,
 /// preserving any explicit value the caller set on the component.
-fn configure_component_wrap(content: &mut RenderableContent, hanging_indent: u32) {
-    if let RenderableContent::Component(arc) = content
+fn configure_component_wrap(content: &mut RenderableTerminalContent, hanging_indent: u32) {
+    if let RenderableTerminalContent::Component(arc) = content
         && let Some(component) = Rc::get_mut(arc)
         && !component.is_block_level()
     {
@@ -31,8 +31,8 @@ fn configure_component_wrap(content: &mut RenderableContent, hanging_indent: u32
 
 /// Force-update the hanging indent on a component, replacing any previously
 /// configured value. Used when the bullet changes after initial construction.
-fn force_component_hanging_indent(content: &mut RenderableContent, hanging_indent: u32) {
-    if let RenderableContent::Component(arc) = content
+fn force_component_hanging_indent(content: &mut RenderableTerminalContent, hanging_indent: u32) {
+    if let RenderableTerminalContent::Component(arc) = content
         && let Some(component) = Rc::get_mut(arc)
         && !component.is_block_level()
     {
@@ -74,7 +74,7 @@ fn force_component_hanging_indent(content: &mut RenderableContent, hanging_inden
 /// ```
 #[derive(Debug)]
 pub struct OrderedList {
-    items: Vec<RenderableContent>,
+    items: Vec<RenderableTerminalContent>,
     layout: Layout,
     indent_children: u32,
 }
@@ -94,15 +94,15 @@ impl<T: Into<String>> From<Vec<T>> for OrderedList {
         OrderedList {
             items: value
                 .into_iter()
-                .map(|f| RenderableContent::String(f.into()))
+                .map(|f| RenderableTerminalContent::String(f.into()))
                 .collect(),
             ..OrderedList::default()
         }
     }
 }
 
-impl From<Vec<RenderableContent>> for OrderedList {
-    fn from(value: Vec<RenderableContent>) -> Self {
+impl From<Vec<RenderableTerminalContent>> for OrderedList {
+    fn from(value: Vec<RenderableTerminalContent>) -> Self {
         OrderedList {
             items: value,
             ..OrderedList::default()
@@ -110,8 +110,8 @@ impl From<Vec<RenderableContent>> for OrderedList {
     }
 }
 
-impl From<Vec<&RenderableContent>> for OrderedList {
-    fn from(value: Vec<&RenderableContent>) -> Self {
+impl From<Vec<&RenderableTerminalContent>> for OrderedList {
+    fn from(value: Vec<&RenderableTerminalContent>) -> Self {
         OrderedList {
             items: value.into_iter().cloned().collect(),
             ..OrderedList::default()
@@ -130,7 +130,7 @@ impl OrderedList {
         Self::default()
     }
 
-    /// Add an item that can be converted to RenderableContent.
+    /// Add an item that can be converted to RenderableTerminalContent.
     ///
     /// Inline components automatically get word wrap configured with
     /// the correct hanging indent so continuation lines align after
@@ -145,7 +145,7 @@ impl OrderedList {
     /// let mut list = OrderedList::empty();
     /// list.add("First item").add("Second item");
     /// ```
-    pub fn add<T: Into<RenderableContent>>(&mut self, item: T) -> &mut Self {
+    pub fn add<T: Into<RenderableTerminalContent>>(&mut self, item: T) -> &mut Self {
         let mut content = item.into();
         // Prefix width depends on the item number: "1. " = 3, "10. " = 4, etc.
         let number = self.items.len() + 1;
@@ -181,7 +181,7 @@ impl OrderedList {
             let prefix_width = visible_width(&prefix);
 
             match item {
-                RenderableContent::String(s) => {
+                RenderableTerminalContent::String(s) => {
                     result.push_str(&prefix);
                     let child_width = term_width.saturating_sub(prefix_width);
                     let lines = split_lines(s.as_str());
@@ -192,7 +192,7 @@ impl OrderedList {
                     );
                     result.push_str(&wrapped.join("\n"));
                 }
-                RenderableContent::Component(component) if component.is_block_level() => {
+                RenderableTerminalContent::Component(component) if component.is_block_level() => {
                     // Block-level child: no prefix, reduced width, indent output.
                     let child_width = term_width.saturating_sub(indent);
                     let content = term.map_or_else(
@@ -208,7 +208,7 @@ impl OrderedList {
                         result.push_str(line);
                     }
                 }
-                RenderableContent::Component(component) => {
+                RenderableTerminalContent::Component(component) => {
                     // Inline component: word wrap was configured at add time.
                     result.push_str(&prefix);
                     let child_width = term_width.saturating_sub(prefix_width);
@@ -227,7 +227,7 @@ impl OrderedList {
     }
 }
 
-impl Renderable for OrderedList {
+impl TerminalRenderable for OrderedList {
     fn render_optimistic(&self, term_width: Option<u32>) -> String {
         let width = term_width.unwrap_or(80);
         let available = self.layout.available_width(width);
@@ -305,7 +305,7 @@ impl Renderable for OrderedList {
 /// - **Mixed content**: Supports both string items and renderable components
 #[derive(Debug)]
 pub struct UnorderedList {
-    items: Vec<RenderableContent>,
+    items: Vec<RenderableTerminalContent>,
     bullet: String,
     hanging_indent: bool,
     layout: Layout,
@@ -329,15 +329,15 @@ impl<T: Into<String>> From<Vec<T>> for UnorderedList {
         UnorderedList {
             items: value
                 .into_iter()
-                .map(|f| RenderableContent::String(f.into()))
+                .map(|f| RenderableTerminalContent::String(f.into()))
                 .collect(),
             ..UnorderedList::default()
         }
     }
 }
 
-impl From<Vec<RenderableContent>> for UnorderedList {
-    fn from(mut value: Vec<RenderableContent>) -> Self {
+impl From<Vec<RenderableTerminalContent>> for UnorderedList {
+    fn from(mut value: Vec<RenderableTerminalContent>) -> Self {
         let list = UnorderedList::default();
         if list.hanging_indent {
             let indent = list.indent_children.unwrap_or(visible_width(&list.bullet));
@@ -352,9 +352,9 @@ impl From<Vec<RenderableContent>> for UnorderedList {
     }
 }
 
-impl From<Vec<&RenderableContent>> for UnorderedList {
-    fn from(value: Vec<&RenderableContent>) -> Self {
-        let mut items: Vec<RenderableContent> = value.into_iter().cloned().collect();
+impl From<Vec<&RenderableTerminalContent>> for UnorderedList {
+    fn from(value: Vec<&RenderableTerminalContent>) -> Self {
+        let mut items: Vec<RenderableTerminalContent> = value.into_iter().cloned().collect();
         let list = UnorderedList::default();
         if list.hanging_indent {
             let indent = list.indent_children.unwrap_or(visible_width(&list.bullet));
@@ -369,7 +369,7 @@ impl From<Vec<&RenderableContent>> for UnorderedList {
 impl From<Prose> for UnorderedList {
     fn from(value: Prose) -> Self {
         let mut list = UnorderedList::default();
-        let mut content: RenderableContent = value.into();
+        let mut content: RenderableTerminalContent = value.into();
         if list.hanging_indent {
             let indent = list.indent_children.unwrap_or(visible_width(&list.bullet));
             configure_component_wrap(&mut content, indent);
@@ -396,7 +396,7 @@ impl UnorderedList {
         Self::default()
     }
 
-    /// Add an item that can be converted to RenderableContent.
+    /// Add an item that can be converted to RenderableTerminalContent.
     ///
     /// When `hanging_indent` is enabled (the default), inline components
     /// automatically get word wrap configured with the correct hanging
@@ -411,7 +411,7 @@ impl UnorderedList {
     /// let mut list = UnorderedList::empty();
     /// list.add("First item").add("Second item");
     /// ```
-    pub fn add<T: Into<RenderableContent>>(&mut self, item: T) -> &mut Self {
+    pub fn add<T: Into<RenderableTerminalContent>>(&mut self, item: T) -> &mut Self {
         let mut content = item.into();
         if self.hanging_indent {
             let indent = self.indent_children.unwrap_or(visible_width(&self.bullet));
@@ -478,7 +478,7 @@ impl UnorderedList {
 
         for item in &self.items {
             match item {
-                RenderableContent::String(s) => {
+                RenderableTerminalContent::String(s) => {
                     result.push_str(&self.bullet);
                     if self.hanging_indent {
                         let child_width = term_width.saturating_sub(bullet_width);
@@ -493,7 +493,7 @@ impl UnorderedList {
                         result.push_str(s);
                     }
                 }
-                RenderableContent::Component(component) if component.is_block_level() => {
+                RenderableTerminalContent::Component(component) if component.is_block_level() => {
                     // Block-level child: no bullet, reduced width, indent output.
                     let child_width = term_width.saturating_sub(indent);
                     let content = term.map_or_else(
@@ -509,7 +509,7 @@ impl UnorderedList {
                         result.push_str(line);
                     }
                 }
-                RenderableContent::Component(component) => {
+                RenderableTerminalContent::Component(component) => {
                     // Inline component: word wrap was configured at add time.
                     result.push_str(&self.bullet);
                     let child_width = term_width.saturating_sub(bullet_width);
@@ -528,7 +528,7 @@ impl UnorderedList {
     }
 }
 
-impl Renderable for UnorderedList {
+impl TerminalRenderable for UnorderedList {
     fn render_optimistic(&self, term_width: Option<u32>) -> String {
         let width = term_width.unwrap_or(80);
         let available = self.layout.available_width(width);
@@ -609,8 +609,8 @@ mod tests {
     fn test_nested_ordered_list() {
         let inner = OrderedList::new(vec!["Nested A", "Nested B"]);
         let items = vec![
-            RenderableContent::String("First".to_string()),
-            RenderableContent::Component(Rc::new(inner)),
+            RenderableTerminalContent::String("First".to_string()),
+            RenderableTerminalContent::Component(Rc::new(inner)),
         ];
         let list = OrderedList::from(items);
         let result = list.render_optimistic(Some(80));
@@ -620,8 +620,8 @@ mod tests {
     #[test]
     fn test_three_level_nesting_width_compounds() {
         let inner = OrderedList::new(vec!["Deep"]);
-        let middle = OrderedList::from(vec![RenderableContent::Component(Rc::new(inner))]);
-        let outer = OrderedList::from(vec![RenderableContent::Component(Rc::new(middle))]);
+        let middle = OrderedList::from(vec![RenderableTerminalContent::Component(Rc::new(inner))]);
+        let outer = OrderedList::from(vec![RenderableTerminalContent::Component(Rc::new(middle))]);
         let result = outer.render_optimistic(Some(80));
         assert_eq!(result, "        1. Deep\n");
     }
@@ -633,9 +633,9 @@ mod tests {
         let inner_list = OrderedList::new(vec!["Sub item"]);
         let prose = Prose::new("Inline text");
         let items = vec![
-            RenderableContent::String("Plain string".to_string()),
-            RenderableContent::Component(Rc::new(prose)),
-            RenderableContent::Component(Rc::new(inner_list)),
+            RenderableTerminalContent::String("Plain string".to_string()),
+            RenderableTerminalContent::Component(Rc::new(prose)),
+            RenderableTerminalContent::Component(Rc::new(inner_list)),
         ];
         let list = OrderedList::from(items);
         let result = list.render_optimistic(Some(80));
@@ -649,8 +649,8 @@ mod tests {
     fn test_nested_unordered_list() {
         let inner = UnorderedList::new(vec!["Sub A", "Sub B"]);
         let items = vec![
-            RenderableContent::String("Top".to_string()),
-            RenderableContent::Component(Rc::new(inner)),
+            RenderableTerminalContent::String("Top".to_string()),
+            RenderableTerminalContent::Component(Rc::new(inner)),
         ];
         let list = UnorderedList::from(items);
         let result = list.render_optimistic(Some(80));
@@ -661,8 +661,8 @@ mod tests {
     fn test_ordered_list_containing_unordered_child() {
         let inner = UnorderedList::new(vec!["Apple", "Banana"]);
         let items = vec![
-            RenderableContent::String("Fruits:".to_string()),
-            RenderableContent::Component(Rc::new(inner)),
+            RenderableTerminalContent::String("Fruits:".to_string()),
+            RenderableTerminalContent::Component(Rc::new(inner)),
         ];
         let list = OrderedList::from(items);
         let result = list.render_optimistic(Some(80));
@@ -673,9 +673,9 @@ mod tests {
     fn test_empty_nested_list() {
         let inner = OrderedList::new(Vec::<String>::new());
         let items = vec![
-            RenderableContent::String("Before".to_string()),
-            RenderableContent::Component(Rc::new(inner)),
-            RenderableContent::String("After".to_string()),
+            RenderableTerminalContent::String("Before".to_string()),
+            RenderableTerminalContent::Component(Rc::new(inner)),
+            RenderableTerminalContent::String("After".to_string()),
         ];
         let list = OrderedList::from(items);
         let result = list.render_optimistic(Some(80));
@@ -685,7 +685,7 @@ mod tests {
     #[test]
     fn test_no_output_exceeds_term_width() {
         let inner = OrderedList::new(vec!["Short"]);
-        let items = vec![RenderableContent::Component(Rc::new(inner))];
+        let items = vec![RenderableTerminalContent::Component(Rc::new(inner))];
         let list = OrderedList::from(items);
         let width = 40u32;
         let result = list.render_optimistic(Some(width));

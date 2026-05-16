@@ -37,7 +37,7 @@
 //!   - [`discovery::clipboard`] - OSC52 clipboard support
 //!   - [`discovery::mode_2027`] - Unicode grapheme cluster support
 //!   - [`discovery::eval`] - Escape code analysis utilities
-//! - [`components`] - Renderable terminal components (sections, lists, tables)
+//! - [`components`] - TerminalRenderable terminal components (sections, lists, tables)
 //! - [`errors`] - Public error types
 //! - [`utils`] - Utility functions (colors, styling, escape codes)
 

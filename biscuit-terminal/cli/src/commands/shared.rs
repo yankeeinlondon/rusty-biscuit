@@ -48,7 +48,7 @@ pub fn apply_image_layout(
     term_image: &mut biscuit_terminal::components::terminal_image::TerminalImage,
     layout: &LayoutArgs,
 ) {
-    use biscuit_terminal::components::renderable::Renderable;
+    use biscuit_terminal::components::renderable::TerminalRenderable;
     use biscuit_terminal::utils::layout::Margin;
 
     if let Some(ml) = layout.margin_left {
@@ -62,9 +62,9 @@ pub fn apply_image_layout(
     }
 }
 
-/// Apply optional margin and alignment overrides to any `Renderable` component.
+/// Apply optional margin and alignment overrides to any `TerminalRenderable` component.
 pub fn apply_renderable_layout(
-    component: &mut impl biscuit_terminal::components::renderable::Renderable,
+    component: &mut impl biscuit_terminal::components::renderable::TerminalRenderable,
     layout: &LayoutArgs,
 ) {
     use biscuit_terminal::utils::layout::Margin;

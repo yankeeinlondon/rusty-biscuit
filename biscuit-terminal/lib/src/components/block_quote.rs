@@ -3,13 +3,13 @@ use std::rc::Rc;
 use crate::{
     components::{
         prose::Prose,
-        renderable::{Renderable, RenderableContent},
+        renderable::{TerminalRenderable, RenderableTerminalContent},
     },
     terminal::Terminal,
     utils::{
         block_constraint::{split_lines, visible_width, wrap_lines},
         color::{Color, Tailwind},
-        layout::Layout,
+        layout::{Layout, LayoutTerminalExt},
     },
 };
 
@@ -29,7 +29,7 @@ use crate::{
 ///
 /// ```
 /// use biscuit_terminal::components::block_quote::BlockQuote;
-/// use biscuit_terminal::components::renderable::Renderable;
+/// use biscuit_terminal::components::renderable::TerminalRenderable;
 ///
 /// // Simple block quote from a string
 /// let quote = BlockQuote::from("The only way to do great work is to love what you do.");
@@ -57,10 +57,10 @@ use crate::{
 ///
 /// // Block quote from Prose component (rich text)
 /// use biscuit_terminal::components::prose::Prose;
-/// use biscuit_terminal::components::renderable::RenderableContent;
+/// use biscuit_terminal::components::renderable::RenderableTerminalContent;
 /// let prose = Prose::new("This is <b>bold</b> and <i>italic</i> text.");
 /// let quote = BlockQuote::new(
-///     RenderableContent::from(prose),
+///     RenderableTerminalContent::from(prose),
 ///     Some("Anonymous")
 /// );
 /// let result = quote.render_optimistic(None);
@@ -70,7 +70,7 @@ use crate::{
 #[derive(Debug, Clone)]
 pub struct BlockQuote {
     /// the content being wrapped in the block quote
-    content: RenderableContent,
+    content: RenderableTerminalContent,
 
     /// if the quote is being attributed to someone
     /// you can add that and it will be placed
@@ -88,7 +88,7 @@ impl Default for BlockQuote {
     fn default() -> Self {
         use crate::utils::wrap_policy::WordWrap;
         BlockQuote {
-            content: RenderableContent::String("".to_string()),
+            content: RenderableTerminalContent::String("".to_string()),
             attribution: None,
             text_color: None,
             bg_color: None,
@@ -104,32 +104,32 @@ impl Default for BlockQuote {
 
 impl From<String> for BlockQuote {
     fn from(value: String) -> Self {
-        BlockQuote::new(RenderableContent::String(value), None::<String>)
+        BlockQuote::new(RenderableTerminalContent::String(value), None::<String>)
     }
 }
 
 impl From<&String> for BlockQuote {
     fn from(value: &String) -> Self {
-        BlockQuote::new(RenderableContent::String(value.into()), None::<String>)
+        BlockQuote::new(RenderableTerminalContent::String(value.into()), None::<String>)
     }
 }
 
 impl From<&str> for BlockQuote {
     fn from(value: &str) -> Self {
-        BlockQuote::new(RenderableContent::String(value.into()), None::<String>)
+        BlockQuote::new(RenderableTerminalContent::String(value.into()), None::<String>)
     }
 }
 
 impl From<Prose> for BlockQuote {
     fn from(value: Prose) -> Self {
-        BlockQuote::new(RenderableContent::Component(Rc::new(value)), None::<String>)
+        BlockQuote::new(RenderableTerminalContent::Component(Rc::new(value)), None::<String>)
     }
 }
 
 impl From<&Prose> for BlockQuote {
     fn from(value: &Prose) -> Self {
         BlockQuote::new(
-            RenderableContent::Component(Rc::new((*value).clone())),
+            RenderableTerminalContent::Component(Rc::new((*value).clone())),
             None::<String>,
         )
     }
@@ -137,7 +137,7 @@ impl From<&Prose> for BlockQuote {
 
 impl BlockQuote {
     /// Create a block quote by passing in the content and _optionally_ an attribution.
-    pub fn new<U: Into<String>>(content: RenderableContent, attribution: Option<U>) -> Self {
+    pub fn new<U: Into<String>>(content: RenderableTerminalContent, attribution: Option<U>) -> Self {
         Self {
             content,
             attribution: attribution.map(|attribution| attribution.into()),
@@ -182,13 +182,13 @@ impl BlockQuote {
 
         // Render child content with constrained width
         let content: String = match &self.content {
-            RenderableContent::String(s) => {
+            RenderableTerminalContent::String(s) => {
                 // Wrap plain strings to child_width using the layout's word wrap strategy
                 let lines = split_lines(s);
                 let wrapped = wrap_lines(lines, &self.layout.word_wrap, child_width);
                 wrapped.join("\n")
             }
-            RenderableContent::Component(component) => {
+            RenderableTerminalContent::Component(component) => {
                 // Use render() with the constrained child width so nested
                 // components respect the block quote's border
                 term.map_or_else(
@@ -245,7 +245,7 @@ impl BlockQuote {
     }
 }
 
-impl Renderable for BlockQuote {
+impl TerminalRenderable for BlockQuote {
     fn render_optimistic(&self, term_width: Option<u32>) -> String {
         let width = term_width.unwrap_or(80);
         let available = self.layout.available_width(width);
@@ -329,7 +329,7 @@ mod tests {
 
     #[test]
     fn test_block_quote_new_with_renderable_content() {
-        let quote = BlockQuote::new(RenderableContent::from("Direct content"), None::<&str>);
+        let quote = BlockQuote::new(RenderableTerminalContent::from("Direct content"), None::<&str>);
         let result = quote.render_optimistic(None);
         assert_eq!(strip_ansi(&result), "│ Direct content");
     }
@@ -340,7 +340,7 @@ mod tests {
 
     #[test]
     fn test_multiline_block_quote() {
-        let quote = BlockQuote::new(RenderableContent::from("Line 1\nLine 2"), None::<&str>);
+        let quote = BlockQuote::new(RenderableTerminalContent::from("Line 1\nLine 2"), None::<&str>);
         let result = quote.render_optimistic(None);
         assert_eq!(strip_ansi(&result), "│ Line 1\n│ Line 2");
     }
@@ -366,7 +366,7 @@ mod tests {
     #[test]
     fn test_block_quote_with_attribution() {
         let quote = BlockQuote::new(
-            RenderableContent::from("To be or not to be"),
+            RenderableTerminalContent::from("To be or not to be"),
             Some("Shakespeare"),
         );
         let result = quote.render_optimistic(None);
@@ -379,7 +379,7 @@ mod tests {
     #[test]
     fn test_block_quote_with_string_attribution() {
         let quote = BlockQuote::new(
-            RenderableContent::from("The unexamined life is not worth living"),
+            RenderableTerminalContent::from("The unexamined life is not worth living"),
             Some(String::from("Socrates")),
         );
         let result = quote.render_optimistic(None);
@@ -392,7 +392,7 @@ mod tests {
     #[test]
     fn test_multiline_with_attribution() {
         let quote = BlockQuote::new(
-            RenderableContent::from("Line one\nLine two"),
+            RenderableTerminalContent::from("Line one\nLine two"),
             Some("Author"),
         );
         let result = quote.render_optimistic(None);
@@ -524,7 +524,7 @@ mod tests {
     }
 
     // =========================================================================
-    // Renderable Trait Tests
+    // TerminalRenderable Trait Tests
     // =========================================================================
 
     #[test]
@@ -559,12 +559,12 @@ mod tests {
     }
 
     // =========================================================================
-    // RenderableContent Integration Tests
+    // RenderableTerminalContent Integration Tests
     // =========================================================================
 
     #[test]
     fn test_renderable_content_string_variant() {
-        let content = RenderableContent::String("direct string".to_string());
+        let content = RenderableTerminalContent::String("direct string".to_string());
         let quote = BlockQuote::new(content, None::<&str>);
         let result = quote.render_optimistic(None);
         assert_eq!(strip_ansi(&result), "│ direct string");
@@ -573,7 +573,7 @@ mod tests {
     #[test]
     fn test_renderable_content_component_variant() {
         let prose = Prose::new("<b>bold content</b>");
-        let content = RenderableContent::Component(Rc::new(prose));
+        let content = RenderableTerminalContent::Component(Rc::new(prose));
         let quote = BlockQuote::new(content, None::<&str>);
         let result = quote.render_optimistic(None);
         // The prose renders its bold content, which should appear in the quote
@@ -610,7 +610,7 @@ mod tests {
     fn test_prose_with_attribution() {
         let prose = Prose::new("<i>In the beginning...</i>");
         let quote = BlockQuote::new(
-            RenderableContent::Component(Rc::new(prose)),
+            RenderableTerminalContent::Component(Rc::new(prose)),
             Some("Genesis"),
         );
         let result = quote.render_optimistic(None);
@@ -647,7 +647,7 @@ mod tests {
     #[test]
     fn test_attribution_only() {
         // Attribution with empty-ish content
-        let quote = BlockQuote::new(RenderableContent::from("Quote"), Some("Author"));
+        let quote = BlockQuote::new(RenderableTerminalContent::from("Quote"), Some("Author"));
         let result = quote.render_optimistic(None);
         let stripped = strip_ansi(&result);
         assert!(stripped.contains("│ Quote"));

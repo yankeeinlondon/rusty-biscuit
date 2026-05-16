@@ -3,7 +3,7 @@
 //! Run with: `cargo run -p biscuit-terminal --example two-column-prose`
 
 use biscuit_terminal::components::prose::Prose;
-use biscuit_terminal::components::renderable::Renderable;
+use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::components::two_column::TwoColumn;
 use biscuit_terminal::terminal::Terminal;
 use biscuit_terminal::utils::layout::WordWrap;

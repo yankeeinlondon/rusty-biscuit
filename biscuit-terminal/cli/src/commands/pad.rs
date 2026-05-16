@@ -2,7 +2,7 @@ use crate::commands::shared::*;
 use crate::commands::{CliContext, Run};
 use biscuit_terminal::components::pad::PadLeft;
 use biscuit_terminal::components::prose::Prose;
-use biscuit_terminal::components::renderable::Renderable;
+use biscuit_terminal::components::renderable::TerminalRenderable;
 use clap::Args as ClapArgs;
 
 /// Pad text on the left (right-align) to a minimum width

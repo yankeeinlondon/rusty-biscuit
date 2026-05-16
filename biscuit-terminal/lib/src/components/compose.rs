@@ -4,7 +4,7 @@ use crate::components::{
     filesystem::FileSystem,
     list::{OrderedList, UnorderedList},
     prose::Prose,
-    renderable::{Renderable, RenderableContent},
+    renderable::{TerminalRenderable, RenderableTerminalContent},
     section::{HeadingLevel, Section},
     table::table::Table,
 };
@@ -24,8 +24,8 @@ use crate::utils::layout::Layout;
 ///
 /// // From a vec of pre-converted items
 /// let compose = Compose::new(vec![
-///     RenderableContent::from("Hello, "),
-///     RenderableContent::from(Prose::new("{{bold}}world{{reset}}!")),
+///     RenderableTerminalContent::from("Hello, "),
+///     RenderableTerminalContent::from(Prose::new("{{bold}}world{{reset}}!")),
 /// ]);
 /// ```
 ///
@@ -45,7 +45,7 @@ use crate::utils::layout::Layout;
 /// // Using From implementations for ergonomic creation
 /// let text: Compose = "Hello, ".into();
 /// let prose = Prose::new("{{bold}}bold text{{reset}}");
-/// let combined = Compose::new(vec![text.into(), RenderableContent::from(prose)]);
+/// let combined = Compose::new(vec![text.into(), RenderableTerminalContent::from(prose)]);
 /// ```
 ///
 /// ```
@@ -61,7 +61,7 @@ use crate::utils::layout::Layout;
 /// ```
 #[derive(Debug)]
 pub struct Compose {
-    parts: Vec<RenderableContent>,
+    parts: Vec<RenderableTerminalContent>,
     layout: Layout,
 }
 
@@ -74,7 +74,7 @@ impl Default for Compose {
 impl From<String> for Compose {
     fn from(value: String) -> Self {
         Compose {
-            parts: vec![RenderableContent::String(value)],
+            parts: vec![RenderableTerminalContent::String(value)],
             layout: Layout::default(),
         }
     }
@@ -83,14 +83,14 @@ impl From<String> for Compose {
 impl From<&str> for Compose {
     fn from(value: &str) -> Self {
         Compose {
-            parts: vec![RenderableContent::String(value.into())],
+            parts: vec![RenderableTerminalContent::String(value.into())],
             layout: Layout::default(),
         }
     }
 }
 
-impl From<RenderableContent> for Compose {
-    fn from(value: RenderableContent) -> Self {
+impl From<RenderableTerminalContent> for Compose {
+    fn from(value: RenderableTerminalContent) -> Self {
         Compose {
             parts: vec![value],
             layout: Layout::default(),
@@ -98,8 +98,8 @@ impl From<RenderableContent> for Compose {
     }
 }
 
-impl From<Vec<RenderableContent>> for Compose {
-    fn from(items: Vec<RenderableContent>) -> Self {
+impl From<Vec<RenderableTerminalContent>> for Compose {
+    fn from(items: Vec<RenderableTerminalContent>) -> Self {
         Compose {
             parts: items,
             layout: Layout::default(),
@@ -107,7 +107,7 @@ impl From<Vec<RenderableContent>> for Compose {
     }
 }
 
-impl Renderable for Compose {
+impl TerminalRenderable for Compose {
     fn render_optimistic(&self, term_width: Option<u32>) -> String {
         let width = term_width.unwrap_or(80);
         let term = Terminal::new_optimistic(width);
@@ -119,8 +119,8 @@ impl Renderable for Compose {
         let mut output = String::new();
         for part in &self.parts {
             match part {
-                RenderableContent::String(s) => output.push_str(s),
-                RenderableContent::Component(c) => output.push_str(&c.render(term)),
+                RenderableTerminalContent::String(s) => output.push_str(s),
+                RenderableTerminalContent::Component(c) => output.push_str(&c.render(term)),
             }
         }
         output
@@ -141,7 +141,7 @@ impl Renderable for Compose {
 
 impl Compose {
     /// Creates a new `Compose` from a vector of renderable items.
-    pub fn new(items: Vec<RenderableContent>) -> Self {
+    pub fn new(items: Vec<RenderableTerminalContent>) -> Self {
         Compose {
             parts: items,
             layout: Layout::default(),
@@ -152,38 +152,38 @@ impl Compose {
     /// to embed styling tokens in it that can be rendered lazily
     /// when we're ready to send to the terminal.
     pub fn add_prose(&mut self, content: Prose) -> &mut Self {
-        self.parts.push(RenderableContent::from(content));
+        self.parts.push(RenderableTerminalContent::from(content));
         self
     }
 
     /// Adds plain text content.
     pub fn add_text<T: Into<String>>(&mut self, content: T) -> &mut Self {
         let text = content.into();
-        self.parts.push(RenderableContent::from(text));
+        self.parts.push(RenderableTerminalContent::from(text));
         self
     }
 
     /// Adds an unordered list.
     pub fn add_unordered_list(&mut self, content: UnorderedList) -> &mut Self {
-        self.parts.push(RenderableContent::from(content));
+        self.parts.push(RenderableTerminalContent::from(content));
         self
     }
 
     /// Adds an ordered list.
     pub fn add_ordered_list(&mut self, content: OrderedList) -> &mut Self {
-        self.parts.push(RenderableContent::from(content));
+        self.parts.push(RenderableTerminalContent::from(content));
         self
     }
 
     /// Adds a [`FileSystem`] tree component.
     pub fn add_file_system(&mut self, content: FileSystem) -> &mut Self {
-        self.parts.push(RenderableContent::from(content));
+        self.parts.push(RenderableTerminalContent::from(content));
         self
     }
 
     /// Adds a [`Table`] component.
     pub fn add_table(&mut self, content: Table) -> &mut Self {
-        self.parts.push(RenderableContent::from(content));
+        self.parts.push(RenderableTerminalContent::from(content));
         self
     }
 
@@ -200,7 +200,7 @@ impl Compose {
             _ => HeadingLevel::h6,
         };
         let section = Section::new(heading_level, title);
-        self.parts.push(RenderableContent::from(section));
+        self.parts.push(RenderableTerminalContent::from(section));
         self
     }
 }
@@ -227,8 +227,8 @@ mod tests {
     #[test]
     fn test_new_with_items() {
         let compose = Compose::new(vec![
-            RenderableContent::from("foo"),
-            RenderableContent::from("bar"),
+            RenderableTerminalContent::from("foo"),
+            RenderableTerminalContent::from("bar"),
         ]);
         assert_eq!(compose.render_optimistic(Some(80)), "foobar");
     }
@@ -236,8 +236,8 @@ mod tests {
     #[test]
     fn test_new_with_mixed_items() {
         let compose = Compose::new(vec![
-            RenderableContent::from("text "),
-            RenderableContent::from(Prose::new("styled")),
+            RenderableTerminalContent::from("text "),
+            RenderableTerminalContent::from(Prose::new("styled")),
         ]);
         let output = compose.render_optimistic(Some(80));
         assert!(output.starts_with("text "));
@@ -276,21 +276,21 @@ mod tests {
 
     #[test]
     fn test_from_renderable_content_string_variant() {
-        let content = RenderableContent::String("direct".into());
+        let content = RenderableTerminalContent::String("direct".into());
         let compose = Compose::from(content);
         assert_eq!(compose.render_optimistic(Some(80)), "direct");
     }
 
     #[test]
     fn test_from_renderable_content_component_variant() {
-        let content = RenderableContent::from(Prose::new("component"));
+        let content = RenderableTerminalContent::from(Prose::new("component"));
         let compose = Compose::from(content);
         assert!(compose.render_optimistic(Some(80)).contains("component"));
     }
 
     #[test]
     fn test_from_vec_renderable_content() {
-        let items = vec![RenderableContent::from("x"), RenderableContent::from("y")];
+        let items = vec![RenderableTerminalContent::from("x"), RenderableTerminalContent::from("y")];
         let compose = Compose::from(items);
         assert_eq!(compose.render_optimistic(Some(80)), "xy");
     }
@@ -637,7 +637,7 @@ mod tests {
     }
 
     // =====================================================================
-    // Renderable trait — render / render_optimistic
+    // TerminalRenderable trait — render / render_optimistic
     // =====================================================================
 
     #[test]
@@ -680,7 +680,7 @@ mod tests {
     }
 
     // =====================================================================
-    // Renderable trait — display
+    // TerminalRenderable trait — display
     // =====================================================================
 
     #[test]
@@ -710,7 +710,7 @@ mod tests {
     }
 
     // =====================================================================
-    // Renderable trait — is_block_level
+    // TerminalRenderable trait — is_block_level
     // =====================================================================
 
     #[test]
@@ -725,7 +725,7 @@ mod tests {
     }
 
     // =====================================================================
-    // Renderable trait — layout builder methods
+    // TerminalRenderable trait — layout builder methods
     // =====================================================================
 
     #[test]
@@ -789,7 +789,7 @@ mod tests {
     }
 
     // =====================================================================
-    // Renderable trait — as_any / Debug
+    // TerminalRenderable trait — as_any / Debug
     // =====================================================================
 
     #[test]
@@ -940,8 +940,8 @@ mod tests {
     fn test_compose_inside_compose() {
         let mut inner = Compose::default();
         inner.add_text("inner");
-        // Use From<RenderableContent> to wrap inner Compose
-        let content = RenderableContent::from(inner);
+        // Use From<RenderableTerminalContent> to wrap inner Compose
+        let content = RenderableTerminalContent::from(inner);
         let mut outer = Compose::from(content);
         outer.add_text(" after");
         let output = outer.render_optimistic(Some(80));
@@ -952,7 +952,7 @@ mod tests {
     #[test]
     fn test_inline_content_inside_compose() {
         let inline = InlineContent::default().with("a").with("b");
-        let content = RenderableContent::from(inline);
+        let content = RenderableTerminalContent::from(inline);
         let mut compose = Compose::from(content);
         compose.add_text(" end");
         assert_eq!(compose.render_optimistic(Some(80)), "ab end");
@@ -961,7 +961,7 @@ mod tests {
     #[test]
     fn test_text_block_via_renderable_content() {
         let block = TextBlock::new("styled");
-        let content = RenderableContent::from(block);
+        let content = RenderableTerminalContent::from(block);
         let compose = Compose::from(content);
         assert!(compose.render_optimistic(Some(80)).contains("styled"));
     }

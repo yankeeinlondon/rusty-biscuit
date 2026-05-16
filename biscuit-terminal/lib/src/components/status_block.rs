@@ -4,7 +4,7 @@ use crate::{
     components::{
         block_quote::BlockQuote,
         prose::Prose,
-        renderable::{Renderable, RenderableContent},
+        renderable::{TerminalRenderable, RenderableTerminalContent},
         status::{Status, StatusState},
     },
     terminal::Terminal,
@@ -97,7 +97,7 @@ impl StatusBlock {
     }
 }
 
-impl Renderable for StatusBlock {
+impl TerminalRenderable for StatusBlock {
     fn render_optimistic(&self, term_width: Option<u32>) -> String {
         let term = Terminal::new_optimistic(term_width.unwrap_or(80));
         self.render(&term)
@@ -119,7 +119,7 @@ impl Renderable for StatusBlock {
                 .collect::<Vec<_>>()
                 .join("\n\n");
             let mut block =
-                BlockQuote::new(RenderableContent::String(composed), None::<&str>)
+                BlockQuote::new(RenderableTerminalContent::String(composed), None::<&str>)
                     .with_left_block_color(self.resolved_border_color())
                     .with_border(&self.border);
             block.layout_mut().left_margin = self.layout.left_margin.clone();

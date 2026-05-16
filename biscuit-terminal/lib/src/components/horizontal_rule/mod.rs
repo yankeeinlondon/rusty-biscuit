@@ -14,7 +14,7 @@ pub use style::{RuleAlignment, RuleStyle, RuleWeight};
 
 use std::io::Cursor;
 
-use crate::components::renderable::Renderable;
+use crate::components::renderable::TerminalRenderable;
 use crate::components::terminal_image::TerminalImage;
 use crate::discovery::detection::{ColorDepth, ColorMode, ImageSupport};
 use crate::terminal::Terminal;
@@ -149,7 +149,7 @@ impl Default for HorizontalRule {
     }
 }
 
-impl Renderable for HorizontalRule {
+impl TerminalRenderable for HorizontalRule {
     fn render(&self, term: &Terminal) -> String {
         // Tier 1: SVG -> PNG -> Kitty graphics protocol. Any capability or
         // rasterization failure falls through to the text tiers below.
@@ -1391,7 +1391,7 @@ mod tests {
     #[test]
     fn test_as_any() {
         let hr = HorizontalRule::new();
-        let any_ref = Renderable::as_any(&hr);
+        let any_ref = TerminalRenderable::as_any(&hr);
         let downcast_ref = any_ref.downcast_ref::<HorizontalRule>();
         assert!(downcast_ref.is_some());
         assert_eq!(downcast_ref.unwrap().style, RuleStyle::Dashes);
@@ -1859,7 +1859,7 @@ mod tests {
         // the companion child since it exercises a distinct render path.
         use crate::components::compose::Compose;
         use crate::components::prose::Prose;
-        use crate::components::renderable::{Renderable, RenderableContent};
+        use crate::components::renderable::{TerminalRenderable, RenderableTerminalContent};
 
         let _guard = ScopedLcAll::force_utf8();
         let term = text_terminal();
@@ -1871,9 +1871,9 @@ mod tests {
         let prose = Prose::new("after the rule");
 
         let compose = Compose::new(vec![
-            RenderableContent::from(hr),
-            RenderableContent::from("\n"),
-            RenderableContent::from(prose),
+            RenderableTerminalContent::from(hr),
+            RenderableTerminalContent::from("\n"),
+            RenderableTerminalContent::from(prose),
         ]);
 
         let out = compose.render(&term);

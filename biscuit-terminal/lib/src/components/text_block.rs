@@ -1,9 +1,9 @@
 use crate::{
-    components::renderable::Renderable,
+    components::renderable::TerminalRenderable,
     terminal::Terminal,
     utils::{
         color::Color,
-        layout::Layout,
+        layout::{Layout, LayoutTerminalExt},
         styling::{FontWeight, Style, Stylist, UnderliningRequest},
     },
 };
@@ -19,7 +19,7 @@ use crate::{
 ///
 /// ```
 /// use biscuit_terminal::components::text_block::TextBlock;
-/// use biscuit_terminal::components::renderable::Renderable;
+/// use biscuit_terminal::components::renderable::TerminalRenderable;
 /// use biscuit_terminal::utils::color::{BasicColor, Color};
 ///
 /// // Basic usage - create styled text
@@ -147,7 +147,7 @@ impl TextBlock {
     }
 }
 
-impl Renderable for TextBlock {
+impl TerminalRenderable for TextBlock {
     fn render_optimistic(&self, term_width: Option<u32>) -> String {
         let width = term_width.unwrap_or(80);
         let term = Terminal::new_optimistic(width);

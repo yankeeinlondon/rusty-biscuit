@@ -1,4 +1,4 @@
-use crate::{components::renderable::Renderable, terminal::Terminal, utils::layout::Layout};
+use crate::{components::renderable::TerminalRenderable, terminal::Terminal, utils::layout::{Layout, LayoutTerminalExt}};
 use std::any::Any;
 
 /// A horizontal progress bar for terminal display.
@@ -10,7 +10,7 @@ use std::any::Any;
 ///
 /// ```
 /// use biscuit_terminal::components::progress::Progress;
-/// use biscuit_terminal::components::renderable::Renderable;
+/// use biscuit_terminal::components::renderable::TerminalRenderable;
 ///
 /// let bar = Progress::new(0.75); // 75% complete
 /// let output = bar.render_optimistic(Some(40));
@@ -112,7 +112,7 @@ impl Progress {
     }
 }
 
-impl Renderable for Progress {
+impl TerminalRenderable for Progress {
     fn render_optimistic(&self, term_width: Option<u32>) -> String {
         let width = term_width.unwrap_or(80);
         let bar_content = self.render_bar();

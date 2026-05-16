@@ -115,7 +115,7 @@ fn render_column_block(render: &RenderedColumn, offset: u32) -> String {
 ///
 /// ```
 /// use biscuit_terminal::components::two_column::TwoColumn;
-/// use biscuit_terminal::components::renderable::Renderable;
+/// use biscuit_terminal::components::renderable::TerminalRenderable;
 ///
 /// // Basic 50/50 split
 /// let cols = TwoColumn::new("Left content", "Right content");
@@ -141,8 +141,8 @@ fn render_column_block(render: &RenderedColumn, offset: u32) -> String {
 /// and minimum column widths.
 #[derive(Debug, Clone)]
 pub struct TwoColumn {
-    left: RenderableContent,
-    right: RenderableContent,
+    left: RenderableTerminalContent,
+    right: RenderableTerminalContent,
     left_width: ColumnWidth,
     gap: u32,
     layout: Layout,
@@ -162,7 +162,7 @@ impl Default for TwoColumn {
 
 impl TwoColumn {
     /// Create a new two-column layout with optional ratio (defaults to 50/50).
-    pub fn new<L: Into<RenderableContent>, R: Into<RenderableContent>>(left: L, right: R) -> Self {
+    pub fn new<L: Into<RenderableTerminalContent>, R: Into<RenderableTerminalContent>>(left: L, right: R) -> Self {
         TwoColumn {
             left: left.into(),
             right: right.into(),
@@ -361,7 +361,7 @@ impl TwoColumn {
 
     fn render_column(
         &self,
-        content: &RenderableContent,
+        content: &RenderableTerminalContent,
         width: u32,
         term: Option<&Terminal>,
     ) -> RenderedColumn {
@@ -373,11 +373,11 @@ impl TwoColumn {
         }
 
         match content {
-            RenderableContent::String(s) => RenderedColumn {
+            RenderableTerminalContent::String(s) => RenderedColumn {
                 lines: wrap_lines(split_lines(s), &WordWrap::WrapProse(None, None), width),
                 uses_cursor_padding: false,
             },
-            RenderableContent::Component(component) => {
+            RenderableTerminalContent::Component(component) => {
                 if let Some(t) = term
                     && let Some(image) = component.as_any().downcast_ref::<TerminalImage>()
                 {
@@ -434,7 +434,7 @@ impl TwoColumn {
     }
 }
 
-impl Renderable for TwoColumn {
+impl TerminalRenderable for TwoColumn {
     fn alignment(mut self, alignment: Alignment) -> Self
     where
         Self: Sized,

@@ -1,7 +1,7 @@
 use crate::{
-    components::renderable::{Renderable, RenderableContent},
+    components::renderable::{TerminalRenderable, RenderableTerminalContent},
     terminal::Terminal,
-    utils::layout::Layout,
+    utils::layout::{Layout, LayoutTerminalExt},
 };
 
 /// Heading level for sections, from h1 (largest) to h6 (smallest).
@@ -64,7 +64,7 @@ impl HeadingLevel {
 ///
 /// ```
 /// use biscuit_terminal::components::section::{Section, HeadingLevel};
-/// use biscuit_terminal::components::renderable::Renderable;
+/// use biscuit_terminal::components::renderable::TerminalRenderable;
 ///
 /// // Create a section with heading and content
 /// let mut section = Section::new(HeadingLevel::h2, "Getting Started");
@@ -80,12 +80,12 @@ impl HeadingLevel {
 /// ## Notes
 ///
 /// Content can be strings, [`Prose`][crate::components::prose::Prose],
-/// or any type implementing [`Into<RenderableContent>`][crate::components::renderable::RenderableContent].
+/// or any type implementing [`Into<RenderableTerminalContent>`][crate::components::renderable::RenderableTerminalContent].
 #[derive(Debug)]
 pub struct Section {
     level: HeadingLevel,
     title: String,
-    content: Vec<RenderableContent>,
+    content: Vec<RenderableTerminalContent>,
     layout: Layout,
 }
 
@@ -101,17 +101,17 @@ impl Section {
     }
 
     /// Add content to the section.
-    pub fn with_content(mut self, content: Vec<RenderableContent>) -> Self {
+    pub fn with_content(mut self, content: Vec<RenderableTerminalContent>) -> Self {
         self.content = content;
         self
     }
 
     /// Add a string item to the content.
     pub fn add_string<T: Into<String>>(&mut self, s: T) {
-        self.content.push(RenderableContent::String(s.into()));
+        self.content.push(RenderableTerminalContent::String(s.into()));
     }
 
-    /// Add any content that can be converted to RenderableContent.
+    /// Add any content that can be converted to RenderableTerminalContent.
     ///
     /// This is a convenience method that accepts strings, Prose, and other
     /// renderable components without requiring manual wrapping.
@@ -126,7 +126,7 @@ impl Section {
     /// section.push("Plain text");
     /// section.push(Prose::new("{{bold}}Styled{{reset}} text"));
     /// ```
-    pub fn push<T: Into<RenderableContent>>(&mut self, item: T) -> &mut Self {
+    pub fn push<T: Into<RenderableTerminalContent>>(&mut self, item: T) -> &mut Self {
         self.content.push(item.into());
         self
     }
@@ -155,8 +155,8 @@ impl Section {
         // Render content
         for item in &self.content {
             let content_str = match item {
-                RenderableContent::String(s) => s.clone(),
-                RenderableContent::Component(component) => {
+                RenderableTerminalContent::String(s) => s.clone(),
+                RenderableTerminalContent::Component(component) => {
                     if let Some(t) = term {
                         component.render_in_width(t, term_width)
                     } else {
@@ -177,7 +177,7 @@ impl Section {
     }
 }
 
-impl Renderable for Section {
+impl TerminalRenderable for Section {
     fn render_optimistic(&self, term_width: Option<u32>) -> String {
         let width = term_width.unwrap_or(80);
         let available = self.layout.available_width(width);

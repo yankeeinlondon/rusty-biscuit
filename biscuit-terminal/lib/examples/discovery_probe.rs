@@ -258,7 +258,7 @@ fn parse_bool_env(name: &str) -> Option<bool> {
 
 fn probe_prose() {
     use biscuit_terminal::components::prose::Prose;
-    use biscuit_terminal::components::renderable::Renderable;
+    use biscuit_terminal::components::renderable::TerminalRenderable;
     use biscuit_terminal::discovery::detection::{
         UnderlineSupport, get_terminal_app, osc8_link_support, underline_support,
     };
