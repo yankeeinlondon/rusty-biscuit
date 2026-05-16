@@ -72,7 +72,8 @@ fn page_options_override_a_css_variable() {
     page.apply_page_options(PageOptions {
         css_variables: Some(vec![("color-bg".to_string(), "#000000".to_string())]),
         ..PageOptions::default()
-    });
+    })
+    .unwrap();
     assert!(page.stylesheet().contains("--color-bg: #000000;"));
 }
 
@@ -85,8 +86,64 @@ fn external_stylesheet_emits_a_link_not_inline_style() {
     page.apply_page_options(PageOptions {
         external_stylesheet: Some(std::path::PathBuf::from("assets/page.css")),
         ..PageOptions::default()
-    });
+    })
+    .unwrap();
     let html = page.render();
     assert!(html.contains(r#"<link rel="stylesheet" href="assets/page.css">"#));
     assert!(!html.contains("<style>"));
+}
+
+#[test]
+fn apply_page_options_rejects_absolute_external_stylesheet() {
+    let body = BrowserFragment::new()
+        .define_as_text_fragment("content")
+        .finalize();
+    let mut page = HtmlPage::from(body);
+    let result = page.apply_page_options(PageOptions {
+        external_stylesheet: Some(std::path::PathBuf::from("/etc/page.css")),
+        ..PageOptions::default()
+    });
+    assert!(result.is_err());
+}
+
+#[test]
+fn nested_component_aux_state_rolls_up_to_page() {
+    use renderable::browser::ComponentStylesheet;
+    use renderable::browser::feature::PageFeature;
+    use renderable::microdata::MicrodataKey;
+    use renderable::stylesheet::CssStyle;
+
+    let child = BrowserFragment::new()
+        .define_as_block_tag(BlockTag::Span, "child")
+        .with_stylesheet(ComponentStylesheet::new("child").add("label", CssStyle::new()))
+        .add_metadata_keypair(MicrodataKey::Description, "child description")
+        .add_feature(PageFeature::DarkMode)
+        .finalize();
+
+    let parent = BrowserFragment::new()
+        .define_as_block_tag(BlockTag::Div, "parent")
+        .add_component(child)
+        .finalize();
+
+    let page = HtmlPage::from(parent);
+
+    // Stylesheet rollup: the nested component's scoped rule appears.
+    assert!(page.stylesheet().contains(".child .label"));
+    // Metadata rollup: the nested description reaches the page <head>.
+    assert!(page.render().contains("child description"));
+    // Feature rollup through the nested component.
+    assert!(page.features().contains(&PageFeature::DarkMode));
+}
+
+#[test]
+fn apply_page_options_rejects_absolute_external_code() {
+    let body = BrowserFragment::new()
+        .define_as_text_fragment("content")
+        .finalize();
+    let mut page = HtmlPage::from(body);
+    let result = page.apply_page_options(PageOptions {
+        external_code: Some(std::path::PathBuf::from("/var/app.js")),
+        ..PageOptions::default()
+    });
+    assert!(result.is_err());
 }

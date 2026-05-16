@@ -59,11 +59,14 @@ pub trait BrowserRenderable: std::fmt::Debug + Any {
     /// Promotes this single component to a standalone [`HtmlPage`].
     ///
     /// The default builds an `HtmlPage` from this component's fragment
-    /// and applies `page` when supplied.
+    /// and applies `page` when supplied. This convenience default skips
+    /// options that fail validation (e.g. an absolute external asset
+    /// path); call [`HtmlPage::apply_page_options`] directly for strict
+    /// `Result`-based handling.
     fn render_html_page(&self, page: Option<PageOptions>) -> HtmlPage {
         let mut html_page = HtmlPage::from(self.render_html_fragment());
         if let Some(options) = page {
-            html_page.apply_page_options(options);
+            let _ = html_page.apply_page_options(options);
         }
         html_page
     }

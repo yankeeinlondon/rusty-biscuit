@@ -4,6 +4,7 @@
 ///   HTML page.
 /// - Each feature will be used to look the code, CSS styling, and
 ///   HEAD based metadata that this feature requires.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum PageFeature {
     CopyToClipboard,
     PasteFromClipboard,

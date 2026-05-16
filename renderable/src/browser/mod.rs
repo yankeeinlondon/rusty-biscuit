@@ -7,7 +7,9 @@ pub use renderable::BrowserRenderable;
 
 use std::path::PathBuf;
 
-use crate::stylesheet::{CssRule, Stylesheet};
+use thiserror::Error;
+
+use crate::stylesheet::{CssRule, CssStyle, Stylesheet};
 
 /// A scoped collection of CSS rulesets owned by a component.
 ///
@@ -15,7 +17,6 @@ use crate::stylesheet::{CssRule, Stylesheet};
 /// Internal selectors registered on the component target elements
 /// **within** that wrapper; the rendered output is a descendant
 /// selector (`.<name> .<child>`).
-#[allow(dead_code)]
 pub struct ComponentStylesheet {
     name: String,
     style: Stylesheet,
@@ -32,6 +33,16 @@ impl ComponentStylesheet {
     /// Returns the component's wrapper class name (without the leading `.`).
     pub fn name(&self) -> &str {
         &self.name
+    }
+
+    /// Register an internal class-scoped rule.
+    ///
+    /// `internal_class` is the bare class name (no leading `.`) of an
+    /// element **within** the component wrapper. [`as_stylesheet`](Self::as_stylesheet)
+    /// lowers it to the descendant selector `.<name> .<internal_class>`.
+    pub fn add(mut self, internal_class: impl Into<String>, style: CssStyle) -> ComponentStylesheet {
+        self.style.push(CssRule::new(internal_class, style));
+        self
     }
 
     /// Lowers internal class selectors into fully-qualified **descendant**
@@ -85,4 +96,15 @@ pub struct PageOptions {
     /// `<script src="…">` instead of an inline `<script>`. The path is
     /// enforced relative so the `src` stays portable.
     pub external_code: Option<PathBuf>,
+}
+
+/// Error raised when a [`PageOptions`] value violates a page-assembly
+/// invariant.
+#[derive(Debug, Error)]
+pub enum PageOptionsError {
+    /// An external asset path was absolute. External `<link href>` /
+    /// `<script src>` paths must be relative so the emitted HTML stays
+    /// portable across hosting locations (decisions.md item 7).
+    #[error("external asset path must be relative, got absolute path: {0}")]
+    AbsoluteAssetPath(PathBuf),
 }

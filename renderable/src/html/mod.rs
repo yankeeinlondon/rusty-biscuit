@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use crate::{
     browser::{
-        PageOptions,
+        PageOptions, PageOptionsError,
         feature::PageFeature,
         fragment::{BrowserFragment, ComposableNode, Ready},
     },
@@ -37,7 +37,6 @@ pub struct HtmlPage {
     #[allow(dead_code)]
     meta: Vec<MetaTag>,
     /// Page-level features rolled up from fragments and the caller.
-    #[allow(dead_code)]
     features: Vec<PageFeature>,
     /// Page-level microdata. Page entries win over component entries on
     /// key conflict (decisions.md item 8).
@@ -128,7 +127,27 @@ impl HtmlPage {
     ///
     /// Replaces the stylesheet when one is supplied, merges CSS-variable
     /// overrides, and records the inline-vs-external asset choices.
-    pub fn apply_page_options(&mut self, options: PageOptions) -> &mut HtmlPage {
+    ///
+    /// ## Errors
+    ///
+    /// Returns [`PageOptionsError::AbsoluteAssetPath`] when
+    /// `external_stylesheet` or `external_code` is an absolute path —
+    /// external asset paths must be relative for portable output. On
+    /// error the page is left unmodified.
+    pub fn apply_page_options(
+        &mut self,
+        options: PageOptions,
+    ) -> Result<&mut HtmlPage, PageOptionsError> {
+        if let Some(path) = &options.external_stylesheet
+            && path.is_absolute()
+        {
+            return Err(PageOptionsError::AbsoluteAssetPath(path.clone()));
+        }
+        if let Some(path) = &options.external_code
+            && path.is_absolute()
+        {
+            return Err(PageOptionsError::AbsoluteAssetPath(path.clone()));
+        }
         if let Some(stylesheet) = options.stylesheet {
             self.stylesheet = stylesheet;
         }
@@ -137,13 +156,15 @@ impl HtmlPage {
         }
         self.external_stylesheet = options.external_stylesheet;
         self.external_code = options.external_code;
-        self
+        Ok(self)
     }
 
     /// Dedups the page's own `<link>` tags **and** the dependency links
     /// pulled from every composed fragment, returning the unified list in
     /// first-seen order.
     ///
+    /// The fragment scan is recursive: dependency links contributed by
+    /// components nested inside other components are collected too.
     /// Identity is [`LinkTag::dedup_key`] — `(rel, href)`. Page-level
     /// links are seen first and win ordering ties.
     pub fn collect_dedup_links(&self) -> Vec<&LinkTag> {
@@ -154,10 +175,61 @@ impl HtmlPage {
                 out.push(link);
             }
         }
-        for fragment in &self.fragments {
+        for fragment in self.all_fragments() {
             for link in fragment.dependency_links() {
                 if seen.insert(link.dedup_key()) {
                     out.push(link);
+                }
+            }
+        }
+        out
+    }
+
+    /// Returns every page fragment plus every component fragment nested
+    /// anywhere within their node trees, in document order (a parent
+    /// precedes its descendants).
+    ///
+    /// This is the recursion point that prevents nested-component
+    /// auxiliary state (stylesheets, dependency links, metadata,
+    /// features) from being silently lost during page assembly.
+    fn all_fragments(&self) -> Vec<&BrowserFragment<Ready>> {
+        let mut out = Vec::new();
+        for fragment in &self.fragments {
+            collect_fragments(fragment, &mut out);
+        }
+        out
+    }
+
+    /// Builds the effective metadata map: component metadata from every
+    /// fragment (document order) overlaid by page-level metadata, which
+    /// wins on key conflict (decisions.md item 8).
+    fn merged_metadata(&self) -> HashMap<MicrodataKey, String> {
+        let mut merged = HashMap::new();
+        for fragment in self.all_fragments() {
+            for (key, value) in fragment.metadata() {
+                merged.insert(*key, value.clone());
+            }
+        }
+        for (key, value) in &self.metadata {
+            merged.insert(*key, value.clone());
+        }
+        merged
+    }
+
+    /// Returns the page's features rolled up from the page itself and
+    /// every fragment (recursively, through nested components), in
+    /// first-seen order with duplicates removed.
+    pub fn features(&self) -> Vec<PageFeature> {
+        let mut out: Vec<PageFeature> = Vec::new();
+        for &feature in &self.features {
+            if !out.contains(&feature) {
+                out.push(feature);
+            }
+        }
+        for fragment in self.all_fragments() {
+            for &feature in fragment.features() {
+                if !out.contains(&feature) {
+                    out.push(feature);
                 }
             }
         }
@@ -173,7 +245,7 @@ impl HtmlPage {
         let mut out = String::new();
         out.push_str(&self.render_root_block());
         out.push_str(&render_stylesheet(&self.stylesheet));
-        for fragment in &self.fragments {
+        for fragment in self.all_fragments() {
             if let Some(component_sheet) = fragment.stylesheet() {
                 out.push_str(&render_stylesheet(&component_sheet.as_stylesheet()));
             }
@@ -197,8 +269,10 @@ impl HtmlPage {
             r#"<meta name="viewport" content="width=device-width, initial-scale=1">"#,
         );
         // 3. title — from the Title microdata key, else first <h1>, else empty.
-        let title = self
-            .metadata
+        // Metadata is the page/component merge so a nested component's
+        // title or description is not lost.
+        let metadata = self.merged_metadata();
+        let title = metadata
             .get(&MicrodataKey::Title)
             .cloned()
             .or_else(|| self.first_h1_text())
@@ -208,7 +282,7 @@ impl HtmlPage {
             crate::browser::utils::escape_text(&title)
         ));
         // 4. other microdata-driven meta tags.
-        for (key, value) in &self.metadata {
+        for (key, value) in &metadata {
             if *key == MicrodataKey::Title {
                 continue;
             }
@@ -226,7 +300,7 @@ impl HtmlPage {
         match &self.external_stylesheet {
             Some(path) => head.push_str(&format!(
                 r#"<link rel="stylesheet" href="{}">"#,
-                path.display()
+                crate::browser::utils::escape_attribute(&path.display().to_string())
             )),
             None => {
                 let css = self.stylesheet();
@@ -239,7 +313,7 @@ impl HtmlPage {
         match &self.external_code {
             Some(path) => head.push_str(&format!(
                 r#"<script src="{}" defer></script>"#,
-                path.display()
+                crate::browser::utils::escape_attribute(&path.display().to_string())
             )),
             None => {
                 let code = self.inline_code();
@@ -285,6 +359,35 @@ impl HtmlPage {
             }
         }
         None
+    }
+}
+
+/// Pushes `fragment` and every component fragment nested anywhere within
+/// its node tree onto `out`, in document order (parent before children).
+fn collect_fragments<'a>(
+    fragment: &'a BrowserFragment<Ready>,
+    out: &mut Vec<&'a BrowserFragment<Ready>>,
+) {
+    out.push(fragment);
+    if let Some(node) = fragment.node() {
+        collect_component_fragments(node, out);
+    }
+}
+
+/// Walks a composable node tree, descending into `BlockTag` children and
+/// recursing into every `Component` fragment found.
+fn collect_component_fragments<'a>(
+    node: &'a ComposableNode,
+    out: &mut Vec<&'a BrowserFragment<Ready>>,
+) {
+    match node {
+        ComposableNode::Component(child) => collect_fragments(child, out),
+        ComposableNode::BlockTag(block) => {
+            for child in &block.content.children {
+                collect_component_fragments(child, out);
+            }
+        }
+        _ => {}
     }
 }
 
