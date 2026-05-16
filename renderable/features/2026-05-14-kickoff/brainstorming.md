@@ -1,5 +1,10 @@
 # Brainstorming: BrowserRenderable Open Questions
 
+> **RESOLVED.** All 12 items below have been worked through and decided. The
+> authoritative record of the outcomes is [`decisions.md`](./decisions.md).
+> This document is retained as the historical agenda; where it conflicts with
+> `decisions.md`, `decisions.md` wins.
+
 Discussion agenda for the followup conversation on [`rendering-to-a-browser.md`](./rendering-to-a-browser.md). Items already landed (descendant scoping, dedup at page assembly, ordered collections, owned fragments, render-pipeline section, code-feature enum stub) are **not** repeated here — this doc only covers what still needs a decision or a design pass.
 
 Sorted roughly by priority: composition/merge semantics is the largest open item and should be discussed first.

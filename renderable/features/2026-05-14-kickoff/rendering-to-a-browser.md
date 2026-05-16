@@ -1,5 +1,10 @@
 # Rendering to a Browser
 
+> **Partially superseded.** This exploration doc predates the design
+> decisions in [`decisions.md`](./decisions.md). Where the two conflict —
+> notably the `BrowserRenderable` trait signature, `PageOptions`, and the
+> stylesheet type names — `decisions.md` wins.
+
 We are trying to create a reusable API surface for **components** who want to be able to put out content that can be rendered in a browser. To do this we must first try to understand:
 
 - how a component can:
@@ -113,9 +118,13 @@ When rendering for _part of the page_ you must ensure that the component can com
 The `BrowserRenderable` trait requires that components who render to the browser must implement the following functions:
 
 ```rust
-fn render_html_fragment(&self) -> BrowserFragment;
-fn render_html_page<T: into PageOptions>(&self, page: Option<T>) -> String;
+fn render_html_fragment(&self) -> BrowserFragment<Ready>;
+fn render_html_page(&self, page: Option<PageOptions>) -> HtmlPage;
 ```
+
+> `render_html_page` returns an `HtmlPage`; the caller then calls
+> `HtmlPage::render()` for the final string. See [`decisions.md`](./decisions.md)
+> item 7.
 
 In the Component Scope section we already discussed how a component can meet all it's goals for building a `BrowserFragment` and therefore fulfilling the contract for the first function. In this section we'll tackle how to take that `BrowserFragment` and convert it to a full HTML page.
 
@@ -123,8 +132,8 @@ The process would look something like:
 
 ```rust
 let fragment = component.render_html_fragment();
-let page = HtmlPage::from(&fragment)
-    .apply_page_options(options.)
+let html: String = HtmlPage::from(fragment)
+    .apply_page_options(options)
     .render();
 ```
 

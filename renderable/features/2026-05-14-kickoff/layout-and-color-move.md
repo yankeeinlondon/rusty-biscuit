@@ -1,5 +1,13 @@
 # Layout + Color Move Spec
 
+> **Note.** Per [`decisions.md`](./decisions.md) item 6, `Layout` is **not**
+> consumed by `PageOptions` or browser page rendering — page styling goes
+> through the page `Stylesheet`. `Layout` still moves to `renderable` as
+> described here, as a future cross-target layout primitive. Separately,
+> `decisions.md` item 10 renames the stylesheet declaration-block type
+> `Stylesheet → CssStyle`; references to `Stylesheet` below predate that
+> rename.
+
 Move `Layout` and `Color` (and their satellite types) from `biscuit-terminal` to the new `renderable` library, so render-target traits (`TerminalRenderable`, `BrowserRenderable`, future `MarkdownRenderable`) can share a common style vocabulary without depending on the terminal crate.
 
 This spec is sequenced **after** the Stylesheet move so `CssColor` is available as a portable cross-target color reference if needed.

@@ -29,15 +29,17 @@ Once the page's body has been constructed, the composition of the HEAD section o
     - a single "stylesheet" (aka, a set of class names with CSS definitions for the page)
         - the stylesheet will be composed from:
             - the aggregate demand from the fragments the page contains 
-            - as well as any page-level demands which were brought in at render time with the [`PageOptions`](@renderable/src/browser.rs) struct.
-        - the fragments will use the [`ComponentStylesheet` struct](@renderable/src/browser.rs) to define their requirements and one of the desirable side effects of this approach is that all classes defined are automatically using a descendant based scope convention which "namespaces" the classes it can define under a base class name for the component:
+            - as well as any page-level demands which were brought in at render time with the [`PageOptions`](@renderable/src/browser/mod.rs) struct.
+        - the fragments will use the [`ComponentStylesheet` struct](@renderable/src/browser/mod.rs) to define their requirements and one of the desirable side effects of this approach is that all classes defined are automatically using a descendant based scope convention which "namespaces" the classes it can define under a base class name for the component:
             - that means that so long as every component has a unique base class name then component's should not collide in their CSS definitions
             - it would make sense for the **BrowserFragment** to have a `validate()` function which can be called that will ensure among other things that:
                 - if the 
         - to start we can assume this stylesheet will always be an inline spreadsheet but in the future we can build in PageOptions which allow for it to be either inline or a file reference
     - if any Javascript is needed for this page to operate correctly then we will want to roll up and dedup all the demands from the contained fragments and merge them with any page-level demands for javascript
-        - just like with the stylesheet, to start we should assume that this is just inline javascript but over time we'll introduce ways to configure that in [`PageOptions`](@renderable/src/browser.rs)
+        - just like with the stylesheet, to start we should assume that this is just inline javascript but over time we'll introduce ways to configure that in [`PageOptions`](@renderable/src/browser/mod.rs)
 
 ## The Component
 
-While a page views the fragments it contains completely generically, components have the benefit of being able to think in terms of how _they_ should be laid out structurally/semantically, etc.
+While a page views the fragments it contains completely generically, components have the benefit of being able to think in terms of how they should be laid out structurally/semantically, etc.
+
+We have completely revamped the [`BrowserFragment`](@renderable/src/browser/fragment.rs) design to provide a type strong solution where composition of HTML elements and sub-components is made explicit.

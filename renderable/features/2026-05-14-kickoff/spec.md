@@ -140,16 +140,21 @@ We already have a working trait, we've just moved it's location to `renderable` 
 The API surface this Project will aim for is:
 
 ```rust
-// the update API surface
+// the updated API surface
 pub trait BrowserRenderable: std::fmt::Debug + Any {
-    // pre-existing
+    // pre-existing — deprecated, removed in Project 3
     fn render_to_browser(&self) -> String;
     fn render_to_browser_with_inline_variables(&self,_variables: &HashMap<String, String>) -> String;
     // adding for future API surface
-    fn render_html_fragment(&self) -> BrowserFragment;
-    fn render_html_page<T: into PageOptions>(&self, page: Option<T>) -> String;
+    fn render_html_fragment(&self) -> BrowserFragment<Ready>;
+    fn render_html_page(&self, page: Option<PageOptions>) -> HtmlPage;
 }
 ```
+
+> See [`decisions.md`](./decisions.md) items 2 and 7: `render_html_fragment`
+> returns the typestate `BrowserFragment<Ready>`, and `render_html_page`
+> returns an `HtmlPage` struct (the caller then calls `HtmlPage::render()`),
+> not a `String`.
 
 - to better understand the thinking of these two new functions and what they imply we went through an exploration phase about [what rendering to the browser means](./rendering-to-the-browser.md).
 - and then we wrote the following details around symbols and ideas we think will be important to reaching the intended 
@@ -187,10 +192,15 @@ render_to_browser() and ignores the variables map entirely, so without this over
 Now that we've built out the new interface operating side-by-side with the old and simpler approach we're ready to graduate to
 getting all call sites to to use the new API surface. The broad scope of this Project is:
 
-1. Small Naming Housekeeping
+1. Small Naming Housekeeping — **Scheme A** (see [`decisions.md`](./decisions.md) item 10)
 
-    - our `Stylesheet` struct would be better named `CssStyle`
-    - then our `HtmlClassDefinition` struct can be renamed `Stylesheet` because that's really what it is :)
+    - the declaration-block struct `Stylesheet` is renamed `CssStyle`
+    - the `(selector, block)` pair becomes a named `CssRule` type
+    - the collection struct `HtmlStyleSheet` is renamed `Stylesheet` — a
+      collection of rules is what a stylesheet actually is
+    - `HtmlClassDefinition` / `ClassDefinition` is **left alone** — it is a
+      list of class names, not a stylesheet. (The earlier idea of renaming
+      `HtmlClassDefinition → Stylesheet` is dropped.)
 
 2. Migrate all callers to the new API surface
 

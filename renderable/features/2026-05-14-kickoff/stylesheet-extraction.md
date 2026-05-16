@@ -64,8 +64,11 @@ These are pure path renames (crate::render::stylesheet::* → renderable::styles
 
 ### Issue 5 — Naming
 
-Spec writes Option<StyleSheet> (CamelCase) but existing struct is Stylesheet. Pick one and stick to it (CSS spec uses "stylesheet"
-as one word; W3C class name is StyleSheet). Either is defensible; rename cost is trivial since there are no external consumers
+**Resolved** by [`decisions.md`](./decisions.md) item 10 (Scheme A): the
+existing single-block `Stylesheet` struct is renamed `CssStyle`; the name
+`Stylesheet` is reassigned to the *collection* type (formerly
+`HtmlStyleSheet`), and the `(selector, block)` pair becomes `CssRule`. "Stylesheet"
+is one word throughout. The rename cost is trivial — no external consumers
 outside darkmatter.
 
 ### Steps
