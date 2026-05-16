@@ -53,3 +53,20 @@ impl Stylesheet {
         self.rules.is_empty()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::stylesheet::style::CssStyle;
+
+    #[test]
+    fn stylesheet_collection_holds_css_rules() {
+        let mut sheet = Stylesheet::new();
+        sheet.push(CssRule::new(".a", CssStyle::new()));
+        sheet.push(CssRule::new(".b", CssStyle::new()));
+        let entries = sheet.entries();
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].selector, ".a");
+        assert_eq!(entries[1].selector, ".b");
+    }
+}

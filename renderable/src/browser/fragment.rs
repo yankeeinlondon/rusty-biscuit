@@ -527,4 +527,23 @@ mod tests {
             Some("Diagram")
         );
     }
+
+    #[test]
+    fn raw_html_is_unescaped_text_fragment_is_escaped() {
+        let raw = BrowserFragment::new()
+            .define_as_raw_html("<b>hi</b>")
+            .finalize()
+            .render();
+        assert!(raw.contains("<b>hi</b>"), "RawHtml must pass through verbatim");
+
+        let text = BrowserFragment::new()
+            .define_as_text_fragment("<b>hi</b>")
+            .finalize()
+            .render();
+        assert!(!text.contains("<b>hi</b>"), "TextFragment must be escaped");
+        assert_eq!(
+            text, "&lt;b&gt;hi&lt;/b&gt;",
+            "TextFragment must escape <, > to entities"
+        );
+    }
 }
