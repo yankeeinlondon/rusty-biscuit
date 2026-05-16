@@ -1,3 +1,3 @@
-# Renderer Library
+# Renderable Library
 
-![image](./assets/renderer-512.png)
+![image|50](../assets/renderer-512.png)
