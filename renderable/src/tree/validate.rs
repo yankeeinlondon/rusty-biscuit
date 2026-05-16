@@ -1,0 +1,409 @@
+//! Structural validation of the canonical render tree.
+//!
+//! [`validate`] walks a [`RenderNode`] tree and reports structural problems
+//! as a [`ValidationReport`]. [`ensure_valid`] is a convenience wrapper that
+//! turns any error-severity finding into a [`ValidationError`].
+//!
+//! ## Examples
+//!
+//! ```
+//! use renderable::tree::{ensure_valid, RenderNode};
+//!
+//! let tree = RenderNode::root(vec![
+//!     RenderNode::paragraph(vec![RenderNode::text("ok")]),
+//! ]);
+//! assert!(ensure_valid(&tree).is_ok());
+//! ```
+
+use serde::{Deserialize, Serialize};
+use thiserror::Error;
+
+use crate::tree::node::{NodeKind, RenderNode};
+use crate::tree::source::SourceSpan;
+use crate::tree::Severity;
+
+/// How thoroughly [`validate`] walks the tree.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ValidationMode {
+    /// Collect every finding in the tree.
+    Full,
+    /// Stop walking at the first [`Severity::Error`] finding.
+    FailFast,
+}
+
+/// A single structural problem found by [`validate`].
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ValidationFinding {
+    /// How serious the finding is.
+    pub severity: Severity,
+    /// A human-readable description.
+    pub message: String,
+    /// The source location the finding refers to, if known.
+    pub span: Option<SourceSpan>,
+}
+
+/// The result of validating a render tree.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ValidationReport {
+    /// Every finding raised during the walk.
+    pub findings: Vec<ValidationFinding>,
+}
+
+impl ValidationReport {
+    /// Returns `true` if the report contains no findings.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.findings.is_empty()
+    }
+
+    /// Returns `true` if any finding has [`Severity::Error`].
+    #[must_use]
+    pub fn has_errors(&self) -> bool {
+        self.findings.iter().any(|f| f.severity == Severity::Error)
+    }
+
+    /// Returns an iterator over the [`Severity::Error`] findings.
+    pub fn errors(&self) -> impl Iterator<Item = &ValidationFinding> {
+        self.findings
+            .iter()
+            .filter(|f| f.severity == Severity::Error)
+    }
+}
+
+/// An error raised when a tree fails structural validation.
+///
+/// Carries every error-severity finding from the underlying
+/// [`ValidationReport`].
+#[derive(Debug, Clone, PartialEq, Error)]
+#[error(
+    "render tree failed validation with {} error(s): {}",
+    .findings.len(),
+    format_findings(.findings)
+)]
+pub struct ValidationError {
+    /// The error-severity findings that caused the failure.
+    pub findings: Vec<ValidationFinding>,
+}
+
+fn format_findings(findings: &[ValidationFinding]) -> String {
+    findings
+        .iter()
+        .map(|f| f.message.as_str())
+        .collect::<Vec<_>>()
+        .join("; ")
+}
+
+/// Returns `true` if `kind` is a block-level node.
+fn is_block(kind: &NodeKind) -> bool {
+    matches!(
+        kind,
+        NodeKind::Root { .. }
+            | NodeKind::Heading { .. }
+            | NodeKind::Paragraph { .. }
+            | NodeKind::BlockQuote { .. }
+            | NodeKind::List { .. }
+            | NodeKind::ListItem { .. }
+            | NodeKind::Code { .. }
+            | NodeKind::ThematicBreak
+            | NodeKind::Table { .. }
+            | NodeKind::TableRow { .. }
+            | NodeKind::TableCell { .. }
+            | NodeKind::FootnoteDefinition { .. }
+    )
+}
+
+/// Returns `true` if `kind` is a container that may hold only phrasing content.
+fn is_phrasing_only(kind: &NodeKind) -> bool {
+    matches!(
+        kind,
+        NodeKind::Paragraph { .. }
+            | NodeKind::Heading { .. }
+            | NodeKind::Emphasis { .. }
+            | NodeKind::Strong { .. }
+            | NodeKind::Delete { .. }
+            | NodeKind::Span { .. }
+            | NodeKind::Link { .. }
+    )
+}
+
+/// A short name for a node kind, used in finding messages.
+fn kind_name(kind: &NodeKind) -> &'static str {
+    match kind {
+        NodeKind::Root { .. } => "Root",
+        NodeKind::Heading { .. } => "Heading",
+        NodeKind::Paragraph { .. } => "Paragraph",
+        NodeKind::BlockQuote { .. } => "BlockQuote",
+        NodeKind::List { .. } => "List",
+        NodeKind::ListItem { .. } => "ListItem",
+        NodeKind::Code { .. } => "Code",
+        NodeKind::ThematicBreak => "ThematicBreak",
+        NodeKind::Table { .. } => "Table",
+        NodeKind::TableRow { .. } => "TableRow",
+        NodeKind::TableCell { .. } => "TableCell",
+        NodeKind::FootnoteDefinition { .. } => "FootnoteDefinition",
+        NodeKind::Text { .. } => "Text",
+        NodeKind::Emphasis { .. } => "Emphasis",
+        NodeKind::Strong { .. } => "Strong",
+        NodeKind::Delete { .. } => "Delete",
+        NodeKind::Span { .. } => "Span",
+        NodeKind::InlineCode { .. } => "InlineCode",
+        NodeKind::Link { .. } => "Link",
+        NodeKind::Image { .. } => "Image",
+        NodeKind::FootnoteReference { .. } => "FootnoteReference",
+        NodeKind::SoftBreak => "SoftBreak",
+        NodeKind::HardBreak => "HardBreak",
+        NodeKind::Html { .. } => "Html",
+        NodeKind::Unsupported { .. } => "Unsupported",
+    }
+}
+
+/// Validates the structure of a render tree.
+///
+/// The tree is walked recursively. Each violation of the Milestone 1
+/// structural rules becomes a [`ValidationFinding`]. In [`ValidationMode::FailFast`]
+/// the walk stops as soon as the first [`Severity::Error`] finding is recorded.
+///
+/// ## Returns
+///
+/// A [`ValidationReport`] listing every finding (or, in fail-fast mode, the
+/// findings collected up to and including the first error).
+#[must_use]
+pub fn validate(node: &RenderNode, mode: ValidationMode) -> ValidationReport {
+    let mut report = ValidationReport::default();
+    walk(node, true, None, mode, &mut report);
+    report
+}
+
+/// Recursively validates `node`.
+///
+/// `is_root_position` is `true` only for the top-level node. `parent` is the
+/// kind of the enclosing node, if any.
+fn walk(
+    node: &RenderNode,
+    is_root_position: bool,
+    parent: Option<&NodeKind>,
+    mode: ValidationMode,
+    report: &mut ValidationReport,
+) {
+    if mode == ValidationMode::FailFast && report.has_errors() {
+        return;
+    }
+
+    check_node(node, is_root_position, parent, report);
+
+    if mode == ValidationMode::FailFast && report.has_errors() {
+        return;
+    }
+
+    for child in node.children() {
+        walk(child, false, Some(&node.kind), mode, report);
+        if mode == ValidationMode::FailFast && report.has_errors() {
+            return;
+        }
+    }
+}
+
+/// Records findings for a single node given its position and parent.
+fn check_node(
+    node: &RenderNode,
+    is_root_position: bool,
+    parent: Option<&NodeKind>,
+    report: &mut ValidationReport,
+) {
+    let span = Some(node.span.clone());
+
+    // `Root` may appear only as the top-level node.
+    if matches!(node.kind, NodeKind::Root { .. }) && !is_root_position {
+        report.findings.push(error(
+            "Root node may appear only as the top-level node",
+            span.clone(),
+        ));
+    }
+
+    // `Unsupported` is a warning, not a structural error.
+    if let NodeKind::Unsupported { label } = &node.kind {
+        report.findings.push(ValidationFinding {
+            severity: Severity::Warning,
+            message: format!("Unsupported node: {label}"),
+            span: span.clone(),
+        });
+    }
+
+    // Containment rules based on the parent kind.
+    match parent {
+        Some(NodeKind::Table { .. }) => {}
+        Some(_) | None => {
+            if matches!(node.kind, NodeKind::TableRow { .. }) {
+                report.findings.push(error(
+                    "TableRow may appear only directly inside a Table",
+                    span.clone(),
+                ));
+            }
+        }
+    }
+
+    if matches!(node.kind, NodeKind::TableCell { .. })
+        && !matches!(parent, Some(NodeKind::TableRow { .. }))
+    {
+        report.findings.push(error(
+            "TableCell may appear only directly inside a TableRow",
+            span.clone(),
+        ));
+    }
+
+    if matches!(node.kind, NodeKind::ListItem { .. })
+        && !matches!(parent, Some(NodeKind::List { .. }))
+    {
+        report.findings.push(error(
+            "ListItem may appear only directly inside a List",
+            span.clone(),
+        ));
+    }
+
+    // Block-level nodes must not appear inside phrasing-only containers.
+    if let Some(parent_kind) = parent
+        && is_phrasing_only(parent_kind)
+        && is_block(&node.kind)
+    {
+        report.findings.push(error(
+            format!(
+                "block-level {} node inside phrasing-only {} container",
+                kind_name(&node.kind),
+                kind_name(parent_kind),
+            ),
+            span,
+        ));
+    }
+}
+
+/// Builds an [`Severity::Error`] finding.
+fn error(message: impl Into<String>, span: Option<SourceSpan>) -> ValidationFinding {
+    ValidationFinding {
+        severity: Severity::Error,
+        message: message.into(),
+        span,
+    }
+}
+
+/// Validates a render tree and fails if any error-severity finding is found.
+///
+/// [`Severity::Warning`] findings do not cause a failure.
+///
+/// ## Errors
+///
+/// Returns [`ValidationError`] carrying every error-severity finding if the
+/// tree violates a structural rule.
+pub fn ensure_valid(node: &RenderNode) -> Result<(), ValidationError> {
+    let report = validate(node, ValidationMode::Full);
+    let errors: Vec<ValidationFinding> = report.errors().cloned().collect();
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        Err(ValidationError { findings: errors })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::tree::{ColumnAlign, HeadingDepth};
+
+    #[test]
+    fn valid_tree_has_no_findings() {
+        let tree = RenderNode::root(vec![RenderNode::paragraph(vec![RenderNode::text(
+            "hello",
+        )])]);
+        let report = validate(&tree, ValidationMode::Full);
+        assert!(report.is_empty());
+        assert!(!report.has_errors());
+    }
+
+    #[test]
+    fn orphaned_table_cell_is_an_error() {
+        // A TableCell directly inside a Paragraph: orphaned and block-in-phrasing.
+        let tree = RenderNode::root(vec![RenderNode::paragraph(vec![
+            RenderNode::table_cell(vec![RenderNode::text("x")]),
+        ])]);
+        let report = validate(&tree, ValidationMode::Full);
+        assert!(report.has_errors());
+        assert!(report
+            .errors()
+            .any(|f| f.message.contains("TableCell may appear only")));
+    }
+
+    #[test]
+    fn block_inside_paragraph_is_an_error() {
+        let tree = RenderNode::root(vec![RenderNode::paragraph(vec![
+            RenderNode::block_quote(vec![RenderNode::text("x")]),
+        ])]);
+        let report = validate(&tree, ValidationMode::Full);
+        assert!(report.has_errors());
+        assert!(report
+            .errors()
+            .any(|f| f.message.contains("block-level BlockQuote")));
+    }
+
+    #[test]
+    fn unsupported_node_is_a_warning_not_error() {
+        let tree = RenderNode::root(vec![RenderNode::paragraph(vec![
+            RenderNode::unsupported("custom directive"),
+        ])]);
+        let report = validate(&tree, ValidationMode::Full);
+        assert!(!report.has_errors());
+        assert!(!report.is_empty());
+        assert_eq!(report.findings[0].severity, Severity::Warning);
+        assert!(ensure_valid(&tree).is_ok());
+    }
+
+    #[test]
+    fn ensure_valid_fails_on_error_tree_and_passes_otherwise() {
+        let bad = RenderNode::root(vec![RenderNode::table_cell(vec![])]);
+        assert!(ensure_valid(&bad).is_err());
+
+        let clean = RenderNode::root(vec![RenderNode::heading(
+            HeadingDepth::new(1).unwrap(),
+            vec![RenderNode::text("Title")],
+        )]);
+        assert!(ensure_valid(&clean).is_ok());
+
+        let warning_only = RenderNode::root(vec![RenderNode::unsupported("thing")]);
+        assert!(ensure_valid(&warning_only).is_ok());
+    }
+
+    #[test]
+    fn fail_fast_stops_at_first_error() {
+        // Two independent errors: an orphaned ListItem and an orphaned TableRow.
+        let tree = RenderNode::root(vec![
+            RenderNode::list_item(None, vec![]),
+            RenderNode::table_row(vec![]),
+        ]);
+        let full = validate(&tree, ValidationMode::Full);
+        let fast = validate(&tree, ValidationMode::FailFast);
+        assert!(full.errors().count() >= 2);
+        assert_eq!(fast.errors().count(), 1);
+        assert!(fast.findings.len() < full.findings.len());
+    }
+
+    #[test]
+    fn nested_root_is_an_error() {
+        let tree = RenderNode::root(vec![RenderNode::root(vec![])]);
+        let report = validate(&tree, ValidationMode::Full);
+        assert!(report.has_errors());
+        assert!(report
+            .errors()
+            .any(|f| f.message.contains("Root node may appear only")));
+    }
+
+    #[test]
+    fn valid_table_passes() {
+        let tree = RenderNode::root(vec![RenderNode::table(
+            vec![ColumnAlign::Left],
+            vec![RenderNode::table_row(vec![RenderNode::table_cell(vec![
+                RenderNode::text("cell"),
+            ])])],
+        )]);
+        assert!(ensure_valid(&tree).is_ok());
+    }
+}

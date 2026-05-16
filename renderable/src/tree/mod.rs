@@ -22,15 +22,23 @@
 //! ```
 
 mod attrs;
+mod diagnostic;
 mod document;
+mod error;
 mod node;
 mod source;
+mod validate;
 
 pub use attrs::NodeAttrs;
+pub use diagnostic::{Diagnostic, DiagnosticKind, Severity};
 pub use document::{Document, DocumentMetadata, Frontmatter, FrontmatterFormat};
+pub use error::{RenderError, RenderStrictness, Rendered};
 pub use node::{ColumnAlign, HeadingDepth, HeadingDepthError, NodeKind, RenderNode};
 pub use source::{
     Provenance, SourceDescriptor, SourceId, SourceLocation, SourceRegistry, SourceSpan,
+};
+pub use validate::{
+    ensure_valid, validate, ValidationError, ValidationFinding, ValidationMode, ValidationReport,
 };
 
 /// A component capable of rendering itself to a canonical [`RenderNode`] tree.
