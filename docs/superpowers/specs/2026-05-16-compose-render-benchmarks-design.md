@@ -38,8 +38,9 @@ meaningful across runs — no dependency on `example-docs/` or on-disk fixtures.
 - **Render corpus** — each generated document packs headings, lists, tables,
   and multiple fenced code blocks (so syntax highlighting does real work).
 
-Proposed size: 200 documents per corpus, tuned during implementation so each
-benchmark run lands in roughly the 5–10s range.
+Sizes are tuned so each benchmark run stays in a reasonable range: the compose
+corpus is 200 documents; the render corpus is 30 documents (terminal rendering
+is expensive) with a 20-document code-heavy sub-corpus for `highlight`.
 
 ## benches/compose_pipeline.rs
 
@@ -73,9 +74,8 @@ Per-mode benchmarks over the render corpus:
 | `html`      | `as_html(&md, HtmlOptions::default())`         |
 | `highlight` | `for_terminal` over a code-block-heavy subset  |
 
-- Terminal rendering uses a fixed-width terminal (`Terminal::new_optimistic(120)`,
-  supplied via `TerminalOptions`) rather than live capability detection, so
-  results are deterministic across machines and runs.
+- Terminal rendering pins `TerminalOptions::max_width` to 120 rather than
+  relying on live terminal-size detection, so results are stable across runs.
 - `highlight` isolates `syntect` syntax-highlighting cost by rendering the
   code-block-heavy subset of the corpus.
 
