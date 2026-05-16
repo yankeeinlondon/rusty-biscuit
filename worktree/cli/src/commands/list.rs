@@ -3,7 +3,7 @@ use std::io::IsTerminal as _;
 use biscuit_terminal::components::list::UnorderedList;
 use biscuit_terminal::components::mermaid::MermaidDiagram;
 use biscuit_terminal::components::prose::Prose;
-use biscuit_terminal::components::renderable::Renderable as _;
+use biscuit_terminal::components::renderable::TerminalRenderable as _;
 use biscuit_terminal::components::terminal_image::{ImageWidth, parse_width_spec};
 use biscuit_terminal::discovery::detection::ImageSupport;
 use biscuit_terminal::terminal::Terminal;
