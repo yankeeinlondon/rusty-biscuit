@@ -1,0 +1,6 @@
+---
+source: darkmatter/lib/tests/render_tree_roundtrip.rs
+expression: rendered.output
+---
+A paragraph with a [link](https://example.com "Example") and an
+![alt text](image.png) image reference.

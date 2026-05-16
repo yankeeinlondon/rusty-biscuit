@@ -1,0 +1,9 @@
+---
+source: darkmatter/lib/tests/render_tree_roundtrip.rs
+expression: rendered.output
+---
+```rust ignore
+fn main() {
+    println!("hello");
+}
+```
