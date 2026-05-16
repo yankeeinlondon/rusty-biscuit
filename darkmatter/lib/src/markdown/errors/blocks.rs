@@ -137,7 +137,7 @@ pub(crate) fn transform_block(message: &str) -> StatusBlock {
 mod tests {
     use std::path::PathBuf;
 
-    use biscuit_terminal::components::renderable::Renderable;
+    use biscuit_terminal::components::renderable::TerminalRenderable;
     use biscuit_terminal::utils::escape_codes::strip_escape_codes;
 
     use super::*;

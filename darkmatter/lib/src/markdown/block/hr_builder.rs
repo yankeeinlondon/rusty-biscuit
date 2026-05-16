@@ -252,7 +252,7 @@ fn map_weight(rule: HorizontalRule, raw: &str) -> HorizontalRule {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use biscuit_terminal::components::renderable::{BrowserRenderable, Renderable};
+    use biscuit_terminal::components::renderable::{BrowserRenderable, TerminalRenderable};
     use biscuit_terminal::discovery::detection::ImageSupport;
     use biscuit_terminal::terminal::Terminal;
 

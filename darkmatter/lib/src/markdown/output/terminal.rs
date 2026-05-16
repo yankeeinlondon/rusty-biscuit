@@ -41,7 +41,7 @@ use crate::markdown::{
 use biscuit_terminal::components::horizontal_rule::HorizontalRule;
 use biscuit_terminal::components::image_options::TerminalImageOptions;
 use biscuit_terminal::components::prose::Prose;
-use biscuit_terminal::components::renderable::Renderable;
+use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::components::table::cell::TableCellContent;
 use biscuit_terminal::components::table::column::TableColumn;
 use biscuit_terminal::components::table::table::Table as TerminalTable;
@@ -651,7 +651,7 @@ impl ImageRenderer {
             return format!("▉ IMAGE[{}]\n", alt_text);
         }
 
-        // Render via Renderable fallback (protocol-aware string output)
+        // Render via TerminalRenderable fallback (protocol-aware string output)
         let render_terminal = self.render_terminal();
         let output = term_image.render(&render_terminal);
         if output.is_empty() {
@@ -797,7 +797,7 @@ fn convert_alignment(align: &pulldown_cmark::Alignment) -> Alignment {
 ///
 /// This function renders markdown content with syntax-highlighted code blocks
 /// using ANSI escape sequences for terminal display. Inline images are rendered
-/// via biscuit-terminal's protocol-aware `Renderable` trait (Kitty/iTerm2).
+/// via biscuit-terminal's protocol-aware `TerminalRenderable` trait (Kitty/iTerm2).
 ///
 /// ## Examples
 ///
@@ -2751,7 +2751,7 @@ fn write_horizontal_rule(
     term: &Terminal,
     terminal_width: u16,
 ) {
-    use biscuit_terminal::components::renderable::Renderable;
+    use biscuit_terminal::components::renderable::TerminalRenderable;
     use biscuit_terminal::utils::layout::{Layout, Margin};
 
     // If we're mid-line, break to column 0 before emitting margins.

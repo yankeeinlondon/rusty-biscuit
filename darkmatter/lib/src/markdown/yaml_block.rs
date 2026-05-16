@@ -7,9 +7,9 @@
 use std::any::Any;
 use std::path::Path;
 
-use biscuit_terminal::components::renderable::{BrowserRenderable, Renderable};
+use biscuit_terminal::components::renderable::{BrowserRenderable, TerminalRenderable};
 use biscuit_terminal::terminal::Terminal;
-use biscuit_terminal::utils::layout::Layout;
+use biscuit_terminal::utils::layout::{Layout, LayoutTerminalExt};
 use thiserror::Error;
 
 use crate::markdown::{
@@ -166,7 +166,7 @@ fn validate_yaml(yaml: &str) -> Result<(), serde_yaml_ng::Error> {
 /// Emits the same ANSI-highlighted `yaml` code block that a Markdown
 /// ` ```yaml ` fence produces (header row + highlighted body) and applies the
 /// stored [`Layout`] (margins, alignment, word-wrap) to the result.
-impl Renderable for YamlBlock {
+impl TerminalRenderable for YamlBlock {
     fn render(&self, term: &Terminal) -> String {
         // Detect color mode fresh so env-var changes between renders are
         // honoured (e.g. dark/light tests that flip COLORFGBG).
@@ -211,7 +211,7 @@ impl Renderable for YamlBlock {
         self.layout.apply_layout(&raw, terminal_width)
     }
 
-    /// Renders without environment detection by delegating to [`Renderable::render`]
+    /// Renders without environment detection by delegating to [`TerminalRenderable::render`]
     /// with a default [`Terminal`]. Once `render` honours the stored layout this
     /// override is behaviourally equivalent to the trait default for a width of
     /// `None`; we keep it explicit so future divergence is intentional.
@@ -410,7 +410,7 @@ mod tests {
         let block = YamlBlock::new("foo: 1").unwrap();
         assert!(block.is_block_level());
         // as_any should return the YamlBlock
-        let any_ref = Renderable::as_any(&block);
+        let any_ref = TerminalRenderable::as_any(&block);
         assert!(any_ref.downcast_ref::<YamlBlock>().is_some());
     }
 
@@ -425,7 +425,7 @@ mod tests {
     fn test_terminal_render_contains_ansi_and_content() {
         let block = YamlBlock::new("foo: 1\nbar: 2").unwrap();
         let term = Terminal::new();
-        let output = Renderable::render(&block, &term);
+        let output = TerminalRenderable::render(&block, &term);
 
         // Should contain ANSI escape codes for syntax highlighting
         assert!(
@@ -460,7 +460,7 @@ mod tests {
         // Render via YamlBlock
         let block = YamlBlock::new(yaml_content).unwrap();
         let term = Terminal::new();
-        let block_output = Renderable::render(&block, &term);
+        let block_output = TerminalRenderable::render(&block, &term);
 
         // Render via Markdown YAML fence
         let md_content = format!("```yaml\n{}\n```", yaml_content);
@@ -619,7 +619,7 @@ mod tests {
         assert_eq!(detect_color_mode(), ColorMode::Dark);
 
         let block = YamlBlock::new("key: value").unwrap();
-        let dark_out = Renderable::render(&block, &Terminal::default());
+        let dark_out = TerminalRenderable::render(&block, &Terminal::default());
         assert!(
             dark_out.contains("\x1b["),
             "Dark-mode render should still emit ANSI escape sequences"
@@ -642,7 +642,7 @@ mod tests {
         assert_eq!(detect_color_mode(), ColorMode::Light);
 
         let block = YamlBlock::new("key: value").unwrap();
-        let light_out = Renderable::render(&block, &Terminal::default());
+        let light_out = TerminalRenderable::render(&block, &Terminal::default());
         assert!(
             light_out.contains("\x1b["),
             "Light-mode render should still emit ANSI escape sequences"
@@ -653,7 +653,7 @@ mod tests {
     ///
     /// Different background colors flow through `CodeHighlighter::new`, so the
     /// emitted SGR background sequences (`\x1b[48;2;…m`) should differ. This
-    /// confirms that `Renderable::render` actually exercises the color-mode
+    /// confirms that `TerminalRenderable::render` actually exercises the color-mode
     /// branch and isn't ignoring the env var.
     #[test]
     #[serial]
@@ -667,10 +667,10 @@ mod tests {
         let term = Terminal::default();
 
         unsafe { std::env::set_var("COLORFGBG", "15;0") };
-        let dark_out = Renderable::render(&block, &term);
+        let dark_out = TerminalRenderable::render(&block, &term);
 
         unsafe { std::env::set_var("COLORFGBG", "0;15") };
-        let light_out = Renderable::render(&block, &term);
+        let light_out = TerminalRenderable::render(&block, &term);
 
         assert_ne!(
             dark_out, light_out,
@@ -689,7 +689,7 @@ mod tests {
         let mut block = YamlBlock::new("foo: 1\nbar: 2").unwrap();
         block.layout_mut().left_margin = Margin::Chars(4);
 
-        let out = Renderable::render(&block, &Terminal::default());
+        let out = TerminalRenderable::render(&block, &Terminal::default());
         let plain = crate::testing::strip_ansi_codes(&out);
 
         for line in plain.lines().filter(|l| !l.trim().is_empty()) {
@@ -708,7 +708,7 @@ mod tests {
     #[test]
     fn test_render_optimistic_smoke() {
         let block = YamlBlock::new("foo: 1").unwrap();
-        let out = Renderable::render_optimistic(&block, None);
+        let out = TerminalRenderable::render_optimistic(&block, None);
         assert!(out.contains("\x1b["), "optimistic render should emit ANSI");
         assert!(
             crate::testing::strip_ansi_codes(&out).contains("foo: 1"),
@@ -720,12 +720,12 @@ mod tests {
     ///
     /// Constructs an optimistic terminal at width 40 and asserts the rendered
     /// output is non-empty and ANSI-bearing. The trait-default `render_in_width`
-    /// (provided by `Renderable`) delegates to `render` with this terminal.
+    /// (provided by `TerminalRenderable`) delegates to `render` with this terminal.
     #[test]
     fn test_render_in_width_smoke() {
         let block = YamlBlock::new("foo: 1\nbar: 2").unwrap();
         let term = Terminal::new_optimistic(40);
-        let out = Renderable::render(&block, &term);
+        let out = TerminalRenderable::render(&block, &term);
 
         assert!(
             !out.is_empty(),
@@ -849,7 +849,7 @@ mod tests {
     fn test_yaml_block_render_is_block_level() {
         let block = YamlBlock::new("foo: 1").unwrap();
         assert!(
-            Renderable::is_block_level(&block),
+            TerminalRenderable::is_block_level(&block),
             "YamlBlock should be block-level"
         );
     }
@@ -858,7 +858,7 @@ mod tests {
     fn test_terminal_render_empty_yaml() {
         let block = YamlBlock::new("").unwrap();
         let term = Terminal::new();
-        let output = Renderable::render(&block, &term);
+        let output = TerminalRenderable::render(&block, &term);
 
         // Should still produce valid output (padding rows at minimum)
         assert!(

@@ -819,7 +819,7 @@ fn section_context_populated_in_graph() {
 
 #[test]
 fn file_tree_builds_from_real_document() {
-    use biscuit_terminal::components::renderable::Renderable;
+    use biscuit_terminal::components::renderable::TerminalRenderable;
     use darkmatter::markdown::reference::file_tree::FileTree;
 
     let dir = TempDir::new().unwrap();
@@ -857,7 +857,7 @@ fn file_tree_builds_from_real_document() {
 
 #[test]
 fn file_tree_follow_mode() {
-    use biscuit_terminal::components::renderable::Renderable;
+    use biscuit_terminal::components::renderable::TerminalRenderable;
     use darkmatter::markdown::reference::file_tree::FileTree;
 
     let dir = TempDir::new().unwrap();
@@ -889,7 +889,7 @@ fn file_tree_follow_mode() {
 
 #[test]
 fn file_tree_toc_linking_follow_mode() {
-    use biscuit_terminal::components::renderable::Renderable;
+    use biscuit_terminal::components::renderable::TerminalRenderable;
     use darkmatter::markdown::reference::file_tree::FileTree;
 
     let dir = TempDir::new().unwrap();
@@ -960,7 +960,7 @@ fn file_tree_toc_linking_follow_validate_catches_child_issues() {
 
 #[test]
 fn file_tree_epilogue_follow_mode() {
-    use biscuit_terminal::components::renderable::Renderable;
+    use biscuit_terminal::components::renderable::TerminalRenderable;
     use darkmatter::markdown::reference::file_tree::FileTree;
 
     let dir = TempDir::new().unwrap();
@@ -998,7 +998,7 @@ fn file_tree_epilogue_follow_mode() {
 
 #[test]
 fn file_tree_multiple_prologues_follow_mode() {
-    use biscuit_terminal::components::renderable::Renderable;
+    use biscuit_terminal::components::renderable::TerminalRenderable;
     use darkmatter::markdown::reference::file_tree::FileTree;
 
     let dir = TempDir::new().unwrap();
@@ -1032,7 +1032,7 @@ fn file_tree_multiple_prologues_follow_mode() {
 
 #[test]
 fn file_tree_show_root_false_preserves_subtree() {
-    use biscuit_terminal::components::renderable::Renderable;
+    use biscuit_terminal::components::renderable::TerminalRenderable;
     use darkmatter::markdown::reference::file_tree::FileTree;
 
     let dir = TempDir::new().unwrap();

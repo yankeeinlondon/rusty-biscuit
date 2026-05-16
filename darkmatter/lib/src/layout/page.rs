@@ -6,7 +6,7 @@ use std::any::Any;
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-use biscuit_terminal::components::renderable::{BrowserRenderable, Renderable};
+use biscuit_terminal::components::renderable::{BrowserRenderable, TerminalRenderable};
 use biscuit_terminal::discovery::detection::ColorMode as TerminalColorMode;
 use biscuit_terminal::terminal::Terminal;
 use biscuit_terminal::utils::layout::Layout;
@@ -59,9 +59,9 @@ pub struct DarkmatterPage {
     alignments: HashMap<PageComponent, PageAlignment>,
     fills: HashMap<PageComponent, PageFill>,
     options: TerminalOptions,
-    /// Stored markdown for [`Renderable`] support.
+    /// Stored markdown for [`TerminalRenderable`] support.
     markdown: Option<Markdown>,
-    /// Layout for [`Renderable`] trait compliance.
+    /// Layout for [`TerminalRenderable`] trait compliance.
     layout: Layout,
 }
 
@@ -153,7 +153,7 @@ impl DarkmatterPage {
         &self.options
     }
 
-    /// Set the markdown document to render for [`Renderable`] support.
+    /// Set the markdown document to render for [`TerminalRenderable`] support.
     pub fn with_markdown(mut self, md: Markdown) -> Self {
         self.markdown = Some(md);
         self
@@ -698,7 +698,7 @@ fn clamp_width(width: u32) -> u16 {
     width.min(u16::MAX as u32) as u16
 }
 
-impl Renderable for DarkmatterPage {
+impl TerminalRenderable for DarkmatterPage {
     fn render(&self, _term: &Terminal) -> String {
         match self.markdown.as_ref() {
             Some(md) => self
@@ -1216,14 +1216,14 @@ mod tests {
     #[test]
     fn renderable_trait_with_markdown() {
         let term = Terminal::new_optimistic(80);
-        let md: Markdown = "# Renderable\n".into();
+        let md: Markdown = "# TerminalRenderable\n".into();
         let page = DarkmatterPage::new(&term).with_markdown(md);
 
-        let out = Renderable::render(&page, &term);
+        let out = TerminalRenderable::render(&page, &term);
         let plain = crate::testing::strip_ansi_codes(&out);
         assert!(
-            plain.contains("Renderable"),
-            "Renderable::render should output markdown content"
+            plain.contains("TerminalRenderable"),
+            "TerminalRenderable::render should output markdown content"
         );
     }
 
@@ -1232,10 +1232,10 @@ mod tests {
         let term = Terminal::new_optimistic(80);
         let page = DarkmatterPage::new(&term);
 
-        let out = Renderable::render(&page, &term);
+        let out = TerminalRenderable::render(&page, &term);
         assert!(
             out.contains("no markdown set"),
-            "Renderable without markdown should show placeholder"
+            "TerminalRenderable without markdown should show placeholder"
         );
     }
 
@@ -1243,7 +1243,7 @@ mod tests {
     fn renderable_trait_block_level() {
         let term = Terminal::new_optimistic(80);
         let page = DarkmatterPage::new(&term);
-        assert!(Renderable::is_block_level(&page));
+        assert!(TerminalRenderable::is_block_level(&page));
     }
 
     #[test]
@@ -1251,7 +1251,7 @@ mod tests {
         let term = Terminal::new_optimistic(80);
         let page = DarkmatterPage::new(&term);
         assert!(
-            Renderable::as_any(&page)
+            TerminalRenderable::as_any(&page)
                 .downcast_ref::<DarkmatterPage>()
                 .is_some()
         );

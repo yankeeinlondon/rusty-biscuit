@@ -59,7 +59,7 @@ use std::borrow::Cow;
 use std::fmt::{self, Display};
 
 use biscuit_terminal::components::prose::Prose;
-use biscuit_terminal::components::renderable::Renderable;
+use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::terminal::Terminal;
 use serde_json::{Map, Value};
 use thiserror::Error;
