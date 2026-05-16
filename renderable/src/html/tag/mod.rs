@@ -1,7 +1,7 @@
 use url::Url;
 
 use crate::browser::fragment::ComposableNode;
-use crate::browser::Stylesheet;
+use crate::stylesheet::CssStyle;
 use crate::html::attribute::{
     ClassDefinition, DomId, HtmlDataAttribute,
     aria::{AriaAttribute, AriaRole},
@@ -275,7 +275,7 @@ pub enum HtmlAttribute {
     /// `class` — one or more space-separated class names.
     Class(ClassDefinition),
     /// `style` — inline CSS declarations.
-    Style(Stylesheet),
+    Style(CssStyle),
     /// `title` — advisory tooltip text.
     Title(String),
     /// `data-*` — custom user-defined data attribute keyed by the

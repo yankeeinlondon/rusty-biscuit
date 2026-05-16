@@ -1,7 +1,8 @@
 use crate::{
-    browser::{fragment::BrowserFragment, feature::CodeFeature, HtmlStyleSheet},
+    browser::{fragment::BrowserFragment, feature::CodeFeature},
     html::tag::{link::LinkTag, meta::MetaTag},
     microdata::MicrodataKey,
+    stylesheet::Stylesheet,
 };
 
 pub mod attribute;
@@ -12,7 +13,7 @@ pub mod tag;
 #[derive(Default)]
 #[allow(dead_code)]
 pub struct HtmlPage {
-    stylesheet: HtmlStyleSheet,
+    stylesheet: Stylesheet,
     links: Vec<LinkTag>,
     script_blocks: Vec<String>,
     meta: Vec<MetaTag>,
@@ -40,7 +41,7 @@ impl From<BrowserFragment> for HtmlPage {
 
 impl HtmlPage {
     // input
-    pub fn new(style: Option<HtmlStyleSheet>) -> HtmlPage {
+    pub fn new(style: Option<Stylesheet>) -> HtmlPage {
         HtmlPage {
             stylesheet: style.unwrap_or_default(),
             ..HtmlPage::default()
