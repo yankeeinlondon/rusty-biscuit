@@ -75,7 +75,28 @@ outdated:
 check:
     @cargo check -p {{ LIBRARY }} -p {{ CLI }}
 
-# Run the latest debug build of the Claudine CLI
+# ---------- benchmarking + profiling ----------
+
+# run the full Criterion bench suite for biscuit-terminal
+bench *args="":
+    @echo -e "Running Criterion benches for {{ BOLD }}{{ PACKAGE }}{{ RESET }}"
+    @cargo bench -p {{ LIBRARY }} -- {{ args }}
+
+# run only the rendering benches (escape codes, prose, word-wrap, layout, components)
+bench-rendering *args="":
+    @cargo bench -p {{ LIBRARY }} --bench rendering -- {{ args }}
+
+# capture a saved baseline for trend tracking (usage: `just bench-baseline main`)
+bench-baseline name:
+    @echo -e "Saving Criterion baseline {{ BOLD }}{{ name }}{{ RESET }}"
+    @cargo bench -p {{ LIBRARY }} -- --save-baseline {{ name }}
+
+# compare current bench timings against a saved baseline
+bench-compare name:
+    @echo -e "Comparing against Criterion baseline {{ BOLD }}{{ name }}{{ RESET }}"
+    @cargo bench -p {{ LIBRARY }} -- --baseline {{ name }}
+
+# Run the latest debug build of the CLI
 cli *args="":
     @cargo run -p {{ CLI }} {{ args }}
 
