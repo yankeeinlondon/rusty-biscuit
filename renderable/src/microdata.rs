@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::fmt;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum MicrodataKey {

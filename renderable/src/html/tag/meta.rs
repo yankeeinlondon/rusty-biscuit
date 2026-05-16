@@ -1,7 +1,9 @@
-const UTF8: &'static str = "utf-8";
+const UTF8: &str = "utf-8";
 
 /// The <meta> HTML element represents metadata that cannot be represented by other meta-related elements,
 /// such as <base>, <link>, <script>, <style>, or <title>.
+#[derive(Default)]
+#[allow(dead_code)]
 pub struct MetaTag {
     /// This attribute declares the document's character encoding. If the attribute is present, its value
     /// must be an ASCII case-insensitive match for the string "utf-8", because UTF-8 is the only valid
@@ -20,30 +22,19 @@ pub struct MetaTag {
     name: Option<String>,
 }
 
-impl Default for MetaTag {
-    fn default() -> MetaTag {
-        MetaTag {
-            charset: None,
-            content: None,
-            http_equiv: None,
-            media: None,
-            name: None,
-        }
-    }
-}
 
 impl MetaTag {
     pub fn new() -> MetaTag {
         MetaTag::default()
     }
 
-    pub fn set_charset(&mut self) -> &mut self {
+    pub fn set_charset(&mut self) -> &mut MetaTag {
         self.charset = Some(UTF8);
         self
     }
 
     /// render the meta tag for the HTML page
-    pub fn render() -> String {
-        !todo()
+    pub fn render(&self) -> String {
+        todo!()
     }
 }

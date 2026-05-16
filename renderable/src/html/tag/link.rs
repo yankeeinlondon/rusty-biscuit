@@ -1,6 +1,7 @@
-use crate::html::rel::LinkRel;
+use crate::html::attribute::rel::LinkRel;
 
 /// Defines the content for an HTML `<link>` tag
+#[allow(dead_code)]
 pub struct LinkTag {
     rel: LinkRel,
     href: Option<String>,

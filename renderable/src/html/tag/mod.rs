@@ -1,10 +1,15 @@
 use url::Url;
 
+use crate::browser::fragment::ComposableNode;
+use crate::browser::Stylesheet;
 use crate::html::attribute::{
     ClassDefinition, DomId, HtmlDataAttribute,
     aria::{AriaAttribute, AriaRole},
     rel::RelAttribute,
 };
+
+/// Placeholder type for HTML attribute values.
+pub type Value = String;
 
 pub mod link;
 pub mod meta;
@@ -15,8 +20,8 @@ pub mod meta;
 /// the more explicit `/>` variant (e.g., `<br/>`).
 ///
 /// > **Note:** the more explicit format with the `/` character has
-/// no additional meaning. The implicit and explicit are semantically
-/// identical.
+/// > no additional meaning. The implicit and explicit are semantically
+/// > identical.
 pub enum VoidTag {
     /// `<area>` — defines a hot-spot region within an image `<map>`,
     /// optionally linked via `href` to another resource.
@@ -331,17 +336,22 @@ pub enum HtmlAttribute {
     Other(String, Value),
 }
 
-/// A single node within an HTML element tree.
+/// A single node within an HTML element tree, restricted to the three
+/// "pure HTML" shapes (no nested components).
 ///
-/// `HtmlNode` is the discriminated union used to populate
-/// [`InnerHtml`]. Each variant represents one of the three node
-/// shapes that may appear as a direct child of an element:
+/// Each variant represents one of the three node shapes that may appear
+/// as a direct child of an element:
 ///
 /// - a non-void element with its own attributes and children
 ///   ([`BlockTag`](HtmlNode::BlockTag)),
 /// - a void element with attributes but no children
 ///   ([`VoidTag`](HtmlNode::VoidTag)), or
 /// - a run of text content ([`TextFragment`](HtmlNode::TextFragment)).
+///
+/// [`InnerHtml`] holds [`ComposableNode`] rather than `HtmlNode` so child
+/// content can include nested `BrowserRenderable` components in addition
+/// to these pure shapes.
+#[allow(private_interfaces)]
 pub enum HtmlNode {
     /// A non-void element — a tag with an opening and closing pair
     /// that may itself contain attributes and nested child nodes
@@ -359,12 +369,19 @@ pub enum HtmlNode {
 
 /// Ordered child content of an HTML element.
 ///
-/// Wraps the sequence of [`HtmlNode`] values that appear between an
-/// element's opening and closing tags. Children are rendered in the
-/// order stored.
+/// Wraps the sequence of [`ComposableNode`] values that appear between an
+/// element's opening and closing tags. Children are rendered in the order
+/// stored, and may include nested `BrowserRenderable` components via
+/// [`ComposableNode::Component`].
 pub struct InnerHtml {
     /// The element's direct children, in document order.
-    children: Vec<HtmlNode>,
+    pub(crate) children: Vec<ComposableNode>,
+}
+
+impl InnerHtml {
+    pub(crate) fn new() -> Self {
+        Self { children: Vec::new() }
+    }
 }
 
 /// A non-void HTML element — a tag with an opening and closing pair
@@ -372,13 +389,31 @@ pub struct InnerHtml {
 ///
 /// Examples: `<div>`, `<section>`, `<a href="…">…</a>`,
 /// `<button type="submit">…</button>`.
-struct HtmlBlockTag {
+///
+/// Crate-private: constructed by the `browser::fragment` builders. External
+/// users compose fragments rather than hand-rolling these structs.
+#[allow(dead_code)]
+pub(crate) struct HtmlBlockTag {
     /// Which non-void tag this element is (e.g. [`BlockTag::Div`]).
-    tag: BlockTag,
+    pub(crate) tag: BlockTag,
+    /// The component's wrapper class — used to namespace any
+    /// `ComponentStylesheet` rules under a descendant selector.
+    pub(crate) base_class: String,
     /// The element's child nodes, in document order.
-    content: InnerHtml,
+    pub(crate) content: InnerHtml,
     /// Attributes attached to this element's opening tag.
-    attributes: Vec<HtmlAttribute>,
+    pub(crate) attributes: Vec<HtmlAttribute>,
+}
+
+impl HtmlBlockTag {
+    pub(crate) fn new(tag: BlockTag, base_class: String) -> Self {
+        Self {
+            tag,
+            base_class,
+            content: InnerHtml::new(),
+            attributes: Vec::new(),
+        }
+    }
 }
 
 /// A void HTML element — a self-contained tag that may carry
@@ -388,10 +423,20 @@ struct HtmlBlockTag {
 /// `<input type="text" name="…">`.
 ///
 /// > **Note:** the trailing-slash form (`<br/>`) is semantically
-/// identical to the bare form (`<br>`); see [`VoidTag`].
-struct HtmlVoidTag {
+/// > identical to the bare form (`<br>`); see [`VoidTag`].
+#[allow(dead_code)]
+pub(crate) struct HtmlVoidTag {
     /// Which void tag this element is (e.g. [`VoidTag::Img`]).
-    tag: VoidTag,
+    pub(crate) tag: VoidTag,
     /// Attributes attached to this element's tag.
-    attributes: Vec<HtmlAttribute>,
+    pub(crate) attributes: Vec<HtmlAttribute>,
+}
+
+impl HtmlVoidTag {
+    pub(crate) fn new(tag: VoidTag) -> Self {
+        Self {
+            tag,
+            attributes: Vec::new(),
+        }
+    }
 }

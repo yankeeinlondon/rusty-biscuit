@@ -32,6 +32,7 @@ pub enum ScriptTagType {
     Other(String),
 }
 
+#[allow(dead_code)]
 pub struct ScriptTag {
     /// **async**
     ///

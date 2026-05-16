@@ -1,5 +1,5 @@
 use crate::{
-    browser::{BrowserFragment, CodeFeature, HtmlStyleSheet},
+    browser::{fragment::BrowserFragment, feature::CodeFeature, HtmlStyleSheet},
     html::tag::{link::LinkTag, meta::MetaTag},
     microdata::MicrodataKey,
 };
@@ -9,6 +9,8 @@ pub mod cors;
 pub mod script;
 pub mod tag;
 
+#[derive(Default)]
+#[allow(dead_code)]
 pub struct HtmlPage {
     stylesheet: HtmlStyleSheet,
     links: Vec<LinkTag>,
@@ -27,21 +29,6 @@ pub struct HtmlPage {
     css_variables: Option<Vec<(String, String)>>,
 }
 
-impl Default for HtmlPage {
-    fn default() -> HtmlPage {
-        HtmlPage {
-            stylesheet: HtmlStyleSheet::new(),
-            links: vec![],
-            script_blocks: vec![],
-            meta: vec![],
-            title: None,
-            features: vec![],
-            fragments: vec![],
-            css_variables: None,
-        }
-    }
-}
-
 impl From<BrowserFragment> for HtmlPage {
     fn from(fragment: BrowserFragment) -> HtmlPage {
         HtmlPage {
@@ -55,7 +42,7 @@ impl HtmlPage {
     // input
     pub fn new(style: Option<HtmlStyleSheet>) -> HtmlPage {
         HtmlPage {
-            stylesheet: style.unwrap_or(HtmlStyleSheet::new()),
+            stylesheet: style.unwrap_or_default(),
             ..HtmlPage::default()
         }
     }
@@ -71,7 +58,7 @@ impl HtmlPage {
 
     /// Adds microdata key/value pairs that fan out into HTML / OpenGraph /
     /// Twitter / Schema.org meta tags at render time (see [`crate::microdata::microdata`]).
-    pub fn add_metadata(&mut self, key: MicrodataKey, value: String) -> &mut HtmlPage {
+    pub fn add_metadata(&mut self, _key: MicrodataKey, _value: String) -> &mut HtmlPage {
         todo!()
     }
 
@@ -99,22 +86,20 @@ impl HtmlPage {
     pub fn collect_dedup_links(&self) -> Vec<&LinkTag> {
         let mut seen = std::collections::HashSet::new();
         let mut out = Vec::new();
-        let push_if_new = |link: &'_ LinkTag,
-                           seen: &mut std::collections::HashSet<String>,
-                           out: &mut Vec<&'_ LinkTag>| {
+        // Page-level links first (they win on ordering ties).
+        for link in &self.links {
             let key = link.dedup_key();
             if seen.insert(key) {
                 out.push(link);
             }
-        };
-        // Page-level links first (they win on ordering ties).
-        for link in &self.links {
-            push_if_new(link, &mut seen, &mut out);
         }
         // Then dependencies from each fragment in registration order.
         for fragment in &self.fragments {
             for link in &fragment.dependency_links {
-                push_if_new(link, &mut seen, &mut out);
+                let key = link.dedup_key();
+                if seen.insert(key) {
+                    out.push(link);
+                }
             }
         }
         out
