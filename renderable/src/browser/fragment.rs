@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::marker::PhantomData;
 
 use crate::{
-    browser::{BrowserRenderable, ComponentStylesheet, feature::PageFeature},
+    browser::{ComponentStylesheet, feature::PageFeature},
     html::tag::{BlockTag, HtmlAttribute, HtmlBlockTag, HtmlVoidTag, VoidTag, link::LinkTag},
     microdata::MicrodataKey,
 };
@@ -63,15 +63,27 @@ impl Refine for RefineText {}
 // ComposableNode
 // ---------------------------------------------------------------------------
 
-/// A composable node is an extension of `HtmlNode` that allows raw HTML
-/// structures as well as other `BrowserRenderable` components to be composed
-/// as children of a component.
+/// A composable node extends `HtmlNode` with two extra shapes: caller-owned
+/// raw HTML, and nested components.
+///
+/// Per decisions.md item 1, the [`Component`](ComposableNode::Component)
+/// variant holds an eager [`BrowserFragment<Ready>`] — composition is
+/// structural, not a boxed trait object. This makes the node tree
+/// homogeneous: every nested component is already "done", so page-level
+/// aggregation is a pure recursive walk with no trait calls.
 #[allow(private_interfaces)]
 pub enum ComposableNode {
+    /// A non-void element with attributes and children.
     BlockTag(HtmlBlockTag),
+    /// A void element with attributes and no children.
     VoidTag(HtmlVoidTag),
+    /// A run of literal text. **Escaped on emit** by the renderer.
     TextFragment(String),
-    Component(Box<dyn BrowserRenderable>),
+    /// Caller-owned prebuilt HTML (SVG, third-party markup). **Never
+    /// escaped** by the renderer — the caller owns correctness.
+    RawHtml(String),
+    /// A nested, fully-rendered component fragment.
+    Component(BrowserFragment<Ready>),
 }
 
 // ---------------------------------------------------------------------------
@@ -85,9 +97,10 @@ pub enum ComposableNode {
 /// The type parameter `S` tracks the construction workflow at compile time:
 ///
 /// ```text
-/// Shape ──define_as_block_tag──▶ RefineBlock ─┐
-///       ──define_as_void_tag──▶ RefineVoid ───┼── finalize() ──▶ Ready
-///       ──define_as_text_fragment──▶ RefineText ─┘
+/// Shape ──define_as_block_tag──▶ RefineBlock ───┐
+///       ──define_as_void_tag──▶ RefineVoid ─────┼── finalize() ──▶ Ready
+///       ──define_as_text_fragment──▶ RefineText ┤
+///       ──define_as_raw_html──▶ RefineText ─────┘
 /// ```
 pub struct BrowserFragment<S: FragmentState = Shape> {
     node: Option<ComposableNode>,
@@ -142,6 +155,18 @@ impl BrowserFragment<Shape> {
     /// [`RefineText`].
     pub fn define_as_text_fragment(self, text: impl Into<String>) -> BrowserFragment<RefineText> {
         self.into_state(Some(ComposableNode::TextFragment(text.into())))
+    }
+
+    /// Commit the fragment to a raw-HTML shape. The string is caller-owned
+    /// and **never escaped** by the renderer. Transitions to [`RefineText`]
+    /// so the cross-cutting builders still apply.
+    ///
+    /// Use this only for final, already-escaped markup — SVG, third-party
+    /// HTML. For literal text content use
+    /// [`define_as_text_fragment`](BrowserFragment::define_as_text_fragment),
+    /// which is escaped on emit.
+    pub fn define_as_raw_html(self, html: impl Into<String>) -> BrowserFragment<RefineText> {
+        self.into_state(Some(ComposableNode::RawHtml(html.into())))
     }
 }
 
@@ -218,6 +243,14 @@ impl BrowserFragment<RefineBlock> {
         self
     }
 
+    /// Append a fully-rendered child component fragment.
+    ///
+    /// Convenience over `add_child(ComposableNode::Component(child))` —
+    /// the recursion point that lets components compose other components.
+    pub fn add_component(self, child: BrowserFragment<Ready>) -> Self {
+        self.add_child(ComposableNode::Component(child))
+    }
+
     /// Close out the build phase. Transitions to [`Ready`].
     pub fn finalize(self) -> BrowserFragment<Ready> {
         self.into_state_preserving_node()
@@ -283,5 +316,55 @@ impl<S: FragmentState> BrowserFragment<S> {
             dependency_links: self.dependency_links,
             _state: PhantomData,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::html::tag::BlockTag;
+
+    #[test]
+    fn define_as_raw_html_finalizes_to_ready() {
+        let fragment = BrowserFragment::new()
+            .define_as_raw_html("<svg></svg>")
+            .finalize();
+        match fragment.node {
+            Some(ComposableNode::RawHtml(ref html)) => assert_eq!(html, "<svg></svg>"),
+            _ => panic!("expected RawHtml node"),
+        }
+    }
+
+    #[test]
+    fn add_component_nests_a_ready_fragment() {
+        let child = BrowserFragment::new()
+            .define_as_text_fragment("child")
+            .finalize();
+        let parent = BrowserFragment::new()
+            .define_as_block_tag(BlockTag::Div, "parent")
+            .add_component(child)
+            .finalize();
+        match parent.node {
+            Some(ComposableNode::BlockTag(ref block)) => {
+                assert_eq!(block.content.children.len(), 1);
+                assert!(matches!(
+                    block.content.children[0],
+                    ComposableNode::Component(_)
+                ));
+            }
+            _ => panic!("expected BlockTag node"),
+        }
+    }
+
+    #[test]
+    fn raw_html_carries_cross_cutting_builders() {
+        let fragment = BrowserFragment::new()
+            .define_as_raw_html("<svg></svg>")
+            .add_metadata_keypair(MicrodataKey::Title, "Diagram")
+            .finalize();
+        assert_eq!(
+            fragment.metadata.get(&MicrodataKey::Title).map(String::as_str),
+            Some("Diagram")
+        );
     }
 }
