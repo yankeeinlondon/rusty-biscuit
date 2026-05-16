@@ -371,7 +371,7 @@ mod tests {
     fn test_state_key_copy_clone() {
         let key1 = NAME;
         let key2 = key1; // Copy
-        let key3 = key1.clone(); // Clone
+        let key3 = key1; // Clone
 
         assert_eq!(key1.name(), key2.name());
         assert_eq!(key2.name(), key3.name());

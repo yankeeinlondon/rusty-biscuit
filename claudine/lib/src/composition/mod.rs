@@ -23,7 +23,7 @@ pub mod sequence;
 mod types;
 
 pub use darkmatter::markdown::compose::shell_expansion::{ShellCommandOrigin, ShellExpansionError};
-pub use error::{CompositionError, SequenceSelectionFailure};
+pub use error::{CompositionError, LOOP_RATE_LIMITED_EXIT_CODE, SequenceSelectionFailure};
 #[allow(deprecated)]
 pub use lifecycle::{
     DefaultLifecycleEmitter, LifecycleConfig, LifecycleEmitter, LifecycleNotification,
@@ -53,8 +53,8 @@ pub use launch_workspace::{LaunchWorkspaceContext, PackageContext};
 pub use types::{
     AgentHint, AmbientVariable, CompositionClosurePlan, CompositionExecutionRequest,
     CompositionMode, EffectiveSelectionHints, InlineClosurePlan, InstalledProviderSnapshot,
-    LoopAction, LoopCondition, LoopConfig, ModelHint, ModelResolutionReason, OutputFormat,
-    PickerInfluence, PreparedComposition, ProviderPickerOption, ProviderPickerPlan,
+    LoopAction, LoopCondition, LoopConfig, ModelHint, ModelResolutionReason, OnRateLimit,
+    OutputFormat, PickerInfluence, PreparedComposition, ProviderPickerOption, ProviderPickerPlan,
     ProviderResolutionReason, ResolutionMode, ResolvedCompositionSource, ResolvedExecutionTarget,
     SelectedProvider, SelectionReason, SequenceExecutionOptions, SequencePlan, SequenceRunSummary,
     SequenceSource, SequenceStep, SequenceStepDraft, SequenceStepOverlay, SequenceStepResult,

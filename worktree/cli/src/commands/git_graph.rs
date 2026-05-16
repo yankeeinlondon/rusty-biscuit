@@ -302,7 +302,7 @@ pub fn base_graph(branch_names: &[String], default_branch: &str) -> Option<Strin
     for (i, sha) in main_commits.iter().enumerate() {
         lines.push(format!("    commit id: \"{sha}\""));
         // After each main commit, insert any branches that diverge here
-        while branch_iter.peek().map_or(false, |b| b.merge_base_idx == i) {
+        while branch_iter.peek().is_some_and(|b| b.merge_base_idx == i) {
             let info = branch_iter.next().unwrap();
             lines.push(format!("    branch {}", info.name));
             lines.push(format!("    checkout {}", info.name));

@@ -8,12 +8,14 @@ use std::env;
 use std::fmt;
 
 use biscuit_terminal::components::prose::Prose;
-use biscuit_terminal::components::renderable::Renderable;
+use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::errors::SourceContext;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::render::stylesheet::{CssSizing, CssSizingProp, Stylesheet, StylesheetError};
+use crate::render::stylesheet::{
+    CssSizing, CssSizingProp, CssStyle, StylesheetBlockError, StylesheetError,
+};
 
 /// BEL character used by OSC 8 hyperlinks.
 const BEL: &str = "\x07";
@@ -54,7 +56,7 @@ pub enum ImageRefError {
 
     /// A CSS style declaration failed to parse.
     #[error("invalid CSS style: {0}")]
-    InvalidStyle(#[from] StylesheetError),
+    InvalidStyle(StylesheetBlockError),
 
     /// Invalid `decoding` value.
     #[error("invalid image decoding value `{value}`")]
@@ -83,6 +85,14 @@ pub enum ImageRefError {
         /// Received value.
         value: String,
     },
+}
+
+/// Wraps a stylesheet parse failure so `?` propagates a [`StylesheetError`]
+/// straight into [`ImageRefError::InvalidStyle`].
+impl From<StylesheetError> for ImageRefError {
+    fn from(error: StylesheetError) -> Self {
+        Self::InvalidStyle(StylesheetBlockError(error))
+    }
 }
 
 impl biscuit_terminal::errors::BlockError for ImageRefError {
@@ -518,7 +528,7 @@ pub struct ImageRef {
     alt: String,
     src: Option<String>,
     srcset: Option<String>,
-    style: Option<Stylesheet>,
+    style: Option<CssStyle>,
     class: Option<String>,
     title: Option<String>,
     decoding: ImageDecoding,
@@ -593,7 +603,7 @@ impl ImageRef {
     }
 
     /// Returns `style` if set.
-    pub fn style(&self) -> Option<&Stylesheet> {
+    pub fn style(&self) -> Option<&CssStyle> {
         self.style.as_ref()
     }
 
@@ -693,7 +703,7 @@ impl ImageRef {
     }
 
     /// Sets inline style from a typed stylesheet.
-    pub fn with_style(mut self, style: Stylesheet) -> Self {
+    pub fn with_style(mut self, style: CssStyle) -> Self {
         if style.is_empty() {
             self.style = None;
         } else {
@@ -705,7 +715,7 @@ impl ImageRef {
     /// Sets inline style from CSS text.
     pub fn with_style_css(mut self, style: impl Into<String>) -> Result<Self, ImageRefError> {
         let style = style.into();
-        let parsed = Stylesheet::try_from(style.as_str())?;
+        let parsed = CssStyle::try_from(style.as_str())?;
         self.style = if parsed.is_empty() {
             None
         } else {
@@ -1024,7 +1034,7 @@ impl ImageRef {
         self.title = metadata.title.and_then(normalize_optional);
 
         if let Some(style) = metadata.style.and_then(normalize_optional)
-            && let Ok(parsed) = Stylesheet::try_from(style.as_str())
+            && let Ok(parsed) = CssStyle::try_from(style.as_str())
             && !parsed.is_empty()
         {
             self.style = Some(parsed);
@@ -1272,7 +1282,7 @@ fn parse_html_image(input: &str) -> Result<ImageRef, ImageRefError> {
     }
 
     if let Some(style) = attrs.get("style")
-        && let Ok(parsed) = Stylesheet::try_from(style.as_str())
+        && let Ok(parsed) = CssStyle::try_from(style.as_str())
         && !parsed.is_empty()
     {
         image.style = Some(parsed);
@@ -1999,7 +2009,7 @@ mod tests {
     fn markdown_policy_strip_drops_extended_metadata() {
         let _env = ScopedEnv::set("IMAGE_REF_METADATA", "strip");
 
-        let style = Stylesheet::new().add(CssSizingProp::Width, CssSizing::percent(50.0));
+        let style = CssStyle::new().add(CssSizingProp::Width, CssSizing::percent(50.0));
         let image = ImageRef::new("https://example.com/pic.png", "Pic")
             .expect("image should build")
             .with_style(style)
@@ -2027,7 +2037,7 @@ mod tests {
     fn markdown_default_policy_is_lossless_and_roundtrips() {
         let _env = ScopedEnv::remove("IMAGE_REF_METADATA");
 
-        let style = Stylesheet::new().add(CssSizingProp::Width, CssSizing::percent(40.0));
+        let style = CssStyle::new().add(CssSizingProp::Width, CssSizing::percent(40.0));
         let original = ImageRef::new("https://example.com/pic.png", "Pic")
             .expect("image should build")
             .with_class("hero")
@@ -2052,11 +2062,46 @@ mod tests {
     }
 
     #[test]
+    fn inline_style_round_trips_through_renderable_css_style() {
+        // Proves the migration to `renderable::stylesheet`: an inline `style`
+        // string parses into the shared `CssStyle` type, survives a markdown
+        // round-trip, and a malformed value surfaces a `StylesheetError`
+        // wrapped into `ImageRefError::InvalidStyle`.
+        let image = ImageRef::new("https://example.com/pic.png", "Pic")
+            .expect("image should build")
+            .with_style_css("width: 40%; height: 240px;")
+            .expect("valid inline style should parse");
+
+        let style = image.style().expect("style should be set");
+        assert_eq!(style.len(), 2);
+        assert_eq!(style.to_css(), "width: 40%;\nheight: 240px;");
+
+        // The typed `CssStyle` builder produces the same declaration block.
+        let typed = CssStyle::new()
+            .add(CssSizingProp::Width, CssSizing::percent(40.0))
+            .add(CssSizingProp::Height, CssSizing::px(240.0));
+        assert_eq!(style.to_css(), typed.to_css());
+
+        // An invalid value bubbles a `StylesheetError` via `?` into the
+        // wrapped `ImageRefError::InvalidStyle` variant.
+        let err = ImageRef::new("https://example.com/pic.png", "Pic")
+            .expect("image should build")
+            .with_style_css("z-index: not-a-number;")
+            .expect_err("invalid integer value should fail");
+        match err {
+            ImageRefError::InvalidStyle(StylesheetBlockError(inner)) => {
+                assert!(matches!(inner, StylesheetError::InvalidInteger { .. }));
+            }
+            other => panic!("expected InvalidStyle, got {other:?}"),
+        }
+    }
+
+    #[test]
     #[serial]
     fn markdown_default_policy_roundtrips_all_defined_metadata_fields() {
         let _env = ScopedEnv::remove("IMAGE_REF_METADATA");
 
-        let style = Stylesheet::new()
+        let style = CssStyle::new()
             .add(CssSizingProp::Width, CssSizing::percent(40.0))
             .add(CssSizingProp::Height, CssSizing::px(240.0));
         let original = ImageRef::new("https://example.com/pic.png", "Diagram")
@@ -2096,8 +2141,8 @@ mod tests {
         assert_eq!(reparsed.data().get("id"), Some(&"123".to_string()));
         assert_eq!(reparsed.data().get("role"), Some(&"diagram".to_string()));
         assert_eq!(
-            reparsed.style().map(Stylesheet::to_css),
-            original.style().map(Stylesheet::to_css)
+            reparsed.style().map(CssStyle::to_css),
+            original.style().map(CssStyle::to_css)
         );
     }
 

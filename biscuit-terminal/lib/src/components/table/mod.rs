@@ -5,7 +5,7 @@
 //! - [`width`] — width planning types: `MeasuredColumn`, `TableWidthMeasurements`,
 //!   `TableWidthPlan`, `TableWidthError`
 //! - [`types`] — `ColumnType`, `Currency`, `VerticalAlign`
-//! - [`table`] — `Table` struct, `impl Table`, `impl Renderable for Table`,
+//! - [`table`] — `Table` struct, `impl Table`, `impl TerminalRenderable for Table`,
 //!   and rendering helpers
 //!
 //! Public items are re-exported here so external consumers can import them

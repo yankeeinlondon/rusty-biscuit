@@ -552,7 +552,7 @@ fn render_section(body: &mut String, section: &Section) {
 pub(crate) fn render_perf_report(report: &CommandPerfReport) -> String {
     use biscuit_terminal::components::block_quote::BlockQuote;
     use biscuit_terminal::components::prose::Prose;
-    use biscuit_terminal::components::renderable::Renderable as _;
+    use biscuit_terminal::components::renderable::TerminalRenderable as _;
     use biscuit_terminal::utils::color::{Color, Tailwind};
 
     let mut body = String::new();

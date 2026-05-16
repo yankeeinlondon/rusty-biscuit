@@ -19,7 +19,7 @@ impl WrapperProfile for QwenWrapper {
         &self,
         args: &mut Vec<String>,
         _env_overrides: &mut Vec<(String, String)>,
-    ) -> Result<Option<String>> {
+    ) -> Result<super::YoloOutcome> {
         // Qwen's catalog records the direct `--yolo` flag, but the runtime
         // also accepts `--approval-mode yolo`. Keep this override to reject
         // conflicting approval modes before appending the catalog flag.
@@ -31,7 +31,7 @@ impl WrapperProfile for QwenWrapper {
         if !has_flag(args, "--yolo") {
             args.push("--yolo".to_string());
         }
-        Ok(None)
+        Ok(super::YoloOutcome::applied())
     }
 
     fn reject_direct_yolo(&self, args: &[String]) -> Result<()> {

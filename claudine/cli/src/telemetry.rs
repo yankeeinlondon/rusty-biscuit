@@ -7,6 +7,7 @@ use chrono::Local;
 use tracing::field::{Field, Visit};
 use tracing::{Event, Span, Subscriber, info_span};
 use tracing_subscriber::EnvFilter;
+use tracing_subscriber::filter::LevelFilter;
 use tracing_subscriber::fmt::format::{FmtSpan, FormatEvent, FormatFields, Writer};
 use tracing_subscriber::fmt::{FmtContext, FormattedFields};
 use tracing_subscriber::prelude::*;
@@ -43,8 +44,10 @@ pub(crate) fn build_env_filter(
     rust_log: Option<&str>,
     debug_level: Option<DebugLevel>,
 ) -> EnvFilter {
-    let builder = tracing_subscriber::EnvFilter::builder()
-        .with_default_directive(tracing::Level::WARN.into());
+    // Default to OFF so no tracing events leak to stderr unless the user
+    // explicitly opts in via RUST_LOG or --debug. See feedback_verbose_vs_debug.
+    let builder =
+        tracing_subscriber::EnvFilter::builder().with_default_directive(LevelFilter::OFF.into());
 
     if let Some(rust_log) = rust_log {
         return builder.parse_lossy(rust_log);
@@ -622,6 +625,24 @@ mod tests {
         .unwrap();
 
         assert_eq!(rendered, r#"(before_tool, shell {"cmd":"git status"})"#);
+    }
+
+    #[test]
+    fn build_env_filter_is_silent_without_opt_in() {
+        let filter = build_env_filter(None, None);
+        assert_eq!(filter.to_string(), "off");
+    }
+
+    #[test]
+    fn build_env_filter_honors_rust_log() {
+        let filter = build_env_filter(Some("info"), None);
+        assert!(filter.to_string().contains("info"));
+    }
+
+    #[test]
+    fn build_env_filter_honors_debug_level() {
+        let filter = build_env_filter(None, Some(DebugLevel::Debug));
+        assert!(filter.to_string().contains("claudine=debug"));
     }
 
     #[test]

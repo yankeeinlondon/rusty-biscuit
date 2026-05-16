@@ -271,11 +271,9 @@ fn available_source_categories(
             .iter()
             .find(|category| input.title.eq_ignore_ascii_case(category))
             .map(|category| (*category).to_string())
-        {
-            if !source_list.contains(&category) {
+            && !source_list.contains(&category) {
                 source_list.push(category);
             }
-        }
     }
 
     source_list

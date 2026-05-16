@@ -6,9 +6,9 @@ use biscuit_terminal::components::block_quote::BlockQuote;
 use biscuit_terminal::components::list::UnorderedList;
 use biscuit_terminal::components::pad::{PadLeft, PadRight};
 use biscuit_terminal::components::prose::Prose;
-use biscuit_terminal::components::renderable::{Renderable, RenderableContent};
+use biscuit_terminal::components::renderable::{TerminalRenderable, RenderableTerminalContent};
 use biscuit_terminal::utils::escape_codes;
-use biscuit_terminal::utils::layout::{Layout, WordWrap};
+use biscuit_terminal::utils::layout::{Layout, LayoutTerminalExt, WordWrap};
 use biscuit_terminal::utils::word_wrap::word_wrap;
 use std::rc::Rc;
 
@@ -137,7 +137,7 @@ fn bench_component_render(c: &mut Criterion) {
         b.iter(|| {
             let prose = Prose::new("To be or not to be, that is the question.");
             let quote = BlockQuote::new(
-                RenderableContent::Component(Rc::new(prose)),
+                RenderableTerminalContent::Component(Rc::new(prose)),
                 Some("Shakespeare"),
             );
             quote.render_optimistic(Some(80))
@@ -146,9 +146,9 @@ fn bench_component_render(c: &mut Criterion) {
 
     group.bench_function("unordered_list_5", |b| {
         b.iter(|| {
-            let items: Vec<RenderableContent> = (1..=5)
+            let items: Vec<RenderableTerminalContent> = (1..=5)
                 .map(|i| {
-                    RenderableContent::Component(Rc::new(Prose::new(format!(
+                    RenderableTerminalContent::Component(Rc::new(Prose::new(format!(
                         "Item number {i} with some descriptive text"
                     ))))
                 })

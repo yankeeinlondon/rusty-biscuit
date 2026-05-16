@@ -13,7 +13,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 use biscuit_terminal::components::status::{Status, StatusState};
-use biscuit_terminal::prelude::Renderable;
+use biscuit_terminal::prelude::TerminalRenderable;
 use biscuit_terminal::terminal::Terminal;
 use claudine::composition::lifecycle::{
     DefaultLifecycleEmitter, LifecycleRunGuard, LifecycleRuntimeContext, LifecycleSignal,
@@ -134,6 +134,58 @@ pub(crate) struct SingleCompositionOutcome {
     pub provider: Provider,
     /// Execution perf metadata, when `--perf` was enabled.
     pub agent_perf: Option<crate::perf::AgentExecutionPerf>,
+    /// Iteration-level summary signals lifted from the structured stream
+    /// for consumption by the `compose --loop` orchestrator.
+    ///
+    /// Populated for the non-harness structured-stream path (the only
+    /// path that can carry a rate-limit trailer or a watchdog
+    /// `error_kind`). `None` for the dry-run, harness, and legacy paths
+    /// where these signals aren't available at this layer.
+    pub iteration_signals: Option<IterationSummarySignals>,
+}
+
+/// Iteration-level signals lifted from the per-iteration
+/// [`claudine::stream::summary::StreamExecutionSummary`] so the
+/// `compose --loop` orchestrator can drive rate-limit-aware iteration and
+/// build [`claudine::composition::CompositionError::LoopIterationFailed`]
+/// with an honest cause.
+#[derive(Debug, Default, Clone)]
+pub(crate) struct IterationSummarySignals {
+    /// Rate-limit trailer observed during the iteration. May be present on
+    /// both successful and failed iterations.
+    pub rate_limit: Option<claudine::stream::summary::RateLimitInfo>,
+    /// Structured `error_kind` (e.g. `step_timeout`, `wall_clock_timeout`,
+    /// `usage_limit_reached`). Mirrors the JSONL session_end row's
+    /// `extra.exit_reason`.
+    pub exit_reason: Option<String>,
+    /// Human-readable failure detail from the iteration's summary, when
+    /// present (e.g. "no stream activity for 30m; terminating due to
+    /// step_timeout").
+    pub error_message: Option<String>,
+    /// Resolved provider identifier (e.g. `"k2p6"`) from the iteration's
+    /// summary, when known. Carried into [`CompositionError::LoopRateLimited`]
+    /// for honest attribution.
+    pub provider_id: Option<String>,
+    /// Resolved model identifier (e.g. `"kimi-for-coding"`) from the
+    /// iteration's summary, when known.
+    pub model_id: Option<String>,
+}
+
+impl IterationSummarySignals {
+    /// Extract the loop-relevant fields from a fully-built
+    /// [`claudine::stream::summary::StreamExecutionSummary`].
+    pub fn from_summary(summary: &claudine::stream::summary::StreamExecutionSummary) -> Self {
+        Self {
+            rate_limit: summary.rate_limit.clone(),
+            exit_reason: summary.error_kind.clone(),
+            error_message: summary.error_message.clone(),
+            // Use the Provider enum's display form (e.g. "opencode"). The
+            // finer-grained AI-SDK provider (e.g. "k2p6") typically lives
+            // inside `rate_limit.message`.
+            provider_id: Some(summary.provider.to_string()),
+            model_id: summary.model.clone(),
+        }
+    }
 }
 
 /// Result of running a structured composition stream.
@@ -963,13 +1015,22 @@ pub(crate) fn execute_composition_request_inner(
 
     // -- Yolo ----------------------------------------------------------------
 
+    // `effective_yolo` is the single source of truth for whether the
+    // provider's native bypass actually took effect on this launch.
+    // Reporter / badge surfaces should read this — never `request.yolo`
+    // (intent) on its own, since interactive OpenCode silently suppresses
+    // the flag.
+    let mut effective_yolo = false;
     if request.yolo {
         let mut env_overrides = Vec::new();
-        if let Some(warn) = profile.apply_yolo_for_mode(
+        let outcome = profile.apply_yolo_for_mode(
             &mut child_args,
             &mut env_overrides,
             !effective_non_interactive,
-        )? && !silent
+        )?;
+        effective_yolo = outcome.applied;
+        if let Some(warn) = outcome.warning
+            && !silent
             && !quiet
         {
             log::warn(&warn);
@@ -977,8 +1038,29 @@ pub(crate) fn execute_composition_request_inner(
         for (key, value) in env_overrides {
             env_plan.env.insert(key.into(), value.into());
         }
-        // Note: yolo support already consumed at env_plan build time
     }
+    // Override the YOLO env var in the child process with the
+    // post-apply truth so the dispatch reporter (which stamps event
+    // metadata from this var) reflects what actually landed, not what
+    // was intended. `build_child_env_with_launch` set this from
+    // `request.yolo` before we knew the outcome — replace it now.
+    env_plan.env.insert(
+        "YOLO".into(),
+        if effective_yolo { "true" } else { "false" }.into(),
+    );
+    // One-shot debug trace of the final argv that goes to the provider
+    // so operators can verify the catalog flag actually landed without
+    // running an external `ps`. Gated by `tracing` (RUST_LOG); never
+    // unconditional output.
+    tracing::debug!(
+        target: "claudine::wrap::yolo",
+        provider = %profile.provider(),
+        request_yolo = request.yolo,
+        effective_yolo,
+        non_interactive = effective_non_interactive,
+        child_args = ?child_args,
+        "yolo applied to provider argv",
+    );
 
     profile.apply_entrypoint(&mut child_args, effective_non_interactive);
 
@@ -1233,6 +1315,8 @@ pub(crate) fn execute_composition_request_inner(
             exit_code: 0,
             provider,
             agent_perf: None,
+            // Dry-run never produces a per-iteration summary.
+            iteration_signals: None,
         };
         // `--perf` is an explicit opt-in and overrides `--silent`/`--quiet`.
         // The perf report is always emitted to stderr when requested.
@@ -1252,7 +1336,7 @@ pub(crate) fn execute_composition_request_inner(
 
     if !silent && !quiet {
         use biscuit_terminal::components::status::{Status, StatusState, StatusTheme};
-        use biscuit_terminal::prelude::Renderable as _;
+        use biscuit_terminal::prelude::TerminalRenderable as _;
 
         let status = Status::from_prose("Starting pre-flight checks".to_string())
             .state(StatusState::Info)
@@ -1453,7 +1537,15 @@ pub(crate) fn execute_composition_request_inner(
             crate::output::log_wrapper_env_details(&env_plan, None, &term, verbose);
         }
 
-        crate::output::log_system_prompt(&effective_sp, detail_requested, silent, quiet, &term);
+        let scope_for_report = effective_repo_root.unwrap_or(&launch_cwd);
+        crate::output::log_system_prompt_with_scope(
+            &effective_sp,
+            detail_requested,
+            silent,
+            quiet,
+            Some(scope_for_report),
+            &term,
+        );
 
         if matches!(
             effective_sp,
@@ -1464,7 +1556,7 @@ pub(crate) fn execute_composition_request_inner(
         }
 
         if effective_non_interactive {
-            crate::output::log_compose_prompt(&request.prepared.prompt, detail_requested, &term);
+            crate::output::log_compose_prompt(&request.prepared.prompt, detail_requested, silent, quiet, &term);
         }
 
         if !quiet {
@@ -1545,6 +1637,13 @@ pub(crate) fn execute_composition_request_inner(
                 .as_ref()
                 .and_then(|c| c.agent_perf())
                 .or(harness_perf),
+            // The harness loop manages its own per-step summaries
+            // internally; surfacing them through this outer struct is a
+            // future enhancement. For now `compose --loop` against a
+            // harness-enabled provider falls back to the legacy
+            // behavior (no rate-limit-aware pause and no `exit_reason`
+            // pickup at the loop boundary).
+            iteration_signals: None,
         };
         // `--perf` is an explicit opt-in and overrides `--silent`/`--quiet`.
         // The perf report is always emitted to stderr when requested.
@@ -1593,6 +1692,7 @@ pub(crate) fn execute_composition_request_inner(
 
         let mut child_spawned = false;
         let mut agent_perf: Option<crate::perf::AgentExecutionPerf> = None;
+        let mut iteration_signals: Option<IterationSummarySignals> = None;
         let exit_result = execute_without_harness(
             mode,
             provider,
@@ -1615,6 +1715,7 @@ pub(crate) fn execute_composition_request_inner(
             &mut child_spawned,
             prompt_timing,
             &mut agent_perf,
+            &mut iteration_signals,
             timeout_config,
         );
 
@@ -1642,6 +1743,7 @@ pub(crate) fn execute_composition_request_inner(
                 .as_ref()
                 .and_then(|c| c.agent_perf())
                 .or(agent_perf),
+            iteration_signals,
         };
         // `--perf` is an explicit opt-in and overrides `--silent`/`--quiet`.
         // The perf report is always emitted to stderr when requested.
@@ -1693,6 +1795,7 @@ fn execute_without_harness(
     child_spawned: &mut bool,
     prompt_timing: Option<claudine::stream::prompt_timing::PromptTimingContext>,
     agent_perf_out: &mut Option<crate::perf::AgentExecutionPerf>,
+    iteration_signals_out: &mut Option<IterationSummarySignals>,
     timeout_config: super::subagent_watchdog::TimeoutConfig,
 ) -> Result<i32> {
     let is_inline = matches!(mode, CompositionExecutionMode::Inline { .. });
@@ -1740,6 +1843,14 @@ fn execute_without_harness(
     };
 
     let _span = tracing::info_span!("composition_postprocess").entered();
+
+    // Lift loop-relevant signals from the per-iteration summary before
+    // the summary is consumed by the renderer below. The `compose --loop`
+    // orchestrator reads these to apply the rate-limit policy and to
+    // build an honest `LoopIterationFailed` error.
+    if let Some(result) = deferred_summary.as_ref() {
+        *iteration_signals_out = Some(IterationSummarySignals::from_summary(&result.summary));
+    }
 
     match mode {
         CompositionExecutionMode::Direct => {

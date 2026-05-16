@@ -6,7 +6,7 @@
 //! - [`prose`] — the public [`Prose`] struct and its builder API
 //! - [`tokens`] — the recursive parser for atomic and block tokens
 //! - [`styles`] — color/weight resolution tables and SGR layer state
-//! - [`render`] — the [`Renderable`](crate::components::renderable::Renderable) impl
+//! - [`render`] — the [`TerminalRenderable`](crate::components::renderable::TerminalRenderable) impl
 
 mod markdown;
 #[allow(clippy::module_inception)]
@@ -24,7 +24,7 @@ mod tests {
         BlockTagAction, StyleLayer, atomic_token_to_escape_with_term, block_tag_layer,
         block_tag_to_escape, resolve_href,
     };
-    use crate::components::renderable::Renderable;
+    use crate::components::renderable::TerminalRenderable;
     use crate::discovery::detection::UnderlineSupport;
     use crate::terminal::Terminal;
 

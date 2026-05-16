@@ -175,11 +175,10 @@ impl<D: DeviceDriver + Clone> DeviceManager<D> {
             poll_handle: Some(poll_handle),
         };
 
-        if let Some(mut previous) = self.devices.write().await.insert(device_id, active) {
-            if let Some(handle) = previous.poll_handle.take() {
+        if let Some(mut previous) = self.devices.write().await.insert(device_id, active)
+            && let Some(handle) = previous.poll_handle.take() {
                 handle.abort();
             }
-        }
 
         // Broadcast connectivity state
         self.broadcast_connectivity().await;

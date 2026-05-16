@@ -149,7 +149,7 @@ const NOT_INVERSE: &str = "27";
 /// Allows for the description of common Terminal styling
 /// options abstracted from a Terminal's underlying capabilities.
 ///
-/// This enum is a `Renderable` component so can later be used
+/// This enum is a `TerminalRenderable` component so can later be used
 /// to render a block of text with the given style (both with
 /// or without the influence of the terminal's capabilities)
 ///

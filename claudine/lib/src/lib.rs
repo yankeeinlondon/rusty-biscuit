@@ -17,6 +17,7 @@ pub mod permissions;
 pub mod protect;
 pub mod provider;
 pub mod provider_id;
+pub mod prompt_reporting;
 pub mod reporting;
 pub mod stream;
 pub mod system_prompt;

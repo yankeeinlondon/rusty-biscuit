@@ -1,0 +1,17 @@
+INFO  2026-05-12T20:00:11 +97ms service=default version=1.14.48 args=["run"] opencode
+INFO  2026-05-12T20:00:12 +20ms service=session id=ses_parent slug=happy-panda version=1.14.48 title=New session created
+INFO  2026-05-12T20:00:12 +5ms service=bus msg=internal chatter
+INFO  2026-05-12T20:00:12 +30ms service=session.prompt session.id=ses_parent step=1 logSpan.http.span.4=0ms loop
+INFO  2026-05-12T20:00:12 +35ms service=llm providerID=kimi-for-coding modelID=k2p6 session.id=ses_parent small=false agent=build mode=primary stream
+INFO  2026-05-12T20:00:13 +40ms service=default http.method=POST http.url=/v1/chat/completions http.status=200 logSpan.http.span.4=320ms Sent HTTP response
+INFO  2026-05-12T20:00:14 +160ms service=permission permission=task pattern=general action={"permission":"*","action":"allow","pattern":"*"} evaluated
+INFO  2026-05-12T20:05:26 +1ms service=session id=ses_child_a slug=lucky-orchid version=1.14.48 parentID=ses_parent title=Count letters in banana created
+INFO  2026-05-12T20:05:27 +5ms service=session.prompt session.id=ses_child_a step=1 logSpan.http.span.4=0ms loop
+INFO  2026-05-12T20:05:28 +10ms service=llm providerID=kimi-for-coding modelID=k2p6 session.id=ses_child_a small=false agent=research mode=subagent stream
+INFO  2026-05-12T20:05:28 +12ms service=bus msg=more chatter
+INFO  2026-05-12T20:05:30 +0ms service=session.prompt session.id=ses_child_a logSpan.http.span.4=4000ms exiting loop
+INFO  2026-05-12T20:05:32 +0ms service=session id=ses_child_b slug=quiet-fox version=1.14.48 parentID=ses_parent title=Spell apple backwards created
+INFO  2026-05-12T20:05:33 +5ms service=session.prompt session.id=ses_child_b step=1 logSpan.http.span.4=0ms loop
+INFO  2026-05-12T20:05:34 +10ms service=llm providerID=kimi-for-coding modelID=k2p6 session.id=ses_child_b small=false agent=research mode=subagent stream
+INFO  2026-05-12T20:05:36 +0ms service=session.prompt session.id=ses_child_b logSpan.http.span.4=3000ms exiting loop
+INFO  2026-05-12T20:05:40 +0ms service=session.prompt session.id=ses_parent logSpan.http.span.4=7437ms exiting loop

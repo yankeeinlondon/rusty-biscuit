@@ -2,7 +2,7 @@ use std::rc::Rc;
 
 use biscuit_terminal::components::list::UnorderedList;
 use biscuit_terminal::components::prose::Prose;
-use biscuit_terminal::components::renderable::{Renderable, RenderableContent};
+use biscuit_terminal::components::renderable::{TerminalRenderable, RenderableTerminalContent};
 use biscuit_terminal::terminal::Terminal;
 use color_eyre::eyre::{Result, eyre};
 use serde_json::{Map, Value, json};
@@ -171,7 +171,7 @@ fn render_terminal(model: &ProviderModel) {
     };
 
     // Build sections as nested lists
-    let mut sections: Vec<RenderableContent> = Vec::new();
+    let mut sections: Vec<RenderableTerminalContent> = Vec::new();
 
     // Identity section
     let mut identity_items = Vec::new();
@@ -189,7 +189,7 @@ fn render_terminal(model: &ProviderModel) {
     }
     if !identity_items.is_empty() {
         sections.push(section_header("Identity"));
-        sections.push(RenderableContent::Component(Rc::new(UnorderedList::new(
+        sections.push(RenderableTerminalContent::Component(Rc::new(UnorderedList::new(
             identity_items,
         ))));
     }
@@ -204,7 +204,7 @@ fn render_terminal(model: &ProviderModel) {
     }
     if !capacity_items.is_empty() {
         sections.push(section_header("Capacity"));
-        sections.push(RenderableContent::Component(Rc::new(UnorderedList::new(
+        sections.push(RenderableTerminalContent::Component(Rc::new(UnorderedList::new(
             capacity_items,
         ))));
     }
@@ -222,7 +222,7 @@ fn render_terminal(model: &ProviderModel) {
         }
         if !modality_items.is_empty() {
             sections.push(section_header("Modalities"));
-            sections.push(RenderableContent::Component(Rc::new(UnorderedList::new(
+            sections.push(RenderableTerminalContent::Component(Rc::new(UnorderedList::new(
                 modality_items,
             ))));
         }
@@ -231,7 +231,7 @@ fn render_terminal(model: &ProviderModel) {
     // Capabilities section
     if !meta.capabilities.is_empty() {
         sections.push(section_header("Capabilities"));
-        sections.push(RenderableContent::Component(Rc::new(UnorderedList::new(
+        sections.push(RenderableTerminalContent::Component(Rc::new(UnorderedList::new(
             meta.capabilities.clone(),
         ))));
     }
@@ -253,7 +253,7 @@ fn render_terminal(model: &ProviderModel) {
         }
         if !pricing_items.is_empty() {
             sections.push(section_header("Pricing"));
-            sections.push(RenderableContent::Component(Rc::new(UnorderedList::new(
+            sections.push(RenderableTerminalContent::Component(Rc::new(UnorderedList::new(
                 pricing_items,
             ))));
         }
@@ -286,7 +286,7 @@ fn render_terminal(model: &ProviderModel) {
         }
         if !param_items.is_empty() {
             sections.push(section_header("Parameters"));
-            sections.push(RenderableContent::Component(Rc::new(UnorderedList::new(
+            sections.push(RenderableTerminalContent::Component(Rc::new(UnorderedList::new(
                 param_items,
             ))));
         }
@@ -295,7 +295,7 @@ fn render_terminal(model: &ProviderModel) {
     // Description section
     if let Some(desc) = &meta.description {
         sections.push(section_header("Description"));
-        sections.push(RenderableContent::Component(Rc::new(Prose::new(
+        sections.push(RenderableTerminalContent::Component(Rc::new(Prose::new(
             desc.clone(),
         ))));
     }
@@ -305,6 +305,6 @@ fn render_terminal(model: &ProviderModel) {
     print!("{}", list.render(&term));
 }
 
-fn section_header(title: &str) -> RenderableContent {
-    RenderableContent::Component(Rc::new(Prose::new(format!("<b>{title}</b>"))))
+fn section_header(title: &str) -> RenderableTerminalContent {
+    RenderableTerminalContent::Component(Rc::new(Prose::new(format!("<b>{title}</b>"))))
 }

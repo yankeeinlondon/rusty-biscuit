@@ -1,10 +1,10 @@
-//! [`Renderable`] implementation for [`Prose`].
+//! [`TerminalRenderable`] implementation for [`Prose`].
 
-use crate::{components::renderable::Renderable, terminal::Terminal, utils::layout::Layout};
+use crate::{components::renderable::TerminalRenderable, terminal::Terminal, utils::layout::{Layout, LayoutTerminalExt}};
 
 use super::prose::Prose;
 
-impl Renderable for Prose {
+impl TerminalRenderable for Prose {
     fn render_optimistic(&self, term_width: Option<u32>) -> String {
         let width = term_width.unwrap_or(80);
         let parsed = self.parse_tokens(None);

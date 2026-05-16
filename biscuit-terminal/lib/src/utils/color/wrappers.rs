@@ -1,6 +1,6 @@
 use crate::{terminal::Terminal, utils::layout::RenderableWrapper};
 
-use super::{BasicColor, RgbColor, Tailwind, WEB_COLOR_LOOKUP, WebColor, basic::color_code};
+use super::{BasicColor, RgbColor, Tailwind, WEB_COLOR_LOOKUP, WebColor, color_terminal::color_code};
 
 /// Wrapper for basic colors that implements `RenderableWrapper`.
 #[derive(Debug, Clone, Copy)]

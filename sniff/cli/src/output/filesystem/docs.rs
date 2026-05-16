@@ -5,7 +5,7 @@ use std::rc::Rc;
 
 use biscuit_terminal::components::list::UnorderedList;
 use biscuit_terminal::components::prose::Prose;
-use biscuit_terminal::components::renderable::{Renderable, RenderableContent};
+use biscuit_terminal::components::renderable::{TerminalRenderable, RenderableTerminalContent};
 use biscuit_terminal::terminal::Terminal;
 use sniff::filesystem::docs::MarkdownMeta;
 use sniff::filesystem::{TitleSource, UpdatedSource};
@@ -37,13 +37,13 @@ pub fn render_docs_output(docs: &[MarkdownMeta], verbose: u8) -> TextOutput {
     // --- stdout: document list ---
     let mut stdout = String::new();
 
-    let items: Vec<RenderableContent> = docs
+    let items: Vec<RenderableTerminalContent> = docs
         .iter()
         .flat_map(|doc| {
             let file_link =
                 format_styled_filepath(&doc.relative, &doc.filepath.display().to_string());
             let main = Prose::new(&file_link).render(&terminal);
-            let mut result = vec![RenderableContent::String(main)];
+            let mut result = vec![RenderableTerminalContent::String(main)];
 
             if verbose > 0 {
                 let mut details: Vec<String> = Vec::new();
@@ -90,7 +90,7 @@ pub fn render_docs_output(docs: &[MarkdownMeta], verbose: u8) -> TextOutput {
                 }
 
                 let detail_list = UnorderedList::new(details).with_bullet("  ");
-                result.push(RenderableContent::Component(Rc::new(detail_list)));
+                result.push(RenderableTerminalContent::Component(Rc::new(detail_list)));
             }
 
             result

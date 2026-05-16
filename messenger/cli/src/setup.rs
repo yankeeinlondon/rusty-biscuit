@@ -1,5 +1,5 @@
 use biscuit_terminal::components::prose::Prose;
-use biscuit_terminal::prelude::Renderable;
+use biscuit_terminal::prelude::TerminalRenderable;
 use biscuit_terminal::terminal::Terminal;
 use color_eyre::eyre::{Result, eyre};
 use inquire::{Confirm, InquireError, Password, PasswordDisplayMode, Select, Text};

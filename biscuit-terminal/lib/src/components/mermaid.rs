@@ -1,6 +1,6 @@
 //! Mermaid diagram rendering for terminals.
 //!
-//! This module provides [`MermaidDiagram`], a composable [`Renderable`] component
+//! This module provides [`MermaidDiagram`], a composable [`TerminalRenderable`] component
 //! for rendering Mermaid diagrams inline in the terminal. It delegates rendering
 //! to `biscuit-visualized` and displays via the terminal's image protocol.
 //!
@@ -24,7 +24,8 @@ use std::path::PathBuf;
 
 use thiserror::Error;
 
-use crate::components::renderable::Renderable;
+use crate::components::renderable::TerminalRenderable;
+use crate::utils::layout::LayoutTerminalExt;
 
 // Re-export types from biscuit-visualized
 pub use biscuit_visualized::mermaid::{MermaidConfig, MermaidTheme, QuadrantTheme};
@@ -92,7 +93,7 @@ pub enum MermaidRenderError {
 /// ## Note
 ///
 /// For composable rendering, prefer [`MermaidDiagram`] which implements
-/// [`Renderable`] and provides proper error handling via
+/// [`TerminalRenderable`] and provides proper error handling via
 /// [`try_render()`](MermaidDiagram::try_render).
 #[derive(Debug, Clone)]
 pub(crate) struct MermaidRenderer {
@@ -342,10 +343,10 @@ impl From<&str> for MermaidRenderer {
     }
 }
 
-/// A composable Mermaid diagram that implements [`Renderable`].
+/// A composable Mermaid diagram that implements [`TerminalRenderable`].
 ///
 /// `MermaidDiagram` wraps [`MermaidRenderer`] and makes diagrams usable
-/// anywhere a `Renderable` is expected — inside `Section`, `Compose`,
+/// anywhere a `TerminalRenderable` is expected — inside `Section`, `Compose`,
 /// lists, or any other container component.
 ///
 /// The render pipeline is:
@@ -361,7 +362,7 @@ impl From<&str> for MermaidRenderer {
 ///
 /// ```rust
 /// use biscuit_terminal::components::mermaid::{MermaidDiagram, MermaidTheme};
-/// use biscuit_terminal::components::renderable::Renderable;
+/// use biscuit_terminal::components::renderable::TerminalRenderable;
 /// use biscuit_terminal::components::terminal_image::ImageWidth;
 ///
 /// let diagram = MermaidDiagram::new("flowchart LR\n    A --> B --> C")
@@ -369,7 +370,7 @@ impl From<&str> for MermaidRenderer {
 ///     .with_title("My Flow")
 ///     .with_width(ImageWidth::Percent(0.6));
 ///
-/// // Use in any Renderable context
+/// // Use in any TerminalRenderable context
 /// let term = biscuit_terminal::terminal::Terminal::default();
 /// let output = diagram.render(&term);
 /// ```
@@ -572,7 +573,7 @@ pub struct MermaidRenderResult {
     pub width_cells: u32,
 }
 
-impl super::renderable::Renderable for MermaidDiagram {
+impl super::renderable::TerminalRenderable for MermaidDiagram {
     fn render(&self, term: &crate::terminal::Terminal) -> String {
         let content = self.render_raw(term);
         self.layout.apply_block_layout(&content, term.width())

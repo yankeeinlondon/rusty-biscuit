@@ -453,36 +453,38 @@ mod tests {
 
     #[test]
     fn test_html_inline_variables_override_flows_through_pipeline() {
-        // Authors can pre-embed a bare `var(--hr-width)` token via the
-        // component-level `width` attribute. When HtmlOptions carries
-        // `hr_css_variables`, the as_html pipeline must apply that
-        // substitution so the caller's override reaches the SVG.
+        // Page-declares-variables model: when HtmlOptions carries
+        // `hr_css_variables`, `as_html` emits a `:root` block declaring
+        // those custom properties. The SVG keeps its literal `var(--hr-*)`
+        // expressions — they are never string-substituted — so the
+        // declared `:root` values resolve against them in the browser.
         use darkmatter::markdown::output::HtmlOptions;
         use std::collections::HashMap;
 
         let markdown = "--- { style: dashes, width: \"var(--hr-width)\" }\n";
         let md: darkmatter::markdown::Markdown = markdown.into();
 
-        // Without overrides: the bare token survives.
+        // Without overrides: no `:root` block is emitted.
         let default_html = as_html(&md, HtmlOptions::default()).unwrap();
         assert!(
-            default_html.contains("var(--hr-width)"),
-            "default render should preserve var(--hr-width): {default_html}"
+            !default_html.contains(":root"),
+            "default render should emit no :root block: {default_html}"
         );
 
-        // With overrides: the bare token is replaced everywhere it appears.
+        // With overrides: a `:root` block declares the variable, and the
+        // SVG still carries the literal `var(--hr-width)` token.
         let mut options = HtmlOptions::default();
         let mut vars = HashMap::new();
         vars.insert("hr-width".to_string(), "42%".to_string());
         options.hr_css_variables = vars;
         let overridden_html = as_html(&md, options).unwrap();
         assert!(
-            !overridden_html.contains("var(--hr-width)"),
-            "override should remove bare var(--hr-width) tokens: {overridden_html}"
+            overridden_html.contains("--hr-width: 42%"),
+            "override should emit a :root declaration --hr-width: 42%: {overridden_html}"
         );
         assert!(
-            overridden_html.contains(r#"width="42%""#),
-            "override should substitute the value: {overridden_html}"
+            overridden_html.contains("var(--hr-width)"),
+            "SVG should keep the literal var(--hr-width) token: {overridden_html}"
         );
     }
 

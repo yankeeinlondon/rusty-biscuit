@@ -5,7 +5,7 @@ use std::io::IsTerminal;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
-use biscuit_terminal::components::renderable::Renderable;
+use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::components::status::{Status, StatusState};
 use claudine::composition::sequence::build_step_overlay;
 use claudine::composition::{

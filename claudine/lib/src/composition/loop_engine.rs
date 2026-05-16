@@ -8,19 +8,44 @@ use super::error::CompositionError;
 use super::loop_actions::ActionStaging;
 use super::loop_config::resolve_loop_config;
 use super::loop_expression::{LoopAmbient, LoopExpressionLookup, evaluate_condition};
-use super::types::{LoopConfig, ResolvedCompositionSource};
+use super::types::{LoopConfig, OnRateLimit, ResolvedCompositionSource};
+use crate::stream::summary::RateLimitInfo;
 
 /// Default safety cap for prompt loops.
 pub const DEFAULT_MAX_ITERATIONS: usize = 100;
 
 /// Runtime options that can override per-document loop configuration.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+///
+/// `PartialEq` is intentionally not derived: the `interrupt_check` field is
+/// a function pointer, and function-pointer equality is not meaningful in
+/// Rust.
+#[derive(Debug, Clone, Copy, Default)]
 pub struct LoopExecutionOptions {
     /// Runtime iteration cap override.
     pub max_iterations: Option<usize>,
     /// Runtime fail-fast override.
     pub fail_fast: Option<bool>,
+    /// Runtime rate-limit policy override. When set, takes precedence over
+    /// any per-document [`LoopConfig::on_rate_limit`].
+    pub on_rate_limit: Option<OnRateLimit>,
+    /// Optional interrupt poll, used by the engine during rate-limit
+    /// pause sleeps to short-circuit if the user hits Ctrl+C. The function
+    /// should return `true` when an interrupt has been observed.
+    ///
+    /// The engine itself never installs signal handlers — that remains the
+    /// CLI's responsibility. When `None`, pause sleeps run to completion.
+    pub interrupt_check: Option<fn() -> bool>,
 }
+
+/// How long the engine sleeps between interrupt-flag checks while pausing
+/// for a rate-limit reset.
+///
+/// Short enough to be responsive to Ctrl+C without burning CPU on the poll.
+const PAUSE_POLL_INTERVAL: std::time::Duration = std::time::Duration::from_millis(100);
+
+/// Safety margin added on top of a provider's `reset_at` to absorb skew —
+/// providers commonly return `429` for a moment after the nominal reset.
+const PAUSE_RESET_MARGIN: std::time::Duration = std::time::Duration::from_secs(5);
 
 /// Context passed to a single loop iteration executor.
 #[derive(Debug, Clone, PartialEq)]
@@ -47,7 +72,7 @@ impl LoopIterationContext {
 }
 
 /// Result from executing one prompt iteration.
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct LoopIterationOutput {
     /// Captured stdout or composed output for this iteration.
     pub output: String,
@@ -55,6 +80,28 @@ pub struct LoopIterationOutput {
     pub exit_code: i32,
     /// Optional execution error associated with the exit code.
     pub error: Option<CompositionError>,
+    /// Rate-limit signal observed during this iteration, when present.
+    ///
+    /// Read by the engine between iterations to apply the configured
+    /// [`OnRateLimit`] policy. May be set even on successful iterations —
+    /// providers commonly attach a trailing rate-limit notice after a
+    /// completion summary.
+    pub rate_limit: Option<RateLimitInfo>,
+    /// Structured `error_kind` from the iteration's session_end JSONL row
+    /// (e.g. `step_timeout`, `wall_clock_timeout`, `usage_limit_reached`).
+    ///
+    /// Used by the loop runner to construct
+    /// [`CompositionError::LoopIterationFailed`] with an honest cause
+    /// instead of overloading [`CompositionError::LoopInvalid`].
+    pub exit_reason: Option<String>,
+    /// Provider identifier reported by the iteration's summary, when known.
+    /// Used by the engine to enrich [`CompositionError::LoopRateLimited`]
+    /// with attribution.
+    pub provider_id: Option<String>,
+    /// Model identifier reported by the iteration's summary, when known.
+    /// Used by the engine to enrich [`CompositionError::LoopRateLimited`]
+    /// with attribution.
+    pub model_id: Option<String>,
 }
 
 impl LoopIterationOutput {
@@ -64,6 +111,10 @@ impl LoopIterationOutput {
             output: output.into(),
             exit_code: 0,
             error: None,
+            rate_limit: None,
+            exit_reason: None,
+            provider_id: None,
+            model_id: None,
         }
     }
 
@@ -73,7 +124,37 @@ impl LoopIterationOutput {
             output: output.into(),
             exit_code,
             error: Some(error),
+            rate_limit: None,
+            exit_reason: None,
+            provider_id: None,
+            model_id: None,
         }
+    }
+
+    /// Attach provider/model attribution to this output (builder style).
+    #[must_use]
+    pub fn with_attribution(
+        mut self,
+        provider_id: Option<String>,
+        model_id: Option<String>,
+    ) -> Self {
+        self.provider_id = provider_id;
+        self.model_id = model_id;
+        self
+    }
+
+    /// Attach a rate-limit signal to this output (builder style).
+    #[must_use]
+    pub fn with_rate_limit(mut self, rate_limit: Option<RateLimitInfo>) -> Self {
+        self.rate_limit = rate_limit;
+        self
+    }
+
+    /// Attach a structured exit reason to this output (builder style).
+    #[must_use]
+    pub fn with_exit_reason(mut self, exit_reason: Option<String>) -> Self {
+        self.exit_reason = exit_reason;
+        self
     }
 }
 
@@ -180,6 +261,10 @@ pub fn execute_loop_with_config(
         .or(config.max_iterations)
         .unwrap_or(DEFAULT_MAX_ITERATIONS);
     let fail_fast = options.fail_fast.or(config.fail_fast).unwrap_or(true);
+    let on_rate_limit = options
+        .on_rate_limit
+        .or(config.on_rate_limit)
+        .unwrap_or_default();
 
     let mut frontmatter = initial_frontmatter;
     let mut iteration_count = 0usize;
@@ -240,6 +325,9 @@ pub fn execute_loop_with_config(
         last_output = output.output;
         last_exit_code = output.exit_code;
         iteration_count += 1;
+        let iteration_rate_limit = output.rate_limit.clone();
+        let iteration_provider = output.provider_id.clone();
+        let iteration_model = output.model_id.clone();
 
         if let Some(error) = output.error {
             if fail_fast {
@@ -252,6 +340,38 @@ pub fn execute_loop_with_config(
                 ));
             }
             continue;
+        }
+
+        // Apply the rate-limit policy when the iteration completed and a
+        // throttling signal was attached. Skipped on the very last
+        // iteration because the loop is about to exit anyway — pausing or
+        // aborting would just delay (or falsely fail) a clean finish.
+        if !is_last {
+            match decide_rate_limit_action(
+                iteration_rate_limit.as_ref(),
+                on_rate_limit,
+                prompt_path,
+                iteration,
+                iteration_provider,
+                iteration_model,
+                options.interrupt_check,
+            ) {
+                RateLimitOutcome::Proceed => {}
+                RateLimitOutcome::Interrupted => {
+                    // Caller's wrapped executor will short-circuit the
+                    // next iteration and produce the LoopInterrupted
+                    // error, so we just continue the loop here.
+                }
+                RateLimitOutcome::Abort(error) => {
+                    return Ok(LoopExecutionResult::failure(
+                        frontmatter,
+                        iteration_count,
+                        last_output,
+                        last_exit_code,
+                        error,
+                    ));
+                }
+            }
         }
 
         // Build a post-executor lookup so action-time templates resolve
@@ -311,6 +431,96 @@ pub fn execute_loop_with_config(
         last_output,
         last_exit_code,
     ))
+}
+
+/// Outcome of consulting the rate-limit policy after an iteration.
+enum RateLimitOutcome {
+    /// No throttle, or `Continue` policy — keep iterating normally.
+    Proceed,
+    /// We paused and the interrupt callback fired during the sleep.
+    /// Caller continues; the wrapped executor will surface the interrupt
+    /// on the next iteration.
+    Interrupted,
+    /// Policy was `Abort` (or `Pause` without a usable reset clock).
+    /// Caller propagates the contained error.
+    Abort(CompositionError),
+}
+
+#[allow(clippy::too_many_arguments)]
+fn decide_rate_limit_action(
+    rate_limit: Option<&RateLimitInfo>,
+    policy: OnRateLimit,
+    prompt_path: &Path,
+    iteration: usize,
+    provider: Option<String>,
+    model: Option<String>,
+    interrupt_check: Option<fn() -> bool>,
+) -> RateLimitOutcome {
+    let Some(rl) = rate_limit else {
+        return RateLimitOutcome::Proceed;
+    };
+    if rl.is_throttled != Some(true) {
+        return RateLimitOutcome::Proceed;
+    }
+
+    let now = chrono::Utc::now();
+    let reset = rl.reset_at;
+    let safe_pause_window = match reset {
+        Some(reset_at) if reset_at > now => Some(
+            (reset_at - now)
+                .to_std()
+                .unwrap_or(std::time::Duration::ZERO)
+                + PAUSE_RESET_MARGIN,
+        ),
+        _ => None,
+    };
+
+    match (policy, safe_pause_window) {
+        (OnRateLimit::Continue, _) => RateLimitOutcome::Proceed,
+        (OnRateLimit::Pause, Some(duration)) => {
+            if interruptible_sleep(duration, interrupt_check) {
+                RateLimitOutcome::Interrupted
+            } else {
+                RateLimitOutcome::Proceed
+            }
+        }
+        // No usable reset clock under `Pause` falls back to `Abort` to
+        // avoid an unbounded sleep. Explicit `Abort` lands here too.
+        (OnRateLimit::Pause, None) | (OnRateLimit::Abort, _) => {
+            RateLimitOutcome::Abort(CompositionError::LoopRateLimited {
+                iteration,
+                prompt_path: prompt_path.to_path_buf(),
+                provider,
+                model,
+                reset_at: reset,
+                message: rl.message.clone(),
+            })
+        }
+    }
+}
+
+/// Sleep up to `duration`, polling `interrupt_check` every
+/// [`PAUSE_POLL_INTERVAL`]. Returns `true` when the sleep was cut short by
+/// an interrupt.
+fn interruptible_sleep(
+    duration: std::time::Duration,
+    interrupt_check: Option<fn() -> bool>,
+) -> bool {
+    let deadline = std::time::Instant::now() + duration;
+    loop {
+        if let Some(check) = interrupt_check
+            && check()
+        {
+            return true;
+        }
+        let now = std::time::Instant::now();
+        if now >= deadline {
+            return false;
+        }
+        let remaining = deadline - now;
+        let slice = remaining.min(PAUSE_POLL_INTERVAL);
+        std::thread::sleep(slice);
+    }
 }
 
 fn apply_actions(
@@ -424,6 +634,7 @@ mod tests {
             actions: vec![LoopAction::Increment("counter".into())],
             max_iterations: None,
             fail_fast: None,
+            on_rate_limit: None,
         }
     }
 
@@ -507,6 +718,7 @@ mod tests {
             actions: vec![],
             max_iterations: None,
             fail_fast: None,
+            on_rate_limit: None,
         };
         let seen = RefCell::new(Vec::new());
         let result = execute_loop_with_config(
@@ -516,6 +728,8 @@ mod tests {
             LoopExecutionOptions {
                 max_iterations: Some(2),
                 fail_fast: None,
+                on_rate_limit: None,
+                interrupt_check: None,
             },
             |ctx| {
                 seen.borrow_mut().push(ctx.ambient.is_last);
@@ -542,6 +756,7 @@ mod tests {
             actions: vec![LoopAction::Increment("counter".into())],
             max_iterations: None,
             fail_fast: Some(false),
+            on_rate_limit: None,
         };
         let seen_exit_codes = RefCell::new(Vec::new());
         let result = execute_loop_with_config(
@@ -609,6 +824,7 @@ mod tests {
             ],
             max_iterations: None,
             fail_fast: Some(false),
+            on_rate_limit: None,
         };
         let result = execute_loop_with_config(
             Path::new("loop.md"),
@@ -645,6 +861,7 @@ mod tests {
             ],
             max_iterations: Some(2),
             fail_fast: None,
+            on_rate_limit: None,
         };
         let result = execute_loop_with_config(
             Path::new("loop.md"),
@@ -675,6 +892,7 @@ mod tests {
             actions: vec![LoopAction::Increment("counter".into())],
             max_iterations: None,
             fail_fast: None,
+            on_rate_limit: None,
         };
         let result = execute_loop_with_config(
             Path::new("loop.md"),
@@ -700,6 +918,7 @@ mod tests {
             actions: vec![LoopAction::Increment("counter".into())],
             max_iterations: None,
             fail_fast: None,
+            on_rate_limit: None,
         };
         let result = execute_loop_with_config(
             Path::new("loop.md"),
@@ -726,6 +945,7 @@ mod tests {
             actions: vec![LoopAction::Increment("counter".into())],
             max_iterations: None,
             fail_fast: None,
+            on_rate_limit: None,
         };
         let result = execute_loop_with_config(
             Path::new("loop.md"),
@@ -755,6 +975,7 @@ mod tests {
             }],
             max_iterations: None,
             fail_fast: None,
+            on_rate_limit: None,
         };
         let result = execute_loop_with_config(
             Path::new("loop.md"),
@@ -783,6 +1004,7 @@ mod tests {
             actions: vec![],
             max_iterations: None,
             fail_fast: None,
+            on_rate_limit: None,
         };
         let outputs = RefCell::new(Vec::new());
         let result = execute_loop_with_config(
@@ -819,6 +1041,7 @@ mod tests {
             actions: vec![],
             max_iterations: None,
             fail_fast: Some(false),
+            on_rate_limit: None,
         };
         let exit_codes = RefCell::new(Vec::new());
         let result = execute_loop_with_config(
@@ -847,5 +1070,295 @@ mod tests {
 
         let seen = exit_codes.borrow();
         assert_eq!(&*seen, &[0, 0, 7]);
+    }
+
+    // ── Rate-limit policy tests ──────────────────────────────────────────
+
+    fn throttled(message: Option<&str>, reset_in_secs: Option<i64>) -> RateLimitInfo {
+        RateLimitInfo {
+            is_throttled: Some(true),
+            retry_after_ms: None,
+            message: message.map(str::to_string),
+            reset_at: reset_in_secs.map(|s| chrono::Utc::now() + chrono::Duration::seconds(s)),
+        }
+    }
+
+    #[test]
+    fn rate_limit_continue_policy_proceeds_without_pausing() {
+        // While-condition exits after 2 successful iterations. Even though
+        // iteration 1 carries a rate-limit trailer, the `Continue` policy
+        // means we don't pause and we don't abort.
+        let config = LoopConfig {
+            condition: LoopCondition::While("counter < 2".into()),
+            actions: vec![LoopAction::Increment("counter".into())],
+            max_iterations: None,
+            fail_fast: None,
+            on_rate_limit: Some(OnRateLimit::Continue),
+        };
+
+        let observed = RefCell::new(Vec::new());
+        let start = std::time::Instant::now();
+        let result = execute_loop_with_config(
+            Path::new("loop.md"),
+            &config,
+            object(json!({"counter": 0})),
+            LoopExecutionOptions::default(),
+            |ctx| {
+                observed.borrow_mut().push(ctx.iteration);
+                Ok(LoopIterationOutput::success("ok")
+                    .with_rate_limit(Some(throttled(Some("hit cap"), Some(60)))))
+            },
+        )
+        .unwrap();
+        let elapsed = start.elapsed();
+
+        assert!(result.error.is_none(), "got: {result:?}");
+        assert_eq!(result.iteration_count, 2);
+        assert!(
+            elapsed < std::time::Duration::from_millis(500),
+            "Continue policy should not sleep; elapsed = {elapsed:?}"
+        );
+    }
+
+    #[test]
+    fn rate_limit_abort_policy_halts_with_structured_error() {
+        let config = LoopConfig {
+            condition: LoopCondition::While("counter < 5".into()),
+            actions: vec![LoopAction::Increment("counter".into())],
+            max_iterations: None,
+            fail_fast: None,
+            on_rate_limit: Some(OnRateLimit::Abort),
+        };
+
+        let result = execute_loop_with_config(
+            Path::new("loop.md"),
+            &config,
+            object(json!({"counter": 0})),
+            LoopExecutionOptions::default(),
+            |_ctx| {
+                Ok(LoopIterationOutput::success("ok")
+                    .with_rate_limit(Some(throttled(Some("usage cap"), Some(60))))
+                    .with_attribution(Some("k2p6".into()), Some("kimi-for-coding".into())))
+            },
+        )
+        .unwrap();
+
+        assert_eq!(result.iteration_count, 1);
+        match result.error {
+            Some(CompositionError::LoopRateLimited {
+                iteration,
+                provider,
+                model,
+                reset_at,
+                message,
+                ..
+            }) => {
+                assert_eq!(iteration, 1);
+                assert_eq!(provider.as_deref(), Some("k2p6"));
+                assert_eq!(model.as_deref(), Some("kimi-for-coding"));
+                assert!(reset_at.is_some());
+                assert_eq!(message.as_deref(), Some("usage cap"));
+            }
+            other => panic!("expected LoopRateLimited, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn rate_limit_pause_with_no_reset_falls_back_to_abort() {
+        // No `reset_at` → Pause cannot wait an unbounded amount, so we
+        // abort cleanly with the same structured error.
+        let config = LoopConfig {
+            condition: LoopCondition::While("counter < 5".into()),
+            actions: vec![LoopAction::Increment("counter".into())],
+            max_iterations: None,
+            fail_fast: None,
+            on_rate_limit: Some(OnRateLimit::Pause),
+        };
+
+        let result = execute_loop_with_config(
+            Path::new("loop.md"),
+            &config,
+            object(json!({"counter": 0})),
+            LoopExecutionOptions::default(),
+            |_ctx| {
+                Ok(LoopIterationOutput::success("ok")
+                    .with_rate_limit(Some(throttled(Some("no reset clock"), None))))
+            },
+        )
+        .unwrap();
+
+        assert_eq!(result.iteration_count, 1);
+        assert!(
+            matches!(result.error, Some(CompositionError::LoopRateLimited { reset_at: None, .. })),
+            "got: {:?}",
+            result.error
+        );
+    }
+
+    #[test]
+    fn rate_limit_pause_skipped_on_final_iteration() {
+        // When the loop is already going to exit (is_last == true), the
+        // engine must not pause — it would block for nothing.
+        let config = LoopConfig {
+            condition: LoopCondition::While("counter < 1".into()),
+            actions: vec![LoopAction::Increment("counter".into())],
+            max_iterations: None,
+            fail_fast: None,
+            on_rate_limit: Some(OnRateLimit::Pause),
+        };
+
+        let start = std::time::Instant::now();
+        let result = execute_loop_with_config(
+            Path::new("loop.md"),
+            &config,
+            object(json!({"counter": 0})),
+            LoopExecutionOptions::default(),
+            |_ctx| {
+                // Iteration 1 IS the last (counter goes 0 → 1, condition fails next round).
+                Ok(LoopIterationOutput::success("ok")
+                    .with_rate_limit(Some(throttled(Some("trailer on last"), Some(300)))))
+            },
+        )
+        .unwrap();
+        let elapsed = start.elapsed();
+
+        assert!(result.error.is_none(), "got: {result:?}");
+        assert!(
+            elapsed < std::time::Duration::from_millis(500),
+            "should skip pause on last iteration; elapsed = {elapsed:?}"
+        );
+    }
+
+    #[test]
+    fn rate_limit_default_policy_is_pause() {
+        // Neither options nor config set on_rate_limit. With no reset_at,
+        // the default Pause falls back to Abort.
+        let config = LoopConfig {
+            condition: LoopCondition::While("counter < 5".into()),
+            actions: vec![LoopAction::Increment("counter".into())],
+            max_iterations: None,
+            fail_fast: None,
+            on_rate_limit: None,
+        };
+
+        let result = execute_loop_with_config(
+            Path::new("loop.md"),
+            &config,
+            object(json!({"counter": 0})),
+            LoopExecutionOptions::default(),
+            |_ctx| {
+                Ok(LoopIterationOutput::success("ok")
+                    .with_rate_limit(Some(throttled(None, None))))
+            },
+        )
+        .unwrap();
+
+        assert!(
+            matches!(result.error, Some(CompositionError::LoopRateLimited { .. })),
+            "default should be Pause→Abort fallback; got: {:?}",
+            result.error
+        );
+    }
+
+    #[test]
+    fn rate_limit_pause_sleeps_until_reset_then_continues() {
+        // Set reset_at ~1s in the future. With Pause policy, the engine
+        // should sleep ~1s + 5s margin, then continue. To keep the test
+        // fast we cap the loop at 2 iterations and only stamp rate_limit
+        // on iteration 1.
+        let config = LoopConfig {
+            condition: LoopCondition::While("counter < 2".into()),
+            actions: vec![LoopAction::Increment("counter".into())],
+            max_iterations: None,
+            fail_fast: None,
+            on_rate_limit: Some(OnRateLimit::Pause),
+        };
+
+        let start = std::time::Instant::now();
+        let result = execute_loop_with_config(
+            Path::new("loop.md"),
+            &config,
+            object(json!({"counter": 0})),
+            LoopExecutionOptions {
+                // Use 0s reset_at + 5s margin so the sleep is bounded.
+                ..LoopExecutionOptions::default()
+            },
+            |ctx| {
+                let rl = if ctx.iteration == 1 {
+                    // 2s reset so the test waits ~7s (2 + 5s margin) before
+                    // proceeding to iteration 2.
+                    Some(throttled(Some("brief cap"), Some(2)))
+                } else {
+                    None
+                };
+                Ok(LoopIterationOutput::success("ok").with_rate_limit(rl))
+            },
+        )
+        .unwrap();
+        let elapsed = start.elapsed();
+
+        assert!(result.error.is_none(), "got: {result:?}");
+        assert_eq!(result.iteration_count, 2);
+        // 2s reset + 5s margin = ~7s expected.
+        assert!(
+            elapsed >= std::time::Duration::from_secs(6),
+            "expected ~7s pause; elapsed = {elapsed:?}"
+        );
+        assert!(
+            elapsed < std::time::Duration::from_secs(20),
+            "pause should not be unbounded; elapsed = {elapsed:?}"
+        );
+    }
+
+    #[test]
+    fn rate_limit_pause_is_interrupt_aware() {
+        // When the interrupt_check callback returns true, the pause exits
+        // immediately and the engine returns Proceed (caller will see the
+        // interrupt on the next iteration via its wrapped executor).
+        use std::sync::atomic::{AtomicBool, Ordering};
+
+        // Static flag because LoopExecutionOptions.interrupt_check is a
+        // bare `fn() -> bool` (Copy).
+        static FIRED: AtomicBool = AtomicBool::new(false);
+        FIRED.store(true, Ordering::SeqCst);
+        fn always_interrupted() -> bool {
+            FIRED.load(Ordering::SeqCst)
+        }
+
+        let config = LoopConfig {
+            condition: LoopCondition::While("counter < 2".into()),
+            actions: vec![LoopAction::Increment("counter".into())],
+            max_iterations: None,
+            fail_fast: None,
+            on_rate_limit: Some(OnRateLimit::Pause),
+        };
+
+        let start = std::time::Instant::now();
+        let _result = execute_loop_with_config(
+            Path::new("loop.md"),
+            &config,
+            object(json!({"counter": 0})),
+            LoopExecutionOptions {
+                interrupt_check: Some(always_interrupted),
+                ..LoopExecutionOptions::default()
+            },
+            |ctx| {
+                let rl = if ctx.iteration == 1 {
+                    // Long reset to prove the interrupt cut it short.
+                    Some(throttled(Some("long cap"), Some(60)))
+                } else {
+                    None
+                };
+                Ok(LoopIterationOutput::success("ok").with_rate_limit(rl))
+            },
+        )
+        .unwrap();
+        let elapsed = start.elapsed();
+
+        assert!(
+            elapsed < std::time::Duration::from_secs(5),
+            "interrupt should cut pause short; elapsed = {elapsed:?}"
+        );
+        FIRED.store(false, Ordering::SeqCst);
     }
 }

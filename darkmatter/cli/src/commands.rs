@@ -726,7 +726,7 @@ pub fn run_compose(
 
     // Verbose compose summary
     if cli.verbose > 0 {
-        use biscuit_terminal::components::renderable::Renderable;
+        use biscuit_terminal::components::renderable::TerminalRenderable;
         use biscuit_terminal::prelude::{Status, StatusState};
         use biscuit_terminal::terminal::Terminal;
         let terminal = Terminal::default();
@@ -743,7 +743,7 @@ pub fn run_compose(
     if cli.verbose > 1
         && let Some(perf_report) = &report.perf
     {
-        use biscuit_terminal::components::renderable::Renderable;
+        use biscuit_terminal::components::renderable::TerminalRenderable;
         use biscuit_terminal::prelude::Status;
         use biscuit_terminal::terminal::Terminal;
         let terminal = Terminal::default();
@@ -792,7 +792,7 @@ pub fn run_compose(
 
     // Emit compose warnings to stderr
     if !report.warnings.is_empty() {
-        use biscuit_terminal::components::renderable::Renderable;
+        use biscuit_terminal::components::renderable::TerminalRenderable;
         use biscuit_terminal::prelude::{Status, StatusState};
         use biscuit_terminal::terminal::Terminal;
         let term = Terminal::default();
@@ -994,7 +994,7 @@ pub fn run_rm(input: &PathBuf, props: &[String], json: bool, cli: &Cli) -> Resul
         println!("{}", serde_json::to_string_pretty(&output)?);
     } else if cli.verbose > 0 {
         use biscuit_terminal::components::prose::Prose;
-        use biscuit_terminal::components::renderable::Renderable;
+        use biscuit_terminal::components::renderable::TerminalRenderable;
         use biscuit_terminal::terminal::Terminal;
         let props_label = if removed.len() == 1 {
             format!("<b>{}</b> property", removed[0])
@@ -1479,7 +1479,7 @@ fn format_validation_issues(
 ) -> String {
     use biscuit_terminal::components::list::UnorderedList;
     use biscuit_terminal::components::prose::Prose;
-    use biscuit_terminal::components::renderable::Renderable as _;
+    use biscuit_terminal::components::renderable::TerminalRenderable as _;
     use darkmatter::markdown::compose::ComposeSource;
     use darkmatter::markdown::reference::types::ReferenceKind;
     use darkmatter::markdown::reference::validate::ReferenceSeverity;
@@ -1826,7 +1826,7 @@ fn validation_report_to_json(
 
 #[instrument(skip_all)]
 fn run_graph(input: &PathBuf, follow: bool, validate: bool, json: bool) -> Result<()> {
-    use biscuit_terminal::components::renderable::Renderable;
+    use biscuit_terminal::components::renderable::TerminalRenderable;
     use biscuit_terminal::terminal::Terminal;
     use darkmatter::markdown::reference::file_tree::FileTree;
 
@@ -1864,7 +1864,7 @@ fn run_graph(input: &PathBuf, follow: bool, validate: bool, json: bool) -> Resul
     // Validation summary footer
     if validate && let Some(report) = tree.validation_report() {
         use biscuit_terminal::components::prose::Prose;
-        use biscuit_terminal::components::renderable::Renderable as _;
+        use biscuit_terminal::components::renderable::TerminalRenderable as _;
 
         let formatted = format_validation_issues(report, &term);
         if !formatted.is_empty() {
@@ -1943,7 +1943,7 @@ fn format_compose_perf_report(
 ) -> String {
     use biscuit_terminal::components::block_quote::BlockQuote;
     use biscuit_terminal::components::prose::Prose;
-    use biscuit_terminal::components::renderable::Renderable as _;
+    use biscuit_terminal::components::renderable::TerminalRenderable as _;
     use biscuit_terminal::components::two_column::TwoColumn;
     use biscuit_terminal::utils::color::{Color, Tailwind};
 

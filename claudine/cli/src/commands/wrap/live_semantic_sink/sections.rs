@@ -2,7 +2,7 @@
 
 use super::LiveSemanticSink;
 use super::Section;
-use biscuit_terminal::components::renderable::Renderable;
+use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::components::status::{Status, StatusState};
 
 impl LiveSemanticSink {

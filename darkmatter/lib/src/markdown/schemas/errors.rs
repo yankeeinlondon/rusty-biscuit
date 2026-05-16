@@ -278,7 +278,7 @@ impl biscuit_terminal::errors::BlockError for SchemaError {
 
 #[cfg(test)]
 mod tests {
-    use biscuit_terminal::components::renderable::Renderable;
+    use biscuit_terminal::components::renderable::TerminalRenderable;
     use biscuit_terminal::errors::BlockError;
     use biscuit_terminal::utils::escape_codes::strip_escape_codes;
 

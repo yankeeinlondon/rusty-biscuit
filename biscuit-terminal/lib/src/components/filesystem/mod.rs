@@ -15,7 +15,7 @@
 //! Basic usage:
 //!
 //! ```no_run
-//! use biscuit_terminal::prelude::{FileSystem, Renderable};
+//! use biscuit_terminal::prelude::{FileSystem, TerminalRenderable};
 //!
 //! let mut fs = FileSystem::new(".").unwrap();
 //! fs.ensure_tree_built();
@@ -97,10 +97,10 @@ use paste::paste;
 use self::metrics::MetricConfig;
 
 use crate::components::prose::Prose;
-use crate::components::renderable::Renderable;
+use crate::components::renderable::TerminalRenderable;
 use crate::terminal::Terminal;
 use crate::utils::block_constraint::{split_at_visible_width, visible_width};
-use crate::utils::layout::Layout;
+use crate::utils::layout::{Layout, LayoutTerminalExt};
 
 /// A terminal component that renders a filesystem directory tree.
 ///
@@ -129,7 +129,7 @@ use crate::utils::layout::Layout;
 /// ## Rendering
 ///
 /// ```no_run
-/// use biscuit_terminal::prelude::{FileSystem, Terminal, Renderable};
+/// use biscuit_terminal::prelude::{FileSystem, Terminal, TerminalRenderable};
 ///
 /// let mut fs = FileSystem::new(".")?;
 ///
@@ -545,7 +545,7 @@ impl FileSystem {
     /// ## Examples
     ///
     /// ```no_run
-    /// # use biscuit_terminal::prelude::{FileSystem, Terminal, Renderable};
+    /// # use biscuit_terminal::prelude::{FileSystem, Terminal, TerminalRenderable};
     /// let mut fs = FileSystem::new_with_formatting(".")?
     ///     .with_file_links();
     /// fs.ensure_tree_built();
@@ -1485,10 +1485,10 @@ impl TryFrom<PathBuf> for FileSystem {
 }
 
 // =============================================================================
-// Renderable Implementation
+// TerminalRenderable Implementation
 // =============================================================================
 
-impl Renderable for FileSystem {
+impl TerminalRenderable for FileSystem {
     /// Renders the filesystem tree as a string without terminal context.
     ///
     /// This method provides basic rendering with Unicode fallback icons and no
@@ -1507,7 +1507,7 @@ impl Renderable for FileSystem {
     /// ## Examples
     ///
     /// ```no_run
-    /// use biscuit_terminal::prelude::{FileSystem, Renderable};
+    /// use biscuit_terminal::prelude::{FileSystem, TerminalRenderable};
     ///
     /// let mut fs = FileSystem::new(".")?;
     /// fs.ensure_tree_built();
@@ -1574,7 +1574,7 @@ impl Renderable for FileSystem {
     /// ## Examples
     ///
     /// ```no_run
-    /// use biscuit_terminal::prelude::{FileSystem, Terminal, Renderable};
+    /// use biscuit_terminal::prelude::{FileSystem, Terminal, TerminalRenderable};
     ///
     /// let mut fs = FileSystem::new_with_formatting(".")?;
     /// fs.ensure_tree_built();
@@ -4077,7 +4077,7 @@ mod tests {
     }
 
     // ============================================================
-    // Renderable Implementation Tests
+    // TerminalRenderable Implementation Tests
     // ============================================================
 
     #[test]
@@ -4586,21 +4586,21 @@ mod tests {
 
     #[test]
     fn test_layout_accessor() {
-        use crate::components::renderable::Renderable;
+        use crate::components::renderable::TerminalRenderable;
         let fs = FileSystem::default();
-        let layout = Renderable::layout(&fs);
+        let layout = TerminalRenderable::layout(&fs);
         // Default layout should have no margins
         assert_eq!(layout.left_margin, crate::utils::layout::Margin::None);
     }
 
     #[test]
     fn test_layout_mut_accessor() {
-        use crate::components::renderable::Renderable;
+        use crate::components::renderable::TerminalRenderable;
         let mut fs = FileSystem::default();
-        Renderable::layout_mut(&mut fs).left_margin = crate::utils::layout::Margin::Chars(4);
+        TerminalRenderable::layout_mut(&mut fs).left_margin = crate::utils::layout::Margin::Chars(4);
 
         assert_eq!(
-            Renderable::layout(&fs).left_margin,
+            TerminalRenderable::layout(&fs).left_margin,
             crate::utils::layout::Margin::Chars(4)
         );
     }

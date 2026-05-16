@@ -41,7 +41,7 @@ use crate::markdown::{
 use biscuit_terminal::components::horizontal_rule::HorizontalRule;
 use biscuit_terminal::components::image_options::TerminalImageOptions;
 use biscuit_terminal::components::prose::Prose;
-use biscuit_terminal::components::renderable::Renderable;
+use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::components::table::cell::TableCellContent;
 use biscuit_terminal::components::table::column::TableColumn;
 use biscuit_terminal::components::table::table::Table as TerminalTable;
@@ -651,7 +651,7 @@ impl ImageRenderer {
             return format!("▉ IMAGE[{}]\n", alt_text);
         }
 
-        // Render via Renderable fallback (protocol-aware string output)
+        // Render via TerminalRenderable fallback (protocol-aware string output)
         let render_terminal = self.render_terminal();
         let output = term_image.render(&render_terminal);
         if output.is_empty() {
@@ -797,7 +797,7 @@ fn convert_alignment(align: &pulldown_cmark::Alignment) -> Alignment {
 ///
 /// This function renders markdown content with syntax-highlighted code blocks
 /// using ANSI escape sequences for terminal display. Inline images are rendered
-/// via biscuit-terminal's protocol-aware `Renderable` trait (Kitty/iTerm2).
+/// via biscuit-terminal's protocol-aware `TerminalRenderable` trait (Kitty/iTerm2).
 ///
 /// ## Examples
 ///
@@ -1371,12 +1371,6 @@ pub(crate) fn write_terminal_with_layout<W: std::io::Write>(
                     } else {
                         wrapper.newline();
                     }
-                }
-
-                // For top-level lists inside a blockquote, add a blank line before the list
-                // if there is prior content, to match paragraph spacing behavior.
-                if list_stack.is_empty() && blockquote_depth > 0 && blockquote_has_content {
-                    wrapper.emit_newline_with_prefix();
                 }
 
                 // Apply page-level layout for top-level lists.
@@ -2757,7 +2751,7 @@ fn write_horizontal_rule(
     term: &Terminal,
     terminal_width: u16,
 ) {
-    use biscuit_terminal::components::renderable::Renderable;
+    use biscuit_terminal::components::renderable::TerminalRenderable;
     use biscuit_terminal::utils::layout::{Layout, Margin};
 
     // If we're mid-line, break to column 0 before emitting margins.
@@ -8702,14 +8696,15 @@ flowchart LR
         let plain = strip_ansi_codes(&output);
         assert!(!plain.contains("Paragraph one- Item 1"));
 
-        // Split into trimmed lines to ignore the padding
+        // List directly follows paragraph inside a blockquote without an
+        // intervening blank styled line.
         let lines: Vec<&str> = plain.lines().map(|l| l.trim_end()).collect();
         let p_idx = lines
             .iter()
             .position(|l| l.contains("Paragraph one"))
             .unwrap();
-        assert_eq!(lines[p_idx + 1], "▐");
-        assert_eq!(lines[p_idx + 2], "▐   - Item 1");
+        assert_eq!(lines[p_idx + 1], "▐   - Item 1");
+        assert_eq!(lines[p_idx + 2], "▐   - Item 2");
     }
 
     #[test]

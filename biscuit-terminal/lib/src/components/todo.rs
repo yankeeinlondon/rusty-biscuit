@@ -5,13 +5,13 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 use crate::components::prose::Prose;
-use crate::components::renderable::Renderable;
+use crate::components::renderable::TerminalRenderable;
 use crate::discovery::detection::ColorDepth;
 use crate::terminal::Terminal;
 use crate::utils::styling::{FontWeight, Style, Stylist};
 use crate::utils::{
     color::{BasicColor, TermColor},
-    layout::Layout,
+    layout::{Layout, LayoutTerminalExt},
 };
 
 /// box outline shape for an _open_ **TODO**
@@ -126,7 +126,7 @@ pub static TODO_CHAR_LOOKUP: LazyLock<HashMap<TodoState, TodoStateRep>> = LazyLo
 ///
 /// ```
 /// use biscuit_terminal::components::todo::Todo;
-/// use biscuit_terminal::components::renderable::Renderable;
+/// use biscuit_terminal::components::renderable::TerminalRenderable;
 ///
 /// // Create a new open TODO
 /// let todo = Todo::new("Review pull request #42");
@@ -289,7 +289,7 @@ impl Todo {
     }
 }
 
-impl Renderable for Todo {
+impl TerminalRenderable for Todo {
     fn render_optimistic(&self, term_width: Option<u32>) -> String {
         let width = term_width.unwrap_or(80);
         let term = Terminal::new_optimistic(width);

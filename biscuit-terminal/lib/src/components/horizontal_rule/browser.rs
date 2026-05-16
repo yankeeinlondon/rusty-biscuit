@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use renderable::browser::fragment::{BrowserFragment, Ready};
 
 use crate::components::renderable::BrowserRenderable;
 use crate::utils::color::{BasicColor, RgbColor};
@@ -100,7 +100,7 @@ pub(super) fn nearest_basic_color(r: u8, g: u8, b: u8) -> BasicColor {
     }
 }
 
-impl BrowserRenderable for HorizontalRule {
+impl HorizontalRule {
     /// Renders the rule as an SVG `<svg>` element with CSS-variable-driven
     /// styling.
     ///
@@ -115,18 +115,15 @@ impl BrowserRenderable for HorizontalRule {
     /// `var(--hr-color, currentColor)`, etc. so that the SVG renders
     /// correctly even when the declared inline variables are stripped —
     /// the fallback inside each `var()` expression is the concrete value
-    /// that was baked in at render time.
-    ///
-    /// Callers that want to override those values after generation can use
-    /// [`render_to_browser_with_inline_variables`](Self::render_to_browser_with_inline_variables)
-    /// which performs string substitution for `var(--name)` tokens.
+    /// that was baked in at render time. The page declares the variables;
+    /// the component emits `var(--foo)` literally.
     ///
     /// ## Notes
     ///
     /// Geometry attributes (`x1`, `x2`, `cx`, `cy`, `r`, `d`, ...) remain
     /// concrete values because not every SVG renderer honors `var()` inside
     /// geometry properties. Only color and stroke-width are variable-driven.
-    fn render_to_browser(&self) -> String {
+    pub(crate) fn render_browser_svg(&self) -> String {
         // Weight in pixels (used both as the declared --hr-weight value and
         // as the fallback inside every var(--hr-weight, N) expression).
         let stroke_width = match self.weight {
@@ -141,10 +138,9 @@ impl BrowserRenderable for HorizontalRule {
         let margin_bottom = self.layout.bottom_margin.to_css_value("0");
 
         // Every `stroke`, `fill`, and `stroke-width` expression goes through
-        // these `var(--hr-xxx, FALLBACK)` forms so downstream overrides via
-        // `render_to_browser_with_inline_variables` (or page-level CSS that
-        // sets `--hr-weight` / `--hr-color`) take effect without the SVG
-        // losing its visual fidelity when the variables are stripped.
+        // these `var(--hr-xxx, FALLBACK)` forms so page-level CSS that sets
+        // `--hr-weight` / `--hr-color` takes effect without the SVG losing
+        // its visual fidelity when the variables are stripped.
         let stroke_var = format!("var(--hr-color, {})", color_attr);
         let width_var = format!("var(--hr-weight, {})", stroke_width);
         let fill_var = format!("var(--hr-color, {})", color_attr);
@@ -216,44 +212,20 @@ impl BrowserRenderable for HorizontalRule {
             content = svg_content,
         )
     }
+}
 
-    /// Renders the rule and then substitutes caller-provided CSS variables
-    /// into any `var(--name)` token found in the output.
+impl BrowserRenderable for HorizontalRule {
+    /// Wraps the rule's SVG as a [`ComposableNode::RawHtml`] island.
     ///
-    /// Because [`render_to_browser`](Self::render_to_browser) now embeds
-    /// `var(--hr-weight, …)`, `var(--hr-color, …)`, and declares
-    /// `--hr-weight` / `--hr-color` / `--hr-width` on the root `<svg>`,
-    /// callers get a natural override surface:
+    /// The SVG is caller-owned, already-formed markup; emitting it as a
+    /// `RawHtml` node tells the renderer to pass it through verbatim
+    /// rather than HTML-escaping it.
     ///
-    /// - Key `"hr-weight"` replaces every `var(--hr-weight)` occurrence.
-    /// - Key `"hr-color"` replaces every `var(--hr-color)` occurrence.
-    /// - Key `"hr-width"` replaces every `var(--hr-width)` occurrence.
-    ///
-    /// The realignment is independent per key — `HashMap` iteration order
-    /// does not affect the result because each `var(--name)` token is
-    /// unique per key.
-    ///
-    /// ## Notes
-    ///
-    /// Tokens with embedded fallbacks (`var(--hr-weight, 4)`) are not
-    /// substituted because their serialized form includes the fallback.
-    /// Pass the bare `var(--hr-weight)` form if you want to be replaced.
-    /// The substitution performed here targets the bare `var(--name)`
-    /// form for backward compatibility with callers that pre-embed
-    /// that exact token (e.g., `HorizontalRule::new().width("var(--rule-width)")`).
-    fn render_to_browser_with_inline_variables(
-        &self,
-        variables: &HashMap<String, String>,
-    ) -> String {
-        // Apply CSS variables if provided
-        let mut svg = self.render_to_browser();
-
-        // Replace any placeholders with actual variables
-        for (key, value) in variables {
-            svg = svg.replace(&format!("var(--{})", key), value);
-        }
-
-        svg
+    /// [`ComposableNode::RawHtml`]: renderable::browser::fragment::ComposableNode::RawHtml
+    fn render_html_fragment(&self) -> BrowserFragment<Ready> {
+        BrowserFragment::new()
+            .define_as_raw_html(self.render_browser_svg())
+            .finalize()
     }
 
     fn as_any(&self) -> &dyn std::any::Any {

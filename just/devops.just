@@ -299,16 +299,15 @@ status subject="":
 _structure dir:
     @eza -lDTL 4 --icons=always --hyperlink {{ dir }}
 
-# brings up nvim to edit *.just files
-edit:
-    @nvim ../just
-
-# brings up nvim to edit .claudine files
-claudine:
-    @nvim ../.claudine
-
-prompts:
-    @nvim ../prompts
-
-skills:
-    @nvim ../skills
+# produce documentation for a package (without dependencies included)
+_doc package open="false":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo
+    echo -e "Creating documentation for {{ bold }}{{ package }}{{ reset }}."
+    echo
+    cargo doc -p {{ package }} --no-deps
+    echo
+    if [[ "{{ open }}" == "true" ]]; then
+        open "../target/doc/{{ package }}/index.html"
+    fi

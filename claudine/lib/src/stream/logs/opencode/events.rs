@@ -89,6 +89,58 @@ pub enum LogClassification {
     UncaughtError {
         raw_text: String,
     },
+    /// OpenCode boot banner line (e.g. `service=default version=... opencode`).
+    BootBanner {
+        version: String,
+    },
+    /// A session was created, optionally with a parentID for subagent child sessions.
+    SessionCreated {
+        id: String,
+        parent_id: Option<String>,
+    },
+    /// An LLM call was initiated.
+    LlmCall {
+        provider_id: String,
+        model_id: String,
+        mode: String,
+        is_stream: bool,
+    },
+    /// A step loop started for a session.
+    StepLoop {
+        session_id: String,
+        step: u32,
+    },
+    /// A step loop exited for a session.
+    StepExit {
+        session_id: String,
+    },
+    /// A permission evaluation was completed.
+    PermissionEvaluated {
+        permission: String,
+        pattern: String,
+        action: String,
+    },
+    /// An HTTP response was sent.
+    HttpResponse {
+        method: String,
+        url: String,
+        status: u16,
+        duration_ms: u64,
+    },
+    /// A `service=snapshot` log line. OpenCode emits these from the git-based
+    /// file-snapshot subsystem to record success and failure of per-step
+    /// snapshot attempts. Surfaced to operators because the message is the
+    /// only context (e.g. "failed to add snapshot files"); tag values carry
+    /// the file path / reason.
+    Snapshot {
+        /// The trailing log message — e.g. `"failed to add snapshot files"`.
+        /// Empty when the message slot was absorbed into a tag value.
+        message: String,
+        /// Severity from the parsed record header. The bridge maps `WARN` /
+        /// `ERROR` to [`crate::stream::semantic::SemanticEvent::Warning`] and
+        /// every other level to [`crate::stream::semantic::SemanticEvent::Info`].
+        level: LogLevel,
+    },
     Unclassified,
 }
 

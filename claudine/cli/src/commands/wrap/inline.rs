@@ -155,7 +155,7 @@ pub(crate) fn try_inline_closure(
         Ok(result) => {
             if show_checks {
                 use biscuit_terminal::components::status::{Status, StatusState};
-                use biscuit_terminal::prelude::Renderable;
+                use biscuit_terminal::prelude::TerminalRenderable;
 
                 log::message(&crate::output::fm_check_ok(
                     "Applied the captured replacement body to the target document",

@@ -59,6 +59,7 @@ description: A record of novel things learned about how to best perform commits 
 ## Git Path Handling in Workspaces
 
 - When the worktree is a Cargo workspace member (e.g., running from `darkmatter/darkmatter/`), git interprets relative paths as relative to the current working directory, not the repo root. Use paths relative to the workspace member directory when committing from within a package subdirectory, not paths from the repo root like `darkmatter/lib/src/...`.
+- **Never `cd` out of the current git worktree to run inspection commands.** The wrapper has already placed you at the worktree root. Specifically, do NOT prefix `sniff repo` (or any other diagnostic) with `cd ~/.claudine/worktrees/<repo>/` — that path is the *parent* directory containing all linked worktrees of `<repo>` and is OUTSIDE the active worktree. OpenCode's permission engine treats it as `external_directory` and surfaces a permission ask (auto-allowed under `--dangerously-skip-permissions` but noise either way). All sniff and git subcommands are already worktree-aware; run them plainly from the inherited cwd.
 
 ## Shell Gotchas
 

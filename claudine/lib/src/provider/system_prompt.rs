@@ -116,7 +116,7 @@ mod tests {
             flag: "-c",
             key: "developer_instructions",
         };
-        let json = serde_json::to_value(&delivery).expect("ConfigKeyInline serializes");
+        let json = serde_json::to_value(delivery).expect("ConfigKeyInline serializes");
         assert_eq!(
             json,
             serde_json::json!({
@@ -134,7 +134,7 @@ mod tests {
             flag: "-c",
             key: "model_instructions_file",
         };
-        let json = serde_json::to_value(&delivery).expect("ConfigKeyFile serializes");
+        let json = serde_json::to_value(delivery).expect("ConfigKeyFile serializes");
         assert_eq!(
             json,
             serde_json::json!({

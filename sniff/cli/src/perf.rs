@@ -80,7 +80,7 @@ pub(crate) fn handle_no_results(
     perf: &CliPerf,
 ) -> Result<(), Box<dyn std::error::Error>> {
     use biscuit_terminal::components::prose::Prose;
-    use biscuit_terminal::components::renderable::Renderable;
+    use biscuit_terminal::components::renderable::TerminalRenderable;
     use biscuit_terminal::terminal::Terminal;
 
     if let Some(msg) = on_error {

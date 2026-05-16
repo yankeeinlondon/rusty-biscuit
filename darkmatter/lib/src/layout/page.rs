@@ -6,7 +6,7 @@ use std::any::Any;
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-use biscuit_terminal::components::renderable::{BrowserRenderable, Renderable};
+use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::discovery::detection::ColorMode as TerminalColorMode;
 use biscuit_terminal::terminal::Terminal;
 use biscuit_terminal::utils::layout::Layout;
@@ -59,9 +59,9 @@ pub struct DarkmatterPage {
     alignments: HashMap<PageComponent, PageAlignment>,
     fills: HashMap<PageComponent, PageFill>,
     options: TerminalOptions,
-    /// Stored markdown for [`Renderable`] support.
+    /// Stored markdown for [`TerminalRenderable`] support.
     markdown: Option<Markdown>,
-    /// Layout for [`Renderable`] trait compliance.
+    /// Layout for [`TerminalRenderable`] trait compliance.
     layout: Layout,
 }
 
@@ -153,7 +153,7 @@ impl DarkmatterPage {
         &self.options
     }
 
-    /// Set the markdown document to render for [`Renderable`] support.
+    /// Set the markdown document to render for [`TerminalRenderable`] support.
     pub fn with_markdown(mut self, md: Markdown) -> Self {
         self.markdown = Some(md);
         self
@@ -698,7 +698,7 @@ fn clamp_width(width: u32) -> u16 {
     width.min(u16::MAX as u32) as u16
 }
 
-impl Renderable for DarkmatterPage {
+impl TerminalRenderable for DarkmatterPage {
     fn render(&self, _term: &Terminal) -> String {
         match self.markdown.as_ref() {
             Some(md) => self
@@ -725,20 +725,11 @@ impl Renderable for DarkmatterPage {
     }
 }
 
-impl BrowserRenderable for DarkmatterPage {
-    fn render_to_browser(&self) -> String {
-        match self.markdown.as_ref() {
-            Some(md) => self
-                .render_to_browser(md)
-                .unwrap_or_else(|e| format!("<!-- render error: {} -->\n", e)),
-            None => "<!-- DarkmatterPage: no markdown set -->\n".to_string(),
-        }
-    }
-
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-}
+// `DarkmatterPage` deliberately does not implement `BrowserRenderable`
+// (decisions.md item 12A): it is a page assembler that consumes many
+// fragments, not a single composable component. Browser output goes
+// through the inherent [`DarkmatterPage::render_to_browser`] method,
+// which takes the `Markdown` explicitly.
 
 /// Wrap HTML markdown body in a page-level container with layout CSS.
 fn wrap_browser_html(body: &str, ctx: &LayoutContext) -> String {
@@ -1125,11 +1116,9 @@ mod tests {
             let md: Markdown = "# Heading\n\n- List item\n\n> Quoted prose\n\n```rust\nfn main() {}\n```\n\n| A | B |\n| - | - |\n| 1 | 2 |\n".into();
 
             let page_out = page.render(&md).unwrap();
-            let direct_out = crate::markdown::output::terminal::for_terminal(
-                &md,
-                TerminalOptions::default(),
-            )
-            .unwrap();
+            let direct_out =
+                crate::markdown::output::terminal::for_terminal(&md, TerminalOptions::default())
+                    .unwrap();
 
             assert_eq!(
                 page_out, direct_out,
@@ -1218,14 +1207,14 @@ mod tests {
     #[test]
     fn renderable_trait_with_markdown() {
         let term = Terminal::new_optimistic(80);
-        let md: Markdown = "# Renderable\n".into();
+        let md: Markdown = "# TerminalRenderable\n".into();
         let page = DarkmatterPage::new(&term).with_markdown(md);
 
-        let out = Renderable::render(&page, &term);
+        let out = TerminalRenderable::render(&page, &term);
         let plain = crate::testing::strip_ansi_codes(&out);
         assert!(
-            plain.contains("Renderable"),
-            "Renderable::render should output markdown content"
+            plain.contains("TerminalRenderable"),
+            "TerminalRenderable::render should output markdown content"
         );
     }
 
@@ -1234,10 +1223,10 @@ mod tests {
         let term = Terminal::new_optimistic(80);
         let page = DarkmatterPage::new(&term);
 
-        let out = Renderable::render(&page, &term);
+        let out = TerminalRenderable::render(&page, &term);
         assert!(
             out.contains("no markdown set"),
-            "Renderable without markdown should show placeholder"
+            "TerminalRenderable without markdown should show placeholder"
         );
     }
 
@@ -1245,7 +1234,7 @@ mod tests {
     fn renderable_trait_block_level() {
         let term = Terminal::new_optimistic(80);
         let page = DarkmatterPage::new(&term);
-        assert!(Renderable::is_block_level(&page));
+        assert!(TerminalRenderable::is_block_level(&page));
     }
 
     #[test]
@@ -1253,7 +1242,7 @@ mod tests {
         let term = Terminal::new_optimistic(80);
         let page = DarkmatterPage::new(&term);
         assert!(
-            Renderable::as_any(&page)
+            TerminalRenderable::as_any(&page)
                 .downcast_ref::<DarkmatterPage>()
                 .is_some()
         );
@@ -1466,10 +1455,7 @@ mod tests {
         );
         // Confirm wrap actually occurred: the long item must span >=2 visible
         // lines so the test would fail without the active width override.
-        let content_lines = plain
-            .lines()
-            .filter(|l| !l.trim().is_empty())
-            .count();
+        let content_lines = plain.lines().filter(|l| !l.trim().is_empty()).count();
         assert!(
             content_lines >= 3,
             "expected the long item to wrap (>=3 non-empty lines incl. second item), got {}:\n{}",
@@ -1613,32 +1599,22 @@ mod tests {
     }
 
     #[test]
-    fn browser_renderable_trait_with_markdown() {
+    fn render_to_browser_emits_markdown_html() {
         let term = Terminal::new_optimistic(80);
         let md: Markdown = "# Browser\n".into();
-        let page = DarkmatterPage::new(&term).with_markdown(md);
+        let page = DarkmatterPage::new(&term);
 
-        let html = BrowserRenderable::render_to_browser(&page);
+        // Browser output goes through the inherent method, not a
+        // `BrowserRenderable` impl (decisions.md item 12A).
+        let html = page.render_to_browser(&md).unwrap();
         assert!(
             html.contains("<h1>Browser</h1>"),
-            "BrowserRenderable::render_to_browser should output markdown HTML content"
+            "render_to_browser should output markdown HTML content"
         );
         // Zero-config page should not add a wrapper div.
         assert!(
             !html.contains("<div class=\"darkmatter-page\""),
-            "BrowserRenderable without layout should not add wrapper"
-        );
-    }
-
-    #[test]
-    fn browser_renderable_trait_without_markdown_shows_placeholder() {
-        let term = Terminal::new_optimistic(80);
-        let page = DarkmatterPage::new(&term);
-
-        let html = BrowserRenderable::render_to_browser(&page);
-        assert!(
-            html.contains("no markdown set"),
-            "BrowserRenderable without markdown should show placeholder"
+            "a zero-config page should not add a wrapper"
         );
     }
 
@@ -1823,7 +1799,7 @@ mod tests {
         );
 
         // Find the last content line and verify padding/margin after it
-        let last_content_idx = lines.len() - 4; // 1 bottom padding + 2 bottom margin + trailing newline handling
+        let _last_content_idx = lines.len() - 4; // 1 bottom padding + 2 bottom margin + trailing newline handling
 
         // Bottom padding row
         let bottom_padding_idx = lines.len() - 3;

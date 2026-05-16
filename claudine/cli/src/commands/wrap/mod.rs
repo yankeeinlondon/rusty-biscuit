@@ -178,6 +178,21 @@ pub(crate) fn switch_process_cwd(child_cwd: &Path) -> Result<()> {
     if current != child_cwd {
         std::env::set_current_dir(child_cwd)?;
     }
+    // Rust's `set_current_dir` calls `chdir(2)` but does NOT touch the
+    // `PWD` environment variable — the shell convention is that `PWD`
+    // tracks "where the user thinks they are", which can differ from
+    // `getcwd(3)`. Several downstream tools (notably OpenCode's
+    // `run.ts:276` resolving `process.env.PWD ?? process.cwd()`) trust
+    // `PWD` over the real cwd. If we don't sync them, the spawned
+    // child inherits the user's pre-chdir `PWD` (e.g. a package
+    // subdirectory the user ran `just commit` from) and resolves paths
+    // against the wrong root.
+    //
+    // SAFETY: single-threaded wrapper startup; no other thread reads
+    // or writes `PWD` concurrently with this call.
+    unsafe {
+        std::env::set_var("PWD", child_cwd.as_os_str());
+    }
     Ok(())
 }
 
@@ -503,22 +518,33 @@ fn run_provider_wrapper_inner(
     profile.reject_direct_yolo(&child_args)?;
     flags::reject_retired_composition_flags(&child_args)?;
 
-    if yolo_requested
-        && let Some(warn) = profile.apply_yolo_for_mode(
+    if yolo_requested {
+        let outcome = profile.apply_yolo_for_mode(
             &mut child_args,
             &mut env_overrides,
             !non_interactive_requested,
-        )?
-    {
-        deferred_warnings.push(warn);
-        // A returned warning means yolo was NOT actually applied for this
-        // invocation (e.g. OpenCode interactive mode), so the summary and
-        // header badge should reflect the disabled state.
-        yolo_enabled = false;
+        )?;
+        if let Some(warn) = outcome.warning {
+            deferred_warnings.push(warn);
+        }
+        // `outcome.applied` is the single source of truth. The summary
+        // and header badge should reflect this — not `yolo_requested`
+        // intent on its own — because some launch modes silently
+        // suppress the flag (e.g. OpenCode interactive TUI).
+        yolo_enabled = outcome.applied;
     }
     if yolo_requested && !profile.has_supported_yolo() {
         yolo_enabled = false;
     }
+    tracing::debug!(
+        target: "claudine::wrap::yolo",
+        provider = %profile.provider(),
+        request_yolo = yolo_requested,
+        effective_yolo = yolo_enabled,
+        non_interactive = non_interactive_requested,
+        child_args = ?child_args,
+        "yolo applied to provider argv",
+    );
 
     profile.apply_entrypoint(&mut child_args, non_interactive_requested);
 
@@ -680,7 +706,7 @@ fn run_provider_wrapper_inner(
 
     if !silent_requested && !quiet_requested {
         use biscuit_terminal::components::status::{Status, StatusState, StatusTheme};
-        use biscuit_terminal::prelude::Renderable as _;
+        use biscuit_terminal::prelude::TerminalRenderable as _;
 
         let status = Status::from_prose("Starting pre-flight checks".to_string())
             .state(StatusState::Info)
@@ -925,17 +951,22 @@ fn run_provider_wrapper_inner(
 
             if let Some(ref source) = opencode_model_source {
                 use biscuit_terminal::components::status::Status;
-                use biscuit_terminal::prelude::Renderable as _;
+                use biscuit_terminal::prelude::TerminalRenderable as _;
                 let status = Status::from_prose(source.status_markup());
                 log::message(&status.render(&term));
             }
         }
 
-        crate::output::log_system_prompt(
+        let scope_for_report = launch_context
+            .repo_root
+            .as_deref()
+            .unwrap_or(&launch_context.cwd);
+        crate::output::log_system_prompt_with_scope(
             &effective_sp,
             detail_requested,
             silent_requested,
             quiet_requested,
+            Some(scope_for_report),
             &term,
         );
 
@@ -1070,7 +1101,7 @@ fn run_provider_wrapper_inner(
 
     if !silent_requested && !quiet_requested {
         use biscuit_terminal::components::status::{Status, StatusState, StatusTheme};
-        use biscuit_terminal::prelude::Renderable as _;
+        use biscuit_terminal::prelude::TerminalRenderable as _;
 
         let status = Status::from_prose("Pre-flight checks have passed".to_string())
             .state(StatusState::Success)
@@ -1324,6 +1355,55 @@ fn run_provider_wrapper_inner(
 mod tests {
     use super::*;
     use std::collections::HashMap;
+
+    /// Regression: `switch_process_cwd` must update both the OS cwd
+    /// (`chdir(2)`) AND the `PWD` env var. Rust's `set_current_dir`
+    /// only does the former; the latter is the shell convention that
+    /// downstream tools (OpenCode, bash, fish, etc.) trust over the
+    /// real cwd. Leaving them out of sync produces spec-vs-reality
+    /// drift in child processes that resolve project / git roots from
+    /// `process.env.PWD`.
+    #[test]
+    fn switch_process_cwd_syncs_pwd_env_var() {
+        // Test mutates process cwd and PWD; serialize it informally
+        // by running synchronously and restoring before assert prints.
+        let target = tempfile::tempdir().unwrap();
+        // Canonicalize: macOS prefixes /private/ on /var paths and
+        // `current_dir()` returns the canonical form.
+        let target_canon = std::fs::canonicalize(target.path()).unwrap();
+
+        let prior_cwd = std::env::current_dir().unwrap();
+        let prior_pwd = std::env::var_os("PWD");
+        // SAFETY: scoped mutation; we restore before returning.
+        unsafe {
+            std::env::set_var("PWD", "/definitely/not/the/target");
+        }
+
+        switch_process_cwd(&target_canon).unwrap();
+        let observed_cwd = std::env::current_dir().unwrap();
+        let observed_pwd = std::env::var_os("PWD");
+
+        // Restore.
+        let _ = std::env::set_current_dir(&prior_cwd);
+        unsafe {
+            match prior_pwd {
+                Some(value) => std::env::set_var("PWD", value),
+                None => std::env::remove_var("PWD"),
+            }
+        }
+
+        assert_eq!(
+            observed_cwd, target_canon,
+            "chdir must take effect",
+        );
+        assert_eq!(
+            observed_pwd.as_deref(),
+            Some(target_canon.as_os_str()),
+            "PWD env var must track child_cwd after switch_process_cwd \
+             (the bug: chdir without PWD-sync lets child processes resolve \
+             paths against stale shell PWD)",
+        );
+    }
 
     #[test]
     fn missing_binary_preflight_has_actionable_message() {

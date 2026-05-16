@@ -193,6 +193,49 @@ impl PromptDelivery {
 // PromptSource — typed prompt input to the wrap pipeline
 // ---------------------------------------------------------------------------
 
+/// Outcome of applying YOLO/auto-approve mode to a provider launch.
+///
+/// `applied` is the single source of truth for "did the provider's
+/// native bypass mechanism actually take effect for this launch":
+/// the wrapper reports `effective_yolo = applied` on the session's
+/// synthesized session_end event, the header badge reads it, and the
+/// trends-table "Yolo" column counts sessions where it was true.
+///
+/// `applied: true` means one of:
+/// - the catalog's `native_flag` (or alias) was pushed onto argv
+/// - the catalog's `env_var=value` pair was added to env_overrides
+/// - the catalog's `non_interactive_flag` was pushed in non-interactive mode
+///
+/// `applied: false` (with an optional warning) means YOLO was requested
+/// but suppressed — e.g. OpenCode in interactive TUI mode, or a
+/// provider whose catalog records [`YoloSupport::None`].
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct YoloOutcome {
+    /// Whether the provider's native bypass mechanism actually took
+    /// effect on this launch.
+    pub applied: bool,
+    /// Optional user-facing warning to surface (e.g. mode mismatch).
+    pub warning: Option<String>,
+}
+
+impl YoloOutcome {
+    /// Yolo took effect on the launch.
+    pub(crate) fn applied() -> Self {
+        Self {
+            applied: true,
+            warning: None,
+        }
+    }
+
+    /// Yolo did not take effect; `warning` explains why.
+    pub(crate) fn not_applied(warning: impl Into<String>) -> Self {
+        Self {
+            applied: false,
+            warning: Some(warning.into()),
+        }
+    }
+}
+
 /// A prompt supplied to the wrap pipeline, already extracted from any
 /// CLI passthrough or composition source.
 ///
@@ -317,21 +360,32 @@ pub(crate) trait WrapperProfile: Send + Sync {
 
     /// Apply YOLO/auto-approve mode to `args` and `env_overrides`.
     ///
-    /// Returns `Ok(Some(warning))` when YOLO is unsupported for this provider.
+    /// Returns a [`YoloOutcome`] capturing both whether the provider's
+    /// native bypass mechanism was actually activated on this launch
+    /// (`applied`) and any user-facing warning text. `applied` is the
+    /// single source of truth the reporter and badge layers should use
+    /// — never re-interpret intent (`request.yolo`) as "yolo took
+    /// effect", because some launch modes silently suppress it (e.g.
+    /// OpenCode TUI rejects `--dangerously-skip-permissions`).
     ///
     /// Default implementation derives behavior from the central provider
-    /// catalog's [`YoloSupport`] descriptor.
+    /// catalog's [`YoloSupport`] descriptor. The mode-unaware variant
+    /// treats `NonInteractiveOnly` as "always emit warning, do not
+    /// apply" — callers in compose/wrap should prefer
+    /// [`apply_yolo_for_mode`] which is mode-aware.
+    ///
+    /// [`apply_yolo_for_mode`]: WrapperProfile::apply_yolo_for_mode
     fn apply_yolo(
         &self,
         args: &mut Vec<String>,
         env_overrides: &mut Vec<(String, String)>,
-    ) -> Result<Option<String>> {
+    ) -> Result<YoloOutcome> {
         match provider_info(self.provider()).yolo {
             YoloSupport::DirectFlag { native_flag } => {
                 if !has_flag(args, native_flag) {
                     args.push(native_flag.to_string());
                 }
-                Ok(None)
+                Ok(YoloOutcome::applied())
             }
             YoloSupport::DirectFlagWithAlias {
                 native_flag,
@@ -340,7 +394,7 @@ pub(crate) trait WrapperProfile: Send + Sync {
                 if !has_any_flag(args, native_flag, aliases) {
                     args.push(native_flag.to_string());
                 }
-                Ok(None)
+                Ok(YoloOutcome::applied())
             }
             YoloSupport::EnvVar { env_var, value } => {
                 if !env_overrides
@@ -349,20 +403,19 @@ pub(crate) trait WrapperProfile: Send + Sync {
                 {
                     env_overrides.push((env_var.to_string(), value.to_string()));
                 }
-                Ok(None)
+                Ok(YoloOutcome::applied())
             }
-            YoloSupport::NonInteractiveOnly {
-                non_interactive_flag,
-            } => {
-                if !has_flag(args, non_interactive_flag) {
-                    args.push(non_interactive_flag.to_string());
-                }
-                Ok(Some(format!(
+            YoloSupport::NonInteractiveOnly { .. } => {
+                // Mode-unaware path: we don't know if we're interactive,
+                // so the conservative default is to NOT apply and emit
+                // the warning. The mode-aware variant below will do the
+                // right thing when callers thread `interactive` through.
+                Ok(YoloOutcome::not_applied(format!(
                     "{} YOLO mode is non-interactive only",
                     self.provider()
                 )))
             }
-            YoloSupport::None => Ok(Some(format!(
+            YoloSupport::None => Ok(YoloOutcome::not_applied(format!(
                 "{} does not support YOLO mode",
                 self.provider()
             ))),
@@ -370,19 +423,43 @@ pub(crate) trait WrapperProfile: Send + Sync {
     }
 
     /// Apply YOLO handling with awareness of interactive vs non-interactive
-    /// mode. Default delegates to the mode-unaware [`apply_yolo`]; overriders
-    /// can produce different behavior when `interactive` matters (e.g.
-    /// OpenCode forwards `--dangerously-skip-permissions` only in
-    /// non-interactive mode).
+    /// mode.
+    ///
+    /// For providers whose catalog records [`YoloSupport::NonInteractiveOnly`]
+    /// (OpenCode today):
+    /// - **Interactive**: do not mutate argv; return `YoloOutcome::not_applied`
+    ///   with a warning. The provider's TUI rejects the flag and silently
+    ///   continues in default permission mode otherwise.
+    /// - **Non-interactive**: push the catalog's `non_interactive_flag` and
+    ///   return `YoloOutcome::applied()`.
+    ///
+    /// All other variants delegate to [`apply_yolo`] (their semantics are
+    /// the same in both modes).
     ///
     /// [`apply_yolo`]: WrapperProfile::apply_yolo
     fn apply_yolo_for_mode(
         &self,
         args: &mut Vec<String>,
         env_overrides: &mut Vec<(String, String)>,
-        _interactive: bool,
-    ) -> Result<Option<String>> {
-        self.apply_yolo(args, env_overrides)
+        interactive: bool,
+    ) -> Result<YoloOutcome> {
+        match provider_info(self.provider()).yolo {
+            YoloSupport::NonInteractiveOnly {
+                non_interactive_flag,
+            } => {
+                if interactive {
+                    return Ok(YoloOutcome::not_applied(format!(
+                        "{} YOLO mode is non-interactive only; ignored",
+                        self.provider()
+                    )));
+                }
+                if !has_flag(args, non_interactive_flag) {
+                    args.push(non_interactive_flag.to_string());
+                }
+                Ok(YoloOutcome::applied())
+            }
+            _ => self.apply_yolo(args, env_overrides),
+        }
     }
 
     /// Whether this provider supports YOLO mode at all.
@@ -1285,17 +1362,21 @@ mod tests {
 
     #[test]
     fn opencode_yolo_interactive_warns_without_mutating_args() {
-        // The mode-aware variant in interactive mode must emit the refined
-        // warning copy and MUST NOT mutate argv.
+        // The mode-aware variant in interactive mode must report
+        // `applied = false`, emit the refined warning, and NOT mutate argv.
         let p = profile(Provider::OpenCode);
         let mut args = vec!["run".to_string(), "status".to_string()];
         let mut env_overrides = Vec::new();
 
-        let warning = p
+        let outcome = p
             .apply_yolo_for_mode(&mut args, &mut env_overrides, /* interactive = */ true)
             .unwrap();
+        assert!(
+            !outcome.applied,
+            "interactive mode must report applied=false; got {outcome:?}",
+        );
         assert_eq!(
-            warning.as_deref(),
+            outcome.warning.as_deref(),
             Some(
                 "--yolo mode is not supported in OpenCode <i>interactive</i> sessions and was ignored"
             ),
@@ -1308,16 +1389,20 @@ mod tests {
         let mut args: Vec<String> = vec!["run".to_string()];
         let mut env = Vec::new();
         let wrapper = OpencodeWrapper;
-        let warning = wrapper
+        let outcome = wrapper
             .apply_yolo_for_mode(&mut args, &mut env, /* interactive = */ false)
             .unwrap();
+        assert!(
+            outcome.applied,
+            "non-interactive mode must report applied=true; got {outcome:?}",
+        );
         assert!(
             args.iter().any(|a| a == "--dangerously-skip-permissions"),
             "flag must be forwarded in non-interactive mode; args={args:?}"
         );
         assert!(
-            warning.is_none(),
-            "no warning expected in non-interactive: got {warning:?}"
+            outcome.warning.is_none(),
+            "no warning expected in non-interactive: got {outcome:?}"
         );
     }
 
@@ -1326,11 +1411,15 @@ mod tests {
         let mut args: Vec<String> = vec![];
         let mut env = Vec::new();
         let wrapper = OpencodeWrapper;
-        let warning = wrapper
+        let outcome = wrapper
             .apply_yolo_for_mode(&mut args, &mut env, /* interactive = */ true)
             .unwrap();
+        assert!(
+            !outcome.applied,
+            "interactive mode must report applied=false; got {outcome:?}",
+        );
         assert_eq!(
-            warning.as_deref(),
+            outcome.warning.as_deref(),
             Some(
                 "--yolo mode is not supported in OpenCode <i>interactive</i> sessions and was ignored"
             ),
@@ -1810,21 +1899,26 @@ mod tests {
         provider: Provider,
         args: &[String],
         env: &[(String, String)],
-        warning: &Option<String>,
+        outcome: &YoloOutcome,
     ) -> bool {
         match provider_info(provider).yolo {
-            YoloSupport::None => warning.is_some() && args.is_empty() && env.is_empty(),
+            YoloSupport::None => {
+                !outcome.applied
+                    && outcome.warning.is_some()
+                    && args.is_empty()
+                    && env.is_empty()
+            }
             YoloSupport::DirectFlag { native_flag } => {
-                warning.is_none() && yolo_flag_present(args, native_flag)
+                outcome.applied && yolo_flag_present(args, native_flag)
             }
             YoloSupport::DirectFlagWithAlias { native_flag, .. } => {
-                warning.is_none() && yolo_flag_present(args, native_flag)
+                outcome.applied && yolo_flag_present(args, native_flag)
             }
             YoloSupport::NonInteractiveOnly {
                 non_interactive_flag,
-            } => warning.is_none() && args.iter().any(|arg| arg == non_interactive_flag),
+            } => outcome.applied && args.iter().any(|arg| arg == non_interactive_flag),
             YoloSupport::EnvVar { env_var, value } => {
-                warning.is_none() && env.iter().any(|(k, v)| k == env_var && v == value)
+                outcome.applied && env.iter().any(|(k, v)| k == env_var && v == value)
             }
         }
     }
@@ -1840,6 +1934,77 @@ mod tests {
             .any(|window| window[0] == flag && window[1] == value)
     }
 
+    /// Regression: the `--yolo` CLI flag and the `CLAUDINE_YOLO` env var
+    /// must reach the SAME field (`request.yolo`) so they cannot diverge.
+    /// Before this binding, the env var was only read by the dispatch
+    /// reporter for metadata stamping while the wrapper's flag-push gate
+    /// looked at the CLI arg alone — producing reports of "yolo: true"
+    /// for sessions where the provider flag never actually landed.
+    ///
+    /// Test mutates process env, so it must be serialized against any
+    /// other test that reads `CLAUDINE_YOLO`. We snapshot/restore here
+    /// rather than relying on a test mutex — the env var is uncommon
+    /// enough that parallel parsing collisions are unlikely.
+    #[test]
+    fn claudine_yolo_env_binds_to_compose_shared_yolo_flag() {
+        use clap::Parser;
+
+        use crate::commands::compose::SharedComposeArgs;
+
+        // Probe shim: `SharedComposeArgs` is `Args`, not `Parser`. Wrap
+        // it in a derive(Parser) container so `try_parse_from` is callable.
+        #[derive(Debug, clap::Parser)]
+        struct Probe {
+            #[command(flatten)]
+            shared: SharedComposeArgs,
+        }
+
+        let prior = std::env::var("CLAUDINE_YOLO").ok();
+        // SAFETY: single-threaded scoped mutation. We restore the prior
+        // value below so sibling tests are unaffected.
+        unsafe {
+            std::env::remove_var("CLAUDINE_YOLO");
+        }
+        let baseline = Probe::try_parse_from(["probe"])
+            .expect("probe must parse without flag or env")
+            .shared
+            .yolo;
+
+        let with_flag = Probe::try_parse_from(["probe", "-y"])
+            .expect("probe with -y must parse")
+            .shared
+            .yolo;
+
+        unsafe {
+            std::env::set_var("CLAUDINE_YOLO", "true");
+        }
+        let from_env = Probe::try_parse_from(["probe"])
+            .expect("probe with CLAUDINE_YOLO=true must parse")
+            .shared
+            .yolo;
+
+        // Restore prior env so we don't leak state.
+        unsafe {
+            match prior {
+                Some(value) => std::env::set_var("CLAUDINE_YOLO", value),
+                None => std::env::remove_var("CLAUDINE_YOLO"),
+            }
+        }
+
+        assert!(
+            !baseline,
+            "no flag and no env must leave yolo=false (got {baseline})",
+        );
+        assert!(
+            with_flag,
+            "-y on argv must enable yolo (got {with_flag})",
+        );
+        assert!(
+            from_env,
+            "CLAUDINE_YOLO=true must enable yolo on SharedComposeArgs (got {from_env})",
+        );
+    }
+
     #[test]
     fn apply_yolo_matches_provider_catalog_for_every_provider() {
         for provider in claudine::provider::PROVIDERS_DISPLAY_ORDER {
@@ -1848,13 +2013,13 @@ mod tests {
             };
             let mut args = Vec::new();
             let mut env = Vec::new();
-            let warning = profile
+            let outcome = profile
                 .apply_yolo_for_mode(&mut args, &mut env, false)
                 .expect("YOLO application should not fail from empty args");
 
             assert!(
-                catalog_yolo_applied(provider, &args, &env, &warning),
-                "{provider:?} yolo mismatch: args={args:?}, env={env:?}, warning={warning:?}"
+                catalog_yolo_applied(provider, &args, &env, &outcome),
+                "{provider:?} yolo mismatch: args={args:?}, env={env:?}, outcome={outcome:?}"
             );
         }
     }

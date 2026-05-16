@@ -767,15 +767,13 @@ mod tests {
         while completed_count < 2 && start.elapsed() < timeout {
             if let Ok(Some(event)) =
                 tokio::time::timeout(std::time::Duration::from_millis(100), rx.recv()).await
-            {
-                if let TaskEvent::StatusChanged {
+                && let TaskEvent::StatusChanged {
                     status: TaskStatus::Completed,
                     ..
                 } = event
                 {
                     completed_count += 1;
                 }
-            }
         }
 
         assert_eq!(completed_count, 2, "Both tasks should complete");

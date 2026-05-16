@@ -22,7 +22,7 @@ use super::tokens::parse_tokens_inner;
 ///
 /// ```rust
 /// use biscuit_terminal::components::prose::Prose;
-/// use biscuit_terminal::components::renderable::Renderable;
+/// use biscuit_terminal::components::renderable::TerminalRenderable;
 ///
 /// let prose = Prose::new("{{bold}}Important:{{reset}} This is bold text");
 /// let rendered = prose.render_optimistic(None);
@@ -37,7 +37,7 @@ use super::tokens::parse_tokens_inner;
 ///
 /// ```rust
 /// use biscuit_terminal::components::prose::Prose;
-/// use biscuit_terminal::components::renderable::Renderable;
+/// use biscuit_terminal::components::renderable::TerminalRenderable;
 ///
 /// let prose = Prose::new("<bold>This is bold</bold> and <red>this is red</red>");
 /// let rendered = prose.render_optimistic(None);
@@ -53,7 +53,7 @@ use super::tokens::parse_tokens_inner;
 ///
 /// ```rust
 /// use biscuit_terminal::components::prose::Prose;
-/// use biscuit_terminal::components::renderable::Renderable;
+/// use biscuit_terminal::components::renderable::TerminalRenderable;
 ///
 /// let prose = Prose::new(r"\<literal \<angles\>");
 /// assert!(prose.render_optimistic(None).contains("literal <angles>"));
@@ -65,7 +65,7 @@ use super::tokens::parse_tokens_inner;
 ///
 /// ```rust
 /// use biscuit_terminal::components::prose::Prose;
-/// use biscuit_terminal::components::renderable::Renderable;
+/// use biscuit_terminal::components::renderable::TerminalRenderable;
 /// use biscuit_terminal::utils::layout::{Alignment, Layout, WordWrap};
 ///
 /// let prose = Prose::new("Styled content")

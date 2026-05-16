@@ -1,7 +1,7 @@
 use std::any::Any;
 
 use crate::components::prose::Prose;
-use crate::components::renderable::{Renderable, RenderableContent};
+use crate::components::renderable::{TerminalRenderable, RenderableTerminalContent};
 use crate::components::text_block::TextBlock;
 use crate::terminal::Terminal;
 use crate::utils::layout::Layout;
@@ -9,7 +9,7 @@ use crate::utils::layout::Layout;
 /// A component that concatenates multiple items into a single line without inserting
 /// newlines between them.
 ///
-/// Each item can be a plain string or any [`Renderable`] component.
+/// Each item can be a plain string or any [`TerminalRenderable`] component.
 /// When rendered, every item is resolved to its string form and the
 /// results are joined directly — or with an optional separator if one
 /// is configured via [`with_separator`](InlineContent::with_separator).
@@ -42,8 +42,8 @@ use crate::utils::layout::Layout;
 ///
 /// // From a vec of pre-converted items
 /// let inline = InlineContent::new(vec![
-///     RenderableContent::from("foo"),
-///     RenderableContent::from(Prose::new("<b>bar</b>")),
+///     RenderableTerminalContent::from("foo"),
+///     RenderableTerminalContent::from(Prose::new("<b>bar</b>")),
 /// ]);
 /// ```
 ///
@@ -78,7 +78,7 @@ use crate::utils::layout::Layout;
 /// ```
 #[derive(Debug)]
 pub struct InlineContent {
-    parts: Vec<RenderableContent>,
+    parts: Vec<RenderableTerminalContent>,
     separator: Option<String>,
     layout: Layout,
 }
@@ -89,7 +89,7 @@ pub struct InlineContent {
 
 impl InlineContent {
     /// Creates a new `InlineContent` from a vector of renderable items.
-    pub fn new(items: Vec<RenderableContent>) -> Self {
+    pub fn new(items: Vec<RenderableTerminalContent>) -> Self {
         InlineContent {
             parts: items,
             separator: None,
@@ -111,7 +111,7 @@ impl Default for InlineContent {
 impl From<String> for InlineContent {
     fn from(value: String) -> Self {
         InlineContent {
-            parts: vec![RenderableContent::String(value)],
+            parts: vec![RenderableTerminalContent::String(value)],
             separator: None,
             layout: Layout::default(),
         }
@@ -121,7 +121,7 @@ impl From<String> for InlineContent {
 impl From<&str> for InlineContent {
     fn from(value: &str) -> Self {
         InlineContent {
-            parts: vec![RenderableContent::String(value.into())],
+            parts: vec![RenderableTerminalContent::String(value.into())],
             separator: None,
             layout: Layout::default(),
         }
@@ -131,15 +131,15 @@ impl From<&str> for InlineContent {
 impl From<&String> for InlineContent {
     fn from(value: &String) -> Self {
         InlineContent {
-            parts: vec![RenderableContent::String(value.clone())],
+            parts: vec![RenderableTerminalContent::String(value.clone())],
             separator: None,
             layout: Layout::default(),
         }
     }
 }
 
-impl From<Vec<RenderableContent>> for InlineContent {
-    fn from(items: Vec<RenderableContent>) -> Self {
+impl From<Vec<RenderableTerminalContent>> for InlineContent {
+    fn from(items: Vec<RenderableTerminalContent>) -> Self {
         InlineContent {
             parts: items,
             separator: None,
@@ -148,8 +148,8 @@ impl From<Vec<RenderableContent>> for InlineContent {
     }
 }
 
-impl From<RenderableContent> for InlineContent {
-    fn from(value: RenderableContent) -> Self {
+impl From<RenderableTerminalContent> for InlineContent {
+    fn from(value: RenderableTerminalContent) -> Self {
         InlineContent {
             parts: vec![value],
             separator: None,
@@ -161,7 +161,7 @@ impl From<RenderableContent> for InlineContent {
 impl From<Prose> for InlineContent {
     fn from(value: Prose) -> Self {
         InlineContent {
-            parts: vec![RenderableContent::from(value)],
+            parts: vec![RenderableTerminalContent::from(value)],
             separator: None,
             layout: Layout::default(),
         }
@@ -171,7 +171,7 @@ impl From<Prose> for InlineContent {
 impl From<TextBlock> for InlineContent {
     fn from(value: TextBlock) -> Self {
         InlineContent {
-            parts: vec![RenderableContent::from(value)],
+            parts: vec![RenderableTerminalContent::from(value)],
             separator: None,
             layout: Layout::default(),
         }
@@ -194,7 +194,7 @@ impl InlineContent {
     ///     .with("Hello, ")
     ///     .with(Prose::new("<b>world</b>"));
     /// ```
-    pub fn with<T: Into<RenderableContent>>(mut self, item: T) -> Self {
+    pub fn with<T: Into<RenderableTerminalContent>>(mut self, item: T) -> Self {
         self.parts.push(item.into());
         self
     }
@@ -226,27 +226,27 @@ impl InlineContent {
 // =========================================================================
 
 impl InlineContent {
-    /// Appends any item that converts to [`RenderableContent`].
-    pub fn push<T: Into<RenderableContent>>(&mut self, item: T) -> &mut Self {
+    /// Appends any item that converts to [`RenderableTerminalContent`].
+    pub fn push<T: Into<RenderableTerminalContent>>(&mut self, item: T) -> &mut Self {
         self.parts.push(item.into());
         self
     }
 
     /// Appends plain text content.
     pub fn add_text<T: Into<String>>(&mut self, content: T) -> &mut Self {
-        self.parts.push(RenderableContent::String(content.into()));
+        self.parts.push(RenderableTerminalContent::String(content.into()));
         self
     }
 
     /// Appends a [`Prose`] component.
     pub fn add_prose(&mut self, content: Prose) -> &mut Self {
-        self.parts.push(RenderableContent::from(content));
+        self.parts.push(RenderableTerminalContent::from(content));
         self
     }
 
     /// Appends a [`TextBlock`] component.
     pub fn add_text_block(&mut self, content: TextBlock) -> &mut Self {
-        self.parts.push(RenderableContent::from(content));
+        self.parts.push(RenderableTerminalContent::from(content));
         self
     }
 }
@@ -268,10 +268,10 @@ impl InlineContent {
 }
 
 // =========================================================================
-// Renderable implementation
+// TerminalRenderable implementation
 // =========================================================================
 
-impl Renderable for InlineContent {
+impl TerminalRenderable for InlineContent {
     fn render_optimistic(&self, term_width: Option<u32>) -> String {
         let width = term_width.unwrap_or(80);
         let term = Terminal::new_optimistic(width);
@@ -287,8 +287,8 @@ impl Renderable for InlineContent {
                 output.push_str(sep);
             }
             match part {
-                RenderableContent::String(s) => output.push_str(s),
-                RenderableContent::Component(c) => output.push_str(&c.render(term)),
+                RenderableTerminalContent::String(s) => output.push_str(s),
+                RenderableTerminalContent::Component(c) => output.push_str(&c.render(term)),
             }
         }
         output
@@ -333,8 +333,8 @@ mod tests {
     #[test]
     fn test_new_with_items() {
         let inline = InlineContent::new(vec![
-            RenderableContent::from("a"),
-            RenderableContent::from("b"),
+            RenderableTerminalContent::from("a"),
+            RenderableTerminalContent::from("b"),
         ]);
         assert_eq!(inline.len(), 2);
         assert_eq!(inline.render_optimistic(Some(80)), "ab");
@@ -393,7 +393,7 @@ mod tests {
 
     #[test]
     fn test_from_vec_renderable_content() {
-        let items = vec![RenderableContent::from("x"), RenderableContent::from("y")];
+        let items = vec![RenderableTerminalContent::from("x"), RenderableTerminalContent::from("y")];
         let inline = InlineContent::from(items);
         assert_eq!(inline.len(), 2);
         assert_eq!(inline.render_optimistic(Some(80)), "xy");
@@ -401,7 +401,7 @@ mod tests {
 
     #[test]
     fn test_from_vec_renderable_content_single_item() {
-        let items = vec![RenderableContent::from("solo")];
+        let items = vec![RenderableTerminalContent::from("solo")];
         let inline = InlineContent::from(items);
         assert_eq!(inline.len(), 1);
         assert_eq!(inline.render_optimistic(Some(80)), "solo");
@@ -409,7 +409,7 @@ mod tests {
 
     #[test]
     fn test_from_renderable_content_string_variant() {
-        let content = RenderableContent::String("direct".into());
+        let content = RenderableTerminalContent::String("direct".into());
         let inline = InlineContent::from(content);
         assert_eq!(inline.len(), 1);
         assert_eq!(inline.render_optimistic(Some(80)), "direct");
@@ -417,7 +417,7 @@ mod tests {
 
     #[test]
     fn test_from_renderable_content_component_variant() {
-        let content = RenderableContent::from(Prose::new("component"));
+        let content = RenderableTerminalContent::from(Prose::new("component"));
         let inline = InlineContent::from(content);
         assert_eq!(inline.len(), 1);
         assert!(inline.render_optimistic(Some(80)).contains("component"));
@@ -486,7 +486,7 @@ mod tests {
 
     #[test]
     fn test_with_renderable_content_directly() {
-        let content = RenderableContent::from("via rc");
+        let content = RenderableTerminalContent::from("via rc");
         let inline = InlineContent::default().with(content);
         assert_eq!(inline.render_optimistic(Some(80)), "via rc");
     }
@@ -640,7 +640,7 @@ mod tests {
     #[test]
     fn test_push_renderable_content() {
         let mut inline = InlineContent::default();
-        inline.push(RenderableContent::from("content"));
+        inline.push(RenderableTerminalContent::from("content"));
         assert_eq!(inline.render_optimistic(Some(80)), "content");
     }
 
@@ -724,9 +724,9 @@ mod tests {
     #[test]
     fn test_no_newlines_between_string_items() {
         let inline = InlineContent::new(vec![
-            RenderableContent::from("line1"),
-            RenderableContent::from("line2"),
-            RenderableContent::from("line3"),
+            RenderableTerminalContent::from("line1"),
+            RenderableTerminalContent::from("line2"),
+            RenderableTerminalContent::from("line3"),
         ]);
         let output = inline.render_optimistic(Some(80));
         assert!(!output.contains('\n'));
@@ -784,11 +784,11 @@ mod tests {
         assert_eq!(InlineContent::from(String::from("x")).len(), 1);
         assert_eq!(InlineContent::from(Prose::new("x")).len(), 1);
         assert_eq!(InlineContent::from(TextBlock::new("x")).len(), 1);
-        assert_eq!(InlineContent::from(RenderableContent::from("x")).len(), 1);
+        assert_eq!(InlineContent::from(RenderableTerminalContent::from("x")).len(), 1);
     }
 
     // =====================================================================
-    // Renderable trait — render / render_optimistic
+    // TerminalRenderable trait — render / render_optimistic
     // =====================================================================
 
     #[test]
@@ -829,7 +829,7 @@ mod tests {
     }
 
     // =====================================================================
-    // Renderable trait — display
+    // TerminalRenderable trait — display
     // =====================================================================
 
     #[test]
@@ -861,7 +861,7 @@ mod tests {
     }
 
     // =====================================================================
-    // Renderable trait — is_block_level
+    // TerminalRenderable trait — is_block_level
     // =====================================================================
 
     #[test]
@@ -877,7 +877,7 @@ mod tests {
     }
 
     // =====================================================================
-    // Renderable trait — layout builder methods
+    // TerminalRenderable trait — layout builder methods
     // =====================================================================
 
     #[test]
@@ -951,7 +951,7 @@ mod tests {
     }
 
     // =====================================================================
-    // Renderable trait — as_any / Debug
+    // TerminalRenderable trait — as_any / Debug
     // =====================================================================
 
     #[test]

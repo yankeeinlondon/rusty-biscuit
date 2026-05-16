@@ -74,18 +74,30 @@ pub struct HtmlOptions {
     /// - `Image`: Render as interactive mermaid diagrams (includes mermaid.js)
     /// - `Text`: Show as fenced code blocks (fallback format)
     pub mermaid_mode: MermaidMode,
-    /// Overrides for horizontal-rule CSS custom properties.
+    /// Page-level declarations for horizontal-rule CSS custom properties.
     ///
-    /// When non-empty, each emitted `<svg>` for a [`HorizontalRule`] is run
-    /// through
-    /// [`BrowserRenderable::render_to_browser_with_inline_variables`],
-    /// which substitutes `var(--hr-*)` tokens with concrete values. Keys
-    /// match the CSS variable names *without* the `--` prefix (e.g.,
-    /// `hr-weight`, `hr-color`, `hr-width`).
+    /// When non-empty, [`as_html`] emits a `:root` CSS block declaring each
+    /// entry as a custom property. Keys match the CSS variable names
+    /// *without* the `--` prefix (e.g., `hr-weight`, `hr-color`,
+    /// `hr-width`); each becomes a `--{key}: {value};` declaration.
     ///
-    /// An empty map (the default) means "no overrides" — the generated SVG
-    /// keeps its `var(--hr-*, …)` expressions so page-level CSS or
-    /// downstream code can override them.
+    /// Components keep their `var(--hr-*, …)` expressions literal in the
+    /// emitted SVG — they are never substituted. The declared `:root`
+    /// values resolve against those `var()` expressions in the browser,
+    /// overriding the per-`var()` fallbacks.
+    ///
+    /// ## Notes
+    ///
+    /// The `:root` block is emitted regardless of [`include_styles`], so
+    /// the override still applies when the full stylesheet is suppressed.
+    /// An empty map (the default) emits no `:root` block — the SVG's
+    /// per-`var()` fallbacks then take effect.
+    ///
+    /// Values must be valid CSS token sequences. Entries whose key or
+    /// value contains a `<` character or a newline are ignored, since
+    /// they could break out of the `<style>` element or emit invalid CSS.
+    ///
+    /// [`include_styles`]: HtmlOptions::include_styles
     pub hr_css_variables: std::collections::HashMap<String, String>,
 }
 
@@ -130,6 +142,13 @@ pub fn as_html(md: &Markdown, options: HtmlOptions) -> MarkdownResult<String> {
     // Create highlighter for code blocks
     let code_highlighter = CodeHighlighter::new(options.code_theme, options.color_mode);
 
+    // Emit page-level `:root` declarations for horizontal-rule CSS custom
+    // properties. This is independent of `include_styles` — the override
+    // must still apply when the full stylesheet is suppressed.
+    if !options.hr_css_variables.is_empty() {
+        output.push_str(&generate_hr_root_block(&options.hr_css_variables));
+    }
+
     // Include styles if requested
     if options.include_styles {
         output.push_str(&generate_styles(&code_highlighter, &options));
@@ -172,7 +191,7 @@ pub fn as_html(md: &Markdown, options: HtmlOptions) -> MarkdownResult<String> {
                 // Create HorizontalRule from attributes via the shared builder
                 // so terminal and HTML renderers stay consistent (Phase 5).
                 let rule = build_rule_with_defaults(hr_defaults.as_ref(), &attrs);
-                output.push_str(&render_rule_browser(&rule, &options.hr_css_variables));
+                output.push_str(&render_rule_browser(&rule));
                 output.push('\n');
             }
             // Phase 5 (B4): bare `---` / `***` / `___` lines surface as
@@ -184,7 +203,7 @@ pub fn as_html(md: &Markdown, options: HtmlOptions) -> MarkdownResult<String> {
                     hr_defaults.as_ref(),
                     &crate::markdown::inline::HorizontalRuleAttrs::default(),
                 );
-                output.push_str(&render_rule_browser(&rule, &options.hr_css_variables));
+                output.push_str(&render_rule_browser(&rule));
                 output.push('\n');
             }
             // Handle standard pulldown-cmark events
@@ -448,25 +467,43 @@ pub fn as_html(md: &Markdown, options: HtmlOptions) -> MarkdownResult<String> {
     Ok(output)
 }
 
-/// Renders a [`HorizontalRule`] to browser SVG, optionally substituting
-/// `var(--hr-*)` custom properties with caller-provided overrides.
+/// Renders a [`HorizontalRule`] to browser SVG.
 ///
 /// ## Notes
 ///
-/// When `vars` is `Some`, each `var(--name)` token in the default SVG is
-/// replaced via
-/// [`BrowserRenderable::render_to_browser_with_inline_variables`]. When
-/// `vars` is `None`, the SVG keeps its `var(--…)` expressions so page-level
-/// CSS (or downstream post-processing) can control the appearance.
-fn render_rule_browser(
-    rule: &HorizontalRule,
-    vars: &std::collections::HashMap<String, String>,
-) -> String {
-    if vars.is_empty() {
-        rule.render_to_browser()
-    } else {
-        rule.render_to_browser_with_inline_variables(vars)
+/// The SVG keeps its literal `var(--hr-*, …)` expressions. Page-level
+/// overrides are declared separately via a `:root` block (see
+/// [`HtmlOptions::hr_css_variables`]); the SVG is never string-substituted.
+fn render_rule_browser(rule: &HorizontalRule) -> String {
+    rule.render_html_fragment().render()
+}
+
+/// Builds a `:root` `<style>` block declaring the horizontal-rule CSS
+/// custom properties from `vars`.
+///
+/// Keys are CSS variable names without the `--` prefix; each becomes a
+/// `--{key}: {value};` declaration. Keys are sorted so the output is
+/// deterministic.
+///
+/// Entries whose key or value contains a `<` character or a newline are
+/// skipped, since they could terminate the `<style>` element or emit
+/// invalid CSS.
+fn generate_hr_root_block(vars: &std::collections::HashMap<String, String>) -> String {
+    let mut keys: Vec<&String> = vars.keys().collect();
+    keys.sort();
+
+    let is_safe = |s: &str| !s.contains('<') && !s.contains('\n');
+
+    let mut block = String::from("<style>\n:root {\n");
+    for key in keys {
+        let value = &vars[key];
+        if !is_safe(key) || !is_safe(value) {
+            continue;
+        }
+        block.push_str(&format!("  --{key}: {value};\n"));
     }
+    block.push_str("}\n</style>\n");
+    block
 }
 
 fn image_ref_from_parts(alt: &str, src: &str, title: &str) -> Option<ImageRef> {
@@ -601,6 +638,44 @@ mod tests {
         assert_eq!(options.color_mode, ColorMode::Dark);
         assert!(!options.include_line_numbers);
         assert!(options.include_styles);
+    }
+
+    #[test]
+    fn test_generate_hr_root_block_sorts_keys() {
+        let mut vars = std::collections::HashMap::new();
+        vars.insert(String::from("hr-width"), String::from("80%"));
+        vars.insert(String::from("hr-color"), String::from("red"));
+        vars.insert(String::from("hr-weight"), String::from("2px"));
+
+        let block = generate_hr_root_block(&vars);
+
+        assert!(block.starts_with("<style>\n:root {\n"));
+        assert!(block.ends_with("}\n</style>\n"));
+
+        let color_at = block.find("--hr-color").unwrap();
+        let weight_at = block.find("--hr-weight").unwrap();
+        let width_at = block.find("--hr-width").unwrap();
+        assert!(color_at < weight_at, "keys must be emitted in sorted order");
+        assert!(weight_at < width_at, "keys must be emitted in sorted order");
+    }
+
+    #[test]
+    fn test_generate_hr_root_block_skips_unsafe_value() {
+        let mut vars = std::collections::HashMap::new();
+        vars.insert(String::from("hr-color"), String::from("red"));
+        vars.insert(
+            String::from("hr-evil"),
+            String::from("red</style><script>alert(1)</script>"),
+        );
+
+        let block = generate_hr_root_block(&vars);
+
+        assert!(block.contains("--hr-color: red;"));
+        assert!(
+            !block.contains("--hr-evil"),
+            "entry with `<` in value must be skipped"
+        );
+        assert!(!block.contains("<script>"));
     }
 
     #[test]

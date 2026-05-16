@@ -1,6 +1,6 @@
 use std::sync::LazyLock;
 
-use biscuit_terminal::prelude::{Prose, Renderable};
+use biscuit_terminal::prelude::{Prose, TerminalRenderable};
 
 pub static YOLO: LazyLock<String> = LazyLock::new(|| {
     Prose::new("<bg-red-900><bold><red-200><bold> YOLO </bold></red-200></bold></bg-red-900>")

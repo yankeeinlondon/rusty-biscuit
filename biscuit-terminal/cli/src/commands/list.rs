@@ -3,7 +3,7 @@ use crate::commands::shared::*;
 use crate::commands::{CliContext, Run};
 use biscuit_terminal::components::list::UnorderedList;
 use biscuit_terminal::components::prose::Prose;
-use biscuit_terminal::components::renderable::{Renderable, RenderableContent};
+use biscuit_terminal::components::renderable::{TerminalRenderable, RenderableTerminalContent};
 use biscuit_terminal::utils::layout::Margin;
 use clap::Args as ClapArgs;
 use std::rc::Rc;
@@ -32,13 +32,13 @@ impl Run for ListArgs {
             ));
         }
 
-        let prose_items: Vec<RenderableContent> = self
+        let prose_items: Vec<RenderableTerminalContent> = self
             .items
             .iter()
             .map(|item| {
                 let text = crate::types::unescape_shell_escapes(item);
                 let prose = Prose::new(&text);
-                RenderableContent::Component(Rc::new(prose))
+                RenderableTerminalContent::Component(Rc::new(prose))
             })
             .collect();
 

@@ -1,7 +1,7 @@
 use crate::args::LayoutArgs;
 use crate::commands::{CliContext, Run};
 use biscuit_terminal::components::filesystem::FileSystem;
-use biscuit_terminal::components::renderable::Renderable;
+use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::terminal::Terminal;
 use biscuit_terminal::utils::layout::Margin;
 use clap::Args as ClapArgs;

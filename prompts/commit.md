@@ -103,6 +103,7 @@ Your task is to:
    - the subagent SHOULD NOT push commits to any remote!
    - the subagent SHOULD be reminded that they are running in a non-interactive session so there is no way to get feedback from the user and attempts should be made to achieve the goals without asking for additional context
 6. once all the subagents have completed their tasks, you will run `sniff repo` to provide the user a summary of the state of the repo
+   - **DO NOT `cd` anywhere before running this command.** The wrapper has already placed you in the correct git worktree's root. Prefixing with `cd /Users/.../rusty-biscuit` (or any other path) will move you to the worktrees-*parent* directory (the one that holds all linked worktrees of this repo), which is OUTSIDE the worktree, triggers OpenCode's `external_directory: ask` permission, and produces noise in the trace. Run plainly: `sniff repo` — `sniff` is already worktree-aware and resolves the correct git root from cwd.
 7. then you will review the "lessons learned" that the subagents provided to you and determine if these are both:
    1. important and worthy of saving to the lessons learned memory file, and
    2. not already represented in the lessons-learned file

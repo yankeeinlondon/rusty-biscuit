@@ -521,7 +521,7 @@ impl Terminal {
     /// Terminal::render("Formatted {{bold}}text{{reset}}");
     /// ```
     pub fn render<T: Into<String>>(content: T) {
-        use crate::utils::layout::Layout;
+        use crate::utils::layout::{Layout, LayoutTerminalExt};
 
         let term = Terminal::new();
         let layout = Layout::default();

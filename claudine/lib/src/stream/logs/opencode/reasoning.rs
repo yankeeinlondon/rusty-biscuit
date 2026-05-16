@@ -2,6 +2,7 @@
 //! maintain stderr-side summary counters, and signal early termination when a
 //! pre-stream usage-cap error is detected.
 
+use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex};
@@ -19,18 +20,31 @@ use crate::stream::logs::opencode::errors::{
     merge_rate_limit, render_malformed_asset_message, render_rate_limit_message, strip_ansi,
 };
 use crate::stream::logs::opencode::events::{
-    AssetType, LogClassification, OpenCodeLogRecord, ParsedOpenCodeStderrLine,
+    AssetType, LogClassification, LogLevel, OpenCodeLogRecord, ParsedOpenCodeStderrLine,
 };
 
-/// Whether an incoming stderr log line was converted into a semantic event
-/// and should therefore be suppressed from raw stderr passthrough.
+/// Whether the bridge took ownership of an incoming stderr log line and
+/// therefore suppresses raw passthrough.
+///
+/// A line is `Consumed` whenever the bridge recognized it as a structured
+/// OpenCode log record — regardless of whether that record produced a
+/// [`SemanticEvent`], was intentionally filtered (e.g. `service=bus`), or
+/// was simply Unclassified. The structured-log format is OpenCode's, so any
+/// line that parses as one is "ours" to interpret; echoing it to the user
+/// proxies internal debug output and is never what we want.
+///
+/// Only truly unstructured stderr (panics, raw `RawText` content, plain
+/// progress preambles) remains `NotConsumed`, preserving the legacy raw
+/// passthrough so genuine error output still reaches the user.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StderrIngestOutcome {
-    /// The bridge classified and emitted a [`SemanticEvent`] for this line.
-    /// Callers should not also echo the raw line to the user.
+    /// The bridge handled this line — either by emitting a [`SemanticEvent`]
+    /// or by parsing it as a structured record we intentionally drop.
+    /// Callers must not echo the raw line.
     Consumed,
-    /// The bridge did not recognize the line as a meaningful diagnostic.
-    /// Callers should keep the existing raw-passthrough behavior.
+    /// The bridge did not recognize the line as a structured OpenCode log
+    /// record (or as a classifiable raw error). Callers should keep the
+    /// existing raw-passthrough behavior.
     NotConsumed,
 }
 
@@ -92,6 +106,14 @@ pub enum EarlyTermination {
 pub struct SharedStderrState {
     pub diagnostics: StderrDiagnostics,
     pub rate_limit: Option<RateLimitInfo>,
+    /// First `providerID` observed on a `service=llm ... mode=primary`
+    /// stderr log line. OpenCode routes the primary turn through a single
+    /// model provider per session, so the first observation is canonical.
+    pub primary_provider_id: Option<String>,
+    /// First `modelID` observed on a `service=llm ... mode=primary` stderr
+    /// log line. Used to enrich [`crate::stream::summary::StreamExecutionSummary::model`]
+    /// when the stdout NDJSON stream does not include an `init` payload.
+    pub primary_model_id: Option<String>,
 }
 
 impl SharedStderrState {
@@ -119,6 +141,28 @@ pub struct OpenCodeLogBridge<S: SemanticEventSink> {
     stdout_event_seen: Arc<AtomicBool>,
     early_terminate: Option<Sender<EarlyTermination>>,
     early_terminate_fired: bool,
+    /// Whether a primary [`SemanticEvent::SessionStart`] has been emitted
+    /// from the stderr stream. Used to suppress duplicates when multiple
+    /// session-created records arrive without a parent id (first match wins).
+    primary_session_emitted: bool,
+    /// Tracks child sessions discovered from `service=session ... parentID=...`
+    /// records so the bridge can convert subsequent `service=session.prompt
+    /// ... exiting loop` records into [`SemanticEvent::SubagentStop`] events.
+    child_sessions: BTreeMap<String, ChildSessionInfo>,
+}
+
+/// Bookkeeping for an OpenCode child session observed on the stderr stream.
+///
+/// Created when a `service=session ... parentID=...` record is classified
+/// as [`LogClassification::SessionCreated`] with a non-empty `parent_id`.
+/// `stopped` flips to `true` the first time the child's `exiting loop`
+/// fires so subsequent `StepExit` records do not emit duplicate
+/// [`SemanticEvent::SubagentStop`] events for the same child.
+#[derive(Debug, Clone, Default)]
+struct ChildSessionInfo {
+    parent_id: String,
+    name: Option<String>,
+    stopped: bool,
 }
 
 impl<S: SemanticEventSink> OpenCodeLogBridge<S> {
@@ -135,6 +179,8 @@ impl<S: SemanticEventSink> OpenCodeLogBridge<S> {
             stdout_event_seen,
             early_terminate,
             early_terminate_fired: false,
+            primary_session_emitted: false,
+            child_sessions: BTreeMap::new(),
         }
     }
 
@@ -165,6 +211,18 @@ impl<S: SemanticEventSink> OpenCodeLogBridge<S> {
             let mut state = self.state.lock().expect("stderr state poisoned");
             state.diagnostics.log_records_parsed =
                 state.diagnostics.log_records_parsed.saturating_add(1);
+        }
+
+        // Aggressive noise filter: `service=bus` lines carry internal
+        // cross-module chatter that is not meaningful to operators.
+        // They are still counted as parsed (so the summary is accurate)
+        // but they do not emit semantic events. Return `Consumed` so the
+        // raw line is suppressed from the user's terminal — the
+        // byte-heartbeat refresh in the stderr reader thread (spawn.rs)
+        // already happened before this line reached the bridge, so the
+        // silence watchdog still sees activity.
+        if record.tags.get("service").map(|s| s.as_str()) == Some("bus") {
+            return StderrIngestOutcome::Consumed;
         }
 
         let classification = classify(&record);
@@ -210,7 +268,43 @@ impl<S: SemanticEventSink> OpenCodeLogBridge<S> {
             LogClassification::UncaughtError { ref raw_text } => {
                 self.on_uncaught_error(raw_text.clone(), Some(&record))
             }
-            LogClassification::Unclassified => StderrIngestOutcome::NotConsumed,
+            // Boot banner is parsed and counted but not promoted to a
+            // semantic event in Phase 3; the NDJSON stream's own session
+            // event remains the SessionStart anchor when present. Suppress
+            // from raw passthrough — it's a structured log record we own.
+            LogClassification::BootBanner { .. } => StderrIngestOutcome::Consumed,
+            LogClassification::SessionCreated { id, parent_id } => {
+                self.on_session_created(&record, id, parent_id)
+            }
+            LogClassification::LlmCall {
+                provider_id,
+                model_id,
+                mode,
+                is_stream,
+            } => self.on_llm_call(&record, provider_id, model_id, mode, is_stream),
+            LogClassification::StepLoop { session_id, step } => {
+                self.on_step_loop(&record, session_id, step)
+            }
+            LogClassification::StepExit { session_id } => self.on_step_exit(&record, session_id),
+            LogClassification::PermissionEvaluated {
+                permission,
+                pattern,
+                action,
+            } => self.on_permission_evaluated(&record, permission, pattern, action),
+            LogClassification::HttpResponse {
+                method,
+                url,
+                status,
+                duration_ms,
+            } => self.on_http_response(&record, method, url, status, duration_ms),
+            LogClassification::Snapshot { message, level } => {
+                self.on_snapshot(&record, message, level)
+            }
+            // An Unclassified line still parsed as a well-formed OpenCode
+            // structured log record (level + timestamp + tags + message).
+            // We have already counted it and refreshed the byte heartbeat;
+            // it is ours to drop rather than proxy as raw debug output.
+            LogClassification::Unclassified => StderrIngestOutcome::Consumed,
         }
     }
 
@@ -468,6 +562,267 @@ impl<S: SemanticEventSink> OpenCodeLogBridge<S> {
         StderrIngestOutcome::Consumed
     }
 
+    fn on_session_created(
+        &mut self,
+        record: &OpenCodeLogRecord,
+        id: String,
+        parent_id: Option<String>,
+    ) -> StderrIngestOutcome {
+        // The bare-value body parser absorbs the trailing ` created`
+        // keyword into the last tag's value; in practice that tag is
+        // `title=`, so strip the suffix before exposing the title to
+        // consumers.
+        let title = record
+            .tags
+            .get("title")
+            .map(|s| s.strip_suffix(" created").unwrap_or(s).to_string())
+            .filter(|s| !s.is_empty());
+        let mut extra_map = base_extra(record, "session_created");
+        extra_map.insert("session_id".into(), Value::String(id.clone()));
+        if let Some(ref parent) = parent_id {
+            extra_map.insert("parent_id".into(), Value::String(parent.clone()));
+        }
+        if let Some(ref title) = title {
+            extra_map.insert("title".into(), Value::String(title.clone()));
+        }
+
+        match parent_id {
+            Some(parent) => {
+                self.child_sessions.insert(
+                    id.clone(),
+                    ChildSessionInfo {
+                        parent_id: parent,
+                        name: title.clone(),
+                        stopped: false,
+                    },
+                );
+                self.sink.on_semantic_event(SemanticEvent::SubagentStart {
+                    name: title,
+                    id: Some(id),
+                    extra: Value::Object(extra_map),
+                });
+            }
+            None => {
+                if self.primary_session_emitted {
+                    debug!(
+                        session_id = %id,
+                        "opencode primary SessionStart already emitted on stderr; skipping duplicate",
+                    );
+                    return StderrIngestOutcome::Consumed;
+                }
+                // Cross-stream dedup: if the stdout NDJSON parser has
+                // already emitted any semantic event (its `init` /
+                // `session_start` payload most likely), the stderr-derived
+                // primary SessionStart would be a redundant duplicate.
+                // First arrival wins, the stderr session_created is
+                // recorded but not re-emitted.
+                if self.stdout_event_seen.load(Ordering::SeqCst) {
+                    debug!(
+                        session_id = %id,
+                        "opencode stdout already emitted a semantic event; skipping stderr primary SessionStart",
+                    );
+                    self.primary_session_emitted = true;
+                    return StderrIngestOutcome::Consumed;
+                }
+                self.primary_session_emitted = true;
+                self.sink.on_semantic_event(SemanticEvent::SessionStart {
+                    session_id: Some(id),
+                    model: None,
+                    extra: Value::Object(extra_map),
+                });
+            }
+        }
+
+        StderrIngestOutcome::Consumed
+    }
+
+    fn on_llm_call(
+        &mut self,
+        record: &OpenCodeLogRecord,
+        provider_id: String,
+        model_id: String,
+        mode: String,
+        is_stream: bool,
+    ) -> StderrIngestOutcome {
+        // Capture the first `mode=primary` LLM call so the final
+        // [`crate::stream::summary::StreamExecutionSummary`] can attribute
+        // the primary provider/model even when the stdout NDJSON stream
+        // omits the `init` payload (e.g. OpenCode's "DONE-only" stream).
+        if mode == "primary" {
+            let mut state = self.state.lock().expect("stderr state poisoned");
+            if state.primary_provider_id.is_none() {
+                state.primary_provider_id = Some(provider_id.clone());
+            }
+            if state.primary_model_id.is_none() {
+                state.primary_model_id = Some(model_id.clone());
+            }
+        }
+
+        let mut extra_map = base_extra(record, "llm_call");
+        extra_map.insert("provider_id".into(), Value::String(provider_id.clone()));
+        extra_map.insert("model_id".into(), Value::String(model_id.clone()));
+        extra_map.insert("mode".into(), Value::String(mode.clone()));
+        extra_map.insert("is_stream".into(), json!(is_stream));
+        let agent = record.tags.get("agent").cloned();
+        if let Some(ref agent) = agent {
+            extra_map.insert("agent".into(), Value::String(agent.clone()));
+        }
+        if let Some(small) = record.tags.get("small") {
+            extra_map.insert("small".into(), Value::String(small.clone()));
+        }
+        if let Some(session_id) = record.tags.get("session.id") {
+            extra_map.insert("session_id".into(), Value::String(session_id.clone()));
+        }
+
+        let rendered_message = format_llm_call_message(&provider_id, &model_id, &mode, agent.as_deref());
+        self.sink.on_semantic_event(SemanticEvent::Info {
+            message: rendered_message,
+            extra: Value::Object(extra_map),
+        });
+        StderrIngestOutcome::Consumed
+    }
+
+    fn on_step_loop(
+        &mut self,
+        record: &OpenCodeLogRecord,
+        session_id: String,
+        step: u32,
+    ) -> StderrIngestOutcome {
+        let mut extra_map = base_extra(record, "step_loop");
+        extra_map.insert("session_id".into(), Value::String(session_id.clone()));
+        extra_map.insert("step".into(), json!(step));
+
+        self.sink.on_semantic_event(SemanticEvent::Info {
+            message: format!("step_loop step={step} session={}", short_session(&session_id)),
+            extra: Value::Object(extra_map),
+        });
+        StderrIngestOutcome::Consumed
+    }
+
+    fn on_step_exit(
+        &mut self,
+        record: &OpenCodeLogRecord,
+        session_id: String,
+    ) -> StderrIngestOutcome {
+        let mut extra_map = base_extra(record, "step_exit");
+        extra_map.insert("session_id".into(), Value::String(session_id.clone()));
+
+        self.sink.on_semantic_event(SemanticEvent::Info {
+            message: format!("exiting_loop session={}", short_session(&session_id)),
+            extra: Value::Object(extra_map),
+        });
+
+        // If this session was registered as a subagent child, emit a
+        // matching SubagentStop. Only fire once per child session so we
+        // maintain a 1:1 SubagentStart/SubagentStop pairing even though
+        // OpenCode emits an `exiting loop` record at the end of every
+        // step within a session.
+        if let Some(child) = self.child_sessions.get_mut(&session_id)
+            && !child.stopped
+        {
+            child.stopped = true;
+            let name = child.name.clone();
+            let parent_id = child.parent_id.clone();
+            let mut subagent_extra = Map::new();
+            subagent_extra.insert("provider".into(), Value::String("opencode".into()));
+            subagent_extra.insert("source".into(), Value::String("stderr_log".into()));
+            subagent_extra.insert(
+                "classification".into(),
+                Value::String("subagent_stop".into()),
+            );
+            subagent_extra.insert("session_id".into(), Value::String(session_id.clone()));
+            subagent_extra.insert("parent_id".into(), Value::String(parent_id));
+            if let Some(ref n) = name {
+                subagent_extra.insert("name".into(), Value::String(n.clone()));
+            }
+            self.sink.on_semantic_event(SemanticEvent::SubagentStop {
+                name,
+                id: Some(session_id),
+                status: None,
+                extra: Value::Object(subagent_extra),
+            });
+        }
+
+        StderrIngestOutcome::Consumed
+    }
+
+    fn on_permission_evaluated(
+        &mut self,
+        record: &OpenCodeLogRecord,
+        permission: String,
+        pattern: String,
+        action: String,
+    ) -> StderrIngestOutcome {
+        let mut extra_map = base_extra(record, "permission_evaluated");
+        extra_map.insert("permission".into(), Value::String(permission.clone()));
+        extra_map.insert("pattern".into(), Value::String(pattern.clone()));
+        extra_map.insert("action".into(), Value::String(action.clone()));
+
+        let rendered_message = format_permission_message(&permission, &pattern, &action);
+        self.sink.on_semantic_event(SemanticEvent::Info {
+            message: rendered_message,
+            extra: Value::Object(extra_map),
+        });
+        StderrIngestOutcome::Consumed
+    }
+
+    fn on_http_response(
+        &mut self,
+        record: &OpenCodeLogRecord,
+        method: String,
+        url: String,
+        status: u16,
+        duration_ms: u64,
+    ) -> StderrIngestOutcome {
+        let mut extra_map = base_extra(record, "http_response");
+        extra_map.insert("method".into(), Value::String(method.clone()));
+        extra_map.insert("url".into(), Value::String(url.clone()));
+        extra_map.insert("status".into(), json!(status));
+        extra_map.insert("duration_ms".into(), json!(duration_ms));
+
+        let rendered_message = format_http_response_message(&method, &url, status, duration_ms);
+        self.sink.on_semantic_event(SemanticEvent::Info {
+            message: rendered_message,
+            extra: Value::Object(extra_map),
+        });
+        StderrIngestOutcome::Consumed
+    }
+
+    /// Emit a Warning describing a `service=snapshot` log line at WARN or
+    /// ERROR level. Tag values such as `file=`, `files=`, `path=`, `error=`,
+    /// and `err=` are surfaced alongside the message so operators have
+    /// enough context to act on snapshot subsystem failures.
+    ///
+    /// INFO and DEBUG snapshot lines (routine maintenance — `taking snapshot`,
+    /// `prune=7.days cleanup`, etc.) are intentionally silent: they're
+    /// counted as parsed structured records and the byte heartbeat fires,
+    /// but no semantic event is emitted because they would dominate the
+    /// rendered output with no user-actionable information.
+    fn on_snapshot(
+        &mut self,
+        record: &OpenCodeLogRecord,
+        message: String,
+        level: LogLevel,
+    ) -> StderrIngestOutcome {
+        if !matches!(level, LogLevel::Warn | LogLevel::Error) {
+            return StderrIngestOutcome::Consumed;
+        }
+
+        let mut extra_map = base_extra(record, "snapshot");
+        let tag_summary = summarize_snapshot_tags(record, &mut extra_map);
+        extra_map.insert(
+            "level".into(),
+            Value::String(format!("{level:?}").to_uppercase()),
+        );
+
+        let rendered_message = format_snapshot_message(&message, &tag_summary);
+        self.sink.on_semantic_event(SemanticEvent::Warning {
+            message: rendered_message,
+            extra: Value::Object(extra_map),
+        });
+        StderrIngestOutcome::Consumed
+    }
+
     fn fire_early_termination(&mut self, termination: EarlyTermination) {
         if self.early_terminate_fired {
             return;
@@ -483,6 +838,168 @@ impl<S: SemanticEventSink> OpenCodeLogBridge<S> {
             );
         }
     }
+}
+
+/// Compact a session id for inline display: keep the `ses_` prefix and the
+/// last 6 hex characters so a 28-character id like `ses_27262f0abffeUMCCfD7fDPCivR`
+/// renders as `ses_…DPCivR`.
+fn short_session(session_id: &str) -> String {
+    const TAIL_LEN: usize = 6;
+    let body = session_id.strip_prefix("ses_").unwrap_or(session_id);
+    if body.chars().count() <= TAIL_LEN + 4 {
+        return session_id.to_string();
+    }
+    let tail: String = body.chars().rev().take(TAIL_LEN).collect::<Vec<_>>().into_iter().rev().collect();
+    format!("ses_…{tail}")
+}
+
+/// Render the inline message string for a `service=llm ... stream` event.
+/// Example: `llm_call_start anthropic/claude-opus-4-7 (mode=primary, agent=build)`.
+fn format_llm_call_message(
+    provider_id: &str,
+    model_id: &str,
+    mode: &str,
+    agent: Option<&str>,
+) -> String {
+    let identity = match (provider_id, model_id) {
+        ("", "") => "(unknown provider/model)".to_string(),
+        ("", model) => model.to_string(),
+        (provider, "") => provider.to_string(),
+        (provider, model) => format!("{provider}/{model}"),
+    };
+    let mut parts: Vec<String> = Vec::with_capacity(2);
+    if !mode.is_empty() {
+        parts.push(format!("mode={mode}"));
+    }
+    if let Some(agent) = agent.filter(|a| !a.is_empty()) {
+        parts.push(format!("agent={agent}"));
+    }
+    if parts.is_empty() {
+        format!("llm_call_start {identity}")
+    } else {
+        format!("llm_call_start {identity} ({})", parts.join(", "))
+    }
+}
+
+/// Render the inline message string for a permission evaluation. OpenCode
+/// emits the resolved `action` either as a bare value or as a JSON object
+/// of the shape `{"permission": "...", "pattern": "...", "action": "..."}`;
+/// when JSON, we extract the inner `action` ("allow" / "deny") so the
+/// rendered text stays scannable.
+fn format_permission_message(permission: &str, pattern: &str, action: &str) -> String {
+    let action_short = summarize_permission_action(action);
+    let subject = match (permission, pattern) {
+        ("", "") => String::new(),
+        ("", pat) => pat.to_string(),
+        (perm, "") => perm.to_string(),
+        (perm, pat) => format!("{perm}:{pat}"),
+    };
+    match (subject.is_empty(), action_short.is_empty()) {
+        (true, true) => "permission_evaluated".to_string(),
+        (true, false) => format!("permission_evaluated → {action_short}"),
+        (false, true) => format!("permission_evaluated {subject}"),
+        (false, false) => format!("permission_evaluated {subject} → {action_short}"),
+    }
+}
+
+fn summarize_permission_action(action: &str) -> String {
+    let trimmed = action.trim();
+    if trimmed.is_empty() {
+        return String::new();
+    }
+    if trimmed.starts_with('{')
+        && let Ok(Value::Object(map)) = serde_json::from_str::<Value>(trimmed)
+        && let Some(Value::String(inner)) = map.get("action")
+    {
+        return inner.clone();
+    }
+    trimmed.to_string()
+}
+
+/// Render the inline message string for a `Sent HTTP response` event.
+fn format_http_response_message(method: &str, url: &str, status: u16, duration_ms: u64) -> String {
+    let duration = if duration_ms == 0 {
+        String::new()
+    } else {
+        format!(" ({duration_ms}ms)")
+    };
+    let target = match (method.is_empty(), url.is_empty()) {
+        (true, true) => String::new(),
+        (true, false) => url.to_string(),
+        (false, true) => method.to_string(),
+        (false, false) => format!("{method} {url}"),
+    };
+    let status_part = if status == 0 {
+        String::new()
+    } else {
+        format!(" {status}")
+    };
+    if target.is_empty() && status == 0 {
+        "http_response".to_string()
+    } else if target.is_empty() {
+        format!("http_response{status_part}{duration}")
+    } else {
+        format!("http_response {target}{status_part}{duration}")
+    }
+}
+
+/// Render the inline message string for a snapshot subsystem log line.
+/// `tag_summary` is a one-line, comma-joined view of the most informative
+/// non-control tags on the record.
+fn format_snapshot_message(message: &str, tag_summary: &str) -> String {
+    let base = if message.is_empty() {
+        "snapshot".to_string()
+    } else {
+        format!("snapshot: {message}")
+    };
+    if tag_summary.is_empty() {
+        base
+    } else {
+        format!("{base} ({tag_summary})")
+    }
+}
+
+/// Copy snapshot-relevant tags into `extra` and return a comma-joined
+/// `key=value` summary suitable for inline rendering. Falls back to all
+/// non-`service` tags when the well-known keys are absent.
+fn summarize_snapshot_tags(
+    record: &OpenCodeLogRecord,
+    extra: &mut Map<String, Value>,
+) -> String {
+    const PREFERRED: &[&str] = &["file", "files", "path", "id", "session.id", "err", "error"];
+    let mut parts: Vec<String> = Vec::new();
+    let mut seen = std::collections::BTreeSet::new();
+
+    for key in PREFERRED {
+        if let Some(value) = record.tags.get(*key) {
+            extra.insert((*key).into(), Value::String(value.clone()));
+            parts.push(format!("{key}={}", truncate_for_inline(value)));
+            seen.insert((*key).to_string());
+        }
+    }
+
+    if parts.is_empty() {
+        for (key, value) in &record.tags {
+            if key == "service" || seen.contains(key) {
+                continue;
+            }
+            extra.insert(key.clone(), Value::String(value.clone()));
+            parts.push(format!("{key}={}", truncate_for_inline(value)));
+        }
+    }
+
+    parts.join(", ")
+}
+
+/// Clip a tag value for inline display so a single multi-kilobyte
+/// `error=` payload cannot blow up the rendered status line.
+fn truncate_for_inline(value: &str) -> String {
+    const MAX: usize = 80;
+    if value.chars().count() <= MAX {
+        return value.to_string();
+    }
+    let head: String = value.chars().take(MAX).collect();
+    format!("{head}…")
 }
 
 fn base_extra(record: &OpenCodeLogRecord, classification: &str) -> Map<String, Value> {
@@ -505,7 +1022,9 @@ fn base_extra(record: &OpenCodeLogRecord, classification: &str) -> Map<String, V
 /// Called once by the wrapper layer after the stderr thread has joined.
 /// Always sets `summary.stderr_diagnostics` when the bridge parsed at least
 /// one structured log record. Always merges `summary.rate_limit` when the
-/// bridge accumulated stderr-side rate-limit state. Always recomputes
+/// bridge accumulated stderr-side rate-limit state. Backfills
+/// `summary.model` from the first observed `mode=primary` LLM call when the
+/// stdout NDJSON stream did not surface a model. Always recomputes
 /// `summary.badges` via [`crate::stream::badges::derive_badges`] so the
 /// stderr-derived badge categories (rate-limit resets, malformed-asset
 /// warnings) appear in the final output.
@@ -521,6 +1040,11 @@ pub fn merge_stderr_state_into_summary(
     }
     if let Some(stderr_rl) = state.rate_limit.clone() {
         summary.rate_limit = Some(merge_rate_limit(summary.rate_limit.clone(), stderr_rl));
+    }
+    if summary.model.is_none()
+        && let Some(model) = state.primary_model_id.clone()
+    {
+        summary.model = Some(model);
     }
     drop(state);
     summary.badges = crate::stream::badges::derive_badges(summary, summary.provider);
@@ -558,10 +1082,14 @@ mod tests {
     }
 
     #[test]
-    fn unclassified_structured_line_returns_not_consumed() {
+    fn unclassified_structured_line_is_consumed_without_emitting_event() {
+        // Structured OpenCode log records are owned by the bridge — even
+        // when they don't classify into a promoted semantic event we
+        // suppress the raw line so it doesn't leak to the user's terminal
+        // as debug output.
         let mut bridge = OpenCodeLogBridge::new(RecordingSink::default(), stdout_seen(), None);
         let outcome = bridge.ingest("INFO 2026-04-15T21:28:30 +0ms service=default msg=hello");
-        assert_eq!(outcome, StderrIngestOutcome::NotConsumed);
+        assert_eq!(outcome, StderrIngestOutcome::Consumed);
         assert_eq!(bridge.sink.events.len(), 0);
         let state = bridge.state.lock().unwrap();
         assert_eq!(state.diagnostics.log_records_parsed, 1);
@@ -796,6 +1324,7 @@ mod tests {
                 ..Default::default()
             },
             rate_limit: None,
+            ..Default::default()
         }));
         let mut summary = StreamExecutionSummary {
             provider: Provider::OpenCode,
@@ -845,6 +1374,7 @@ mod tests {
                 message: Some("Usage limit reached".into()),
                 reset_at: Some(reset),
             }),
+            ..Default::default()
         }));
         let mut summary = StreamExecutionSummary {
             provider: Provider::OpenCode,
@@ -883,6 +1413,481 @@ mod tests {
         assert!(summary.stderr_diagnostics.is_none());
         assert!(summary.rate_limit.is_none());
         assert!(summary.badges.is_empty());
+    }
+
+    #[test]
+    fn bus_line_is_consumed_silently_and_counts_as_parsed() {
+        // `service=bus` is the noisiest source on the stderr stream
+        // (~70-75% of INFO volume) and carries nothing the user cares
+        // about. Bus lines are counted in diagnostics but produce no
+        // semantic event and must NEVER leak to the user as raw stderr —
+        // so the bridge returns `Consumed` to suppress raw passthrough.
+        let mut bridge = OpenCodeLogBridge::new(RecordingSink::default(), stdout_seen(), None);
+        let line = "INFO 2026-04-15T21:28:30 +5ms service=bus msg=internal chatter";
+        let outcome = bridge.ingest(line);
+        assert_eq!(outcome, StderrIngestOutcome::Consumed);
+        assert_eq!(bridge.sink.events.len(), 0, "bus lines must not emit semantic events");
+        let state = bridge.state.lock().unwrap();
+        assert_eq!(
+            state.diagnostics.log_records_parsed, 1,
+            "bus lines must still be counted as parsed"
+        );
+    }
+
+    #[test]
+    fn non_bus_line_classifies_normally_after_bus_filter() {
+        let mut bridge = OpenCodeLogBridge::new(RecordingSink::default(), stdout_seen(), None);
+        // First, a bus line that is silently dropped (but still consumed
+        // so it never reaches raw stderr passthrough).
+        let bus_line = "INFO 2026-04-15T21:28:30 +5ms service=bus msg=ignored";
+        assert_eq!(bridge.ingest(bus_line), StderrIngestOutcome::Consumed);
+        // Then, a malformed asset line that should classify normally.
+        let real_line = "ERROR 2026-04-15T21:28:30 +315ms service=config command=/tmp/foo.md err=ENOENT failed to load command";
+        assert_eq!(bridge.ingest(real_line), StderrIngestOutcome::Consumed);
+        assert_eq!(bridge.sink.events.len(), 1);
+        let state = bridge.state.lock().unwrap();
+        assert_eq!(state.diagnostics.log_records_parsed, 2);
+        assert_eq!(state.diagnostics.malformed_asset_events, 1);
+    }
+
+    // ------------------------------------------------------------------
+    // Phase-3 semantic event promotion
+    // ------------------------------------------------------------------
+
+    #[test]
+    fn session_created_without_parent_emits_session_start() {
+        // Phase 4 dedup gate: bridge emits a primary SessionStart only
+        // when stdout has not yet produced any semantic event.
+        let mut bridge = OpenCodeLogBridge::new(RecordingSink::default(), stdout_unseen(), None);
+        let line = "INFO  2026-05-12T20:00:12 +20ms service=session id=ses_primary slug=happy-panda version=1.14.48 title=New session created";
+        assert_eq!(bridge.ingest(line), StderrIngestOutcome::Consumed);
+        assert_eq!(bridge.sink.events.len(), 1);
+        match &bridge.sink.events[0] {
+            SemanticEvent::SessionStart {
+                session_id,
+                model,
+                extra,
+            } => {
+                assert_eq!(session_id.as_deref(), Some("ses_primary"));
+                assert!(model.is_none());
+                assert_string(extra, "classification", "session_created");
+                assert_string(extra, "session_id", "ses_primary");
+                assert_string(extra, "title", "New session");
+            }
+            other => panic!("expected SessionStart, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn duplicate_primary_session_created_is_not_re_emitted() {
+        let mut bridge = OpenCodeLogBridge::new(RecordingSink::default(), stdout_unseen(), None);
+        let line = "INFO  2026-05-12T20:00:12 +20ms service=session id=ses_primary title=A created";
+        assert_eq!(bridge.ingest(line), StderrIngestOutcome::Consumed);
+        let line2 =
+            "INFO  2026-05-12T20:00:13 +21ms service=session id=ses_primary_other title=B created";
+        assert_eq!(bridge.ingest(line2), StderrIngestOutcome::Consumed);
+        assert_eq!(
+            bridge.sink.events.len(),
+            1,
+            "second primary session-created must be suppressed",
+        );
+    }
+
+    #[test]
+    fn session_created_with_parent_emits_subagent_start() {
+        let mut bridge = OpenCodeLogBridge::new(RecordingSink::default(), stdout_seen(), None);
+        let line = "INFO  2026-05-12T20:05:26 +1ms service=session id=ses_child slug=lucky-orchid version=1.14.48 parentID=ses_parent title=Count letters in 'banana' created";
+        assert_eq!(bridge.ingest(line), StderrIngestOutcome::Consumed);
+        assert_eq!(bridge.sink.events.len(), 1);
+        match &bridge.sink.events[0] {
+            SemanticEvent::SubagentStart { name, id, extra } => {
+                assert_eq!(id.as_deref(), Some("ses_child"));
+                assert!(name.is_some());
+                assert_string(extra, "classification", "session_created");
+                assert_string(extra, "session_id", "ses_child");
+                assert_string(extra, "parent_id", "ses_parent");
+            }
+            other => panic!("expected SubagentStart, got {other:?}"),
+        }
+        assert!(bridge.child_sessions.contains_key("ses_child"));
+    }
+
+    #[test]
+    fn llm_call_emits_info_event_with_provider_model_mode() {
+        let mut bridge = OpenCodeLogBridge::new(RecordingSink::default(), stdout_seen(), None);
+        let line = "INFO  2026-05-12T20:00:12 +0ms service=llm providerID=kimi-for-coding modelID=k2p6 session.id=ses_a small=false agent=build mode=primary stream";
+        assert_eq!(bridge.ingest(line), StderrIngestOutcome::Consumed);
+        match &bridge.sink.events[0] {
+            SemanticEvent::Info { message, extra } => {
+                assert_eq!(
+                    message,
+                    "llm_call_start kimi-for-coding/k2p6 (mode=primary, agent=build)"
+                );
+                assert_string(extra, "provider_id", "kimi-for-coding");
+                assert_string(extra, "model_id", "k2p6");
+                assert_string(extra, "mode", "primary");
+                assert_string(extra, "agent", "build");
+                assert_string(extra, "session_id", "ses_a");
+                assert_eq!(extra.get("is_stream"), Some(&json!(true)));
+            }
+            other => panic!("expected Info, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn step_loop_emits_info_event() {
+        let mut bridge = OpenCodeLogBridge::new(RecordingSink::default(), stdout_seen(), None);
+        let line = "INFO  2026-05-12T20:00:12 +0ms service=session.prompt session.id=ses_a step=3 logSpan.http.span.4=55ms loop";
+        assert_eq!(bridge.ingest(line), StderrIngestOutcome::Consumed);
+        match &bridge.sink.events[0] {
+            SemanticEvent::Info { message, extra } => {
+                assert!(
+                    message.starts_with("step_loop step=3 session="),
+                    "expected enriched step_loop message, got {message:?}",
+                );
+                assert_string(extra, "session_id", "ses_a");
+                assert_eq!(extra.get("step"), Some(&json!(3)));
+            }
+            other => panic!("expected Info, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn step_exit_for_non_child_session_emits_only_info_event() {
+        let mut bridge = OpenCodeLogBridge::new(RecordingSink::default(), stdout_seen(), None);
+        let line = "INFO  2026-05-12T20:00:19 +1ms service=session.prompt session.id=ses_a logSpan.http.span.4=7437ms exiting loop";
+        assert_eq!(bridge.ingest(line), StderrIngestOutcome::Consumed);
+        assert_eq!(bridge.sink.events.len(), 1);
+        match &bridge.sink.events[0] {
+            SemanticEvent::Info { message, extra } => {
+                assert!(
+                    message.starts_with("exiting_loop session="),
+                    "expected enriched exiting_loop message, got {message:?}",
+                );
+                assert_string(extra, "session_id", "ses_a");
+            }
+            other => panic!("expected Info, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn step_exit_for_child_session_emits_info_then_subagent_stop() {
+        let mut bridge = OpenCodeLogBridge::new(RecordingSink::default(), stdout_seen(), None);
+
+        let start = "INFO  2026-05-12T20:05:26 +1ms service=session id=ses_child parentID=ses_parent title=Count created";
+        assert_eq!(bridge.ingest(start), StderrIngestOutcome::Consumed);
+        let exit = "INFO  2026-05-12T20:05:30 +0ms service=session.prompt session.id=ses_child logSpan.http.span.4=4000ms exiting loop";
+        assert_eq!(bridge.ingest(exit), StderrIngestOutcome::Consumed);
+
+        assert_eq!(bridge.sink.events.len(), 3);
+        match &bridge.sink.events[0] {
+            SemanticEvent::SubagentStart { id, .. } => {
+                assert_eq!(id.as_deref(), Some("ses_child"));
+            }
+            other => panic!("expected SubagentStart first, got {other:?}"),
+        }
+        match &bridge.sink.events[1] {
+            SemanticEvent::Info { message, .. } => {
+                assert!(
+                    message.starts_with("exiting_loop session="),
+                    "expected enriched exiting_loop message, got {message:?}",
+                );
+            }
+            other => panic!("expected Info second, got {other:?}"),
+        }
+        match &bridge.sink.events[2] {
+            SemanticEvent::SubagentStop { id, extra, .. } => {
+                assert_eq!(id.as_deref(), Some("ses_child"));
+                assert_string(extra, "parent_id", "ses_parent");
+                assert_string(extra, "classification", "subagent_stop");
+            }
+            other => panic!("expected SubagentStop third, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn step_exit_for_child_session_emits_subagent_stop_only_once() {
+        let mut bridge = OpenCodeLogBridge::new(RecordingSink::default(), stdout_seen(), None);
+
+        let start = "INFO  2026-05-12T20:05:26 +1ms service=session id=ses_child parentID=ses_parent title=Count created";
+        assert_eq!(bridge.ingest(start), StderrIngestOutcome::Consumed);
+        let exit = "INFO  2026-05-12T20:05:30 +0ms service=session.prompt session.id=ses_child logSpan.http.span.4=4000ms exiting loop";
+        assert_eq!(bridge.ingest(exit), StderrIngestOutcome::Consumed);
+        assert_eq!(bridge.ingest(exit), StderrIngestOutcome::Consumed);
+
+        let subagent_stops = bridge
+            .sink
+            .events
+            .iter()
+            .filter(|e| matches!(e, SemanticEvent::SubagentStop { .. }))
+            .count();
+        assert_eq!(
+            subagent_stops, 1,
+            "SubagentStop must fire only once per child session",
+        );
+    }
+
+    #[test]
+    fn permission_evaluated_emits_info_event() {
+        let mut bridge = OpenCodeLogBridge::new(RecordingSink::default(), stdout_seen(), None);
+        let line = r#"INFO  2026-05-12T20:05:26 +160ms service=permission permission=task pattern=general action={"permission":"*","action":"allow","pattern":"*"} evaluated"#;
+        assert_eq!(bridge.ingest(line), StderrIngestOutcome::Consumed);
+        match &bridge.sink.events[0] {
+            SemanticEvent::Info { message, extra } => {
+                assert_eq!(message, "permission_evaluated task:general → allow");
+                assert_string(extra, "permission", "task");
+                assert_string(extra, "pattern", "general");
+            }
+            other => panic!("expected Info, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn http_response_emits_info_event() {
+        let mut bridge = OpenCodeLogBridge::new(RecordingSink::default(), stdout_seen(), None);
+        let line = "INFO  2026-05-12T20:05:54 +0ms service=default http.method=POST http.url=/session/x/message http.status=500 logSpan.http.span.4=99ms Sent HTTP response";
+        assert_eq!(bridge.ingest(line), StderrIngestOutcome::Consumed);
+        match &bridge.sink.events[0] {
+            SemanticEvent::Info { message, extra } => {
+                assert_eq!(
+                    message,
+                    "http_response POST /session/x/message 500 (99ms)"
+                );
+                assert_string(extra, "method", "POST");
+                assert_string(extra, "url", "/session/x/message");
+                assert_eq!(extra.get("status"), Some(&json!(500)));
+                assert_eq!(extra.get("duration_ms"), Some(&json!(99)));
+            }
+            other => panic!("expected Info, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn snapshot_warn_line_emits_warning_with_message_context() {
+        // OpenCode's stderr body parser absorbs trailing message text into
+        // the last bare-valued tag (a known quirk handled elsewhere via
+        // `has_trailing_keyword`). Either shape — a clean trailing message
+        // OR an absorbed tag value — must surface enough context for the
+        // user to know which snapshot subsystem operation failed.
+        let mut bridge = OpenCodeLogBridge::new(RecordingSink::default(), stdout_seen(), None);
+        // JSON-array `files=[…]` form: parser cleanly separates trailing message.
+        let line = r#"WARN  2026-05-12T20:05:26 +0ms service=snapshot session.id=ses_a files=["/repo/.env",".npmrc"] failed to add snapshot files"#;
+        assert_eq!(bridge.ingest(line), StderrIngestOutcome::Consumed);
+        assert_eq!(bridge.sink.events.len(), 1);
+        match &bridge.sink.events[0] {
+            SemanticEvent::Warning { message, extra } => {
+                assert!(
+                    message.starts_with("snapshot: failed to add snapshot files"),
+                    "expected snapshot message prefix, got {message:?}",
+                );
+                assert!(
+                    message.contains("files=") || message.contains("session.id="),
+                    "expected tag summary in message, got {message:?}",
+                );
+                assert_string(extra, "level", "WARN");
+                assert_string(extra, "classification", "snapshot");
+                assert!(
+                    extra.get("files").is_some() || extra.get("session.id").is_some(),
+                    "expected files or session.id in extra, got {extra:?}",
+                );
+            }
+            other => panic!("expected Warning, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn snapshot_warn_line_with_absorbed_trailing_still_carries_context() {
+        // Even when the body parser absorbs the trailing message into a
+        // bare-valued tag (e.g. `file=/repo/.env failed to add snapshot files`),
+        // the rendered Warning must still surface enough information for
+        // the operator to know what was being snapshotted — the file path
+        // and the absorbed diagnostic both ride along in the tag summary.
+        let mut bridge = OpenCodeLogBridge::new(RecordingSink::default(), stdout_seen(), None);
+        let line = "WARN  2026-05-12T20:05:26 +0ms service=snapshot session.id=ses_a file=/repo/.env failed to add snapshot files";
+        assert_eq!(bridge.ingest(line), StderrIngestOutcome::Consumed);
+        match &bridge.sink.events[0] {
+            SemanticEvent::Warning { message, extra } => {
+                assert!(
+                    message.contains("/repo/.env") && message.contains("failed to add snapshot files"),
+                    "expected file path and diagnostic in message, got {message:?}",
+                );
+                assert_string(extra, "level", "WARN");
+            }
+            other => panic!("expected Warning, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn snapshot_info_line_is_silently_consumed() {
+        // Routine snapshot maintenance — INFO/DEBUG `taking snapshot`,
+        // `prune=7.days cleanup`, etc. — is parsed and counted but emits
+        // no semantic event. They dominate snapshot-line volume and
+        // carry no user-actionable signal; only WARN/ERROR-level
+        // snapshot lines (`failed to add snapshot files`, etc.) surface
+        // as Warning events.
+        let mut bridge = OpenCodeLogBridge::new(RecordingSink::default(), stdout_seen(), None);
+        let lines = [
+            r#"INFO  2026-05-12T20:05:26 +0ms service=snapshot id=snap_abc files=["/repo/x.rs"] taking snapshot"#,
+            "INFO  2026-05-12T20:05:27 +0ms service=snapshot prune=7.days cleanup",
+            "DEBUG 2026-05-12T20:05:28 +0ms service=snapshot id=snap_xyz noop",
+        ];
+        for line in lines {
+            assert_eq!(bridge.ingest(line), StderrIngestOutcome::Consumed);
+        }
+        assert_eq!(
+            bridge.sink.events.len(),
+            0,
+            "routine snapshot lines must not emit events; got {:?}",
+            bridge.sink.events,
+        );
+        let state = bridge.state.lock().unwrap();
+        assert_eq!(
+            state.diagnostics.log_records_parsed, 3,
+            "INFO/DEBUG snapshot lines must still count as parsed records"
+        );
+    }
+
+    #[test]
+    fn boot_banner_is_parsed_and_consumed_without_emitting_event() {
+        // The boot banner is parsed and counted but Phase 3 deliberately
+        // does not promote it to a `SessionStart` (the NDJSON stream's
+        // own session event remains the anchor). It still must NOT be
+        // proxied to the user's terminal — return `Consumed` so the raw
+        // stderr passthrough does not echo it as debug output.
+        let mut bridge = OpenCodeLogBridge::new(RecordingSink::default(), stdout_seen(), None);
+        let line = "INFO  2026-05-12T20:00:11 +97ms service=default version=1.14.48 args=[\"run\"] opencode";
+        assert_eq!(bridge.ingest(line), StderrIngestOutcome::Consumed);
+        assert_eq!(bridge.sink.events.len(), 0);
+        let state = bridge.state.lock().unwrap();
+        assert_eq!(state.diagnostics.log_records_parsed, 1);
+    }
+
+    // ------------------------------------------------------------------
+    // Phase-4 cross-stream dedup and summary enrichment
+    // ------------------------------------------------------------------
+
+    #[test]
+    fn primary_llm_call_captures_provider_and_model_on_first_observation() {
+        let mut bridge = OpenCodeLogBridge::new(RecordingSink::default(), stdout_seen(), None);
+        let line = "INFO  2026-05-12T20:00:12 +0ms service=llm providerID=kimi-for-coding modelID=k2p6 session.id=ses_a small=false agent=build mode=primary stream";
+        assert_eq!(bridge.ingest(line), StderrIngestOutcome::Consumed);
+
+        let state = bridge.state.lock().unwrap();
+        assert_eq!(state.primary_provider_id.as_deref(), Some("kimi-for-coding"));
+        assert_eq!(state.primary_model_id.as_deref(), Some("k2p6"));
+    }
+
+    #[test]
+    fn primary_llm_call_only_captures_first_mode_primary_observation() {
+        let mut bridge = OpenCodeLogBridge::new(RecordingSink::default(), stdout_seen(), None);
+        let first = "INFO  2026-05-12T20:00:12 +0ms service=llm providerID=kimi-for-coding modelID=k2p6 session.id=ses_a mode=primary stream";
+        let second = "INFO  2026-05-12T20:01:00 +0ms service=llm providerID=anthropic modelID=claude-4 session.id=ses_a mode=primary stream";
+        assert_eq!(bridge.ingest(first), StderrIngestOutcome::Consumed);
+        assert_eq!(bridge.ingest(second), StderrIngestOutcome::Consumed);
+
+        let state = bridge.state.lock().unwrap();
+        assert_eq!(state.primary_provider_id.as_deref(), Some("kimi-for-coding"));
+        assert_eq!(state.primary_model_id.as_deref(), Some("k2p6"));
+    }
+
+    #[test]
+    fn non_primary_llm_call_does_not_capture_provider_and_model() {
+        let mut bridge = OpenCodeLogBridge::new(RecordingSink::default(), stdout_seen(), None);
+        let line = "INFO  2026-05-12T20:00:12 +0ms service=llm providerID=kimi-for-coding modelID=k2p6-small session.id=ses_a mode=subagent stream";
+        assert_eq!(bridge.ingest(line), StderrIngestOutcome::Consumed);
+
+        let state = bridge.state.lock().unwrap();
+        assert!(state.primary_provider_id.is_none());
+        assert!(state.primary_model_id.is_none());
+    }
+
+    #[test]
+    fn merge_stderr_state_backfills_summary_model_from_primary_llm_call() {
+        use crate::provider_id::Provider;
+        use crate::stream::summary::StreamExecutionSummary;
+
+        let state = Arc::new(Mutex::new(SharedStderrState {
+            diagnostics: StderrDiagnostics {
+                log_records_parsed: 1,
+                ..Default::default()
+            },
+            rate_limit: None,
+            primary_provider_id: Some("kimi-for-coding".into()),
+            primary_model_id: Some("k2p6".into()),
+        }));
+        let mut summary = StreamExecutionSummary {
+            provider: Provider::OpenCode,
+            model: None,
+            ..Default::default()
+        };
+
+        merge_stderr_state_into_summary(&state, &mut summary);
+        assert_eq!(summary.model.as_deref(), Some("k2p6"));
+    }
+
+    #[test]
+    fn merge_stderr_state_does_not_overwrite_existing_summary_model() {
+        use crate::provider_id::Provider;
+        use crate::stream::summary::StreamExecutionSummary;
+
+        let state = Arc::new(Mutex::new(SharedStderrState {
+            diagnostics: StderrDiagnostics {
+                log_records_parsed: 1,
+                ..Default::default()
+            },
+            rate_limit: None,
+            primary_provider_id: Some("kimi-for-coding".into()),
+            primary_model_id: Some("k2p6".into()),
+        }));
+        let mut summary = StreamExecutionSummary {
+            provider: Provider::OpenCode,
+            model: Some("preexisting-model".into()),
+            ..Default::default()
+        };
+
+        merge_stderr_state_into_summary(&state, &mut summary);
+        assert_eq!(
+            summary.model.as_deref(),
+            Some("preexisting-model"),
+            "stdout-derived model must win over the stderr backfill",
+        );
+    }
+
+    #[test]
+    fn primary_session_start_is_suppressed_when_stdout_already_emitted() {
+        // Cross-stream dedup: if stdout has already emitted any semantic
+        // event, the stderr-derived primary SessionStart is redundant and
+        // must be dropped. The `primary_session_emitted` flag is still set
+        // so subsequent stderr session_created lines for other ids are
+        // also suppressed.
+        let mut bridge = OpenCodeLogBridge::new(RecordingSink::default(), stdout_seen(), None);
+        let line = "INFO  2026-05-12T20:00:12 +20ms service=session id=ses_primary title=Primary created";
+        assert_eq!(bridge.ingest(line), StderrIngestOutcome::Consumed);
+        assert_eq!(
+            bridge.sink.events.len(),
+            0,
+            "stderr SessionStart must be suppressed when stdout has already emitted",
+        );
+        assert!(
+            bridge.primary_session_emitted,
+            "primary_session_emitted must be set so future duplicates are also skipped",
+        );
+    }
+
+    #[test]
+    fn subagent_start_is_not_dedup_gated_by_stdout_event_seen() {
+        // The dedup gate only applies to the primary SessionStart;
+        // child session_created lines must always promote to SubagentStart
+        // because the stdout NDJSON stream no longer synthesizes them
+        // (Phase 4 removed the synthesis path).
+        let mut bridge = OpenCodeLogBridge::new(RecordingSink::default(), stdout_seen(), None);
+        let line = "INFO  2026-05-12T20:05:26 +1ms service=session id=ses_child parentID=ses_parent title=Count created";
+        assert_eq!(bridge.ingest(line), StderrIngestOutcome::Consumed);
+        assert_eq!(bridge.sink.events.len(), 1);
+        assert!(matches!(
+            bridge.sink.events[0],
+            SemanticEvent::SubagentStart { .. }
+        ));
     }
 
     #[test]

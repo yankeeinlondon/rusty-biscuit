@@ -1,9 +1,9 @@
 use crate::{
-    components::renderable::Renderable,
+    components::renderable::TerminalRenderable,
     terminal::Terminal,
     utils::{
         block_constraint::{sanitize_wrapped_lines, split_lines, visible_width, wrap_lines},
-        layout::{Alignment, Layout, RowFill},
+        layout::{Alignment, Layout, LayoutTerminalExt, RowFill},
         wrap_policy::WordWrap,
     },
 };
@@ -28,7 +28,7 @@ use crate::discovery::detection::{ColorDepth, ColorMode};
 /// ```
 /// use biscuit_terminal::components::table::{Table, TableColumn, TableCellContent};
 /// use biscuit_terminal::components::table::types::{ColumnType, Currency};
-/// use biscuit_terminal::components::renderable::Renderable;
+/// use biscuit_terminal::components::renderable::TerminalRenderable;
 ///
 /// // Build a table with columns and data
 /// let mut table = Table::new()
@@ -1312,7 +1312,7 @@ impl Table {
     }
 }
 
-impl Renderable for Table {
+impl TerminalRenderable for Table {
     fn render_optimistic(&self, term_width: Option<u32>) -> String {
         let width = term_width.unwrap_or(80);
         // Opportunistic render assumes full capability; stripe if requested
