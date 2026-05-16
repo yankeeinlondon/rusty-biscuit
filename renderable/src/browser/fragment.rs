@@ -339,6 +339,9 @@ fn validate_node(node: &ComposableNode) -> bool {
 fn render_attributes(attributes: &[HtmlAttribute]) -> String {
     let mut out = String::new();
     for attr in attributes {
+        // Project 2 scope: only the common string/URL attributes are
+        // emitted. Variants not matched here (Class, Id, Style, …) are
+        // intentionally dropped until a consumer needs them.
         let pair: Option<(&str, String)> = match attr {
             HtmlAttribute::Title(value) => Some(("title", value.clone())),
             HtmlAttribute::Alt(value) => Some(("alt", value.clone())),
