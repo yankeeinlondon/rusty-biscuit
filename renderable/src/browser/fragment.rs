@@ -308,7 +308,11 @@ fn render_node(node: &ComposableNode) -> String {
         ComposableNode::RawHtml(html) => html.clone(),
         ComposableNode::Component(fragment) => fragment.render(),
         ComposableNode::VoidTag(void) => {
-            format!("<{}{}>", void.tag.name(), render_attributes(&void.attributes))
+            format!(
+                "<{}{}>",
+                void.tag.name(),
+                render_attributes(&void.attributes, None)
+            )
         }
         ComposableNode::BlockTag(block) => {
             let name = block.tag.name();
@@ -316,7 +320,7 @@ fn render_node(node: &ComposableNode) -> String {
                 block.content.children.iter().map(render_node).collect();
             format!(
                 "<{name}{}>{children}</{name}>",
-                render_attributes(&block.attributes)
+                render_attributes(&block.attributes, Some(&block.base_class))
             )
         }
     }
@@ -336,27 +340,82 @@ fn validate_node(node: &ComposableNode) -> bool {
 
 /// Serializes a slice of attributes into an opening-tag attribute string
 /// (leading space included when non-empty). Attribute values are escaped.
-fn render_attributes(attributes: &[HtmlAttribute]) -> String {
+///
+/// `extra_class` supplies a component wrapper class (the block's
+/// `base_class`) which is merged ahead of any explicit
+/// [`HtmlAttribute::Class`] values into a single `class="..."` attribute.
+/// Pass `None` for void tags, which have no `base_class`.
+fn render_attributes(attributes: &[HtmlAttribute], extra_class: Option<&str>) -> String {
+    use crate::browser::utils::escape_attribute;
+
+    /// Appends a leading-space `key="value"` pair with the value escaped.
+    fn push_pair(out: &mut String, key: &str, value: &str) {
+        out.push_str(&format!(r#" {key}="{}""#, escape_attribute(value)));
+    }
+    /// Appends a leading-space bare boolean attribute when `present`.
+    fn push_bool(out: &mut String, name: &str, present: bool) {
+        if present {
+            out.push(' ');
+            out.push_str(name);
+        }
+    }
+
     let mut out = String::new();
+
+    // Merge the component wrapper class with every explicit `Class`
+    // attribute into a single `class="..."` (base class first).
+    let mut class_parts: Vec<Option<&str>> = vec![extra_class];
     for attr in attributes {
-        // Project 2 scope: only the common string/URL attributes are
-        // emitted. Variants not matched here (Class, Id, Style, …) are
-        // intentionally dropped until a consumer needs them.
-        let pair: Option<(&str, String)> = match attr {
-            HtmlAttribute::Title(value) => Some(("title", value.clone())),
-            HtmlAttribute::Alt(value) => Some(("alt", value.clone())),
-            HtmlAttribute::Name(value) => Some(("name", value.clone())),
-            HtmlAttribute::Placeholder(value) => Some(("placeholder", value.clone())),
-            HtmlAttribute::Target(value) => Some(("target", value.clone())),
-            HtmlAttribute::Href(url) => Some(("href", url.to_string())),
-            HtmlAttribute::Src(url) => Some(("src", url.to_string())),
-            _ => None,
-        };
-        if let Some((key, value)) = pair {
-            out.push_str(&format!(
-                r#" {key}="{}""#,
-                crate::browser::utils::escape_attribute(&value)
-            ));
+        if let HtmlAttribute::Class(class) = attr {
+            class_parts.push(Some(class.as_str()));
+        }
+    }
+    let merged_class = crate::browser::utils::classes(class_parts);
+    if !merged_class.is_empty() {
+        push_pair(&mut out, "class", &merged_class);
+    }
+
+    for attr in attributes {
+        match attr {
+            // Handled above as part of the merged class attribute.
+            HtmlAttribute::Class(_) => {}
+            HtmlAttribute::Id(id) => push_pair(&mut out, "id", id.as_str()),
+            HtmlAttribute::Style(style) => {
+                let value = style.to_css().replace('\n', " ");
+                push_pair(&mut out, "style", &value);
+            }
+            HtmlAttribute::Title(value) => push_pair(&mut out, "title", value),
+            HtmlAttribute::Data(name, value) => {
+                push_pair(&mut out, &format!("data-{}", name.as_str()), value);
+            }
+            HtmlAttribute::Hidden(present) => push_bool(&mut out, "hidden", *present),
+            HtmlAttribute::Role(role) => push_pair(&mut out, "role", role.as_str()),
+            HtmlAttribute::Aria(aria) => out.push_str(&aria.render()),
+            HtmlAttribute::Href(url) => push_pair(&mut out, "href", url.as_str()),
+            HtmlAttribute::Src(url) => push_pair(&mut out, "src", url.as_str()),
+            HtmlAttribute::Alt(value) => push_pair(&mut out, "alt", value),
+            HtmlAttribute::Type(html_type) => {
+                push_pair(&mut out, "type", &html_type.as_value());
+            }
+            HtmlAttribute::Name(value) => push_pair(&mut out, "name", value),
+            HtmlAttribute::Value(value) => push_pair(&mut out, "value", value),
+            HtmlAttribute::Placeholder(value) => {
+                push_pair(&mut out, "placeholder", value);
+            }
+            HtmlAttribute::Disabled(present) => {
+                push_bool(&mut out, "disabled", *present);
+            }
+            HtmlAttribute::Checked(present) => {
+                push_bool(&mut out, "checked", *present);
+            }
+            HtmlAttribute::Selected(present) => {
+                push_bool(&mut out, "selected", *present);
+            }
+            HtmlAttribute::Target(value) => push_pair(&mut out, "target", value),
+            HtmlAttribute::Rel(rel) => push_pair(&mut out, "rel", rel.as_str()),
+            HtmlAttribute::Other(key, value) => {
+                push_pair(&mut out, &escape_attribute(key), value);
+            }
         }
     }
     out

@@ -266,6 +266,49 @@ pub enum HtmlType {
     Other(String),
 }
 
+impl HtmlType {
+    /// The `type` attribute value for this variant.
+    ///
+    /// Most variants map to a static token; `Mime` and `Other` carry an
+    /// owned string, hence the [`Cow`] return.
+    pub fn as_value(&self) -> std::borrow::Cow<'_, str> {
+        use std::borrow::Cow;
+        match self {
+            HtmlType::Button => Cow::Borrowed("button"),
+            HtmlType::Checkbox => Cow::Borrowed("checkbox"),
+            HtmlType::Color => Cow::Borrowed("color"),
+            HtmlType::Date => Cow::Borrowed("date"),
+            HtmlType::DatetimeLocal => Cow::Borrowed("datetime-local"),
+            HtmlType::Email => Cow::Borrowed("email"),
+            HtmlType::File => Cow::Borrowed("file"),
+            HtmlType::Hidden => Cow::Borrowed("hidden"),
+            HtmlType::Image => Cow::Borrowed("image"),
+            HtmlType::Month => Cow::Borrowed("month"),
+            HtmlType::Number => Cow::Borrowed("number"),
+            HtmlType::Password => Cow::Borrowed("password"),
+            HtmlType::Radio => Cow::Borrowed("radio"),
+            HtmlType::Range => Cow::Borrowed("range"),
+            HtmlType::Reset => Cow::Borrowed("reset"),
+            HtmlType::Search => Cow::Borrowed("search"),
+            HtmlType::Submit => Cow::Borrowed("submit"),
+            HtmlType::Tel => Cow::Borrowed("tel"),
+            HtmlType::Text => Cow::Borrowed("text"),
+            HtmlType::Time => Cow::Borrowed("time"),
+            HtmlType::Url => Cow::Borrowed("url"),
+            HtmlType::Week => Cow::Borrowed("week"),
+            HtmlType::Decimal => Cow::Borrowed("1"),
+            HtmlType::LowerAlpha => Cow::Borrowed("a"),
+            HtmlType::UpperAlpha => Cow::Borrowed("A"),
+            HtmlType::LowerRoman => Cow::Borrowed("i"),
+            HtmlType::UpperRoman => Cow::Borrowed("I"),
+            HtmlType::Module => Cow::Borrowed("module"),
+            HtmlType::ImportMap => Cow::Borrowed("importmap"),
+            HtmlType::Mime(value) => Cow::Borrowed(value.as_str()),
+            HtmlType::Other(value) => Cow::Borrowed(value.as_str()),
+        }
+    }
+}
+
 /// Enumerates the most common HTML Attributes, providing
 /// strong types. Allows an `Other((String, Value))` outlet
 /// if a less commonly used attribute is needed.

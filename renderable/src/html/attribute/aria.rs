@@ -255,6 +255,223 @@ pub enum AriaAttribute {
     BrailleRoleDescription(String),
 }
 
+impl AriaTriState {
+    /// The string token for this tri-state value.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            AriaTriState::True => "true",
+            AriaTriState::False => "false",
+            AriaTriState::Mixed => "mixed",
+        }
+    }
+}
+
+impl AriaAutoComplete {
+    /// The `aria-autocomplete` token for this value.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            AriaAutoComplete::None => "none",
+            AriaAutoComplete::Inline => "inline",
+            AriaAutoComplete::List => "list",
+            AriaAutoComplete::Both => "both",
+        }
+    }
+}
+
+impl AriaHasPopup {
+    /// The `aria-haspopup` token for this value.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            AriaHasPopup::False => "false",
+            AriaHasPopup::True => "true",
+            AriaHasPopup::Menu => "menu",
+            AriaHasPopup::ListBox => "listbox",
+            AriaHasPopup::Tree => "tree",
+            AriaHasPopup::Grid => "grid",
+            AriaHasPopup::Dialog => "dialog",
+        }
+    }
+}
+
+impl AriaInvalid {
+    /// The `aria-invalid` token for this value.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            AriaInvalid::False => "false",
+            AriaInvalid::True => "true",
+            AriaInvalid::Grammar => "grammar",
+            AriaInvalid::Spelling => "spelling",
+        }
+    }
+}
+
+impl AriaOrientation {
+    /// The `aria-orientation` token for this value.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            AriaOrientation::Horizontal => "horizontal",
+            AriaOrientation::Vertical => "vertical",
+        }
+    }
+}
+
+impl AriaLive {
+    /// The `aria-live` token for this value.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            AriaLive::Assertive => "assertive",
+            AriaLive::Off => "off",
+            AriaLive::Polite => "polite",
+        }
+    }
+}
+
+impl AriaRelevant {
+    /// The `aria-relevant` token for this value.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            AriaRelevant::Additions => "additions",
+            AriaRelevant::All => "all",
+            AriaRelevant::Removals => "removals",
+            AriaRelevant::Text => "text",
+        }
+    }
+}
+
+impl AriaSort {
+    /// The `aria-sort` token for this value.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            AriaSort::Ascending => "ascending",
+            AriaSort::Descending => "descending",
+            AriaSort::None => "none",
+            AriaSort::Other => "other",
+        }
+    }
+}
+
+impl AriaCurrent {
+    /// The `aria-current` token for this value.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            AriaCurrent::False => "false",
+            AriaCurrent::True => "true",
+            AriaCurrent::Page => "page",
+            AriaCurrent::Step => "step",
+            AriaCurrent::Location => "location",
+            AriaCurrent::Date => "date",
+            AriaCurrent::Time => "time",
+        }
+    }
+}
+
+impl AriaDropEffect {
+    /// The `aria-dropeffect` token for this value.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            AriaDropEffect::Copy => "copy",
+            AriaDropEffect::Execute => "execute",
+            AriaDropEffect::Link => "link",
+            AriaDropEffect::Move => "move",
+            AriaDropEffect::None => "none",
+            AriaDropEffect::Popup => "popup",
+        }
+    }
+}
+
+impl AriaAttribute {
+    /// Renders this attribute as a leading-space `aria-{name}="{value}"`
+    /// fragment, with the value escaped for a double-quoted attribute.
+    ///
+    /// ARIA booleans are string-valued (`"true"`/`"false"`), not HTML
+    /// boolean attributes, so they always emit an explicit value.
+    pub fn render(&self) -> String {
+        fn join_ids(ids: &[DomId]) -> String {
+            ids.iter()
+                .map(DomId::as_str)
+                .collect::<Vec<_>>()
+                .join(" ")
+        }
+        let bool_str = |value: bool| if value { "true" } else { "false" }.to_string();
+
+        let (name, value): (&str, String) = match self {
+            AriaAttribute::AutoComplete(v) => ("autocomplete", v.as_str().to_string()),
+            AriaAttribute::Checked(v) => ("checked", v.as_str().to_string()),
+            AriaAttribute::Disabled(v) => ("disabled", bool_str(*v)),
+            AriaAttribute::ErrorMessage(v) => ("errormessage", v.as_str().to_string()),
+            AriaAttribute::Expanded(v) => ("expanded", bool_str(*v)),
+            AriaAttribute::HasPopup(v) => ("haspopup", v.as_str().to_string()),
+            AriaAttribute::Hidden(v) => ("hidden", bool_str(*v)),
+            AriaAttribute::Invalid(v) => ("invalid", v.as_str().to_string()),
+            AriaAttribute::KeyShortcuts(v) => ("keyshortcuts", v.clone()),
+            AriaAttribute::Label(v) => ("label", v.clone()),
+            AriaAttribute::Level(v) => ("level", v.to_string()),
+            AriaAttribute::Modal(v) => ("modal", bool_str(*v)),
+            AriaAttribute::MultiLine(v) => ("multiline", bool_str(*v)),
+            AriaAttribute::MultiSelectable(v) => ("multiselectable", bool_str(*v)),
+            AriaAttribute::Orientation(v) => ("orientation", v.as_str().to_string()),
+            AriaAttribute::Placeholder(v) => ("placeholder", v.clone()),
+            AriaAttribute::Pressed(v) => ("pressed", v.as_str().to_string()),
+            AriaAttribute::ReadOnly(v) => ("readonly", bool_str(*v)),
+            AriaAttribute::Required(v) => ("required", bool_str(*v)),
+            AriaAttribute::Selected(v) => ("selected", bool_str(*v)),
+            AriaAttribute::Sort(v) => ("sort", v.as_str().to_string()),
+            AriaAttribute::ValueMax(v) => ("valuemax", v.to_string()),
+            AriaAttribute::ValueMin(v) => ("valuemin", v.to_string()),
+            AriaAttribute::ValueNow(v) => ("valuenow", v.to_string()),
+            AriaAttribute::ValueText(v) => ("valuetext", v.clone()),
+            AriaAttribute::Atomic(v) => ("atomic", bool_str(*v)),
+            AriaAttribute::Busy(v) => ("busy", bool_str(*v)),
+            AriaAttribute::Live(v) => ("live", v.as_str().to_string()),
+            AriaAttribute::Relevant(v) => (
+                "relevant",
+                v.iter()
+                    .map(AriaRelevant::as_str)
+                    .collect::<Vec<_>>()
+                    .join(" "),
+            ),
+            AriaAttribute::DropEffect(v) => (
+                "dropeffect",
+                v.iter()
+                    .map(AriaDropEffect::as_str)
+                    .collect::<Vec<_>>()
+                    .join(" "),
+            ),
+            AriaAttribute::Grabbed(v) => ("grabbed", bool_str(*v)),
+            AriaAttribute::ActiveDescendant(v) => {
+                ("activedescendant", v.as_str().to_string())
+            }
+            AriaAttribute::ColCount(v) => ("colcount", v.to_string()),
+            AriaAttribute::ColIndex(v) => ("colindex", v.to_string()),
+            AriaAttribute::ColIndexText(v) => ("colindextext", v.clone()),
+            AriaAttribute::ColSpan(v) => ("colspan", v.to_string()),
+            AriaAttribute::Controls(v) => ("controls", join_ids(v)),
+            AriaAttribute::DescribedBy(v) => ("describedby", join_ids(v)),
+            AriaAttribute::Description(v) => ("description", v.clone()),
+            AriaAttribute::Details(v) => ("details", join_ids(v)),
+            AriaAttribute::FlowTo(v) => ("flowto", join_ids(v)),
+            AriaAttribute::LabelledBy(v) => ("labelledby", join_ids(v)),
+            AriaAttribute::Owns(v) => ("owns", join_ids(v)),
+            AriaAttribute::PosInSet(v) => ("posinset", v.to_string()),
+            AriaAttribute::RowCount(v) => ("rowcount", v.to_string()),
+            AriaAttribute::RowIndex(v) => ("rowindex", v.to_string()),
+            AriaAttribute::RowIndexText(v) => ("rowindextext", v.clone()),
+            AriaAttribute::RowSpan(v) => ("rowspan", v.to_string()),
+            AriaAttribute::SetSize(v) => ("setsize", v.to_string()),
+            AriaAttribute::Current(v) => ("current", v.as_str().to_string()),
+            AriaAttribute::RoleDescription(v) => ("roledescription", v.clone()),
+            AriaAttribute::BrailleLabel(v) => ("braillelabel", v.clone()),
+            AriaAttribute::BrailleRoleDescription(v) => {
+                ("brailleroledescription", v.clone())
+            }
+        };
+        format!(
+            r#" aria-{name}="{}""#,
+            crate::browser::utils::escape_attribute(&value)
+        )
+    }
+}
+
 /// Enumerates the WAI-ARIA roles that may be assigned to an element via the
 /// `role` attribute. Roles are grouped into widget, document structure,
 /// landmark, live region, and window categories.
@@ -442,4 +659,96 @@ pub enum AriaRole {
     // --- Application role ---
     /// A structure containing one or more focusable elements requiring user input, such as keyboard or gesture events.
     Application,
+}
+
+impl AriaRole {
+    /// The lowercase `role` attribute token for this WAI-ARIA role.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            AriaRole::Alert => "alert",
+            AriaRole::AlertDialog => "alertdialog",
+            AriaRole::Button => "button",
+            AriaRole::Checkbox => "checkbox",
+            AriaRole::Combobox => "combobox",
+            AriaRole::GridCell => "gridcell",
+            AriaRole::Link => "link",
+            AriaRole::MenuItem => "menuitem",
+            AriaRole::MenuItemCheckbox => "menuitemcheckbox",
+            AriaRole::MenuItemRadio => "menuitemradio",
+            AriaRole::Option => "option",
+            AriaRole::ProgressBar => "progressbar",
+            AriaRole::Radio => "radio",
+            AriaRole::ScrollBar => "scrollbar",
+            AriaRole::SearchBox => "searchbox",
+            AriaRole::Separator => "separator",
+            AriaRole::Slider => "slider",
+            AriaRole::SpinButton => "spinbutton",
+            AriaRole::Switch => "switch",
+            AriaRole::Tab => "tab",
+            AriaRole::TabPanel => "tabpanel",
+            AriaRole::TextBox => "textbox",
+            AriaRole::TreeItem => "treeitem",
+            AriaRole::Grid => "grid",
+            AriaRole::ListBox => "listbox",
+            AriaRole::Menu => "menu",
+            AriaRole::MenuBar => "menubar",
+            AriaRole::RadioGroup => "radiogroup",
+            AriaRole::TabList => "tablist",
+            AriaRole::Tree => "tree",
+            AriaRole::TreeGrid => "treegrid",
+            AriaRole::Article => "article",
+            AriaRole::Blockquote => "blockquote",
+            AriaRole::Caption => "caption",
+            AriaRole::Cell => "cell",
+            AriaRole::Code => "code",
+            AriaRole::ColumnHeader => "columnheader",
+            AriaRole::Comment => "comment",
+            AriaRole::Definition => "definition",
+            AriaRole::Deletion => "deletion",
+            AriaRole::Document => "document",
+            AriaRole::Emphasis => "emphasis",
+            AriaRole::Feed => "feed",
+            AriaRole::Figure => "figure",
+            AriaRole::Generic => "generic",
+            AriaRole::Group => "group",
+            AriaRole::Heading => "heading",
+            AriaRole::Image => "image",
+            AriaRole::Insertion => "insertion",
+            AriaRole::List => "list",
+            AriaRole::ListItem => "listitem",
+            AriaRole::Mark => "mark",
+            AriaRole::Math => "math",
+            AriaRole::Meter => "meter",
+            AriaRole::None => "none",
+            AriaRole::Note => "note",
+            AriaRole::Paragraph => "paragraph",
+            AriaRole::Presentation => "presentation",
+            AriaRole::Row => "row",
+            AriaRole::RowGroup => "rowgroup",
+            AriaRole::RowHeader => "rowheader",
+            AriaRole::Strong => "strong",
+            AriaRole::Subscript => "subscript",
+            AriaRole::Suggestion => "suggestion",
+            AriaRole::Superscript => "superscript",
+            AriaRole::Table => "table",
+            AriaRole::Term => "term",
+            AriaRole::Time => "time",
+            AriaRole::Toolbar => "toolbar",
+            AriaRole::Tooltip => "tooltip",
+            AriaRole::Banner => "banner",
+            AriaRole::Complementary => "complementary",
+            AriaRole::ContentInfo => "contentinfo",
+            AriaRole::Form => "form",
+            AriaRole::Main => "main",
+            AriaRole::Navigation => "navigation",
+            AriaRole::Region => "region",
+            AriaRole::Search => "search",
+            AriaRole::Log => "log",
+            AriaRole::Marquee => "marquee",
+            AriaRole::Status => "status",
+            AriaRole::Timer => "timer",
+            AriaRole::Dialog => "dialog",
+            AriaRole::Application => "application",
+        }
+    }
 }

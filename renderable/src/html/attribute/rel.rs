@@ -123,3 +123,80 @@ pub enum RelAttribute {
     ForHyperLinkOrArea(ARel),
     ForForm(FormRel),
 }
+
+impl LinkRel {
+    /// The `rel` keyword token for this link relationship.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            LinkRel::Alternate => "alternate",
+            LinkRel::Author => "author",
+            LinkRel::Canonical => "canonical",
+            LinkRel::CompressionDictionary => "compression-dictionary",
+            LinkRel::Expect => "expect",
+            LinkRel::Help => "help",
+            LinkRel::License => "license",
+            LinkRel::Manifest => "manifest",
+            LinkRel::Me => "me",
+            LinkRel::Next => "next",
+            LinkRel::Prev => "prev",
+            LinkRel::PrivacyPolicy => "privacy-policy",
+            LinkRel::Search => "search",
+            LinkRel::Stylesheet => "stylesheet",
+            LinkRel::TermsOfService => "terms-of-service",
+        }
+    }
+}
+
+impl ARel {
+    /// The `rel` keyword token for this hyperlink/area relationship.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            ARel::Alternate => "alternate",
+            ARel::Author => "author",
+            ARel::Bookmark => "bookmark",
+            ARel::External => "external",
+            ARel::Help => "help",
+            ARel::License => "license",
+            ARel::Me => "me",
+            ARel::Next => "next",
+            ARel::NoFollow => "nofollow",
+            ARel::NoOpener => "noopener",
+            ARel::NoReferrer => "noreferrer",
+            ARel::Opener => "opener",
+            ARel::Prev => "prev",
+            ARel::PrivacyPolicy => "privacy-policy",
+            ARel::Search => "search",
+            ARel::Tag => "tag",
+            ARel::TermsOfService => "terms-of-service",
+        }
+    }
+}
+
+impl FormRel {
+    /// The `rel` keyword token for this form relationship.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            FormRel::External => "external",
+            FormRel::Help => "help",
+            FormRel::License => "license",
+            FormRel::Next => "next",
+            FormRel::NoFollow => "nofollow",
+            FormRel::NoOpener => "noopener",
+            FormRel::NoReferrer => "noreferrer",
+            FormRel::Opener => "opener",
+            FormRel::Prev => "prev",
+            FormRel::Search => "search",
+        }
+    }
+}
+
+impl RelAttribute {
+    /// The `rel` keyword token, dispatching to the inner relationship enum.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            RelAttribute::ForLink(rel) => rel.as_str(),
+            RelAttribute::ForHyperLinkOrArea(rel) => rel.as_str(),
+            RelAttribute::ForForm(rel) => rel.as_str(),
+        }
+    }
+}

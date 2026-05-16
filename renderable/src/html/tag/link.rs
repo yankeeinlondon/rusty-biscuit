@@ -27,23 +27,7 @@ impl LinkTag {
 
     /// Returns the `rel` attribute as its HTML keyword string.
     fn rel_str(&self) -> &'static str {
-        match self.rel {
-            LinkRel::Alternate => "alternate",
-            LinkRel::Author => "author",
-            LinkRel::Canonical => "canonical",
-            LinkRel::CompressionDictionary => "compression-dictionary",
-            LinkRel::Expect => "expect",
-            LinkRel::Help => "help",
-            LinkRel::License => "license",
-            LinkRel::Manifest => "manifest",
-            LinkRel::Me => "me",
-            LinkRel::Next => "next",
-            LinkRel::Prev => "prev",
-            LinkRel::PrivacyPolicy => "privacy-policy",
-            LinkRel::Search => "search",
-            LinkRel::Stylesheet => "stylesheet",
-            LinkRel::TermsOfService => "terms-of-service",
-        }
+        self.rel.as_str()
     }
 
     /// Renders this link tag as an HTML `<link>` element.

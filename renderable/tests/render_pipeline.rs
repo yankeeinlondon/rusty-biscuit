@@ -12,7 +12,7 @@ fn fragment_renders_block_with_text_child() {
         ))
         .finalize();
     let html = fragment.render();
-    assert_eq!(html, "<p>hello &amp; welcome</p>");
+    assert_eq!(html, r#"<p class="intro">hello &amp; welcome</p>"#);
 }
 
 #[test]
@@ -36,7 +36,7 @@ fn page_render_emits_doctype_charset_and_title() {
     let html = page.render();
     assert!(html.starts_with("<!DOCTYPE html><html><head><meta charset=\"utf-8\">"));
     assert!(html.contains("<title>My Page</title>"));
-    assert!(html.contains("<h1>Welcome</h1>"));
+    assert!(html.contains(r#"<h1 class="heading">Welcome</h1>"#));
 }
 
 #[test]
@@ -133,6 +133,110 @@ fn nested_component_aux_state_rolls_up_to_page() {
     assert!(page.render().contains("child description"));
     // Feature rollup through the nested component.
     assert!(page.features().contains(&PageFeature::DarkMode));
+}
+
+#[test]
+fn block_emits_base_class() {
+    use renderable::browser::fragment::ComposableNode;
+
+    let fragment = BrowserFragment::new()
+        .define_as_block_tag(BlockTag::Div, "widget")
+        .add_child(ComposableNode::TextFragment("hi".to_string()))
+        .finalize();
+    assert_eq!(fragment.render(), r#"<div class="widget">hi</div>"#);
+}
+
+#[test]
+fn base_class_merges_with_explicit_class() {
+    use renderable::html::attribute::ClassDefinition;
+    use renderable::html::tag::HtmlAttribute;
+
+    let fragment = BrowserFragment::new()
+        .define_as_block_tag(BlockTag::Div, "widget")
+        .add_attribute(HtmlAttribute::Class(ClassDefinition::new("active large")))
+        .finalize();
+    assert_eq!(fragment.render(), r#"<div class="widget active large"></div>"#);
+}
+
+#[test]
+fn empty_base_class_yields_no_class_attribute() {
+    let fragment = BrowserFragment::new()
+        .define_as_block_tag(BlockTag::Div, "")
+        .finalize();
+    assert_eq!(fragment.render(), "<div></div>");
+}
+
+#[test]
+fn id_and_style_are_rendered() {
+    use renderable::html::attribute::DomId;
+    use renderable::html::tag::HtmlAttribute;
+    use renderable::stylesheet::{CssIntegerProp, CssSizing, CssSizingProp, CssStyle};
+
+    // A two-declaration style exercises the `\n` → space collapse.
+    let style = CssStyle::new()
+        .add(CssSizingProp::Width, CssSizing::px(80.0))
+        .add(CssIntegerProp::ZIndex, 5);
+    let fragment = BrowserFragment::new()
+        .define_as_block_tag(BlockTag::Span, "")
+        .add_attribute(HtmlAttribute::Id(DomId::new("main")))
+        .add_attribute(HtmlAttribute::Style(style))
+        .finalize();
+    let html = fragment.render();
+    assert!(html.contains(r#"id="main""#), "{html}");
+    assert!(html.contains(r#"style="width: 80px; z-index: 5;""#), "{html}");
+}
+
+#[test]
+fn boolean_attribute_present_when_true_absent_when_false() {
+    use renderable::html::tag::{HtmlAttribute, VoidTag};
+
+    let on = BrowserFragment::new()
+        .define_as_void_tag(VoidTag::Input)
+        .add_attribute(HtmlAttribute::Disabled(true))
+        .finalize();
+    assert_eq!(on.render(), "<input disabled>");
+
+    let off = BrowserFragment::new()
+        .define_as_void_tag(VoidTag::Input)
+        .add_attribute(HtmlAttribute::Disabled(false))
+        .finalize();
+    assert_eq!(off.render(), "<input>");
+}
+
+#[test]
+fn role_aria_and_data_attributes_are_rendered() {
+    use renderable::html::attribute::aria::{AriaAttribute, AriaRole};
+    use renderable::html::attribute::HtmlDataAttribute;
+    use renderable::html::tag::HtmlAttribute;
+
+    let fragment = BrowserFragment::new()
+        .define_as_block_tag(BlockTag::Div, "")
+        .add_attribute(HtmlAttribute::Role(AriaRole::AlertDialog))
+        .add_attribute(HtmlAttribute::Aria(AriaAttribute::Expanded(true)))
+        .add_attribute(HtmlAttribute::Data(
+            HtmlDataAttribute::new("count"),
+            "3".to_string(),
+        ))
+        .finalize();
+    let html = fragment.render();
+    assert!(html.contains(r#"role="alertdialog""#), "{html}");
+    assert!(html.contains(r#"aria-expanded="true""#), "{html}");
+    assert!(html.contains(r#"data-count="3""#), "{html}");
+}
+
+#[test]
+fn attribute_values_are_escaped() {
+    use renderable::html::tag::HtmlAttribute;
+
+    let fragment = BrowserFragment::new()
+        .define_as_block_tag(BlockTag::Div, "")
+        .add_attribute(HtmlAttribute::Title(r#"a "quote" < & b"#.to_string()))
+        .finalize();
+    let html = fragment.render();
+    assert!(
+        html.contains(r#"title="a &quot;quote&quot; &lt; &amp; b""#),
+        "{html}"
+    );
 }
 
 #[test]
