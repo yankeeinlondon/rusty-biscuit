@@ -270,7 +270,7 @@ impl HtmlType {
     /// The `type` attribute value for this variant.
     ///
     /// Most variants map to a static token; `Mime` and `Other` carry an
-    /// owned string, hence the [`Cow`] return.
+    /// owned string, hence the [`Cow`](std::borrow::Cow) return.
     pub fn as_value(&self) -> std::borrow::Cow<'_, str> {
         use std::borrow::Cow;
         match self {
