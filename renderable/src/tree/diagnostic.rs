@@ -80,6 +80,21 @@ impl Diagnostic {
         }
     }
 
+    /// Creates a [`DiagnosticKind::Validation`] diagnostic with the given severity.
+    #[must_use]
+    pub fn validation(
+        severity: Severity,
+        message: impl Into<String>,
+        span: Option<SourceSpan>,
+    ) -> Self {
+        Self {
+            kind: DiagnosticKind::Validation,
+            severity,
+            message: message.into(),
+            span,
+        }
+    }
+
     /// Returns `true` if this diagnostic has [`Severity::Error`].
     #[must_use]
     pub fn is_error(&self) -> bool {

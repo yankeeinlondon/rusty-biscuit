@@ -11,11 +11,14 @@ use crate::tree::diagnostic::Diagnostic;
 use crate::tree::validate::{ValidationError, ValidationFinding};
 
 /// How strictly a renderer treats lossy or unsupported content.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+///
+/// The [`Default`] is [`RenderStrictness::Warn`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum RenderStrictness {
     /// Reject lossy conversions and unsupported nodes with a [`RenderError`].
     Strict,
     /// Permit them but record a [`Diagnostic`] for each.
+    #[default]
     Warn,
     /// Permit them silently, recording no diagnostics.
     Lossy,

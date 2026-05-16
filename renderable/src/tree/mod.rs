@@ -26,6 +26,7 @@ mod diagnostic;
 mod document;
 mod error;
 mod node;
+pub mod render;
 mod source;
 mod validate;
 
@@ -34,6 +35,10 @@ pub use diagnostic::{Diagnostic, DiagnosticKind, Severity};
 pub use document::{Document, DocumentMetadata, Frontmatter, FrontmatterFormat};
 pub use error::{RenderError, RenderStrictness, Rendered};
 pub use node::{ColumnAlign, HeadingDepth, HeadingDepthError, NodeKind, RenderNode};
+pub use render::{
+    render_markdown_document, render_markdown_node, MarkdownDialect, MarkdownRenderOptions,
+    MarkdownStyleOptions,
+};
 pub use source::{
     Provenance, SourceDescriptor, SourceId, SourceLocation, SourceRegistry, SourceSpan,
 };
