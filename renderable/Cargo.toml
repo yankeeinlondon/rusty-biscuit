@@ -8,7 +8,18 @@ license = "AGPL-3.0-only"
 name = "renderable"
 path = "src/lib.rs"
 
+[features]
+clap = ["dep:clap"]
+
 [dependencies]
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
 thiserror = "2.0"
 tracing = "0.1"
 url = "2.5"
+
+# CLI argument parsing (optional, for ValueEnum derive)
+clap = { version = "4", features = ["derive"], optional = true }
+
+[dev-dependencies]
+proptest = "1.5"
