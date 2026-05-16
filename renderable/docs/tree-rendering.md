@@ -154,39 +154,44 @@ input:
 
 Flow A is genuinely proven at the test level, not theoretical.
 
-### Flow B — component → tree → render (proof of concept only)
+### Flow B — component → tree → render (one component, parity-gated)
 
-This is the `TreeRenderable` use case, and coverage is thin:
+This is the `TreeRenderable` use case. One component is adopted and now has a
+parity gate; the rest of the component ecosystem is unadopted.
 
-- Only `BlockQuote` is tested, with 8 happy-path tests: tree-structure
-  assertions (root kind, child counts), text extraction from a `Prose`, and
+- Only `BlockQuote` implements `TreeRenderable`. Its 8 happy-path tests cover
+  tree structure (root kind, child counts), text extraction from a `Prose`, and
   rendering the projected tree out through the Markdown and Browser renderers
   (`render_markdown_node` → `> Quoted text`; `render_browser_node` → contains
   `<blockquote>`).
-- `TreeComponent` is unit-tested, but with synthetic stub types — not with a
-  real component.
+- `TreeComponent` is unit-tested with synthetic stub types.
+- **Component parity** (`render_tree_component_parity.rs`, `biscuit-terminal`) —
+  `BlockQuote` is rendered *both* ways, its bespoke `TerminalRenderable` versus
+  `TreeComponent` through the tree, and the two outputs are compared on semantic
+  invariants (token presence after ANSI stripping). This is the Flow B
+  equivalent of the darkmatter parity gate: it demonstrates the tree path
+  preserves a component's content faithfully, with the accepted layout
+  divergences (border treatment, attribution placement, flattened `Prose`
+  styling) documented in the test.
 
-These tests prove the **cross-crate plumbing works** — a real component can
-produce a valid tree and that tree renders. They do **not** prove the tree
-approach can faithfully *replace* a component's existing renderers.
+Flow B is now **parity-gated for `BlockQuote`** — for that component the tree
+path is demonstrated faithful, not merely wired. It remains a single-component
+proof: the parity discipline exists and is proven once, but no component more
+complex than `BlockQuote` has been put through it.
 
 ### Known gaps
 
-- **No component-side parity test.** Nothing compares a component's bespoke
-  output (`BlockQuote::render(&term)`) against its tree-routed output
-  (`TreeComponent::new(quote).render(&term)`). Flow A has exactly this kind of
-  parity gate (Phase 11); Flow B does not. Until it exists, "components can
-  migrate to the tree" is asserted-by-design, not demonstrated. **Adding this
-  test — render the same component both ways and assert semantic equivalence —
-  is the single highest-value next step for Flow B**, and should be the gate
-  before any further component adoption.
+- **Component parity covers only `BlockQuote`.** The component-side parity gate
+  (`render_tree_component_parity.rs`) demonstrates the tree path on `BlockQuote`
+  alone. Every further component adoption needs its own parity test before the
+  component is flipped — the discipline is established, but unproven on anything
+  more complex than `BlockQuote`.
 - **No production wiring.** `as_html`, `for_terminal`, and every component
   `.render()` still run legacy code. The tree path is reachable only from tests.
-- **The component terminal-via-tree path is untested for `BlockQuote`** — its
-  tree tests cover Markdown and Browser only.
-- **Lossy projection fidelity is untested.** `BlockQuote`'s text extraction from
-  a component is documented as lossy (ANSI stripped, structure collapsed); no
-  test characterizes what is lost.
+- **Lossy projection fidelity is characterized, not eliminated.** `BlockQuote`'s
+  text extraction from a `Prose` component is lossy (styling flattened); the
+  parity test asserts the *content* survives both paths and documents the
+  styling loss as accepted — it does not recover the lost styling.
 - **Hard components are unprojected.** `BlockQuote` is nearly the simplest
   structural component. Tables, nested lists, and mixed inline/block content —
   the cases that would actually stress the `NodeKind` vocabulary from the
@@ -203,10 +208,12 @@ own feature with its own parity gate.
 
 ### Near term — close the Flow B confidence gap
 
-1. **Add the component-side parity test** for `BlockQuote`: bespoke
-   `TerminalRenderable` vs `TreeComponent` through the tree, asserting semantic
-   equivalence. This converts "the plumbing runs" into "the tree can replace a
-   renderer."
+1. **Component-side parity test — done.** `render_tree_component_parity.rs`
+   renders `BlockQuote` both ways — bespoke `TerminalRenderable` vs
+   `TreeComponent` through the tree — and asserts semantic equivalence. This
+   converts "the plumbing runs" into "the tree can faithfully render this
+   component." The pattern is now established; every further component adoption
+   must add its own parity test before the component is flipped.
 2. **Build the `BrowserRenderable` tree adapter.** `TreeComponent` only bridges
    the terminal today. The browser adapter must define an error policy because
    `BrowserRenderable::render_html_fragment` is infallible.
