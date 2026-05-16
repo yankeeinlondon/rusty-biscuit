@@ -1,11 +1,22 @@
 //! Stack-based fold of a `pulldown-cmark` event stream into a render tree.
 //!
 //! [`fold_markdown_to_document`] walks a [`pulldown_cmark`] 0.13 event stream
-//! and builds a canonical [`renderable::tree::Document`]. It is the minimal
-//! Milestone 1 fold: it covers the common CommonMark + GFM subset (paragraphs,
-//! headings, lists, tables, code, emphasis, links, images, breaks, raw HTML and
-//! task lists). Footnotes, custom darkmatter inline styles, attributed
-//! horizontal rules and full raw-HTML grouping are intentionally out of scope.
+//! and builds a canonical [`renderable::tree::Document`]. It covers the common
+//! CommonMark + GFM subset (paragraphs, headings, lists, tables, code,
+//! emphasis, links, images, breaks, raw HTML, task lists), plus footnotes,
+//! grouped raw-HTML blocks, and native superscript/subscript spans.
+//!
+//! Two darkmatter inline conveniences are intentionally **deferred** to a
+//! follow-up feature: `==mark==` / dim inline styles and horizontal rules with
+//! attribute blocks. Both are produced by darkmatter's `InlineStyleProcessor` /
+//! `RuleProcessor`, which are iterator adapters bounded
+//! `where I: Iterator<Item = Event<'a>>`. They cannot consume an `OffsetIter`
+//! (item `(Event, Range)`) and they discard source byte ranges (splitting text
+//! events, replacing whole paragraphs). Routing the fold through them would
+//! make every node `Synthetic` with no location — a regression. Reconciling
+//! offset preservation with those processors needs a separate design decision,
+//! so the fold stays on `Parser::new_ext(...).into_offset_iter()` and the two
+//! features wait for that follow-up.
 //!
 //! The fold is **total**: every event the parser can emit either becomes a node
 //! or produces a [`Diagnostic`] — no event is silently dropped. The
@@ -70,8 +81,15 @@ enum ContainerKind {
     Emphasis,
     Strong,
     Delete,
-    /// `Span` is used for lossy super/subscript folds.
-    Span,
+    /// A generic inline span carrying the given CSS classes. Used for native
+    /// superscript (`["sup"]`) and subscript (`["sub"]`) folds.
+    Span {
+        classes: Vec<String>,
+    },
+    /// A footnote definition; `identifier` is the footnote label.
+    FootnoteDefinition {
+        identifier: String,
+    },
     Link {
         url: String,
         title: Option<String>,
@@ -85,8 +103,8 @@ enum ContainerKind {
     Unsupported {
         label: String,
     },
-    /// `Tag::HtmlBlock` — a pure structural wrapper whose children (the
-    /// `Event::Html` lines) are spliced directly into the parent on close.
+    /// `Tag::HtmlBlock` — the `Event::Html` lines inside it are concatenated
+    /// into a single `NodeKind::Html { block: true }` node on close.
     HtmlBlock,
 }
 
@@ -134,10 +152,11 @@ impl Fold {
 /// Folds a Markdown string into a canonical [`renderable::tree::Document`].
 ///
 /// The input is parsed with `ENABLE_TABLES | ENABLE_STRIKETHROUGH |
-/// ENABLE_TASKLISTS`. Task lists are enabled (unlike darkmatter's existing
-/// render path) because the render tree models `ListItem.checked`; the other
-/// extensions (footnotes, math, definition lists, super/subscript, metadata
-/// blocks) stay off for Milestone 1.
+/// ENABLE_TASKLISTS | ENABLE_FOOTNOTES | ENABLE_SUPERSCRIPT |
+/// ENABLE_SUBSCRIPT`. Task lists let the render tree model
+/// `ListItem.checked`; footnotes fold to `FootnoteDefinition` /
+/// `FootnoteReference` nodes; superscript/subscript fold to class-carrying
+/// `Span` nodes. Math, definition lists and metadata blocks stay off.
 ///
 /// Frontmatter is **not** populated: darkmatter extracts frontmatter before the
 /// parser ever sees the content, and the chosen options do not enable metadata
@@ -156,11 +175,16 @@ pub fn fold_markdown_to_document(
 ) -> (Document, Vec<Diagnostic>) {
     let (registry, source_id) = single_source_registry(source);
 
-    // Milestone 1 option set: tables + strikethrough match darkmatter's render
-    // path, plus task lists so `ListItem.checked` can be populated. Footnotes,
-    // math, definition lists, super/subscript and metadata blocks stay off.
-    let options =
-        Options::ENABLE_TABLES | Options::ENABLE_STRIKETHROUGH | Options::ENABLE_TASKLISTS;
+    // Tables + strikethrough match darkmatter's render path; task lists let
+    // `ListItem.checked` be populated; footnotes and super/subscript fold to
+    // real nodes (`FootnoteDefinition`/`FootnoteReference`, `Span`). Math,
+    // definition lists and metadata blocks stay off.
+    let options = Options::ENABLE_TABLES
+        | Options::ENABLE_STRIKETHROUGH
+        | Options::ENABLE_TASKLISTS
+        | Options::ENABLE_FOOTNOTES
+        | Options::ENABLE_SUPERSCRIPT
+        | Options::ENABLE_SUBSCRIPT;
 
     let mut fold = Fold {
         stack: vec![Frame {
@@ -192,13 +216,11 @@ pub fn fold_markdown_to_document(
             Event::HardBreak => fold.push_leaf(RenderNode::hard_break(), range),
             Event::Rule => fold.push_leaf(RenderNode::thematic_break(), range),
             Event::TaskListMarker(checked) => fold.task_marker(checked, range),
-            // Disabled by the chosen options, but the fold must stay total.
             Event::FootnoteReference(name) => {
-                let label = format!("footnote reference [{name}]");
-                fold.push_leaf(RenderNode::unsupported(label.clone()), range.clone());
-                fold.diagnostics
-                    .push(Diagnostic::unsupported(label, Some(fold.parsed_span(range))));
+                fold.push_leaf(RenderNode::footnote_reference(name.into_string()), range);
             }
+            // Math stays disabled by the chosen options; the fold must stay
+            // total regardless.
             Event::InlineMath(_) | Event::DisplayMath(_) => {
                 let label = "math expression".to_string();
                 fold.push_leaf(RenderNode::unsupported(label.clone()), range.clone());
@@ -267,13 +289,12 @@ impl Fold {
             Tag::Emphasis => ContainerKind::Emphasis,
             Tag::Strong => ContainerKind::Strong,
             Tag::Strikethrough => ContainerKind::Delete,
-            Tag::Superscript | Tag::Subscript => {
-                self.diagnostics.push(Diagnostic::lossy(
-                    "super/subscript folded to a generic span",
-                    Some(self.parsed_span(range.clone())),
-                ));
-                ContainerKind::Span
-            }
+            Tag::Superscript => ContainerKind::Span {
+                classes: vec!["sup".to_string()],
+            },
+            Tag::Subscript => ContainerKind::Span {
+                classes: vec!["sub".to_string()],
+            },
             Tag::Link {
                 dest_url, title, ..
             } => ContainerKind::Link {
@@ -286,9 +307,8 @@ impl Fold {
                 url: dest_url.into_string(),
                 title: non_empty(title.into_string()),
             },
-            // Disabled by the chosen options; kept total per the inventory.
-            Tag::FootnoteDefinition(name) => ContainerKind::Unsupported {
-                label: format!("footnote definition [{name}]"),
+            Tag::FootnoteDefinition(name) => ContainerKind::FootnoteDefinition {
+                identifier: name.into_string(),
             },
             Tag::DefinitionList | Tag::DefinitionListTitle | Tag::DefinitionListDefinition => {
                 ContainerKind::Unsupported {
@@ -331,10 +351,17 @@ impl Fold {
                 });
             }
             ContainerKind::HtmlBlock => {
-                // Structural wrapper: splice the contained HTML lines upward.
-                if let Some(parent) = self.stack.last_mut() {
-                    parent.children.extend(children);
+                // Concatenate the contained `Event::Html` lines into one
+                // block-level `Html` node spanning the whole `HtmlBlock`.
+                let mut value = String::new();
+                for child in &children {
+                    if let NodeKind::Html { value: line, .. } = &child.kind {
+                        value.push_str(line);
+                    }
                 }
+                let mut node = RenderNode::html(value, true);
+                node.span = span;
+                self.push_child(node);
             }
             ContainerKind::TableHead => {
                 // A table head folds into an ordinary leading TableRow.
@@ -402,7 +429,10 @@ fn build_container(kind: ContainerKind, children: Vec<RenderNode>) -> RenderNode
         ContainerKind::Emphasis => RenderNode::emphasis(children),
         ContainerKind::Strong => RenderNode::strong(children),
         ContainerKind::Delete => RenderNode::delete(children),
-        ContainerKind::Span => RenderNode::span(Vec::new(), children),
+        ContainerKind::Span { classes } => RenderNode::span(classes, children),
+        ContainerKind::FootnoteDefinition { identifier } => {
+            RenderNode::footnote_definition(identifier, children)
+        }
         ContainerKind::Link { url, title } => RenderNode::link(url, title, children),
         ContainerKind::Image { url, title } => {
             RenderNode::image(url, title, image_alt(&children))
@@ -702,19 +732,116 @@ mod tests {
     }
 
     #[test]
-    fn raw_html_block_and_inline() {
+    fn raw_html_block_is_one_grouped_node() {
         let (doc, _) = fold("<div>\nblock\n</div>\n");
-        // HtmlBlock is spliced; its Html lines land at the document root.
-        assert!(roots(&doc)
+        // The whole HtmlBlock folds to exactly one block-level Html node whose
+        // value concatenates the contained lines.
+        let children = roots(&doc);
+        let html: Vec<&RenderNode> = children
             .iter()
-            .any(|n| matches!(n.kind, NodeKind::Html { block: true, .. })));
+            .filter(|n| matches!(n.kind, NodeKind::Html { block: true, .. }))
+            .collect();
+        assert_eq!(html.len(), 1, "an HTML block must fold to a single node");
+        match &html[0].kind {
+            NodeKind::Html { value, block } => {
+                assert!(*block);
+                assert_eq!(value, "<div>\nblock\n</div>\n");
+            }
+            other => panic!("expected block Html, got {other:?}"),
+        }
+    }
 
+    #[test]
+    fn inline_html_is_a_non_block_html_node() {
         let (doc, _) = fold("text <span>inline</span> more");
         let para = &roots(&doc)[0];
         assert!(para
             .children()
             .iter()
             .any(|n| matches!(n.kind, NodeKind::Html { block: false, .. })));
+    }
+
+    #[test]
+    fn footnote_reference_and_definition_fold_to_real_nodes() {
+        let (doc, diags) = fold("A claim.[^note]\n\n[^note]: The supporting detail.\n");
+        assert!(diags.is_empty(), "footnotes fold without diagnostics");
+        let children = roots(&doc);
+
+        // The reference lands inside the paragraph.
+        let para = &children[0];
+        let reference = para
+            .children()
+            .iter()
+            .find(|n| matches!(n.kind, NodeKind::FootnoteReference { .. }))
+            .expect("paragraph carries a footnote reference");
+        match &reference.kind {
+            NodeKind::FootnoteReference { identifier } => assert_eq!(identifier, "note"),
+            other => panic!("expected footnote reference, got {other:?}"),
+        }
+
+        // The definition is a top-level node.
+        let definition = children
+            .iter()
+            .find(|n| matches!(n.kind, NodeKind::FootnoteDefinition { .. }))
+            .expect("document carries a footnote definition");
+        match &definition.kind {
+            NodeKind::FootnoteDefinition { identifier, children } => {
+                assert_eq!(identifier, "note");
+                assert!(!children.is_empty());
+            }
+            other => panic!("expected footnote definition, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn footnote_reference_carries_source_location() {
+        let input = "A claim.[^note]\n\n[^note]: detail\n";
+        let (doc, _) = fold(input);
+        let para = &roots(&doc)[0];
+        let reference = para
+            .children()
+            .iter()
+            .find(|n| matches!(n.kind, NodeKind::FootnoteReference { .. }))
+            .expect("paragraph carries a footnote reference");
+        let location = reference
+            .span
+            .location
+            .as_ref()
+            .expect("footnote reference must carry a parsed source location");
+        assert_eq!(reference.span.provenance, Provenance::Parsed);
+        assert!(location.bytes.start < location.bytes.end);
+        assert!(location.bytes.end <= input.len());
+    }
+
+    /// `pulldown-cmark`'s superscript extension only fires when the `^`
+    /// delimiters flank a word boundary (`^text^`); `x^2^` mid-word parses as
+    /// plain text. The test uses the form the parser accepts.
+    #[test]
+    fn native_superscript_folds_to_span_with_sup_class() {
+        let (doc, diags) = fold("the ^2nd^ time");
+        assert!(diags.is_empty(), "superscript folds without diagnostics");
+        let para = &roots(&doc)[0];
+        let span = para
+            .children()
+            .iter()
+            .find(|n| matches!(n.kind, NodeKind::Span { .. }))
+            .expect("paragraph carries a span");
+        assert_eq!(span.attrs.classes, vec!["sup".to_string()]);
+    }
+
+    /// `pulldown-cmark`'s subscript extension uses single `~` delimiters at a
+    /// word boundary (`~text~`); the double `~~` form stays strikethrough.
+    #[test]
+    fn native_subscript_folds_to_span_with_sub_class() {
+        let (doc, diags) = fold("water is ~aqua~ here");
+        assert!(diags.is_empty(), "subscript folds without diagnostics");
+        let para = &roots(&doc)[0];
+        let span = para
+            .children()
+            .iter()
+            .find(|n| matches!(n.kind, NodeKind::Span { .. }))
+            .expect("paragraph carries a span");
+        assert_eq!(span.attrs.classes, vec!["sub".to_string()]);
     }
 
     #[test]

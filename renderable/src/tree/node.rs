@@ -479,6 +479,26 @@ impl RenderNode {
         Self::synthetic(NodeKind::HardBreak)
     }
 
+    /// Creates a [`NodeKind::FootnoteReference`] node.
+    #[must_use]
+    pub fn footnote_reference(identifier: impl Into<String>) -> Self {
+        Self::synthetic(NodeKind::FootnoteReference {
+            identifier: identifier.into(),
+        })
+    }
+
+    /// Creates a [`NodeKind::FootnoteDefinition`] node.
+    #[must_use]
+    pub fn footnote_definition(
+        identifier: impl Into<String>,
+        children: Vec<RenderNode>,
+    ) -> Self {
+        Self::synthetic(NodeKind::FootnoteDefinition {
+            identifier: identifier.into(),
+            children,
+        })
+    }
+
     /// Creates a [`NodeKind::Html`] node.
     #[must_use]
     pub fn html(value: impl Into<String>, block: bool) -> Self {

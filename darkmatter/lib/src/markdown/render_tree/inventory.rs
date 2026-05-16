@@ -26,29 +26,41 @@
 //!
 //! [`NodeKind::Unsupported`]: renderable::tree::NodeKind::Unsupported
 //!
-//! ## Options darkmatter enables
+//! ## Options the fold enables
 //!
-//! The canonical render path constructs its parser with
-//! `darkmatter::markdown::markdown_parse_options()`, which is exactly:
+//! The render-tree fold ([`fold_markdown_to_document`]) constructs its parser
+//! with:
 //!
 //! ```text
 //! Options::ENABLE_TABLES | Options::ENABLE_STRIKETHROUGH
+//!   | Options::ENABLE_TASKLISTS | Options::ENABLE_FOOTNOTES
+//!   | Options::ENABLE_SUPERSCRIPT | Options::ENABLE_SUBSCRIPT
 //! ```
 //!
-//! Consequently, on the render path darkmatter **does not** enable footnotes,
-//! task lists, superscript, subscript, math, definition lists, heading
-//! attributes, or metadata blocks. Variants gated behind those flags
-//! (`FootnoteDefinition`, `FootnoteReference`, `TaskListMarker`, `Superscript`,
-//! `Subscript`, `InlineMath`, `DisplayMath`, `DefinitionList*`,
-//! `MetadataBlock`, and heading `id`/`classes`/`attrs`) are **never produced
-//! on the render path** today. They are still inventoried below — fully and
-//! exhaustively — because:
+//! [`fold_markdown_to_document`]: super::fold::fold_markdown_to_document
 //!
-//! - the `cleanup` path uses `Options::all() - ENABLE_SMART_PUNCTUATION -
-//!   ENABLE_DEFINITION_LIST`, so most of them *are* produced elsewhere in
-//!   darkmatter, and
-//! - the fold must remain total: a wildcard-free `match` over the real enums
-//!   is the only safe contract.
+//! Consequently the fold **does not** enable math, definition lists, heading
+//! attributes, or metadata blocks. Variants gated behind those flags
+//! (`InlineMath`, `DisplayMath`, `DefinitionList*`, `MetadataBlock`, and
+//! heading `id`/`classes`/`attrs`) are **never produced by the fold** today.
+//! They are still inventoried below — fully and exhaustively — because the fold
+//! must remain total: a wildcard-free `match` over the real enums is the only
+//! safe contract.
+//!
+//! ## Intentionally deferred: `==mark==`/dim and HR-with-attributes
+//!
+//! Two darkmatter inline conveniences are **deliberately not folded** and are
+//! deferred to a follow-up feature: `==mark==` / dim inline styles and
+//! horizontal rules carrying an attribute block. These are produced by
+//! darkmatter's `InlineStyleProcessor` and `RuleProcessor`, which are iterator
+//! adapters bounded `where I: Iterator<Item = Event<'a>>`. They cannot consume
+//! the fold's `OffsetIter` (item `(Event, Range)`) and they destroy source byte
+//! ranges — splitting `Event::Text` and replacing whole paragraphs — so routing
+//! the fold through them would strip every node of its `SourceLocation`, a
+//! regression. Reconciling offset preservation with those processors needs a
+//! separate design decision; until then the fold reads the raw
+//! `pulldown-cmark` stream and `==mark==` text and bare `---` rules fold to
+//! ordinary `Text` / `ThematicBreak` nodes.
 //!
 //! Note: `darkmatter` extracts YAML frontmatter itself (see
 //! `markdown::frontmatter`) *before* handing content to `pulldown-cmark`, so
@@ -70,7 +82,7 @@
 //! | `Code(CowStr)` | `Node` | `NodeKind::InlineCode`. |
 //! | `InlineMath(CowStr)` | `Unsupported` | Requires `ENABLE_MATH`; not enabled. Revisit. |
 //! | `DisplayMath(CowStr)` | `Unsupported` | Requires `ENABLE_MATH`; not enabled. Revisit. |
-//! | `Html(CowStr)` | `Node` | `NodeKind::Html { block: true }` — one line inside an HTML block. |
+//! | `Html(CowStr)` | `Noise` | One line inside an HTML block; the fold concatenates these into the block's single `NodeKind::Html { block: true }`. |
 //! | `InlineHtml(CowStr)` | `Node` | `NodeKind::Html { block: false }`. |
 //! | `FootnoteReference(CowStr)` | `Node` | `NodeKind::FootnoteReference`. Requires `ENABLE_FOOTNOTES`. |
 //! | `SoftBreak` | `Node` | `NodeKind::SoftBreak`. |
@@ -86,7 +98,7 @@
 //! | `Heading { level, id, classes, attrs }` | `Node` | `NodeKind::Heading`. `level` → `depth`; `id` → `attrs.id`. `classes`/`attrs` only populated with `ENABLE_HEADING_ATTRIBUTES`. |
 //! | `BlockQuote(Option<BlockQuoteKind>)` | `Lossy` | `NodeKind::BlockQuote`. The optional GFM alert kind (`Note`/`Tip`/`Important`/`Warning`/`Caution`) has no tree field in v1 and is dropped. |
 //! | `CodeBlock(CodeBlockKind)` | `Node` | `NodeKind::Code`. `Fenced(info)` → `lang`/`meta`; `Indented` → `lang: None`. |
-//! | `HtmlBlock` | `Noise` | Structural wrapper only; the contained `Event::Html` lines carry the content. |
+//! | `HtmlBlock` | `Node` | `NodeKind::Html { block: true }`. The fold concatenates the contained `Event::Html` lines into one node spanning the block. |
 //! | `List(Option<u64>)` | `Node` | `NodeKind::List`. `Some(n)` → `ordered: true, start: Some(n)`; `None` → `ordered: false`. |
 //! | `Item` | `Node` | `NodeKind::ListItem`. |
 //! | `FootnoteDefinition(CowStr)` | `Node` | `NodeKind::FootnoteDefinition`. Requires `ENABLE_FOOTNOTES`. |
@@ -100,8 +112,8 @@
 //! | `Emphasis` | `Node` | `NodeKind::Emphasis`. |
 //! | `Strong` | `Node` | `NodeKind::Strong`. |
 //! | `Strikethrough` | `Node` | `NodeKind::Delete`. Requires `ENABLE_STRIKETHROUGH`. |
-//! | `Superscript` | `Lossy` | `NodeKind::Span` (no superscript kind; the semantic is dropped). Requires `ENABLE_SUPERSCRIPT`. |
-//! | `Subscript` | `Lossy` | `NodeKind::Span` (no subscript kind; the semantic is dropped). Requires `ENABLE_SUBSCRIPT`. |
+//! | `Superscript` | `Node` | `NodeKind::Span` with `attrs.classes = ["sup"]`. Requires `ENABLE_SUPERSCRIPT`. |
+//! | `Subscript` | `Node` | `NodeKind::Span` with `attrs.classes = ["sub"]`. Requires `ENABLE_SUBSCRIPT`. |
 //! | `Link { link_type, dest_url, title, id }` | `Node` | `NodeKind::Link`. `dest_url` → `url`; `title` → `title`. `link_type`/`id` are not represented. |
 //! | `Image { link_type, dest_url, title, id }` | `Node` | `NodeKind::Image`. `dest_url` → `url`; `title` → `title`; alt text gathered from child text. |
 //! | `MetadataBlock(MetadataBlockKind)` | `Meta` | Folds into `DocumentMetadata`. Requires `ENABLE_YAML_STYLE_METADATA_BLOCKS` or `ENABLE_PLUSES_DELIMITED_METADATA_BLOCKS`. |
@@ -114,7 +126,9 @@
 //! 1. **`HtmlBlock` is a `Tag`, not an `Event`.** 0.13 has a `Tag::HtmlBlock`
 //!    start/end pair; the actual HTML text arrives as `Event::Html` lines
 //!    *inside* it. The spec line "`HtmlBlock / Html | Node`" conflated the two.
-//!    Disposition: `Tag::HtmlBlock` → `Noise`; `Event::Html` → `Node`.
+//!    The fold groups the block: `Tag::HtmlBlock` → `Node` (one
+//!    `NodeKind::Html { block: true }` spanning the block); the inner
+//!    `Event::Html` lines are concatenated into it and so are `Noise`.
 //! 2. **`BlockQuote` carries `Option<BlockQuoteKind>`.** 0.13's
 //!    `Tag::BlockQuote(Option<BlockQuoteKind>)` and
 //!    `TagEnd::BlockQuote(Option<BlockQuoteKind>)` both carry the optional GFM
@@ -123,8 +137,9 @@
 //! 3. **No `TableBody` tag exists.** Per the 0.13 docs, the table body starts
 //!    immediately after `TagEnd::TableHead`; rows are plain `TableRow`s.
 //! 4. **`Superscript`/`Subscript` exist** as real `Tag`/`TagEnd` variants in
-//!    0.13 (gated by `ENABLE_SUPERSCRIPT`/`ENABLE_SUBSCRIPT`). The tree has no
-//!    matching kind, so they fold to `Span` and are `Lossy`, not `Node`.
+//!    0.13 (gated by `ENABLE_SUPERSCRIPT`/`ENABLE_SUBSCRIPT`). The fold maps
+//!    them to `NodeKind::Span` carrying the class `"sup"` / `"sub"`; the
+//!    semantic is preserved on `attrs.classes`, so the disposition is `Node`.
 //! 5. **`InlineMath`/`DisplayMath` are `Event` variants** (gated by
 //!    `ENABLE_MATH`), not tags — confirmed `Unsupported`.
 //! 6. **`MetadataBlock` is a `Tag`** carrying `MetadataBlockKind`
@@ -218,7 +233,7 @@ pub fn disposition_for_event(event: &Event<'_>) -> Disposition {
         Event::Code(_) => Disposition::Node,
         Event::InlineMath(_) => Disposition::Unsupported,
         Event::DisplayMath(_) => Disposition::Unsupported,
-        Event::Html(_) => Disposition::Node,
+        Event::Html(_) => Disposition::Noise,
         Event::InlineHtml(_) => Disposition::Node,
         Event::FootnoteReference(_) => Disposition::Node,
         Event::SoftBreak => Disposition::Node,
@@ -241,7 +256,7 @@ pub fn disposition_for_event(event: &Event<'_>) -> Disposition {
 ///
 /// assert_eq!(disposition_for_tag(&Tag::Paragraph), Disposition::Node);
 /// assert_eq!(disposition_for_tag(&Tag::BlockQuote(None)), Disposition::Lossy);
-/// assert_eq!(disposition_for_tag(&Tag::HtmlBlock), Disposition::Noise);
+/// assert_eq!(disposition_for_tag(&Tag::HtmlBlock), Disposition::Node);
 /// ```
 #[must_use]
 pub fn disposition_for_tag(tag: &Tag<'_>) -> Disposition {
@@ -250,7 +265,7 @@ pub fn disposition_for_tag(tag: &Tag<'_>) -> Disposition {
         Tag::Heading { .. } => Disposition::Node,
         Tag::BlockQuote(_) => Disposition::Lossy,
         Tag::CodeBlock(_) => Disposition::Node,
-        Tag::HtmlBlock => Disposition::Noise,
+        Tag::HtmlBlock => Disposition::Node,
         Tag::List(_) => Disposition::Node,
         Tag::Item => Disposition::Node,
         Tag::FootnoteDefinition(_) => Disposition::Node,
@@ -264,8 +279,8 @@ pub fn disposition_for_tag(tag: &Tag<'_>) -> Disposition {
         Tag::Emphasis => Disposition::Node,
         Tag::Strong => Disposition::Node,
         Tag::Strikethrough => Disposition::Node,
-        Tag::Superscript => Disposition::Lossy,
-        Tag::Subscript => Disposition::Lossy,
+        Tag::Superscript => Disposition::Node,
+        Tag::Subscript => Disposition::Node,
         Tag::Link { .. } => Disposition::Node,
         Tag::Image { .. } => Disposition::Node,
         Tag::MetadataBlock(_) => Disposition::Meta,
@@ -458,12 +473,12 @@ mod tests {
         );
     }
 
-    /// `Superscript`/`Subscript` exist in 0.13 and fold lossily to a span —
-    /// pins correction #4.
+    /// `Superscript`/`Subscript` exist in 0.13 and fold to a class-carrying
+    /// `Span` node — pins correction #4.
     #[test]
-    fn super_and_subscript_are_lossy() {
-        assert_eq!(disposition_for_tag(&Tag::Superscript), Disposition::Lossy);
-        assert_eq!(disposition_for_tag(&Tag::Subscript), Disposition::Lossy);
+    fn super_and_subscript_are_nodes() {
+        assert_eq!(disposition_for_tag(&Tag::Superscript), Disposition::Node);
+        assert_eq!(disposition_for_tag(&Tag::Subscript), Disposition::Node);
     }
 
     /// Runtime fixture: a Markdown string exercising several event categories,
