@@ -89,3 +89,7 @@ criterion = { version = "0.5", features = ["html_reports"] }
 [[bench]]
 name = "schema_validation"
 harness = false
+
+[[bench]]
+name = "render_tree"
+harness = false
