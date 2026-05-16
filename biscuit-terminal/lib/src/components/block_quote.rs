@@ -279,6 +279,54 @@ impl TerminalRenderable for BlockQuote {
     }
 }
 
+impl BlockQuote {
+    /// Extracts the plain text of the block quote content.
+    ///
+    /// For the [`RenderableTerminalContent::String`] variant the string is
+    /// used verbatim. For the [`RenderableTerminalContent::Component`]
+    /// variant the component is rendered optimistically and its ANSI escape
+    /// sequences are stripped — this is a deliberately lossy projection, as
+    /// the render tree captures document structure rather than terminal
+    /// presentation.
+    fn plain_text(&self) -> String {
+        match &self.content {
+            RenderableTerminalContent::String(s) => s.clone(),
+            RenderableTerminalContent::Component(component) => {
+                crate::utils::escape_codes::strip_escape_codes(
+                    component.render_optimistic(None),
+                )
+            }
+        }
+    }
+}
+
+impl renderable::tree::TreeRenderable for BlockQuote {
+    /// Projects the block quote into the canonical render tree as a
+    /// [`NodeKind::BlockQuote`].
+    ///
+    /// The textual content becomes a single `Paragraph` of `Text`. When an
+    /// attribution is present it is appended as a second `Paragraph`
+    /// containing a single `Text` of the form `— {attribution}`.
+    ///
+    /// Color, border, and layout are terminal presentation concerns and are
+    /// intentionally omitted from the structural tree.
+    fn render_tree(&self) -> renderable::tree::RenderNode {
+        use renderable::tree::RenderNode;
+
+        let mut children = vec![RenderNode::paragraph(vec![RenderNode::text(
+            self.plain_text(),
+        )])];
+
+        if let Some(attribution) = &self.attribution {
+            children.push(RenderNode::paragraph(vec![RenderNode::text(format!(
+                "— {attribution}"
+            ))]));
+        }
+
+        RenderNode::block_quote(children)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -704,5 +752,92 @@ mod tests {
         let lines: Vec<&str> = stripped.lines().collect();
         assert_eq!(lines.len(), 1);
         assert_eq!(lines[0], "│ short text");
+    }
+
+    // =========================================================================
+    // TreeRenderable Tests
+    // =========================================================================
+
+    use renderable::tree::render::{
+        render_browser_node, render_markdown_node, BrowserRenderOptions, MarkdownRenderOptions,
+    };
+    use renderable::tree::{NodeKind, TreeRenderable};
+
+    #[test]
+    fn test_render_tree_root_is_block_quote() {
+        let quote = BlockQuote::from("Quoted text");
+        let node = quote.render_tree();
+        assert!(matches!(node.kind, NodeKind::BlockQuote { .. }));
+    }
+
+    #[test]
+    fn test_render_tree_contains_text() {
+        let quote = BlockQuote::from("Quoted text");
+        let node = quote.render_tree();
+        let json = serde_json::to_string(&node).expect("serialize");
+        assert!(json.contains("Quoted text"));
+    }
+
+    #[test]
+    fn test_render_tree_without_attribution_has_single_child() {
+        let quote = BlockQuote::from("Just a quote");
+        let node = quote.render_tree();
+        assert_eq!(node.children().len(), 1);
+    }
+
+    #[test]
+    fn test_render_tree_with_attribution_appends_child() {
+        let quote = BlockQuote::new(
+            RenderableTerminalContent::from("To be or not to be"),
+            Some("Shakespeare"),
+        );
+        let node = quote.render_tree();
+        assert_eq!(node.children().len(), 2);
+        let json = serde_json::to_string(&node).expect("serialize");
+        assert!(json.contains("— Shakespeare"));
+    }
+
+    #[test]
+    fn test_render_tree_extracts_text_from_component() {
+        let prose = Prose::new("<b>bold content</b>");
+        let quote = BlockQuote::from(prose);
+        let node = quote.render_tree();
+        let json = serde_json::to_string(&node).expect("serialize");
+        // Component text is extracted with ANSI escapes stripped.
+        assert!(json.contains("bold content"));
+    }
+
+    #[test]
+    fn test_render_tree_to_markdown() {
+        let quote = BlockQuote::from("Quoted text");
+        let node = quote.render_tree();
+        let rendered = render_markdown_node(&node, &MarkdownRenderOptions::default())
+            .expect("markdown render");
+        assert_eq!(rendered.output, "> Quoted text");
+    }
+
+    #[test]
+    fn test_render_tree_to_markdown_with_attribution() {
+        let quote = BlockQuote::new(
+            RenderableTerminalContent::from("To be or not to be"),
+            Some("Shakespeare"),
+        );
+        let node = quote.render_tree();
+        let rendered = render_markdown_node(&node, &MarkdownRenderOptions::default())
+            .expect("markdown render");
+        assert!(rendered.output.starts_with("> "));
+        assert!(rendered.output.contains("To be or not to be"));
+        assert!(rendered.output.contains("— Shakespeare"));
+    }
+
+    #[test]
+    fn test_render_tree_to_browser() {
+        let quote = BlockQuote::from("Quoted text");
+        let node = quote.render_tree();
+        let rendered =
+            render_browser_node(&node, &BrowserRenderOptions::default()).expect("browser render");
+        let html = rendered.output.render();
+        assert!(html.contains("<blockquote>"));
+        assert!(html.contains("Quoted text"));
     }
 }
