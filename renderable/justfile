@@ -31,28 +31,30 @@ default:
 
     if command -v md &> /dev/null; then
         md just.md
+    else
+        echo
+        echo -e "{{ BOLD }}Renderable Library{{ RESET }}"
+        echo "======================================================================================"
     fi
-
     echo
-    echo -e "{{ BOLD }}Renderable Library{{ RESET }}"
-    echo "======================================================================================"
-    echo ""
+
+
     just --list | grep -v 'default'
     echo
 
-# Build the library and CLI
+# Build the Library
 build *args="":
     @just _build renderable "Renderable Library" {{ args }}
 
-# Test both library and CLI.
+# Test Library
 test *args="":
     @just _test renderable {{ args }}
 
-# Lint both the library and CLI
+# Lint Library
 lint:
     @just _lint renderable
 
-# Lint (and fix) both the library and CLI
+# Lint library (and fix)
 lint-fix:
     @just _lint renderable || just _fix_lint renderable
 
@@ -68,6 +70,7 @@ structure:
     @just _structure src
     @echo
 
+# produce documentation for renderable (without dependencies)
 doc open="false":
     @just _doc renderable "{{ open }}"
 
