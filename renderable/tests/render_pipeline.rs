@@ -251,3 +251,80 @@ fn apply_page_options_rejects_absolute_external_code() {
     });
     assert!(result.is_err());
 }
+
+#[test]
+fn component_metadata_is_first_write_wins_and_page_overrides() {
+    use renderable::microdata::MicrodataKey;
+
+    let first = BrowserFragment::new()
+        .define_as_text_fragment("a")
+        .add_metadata_keypair(MicrodataKey::Description, "first description")
+        .finalize();
+    let second = BrowserFragment::new()
+        .define_as_text_fragment("b")
+        .add_metadata_keypair(MicrodataKey::Description, "second description")
+        .finalize();
+    let mut page = HtmlPage::from_fragments(vec![first, second]);
+
+    // The earlier component wins a component-vs-component conflict.
+    let html = page.render();
+    assert!(html.contains("first description"), "{html}");
+    assert!(!html.contains("second description"), "{html}");
+
+    // Page-level metadata overrides any component value.
+    page.add_metadata(MicrodataKey::Description, "page description");
+    let html = page.render();
+    assert!(html.contains("page description"), "{html}");
+    assert!(!html.contains("first description"), "{html}");
+}
+
+#[test]
+fn page_stylesheet_ships_palette_and_semantic_references() {
+    let body = BrowserFragment::new()
+        .define_as_text_fragment("x")
+        .finalize();
+    let css = HtmlPage::from(body).stylesheet();
+    // Palette layer is present.
+    assert!(css.contains("--color-blue-500:"), "{css}");
+    // Semantic color tokens reference the palette, not raw hex.
+    assert!(css.contains("--color-accent: var(--color-blue-500);"), "{css}");
+}
+
+#[test]
+fn render_html_page_propagates_invalid_page_options() {
+    use renderable::browser::{BrowserRenderable, PageOptions};
+    use std::any::Any;
+
+    #[derive(Debug)]
+    struct Dummy;
+    impl BrowserRenderable for Dummy {
+        fn render_to_browser(&self) -> String {
+            "<p>x</p>".to_string()
+        }
+        fn as_any(&self) -> &dyn Any {
+            self
+        }
+    }
+
+    assert!(Dummy.render_html_page(None).is_ok());
+
+    let result = Dummy.render_html_page(Some(PageOptions {
+        external_stylesheet: Some(std::path::PathBuf::from("/abs/page.css")),
+        ..PageOptions::default()
+    }));
+    assert!(result.is_err());
+}
+
+#[test]
+fn composable_node_component_constructs_directly() {
+    use renderable::browser::fragment::ComposableNode;
+
+    let child = BrowserFragment::new()
+        .define_as_text_fragment("hi")
+        .finalize();
+    let parent = BrowserFragment::new()
+        .define_as_block_tag(BlockTag::Div, "wrap")
+        .add_child(ComposableNode::Component(Box::new(child)))
+        .finalize();
+    assert!(parent.render().contains("hi"));
+}

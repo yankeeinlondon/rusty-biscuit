@@ -1709,6 +1709,50 @@ fn main() {
 
     writeln!(writer, "        }}").unwrap();
     writeln!(writer, "    }}").unwrap();
+
+    // Write palette_defaults method
+    writeln!(writer).unwrap();
+    writeln!(
+        writer,
+        "    /// Every concrete Tailwind palette color as a"
+    )
+    .unwrap();
+    writeln!(
+        writer,
+        "    /// `(custom-property-name, hex-value)` pair."
+    )
+    .unwrap();
+    writeln!(writer, "    ///").unwrap();
+    writeln!(
+        writer,
+        "    /// Names omit the leading `--`. Special values (`Inherit`,"
+    )
+    .unwrap();
+    writeln!(
+        writer,
+        "    /// `Current`, `Transparent`) are excluded — they have no hex value."
+    )
+    .unwrap();
+    writeln!(
+        writer,
+        "    pub fn palette_defaults() -> &'static [(&'static str, &'static str)] {{"
+    )
+    .unwrap();
+    writeln!(writer, "        &[").unwrap();
+
+    for color in TAILWIND_COLORS {
+        let (r, g, b) = color.oklch.to_srgb();
+        let name = color.css_var.strip_prefix("--").unwrap_or(color.css_var);
+        writeln!(
+            writer,
+            "            (\"{}\", \"#{:02x}{:02x}{:02x}\"),",
+            name, r, g, b
+        )
+        .unwrap();
+    }
+
+    writeln!(writer, "        ]").unwrap();
+    writeln!(writer, "    }}").unwrap();
     writeln!(writer, "}}").unwrap();
 
     // Tell Cargo to rerun if build.rs changes

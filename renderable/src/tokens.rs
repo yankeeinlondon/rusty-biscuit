@@ -1,11 +1,17 @@
 //! Compiler-checked semantic CSS-variable tokens.
 //!
-//! Three families ship: colors, spacing, typography. Each token is a
-//! typed enum variant that knows its `--name`, its default value, and
-//! how to reference itself as `var(--name)`. The page declares these in
-//! its `:root` block; components consume them via [`SemanticToken::var`]
-//! and friends. Components must reference this semantic layer, not the
-//! open palette layer (`Color::Var`).
+//! Two layers ship in the page `:root` block (decisions.md item 3):
+//!
+//! - the **palette layer** — every Tailwind color as `--color-blue-500`
+//!   etc., mechanically derived from [`crate::color::Tailwind`];
+//! - the **semantic layer** — curated tokens (`--color-bg`, `--space-2`,
+//!   `--font-mono`) across three families: colors, spacing, typography.
+//!
+//! Each semantic token is a typed enum variant that knows its `--name`,
+//! its default value, and how to reference itself as `var(--name)`.
+//! Semantic color defaults reference the palette layer (`var(--color-…)`)
+//! so a caller re-themes by overriding either layer. Components reference
+//! the semantic layer; the page declares both via [`root_defaults`].
 
 /// A curated semantic color token. Defaults reference the palette layer
 /// so a caller re-themes by overriding the semantic token, not the
@@ -57,18 +63,22 @@ impl SemanticToken {
         }
     }
 
-    /// The default CSS value for this token. Defaults reference Tailwind
-    /// palette hex values directly so the semantic layer is self-contained.
+    /// The default CSS value for this token.
+    ///
+    /// Per decisions.md item 3A, semantic defaults **reference the palette
+    /// layer** (`var(--color-…)`) rather than hard-coding hex values, so a
+    /// caller can re-theme by overriding either the semantic token or the
+    /// underlying palette token.
     pub fn default_value(&self) -> &'static str {
         match self {
-            SemanticToken::Bg => "#ffffff",
-            SemanticToken::Fg => "#1f2937",
-            SemanticToken::FgMuted => "#6b7280",
-            SemanticToken::Accent => "#3b82f6",
-            SemanticToken::Error => "#ef4444",
-            SemanticToken::Warning => "#f59e0b",
-            SemanticToken::Success => "#22c55e",
-            SemanticToken::Border => "#e5e7eb",
+            SemanticToken::Bg => "var(--color-white)",
+            SemanticToken::Fg => "var(--color-gray-800)",
+            SemanticToken::FgMuted => "var(--color-gray-500)",
+            SemanticToken::Accent => "var(--color-blue-500)",
+            SemanticToken::Error => "var(--color-red-500)",
+            SemanticToken::Warning => "var(--color-amber-500)",
+            SemanticToken::Success => "var(--color-green-500)",
+            SemanticToken::Border => "var(--color-gray-200)",
         }
     }
 
@@ -195,14 +205,20 @@ impl FontToken {
     }
 }
 
-/// Returns the full `(name, value)` list of semantic-layer defaults
-/// across all three token families, in declaration order.
+/// Returns the full `(name, value)` list of page `:root` defaults: the
+/// Tailwind **palette layer** first, then the **semantic layer** across
+/// all three token families, in declaration order.
 ///
 /// `HtmlPage` emits these as the page-level `:root { … }` block unless a
 /// caller overrides specific tokens via `PageOptions`. Each pair is
-/// `(custom-property-name-without-leading-dashes, css-value)`.
+/// `(custom-property-name-without-leading-dashes, css-value)`. The palette
+/// is declared before the semantic layer so semantic `var(--color-…)`
+/// defaults resolve against palette tokens.
 pub fn root_defaults() -> Vec<(String, String)> {
     let mut out = Vec::new();
+    for (name, value) in crate::color::Tailwind::palette_defaults() {
+        out.push(((*name).to_string(), (*value).to_string()));
+    }
     for token in SemanticToken::ALL {
         out.push((token.name().to_string(), token.default_value().to_string()));
     }
@@ -248,8 +264,10 @@ mod tests {
     #[test]
     fn root_defaults_covers_every_token() {
         let defaults = root_defaults();
-        let expected =
-            SemanticToken::ALL.len() + SpaceToken::ALL.len() + FontToken::ALL.len();
+        let expected = crate::color::Tailwind::palette_defaults().len()
+            + SemanticToken::ALL.len()
+            + SpaceToken::ALL.len()
+            + FontToken::ALL.len();
         assert_eq!(defaults.len(), expected);
         // Names are unique.
         let mut names: Vec<&str> = defaults.iter().map(|(n, _)| n.as_str()).collect();
@@ -257,6 +275,27 @@ mod tests {
         let unique = names.len();
         names.dedup();
         assert_eq!(names.len(), unique, "token names must be unique");
+    }
+
+    #[test]
+    fn root_defaults_includes_the_palette_layer() {
+        let defaults = root_defaults();
+        assert!(
+            defaults.iter().any(|(name, _)| name == "color-blue-500"),
+            "the palette layer must declare --color-blue-500"
+        );
+    }
+
+    #[test]
+    fn semantic_color_defaults_reference_the_palette() {
+        for token in SemanticToken::ALL {
+            let value = token.default_value();
+            assert!(
+                value.starts_with("var(--color-"),
+                "semantic color token {token:?} default should reference a \
+                 palette variable, got {value}"
+            );
+        }
     }
 
     #[test]

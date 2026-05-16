@@ -236,7 +236,7 @@ Project 1 left `renderable::browser::BrowserRenderable` as the legacy two-method
       /// escaped** by the renderer — the caller owns correctness.
       RawHtml(String),
       /// A nested, fully-rendered component fragment.
-      Component(BrowserFragment<Ready>),
+      Component(Box<BrowserFragment<Ready>>),
   }
   ```
 
@@ -1767,7 +1767,7 @@ Project 2 is complete when all of the following hold:
 - [ ] `renderable` is still a leaf crate: `cargo tree -p renderable -i biscuit-terminal` and `-i darkmatter` find no match.
 - [ ] `BrowserRenderable` carries four methods (`render_to_browser`, `render_to_browser_with_inline_variables`, `render_html_fragment`, `render_html_page`); the latter two have default implementations.
 - [ ] `MarkdownRenderable` and `AstRenderable` traits exist and are exported.
-- [ ] `ComposableNode` has five variants including `RawHtml(String)` and `Component(BrowserFragment<Ready>)`; `BrowserFragment::define_as_raw_html` and `add_component` exist.
+- [ ] `ComposableNode` has five variants including `RawHtml(String)` and `Component(Box<BrowserFragment<Ready>>)` (boxed to break the otherwise-infinite recursive type — `BrowserFragment` itself stores a `ComposableNode`); `BrowserFragment::define_as_raw_html` and `add_component` exist.
 - [ ] The semantic token layer (`SemanticToken`, `SpaceToken`, `FontToken`, `root_defaults`) exists in `renderable::tokens` and is compiler-checked.
 - [ ] `PageOptions` carries no `Layout`; it has `stylesheet`, `css_variables`, `external_stylesheet`, `external_code`.
 - [ ] `HtmlPage` has no `title` field; `set_title` writes the `Title` microdata key; `render`, `stylesheet`, and `inline_code` are pure and perform no I/O.

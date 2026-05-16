@@ -1,7 +1,7 @@
 use std::any::Any;
 use std::collections::HashMap;
 
-use crate::browser::PageOptions;
+use crate::browser::{PageOptions, PageOptionsError};
 use crate::browser::fragment::{BrowserFragment, Ready};
 use crate::html::HtmlPage;
 
@@ -59,16 +59,22 @@ pub trait BrowserRenderable: std::fmt::Debug + Any {
     /// Promotes this single component to a standalone [`HtmlPage`].
     ///
     /// The default builds an `HtmlPage` from this component's fragment
-    /// and applies `page` when supplied. This convenience default skips
-    /// options that fail validation (e.g. an absolute external asset
-    /// path); call [`HtmlPage::apply_page_options`] directly for strict
-    /// `Result`-based handling.
-    fn render_html_page(&self, page: Option<PageOptions>) -> HtmlPage {
+    /// and applies `page` when supplied.
+    ///
+    /// ## Errors
+    ///
+    /// Propagates [`PageOptionsError`] when `page` carries invalid options
+    /// (e.g. an absolute external asset path), so misuse surfaces rather
+    /// than being silently dropped.
+    fn render_html_page(
+        &self,
+        page: Option<PageOptions>,
+    ) -> Result<HtmlPage, PageOptionsError> {
         let mut html_page = HtmlPage::from(self.render_html_fragment());
         if let Some(options) = page {
-            let _ = html_page.apply_page_options(options);
+            html_page.apply_page_options(options)?;
         }
-        html_page
+        Ok(html_page)
     }
 
     fn as_any(&self) -> &dyn Any;

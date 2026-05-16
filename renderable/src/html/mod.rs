@@ -200,14 +200,18 @@ impl HtmlPage {
         out
     }
 
-    /// Builds the effective metadata map: component metadata from every
-    /// fragment (document order) overlaid by page-level metadata, which
-    /// wins on key conflict (decisions.md item 8).
+    /// Builds the effective metadata map.
+    ///
+    /// Component metadata is collected in document order with **first-write
+    /// wins** semantics — when two components set the same key, the
+    /// earlier-positioned component's value is kept. Page-level metadata is
+    /// applied last and **overwrites** any component value, so the page
+    /// always wins on key conflict (decisions.md item 8).
     fn merged_metadata(&self) -> HashMap<MicrodataKey, String> {
         let mut merged = HashMap::new();
         for fragment in self.all_fragments() {
             for (key, value) in fragment.metadata() {
-                merged.insert(*key, value.clone());
+                merged.entry(*key).or_insert_with(|| value.clone());
             }
         }
         for (key, value) in &self.metadata {
