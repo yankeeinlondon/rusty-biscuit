@@ -1,6 +1,15 @@
-use std::collections::HashMap;
+pub mod feature;
+pub mod fragment;
+pub mod utils;
+pub mod renderable;
 
-use crate::{html::link::LinkTag, microdata::MicrodataKey};
+pub use renderable::BrowserRenderable;
+
+/// Placeholder type until the real Stylesheet is moved from darkmatter in Phase C.
+pub struct Stylesheet;
+
+/// Placeholder type until Layout is moved from biscuit-terminal in Phase D.
+pub struct Layout;
 
 /// A collection of CSS rulesets keyed by **selector** in declaration order.
 ///
@@ -18,6 +27,12 @@ use crate::{html::link::LinkTag, microdata::MicrodataKey};
 /// - Page assembly may dedup or merge entries with identical selectors,
 ///   but this type does not enforce it.
 pub struct HtmlStyleSheet(Vec<(String, Stylesheet)>);
+
+impl Default for HtmlStyleSheet {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl HtmlStyleSheet {
     pub fn new() -> HtmlStyleSheet {
@@ -41,6 +56,7 @@ impl HtmlStyleSheet {
 /// Internal selectors registered via [`ComponentStylesheet::add`] target
 /// elements **within** that wrapper; the rendered output is a descendant
 /// selector (`.<name> .<child>`).
+#[allow(dead_code)]
 pub struct ComponentStylesheet {
     name: String,
     style: HtmlStyleSheet,
@@ -82,99 +98,7 @@ impl ComponentStylesheet {
     }
 }
 
-/// The key output of a `BrowserRenderable` component which
-/// represents an HTML fragment along with page-level attributes
-/// that this fragment expects to be included in the page when it's
-/// rendered.
-pub struct BrowserFragment {
-    /// The HTML fragment
-    pub body: Option<String>,
-    /// A stylesheet defining the classes which this component uses for it's default values
-    pub stylesheet: Option<ComponentStylesheet>,
-    /// FUTURE: will allow reusable code blocks to be included on a page
-    pub code_features: Vec<CodeFeature>,
-
-    /// stores key/value pairs of metadata that will be converted to HTML
-    /// microdata at runtime.
-    ///
-    /// Note: this is more typically set at the page level but if a component
-    /// has a strong view on what the page's metadata should be then it can
-    /// express it and it will be honored unless the page overrides the value
-    /// for the properties set by the component
-    metadata: HashMap<MicrodataKey, String>,
-
-    pub dependency_links: Vec<LinkTag>,
-}
-
-impl Default for BrowserFragment {
-    fn default() -> BrowserFragment {
-        BrowserFragment {
-            body: None,
-            stylesheet: None,
-            code_features: vec![],
-            metadata: HashMap::new(),
-            dependency_links: vec![],
-        }
-    }
-}
-
-impl BrowserFragment {
-    pub fn new(body: Option<String>) -> BrowserFragment {
-        BrowserFragment {
-            body,
-            ..BrowserFragment::default()
-        }
-    }
-
-    pub fn set_body(&mut self, content: String) -> &mut BrowserFragment {
-        todo!()
-    }
-
-    pub fn set_default_styles(style: ComponentStylesheet) -> &mut BrowserFragment {
-        todo!()
-    }
-
-    pub fn add_metadata_keypair<T: Into<String>>(
-        &mut self,
-        key: MicrodataKey,
-        value: T,
-    ) -> &mut BrowserFragment {
-        self.metadata.insert(key, value.into());
-        self
-    }
-
-    pub fn add_linked_dependency(&mut self, link: LinkTag) -> &mut BrowserFragment {
-        self.dependency_links.push(link);
-        self
-    }
-
-    /// Renders the fragment as HTML
-    pub fn render(self) -> String {
-        todo!()
-    }
-
-    /// **validate_render_content()**
-    ///
-    /// validates that the content that would be generated via `render()`:
-    /// 1. generate a valid HTML tag
-    /// 2. that the top level tag is a valid tag name
-    /// 3. that the top level tag has a
-    /// 4. all child fragments contain valid render content
-    pub fn validate_render_content(self) -> bool {
-        todo!()
-    }
-}
-
-/// enumerates all of the reusable code blocks which can be added to a
-/// HTML page.
-pub enum CodeFeature {
-    CopyToClipboard,
-    PasteFromClipboard,
-    CollapseNestedLists,
-    ExpandNestedLists,
-    ShowDialog,
-}
-
+#[allow(dead_code)]
 pub struct PageOptions {
     /// Cross-target layout settings (margins, alignment, page bg color).
     /// `Layout` will live in `renderable::layout` once the layout-move spec lands.
