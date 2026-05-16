@@ -739,7 +739,6 @@ mod tests {
     use crate::utils::color::BasicColor;
     use crate::utils::layout::Margin;
     use insta::assert_snapshot;
-    use std::collections::HashMap;
 
     /// RAII guard that overrides `LC_ALL` (and clears `LC_CTYPE` / `LANG`)
     /// for the duration of a single test, then restores the prior values
@@ -1334,7 +1333,7 @@ mod tests {
             .weight(RuleWeight::Medium)
             .width("50%")
             .color("blue");
-        let result = hr.render_to_browser();
+        let result = hr.render_browser_svg();
         // Outer <svg> width remains a concrete value (not var-driven).
         assert!(result.contains(r#"width="50%""#));
         // A4: stroke and stroke-width flow through `var(--hr-*, fallback)`.
@@ -1355,7 +1354,7 @@ mod tests {
     #[test]
     fn test_render_to_browser_default() {
         let hr = HorizontalRule::new();
-        let result = hr.render_to_browser();
+        let result = hr.render_browser_svg();
         assert!(result.contains(r#"width="100%""#));
         assert!(
             result.contains(r#"stroke="var(--hr-color, currentColor)""#),
@@ -1368,15 +1367,6 @@ mod tests {
         assert!(result.contains("--hr-weight: 4"));
         assert!(result.contains("--hr-color: currentColor"));
         assert!(result.contains("--hr-width: 100%"));
-    }
-
-    #[test]
-    fn test_render_to_browser_with_inline_variables() {
-        let hr = HorizontalRule::new().width("var(--rule-width)");
-        let mut variables = std::collections::HashMap::new();
-        variables.insert("rule-width".to_string(), "75%".to_string());
-        let result = hr.render_to_browser_with_inline_variables(&variables);
-        assert!(result.contains(r#"width="75%""#));
     }
 
     #[test]
@@ -1811,7 +1801,7 @@ mod tests {
                     .weight(weight.clone())
                     .width("100%");
 
-                let result = hr.render_to_browser();
+                let result = hr.render_browser_svg();
                 assert_snapshot!(format!("browser_{}_{}", style_name, weight_name), result);
             }
         }
@@ -1904,7 +1894,7 @@ mod tests {
             .color("red");
 
         let terminal_result1 = hr1.render(&term);
-        let browser_result1 = hr1.render_to_browser();
+        let browser_result1 = hr1.render_browser_svg();
 
         assert_snapshot!("terminal_custom_attributes", terminal_result1);
         assert_snapshot!("browser_custom_attributes", browser_result1);
@@ -1918,7 +1908,7 @@ mod tests {
             .color("#00ff00");
 
         let terminal_result2 = hr2.render(&term);
-        let browser_result2 = hr2.render_to_browser();
+        let browser_result2 = hr2.render_browser_svg();
 
         assert_snapshot!("terminal_custom_attributes_2", terminal_result2);
         assert_snapshot!("browser_custom_attributes_2", browser_result2);
@@ -2413,12 +2403,12 @@ mod tests {
     // Phase 3: A4 — browser CSS-variable strategy
     // ================================================================
 
-    /// Default `render_to_browser` output declares all three CSS custom
+    /// Default browser SVG output declares all three CSS custom
     /// properties on the root `<svg>` element.
     #[test]
     fn test_render_to_browser_contains_css_variables() {
         let hr = HorizontalRule::new();
-        let result = hr.render_to_browser();
+        let result = hr.render_browser_svg();
         assert!(
             result.contains("--hr-weight:"),
             "expected --hr-weight declaration: {result}"
@@ -2457,7 +2447,7 @@ mod tests {
         ];
         for style in styles {
             let hr = HorizontalRule::new().style(style.clone());
-            let result = hr.render_to_browser();
+            let result = hr.render_browser_svg();
             assert!(
                 result.contains("var(--hr-color,"),
                 "style {style:?} missing var(--hr-color, …): {result}"
@@ -2491,7 +2481,7 @@ mod tests {
             (RuleWeight::Thick, "8"),
         ] {
             let hr = HorizontalRule::new().weight(weight.clone());
-            let result = hr.render_to_browser();
+            let result = hr.render_browser_svg();
             let declared = format!("--hr-weight: {expected_px}");
             let fallback = format!("var(--hr-weight, {expected_px})");
             assert!(
@@ -2510,7 +2500,7 @@ mod tests {
     #[test]
     fn test_render_to_browser_fallbacks_work() {
         let hr = HorizontalRule::new().weight(RuleWeight::Medium);
-        let result = hr.render_to_browser();
+        let result = hr.render_browser_svg();
         assert!(
             result.contains("var(--hr-weight, 4)"),
             "default medium weight must embed var(--hr-weight, 4): {result}"
@@ -2521,94 +2511,11 @@ mod tests {
         );
     }
 
-    /// Overriding `hr-weight` via `render_to_browser_with_inline_variables`
-    /// replaces the bare `var(--hr-weight)` token with the caller's value.
-    #[test]
-    fn test_render_to_browser_with_inline_variables_overrides_weight() {
-        let hr = HorizontalRule::new().weight(RuleWeight::Medium);
-        // The caller-visible override path is the bare form — the default
-        // SVG uses `var(--hr-weight, 4)`. Drop the fallback first so the
-        // token is substitutable.
-        let bare_svg = hr
-            .render_to_browser()
-            .replace("var(--hr-weight, 4)", "var(--hr-weight)");
-        let mut vars = HashMap::new();
-        vars.insert("hr-weight".to_string(), "12".to_string());
-        // Substitute manually (mirrors render_to_browser_with_inline_variables).
-        let result = bare_svg.replace("var(--hr-weight)", vars.get("hr-weight").unwrap());
-        assert!(
-            result.contains("stroke-width=\"12\""),
-            "expected stroke-width=\"12\" after override: {result}"
-        );
-        assert!(
-            !result.contains("var(--hr-weight)"),
-            "all bare var(--hr-weight) tokens should be replaced: {result}"
-        );
-    }
-
-    /// Same as above but using the public API directly — asserts the
-    /// `replace(..)` implementation continues to hit `var(--name)` tokens
-    /// without fallbacks.
-    #[test]
-    fn test_render_to_browser_with_inline_variables_substitutes_bare_tokens() {
-        // Construct an HR that pre-embeds a bare var() token in `width`
-        // — this matches the documented behavior of the existing API.
-        let hr = HorizontalRule::new().width("var(--hr-width)");
-        let mut vars = HashMap::new();
-        vars.insert("hr-width".to_string(), "42%".to_string());
-        let result = hr.render_to_browser_with_inline_variables(&vars);
-        // The outer svg width now reads "42%" after substitution.
-        assert!(
-            result.contains(r#"width="42%""#),
-            "expected width=\"42%\" after substitution: {result}"
-        );
-    }
-
-    /// Overriding `hr-color` via a bare token gets replaced.
-    #[test]
-    fn test_render_to_browser_with_inline_variables_overrides_color() {
-        let hr = HorizontalRule::new();
-        let bare_svg = hr
-            .render_to_browser()
-            .replace("var(--hr-color, currentColor)", "var(--hr-color)");
-        let mut vars = HashMap::new();
-        vars.insert("hr-color".to_string(), "#abcdef".to_string());
-        let result = bare_svg.replace("var(--hr-color)", vars.get("hr-color").unwrap());
-        assert!(
-            result.contains(r##"stroke="#abcdef""##),
-            "expected stroke=\"#abcdef\" after override: {result}"
-        );
-        assert!(
-            !result.contains("var(--hr-color)"),
-            "no bare var(--hr-color) tokens should remain: {result}"
-        );
-    }
-
-    /// The declaration of each `--hr-*` variable does not depend on
-    /// `HashMap` iteration order — the values are substituted independently.
-    #[test]
-    fn test_render_to_browser_with_inline_variables_order_independent() {
-        let hr = HorizontalRule::new().width("var(--hr-width)");
-        let mut a = HashMap::new();
-        a.insert("hr-width".to_string(), "30%".to_string());
-        a.insert("extra".to_string(), "unused".to_string());
-
-        let mut b = HashMap::new();
-        b.insert("extra".to_string(), "unused".to_string());
-        b.insert("hr-width".to_string(), "30%".to_string());
-
-        assert_eq!(
-            hr.render_to_browser_with_inline_variables(&a),
-            hr.render_to_browser_with_inline_variables(&b),
-            "HashMap key order must not affect output"
-        );
-    }
-
     /// `--hr-color` is set from the component's `.color(..)` when provided.
     #[test]
     fn test_render_to_browser_color_declaration_reflects_component_color() {
         let hr = HorizontalRule::new().color("#ff00aa");
-        let result = hr.render_to_browser();
+        let result = hr.render_browser_svg();
         assert!(
             result.contains("--hr-color: #ff00aa"),
             "expected --hr-color: #ff00aa: {result}"
@@ -2623,7 +2530,7 @@ mod tests {
     #[test]
     fn test_render_to_browser_width_declaration_reflects_component_width() {
         let hr = HorizontalRule::new().width("60ch");
-        let result = hr.render_to_browser();
+        let result = hr.render_browser_svg();
         assert!(
             result.contains("--hr-width: 60ch"),
             "expected --hr-width: 60ch: {result}"
@@ -2721,7 +2628,7 @@ mod tests {
             ..Layout::default()
         };
         let hr = HorizontalRule::new().with_layout(layout);
-        let result = hr.render_to_browser();
+        let result = hr.render_browser_svg();
         assert!(
             result.contains("margin: calc(2% + 3ch) auto"),
             "expected calc(2% + 3ch) margin in browser output: {result}"

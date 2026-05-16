@@ -24,6 +24,8 @@ use std::path::PathBuf;
 
 use thiserror::Error;
 
+use renderable::browser::fragment::{BrowserFragment, Ready};
+
 use crate::components::renderable::{BrowserRenderable, TerminalRenderable};
 use crate::components::terminal_image::{ImageWidth, TerminalImage};
 use crate::terminal::Terminal;
@@ -391,6 +393,25 @@ impl TerminalRenderable for GraphExpression {
 }
 
 impl BrowserRenderable for GraphExpression {
+    /// Wraps the graph's SVG as a [`ComposableNode::RawHtml`] island.
+    ///
+    /// The SVG is caller-owned, already-formed markup; emitting it as a
+    /// `RawHtml` node tells the renderer to pass it through verbatim
+    /// rather than HTML-escaping it.
+    ///
+    /// [`ComposableNode::RawHtml`]: renderable::browser::fragment::ComposableNode::RawHtml
+    fn render_html_fragment(&self) -> BrowserFragment<Ready> {
+        BrowserFragment::new()
+            .define_as_raw_html(self.render_browser_svg())
+            .finalize()
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+}
+
+impl GraphExpression {
     /// Render the graph as a raw inline SVG element suitable for embedding
     /// directly into an HTML document.
     ///
@@ -404,7 +425,7 @@ impl BrowserRenderable for GraphExpression {
     /// On render failure, returns the fallback code block wrapped in
     /// `<pre><code class="language-dot">…</code></pre>` so the source is
     /// still visible to the reader.
-    fn render_to_browser(&self) -> String {
+    fn render_browser_svg(&self) -> String {
         let request = biscuit_visualized::artifact::RenderRequest {
             format: biscuit_visualized::artifact::OutputFormat::Svg,
             scale: self.scale,
@@ -423,12 +444,6 @@ impl BrowserRenderable for GraphExpression {
         }
     }
 
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-}
-
-impl GraphExpression {
     fn browser_fallback(&self, error: &str) -> String {
         let escaped = html_escape(&self.fallback_code_block());
         format!(
@@ -544,7 +559,7 @@ mod tests {
     #[test]
     fn browser_render_emits_svg() {
         let graph = GraphExpression::parse("a -> b -> c", GraphInputSyntax::Auto).unwrap();
-        let html = graph.render_to_browser();
+        let html = graph.render_browser_svg();
         assert!(
             html.contains("<svg"),
             "expected raw SVG output, got: {html}"
@@ -563,7 +578,7 @@ mod tests {
             GraphInputSyntax::Dot,
         )
         .unwrap();
-        let html = graph.render_to_browser();
+        let html = graph.render_browser_svg();
         assert!(html.contains("<svg"));
         assert!(html.contains("</svg>"));
     }

@@ -10,6 +10,7 @@ use std::path::Path;
 use biscuit_terminal::components::renderable::{BrowserRenderable, TerminalRenderable};
 use biscuit_terminal::terminal::Terminal;
 use biscuit_terminal::utils::layout::{Layout, LayoutTerminalExt};
+use renderable::browser::fragment::{BrowserFragment, Ready};
 use thiserror::Error;
 
 use crate::markdown::{
@@ -244,7 +245,27 @@ impl TerminalRenderable for YamlBlock {
 /// `BrowserRenderable` does not have layout state to apply; layout for HTML
 /// output is handled by surrounding CSS.
 impl BrowserRenderable for YamlBlock {
-    fn render_to_browser(&self) -> String {
+    /// Wraps the highlighted code-block HTML as a [`ComposableNode::RawHtml`]
+    /// island.
+    ///
+    /// The HTML is caller-owned, already-formed markup (highlighted spans,
+    /// escaped content); emitting it as a `RawHtml` node tells the renderer
+    /// to pass it through verbatim rather than HTML-escaping it.
+    ///
+    /// [`ComposableNode::RawHtml`]: renderable::browser::fragment::ComposableNode::RawHtml
+    fn render_html_fragment(&self) -> BrowserFragment<Ready> {
+        BrowserFragment::new()
+            .define_as_raw_html(self.render_browser_html())
+            .finalize()
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+}
+
+impl YamlBlock {
+    fn render_browser_html(&self) -> String {
         // Route through HtmlOptions::default() for symmetry with the terminal
         // path. Reuse the resolved color mode and theme rather than re-detecting.
         let options = HtmlOptions::default();
@@ -259,10 +280,6 @@ impl BrowserRenderable for YamlBlock {
                 )
             },
         )
-    }
-
-    fn as_any(&self) -> &dyn Any {
-        self
     }
 }
 
@@ -516,7 +533,7 @@ mod tests {
     #[test]
     fn test_browser_render_contains_language_yaml() {
         let block = YamlBlock::new("foo: 1").unwrap();
-        let html = BrowserRenderable::render_to_browser(&block);
+        let html = block.render_browser_html();
 
         // Should contain language-yaml class
         assert!(
@@ -529,7 +546,7 @@ mod tests {
     #[test]
     fn test_browser_render_escapes_html_in_yaml() {
         let block = YamlBlock::new("script: \"<script>alert('xss')</script>\"").unwrap();
-        let html = BrowserRenderable::render_to_browser(&block);
+        let html = block.render_browser_html();
 
         // Should escape HTML special characters
         assert!(
@@ -541,7 +558,7 @@ mod tests {
 
     /// §3.1 — Strict body-substring parity test (browser).
     ///
-    /// Both `YamlBlock::render_to_browser` and the Markdown YAML fence route
+    /// Both `YamlBlock::render_browser_html` and the Markdown YAML fence route
     /// through `render_html_code_block`, so they must emit byte-identical
     /// highlighted span sequences for the YAML payload. We extract the
     /// `<pre><code class="language-yaml">` opener through the final-key span
@@ -558,7 +575,7 @@ mod tests {
 
         // Render via YamlBlock
         let block = YamlBlock::new(yaml_content).unwrap();
-        let block_html = BrowserRenderable::render_to_browser(&block);
+        let block_html = block.render_browser_html();
 
         // Render via Markdown YAML fence
         let md_content = format!("```yaml\n{}\n```", yaml_content);
@@ -807,7 +824,7 @@ mod tests {
     #[test]
     fn test_browser_render_structure() {
         let block = YamlBlock::new("nested:\n  key: value").unwrap();
-        let html = BrowserRenderable::render_to_browser(&block);
+        let html = block.render_browser_html();
 
         // Should contain pre and code tags
         assert!(
@@ -870,7 +887,7 @@ mod tests {
     #[test]
     fn test_browser_render_empty_yaml() {
         let block = YamlBlock::new("").unwrap();
-        let html = BrowserRenderable::render_to_browser(&block);
+        let html = block.render_browser_html();
 
         // Should contain the code block structure even for empty YAML
         assert!(

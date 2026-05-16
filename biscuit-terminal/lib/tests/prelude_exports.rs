@@ -23,7 +23,7 @@ fn prelude_exports_browser_renderable_trait() {
     // `BrowserRenderable` must be importable from the prelude so generic
     // code can be written against it without reaching into submodules.
     fn takes_browser_renderable<T: BrowserRenderable>(r: &T) -> String {
-        r.render_to_browser()
+        r.render_html_fragment().render()
     }
 
     let rule = HorizontalRule::new();

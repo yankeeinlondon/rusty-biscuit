@@ -291,14 +291,17 @@ fn page_stylesheet_ships_palette_and_semantic_references() {
 
 #[test]
 fn render_html_page_returns_a_page_with_options_applied() {
+    use renderable::browser::fragment::{BrowserFragment, Ready};
     use renderable::browser::{BrowserRenderable, PageOptions, RelativeAssetPath};
     use std::any::Any;
 
     #[derive(Debug)]
     struct Dummy;
     impl BrowserRenderable for Dummy {
-        fn render_to_browser(&self) -> String {
-            "<p>x</p>".to_string()
+        fn render_html_fragment(&self) -> BrowserFragment<Ready> {
+            BrowserFragment::new()
+                .define_as_raw_html("<p>x</p>")
+                .finalize()
         }
         fn as_any(&self) -> &dyn Any {
             self
