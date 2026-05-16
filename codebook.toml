@@ -1,4 +1,5 @@
 words = [
+    "blockquotes",
     "boolish",
     "cliclick",
     "colindex",
@@ -48,6 +49,7 @@ words = [
     "rstest",
     "rustdoc",
     "schemars",
+    "serde",
     "subagents",
     "syntect",
     "tmux",
