@@ -328,7 +328,7 @@ pub fn render_repo_deps_svg(
         Ok(g) => g.with_orientation(orientation),
         Err(e) => return format!("Failed to build dependency graph: {e}"),
     };
-    graph.render_to_browser()
+    graph.render_html_fragment().render()
 }
 
 /// Render an internal dependency list for the repository as styled text.
