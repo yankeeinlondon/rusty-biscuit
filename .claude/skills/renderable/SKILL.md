@@ -1,31 +1,123 @@
 ---
-description: this agent skill provides rich details into the "renderable" library and the traits and utilities it provides to aid in the creating of components that render to the terminal, the browser, and other targets.
+description: Expert knowledge for the `renderable` library which provides traits and utilities for multi-target rendering (Terminal, Markdown, Browser, AST) in the rusty-biscuit monorepo.
 ---
-# `renderable` library
+# `renderable` Library
 
-This library provides traits and utilities to aid in the creation of "components" which _render_ to multiple target types:
+Provides traits and utilities for type-strong, multi-target renderable components.
 
-1. Terminal
-2. Markdown
-3. MarkdownPlus*
-4. Browser
-5. AST
+## Render Targets
 
-> - **Markdown** and **MarkdownPlus** are both forms of Markdown but the term **MarkdownPlus** refers to a more feature rich Markdown format that leverages inline HTML to achieve this richer functionality. Effectively **MarkdownPlus** trades some of the ergonomics of authoring Markdown for more functionality.
-> - **AST** uses the [HAST](https://github.com/syntax-tree/hast) style of AST popularized by the Javascript/Typescript ecosystem but now made available via the [`markdown`](https://crates.io/crates/markdown) crate.
+| Target       | Trait                | Crate              |
+|--------------|----------------------|--------------------|
+| Terminal     | `TerminalRenderable` | `biscuit-terminal` |
+| Markdown     | `MarkdownRenderable` | `renderable`       |
+| MarkdownPlus | `MarkdownRenderable` | `renderable`       |
+| Browser      | `BrowserRenderable`  | `renderable`       |
+| AST          | `AstRenderable`      | `renderable`       |
 
-## Modules
+> **MarkdownPlus** is Markdown with richer features via inline HTML.
+> **AST** uses the [HAST](https://github.com/syntax-tree/hast) style via the [`markdown`](https://crates.io/crates/markdown) crate.
 
-```mermaid
-mindmap lib((renderable))
-    Browser
-    HTML
-    Color
-    Stylesheet
-    AST
-    Markdown
-    Microdata
-    Target
+## Topics
+
+| Topic                                     | Description                                                                                                    |
+|-------------------------------------------|----------------------------------------------------------------------------------------------------------------|
+| [Browser Module](./browser.md)            | `BrowserRenderable` trait, `BrowserFragment<Ready>`, `ComponentStylesheet`, `PageOptions`, `RelativeAssetPath` |
+| [HTML Module](./html.md)                  | `HtmlPage` assembly, fragment composition, metadata merging, tag types                                         |
+| [Stylesheet Module](./stylesheet.md)      | Type-safe CSS builder: `CssStyle`, `CssRule`, `Stylesheet`, typed properties and values                        |
+| [Color Module](./color.md)                | Cross-target color system: `Color`, `CssColor`, `WebColor`, `BasicColor`, `Tailwind`, RGB, HDR                 |
+| [Layout Module](./layout.md)              | Target-agnostic layout: `Layout`, `Alignment`, `Margin`, `RowFill`, `MaxWidth`                                 |
+| [Markdown Module](./markdown.md)          | `MarkdownRenderable` trait and style-aware Markdown output                                                     |
+| [AST Module](./ast.md)                    | `AstRenderable` trait and HAST-style AST output                                                                |
+| [Design Decisions](./design-decisions.md) | Key architecture decisions, naming conventions, migration notes                                                |
+
+## Quick Start
+
+### Implementing BrowserRenderable
+
+```rust
+use renderable::browser::{BrowserRenderable, BrowserFragment, Ready};
+use renderable::browser::fragment::ComposableNode;
+use std::any::Any;
+
+#[derive(Debug)]
+struct MyComponent { text: String }
+
+impl BrowserRenderable for MyComponent {
+    fn render_html_fragment(&self) -> BrowserFragment<Ready> {
+        BrowserFragment::new(ComposableNode::text(&self.text))
+    }
+    fn as_any(&self) -> &dyn Any { self }
+}
 ```
 
-The **renderable** library is composed of the following modules:
+### Rendering a Page
+
+```rust
+use renderable::browser::PageOptions;
+
+let page = component.render_html_page(Some(PageOptions {
+    stylesheet: Some(my_stylesheet),
+    css_variables: Some(vec![("primary".into(), "#336699".into())]),
+    ..Default::default()
+}));
+
+let html = page.render();
+```
+
+### Building a Stylesheet
+
+```rust
+use renderable::stylesheet::{
+    CssStyle, CssSizingProp, CssSizing, CssColorProp, CssColor
+};
+
+let style = CssStyle::new()
+    .add(CssSizingProp::Width, CssSizing::px(320.0))
+    .add(CssColorProp::Color, CssColor::rgb(0x33, 0x66, 0x99));
+```
+
+## Architecture
+
+```text
+┌─────────────────────────────────────────────┐
+│  Components (biscuit-terminal, darkmatter)  │
+└─────────────────────────────────────────────┘
+           │
+    ┌──────┼──────┐
+    │      │      │
+    ▼      ▼      ▼
+┌────────┐ ┌────────┐ ┌────────┐
+│Terminal│ │ Browser│ │Markdown│
+│(biscuit│ │(render │ │(render │
+│terminal│ │ able)  │ │ able)  │
+└────────┘ └────────┘ └────────┘
+                │
+                ▼
+      ┌─────────────────┐
+      │ HtmlPage        │
+      │ BrowserFragment │
+      │ ComponentStyle  │
+      └─────────────────┘
+                │
+                ▼
+      ┌─────────────────┐
+      │ CSS / HTML output│
+      └─────────────────┘
+```
+
+## Migration from Pre-Renderable
+
+**15 May 2026**
+
+This library was born out of a desire to start centralizing traits and utilities designed to
+promote the development of "renderable components" which can render to multiple targets.
+
+| Old                       | New                         | Location                 |
+|---------------------------|-----------------------------|--------------------------|
+| `Renderable`              | `TerminalRenderable`        | `biscuit-terminal`       |
+| `RenderableContent`       | `RenderableTerminalContent` | `biscuit-terminal`       |
+| `BrowserRenderable`       | `BrowserRenderable`         | `renderable::browser`    |
+| `Stylesheet` (darkmatter) | `CssStyle` / `Stylesheet`   | `renderable::stylesheet` |
+| `Layout`                  | `Layout`                    | `renderable::layout`     |
+| `Color`                   | `Color`                     | `renderable::color`      |
