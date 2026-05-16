@@ -6,7 +6,7 @@ use std::any::Any;
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-use biscuit_terminal::components::renderable::{BrowserRenderable, TerminalRenderable};
+use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::discovery::detection::ColorMode as TerminalColorMode;
 use biscuit_terminal::terminal::Terminal;
 use biscuit_terminal::utils::layout::Layout;
@@ -725,20 +725,11 @@ impl TerminalRenderable for DarkmatterPage {
     }
 }
 
-impl BrowserRenderable for DarkmatterPage {
-    fn render_to_browser(&self) -> String {
-        match self.markdown.as_ref() {
-            Some(md) => self
-                .render_to_browser(md)
-                .unwrap_or_else(|e| format!("<!-- render error: {} -->\n", e)),
-            None => "<!-- DarkmatterPage: no markdown set -->\n".to_string(),
-        }
-    }
-
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-}
+// `DarkmatterPage` deliberately does not implement `BrowserRenderable`
+// (decisions.md item 12A): it is a page assembler that consumes many
+// fragments, not a single composable component. Browser output goes
+// through the inherent [`DarkmatterPage::render_to_browser`] method,
+// which takes the `Markdown` explicitly.
 
 /// Wrap HTML markdown body in a page-level container with layout CSS.
 fn wrap_browser_html(body: &str, ctx: &LayoutContext) -> String {
@@ -1608,32 +1599,22 @@ mod tests {
     }
 
     #[test]
-    fn browser_renderable_trait_with_markdown() {
+    fn render_to_browser_emits_markdown_html() {
         let term = Terminal::new_optimistic(80);
         let md: Markdown = "# Browser\n".into();
-        let page = DarkmatterPage::new(&term).with_markdown(md);
+        let page = DarkmatterPage::new(&term);
 
-        let html = BrowserRenderable::render_to_browser(&page);
+        // Browser output goes through the inherent method, not a
+        // `BrowserRenderable` impl (decisions.md item 12A).
+        let html = page.render_to_browser(&md).unwrap();
         assert!(
             html.contains("<h1>Browser</h1>"),
-            "BrowserRenderable::render_to_browser should output markdown HTML content"
+            "render_to_browser should output markdown HTML content"
         );
         // Zero-config page should not add a wrapper div.
         assert!(
             !html.contains("<div class=\"darkmatter-page\""),
-            "BrowserRenderable without layout should not add wrapper"
-        );
-    }
-
-    #[test]
-    fn browser_renderable_trait_without_markdown_shows_placeholder() {
-        let term = Terminal::new_optimistic(80);
-        let page = DarkmatterPage::new(&term);
-
-        let html = BrowserRenderable::render_to_browser(&page);
-        assert!(
-            html.contains("no markdown set"),
-            "BrowserRenderable without markdown should show placeholder"
+            "a zero-config page should not add a wrapper"
         );
     }
 
