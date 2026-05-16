@@ -7,7 +7,7 @@ pub use renderable::BrowserRenderable;
 
 use std::path::PathBuf;
 
-use crate::stylesheet::Stylesheet;
+use crate::stylesheet::{CssRule, Stylesheet};
 
 /// A scoped collection of CSS rulesets owned by a component.
 ///
@@ -53,7 +53,12 @@ impl ComponentStylesheet {
     /// The original (unscoped) entries are not retained in the output; only
     /// the scoped selectors. Order is preserved.
     pub fn as_stylesheet(&self) -> Stylesheet {
-        todo!()
+        let mut out = Stylesheet::new();
+        for rule in self.style.entries() {
+            let scoped = format!(".{} .{}", self.name, rule.selector);
+            out.push(CssRule::new(scoped, rule.style.clone()));
+        }
+        out
     }
 }
 

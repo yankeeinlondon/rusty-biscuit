@@ -277,18 +277,86 @@ impl BrowserFragment<RefineText> {
 
 impl BrowserFragment<Ready> {
     /// Render the fragment as an HTML string.
-    pub fn render(self) -> String {
-        todo!()
+    ///
+    /// `TextFragment` content is HTML-escaped; `RawHtml` content is
+    /// emitted verbatim (caller-owned). Nested `Component` fragments
+    /// recurse.
+    pub fn render(&self) -> String {
+        match &self.node {
+            Some(node) => render_node(node),
+            None => String::new(),
+        }
     }
 
-    /// Validate that `render()` would produce well-formed HTML:
-    ///
-    /// 1. the top-level node is present and is a valid tag,
-    /// 2. attributes are well-formed for the chosen tag,
-    /// 3. all descendant fragments are themselves valid.
+    /// Returns `true` when `render()` would produce well-formed HTML:
+    /// the top-level node is present, and every descendant fragment is
+    /// itself valid.
     pub fn validate_render_content(&self) -> bool {
-        todo!()
+        match &self.node {
+            None => false,
+            Some(node) => validate_node(node),
+        }
     }
+}
+
+/// Recursively renders a single composable node to HTML.
+fn render_node(node: &ComposableNode) -> String {
+    match node {
+        ComposableNode::TextFragment(text) => {
+            crate::browser::utils::escape_text(text).into_owned()
+        }
+        ComposableNode::RawHtml(html) => html.clone(),
+        ComposableNode::Component(fragment) => fragment.render(),
+        ComposableNode::VoidTag(void) => {
+            format!("<{}{}>", void.tag.name(), render_attributes(&void.attributes))
+        }
+        ComposableNode::BlockTag(block) => {
+            let name = block.tag.name();
+            let children: String =
+                block.content.children.iter().map(render_node).collect();
+            format!(
+                "<{name}{}>{children}</{name}>",
+                render_attributes(&block.attributes)
+            )
+        }
+    }
+}
+
+/// Recursively validates a composable node.
+fn validate_node(node: &ComposableNode) -> bool {
+    match node {
+        ComposableNode::TextFragment(_) | ComposableNode::RawHtml(_) => true,
+        ComposableNode::VoidTag(_) => true,
+        ComposableNode::Component(fragment) => fragment.validate_render_content(),
+        ComposableNode::BlockTag(block) => {
+            block.content.children.iter().all(validate_node)
+        }
+    }
+}
+
+/// Serializes a slice of attributes into an opening-tag attribute string
+/// (leading space included when non-empty). Attribute values are escaped.
+fn render_attributes(attributes: &[HtmlAttribute]) -> String {
+    let mut out = String::new();
+    for attr in attributes {
+        let pair: Option<(&str, String)> = match attr {
+            HtmlAttribute::Title(value) => Some(("title", value.clone())),
+            HtmlAttribute::Alt(value) => Some(("alt", value.clone())),
+            HtmlAttribute::Name(value) => Some(("name", value.clone())),
+            HtmlAttribute::Placeholder(value) => Some(("placeholder", value.clone())),
+            HtmlAttribute::Target(value) => Some(("target", value.clone())),
+            HtmlAttribute::Href(url) => Some(("href", url.to_string())),
+            HtmlAttribute::Src(url) => Some(("src", url.to_string())),
+            _ => None,
+        };
+        if let Some((key, value)) = pair {
+            out.push_str(&format!(
+                r#" {key}="{}""#,
+                crate::browser::utils::escape_attribute(&value)
+            ));
+        }
+    }
+    out
 }
 
 impl BrowserFragment<Ready> {

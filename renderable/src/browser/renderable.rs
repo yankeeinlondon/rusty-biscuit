@@ -22,7 +22,8 @@ use crate::html::HtmlPage;
 ///   caller then calls [`HtmlPage::render`] for the final string (see
 ///   decisions.md item 7).
 /// - The default `render_html_fragment` wraps the legacy
-///   `render_to_browser()` output in a [`ComposableNode::RawHtml`]
+///   `render_to_browser()` output in a
+///   [`ComposableNode::RawHtml`](crate::browser::fragment::ComposableNode::RawHtml)
 ///   fragment, matching the one-line migration shim in decisions.md
 ///   item 12B.
 pub trait BrowserRenderable: std::fmt::Debug + Any {

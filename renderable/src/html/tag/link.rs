@@ -22,7 +22,12 @@ impl LinkTag {
     /// avoids emitting near-identical `<link>` tags that browsers will fetch
     /// independently.
     pub fn dedup_key(&self) -> String {
-        let rel = match self.rel {
+        format!("{}|{}", self.rel_str(), self.href.as_deref().unwrap_or(""))
+    }
+
+    /// Returns the `rel` attribute as its HTML keyword string.
+    fn rel_str(&self) -> &'static str {
+        match self.rel {
             LinkRel::Alternate => "alternate",
             LinkRel::Author => "author",
             LinkRel::Canonical => "canonical",
@@ -38,7 +43,25 @@ impl LinkTag {
             LinkRel::Search => "search",
             LinkRel::Stylesheet => "stylesheet",
             LinkRel::TermsOfService => "terms-of-service",
-        };
-        format!("{}|{}", rel, self.href.as_deref().unwrap_or(""))
+        }
+    }
+
+    /// Renders this link tag as an HTML `<link>` element.
+    pub fn render(&self) -> String {
+        let mut out = format!(r#"<link rel="{}""#, self.rel_str());
+        if let Some(href) = &self.href {
+            out.push_str(&format!(r#" href="{href}""#));
+        }
+        if let Some(hreflang) = &self.hreflang {
+            out.push_str(&format!(r#" hreflang="{hreflang}""#));
+        }
+        if let Some(title) = &self.title {
+            out.push_str(&format!(r#" title="{title}""#));
+        }
+        if let Some(media) = &self.media {
+            out.push_str(&format!(r#" media="{media}""#));
+        }
+        out.push('>');
+        out
     }
 }

@@ -1,8 +1,12 @@
 use std::collections::HashMap;
 
 use crate::{
-    browser::{PageOptions, fragment::BrowserFragment, fragment::Ready, feature::PageFeature},
-    html::tag::{link::LinkTag, meta::MetaTag},
+    browser::{
+        PageOptions,
+        feature::PageFeature,
+        fragment::{BrowserFragment, ComposableNode, Ready},
+    },
+    html::tag::{BlockTag, link::LinkTag, meta::MetaTag},
     microdata::MicrodataKey,
     stylesheet::Stylesheet,
 };
@@ -160,25 +164,182 @@ impl HtmlPage {
         out
     }
 
-    /// Renders the page to a complete HTML string.
+    /// Returns the page's rolled-up CSS text.
     ///
-    /// Pure: never performs I/O. When [`PageOptions`] selected external
-    /// assets, this emits `<link>` / `<script src>` references; the
-    /// caller pulls content from [`stylesheet`](HtmlPage::stylesheet) /
-    /// [`inline_code`](HtmlPage::inline_code) and writes it.
-    pub fn render(&self) -> String {
-        todo!("Phase E")
-    }
-
-    /// Returns the page's rolled-up CSS text (`:root` block + page
-    /// stylesheet + component default stylesheets).
+    /// Order: `:root` semantic-token block, then the page stylesheet,
+    /// then each fragment's component default stylesheet in
+    /// fragment-registration order.
     pub fn stylesheet(&self) -> String {
-        todo!("Phase E")
+        let mut out = String::new();
+        out.push_str(&self.render_root_block());
+        out.push_str(&render_stylesheet(&self.stylesheet));
+        for fragment in &self.fragments {
+            if let Some(component_sheet) = fragment.stylesheet() {
+                out.push_str(&render_stylesheet(&component_sheet.as_stylesheet()));
+            }
+        }
+        out
     }
 
-    /// Returns the page's rolled-up JS text (page script blocks +
-    /// per-fragment feature code).
+    /// Returns the page's rolled-up JS text (page-level script blocks,
+    /// joined by blank lines).
     pub fn inline_code(&self) -> String {
-        todo!("Phase E")
+        self.script_blocks.join("\n\n")
     }
+
+    /// Renders the page to a complete HTML string. Pure — no I/O.
+    pub fn render(&self) -> String {
+        let mut head = String::new();
+        // 1. charset — always first.
+        head.push_str(r#"<meta charset="utf-8">"#);
+        // 2. viewport.
+        head.push_str(
+            r#"<meta name="viewport" content="width=device-width, initial-scale=1">"#,
+        );
+        // 3. title — from the Title microdata key, else first <h1>, else empty.
+        let title = self
+            .metadata
+            .get(&MicrodataKey::Title)
+            .cloned()
+            .or_else(|| self.first_h1_text())
+            .unwrap_or_default();
+        head.push_str(&format!(
+            "<title>{}</title>",
+            crate::browser::utils::escape_text(&title)
+        ));
+        // 4. other microdata-driven meta tags.
+        for (key, value) in &self.metadata {
+            if *key == MicrodataKey::Title {
+                continue;
+            }
+            for (_source, html) in crate::microdata::microdata(*key, value) {
+                for tag in html {
+                    head.push_str(&tag);
+                }
+            }
+        }
+        // 5. link tags — deduped, page-level first.
+        for link in self.collect_dedup_links() {
+            head.push_str(&link.render());
+        }
+        // 6. stylesheet — external <link> or inline <style>.
+        match &self.external_stylesheet {
+            Some(path) => head.push_str(&format!(
+                r#"<link rel="stylesheet" href="{}">"#,
+                path.display()
+            )),
+            None => {
+                let css = self.stylesheet();
+                if !css.is_empty() {
+                    head.push_str(&format!("<style>{css}</style>"));
+                }
+            }
+        }
+        // 7. script blocks — external <script src> or inline <script>.
+        match &self.external_code {
+            Some(path) => head.push_str(&format!(
+                r#"<script src="{}" defer></script>"#,
+                path.display()
+            )),
+            None => {
+                let code = self.inline_code();
+                if !code.is_empty() {
+                    head.push_str(&format!("<script>{code}</script>"));
+                }
+            }
+        }
+        let body: String = self.fragments.iter().map(|f| f.render()).collect();
+        format!(
+            "<!DOCTYPE html><html><head>{head}</head><body>{body}</body></html>"
+        )
+    }
+
+    /// Renders the page-level `:root { … }` block. Starts from the
+    /// semantic-token defaults and applies any `css_variables` overrides.
+    fn render_root_block(&self) -> String {
+        let mut variables: Vec<(String, String)> = crate::tokens::root_defaults();
+        if let Some(overrides) = &self.css_variables {
+            for (name, value) in overrides {
+                match variables.iter_mut().find(|(n, _)| n == name) {
+                    Some(entry) => entry.1 = value.clone(),
+                    None => variables.push((name.clone(), value.clone())),
+                }
+            }
+        }
+        let body: String = variables
+            .iter()
+            .map(|(name, value)| format!("--{name}: {value};"))
+            .collect();
+        format!(":root{{{body}}}")
+    }
+
+    /// Walks the fragment tree for the first `<h1>` and returns its
+    /// concatenated text content. `RawHtml` islands are invisible to
+    /// this scan (decisions.md item 8B).
+    fn first_h1_text(&self) -> Option<String> {
+        for fragment in &self.fragments {
+            if let Some(node) = fragment.node() {
+                if let Some(text) = find_first_h1_text(node) {
+                    return Some(text);
+                }
+            }
+        }
+        None
+    }
+}
+
+/// Serializes a `Stylesheet` collection into CSS rule text.
+fn render_stylesheet(sheet: &Stylesheet) -> String {
+    sheet
+        .entries()
+        .iter()
+        .map(|rule| format!("{}{{{}}}", rule.selector, rule.style.to_css()))
+        .collect()
+}
+
+/// Recursively searches a composable node tree for the first `<h1>` and
+/// returns its concatenated text content. Returns `None` if no `<h1>` is
+/// found in the typed tree (`RawHtml` islands are not scanned).
+pub(crate) fn find_first_h1_text(node: &ComposableNode) -> Option<String> {
+    match node {
+        ComposableNode::BlockTag(block) => {
+            if matches!(block.tag, BlockTag::H1) {
+                return Some(collect_text(&block.content.children));
+            }
+            for child in &block.content.children {
+                if let Some(text) = find_first_h1_text(child) {
+                    return Some(text);
+                }
+            }
+            None
+        }
+        ComposableNode::Component(fragment) => {
+            fragment.node().and_then(find_first_h1_text)
+        }
+        _ => None,
+    }
+}
+
+/// Concatenates the text content of a node slice (text fragments only).
+fn collect_text(children: &[ComposableNode]) -> String {
+    let mut out = String::new();
+    for child in children {
+        match child {
+            ComposableNode::TextFragment(text) => out.push_str(text),
+            ComposableNode::BlockTag(block) => {
+                out.push_str(&collect_text(&block.content.children));
+            }
+            ComposableNode::Component(fragment) => {
+                if let Some(node) = fragment.node() {
+                    if let ComposableNode::BlockTag(block) = node {
+                        out.push_str(&collect_text(&block.content.children));
+                    } else if let ComposableNode::TextFragment(text) = node {
+                        out.push_str(text);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    out
 }

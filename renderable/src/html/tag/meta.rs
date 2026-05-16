@@ -28,13 +28,41 @@ impl MetaTag {
         MetaTag::default()
     }
 
+    /// Mark this meta tag as the document charset declaration.
     pub fn set_charset(&mut self) -> &mut MetaTag {
         self.charset = Some(UTF8);
         self
     }
 
-    /// render the meta tag for the HTML page
+    /// Set the `name` attribute and its `content` value.
+    pub fn set_named(&mut self, name: impl Into<String>, content: impl Into<String>) -> &mut MetaTag {
+        self.name = Some(name.into());
+        self.content = Some(content.into());
+        self
+    }
+
+    /// Renders this meta tag as an HTML `<meta>` element.
+    ///
+    /// Emits `<meta charset="utf-8">` when a charset is set; otherwise
+    /// emits the `name` / `http-equiv` / `content` / `media` attributes
+    /// that are present.
     pub fn render(&self) -> String {
-        todo!()
+        if let Some(charset) = self.charset {
+            return format!(r#"<meta charset="{charset}">"#);
+        }
+        let mut attrs = String::new();
+        if let Some(http_equiv) = &self.http_equiv {
+            attrs.push_str(&format!(r#" http-equiv="{http_equiv}""#));
+        }
+        if let Some(name) = &self.name {
+            attrs.push_str(&format!(r#" name="{name}""#));
+        }
+        if let Some(content) = &self.content {
+            attrs.push_str(&format!(r#" content="{content}""#));
+        }
+        if let Some(media) = &self.media {
+            attrs.push_str(&format!(r#" media="{media}""#));
+        }
+        format!("<meta{attrs}>")
     }
 }
