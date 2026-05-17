@@ -45,8 +45,9 @@ pub trait TreeRenderable {
     /// Renders the component to a canonical render tree.
     fn render_tree(&self) -> RenderNode;
 
-    /// Optional layout hints for tree rendering. Defaults to `None`.
-    fn tree_layout_hints(&self) -> Option<LayoutHints> { None }
+    /// Optional layout for this component, seeded on its root node by the
+    /// tree renderers. Defaults to `None`.
+    fn tree_layout(&self) -> Option<renderable::layout::Layout> { None }
 }
 ```
 
@@ -81,7 +82,9 @@ Presentational hints ride on `NodeAttrs.data` under namespaced keys via
 `WIDGET_PROGRESS`, `WIDGET_COLUMNS`). `NodeAttrs::set_hint` / `get_hint` /
 `remove_hint` are the low-level accessors; typed helper structs wrap them:
 
-- **`LayoutHints`** — margins.
+- **`Layout`** — margins, alignment, max-width, word wrap. Stored via
+  `NodeAttrs::set_layout` / read with `NodeAttrs::layout`; permitted on
+  block-level nodes only. See `layout.md`.
 - **`ListRenderHints`** — bullet, hanging indent, child indent.
 - **`CodeRenderHints`** — header row, language label, highlight flag.
 - **`ProgressHints`** — value, bar width, glyphs, brackets.

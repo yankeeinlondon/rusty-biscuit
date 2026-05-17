@@ -126,15 +126,16 @@ Cross-target color types.
 - **`RgbColor`** / **`Octet`** — RGB representation
 - **`HdrColor`** — HDR color support
 
-### Layout (`layout.rs`)
+### Layout (`layout/`)
 
-Target-agnostic layout configuration data.
+Target-agnostic layout configuration for block-level components.
 
-- **`Layout`** — controls margins, alignment, word-wrapping, and background color
+- **`Layout`** — margins, alignment, max-width, and word-wrapping
+- **`TargetValue<T>`** — a value that is universal or specified per render target
+- **`Length`** — a layout length: `Zero`, `Ch`, `Percent`, or target-native `Css`
+- **`Margin`** — a four-sided box, each side a `TargetValue<Length>`
 - **`Alignment`** — horizontal alignment (`Left`, `Center`, `Right`)
-- **`Margin`** — fixed (`Chars`), percentage (`Percent`), or composed (`Offset`) margin values
-- **`RowFill`** — row padding strategy (`Auto`, `Fill`, `Exact`)
-- **`MaxWidth`** — width constraints
+- **`LayoutError`** — invalid percentage, non-universal unit, or empty per-target map
 
 ### Markdown (`markdown.rs`)
 

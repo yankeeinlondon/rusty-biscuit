@@ -40,7 +40,7 @@ Terminal from the single tree it produces.
 | [HTML Module](./html.md)                  | `HtmlPage` assembly, fragment composition, metadata merging, tag types                                         |
 | [Stylesheet Module](./stylesheet.md)      | Type-safe CSS builder: `CssStyle`, `CssRule`, `Stylesheet`, typed properties and values                        |
 | [Color Module](./color.md)                | Cross-target color system: `Color`, `CssColor`, `WebColor`, `BasicColor`, `Tailwind`, RGB, HDR                 |
-| [Layout Module](./layout.md)              | Target-agnostic layout: `Layout`, `Alignment`, `Margin`, `RowFill`, `MaxWidth`                                 |
+| [Layout Module](./layout.md)              | Target-agnostic layout: `Layout`, `TargetValue`, `Length`, `Margin`, `Alignment`                               |
 | [Markdown Module](./markdown.md)          | `MarkdownRenderable` trait and style-aware Markdown output                                                     |
 | [Tree Module](./tree.md)                  | Render tree: `RenderNode`, `Document`, `TreeRenderable`, component projection, render hints, `CodeRenderer`, tree renderers |
 | [Design Decisions](./design-decisions.md) | Key architecture decisions, naming conventions, migration notes                                                |

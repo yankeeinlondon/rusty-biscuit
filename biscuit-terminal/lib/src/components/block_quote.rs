@@ -318,8 +318,10 @@ impl renderable::tree::TreeRenderable for BlockQuote {
     /// attribution is present it is appended as a second `Paragraph`
     /// containing a single `Text` of the form `— {attribution}`.
     ///
-    /// Color, border, and layout are terminal presentation concerns and are
-    /// intentionally omitted from the structural tree.
+    /// A non-default [`Layout`] (margin, alignment, max-width, word wrap) is
+    /// recorded on the root node's attributes so the tree renderers apply it,
+    /// matching the bespoke `render` path. Color and border remain terminal
+    /// presentation concerns and are intentionally omitted.
     fn render_tree(&self) -> renderable::tree::RenderNode {
         use renderable::tree::RenderNode;
 
@@ -333,7 +335,14 @@ impl renderable::tree::TreeRenderable for BlockQuote {
             ))]));
         }
 
-        RenderNode::block_quote(children)
+        let mut node = RenderNode::block_quote(children);
+        // A block quote carries an intrinsic word-wrap default, so compare
+        // against the component's own baseline rather than `Layout::default()`
+        // — only a caller-customized layout is recorded on the node.
+        if self.layout != Self::default().layout {
+            node.attrs.set_layout(&self.layout);
+        }
+        node
     }
 }
 
