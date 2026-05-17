@@ -60,11 +60,36 @@ pub use validate::{
 pub trait TreeRenderable {
     /// Renders the component to a canonical render tree.
     fn render_tree(&self) -> RenderNode;
+
+    /// Optional layout for this component, seeded on its root node by the
+    /// tree renderers. Defaults to `None`.
+    fn tree_layout(&self) -> Option<crate::layout::Layout> {
+        None
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn tree_renderable_can_supply_a_layout() {
+        use crate::layout::{Layout, Length, Margin};
+
+        struct Demo;
+        impl TreeRenderable for Demo {
+            fn render_tree(&self) -> RenderNode {
+                RenderNode::paragraph(vec![RenderNode::text("hi")])
+            }
+            fn tree_layout(&self) -> Option<Layout> {
+                Some(Layout {
+                    margin: Margin::x(Length::ch(1)),
+                    ..Layout::default()
+                })
+            }
+        }
+        assert!(Demo.tree_layout().is_some());
+    }
 
     #[test]
     fn heading_depth_rejects_out_of_range() {
