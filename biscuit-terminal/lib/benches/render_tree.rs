@@ -17,9 +17,14 @@
 
 use std::hint::black_box;
 
-use criterion::{Criterion, criterion_group, criterion_main};
+use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
 
+use biscuit_terminal::components::list::{OrderedList, UnorderedList};
+use biscuit_terminal::components::progress::Progress;
 use biscuit_terminal::components::renderable::TerminalRenderable;
+use biscuit_terminal::components::section::{HeadingLevel, Section};
+use biscuit_terminal::components::table::{Table, TableCellContent, TableColumn};
+use biscuit_terminal::components::two_column::TwoColumn;
 use biscuit_terminal::render_tree::{
     TerminalRenderOptions, TreeComponent, render_terminal_document, render_terminal_node,
 };
@@ -228,10 +233,95 @@ fn bench_tree_component(c: &mut Criterion) {
     group.finish();
 }
 
+fn bench_component_render_path_comparison(c: &mut Criterion) {
+    let term = Terminal::new_optimistic(120);
+    let opts = TerminalRenderOptions::new(&term, Default::default());
+    let progress = Progress::new(0.72)
+        .with_label("Indexing")
+        .with_bar_width(48);
+    let unordered = UnorderedList::new(
+        (0..80)
+            .map(|i| format!("Unordered item {i} with enough content to exercise wrapping"))
+            .collect::<Vec<_>>(),
+    );
+    let ordered = OrderedList::new(
+        (0..80)
+            .map(|i| format!("Ordered step {i} with enough content to exercise wrapping"))
+            .collect::<Vec<_>>(),
+    );
+    let mut section = Section::new(HeadingLevel::h2, "Benchmark Section");
+    for i in 0..60 {
+        section.push(format!(
+            "Section paragraph {i} with component content projected into the render tree"
+        ));
+    }
+    let two_column = TwoColumn::new(
+        "Left column\nwith multiple lines\nand repeated content",
+        "Right column\nwith its own lines\nand repeated content",
+    )
+    .with_left_percent(0.45)
+    .with_gap(4);
+    let table = Table::new()
+        .with_columns(vec![
+            TableColumn::new("Name"),
+            TableColumn::new("Status"),
+            TableColumn::new("Notes"),
+        ])
+        .with_data(
+            (0..80)
+                .map(|i| {
+                    vec![
+                        TableCellContent::Text(format!("Item {i}")),
+                        TableCellContent::Text(if i % 3 == 0 { "Ready" } else { "Queued" }.into()),
+                        TableCellContent::Text(format!(
+                            "This row has enough text to exercise wrapping and width planning {i}"
+                        )),
+                    ]
+                })
+                .collect(),
+        );
+
+    let mut group = c.benchmark_group("component_render_path_comparison");
+
+    macro_rules! bench_component {
+        ($name:literal, $component:expr) => {{
+            group.bench_with_input(
+                BenchmarkId::new($name, "bespoke"),
+                &$component,
+                |b, component| b.iter(|| component.render(black_box(&term))),
+            );
+            group.bench_with_input(
+                BenchmarkId::new($name, "tree"),
+                &$component,
+                |b, component| {
+                    b.iter(|| {
+                        let node = component
+                            .render_tree_node()
+                            .expect("comparison component should support tree rendering");
+                        render_terminal_node(black_box(&node), black_box(&opts))
+                            .expect("tree rendering should succeed")
+                            .output
+                    })
+                },
+            );
+        }};
+    }
+
+    bench_component!("progress", progress);
+    bench_component!("unordered_list_80", unordered);
+    bench_component!("ordered_list_80", ordered);
+    bench_component!("section_60", section);
+    bench_component!("two_column", two_column);
+    bench_component!("table_80x3", table);
+
+    group.finish();
+}
+
 criterion_group!(
     benches,
     bench_render_node,
     bench_render_document,
     bench_tree_component,
+    bench_component_render_path_comparison,
 );
 criterion_main!(benches);

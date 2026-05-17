@@ -29,10 +29,7 @@ fn main() {
         }
         for scenario in scenarios() {
             let (bespoke, tree) = (case.render)(&scenario);
-            let title = format!(
-                "{} × {} (w{})",
-                case.name, scenario.name, scenario.width
-            );
+            let title = format!("{} × {} (w{})", case.name, scenario.name, scenario.width);
             print!("{}", side_by_side(&title, &bespoke, &tree, scenario.width));
         }
     }
