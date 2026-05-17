@@ -31,6 +31,7 @@
 //! assert!(rendered.output.contains("Hello"));
 //! ```
 
+use renderable::color::TerminalCodeContext;
 use renderable::tree::{
     ColumnAlign, ColumnConditional, Diagnostic, Document, NodeKind, ProgressHints, RenderError,
     RenderNode, RenderStrictness, Rendered, Severity, TableColumnHints,
@@ -623,7 +624,8 @@ impl Writer<'_> {
     /// hook before falling back to the built-in plain rendering.
     ///
     /// When [`TerminalRenderOptions::code_renderer`] is set, the hook is given
-    /// the language, body, node attributes, and the available render width.
+    /// the language, body, node attributes, and a [`TerminalCodeContext`]
+    /// containing the available render width, color depth, and color mode.
     /// A `Some` result is used verbatim; a `None` result falls back to
     /// [`Self::render_code`].
     fn render_code_node(
@@ -633,8 +635,12 @@ impl Writer<'_> {
         attrs: &renderable::tree::NodeAttrs,
     ) -> String {
         if let Some(renderer) = &self.opts.code_renderer {
-            let width = self.opts.context.available_width;
-            if let Some(rendered) = renderer.render_terminal_code(lang, value, attrs, width) {
+            let context = TerminalCodeContext::new(
+                self.opts.context.available_width,
+                (&self.opts.context.color_depth).into(),
+                (&self.opts.context.color_mode).into(),
+            );
+            if let Some(rendered) = renderer.render_terminal_code(lang, value, attrs, context) {
                 return rendered;
             }
         }

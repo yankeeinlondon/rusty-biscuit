@@ -245,6 +245,19 @@ impl TerminalRenderOptions {
         }
     }
 
+    /// Builds options from an explicit context and strictness.
+    ///
+    /// Useful when you need to override specific context fields (e.g., for
+    /// testing that `available_width` differs from root width).
+    #[must_use]
+    pub fn from_context(context: TerminalRenderContext, strictness: RenderStrictness) -> Self {
+        Self {
+            context,
+            strictness,
+            code_renderer: None,
+        }
+    }
+
     /// Sets the optional code-block render hook.
     #[must_use]
     pub fn with_code_renderer(mut self, code_renderer: Rc<dyn CodeRenderer>) -> Self {

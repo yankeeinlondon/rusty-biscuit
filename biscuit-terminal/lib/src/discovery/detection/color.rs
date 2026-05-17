@@ -162,6 +162,57 @@ pub fn color_mode() -> ColorMode {
     ColorMode::Dark
 }
 
+// ---------------------------------------------------------------------------
+// Boundary conversions to renderable types
+// ---------------------------------------------------------------------------
+
+use renderable::color::ColorDepth as RenderColorDepth;
+use renderable::color::ColorMode as RenderColorMode;
+
+impl From<ColorDepth> for RenderColorDepth {
+    fn from(depth: ColorDepth) -> Self {
+        match depth {
+            ColorDepth::None => RenderColorDepth::None,
+            ColorDepth::Minimal => RenderColorDepth::Minimal,
+            ColorDepth::Basic => RenderColorDepth::Basic,
+            ColorDepth::Enhanced => RenderColorDepth::Enhanced,
+            ColorDepth::TrueColor => RenderColorDepth::TrueColor,
+        }
+    }
+}
+
+impl From<&ColorDepth> for RenderColorDepth {
+    fn from(depth: &ColorDepth) -> Self {
+        match depth {
+            ColorDepth::None => RenderColorDepth::None,
+            ColorDepth::Minimal => RenderColorDepth::Minimal,
+            ColorDepth::Basic => RenderColorDepth::Basic,
+            ColorDepth::Enhanced => RenderColorDepth::Enhanced,
+            ColorDepth::TrueColor => RenderColorDepth::TrueColor,
+        }
+    }
+}
+
+impl From<ColorMode> for RenderColorMode {
+    fn from(mode: ColorMode) -> Self {
+        match mode {
+            ColorMode::Light => RenderColorMode::Light,
+            ColorMode::Dark => RenderColorMode::Dark,
+            ColorMode::Unknown => RenderColorMode::Unknown,
+        }
+    }
+}
+
+impl From<&ColorMode> for RenderColorMode {
+    fn from(mode: &ColorMode) -> Self {
+        match mode {
+            ColorMode::Light => RenderColorMode::Light,
+            ColorMode::Dark => RenderColorMode::Dark,
+            ColorMode::Unknown => RenderColorMode::Unknown,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -190,5 +241,29 @@ mod tests {
         let mode = ColorMode::Dark;
         let json = serde_json::to_string(&mode).unwrap();
         assert!(json.contains("Dark"));
+    }
+
+    #[test]
+    fn color_depth_conversion_round_trip() {
+        for depth in [
+            ColorDepth::None,
+            ColorDepth::Minimal,
+            ColorDepth::Basic,
+            ColorDepth::Enhanced,
+            ColorDepth::TrueColor,
+        ] {
+            let render: RenderColorDepth = depth.clone().into();
+            let render_ref: RenderColorDepth = (&depth).into();
+            assert_eq!(render, render_ref);
+        }
+    }
+
+    #[test]
+    fn color_mode_conversion_round_trip() {
+        for mode in [ColorMode::Light, ColorMode::Dark, ColorMode::Unknown] {
+            let render: RenderColorMode = mode.clone().into();
+            let render_ref: RenderColorMode = (&mode).into();
+            assert_eq!(render, render_ref);
+        }
     }
 }
