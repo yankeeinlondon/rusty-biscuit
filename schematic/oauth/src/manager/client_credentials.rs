@@ -3,7 +3,7 @@
 use oauth2::Scope;
 
 use crate::error::OAuthError;
-use crate::manager::{OAuth2Manager, build_http_client, extract_tokens};
+use crate::manager::{build_http_client, extract_tokens, OAuth2Manager};
 use crate::types::StoredTokens;
 
 impl OAuth2Manager {
@@ -14,9 +14,7 @@ impl OAuth2Manager {
     /// ## Errors
     ///
     /// Returns `OAuthError::TokenExchange` if the token endpoint returns an error.
-    pub async fn acquire_client_credentials_token(
-        &self,
-    ) -> Result<StoredTokens, OAuthError> {
+    pub async fn acquire_client_credentials_token(&self) -> Result<StoredTokens, OAuthError> {
         let mut request = self.client.exchange_client_credentials();
 
         for scope in &self.config.scopes {

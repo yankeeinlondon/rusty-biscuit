@@ -148,7 +148,8 @@ pub fn generate_request_struct_with_options(
         endpoint_spec::generate_endpoint_spec_impl(&struct_name, &endpoint.id, &endpoint.response);
 
     // Generate into_parts method
-    let into_parts = into_parts::generate_into_parts(endpoint, &path_params, &query_params, &method_str);
+    let into_parts =
+        into_parts::generate_into_parts(endpoint, &path_params, &query_params, &method_str);
 
     // Generate doc comments with example section
     let doc_lines = generate_doc_comment_with_example(

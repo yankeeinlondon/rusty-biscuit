@@ -15,9 +15,7 @@ pub fn all() -> Vec<Endpoint> {
             request: None,
             response: ApiResponse::json_vec_type("Tag"),
             headers: vec![],
-            params: Some(
-                EndpointParams::default().with_pagination(PaginationStyle::gitlab()),
-            ),
+            params: Some(EndpointParams::default().with_pagination(PaginationStyle::gitlab())),
             oauth_scopes: None,
         },
         Endpoint {
@@ -39,9 +37,7 @@ pub fn all() -> Vec<Endpoint> {
             request: None,
             response: ApiResponse::json_vec_type("Release"),
             headers: vec![],
-            params: Some(
-                EndpointParams::default().with_pagination(PaginationStyle::gitlab()),
-            ),
+            params: Some(EndpointParams::default().with_pagination(PaginationStyle::gitlab())),
             oauth_scopes: None,
         },
         Endpoint {

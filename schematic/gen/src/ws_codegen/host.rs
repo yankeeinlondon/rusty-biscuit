@@ -417,8 +417,10 @@ fn generate_accept_and_auth_helpers(
             let header_name = header.clone();
             let env_names = env_auth.to_vec();
             let common_helpers = super::shared::generate_host_common_auth_helpers(&env_names);
-            let validate_fn =
-                super::shared::generate_host_validate_raw_header(&header_name, "Invalid authentication header");
+            let validate_fn = super::shared::generate_host_validate_raw_header(
+                &header_name,
+                "Invalid authentication header",
+            );
 
             (
                 quote! {

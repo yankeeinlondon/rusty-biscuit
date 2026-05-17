@@ -1,10 +1,10 @@
 use std::collections::HashSet;
 
+use super::super::source::OpenApiSource;
 use super::auth::map_auth_strategy;
 use super::diagnostics::OpenApiDiagnostic;
 use super::mappings;
 use super::resolver::RefResolver;
-use super::super::source::OpenApiSource;
 use crate::models::ModelCatalog;
 use crate::types::RestApi;
 
@@ -216,9 +216,7 @@ impl OpenApiImport {
     }
 
     /// Parses the OpenAPI document from the configured source.
-    fn parse_source(
-        &self,
-    ) -> Result<openapiv3::OpenAPI, super::super::error::OpenApiError> {
+    fn parse_source(&self) -> Result<openapiv3::OpenAPI, super::super::error::OpenApiError> {
         match &self.source {
             OpenApiSource::Path(path) => {
                 let content = std::fs::read_to_string(path).map_err(|e| {
@@ -235,22 +233,18 @@ impl OpenApiImport {
                     }
                 })
             }
-            OpenApiSource::Json(content) => {
-                serde_json::from_str(content).map_err(|e| {
-                    super::super::error::OpenApiError::Parse {
-                        message: e.to_string(),
-                        location: Some(format!("line {}, column {}", e.line(), e.column())),
-                    }
-                })
-            }
-            OpenApiSource::Yaml(content) => {
-                serde_yaml_ng::from_str(content).map_err(|e| {
-                    super::super::error::OpenApiError::Parse {
-                        message: e.to_string(),
-                        location: None,
-                    }
-                })
-            }
+            OpenApiSource::Json(content) => serde_json::from_str(content).map_err(|e| {
+                super::super::error::OpenApiError::Parse {
+                    message: e.to_string(),
+                    location: Some(format!("line {}, column {}", e.line(), e.column())),
+                }
+            }),
+            OpenApiSource::Yaml(content) => serde_yaml_ng::from_str(content).map_err(|e| {
+                super::super::error::OpenApiError::Parse {
+                    message: e.to_string(),
+                    location: None,
+                }
+            }),
             OpenApiSource::Bytes(bytes) => {
                 let content = String::from_utf8_lossy(bytes);
                 serde_yaml_ng::from_str(&content).map_err(|e| {
@@ -672,7 +666,10 @@ components:
         let source = OpenApiSource::yaml(yaml);
         let result = OpenApiImport::new(source).build().unwrap();
 
-        assert!(matches!(result.api.auth, crate::auth::AuthStrategy::BearerToken { .. }));
+        assert!(matches!(
+            result.api.auth,
+            crate::auth::AuthStrategy::BearerToken { .. }
+        ));
     }
 
     #[test]

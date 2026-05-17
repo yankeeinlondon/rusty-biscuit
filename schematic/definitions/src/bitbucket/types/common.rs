@@ -171,7 +171,7 @@ mod tests {
 
     #[test]
     fn empty_json_deserializes_cleanly() {
-        use super::super::{Repository, PullRequest, Issue, Tag, Download, SourceEntry};
+        use super::super::{Download, Issue, PullRequest, Repository, SourceEntry, Tag};
         let _user: User = serde_json::from_str("{}").unwrap();
         let _repo: Repository = serde_json::from_str("{}").unwrap();
         let _pr: PullRequest = serde_json::from_str("{}").unwrap();

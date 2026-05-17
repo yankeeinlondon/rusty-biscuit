@@ -22,7 +22,10 @@ pub(super) struct ConstructorInit<'a> {
 /// - `with_base_url()` constructor
 /// - `with_client()` constructor
 /// - `with_client_and_base_url()` constructor
-pub(super) fn generate_constructors(_struct_name: &Ident, init: &ConstructorInit<'_>) -> TokenStream {
+pub(super) fn generate_constructors(
+    _struct_name: &Ident,
+    init: &ConstructorInit<'_>,
+) -> TokenStream {
     let base_url = init.base_url;
     let env_auth = init.env_auth;
     let auth_strategy_init = init.auth_strategy_init;

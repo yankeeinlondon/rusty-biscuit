@@ -1,5 +1,5 @@
+use super::helpers::{generate_auth_helper_methods, generate_auth_setup, to_snake_case};
 use super::*;
-use super::helpers::{generate_auth_setup, generate_auth_helper_methods, to_snake_case};
 use crate::codegen::request_structs::{format_generated_code, validate_generated_code};
 use schematic_define::{ApiResponse, AuthStrategy, Endpoint, RestMethod};
 
@@ -102,9 +102,7 @@ fn generate_request_method_no_auth() {
     assert!(code.contains("async fn build_and_send_request"));
     assert!(code.contains("let request = request.into()"));
     assert!(code.contains("let endpoint_id = request.endpoint_id()"));
-    assert!(
-        code.contains("let (method, path, body, endpoint_headers) = request.into_parts()?")
-    );
+    assert!(code.contains("let (method, path, body, endpoint_headers) = request.into_parts()?"));
     assert!(code.contains("format!(\"{}{}\", self.base_url, path)"));
 
     // Check HTTP method matching
@@ -114,9 +112,7 @@ fn generate_request_method_no_auth() {
     assert!(code.contains(r#""PATCH" => self.client.patch(&url)"#));
     assert!(code.contains(r#""DELETE" => self.client.delete(&url)"#));
     assert!(code.contains(r#""HEAD" => self.client.head(&url)"#));
-    assert!(
-        code.contains(r#""OPTIONS" => self.client.request(reqwest::Method::OPTIONS, &url)"#)
-    );
+    assert!(code.contains(r#""OPTIONS" => self.client.request(reqwest::Method::OPTIONS, &url)"#));
 
     // Check error handling
     assert!(code.contains("SchematicError::UnsupportedMethod"));
