@@ -7,6 +7,9 @@
 mod length;
 pub use length::{Length, LayoutError};
 
+mod target_value;
+pub use target_value::TargetValue;
+
 use crate::color::Color;
 
 pub use crate::wrap_policy::WordWrap;
