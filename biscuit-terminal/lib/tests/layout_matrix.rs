@@ -49,3 +49,31 @@ fn side_by_side_includes_title_and_both_columns() {
     assert!(out.contains("My Title"));
     assert!(out.contains("left") && out.contains("right"));
 }
+
+use layout_matrix_support::component_cases;
+
+#[test]
+fn component_case_count_is_six() {
+    assert_eq!(component_cases().len(), 6);
+}
+
+#[test]
+fn every_case_renders_non_empty() {
+    for case in component_cases() {
+        for scenario in scenarios() {
+            let (bespoke, tree) = (case.render)(&scenario);
+            assert!(
+                !bespoke.is_empty(),
+                "{}/{}: bespoke output was empty",
+                case.name,
+                scenario.name
+            );
+            assert!(
+                !tree.is_empty(),
+                "{}/{}: tree output was empty",
+                case.name,
+                scenario.name
+            );
+        }
+    }
+}
