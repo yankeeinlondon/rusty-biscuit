@@ -176,9 +176,10 @@ impl<D: DeviceDriver + Clone> DeviceManager<D> {
         };
 
         if let Some(mut previous) = self.devices.write().await.insert(device_id, active)
-            && let Some(handle) = previous.poll_handle.take() {
-                handle.abort();
-            }
+            && let Some(handle) = previous.poll_handle.take()
+        {
+            handle.abort();
+        }
 
         // Broadcast connectivity state
         self.broadcast_connectivity().await;
