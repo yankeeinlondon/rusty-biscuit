@@ -37,7 +37,7 @@ use serde::{Deserialize, Serialize};
 ///   "word_wrap": "none"
 /// }
 /// ```
-#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Layout {
     /// Outer margins.
     pub margin: Margin,
@@ -47,6 +47,22 @@ pub struct Layout {
     pub max_width: Option<TargetValue<Length>>,
     /// Content-wrapping policy.
     pub word_wrap: WordWrap,
+}
+
+impl Default for Layout {
+    /// Zero margins, left-aligned, no max-width, and no content wrapping.
+    ///
+    /// `word_wrap` defaults to [`WordWrap::None`] rather than
+    /// [`WordWrap::default()`] so that block components do not wrap unless a
+    /// caller opts in.
+    fn default() -> Self {
+        Self {
+            margin: Margin::default(),
+            alignment: Alignment::default(),
+            max_width: None,
+            word_wrap: WordWrap::None,
+        }
+    }
 }
 
 impl Layout {
