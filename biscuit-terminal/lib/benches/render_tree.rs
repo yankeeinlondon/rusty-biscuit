@@ -17,11 +17,11 @@
 
 use std::hint::black_box;
 
-use criterion::{criterion_group, criterion_main, Criterion};
+use criterion::{Criterion, criterion_group, criterion_main};
 
 use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::render_tree::{
-    render_terminal_document, render_terminal_node, TerminalRenderOptions, TreeComponent,
+    TerminalRenderOptions, TreeComponent, render_terminal_document, render_terminal_node,
 };
 use biscuit_terminal::terminal::Terminal;
 use renderable::tree::{
@@ -62,9 +62,7 @@ fn large_table_tree() -> RenderNode {
     table_rows.push(RenderNode::table_row(header_cells));
     for row in 0..rows {
         let cells: Vec<RenderNode> = (0..columns)
-            .map(|col| {
-                RenderNode::table_cell(vec![RenderNode::text(format!("r{row}c{col} cell"))])
-            })
+            .map(|col| RenderNode::table_cell(vec![RenderNode::text(format!("r{row}c{col} cell"))]))
             .collect();
         table_rows.push(RenderNode::table_row(cells));
     }
@@ -76,9 +74,9 @@ fn deeply_nested_list_tree() -> RenderNode {
     fn nest(level: usize, depth: usize, siblings: usize) -> RenderNode {
         let items: Vec<RenderNode> = (0..siblings)
             .map(|sibling| {
-                let mut children = vec![RenderNode::paragraph(vec![RenderNode::text(
-                    format!("level {level} item {sibling} with descriptive text"),
-                )])];
+                let mut children = vec![RenderNode::paragraph(vec![RenderNode::text(format!(
+                    "level {level} item {sibling} with descriptive text"
+                ))])];
                 if level + 1 < depth {
                     children.push(nest(level + 1, depth, siblings));
                 }
@@ -138,9 +136,9 @@ fn repeated_subtree() -> RenderNode {
                     .map(|item| {
                         RenderNode::list_item(
                             None,
-                            vec![RenderNode::paragraph(vec![RenderNode::text(
-                                format!("list item {item}"),
-                            )])],
+                            vec![RenderNode::paragraph(vec![RenderNode::text(format!(
+                                "list item {item}"
+                            ))])],
                         )
                     })
                     .collect(),

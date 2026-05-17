@@ -139,9 +139,7 @@ fn render_tree_component_parity_plain() {
     assert_component_parity(
         "plain",
         quote,
-        &[
-            "The only way to do great work is to love what you do.",
-        ],
+        &["The only way to do great work is to love what you do."],
     );
 }
 

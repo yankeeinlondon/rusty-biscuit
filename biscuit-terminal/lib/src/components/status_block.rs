@@ -4,7 +4,7 @@ use crate::{
     components::{
         block_quote::BlockQuote,
         prose::Prose,
-        renderable::{TerminalRenderable, RenderableTerminalContent},
+        renderable::{RenderableTerminalContent, TerminalRenderable},
         status::{Status, StatusState},
     },
     terminal::Terminal,

@@ -3,7 +3,7 @@ use crate::commands::shared::*;
 use crate::commands::{CliContext, Run};
 use biscuit_terminal::components::block_quote::BlockQuote;
 use biscuit_terminal::components::prose::Prose;
-use biscuit_terminal::components::renderable::{TerminalRenderable, RenderableTerminalContent};
+use biscuit_terminal::components::renderable::{RenderableTerminalContent, TerminalRenderable};
 use biscuit_terminal::utils::layout::Margin;
 use clap::Args as ClapArgs;
 use std::rc::Rc;

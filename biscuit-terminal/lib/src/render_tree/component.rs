@@ -2,8 +2,9 @@
 //! implements [`TreeRenderable`].
 
 use std::any::Any;
+use std::rc::Rc;
 
-use renderable::tree::{RenderStrictness, TreeRenderable};
+use renderable::tree::{CodeRenderer, RenderStrictness, TreeRenderable};
 
 use crate::components::renderable::TerminalRenderable;
 use crate::terminal::Terminal;
@@ -47,7 +48,6 @@ use super::render::render_terminal_node;
 /// let rendered = component.render_optimistic(Some(80));
 /// assert!(rendered.contains("quoted text"));
 /// ```
-#[derive(Debug)]
 pub struct TreeComponent<T: TreeRenderable + std::fmt::Debug> {
     /// The wrapped tree-renderable value.
     pub inner: T,
@@ -58,6 +58,23 @@ pub struct TreeComponent<T: TreeRenderable + std::fmt::Debug> {
     /// [`RenderStrictness::Strict`] is clamped to [`RenderStrictness::Warn`]
     /// at render time so the infallible trait contract holds.
     pub strictness: RenderStrictness,
+    /// An optional hook for custom code-block rendering.
+    ///
+    /// When set, it is threaded into the [`TerminalRenderOptions`] used to
+    /// render the projected tree.
+    pub code_renderer: Option<Rc<dyn CodeRenderer>>,
+}
+
+impl<T: TreeRenderable + std::fmt::Debug> std::fmt::Debug for TreeComponent<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // `dyn CodeRenderer` is not `Debug`; report only whether one is set.
+        f.debug_struct("TreeComponent")
+            .field("inner", &self.inner)
+            .field("layout", &self.layout)
+            .field("strictness", &self.strictness)
+            .field("code_renderer", &self.code_renderer.is_some())
+            .finish()
+    }
 }
 
 impl<T: TreeRenderable + std::fmt::Debug> TreeComponent<T> {
@@ -68,7 +85,15 @@ impl<T: TreeRenderable + std::fmt::Debug> TreeComponent<T> {
             inner,
             layout: Layout::default(),
             strictness: RenderStrictness::Warn,
+            code_renderer: None,
         }
+    }
+
+    /// Sets the optional code-block render hook.
+    #[must_use]
+    pub fn with_code_renderer(mut self, code_renderer: Rc<dyn CodeRenderer>) -> Self {
+        self.code_renderer = Some(code_renderer);
+        self
     }
 
     /// Renders the projected tree, applying the adapter's error policy.
@@ -79,7 +104,8 @@ impl<T: TreeRenderable + std::fmt::Debug> TreeComponent<T> {
             RenderStrictness::Strict => RenderStrictness::Warn,
             other => other,
         };
-        let opts = TerminalRenderOptions::new(term, strictness);
+        let mut opts = TerminalRenderOptions::new(term, strictness);
+        opts.code_renderer = self.code_renderer.clone();
         let node = self.inner.render_tree();
         match render_terminal_node(&node, &opts) {
             Ok(rendered) => rendered.output,
@@ -153,9 +179,9 @@ mod render_tree_component_tests {
     impl TreeRenderable for Broken {
         fn render_tree(&self) -> RenderNode {
             // An orphaned TableCell inside a Paragraph fails validation.
-            RenderNode::root(vec![RenderNode::paragraph(vec![
-                RenderNode::table_cell(vec![RenderNode::text("x")]),
-            ])])
+            RenderNode::root(vec![RenderNode::paragraph(vec![RenderNode::table_cell(
+                vec![RenderNode::text("x")],
+            )])])
         }
     }
 
@@ -179,7 +205,10 @@ mod render_tree_component_tests {
     #[test]
     fn render_tree_component_layout_accessors() {
         let mut component = TreeComponent::new(Para("x".into()));
-        assert_eq!(component.layout().left_margin, Layout::default().left_margin);
+        assert_eq!(
+            component.layout().left_margin,
+            Layout::default().left_margin
+        );
         component.layout_mut().left_margin = Margin::Chars(4);
         assert_eq!(component.layout().left_margin, Margin::Chars(4));
     }

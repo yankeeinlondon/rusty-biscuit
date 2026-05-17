@@ -286,13 +286,18 @@ pub(super) fn parse_tokens_inner(
                                     // Styled tag: layer-aware push/pop
                                     let prev = state.set(layer, open.as_ref());
                                     result.push_str(open.as_ref());
-                                    result.push_str(&parse_tokens_inner(&inner_content, term, state));
+                                    result.push_str(&parse_tokens_inner(
+                                        &inner_content,
+                                        term,
+                                        state,
+                                    ));
                                     state.restore(layer, prev);
                                     result.push_str(state.close_code(layer));
                                 } else {
                                     // Structural tag (e.g. `<a href>` with OSC8
                                     // or markdown fallback): emit open/close as-is.
-                                    let rendered_inner = parse_tokens_inner(&inner_content, term, state);
+                                    let rendered_inner =
+                                        parse_tokens_inner(&inner_content, term, state);
                                     let is_markdown_link_fallback = open.as_ref() == "["
                                         && close.as_ref().starts_with("](")
                                         && close.as_ref().ends_with(')');

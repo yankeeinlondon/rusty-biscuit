@@ -1,8 +1,11 @@
 use std::rc::Rc;
 
+use renderable::tree::{ListRenderHints, RenderNode};
+
 use crate::{
-    components::renderable::{TerminalRenderable, RenderableTerminalContent},
+    components::renderable::{RenderableTerminalContent, TerminalRenderable},
     prelude::Prose,
+    render_tree::projection::TreeProjectionContext,
     terminal::Terminal,
     utils::{
         block_constraint::{split_lines, visible_width, wrap_lines},
@@ -259,6 +262,43 @@ impl TerminalRenderable for OrderedList {
     fn is_block_level(&self) -> bool {
         true
     }
+
+    /// Projects this ordered list into a [`NodeKind::List`] render-tree node.
+    ///
+    /// Each item is projected into a [`NodeKind::ListItem`] whose children
+    /// come from [`RenderableTerminalContent::to_tree_nodes`]. The list's
+    /// `indent_children` setting is recorded as a list hint on the node.
+    ///
+    /// [`NodeKind::List`]: renderable::tree::NodeKind::List
+    /// [`NodeKind::ListItem`]: renderable::tree::NodeKind::ListItem
+    fn render_tree_node(&self) -> Option<RenderNode> {
+        let children = project_list_items(&self.items);
+        let mut node = RenderNode::list(true, None, children);
+        node.attrs.set_list_hints(&ListRenderHints {
+            bullet: None,
+            hanging_indent: true,
+            indent_children: Some(self.indent_children),
+        });
+        Some(node)
+    }
+}
+
+/// Projects a list's items into [`NodeKind::ListItem`] nodes.
+///
+/// Each [`RenderableTerminalContent`] item is projected with a fresh
+/// [`TreeProjectionContext`]; the resulting nodes become the children of an
+/// unchecked list item.
+///
+/// [`NodeKind::ListItem`]: renderable::tree::NodeKind::ListItem
+fn project_list_items(items: &[RenderableTerminalContent]) -> Vec<RenderNode> {
+    items
+        .iter()
+        .map(|item| {
+            let mut ctx = TreeProjectionContext::default();
+            let result = item.to_tree_nodes(&mut ctx);
+            RenderNode::list_item(None, result.nodes)
+        })
+        .collect()
 }
 
 // =============================================================================
@@ -559,6 +599,31 @@ impl TerminalRenderable for UnorderedList {
 
     fn is_block_level(&self) -> bool {
         true
+    }
+
+    /// Projects this unordered list into a [`NodeKind::List`] render-tree node.
+    ///
+    /// Each item is projected into a [`NodeKind::ListItem`] whose children
+    /// come from [`RenderableTerminalContent::to_tree_nodes`]. A non-default
+    /// bullet, the hanging-indent flag, and any explicit `indent_children`
+    /// width are recorded as list hints on the node.
+    ///
+    /// [`NodeKind::List`]: renderable::tree::NodeKind::List
+    /// [`NodeKind::ListItem`]: renderable::tree::NodeKind::ListItem
+    fn render_tree_node(&self) -> Option<RenderNode> {
+        let children = project_list_items(&self.items);
+        let mut node = RenderNode::list(false, None, children);
+        let bullet = if self.bullet == "- " {
+            None
+        } else {
+            Some(self.bullet.clone())
+        };
+        node.attrs.set_list_hints(&ListRenderHints {
+            bullet,
+            hanging_indent: self.hanging_indent,
+            indent_children: self.indent_children,
+        });
+        Some(node)
     }
 }
 

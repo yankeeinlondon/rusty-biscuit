@@ -6,7 +6,7 @@ use biscuit_terminal::components::block_quote::BlockQuote;
 use biscuit_terminal::components::list::UnorderedList;
 use biscuit_terminal::components::pad::{PadLeft, PadRight};
 use biscuit_terminal::components::prose::Prose;
-use biscuit_terminal::components::renderable::{TerminalRenderable, RenderableTerminalContent};
+use biscuit_terminal::components::renderable::{RenderableTerminalContent, TerminalRenderable};
 use biscuit_terminal::utils::escape_codes;
 use biscuit_terminal::utils::layout::{Layout, LayoutTerminalExt, WordWrap};
 use biscuit_terminal::utils::word_wrap::word_wrap;

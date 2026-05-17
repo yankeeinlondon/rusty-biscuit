@@ -1,7 +1,7 @@
 use std::any::Any;
 
 use crate::components::prose::Prose;
-use crate::components::renderable::{TerminalRenderable, RenderableTerminalContent};
+use crate::components::renderable::{RenderableTerminalContent, TerminalRenderable};
 use crate::components::text_block::TextBlock;
 use crate::terminal::Terminal;
 use crate::utils::layout::Layout;
@@ -234,7 +234,8 @@ impl InlineContent {
 
     /// Appends plain text content.
     pub fn add_text<T: Into<String>>(&mut self, content: T) -> &mut Self {
-        self.parts.push(RenderableTerminalContent::String(content.into()));
+        self.parts
+            .push(RenderableTerminalContent::String(content.into()));
         self
     }
 
@@ -393,7 +394,10 @@ mod tests {
 
     #[test]
     fn test_from_vec_renderable_content() {
-        let items = vec![RenderableTerminalContent::from("x"), RenderableTerminalContent::from("y")];
+        let items = vec![
+            RenderableTerminalContent::from("x"),
+            RenderableTerminalContent::from("y"),
+        ];
         let inline = InlineContent::from(items);
         assert_eq!(inline.len(), 2);
         assert_eq!(inline.render_optimistic(Some(80)), "xy");
@@ -784,7 +788,10 @@ mod tests {
         assert_eq!(InlineContent::from(String::from("x")).len(), 1);
         assert_eq!(InlineContent::from(Prose::new("x")).len(), 1);
         assert_eq!(InlineContent::from(TextBlock::new("x")).len(), 1);
-        assert_eq!(InlineContent::from(RenderableTerminalContent::from("x")).len(), 1);
+        assert_eq!(
+            InlineContent::from(RenderableTerminalContent::from("x")).len(),
+            1
+        );
     }
 
     // =====================================================================

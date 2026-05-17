@@ -3,7 +3,7 @@ use std::rc::Rc;
 use crate::{
     components::{
         prose::Prose,
-        renderable::{TerminalRenderable, RenderableTerminalContent},
+        renderable::{RenderableTerminalContent, TerminalRenderable},
     },
     terminal::Terminal,
     utils::{
@@ -110,19 +110,28 @@ impl From<String> for BlockQuote {
 
 impl From<&String> for BlockQuote {
     fn from(value: &String) -> Self {
-        BlockQuote::new(RenderableTerminalContent::String(value.into()), None::<String>)
+        BlockQuote::new(
+            RenderableTerminalContent::String(value.into()),
+            None::<String>,
+        )
     }
 }
 
 impl From<&str> for BlockQuote {
     fn from(value: &str) -> Self {
-        BlockQuote::new(RenderableTerminalContent::String(value.into()), None::<String>)
+        BlockQuote::new(
+            RenderableTerminalContent::String(value.into()),
+            None::<String>,
+        )
     }
 }
 
 impl From<Prose> for BlockQuote {
     fn from(value: Prose) -> Self {
-        BlockQuote::new(RenderableTerminalContent::Component(Rc::new(value)), None::<String>)
+        BlockQuote::new(
+            RenderableTerminalContent::Component(Rc::new(value)),
+            None::<String>,
+        )
     }
 }
 
@@ -137,7 +146,10 @@ impl From<&Prose> for BlockQuote {
 
 impl BlockQuote {
     /// Create a block quote by passing in the content and _optionally_ an attribution.
-    pub fn new<U: Into<String>>(content: RenderableTerminalContent, attribution: Option<U>) -> Self {
+    pub fn new<U: Into<String>>(
+        content: RenderableTerminalContent,
+        attribution: Option<U>,
+    ) -> Self {
         Self {
             content,
             attribution: attribution.map(|attribution| attribution.into()),
@@ -292,9 +304,7 @@ impl BlockQuote {
         match &self.content {
             RenderableTerminalContent::String(s) => s.clone(),
             RenderableTerminalContent::Component(component) => {
-                crate::utils::escape_codes::strip_escape_codes(
-                    component.render_optimistic(None),
-                )
+                crate::utils::escape_codes::strip_escape_codes(component.render_optimistic(None))
             }
         }
     }
@@ -377,7 +387,10 @@ mod tests {
 
     #[test]
     fn test_block_quote_new_with_renderable_content() {
-        let quote = BlockQuote::new(RenderableTerminalContent::from("Direct content"), None::<&str>);
+        let quote = BlockQuote::new(
+            RenderableTerminalContent::from("Direct content"),
+            None::<&str>,
+        );
         let result = quote.render_optimistic(None);
         assert_eq!(strip_ansi(&result), "│ Direct content");
     }
@@ -388,7 +401,10 @@ mod tests {
 
     #[test]
     fn test_multiline_block_quote() {
-        let quote = BlockQuote::new(RenderableTerminalContent::from("Line 1\nLine 2"), None::<&str>);
+        let quote = BlockQuote::new(
+            RenderableTerminalContent::from("Line 1\nLine 2"),
+            None::<&str>,
+        );
         let result = quote.render_optimistic(None);
         assert_eq!(strip_ansi(&result), "│ Line 1\n│ Line 2");
     }
@@ -759,7 +775,7 @@ mod tests {
     // =========================================================================
 
     use renderable::tree::render::{
-        render_browser_node, render_markdown_node, BrowserRenderOptions, MarkdownRenderOptions,
+        BrowserRenderOptions, MarkdownRenderOptions, render_browser_node, render_markdown_node,
     };
     use renderable::tree::{NodeKind, TreeRenderable};
 

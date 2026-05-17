@@ -1,3 +1,8 @@
+use renderable::tree::{
+    ColumnAlign, ColumnConditional, LayoutHints, RenderNode, TableCellHints, TableColumnHints,
+    TableTerminalHints,
+};
+
 use crate::{
     components::renderable::TerminalRenderable,
     terminal::Terminal,
@@ -11,7 +16,7 @@ use crate::{
 pub use super::cell::TableCellContent;
 use super::cell::pad_cell;
 pub use super::column::TableColumn;
-use super::types::VerticalAlign;
+use super::types::{Currency, VerticalAlign};
 use super::width::{MeasuredColumn, TableWidthError, TableWidthMeasurements, TableWidthPlan};
 use crate::discovery::detection::{ColorDepth, ColorMode};
 
@@ -1375,6 +1380,188 @@ impl TerminalRenderable for Table {
     fn is_block_level(&self) -> bool {
         true
     }
+
+    /// Projects this table into a canonical [`NodeKind::Table`] render node.
+    ///
+    /// The first child row is the header row; each remaining child row is a
+    /// data row. Every cell carries the readable pre-formatted text as a
+    /// [`NodeKind::Text`] node, plus [`TableCellHints`] recording the cell
+    /// kind, the original typed value as JSON, and alignment. The table node
+    /// carries per-column [`TableColumnHints`] and [`TableTerminalHints`], and
+    /// [`LayoutHints`] when margins are non-default.
+    ///
+    /// [`NodeKind::Table`]: renderable::tree::NodeKind::Table
+    /// [`NodeKind::Text`]: renderable::tree::NodeKind::Text
+    fn render_tree_node(&self) -> Option<RenderNode> {
+        let align: Vec<ColumnAlign> = self
+            .columns
+            .iter()
+            .map(|col| alignment_to_column_align(col.effective_alignment()))
+            .collect();
+
+        let mut rows: Vec<RenderNode> = Vec::with_capacity(self.data.len() + 1);
+
+        // Header row: each cell is the column header text.
+        let header_cells: Vec<RenderNode> = self
+            .columns
+            .iter()
+            .map(|col| RenderNode::table_cell(vec![RenderNode::text(col.header.clone())]))
+            .collect();
+        rows.push(RenderNode::table_row(header_cells));
+
+        // Data rows: each cell is the readable pre-formatted string plus hints.
+        for row in &self.data {
+            let cells: Vec<RenderNode> = row
+                .iter()
+                .enumerate()
+                .map(|(col_idx, content)| {
+                    let mut cell =
+                        RenderNode::table_cell(vec![RenderNode::text(content.to_string())]);
+                    let column = self.columns.get(col_idx);
+                    let alignment = column
+                        .map(TableColumn::effective_alignment)
+                        .unwrap_or(Alignment::Left);
+                    let vertical = column
+                        .map(|c| c.vertical_align)
+                        .unwrap_or(VerticalAlign::Top);
+                    cell.attrs.set_table_cell_hints(&TableCellHints {
+                        kind: cell_content_kind(content).to_string(),
+                        raw_value: cell_content_raw_value(content),
+                        alignment: alignment_token(alignment).to_string(),
+                        vertical_alignment: vertical_align_token(vertical).to_string(),
+                    });
+                    cell
+                })
+                .collect();
+            rows.push(RenderNode::table_row(cells));
+        }
+
+        let mut node = RenderNode::table(align, rows);
+
+        // Per-column hints on the table node.
+        for (idx, col) in self.columns.iter().enumerate() {
+            let hints = TableColumnHints {
+                min_width: col.min_width.and_then(|w| u32::try_from(w).ok()),
+                max_width: col.max_width.and_then(|w| u32::try_from(w).ok()),
+                fixed_width: col.fixed_width.and_then(|w| u32::try_from(w).ok()),
+                conditional: conditional_to_hint(&col.when),
+                drop_note: col.drop_note(),
+                uniform_alignment: col.uniform_alignment,
+            };
+            node.attrs.set_table_column_hints(idx, &hints);
+        }
+
+        // Terminal hints on the table node.
+        node.attrs.set_table_terminal_hints(&TableTerminalHints {
+            prefer_cursor_alignment: self.prefer_cursor_alignment,
+            alternate_background: self.alternate_background_color,
+            alternate_text_color: self.alternate_text_color,
+        });
+
+        // Layout hints when margins are non-default. Margins are resolved to
+        // character counts against a representative 80-column width.
+        let default_margin = renderable::layout::Margin::default();
+        let margins_non_default = self.layout.left_margin != default_margin
+            || self.layout.right_margin != default_margin
+            || self.layout.top_margin != default_margin
+            || self.layout.bottom_margin != default_margin;
+        if margins_non_default {
+            let hints = LayoutHints {
+                left_margin: Some(Layout::resolve_margin(&self.layout.left_margin, 80)),
+                right_margin: Some(Layout::resolve_margin(&self.layout.right_margin, 80)),
+                top_margin: Some(Layout::resolve_margin(&self.layout.top_margin, 80)),
+                bottom_margin: Some(Layout::resolve_margin(&self.layout.bottom_margin, 80)),
+            };
+            for (key, value) in [
+                ("left_margin", hints.left_margin),
+                ("right_margin", hints.right_margin),
+                ("top_margin", hints.top_margin),
+                ("bottom_margin", hints.bottom_margin),
+            ] {
+                if let Some(v) = value {
+                    node.attrs.set_hint(
+                        renderable::tree::HintNamespace::LAYOUT,
+                        key,
+                        serde_json::Value::from(v),
+                    );
+                }
+            }
+        }
+
+        Some(node)
+    }
+}
+
+/// Maps a layout [`Alignment`] to a render-tree [`ColumnAlign`].
+fn alignment_to_column_align(alignment: Alignment) -> ColumnAlign {
+    match alignment {
+        Alignment::Left => ColumnAlign::Left,
+        Alignment::Center => ColumnAlign::Center,
+        Alignment::Right => ColumnAlign::Right,
+    }
+}
+
+/// Returns the cell-hint alignment token for a layout [`Alignment`].
+fn alignment_token(alignment: Alignment) -> &'static str {
+    match alignment {
+        Alignment::Left => "left",
+        Alignment::Center => "center",
+        Alignment::Right => "right",
+    }
+}
+
+/// Returns the cell-hint vertical-alignment token for a [`VerticalAlign`].
+fn vertical_align_token(vertical: VerticalAlign) -> &'static str {
+    match vertical {
+        VerticalAlign::Top => "top",
+        VerticalAlign::Middle => "middle",
+        VerticalAlign::Bottom => "bottom",
+    }
+}
+
+/// Returns the cell-hint kind token for a [`TableCellContent`].
+fn cell_content_kind(content: &TableCellContent) -> &'static str {
+    match content {
+        TableCellContent::Text(_) => "text",
+        TableCellContent::Integer(_) => "integer",
+        TableCellContent::Float(_) => "float",
+        TableCellContent::Currency(_, _) => "currency",
+    }
+}
+
+/// Returns the original typed value of a [`TableCellContent`] as JSON.
+fn cell_content_raw_value(content: &TableCellContent) -> serde_json::Value {
+    match content {
+        TableCellContent::Text(s) => serde_json::Value::String(s.clone()),
+        TableCellContent::Integer(n) => serde_json::Value::from(*n),
+        TableCellContent::Float(n) => serde_json::Value::from(*n),
+        TableCellContent::Currency(currency, amount) => serde_json::json!({
+            "currency": currency_token(currency),
+            "amount": amount,
+        }),
+    }
+}
+
+/// Returns the ISO-style token for a [`Currency`].
+fn currency_token(currency: &Currency) -> &'static str {
+    match currency {
+        Currency::USD => "USD",
+        Currency::GBP => "GBP",
+        Currency::EUR => "EUR",
+    }
+}
+
+/// Maps a column [`super::column::Conditional`] to a [`ColumnConditional`] hint.
+fn conditional_to_hint(conditional: &super::column::Conditional) -> ColumnConditional {
+    match conditional {
+        super::column::Conditional::Always => ColumnConditional::Always,
+        super::column::Conditional::WidthGreaterThan(n) => {
+            ColumnConditional::WidthGreaterThan(*n)
+        }
+        super::column::Conditional::LessThanOrEqual(n) => {
+            ColumnConditional::LessThanOrEqual(*n)
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1832,7 +2019,7 @@ fn render_row_with_cursor_positioning(
 ///
 /// Returns a vector of lines representing the wrapped content. Handles both
 /// explicit newlines in the content and word wrap overflow.
-fn wrap_cell_content(content: &str, strategy: &WordWrap, width: usize) -> Vec<String> {
+pub(crate) fn wrap_cell_content(content: &str, strategy: &WordWrap, width: usize) -> Vec<String> {
     if width == 0 {
         return vec![String::new()];
     }
@@ -1885,7 +2072,7 @@ fn calculate_row_heights(
 ///
 /// Given the actual lines of content and the target row height, returns a vector
 /// of lines with appropriate empty-line padding based on the vertical alignment.
-fn apply_vertical_padding(
+pub(crate) fn apply_vertical_padding(
     lines: Vec<String>,
     row_height: usize,
     vertical_align: VerticalAlign,
@@ -1925,7 +2112,7 @@ fn apply_vertical_padding(
 /// Produces a very subtle tint that adapts to the terminal's color mode:
 /// - **Dark mode**: a faint warm gray (`rgb(30, 30, 34)`)
 /// - **Light mode**: a faint cool gray (`rgb(235, 235, 238)`)
-fn stripe_bg_escape(color_mode: &ColorMode) -> &'static str {
+pub(crate) fn stripe_bg_escape(color_mode: &ColorMode) -> &'static str {
     match color_mode {
         ColorMode::Light => "\x1b[48;2;235;235;238m",
         ColorMode::Dark | ColorMode::Unknown => "\x1b[48;2;30;30;34m",
@@ -1937,7 +2124,7 @@ fn stripe_bg_escape(color_mode: &ColorMode) -> &'static str {
 /// Produces a subtle shift from the default foreground:
 /// - **Dark mode**: a slightly muted light gray (`rgb(180, 180, 190)`)
 /// - **Light mode**: a slightly softened dark gray (`rgb(80, 80, 90)`)
-fn stripe_fg_escape(color_mode: &ColorMode) -> &'static str {
+pub(crate) fn stripe_fg_escape(color_mode: &ColorMode) -> &'static str {
     match color_mode {
         ColorMode::Light => "\x1b[38;2;80;80;90m",
         ColorMode::Dark | ColorMode::Unknown => "\x1b[38;2;180;180;190m",
@@ -1945,12 +2132,12 @@ fn stripe_fg_escape(color_mode: &ColorMode) -> &'static str {
 }
 
 /// The escape sequence that resets only the background color.
-const BG_RESET: &str = "\x1b[49m";
+pub(crate) const BG_RESET: &str = "\x1b[49m";
 
 /// The escape sequence that resets only the foreground color.
-const FG_RESET: &str = "\x1b[39m";
+pub(crate) const FG_RESET: &str = "\x1b[39m";
 
-fn build_border(widths: &[usize], left: char, junction: char, right: char) -> String {
+pub(crate) fn build_border(widths: &[usize], left: char, junction: char, right: char) -> String {
     if widths.is_empty() {
         return String::new();
     }

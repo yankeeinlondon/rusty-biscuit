@@ -1,5 +1,8 @@
+use renderable::tree::{HeadingDepth, RenderNode};
+
 use crate::{
-    components::renderable::{TerminalRenderable, RenderableTerminalContent},
+    components::renderable::{RenderableTerminalContent, TerminalRenderable},
+    render_tree::projection::TreeProjectionContext,
     terminal::Terminal,
     utils::layout::{Layout, LayoutTerminalExt},
 };
@@ -108,7 +111,8 @@ impl Section {
 
     /// Add a string item to the content.
     pub fn add_string<T: Into<String>>(&mut self, s: T) {
-        self.content.push(RenderableTerminalContent::String(s.into()));
+        self.content
+            .push(RenderableTerminalContent::String(s.into()));
     }
 
     /// Add any content that can be converted to RenderableTerminalContent.
@@ -206,6 +210,33 @@ impl TerminalRenderable for Section {
 
     fn is_block_level(&self) -> bool {
         true
+    }
+
+    /// Projects this section into a [`NodeKind::Section`](renderable::tree::NodeKind::Section)
+    /// render-tree node.
+    ///
+    /// The heading level maps to a [`HeadingDepth`]; the title becomes a single
+    /// [`RenderNode::text`] in the heading's phrasing content; each content item
+    /// is projected via [`to_tree_nodes`](RenderableTerminalContent::to_tree_nodes)
+    /// and collected into the section body.
+    ///
+    /// ## Notes
+    ///
+    /// Projection diagnostics are discarded here because `render_tree_node`
+    /// returns `Option<RenderNode>` and cannot carry them.
+    fn render_tree_node(&self) -> Option<RenderNode> {
+        // HeadingLevel::level() always returns 1..=6, which HeadingDepth accepts.
+        let depth = HeadingDepth::new(self.level.level()).ok()?;
+        let heading = vec![RenderNode::text(&self.title)];
+
+        let mut children = Vec::new();
+        for item in &self.content {
+            let mut ctx = TreeProjectionContext::default();
+            let result = item.to_tree_nodes(&mut ctx);
+            children.extend(result.nodes);
+        }
+
+        Some(RenderNode::section(depth, heading, children))
     }
 }
 

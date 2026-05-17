@@ -1,4 +1,9 @@
-use crate::{components::renderable::TerminalRenderable, terminal::Terminal, utils::layout::{Layout, LayoutTerminalExt}};
+use crate::{
+    components::renderable::TerminalRenderable,
+    terminal::Terminal,
+    utils::layout::{Layout, LayoutTerminalExt},
+};
+use renderable::tree::{ProgressHints, RenderNode};
 use std::any::Any;
 
 /// A horizontal progress bar for terminal display.
@@ -136,6 +141,34 @@ impl TerminalRenderable for Progress {
 
     fn as_any(&self) -> &dyn Any {
         self
+    }
+
+    /// Projects the progress bar to a [`NodeKind::Paragraph`] carrying
+    /// [`ProgressHints`].
+    ///
+    /// The paragraph's visible text is `"{label} {percentage}%"` (or just
+    /// `"{percentage}%"` when there is no label) so renderers without progress
+    /// hint support degrade to readable plain text. Renderers that recognize
+    /// the hints reconstruct the full bar.
+    ///
+    /// [`NodeKind::Paragraph`]: renderable::tree::NodeKind::Paragraph
+    fn render_tree_node(&self) -> Option<RenderNode> {
+        let percentage = (self.value * 100.0).round() as u32;
+        let visible = match &self.label {
+            Some(label) => format!("{label} {percentage}%"),
+            None => format!("{percentage}%"),
+        };
+
+        let mut node = RenderNode::paragraph(vec![RenderNode::text(visible)]);
+        node.attrs.set_progress_hints(&ProgressHints {
+            value: self.value,
+            bar_width: self.bar_width,
+            fill_char: self.fill_char,
+            empty_char: self.empty_char,
+            left_bracket: self.left_bracket,
+            right_bracket: self.right_bracket,
+        });
+        Some(node)
     }
 }
 

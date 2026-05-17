@@ -11,6 +11,8 @@
 //! - [`TreeComponent`] — adapts any
 //!   [`TreeRenderable`](renderable::tree::TreeRenderable) into a
 //!   [`TerminalRenderable`](crate::components::renderable::TerminalRenderable).
+//! - [`BrowserTreeComponent`] — adapts any [`TreeRenderable`] into a
+//!   [`BrowserRenderable`](renderable::browser::BrowserRenderable).
 //! - [`TerminalRenderOptions`] / [`TerminalRenderContext`] — render options
 //!   and the terminal-capability snapshot the renderer consults.
 //!
@@ -27,10 +29,14 @@
 //! assert!(rendered.output.contains("Hello, terminal"));
 //! ```
 
+mod browser_adapter;
 mod component;
 mod options;
+pub mod projection;
 mod render;
 
+pub use browser_adapter::BrowserTreeComponent;
 pub use component::TreeComponent;
 pub use options::{TerminalRenderContext, TerminalRenderOptions};
+pub use projection::{ProjectionResult, TreeProjectionContext};
 pub use render::{render_terminal_document, render_terminal_node};

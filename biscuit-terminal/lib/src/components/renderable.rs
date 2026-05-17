@@ -1,6 +1,8 @@
 use std::any::Any;
 use std::rc::Rc;
 
+use renderable::tree::RenderNode;
+
 use crate::terminal::Terminal;
 use crate::utils::layout::{Alignment, Layout, Margin, RowFill};
 use crate::utils::wrap_policy::WordWrap;
@@ -193,6 +195,27 @@ pub trait TerminalRenderable: std::fmt::Debug + Any {
             format!("{rendered}\n")
         }
     }
+
+    /// Projects this component to a canonical render tree node.
+    ///
+    /// Components that support tree-based rendering return `Some(node)` with
+    /// their content projected into the canonical [`RenderNode`] structure.
+    /// Components that only support bespoke terminal rendering return `None`.
+    ///
+    /// ## Default
+    ///
+    /// Returns `None`. Components opt into tree projection by overriding
+    /// this method.
+    ///
+    /// ## Notes
+    ///
+    /// The returned node uses [`SourceSpan::synthetic()`] since the content
+    /// is generated at runtime rather than parsed from source.
+    ///
+    /// [`SourceSpan::synthetic()`]: renderable::tree::SourceSpan::synthetic
+    fn render_tree_node(&self) -> Option<RenderNode> {
+        None
+    }
 }
 
 /// Re-export of the browser render trait, now homed in `renderable`.
@@ -253,7 +276,9 @@ impl Clone for RenderableTerminalContent {
     fn clone(&self) -> Self {
         match self {
             RenderableTerminalContent::String(s) => RenderableTerminalContent::String(s.clone()),
-            RenderableTerminalContent::Component(c) => RenderableTerminalContent::Component(Rc::clone(c)),
+            RenderableTerminalContent::Component(c) => {
+                RenderableTerminalContent::Component(Rc::clone(c))
+            }
         }
     }
 }

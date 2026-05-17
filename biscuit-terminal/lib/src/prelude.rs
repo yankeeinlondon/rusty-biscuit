@@ -17,7 +17,9 @@ pub use crate::components::mermaid::{
 pub use crate::components::pad::{PadLeft, PadRight};
 pub use crate::components::progress::Progress;
 pub use crate::components::prose::Prose;
-pub use crate::components::renderable::{BrowserRenderable, TerminalRenderable, RenderableTerminalContent};
+pub use crate::components::renderable::{
+    BrowserRenderable, RenderableTerminalContent, TerminalRenderable,
+};
 pub use crate::components::section::{HeadingLevel, Section};
 pub use crate::components::status::{Status, StatusState, StatusTheme};
 pub use crate::components::status_block::StatusBlock;

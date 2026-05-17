@@ -1849,7 +1849,7 @@ mod tests {
         // the companion child since it exercises a distinct render path.
         use crate::components::compose::Compose;
         use crate::components::prose::Prose;
-        use crate::components::renderable::{TerminalRenderable, RenderableTerminalContent};
+        use crate::components::renderable::{RenderableTerminalContent, TerminalRenderable};
 
         let _guard = ScopedLcAll::force_utf8();
         let term = text_terminal();

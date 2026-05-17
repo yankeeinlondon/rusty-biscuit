@@ -4,7 +4,7 @@ use crate::components::{
     filesystem::FileSystem,
     list::{OrderedList, UnorderedList},
     prose::Prose,
-    renderable::{TerminalRenderable, RenderableTerminalContent},
+    renderable::{RenderableTerminalContent, TerminalRenderable},
     section::{HeadingLevel, Section},
     table::table::Table,
 };
@@ -290,7 +290,10 @@ mod tests {
 
     #[test]
     fn test_from_vec_renderable_content() {
-        let items = vec![RenderableTerminalContent::from("x"), RenderableTerminalContent::from("y")];
+        let items = vec![
+            RenderableTerminalContent::from("x"),
+            RenderableTerminalContent::from("y"),
+        ];
         let compose = Compose::from(items);
         assert_eq!(compose.render_optimistic(Some(80)), "xy");
     }

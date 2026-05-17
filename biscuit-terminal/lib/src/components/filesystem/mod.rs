@@ -4597,7 +4597,8 @@ mod tests {
     fn test_layout_mut_accessor() {
         use crate::components::renderable::TerminalRenderable;
         let mut fs = FileSystem::default();
-        TerminalRenderable::layout_mut(&mut fs).left_margin = crate::utils::layout::Margin::Chars(4);
+        TerminalRenderable::layout_mut(&mut fs).left_margin =
+            crate::utils::layout::Margin::Chars(4);
 
         assert_eq!(
             TerminalRenderable::layout(&fs).left_margin,

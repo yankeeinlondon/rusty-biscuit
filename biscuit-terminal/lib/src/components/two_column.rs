@@ -1,5 +1,8 @@
+use renderable::tree::{ColumnWidthKind, ColumnsHints, RenderNode};
+
 use crate::discovery::detection::TerminalApp;
 use crate::prelude::*;
+use crate::render_tree::projection::TreeProjectionContext;
 use crate::utils::block_constraint::{split_lines, visible_width, wrap_lines};
 
 /// Determines how wide a column should be.
@@ -162,7 +165,10 @@ impl Default for TwoColumn {
 
 impl TwoColumn {
     /// Create a new two-column layout with optional ratio (defaults to 50/50).
-    pub fn new<L: Into<RenderableTerminalContent>, R: Into<RenderableTerminalContent>>(left: L, right: R) -> Self {
+    pub fn new<L: Into<RenderableTerminalContent>, R: Into<RenderableTerminalContent>>(
+        left: L,
+        right: R,
+    ) -> Self {
         TwoColumn {
             left: left.into(),
             right: right.into(),
@@ -473,6 +479,42 @@ impl TerminalRenderable for TwoColumn {
         true
     }
 
+    /// Projects the two-column layout to a [`NodeKind::BlockQuote`] container
+    /// carrying [`ColumnsHints`].
+    ///
+    /// The left and right column contents are each projected into block-level
+    /// nodes; the block quote holds the left nodes followed by the right
+    /// nodes, and [`ColumnsHints::left_count`] records the split point. The
+    /// three tree renderers special-case the columns hint, so the block
+    /// quote's border never actually renders.
+    ///
+    /// A column whose content is a [`TerminalImage`] cannot be projected —
+    /// cursor-overlay image rendering has no render-tree representation — so
+    /// this returns a [`RenderNode::unsupported`] node instead.
+    ///
+    /// [`NodeKind::BlockQuote`]: renderable::tree::NodeKind::BlockQuote
+    fn render_tree_node(&self) -> Option<RenderNode> {
+        if content_is_terminal_image(&self.left) || content_is_terminal_image(&self.right) {
+            return Some(RenderNode::unsupported("two-column terminal image"));
+        }
+
+        let left_nodes = project_column(&self.left);
+        let right_nodes = project_column(&self.right);
+
+        let left_count = left_nodes.len();
+        let mut children = left_nodes;
+        children.extend(right_nodes);
+
+        let mut container = RenderNode::block_quote(children);
+        container.attrs.set_columns_hints(&ColumnsHints {
+            gap: self.gap,
+            left_width: column_width_kind(self.left_width),
+            left_count,
+            stack_below: true,
+        });
+        Some(container)
+    }
+
     fn layout(&self) -> &Layout {
         &self.layout
     }
@@ -525,6 +567,68 @@ impl TerminalRenderable for TwoColumn {
         self.layout.word_wrap = wrap;
         self
     }
+}
+
+/// Returns `true` when `content` is a [`TerminalImage`] component.
+fn content_is_terminal_image(content: &RenderableTerminalContent) -> bool {
+    matches!(
+        content,
+        RenderableTerminalContent::Component(component)
+            if component.as_any().downcast_ref::<TerminalImage>().is_some()
+    )
+}
+
+/// Maps a bespoke [`ColumnWidth`] to the render-tree [`ColumnWidthKind`].
+fn column_width_kind(width: ColumnWidth) -> ColumnWidthKind {
+    match width {
+        ColumnWidth::Fixed(chars) => ColumnWidthKind::Fixed(chars),
+        ColumnWidth::Percent(percent) => ColumnWidthKind::Percent(percent),
+    }
+}
+
+/// Projects a column's content into block-level render-tree nodes.
+///
+/// Inline-only projected content is wrapped in a [`RenderNode::paragraph`] so
+/// the enclosing block quote carries valid block children.
+fn project_column(content: &RenderableTerminalContent) -> Vec<RenderNode> {
+    let mut ctx = TreeProjectionContext::default();
+    let nodes = content.to_tree_nodes(&mut ctx).nodes;
+
+    let mut inline_run: Vec<RenderNode> = Vec::new();
+    let mut blocks: Vec<RenderNode> = Vec::new();
+    for node in nodes {
+        if is_inline_node(&node) {
+            inline_run.push(node);
+        } else {
+            if !inline_run.is_empty() {
+                blocks.push(RenderNode::paragraph(std::mem::take(&mut inline_run)));
+            }
+            blocks.push(node);
+        }
+    }
+    if !inline_run.is_empty() {
+        blocks.push(RenderNode::paragraph(inline_run));
+    }
+    blocks
+}
+
+/// Returns `true` when `node` is an inline-level (phrasing) render-tree node.
+fn is_inline_node(node: &RenderNode) -> bool {
+    use renderable::tree::NodeKind;
+    matches!(
+        node.kind,
+        NodeKind::Text { .. }
+            | NodeKind::Emphasis { .. }
+            | NodeKind::Strong { .. }
+            | NodeKind::Delete { .. }
+            | NodeKind::Span { .. }
+            | NodeKind::InlineCode { .. }
+            | NodeKind::Link { .. }
+            | NodeKind::Image { .. }
+            | NodeKind::FootnoteReference { .. }
+            | NodeKind::SoftBreak
+            | NodeKind::HardBreak
+    )
 }
 
 #[cfg(test)]

@@ -307,12 +307,8 @@ impl GraphExpression {
         // The resulting `target_width_px` is fed to the rasterizer so the PNG
         // is rendered once at exactly the display resolution — no oversampling,
         // no downscaling, text rasterised fresh at the terminal's pixel density.
-        let dims =
-            TerminalImage::resolve_dimensions_for(&self.width, &self.layout, term.width());
-        let cell_pixel_width = term
-            .cell_size()
-            .map(|cs| cs.width.max(1))
-            .unwrap_or(8u32);
+        let dims = TerminalImage::resolve_dimensions_for(&self.width, &self.layout, term.width());
+        let cell_pixel_width = term.cell_size().map(|cs| cs.width.max(1)).unwrap_or(8u32);
         let target_width_px = (dims.image_width.max(1)) * cell_pixel_width;
 
         let (png_path, cache_hit) = self.render_to_cached_png_at_width(target_width_px)?;
@@ -573,11 +569,8 @@ mod tests {
 
     #[test]
     fn browser_render_dot_input_emits_svg() {
-        let graph = GraphExpression::parse(
-            "digraph G { A -> B; B -> C; }",
-            GraphInputSyntax::Dot,
-        )
-        .unwrap();
+        let graph =
+            GraphExpression::parse("digraph G { A -> B; B -> C; }", GraphInputSyntax::Dot).unwrap();
         let html = graph.render_browser_svg();
         assert!(html.contains("<svg"));
         assert!(html.contains("</svg>"));
