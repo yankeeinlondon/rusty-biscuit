@@ -432,9 +432,7 @@ pub struct ResolvedOpenCodeTool {
 impl ResolvedOpenCodeTool {
     /// Returns the subagent session id from `metadata.sessionId` when present.
     pub fn task_subagent_id(&self) -> Option<&str> {
-        self.metadata
-            .as_ref()
-            .and_then(|m| m.session_id.as_deref())
+        self.metadata.as_ref().and_then(|m| m.session_id.as_deref())
     }
 
     /// Returns the task start time epoch in milliseconds from `time.start` when present.
@@ -793,9 +791,7 @@ mod tests {
 
     #[test]
     fn opencode_tool_task_subagent_id_missing() {
-        let event = parse(
-            r#"{"type":"tool_use","part":{"id":"t1","tool":"task"}}"#,
-        );
+        let event = parse(r#"{"type":"tool_use","part":{"id":"t1","tool":"task"}}"#);
         let OpenCodeEvent::ToolUse(tool) = event else {
             panic!("expected ToolUse");
         };
@@ -817,9 +813,7 @@ mod tests {
 
     #[test]
     fn opencode_tool_task_started_at_epoch_ms_missing() {
-        let event = parse(
-            r#"{"type":"tool_use","part":{"id":"t1","tool":"task"}}"#,
-        );
+        let event = parse(r#"{"type":"tool_use","part":{"id":"t1","tool":"task"}}"#);
         let OpenCodeEvent::ToolUse(tool) = event else {
             panic!("expected ToolUse");
         };

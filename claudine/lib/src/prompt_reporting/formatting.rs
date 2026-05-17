@@ -86,8 +86,8 @@ pub(crate) fn prompt_body_width(term: &Terminal) -> u32 {
 /// assert!(!output.contains("\n\n\n"));
 /// ```
 pub fn render_markdown_for_terminal(text: &str, _term: &Terminal, max_width: u32) -> String {
-    use darkmatter::markdown::output::terminal::{for_terminal, TerminalOptions};
     use darkmatter::markdown::Markdown;
+    use darkmatter::markdown::output::terminal::{TerminalOptions, for_terminal};
 
     if text.trim().is_empty() {
         return String::new();
@@ -403,5 +403,4 @@ mod tests {
         assert!(stripped.contains("bold"));
         assert!(stripped.contains("italic"));
     }
-
 }

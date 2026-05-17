@@ -12,10 +12,9 @@ use test_toolkit::{EnvGuard, trace_phase};
 
 #[fixture]
 fn playa_dry_run() -> EnvGuard {
-    trace_phase!(
-        "setup_playa_dry_run",
-        { EnvGuard::set_safe("PLAYA_DRY_RUN", "1") }
-    )
+    trace_phase!("setup_playa_dry_run", {
+        EnvGuard::set_safe("PLAYA_DRY_RUN", "1")
+    })
 }
 
 fn make_config_with_action(event: AgenticEvent, action: HookAction) -> CanonicalRuntimeConfig {

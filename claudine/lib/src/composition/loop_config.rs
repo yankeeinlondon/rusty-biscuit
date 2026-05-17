@@ -81,9 +81,11 @@ pub fn resolve_loop_config(
         None => None,
     };
     let on_rate_limit = match loop_map.get("on_rate_limit") {
-        Some(serde_json::Value::String(raw)) => Some(OnRateLimit::parse(raw).map_err(|why| {
-            CompositionError::LoopInvalid(format!("`loop.on_rate_limit` {why}"))
-        })?),
+        Some(serde_json::Value::String(raw)) => {
+            Some(OnRateLimit::parse(raw).map_err(|why| {
+                CompositionError::LoopInvalid(format!("`loop.on_rate_limit` {why}"))
+            })?)
+        }
         Some(other) => {
             return Err(CompositionError::LoopInvalid(format!(
                 "`loop.on_rate_limit` must be a string, got {}",
@@ -659,20 +661,14 @@ mod tests {
 
     #[test]
     fn on_rate_limit_pause_parses() {
-        let source = make_source(&[(
-            "loop",
-            json!({"while": "true", "on_rate_limit": "pause"}),
-        )]);
+        let source = make_source(&[("loop", json!({"while": "true", "on_rate_limit": "pause"}))]);
         let config = resolve_loop_config(&source).unwrap().unwrap();
         assert_eq!(config.on_rate_limit, Some(OnRateLimit::Pause));
     }
 
     #[test]
     fn on_rate_limit_abort_parses() {
-        let source = make_source(&[(
-            "loop",
-            json!({"while": "true", "on_rate_limit": "abort"}),
-        )]);
+        let source = make_source(&[("loop", json!({"while": "true", "on_rate_limit": "abort"}))]);
         let config = resolve_loop_config(&source).unwrap().unwrap();
         assert_eq!(config.on_rate_limit, Some(OnRateLimit::Abort));
     }
@@ -689,10 +685,7 @@ mod tests {
 
     #[test]
     fn on_rate_limit_unknown_value_is_rejected() {
-        let source = make_source(&[(
-            "loop",
-            json!({"while": "true", "on_rate_limit": "halt"}),
-        )]);
+        let source = make_source(&[("loop", json!({"while": "true", "on_rate_limit": "halt"}))]);
         let err = resolve_loop_config(&source).unwrap_err();
         let CompositionError::LoopInvalid(message) = err else {
             panic!("expected LoopInvalid");
@@ -705,10 +698,7 @@ mod tests {
 
     #[test]
     fn on_rate_limit_non_string_is_rejected() {
-        let source = make_source(&[(
-            "loop",
-            json!({"while": "true", "on_rate_limit": true}),
-        )]);
+        let source = make_source(&[("loop", json!({"while": "true", "on_rate_limit": true}))]);
         let err = resolve_loop_config(&source).unwrap_err();
         assert!(
             matches!(err, CompositionError::LoopInvalid(msg) if msg.contains("must be a string"))
@@ -717,10 +707,7 @@ mod tests {
 
     #[test]
     fn on_rate_limit_typo_suggests_canonical_key() {
-        let source = make_source(&[(
-            "loop",
-            json!({"while": "true", "on-rate-limit": "abort"}),
-        )]);
+        let source = make_source(&[("loop", json!({"while": "true", "on-rate-limit": "abort"}))]);
         let err = resolve_loop_config(&source).unwrap_err();
         let CompositionError::LoopInvalid(message) = err else {
             panic!("expected LoopInvalid");

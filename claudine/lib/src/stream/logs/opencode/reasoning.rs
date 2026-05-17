@@ -674,7 +674,8 @@ impl<S: SemanticEventSink> OpenCodeLogBridge<S> {
             extra_map.insert("session_id".into(), Value::String(session_id.clone()));
         }
 
-        let rendered_message = format_llm_call_message(&provider_id, &model_id, &mode, agent.as_deref());
+        let rendered_message =
+            format_llm_call_message(&provider_id, &model_id, &mode, agent.as_deref());
         self.sink.on_semantic_event(SemanticEvent::Info {
             message: rendered_message,
             extra: Value::Object(extra_map),
@@ -693,7 +694,10 @@ impl<S: SemanticEventSink> OpenCodeLogBridge<S> {
         extra_map.insert("step".into(), json!(step));
 
         self.sink.on_semantic_event(SemanticEvent::Info {
-            message: format!("step_loop step={step} session={}", short_session(&session_id)),
+            message: format!(
+                "step_loop step={step} session={}",
+                short_session(&session_id)
+            ),
             extra: Value::Object(extra_map),
         });
         StderrIngestOutcome::Consumed
@@ -849,7 +853,14 @@ fn short_session(session_id: &str) -> String {
     if body.chars().count() <= TAIL_LEN + 4 {
         return session_id.to_string();
     }
-    let tail: String = body.chars().rev().take(TAIL_LEN).collect::<Vec<_>>().into_iter().rev().collect();
+    let tail: String = body
+        .chars()
+        .rev()
+        .take(TAIL_LEN)
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect();
     format!("ses_…{tail}")
 }
 
@@ -962,10 +973,7 @@ fn format_snapshot_message(message: &str, tag_summary: &str) -> String {
 /// Copy snapshot-relevant tags into `extra` and return a comma-joined
 /// `key=value` summary suitable for inline rendering. Falls back to all
 /// non-`service` tags when the well-known keys are absent.
-fn summarize_snapshot_tags(
-    record: &OpenCodeLogRecord,
-    extra: &mut Map<String, Value>,
-) -> String {
+fn summarize_snapshot_tags(record: &OpenCodeLogRecord, extra: &mut Map<String, Value>) -> String {
     const PREFERRED: &[&str] = &["file", "files", "path", "id", "session.id", "err", "error"];
     let mut parts: Vec<String> = Vec::new();
     let mut seen = std::collections::BTreeSet::new();
@@ -1426,7 +1434,11 @@ mod tests {
         let line = "INFO 2026-04-15T21:28:30 +5ms service=bus msg=internal chatter";
         let outcome = bridge.ingest(line);
         assert_eq!(outcome, StderrIngestOutcome::Consumed);
-        assert_eq!(bridge.sink.events.len(), 0, "bus lines must not emit semantic events");
+        assert_eq!(
+            bridge.sink.events.len(),
+            0,
+            "bus lines must not emit semantic events"
+        );
         let state = bridge.state.lock().unwrap();
         assert_eq!(
             state.diagnostics.log_records_parsed, 1,
@@ -1649,10 +1661,7 @@ mod tests {
         assert_eq!(bridge.ingest(line), StderrIngestOutcome::Consumed);
         match &bridge.sink.events[0] {
             SemanticEvent::Info { message, extra } => {
-                assert_eq!(
-                    message,
-                    "http_response POST /session/x/message 500 (99ms)"
-                );
+                assert_eq!(message, "http_response POST /session/x/message 500 (99ms)");
                 assert_string(extra, "method", "POST");
                 assert_string(extra, "url", "/session/x/message");
                 assert_eq!(extra.get("status"), Some(&json!(500)));
@@ -1708,7 +1717,8 @@ mod tests {
         match &bridge.sink.events[0] {
             SemanticEvent::Warning { message, extra } => {
                 assert!(
-                    message.contains("/repo/.env") && message.contains("failed to add snapshot files"),
+                    message.contains("/repo/.env")
+                        && message.contains("failed to add snapshot files"),
                     "expected file path and diagnostic in message, got {message:?}",
                 );
                 assert_string(extra, "level", "WARN");
@@ -1773,7 +1783,10 @@ mod tests {
         assert_eq!(bridge.ingest(line), StderrIngestOutcome::Consumed);
 
         let state = bridge.state.lock().unwrap();
-        assert_eq!(state.primary_provider_id.as_deref(), Some("kimi-for-coding"));
+        assert_eq!(
+            state.primary_provider_id.as_deref(),
+            Some("kimi-for-coding")
+        );
         assert_eq!(state.primary_model_id.as_deref(), Some("k2p6"));
     }
 
@@ -1786,7 +1799,10 @@ mod tests {
         assert_eq!(bridge.ingest(second), StderrIngestOutcome::Consumed);
 
         let state = bridge.state.lock().unwrap();
-        assert_eq!(state.primary_provider_id.as_deref(), Some("kimi-for-coding"));
+        assert_eq!(
+            state.primary_provider_id.as_deref(),
+            Some("kimi-for-coding")
+        );
         assert_eq!(state.primary_model_id.as_deref(), Some("k2p6"));
     }
 
@@ -1861,7 +1877,8 @@ mod tests {
         // so subsequent stderr session_created lines for other ids are
         // also suppressed.
         let mut bridge = OpenCodeLogBridge::new(RecordingSink::default(), stdout_seen(), None);
-        let line = "INFO  2026-05-12T20:00:12 +20ms service=session id=ses_primary title=Primary created";
+        let line =
+            "INFO  2026-05-12T20:00:12 +20ms service=session id=ses_primary title=Primary created";
         assert_eq!(bridge.ingest(line), StderrIngestOutcome::Consumed);
         assert_eq!(
             bridge.sink.events.len(),

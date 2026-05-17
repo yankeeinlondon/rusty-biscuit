@@ -20,7 +20,9 @@
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
-use claudine::composition::{InstalledProviderSnapshot, LaunchWorkspaceContext, build_installed_snapshot};
+use claudine::composition::{
+    InstalledProviderSnapshot, LaunchWorkspaceContext, build_installed_snapshot,
+};
 use claudine::events::{EnvironmentContext, environment_context_from_sniff_result};
 use claudine::provider::{PROVIDERS_DISPLAY_ORDER, Provider};
 use claudine::system_prompt::LaunchContext;
@@ -151,7 +153,13 @@ impl CompositionPrepContext {
                 .unwrap_or((None, None));
 
             let env_context = environment_context_from_sniff_result(sniff_result);
-            (launch_context, env_context, git_root, repo, launch_detection_error)
+            (
+                launch_context,
+                env_context,
+                git_root,
+                repo,
+                launch_detection_error,
+            )
         };
 
         // Resolve source_repo_root: in the 99% case the markdown file

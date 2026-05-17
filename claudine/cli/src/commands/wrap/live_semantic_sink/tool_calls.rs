@@ -4,7 +4,7 @@ use super::LiveSemanticSink;
 use super::{Section, TOOL_RESULT_BODY_MAX_LINES, ToolResultBody};
 use biscuit_terminal::components::block_quote::BlockQuote;
 use biscuit_terminal::components::prose::Prose;
-use biscuit_terminal::components::renderable::{TerminalRenderable, RenderableTerminalContent};
+use biscuit_terminal::components::renderable::{RenderableTerminalContent, TerminalRenderable};
 use biscuit_terminal::components::status::StatusState;
 use biscuit_terminal::utils::color::{Color, Tailwind};
 use biscuit_terminal::utils::layout::{Margin, WordWrap};
@@ -33,9 +33,10 @@ impl LiveSemanticSink {
 
         if body.truncated {
             let note = Prose::new("<b>tool call</b>'s response truncated for brevity".to_string());
-            let mut note_block = BlockQuote::new(RenderableTerminalContent::from(note), None::<&str>)
-                .with_left_block_color(Color::Tailwind(Tailwind::Orange700))
-                .with_border("\u{2503} ");
+            let mut note_block =
+                BlockQuote::new(RenderableTerminalContent::from(note), None::<&str>)
+                    .with_left_block_color(Color::Tailwind(Tailwind::Orange700))
+                    .with_border("\u{2503} ");
             note_block.layout_mut().left_margin = Margin::Chars(0);
             note_block.layout_mut().right_margin = Margin::Chars(0);
             let rendered = note_block.render(&self.terminal);

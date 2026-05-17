@@ -60,11 +60,7 @@ impl StreamCapture {
     /// `started_at` should be the same `Instant` the spawn function uses
     /// as its wall-clock reference so the embedded `ts_ms` values align
     /// with the rest of the telemetry.
-    pub(crate) fn open(
-        provider: Option<Provider>,
-        pid: u32,
-        started_at: Instant,
-    ) -> Option<Self> {
+    pub(crate) fn open(provider: Option<Provider>, pid: u32, started_at: Instant) -> Option<Self> {
         let dir = capture_dir_from_env()?;
         if let Err(err) = fs::create_dir_all(&dir) {
             tracing::debug!(
@@ -83,11 +79,7 @@ impl StreamCapture {
         let filename = format!("{provider_slug}-{timestamp}-{pid}.ndjson");
         let path = dir.join(filename);
 
-        let file = match OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&path)
-        {
+        let file = match OpenOptions::new().create(true).append(true).open(&path) {
             Ok(f) => f,
             Err(err) => {
                 tracing::debug!(
@@ -122,7 +114,9 @@ impl StreamCapture {
         if line.chars().all(char::is_whitespace) {
             return;
         }
-        let ts_ms = line_at.saturating_duration_since(self.started_at).as_millis() as u64;
+        let ts_ms = line_at
+            .saturating_duration_since(self.started_at)
+            .as_millis() as u64;
         let entry = json!({ "ts_ms": ts_ms, "raw": line });
         let mut serialized = match serde_json::to_string(&entry) {
             Ok(s) => s,
@@ -251,13 +245,31 @@ mod tests {
 
         let meta = entries
             .iter()
-            .find(|p| p.file_name().and_then(|n| n.to_str()) == Some(
-                ndjson.file_name().and_then(|n| n.to_str()).unwrap().replace(".ndjson", ".meta.json").as_str()
-            ))
-            .or_else(|| entries.iter().find(|p| p.to_string_lossy().ends_with(".meta.json")))
+            .find(|p| {
+                p.file_name().and_then(|n| n.to_str())
+                    == Some(
+                        ndjson
+                            .file_name()
+                            .and_then(|n| n.to_str())
+                            .unwrap()
+                            .replace(".ndjson", ".meta.json")
+                            .as_str(),
+                    )
+            })
+            .or_else(|| {
+                entries
+                    .iter()
+                    .find(|p| p.to_string_lossy().ends_with(".meta.json"))
+            })
             .expect("meta sidecar");
         let meta_body = fs::read_to_string(meta).unwrap();
-        assert!(meta_body.contains("\"provider\""), "meta has provider: {meta_body}");
-        assert!(meta_body.contains("\"pid\": 42"), "meta has pid: {meta_body}");
+        assert!(
+            meta_body.contains("\"provider\""),
+            "meta has provider: {meta_body}"
+        );
+        assert!(
+            meta_body.contains("\"pid\": 42"),
+            "meta has pid: {meta_body}"
+        );
     }
 }

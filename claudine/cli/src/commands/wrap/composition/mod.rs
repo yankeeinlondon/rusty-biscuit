@@ -807,7 +807,11 @@ pub(crate) fn execute_composition_request_inner(
         _ => SelectionReason::InteractiveChoice,
     };
     let is_inline = matches!(request.prepared.closure, CompositionClosurePlan::Inline(_));
-    record_substage(&mut perf_collector, &mut last_checkpoint, "target resolution");
+    record_substage(
+        &mut perf_collector,
+        &mut last_checkpoint,
+        "target resolution",
+    );
 
     // -- Profile, binary, arguments, environment --------------------------
 
@@ -1178,7 +1182,10 @@ pub(crate) fn execute_composition_request_inner(
 
     let scoped_tmp = super::system_prompt::scoped_tmp_dir(&launch_workspace);
     super::system_prompt::maybe_gitignore_claudine_tmp(
-        launch_workspace.repo_root.as_deref().unwrap_or(&launch_workspace.launch_cwd),
+        launch_workspace
+            .repo_root
+            .as_deref()
+            .unwrap_or(&launch_workspace.launch_cwd),
     );
 
     let mut sp_artifacts: Vec<super::system_prompt::SystemPromptArtifact> = Vec::new();
@@ -1187,8 +1194,12 @@ pub(crate) fn execute_composition_request_inner(
         claudine::system_prompt::EffectiveSystemPrompt::None
         | claudine::system_prompt::EffectiveSystemPrompt::Disabled { .. } => {}
         claudine::system_prompt::EffectiveSystemPrompt::Ready(prepared) => {
-            let application =
-                profile.apply_system_prompt(prepared, !effective_non_interactive, &launch_cwd, &scoped_tmp)?;
+            let application = profile.apply_system_prompt(
+                prepared,
+                !effective_non_interactive,
+                &launch_cwd,
+                &scoped_tmp,
+            )?;
             child_args.extend(application.args);
             for (k, v) in application.env {
                 if k == "HOME" && env_plan.env.contains_key(std::ffi::OsStr::new("HOME")) {
@@ -1289,7 +1300,11 @@ pub(crate) fn execute_composition_request_inner(
 
     let sp_display_lines = super::system_prompt::describe_effective(&effective_sp);
 
-    record_substage(&mut perf_collector, &mut last_checkpoint, "stream + prompt delivery");
+    record_substage(
+        &mut perf_collector,
+        &mut last_checkpoint,
+        "stream + prompt delivery",
+    );
 
     if let Some(collector) = perf_collector.as_mut() {
         collector.mark_env_setup_complete();
@@ -1556,7 +1571,13 @@ pub(crate) fn execute_composition_request_inner(
         }
 
         if effective_non_interactive {
-            crate::output::log_compose_prompt(&request.prepared.prompt, detail_requested, silent, quiet, &term);
+            crate::output::log_compose_prompt(
+                &request.prepared.prompt,
+                detail_requested,
+                silent,
+                quiet,
+                &term,
+            );
         }
 
         if !quiet {
