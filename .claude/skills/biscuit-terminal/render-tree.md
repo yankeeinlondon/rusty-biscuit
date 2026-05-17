@@ -27,9 +27,11 @@ See the `renderable` skill's *Tree Module* topic for the tree model itself
 - **`TerminalRenderContext`** — the terminal-capability snapshot the renderer
   consults: `width`, `available_width`, `current_indent`, `color_depth`,
   `color_mode`, `hyperlinks`, `image_support`, `supports_unicode`, `layout`,
-  `terminal`, `active_layout_hints`. Built via `from_terminal` / `fallback`.
+  `terminal`, `active_layout`. Built via `from_terminal` / `fallback`.
   Fork helpers — `for_child(indent_delta, width_delta)`, `with_width`,
   `with_layout` — narrow width and accumulate indent for nested content.
+  (`active_layout` is currently a carried-but-unread field; the renderer
+  applies layout from `NodeAttrs::layout()` directly — see *Layout* below.)
 
 ## Strictness model
 
@@ -75,6 +77,24 @@ widgets render from `renderable.widget.progress.*` hints on a `Paragraph`;
 two-column layouts render from `renderable.widget.columns.*` hints on a
 `BlockQuote`. Tables use a two-pass pre-scan / emit renderer that reuses the
 table module's width-planning utilities (but not `Table::render()`).
+
+## Layout
+
+The terminal tree renderer applies a block node's `renderable::layout::Layout`
+(read from `NodeAttrs::layout()`). It resolves each margin to whole cells
+against the available width via the shared `resolve_cells` helper
+(`Ch(n)`→`n`, `Percent(p)`→`round(width*p/100)`, `Zero`/`Css`/absent→`0`,
+resolving for `RenderTarget::Terminal`), narrows the child render width by
+left+right margins, prefixes each line, block-aligns the component as a unit,
+and emits top/bottom margins as blank rows. `max_width` is **not** applied
+(Browser-only). The Group 1 components seed their own `Layout` onto the
+projected node, so layout flows through whether a component is rendered via
+the tree or composed bespoke.
+
+`LayoutTerminalExt` (`utils::layout`) — `apply_layout` / `apply_block_layout` /
+`available_width` — is the bespoke (non-tree) path's terminal layout
+application, now reading the same `Layout` type. The legacy `RowFill` /
+`MaxWidth` / `Margin` enum and the `row_fill_strategy` builder are removed.
 
 ## Code-Render Hook
 

@@ -53,6 +53,8 @@ let output = DarkmatterPage::new(&term)
 
 `DarkmatterPage` implements `biscuit_terminal::components::renderable::TerminalRenderable` for composition with the biscuit-terminal component ecosystem. With no builder calls, `render` is byte-for-byte equivalent to `for_terminal(&md, TerminalOptions::default())`.
 
+> **Layout migration.** The page-layout value types — `PageMargin`, `PagePadding`, `PageFill`, `PageAlignment` — are now `#[deprecated]` in favor of `renderable::layout` (the consolidated `Layout` primitive). They remain `pub` (the CLI builds them from flags) and carry conversion bridges (`From<PageMargin>` → `renderable::layout::Margin`, `From<PageAlignment>` → `Alignment`, `TryFrom<PageFill>`/`TryFrom<WidthUnit>` for width caps). `DarkmatterPage` keeps its builder API unchanged but now maps page settings onto a `renderable::layout::Layout` internally. See `renderable/docs/layout-and-style.md`.
+
 ## Compose Pipeline
 
 Three-phase pipeline for document preparation leveraging the [pulldown-cmark](./pulldown-cmark.md) crate:
@@ -277,7 +279,7 @@ These helpers ensure Markdown code fences and `YamlBlock` use identical syntax-h
     - `YamlBlock::from_markdown_file(path)` — from a Markdown file on disk
 - **Validation:** all constructors parse YAML through `serde_yaml_ng::from_str` and fail fast; the parsed `Value` is not retained
 - **Rendering:** implements `TerminalRenderable` and `BrowserRenderable` from `biscuit-terminal`, delegating to the shared code-block helpers with `language = "yaml"`
-- **Tree projection:** implements `render_tree_node()` — projects to a `NodeKind::Code` node (lang `"yaml"`) carrying `CodeRenderHints { header_row, language_label, highlight }`, so it renders through the `renderable` tree pipeline as well as the bespoke path
+- **Tree projection:** implements `render_tree_node()` — projects to a `NodeKind::Code` node (lang `"yaml"`) carrying `CodeRenderHints { header_row, language_label, highlight }`, and a `Layout` (via `set_layout`) when its `layout` field is non-default, so it renders through the `renderable` tree pipeline as well as the bespoke path
 - Produces a standard highlighted code block — no bespoke YAML tree view
 
 Located in `darkmatter/lib/src/markdown/yaml_block.rs`.

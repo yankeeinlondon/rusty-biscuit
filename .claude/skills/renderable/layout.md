@@ -11,8 +11,9 @@ alignment within the parent, max-width, and content wrapping. Appearance
 
 The layout rides on render-tree nodes via `NodeAttrs::set_layout` and is
 consumed by the Browser renderer (lowered to inline CSS) and the Terminal
-renderer (cell margins / alignment). The Markdown renderer deliberately
-ignores it.
+renderer (margins resolved to cells, plus block alignment). The Markdown
+renderer deliberately ignores it. `max_width` is a Browser-only property —
+the Terminal renderer does not apply it.
 
 Terminal ANSI-width application lives in `biscuit-terminal` as the
 `LayoutTerminalExt` extension trait.
@@ -39,8 +40,14 @@ let layout = Layout {
 ```
 
 `Layout::default()` is zero margins, `Alignment::Left`, no `max_width`, and
-`WordWrap::None`. `Layout::validate()` returns the first `LayoutError` from
-its `margin` or `max_width`.
+`WordWrap::None` — note this is the hand-written default, *not*
+`WordWrap::default()` (which is a wrapping policy).
+
+`Layout::validate()` (and `Margin::validate()` / `TargetValue::validate()`)
+returns the first `LayoutError` from `margin` or `max_width`. Validation is
+**opt-in**: a caller constructing a `Layout` should call it, but the render
+pipeline does not — once a `Layout` is on the tree the renderers lower it
+as-is. Only *placement* (block-only) is enforced, by tree validation.
 
 ## Length
 
