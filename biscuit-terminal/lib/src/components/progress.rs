@@ -168,6 +168,9 @@ impl TerminalRenderable for Progress {
             left_bracket: self.left_bracket,
             right_bracket: self.right_bracket,
         });
+        if self.layout != Layout::default() {
+            node.attrs.set_layout(&self.layout);
+        }
         Some(node)
     }
 }
@@ -310,5 +313,14 @@ mod tests {
             output.starts_with("    "),
             "Should have left margin of 4 spaces"
         );
+    }
+
+    #[test]
+    fn progress_render_tree_node_carries_layout_when_margins_set() {
+        use crate::utils::layout::{Length, Margin};
+        let mut bar = Progress::new(0.5);
+        bar.layout_mut().margin = Margin::x(Length::ch(2));
+        let node = bar.render_tree_node().unwrap();
+        assert!(node.attrs.layout().is_some());
     }
 }

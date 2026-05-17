@@ -4,7 +4,7 @@
 //! `layout_matrix` snapshot test so they render through identical code.
 #![allow(dead_code)]
 
-use renderable::layout::{Alignment, Layout, Margin, RowFill, WordWrap};
+use renderable::layout::{Alignment, Layout, Length, Margin, TargetValue, WordWrap};
 
 /// One cell of the matrix: a layout configuration applied at a width.
 #[derive(Clone)]
@@ -28,7 +28,10 @@ pub fn scenarios() -> Vec<Scenario> {
         Scenario {
             name: "left_margin_4",
             layout: Layout {
-                left_margin: Margin::Chars(4),
+                margin: Margin {
+                    left: TargetValue::universal(Length::ch(4)),
+                    ..Margin::default()
+                },
                 ..Layout::default()
             },
             width: 80,
@@ -36,7 +39,10 @@ pub fn scenarios() -> Vec<Scenario> {
         Scenario {
             name: "right_margin_4",
             layout: Layout {
-                right_margin: Margin::Chars(4),
+                margin: Margin {
+                    right: TargetValue::universal(Length::ch(4)),
+                    ..Margin::default()
+                },
                 ..Layout::default()
             },
             width: 80,
@@ -44,7 +50,10 @@ pub fn scenarios() -> Vec<Scenario> {
         Scenario {
             name: "top_margin_2",
             layout: Layout {
-                top_margin: Margin::Chars(2),
+                margin: Margin {
+                    top: TargetValue::universal(Length::ch(2)),
+                    ..Margin::default()
+                },
                 ..Layout::default()
             },
             width: 80,
@@ -52,7 +61,10 @@ pub fn scenarios() -> Vec<Scenario> {
         Scenario {
             name: "bottom_margin_2",
             layout: Layout {
-                bottom_margin: Margin::Chars(2),
+                margin: Margin {
+                    bottom: TargetValue::universal(Length::ch(2)),
+                    ..Margin::default()
+                },
                 ..Layout::default()
             },
             width: 80,
@@ -60,7 +72,10 @@ pub fn scenarios() -> Vec<Scenario> {
         Scenario {
             name: "left_margin_pct_10",
             layout: Layout {
-                left_margin: Margin::Percent(10.0),
+                margin: Margin {
+                    left: TargetValue::universal(Length::Percent(10.0)),
+                    ..Margin::default()
+                },
                 ..Layout::default()
             },
             width: 80,
@@ -82,9 +97,9 @@ pub fn scenarios() -> Vec<Scenario> {
             width: 80,
         },
         Scenario {
-            name: "row_fill_fill",
+            name: "max_width_40",
             layout: Layout {
-                row_fill_strategy: RowFill::Fill,
+                max_width: Some(TargetValue::universal(Length::ch(40))),
                 ..Layout::default()
             },
             width: 80,
@@ -216,12 +231,8 @@ pub fn component_cases() -> Vec<ComponentCase> {
         ComponentCase {
             name: "UnorderedList",
             render: Box::new(|s| {
-                let list = UnorderedList::new(vec![
-                    "First item",
-                    "Second item",
-                    "Third item",
-                ])
-                .with_layout(s.layout.clone());
+                let list = UnorderedList::new(vec!["First item", "Second item", "Third item"])
+                    .with_layout(s.layout.clone());
                 let term = Terminal::new_optimistic(s.width);
                 let bespoke = list.render(&term);
                 let tree = list
@@ -234,9 +245,8 @@ pub fn component_cases() -> Vec<ComponentCase> {
         ComponentCase {
             name: "TwoColumn",
             render: Box::new(|s| {
-                let columns =
-                    TwoColumn::new("Left column content.", "Right column content.")
-                        .with_layout(s.layout.clone());
+                let columns = TwoColumn::new("Left column content.", "Right column content.")
+                    .with_layout(s.layout.clone());
                 let term = Terminal::new_optimistic(s.width);
                 let bespoke = columns.render(&term);
                 let tree = columns
@@ -265,10 +275,7 @@ pub fn component_cases() -> Vec<ComponentCase> {
             name: "Table",
             render: Box::new(|s| {
                 let table = Table::new()
-                    .with_columns(vec![
-                        TableColumn::new("Name"),
-                        TableColumn::new("Score"),
-                    ])
+                    .with_columns(vec![TableColumn::new("Name"), TableColumn::new("Score")])
                     .with_data(vec![
                         vec![
                             TableCellContent::Text("Ann".into()),

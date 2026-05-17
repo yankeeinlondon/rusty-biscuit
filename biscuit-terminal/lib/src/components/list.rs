@@ -279,6 +279,9 @@ impl TerminalRenderable for OrderedList {
             hanging_indent: true,
             indent_children: Some(self.indent_children),
         });
+        if self.layout != Layout::default() {
+            node.attrs.set_layout(&self.layout);
+        }
         Some(node)
     }
 }
@@ -623,6 +626,9 @@ impl TerminalRenderable for UnorderedList {
             hanging_indent: self.hanging_indent,
             indent_children: self.indent_children,
         });
+        if self.layout != Layout::default() {
+            node.attrs.set_layout(&self.layout);
+        }
         Some(node)
     }
 }
@@ -873,5 +879,23 @@ mod tests {
                 line
             );
         }
+    }
+
+    #[test]
+    fn ordered_list_render_tree_node_carries_layout_when_margins_set() {
+        use crate::utils::layout::{Length, Margin};
+        let mut list = OrderedList::new(vec!["First", "Second"]);
+        list.layout_mut().margin = Margin::x(Length::ch(2));
+        let node = list.render_tree_node().unwrap();
+        assert!(node.attrs.layout().is_some());
+    }
+
+    #[test]
+    fn unordered_list_render_tree_node_carries_layout_when_margins_set() {
+        use crate::utils::layout::{Length, Margin};
+        let mut list = UnorderedList::new(vec!["Apple", "Banana"]);
+        list.layout_mut().margin = Margin::x(Length::ch(2));
+        let node = list.render_tree_node().unwrap();
+        assert!(node.attrs.layout().is_some());
     }
 }

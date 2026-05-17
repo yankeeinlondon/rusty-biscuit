@@ -495,6 +495,9 @@ impl TerminalRenderable for TwoColumn {
             left_count,
             stack_below: true,
         });
+        if self.layout != Layout::default() {
+            container.attrs.set_layout(&self.layout);
+        }
         Some(container)
     }
 
@@ -610,5 +613,14 @@ mod tests {
     fn is_block_level_component() {
         let two = TwoColumn::new("L", "R");
         assert!(two.is_block_level());
+    }
+
+    #[test]
+    fn two_column_render_tree_node_carries_layout_when_margins_set() {
+        use crate::utils::layout::{Length, Margin};
+        let mut two = TwoColumn::new("L", "R");
+        two.layout_mut().margin = Margin::x(Length::ch(2));
+        let node = two.render_tree_node().unwrap();
+        assert!(node.attrs.layout().is_some());
     }
 }

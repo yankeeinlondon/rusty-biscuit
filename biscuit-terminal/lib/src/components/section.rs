@@ -236,7 +236,11 @@ impl TerminalRenderable for Section {
             children.extend(result.nodes);
         }
 
-        Some(RenderNode::section(depth, heading, children))
+        let mut node = RenderNode::section(depth, heading, children);
+        if self.layout != Layout::default() {
+            node.attrs.set_layout(&self.layout);
+        }
+        Some(node)
     }
 }
 
@@ -263,5 +267,14 @@ mod tests {
     fn test_heading_levels() {
         assert_eq!(HeadingLevel::h1.level(), 1);
         assert_eq!(HeadingLevel::h6.level(), 6);
+    }
+
+    #[test]
+    fn section_render_tree_node_carries_layout_when_margins_set() {
+        use crate::utils::layout::{Length, Margin};
+        let mut section = Section::new(HeadingLevel::h1, "Title");
+        section.layout.margin = Margin::x(Length::ch(2));
+        let node = section.render_tree_node().unwrap();
+        assert!(node.attrs.layout().is_some());
     }
 }

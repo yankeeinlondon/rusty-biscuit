@@ -1,5 +1,5 @@
 use renderable::tree::{
-    ColumnAlign, ColumnConditional, LayoutHints, RenderNode, TableCellHints, TableColumnHints,
+    ColumnAlign, ColumnConditional, RenderNode, TableCellHints, TableColumnHints,
     TableTerminalHints,
 };
 
@@ -1376,7 +1376,9 @@ impl TerminalRenderable for Table {
     /// [`NodeKind::Text`] node, plus [`TableCellHints`] recording the cell
     /// kind, the original typed value as JSON, and alignment. The table node
     /// carries per-column [`TableColumnHints`] and [`TableTerminalHints`], and
-    /// [`LayoutHints`] when margins are non-default.
+    /// the consolidated [`Layout`] when margins are non-default.
+    ///
+    /// [`Layout`]: renderable::layout::Layout
     ///
     /// [`NodeKind::Table`]: renderable::tree::NodeKind::Table
     /// [`NodeKind::Text`]: renderable::tree::NodeKind::Text
@@ -1446,30 +1448,9 @@ impl TerminalRenderable for Table {
             alternate_text_color: self.alternate_text_color,
         });
 
-        // Layout hints when margins are non-default. Margins are resolved to
-        // character counts against a representative 80-column width.
-        let margins_non_default = self.layout.margin != renderable::layout::Margin::default();
-        if margins_non_default {
-            let hints = LayoutHints {
-                left_margin: Some(resolve_cells(&self.layout.margin.left, 80)),
-                right_margin: Some(resolve_cells(&self.layout.margin.right, 80)),
-                top_margin: Some(resolve_cells(&self.layout.margin.top, 80)),
-                bottom_margin: Some(resolve_cells(&self.layout.margin.bottom, 80)),
-            };
-            for (key, value) in [
-                ("left_margin", hints.left_margin),
-                ("right_margin", hints.right_margin),
-                ("top_margin", hints.top_margin),
-                ("bottom_margin", hints.bottom_margin),
-            ] {
-                if let Some(v) = value {
-                    node.attrs.set_hint(
-                        renderable::tree::HintNamespace::LAYOUT,
-                        key,
-                        serde_json::Value::from(v),
-                    );
-                }
-            }
+        // Carry the consolidated layout when it differs from the default.
+        if self.layout != renderable::layout::Layout::default() {
+            node.attrs.set_layout(&self.layout);
         }
 
         Some(node)
@@ -2521,12 +2502,12 @@ mod tests {
 
     #[test]
     fn test_table_with_left_margin() {
-        use crate::utils::layout::Margin;
+        use crate::utils::layout::{Length, TargetValue};
 
         let mut table = Table::new()
             .with_columns(vec![TableColumn::new("X")])
             .with_data(vec![vec!["A".into()]]);
-        table.layout_mut().left_margin = Margin::Chars(1);
+        table.layout_mut().margin.left = TargetValue::universal(Length::ch(1));
 
         let rendered = table.render_optimistic(Some(60));
         for line in rendered.lines() {
@@ -2576,13 +2557,13 @@ mod tests {
 
     #[test]
     fn test_cursor_alignment_with_left_margin() {
-        use crate::utils::layout::Margin;
+        use crate::utils::layout::{Length, TargetValue};
 
         let mut table = Table::new()
             .with_columns(vec![TableColumn::new("X")])
             .with_data(vec![vec!["A".into()]])
             .prefer_cursor_alignment();
-        table.layout_mut().left_margin = Margin::Chars(5);
+        table.layout_mut().margin.left = TargetValue::universal(Length::ch(5));
 
         let result = table.render_optimistic(Some(80));
         // Table should start at column 6 (5 margin + 1 for 1-indexed)
@@ -2722,15 +2703,14 @@ mod tests {
 
     #[test]
     fn test_cursor_alignment_row_fill() {
-        use crate::utils::layout::Margin;
+        use crate::utils::layout::{Length, TargetValue};
 
         let mut table = Table::new()
             .with_columns(vec![TableColumn::new("X")])
             .with_data(vec![vec!["A".into()]])
             .prefer_cursor_alignment();
-        table.layout_mut().left_margin = Margin::Chars(2);
-        table.layout_mut().right_margin = Margin::Chars(2);
-        table.layout_mut().row_fill_strategy = RowFill::Fill;
+        table.layout_mut().margin.left = TargetValue::universal(Length::ch(2));
+        table.layout_mut().margin.right = TargetValue::universal(Length::ch(2));
 
         let result = table.render_optimistic(Some(20));
         // With row fill enabled, lines should extend to fill available width
@@ -3653,7 +3633,7 @@ mod tests {
 
     #[test]
     fn test_table_respects_available_width_cursor_mode() {
-        use crate::utils::layout::Margin;
+        use crate::utils::layout::{Length, TargetValue};
 
         let mut table = Table::new()
             .with_columns(vec![
@@ -3666,8 +3646,8 @@ mod tests {
             ]])
             .prefer_cursor_alignment();
 
-        table.layout_mut().left_margin = Margin::Chars(5);
-        table.layout_mut().right_margin = Margin::Chars(5);
+        table.layout_mut().margin.left = TargetValue::universal(Length::ch(5));
+        table.layout_mut().margin.right = TargetValue::universal(Length::ch(5));
 
         let result = table.render_optimistic(Some(60));
 
@@ -4664,5 +4644,16 @@ mod tests {
         // Without available_width, render_content does not filter
         let result = table.render_content(None, None, None);
         assert!(result.contains("Details"), "No width = no filtering");
+    }
+
+    #[test]
+    fn table_render_tree_node_carries_layout_when_margins_set() {
+        use renderable::layout::{Length, Margin};
+        let mut table = Table::new()
+            .with_columns(vec![TableColumn::new("Name")])
+            .with_data(vec![vec!["Alice".into()]]);
+        table.layout.margin = Margin::x(Length::ch(2));
+        let node = table.render_tree_node().unwrap();
+        assert!(node.attrs.layout().is_some());
     }
 }

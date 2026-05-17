@@ -3,8 +3,8 @@ source: biscuit-terminal/lib/tests/layout_matrix.rs
 expression: block
 ---
 BESPOKE
-## Getting Started                                                              
-Welcome to the tutorial.                                                        
+## Getting Started
+Welcome to the tutorial.
 Let's begin with installation.
 ---
 TREE
