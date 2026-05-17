@@ -44,3 +44,17 @@ fn stacked_stripped_has_no_ansi() {
     let block = stacked_stripped("\x1b[1mhi\x1b[0m", "\x1b[2mbye\x1b[0m");
     assert!(!block.contains('\x1b'), "snapshot block must be ANSI-free");
 }
+
+#[test]
+fn layout_matrix_snapshots() {
+    for case in component_cases() {
+        for scenario in scenarios() {
+            let (bespoke, tree) = (case.render)(&scenario);
+            let block = stacked_stripped(&bespoke, &tree);
+            insta::assert_snapshot!(
+                format!("{}__{}", case.name, scenario.name),
+                block
+            );
+        }
+    }
+}
