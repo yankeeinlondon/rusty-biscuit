@@ -17,11 +17,11 @@
 
 use std::hint::black_box;
 
-use criterion::{criterion_group, criterion_main, Criterion, Throughput};
+use criterion::{Criterion, Throughput, criterion_group, criterion_main};
 use darkmatter::markdown::render_tree::fold_markdown_to_document;
 use renderable::tree::{
-    render_browser_document, render_markdown_document, BrowserRenderOptions,
-    MarkdownRenderOptions, SourceDescriptor,
+    BrowserRenderOptions, MarkdownRenderOptions, SourceDescriptor, render_browser_document,
+    render_markdown_document,
 };
 
 // ---------------------------------------------------------------------------
@@ -112,7 +112,9 @@ fn bench_fold(c: &mut Criterion) {
         group.throughput(Throughput::Bytes(input.len() as u64));
         group.bench_function(*name, |b| {
             b.iter(|| {
-                let source = SourceDescriptor::Virtual { name: (*name).into() };
+                let source = SourceDescriptor::Virtual {
+                    name: (*name).into(),
+                };
                 fold_markdown_to_document(source, black_box(input))
             })
         });
@@ -132,7 +134,9 @@ fn bench_render_markdown(c: &mut Criterion) {
 
     let mut group = c.benchmark_group("render_tree_markdown");
     for (name, input) in &inputs {
-        let source = SourceDescriptor::Virtual { name: (*name).into() };
+        let source = SourceDescriptor::Virtual {
+            name: (*name).into(),
+        };
         let (doc, _diags) = fold_markdown_to_document(source, input);
         group.bench_function(*name, |b| {
             b.iter(|| render_markdown_document(black_box(&doc), &opts))
@@ -153,7 +157,9 @@ fn bench_render_browser(c: &mut Criterion) {
 
     let mut group = c.benchmark_group("render_tree_browser");
     for (name, input) in &inputs {
-        let source = SourceDescriptor::Virtual { name: (*name).into() };
+        let source = SourceDescriptor::Virtual {
+            name: (*name).into(),
+        };
         let (doc, _diags) = fold_markdown_to_document(source, input);
         group.bench_function(*name, |b| {
             b.iter(|| render_browser_document(black_box(&doc), &opts))
@@ -177,9 +183,10 @@ fn bench_fold_then_render(c: &mut Criterion) {
         group.throughput(Throughput::Bytes(input.len() as u64));
         group.bench_function(*name, |b| {
             b.iter(|| {
-                let source = SourceDescriptor::Virtual { name: (*name).into() };
-                let (doc, _diags) =
-                    fold_markdown_to_document(source, black_box(input));
+                let source = SourceDescriptor::Virtual {
+                    name: (*name).into(),
+                };
+                let (doc, _diags) = fold_markdown_to_document(source, black_box(input));
                 render_markdown_document(&doc, &opts)
             })
         });

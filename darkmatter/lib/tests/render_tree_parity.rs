@@ -83,12 +83,12 @@
 //! renderer change drop content, the invariant assertions here fail and name
 //! the offending token.
 
-use biscuit_terminal::render_tree::{render_terminal_document, TerminalRenderOptions};
+use biscuit_terminal::render_tree::{TerminalRenderOptions, render_terminal_document};
+use darkmatter::markdown::Markdown;
 use darkmatter::markdown::output::{HtmlOptions, TerminalOptions, as_html, for_terminal};
 use darkmatter::markdown::render_tree::fold_markdown_to_document;
-use darkmatter::markdown::Markdown;
 use renderable::tree::{
-    render_browser_document, BrowserRenderOptions, Document, RawHtmlPolicy, SourceDescriptor,
+    BrowserRenderOptions, Document, RawHtmlPolicy, SourceDescriptor, render_browser_document,
 };
 
 // ---------------------------------------------------------------------------
@@ -178,9 +178,7 @@ fn strip_ansi(input: &str) -> String {
                             idx += 1;
                             break;
                         }
-                        if bytes[idx] == '\u{1b}'
-                            && idx + 1 < bytes.len()
-                            && bytes[idx + 1] == '\\'
+                        if bytes[idx] == '\u{1b}' && idx + 1 < bytes.len() && bytes[idx + 1] == '\\'
                         {
                             idx += 2;
                             break;
@@ -405,7 +403,11 @@ fn assert_parity(name: &str, text_tokens: &[&str], html_url_tokens: &[&str]) {
 
 #[test]
 fn render_tree_parity_headings() {
-    assert_parity("headings", &["Top Level", "Second Level", "Third Level"], &[]);
+    assert_parity(
+        "headings",
+        &["Top Level", "Second Level", "Third Level"],
+        &[],
+    );
 }
 
 #[test]
@@ -541,7 +543,11 @@ fn render_tree_parity_raw_html() {
         &tree_term,
         // `inline html` is the inline-HTML text the legacy renderer keeps
         // (tags stripped); the surrounding paragraphs are retained too.
-        &["A paragraph then a block", "inline html", "Trailing paragraph"],
+        &[
+            "A paragraph then a block",
+            "inline html",
+            "Trailing paragraph",
+        ],
     );
 
     // The legacy terminal renderer's documented gap: it drops the raw block.

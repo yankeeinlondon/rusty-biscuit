@@ -224,8 +224,10 @@ pub fn fold_markdown_to_document(
             Event::InlineMath(_) | Event::DisplayMath(_) => {
                 let label = "math expression".to_string();
                 fold.push_leaf(RenderNode::unsupported(label.clone()), range.clone());
-                fold.diagnostics
-                    .push(Diagnostic::unsupported(label, Some(fold.parsed_span(range))));
+                fold.diagnostics.push(Diagnostic::unsupported(
+                    label,
+                    Some(fold.parsed_span(range)),
+                ));
             }
         }
     }
@@ -434,9 +436,7 @@ fn build_container(kind: ContainerKind, children: Vec<RenderNode>) -> RenderNode
             RenderNode::footnote_definition(identifier, children)
         }
         ContainerKind::Link { url, title } => RenderNode::link(url, title, children),
-        ContainerKind::Image { url, title } => {
-            RenderNode::image(url, title, image_alt(&children))
-        }
+        ContainerKind::Image { url, title } => RenderNode::image(url, title, image_alt(&children)),
         // Handled by `Fold::end`; unreachable here.
         ContainerKind::Root
         | ContainerKind::HtmlBlock
@@ -485,11 +485,7 @@ fn slug_from_children(children: &[RenderNode]) -> Option<String> {
     let mut text = String::new();
     collect_text(children, &mut text);
     let slug = slugify(&text);
-    if slug.is_empty() {
-        None
-    } else {
-        Some(slug)
-    }
+    if slug.is_empty() { None } else { Some(slug) }
 }
 
 /// Slugifies text: lowercase, spaces to `-`, non-alphanumeric (other than `-`)
@@ -555,11 +551,7 @@ fn column_align(alignment: pulldown_cmark::Alignment) -> ColumnAlign {
 
 /// Normalizes an empty title string to `None`.
 fn non_empty(value: String) -> Option<String> {
-    if value.is_empty() {
-        None
-    } else {
-        Some(value)
-    }
+    if value.is_empty() { None } else { Some(value) }
 }
 
 #[cfg(test)]
@@ -613,12 +605,8 @@ mod tests {
         let emphasis = &para.children()[0];
         assert!(matches!(emphasis.kind, NodeKind::Emphasis { .. }));
         let kinds: Vec<&NodeKind> = emphasis.children().iter().map(|n| &n.kind).collect();
-        assert!(kinds
-            .iter()
-            .any(|k| matches!(k, NodeKind::Strong { .. })));
-        assert!(kinds
-            .iter()
-            .any(|k| matches!(k, NodeKind::Delete { .. })));
+        assert!(kinds.iter().any(|k| matches!(k, NodeKind::Strong { .. })));
+        assert!(kinds.iter().any(|k| matches!(k, NodeKind::Delete { .. })));
     }
 
     #[test]
@@ -718,17 +706,19 @@ mod tests {
     fn soft_and_hard_breaks() {
         let (doc, _) = fold("line one\nline two");
         let para = &roots(&doc)[0];
-        assert!(para
-            .children()
-            .iter()
-            .any(|n| matches!(n.kind, NodeKind::SoftBreak)));
+        assert!(
+            para.children()
+                .iter()
+                .any(|n| matches!(n.kind, NodeKind::SoftBreak))
+        );
 
         let (doc, _) = fold("line one\\\nline two");
         let para = &roots(&doc)[0];
-        assert!(para
-            .children()
-            .iter()
-            .any(|n| matches!(n.kind, NodeKind::HardBreak)));
+        assert!(
+            para.children()
+                .iter()
+                .any(|n| matches!(n.kind, NodeKind::HardBreak))
+        );
     }
 
     #[test]
@@ -755,10 +745,11 @@ mod tests {
     fn inline_html_is_a_non_block_html_node() {
         let (doc, _) = fold("text <span>inline</span> more");
         let para = &roots(&doc)[0];
-        assert!(para
-            .children()
-            .iter()
-            .any(|n| matches!(n.kind, NodeKind::Html { block: false, .. })));
+        assert!(
+            para.children()
+                .iter()
+                .any(|n| matches!(n.kind, NodeKind::Html { block: false, .. }))
+        );
     }
 
     #[test]
@@ -785,7 +776,10 @@ mod tests {
             .find(|n| matches!(n.kind, NodeKind::FootnoteDefinition { .. }))
             .expect("document carries a footnote definition");
         match &definition.kind {
-            NodeKind::FootnoteDefinition { identifier, children } => {
+            NodeKind::FootnoteDefinition {
+                identifier,
+                children,
+            } => {
                 assert_eq!(identifier, "note");
                 assert!(!children.is_empty());
             }
@@ -904,8 +898,10 @@ mod tests {
         };
         fold.task_marker(true, 0..3);
         assert_eq!(fold.diagnostics.len(), 1);
-        assert!(fold.diagnostics[0]
-            .message
-            .contains("task-list marker outside a list item"));
+        assert!(
+            fold.diagnostics[0]
+                .message
+                .contains("task-list marker outside a list item")
+        );
     }
 }

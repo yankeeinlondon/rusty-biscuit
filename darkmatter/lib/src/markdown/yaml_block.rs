@@ -11,6 +11,7 @@ use biscuit_terminal::components::renderable::{BrowserRenderable, TerminalRender
 use biscuit_terminal::terminal::Terminal;
 use biscuit_terminal::utils::layout::{Layout, LayoutTerminalExt};
 use renderable::browser::fragment::{BrowserFragment, Ready};
+use renderable::tree::{CodeRenderHints, RenderNode};
 use thiserror::Error;
 
 use crate::markdown::{
@@ -236,6 +237,22 @@ impl TerminalRenderable for YamlBlock {
 
     fn is_block_level(&self) -> bool {
         true
+    }
+
+    /// Projects this block into a [`NodeKind::Code`](renderable::tree::NodeKind::Code)
+    /// render-tree node tagged with the `yaml` language.
+    ///
+    /// The node carries [`CodeRenderHints`] requesting a header row, a `yaml`
+    /// language label, and syntax highlighting, so a tree renderer wired with
+    /// a `CodeRenderer` hook can reproduce the bespoke highlighted output.
+    fn render_tree_node(&self) -> Option<RenderNode> {
+        let mut node = RenderNode::code(Some("yaml".into()), None, self.yaml.clone());
+        node.attrs.set_code_hints(&CodeRenderHints {
+            header_row: true,
+            language_label: Some("yaml".into()),
+            highlight: true,
+        });
+        Some(node)
     }
 }
 

@@ -327,7 +327,10 @@ fn unsupported_reference_type_escapes_markup() {
     let out = render(&err);
     // The literal angle brackets must appear in the plain-text output,
     // not be swallowed by the Prose parser as malformed tags.
-    assert_contains_all(&out, &["TransclusionError", "<script>", "alert(1)", "</script>"]);
+    assert_contains_all(
+        &out,
+        &["TransclusionError", "<script>", "alert(1)", "</script>"],
+    );
     insta::assert_snapshot!("unsupported_reference_type_markup", out);
 }
 

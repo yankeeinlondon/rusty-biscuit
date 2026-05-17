@@ -65,8 +65,8 @@ pub use completion::{CompletionKind, CompletionSuggestion};
 pub use detect::{DetectOptions, detect_from_document, detect_schema, schema_to_yaml};
 pub use errors::SchemaError;
 pub use simplified::{
-    Constraint, DRAFT_2020_12, PropertyAtom, PropertyDef, SchemaArm, SchemaShape,
-    SimplifiedSchema, SimplifiedType, parse_yaml_schema, to_json_schema,
+    Constraint, DRAFT_2020_12, PropertyAtom, PropertyDef, SchemaArm, SchemaShape, SimplifiedSchema,
+    SimplifiedType, parse_yaml_schema, to_json_schema,
 };
 pub use validate::{CACHE_SIZE_ENV, DEFAULT_CACHE_SIZE, PositionMap, ValidatorCache};
 
@@ -116,16 +116,12 @@ impl DarkmatterSchemas {
     ///
     /// Propagates [`SchemaError::Io`], [`SchemaError::AmbiguousReferenced`],
     /// or [`SchemaError::Baseline`] depending on the failure shape.
-    pub fn with_baseline_from_file(
-        mut self,
-        path: impl AsRef<Path>,
-    ) -> Result<Self, SchemaError> {
+    pub fn with_baseline_from_file(mut self, path: impl AsRef<Path>) -> Result<Self, SchemaError> {
         let path = path.as_ref();
         let base = path.parent().unwrap_or_else(|| Path::new("."));
         // Drive resolution through the file-reference path so YAML/JSON
         // disambiguation matches `$schema` references.
-        let yaml_value =
-            serde_yaml_ng::Value::String(path.to_string_lossy().into_owned());
+        let yaml_value = serde_yaml_ng::Value::String(path.to_string_lossy().into_owned());
         let resolved =
             resolve::resolve_yaml_schema(&yaml_value, base).map_err(|err| match err {
                 SchemaError::Io { .. } => err,
@@ -170,10 +166,7 @@ impl DarkmatterSchemas {
     ///
     /// Propagates [`SchemaError`] from parsing, resolution, conversion, or
     /// validator construction.
-    pub fn effective_for(
-        &self,
-        source: &Markdown,
-    ) -> Result<Option<EffectiveSchema>, SchemaError> {
+    pub fn effective_for(&self, source: &Markdown) -> Result<Option<EffectiveSchema>, SchemaError> {
         let base_dir = base_dir_for(source);
         let frontmatter = source.frontmatter().as_map();
         let schema_value = frontmatter.get("$schema");
@@ -215,7 +208,9 @@ impl DarkmatterSchemas {
         let frontmatter_value = frontmatter_as_json(source);
         let positions = positions_for(source);
         match self.effective_for(source)? {
-            Some(effective) => Ok(effective.validate_with_positions(&frontmatter_value, &positions)),
+            Some(effective) => {
+                Ok(effective.validate_with_positions(&frontmatter_value, &positions))
+            }
             None => Ok(ValidationReport {
                 valid: true,
                 problems: Vec::new(),
@@ -270,9 +265,7 @@ impl EffectiveSchema {
         positions: &PositionMap,
     ) -> ValidationReport {
         let problems = match &self.arm_validators {
-            Some(arms) => {
-                validate::collect_root_union_problems(arms, frontmatter, positions)
-            }
+            Some(arms) => validate::collect_root_union_problems(arms, frontmatter, positions),
             None => validate::collect_problems(&self.validator, frontmatter, positions),
         };
         ValidationReport {
@@ -359,7 +352,10 @@ fn positions_for(source: &Markdown) -> PositionMap {
     }
     let mut yaml_map = serde_yaml_ng::Mapping::new();
     for (k, v) in map {
-        yaml_map.insert(serde_yaml_ng::Value::String(k.clone()), json_to_yaml_value(v));
+        yaml_map.insert(
+            serde_yaml_ng::Value::String(k.clone()),
+            json_to_yaml_value(v),
+        );
     }
     let yaml_value = serde_yaml_ng::Value::Mapping(yaml_map);
     match serde_yaml_ng::to_string(&yaml_value) {
@@ -438,9 +434,7 @@ mod tests {
 
     #[test]
     fn validates_inline_schema_success() {
-        let md = md_with_schema(
-            "$schema:\n  title: 'string(required)'\ntitle: Hello\n",
-        );
+        let md = md_with_schema("$schema:\n  title: 'string(required)'\ntitle: Hello\n");
         let api = DarkmatterSchemas::new();
         let report = api.validate(&md).unwrap();
         assert!(report.valid, "expected valid: {:?}", report.problems);
@@ -448,9 +442,7 @@ mod tests {
 
     #[test]
     fn validates_inline_schema_missing_required() {
-        let md = md_with_schema(
-            "$schema:\n  title: 'string(required)'\nother: stuff\n",
-        );
+        let md = md_with_schema("$schema:\n  title: 'string(required)'\nother: stuff\n");
         let api = DarkmatterSchemas::new();
         let report = api.validate(&md).unwrap();
         assert!(!report.valid);
@@ -498,9 +490,7 @@ mod tests {
 
     #[test]
     fn baseline_merges_with_document_schema() {
-        let md = md_with_schema(
-            "$schema:\n  title: 'string(required)'\ntitle: hi\n",
-        );
+        let md = md_with_schema("$schema:\n  title: 'string(required)'\ntitle: hi\n");
         let baseline = SimplifiedSchema::Single(SchemaShape {
             properties: {
                 let mut m = indexmap::IndexMap::new();

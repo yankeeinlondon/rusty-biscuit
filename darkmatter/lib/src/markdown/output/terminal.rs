@@ -3473,7 +3473,15 @@ fn main() {}
         let meta = crate::markdown::dsl::CodeBlockMeta::default();
 
         let code = "fn main() {}";
-        let result = highlight_code(code, "rust", &highlighter, &options, &meta, ColorMode::Dark, None);
+        let result = highlight_code(
+            code,
+            "rust",
+            &highlighter,
+            &options,
+            &meta,
+            ColorMode::Dark,
+            None,
+        );
 
         assert!(result.is_ok());
         let output = result.unwrap();
@@ -3489,7 +3497,15 @@ fn main() {}
         let meta = crate::markdown::dsl::CodeBlockMeta::default();
 
         let code = "fn main() {}";
-        let result = highlight_code(code, "rust", &highlighter, &options, &meta, ColorMode::Dark, None);
+        let result = highlight_code(
+            code,
+            "rust",
+            &highlighter,
+            &options,
+            &meta,
+            ColorMode::Dark,
+            None,
+        );
 
         assert!(result.is_ok());
         let output = result.unwrap();
@@ -3519,7 +3535,15 @@ fn main() {}
         let meta = crate::markdown::dsl::CodeBlockMeta::default();
 
         let code = "fn main() {}";
-        let result = highlight_code(code, "rust", &highlighter, &options, &meta, ColorMode::Dark, None);
+        let result = highlight_code(
+            code,
+            "rust",
+            &highlighter,
+            &options,
+            &meta,
+            ColorMode::Dark,
+            None,
+        );
 
         assert!(result.is_ok());
         let output = result.unwrap();
@@ -3544,7 +3568,15 @@ fn main() {}
         let meta = crate::markdown::dsl::CodeBlockMeta::default();
 
         let code = "test";
-        let result = highlight_code(code, "rust", &highlighter, &options, &meta, ColorMode::Dark, None);
+        let result = highlight_code(
+            code,
+            "rust",
+            &highlighter,
+            &options,
+            &meta,
+            ColorMode::Dark,
+            None,
+        );
 
         assert!(result.is_ok());
         let output = result.unwrap();
@@ -3577,7 +3609,15 @@ fn main() {}
         meta.highlight.add_line(2);
 
         let code = "line 1\nline 2\nline 3";
-        let result = highlight_code(code, "rust", &highlighter, &options, &meta, ColorMode::Dark, None);
+        let result = highlight_code(
+            code,
+            "rust",
+            &highlighter,
+            &options,
+            &meta,
+            ColorMode::Dark,
+            None,
+        );
 
         assert!(result.is_ok());
         let output = result.unwrap();
@@ -3612,7 +3652,15 @@ fn main() {}
         meta.highlight.add_range(2, 4).unwrap();
 
         let code = "line 1\nline 2\nline 3\nline 4\nline 5";
-        let result = highlight_code(code, "rust", &highlighter, &options, &meta, ColorMode::Dark, None);
+        let result = highlight_code(
+            code,
+            "rust",
+            &highlighter,
+            &options,
+            &meta,
+            ColorMode::Dark,
+            None,
+        );
 
         assert!(result.is_ok());
         let output = result.unwrap();
@@ -3643,7 +3691,15 @@ fn main() {}
         meta.highlight.add_range(4, 6).unwrap();
 
         let code = "line 1\nline 2\nline 3\nline 4\nline 5\nline 6";
-        let result = highlight_code(code, "rust", &highlighter, &options, &meta, ColorMode::Dark, None);
+        let result = highlight_code(
+            code,
+            "rust",
+            &highlighter,
+            &options,
+            &meta,
+            ColorMode::Dark,
+            None,
+        );
 
         assert!(result.is_ok());
         let output = result.unwrap();
@@ -3679,7 +3735,15 @@ fn main() {}
         meta.highlight.add_line(2);
 
         let code = "line 1\nline 2\nline 3";
-        let result = highlight_code(code, "rust", &highlighter, &options, &meta, ColorMode::Dark, None);
+        let result = highlight_code(
+            code,
+            "rust",
+            &highlighter,
+            &options,
+            &meta,
+            ColorMode::Dark,
+            None,
+        );
 
         assert!(result.is_ok());
         let output = result.unwrap();
@@ -3716,7 +3780,15 @@ fn main() {}
 
         let code =
             "line 1\nline 2\nline 3\nline 4\nline 5\nline 6\nline 7\nline 8\nline 9\nline 10";
-        let result = highlight_code(code, "rust", &highlighter, &options, &meta, ColorMode::Dark, None);
+        let result = highlight_code(
+            code,
+            "rust",
+            &highlighter,
+            &options,
+            &meta,
+            ColorMode::Dark,
+            None,
+        );
 
         assert!(result.is_ok());
         let output = result.unwrap();
@@ -3749,7 +3821,15 @@ fn main() {}
         let meta = crate::markdown::dsl::CodeBlockMeta::default();
 
         let code = "let x = 1;";
-        let result = highlight_code(code, "rust", &highlighter, &options, &meta, ColorMode::Dark, None);
+        let result = highlight_code(
+            code,
+            "rust",
+            &highlighter,
+            &options,
+            &meta,
+            ColorMode::Dark,
+            None,
+        );
 
         assert!(result.is_ok());
         let output = result.unwrap();
@@ -3799,7 +3879,15 @@ fn main() {}
         meta.highlight.add_line(0); // Line 0 should be ignored (1-indexed)
 
         let code = "line 1\nline 2\nline 3";
-        let result = highlight_code(code, "rust", &highlighter, &options, &meta, ColorMode::Dark, None);
+        let result = highlight_code(
+            code,
+            "rust",
+            &highlighter,
+            &options,
+            &meta,
+            ColorMode::Dark,
+            None,
+        );
 
         assert!(result.is_ok());
         let output = result.unwrap();
@@ -3836,7 +3924,15 @@ fn main() {}
         meta.highlight.add_line(100); // Line 100 on 5-line code should be ignored
 
         let code = "line 1\nline 2\nline 3\nline 4\nline 5";
-        let result = highlight_code(code, "rust", &highlighter, &options, &meta, ColorMode::Dark, None);
+        let result = highlight_code(
+            code,
+            "rust",
+            &highlighter,
+            &options,
+            &meta,
+            ColorMode::Dark,
+            None,
+        );
 
         assert!(result.is_ok());
         let output = result.unwrap();

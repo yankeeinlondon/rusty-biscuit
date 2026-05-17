@@ -72,10 +72,7 @@ pub enum CompletionKind {
 /// For property-level unions, the first atom whose type is completable wins.
 /// This matches the spec's intent of "treat the property as that type for
 /// the purpose of completion" without trying to merge competing arms.
-pub fn for_property(
-    effective: &EffectiveSchema,
-    property: &str,
-) -> Option<CompletionSuggestion> {
+pub fn for_property(effective: &EffectiveSchema, property: &str) -> Option<CompletionSuggestion> {
     let simplified = effective.simplified.as_ref()?;
     let shape = single_shape(simplified)?;
     let def = shape.properties.get(property)?;
@@ -203,9 +200,7 @@ mod tests {
 
     #[test]
     fn file_property_with_match_patterns() {
-        let eff = effective(
-            "$schema:\n  cover: \"file(match('*.png', '*.jpg'))\"\n",
-        );
+        let eff = effective("$schema:\n  cover: \"file(match('*.png', '*.jpg'))\"\n");
         let suggestion = for_property(&eff, "cover").expect("cover should be completable");
         assert_eq!(suggestion.property, "cover");
         assert!(!suggestion.is_array);
@@ -229,9 +224,7 @@ mod tests {
 
     #[test]
     fn enum_property_returns_members() {
-        let eff = effective(
-            "$schema:\n  status: enum(draft, published, archived)\n",
-        );
+        let eff = effective("$schema:\n  status: enum(draft, published, archived)\n");
         let suggestion = for_property(&eff, "status").expect("status should be completable");
         match suggestion.kind {
             CompletionKind::Enum { members } => {
@@ -284,9 +277,7 @@ mod tests {
 
     #[test]
     fn description_is_preserved() {
-        let eff = effective(
-            "$schema:\n  cover: \"file -> The cover image for this post\"\n",
-        );
+        let eff = effective("$schema:\n  cover: \"file -> The cover image for this post\"\n");
         let suggestion = for_property(&eff, "cover").expect("cover should be completable");
         assert_eq!(
             suggestion.description.as_deref(),
@@ -296,9 +287,7 @@ mod tests {
 
     #[test]
     fn property_union_picks_first_completable_arm() {
-        let eff = effective(
-            "$schema:\n  href:\n    - url\n    - file\n",
-        );
+        let eff = effective("$schema:\n  href:\n    - url\n    - file\n");
         let suggestion = for_property(&eff, "href").expect("href should be completable");
         match suggestion.kind {
             CompletionKind::Hint { format } => assert!(format.contains("URL")),

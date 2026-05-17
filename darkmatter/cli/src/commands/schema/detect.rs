@@ -6,9 +6,7 @@ use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::terminal::Terminal;
 use color_eyre::eyre::Result;
 use darkmatter::markdown::Markdown;
-use darkmatter::markdown::schemas::{
-    DetectOptions, detect_schema, schema_to_yaml, to_json_schema,
-};
+use darkmatter::markdown::schemas::{DetectOptions, detect_schema, schema_to_yaml, to_json_schema};
 use std::path::{Path, PathBuf};
 
 /// Run `md schema detect`.
@@ -17,11 +15,7 @@ use std::path::{Path, PathBuf};
 /// frontmatter cannot be parsed (matching the validate convention), and
 /// `2` when conversion to JSON Schema fails (only possible with
 /// `--format json`).
-pub fn run_detect(
-    files: &[PathBuf],
-    format: SchemaDetectFormat,
-    merge: bool,
-) -> Result<()> {
+pub fn run_detect(files: &[PathBuf], format: SchemaDetectFormat, merge: bool) -> Result<()> {
     let terminal = Terminal::default();
     let mut docs: Vec<Markdown> = Vec::with_capacity(files.len());
     let mut any_parse_error = false;

@@ -20,11 +20,7 @@ fn write_file(dir: &TempDir, name: &str, content: &str) -> PathBuf {
 #[test]
 fn schema_detect_yaml_emits_simplified_schema() {
     let tmp = TempDir::new().unwrap();
-    let doc = write_file(
-        &tmp,
-        "doc.md",
-        "---\ntitle: Hello\ncount: 42\n---\nBody\n",
-    );
+    let doc = write_file(&tmp, "doc.md", "---\ntitle: Hello\ncount: 42\n---\nBody\n");
 
     md_cmd()
         .args(["schema", "detect"])
@@ -39,11 +35,7 @@ fn schema_detect_yaml_emits_simplified_schema() {
 #[test]
 fn schema_detect_json_emits_json_schema() {
     let tmp = TempDir::new().unwrap();
-    let doc = write_file(
-        &tmp,
-        "doc.md",
-        "---\ntitle: Hello\n---\nBody\n",
-    );
+    let doc = write_file(&tmp, "doc.md", "---\ntitle: Hello\n---\nBody\n");
 
     md_cmd()
         .args(["schema", "detect", "--format", "json"])

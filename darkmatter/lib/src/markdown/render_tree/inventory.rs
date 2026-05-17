@@ -513,19 +513,25 @@ let x = 1;
         let events: Vec<Event<'_>> = Parser::new_ext(markdown, options).collect();
 
         // Every produced event must have a disposition (exhaustive match runs).
-        let dispositions: HashSet<Disposition> = events
-            .iter()
-            .map(disposition_for_event)
-            .collect();
+        let dispositions: HashSet<Disposition> = events.iter().map(disposition_for_event).collect();
         assert!(dispositions.contains(&Disposition::Node));
         assert!(dispositions.contains(&Disposition::Noise));
 
         // Spot-check that the expected categories of variant were emitted.
         let has = |pred: &dyn Fn(&Event<'_>) -> bool| events.iter().any(pred);
 
-        assert!(has(&|e| matches!(e, Event::Start(Tag::Heading { .. }))), "heading");
-        assert!(has(&|e| matches!(e, Event::Start(Tag::Paragraph))), "paragraph");
-        assert!(has(&|e| matches!(e, Event::Start(Tag::BlockQuote(_)))), "blockquote");
+        assert!(
+            has(&|e| matches!(e, Event::Start(Tag::Heading { .. }))),
+            "heading"
+        );
+        assert!(
+            has(&|e| matches!(e, Event::Start(Tag::Paragraph))),
+            "paragraph"
+        );
+        assert!(
+            has(&|e| matches!(e, Event::Start(Tag::BlockQuote(_)))),
+            "blockquote"
+        );
         assert!(has(&|e| matches!(e, Event::Start(Tag::List(_)))), "list");
         assert!(has(&|e| matches!(e, Event::Start(Tag::Item))), "item");
         assert!(
@@ -533,16 +539,31 @@ let x = 1;
             "code block"
         );
         assert!(has(&|e| matches!(e, Event::Start(Tag::Table(_)))), "table");
-        assert!(has(&|e| matches!(e, Event::Start(Tag::TableHead))), "table head");
-        assert!(has(&|e| matches!(e, Event::Start(Tag::TableRow))), "table row");
-        assert!(has(&|e| matches!(e, Event::Start(Tag::TableCell))), "table cell");
-        assert!(has(&|e| matches!(e, Event::Start(Tag::Emphasis))), "emphasis");
+        assert!(
+            has(&|e| matches!(e, Event::Start(Tag::TableHead))),
+            "table head"
+        );
+        assert!(
+            has(&|e| matches!(e, Event::Start(Tag::TableRow))),
+            "table row"
+        );
+        assert!(
+            has(&|e| matches!(e, Event::Start(Tag::TableCell))),
+            "table cell"
+        );
+        assert!(
+            has(&|e| matches!(e, Event::Start(Tag::Emphasis))),
+            "emphasis"
+        );
         assert!(has(&|e| matches!(e, Event::Start(Tag::Strong))), "strong");
         assert!(
             has(&|e| matches!(e, Event::Start(Tag::Strikethrough))),
             "strikethrough (ENABLE_STRIKETHROUGH)"
         );
-        assert!(has(&|e| matches!(e, Event::Start(Tag::Link { .. }))), "link");
+        assert!(
+            has(&|e| matches!(e, Event::Start(Tag::Link { .. }))),
+            "link"
+        );
         assert!(has(&|e| matches!(e, Event::Code(_))), "inline code");
         assert!(has(&|e| matches!(e, Event::Text(_))), "text");
         assert!(has(&|e| matches!(e, Event::Rule)), "rule");
@@ -557,14 +578,18 @@ let x = 1;
         let markdown = "~~struck~~";
         let plain: Vec<Event<'_>> = Parser::new(markdown).collect();
         assert!(
-            !plain.iter().any(|e| matches!(e, Event::Start(Tag::Strikethrough))),
+            !plain
+                .iter()
+                .any(|e| matches!(e, Event::Start(Tag::Strikethrough))),
             "strikethrough must be gated behind ENABLE_STRIKETHROUGH"
         );
 
         let with_ext: Vec<Event<'_>> =
             Parser::new_ext(markdown, Options::ENABLE_STRIKETHROUGH).collect();
         assert!(
-            with_ext.iter().any(|e| matches!(e, Event::Start(Tag::Strikethrough))),
+            with_ext
+                .iter()
+                .any(|e| matches!(e, Event::Start(Tag::Strikethrough))),
             "strikethrough must appear with ENABLE_STRIKETHROUGH"
         );
     }

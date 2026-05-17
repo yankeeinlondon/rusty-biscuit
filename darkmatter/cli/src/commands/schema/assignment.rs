@@ -319,11 +319,7 @@ mod tests {
 
     #[test]
     fn deep_nested_path() {
-        assert_assignment(
-            "a.b.c=1",
-            &["a", "b", "c"],
-            json!(1),
-        );
+        assert_assignment("a.b.c=1", &["a", "b", "c"], json!(1));
     }
 
     #[test]
@@ -375,7 +371,11 @@ mod tests {
         let mut map: FrontmatterMap = FrontmatterMap::new();
         apply_all(
             &mut map,
-            &[make_assignment(&["user", "email"], json!("k@k.net"), "k@k.net")],
+            &[make_assignment(
+                &["user", "email"],
+                json!("k@k.net"),
+                "k@k.net",
+            )],
             None,
         );
         assert_eq!(map["user"], json!({ "email": "k@k.net" }));
@@ -387,7 +387,11 @@ mod tests {
         map.insert("user".into(), json!({ "name": "Ken" }));
         apply_all(
             &mut map,
-            &[make_assignment(&["user", "email"], json!("k@k.net"), "k@k.net")],
+            &[make_assignment(
+                &["user", "email"],
+                json!("k@k.net"),
+                "k@k.net",
+            )],
             None,
         );
         assert_eq!(map["user"], json!({ "name": "Ken", "email": "k@k.net" }));
@@ -399,7 +403,11 @@ mod tests {
         map.insert("user".into(), json!("string-instead-of-object"));
         apply_all(
             &mut map,
-            &[make_assignment(&["user", "email"], json!("k@k.net"), "k@k.net")],
+            &[make_assignment(
+                &["user", "email"],
+                json!("k@k.net"),
+                "k@k.net",
+            )],
             None,
         );
         assert_eq!(map["user"], json!({ "email": "k@k.net" }));

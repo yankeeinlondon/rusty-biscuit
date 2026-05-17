@@ -3114,9 +3114,7 @@ fn layout_combined_margin_padding_bg() {
 
 use biscuit_terminal::terminal::Terminal;
 use clap::Parser;
-use darkmatter::layout::{
-    DarkmatterPage, PageAlignment, PageComponent, PageFill, WidthUnit,
-};
+use darkmatter::layout::{DarkmatterPage, PageAlignment, PageComponent, PageFill, WidthUnit};
 use darkmatter_cli::Cli;
 use darkmatter_cli::output::apply_cli_layout_flags;
 
@@ -3233,7 +3231,10 @@ fn layout_parsed_line_numbers_flag_values() {
     // explicitly disables. Verified against the parsed CLI struct since the
     // CLI's `render_terminal_output` applies this flag separately from the
     // layout-flag pipeline.
-    assert_eq!(parse_cli(&["fixture.md", "--line-numbers"]).line_numbers, Some(true));
+    assert_eq!(
+        parse_cli(&["fixture.md", "--line-numbers"]).line_numbers,
+        Some(true)
+    );
     assert_eq!(
         parse_cli(&["fixture.md", "--line-numbers", "true"]).line_numbers,
         Some(true)

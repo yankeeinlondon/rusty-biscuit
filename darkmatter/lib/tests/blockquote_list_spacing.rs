@@ -42,9 +42,10 @@ fn paragraph_to_list_in_blockquote_is_tight() {
     let rendered = for_terminal(&md, options()).unwrap();
     let plain = strip_ansi(&rendered);
 
-    let intro_line = plain.lines().find(|l| l.contains("intro text here:")).expect(
-        "intro line should be present",
-    );
+    let intro_line = plain
+        .lines()
+        .find(|l| l.contains("intro text here:"))
+        .expect("intro line should be present");
     let intro_idx = plain.lines().position(|l| l == intro_line).unwrap();
     let next_idx = plain
         .lines()

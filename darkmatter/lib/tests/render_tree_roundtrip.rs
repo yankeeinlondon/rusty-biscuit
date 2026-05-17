@@ -15,9 +15,9 @@
 
 use darkmatter::markdown::render_tree::fold_markdown_to_document;
 use renderable::tree::{
-    render_markdown_document, ColumnAlign, DiagnosticKind, Document, MarkdownDialect,
-    MarkdownRenderOptions, NodeKind, Provenance, RenderError, RenderNode, RenderStrictness,
-    SourceDescriptor,
+    ColumnAlign, DiagnosticKind, Document, MarkdownDialect, MarkdownRenderOptions, NodeKind,
+    Provenance, RenderError, RenderNode, RenderStrictness, SourceDescriptor,
+    render_markdown_document,
 };
 
 /// Reads a fixture from `tests/fixtures/render_tree/`.
@@ -50,7 +50,10 @@ fn roots(doc: &Document) -> &[RenderNode] {
 #[test]
 fn render_tree_paragraph_round_trip() {
     let (doc, diags) = fold_fixture("paragraph.md");
-    assert!(diags.is_empty(), "clean fixture must fold without diagnostics");
+    assert!(
+        diags.is_empty(),
+        "clean fixture must fold without diagnostics"
+    );
 
     let children = roots(&doc);
     assert_eq!(children.len(), 1);
@@ -109,7 +112,11 @@ fn render_tree_lists_round_trip() {
     let children = roots(&doc);
     assert_eq!(children.len(), 2);
     match &children[0].kind {
-        NodeKind::List { ordered, start, children } => {
+        NodeKind::List {
+            ordered,
+            start,
+            children,
+        } => {
             assert!(!ordered);
             assert_eq!(*start, None);
             assert_eq!(children.len(), 2);
@@ -117,7 +124,11 @@ fn render_tree_lists_round_trip() {
         other => panic!("expected unordered list, got {other:?}"),
     }
     match &children[1].kind {
-        NodeKind::List { ordered, start, children } => {
+        NodeKind::List {
+            ordered,
+            start,
+            children,
+        } => {
             assert!(ordered);
             assert_eq!(*start, Some(1));
             assert_eq!(children.len(), 2);
@@ -234,23 +245,30 @@ fn render_tree_links_images_round_trip() {
 #[test]
 fn render_tree_html_round_trip() {
     let (doc, diags) = fold_fixture("html.md");
-    assert!(diags.is_empty(), "the fold itself raises no diagnostics for raw HTML");
+    assert!(
+        diags.is_empty(),
+        "the fold itself raises no diagnostics for raw HTML"
+    );
 
     // The HtmlBlock wrapper is spliced away: its `Html` lines land at the
     // document root, and inline HTML lands inside the trailing paragraph.
     let children = roots(&doc);
-    assert!(children
-        .iter()
-        .any(|node| matches!(node.kind, NodeKind::Html { block: true, .. })));
+    assert!(
+        children
+            .iter()
+            .any(|node| matches!(node.kind, NodeKind::Html { block: true, .. }))
+    );
     let last_para = children
         .iter()
         .rev()
         .find(|node| matches!(node.kind, NodeKind::Paragraph { .. }))
         .expect("fixture ends with a paragraph");
-    assert!(last_para
-        .children()
-        .iter()
-        .any(|node| matches!(node.kind, NodeKind::Html { block: false, .. })));
+    assert!(
+        last_para
+            .children()
+            .iter()
+            .any(|node| matches!(node.kind, NodeKind::Html { block: false, .. }))
+    );
 
     // Rendering raw HTML under the default plain-Markdown dialect is lossy:
     // the renderer emits the raw value but records a `Lossy` diagnostic per
@@ -260,10 +278,12 @@ fn render_tree_html_round_trip() {
         !rendered.diagnostics.is_empty(),
         "raw HTML must be diagnosed as lossy under plain Markdown"
     );
-    assert!(rendered
-        .diagnostics
-        .iter()
-        .all(|diag| diag.kind == DiagnosticKind::Lossy));
+    assert!(
+        rendered
+            .diagnostics
+            .iter()
+            .all(|diag| diag.kind == DiagnosticKind::Lossy)
+    );
     insta::assert_snapshot!("html", rendered.output);
 }
 
@@ -428,8 +448,7 @@ fn lossy_html_fixture_strictness() {
         strictness: RenderStrictness::Warn,
         style: None,
     };
-    let warn_rendered =
-        render_markdown_document(&doc, &warn).expect("Warn mode must succeed");
+    let warn_rendered = render_markdown_document(&doc, &warn).expect("Warn mode must succeed");
     assert!(
         !warn_rendered.diagnostics.is_empty(),
         "Warn mode must record lossy diagnostics for raw HTML"
@@ -440,8 +459,7 @@ fn lossy_html_fixture_strictness() {
         strictness: RenderStrictness::Lossy,
         style: None,
     };
-    let lossy_rendered =
-        render_markdown_document(&doc, &lossy).expect("Lossy mode must succeed");
+    let lossy_rendered = render_markdown_document(&doc, &lossy).expect("Lossy mode must succeed");
     assert!(
         lossy_rendered.diagnostics.is_empty(),
         "Lossy mode must record no diagnostics"

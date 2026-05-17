@@ -249,18 +249,15 @@ fn level2_max_width_caps_visible_content_columns() {
         .iter()
         .position(|l| l.contains("Sentinel_paragraph"))
         .unwrap_or_else(|| {
-            panic!("sentinel line not found in pane capture. plain:\n{}", frame.plain)
+            panic!(
+                "sentinel line not found in pane capture. plain:\n{}",
+                frame.plain
+            )
         });
 
     // Check the sentinel line and the next two lines (wrap continuation) all
     // fit within 40 visible columns.
-    for (offset, line) in lines
-        .iter()
-        .skip(sentinel_idx)
-        .take(3)
-        .copied()
-        .enumerate()
-    {
+    for (offset, line) in lines.iter().skip(sentinel_idx).take(3).copied().enumerate() {
         let visible = rtrim(line).chars().count();
         assert!(
             visible <= 40,
@@ -470,8 +467,10 @@ fn level2_table_center_alignment_indents_more_than_left() {
     // wrapping column needs ~9 cols of content plus pipes/padding, so a
     // 2-column table needs roughly 25 cols minimum. We pick 40 so the cap
     // still leaves visible alignment surplus on the 60-col page.
-    let Some((left, _)) = run_md(body, "--align-tables left --fill-tables max=40 --max-width 60")
-    else {
+    let Some((left, _)) = run_md(
+        body,
+        "--align-tables left --fill-tables max=40 --max-width 60",
+    ) else {
         return;
     };
     let Some((center, _)) = run_md(
@@ -767,7 +766,12 @@ Some prose paragraph.\n\
     );
 
     // Every component anchor must be present in the captured pane.
-    for anchor in ["Some prose paragraph", "list item alpha", "list item beta", "A quoted observation"] {
+    for anchor in [
+        "Some prose paragraph",
+        "list item alpha",
+        "list item beta",
+        "A quoted observation",
+    ] {
         assert!(
             frame.plain.contains(anchor),
             "expected '{anchor}' in captured plain output. plain:\n{}",
