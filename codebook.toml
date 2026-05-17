@@ -1,4 +1,6 @@
 words = [
+    "asana",
+    "asana's",
     "blockquotes",
     "boolish",
     "cliclick",
@@ -38,6 +40,7 @@ words = [
     "nextest",
     "nomodule",
     "numberlike",
+    "ons",
     "opencode",
     "parallelizable",
     "referrerpolicy",
@@ -52,6 +55,7 @@ words = [
     "serde",
     "subagents",
     "syntect",
+    "tful",
     "tmux",
     "tokio",
     "treegrid",
