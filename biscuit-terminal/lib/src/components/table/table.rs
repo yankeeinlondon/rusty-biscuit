@@ -5,10 +5,11 @@ use renderable::tree::{
 
 use crate::{
     components::renderable::TerminalRenderable,
+    render_tree::render::resolve_cells,
     terminal::Terminal,
     utils::{
         block_constraint::{sanitize_wrapped_lines, split_lines, visible_width, wrap_lines},
-        layout::{Alignment, Layout, LayoutTerminalExt, RowFill},
+        layout::{Alignment, Layout, LayoutTerminalExt},
         wrap_policy::WordWrap,
     },
 };
@@ -1070,8 +1071,8 @@ impl Table {
         let mut result = String::new();
 
         // Calculate margins first to determine available width for column calculation
-        let left_margin = Layout::resolve_margin(&self.layout.left_margin, term_width);
-        let right_margin = Layout::resolve_margin(&self.layout.right_margin, term_width);
+        let left_margin = resolve_cells(&self.layout.margin.left, term_width);
+        let right_margin = resolve_cells(&self.layout.margin.right, term_width);
         let available_width = term_width
             .saturating_sub(left_margin)
             .saturating_sub(right_margin);
@@ -1101,21 +1102,8 @@ impl Table {
             }
         };
 
-        // Determine if we should fill rows (for background color)
-        let should_fill = match &self.layout.row_fill_strategy {
-            RowFill::Fill => true,
-            RowFill::Auto => self.layout.page_bg_color.is_some(),
-            RowFill::Exact => false,
-        };
-        let fill_end_col = if should_fill {
-            Some(
-                left_margin
-                    .saturating_add(available_width)
-                    .saturating_add(1),
-            )
-        } else {
-            None
-        };
+        // Row fill / page background are no longer part of `Layout`.
+        let fill_end_col: Option<u32> = None;
 
         // Collect column alignments
         let alignments: Vec<Alignment> = plan
@@ -1460,17 +1448,13 @@ impl TerminalRenderable for Table {
 
         // Layout hints when margins are non-default. Margins are resolved to
         // character counts against a representative 80-column width.
-        let default_margin = renderable::layout::Margin::default();
-        let margins_non_default = self.layout.left_margin != default_margin
-            || self.layout.right_margin != default_margin
-            || self.layout.top_margin != default_margin
-            || self.layout.bottom_margin != default_margin;
+        let margins_non_default = self.layout.margin != renderable::layout::Margin::default();
         if margins_non_default {
             let hints = LayoutHints {
-                left_margin: Some(Layout::resolve_margin(&self.layout.left_margin, 80)),
-                right_margin: Some(Layout::resolve_margin(&self.layout.right_margin, 80)),
-                top_margin: Some(Layout::resolve_margin(&self.layout.top_margin, 80)),
-                bottom_margin: Some(Layout::resolve_margin(&self.layout.bottom_margin, 80)),
+                left_margin: Some(resolve_cells(&self.layout.margin.left, 80)),
+                right_margin: Some(resolve_cells(&self.layout.margin.right, 80)),
+                top_margin: Some(resolve_cells(&self.layout.margin.top, 80)),
+                bottom_margin: Some(resolve_cells(&self.layout.margin.bottom, 80)),
             };
             for (key, value) in [
                 ("left_margin", hints.left_margin),
@@ -1555,12 +1539,8 @@ fn currency_token(currency: &Currency) -> &'static str {
 fn conditional_to_hint(conditional: &super::column::Conditional) -> ColumnConditional {
     match conditional {
         super::column::Conditional::Always => ColumnConditional::Always,
-        super::column::Conditional::WidthGreaterThan(n) => {
-            ColumnConditional::WidthGreaterThan(*n)
-        }
-        super::column::Conditional::LessThanOrEqual(n) => {
-            ColumnConditional::LessThanOrEqual(*n)
-        }
+        super::column::Conditional::WidthGreaterThan(n) => ColumnConditional::WidthGreaterThan(*n),
+        super::column::Conditional::LessThanOrEqual(n) => ColumnConditional::LessThanOrEqual(*n),
     }
 }
 

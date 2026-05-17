@@ -3413,15 +3413,21 @@ mod tests {
 
     #[test]
     fn test_filesystem_builder_layout() {
-        use crate::utils::layout::{Layout, Margin};
+        use crate::utils::layout::{Layout, Length, Margin, TargetValue};
 
         let custom_layout = Layout {
-            left_margin: Margin::Chars(4),
+            margin: Margin {
+                left: TargetValue::universal(Length::ch(4)),
+                ..Margin::default()
+            },
             ..Layout::default()
         };
 
         let fs = FileSystem::new(".").unwrap().layout(custom_layout.clone());
-        assert_eq!(fs.layout.left_margin, Margin::Chars(4));
+        assert_eq!(
+            fs.layout.margin.left,
+            TargetValue::universal(Length::ch(4))
+        );
     }
 
     #[test]
@@ -4590,19 +4596,23 @@ mod tests {
         let fs = FileSystem::default();
         let layout = TerminalRenderable::layout(&fs);
         // Default layout should have no margins
-        assert_eq!(layout.left_margin, crate::utils::layout::Margin::None);
+        assert_eq!(
+            layout.margin.left,
+            crate::utils::layout::TargetValue::universal(crate::utils::layout::Length::Zero)
+        );
     }
 
     #[test]
     fn test_layout_mut_accessor() {
         use crate::components::renderable::TerminalRenderable;
+        use crate::utils::layout::{Length, TargetValue};
         let mut fs = FileSystem::default();
-        TerminalRenderable::layout_mut(&mut fs).left_margin =
-            crate::utils::layout::Margin::Chars(4);
+        TerminalRenderable::layout_mut(&mut fs).margin.left =
+            TargetValue::universal(Length::ch(4));
 
         assert_eq!(
-            TerminalRenderable::layout(&fs).left_margin,
-            crate::utils::layout::Margin::Chars(4)
+            TerminalRenderable::layout(&fs).margin.left,
+            TargetValue::universal(Length::ch(4))
         );
     }
 

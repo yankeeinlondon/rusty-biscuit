@@ -33,7 +33,7 @@ mod browser_adapter;
 mod component;
 mod options;
 pub mod projection;
-mod render;
+pub(crate) mod render;
 
 pub use browser_adapter::BrowserTreeComponent;
 pub use component::TreeComponent;

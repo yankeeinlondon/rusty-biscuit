@@ -110,8 +110,9 @@ fn bench_layout_apply(c: &mut Criterion) {
     });
     group.bench_function("with_margins", |b| {
         let layout = Layout {
-            left_margin: biscuit_terminal::utils::layout::Margin::Chars(4),
-            right_margin: biscuit_terminal::utils::layout::Margin::Chars(4),
+            margin: biscuit_terminal::utils::layout::Margin::x(
+                biscuit_terminal::utils::layout::Length::ch(4),
+            ),
             ..Default::default()
         };
         b.iter(|| layout.apply_layout(black_box(content), 80))

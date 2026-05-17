@@ -3,7 +3,7 @@ use crate::commands::shared::*;
 use crate::commands::{CliContext, Run};
 use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::terminal::Terminal;
-use biscuit_terminal::utils::layout::{Margin, WordWrap};
+use biscuit_terminal::utils::layout::{Length, TargetValue, WordWrap};
 use clap::Args as ClapArgs;
 
 /// Render prose text with inline styling tokens
@@ -46,10 +46,10 @@ impl Run for ProseArgs {
         }
 
         if let Some(left) = self.layout.margin_left {
-            prose = prose.with_left_margin(Margin::Chars(left));
+            prose = prose.with_left_margin(TargetValue::universal(Length::ch(left)));
         }
         if let Some(right) = self.layout.margin_right {
-            prose = prose.with_right_margin(Margin::Chars(right));
+            prose = prose.with_right_margin(TargetValue::universal(Length::ch(right)));
         }
         if let Some(align) = self.layout.alignment {
             prose = prose.alignment(align);

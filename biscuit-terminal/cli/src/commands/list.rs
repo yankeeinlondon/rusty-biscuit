@@ -4,7 +4,7 @@ use crate::commands::{CliContext, Run};
 use biscuit_terminal::components::list::UnorderedList;
 use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::components::renderable::{RenderableTerminalContent, TerminalRenderable};
-use biscuit_terminal::utils::layout::Margin;
+use biscuit_terminal::utils::layout::{Length, TargetValue};
 use clap::Args as ClapArgs;
 use std::rc::Rc;
 
@@ -49,10 +49,10 @@ impl Run for ListArgs {
         }
 
         if let Some(left) = self.layout.margin_left {
-            list = list.left_margin(Margin::Chars(left));
+            list = list.left_margin(TargetValue::universal(Length::ch(left)));
         }
         if let Some(right) = self.layout.margin_right {
-            list = list.right_margin(Margin::Chars(right));
+            list = list.right_margin(TargetValue::universal(Length::ch(right)));
         }
         if let Some(align) = self.layout.alignment {
             list = list.alignment(align);

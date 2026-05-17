@@ -4,7 +4,7 @@ use std::rc::Rc;
 use renderable::tree::RenderNode;
 
 use crate::terminal::Terminal;
-use crate::utils::layout::{Alignment, Layout, Margin, RowFill};
+use crate::utils::layout::{Alignment, Layout, Length, TargetValue, add_cells};
 use crate::utils::wrap_policy::WordWrap;
 
 /// A struct or enum which implements the **TerminalRenderable** trait
@@ -56,38 +56,38 @@ pub trait TerminalRenderable: std::fmt::Debug + Any {
     fn layout_mut(&mut self) -> &mut Layout;
 
     /// Set the left margin on this component's layout.
-    fn left_margin(mut self, margin: Margin) -> Self
+    fn left_margin(mut self, margin: TargetValue<Length>) -> Self
     where
         Self: Sized,
     {
-        self.layout_mut().left_margin = margin;
+        self.layout_mut().margin.left = margin;
         self
     }
 
     /// Set the right margin on this component's layout.
-    fn right_margin(mut self, margin: Margin) -> Self
+    fn right_margin(mut self, margin: TargetValue<Length>) -> Self
     where
         Self: Sized,
     {
-        self.layout_mut().right_margin = margin;
+        self.layout_mut().margin.right = margin;
         self
     }
 
     /// Set the top margin on this component's layout.
-    fn top_margin(mut self, margin: Margin) -> Self
+    fn top_margin(mut self, margin: TargetValue<Length>) -> Self
     where
         Self: Sized,
     {
-        self.layout_mut().top_margin = margin;
+        self.layout_mut().margin.top = margin;
         self
     }
 
     /// Set the bottom margin on this component's layout.
-    fn bottom_margin(mut self, margin: Margin) -> Self
+    fn bottom_margin(mut self, margin: TargetValue<Length>) -> Self
     where
         Self: Sized,
     {
-        self.layout_mut().bottom_margin = margin;
+        self.layout_mut().margin.bottom = margin;
         self
     }
 
@@ -97,15 +97,6 @@ pub trait TerminalRenderable: std::fmt::Debug + Any {
         Self: Sized,
     {
         self.layout_mut().alignment = alignment;
-        self
-    }
-
-    /// Set the row-fill strategy on this component's layout.
-    fn row_fill_strategy(mut self, strategy: RowFill) -> Self
-    where
-        Self: Sized,
-    {
-        self.layout_mut().row_fill_strategy = strategy;
         self
     }
 
@@ -137,15 +128,15 @@ pub trait TerminalRenderable: std::fmt::Debug + Any {
 
     /// Adjust this component's margins to nest inside a parent layout.
     ///
-    /// Adds `left_offset` characters to the parent's left margin and
-    /// `right_offset` characters to the parent's right margin, using
-    /// lazy `Margin::Offset` composition so percentages resolve later.
+    /// Adds `left_offset` cells to the parent's left margin and `right_offset`
+    /// cells to the parent's right margin. Only universal cell-based margins
+    /// can absorb the offset; per-target margins are inherited unchanged.
     fn with_parent_layout(mut self, parent: &Layout, left_offset: u32, right_offset: u32) -> Self
     where
         Self: Sized,
     {
-        self.layout_mut().left_margin = parent.left_margin.clone().add_chars(left_offset);
-        self.layout_mut().right_margin = parent.right_margin.clone().add_chars(right_offset);
+        self.layout_mut().margin.left = add_cells(&parent.margin.left, left_offset);
+        self.layout_mut().margin.right = add_cells(&parent.margin.right, right_offset);
         self
     }
 

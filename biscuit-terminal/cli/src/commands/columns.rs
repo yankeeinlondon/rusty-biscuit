@@ -3,7 +3,7 @@ use crate::commands::shared::*;
 use crate::commands::{CliContext, Run};
 use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::components::two_column::TwoColumn;
-use biscuit_terminal::utils::layout::Margin;
+use biscuit_terminal::utils::layout::{Length, TargetValue};
 use clap::Args as ClapArgs;
 
 /// Render two columns of text side by side
@@ -37,10 +37,10 @@ impl Run for ColumnsArgs {
         }
 
         if let Some(left) = self.layout.margin_left {
-            columns = columns.left_margin(Margin::Chars(left));
+            columns = columns.left_margin(TargetValue::universal(Length::ch(left)));
         }
         if let Some(right) = self.layout.margin_right {
-            columns = columns.right_margin(Margin::Chars(right));
+            columns = columns.right_margin(TargetValue::universal(Length::ch(right)));
         }
         if let Some(align) = self.layout.alignment {
             columns = columns.alignment(align);

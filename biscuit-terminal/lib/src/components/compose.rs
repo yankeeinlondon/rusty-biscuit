@@ -211,7 +211,7 @@ mod tests {
     use crate::components::inline_content::InlineContent;
     use crate::components::table::TableColumn;
     use crate::components::text_block::TextBlock;
-    use crate::utils::layout::{Alignment, Margin, RowFill};
+    use crate::utils::layout::{Alignment, Length, TargetValue};
     use crate::utils::wrap_policy::WordWrap;
 
     // =====================================================================
@@ -740,38 +740,32 @@ mod tests {
 
     #[test]
     fn test_left_margin_builder() {
-        let compose = Compose::from("test").left_margin(Margin::Chars(4));
-        assert_eq!(compose.layout().left_margin, Margin::Chars(4));
+        let compose = Compose::from("test").left_margin(TargetValue::universal(Length::ch(4)));
+        assert_eq!(compose.layout().margin.left, TargetValue::universal(Length::ch(4)));
     }
 
     #[test]
     fn test_right_margin_builder() {
-        let compose = Compose::from("test").right_margin(Margin::Chars(4));
-        assert_eq!(compose.layout().right_margin, Margin::Chars(4));
+        let compose = Compose::from("test").right_margin(TargetValue::universal(Length::ch(4)));
+        assert_eq!(compose.layout().margin.right, TargetValue::universal(Length::ch(4)));
     }
 
     #[test]
     fn test_top_margin_builder() {
-        let compose = Compose::from("test").top_margin(Margin::Chars(2));
-        assert_eq!(compose.layout().top_margin, Margin::Chars(2));
+        let compose = Compose::from("test").top_margin(TargetValue::universal(Length::ch(2)));
+        assert_eq!(compose.layout().margin.top, TargetValue::universal(Length::ch(2)));
     }
 
     #[test]
     fn test_bottom_margin_builder() {
-        let compose = Compose::from("test").bottom_margin(Margin::Chars(2));
-        assert_eq!(compose.layout().bottom_margin, Margin::Chars(2));
+        let compose = Compose::from("test").bottom_margin(TargetValue::universal(Length::ch(2)));
+        assert_eq!(compose.layout().margin.bottom, TargetValue::universal(Length::ch(2)));
     }
 
     #[test]
     fn test_alignment_builder() {
         let compose = Compose::from("test").alignment(Alignment::Right);
         assert_eq!(compose.layout().alignment, Alignment::Right);
-    }
-
-    #[test]
-    fn test_row_fill_strategy_builder() {
-        let compose = Compose::from("test").row_fill_strategy(RowFill::Fill);
-        assert_eq!(compose.layout().row_fill_strategy, RowFill::Fill);
     }
 
     #[test]
@@ -783,11 +777,11 @@ mod tests {
     #[test]
     fn test_chained_layout_builders() {
         let compose = Compose::from("test")
-            .left_margin(Margin::Chars(2))
-            .right_margin(Margin::Chars(2))
+            .left_margin(TargetValue::universal(Length::ch(2)))
+            .right_margin(TargetValue::universal(Length::ch(2)))
             .alignment(Alignment::Center);
-        assert_eq!(compose.layout().left_margin, Margin::Chars(2));
-        assert_eq!(compose.layout().right_margin, Margin::Chars(2));
+        assert_eq!(compose.layout().margin.left, TargetValue::universal(Length::ch(2)));
+        assert_eq!(compose.layout().margin.right, TargetValue::universal(Length::ch(2)));
         assert_eq!(compose.layout().alignment, Alignment::Center);
     }
 

@@ -449,23 +449,6 @@ impl TerminalRenderable for TwoColumn {
         self
     }
 
-    fn with_parent_layout(mut self, parent: &Layout, left_offset: u32, right_offset: u32) -> Self
-    where
-        Self: Sized,
-    {
-        self.layout.left_margin = parent.left_margin.clone().add_chars(left_offset);
-        self.layout.right_margin = parent.right_margin.clone().add_chars(right_offset);
-        self
-    }
-
-    fn bottom_margin(mut self, margin: Margin) -> Self
-    where
-        Self: Sized,
-    {
-        self.layout.bottom_margin = margin;
-        self
-    }
-
     fn render(&self, term: &Terminal) -> String {
         let width = term.width();
         self.render_with_width(width, Some(term))
@@ -523,49 +506,9 @@ impl TerminalRenderable for TwoColumn {
         &mut self.layout
     }
 
-    fn left_margin(mut self, margin: Margin) -> Self
-    where
-        Self: Sized,
-    {
-        self.layout.left_margin = margin;
-        self
-    }
-
     fn render_optimistic(&self, term_width: Option<u32>) -> String {
         let width = term_width.unwrap_or(80);
         self.render_with_width(width, None)
-    }
-
-    fn right_margin(mut self, margin: Margin) -> Self
-    where
-        Self: Sized,
-    {
-        self.layout.right_margin = margin;
-        self
-    }
-
-    fn row_fill_strategy(mut self, strategy: RowFill) -> Self
-    where
-        Self: Sized,
-    {
-        self.layout.row_fill_strategy = strategy;
-        self
-    }
-
-    fn top_margin(mut self, margin: Margin) -> Self
-    where
-        Self: Sized,
-    {
-        self.layout.top_margin = margin;
-        self
-    }
-
-    fn word_wrap(mut self, wrap: WordWrap) -> Self
-    where
-        Self: Sized,
-    {
-        self.layout.word_wrap = wrap;
-        self
     }
 }
 

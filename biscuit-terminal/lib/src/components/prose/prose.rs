@@ -2,7 +2,7 @@
 
 use crate::{
     terminal::Terminal,
-    utils::layout::{Layout, Margin},
+    utils::layout::{Layout, Length, TargetValue},
     utils::wrap_policy::WordWrap,
 };
 
@@ -104,14 +104,14 @@ impl Prose {
     }
 
     /// Set the left margin.
-    pub fn with_left_margin(mut self, margin: Margin) -> Self {
-        self.layout.left_margin = margin;
+    pub fn with_left_margin(mut self, margin: TargetValue<Length>) -> Self {
+        self.layout.margin.left = margin;
         self
     }
 
     /// Set the right margin.
-    pub fn with_right_margin(mut self, margin: Margin) -> Self {
-        self.layout.right_margin = margin;
+    pub fn with_right_margin(mut self, margin: TargetValue<Length>) -> Self {
+        self.layout.margin.right = margin;
         self
     }
 

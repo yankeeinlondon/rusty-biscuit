@@ -993,7 +993,7 @@ fn render_progress_bar(hints: &ProgressHints, paragraph_text: &str) -> String {
 /// [`Length::Css`] has no terminal meaning and resolves to `0`.
 ///
 /// [`TargetValue<Length>`]: renderable::layout::TargetValue
-fn resolve_cells(
+pub(crate) fn resolve_cells(
     tv: &renderable::layout::TargetValue<renderable::layout::Length>,
     width: u32,
 ) -> u32 {

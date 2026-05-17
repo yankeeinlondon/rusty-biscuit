@@ -4,7 +4,7 @@ use crate::commands::{CliContext, Run};
 use biscuit_terminal::components::block_quote::BlockQuote;
 use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::components::renderable::{RenderableTerminalContent, TerminalRenderable};
-use biscuit_terminal::utils::layout::Margin;
+use biscuit_terminal::utils::layout::{Length, TargetValue};
 use clap::Args as ClapArgs;
 use std::rc::Rc;
 
@@ -40,10 +40,10 @@ impl Run for QuoteArgs {
         );
 
         if let Some(left) = self.layout.margin_left {
-            quote = quote.left_margin(Margin::Chars(left));
+            quote = quote.left_margin(TargetValue::universal(Length::ch(left)));
         }
         if let Some(right) = self.layout.margin_right {
-            quote = quote.right_margin(Margin::Chars(right));
+            quote = quote.right_margin(TargetValue::universal(Length::ch(right)));
         }
         if let Some(align) = self.layout.alignment {
             quote = quote.alignment(align);

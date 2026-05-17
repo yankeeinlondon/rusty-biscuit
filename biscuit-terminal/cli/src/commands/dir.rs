@@ -3,7 +3,7 @@ use crate::commands::{CliContext, Run};
 use biscuit_terminal::components::filesystem::FileSystem;
 use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::terminal::Terminal;
-use biscuit_terminal::utils::layout::Margin;
+use biscuit_terminal::utils::layout::{Length, TargetValue};
 use clap::Args as ClapArgs;
 
 /// Options for rendering a directory tree.
@@ -101,10 +101,10 @@ pub fn render_dir(
     }
 
     if let Some(left) = layout.margin_left {
-        fs = fs.left_margin(Margin::Chars(left));
+        fs = fs.left_margin(TargetValue::universal(Length::ch(left)));
     }
     if let Some(right) = layout.margin_right {
-        fs = fs.right_margin(Margin::Chars(right));
+        fs = fs.right_margin(TargetValue::universal(Length::ch(right)));
     }
     if let Some(align) = layout.alignment {
         fs = fs.alignment(align);

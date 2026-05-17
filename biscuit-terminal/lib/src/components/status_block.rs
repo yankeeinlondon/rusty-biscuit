@@ -10,7 +10,7 @@ use crate::{
     terminal::Terminal,
     utils::{
         color::Color,
-        layout::{Layout, Margin},
+        layout::{Layout, Length, Margin, TargetValue},
         wrap_policy::WordWrap,
     },
 };
@@ -42,8 +42,10 @@ impl StatusBlock {
             border_color: None,
             border: "┃ ".to_string(),
             layout: Layout {
-                left_margin: Margin::Chars(0),
-                right_margin: Margin::Chars(5),
+                margin: Margin {
+                    right: TargetValue::universal(Length::ch(5)),
+                    ..Margin::default()
+                },
                 word_wrap: WordWrap::WrapProse(Some(8), None),
                 ..Layout::default()
             },
@@ -122,8 +124,8 @@ impl TerminalRenderable for StatusBlock {
                 BlockQuote::new(RenderableTerminalContent::String(composed), None::<&str>)
                     .with_left_block_color(self.resolved_border_color())
                     .with_border(&self.border);
-            block.layout_mut().left_margin = self.layout.left_margin.clone();
-            block.layout_mut().right_margin = self.layout.right_margin.clone();
+            block.layout_mut().margin.left = self.layout.margin.left.clone();
+            block.layout_mut().margin.right = self.layout.margin.right.clone();
             block.layout_mut().word_wrap = self.layout.word_wrap.clone();
             parts.push(block.render(term));
         }
@@ -339,8 +341,8 @@ mod tests {
         let term = no_color_terminal(32);
         let block = StatusBlock::new(StatusState::Error)
             .body("alpha beta gamma delta epsilon")
-            .left_margin(Margin::Chars(4))
-            .right_margin(Margin::Chars(10));
+            .left_margin(TargetValue::universal(Length::ch(4)))
+            .right_margin(TargetValue::universal(Length::ch(10)));
         let rendered = strip_ansi(&block.render(&term));
         let lines: Vec<_> = rendered.lines().collect();
         assert!(lines.len() > 1, "expected wrapped output: {rendered:?}");
@@ -372,8 +374,8 @@ mod tests {
             .hint("Hint")
             .border_color(Color::Tailwind(Tailwind::Orange700))
             .border("┃ ")
-            .left_margin(Margin::Chars(2))
-            .right_margin(Margin::Chars(3));
+            .left_margin(TargetValue::universal(Length::ch(2)))
+            .right_margin(TargetValue::universal(Length::ch(3)));
         let cloned = block.clone();
         assert_eq!(
             cloned.render_optimistic(Some(80)),

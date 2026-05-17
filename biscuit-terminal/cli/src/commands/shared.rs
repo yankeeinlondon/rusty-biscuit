@@ -49,13 +49,13 @@ pub fn apply_image_layout(
     layout: &LayoutArgs,
 ) {
     use biscuit_terminal::components::renderable::TerminalRenderable;
-    use biscuit_terminal::utils::layout::Margin;
+    use biscuit_terminal::utils::layout::{Length, TargetValue};
 
     if let Some(ml) = layout.margin_left {
-        term_image.layout_mut().left_margin = Margin::Chars(ml);
+        term_image.layout_mut().margin.left = TargetValue::universal(Length::ch(ml));
     }
     if let Some(mr) = layout.margin_right {
-        term_image.layout_mut().right_margin = Margin::Chars(mr);
+        term_image.layout_mut().margin.right = TargetValue::universal(Length::ch(mr));
     }
     if let Some(align) = layout.alignment {
         term_image.layout_mut().alignment = align;
@@ -67,13 +67,13 @@ pub fn apply_renderable_layout(
     component: &mut impl biscuit_terminal::components::renderable::TerminalRenderable,
     layout: &LayoutArgs,
 ) {
-    use biscuit_terminal::utils::layout::Margin;
+    use biscuit_terminal::utils::layout::{Length, TargetValue};
 
     if let Some(ml) = layout.margin_left {
-        component.layout_mut().left_margin = Margin::Chars(ml);
+        component.layout_mut().margin.left = TargetValue::universal(Length::ch(ml));
     }
     if let Some(mr) = layout.margin_right {
-        component.layout_mut().right_margin = Margin::Chars(mr);
+        component.layout_mut().margin.right = TargetValue::universal(Length::ch(mr));
     }
     if let Some(align) = layout.alignment {
         component.layout_mut().alignment = align;

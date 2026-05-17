@@ -158,7 +158,7 @@ mod render_tree_component_tests {
 
     use crate::components::block_quote::BlockQuote;
     use crate::utils::escape_codes::strip_escape_codes;
-    use crate::utils::layout::Margin;
+    use crate::utils::layout::{Length, TargetValue};
 
     /// A minimal `TreeRenderable` test type.
     #[derive(Debug)]
@@ -206,11 +206,14 @@ mod render_tree_component_tests {
     fn render_tree_component_layout_accessors() {
         let mut component = TreeComponent::new(Para("x".into()));
         assert_eq!(
-            component.layout().left_margin,
-            Layout::default().left_margin
+            component.layout().margin.left,
+            Layout::default().margin.left
         );
-        component.layout_mut().left_margin = Margin::Chars(4);
-        assert_eq!(component.layout().left_margin, Margin::Chars(4));
+        component.layout_mut().margin.left = TargetValue::universal(Length::ch(4));
+        assert_eq!(
+            component.layout().margin.left,
+            TargetValue::universal(Length::ch(4))
+        );
     }
 
     #[test]

@@ -61,12 +61,12 @@ pub enum GraphRenderError {
 ///     GraphExpression, GraphInputSyntax, GraphOrientation,
 /// };
 /// use biscuit_terminal::components::renderable::TerminalRenderable;
-/// use biscuit_terminal::utils::layout::Margin;
+/// use biscuit_terminal::utils::layout::{Length, TargetValue};
 ///
 /// let graph = GraphExpression::for_terminal("a -> b -> c", GraphInputSyntax::Auto)?
 ///     .with_orientation(GraphOrientation::LeftToRight)
 ///     .with_title("My Graph")
-///     .left_margin(Margin::Chars(4));
+///     .left_margin(TargetValue::universal(Length::ch(4)));
 ///
 /// # Ok::<(), biscuit_terminal::components::graph_expression::GraphRenderError>(())
 /// ```

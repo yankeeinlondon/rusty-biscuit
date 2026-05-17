@@ -737,7 +737,7 @@ mod tests {
     use crate::discovery::detection::ColorDepth;
     use crate::terminal::Terminal;
     use crate::utils::color::BasicColor;
-    use crate::utils::layout::Margin;
+    use crate::utils::layout::{Length, TargetValue};
     use insta::assert_snapshot;
 
     /// RAII guard that overrides `LC_ALL` (and clears `LC_CTYPE` / `LANG`)
@@ -1374,8 +1374,11 @@ mod tests {
         let mut hr = HorizontalRule::new();
         let _layout = hr.layout();
 
-        hr.layout_mut().top_margin = Margin::Chars(2);
-        assert_eq!(hr.layout().top_margin, Margin::Chars(2));
+        hr.layout_mut().margin.top = TargetValue::universal(Length::ch(2));
+        assert_eq!(
+            hr.layout().margin.top,
+            TargetValue::universal(Length::ch(2))
+        );
     }
 
     #[test]
@@ -2592,46 +2595,47 @@ mod tests {
     }
 
     // ================================================================
-    // Phase 4: D4 — Margin::Offset CSS correctness (calc wrapper)
+    // Phase 4: D4 — margin CSS lowering for the browser target
     // ================================================================
 
-    /// `Margin::Offset(Percent(2.0), 3)` should emit `calc(2% + 3ch)` so the
-    /// CSS is browser-legal.
+    /// A percent margin lowers to a `%` CSS value.
     #[test]
-    fn test_margin_offset_percent_emits_calc() {
-        let margin = Margin::Offset(Box::new(Margin::Percent(2.0)), 3);
-        assert_eq!(margin.to_css_value("0"), "calc(2% + 3ch)");
-    }
-
-    /// `Margin::Offset(..., 0)` returns the base value unchanged — no
-    /// `calc(5% + 0ch)` noise.
-    #[test]
-    fn test_margin_offset_zero_chars_strips_calc() {
-        let margin = Margin::Offset(Box::new(Margin::Percent(2.0)), 0);
+    fn test_margin_percent_emits_percent() {
+        let margin = TargetValue::universal(Length::percent(2.0).unwrap());
         assert_eq!(margin.to_css_value("0"), "2%");
     }
 
-    /// `Margin::Offset(None, 3)` collapses to the plain `3ch` fast path.
+    /// A zero margin lowers to the supplied default.
     #[test]
-    fn test_margin_offset_zero_base_returns_ch() {
-        let margin = Margin::Offset(Box::new(Margin::None), 3);
+    fn test_margin_zero_emits_default() {
+        let margin: TargetValue<Length> = TargetValue::universal(Length::Zero);
+        assert_eq!(margin.to_css_value("0"), "0");
+    }
+
+    /// A cell margin lowers to a `ch` CSS value.
+    #[test]
+    fn test_margin_chars_emits_ch() {
+        let margin = TargetValue::universal(Length::ch(3));
         assert_eq!(margin.to_css_value("0"), "3ch");
     }
 
-    /// `Margin::Offset` composed into a full browser render emits legal
-    /// `calc(..)` CSS inside the outer `<svg>`'s inline style.
+    /// A percent margin composed into a full browser render emits legal
+    /// CSS inside the outer `<svg>`'s inline style.
     #[test]
-    fn test_render_to_browser_margin_offset_uses_calc() {
+    fn test_render_to_browser_percent_margin() {
         use crate::utils::layout::Layout;
         let layout = Layout {
-            top_margin: Margin::Offset(Box::new(Margin::Percent(2.0)), 3),
+            margin: crate::utils::layout::Margin {
+                top: TargetValue::universal(Length::percent(2.0).unwrap()),
+                ..crate::utils::layout::Margin::default()
+            },
             ..Layout::default()
         };
         let hr = HorizontalRule::new().with_layout(layout);
         let result = hr.render_browser_svg();
         assert!(
-            result.contains("margin: calc(2% + 3ch) auto"),
-            "expected calc(2% + 3ch) margin in browser output: {result}"
+            result.contains("margin: 2% auto"),
+            "expected 2% margin in browser output: {result}"
         );
     }
 

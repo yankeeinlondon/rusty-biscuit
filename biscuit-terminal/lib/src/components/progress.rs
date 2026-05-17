@@ -302,9 +302,9 @@ mod tests {
 
     #[test]
     fn test_progress_uses_layout() {
-        use crate::utils::layout::Margin;
+        use crate::utils::layout::{Length, TargetValue};
 
-        let bar = Progress::new(0.5).left_margin(Margin::Chars(4));
+        let bar = Progress::new(0.5).left_margin(TargetValue::universal(Length::ch(4)));
         let output = bar.render_optimistic(Some(80));
         assert!(
             output.starts_with("    "),
