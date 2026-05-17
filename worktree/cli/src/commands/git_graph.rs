@@ -32,7 +32,7 @@ const DETAIL_FMT: &str = "%h%x1f%s%x1f%at%x1f%D";
 fn commit_details(rev: &str, max: usize) -> Vec<CommitDetail> {
     let max_str = max.to_string();
     let fmt_arg = format!("--format={DETAIL_FMT}");
-    let Ok(output) = git_command(&["log", &fmt_arg, "--max-count", &max_str, rev]) else {
+    let Ok(output) = git_command(&["log", &fmt_arg, "--max-count", &max_str, rev, "--"]) else {
         return vec![];
     };
     parse_commit_lines(&output)
@@ -41,7 +41,7 @@ fn commit_details(rev: &str, max: usize) -> Vec<CommitDetail> {
 /// Query git log for commits reachable from `target` but not `exclude`, oldest first.
 fn commit_details_since(target: &str, exclude: &str) -> Vec<CommitDetail> {
     let fmt_arg = format!("--format={DETAIL_FMT}");
-    let Ok(output) = git_command(&["log", &fmt_arg, target, "--not", exclude]) else {
+    let Ok(output) = git_command(&["log", &fmt_arg, target, "--not", exclude, "--"]) else {
         return vec![];
     };
     parse_commit_lines(&output)
@@ -185,6 +185,7 @@ fn commits_since(target: &str, exclude: &str, max: usize) -> Vec<String> {
         target,
         "--not",
         exclude,
+        "--",
     ]) {
         Ok(output) if !output.is_empty() => {
             let mut v: Vec<String> = output.lines().map(|s| s.to_string()).collect();
@@ -198,7 +199,7 @@ fn commits_since(target: &str, exclude: &str, max: usize) -> Vec<String> {
 /// Returns up to `max` ancestor commits ending at `tip`, oldest first.
 fn ancestor_commits(tip: &str, max: usize) -> Vec<String> {
     let max_str = max.to_string();
-    match git_command(&["log", "--format=%h", "--max-count", &max_str, tip]) {
+    match git_command(&["log", "--format=%h", "--max-count", &max_str, tip, "--"]) {
         Ok(output) if !output.is_empty() => {
             let mut v: Vec<String> = output.lines().map(|s| s.to_string()).collect();
             v.reverse();
