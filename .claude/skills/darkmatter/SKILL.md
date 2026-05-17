@@ -51,7 +51,7 @@ let output = DarkmatterPage::new(&term)
     .render(&md)?;
 ```
 
-`DarkmatterPage` implements `biscuit_terminal::renderable::Renderable` for composition with the biscuit-terminal component ecosystem. With no builder calls, `render` is byte-for-byte equivalent to `for_terminal(&md, TerminalOptions::default())`.
+`DarkmatterPage` implements `biscuit_terminal::components::renderable::TerminalRenderable` for composition with the biscuit-terminal component ecosystem. With no builder calls, `render` is byte-for-byte equivalent to `for_terminal(&md, TerminalOptions::default())`.
 
 ## Compose Pipeline
 
@@ -226,7 +226,7 @@ Fill grammar: `full`, `pad=<n|n%>`, `indent=<n|n%>`, `max=<n|n%>`, `explicit=<n|
 
 ### FileTree Component
 
-`FileTree` is a `Renderable` component that visualizes a Markdown file's dependency surface:
+`FileTree` is a `TerminalRenderable` component that visualizes a Markdown file's dependency surface:
 - References (hyperlinks, images, CSS/script imports) above the file line
 - Transclusions below the file line with section-aware captions
 - Optional recursive expansion via `.follow_transclusions()`
@@ -236,7 +236,7 @@ Located in `darkmatter/lib/src/markdown/reference/file_tree/`.
 
 ### Horizontal Rules
 
-Darkmatter styles CommonMark `---` / `___` / `***` horizontal rules from page-level `hr` frontmatter defaults, with optional per-rule attribute-block overrides (YAML flow-mapping syntax), and dispatches rendering to biscuit-terminal's `HorizontalRule` (`Renderable` + `BrowserRenderable`).
+Darkmatter styles CommonMark `---` / `___` / `***` horizontal rules from page-level `hr` frontmatter defaults, with optional per-rule attribute-block overrides (YAML flow-mapping syntax), and dispatches rendering to biscuit-terminal's `HorizontalRule` (`TerminalRenderable` + `BrowserRenderable`).
 
 - **Markdown syntax**: `--- { style: waves, width: "50%" }`
 - **Supported attributes** (all optional):
@@ -276,10 +276,30 @@ These helpers ensure Markdown code fences and `YamlBlock` use identical syntax-h
     - `YamlBlock::from_markdown_content(md)` — extracts only the frontmatter; yields `{}` if none
     - `YamlBlock::from_markdown_file(path)` — from a Markdown file on disk
 - **Validation:** all constructors parse YAML through `serde_yaml_ng::from_str` and fail fast; the parsed `Value` is not retained
-- **Rendering:** implements `Renderable` and `BrowserRenderable` from `biscuit-terminal`, delegating to the shared code-block helpers with `language = "yaml"`
-- **No tree view or custom YAML renderer** — produces a standard highlighted code block
+- **Rendering:** implements `TerminalRenderable` and `BrowserRenderable` from `biscuit-terminal`, delegating to the shared code-block helpers with `language = "yaml"`
+- **Tree projection:** implements `render_tree_node()` — projects to a `NodeKind::Code` node (lang `"yaml"`) carrying `CodeRenderHints { header_row, language_label, highlight }`, so it renders through the `renderable` tree pipeline as well as the bespoke path
+- Produces a standard highlighted code block — no bespoke YAML tree view
 
 Located in `darkmatter/lib/src/markdown/yaml_block.rs`.
+
+## Render Tree Integration
+
+The shared render-tree architecture lives in `renderable::tree` (the model)
+and `biscuit_terminal::render_tree` (the terminal renderer). Darkmatter's
+current involvement:
+
+- `YamlBlock` projects to the tree via `render_tree_node()` (above).
+- `darkmatter::markdown::render_tree::fold_markdown_to_document` folds a
+  `pulldown-cmark` event stream into a `Document` — **experimental and
+  internal**; it does not change the public `as_html` / `for_terminal`
+  renderers.
+- A full migration of darkmatter onto the tree renderer (including a darkmatter
+  `CodeRenderer` hook for syntax highlighting) is upcoming. Its first precursor
+  — widening `CodeRenderer` to carry terminal color depth / color mode — is
+  specified in `renderable/features/2026-05-16-color-decisions/`.
+
+See the `renderable` skill (*Tree Module*) and the `biscuit-terminal` skill
+(*Render Tree*) for the architecture.
 
 
 
