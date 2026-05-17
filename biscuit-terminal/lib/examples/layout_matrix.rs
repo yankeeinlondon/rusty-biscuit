@@ -22,10 +22,10 @@ fn main() {
     let filter = std::env::args().nth(1);
 
     for case in component_cases() {
-        if let Some(filter) = &filter {
-            if !case.name.eq_ignore_ascii_case(filter) {
-                continue;
-            }
+        if let Some(filter) = &filter
+            && !case.name.eq_ignore_ascii_case(filter)
+        {
+            continue;
         }
         for scenario in scenarios() {
             let (bespoke, tree) = (case.render)(&scenario);

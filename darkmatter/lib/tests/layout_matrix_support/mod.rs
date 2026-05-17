@@ -161,13 +161,17 @@ pub fn stacked_stripped(bespoke: &str, tree: &str) -> String {
     )
 }
 
+/// A boxed closure that builds a component under a [`Scenario`] and renders
+/// it both ways, returning `(bespoke_output, tree_output)`.
+type RenderFn = Box<dyn Fn(&Scenario) -> (String, String)>;
+
 /// A named component with a closure that builds it under a scenario and
 /// renders both the bespoke and tree paths.
 pub struct ComponentCase {
     /// Component name, used in harness headers and snapshot names.
     pub name: &'static str,
     /// Returns `(bespoke_output, tree_output)`, both with ANSI retained.
-    pub render: Box<dyn Fn(&Scenario) -> (String, String)>,
+    pub render: RenderFn,
 }
 
 /// Folds a `RenderNode` into terminal output at the given width.
