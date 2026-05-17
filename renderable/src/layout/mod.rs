@@ -10,6 +10,10 @@ pub use length::{Length, LayoutError};
 mod target_value;
 pub use target_value::TargetValue;
 
+mod margin;
+// pub use margin::{Alignment, Margin}; -- wired in Task 5
+// (legacy `Alignment`/`Margin` below still occupy the crate-public path)
+
 use crate::color::Color;
 
 pub use crate::wrap_policy::WordWrap;
