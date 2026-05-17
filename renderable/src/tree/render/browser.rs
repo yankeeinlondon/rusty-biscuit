@@ -718,7 +718,8 @@ fn align_value(align: ColumnAlign) -> Option<&'static str> {
 }
 
 /// Translates a node's [`NodeAttrs`] into HTML attributes: `id` to the `id`
-/// attribute and `classes` to a single `class` attribute.
+/// attribute, `classes` to a single `class` attribute, and a stored
+/// [`Layout`](crate::layout::Layout) to an inline `style` attribute.
 fn node_attributes(attrs: &NodeAttrs) -> Vec<HtmlAttribute> {
     let mut out = Vec::new();
     if let Some(id) = &attrs.id {
@@ -729,7 +730,75 @@ fn node_attributes(attrs: &NodeAttrs) -> Vec<HtmlAttribute> {
             attrs.classes.join(" "),
         )));
     }
+    if let Some(layout) = attrs.layout() {
+        let css = layout_to_css(&layout);
+        if !css.is_empty() {
+            out.push(HtmlAttribute::Other("style".into(), css));
+        }
+    }
     out
+}
+
+/// Lowers a [`Layout`](crate::layout::Layout) to an inline CSS declaration
+/// string for the browser target.
+///
+/// Margin sides are resolved with [`TargetValue::resolve`] for
+/// [`RenderTarget::Browser`]. Vertical sides (`top` / `bottom`) lower a
+/// [`Length::Ch`] to `lh` (line-height units); horizontal sides lower it to
+/// `ch`. A `max_width` adds `margin-left` / `margin-right: auto` per the
+/// node's [`Alignment`]. [`WordWrap::None`] adds `white-space:nowrap`; any
+/// wrapping variant adds `overflow-wrap:break-word`.
+fn layout_to_css(layout: &crate::layout::Layout) -> String {
+    use crate::layout::{Alignment, Length, TargetValue, WordWrap};
+    use crate::target::RenderTarget;
+
+    fn resolve(tv: &TargetValue<Length>) -> Option<&Length> {
+        tv.resolve(RenderTarget::Browser)
+    }
+    fn css_len(len: &Length, vertical: bool) -> String {
+        match len {
+            Length::Zero => "0".into(),
+            Length::Ch(n) if vertical => format!("{n}lh"),
+            Length::Ch(n) => format!("{n}ch"),
+            Length::Percent(p) => format!("{p}%"),
+            Length::Css(sizing) => sizing.to_string(),
+        }
+    }
+
+    let m = &layout.margin;
+    let mut decls: Vec<String> = Vec::new();
+    if let Some(l) = resolve(&m.top) {
+        decls.push(format!("margin-top:{}", css_len(l, true)));
+    }
+    if let Some(l) = resolve(&m.bottom) {
+        decls.push(format!("margin-bottom:{}", css_len(l, true)));
+    }
+    if let Some(l) = resolve(&m.left) {
+        decls.push(format!("margin-left:{}", css_len(l, false)));
+    }
+    if let Some(l) = resolve(&m.right) {
+        decls.push(format!("margin-right:{}", css_len(l, false)));
+    }
+    if let Some(mw) = layout.max_width.as_ref().and_then(resolve) {
+        decls.push(format!("max-width:{}", css_len(mw, false)));
+        match layout.alignment {
+            Alignment::Center => {
+                decls.push("margin-left:auto".into());
+                decls.push("margin-right:auto".into());
+            }
+            Alignment::Right => {
+                decls.push("margin-left:auto".into());
+            }
+            Alignment::Left => {}
+        }
+    }
+    match layout.word_wrap {
+        WordWrap::None => decls.push("white-space:nowrap".into()),
+        WordWrap::WrapProse(..) | WordWrap::BespokeProse(..) | WordWrap::Truncate(_) => {
+            decls.push("overflow-wrap:break-word".into());
+        }
+    }
+    decls.join(";")
 }
 
 /// Builds a finalized text fragment. The fragment renderer HTML-escapes the
@@ -1198,6 +1267,54 @@ mod tests {
         let out = html(&section);
         assert!(out.contains(r#"id="intro""#), "{out}");
         assert!(out.contains(r#"class="featured""#), "{out}");
+    }
+
+    #[test]
+    fn browser_renderer_lowers_layout_to_css() {
+        use crate::layout::{Alignment, Layout, Length, Margin, TargetValue};
+
+        let mut para = RenderNode::paragraph(vec![RenderNode::text("hi")]);
+        para.attrs.set_layout(&Layout {
+            margin: Margin::x(Length::ch(2)),
+            alignment: Alignment::Center,
+            max_width: Some(TargetValue::universal(Length::Percent(80.0))),
+            ..Layout::default()
+        });
+        let root = RenderNode::root(vec![para]);
+
+        let rendered = render_browser_node(&root, &BrowserRenderOptions::default()).unwrap();
+        let html = rendered.output.render();
+        assert!(
+            html.contains("margin-left:2ch") || html.contains("margin-left: 2ch"),
+            "{html}"
+        );
+        assert!(
+            html.contains("max-width:80%") || html.contains("max-width: 80%"),
+            "{html}"
+        );
+        assert!(
+            html.contains("margin-left:auto")
+                || html.contains("margin-right:auto")
+                || html.contains("margin: 0 auto"),
+            "{html}"
+        );
+    }
+
+    #[test]
+    fn browser_renderer_lowers_vertical_margin_to_lh() {
+        use crate::layout::{Layout, Length, Margin};
+
+        let mut para = RenderNode::paragraph(vec![RenderNode::text("hi")]);
+        para.attrs.set_layout(&Layout {
+            margin: Margin::y(Length::ch(1)),
+            ..Layout::default()
+        });
+        let root = RenderNode::root(vec![para]);
+        let html = render_browser_node(&root, &BrowserRenderOptions::default())
+            .unwrap()
+            .output
+            .render();
+        assert!(html.contains("1lh"), "vertical Ch margin must lower to lh: {html}");
     }
 
     #[test]
