@@ -35,6 +35,18 @@ pub fn assemble_shared_module() -> TokenStream {
         /// reqwest as a direct dependency.
         pub use reqwest;
 
+        /// Re-export `schematic-define` for downstream crates.
+        ///
+        /// Generated client builder methods expose `schematic-define` types in
+        /// their public signatures (e.g. [`auth_update`](AuthStrategy)). Re-exporting
+        /// the crate lets consumers name those types without adding
+        /// `schematic-define` as a direct dependency.
+        pub use schematic_define;
+
+        /// Auth-strategy types re-exported flat from `schematic-define` for
+        /// ergonomic use in generated client builder calls.
+        pub use schematic_define::{AuthPolicy, AuthStrategy, EnvAuthStrategy, Headers, OAuth2Config, UpdateStrategy};
+
         #request_parts_type
 
         #error_type
