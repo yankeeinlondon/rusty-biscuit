@@ -1,15 +1,26 @@
 ---
 title: "CodeRenderer Terminal Color Context"
 created: "2026-05-16"
+revised: "2026-05-16"
+revision: 2
 status: draft
 confidence: high
 related:
   - renderable/features/2026-05-16-iterative-improvement/components-group1-plan.md
   - .ai/plans/2026-05-16.execution-of-components-group1.md
+review: renderable/features/2026-05-16-color-decisions/review.md
 precursor_to: "Darkmatter tree-rendering migration"
 ---
 
 # CodeRenderer Terminal Color Context
+
+> **Revision 2** incorporates the architect review
+> (`review.md`): the `TerminalCodeContext` struct is now settled, the
+> `ColorDepth` variant set and `ColorMode::Unknown` semantics are settled,
+> a no-color hook contract and boundary conversion helpers are specified,
+> pass-through tests are added to acceptance criteria, the over-claim about
+> current darkmatter downsampling is corrected, and code-block metadata plus
+> true depth downsampling are captured as darkmatter-migration future work.
 
 ## 1. Summary
 
@@ -19,7 +30,8 @@ receives only a `width: u32`. It must be widened to carry the terminal's
 make the same capability-aware color decisions the rest of the tree renderer
 makes — without breaking the crate dependency graph.
 
-This is a small, additive change. It is specified as a **standalone
+The widened parameter is a settled, `renderable`-owned `TerminalCodeContext`
+value. This is a small, additive change. It is specified as a **standalone
 precursor** because it must land **before** darkmatter implements
 `CodeRenderer`: widening the trait is free now and a breaking change to
 darkmatter once darkmatter depends on the current signature.
@@ -133,16 +145,27 @@ This is not hypothetical. Darkmatter's existing code-block rendering already
 depends on both:
 
 - **Color mode** (light/dark) — `darkmatter::markdown::highlighting`
-  defines its own `ColorMode` and a `detect_color_mode()`; `CodeHighlighter`
-  is constructed with it to pick a syntect theme.
+  defines its own `ColorMode` (`Light` / `Dark`) and a `detect_color_mode()`;
+  `CodeHighlighter` is constructed with it to pick a syntect theme.
 - **Color depth** — `darkmatter::markdown::output::terminal` defines its own
   `ColorDepth` (`None`, `Colors256`, `TrueColor`, …) with an `auto_detect()`,
-  and `TerminalOptions.color_depth` drives downsampling of 24-bit SGR for
-  256/16-color terminals.
+  and `TerminalOptions.color_depth` is part of darkmatter's terminal options.
 
-A darkmatter `CodeRenderer` that receives only `width` would have to
-re-derive both by ambient detection — re-introducing the consistency gap of
-§3.1 for the one node kind that most needs faithful color handling.
+**Accurate scope of current darkmatter `color_depth` behavior.** Today
+darkmatter uses `color_depth` primarily for the **no-color early return**
+(`ColorDepth::None`) and for constructing the shared `biscuit-terminal::Terminal`.
+It is **not** the case that darkmatter consistently downsamples 24-bit SGR to
+256/16-color output for code-heavy content: code-block and prose paths still
+emit many `38;2` / `48;2` true-color sequences regardless of the advertised
+256/16-color depth. True depth-aware downsampling is a **goal of the darkmatter
+tree-rendering migration** (see §10), not an existing guarantee — but the
+context this precursor adds is the prerequisite that makes it implementable
+consistently.
+
+A darkmatter `CodeRenderer` that receives only `width` would have to re-derive
+both color depth and color mode by ambient detection — re-introducing the
+consistency gap of §3.1 for the one node kind that most needs faithful color
+handling.
 
 ### 3.3 Change-ordering
 
@@ -167,41 +190,58 @@ edit to darkmatter. Doing it first is strictly cheaper.
 
 - Migrating darkmatter onto the tree renderer (the subsequent body of work).
 - Implementing a production darkmatter `CodeRenderer` (subsequent work).
+- Implementing true depth-aware SGR downsampling. It **is** a goal of the
+  darkmatter migration (§10) but is out of scope for this precursor, which
+  only delivers the capability context that makes it possible.
 - Changing `render_browser_code` — the browser target has no terminal
   capability concept; it stays as-is.
-- Unifying the three separate color-capability enums
-  (`biscuit-terminal::discovery::detection::{ColorDepth, ColorMode}`,
-  `darkmatter`'s own `ColorDepth` / `ColorMode`) beyond what this hook needs.
-  A full consolidation may be desirable later but is out of scope here.
+- Replacing the existing `ColorDepth` / `ColorMode` enums in
+  `biscuit-terminal` and `darkmatter` with the new `renderable` types. This
+  precursor only introduces the `renderable` types and maps **at the
+  `CodeRenderer` boundary**. Workspace-wide consolidation is deferred (§7,
+  OQ-1).
 - Adding OSC8 hyperlink or image-protocol information to the code hook — code
   blocks emit neither.
+- Carrying code-block metadata beyond color (title, line numbering, line
+  highlighting). Captured as darkmatter-migration future work (§10).
 
 ## 5. Requirements
 
 ### 5.1 Functional requirements
 
 - **FR-1** — `renderable` MUST define terminal color-capability descriptor
-  types usable by `CodeRenderer` without depending on `biscuit-terminal`.
-  At minimum this covers **color depth** and **color mode**.
-- **FR-2** — `CodeRenderer::render_terminal_code` MUST receive, in addition to
-  `lang`, `value`, and `attrs`: the available render **width**, the terminal
-  **color depth**, and the terminal **color mode**.
+  types — `ColorDepth` and `ColorMode` — in `renderable::color`, usable by
+  `CodeRenderer` without depending on `biscuit-terminal`.
+- **FR-2** — `renderable` MUST define a `TerminalCodeContext` value type
+  carrying `width: u32`, `color_depth: ColorDepth`, and
+  `color_mode: ColorMode`. `CodeRenderer::render_terminal_code` MUST receive
+  it in addition to `lang`, `value`, and `attrs`.
 - **FR-3** — The terminal tree renderer (`biscuit-terminal`) MUST populate the
-  new context by mapping from its `TerminalRenderContext`
-  (`available_width`, `color_depth`, `color_mode`) at the `render_code_node`
-  call site. No ambient re-detection in the renderer.
-- **FR-4** — The mapping from `biscuit-terminal`'s `ColorDepth`
-  (`None`, `Minimal`, `Basic`, `Enhanced`, `TrueColor`) and `ColorMode`
-  (`Light`, `Dark`, `Unknown`) onto the `renderable` descriptors MUST be
-  total and lossless enough that a code renderer can choose between, at least:
-  no color, 16-color, 256-color, and true-color output, and between
-  light / dark / unknown backgrounds.
-- **FR-5** — `render_browser_code` MUST be unchanged.
-- **FR-6** — The built-in plain code renderer
-  (`Writer::render_code`) MUST be unaffected; it already renders through the
-  full `TerminalRenderContext`.
-- **FR-7** — The `width`-only behavior MUST NOT be retained as a second code
+  `TerminalCodeContext` by mapping from its `TerminalRenderContext`, using
+  `available_width` (NOT root `width`), `color_depth`, and `color_mode`, at
+  the `render_code_node` call site. No ambient re-detection in the renderer.
+- **FR-4** — `renderable::color::ColorDepth` MUST mirror `biscuit-terminal`'s
+  five-variant enum — `None`, `Minimal`, `Basic`, `Enhanced`, `TrueColor` —
+  so the boundary mapping is total and lossless, including 8-color `Minimal`.
+- **FR-5** — `renderable::color::ColorMode` MUST have the variants `Light`,
+  `Dark`, and `Unknown`, mirroring `biscuit-terminal`. `Unknown` MUST mean
+  "the terminal renderer could not determine the background"; see §6 D-6 for
+  resolution rules.
+- **FR-6** — A boundary conversion API MUST exist so call sites do not inline
+  `match` expressions. It MUST be implemented as
+  `impl From<biscuit_terminal::discovery::detection::ColorDepth> for
+  renderable::color::ColorDepth` (and the same for `ColorMode`), located in
+  `biscuit-terminal` (the crate that can name both types).
+- **FR-7** — `render_browser_code` MUST be unchanged.
+- **FR-8** — The built-in plain code renderer (`Writer::render_code`) MUST be
+  unaffected; it already renders through the full `TerminalRenderContext`.
+- **FR-9** — The `width`-only behavior MUST NOT be retained as a second code
   path. There is one terminal code hook signature.
+- **FR-10** — The `CodeRenderer` trait documentation MUST state the no-color
+  contract: an implementor SHOULD treat `ColorDepth::None` as "emit no ANSI
+  styling", and if it cannot honor the supplied capability context it SHOULD
+  return `None` so the built-in plain renderer handles the block. Implementors
+  MUST NOT run ambient capability detection to override the supplied context.
 
 ### 5.2 Compatibility and migration requirements
 
@@ -217,42 +257,45 @@ edit to darkmatter. Doing it first is strictly cheaper.
 
 - **QR-1** — `cargo clippy --all-targets` MUST be warning-free for
   `renderable`, `biscuit-terminal`, and `darkmatter`.
-- **QR-2** — The new `renderable` descriptor types MUST be documented per the
-  repo rustdoc convention (no H1 in `///`, `## Examples` etc.) and MUST
-  derive the same standard traits as sibling color types
-  (`Debug, Clone, PartialEq`, serde where consistent with the module).
+- **QR-2** — The new `renderable` descriptor and context types MUST be
+  documented per the repo rustdoc convention (no H1 in `///`, `## Examples`
+  etc.). `ColorDepth` / `ColorMode` MUST derive `Debug, Clone, Copy,
+  PartialEq, Eq` (fieldless enums) and serde where consistent with the
+  `renderable::color` module. `TerminalCodeContext` MUST derive `Debug, Clone,
+  Copy, PartialEq, Eq` and provide a `new(width, color_depth, color_mode)`
+  constructor.
 - **QR-3** — The architecture note on the `CodeRenderer` trait MUST be updated
-  to describe the new context type instead of the `width: u32` rationale.
+  to describe `TerminalCodeContext` instead of the `width: u32` rationale, and
+  MUST include the no-color contract (FR-10).
+- **QR-4** — `renderable::color`'s module documentation MUST be extended to
+  state that `ColorDepth` / `ColorMode` are **terminal capability
+  descriptors**, distinct from the color-*value* types in the module, and that
+  terminal ANSI emission still lives in `biscuit-terminal`.
 
 ## 6. Design Decisions
 
-### 6.1 Settled
+All decisions below are **settled** for implementation.
 
 - **D-1 — The trait stays in `renderable`.** Homing `CodeRenderer` in
   `biscuit-terminal` would block the browser renderer (which lives in
   `renderable`) from sharing the trait. The dependency direction is not
   negotiable.
-- **D-2 — The hook carries a context value, not the full
-  `TerminalRenderContext`.** `renderable` cannot name that type; a purpose-built
-  `renderable`-owned value is the only option that respects D-1.
-- **D-3 — Only width + color depth + color mode are in scope.** Code blocks
-  do not emit hyperlinks or images; Unicode support is already reflected in
-  how `value` is projected. Adding unused fields is rejected (simplicity).
-
-### 6.2 Recommended (pending confirmation)
-
-- **D-4 — A small struct over loose primitives.** Pass a single
-  `TerminalCodeContext` value rather than three positional arguments.
-  Rationale: future-proof (new fields are additive without re-threading call
-  sites), self-documenting, and consistent with how `renderable` already
-  groups render configuration.
-
-  Illustrative shape (final naming/placement subject to Open Questions):
+- **D-2 — The hook carries a `TerminalCodeContext` value, not the full
+  `TerminalRenderContext`.** `renderable` cannot name that type; a
+  purpose-built `renderable`-owned value is the only option that respects D-1.
+- **D-3 — Scope is width + color depth + color mode only.** Code blocks do not
+  emit hyperlinks or images; Unicode support is already reflected in how
+  `value` is projected. Adding unused fields is rejected (simplicity).
+- **D-4 — `TerminalCodeContext` is a `Copy` struct passed by value.** All
+  fields are `Copy`, so the hook takes `context: TerminalCodeContext` by value
+  — no lifetimes for implementors. It provides a
+  `new(width, color_depth, color_mode)` constructor.
 
   ```rust
-  // renderable
+  // renderable::tree::render  (re-exported from renderable::tree)
+  #[derive(Debug, Clone, Copy, PartialEq, Eq)]
   pub struct TerminalCodeContext {
-      /// Available render width in columns.
+      /// Available render width in columns (post-indent).
       pub width: u32,
       /// Color depth the terminal advertises.
       pub color_depth: ColorDepth,
@@ -265,7 +308,7 @@ edit to darkmatter. Doing it first is strictly cheaper.
       lang: Option<&str>,
       value: &str,
       attrs: &NodeAttrs,
-      context: &TerminalCodeContext,
+      context: TerminalCodeContext,
   ) -> Option<String>;
   ```
 
@@ -273,66 +316,131 @@ edit to darkmatter. Doing it first is strictly cheaper.
   `renderable::color` already owns the color *value* system (`Color`,
   `WebColor`, `BasicColor`, RGB, HDR). Color *capability* descriptors
   (`ColorDepth`, `ColorMode`) are a natural fit there, and placing them in the
-  lowest crate lets `biscuit-terminal` and `darkmatter` both map onto a single
-  canonical pair instead of each crate keeping its own.
+  lowest crate lets `biscuit-terminal` and `darkmatter` map onto a single
+  canonical pair. Module docs MUST clarify these are capability descriptors,
+  not terminal-rendering APIs (QR-4).
+- **D-6 — `ColorMode::Unknown` resolution rules.**
+  - `renderable::color::ColorMode::Unknown` means "the terminal renderer could
+    not determine the background." It is a faithful signal, not an error.
+  - A `CodeRenderer` MUST NOT run ambient detection to resolve `Unknown`
+    (that would re-introduce the §3.1 consistency gap).
+  - When a code renderer must pick a concrete light/dark treatment, it
+    resolves `Unknown` against its own configured option (e.g. darkmatter's
+    `TerminalOptions.color_mode`); if no such option is configured at the
+    tree-rendering entry point, it defaults to `Dark`. This rule is recorded
+    here so the darkmatter implementation does not invent an ad-hoc fallback.
+- **D-7 — Five-variant `ColorDepth` (resolves former OQ-2).** The enum mirrors
+  `biscuit-terminal` exactly (`None`, `Minimal`, `Basic`, `Enhanced`,
+  `TrueColor`) so the boundary map is lossless. A consumer that is internally
+  coarser (e.g. darkmatter's `None` / `Colors256` / `TrueColor`) maps the
+  surplus variants *consciously* on its own side rather than losing them at
+  the boundary.
+- **D-8 — Boundary conversion via `From` impls in `biscuit-terminal`
+  (resolves former Rec-5).** `impl From<…detection::ColorDepth> for
+  renderable::color::ColorDepth` and the `ColorMode` equivalent live in
+  `biscuit-terminal`, where both source and target types are nameable. This
+  keeps `render_code_node` focused on rendering and the conversion reusable.
+- **D-9 — Plain type names with use-site aliasing (resolves former OQ-3 /
+  Rec-10).** The new types are named `ColorDepth` / `ColorMode` (consistent
+  with `renderable::color` owning color types). Because identically named
+  types exist in `biscuit-terminal::discovery::detection` and `darkmatter`,
+  crates that import more than one MUST alias at the use site, e.g.
+  `use renderable::color::ColorDepth as RenderColorDepth;` — matching the
+  existing precedent (`darkmatter` already does
+  `use biscuit_terminal::discovery::detection::ColorDepth as TerminalColorDepth`).
 
 ## 7. Open Questions
 
-- **OQ-1 — Naming.** `ColorDepth` and `ColorMode` already exist as distinct
-  types in both `biscuit-terminal::discovery::detection` and `darkmatter`.
-  Adding `renderable::color::ColorDepth` / `ColorMode` creates three
-  same-named types. Acceptable (different modules), or should the `renderable`
-  types take disambiguating names (e.g. `TerminalColorDepth`)? Recommendation:
-  use plain `ColorDepth` / `ColorMode` in `renderable::color` and let the
-  other crates re-export or alias.
-- **OQ-2 — Variant set for `renderable::color::ColorDepth`.** Mirror
-  `biscuit-terminal`'s five-variant enum (`None`, `Minimal`, `Basic`,
-  `Enhanced`, `TrueColor`) for a lossless map, or a coarser set
-  (`None`, `Ansi16`, `Ansi256`, `TrueColor`) sufficient for highlighter
-  downsampling? FR-4 only requires the coarser distinctions.
-- **OQ-3 — Should `biscuit-terminal` and `darkmatter` eventually *replace*
-  their own `ColorDepth`/`ColorMode` with the `renderable` types**, or only
-  map at the `CodeRenderer` boundary? Full replacement is out of scope (§4.2)
-  but the decision affects whether the new types are designed as a superset.
-- **OQ-4 — Context value name.** `TerminalCodeContext` vs `CodeTerminalContext`
-  vs `CodeRenderContext`. Should not collide with `TerminalRenderContext`.
+- **OQ-1 — Workspace-wide consolidation.** Should `biscuit-terminal` and
+  `darkmatter` eventually *replace* their own `ColorDepth` / `ColorMode` with
+  the `renderable` canonical pair, rather than only mapping at the
+  `CodeRenderer` boundary? This is **deferred** — out of scope for this
+  precursor (§4.2). D-7 already designs the `renderable` enum as a faithful
+  superset/mirror, so a later consolidation is not blocked.
 
 ## 8. Affected Code
 
 | Crate | File | Change |
 |-------|------|--------|
-| `renderable` | `src/color/` (`mod.rs` + new) | New `ColorDepth`, `ColorMode` descriptors |
-| `renderable` | `src/tree/render/mod.rs` | New `TerminalCodeContext`; widen `render_terminal_code`; update architecture note |
-| `renderable` | `src/tree/mod.rs` | Re-export new public types |
-| `biscuit-terminal` | `src/render_tree/render.rs` | `render_code_node` builds `TerminalCodeContext` from `TerminalRenderContext` |
-| `biscuit-terminal` | `src/discovery/detection/color.rs` | Map `biscuit-terminal` `ColorDepth`/`ColorMode` → `renderable` descriptors |
-| `biscuit-terminal` | tree-render tests | Update the Phase 3 stub `CodeRenderer` |
+| `renderable` | `src/color/` (`mod.rs` + new module) | New `ColorDepth`, `ColorMode` capability descriptors; module-doc clarification (QR-4) |
+| `renderable` | `src/tree/render/mod.rs` | New `TerminalCodeContext`; widen `render_terminal_code`; update architecture note + no-color contract |
+| `renderable` | `src/tree/mod.rs` | Re-export `TerminalCodeContext` and the new color types |
+| `biscuit-terminal` | `src/discovery/detection/color.rs` | `From` impls mapping `biscuit-terminal` `ColorDepth`/`ColorMode` → `renderable` descriptors (D-8) |
+| `biscuit-terminal` | `src/render_tree/render.rs` | `render_code_node` builds `TerminalCodeContext` from `TerminalRenderContext` (`available_width`, `color_depth`, `color_mode`) |
+| `biscuit-terminal` | tree-render tests | Update the Phase 3 stub `CodeRenderer`; add context pass-through tests (§9) |
 
 Darkmatter is **not** touched by this spec — it consumes the final signature
 during the subsequent migration.
 
 ## 9. Acceptance Criteria
 
-- [ ] `renderable` defines color-depth and color-mode descriptors with no
-      `biscuit-terminal` dependency (FR-1).
-- [ ] `CodeRenderer::render_terminal_code` receives width, color depth, and
-      color mode (FR-2); the `width`-only signature is gone (FR-7).
-- [ ] The terminal renderer populates the context from `TerminalRenderContext`
-      with no ambient re-detection (FR-3); the `biscuit-terminal` →
-      `renderable` capability map is total (FR-4).
+- [ ] `renderable::color` defines `ColorDepth` (five variants, D-7) and
+      `ColorMode` (`Light`/`Dark`/`Unknown`), with no `biscuit-terminal`
+      dependency (FR-1, FR-4, FR-5).
+- [ ] `renderable` defines `Copy` `TerminalCodeContext` with a `new(...)`
+      constructor (FR-2, D-4, QR-2).
+- [ ] `CodeRenderer::render_terminal_code` takes `TerminalCodeContext` by
+      value; the `width`-only signature is gone (FR-2, FR-9).
+- [ ] `biscuit-terminal` provides `From` impls for both capability types
+      (FR-6, D-8).
+- [ ] `render_code_node` populates the context from `TerminalRenderContext`
+      with no ambient re-detection (FR-3).
+- [ ] **Pass-through tests** in `biscuit-terminal`: a stub `CodeRenderer` is
+      installed and asserted to receive
+      (a) `available_width`, not root `width` (verified via a nested/indented
+      context where the two differ);
+      (b) the `ColorDepth` configured on the manually built
+      `TerminalRenderContext`;
+      (c) the `ColorMode` configured on the context, including `Unknown`;
+      (d) values matching the manually built context with no influence from
+      conflicting ambient env vars.
 - [ ] `render_browser_code` and the built-in plain code renderer are
-      unchanged (FR-5, FR-6).
+      unchanged (FR-7, FR-8).
+- [ ] The `CodeRenderer` docs state the no-color / return-`None` contract and
+      forbid ambient detection (FR-10, QR-3); `renderable::color` module docs
+      mark the new types as capability descriptors (QR-4).
 - [ ] The Phase 3 test stub compiles against the new signature (CR-1).
 - [ ] `renderable`, `biscuit-terminal`, and `darkmatter` build, test green
       (incl. `yaml_block_parity` and Group 1 parity suites), and are
       clippy-clean (CR-2, QR-1).
-- [ ] The `CodeRenderer` architecture note reflects the new context (QR-3).
 
 ## 10. Out of Scope / Future Work
 
-- The darkmatter tree-rendering migration itself, including darkmatter's
-  production `impl CodeRenderer` that maps `TerminalCodeContext` onto
-  `CodeHighlighter` + `TerminalOptions.color_depth`.
-- Consolidating the three `ColorDepth` / `ColorMode` enums across the
-  workspace onto the `renderable` canonical pair (tracked via OQ-3).
-- Extending the code hook with any non-color capability signal.
+These belong to the **darkmatter tree-rendering migration** spec, not this
+precursor. They are recorded here so the next spec does not lose them.
+
+- **Darkmatter `impl CodeRenderer`.** A production code renderer that maps
+  `TerminalCodeContext` onto `CodeHighlighter` + `TerminalOptions`, with:
+  - `TerminalCodeContext.color_depth` → `TerminalOptions.color_depth` **with
+    no `auto_detect()` call** — the supplied context is authoritative;
+  - `TerminalCodeContext.color_mode` → darkmatter's `highlighting::ColorMode`
+    using the explicit `Unknown` fallback rule (D-6);
+  - an acceptance test that sets **conflicting ambient env vars and render
+    context values** and verifies code blocks follow the render context.
+- **True depth-aware SGR downsampling — confirmed goal.** The darkmatter
+  migration MUST downsample 24-bit `38;2` / `48;2` sequences to 256-color
+  (`Enhanced`), 16-color (`Basic`), 8-color (`Minimal`), or strip them
+  entirely (`None`) according to `TerminalCodeContext.color_depth`. This is a
+  separate acceptance criterion for that migration; this precursor only
+  supplies the depth signal that makes it implementable.
+- **Code-block metadata beyond color.** Color context alone is not sufficient
+  for full darkmatter code-block parity. Markdown fences carry richer info
+  strings (`CodeBlockMeta`: title, line numbering, line highlighting). Note
+  that `NodeKind::Code` already has an unused `meta: Option<String>` field
+  that can carry the raw info string; the migration must design how that field
+  (or structured `CodeRenderHints` equivalents) preserves `CodeBlockMeta`
+  before tree-rendered darkmatter code blocks can be called parity-complete.
+- **Workspace-wide `ColorDepth` / `ColorMode` consolidation** (OQ-1).
+
+## 11. Revision History
+
+- **r2 (2026-05-16)** — Incorporated architect review (`review.md`): settled
+  `TerminalCodeContext` (D-4); settled five-variant `ColorDepth` (D-7);
+  settled `ColorMode::Unknown` semantics (D-6); added boundary `From` impls
+  (D-8, FR-6); settled type naming / aliasing (D-9); added no-color hook
+  contract (FR-10); added module-doc clarification requirement (QR-4);
+  corrected the over-claim about current darkmatter downsampling (§3.2);
+  added context pass-through acceptance tests (§9); captured darkmatter
+  mapping tests, confirmed true downsampling goal, and code-block metadata as
+  future work (§10).
+- **r1 (2026-05-16)** — Initial draft.
