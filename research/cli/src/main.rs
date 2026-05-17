@@ -7,7 +7,7 @@ use std::path::PathBuf;
 use tracing_subscriber::{filter::EnvFilter, fmt, layer::SubscriberExt, util::SubscriberInitExt};
 
 /// Debug trace level for tracing output.
-/// 
+///
 /// Use this to control the verbosity of internal debug traces.
 /// The default is `warn`, which only shows warnings and errors.
 /// Use `RUST_LOG` environment variable to override.
@@ -59,7 +59,7 @@ impl DebugLevel {
 #[command(about = "Automated research tool for software libraries", long_about = None)]
 struct Cli {
     /// Increase output verbosity (-v, -vv, -vvv) for richer console output
-    /// 
+    ///
     /// This flag controls the amount of human-readable status output shown to the user.
     /// It does NOT control debug tracing - use --debug <level> for that.
     #[arg(short = 'v', action = clap::ArgAction::Count, global = true)]
@@ -244,7 +244,7 @@ fn show_topic(topic: &str) -> Result<(), Box<dyn std::error::Error>> {
 /// Initialize tracing subscriber based on debug level and output format.
 ///
 /// Tracing output goes to stderr to keep stdout clean for data output.
-/// 
+///
 /// Precedence for filter level:
 /// 1. RUST_LOG environment variable (if set)
 /// 2. --debug command line flag

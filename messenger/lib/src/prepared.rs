@@ -16,9 +16,7 @@ impl PreparedMessage {
     pub fn new(message: &Message) -> Self {
         let markdown_nodes = match &message.body {
             Some(MessageBody::Markdown(markdown))
-            | Some(MessageBody::Summarized { markdown, .. }) => {
-                Some(parse_markdown(markdown))
-            }
+            | Some(MessageBody::Summarized { markdown, .. }) => Some(parse_markdown(markdown)),
             _ => None,
         };
 
@@ -78,18 +76,16 @@ impl PreparedMessage {
             (Some(MessageBody::Markdown(markdown)), None) => {
                 render_for_provider(markdown, provider)
             }
-            (Some(MessageBody::Summarized { markdown, summary }), nodes_opt) => {
-                match provider {
-                    ProviderKind::Apns | ProviderKind::Fcm => summary.clone(),
-                    ProviderKind::Signal
-                    | ProviderKind::WhatsApp
-                    | ProviderKind::Desktop => summary.clone(),
-                    _ => match nodes_opt {
-                        Some(nodes) => render_nodes_for_provider(nodes, provider),
-                        None => render_for_provider(markdown, provider),
-                    },
+            (Some(MessageBody::Summarized { markdown, summary }), nodes_opt) => match provider {
+                ProviderKind::Apns | ProviderKind::Fcm => summary.clone(),
+                ProviderKind::Signal | ProviderKind::WhatsApp | ProviderKind::Desktop => {
+                    summary.clone()
                 }
-            }
+                _ => match nodes_opt {
+                    Some(nodes) => render_nodes_for_provider(nodes, provider),
+                    None => render_for_provider(markdown, provider),
+                },
+            },
             (None, _) => String::new(),
         }
     }
@@ -104,9 +100,7 @@ impl PreparedMessage {
         match (&self.message.body, &self.markdown_nodes) {
             (Some(MessageBody::Summarized { summary, .. }), _) => summary.clone(),
             (Some(MessageBody::Plain(text)), _) => text.clone(),
-            (Some(MessageBody::Markdown(_)), Some(nodes)) => {
-                plain_text::render_plain_text(nodes)
-            }
+            (Some(MessageBody::Markdown(_)), Some(nodes)) => plain_text::render_plain_text(nodes),
             (Some(MessageBody::Markdown(md)), None) => {
                 plain_text::render_plain_text(&crate::markdown::parse::parse_markdown(md))
             }
