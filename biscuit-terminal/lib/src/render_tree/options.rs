@@ -66,12 +66,15 @@ pub struct TerminalRenderContext {
     /// rendered. Starts at 0 and increases as the renderer enters nested
     /// structures like block quotes or list items.
     pub current_indent: u32,
-    /// Active layout from the current tree context.
+    /// Active layout carried on the context, set via [`with_layout`].
     ///
-    /// When a [`TreeRenderable`] provides a [`Layout`](renderable::layout::Layout),
-    /// it is propagated here so child renderers can consult it.
+    /// This field is not consulted by the tree renderer today: it applies a
+    /// node's layout directly from
+    /// [`NodeAttrs::layout`](renderable::tree::NodeAttrs::layout). The field is
+    /// retained for the [`with_layout`] API shape and for potential future use
+    /// by child renderers.
     ///
-    /// [`TreeRenderable`]: renderable::tree::TreeRenderable
+    /// [`with_layout`]: TerminalRenderContext::with_layout
     pub active_layout: Option<RenderableLayout>,
 }
 

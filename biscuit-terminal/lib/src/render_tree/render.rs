@@ -176,7 +176,9 @@ impl Writer<'_> {
         let bottom = resolve_cells(&layout.margin.bottom, available);
 
         // Render the content within the width left after horizontal margins.
-        let content_width = available.saturating_sub(left + right);
+        // Clamp to at least 1: a width-0 sub-render is degenerate for the
+        // downstream components (matching `render_columns`'s `.max(1)`).
+        let content_width = available.saturating_sub(left + right).max(1);
         let content = {
             let mut narrowed = self.opts.clone();
             narrowed.context.available_width = content_width;
@@ -214,8 +216,12 @@ impl Writer<'_> {
             if idx > 0 {
                 out.push('\n');
             }
-            out.push_str(&lead);
-            out.push_str(line);
+            // Keep blank lines blank: prefixing an empty line would produce
+            // a line of trailing whitespace.
+            if !line.is_empty() {
+                out.push_str(&lead);
+                out.push_str(line);
+            }
         }
         for _ in 0..bottom {
             out.push('\n');
