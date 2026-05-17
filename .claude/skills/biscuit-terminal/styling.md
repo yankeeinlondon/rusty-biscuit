@@ -50,16 +50,16 @@ The `Prose` struct allows styled text with inline tokens:
 
 ```rust
 use biscuit_terminal::components::prose::Prose;
-use biscuit_terminal::components::renderable::Renderable;
+use biscuit_terminal::components::renderable::TerminalRenderable;
 
 // Create prose with inline styling
 let prose = Prose::new("Hello {{bold}}world{{reset}}!");
-let output = prose.render(None);
+let output = prose.render_optimistic(None);
 // → "Hello \x1b[1mworld\x1b[0m!\x1b[0m"
 
 // With builder pattern
 let prose = Prose::new("<b>Important</b> message")
-    .with_word_wrap(WordWrap::WrapProse(None))
+    .with_word_wrap(WordWrap::WrapProse(None, None))
     .with_left_margin(Margin::Chars(4));
 ```
 

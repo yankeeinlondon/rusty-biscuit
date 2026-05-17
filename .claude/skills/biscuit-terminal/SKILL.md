@@ -38,6 +38,7 @@ if term.supports_italic { println!("\x1b[3mItalic\x1b[0m"); }
 |-------|-------------|
 | [Terminal Struct](./terminal-struct.md) | Main struct, static vs dynamic properties, enums |
 | [Components](./components.md) | All renderable components: BlockQuote, Compose, FileSystem, GraphExpression, HorizontalRule, InlineContent, MermaidDiagram, OrderedList, UnorderedList, PadLeft, PadRight, Progress, Prose, Section, Status, StatusBlock, Table, TerminalImage, TextBlock, Todo, TwoColumn |
+| [Render Tree](./render-tree.md) | Terminal renderer for the `renderable` render tree: `render_terminal_node`, `TreeComponent`, `BrowserTreeComponent`, projection layer, `render_tree_node`, native rendering, `CodeRenderer` hook |
 | [Image Rendering](./image-rendering.md) | Kitty/iTerm2 protocols, width parsing, cursor behavior, policy controls |
 | [Mermaid Diagrams](./mermaid-diagrams.md) | Terminal-facing `MermaidDiagram` adapter backed by biscuit-visualized |
 | [Color System](./color-system.md) | BasicColor, RgbColor, WebColor, Tailwind, HdrColor with TermColor trait |
@@ -236,8 +237,14 @@ biscuit_terminal/
 │   ├── mode_2027.rs      # Grapheme cluster support
 │   ├── cursor_position.rs # Cursor position queries
 │   └── eval.rs           # Escape analysis
+├── render_tree/          # Terminal renderer for the renderable render tree
+│   ├── render.rs         # render_terminal_node — native heading/list/table rendering
+│   ├── component.rs      # TreeComponent<T> adapter (TreeRenderable → TerminalRenderable)
+│   ├── browser_adapter.rs # BrowserTreeComponent<T> adapter
+│   ├── projection.rs     # RenderableTerminalContent::to_tree_nodes, TreeProjectionContext
+│   └── options.rs        # TerminalRenderOptions, TerminalRenderContext
 ├── components/           # Rendering
-│   ├── renderable.rs     # Renderable trait + RenderableContent
+│   ├── renderable.rs     # TerminalRenderable trait (+ render_tree_node) + RenderableTerminalContent
 │   ├── compose.rs        # Compose (combine multiple renderables)
 │   ├── section.rs        # Section with heading levels (h1-h6)
 │   ├── block_quote.rs    # BlockQuote with attribution
