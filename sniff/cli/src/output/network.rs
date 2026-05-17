@@ -5,7 +5,7 @@ use biscuit_terminal::{
         compose::Compose,
         list::UnorderedList,
         prose::Prose,
-        renderable::{TerminalRenderable, RenderableTerminalContent},
+        renderable::{RenderableTerminalContent, TerminalRenderable},
     },
     terminal::Terminal,
     utils::layout::Margin,

@@ -9,7 +9,9 @@ use biscuit_terminal::components::graph_expression::{
 };
 use biscuit_terminal::components::list::UnorderedList;
 use biscuit_terminal::components::prose::Prose;
-use biscuit_terminal::components::renderable::{BrowserRenderable, TerminalRenderable, RenderableTerminalContent};
+use biscuit_terminal::components::renderable::{
+    BrowserRenderable, RenderableTerminalContent, TerminalRenderable,
+};
 use biscuit_terminal::components::terminal_image::{ImageWidth, parse_width_spec};
 use biscuit_terminal::terminal::Terminal;
 use sniff::filesystem::repo::Package;
@@ -58,9 +60,7 @@ pub(super) fn build_deps_dot(
         node_ids.insert(pkg.name.as_str(), format!("n{i}"));
     }
 
-    let in_focus = |name: &str| -> bool {
-        focus_names.is_none_or(|set| set.contains(name))
-    };
+    let in_focus = |name: &str| -> bool { focus_names.is_none_or(|set| set.contains(name)) };
 
     // Check if there are any edges that will actually be rendered.
     let has_edges = packages.iter().any(|p| {
@@ -204,13 +204,11 @@ fn prepare_deps_graph(
     };
 
     let focus: Vec<&Package> = select_repo_packages(packages, repo_filter, package, package_area);
-    let has_focus_filter =
-        !repo_filter.is_empty() || package.is_some() || package_area.is_some();
+    let has_focus_filter = !repo_filter.is_empty() || package.is_some() || package_area.is_some();
 
     let (visible, focus_names): (Vec<Package>, Option<HashSet<String>>) = if has_focus_filter {
         let focus_set: HashSet<&str> = focus.iter().map(|p| p.name.as_str()).collect();
-        let mut visible_names: HashSet<String> =
-            focus.iter().map(|p| p.name.to_string()).collect();
+        let mut visible_names: HashSet<String> = focus.iter().map(|p| p.name.to_string()).collect();
 
         // 1-hop outbound: deps of focused packages
         for pkg in &focus {
@@ -220,7 +218,11 @@ fn prepare_deps_graph(
         }
         // 1-hop inbound: packages that depend on a focused package
         for pkg in packages {
-            if pkg.depends_on.iter().any(|d| focus_set.contains(d.as_str())) {
+            if pkg
+                .depends_on
+                .iter()
+                .any(|d| focus_set.contains(d.as_str()))
+            {
                 visible_names.insert(pkg.name.clone());
             }
         }
@@ -281,16 +283,11 @@ pub fn render_repo_deps_visual(
         None => DEFAULT_DEPS_WIDTH,
     };
 
-    let (dot, orientation) = match prepare_deps_graph(
-        repo,
-        repo_filter,
-        package,
-        package_area,
-        orientation_spec,
-    ) {
-        DepsGraphPrep::Graph { dot, orientation } => (dot, orientation),
-        DepsGraphPrep::Message(msg) => return msg,
-    };
+    let (dot, orientation) =
+        match prepare_deps_graph(repo, repo_filter, package, package_area, orientation_spec) {
+            DepsGraphPrep::Graph { dot, orientation } => (dot, orientation),
+            DepsGraphPrep::Message(msg) => return msg,
+        };
 
     let graph = match GraphExpression::for_terminal(&dot, GraphInputSyntax::Dot) {
         Ok(g) => g.with_width(width).with_orientation(orientation),
@@ -313,16 +310,11 @@ pub fn render_repo_deps_svg(
     package_area: Option<&str>,
     orientation_spec: Option<&str>,
 ) -> String {
-    let (dot, orientation) = match prepare_deps_graph(
-        repo,
-        repo_filter,
-        package,
-        package_area,
-        orientation_spec,
-    ) {
-        DepsGraphPrep::Graph { dot, orientation } => (dot, orientation),
-        DepsGraphPrep::Message(msg) => return msg,
-    };
+    let (dot, orientation) =
+        match prepare_deps_graph(repo, repo_filter, package, package_area, orientation_spec) {
+            DepsGraphPrep::Graph { dot, orientation } => (dot, orientation),
+            DepsGraphPrep::Message(msg) => return msg,
+        };
 
     let graph = match GraphExpression::for_terminal(&dot, GraphInputSyntax::Dot) {
         Ok(g) => g.with_orientation(orientation),

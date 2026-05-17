@@ -203,8 +203,11 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                     .collect()
             } else if has_pkg_filter {
                 let pkgs = sniff::filesystem::docs::detect_repo_packages(&repo_root);
-                let lowered: Vec<String> =
-                    docs_filter.package.iter().map(|p| p.to_lowercase()).collect();
+                let lowered: Vec<String> = docs_filter
+                    .package
+                    .iter()
+                    .map(|p| p.to_lowercase())
+                    .collect();
                 pkgs.iter()
                     .filter(|(name, _)| lowered.iter().any(|p| name.eq_ignore_ascii_case(p)))
                     .map(|(_, rel)| repo_root.join(rel))
@@ -279,10 +282,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                     .collect();
 
                 let packages = if has_area_filter && !has_pkg_filter {
-                    sniff::filesystem::docs::detect_packages_in_dirs(
-                        &repo_root,
-                        &target_dirs,
-                    )
+                    sniff::filesystem::docs::detect_packages_in_dirs(&repo_root, &target_dirs)
                 } else {
                     pkg_handle.join().unwrap_or_default()
                 };
@@ -298,10 +298,8 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                     );
                 }
             } else if has_area_filter && !has_pkg_filter {
-                let packages = sniff::filesystem::docs::detect_packages_in_dirs(
-                    &repo_root,
-                    &target_dirs,
-                );
+                let packages =
+                    sniff::filesystem::docs::detect_packages_in_dirs(&repo_root, &target_dirs);
                 let mode = if needs_full_parse {
                     sniff::filesystem::docs::DocParseMode::Full
                 } else {
@@ -327,14 +325,9 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                     |_| true,
                 );
                 let packages = pkg_handle.join().unwrap_or_default();
-                sniff::filesystem::docs::assign_packages(
-                    &mut all_docs,
-                    &packages,
-                    &repo_root,
-                );
+                sniff::filesystem::docs::assign_packages(&mut all_docs, &packages, &repo_root);
             } else if has_pkg_filter || needs_full_parse {
-                let packages =
-                    sniff::filesystem::docs::detect_repo_packages(&repo_root);
+                let packages = sniff::filesystem::docs::detect_repo_packages(&repo_root);
                 let mode = if needs_full_parse {
                     sniff::filesystem::docs::DocParseMode::Full
                 } else {
@@ -697,7 +690,8 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                         return Ok(());
                     }
                     if cli.verbose > 0 {
-                        if let Some(info) = sniff::filesystem::git::get_current_worktree_info(dir)? {
+                        if let Some(info) = sniff::filesystem::git::get_current_worktree_info(dir)?
+                        {
                             println!("{} [{}]", info.0, info.1);
                         } else {
                             println!("{name}");
@@ -1461,8 +1455,7 @@ pub(super) fn resolve_package_and_area(
                     .and_then(|pkgs| pkgs.iter().find(|p| p.name.to_lowercase() == lower_name))
                     .map(|p| p.package_area.clone())
                     .unwrap_or_else(|| pkg_path.trim_end_matches('/').to_string());
-                let requested =
-                    area_path_label(packages, area).unwrap_or_else(|| area.to_string());
+                let requested = area_path_label(packages, area).unwrap_or_else(|| area.to_string());
                 return Err(format!(
                     "Package '{name}' is in area '{real_area}', not '{requested}'"
                 )

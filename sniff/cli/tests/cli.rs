@@ -3314,7 +3314,10 @@ fn test_repo_packages_on_error_message() {
         .assert()
         .failure();
     let stderr = String::from_utf8_lossy(&assert.get_output().stderr);
-    assert!(stderr.contains("nothing here"), "stderr should contain custom error message, got: {stderr}");
+    assert!(
+        stderr.contains("nothing here"),
+        "stderr should contain custom error message, got: {stderr}"
+    );
 }
 
 #[test]

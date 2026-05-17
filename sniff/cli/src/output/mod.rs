@@ -48,9 +48,8 @@ pub use topics::render_topics_table;
 pub(crate) use filesystem::{
     collect_repo_package_area_names, collect_repo_package_names, print_current_package_area_dirty,
     print_package_area_has_source_code_changes, render_dirty_package_areas, render_dirty_packages,
-    render_files_section, render_filesystem_section, render_language_section,
-    render_repo_deps_svg, render_repo_deps_text, render_repo_deps_visual, render_repo_language,
-    render_repo_package,
+    render_files_section, render_filesystem_section, render_language_section, render_repo_deps_svg,
+    render_repo_deps_text, render_repo_deps_visual, render_repo_language, render_repo_package,
     render_repo_package_area, render_repo_package_area_root, render_repo_package_areas_formatted,
     render_repo_package_root, render_repo_packages_formatted, render_repo_root,
     render_repo_section, render_staged_package_areas, render_staged_packages,
