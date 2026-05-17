@@ -41,38 +41,6 @@ impl HintNamespace {
     pub const WIDGET_COLUMNS: HintNamespace = HintNamespace("renderable.widget.columns");
 }
 
-/// Hints that influence how a tree node is laid out during rendering.
-///
-/// Components can return these hints via [`TreeRenderable::tree_layout_hints`]
-/// to influence spacing and alignment during tree rendering.
-///
-/// [`TreeRenderable::tree_layout_hints`]: crate::tree::TreeRenderable::tree_layout_hints
-///
-/// ## Examples
-///
-/// ```
-/// use renderable::tree::LayoutHints;
-///
-/// let hints = LayoutHints {
-///     top_margin: Some(1),
-///     bottom_margin: Some(2),
-///     ..Default::default()
-/// };
-/// assert_eq!(hints.top_margin, Some(1));
-/// assert_eq!(hints.left_margin, None);
-/// ```
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub struct LayoutHints {
-    /// Suggested top margin in lines.
-    pub top_margin: Option<u32>,
-    /// Suggested bottom margin in lines.
-    pub bottom_margin: Option<u32>,
-    /// Suggested left margin in characters.
-    pub left_margin: Option<u32>,
-    /// Suggested right margin in characters.
-    pub right_margin: Option<u32>,
-}
-
 /// Render hints for list nodes.
 ///
 /// Components that produce a [`NodeKind::List`] node can attach these hints
@@ -1164,6 +1132,47 @@ impl NodeAttrs {
             alternate_text_color: read_flag("alternate_text_color"),
         }
     }
+
+    /// Stores a [`Layout`](crate::layout::Layout) under the
+    /// [`HintNamespace::LAYOUT`] namespace.
+    ///
+    /// The layout is serialized to JSON and recovered by
+    /// [`NodeAttrs::layout`].
+    ///
+    /// ## Examples
+    ///
+    /// ```
+    /// use renderable::layout::Layout;
+    /// use renderable::tree::NodeAttrs;
+    ///
+    /// let mut attrs = NodeAttrs::default();
+    /// attrs.set_layout(&Layout::default());
+    /// assert_eq!(attrs.layout(), Some(Layout::default()));
+    /// ```
+    pub fn set_layout(&mut self, layout: &crate::layout::Layout) {
+        if let Ok(value) = serde_json::to_value(layout) {
+            self.set_hint(HintNamespace::LAYOUT, "layout", value);
+        }
+    }
+
+    /// Reads the [`Layout`](crate::layout::Layout) stored on this node, if any.
+    ///
+    /// Returns `None` when no layout hint is present or the stored value
+    /// fails to deserialize.
+    ///
+    /// ## Examples
+    ///
+    /// ```
+    /// use renderable::tree::NodeAttrs;
+    ///
+    /// // An empty attribute set carries no layout.
+    /// assert!(NodeAttrs::default().layout().is_none());
+    /// ```
+    #[must_use]
+    pub fn layout(&self) -> Option<crate::layout::Layout> {
+        let value = self.get_hint(HintNamespace::LAYOUT, "layout")?;
+        serde_json::from_value(value.clone()).ok()
+    }
 }
 
 #[cfg(test)]
@@ -1266,40 +1275,18 @@ mod tests {
     }
 
     #[test]
-    fn layout_hints_default_is_all_none() {
-        let hints = LayoutHints::default();
-        assert_eq!(hints.top_margin, None);
-        assert_eq!(hints.bottom_margin, None);
-        assert_eq!(hints.left_margin, None);
-        assert_eq!(hints.right_margin, None);
-    }
+    fn layout_roundtrips_through_node_attrs() {
+        use crate::layout::{Alignment, Layout, Length, Margin};
 
-    #[test]
-    fn layout_hints_partial_initialization() {
-        let hints = LayoutHints {
-            top_margin: Some(1),
-            bottom_margin: Some(2),
-            ..Default::default()
+        let layout = Layout {
+            margin: Margin::x(Length::ch(2)),
+            alignment: Alignment::Center,
+            ..Layout::default()
         };
-        assert_eq!(hints.top_margin, Some(1));
-        assert_eq!(hints.bottom_margin, Some(2));
-        assert_eq!(hints.left_margin, None);
-        assert_eq!(hints.right_margin, None);
-    }
-
-    #[test]
-    fn layout_hints_serde_round_trip() {
-        let hints = LayoutHints {
-            top_margin: Some(1),
-            bottom_margin: Some(2),
-            left_margin: Some(3),
-            right_margin: Some(4),
-        };
-
-        let json_str = serde_json::to_string(&hints).expect("serialize");
-        let decoded: LayoutHints = serde_json::from_str(&json_str).expect("deserialize");
-
-        assert_eq!(hints, decoded);
+        let mut attrs = NodeAttrs::default();
+        assert!(attrs.layout().is_none());
+        attrs.set_layout(&layout);
+        assert_eq!(attrs.layout(), Some(layout));
     }
 
     #[test]

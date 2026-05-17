@@ -31,7 +31,7 @@ mod source;
 mod validate;
 
 pub use attrs::{
-    CodeRenderHints, ColumnConditional, ColumnWidthKind, ColumnsHints, HintNamespace, LayoutHints,
+    CodeRenderHints, ColumnConditional, ColumnWidthKind, ColumnsHints, HintNamespace,
     ListRenderHints, NodeAttrs, ProgressHints, TableCellHints, TableColumnHints, TableTerminalHints,
 };
 pub use diagnostic::{Diagnostic, DiagnosticKind, Severity};
@@ -60,35 +60,6 @@ pub use validate::{
 pub trait TreeRenderable {
     /// Renders the component to a canonical render tree.
     fn render_tree(&self) -> RenderNode;
-
-    /// Returns layout hints for tree rendering, if any.
-    ///
-    /// Components that want to influence layout during tree rendering can
-    /// override this to provide hints. The default returns `None`.
-    ///
-    /// ## Examples
-    ///
-    /// ```
-    /// use renderable::tree::{LayoutHints, RenderNode, TreeRenderable};
-    ///
-    /// struct MyComponent;
-    ///
-    /// impl TreeRenderable for MyComponent {
-    ///     fn render_tree(&self) -> RenderNode {
-    ///         RenderNode::text("Hello")
-    ///     }
-    ///
-    ///     fn tree_layout_hints(&self) -> Option<LayoutHints> {
-    ///         Some(LayoutHints {
-    ///             top_margin: Some(1),
-    ///             ..Default::default()
-    ///         })
-    ///     }
-    /// }
-    /// ```
-    fn tree_layout_hints(&self) -> Option<LayoutHints> {
-        None
-    }
 }
 
 #[cfg(test)]
