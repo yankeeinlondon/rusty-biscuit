@@ -4,9 +4,8 @@
 //! generated schematic-schema client.
 
 use async_trait::async_trait;
-use schematic_define::{AuthStrategy, UpdateStrategy};
 use schematic_schema::bitbucket::*;
-use schematic_schema::shared::SchematicError;
+use schematic_schema::shared::{AuthStrategy, SchematicError, UpdateStrategy};
 
 use super::{
     provider::RemoteRepoProvider,
