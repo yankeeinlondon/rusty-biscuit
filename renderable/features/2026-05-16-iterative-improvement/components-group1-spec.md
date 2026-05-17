@@ -3,6 +3,7 @@ last_updated: "2026-05-16"
 source_documents:
   - renderable/docs/tree-rendering.md
   - renderable/features/2026-05-16-iterative-improvement/components-group1-review.md
+  - renderable/features/2026-05-16-iterative-improvement/the-fold.md
   - renderable/features/2026-05-16-iterative-improvement/components/OrderedList.md
   - renderable/features/2026-05-16-iterative-improvement/components/Progress.md
   - renderable/features/2026-05-16-iterative-improvement/components/Section.md
@@ -154,6 +155,25 @@ Code rendering hooks belong in tree render options and must be reachable through
 options or hook configuration into `render_terminal_node`. Without this,
 `YamlBlock` cannot preserve highlighting when rendered through the adapter.
 
+### Provenance of Projected Nodes
+
+Every `RenderNode` carries a `SourceSpan` with a `Provenance`. Projected
+component nodes have no byte range in any text source, so the projection layer
+must assign provenance deliberately rather than leaving it implicit.
+
+For group 1, projected component nodes use `SourceSpan::synthetic()`
+(`Provenance::Synthetic`, `location: None`). This matches how builder-created
+nodes are already marked and keeps a projected component subtree internally
+consistent.
+
+The reason to settle this in group 1, rather than during a later renderer
+migration, is that a projected component subtree is exactly the kind of subtree
+a document-level pipeline would eventually splice into a larger parsed tree.
+Fixing the convention now means a projected subtree drops into a mixed
+`Provenance::Parsed` / `Synthetic` document without a later reclassification
+pass. Structural snapshot tests serialize the `SourceSpan`, so the convention
+is enforced from Phase 0.
+
 ## Architecture Enhancements
 
 ### 1. Tree Content Projection Layer
@@ -178,6 +198,15 @@ fn to_tree_nodes(&self, context: &TreeProjectionContext) -> ProjectionResult<Vec
 The result should include diagnostics, because projection can lose styling,
 encounter unsupported components, or hit the recursion limit before any renderer
 runs.
+
+`ProjectionResult` diagnostics must be the existing `renderable::tree::Diagnostic`
+type — the same type tree validation and any document-level fold already
+produce. Projection uses `DiagnosticKind::Unsupported` for unprojectable
+components and recursion overflow, and `DiagnosticKind::Lossy` for accepted
+styling loss. Introducing a projection-specific diagnostic type is explicitly
+rejected: a single diagnostic vocabulary keeps component projection, tree
+validation, and any future document-level pipeline mergeable without a
+translation layer.
 
 This layer is required by `Section`, both list components, `TwoColumn`, and the
 styled-content parts of `Table`.
@@ -226,6 +255,14 @@ ProgressHints {
 
 Malformed required hints are diagnostics in `Warn` and errors in `Strict`.
 Renderers that do not understand a namespace ignore it.
+
+The typed helper layer must not hard-code the `renderable` prefix. Expose it as
+a reusable pattern — generic over a namespace root — so other crates can define
+their own typed helpers over their own reserved namespace, for example to carry
+parser data that has no `NodeKind` field. `NodeAttrs.data` is a
+`BTreeMap<String, serde_json::Value>`; the helper layer is the typed,
+collision-resistant way to read and write it, and that contract should be the
+same whether the writer is a component projection or a document-level pipeline.
 
 ### 3. Layout Transfer Through Existing `TreeComponent`
 
@@ -728,7 +765,9 @@ Deliver:
 - optional tree method on `TerminalRenderable`
 - projection context with recursion depth guard
 - `RenderableTerminalContent::to_tree_nodes()` or equivalent
-- typed hint helpers over `NodeAttrs.data`
+- projected nodes use `SourceSpan::synthetic()`; projection diagnostics use the
+  shared `renderable::tree::Diagnostic` type
+- typed hint helpers over `NodeAttrs.data`, generic over a namespace root
 - `TreeRenderable::tree_layout_hints()` default method
 - `TreeComponent` layout initialization from wrapped component hints
 - extensions to existing `TerminalRenderContext`
@@ -968,6 +1007,11 @@ flipping broad production rendering paths:
   `NodeKind::Table` if the hint payload grows too large?
 - What exact strictness behavior should browser adapters expose beyond their
   default `Warn` policy?
+- Should `Provenance` gain a first-class component/origin variant so a spliced
+  component subtree can name its originating component, instead of being
+  indistinguishable from other `Synthetic` nodes? `SourceDescriptor::Component`
+  already exists, but no `Provenance` variant references it outside
+  `Transcluded`.
 
 ## Recommended Initial Scope
 
