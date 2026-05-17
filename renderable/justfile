@@ -89,6 +89,33 @@ layout_matrix:
     @echo
     @cargo run -p darkmatter --example layout_matrix
 
+# Report tree-vs-bespoke render drift (RECORD_DRIFT ledger sizes)
+drift-report:
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    echo
+    echo -e "{{ BOLD }}Render Drift Report{{ RESET }}"
+    echo -e "{{ DIM }}render-tree engine vs bespoke renderer — KNOWN_DRIFT ledger{{ RESET }}"
+    echo
+
+    total=0
+    for crate in biscuit-terminal darkmatter; do
+        out=$(RECORD_DRIFT=1 cargo test -q -p "$crate" --test render_comparison -- --nocapture)
+        count=$(echo "$out" | sed -n 's/.*END KNOWN_DRIFT (\([0-9]*\) entries).*/\1/p')
+        count=${count:-0}
+        total=$((total + count))
+        echo -e "  {{ BOLD }}${crate}{{ RESET }}: ${count} drift entries"
+        echo "$out" \
+            | awk '/=== BEGIN KNOWN_DRIFT/{f=1;next} /=== END KNOWN_DRIFT/{f=0} f' \
+            | sed -n 's/.*("\([^"]*\)".*/\1/p' \
+            | sort | uniq -c | sed 's/^/  /'
+        echo
+    done
+    echo -e "  {{ BOLD }}total{{ RESET }}: ${total} drift entries"
+    echo -e "  {{ DIM }}exit condition: 0 entries in both crates{{ RESET }}"
+    echo
+
 # No-op recipe: reference color vars so linters won't report them as unused.
 # Run `just _colors` if you want to exercise this (it does nothing).
 _colors:

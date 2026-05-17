@@ -1,31 +1,3 @@
-use std::collections::HashMap;
-
-use crate::{browser::feature::PageFeature, microdata::MicrodataKey, stylesheet::Stylesheet};
-
-pub struct MarkdownStyle {
-    // pub table: PageBlock,
-    // pub hr: PageBlock,
-}
-
-pub enum MarkdownStyleOptions {
-    /// although a stylesheet is more tightly aligned with an HTML
-    /// target, Markdown content can take advantage of _downsampling_
-    /// the stylesheet to a `MarkdownStyle` struct.
-    Stylesheet(Stylesheet),
-    /// if you're really only designing for Markdown and/or Terminal
-    /// target then you can just pass in `MarkdownStyle` who's shape
-    /// is designed to slot into a Markdown page's `style` property.
-    MarkdownStyle(MarkdownStyle),
-}
-
-/// Both render functions associated with the `MarkdownRenderable` trait allow
-/// the caller to pass in a set of options to effect rendering output.
-pub struct MarkdownOptions {
-    pub style: Option<MarkdownStyleOptions>,
-    pub features: Option<Vec<PageFeature>>,
-    pub metadata: Option<HashMap<MicrodataKey, String>>,
-}
-
 /// A component capable of rendering itself as Markdown output.
 ///
 /// Markdown is a _superset_ of HTML which means, strictly speaking, it can
@@ -35,10 +7,22 @@ pub struct MarkdownOptions {
 /// 1. Every HTML tag makes the authoring experience less ergonomic
 /// 2. While many renders might render a few inline elements effectively you should expect inconsistent
 pub trait MarkdownRenderable {
-    /// Renders the component as a Markdown string.
-    fn render_markdown(&self, style: Option<MarkdownOptions>) -> String;
+    /// Renders the component as a Markdown string (including Markdown body and optionally
+    /// YAML Frontmatter).
+    ///
+    /// - any valid Markdown can be passed through "as is"
+    /// - some renderers might offer (on their input) an option to "clean" the markdown to make it more idiomatic
+    /// - some renderers might decide to provide an option (on their input) to
+    fn render_markdown(&self) -> String;
 
-    /// Renders the component as a Markdown content with an emphasis on functionality
-    /// over ergonomics.
-    fn render_markdown_plus(&self, style: Option<MarkdownOptions>) -> String;
+    /// Renders the component as a Markdown string (including Markdown body and optionally
+    /// YAML Frontmatter).
+    ///
+    /// - Features often supported by markdown renders like:
+    ///     - iframes (darkmatter will convert )
+    ///     - disclosures (darkmatter will convert ergonomic markdown directives into HTML variant)
+    ///     - nicer table rendering (by converting Markdown tables to HTML tables)
+    ///
+    /// > **Note:** the features supported should _never_ rely on Javascript!
+    fn render_markdown_plus(&self) -> String;
 }
