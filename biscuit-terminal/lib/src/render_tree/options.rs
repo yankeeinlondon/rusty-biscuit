@@ -6,7 +6,8 @@
 
 use std::rc::Rc;
 
-use renderable::tree::{CodeRenderer, LayoutHints, RenderStrictness};
+use renderable::layout::Layout as RenderableLayout;
+use renderable::tree::{CodeRenderer, RenderStrictness};
 
 use crate::discovery::detection::{ColorDepth, ColorMode, ImageSupport};
 use crate::terminal::Terminal;
@@ -65,13 +66,13 @@ pub struct TerminalRenderContext {
     /// rendered. Starts at 0 and increases as the renderer enters nested
     /// structures like block quotes or list items.
     pub current_indent: u32,
-    /// Active layout hints from the current tree context.
+    /// Active layout from the current tree context.
     ///
-    /// When a [`TreeRenderable`] provides layout hints, they are propagated
-    /// here so child renderers can consult them.
+    /// When a [`TreeRenderable`] provides a [`Layout`](renderable::layout::Layout),
+    /// it is propagated here so child renderers can consult it.
     ///
     /// [`TreeRenderable`]: renderable::tree::TreeRenderable
-    pub active_layout_hints: Option<LayoutHints>,
+    pub active_layout: Option<RenderableLayout>,
 }
 
 impl TerminalRenderContext {
@@ -95,7 +96,7 @@ impl TerminalRenderContext {
             terminal: Terminal::from(term),
             available_width: width,
             current_indent: 0,
-            active_layout_hints: None,
+            active_layout: None,
         }
     }
 
@@ -166,33 +167,34 @@ impl TerminalRenderContext {
         }
     }
 
-    /// Creates a context with specific layout hints.
+    /// Creates a context with a specific active [`Layout`].
     ///
-    /// Used when a [`TreeRenderable`] provides layout hints that should be
+    /// Used when a [`TreeRenderable`] provides a layout that should be
     /// available to child renderers.
     ///
     /// [`TreeRenderable`]: renderable::tree::TreeRenderable
+    /// [`Layout`]: renderable::layout::Layout
     ///
     /// ## Examples
     ///
     /// ```
     /// use biscuit_terminal::render_tree::TerminalRenderContext;
-    /// use renderable::tree::LayoutHints;
+    /// use renderable::layout::{Layout, Length, Margin};
     ///
     /// let ctx = TerminalRenderContext::fallback();
-    /// assert!(ctx.active_layout_hints.is_none());
+    /// assert!(ctx.active_layout.is_none());
     ///
-    /// let hints = LayoutHints {
-    ///     top_margin: Some(1),
-    ///     ..Default::default()
+    /// let layout = Layout {
+    ///     margin: Margin::y(Length::ch(1)),
+    ///     ..Layout::default()
     /// };
-    /// let with_hints = ctx.with_layout(hints.clone());
-    /// assert_eq!(with_hints.active_layout_hints, Some(hints));
+    /// let with_layout = ctx.with_layout(Some(layout.clone()));
+    /// assert_eq!(with_layout.active_layout, Some(layout));
     /// ```
     #[must_use]
-    pub fn with_layout(&self, hints: LayoutHints) -> Self {
+    pub fn with_layout(&self, layout: Option<RenderableLayout>) -> Self {
         Self {
-            active_layout_hints: Some(hints),
+            active_layout: layout,
             ..self.clone()
         }
     }
@@ -275,11 +277,11 @@ mod tests {
     }
 
     #[test]
-    fn from_terminal_initializes_layout_hints_to_none() {
+    fn from_terminal_initializes_layout_to_none() {
         let term = Terminal::new_optimistic(80);
         let ctx = TerminalRenderContext::from_terminal(&term);
 
-        assert!(ctx.active_layout_hints.is_none());
+        assert!(ctx.active_layout.is_none());
     }
 
     #[test]
@@ -289,7 +291,7 @@ mod tests {
         assert_eq!(ctx.width, 80);
         assert_eq!(ctx.available_width, 80);
         assert_eq!(ctx.current_indent, 0);
-        assert!(ctx.active_layout_hints.is_none());
+        assert!(ctx.active_layout.is_none());
     }
 
     #[test]
@@ -329,16 +331,18 @@ mod tests {
     }
 
     #[test]
-    fn for_child_preserves_layout_hints() {
-        let ctx = TerminalRenderContext::fallback();
-        let hints = LayoutHints {
-            top_margin: Some(2),
-            ..Default::default()
-        };
-        let with_hints = ctx.with_layout(hints.clone());
-        let child = with_hints.for_child(4, 0);
+    fn for_child_preserves_layout() {
+        use renderable::layout::{Layout, Length, Margin};
 
-        assert_eq!(child.active_layout_hints, Some(hints));
+        let ctx = TerminalRenderContext::fallback();
+        let layout = Layout {
+            margin: Margin::y(Length::ch(2)),
+            ..Layout::default()
+        };
+        let with_layout = ctx.with_layout(Some(layout.clone()));
+        let child = with_layout.for_child(4, 0);
+
+        assert_eq!(child.active_layout, Some(layout));
     }
 
     #[test]
@@ -368,50 +372,53 @@ mod tests {
     }
 
     #[test]
-    fn with_layout_sets_hints() {
-        let ctx = TerminalRenderContext::fallback();
-        let hints = LayoutHints {
-            top_margin: Some(1),
-            bottom_margin: Some(2),
-            left_margin: Some(3),
-            right_margin: Some(4),
-        };
-        let with_hints = ctx.with_layout(hints.clone());
+    fn with_layout_sets_layout() {
+        use renderable::layout::{Layout, Length, Margin};
 
-        assert_eq!(with_hints.active_layout_hints, Some(hints));
+        let ctx = TerminalRenderContext::fallback();
+        let layout = Layout {
+            margin: Margin::x(Length::ch(3)),
+            ..Layout::default()
+        };
+        let with_layout = ctx.with_layout(Some(layout.clone()));
+
+        assert_eq!(with_layout.active_layout, Some(layout));
     }
 
     #[test]
-    fn with_layout_replaces_existing_hints() {
+    fn with_layout_replaces_existing_layout() {
+        use renderable::layout::{Layout, Length, Margin};
+
         let ctx = TerminalRenderContext::fallback();
-        let hints1 = LayoutHints {
-            top_margin: Some(1),
-            ..Default::default()
+        let layout1 = Layout {
+            margin: Margin::y(Length::ch(1)),
+            ..Layout::default()
         };
-        let hints2 = LayoutHints {
-            top_margin: Some(5),
-            bottom_margin: Some(10),
-            ..Default::default()
+        let layout2 = Layout {
+            margin: Margin::y(Length::ch(5)),
+            ..Layout::default()
         };
 
-        let with_hints1 = ctx.with_layout(hints1);
-        let with_hints2 = with_hints1.with_layout(hints2.clone());
+        let with_layout1 = ctx.with_layout(Some(layout1));
+        let with_layout2 = with_layout1.with_layout(Some(layout2.clone()));
 
-        assert_eq!(with_hints2.active_layout_hints, Some(hints2));
+        assert_eq!(with_layout2.active_layout, Some(layout2));
     }
 
     #[test]
     fn with_layout_preserves_width_and_indent() {
+        use renderable::layout::{Layout, Length, Margin};
+
         let ctx = TerminalRenderContext::fallback();
         let indented = ctx.for_child(5, 3);
-        let hints = LayoutHints {
-            top_margin: Some(1),
-            ..Default::default()
+        let layout = Layout {
+            margin: Margin::y(Length::ch(1)),
+            ..Layout::default()
         };
-        let with_hints = indented.with_layout(hints);
+        let with_layout = indented.with_layout(Some(layout));
 
-        assert_eq!(with_hints.width, 80);
-        assert_eq!(with_hints.available_width, 72);
-        assert_eq!(with_hints.current_indent, 5);
+        assert_eq!(with_layout.width, 80);
+        assert_eq!(with_layout.available_width, 72);
+        assert_eq!(with_layout.current_indent, 5);
     }
 }

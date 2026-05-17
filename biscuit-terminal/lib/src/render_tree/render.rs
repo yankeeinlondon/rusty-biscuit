@@ -146,7 +146,86 @@ struct Writer<'a> {
 
 impl Writer<'_> {
     /// Renders a single block-level node and its subtree.
+    ///
+    /// When the node carries a [`Layout`](renderable::layout::Layout), its
+    /// margins and alignment are applied around the rendered content: the
+    /// child width is reduced by the horizontal margins, each produced line is
+    /// prefixed by the left margin (plus any alignment offset), and the
+    /// vertical margins emit leading/trailing blank lines.
     fn render(&mut self, node: &RenderNode) -> Result<String, RenderError> {
+        match node.attrs.layout() {
+            Some(layout) => self.render_with_layout(node, &layout),
+            None => self.render_kind(node),
+        }
+    }
+
+    /// Renders a node's content within the constraints of a [`Layout`].
+    ///
+    /// The horizontal margins reduce the available render width; the rendered
+    /// content is then padded by the left margin and an alignment offset, and
+    /// the vertical margins are emitted as blank lines.
+    fn render_with_layout(
+        &mut self,
+        node: &RenderNode,
+        layout: &renderable::layout::Layout,
+    ) -> Result<String, RenderError> {
+        let available = self.opts.context.available_width;
+        let left = resolve_cells(&layout.margin.left, available);
+        let right = resolve_cells(&layout.margin.right, available);
+        let top = resolve_cells(&layout.margin.top, available);
+        let bottom = resolve_cells(&layout.margin.bottom, available);
+
+        // Render the content within the width left after horizontal margins.
+        let content_width = available.saturating_sub(left + right);
+        let content = {
+            let mut narrowed = self.opts.clone();
+            narrowed.context.available_width = content_width;
+            narrowed.context.width = content_width;
+            narrowed.context.terminal.fixed_width = Some(content_width);
+            let mut sub = Writer {
+                opts: &narrowed,
+                diagnostics: Vec::new(),
+            };
+            let rendered = sub.render_kind(node);
+            self.diagnostics.append(&mut sub.diagnostics);
+            rendered?
+        };
+
+        // Alignment offset: extra left padding when the content is narrower
+        // than the space available between the horizontal margins.
+        let widest = content
+            .split('\n')
+            .map(visible_width)
+            .max()
+            .unwrap_or(0);
+        let slack = content_width.saturating_sub(widest);
+        let align_offset = match layout.alignment {
+            Alignment::Left => 0,
+            Alignment::Center => slack / 2,
+            Alignment::Right => slack,
+        };
+
+        let lead = " ".repeat((left + align_offset) as usize);
+        let mut out = String::new();
+        for _ in 0..top {
+            out.push('\n');
+        }
+        for (idx, line) in content.split('\n').enumerate() {
+            if idx > 0 {
+                out.push('\n');
+            }
+            out.push_str(&lead);
+            out.push_str(line);
+        }
+        for _ in 0..bottom {
+            out.push('\n');
+        }
+        Ok(out)
+    }
+
+    /// Renders a single block-level node by its [`NodeKind`], without applying
+    /// any node-level [`Layout`].
+    fn render_kind(&mut self, node: &RenderNode) -> Result<String, RenderError> {
         match &node.kind {
             NodeKind::Root { children } => self.render_blocks(children),
             NodeKind::Heading { depth, children } => {
@@ -498,11 +577,7 @@ impl Writer<'_> {
 
         // The indent for nested block children: explicit hint, else the
         // default for the list kind (4 for ordered, bullet width otherwise).
-        let default_indent = if ordered {
-            4
-        } else {
-            visible_width(&bullet)
-        };
+        let default_indent = if ordered { 4 } else { visible_width(&bullet) };
         let indent_children = hints.indent_children.unwrap_or(default_indent);
 
         let mut lines = Vec::with_capacity(children.len());
@@ -903,6 +978,26 @@ fn render_progress_bar(hints: &ProgressHints, paragraph_text: &str) -> String {
             "{}{bar}{} {percentage_str}",
             hints.left_bracket, hints.right_bracket
         ),
+    }
+}
+
+/// Resolves a [`TargetValue<Length>`] to whole terminal cells against `width`.
+///
+/// [`Length::Percent`] is taken as a fraction of `width`;
+/// [`Length::Css`] has no terminal meaning and resolves to `0`.
+///
+/// [`TargetValue<Length>`]: renderable::layout::TargetValue
+fn resolve_cells(
+    tv: &renderable::layout::TargetValue<renderable::layout::Length>,
+    width: u32,
+) -> u32 {
+    use renderable::layout::Length;
+    use renderable::target::RenderTarget;
+    match tv.resolve(RenderTarget::Terminal) {
+        Some(Length::Zero) | None => 0,
+        Some(Length::Ch(n)) => *n,
+        Some(Length::Percent(p)) => ((width as f32) * p / 100.0).round() as u32,
+        Some(Length::Css(_)) => 0,
     }
 }
 
