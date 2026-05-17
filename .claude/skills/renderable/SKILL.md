@@ -42,7 +42,7 @@ Terminal from the single tree it produces.
 | [Color Module](./color.md)                | Cross-target color system: `Color`, `CssColor`, `WebColor`, `BasicColor`, `Tailwind`, RGB, HDR                 |
 | [Layout Module](./layout.md)              | Target-agnostic layout: `Layout`, `Alignment`, `Margin`, `RowFill`, `MaxWidth`                                 |
 | [Markdown Module](./markdown.md)          | `MarkdownRenderable` trait and style-aware Markdown output                                                     |
-| [Tree Module](./tree.md)                  | Render tree: `RenderNode`, `Document`, `TreeRenderable`, Markdown/Browser/Terminal tree renderers              |
+| [Tree Module](./tree.md)                  | Render tree: `RenderNode`, `Document`, `TreeRenderable`, component projection, render hints, `CodeRenderer`, tree renderers |
 | [Design Decisions](./design-decisions.md) | Key architecture decisions, naming conventions, migration notes                                                |
 
 ## Quick Start
