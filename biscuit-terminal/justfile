@@ -113,8 +113,11 @@ doc open="false":
     @just _doc biscuit-terminal "{{ open }}"
     @just _doc biscuit-terminal-cli "{{ open }}"
 
-# No-op recipe: reference color vars so linters won't report them as unused.
+parity:
+    cargo run -p biscuit-terminal --example render_tree_parity
+    cargo run -p darkmatter --example render_tree_parity
 
+# No-op recipe: reference color vars so linters won't report them as unused.
 # Run `just _colors` if you want to exercise this (it does nothing).
 _colors:
     @: {{ BOLD }} {{ ITALIC }} {{ RESET }} {{ BLACK }} {{ RED }} {{ GREEN }} {{ YELLOW }} {{ BLUE }} {{ MAGENTA }} {{ CYAN }} {{ WHITE }} {{ DIM }} >/dev/null || true
