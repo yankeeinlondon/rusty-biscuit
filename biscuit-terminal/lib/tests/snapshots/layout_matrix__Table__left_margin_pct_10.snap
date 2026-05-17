@@ -1,0 +1,19 @@
+---
+source: biscuit-terminal/lib/tests/layout_matrix.rs
+expression: block
+---
+BESPOKE
+        ┌──────┬───────┐
+        │ Name │ Score │
+        ├──────┼───────┤
+        │ Ann  │ 42    │
+        │ Bob  │ 17    │
+        └──────┴───────┘
+---
+TREE
+┌──────┬───────┐
+│ Name │ Score │
+├──────┼───────┤
+│ Ann  │ 42    │
+│ Bob  │ 17    │
+└──────┴───────┘

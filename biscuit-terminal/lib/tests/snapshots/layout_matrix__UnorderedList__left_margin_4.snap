@@ -1,0 +1,13 @@
+---
+source: biscuit-terminal/lib/tests/layout_matrix.rs
+expression: block
+---
+BESPOKE
+    - First item
+    - Second item
+    - Third item
+---
+TREE
+- First item
+- Second item
+- Third item
