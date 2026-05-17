@@ -938,6 +938,30 @@ mod tests {
     }
 
     #[test]
+    fn markdown_body_is_unchanged_when_layout_is_present() {
+        use crate::layout::{Layout, Length, Margin};
+
+        let plain = RenderNode::root(vec![RenderNode::paragraph(vec![RenderNode::text("hi")])]);
+
+        let mut para = RenderNode::paragraph(vec![RenderNode::text("hi")]);
+        para.attrs.set_layout(&Layout {
+            margin: Margin::all(Length::ch(4)),
+            ..Layout::default()
+        });
+        let with_layout = RenderNode::root(vec![para]);
+
+        let opts = MarkdownRenderOptions::default();
+        let a = render_markdown_node(&plain, &opts).unwrap();
+        let b = render_markdown_node(&with_layout, &opts).unwrap();
+
+        assert_eq!(a.output, b.output, "Markdown body must ignore Layout");
+        assert!(
+            b.diagnostics.is_empty(),
+            "dropping layout from the Markdown body is by design — no diagnostics"
+        );
+    }
+
+    #[test]
     fn nested_sections_render_correctly() {
         let tree = RenderNode::root(vec![RenderNode::section(
             HeadingDepth::new(1).unwrap(),
