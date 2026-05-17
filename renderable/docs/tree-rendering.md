@@ -21,7 +21,9 @@ a dependency cycle.
 
 - `RenderNode { kind: NodeKind, span: SourceSpan, attrs: NodeAttrs }` — the node
   envelope. `span` carries provenance (and an optional byte range); `attrs`
-  carries identity (`id`), semantic `classes`, and namespaced extension `data`.
+  carries identity (`id`), semantic `classes`, namespaced extension `data`, and
+  an optional block-level `Layout` (margins, alignment, max-width, wrapping —
+  see `layout-and-style.md`).
 - `NodeKind` — a 25-variant payload enum covering document structure: `Root`,
   `Heading`, `Paragraph`, `BlockQuote`, `List`, `ListItem`, `Code`,
   `ThematicBreak`, `Table`, `TableRow`, `TableCell`, `FootnoteDefinition`,
