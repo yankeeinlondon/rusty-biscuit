@@ -6,6 +6,421 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
+/// A namespace for render hints stored in [`NodeAttrs::data`].
+///
+/// Namespaces provide a structured way to organize hints without key collisions.
+/// The full key is constructed as `"{namespace}.{key}"`.
+///
+/// ## Examples
+///
+/// ```
+/// use renderable::tree::{HintNamespace, NodeAttrs};
+/// use serde_json::json;
+///
+/// let mut attrs = NodeAttrs::default();
+/// attrs.set_hint(HintNamespace::LAYOUT, "margin_top", json!(2));
+/// assert_eq!(attrs.get_hint(HintNamespace::LAYOUT, "margin_top"), Some(&json!(2)));
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct HintNamespace(pub &'static str);
+
+impl HintNamespace {
+    /// Layout hints (margins, alignment, etc.).
+    pub const LAYOUT: HintNamespace = HintNamespace("renderable.layout");
+    /// List-specific hints (bullet style, numbering, etc.).
+    pub const LIST: HintNamespace = HintNamespace("renderable.list");
+    /// Table-specific hints (column widths, borders, etc.).
+    pub const TABLE: HintNamespace = HintNamespace("renderable.table");
+    /// Code block hints (language, highlighting, etc.).
+    pub const CODE: HintNamespace = HintNamespace("renderable.code");
+    /// Terminal-specific hints (colors, escape sequences, etc.).
+    pub const TERMINAL: HintNamespace = HintNamespace("renderable.terminal");
+    /// Progress widget hints.
+    pub const WIDGET_PROGRESS: HintNamespace = HintNamespace("renderable.widget.progress");
+    /// Column widget hints.
+    pub const WIDGET_COLUMNS: HintNamespace = HintNamespace("renderable.widget.columns");
+}
+
+/// Hints that influence how a tree node is laid out during rendering.
+///
+/// Components can return these hints via [`TreeRenderable::tree_layout_hints`]
+/// to influence spacing and alignment during tree rendering.
+///
+/// [`TreeRenderable::tree_layout_hints`]: crate::tree::TreeRenderable::tree_layout_hints
+///
+/// ## Examples
+///
+/// ```
+/// use renderable::tree::LayoutHints;
+///
+/// let hints = LayoutHints {
+///     top_margin: Some(1),
+///     bottom_margin: Some(2),
+///     ..Default::default()
+/// };
+/// assert_eq!(hints.top_margin, Some(1));
+/// assert_eq!(hints.left_margin, None);
+/// ```
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LayoutHints {
+    /// Suggested top margin in lines.
+    pub top_margin: Option<u32>,
+    /// Suggested bottom margin in lines.
+    pub bottom_margin: Option<u32>,
+    /// Suggested left margin in characters.
+    pub left_margin: Option<u32>,
+    /// Suggested right margin in characters.
+    pub right_margin: Option<u32>,
+}
+
+/// Render hints for list nodes.
+///
+/// Components that produce a [`NodeKind::List`] node can attach these hints
+/// to its [`NodeAttrs`] so the terminal renderer reproduces bespoke list
+/// formatting (custom bullets, hanging indent, child indentation).
+///
+/// [`NodeKind::List`]: crate::tree::NodeKind::List
+///
+/// ## Examples
+///
+/// ```
+/// use renderable::tree::ListRenderHints;
+///
+/// let hints = ListRenderHints {
+///     bullet: Some("* ".into()),
+///     ..Default::default()
+/// };
+/// assert!(hints.hanging_indent);
+/// assert_eq!(hints.indent_children, None);
+/// ```
+#[derive(Debug, Clone, PartialEq)]
+pub struct ListRenderHints {
+    /// Custom bullet string for unordered lists.
+    pub bullet: Option<String>,
+    /// Whether continuation lines align after the prefix.
+    pub hanging_indent: bool,
+    /// Indentation width for nested block children.
+    pub indent_children: Option<u32>,
+}
+
+impl Default for ListRenderHints {
+    fn default() -> Self {
+        Self {
+            bullet: None,
+            hanging_indent: true,
+            indent_children: None,
+        }
+    }
+}
+
+/// Render hints for code-block nodes.
+///
+/// Components that produce a [`NodeKind::Code`] node can attach these hints
+/// to its [`NodeAttrs`] so renderers reproduce bespoke code-block formatting
+/// (a language header row, an explicit label, syntax highlighting).
+///
+/// [`NodeKind::Code`]: crate::tree::NodeKind::Code
+///
+/// ## Examples
+///
+/// ```
+/// use renderable::tree::CodeRenderHints;
+///
+/// let hints = CodeRenderHints {
+///     header_row: true,
+///     language_label: Some("yaml".into()),
+///     highlight: true,
+/// };
+/// assert!(hints.header_row);
+/// assert_eq!(hints.language_label.as_deref(), Some("yaml"));
+/// ```
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct CodeRenderHints {
+    /// Whether to render a header row with the language label.
+    pub header_row: bool,
+    /// Explicit language label override.
+    pub language_label: Option<String>,
+    /// Whether syntax highlighting is requested.
+    pub highlight: bool,
+}
+
+/// Render hints for progress-bar widgets.
+///
+/// A `Progress` component projects to a [`NodeKind::Paragraph`] carrying these
+/// hints in its [`NodeAttrs`]. Renderers that recognize the hints draw a
+/// progress bar; renderers that do not fall back to the paragraph's plain text.
+///
+/// [`NodeKind::Paragraph`]: crate::tree::NodeKind::Paragraph
+///
+/// ## Examples
+///
+/// ```
+/// use renderable::tree::ProgressHints;
+///
+/// let hints = ProgressHints {
+///     value: 0.75,
+///     ..Default::default()
+/// };
+/// assert_eq!(hints.bar_width, 20);
+/// assert_eq!(hints.fill_char, '█');
+/// ```
+#[derive(Debug, Clone, PartialEq)]
+pub struct ProgressHints {
+    /// Completion value, 0.0..=1.0.
+    pub value: f32,
+    /// Width of the bar in characters.
+    pub bar_width: u32,
+    /// Character for the filled portion.
+    pub fill_char: char,
+    /// Character for the empty portion.
+    pub empty_char: char,
+    /// Left bracket character.
+    pub left_bracket: char,
+    /// Right bracket character.
+    pub right_bracket: char,
+}
+
+impl Default for ProgressHints {
+    fn default() -> Self {
+        Self {
+            value: 0.0,
+            bar_width: 20,
+            fill_char: '█',
+            empty_char: '·',
+            left_bracket: '[',
+            right_bracket: ']',
+        }
+    }
+}
+
+/// How a column's width is specified.
+///
+/// ## Examples
+///
+/// ```
+/// use renderable::tree::ColumnWidthKind;
+///
+/// let fixed = ColumnWidthKind::Fixed(30);
+/// let half = ColumnWidthKind::Percent(0.5);
+/// assert_ne!(fixed, half);
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum ColumnWidthKind {
+    /// Fixed width in characters.
+    Fixed(u32),
+    /// Fraction of available width, 0.0..=1.0.
+    Percent(f32),
+}
+
+/// Render hints for two-column layout widgets.
+///
+/// A `TwoColumn` component projects to a [`NodeKind::BlockQuote`] container
+/// carrying these hints in its [`NodeAttrs`]. Renderers that recognize the
+/// hints lay the children out side by side; renderers that do not fall back
+/// to a plain block quote.
+///
+/// [`NodeKind::BlockQuote`]: crate::tree::NodeKind::BlockQuote
+///
+/// ## Examples
+///
+/// ```
+/// use renderable::tree::ColumnsHints;
+///
+/// let hints = ColumnsHints {
+///     left_count: 1,
+///     ..Default::default()
+/// };
+/// assert_eq!(hints.gap, 3);
+/// assert!(hints.stack_below);
+/// ```
+#[derive(Debug, Clone, PartialEq)]
+pub struct ColumnsHints {
+    /// Character gap between the two columns.
+    pub gap: u32,
+    /// How the left column's width is determined.
+    pub left_width: ColumnWidthKind,
+    /// Number of leading children belonging to the left column;
+    /// remaining children belong to the right column.
+    pub left_count: usize,
+    /// Whether to stack the columns vertically below a width threshold.
+    pub stack_below: bool,
+}
+
+impl Default for ColumnsHints {
+    fn default() -> Self {
+        Self {
+            gap: 3,
+            left_width: ColumnWidthKind::Percent(0.5),
+            left_count: 0,
+            stack_below: true,
+        }
+    }
+}
+
+/// A column's conditional visibility, keyed to the renderable width.
+///
+/// Mirrors the `Conditional` enum used by the bespoke `Table` component.
+/// Serialized to a compact string form: `"always"`, `"gt:{n}"`, `"le:{n}"`.
+///
+/// ## Examples
+///
+/// ```
+/// use renderable::tree::ColumnConditional;
+///
+/// assert_eq!(ColumnConditional::Always.to_token(), "always");
+/// assert_eq!(ColumnConditional::WidthGreaterThan(80).to_token(), "gt:80");
+/// assert_eq!(
+///     ColumnConditional::from_token("le:40"),
+///     Some(ColumnConditional::LessThanOrEqual(40)),
+/// );
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ColumnConditional {
+    /// Column is always visible.
+    #[default]
+    Always,
+    /// Visible when renderable width is greater than the threshold.
+    WidthGreaterThan(u32),
+    /// Visible when renderable width is less than or equal to the threshold.
+    LessThanOrEqual(u32),
+}
+
+impl ColumnConditional {
+    /// Returns the compact string token for this conditional.
+    #[must_use]
+    pub fn to_token(self) -> String {
+        match self {
+            ColumnConditional::Always => "always".to_string(),
+            ColumnConditional::WidthGreaterThan(n) => format!("gt:{n}"),
+            ColumnConditional::LessThanOrEqual(n) => format!("le:{n}"),
+        }
+    }
+
+    /// Parses a compact string token into a conditional.
+    ///
+    /// Returns `None` for an unrecognized or malformed token.
+    #[must_use]
+    pub fn from_token(token: &str) -> Option<Self> {
+        if token == "always" {
+            return Some(ColumnConditional::Always);
+        }
+        if let Some(rest) = token.strip_prefix("gt:") {
+            return rest.parse().ok().map(ColumnConditional::WidthGreaterThan);
+        }
+        if let Some(rest) = token.strip_prefix("le:") {
+            return rest.parse().ok().map(ColumnConditional::LessThanOrEqual);
+        }
+        None
+    }
+}
+
+/// Per-column render hints for a projected [`NodeKind::Table`] node.
+///
+/// A `Table` component records one set of these per column under the
+/// [`HintNamespace::TABLE`] namespace, keyed `column.{i}.*`. Renderers that
+/// recognize the hints reproduce bespoke column width and visibility
+/// behavior; renderers that do not fall back to plain table layout.
+///
+/// [`NodeKind::Table`]: crate::tree::NodeKind::Table
+///
+/// ## Examples
+///
+/// ```
+/// use renderable::tree::{ColumnConditional, NodeAttrs, TableColumnHints};
+///
+/// let mut attrs = NodeAttrs::default();
+/// attrs.set_table_column_hints(0, &TableColumnHints {
+///     min_width: Some(8),
+///     conditional: ColumnConditional::WidthGreaterThan(80),
+///     ..Default::default()
+/// });
+/// let hints = attrs.table_column_hints(0);
+/// assert_eq!(hints.min_width, Some(8));
+/// ```
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct TableColumnHints {
+    /// Minimum column width in characters.
+    pub min_width: Option<u32>,
+    /// Maximum column width in characters.
+    pub max_width: Option<u32>,
+    /// Fixed column width in characters.
+    pub fixed_width: Option<u32>,
+    /// Conditional visibility keyed to the renderable width.
+    pub conditional: ColumnConditional,
+    /// Note appended after the table when this column is dropped.
+    pub drop_note: Option<String>,
+    /// Whether all cells in this column align uniformly.
+    pub uniform_alignment: bool,
+}
+
+/// Render hints for a single projected [`NodeKind::TableCell`] node.
+///
+/// A `Table` component records these on each data cell so renderers can
+/// recover the original typed value, the cell semantics, and per-cell
+/// alignment.
+///
+/// [`NodeKind::TableCell`]: crate::tree::NodeKind::TableCell
+///
+/// ## Examples
+///
+/// ```
+/// use renderable::tree::{NodeAttrs, TableCellHints};
+/// use serde_json::json;
+///
+/// let mut attrs = NodeAttrs::default();
+/// attrs.set_table_cell_hints(&TableCellHints {
+///     kind: "currency".into(),
+///     raw_value: json!(1234.56),
+///     alignment: "right".into(),
+///     vertical_alignment: "top".into(),
+/// });
+/// let hints = attrs.table_cell_hints().expect("cell hints present");
+/// assert_eq!(hints.kind, "currency");
+/// ```
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct TableCellHints {
+    /// Cell kind: `"text"`, `"integer"`, `"float"`, or `"currency"`.
+    pub kind: String,
+    /// The original typed value, preserved as JSON.
+    pub raw_value: serde_json::Value,
+    /// Horizontal alignment: `"left"`, `"center"`, or `"right"`.
+    pub alignment: String,
+    /// Vertical alignment: `"top"`, `"middle"`, or `"bottom"`.
+    pub vertical_alignment: String,
+}
+
+/// Terminal-specific render hints for a projected [`NodeKind::Table`] node.
+///
+/// These are stored under the [`HintNamespace::TERMINAL`] namespace and
+/// influence terminal-only behaviors. Markdown and browser renderers ignore
+/// them.
+///
+/// [`NodeKind::Table`]: crate::tree::NodeKind::Table
+///
+/// ## Examples
+///
+/// ```
+/// use renderable::tree::{NodeAttrs, TableTerminalHints};
+///
+/// let mut attrs = NodeAttrs::default();
+/// attrs.set_table_terminal_hints(&TableTerminalHints {
+///     prefer_cursor_alignment: true,
+///     alternate_background: true,
+///     ..Default::default()
+/// });
+/// let hints = attrs.table_terminal_hints();
+/// assert!(hints.prefer_cursor_alignment);
+/// ```
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct TableTerminalHints {
+    /// Whether to use cursor positioning for cell alignment.
+    pub prefer_cursor_alignment: bool,
+    /// Whether even data rows receive an alternating background tint.
+    pub alternate_background: bool,
+    /// Whether even data rows receive an alternating text tint.
+    pub alternate_text_color: bool,
+}
+
 /// Optional presentational attributes carried by every render node.
 ///
 /// All fields are optional; the [`Default`] value is an empty set of
@@ -30,4 +445,1122 @@ pub struct NodeAttrs {
     pub classes: Vec<String>,
     /// Arbitrary structured data keyed by name.
     pub data: BTreeMap<String, serde_json::Value>,
+}
+
+impl NodeAttrs {
+    /// Sets a hint value in the given namespace.
+    ///
+    /// The full key is constructed as `"{namespace}.{key}"`.
+    ///
+    /// ## Examples
+    ///
+    /// ```
+    /// use renderable::tree::{HintNamespace, NodeAttrs};
+    /// use serde_json::json;
+    ///
+    /// let mut attrs = NodeAttrs::default();
+    /// attrs.set_hint(HintNamespace::LAYOUT, "margin_top", json!(2));
+    /// ```
+    pub fn set_hint(&mut self, ns: HintNamespace, key: &str, value: serde_json::Value) {
+        let full_key = format!("{}.{}", ns.0, key);
+        self.data.insert(full_key, value);
+    }
+
+    /// Gets a hint value from the given namespace.
+    ///
+    /// Returns `None` if the hint does not exist.
+    ///
+    /// ## Examples
+    ///
+    /// ```
+    /// use renderable::tree::{HintNamespace, NodeAttrs};
+    /// use serde_json::json;
+    ///
+    /// let mut attrs = NodeAttrs::default();
+    /// attrs.set_hint(HintNamespace::LAYOUT, "margin_top", json!(2));
+    /// assert_eq!(attrs.get_hint(HintNamespace::LAYOUT, "margin_top"), Some(&json!(2)));
+    /// assert_eq!(attrs.get_hint(HintNamespace::LAYOUT, "nonexistent"), None);
+    /// ```
+    pub fn get_hint(&self, ns: HintNamespace, key: &str) -> Option<&serde_json::Value> {
+        let full_key = format!("{}.{}", ns.0, key);
+        self.data.get(&full_key)
+    }
+
+    /// Removes a hint from the given namespace.
+    ///
+    /// Returns the removed value, or `None` if the hint did not exist.
+    ///
+    /// ## Examples
+    ///
+    /// ```
+    /// use renderable::tree::{HintNamespace, NodeAttrs};
+    /// use serde_json::json;
+    ///
+    /// let mut attrs = NodeAttrs::default();
+    /// attrs.set_hint(HintNamespace::LAYOUT, "margin_top", json!(2));
+    /// let removed = attrs.remove_hint(HintNamespace::LAYOUT, "margin_top");
+    /// assert_eq!(removed, Some(json!(2)));
+    /// assert_eq!(attrs.get_hint(HintNamespace::LAYOUT, "margin_top"), None);
+    /// ```
+    pub fn remove_hint(&mut self, ns: HintNamespace, key: &str) -> Option<serde_json::Value> {
+        let full_key = format!("{}.{}", ns.0, key);
+        self.data.remove(&full_key)
+    }
+
+    /// Stores [`ListRenderHints`] under the [`HintNamespace::LIST`] namespace.
+    ///
+    /// Only non-default fields are written: a `None` bullet, a `true`
+    /// `hanging_indent`, and a `None` `indent_children` are left unset so the
+    /// hint footprint stays minimal.
+    ///
+    /// ## Examples
+    ///
+    /// ```
+    /// use renderable::tree::{ListRenderHints, NodeAttrs};
+    ///
+    /// let mut attrs = NodeAttrs::default();
+    /// attrs.set_list_hints(&ListRenderHints {
+    ///     bullet: Some("* ".into()),
+    ///     hanging_indent: false,
+    ///     indent_children: Some(4),
+    /// });
+    /// let hints = attrs.list_hints();
+    /// assert_eq!(hints.bullet.as_deref(), Some("* "));
+    /// assert!(!hints.hanging_indent);
+    /// assert_eq!(hints.indent_children, Some(4));
+    /// ```
+    pub fn set_list_hints(&mut self, hints: &ListRenderHints) {
+        match &hints.bullet {
+            Some(bullet) => self.set_hint(
+                HintNamespace::LIST,
+                "bullet",
+                serde_json::Value::String(bullet.clone()),
+            ),
+            None => {
+                self.remove_hint(HintNamespace::LIST, "bullet");
+            }
+        }
+
+        if hints.hanging_indent {
+            self.remove_hint(HintNamespace::LIST, "hanging_indent");
+        } else {
+            self.set_hint(
+                HintNamespace::LIST,
+                "hanging_indent",
+                serde_json::Value::Bool(false),
+            );
+        }
+
+        match hints.indent_children {
+            Some(indent) => self.set_hint(
+                HintNamespace::LIST,
+                "indent_children",
+                serde_json::Value::from(indent),
+            ),
+            None => {
+                self.remove_hint(HintNamespace::LIST, "indent_children");
+            }
+        }
+    }
+
+    /// Reads [`ListRenderHints`] from the [`HintNamespace::LIST`] namespace.
+    ///
+    /// Missing hints fall back to [`ListRenderHints::default`].
+    ///
+    /// ## Examples
+    ///
+    /// ```
+    /// use renderable::tree::NodeAttrs;
+    ///
+    /// // An empty attribute set yields the default hints.
+    /// let attrs = NodeAttrs::default();
+    /// let hints = attrs.list_hints();
+    /// assert_eq!(hints.bullet, None);
+    /// assert!(hints.hanging_indent);
+    /// ```
+    #[must_use]
+    pub fn list_hints(&self) -> ListRenderHints {
+        let bullet = self
+            .get_hint(HintNamespace::LIST, "bullet")
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_string);
+
+        let hanging_indent = self
+            .get_hint(HintNamespace::LIST, "hanging_indent")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(true);
+
+        let indent_children = self
+            .get_hint(HintNamespace::LIST, "indent_children")
+            .and_then(serde_json::Value::as_u64)
+            .and_then(|v| u32::try_from(v).ok());
+
+        ListRenderHints {
+            bullet,
+            hanging_indent,
+            indent_children,
+        }
+    }
+
+    /// Stores [`CodeRenderHints`] under the [`HintNamespace::CODE`] namespace.
+    ///
+    /// Only non-default fields are written: a `false` `header_row`, a `None`
+    /// `language_label`, and a `false` `highlight` are left unset so the hint
+    /// footprint stays minimal.
+    ///
+    /// ## Examples
+    ///
+    /// ```
+    /// use renderable::tree::{CodeRenderHints, NodeAttrs};
+    ///
+    /// let mut attrs = NodeAttrs::default();
+    /// attrs.set_code_hints(&CodeRenderHints {
+    ///     header_row: true,
+    ///     language_label: Some("yaml".into()),
+    ///     highlight: true,
+    /// });
+    /// let hints = attrs.code_hints();
+    /// assert!(hints.header_row);
+    /// assert_eq!(hints.language_label.as_deref(), Some("yaml"));
+    /// assert!(hints.highlight);
+    /// ```
+    pub fn set_code_hints(&mut self, hints: &CodeRenderHints) {
+        if hints.header_row {
+            self.set_hint(
+                HintNamespace::CODE,
+                "header_row",
+                serde_json::Value::Bool(true),
+            );
+        } else {
+            self.remove_hint(HintNamespace::CODE, "header_row");
+        }
+
+        match &hints.language_label {
+            Some(label) => self.set_hint(
+                HintNamespace::CODE,
+                "language_label",
+                serde_json::Value::String(label.clone()),
+            ),
+            None => {
+                self.remove_hint(HintNamespace::CODE, "language_label");
+            }
+        }
+
+        if hints.highlight {
+            self.set_hint(
+                HintNamespace::CODE,
+                "highlight",
+                serde_json::Value::Bool(true),
+            );
+        } else {
+            self.remove_hint(HintNamespace::CODE, "highlight");
+        }
+    }
+
+    /// Reads [`CodeRenderHints`] from the [`HintNamespace::CODE`] namespace.
+    ///
+    /// Missing hints fall back to [`CodeRenderHints::default`].
+    ///
+    /// ## Examples
+    ///
+    /// ```
+    /// use renderable::tree::NodeAttrs;
+    ///
+    /// // An empty attribute set yields the default hints.
+    /// let attrs = NodeAttrs::default();
+    /// let hints = attrs.code_hints();
+    /// assert!(!hints.header_row);
+    /// assert_eq!(hints.language_label, None);
+    /// assert!(!hints.highlight);
+    /// ```
+    #[must_use]
+    pub fn code_hints(&self) -> CodeRenderHints {
+        let header_row = self
+            .get_hint(HintNamespace::CODE, "header_row")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false);
+
+        let language_label = self
+            .get_hint(HintNamespace::CODE, "language_label")
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_string);
+
+        let highlight = self
+            .get_hint(HintNamespace::CODE, "highlight")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false);
+
+        CodeRenderHints {
+            header_row,
+            language_label,
+            highlight,
+        }
+    }
+
+    /// Stores [`ProgressHints`] under the [`HintNamespace::WIDGET_PROGRESS`]
+    /// namespace.
+    ///
+    /// All six fields are written so [`NodeAttrs::progress_hints`] can detect
+    /// the presence of progress hints and reproduce the bar faithfully.
+    ///
+    /// ## Examples
+    ///
+    /// ```
+    /// use renderable::tree::{NodeAttrs, ProgressHints};
+    ///
+    /// let mut attrs = NodeAttrs::default();
+    /// attrs.set_progress_hints(&ProgressHints {
+    ///     value: 0.5,
+    ///     ..Default::default()
+    /// });
+    /// assert_eq!(attrs.progress_hints().unwrap().value, 0.5);
+    /// ```
+    pub fn set_progress_hints(&mut self, hints: &ProgressHints) {
+        self.set_hint(
+            HintNamespace::WIDGET_PROGRESS,
+            "value",
+            serde_json::Value::from(hints.value),
+        );
+        self.set_hint(
+            HintNamespace::WIDGET_PROGRESS,
+            "bar_width",
+            serde_json::Value::from(hints.bar_width),
+        );
+        self.set_hint(
+            HintNamespace::WIDGET_PROGRESS,
+            "fill_char",
+            serde_json::Value::String(hints.fill_char.to_string()),
+        );
+        self.set_hint(
+            HintNamespace::WIDGET_PROGRESS,
+            "empty_char",
+            serde_json::Value::String(hints.empty_char.to_string()),
+        );
+        self.set_hint(
+            HintNamespace::WIDGET_PROGRESS,
+            "left_bracket",
+            serde_json::Value::String(hints.left_bracket.to_string()),
+        );
+        self.set_hint(
+            HintNamespace::WIDGET_PROGRESS,
+            "right_bracket",
+            serde_json::Value::String(hints.right_bracket.to_string()),
+        );
+    }
+
+    /// Reads [`ProgressHints`] from the [`HintNamespace::WIDGET_PROGRESS`]
+    /// namespace.
+    ///
+    /// Returns `None` when no progress `value` hint is present, so renderers
+    /// can detect whether a paragraph is a projected progress widget. Any
+    /// individual missing field falls back to [`ProgressHints::default`].
+    ///
+    /// ## Examples
+    ///
+    /// ```
+    /// use renderable::tree::NodeAttrs;
+    ///
+    /// // A plain paragraph carries no progress hints.
+    /// assert!(NodeAttrs::default().progress_hints().is_none());
+    /// ```
+    #[must_use]
+    pub fn progress_hints(&self) -> Option<ProgressHints> {
+        let value = self
+            .get_hint(HintNamespace::WIDGET_PROGRESS, "value")
+            .and_then(serde_json::Value::as_f64)? as f32;
+
+        let defaults = ProgressHints::default();
+
+        let bar_width = self
+            .get_hint(HintNamespace::WIDGET_PROGRESS, "bar_width")
+            .and_then(serde_json::Value::as_u64)
+            .and_then(|v| u32::try_from(v).ok())
+            .unwrap_or(defaults.bar_width);
+
+        let read_char = |key: &str, fallback: char| -> char {
+            self.get_hint(HintNamespace::WIDGET_PROGRESS, key)
+                .and_then(serde_json::Value::as_str)
+                .and_then(|s| s.chars().next())
+                .unwrap_or(fallback)
+        };
+
+        Some(ProgressHints {
+            value,
+            bar_width,
+            fill_char: read_char("fill_char", defaults.fill_char),
+            empty_char: read_char("empty_char", defaults.empty_char),
+            left_bracket: read_char("left_bracket", defaults.left_bracket),
+            right_bracket: read_char("right_bracket", defaults.right_bracket),
+        })
+    }
+
+    /// Stores [`ColumnsHints`] under the [`HintNamespace::WIDGET_COLUMNS`]
+    /// namespace.
+    ///
+    /// All fields are written so [`NodeAttrs::columns_hints`] can detect the
+    /// presence of column hints and reconstruct the two-column layout.
+    ///
+    /// ## Examples
+    ///
+    /// ```
+    /// use renderable::tree::{ColumnsHints, NodeAttrs};
+    ///
+    /// let mut attrs = NodeAttrs::default();
+    /// attrs.set_columns_hints(&ColumnsHints {
+    ///     left_count: 2,
+    ///     ..Default::default()
+    /// });
+    /// assert_eq!(attrs.columns_hints().unwrap().left_count, 2);
+    /// ```
+    pub fn set_columns_hints(&mut self, hints: &ColumnsHints) {
+        self.set_hint(
+            HintNamespace::WIDGET_COLUMNS,
+            "gap",
+            serde_json::Value::from(hints.gap),
+        );
+        let (kind, value) = match hints.left_width {
+            ColumnWidthKind::Fixed(chars) => ("fixed", serde_json::Value::from(chars)),
+            ColumnWidthKind::Percent(percent) => ("percent", serde_json::Value::from(percent)),
+        };
+        self.set_hint(
+            HintNamespace::WIDGET_COLUMNS,
+            "left_width_kind",
+            serde_json::Value::String(kind.to_string()),
+        );
+        self.set_hint(HintNamespace::WIDGET_COLUMNS, "left_width", value);
+        self.set_hint(
+            HintNamespace::WIDGET_COLUMNS,
+            "left_count",
+            serde_json::Value::from(hints.left_count as u64),
+        );
+        self.set_hint(
+            HintNamespace::WIDGET_COLUMNS,
+            "stack_below",
+            serde_json::Value::Bool(hints.stack_below),
+        );
+    }
+
+    /// Reads [`ColumnsHints`] from the [`HintNamespace::WIDGET_COLUMNS`]
+    /// namespace.
+    ///
+    /// Returns `None` when no `gap` hint is present, so renderers can detect
+    /// whether a block quote is a projected two-column widget. Any individual
+    /// missing field falls back to [`ColumnsHints::default`].
+    ///
+    /// ## Examples
+    ///
+    /// ```
+    /// use renderable::tree::NodeAttrs;
+    ///
+    /// // A plain block quote carries no column hints.
+    /// assert!(NodeAttrs::default().columns_hints().is_none());
+    /// ```
+    #[must_use]
+    pub fn columns_hints(&self) -> Option<ColumnsHints> {
+        let gap = self
+            .get_hint(HintNamespace::WIDGET_COLUMNS, "gap")
+            .and_then(serde_json::Value::as_u64)
+            .and_then(|v| u32::try_from(v).ok())?;
+
+        let defaults = ColumnsHints::default();
+
+        let left_width = match self
+            .get_hint(HintNamespace::WIDGET_COLUMNS, "left_width_kind")
+            .and_then(serde_json::Value::as_str)
+        {
+            Some("fixed") => self
+                .get_hint(HintNamespace::WIDGET_COLUMNS, "left_width")
+                .and_then(serde_json::Value::as_u64)
+                .and_then(|v| u32::try_from(v).ok())
+                .map(ColumnWidthKind::Fixed)
+                .unwrap_or(defaults.left_width),
+            Some("percent") => self
+                .get_hint(HintNamespace::WIDGET_COLUMNS, "left_width")
+                .and_then(serde_json::Value::as_f64)
+                .map(|v| ColumnWidthKind::Percent(v as f32))
+                .unwrap_or(defaults.left_width),
+            _ => defaults.left_width,
+        };
+
+        let left_count = self
+            .get_hint(HintNamespace::WIDGET_COLUMNS, "left_count")
+            .and_then(serde_json::Value::as_u64)
+            .map(|v| v as usize)
+            .unwrap_or(defaults.left_count);
+
+        let stack_below = self
+            .get_hint(HintNamespace::WIDGET_COLUMNS, "stack_below")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(defaults.stack_below);
+
+        Some(ColumnsHints {
+            gap,
+            left_width,
+            left_count,
+            stack_below,
+        })
+    }
+
+    /// Stores [`TableColumnHints`] for column `index` under the
+    /// [`HintNamespace::TABLE`] namespace.
+    ///
+    /// Keys are prefixed `column.{index}.`. Only non-default fields are
+    /// written so the hint footprint stays minimal.
+    ///
+    /// ## Examples
+    ///
+    /// ```
+    /// use renderable::tree::{NodeAttrs, TableColumnHints};
+    ///
+    /// let mut attrs = NodeAttrs::default();
+    /// attrs.set_table_column_hints(2, &TableColumnHints {
+    ///     fixed_width: Some(12),
+    ///     ..Default::default()
+    /// });
+    /// assert_eq!(attrs.table_column_hints(2).fixed_width, Some(12));
+    /// ```
+    pub fn set_table_column_hints(&mut self, index: usize, hints: &TableColumnHints) {
+        let key = |suffix: &str| format!("column.{index}.{suffix}");
+
+        for (suffix, value) in [
+            ("min_width", hints.min_width),
+            ("max_width", hints.max_width),
+            ("fixed_width", hints.fixed_width),
+        ] {
+            match value {
+                Some(width) => self.set_hint(
+                    HintNamespace::TABLE,
+                    &key(suffix),
+                    serde_json::Value::from(width),
+                ),
+                None => {
+                    self.remove_hint(HintNamespace::TABLE, &key(suffix));
+                }
+            }
+        }
+
+        if hints.conditional == ColumnConditional::Always {
+            self.remove_hint(HintNamespace::TABLE, &key("conditional"));
+        } else {
+            self.set_hint(
+                HintNamespace::TABLE,
+                &key("conditional"),
+                serde_json::Value::String(hints.conditional.to_token()),
+            );
+        }
+
+        match &hints.drop_note {
+            Some(note) => self.set_hint(
+                HintNamespace::TABLE,
+                &key("drop_note"),
+                serde_json::Value::String(note.clone()),
+            ),
+            None => {
+                self.remove_hint(HintNamespace::TABLE, &key("drop_note"));
+            }
+        }
+
+        if hints.uniform_alignment {
+            self.set_hint(
+                HintNamespace::TABLE,
+                &key("uniform_alignment"),
+                serde_json::Value::Bool(true),
+            );
+        } else {
+            self.remove_hint(HintNamespace::TABLE, &key("uniform_alignment"));
+        }
+    }
+
+    /// Reads [`TableColumnHints`] for column `index` from the
+    /// [`HintNamespace::TABLE`] namespace.
+    ///
+    /// Missing hints fall back to [`TableColumnHints::default`]. Malformed
+    /// conditional tokens fall back to [`ColumnConditional::Always`].
+    ///
+    /// ## Examples
+    ///
+    /// ```
+    /// use renderable::tree::NodeAttrs;
+    ///
+    /// // An empty attribute set yields the default column hints.
+    /// let hints = NodeAttrs::default().table_column_hints(0);
+    /// assert_eq!(hints.min_width, None);
+    /// ```
+    #[must_use]
+    pub fn table_column_hints(&self, index: usize) -> TableColumnHints {
+        let key = |suffix: &str| format!("column.{index}.{suffix}");
+
+        let read_width = |suffix: &str| -> Option<u32> {
+            self.get_hint(HintNamespace::TABLE, &key(suffix))
+                .and_then(serde_json::Value::as_u64)
+                .and_then(|v| u32::try_from(v).ok())
+        };
+
+        let conditional = self
+            .get_hint(HintNamespace::TABLE, &key("conditional"))
+            .and_then(serde_json::Value::as_str)
+            .and_then(ColumnConditional::from_token)
+            .unwrap_or_default();
+
+        let drop_note = self
+            .get_hint(HintNamespace::TABLE, &key("drop_note"))
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_string);
+
+        let uniform_alignment = self
+            .get_hint(HintNamespace::TABLE, &key("uniform_alignment"))
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false);
+
+        TableColumnHints {
+            min_width: read_width("min_width"),
+            max_width: read_width("max_width"),
+            fixed_width: read_width("fixed_width"),
+            conditional,
+            drop_note,
+            uniform_alignment,
+        }
+    }
+
+    /// Stores [`TableCellHints`] under the [`HintNamespace::TABLE`] namespace.
+    ///
+    /// All four fields are written so [`NodeAttrs::table_cell_hints`] can
+    /// detect the presence of cell hints.
+    ///
+    /// ## Examples
+    ///
+    /// ```
+    /// use renderable::tree::{NodeAttrs, TableCellHints};
+    /// use serde_json::json;
+    ///
+    /// let mut attrs = NodeAttrs::default();
+    /// attrs.set_table_cell_hints(&TableCellHints {
+    ///     kind: "integer".into(),
+    ///     raw_value: json!(42),
+    ///     alignment: "right".into(),
+    ///     vertical_alignment: "top".into(),
+    /// });
+    /// assert!(attrs.table_cell_hints().is_some());
+    /// ```
+    pub fn set_table_cell_hints(&mut self, hints: &TableCellHints) {
+        self.set_hint(
+            HintNamespace::TABLE,
+            "cell.kind",
+            serde_json::Value::String(hints.kind.clone()),
+        );
+        self.set_hint(
+            HintNamespace::TABLE,
+            "cell.raw_value",
+            hints.raw_value.clone(),
+        );
+        self.set_hint(
+            HintNamespace::TABLE,
+            "cell.alignment",
+            serde_json::Value::String(hints.alignment.clone()),
+        );
+        self.set_hint(
+            HintNamespace::TABLE,
+            "cell.vertical_alignment",
+            serde_json::Value::String(hints.vertical_alignment.clone()),
+        );
+    }
+
+    /// Reads [`TableCellHints`] from the [`HintNamespace::TABLE`] namespace.
+    ///
+    /// Returns `None` when no `cell.kind` hint is present, so renderers can
+    /// detect whether a table cell carries typed-cell hints.
+    ///
+    /// ## Examples
+    ///
+    /// ```
+    /// use renderable::tree::NodeAttrs;
+    ///
+    /// // A plain table cell carries no cell hints.
+    /// assert!(NodeAttrs::default().table_cell_hints().is_none());
+    /// ```
+    #[must_use]
+    pub fn table_cell_hints(&self) -> Option<TableCellHints> {
+        let kind = self
+            .get_hint(HintNamespace::TABLE, "cell.kind")
+            .and_then(serde_json::Value::as_str)?
+            .to_string();
+
+        let raw_value = self
+            .get_hint(HintNamespace::TABLE, "cell.raw_value")
+            .cloned()
+            .unwrap_or(serde_json::Value::Null);
+
+        let read_str = |key: &str, fallback: &str| -> String {
+            self.get_hint(HintNamespace::TABLE, key)
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or(fallback)
+                .to_string()
+        };
+
+        Some(TableCellHints {
+            kind,
+            raw_value,
+            alignment: read_str("cell.alignment", "left"),
+            vertical_alignment: read_str("cell.vertical_alignment", "top"),
+        })
+    }
+
+    /// Stores [`TableTerminalHints`] under the [`HintNamespace::TERMINAL`]
+    /// namespace.
+    ///
+    /// Only `true` flags are written so the hint footprint stays minimal.
+    ///
+    /// ## Examples
+    ///
+    /// ```
+    /// use renderable::tree::{NodeAttrs, TableTerminalHints};
+    ///
+    /// let mut attrs = NodeAttrs::default();
+    /// attrs.set_table_terminal_hints(&TableTerminalHints {
+    ///     alternate_text_color: true,
+    ///     ..Default::default()
+    /// });
+    /// assert!(attrs.table_terminal_hints().alternate_text_color);
+    /// ```
+    pub fn set_table_terminal_hints(&mut self, hints: &TableTerminalHints) {
+        for (key, flag) in [
+            ("prefer_cursor_alignment", hints.prefer_cursor_alignment),
+            ("alternate_background", hints.alternate_background),
+            ("alternate_text_color", hints.alternate_text_color),
+        ] {
+            if flag {
+                self.set_hint(HintNamespace::TERMINAL, key, serde_json::Value::Bool(true));
+            } else {
+                self.remove_hint(HintNamespace::TERMINAL, key);
+            }
+        }
+    }
+
+    /// Reads [`TableTerminalHints`] from the [`HintNamespace::TERMINAL`]
+    /// namespace.
+    ///
+    /// Missing hints fall back to [`TableTerminalHints::default`].
+    ///
+    /// ## Examples
+    ///
+    /// ```
+    /// use renderable::tree::NodeAttrs;
+    ///
+    /// // An empty attribute set yields all-false terminal hints.
+    /// let hints = NodeAttrs::default().table_terminal_hints();
+    /// assert!(!hints.prefer_cursor_alignment);
+    /// ```
+    #[must_use]
+    pub fn table_terminal_hints(&self) -> TableTerminalHints {
+        let read_flag = |key: &str| -> bool {
+            self.get_hint(HintNamespace::TERMINAL, key)
+                .and_then(serde_json::Value::as_bool)
+                .unwrap_or(false)
+        };
+
+        TableTerminalHints {
+            prefer_cursor_alignment: read_flag("prefer_cursor_alignment"),
+            alternate_background: read_flag("alternate_background"),
+            alternate_text_color: read_flag("alternate_text_color"),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn hint_round_trip_set_get_remove() {
+        let mut attrs = NodeAttrs::default();
+
+        // Set hint
+        attrs.set_hint(HintNamespace::LAYOUT, "margin_top", json!(2));
+        assert_eq!(
+            attrs.get_hint(HintNamespace::LAYOUT, "margin_top"),
+            Some(&json!(2))
+        );
+
+        // Overwrite hint
+        attrs.set_hint(HintNamespace::LAYOUT, "margin_top", json!(5));
+        assert_eq!(
+            attrs.get_hint(HintNamespace::LAYOUT, "margin_top"),
+            Some(&json!(5))
+        );
+
+        // Remove hint
+        let removed = attrs.remove_hint(HintNamespace::LAYOUT, "margin_top");
+        assert_eq!(removed, Some(json!(5)));
+        assert_eq!(attrs.get_hint(HintNamespace::LAYOUT, "margin_top"), None);
+
+        // Remove nonexistent hint
+        let removed = attrs.remove_hint(HintNamespace::LAYOUT, "margin_top");
+        assert_eq!(removed, None);
+    }
+
+    #[test]
+    fn namespaced_keys_do_not_collide_with_adhoc_keys() {
+        let mut attrs = NodeAttrs::default();
+
+        // Set a namespaced hint (full key: "renderable.layout.margin")
+        attrs.set_hint(HintNamespace::LAYOUT, "margin", json!(10));
+
+        // Set an ad-hoc key that looks similar but uses a different prefix
+        attrs
+            .data
+            .insert("layout.margin".to_string(), json!("adhoc_value"));
+
+        // The namespaced hint is unaffected by the ad-hoc key
+        assert_eq!(
+            attrs.get_hint(HintNamespace::LAYOUT, "margin"),
+            Some(&json!(10))
+        );
+
+        // The ad-hoc key exists separately
+        assert_eq!(attrs.data.get("layout.margin"), Some(&json!("adhoc_value")));
+
+        // Both keys coexist in data
+        assert_eq!(attrs.data.get("renderable.layout.margin"), Some(&json!(10)));
+    }
+
+    #[test]
+    fn different_namespaces_do_not_collide() {
+        let mut attrs = NodeAttrs::default();
+
+        attrs.set_hint(HintNamespace::LAYOUT, "width", json!(100));
+        attrs.set_hint(HintNamespace::TABLE, "width", json!(200));
+        attrs.set_hint(HintNamespace::WIDGET_COLUMNS, "width", json!(300));
+
+        assert_eq!(
+            attrs.get_hint(HintNamespace::LAYOUT, "width"),
+            Some(&json!(100))
+        );
+        assert_eq!(
+            attrs.get_hint(HintNamespace::TABLE, "width"),
+            Some(&json!(200))
+        );
+        assert_eq!(
+            attrs.get_hint(HintNamespace::WIDGET_COLUMNS, "width"),
+            Some(&json!(300))
+        );
+    }
+
+    #[test]
+    fn json_serialization_preserves_namespaced_keys() {
+        let mut attrs = NodeAttrs::default();
+        attrs.set_hint(HintNamespace::LAYOUT, "margin_top", json!(2));
+        attrs.set_hint(HintNamespace::TABLE, "border", json!(true));
+
+        let json_str = serde_json::to_string(&attrs).expect("serialize");
+        let decoded: NodeAttrs = serde_json::from_str(&json_str).expect("deserialize");
+
+        assert_eq!(
+            decoded.get_hint(HintNamespace::LAYOUT, "margin_top"),
+            Some(&json!(2))
+        );
+        assert_eq!(
+            decoded.get_hint(HintNamespace::TABLE, "border"),
+            Some(&json!(true))
+        );
+    }
+
+    #[test]
+    fn layout_hints_default_is_all_none() {
+        let hints = LayoutHints::default();
+        assert_eq!(hints.top_margin, None);
+        assert_eq!(hints.bottom_margin, None);
+        assert_eq!(hints.left_margin, None);
+        assert_eq!(hints.right_margin, None);
+    }
+
+    #[test]
+    fn layout_hints_partial_initialization() {
+        let hints = LayoutHints {
+            top_margin: Some(1),
+            bottom_margin: Some(2),
+            ..Default::default()
+        };
+        assert_eq!(hints.top_margin, Some(1));
+        assert_eq!(hints.bottom_margin, Some(2));
+        assert_eq!(hints.left_margin, None);
+        assert_eq!(hints.right_margin, None);
+    }
+
+    #[test]
+    fn layout_hints_serde_round_trip() {
+        let hints = LayoutHints {
+            top_margin: Some(1),
+            bottom_margin: Some(2),
+            left_margin: Some(3),
+            right_margin: Some(4),
+        };
+
+        let json_str = serde_json::to_string(&hints).expect("serialize");
+        let decoded: LayoutHints = serde_json::from_str(&json_str).expect("deserialize");
+
+        assert_eq!(hints, decoded);
+    }
+
+    #[test]
+    fn code_hints_round_trip_set_and_read() {
+        let mut attrs = NodeAttrs::default();
+        attrs.set_code_hints(&CodeRenderHints {
+            header_row: true,
+            language_label: Some("yaml".into()),
+            highlight: true,
+        });
+
+        let hints = attrs.code_hints();
+        assert!(hints.header_row);
+        assert_eq!(hints.language_label.as_deref(), Some("yaml"));
+        assert!(hints.highlight);
+    }
+
+    #[test]
+    fn code_hints_default_fields_are_left_unset() {
+        let mut attrs = NodeAttrs::default();
+        attrs.set_code_hints(&CodeRenderHints::default());
+
+        // No keys are written for an all-default hint set.
+        assert!(attrs.get_hint(HintNamespace::CODE, "header_row").is_none());
+        assert!(
+            attrs
+                .get_hint(HintNamespace::CODE, "language_label")
+                .is_none()
+        );
+        assert!(attrs.get_hint(HintNamespace::CODE, "highlight").is_none());
+
+        let hints = attrs.code_hints();
+        assert_eq!(hints, CodeRenderHints::default());
+    }
+
+    #[test]
+    fn progress_hints_default_matches_progress_component() {
+        let hints = ProgressHints::default();
+        assert_eq!(hints.value, 0.0);
+        assert_eq!(hints.bar_width, 20);
+        assert_eq!(hints.fill_char, '█');
+        assert_eq!(hints.empty_char, '·');
+        assert_eq!(hints.left_bracket, '[');
+        assert_eq!(hints.right_bracket, ']');
+    }
+
+    #[test]
+    fn progress_hints_round_trip_set_and_read() {
+        let mut attrs = NodeAttrs::default();
+        attrs.set_progress_hints(&ProgressHints {
+            value: 0.42,
+            bar_width: 10,
+            fill_char: '#',
+            empty_char: '-',
+            left_bracket: '(',
+            right_bracket: ')',
+        });
+
+        let hints = attrs.progress_hints().expect("progress hints present");
+        assert!((hints.value - 0.42).abs() < 1e-6);
+        assert_eq!(hints.bar_width, 10);
+        assert_eq!(hints.fill_char, '#');
+        assert_eq!(hints.empty_char, '-');
+        assert_eq!(hints.left_bracket, '(');
+        assert_eq!(hints.right_bracket, ')');
+    }
+
+    #[test]
+    fn progress_hints_absent_returns_none() {
+        let attrs = NodeAttrs::default();
+        assert!(attrs.progress_hints().is_none());
+    }
+
+    #[test]
+    fn progress_hints_missing_fields_fall_back_to_defaults() {
+        // Only `value` is present; the rest fall back to defaults.
+        let mut attrs = NodeAttrs::default();
+        attrs.set_hint(HintNamespace::WIDGET_PROGRESS, "value", json!(0.25));
+
+        let hints = attrs.progress_hints().expect("value present");
+        assert!((hints.value - 0.25).abs() < 1e-6);
+        assert_eq!(hints, ProgressHints {
+            value: hints.value,
+            ..Default::default()
+        });
+    }
+
+    #[test]
+    fn columns_hints_default_matches_two_column_component() {
+        let hints = ColumnsHints::default();
+        assert_eq!(hints.gap, 3);
+        assert_eq!(hints.left_width, ColumnWidthKind::Percent(0.5));
+        assert_eq!(hints.left_count, 0);
+        assert!(hints.stack_below);
+    }
+
+    #[test]
+    fn columns_hints_round_trip_percent() {
+        let mut attrs = NodeAttrs::default();
+        attrs.set_columns_hints(&ColumnsHints {
+            gap: 5,
+            left_width: ColumnWidthKind::Percent(0.7),
+            left_count: 3,
+            stack_below: false,
+        });
+
+        let hints = attrs.columns_hints().expect("columns hints present");
+        assert_eq!(hints.gap, 5);
+        assert_eq!(hints.left_width, ColumnWidthKind::Percent(0.7));
+        assert_eq!(hints.left_count, 3);
+        assert!(!hints.stack_below);
+    }
+
+    #[test]
+    fn columns_hints_round_trip_fixed() {
+        let mut attrs = NodeAttrs::default();
+        attrs.set_columns_hints(&ColumnsHints {
+            gap: 2,
+            left_width: ColumnWidthKind::Fixed(40),
+            left_count: 1,
+            stack_below: true,
+        });
+
+        let hints = attrs.columns_hints().expect("columns hints present");
+        assert_eq!(hints.gap, 2);
+        assert_eq!(hints.left_width, ColumnWidthKind::Fixed(40));
+        assert_eq!(hints.left_count, 1);
+        assert!(hints.stack_below);
+    }
+
+    #[test]
+    fn columns_hints_absent_returns_none() {
+        let attrs = NodeAttrs::default();
+        assert!(attrs.columns_hints().is_none());
+    }
+
+    #[test]
+    fn column_conditional_token_round_trip() {
+        for c in [
+            ColumnConditional::Always,
+            ColumnConditional::WidthGreaterThan(80),
+            ColumnConditional::LessThanOrEqual(40),
+        ] {
+            assert_eq!(ColumnConditional::from_token(&c.to_token()), Some(c));
+        }
+        assert_eq!(ColumnConditional::from_token("bogus"), None);
+        assert_eq!(ColumnConditional::from_token("gt:notanumber"), None);
+    }
+
+    #[test]
+    fn table_column_hints_round_trip() {
+        let mut attrs = NodeAttrs::default();
+        attrs.set_table_column_hints(1, &TableColumnHints {
+            min_width: Some(4),
+            max_width: Some(40),
+            fixed_width: Some(12),
+            conditional: ColumnConditional::WidthGreaterThan(80),
+            drop_note: Some("notes hidden".into()),
+            uniform_alignment: true,
+        });
+
+        let hints = attrs.table_column_hints(1);
+        assert_eq!(hints.min_width, Some(4));
+        assert_eq!(hints.max_width, Some(40));
+        assert_eq!(hints.fixed_width, Some(12));
+        assert_eq!(hints.conditional, ColumnConditional::WidthGreaterThan(80));
+        assert_eq!(hints.drop_note.as_deref(), Some("notes hidden"));
+        assert!(hints.uniform_alignment);
+    }
+
+    #[test]
+    fn table_column_hints_default_fields_left_unset() {
+        let mut attrs = NodeAttrs::default();
+        attrs.set_table_column_hints(0, &TableColumnHints::default());
+        assert!(attrs.data.is_empty());
+        assert_eq!(attrs.table_column_hints(0), TableColumnHints::default());
+    }
+
+    #[test]
+    fn table_column_hints_indexed_independently() {
+        let mut attrs = NodeAttrs::default();
+        attrs.set_table_column_hints(0, &TableColumnHints {
+            min_width: Some(5),
+            ..Default::default()
+        });
+        attrs.set_table_column_hints(1, &TableColumnHints {
+            min_width: Some(9),
+            ..Default::default()
+        });
+        assert_eq!(attrs.table_column_hints(0).min_width, Some(5));
+        assert_eq!(attrs.table_column_hints(1).min_width, Some(9));
+    }
+
+    #[test]
+    fn table_cell_hints_round_trip() {
+        let mut attrs = NodeAttrs::default();
+        attrs.set_table_cell_hints(&TableCellHints {
+            kind: "currency".into(),
+            raw_value: json!(1234.56),
+            alignment: "right".into(),
+            vertical_alignment: "middle".into(),
+        });
+
+        let hints = attrs.table_cell_hints().expect("cell hints present");
+        assert_eq!(hints.kind, "currency");
+        assert_eq!(hints.raw_value, json!(1234.56));
+        assert_eq!(hints.alignment, "right");
+        assert_eq!(hints.vertical_alignment, "middle");
+    }
+
+    #[test]
+    fn table_cell_hints_absent_returns_none() {
+        assert!(NodeAttrs::default().table_cell_hints().is_none());
+    }
+
+    #[test]
+    fn table_cell_hints_missing_fields_fall_back() {
+        // Only `cell.kind` is set; the rest fall back to defaults.
+        let mut attrs = NodeAttrs::default();
+        attrs.set_hint(HintNamespace::TABLE, "cell.kind", json!("text"));
+        let hints = attrs.table_cell_hints().expect("kind present");
+        assert_eq!(hints.kind, "text");
+        assert_eq!(hints.alignment, "left");
+        assert_eq!(hints.vertical_alignment, "top");
+        assert_eq!(hints.raw_value, serde_json::Value::Null);
+    }
+
+    #[test]
+    fn table_terminal_hints_round_trip() {
+        let mut attrs = NodeAttrs::default();
+        attrs.set_table_terminal_hints(&TableTerminalHints {
+            prefer_cursor_alignment: true,
+            alternate_background: true,
+            alternate_text_color: false,
+        });
+        let hints = attrs.table_terminal_hints();
+        assert!(hints.prefer_cursor_alignment);
+        assert!(hints.alternate_background);
+        assert!(!hints.alternate_text_color);
+    }
+
+    #[test]
+    fn table_terminal_hints_default_fields_left_unset() {
+        let mut attrs = NodeAttrs::default();
+        attrs.set_table_terminal_hints(&TableTerminalHints::default());
+        assert!(attrs.data.is_empty());
+        assert_eq!(attrs.table_terminal_hints(), TableTerminalHints::default());
+    }
+
+    #[test]
+    fn custom_namespace_works() {
+        // Verify external crates can define their own namespaces
+        const CUSTOM_NS: HintNamespace = HintNamespace("myapp.custom");
+
+        let mut attrs = NodeAttrs::default();
+        attrs.set_hint(CUSTOM_NS, "setting", json!("value"));
+
+        assert_eq!(attrs.get_hint(CUSTOM_NS, "setting"), Some(&json!("value")));
+        assert_eq!(
+            attrs.data.get("myapp.custom.setting"),
+            Some(&json!("value"))
+        );
+    }
 }

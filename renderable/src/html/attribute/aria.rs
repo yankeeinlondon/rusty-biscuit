@@ -387,10 +387,7 @@ impl AriaAttribute {
     /// boolean attributes, so they always emit an explicit value.
     pub fn render(&self) -> String {
         fn join_ids(ids: &[DomId]) -> String {
-            ids.iter()
-                .map(DomId::as_str)
-                .collect::<Vec<_>>()
-                .join(" ")
+            ids.iter().map(DomId::as_str).collect::<Vec<_>>().join(" ")
         }
         let bool_str = |value: bool| if value { "true" } else { "false" }.to_string();
 
@@ -438,9 +435,7 @@ impl AriaAttribute {
                     .join(" "),
             ),
             AriaAttribute::Grabbed(v) => ("grabbed", bool_str(*v)),
-            AriaAttribute::ActiveDescendant(v) => {
-                ("activedescendant", v.as_str().to_string())
-            }
+            AriaAttribute::ActiveDescendant(v) => ("activedescendant", v.as_str().to_string()),
             AriaAttribute::ColCount(v) => ("colcount", v.to_string()),
             AriaAttribute::ColIndex(v) => ("colindex", v.to_string()),
             AriaAttribute::ColIndexText(v) => ("colindextext", v.clone()),
@@ -461,9 +456,7 @@ impl AriaAttribute {
             AriaAttribute::Current(v) => ("current", v.as_str().to_string()),
             AriaAttribute::RoleDescription(v) => ("roledescription", v.clone()),
             AriaAttribute::BrailleLabel(v) => ("braillelabel", v.clone()),
-            AriaAttribute::BrailleRoleDescription(v) => {
-                ("brailleroledescription", v.clone())
-            }
+            AriaAttribute::BrailleRoleDescription(v) => ("brailleroledescription", v.clone()),
         };
         format!(
             r#" aria-{name}="{}""#,

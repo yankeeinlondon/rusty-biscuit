@@ -30,5 +30,5 @@ pub enum RenderTarget {
     ///
     /// 2. `render_html_components()`
     Browser,
-    Ast
+    Ast,
 }

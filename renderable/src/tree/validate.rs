@@ -18,9 +18,9 @@
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+use crate::tree::Severity;
 use crate::tree::node::{NodeKind, RenderNode};
 use crate::tree::source::SourceSpan;
-use crate::tree::Severity;
 
 /// How thoroughly [`validate`] walks the tree.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -101,6 +101,7 @@ fn is_block(kind: &NodeKind) -> bool {
         kind,
         NodeKind::Root { .. }
             | NodeKind::Heading { .. }
+            | NodeKind::Section { .. }
             | NodeKind::Paragraph { .. }
             | NodeKind::BlockQuote { .. }
             | NodeKind::List { .. }
@@ -133,6 +134,7 @@ fn kind_name(kind: &NodeKind) -> &'static str {
     match kind {
         NodeKind::Root { .. } => "Root",
         NodeKind::Heading { .. } => "Heading",
+        NodeKind::Section { .. } => "Section",
         NodeKind::Paragraph { .. } => "Paragraph",
         NodeKind::BlockQuote { .. } => "BlockQuote",
         NodeKind::List { .. } => "List",
@@ -195,6 +197,22 @@ fn walk(
 
     if mode == ValidationMode::FailFast && report.has_errors() {
         return;
+    }
+
+    // Section.heading children must be validated as phrasing content. We use
+    // a synthetic Heading parent kind to trigger the phrasing-only check.
+    if let NodeKind::Section { heading, .. } = &node.kind {
+        // Use a synthetic Heading as the parent to enforce phrasing-only rules.
+        let synthetic_heading = NodeKind::Heading {
+            depth: crate::tree::HeadingDepth::new(1).unwrap(),
+            children: vec![],
+        };
+        for child in heading {
+            walk(child, false, Some(&synthetic_heading), mode, report);
+            if mode == ValidationMode::FailFast && report.has_errors() {
+                return;
+            }
+        }
     }
 
     for child in node.children() {
@@ -312,9 +330,7 @@ mod tests {
 
     #[test]
     fn valid_tree_has_no_findings() {
-        let tree = RenderNode::root(vec![RenderNode::paragraph(vec![RenderNode::text(
-            "hello",
-        )])]);
+        let tree = RenderNode::root(vec![RenderNode::paragraph(vec![RenderNode::text("hello")])]);
         let report = validate(&tree, ValidationMode::Full);
         assert!(report.is_empty());
         assert!(!report.has_errors());
@@ -323,33 +339,37 @@ mod tests {
     #[test]
     fn orphaned_table_cell_is_an_error() {
         // A TableCell directly inside a Paragraph: orphaned and block-in-phrasing.
-        let tree = RenderNode::root(vec![RenderNode::paragraph(vec![
-            RenderNode::table_cell(vec![RenderNode::text("x")]),
-        ])]);
+        let tree = RenderNode::root(vec![RenderNode::paragraph(vec![RenderNode::table_cell(
+            vec![RenderNode::text("x")],
+        )])]);
         let report = validate(&tree, ValidationMode::Full);
         assert!(report.has_errors());
-        assert!(report
-            .errors()
-            .any(|f| f.message.contains("TableCell may appear only")));
+        assert!(
+            report
+                .errors()
+                .any(|f| f.message.contains("TableCell may appear only"))
+        );
     }
 
     #[test]
     fn block_inside_paragraph_is_an_error() {
-        let tree = RenderNode::root(vec![RenderNode::paragraph(vec![
-            RenderNode::block_quote(vec![RenderNode::text("x")]),
-        ])]);
+        let tree = RenderNode::root(vec![RenderNode::paragraph(vec![RenderNode::block_quote(
+            vec![RenderNode::text("x")],
+        )])]);
         let report = validate(&tree, ValidationMode::Full);
         assert!(report.has_errors());
-        assert!(report
-            .errors()
-            .any(|f| f.message.contains("block-level BlockQuote")));
+        assert!(
+            report
+                .errors()
+                .any(|f| f.message.contains("block-level BlockQuote"))
+        );
     }
 
     #[test]
     fn unsupported_node_is_a_warning_not_error() {
-        let tree = RenderNode::root(vec![RenderNode::paragraph(vec![
-            RenderNode::unsupported("custom directive"),
-        ])]);
+        let tree = RenderNode::root(vec![RenderNode::paragraph(vec![RenderNode::unsupported(
+            "custom directive",
+        )])]);
         let report = validate(&tree, ValidationMode::Full);
         assert!(!report.has_errors());
         assert!(!report.is_empty());
@@ -391,9 +411,11 @@ mod tests {
         let tree = RenderNode::root(vec![RenderNode::root(vec![])]);
         let report = validate(&tree, ValidationMode::Full);
         assert!(report.has_errors());
-        assert!(report
-            .errors()
-            .any(|f| f.message.contains("Root node may appear only")));
+        assert!(
+            report
+                .errors()
+                .any(|f| f.message.contains("Root node may appear only"))
+        );
     }
 
     #[test]
@@ -405,5 +427,96 @@ mod tests {
             ])])],
         )]);
         assert!(ensure_valid(&tree).is_ok());
+    }
+
+    #[test]
+    fn section_builder_roundtrip() {
+        let section = RenderNode::section(
+            HeadingDepth::new(2).unwrap(),
+            vec![RenderNode::text("Title")],
+            vec![RenderNode::paragraph(vec![RenderNode::text("Body")])],
+        );
+        assert!(matches!(section.kind, NodeKind::Section { .. }));
+        // children() returns the body children, not the heading
+        assert_eq!(section.children().len(), 1);
+    }
+
+    #[test]
+    fn section_children_access() {
+        let mut section = RenderNode::section(
+            HeadingDepth::new(1).unwrap(),
+            vec![RenderNode::text("Heading")],
+            vec![
+                RenderNode::paragraph(vec![RenderNode::text("Para 1")]),
+                RenderNode::paragraph(vec![RenderNode::text("Para 2")]),
+            ],
+        );
+        assert_eq!(section.children().len(), 2);
+        // children_mut returns mutable access to body children
+        let children = section.children_mut().unwrap();
+        children.push(RenderNode::paragraph(vec![RenderNode::text("Para 3")]));
+        assert_eq!(section.children().len(), 3);
+    }
+
+    #[test]
+    fn valid_section_passes() {
+        let tree = RenderNode::root(vec![RenderNode::section(
+            HeadingDepth::new(2).unwrap(),
+            vec![RenderNode::text("Section Title")],
+            vec![RenderNode::paragraph(vec![RenderNode::text("Body text")])],
+        )]);
+        assert!(ensure_valid(&tree).is_ok());
+    }
+
+    #[test]
+    fn block_in_section_heading_is_an_error() {
+        // Section.heading must contain only phrasing content; a Paragraph is
+        // block-level and violates this rule.
+        let tree = RenderNode::root(vec![RenderNode::section(
+            HeadingDepth::new(1).unwrap(),
+            vec![RenderNode::paragraph(vec![RenderNode::text(
+                "Block in heading",
+            )])],
+            vec![],
+        )]);
+        let report = validate(&tree, ValidationMode::Full);
+        assert!(report.has_errors());
+        assert!(
+            report
+                .errors()
+                .any(|f| f.message.contains("block-level Paragraph"))
+        );
+    }
+
+    #[test]
+    fn nested_section_passes() {
+        // Sections may contain other sections in their body.
+        let tree = RenderNode::root(vec![RenderNode::section(
+            HeadingDepth::new(1).unwrap(),
+            vec![RenderNode::text("Parent")],
+            vec![RenderNode::section(
+                HeadingDepth::new(2).unwrap(),
+                vec![RenderNode::text("Child")],
+                vec![RenderNode::paragraph(vec![RenderNode::text("Content")])],
+            )],
+        )]);
+        assert!(ensure_valid(&tree).is_ok());
+    }
+
+    #[test]
+    fn section_is_block_level() {
+        // A Section inside a phrasing-only container should be an error.
+        let tree = RenderNode::root(vec![RenderNode::paragraph(vec![RenderNode::section(
+            HeadingDepth::new(1).unwrap(),
+            vec![RenderNode::text("Bad")],
+            vec![],
+        )])]);
+        let report = validate(&tree, ValidationMode::Full);
+        assert!(report.has_errors());
+        assert!(
+            report
+                .errors()
+                .any(|f| f.message.contains("block-level Section"))
+        );
     }
 }

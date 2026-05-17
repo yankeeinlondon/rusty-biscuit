@@ -92,6 +92,20 @@ pub enum NodeKind {
         /// Child nodes.
         children: Vec<RenderNode>,
     },
+    /// A section: a heading with its body content.
+    ///
+    /// Unlike `Heading`, which contains only phrasing content (the heading
+    /// text), `Section` groups a heading with the block-level content that
+    /// follows it. The `heading` field holds phrasing content; `children`
+    /// holds block-level body content.
+    Section {
+        /// The section depth (maps to h1–h6).
+        depth: HeadingDepth,
+        /// Phrasing content for the section heading.
+        heading: Vec<RenderNode>,
+        /// Block-level body content.
+        children: Vec<RenderNode>,
+    },
     /// A paragraph.
     Paragraph {
         /// Child nodes.
@@ -262,6 +276,7 @@ impl RenderNode {
         match &self.kind {
             NodeKind::Root { children }
             | NodeKind::Heading { children, .. }
+            | NodeKind::Section { children, .. }
             | NodeKind::Paragraph { children }
             | NodeKind::BlockQuote { children }
             | NodeKind::List { children, .. }
@@ -297,6 +312,7 @@ impl RenderNode {
         match &mut self.kind {
             NodeKind::Root { children }
             | NodeKind::Heading { children, .. }
+            | NodeKind::Section { children, .. }
             | NodeKind::Paragraph { children }
             | NodeKind::BlockQuote { children }
             | NodeKind::List { children, .. }
@@ -333,6 +349,23 @@ impl RenderNode {
     #[must_use]
     pub fn heading(depth: HeadingDepth, children: Vec<RenderNode>) -> Self {
         Self::synthetic(NodeKind::Heading { depth, children })
+    }
+
+    /// Creates a [`NodeKind::Section`] node.
+    ///
+    /// The `heading` parameter holds phrasing content for the section title;
+    /// `children` holds block-level body content.
+    #[must_use]
+    pub fn section(
+        depth: HeadingDepth,
+        heading: Vec<RenderNode>,
+        children: Vec<RenderNode>,
+    ) -> Self {
+        Self::synthetic(NodeKind::Section {
+            depth,
+            heading,
+            children,
+        })
     }
 
     /// Creates a [`NodeKind::Paragraph`] node.
@@ -441,11 +474,7 @@ impl RenderNode {
 
     /// Creates a [`NodeKind::Link`] node.
     #[must_use]
-    pub fn link(
-        url: impl Into<String>,
-        title: Option<String>,
-        children: Vec<RenderNode>,
-    ) -> Self {
+    pub fn link(url: impl Into<String>, title: Option<String>, children: Vec<RenderNode>) -> Self {
         Self::synthetic(NodeKind::Link {
             url: url.into(),
             title,
@@ -455,11 +484,7 @@ impl RenderNode {
 
     /// Creates a [`NodeKind::Image`] node.
     #[must_use]
-    pub fn image(
-        url: impl Into<String>,
-        title: Option<String>,
-        alt: impl Into<String>,
-    ) -> Self {
+    pub fn image(url: impl Into<String>, title: Option<String>, alt: impl Into<String>) -> Self {
         Self::synthetic(NodeKind::Image {
             url: url.into(),
             title,
@@ -489,10 +514,7 @@ impl RenderNode {
 
     /// Creates a [`NodeKind::FootnoteDefinition`] node.
     #[must_use]
-    pub fn footnote_definition(
-        identifier: impl Into<String>,
-        children: Vec<RenderNode>,
-    ) -> Self {
+    pub fn footnote_definition(identifier: impl Into<String>, children: Vec<RenderNode>) -> Self {
         Self::synthetic(NodeKind::FootnoteDefinition {
             identifier: identifier.into(),
             children,

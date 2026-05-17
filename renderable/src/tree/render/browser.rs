@@ -25,15 +25,15 @@
 
 use crate::browser::PageOptions;
 use crate::browser::fragment::{BrowserFragment, ComposableNode, Ready};
+use crate::html::HtmlPage;
 use crate::html::attribute::{ClassDefinition, DomId};
 use crate::html::tag::{BlockTag, HtmlAttribute, HtmlType, VoidTag};
-use crate::html::HtmlPage;
 use crate::tree::attrs::NodeAttrs;
 use crate::tree::diagnostic::{Diagnostic, Severity};
 use crate::tree::document::Document;
 use crate::tree::error::{RenderError, RenderStrictness, Rendered};
 use crate::tree::node::{ColumnAlign, HeadingDepth, NodeKind, RenderNode};
-use crate::tree::validate::{validate, ValidationError, ValidationMode};
+use crate::tree::validate::{ValidationError, ValidationMode, validate};
 
 /// How a [`NodeKind::Html`] node is treated by the browser renderer.
 ///
@@ -146,10 +146,7 @@ pub fn render_browser_document(
 
 /// Validates `node` and builds a [`Writer`], folding (or escalating) every
 /// warning-severity validation finding per the strictness model.
-fn gate<'a>(
-    node: &RenderNode,
-    opts: &'a BrowserRenderOptions,
-) -> Result<Writer<'a>, RenderError> {
+fn gate<'a>(node: &RenderNode, opts: &'a BrowserRenderOptions) -> Result<Writer<'a>, RenderError> {
     let report = validate(node, ValidationMode::Full);
     if report.has_errors() {
         return Err(ValidationError {
@@ -200,35 +197,51 @@ impl Writer<'_> {
             NodeKind::Heading { depth, children } => {
                 self.block(heading_tag(*depth), &node.attrs, children)
             }
+            NodeKind::Section {
+                depth,
+                heading,
+                children,
+            } => self.render_section(node, *depth, heading, children),
             NodeKind::Paragraph { children } => self.block(BlockTag::P, &node.attrs, children),
             NodeKind::BlockQuote { children } => {
-                self.block(BlockTag::Blockquote, &node.attrs, children)
+                if let Some(hints) = node.attrs.columns_hints() {
+                    self.render_columns(node, &hints, children)
+                } else {
+                    self.block(BlockTag::Blockquote, &node.attrs, children)
+                }
             }
-            NodeKind::List { ordered, start, children } => {
-                self.render_list(node, *ordered, *start, children)
-            }
+            NodeKind::List {
+                ordered,
+                start,
+                children,
+            } => self.render_list(node, *ordered, *start, children),
             NodeKind::ListItem { checked, children } => {
                 self.render_list_item(node, *checked, children)
             }
-            NodeKind::Code { lang, meta: _, value } => {
-                Ok(self.render_code_block(node, lang.as_deref(), value))
-            }
+            NodeKind::Code {
+                lang,
+                meta: _,
+                value,
+            } => Ok(self.render_code_block(node, lang.as_deref(), value)),
             NodeKind::ThematicBreak => Ok(self.void(VoidTag::Hr, &node.attrs)),
             NodeKind::Table { align, children } => self.render_table(node, align, children),
             NodeKind::TableRow { children } => self.block(BlockTag::Tr, &node.attrs, children),
             NodeKind::TableCell { children } => self.block(BlockTag::Td, &node.attrs, children),
-            NodeKind::FootnoteDefinition { identifier, children } => {
-                self.render_footnote_definition(node, identifier, children)
-            }
+            NodeKind::FootnoteDefinition {
+                identifier,
+                children,
+            } => self.render_footnote_definition(node, identifier, children),
             NodeKind::Text { value } => Ok(text_fragment(value)),
             NodeKind::Emphasis { children } => self.block(BlockTag::Em, &node.attrs, children),
             NodeKind::Strong { children } => self.block(BlockTag::Strong, &node.attrs, children),
             NodeKind::Delete { children } => self.block(BlockTag::S, &node.attrs, children),
             NodeKind::Span { children } => self.block(BlockTag::Span, &node.attrs, children),
             NodeKind::InlineCode { value } => Ok(self.render_inline_code(node, value)),
-            NodeKind::Link { url, title, children } => {
-                self.render_link(node, url, title.as_deref(), children)
-            }
+            NodeKind::Link {
+                url,
+                title,
+                children,
+            } => self.render_link(node, url, title.as_deref(), children),
             NodeKind::Image { url, title, alt } => {
                 Ok(self.render_image(node, url, title.as_deref(), alt))
             }
@@ -279,6 +292,69 @@ impl Writer<'_> {
             fragment = fragment.add_attribute(attr);
         }
         fragment.finalize()
+    }
+
+    /// Renders a section as `<section>` containing a heading tag and body.
+    fn render_section(
+        &mut self,
+        node: &RenderNode,
+        depth: HeadingDepth,
+        heading: &[RenderNode],
+        children: &[RenderNode],
+    ) -> Result<BrowserFragment<Ready>, RenderError> {
+        let mut fragment = BrowserFragment::new().define_as_block_tag(BlockTag::Section, "");
+        for attr in node_attributes(&node.attrs) {
+            fragment = fragment.add_attribute(attr);
+        }
+
+        // Render the heading as h1-h6.
+        let mut heading_fragment =
+            BrowserFragment::new().define_as_block_tag(heading_tag(depth), "");
+        for child in heading {
+            heading_fragment = heading_fragment.add_component(self.render(child)?);
+        }
+        fragment = fragment.add_component(heading_fragment.finalize());
+
+        // Render the body children.
+        for child in children {
+            fragment = fragment.add_component(self.render(child)?);
+        }
+        Ok(fragment.finalize())
+    }
+
+    /// Renders a two-column block quote as a `<div class="columns">` flex
+    /// container holding two `<div class="column">` children.
+    ///
+    /// The flat child list is split at [`ColumnsHints::left_count`]; the left
+    /// children fill the first column `<div>`, the rest fill the second. The
+    /// classes are CSS-ready hooks — the renderer emits no inline styles.
+    ///
+    /// [`ColumnsHints::left_count`]: crate::tree::ColumnsHints::left_count
+    fn render_columns(
+        &mut self,
+        node: &RenderNode,
+        hints: &crate::tree::ColumnsHints,
+        children: &[RenderNode],
+    ) -> Result<BrowserFragment<Ready>, RenderError> {
+        let split = hints.left_count.min(children.len());
+        let (left, right) = children.split_at(split);
+
+        let mut container = BrowserFragment::new().define_as_block_tag(BlockTag::Div, "");
+        container = container.add_attribute(HtmlAttribute::Class(ClassDefinition::new("columns")));
+        for attr in node_attributes(&node.attrs) {
+            container = container.add_attribute(attr);
+        }
+
+        for group in [left, right] {
+            let mut column = BrowserFragment::new().define_as_block_tag(BlockTag::Div, "");
+            column =
+                column.add_attribute(HtmlAttribute::Class(ClassDefinition::new("column")));
+            for child in group {
+                column = column.add_component(self.render(child)?);
+            }
+            container = container.add_component(column.finalize());
+        }
+        Ok(container.finalize())
     }
 
     /// Renders a list as `<ol>` (respecting `start`) or `<ul>`.
@@ -461,11 +537,11 @@ impl Writer<'_> {
         children: &[RenderNode],
     ) -> Result<BrowserFragment<Ready>, RenderError> {
         let mut fragment = BrowserFragment::new().define_as_block_tag(BlockTag::Div, "");
-        fragment = fragment.add_attribute(HtmlAttribute::Id(DomId::new(format!(
-            "fn-{identifier}"
-        ))));
         fragment =
-            fragment.add_attribute(HtmlAttribute::Class(ClassDefinition::new("footnote-definition")));
+            fragment.add_attribute(HtmlAttribute::Id(DomId::new(format!("fn-{identifier}"))));
+        fragment = fragment.add_attribute(HtmlAttribute::Class(ClassDefinition::new(
+            "footnote-definition",
+        )));
         for attr in node_attributes(&node.attrs) {
             fragment = fragment.add_attribute(attr);
         }
@@ -608,8 +684,10 @@ impl Writer<'_> {
     /// Records a lossy diagnostic, unless strictness is [`RenderStrictness::Lossy`].
     fn note_lossy(&mut self, message: &str, node: &RenderNode) {
         if self.opts.strictness != RenderStrictness::Lossy {
-            self.diagnostics
-                .push(Diagnostic::lossy(message.to_string(), Some(node.span.clone())));
+            self.diagnostics.push(Diagnostic::lossy(
+                message.to_string(),
+                Some(node.span.clone()),
+            ));
         }
     }
 }
@@ -805,18 +883,14 @@ mod tests {
 
     #[test]
     fn block_quote() {
-        let bq = RenderNode::block_quote(vec![RenderNode::paragraph(vec![RenderNode::text(
-            "quote",
-        )])]);
+        let bq =
+            RenderNode::block_quote(vec![RenderNode::paragraph(vec![RenderNode::text("quote")])]);
         assert_eq!(html(&bq), "<blockquote><p>quote</p></blockquote>");
     }
 
     #[test]
     fn span_carries_classes() {
-        let span = RenderNode::span(
-            vec!["hl".into(), "big".into()],
-            vec![RenderNode::text("x")],
-        );
+        let span = RenderNode::span(vec!["hl".into(), "big".into()], vec![RenderNode::text("x")]);
         assert_eq!(html(&span), r#"<span class="hl big">x</span>"#);
     }
 
@@ -844,10 +918,19 @@ mod tests {
         );
         let out = html(&table);
         assert!(out.starts_with("<table><thead><tr>"), "{out}");
-        assert!(out.contains(r#"<th style="text-align:left">H1</th>"#), "{out}");
-        assert!(out.contains(r#"<th style="text-align:right">H2</th>"#), "{out}");
+        assert!(
+            out.contains(r#"<th style="text-align:left">H1</th>"#),
+            "{out}"
+        );
+        assert!(
+            out.contains(r#"<th style="text-align:right">H2</th>"#),
+            "{out}"
+        );
         assert!(out.contains("<tbody><tr>"), "{out}");
-        assert!(out.contains(r#"<td style="text-align:left">a</td>"#), "{out}");
+        assert!(
+            out.contains(r#"<td style="text-align:left">a</td>"#),
+            "{out}"
+        );
         assert!(out.ends_with("</tbody></table>"), "{out}");
     }
 
@@ -879,8 +962,9 @@ mod tests {
     #[test]
     fn raw_html_allow_emits_verbatim() {
         let node = RenderNode::html("<b>raw</b>", false);
-        let rendered = render_browser_node(&node, &opts(RenderStrictness::Warn, RawHtmlPolicy::Allow))
-            .expect("render");
+        let rendered =
+            render_browser_node(&node, &opts(RenderStrictness::Warn, RawHtmlPolicy::Allow))
+                .expect("render");
         assert_eq!(rendered.output.render(), "<b>raw</b>");
         assert!(rendered.diagnostics.is_empty());
     }
@@ -908,8 +992,10 @@ mod tests {
     #[test]
     fn raw_html_reject_errors_under_strict() {
         let node = RenderNode::html("<b>raw</b>", false);
-        let result =
-            render_browser_node(&node, &opts(RenderStrictness::Strict, RawHtmlPolicy::Reject));
+        let result = render_browser_node(
+            &node,
+            &opts(RenderStrictness::Strict, RawHtmlPolicy::Reject),
+        );
         assert!(matches!(result, Err(RenderError::LossyRejected { .. })));
     }
 
@@ -928,8 +1014,10 @@ mod tests {
         // The validation gate escalates the `Unsupported` warning to
         // `InvalidTree` before the node-level path is reached.
         let node = RenderNode::root(vec![RenderNode::unsupported("custom")]);
-        let result =
-            render_browser_node(&node, &opts(RenderStrictness::Strict, RawHtmlPolicy::Escape));
+        let result = render_browser_node(
+            &node,
+            &opts(RenderStrictness::Strict, RawHtmlPolicy::Escape),
+        );
         assert!(matches!(result, Err(RenderError::InvalidTree { .. })));
     }
 
@@ -972,16 +1060,15 @@ mod tests {
 
     #[test]
     fn invalid_tree_errors_before_output() {
-        let bad = RenderNode::root(vec![RenderNode::paragraph(vec![
-            RenderNode::table_cell(vec![RenderNode::text("x")]),
-        ])]);
+        let bad = RenderNode::root(vec![RenderNode::paragraph(vec![RenderNode::table_cell(
+            vec![RenderNode::text("x")],
+        )])]);
         for strictness in [
             RenderStrictness::Strict,
             RenderStrictness::Warn,
             RenderStrictness::Lossy,
         ] {
-            let result =
-                render_browser_node(&bad, &opts(strictness, RawHtmlPolicy::Escape));
+            let result = render_browser_node(&bad, &opts(strictness, RawHtmlPolicy::Escape));
             assert!(matches!(result, Err(RenderError::InvalidTree { .. })));
         }
     }
@@ -1002,7 +1089,10 @@ mod tests {
         let rendered =
             render_browser_document(&doc, &BrowserRenderOptions::default()).expect("render");
         let html = rendered.output.render();
-        assert!(html.contains("<body><h1>Title</h1><p>Body</p></body>"), "{html}");
+        assert!(
+            html.contains("<body><h1>Title</h1><p>Body</p></body>"),
+            "{html}"
+        );
     }
 
     #[test]
@@ -1010,9 +1100,7 @@ mod tests {
         let doc = Document {
             sources: SourceRegistry::default(),
             metadata: DocumentMetadata::default(),
-            root: RenderNode::root(vec![RenderNode::paragraph(vec![RenderNode::text(
-                "x",
-            )])]),
+            root: RenderNode::root(vec![RenderNode::paragraph(vec![RenderNode::text("x")])]),
         };
         let mut sheet = crate::stylesheet::Stylesheet::new();
         sheet.push(crate::stylesheet::CssRule::new(
@@ -1045,14 +1133,90 @@ mod tests {
                     raw: "title: Ignored".into(),
                 }),
             },
-            root: RenderNode::root(vec![RenderNode::paragraph(vec![RenderNode::text(
-                "Body",
-            )])]),
+            root: RenderNode::root(vec![RenderNode::paragraph(vec![RenderNode::text("Body")])]),
         };
         let rendered =
             render_browser_document(&doc, &BrowserRenderOptions::default()).expect("render");
         let html = rendered.output.render();
         assert!(html.contains("<body><p>Body</p></body>"), "{html}");
         assert!(!html.contains("Ignored"), "{html}");
+    }
+
+    #[test]
+    fn section_renders_as_section_element() {
+        let section = RenderNode::section(
+            HeadingDepth::new(2).unwrap(),
+            vec![RenderNode::text("Title")],
+            vec![RenderNode::paragraph(vec![RenderNode::text("Body")])],
+        );
+        let out = html(&section);
+        assert!(out.starts_with("<section>"), "{out}");
+        assert!(out.contains("<h2>Title</h2>"), "{out}");
+        assert!(out.contains("<p>Body</p>"), "{out}");
+        assert!(out.ends_with("</section>"), "{out}");
+    }
+
+    #[test]
+    fn section_heading_uses_correct_depth() {
+        for depth in 1..=6 {
+            let section = RenderNode::section(
+                HeadingDepth::new(depth).unwrap(),
+                vec![RenderNode::text("T")],
+                vec![],
+            );
+            let out = html(&section);
+            assert!(out.contains(&format!("<h{depth}>T</h{depth}>")), "{out}");
+        }
+    }
+
+    #[test]
+    fn section_with_styled_heading() {
+        let section = RenderNode::section(
+            HeadingDepth::new(1).unwrap(),
+            vec![
+                RenderNode::text("Hello "),
+                RenderNode::strong(vec![RenderNode::text("World")]),
+            ],
+            vec![],
+        );
+        let out = html(&section);
+        assert!(
+            out.contains("<h1>Hello <strong>World</strong></h1>"),
+            "{out}"
+        );
+    }
+
+    #[test]
+    fn section_carries_node_attrs() {
+        let mut section = RenderNode::section(
+            HeadingDepth::new(2).unwrap(),
+            vec![RenderNode::text("Title")],
+            vec![],
+        );
+        section.attrs.id = Some("intro".into());
+        section.attrs.classes = vec!["featured".into()];
+        let out = html(&section);
+        assert!(out.contains(r#"id="intro""#), "{out}");
+        assert!(out.contains(r#"class="featured""#), "{out}");
+    }
+
+    #[test]
+    fn nested_sections_render_correctly() {
+        let tree = RenderNode::root(vec![RenderNode::section(
+            HeadingDepth::new(1).unwrap(),
+            vec![RenderNode::text("Parent")],
+            vec![RenderNode::section(
+                HeadingDepth::new(2).unwrap(),
+                vec![RenderNode::text("Child")],
+                vec![RenderNode::paragraph(vec![RenderNode::text("Content")])],
+            )],
+        )]);
+        let out = html(&tree);
+        assert!(
+            out.contains(
+                "<section><h1>Parent</h1><section><h2>Child</h2><p>Content</p></section></section>"
+            ),
+            "{out}"
+        );
     }
 }

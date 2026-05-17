@@ -151,7 +151,10 @@ fn base_class_merges_with_explicit_class() {
         .define_as_block_tag(BlockTag::Div, "widget")
         .add_attribute(HtmlAttribute::Class(ClassDefinition::new("active large")))
         .finalize();
-    assert_eq!(fragment.render(), r#"<div class="widget active large"></div>"#);
+    assert_eq!(
+        fragment.render(),
+        r#"<div class="widget active large"></div>"#
+    );
 }
 
 #[test]
@@ -179,7 +182,10 @@ fn id_and_style_are_rendered() {
         .finalize();
     let html = fragment.render();
     assert!(html.contains(r#"id="main""#), "{html}");
-    assert!(html.contains(r#"style="width: 80px; z-index: 5;""#), "{html}");
+    assert!(
+        html.contains(r#"style="width: 80px; z-index: 5;""#),
+        "{html}"
+    );
 }
 
 #[test]
@@ -201,8 +207,8 @@ fn boolean_attribute_present_when_true_absent_when_false() {
 
 #[test]
 fn role_aria_and_data_attributes_are_rendered() {
-    use renderable::html::attribute::aria::{AriaAttribute, AriaRole};
     use renderable::html::attribute::HtmlDataAttribute;
+    use renderable::html::attribute::aria::{AriaAttribute, AriaRole};
     use renderable::html::tag::HtmlAttribute;
 
     let fragment = BrowserFragment::new()
@@ -248,7 +254,10 @@ fn external_code_emits_a_script_src() {
         ..PageOptions::default()
     });
     let html = page.render();
-    assert!(html.contains(r#"<script src="assets/app.js" defer></script>"#), "{html}");
+    assert!(
+        html.contains(r#"<script src="assets/app.js" defer></script>"#),
+        "{html}"
+    );
 }
 
 #[test]
@@ -286,7 +295,10 @@ fn page_stylesheet_ships_palette_and_semantic_references() {
     // Palette layer is present.
     assert!(css.contains("--color-blue-500:"), "{css}");
     // Semantic color tokens reference the palette, not raw hex.
-    assert!(css.contains("--color-accent: var(--color-blue-500);"), "{css}");
+    assert!(
+        css.contains("--color-accent: var(--color-blue-500);"),
+        "{css}"
+    );
 }
 
 #[test]

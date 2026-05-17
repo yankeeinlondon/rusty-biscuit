@@ -26,7 +26,7 @@ use crate::tree::diagnostic::{Diagnostic, Severity};
 use crate::tree::document::{Document, FrontmatterFormat};
 use crate::tree::error::{RenderError, RenderStrictness, Rendered};
 use crate::tree::node::{ColumnAlign, NodeKind, RenderNode};
-use crate::tree::validate::{validate, ValidationError, ValidationMode};
+use crate::tree::validate::{ValidationError, ValidationMode, validate};
 
 /// The Markdown dialect a render targets.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -178,14 +178,34 @@ impl Writer<'_> {
                 let hashes = "#".repeat(usize::from(depth.get()));
                 Ok(format!("{hashes} {}", self.render_inline(children)?))
             }
+            NodeKind::Section {
+                depth,
+                heading,
+                children,
+            } => {
+                let hashes = "#".repeat(usize::from(depth.get()));
+                let heading_line = format!("{hashes} {}", self.render_inline(heading)?);
+                let body = self.render_blocks(children)?;
+                if body.is_empty() {
+                    Ok(heading_line)
+                } else {
+                    Ok(format!("{heading_line}\n\n{body}"))
+                }
+            }
             NodeKind::Paragraph { children } => self.render_inline(children),
             NodeKind::BlockQuote { children } => {
-                let inner = self.render_blocks(children)?;
-                Ok(prefix_lines(&inner, "> "))
+                if let Some(hints) = node.attrs.columns_hints() {
+                    self.render_columns(children, &hints)
+                } else {
+                    let inner = self.render_blocks(children)?;
+                    Ok(prefix_lines(&inner, "> "))
+                }
             }
-            NodeKind::List { ordered, start, children } => {
-                self.render_list(*ordered, *start, children)
-            }
+            NodeKind::List {
+                ordered,
+                start,
+                children,
+            } => self.render_list(*ordered, *start, children),
             NodeKind::ListItem { checked, children } => {
                 let body = self.render_blocks(children)?;
                 Ok(match checked {
@@ -210,23 +230,24 @@ impl Writer<'_> {
             NodeKind::Table { align, children } => self.render_table(align, children),
             NodeKind::TableRow { children } => self.render_table_row(children),
             NodeKind::TableCell { children } => self.render_inline(children),
-            NodeKind::FootnoteDefinition { identifier, children } => {
+            NodeKind::FootnoteDefinition {
+                identifier,
+                children,
+            } => {
                 let body = self.render_blocks(children)?;
                 Ok(format!("[^{identifier}]: {body}"))
             }
             NodeKind::Text { value } => Ok(value.clone()),
-            NodeKind::Emphasis { children } => {
-                Ok(format!("_{}_", self.render_inline(children)?))
-            }
-            NodeKind::Strong { children } => {
-                Ok(format!("**{}**", self.render_inline(children)?))
-            }
-            NodeKind::Delete { children } => {
-                Ok(format!("~~{}~~", self.render_inline(children)?))
-            }
+            NodeKind::Emphasis { children } => Ok(format!("_{}_", self.render_inline(children)?)),
+            NodeKind::Strong { children } => Ok(format!("**{}**", self.render_inline(children)?)),
+            NodeKind::Delete { children } => Ok(format!("~~{}~~", self.render_inline(children)?)),
             NodeKind::Span { children } => self.render_span(node, children),
             NodeKind::InlineCode { value } => Ok(format!("`{value}`")),
-            NodeKind::Link { url, title, children } => {
+            NodeKind::Link {
+                url,
+                title,
+                children,
+            } => {
                 let text = self.render_inline(children)?;
                 Ok(format!("[{text}]({})", link_target(url, title)))
             }
@@ -260,6 +281,27 @@ impl Writer<'_> {
             output.push_str(&self.render(child)?);
         }
         Ok(output)
+    }
+
+    /// Renders a two-column block quote as two sequential sections.
+    ///
+    /// Markdown has no side-by-side layout; the left column's blocks are
+    /// emitted first, then a blank line, then the right column's blocks.
+    fn render_columns(
+        &mut self,
+        children: &[RenderNode],
+        hints: &crate::tree::ColumnsHints,
+    ) -> Result<String, RenderError> {
+        let split = hints.left_count.min(children.len());
+        let (left, right) = children.split_at(split);
+        let left = self.render_blocks(left)?;
+        let right = self.render_blocks(right)?;
+        Ok(match (left.is_empty(), right.is_empty()) {
+            (true, true) => String::new(),
+            (false, true) => left,
+            (true, false) => right,
+            (false, false) => format!("{left}\n\n{right}"),
+        })
     }
 
     /// Renders a list, numbering ordered items from `start`.
@@ -336,9 +378,7 @@ impl Writer<'_> {
                     classes.join(", ")
                 );
                 match self.opts.strictness {
-                    RenderStrictness::Strict => {
-                        Err(RenderError::LossyRejected { message })
-                    }
+                    RenderStrictness::Strict => Err(RenderError::LossyRejected { message }),
                     RenderStrictness::Warn => {
                         self.diagnostics
                             .push(Diagnostic::lossy(message, Some(node.span.clone())));
@@ -363,9 +403,7 @@ impl Writer<'_> {
             MarkdownDialect::Markdown => {
                 let message = "raw HTML is not portable plain Markdown".to_string();
                 match self.opts.strictness {
-                    RenderStrictness::Strict => {
-                        Err(RenderError::LossyRejected { message })
-                    }
+                    RenderStrictness::Strict => Err(RenderError::LossyRejected { message }),
                     // Under Warn/Lossy the raw value is emitted (CommonMark
                     // permits raw HTML); Warn additionally records it.
                     RenderStrictness::Warn => {
@@ -461,10 +499,10 @@ fn indent_continuation(text: &str, indent: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tree::node::HeadingDepth;
     use crate::tree::DocumentMetadata;
     use crate::tree::Frontmatter;
     use crate::tree::SourceRegistry;
+    use crate::tree::node::HeadingDepth;
 
     fn render(node: &RenderNode) -> Rendered<String> {
         render_markdown_node(node, &MarkdownRenderOptions::default()).expect("render")
@@ -537,8 +575,14 @@ mod tests {
             false,
             None,
             vec![
-                RenderNode::list_item(None, vec![RenderNode::paragraph(vec![RenderNode::text("a")])]),
-                RenderNode::list_item(None, vec![RenderNode::paragraph(vec![RenderNode::text("b")])]),
+                RenderNode::list_item(
+                    None,
+                    vec![RenderNode::paragraph(vec![RenderNode::text("a")])],
+                ),
+                RenderNode::list_item(
+                    None,
+                    vec![RenderNode::paragraph(vec![RenderNode::text("b")])],
+                ),
             ],
         );
         assert_eq!(render(&ul).output, "- a\n- b");
@@ -547,8 +591,14 @@ mod tests {
             true,
             Some(3),
             vec![
-                RenderNode::list_item(None, vec![RenderNode::paragraph(vec![RenderNode::text("x")])]),
-                RenderNode::list_item(None, vec![RenderNode::paragraph(vec![RenderNode::text("y")])]),
+                RenderNode::list_item(
+                    None,
+                    vec![RenderNode::paragraph(vec![RenderNode::text("x")])],
+                ),
+                RenderNode::list_item(
+                    None,
+                    vec![RenderNode::paragraph(vec![RenderNode::text("y")])],
+                ),
             ],
         );
         assert_eq!(render(&ol).output, "3. x\n4. y");
@@ -560,8 +610,14 @@ mod tests {
             false,
             None,
             vec![
-                RenderNode::list_item(Some(true), vec![RenderNode::paragraph(vec![RenderNode::text("done")])]),
-                RenderNode::list_item(Some(false), vec![RenderNode::paragraph(vec![RenderNode::text("todo")])]),
+                RenderNode::list_item(
+                    Some(true),
+                    vec![RenderNode::paragraph(vec![RenderNode::text("done")])],
+                ),
+                RenderNode::list_item(
+                    Some(false),
+                    vec![RenderNode::paragraph(vec![RenderNode::text("todo")])],
+                ),
             ],
         );
         assert_eq!(render(&list).output, "- [x] done\n- [ ] todo");
@@ -650,7 +706,10 @@ mod tests {
     #[test]
     fn classed_span_degrades_in_plain_markdown_with_diagnostic() {
         let span = RenderNode::span(vec!["hl".into()], vec![RenderNode::text("x")]);
-        let rendered = render_with(&span, &opts(MarkdownDialect::Markdown, RenderStrictness::Warn));
+        let rendered = render_with(
+            &span,
+            &opts(MarkdownDialect::Markdown, RenderStrictness::Warn),
+        );
         assert_eq!(rendered.output, "x");
         assert_eq!(rendered.diagnostics.len(), 1);
     }
@@ -658,8 +717,10 @@ mod tests {
     #[test]
     fn classed_span_emits_html_in_markdown_plus() {
         let span = RenderNode::span(vec!["hl".into()], vec![RenderNode::text("x")]);
-        let rendered =
-            render_with(&span, &opts(MarkdownDialect::MarkdownPlus, RenderStrictness::Warn));
+        let rendered = render_with(
+            &span,
+            &opts(MarkdownDialect::MarkdownPlus, RenderStrictness::Warn),
+        );
         assert_eq!(rendered.output, "<span class=\"hl\">x</span>");
         assert!(rendered.diagnostics.is_empty());
     }
@@ -667,15 +728,20 @@ mod tests {
     #[test]
     fn classed_span_rejected_in_strict_plain_markdown() {
         let span = RenderNode::span(vec!["hl".into()], vec![RenderNode::text("x")]);
-        let result =
-            render_markdown_node(&span, &opts(MarkdownDialect::Markdown, RenderStrictness::Strict));
+        let result = render_markdown_node(
+            &span,
+            &opts(MarkdownDialect::Markdown, RenderStrictness::Strict),
+        );
         assert!(matches!(result, Err(RenderError::LossyRejected { .. })));
     }
 
     #[test]
     fn html_degrades_in_plain_markdown_with_diagnostic() {
         let html = RenderNode::html("<br>", false);
-        let rendered = render_with(&html, &opts(MarkdownDialect::Markdown, RenderStrictness::Warn));
+        let rendered = render_with(
+            &html,
+            &opts(MarkdownDialect::Markdown, RenderStrictness::Warn),
+        );
         assert_eq!(rendered.output, "<br>");
         assert_eq!(rendered.diagnostics.len(), 1);
     }
@@ -683,8 +749,10 @@ mod tests {
     #[test]
     fn html_emits_raw_in_markdown_plus() {
         let html = RenderNode::html("<div>x</div>", true);
-        let rendered =
-            render_with(&html, &opts(MarkdownDialect::MarkdownPlus, RenderStrictness::Warn));
+        let rendered = render_with(
+            &html,
+            &opts(MarkdownDialect::MarkdownPlus, RenderStrictness::Warn),
+        );
         assert_eq!(rendered.output, "<div>x</div>");
         assert!(rendered.diagnostics.is_empty());
     }
@@ -692,8 +760,10 @@ mod tests {
     #[test]
     fn html_rejected_in_strict_plain_markdown() {
         let html = RenderNode::html("<br>", false);
-        let result =
-            render_markdown_node(&html, &opts(MarkdownDialect::Markdown, RenderStrictness::Strict));
+        let result = render_markdown_node(
+            &html,
+            &opts(MarkdownDialect::Markdown, RenderStrictness::Strict),
+        );
         assert!(matches!(result, Err(RenderError::LossyRejected { .. })));
     }
 
@@ -713,8 +783,10 @@ mod tests {
     #[test]
     fn unsupported_emits_diagnostic_in_warn_mode() {
         let node = RenderNode::root(vec![RenderNode::unsupported("custom")]);
-        let rendered =
-            render_with(&node, &opts(MarkdownDialect::Markdown, RenderStrictness::Warn));
+        let rendered = render_with(
+            &node,
+            &opts(MarkdownDialect::Markdown, RenderStrictness::Warn),
+        );
         assert_eq!(rendered.output, "<!-- unsupported: custom -->");
         // One validation-warning diagnostic plus one renderer Unsupported
         // diagnostic.
@@ -724,8 +796,10 @@ mod tests {
     #[test]
     fn unsupported_emits_nothing_in_lossy_mode() {
         let node = RenderNode::root(vec![RenderNode::unsupported("custom")]);
-        let rendered =
-            render_with(&node, &opts(MarkdownDialect::Markdown, RenderStrictness::Lossy));
+        let rendered = render_with(
+            &node,
+            &opts(MarkdownDialect::Markdown, RenderStrictness::Lossy),
+        );
         assert_eq!(rendered.output, "");
         assert!(rendered.diagnostics.is_empty());
     }
@@ -733,18 +807,15 @@ mod tests {
     #[test]
     fn invalid_tree_fails_before_output_regardless_of_strictness() {
         // An orphaned TableCell inside a Paragraph: a structural error.
-        let bad = RenderNode::root(vec![RenderNode::paragraph(vec![
-            RenderNode::table_cell(vec![RenderNode::text("x")]),
-        ])]);
+        let bad = RenderNode::root(vec![RenderNode::paragraph(vec![RenderNode::table_cell(
+            vec![RenderNode::text("x")],
+        )])]);
         for strictness in [
             RenderStrictness::Strict,
             RenderStrictness::Warn,
             RenderStrictness::Lossy,
         ] {
-            let result = render_markdown_node(
-                &bad,
-                &opts(MarkdownDialect::Markdown, strictness),
-            );
+            let result = render_markdown_node(&bad, &opts(MarkdownDialect::Markdown, strictness));
             assert!(matches!(result, Err(RenderError::InvalidTree { .. })));
         }
     }
@@ -753,14 +824,18 @@ mod tests {
     fn warning_validation_finding_folds_into_diagnostics_under_warn() {
         // An Unsupported node yields a warning-severity validation finding.
         let node = RenderNode::root(vec![RenderNode::unsupported("custom")]);
-        let rendered =
-            render_with(&node, &opts(MarkdownDialect::Markdown, RenderStrictness::Warn));
-        assert!(rendered
-            .diagnostics
-            .iter()
-            .any(|d| d.kind == crate::tree::DiagnosticKind::Validation
-                && d.severity == crate::tree::Severity::Warning
-                && d.message.contains("Unsupported node")));
+        let rendered = render_with(
+            &node,
+            &opts(MarkdownDialect::Markdown, RenderStrictness::Warn),
+        );
+        assert!(
+            rendered
+                .diagnostics
+                .iter()
+                .any(|d| d.kind == crate::tree::DiagnosticKind::Validation
+                    && d.severity == crate::tree::Severity::Warning
+                    && d.message.contains("Unsupported node"))
+        );
     }
 
     #[test]
@@ -825,5 +900,60 @@ mod tests {
         assert_eq!(opts.dialect, MarkdownDialect::Markdown);
         assert_eq!(opts.strictness, RenderStrictness::Warn);
         assert!(opts.style.is_none());
+    }
+
+    #[test]
+    fn section_renders_heading_then_body() {
+        let section = RenderNode::section(
+            HeadingDepth::new(2).unwrap(),
+            vec![RenderNode::text("Title")],
+            vec![RenderNode::paragraph(vec![RenderNode::text(
+                "Body paragraph",
+            )])],
+        );
+        assert_eq!(render(&section).output, "## Title\n\nBody paragraph");
+    }
+
+    #[test]
+    fn section_with_empty_body_renders_heading_only() {
+        let section = RenderNode::section(
+            HeadingDepth::new(3).unwrap(),
+            vec![RenderNode::text("Just a heading")],
+            vec![],
+        );
+        assert_eq!(render(&section).output, "### Just a heading");
+    }
+
+    #[test]
+    fn section_with_inline_heading_styles() {
+        let section = RenderNode::section(
+            HeadingDepth::new(1).unwrap(),
+            vec![
+                RenderNode::text("Hello "),
+                RenderNode::strong(vec![RenderNode::text("World")]),
+            ],
+            vec![RenderNode::paragraph(vec![RenderNode::text("Content")])],
+        );
+        assert_eq!(render(&section).output, "# Hello **World**\n\nContent");
+    }
+
+    #[test]
+    fn nested_sections_render_correctly() {
+        let tree = RenderNode::root(vec![RenderNode::section(
+            HeadingDepth::new(1).unwrap(),
+            vec![RenderNode::text("Parent")],
+            vec![
+                RenderNode::paragraph(vec![RenderNode::text("Intro")]),
+                RenderNode::section(
+                    HeadingDepth::new(2).unwrap(),
+                    vec![RenderNode::text("Child")],
+                    vec![RenderNode::paragraph(vec![RenderNode::text("Body")])],
+                ),
+            ],
+        )]);
+        assert_eq!(
+            render(&tree).output,
+            "# Parent\n\nIntro\n\n## Child\n\nBody"
+        );
     }
 }

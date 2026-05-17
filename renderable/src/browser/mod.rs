@@ -1,7 +1,7 @@
 pub mod feature;
 pub mod fragment;
-pub mod utils;
 pub mod renderable;
+pub mod utils;
 
 pub use renderable::BrowserRenderable;
 
@@ -40,7 +40,11 @@ impl ComponentStylesheet {
     /// `internal_class` is the bare class name (no leading `.`) of an
     /// element **within** the component wrapper. [`as_stylesheet`](Self::as_stylesheet)
     /// lowers it to the descendant selector `.<name> .<internal_class>`.
-    pub fn add(mut self, internal_class: impl Into<String>, style: CssStyle) -> ComponentStylesheet {
+    pub fn add(
+        mut self,
+        internal_class: impl Into<String>,
+        style: CssStyle,
+    ) -> ComponentStylesheet {
         self.style.push(CssRule::new(internal_class, style));
         self
     }

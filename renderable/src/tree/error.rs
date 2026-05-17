@@ -91,8 +91,8 @@ impl From<ValidationError> for RenderError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tree::validate::ValidationError;
     use crate::tree::Severity;
+    use crate::tree::validate::ValidationError;
 
     #[test]
     fn rendered_new_has_no_diagnostics() {
