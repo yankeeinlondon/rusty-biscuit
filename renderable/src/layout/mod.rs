@@ -4,6 +4,9 @@
 //! ANSI-width application (`apply_layout` / `apply_block_layout`) lives in
 //! `biscuit-terminal` as the `LayoutTerminalExt` extension trait.
 
+mod length;
+pub use length::{Length, LayoutError};
+
 use crate::color::Color;
 
 pub use crate::wrap_policy::WordWrap;
