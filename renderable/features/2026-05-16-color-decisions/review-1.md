@@ -70,7 +70,7 @@ a code node through a capturing renderer, and asserts the captured
 Spec D-6 says `Unknown` must be resolved by a code renderer against its own
 configured option, defaulting to `Dark` when there is no configured option.
 The docs in `renderable/src/color/capability.rs:66` instead tell
-implementors to use a conservative palette that works on both light and dark
+implementers to use a conservative palette that works on both light and dark
 backgrounds.
 
 That is a subtle but important contract mismatch for the future darkmatter

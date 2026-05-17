@@ -106,7 +106,7 @@ FR-6 says the built-in plain renderer is unaffected, but the hook's behavior und
 
 Add a contract to `CodeRenderer` docs:
 
-- Implementors should treat `ColorDepth::None` as "emit no ANSI styling."
+- Implementers should treat `ColorDepth::None` as "emit no ANSI styling."
 - If an implementation cannot honor the capability context, it should return `None` and let the plain renderer handle the block.
 
 This keeps the hook consistent with the rest of terminal tree rendering.

@@ -1,5 +1,5 @@
-set dotenv-load := true
-set positional-arguments := true
+set dotenv-load
+set positional-arguments
 
 # set allow-duplicate-recipes
 
