@@ -10,9 +10,7 @@ mod parity_helpers;
 use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::components::section::{HeadingLevel, Section};
 use biscuit_terminal::render_tree::{TerminalRenderOptions, render_terminal_node};
-use renderable::tree::{
-    NodeKind, RenderStrictness, ValidationMode, validate,
-};
+use renderable::tree::{NodeKind, RenderStrictness, ValidationMode, validate};
 
 use parity_helpers::{PARITY_WIDTHS, assert_contains_tokens, strip_ansi, test_terminal};
 
@@ -163,9 +161,7 @@ fn tree_output_places_heading_before_body() {
     let node = section.render_tree_node().expect("tree node");
     let plain = strip_ansi(&render_tree(&node, 80));
 
-    let heading_pos = plain
-        .find("Getting Started")
-        .expect("heading present");
+    let heading_pos = plain.find("Getting Started").expect("heading present");
     let first_body_pos = plain.find("Welcome").expect("first body item present");
     let second_body_pos = plain
         .find("installation")
@@ -213,9 +209,6 @@ fn tree_output_renders_at_all_parity_widths() {
         let section = sample_section();
         let node = section.render_tree_node().expect("tree node");
         let tree = render_tree(&node, width);
-        assert_contains_tokens(
-            &tree,
-            &["Getting Started", "Welcome", "installation"],
-        );
+        assert_contains_tokens(&tree, &["Getting Started", "Welcome", "installation"]);
     }
 }

@@ -127,9 +127,7 @@ fn projected_progress_tree_validates() {
 #[test]
 fn projected_progress_extremes_validate() {
     for value in [0.0, 1.0, -0.5, 1.5] {
-        let node = Progress::new(value)
-            .render_tree_node()
-            .expect("tree node");
+        let node = Progress::new(value).render_tree_node().expect("tree node");
         let report = validate(&node, ValidationMode::Full);
         assert!(
             !report.has_errors(),
@@ -194,7 +192,10 @@ fn terminal_tree_render_empty_bar_is_all_empty() {
 fn terminal_tree_render_unlabeled_omits_label_segment() {
     let node = Progress::new(0.5).render_tree_node().expect("tree node");
     let plain = strip_ansi(&render_tree(&node, 80));
-    assert!(plain.trim_start().starts_with('['), "starts with bar bracket: {plain:?}");
+    assert!(
+        plain.trim_start().starts_with('['),
+        "starts with bar bracket: {plain:?}"
+    );
     assert!(plain.contains("50%"), "percentage present: {plain:?}");
 }
 
@@ -208,14 +209,20 @@ fn markdown_fallback_keeps_label_and_percentage() {
     let node = bar.render_tree_node().expect("tree node");
     let md = render_md(&node);
     assert!(md.contains("Loading"), "label survives in markdown: {md:?}");
-    assert!(md.contains("75%"), "percentage survives in markdown: {md:?}");
+    assert!(
+        md.contains("75%"),
+        "percentage survives in markdown: {md:?}"
+    );
 }
 
 #[test]
 fn markdown_fallback_unlabeled_keeps_percentage() {
     let node = Progress::new(0.3).render_tree_node().expect("tree node");
     let md = render_md(&node);
-    assert!(md.contains("30%"), "percentage survives in markdown: {md:?}");
+    assert!(
+        md.contains("30%"),
+        "percentage survives in markdown: {md:?}"
+    );
 }
 
 #[test]
@@ -224,7 +231,10 @@ fn browser_fallback_keeps_label_and_percentage() {
     let node = bar.render_tree_node().expect("tree node");
     let html = render_html(&node);
     assert!(html.contains("Loading"), "label survives in HTML: {html:?}");
-    assert!(html.contains("75%"), "percentage survives in HTML: {html:?}");
+    assert!(
+        html.contains("75%"),
+        "percentage survives in HTML: {html:?}"
+    );
     assert!(html.contains("<p>"), "rendered as a paragraph: {html:?}");
 }
 
@@ -234,9 +244,7 @@ fn browser_fallback_keeps_label_and_percentage() {
 
 #[test]
 fn custom_fill_and_empty_glyphs_survive_tree_render() {
-    let bar = Progress::new(0.5)
-        .with_fill_char('#')
-        .with_empty_char('-');
+    let bar = Progress::new(0.5).with_fill_char('#').with_empty_char('-');
     let node = bar.render_tree_node().expect("tree node");
 
     let hints = node.attrs.progress_hints().expect("hints present");
@@ -246,7 +254,10 @@ fn custom_fill_and_empty_glyphs_survive_tree_render() {
     let plain = strip_ansi(&render_tree(&node, 80));
     assert!(plain.contains('#'), "custom fill glyph honored: {plain:?}");
     assert!(plain.contains('-'), "custom empty glyph honored: {plain:?}");
-    assert!(!plain.contains('█'), "default fill glyph not used: {plain:?}");
+    assert!(
+        !plain.contains('█'),
+        "default fill glyph not used: {plain:?}"
+    );
 }
 
 #[test]
@@ -259,8 +270,14 @@ fn custom_bracket_glyphs_survive_tree_render() {
     assert_eq!(hints.right_bracket, ')');
 
     let plain = strip_ansi(&render_tree(&node, 80));
-    assert!(plain.contains('('), "custom left bracket honored: {plain:?}");
-    assert!(plain.contains(')'), "custom right bracket honored: {plain:?}");
+    assert!(
+        plain.contains('('),
+        "custom left bracket honored: {plain:?}"
+    );
+    assert!(
+        plain.contains(')'),
+        "custom right bracket honored: {plain:?}"
+    );
 }
 
 // ---------------------------------------------------------------------------

@@ -11,9 +11,7 @@ mod parity_helpers;
 
 use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::components::table::types::{ColumnType, Currency};
-use biscuit_terminal::components::table::{
-    Conditional, Table, TableCellContent, TableColumn,
-};
+use biscuit_terminal::components::table::{Conditional, Table, TableCellContent, TableColumn};
 use biscuit_terminal::render_tree::{TerminalRenderOptions, render_terminal_node};
 use renderable::tree::{
     ColumnAlign, ColumnConditional, NodeKind, RenderNode, RenderStrictness, ValidationMode,
@@ -27,8 +25,14 @@ fn sample_table() -> Table {
     Table::new()
         .with_columns(vec![TableColumn::new("Name"), TableColumn::new("Score")])
         .with_data(vec![
-            vec![TableCellContent::Text("Ann".into()), TableCellContent::Integer(42)],
-            vec![TableCellContent::Text("Bob".into()), TableCellContent::Integer(17)],
+            vec![
+                TableCellContent::Text("Ann".into()),
+                TableCellContent::Integer(42),
+            ],
+            vec![
+                TableCellContent::Text("Bob".into()),
+                TableCellContent::Integer(17),
+            ],
         ])
 }
 
@@ -114,7 +118,11 @@ fn render_tree_node_carries_column_alignment() {
         panic!("expected Table");
     };
     assert_eq!(align[0], ColumnAlign::Left, "text column left-aligned");
-    assert_eq!(align[1], ColumnAlign::Right, "currency column right-aligned");
+    assert_eq!(
+        align[1],
+        ColumnAlign::Right,
+        "currency column right-aligned"
+    );
     assert_eq!(align[2], ColumnAlign::Right, "integer column right-aligned");
 }
 
@@ -226,10 +234,7 @@ fn tree_output_preserves_all_cell_content() {
     let table = typed_table();
     let node = table.render_tree_node().expect("tree node");
     let tree = render_tree(&node, 80);
-    assert_contains_tokens(
-        &tree,
-        &["Product", "Price", "Stock", "Widget", "Gadget"],
-    );
+    assert_contains_tokens(&tree, &["Product", "Price", "Stock", "Widget", "Gadget"]);
 }
 
 // ---------------------------------------------------------------------------
@@ -260,10 +265,7 @@ fn tree_output_keeps_columns_in_order() {
 #[test]
 fn tree_output_handles_multi_line_cells() {
     let table = Table::new()
-        .with_columns(vec![
-            TableColumn::new("Task"),
-            TableColumn::new("Status"),
-        ])
+        .with_columns(vec![TableColumn::new("Task"), TableColumn::new("Status")])
         .with_data(vec![vec![
             TableCellContent::Text("line one\nline two".into()),
             TableCellContent::Text("Done".into()),
@@ -427,12 +429,8 @@ fn malformed_conditional_token_defaults_to_always() {
     let mut table = RenderNode::table(
         vec![ColumnAlign::Left],
         vec![
-            RenderNode::table_row(vec![RenderNode::table_cell(vec![RenderNode::text(
-                "Col",
-            )])]),
-            RenderNode::table_row(vec![RenderNode::table_cell(vec![RenderNode::text(
-                "Val",
-            )])]),
+            RenderNode::table_row(vec![RenderNode::table_cell(vec![RenderNode::text("Col")])]),
+            RenderNode::table_row(vec![RenderNode::table_cell(vec![RenderNode::text("Val")])]),
         ],
     );
     table.attrs.set_hint(

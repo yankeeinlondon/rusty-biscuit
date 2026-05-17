@@ -27,7 +27,10 @@ fn render_tree(node: &RenderNode, width: u32) -> String {
 
 /// Builds a `ListItem` whose body is a single paragraph of text.
 fn text_item(text: &str) -> RenderNode {
-    RenderNode::list_item(None, vec![RenderNode::paragraph(vec![RenderNode::text(text)])])
+    RenderNode::list_item(
+        None,
+        vec![RenderNode::paragraph(vec![RenderNode::text(text)])],
+    )
 }
 
 // ---------------------------------------------------------------------------
@@ -192,7 +195,10 @@ fn unordered_tree_output_aligns_bullets() {
     let node = list.render_tree_node().expect("tree node");
     let plain = strip_ansi(&render_tree(&node, 80));
     for line in plain.lines().filter(|l| !l.trim().is_empty()) {
-        assert!(line.starts_with("- "), "every line starts with a bullet: {line:?}");
+        assert!(
+            line.starts_with("- "),
+            "every line starts with a bullet: {line:?}"
+        );
     }
 }
 
@@ -228,7 +234,10 @@ fn ordered_list_honors_non_default_start() {
         let children = vec![text_item("x"), text_item("y")];
         let node = RenderNode::list(true, Some(start), children);
         let plain = strip_ansi(&render_tree(&node, 80));
-        assert!(plain.contains(&format!("{start}. x")), "start={start} first");
+        assert!(
+            plain.contains(&format!("{start}. x")),
+            "start={start} first"
+        );
         assert!(
             plain.contains(&format!("{}. y", start + 1)),
             "start={start} second"
@@ -321,7 +330,10 @@ fn list_item_with_block_children_indents_without_double_bullet() {
     let plain = strip_ansi(&render_tree(&node, 80));
 
     // The paragraph carries the bullet.
-    assert!(plain.contains("- Steps:"), "paragraph carries bullet: {plain:?}");
+    assert!(
+        plain.contains("- Steps:"),
+        "paragraph carries bullet: {plain:?}"
+    );
     // The code block is indented, not bulleted.
     let code_line = plain
         .lines()
@@ -378,7 +390,10 @@ fn disabled_hanging_indent_survives_projection_and_render() {
 
     let plain = strip_ansi(&render_tree(&node, 30));
     let lines: Vec<&str> = plain.lines().filter(|l| !l.trim().is_empty()).collect();
-    assert!(lines.len() > 1, "content should wrap at width 30: {lines:?}");
+    assert!(
+        lines.len() > 1,
+        "content should wrap at width 30: {lines:?}"
+    );
     for line in &lines[1..] {
         assert!(
             !line.starts_with(' '),
@@ -425,7 +440,11 @@ fn lists_render_at_all_parity_widths() {
 #[test]
 fn nested_section_with_list_validates_and_renders() {
     // A list embedded in a section body — exercises the projection chain.
-    let list_node = RenderNode::list(true, None, vec![text_item("step one"), text_item("step two")]);
+    let list_node = RenderNode::list(
+        true,
+        None,
+        vec![text_item("step one"), text_item("step two")],
+    );
     let section = RenderNode::section(
         HeadingDepth::new(2).unwrap(),
         vec![RenderNode::text("Instructions")],
@@ -435,5 +454,8 @@ fn nested_section_with_list_validates_and_renders() {
     assert!(!report.has_errors(), "section with list validates");
 
     let plain = strip_ansi(&render_tree(&section, 80));
-    assert_contains_tokens(&plain, &["Instructions", "1.", "step one", "2.", "step two"]);
+    assert_contains_tokens(
+        &plain,
+        &["Instructions", "1.", "step one", "2.", "step two"],
+    );
 }

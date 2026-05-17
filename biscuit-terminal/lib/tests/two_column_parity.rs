@@ -104,7 +104,10 @@ fn projected_children_preserve_both_column_regions() {
     let hints = node.attrs.columns_hints().expect("columns hints");
 
     // `left_count` records where the left group ends.
-    assert!(hints.left_count >= 1, "left column produced at least one node");
+    assert!(
+        hints.left_count >= 1,
+        "left column produced at least one node"
+    );
     assert!(
         hints.left_count < children.len(),
         "right column produced at least one node"
@@ -171,8 +174,14 @@ fn terminal_render_keeps_both_columns() {
     let cols = TwoColumn::new("LeftSide", "RightSide");
     let node = cols.render_tree_node().expect("tree node");
     let plain = strip_ansi(&render_tree(&node, 80));
-    assert!(plain.contains("LeftSide"), "left content survives: {plain:?}");
-    assert!(plain.contains("RightSide"), "right content survives: {plain:?}");
+    assert!(
+        plain.contains("LeftSide"),
+        "left content survives: {plain:?}"
+    );
+    assert!(
+        plain.contains("RightSide"),
+        "right content survives: {plain:?}"
+    );
 }
 
 #[test]
@@ -181,7 +190,10 @@ fn markdown_render_keeps_both_columns() {
     let node = cols.render_tree_node().expect("tree node");
     let md = render_md(&node);
     assert!(md.contains("LeftSide"), "left survives in markdown: {md:?}");
-    assert!(md.contains("RightSide"), "right survives in markdown: {md:?}");
+    assert!(
+        md.contains("RightSide"),
+        "right survives in markdown: {md:?}"
+    );
     // The columns fallback is sequential sections, not a `>` quote.
     assert!(!md.contains('>'), "no block-quote marker emitted: {md:?}");
 }
@@ -192,7 +204,10 @@ fn browser_render_keeps_both_columns_in_flex_container() {
     let node = cols.render_tree_node().expect("tree node");
     let html = render_html(&node);
     assert!(html.contains("LeftSide"), "left survives in HTML: {html:?}");
-    assert!(html.contains("RightSide"), "right survives in HTML: {html:?}");
+    assert!(
+        html.contains("RightSide"),
+        "right survives in HTML: {html:?}"
+    );
     assert!(
         html.contains(r#"class="columns""#),
         "columns container class present: {html:?}"
@@ -222,7 +237,10 @@ fn wide_terminal_renders_columns_side_by_side() {
     let on_same_line = plain
         .lines()
         .any(|line| line.contains("LeftWord") && line.contains("RightWord"));
-    assert!(on_same_line, "columns are side by side at width 80: {plain:?}");
+    assert!(
+        on_same_line,
+        "columns are side by side at width 80: {plain:?}"
+    );
 }
 
 #[test]
@@ -235,9 +253,15 @@ fn narrow_terminal_stacks_columns() {
     let same_line = plain
         .lines()
         .any(|line| line.contains("LeftWord") && line.contains("RightWord"));
-    assert!(!same_line, "columns are stacked at a narrow width: {plain:?}");
+    assert!(
+        !same_line,
+        "columns are stacked at a narrow width: {plain:?}"
+    );
     assert!(plain.contains("LeftWord"), "left still present: {plain:?}");
-    assert!(plain.contains("RightWord"), "right still present: {plain:?}");
+    assert!(
+        plain.contains("RightWord"),
+        "right still present: {plain:?}"
+    );
 }
 
 // ---------------------------------------------------------------------------
