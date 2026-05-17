@@ -97,21 +97,29 @@ check:
 # run the full Criterion bench suite for darkmatter
 bench *args="":
     @echo -e "Running Criterion benches for {{ BOLD }}{{ LIB_NAME }}{{ RESET }}"
-    @cargo bench -p {{ LIBRARY }} -- {{ args }}
+    @cargo bench -p {{ LIBRARY }} --benches -- {{ args }}
 
 # run only the schema validation benches (1000-doc corpus, warm + cold cache)
 bench-schema *args="":
     @cargo bench -p {{ LIBRARY }} --bench schema_validation -- {{ args }}
 
+# run only the compose pipeline benches (per-stage isolation)
+bench-compose *args="":
+    @cargo bench -p {{ LIBRARY }} --bench compose_pipeline -- {{ args }}
+
+# run only the render pipeline benches (parse, terminal, html, highlight)
+bench-render *args="":
+    @cargo bench -p {{ LIBRARY }} --bench render_pipeline -- {{ args }}
+
 # capture a saved baseline for trend tracking (usage: `just bench-baseline main`)
 bench-baseline name:
     @echo -e "Saving Criterion baseline {{ BOLD }}{{ name }}{{ RESET }}"
-    @cargo bench -p {{ LIBRARY }} -- --save-baseline {{ name }}
+    @cargo bench -p {{ LIBRARY }} --benches -- --save-baseline {{ name }}
 
 # compare current bench timings against a saved baseline
 bench-compare name:
     @echo -e "Comparing against Criterion baseline {{ BOLD }}{{ name }}{{ RESET }}"
-    @cargo bench -p {{ LIBRARY }} -- --baseline {{ name }}
+    @cargo bench -p {{ LIBRARY }} --benches -- --baseline {{ name }}
 
 # Run the latest debug build of the Claudine CLI
 cli *args="":
