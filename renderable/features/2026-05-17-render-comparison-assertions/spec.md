@@ -24,7 +24,7 @@ output against the bespoke renderer (the oracle) for every component under
 every layout scenario, across the **complete** output — visible text, layout,
 and ANSI styling. The suite genuinely asserts `tree == bespoke`. Known drift is
 tracked in an expected-failures ledger so CI stays green while the ledger gives
-an exact, self-maintaining count of remaining engine bugs.
+an exact, self-maintaining count of remaining drift.
 
 ## Non-Goals
 
@@ -58,16 +58,41 @@ broke.
 | `text` | ANSI-stripped visible text, exact equality | Layout + content drift, ignoring color |
 | `indent` | Per-line count of leading visible spaces (`Vec<usize>`) | Left margin, centering, right alignment |
 | `blank_lines` | Indices of blank lines within the output (`Vec<usize>`) | Top/bottom margin, inter-block spacing |
-| `width` | Maximum visible line width (`usize`) | Right margin, wrapping, width handling |
-| `styling` | Ordered sequence of SGR escape sequences (`Vec<String>`) | Color, bold, dim drift |
-
-Facet extraction operates on the rendered strings only — pure string analysis,
-no component types. "Visible" width/indent means after ANSI stripping; a
-leading space is U+0020.
+| `width` | Maximum visible line width — ANSI-stripped `.chars().count()` (`usize`) | Right margin, wrapping, width handling |
+| `styling` | Ordered list of `(visible_offset, sgr_sequence)` pairs (`Vec<(usize, String)>`) | Color, bold, dim drift |
 
 A facet **drifts** for a (component, scenario) when its extracted value differs
-between the bespoke and tree outputs. The `exact` facet drifts whenever any
-other facet does; the sub-facets exist to attribute that drift.
+between the bespoke and tree outputs. `exact` is computed by direct string
+comparison, never inferred from the sub-facets; it necessarily drifts whenever
+a sub-facet does, and additionally catches differences — trailing whitespace,
+ANSI ordering and position — that no sub-facet isolates. The sub-facets exist
+to attribute `exact` drift to a dimension.
+
+### Extraction semantics
+
+Facet extraction operates on the rendered strings only — pure string analysis,
+no component types.
+
+- **Line splitting.** Extraction splits on `\n` (`str::split('\n')`), *not*
+  `str::lines()`. `lines()` discards the empty final element produced by a
+  trailing newline, which would hide top/bottom-margin and trailing-blank-line
+  drift. The element after a trailing `\n` is a real, comparable line.
+- **ANSI stripping.** Facets that work on visible text (`text`, `indent`,
+  `blank_lines`, `width`) strip ANSI with the existing
+  `biscuit_terminal::prelude::strip_escape_codes` helper — the same stripper the
+  rest of the terminal test suite uses. No second ANSI stripper is introduced.
+- **Width.** `width` is the ANSI-stripped `.chars().count()` of the widest
+  line. The current scenario matrix is ASCII-only, so code-point count equals
+  display width. If wide-Unicode scenarios are added later this must move to a
+  terminal display-width helper.
+- **Indent.** A leading space is U+0020; `indent` counts leading U+0020 on the
+  ANSI-stripped line.
+- **`styling` precision.** `styling` records `(visible_offset, sgr_sequence)`
+  pairs — each SGR sequence and the visible-character offset at which it
+  appears. This localizes color/emphasis drift better than a bare sequence
+  list, but it still cannot prove two equal-offset SGRs style identical glyphs
+  if surrounding text shifted. That residual case is always caught by `exact`;
+  `styling` is a diagnostic aid, not an independent correctness guarantee.
 
 ## The Drift Ledger
 
@@ -88,18 +113,34 @@ const KNOWN_DRIFT: &[(&str, &str, Facet)] = &[
 `BlankLines`, `Width`, `Styling`) deriving `Debug`, `Clone`, `Copy`, `PartialEq`,
 `Eq`, `Ord`, `PartialOrd`.
 
-The ledger length is the remaining-bug count for that crate. The ledger is the
-bug backlog in data form.
+The ledger length is the **remaining drift count** for that crate — the number
+of known drifting `(component, scenario, facet)` observations, *not* the number
+of underlying engine bugs. One engine bug typically produces several entries:
+every diagnostic facet it disturbs, plus the `exact` facet. The ledger is the
+drift backlog in data form; mapping it to discrete bugs (issue IDs, grouping)
+is out of scope for this suite.
+
+### Ledger integrity
+
+`KNOWN_DRIFT` is normalized into a `BTreeSet` of drift keys at the start of the
+test. If the constant contains duplicate triples the test panics immediately
+(`duplicate KNOWN_DRIFT entry`) — duplicates would silently inflate the drift
+count and usually indicate a bad merge or paste. Record mode (below) emits the
+literal in deterministic sorted order so committed diffs stay minimal and
+stable.
 
 ### Bootstrap
 
 The initial ledger is generated, not hand-written. Running the test with the
-environment variable `RECORD_DRIFT=1` set causes the test to print the complete
-current drift set as a ready-to-paste `KNOWN_DRIFT` literal (sorted
-deterministically) and pass without comparing against the existing ledger. The
-engineer pastes that output into the test file and commits it.
+environment variable `RECORD_DRIFT` set to a truthy value — `1`, `true`, or
+`yes` (case-insensitive) — causes the test to print the complete current drift
+set as a ready-to-paste `KNOWN_DRIFT` literal, sorted deterministically, and
+pass without comparing against the existing ledger. The engineer pastes that
+output into the test file and commits it.
 
-Without `RECORD_DRIFT`, the test compares normally.
+Any other value, including `0` or `false`, leaves the test in normal compare
+mode, so an inherited `RECORD_DRIFT=0` does not surprise CI or local shells.
+Unset behaves the same as a non-truthy value: normal compare mode.
 
 ## Test Behavior
 
@@ -111,7 +152,8 @@ One `#[test]` function per crate — `render_matches_bespoke`. It:
    retained).
 3. Extracts all six facets from each side and records every drifting
    `(component, scenario, facet)` triple into a live drift set.
-4. If `RECORD_DRIFT=1`: print the live set as a `KNOWN_DRIFT` literal, pass.
+4. If `RECORD_DRIFT` is truthy: print the live set as a sorted `KNOWN_DRIFT`
+   literal, pass.
 5. Otherwise compare the live set against `KNOWN_DRIFT`:
    - **Triples in live but not in the ledger** → panic: `REGRESSION / unrecorded
      drift`, listing each triple. Either a real regression, or new drift that
@@ -121,8 +163,13 @@ One `#[test]` function per crate — `render_matches_bespoke`. It:
      facet; the ledger entry must be deleted.
    - **Equal** → pass.
 
-Failure messages list the exact offending triples so the required ledger edit
-(or the regression) is unambiguous.
+Every failure panic opens with a one-line summary —
+`live drift: N, known: M, unrecorded: X, fixed: Y` — followed by the offending
+triples, so the required ledger edit (or the regression) is unambiguous. For up
+to the first five **unrecorded** triples the panic also prints the bespoke and
+tree facet values (rendered strings for `exact`/`text` truncated to a
+reasonable cap, e.g. 200 chars), so newly introduced drift can be diagnosed
+without rerunning under ad-hoc logging.
 
 The test is green precisely when the live drift set equals the ledger — i.e.
 when every known bug is still present and no new drift and no fixes have
@@ -158,8 +205,9 @@ included with `mod layout_matrix_support;`.
   (produced by `layout_matrix_support`'s `render_tree_string` on a render
   error). Such a sentinel simply produces drift on the relevant facets and is
   recorded in the ledger like any other drift — it is not special-cased.
-- `RECORD_DRIFT` is read once via `std::env::var`; any value other than unset
-  enables record mode.
+- `RECORD_DRIFT` is read once via `std::env::var`; record mode is enabled only
+  when the value, lowercased and trimmed, is `1`, `true`, or `yes`. Every other
+  value (including `0`, `false`, and unset) leaves the test in compare mode.
 
 ## Testing
 
@@ -175,6 +223,22 @@ Additionally:
   produces the "REGRESSION / unrecorded drift" failure (manual one-off check
   during implementation; not committed).
 - Both crates remain `clippy`-clean.
+
+## Implementation Notes
+
+- Represent triples internally as a named `DriftKey { component, scenario,
+  facet }` struct deriving `Ord`/`Eq`/`Hash` for `BTreeSet` use. The committed
+  `KNOWN_DRIFT` constant may stay tuple-shaped for compact literals; convert
+  tuples into `DriftKey`s on load.
+- Define an `ALL_FACETS: [Facet; 6]` constant and iterate it everywhere facets
+  are enumerated, so record output ordering is stable and a newly added facet
+  cannot be silently skipped.
+- Compare every facet independently, `exact` included — never derive `exact`
+  drift from the sub-facets. `exact` catches trailing-space and ANSI-position
+  differences the sub-facets do not localize.
+- Panic messages include both counts and the categorized triples so a single
+  read of the failure tells the engineer exactly which ledger lines to add or
+  remove.
 
 ## Exit Condition
 
