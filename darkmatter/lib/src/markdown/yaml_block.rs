@@ -252,6 +252,9 @@ impl TerminalRenderable for YamlBlock {
             language_label: Some("yaml".into()),
             highlight: true,
         });
+        if self.layout != Layout::default() {
+            node.attrs.set_layout(&self.layout);
+        }
         Some(node)
     }
 }
@@ -304,7 +307,7 @@ impl YamlBlock {
 mod tests {
     use super::*;
     use crate::markdown::highlighting::{ColorMode, detect_color_mode};
-    use biscuit_terminal::utils::layout::Margin;
+    use biscuit_terminal::utils::layout::{Length, TargetValue};
     use serial_test::serial;
     use std::io::Write;
     use tempfile::NamedTempFile;
@@ -712,16 +715,16 @@ mod tests {
         );
     }
 
-    /// §3.2 — Layout `left_margin` must be applied to the rendered output.
+    /// §3.2 — Layout left margin must be applied to the rendered output.
     ///
-    /// Sets `Margin::Chars(4)` on the block's layout and asserts every
+    /// Sets a 4-cell left margin on the block's layout and asserts every
     /// non-empty rendered line begins with the expected indent. This is the
     /// behavioural test for Phase 1 §1.1 (rewriting `render` to honour the
     /// stored layout).
     #[test]
     fn test_left_margin_is_applied() {
         let mut block = YamlBlock::new("foo: 1\nbar: 2").unwrap();
-        block.layout_mut().left_margin = Margin::Chars(4);
+        block.layout_mut().margin.left = TargetValue::universal(Length::ch(4));
 
         let out = TerminalRenderable::render(&block, &Terminal::default());
         let plain = crate::testing::strip_ansi_codes(&out);

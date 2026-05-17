@@ -1,3 +1,9 @@
+// The CLI maps `--align-*` / `--fill-*` arguments onto the deprecated
+// page-layout types (`PageAlignment`, `PageFill`, `WidthUnit`), which remain
+// the public construction path through the `DarkmatterPage` builder. The
+// migration to `renderable::layout::Layout` is tracked separately.
+#![allow(deprecated)]
+
 use clap::{Parser, Subcommand, ValueEnum};
 use clap_complete::Shell;
 use clap_complete::engine::{ArgValueCompleter, CompletionCandidate};

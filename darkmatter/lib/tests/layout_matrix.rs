@@ -9,8 +9,10 @@ mod layout_matrix_support;
 use layout_matrix_support::{component_cases, scenarios, stacked_stripped};
 
 #[test]
-fn scenario_count_is_twelve() {
-    assert_eq!(scenarios().len(), 12);
+fn scenario_count_is_eleven() {
+    // The legacy `row_fill_fill` scenario was dropped: `RowFill` has no
+    // equivalent on the new `renderable::layout::Layout`.
+    assert_eq!(scenarios().len(), 11);
 }
 
 #[test]

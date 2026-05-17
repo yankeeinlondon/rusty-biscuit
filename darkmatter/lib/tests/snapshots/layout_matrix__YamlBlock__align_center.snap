@@ -12,9 +12,9 @@ BESPOKE
                                     - terminal
 ---
 TREE
-```yaml
-    name: rusty-biscuit
-    version: 0.1.0
-    tags:
-      - cli
-      - terminal
+                            ```yaml
+                                name: rusty-biscuit
+                                version: 0.1.0
+                                tags:
+                                  - cli
+                                  - terminal

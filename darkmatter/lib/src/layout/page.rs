@@ -2,6 +2,13 @@
 //! padding, page background, max-width, alignment, and per-component fill
 //! settings for darkmatter rendering.
 
+// `DarkmatterPage` is built from the deprecated page-layout types
+// (`PageMargin`, `PagePadding`, `PageAlignment`, `PageFill`); the builder is
+// the CLI's only construction path, so this module legitimately references
+// them. Page margins are mapped onto `renderable::layout::Layout` via the
+// `From`/`TryFrom` bridges in `super::types`.
+#![allow(deprecated)]
+
 use std::any::Any;
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -159,11 +166,46 @@ impl DarkmatterPage {
         self
     }
 
+    // ---------- Layout synchronization ----------
+
+    /// Rebuild the [`renderable::layout::Layout`] mirror from current page
+    /// state.
+    ///
+    /// Page margin **and** padding are both transparent/filled space outside
+    /// the content rectangle; the new [`Layout`] primitive has no separate
+    /// padding concept, so the two are summed into the layout margin. The
+    /// max-width cap is mapped to a universal `Ch` length. This keeps the
+    /// [`TerminalRenderable::layout`] accessor consistent with the builder
+    /// state without disturbing the bespoke row-decoration pipeline.
+    fn rebuild_layout(&mut self) {
+        use renderable::layout::{Length, Margin as RMargin, TargetValue};
+
+        let margin: RMargin = self.margin.into();
+        let padding: RMargin = self.padding.into();
+        let sum = |a: &TargetValue<Length>, b: &TargetValue<Length>| {
+            let cells = |tv: &TargetValue<Length>| match tv {
+                TargetValue::Universal(Length::Ch(n)) => *n,
+                _ => 0,
+            };
+            TargetValue::universal(Length::ch(cells(a) + cells(b)))
+        };
+        self.layout.margin = RMargin {
+            top: sum(&margin.top, &padding.top),
+            right: sum(&margin.right, &padding.right),
+            bottom: sum(&margin.bottom, &padding.bottom),
+            left: sum(&margin.left, &padding.left),
+        };
+        self.layout.max_width = self
+            .max_width
+            .map(|mw| TargetValue::universal(Length::ch(u32::from(mw))));
+    }
+
     // ---------- Margin builders ----------
 
     /// Set all four sides of the margin to `n` cells.
     pub fn with_margin(mut self, n: u16) -> Self {
         self.margin = PageMargin::all(n);
+        self.rebuild_layout();
         self
     }
 
@@ -171,6 +213,7 @@ impl DarkmatterPage {
     pub fn with_margin_x(mut self, n: u16) -> Self {
         self.margin.left = n;
         self.margin.right = n;
+        self.rebuild_layout();
         self
     }
 
@@ -178,30 +221,35 @@ impl DarkmatterPage {
     pub fn with_margin_y(mut self, n: u16) -> Self {
         self.margin.top = n;
         self.margin.bottom = n;
+        self.rebuild_layout();
         self
     }
 
     /// Set the top margin to `n` rows.
     pub fn with_margin_top(mut self, n: u16) -> Self {
         self.margin.top = n;
+        self.rebuild_layout();
         self
     }
 
     /// Set the bottom margin to `n` rows.
     pub fn with_margin_bottom(mut self, n: u16) -> Self {
         self.margin.bottom = n;
+        self.rebuild_layout();
         self
     }
 
     /// Set the left margin to `n` columns.
     pub fn with_margin_left(mut self, n: u16) -> Self {
         self.margin.left = n;
+        self.rebuild_layout();
         self
     }
 
     /// Set the right margin to `n` columns.
     pub fn with_margin_right(mut self, n: u16) -> Self {
         self.margin.right = n;
+        self.rebuild_layout();
         self
     }
 
@@ -210,6 +258,7 @@ impl DarkmatterPage {
     /// Set all four sides of the padding to `n` cells.
     pub fn with_padding(mut self, n: u16) -> Self {
         self.padding = PagePadding::all(n);
+        self.rebuild_layout();
         self
     }
 
@@ -217,6 +266,7 @@ impl DarkmatterPage {
     pub fn with_padding_x(mut self, n: u16) -> Self {
         self.padding.left = n;
         self.padding.right = n;
+        self.rebuild_layout();
         self
     }
 
@@ -224,30 +274,35 @@ impl DarkmatterPage {
     pub fn with_padding_y(mut self, n: u16) -> Self {
         self.padding.top = n;
         self.padding.bottom = n;
+        self.rebuild_layout();
         self
     }
 
     /// Set the top padding to `n` rows.
     pub fn with_padding_top(mut self, n: u16) -> Self {
         self.padding.top = n;
+        self.rebuild_layout();
         self
     }
 
     /// Set the bottom padding to `n` rows.
     pub fn with_padding_bottom(mut self, n: u16) -> Self {
         self.padding.bottom = n;
+        self.rebuild_layout();
         self
     }
 
     /// Set the left padding to `n` columns.
     pub fn with_padding_left(mut self, n: u16) -> Self {
         self.padding.left = n;
+        self.rebuild_layout();
         self
     }
 
     /// Set the right padding to `n` columns.
     pub fn with_padding_right(mut self, n: u16) -> Self {
         self.padding.right = n;
+        self.rebuild_layout();
         self
     }
 
@@ -262,6 +317,7 @@ impl DarkmatterPage {
     /// Cap the content width at `max_width` columns.
     pub fn with_max_width(mut self, max_width: u16) -> Self {
         self.max_width = Some(max_width);
+        self.rebuild_layout();
         self
     }
 

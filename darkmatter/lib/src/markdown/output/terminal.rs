@@ -27,6 +27,10 @@
 //! // Output contains ANSI escape codes for terminal display
 //! ```
 
+// `PageAlignment`/`PageFill` are deprecated in favor of
+// `renderable::layout::Layout`; the page-level component-layout pipeline in
+// this module still consumes them while that migration completes.
+#[allow(deprecated)]
 use crate::layout::{LayoutContext, PageAlignment, PageComponent, PageFill};
 use crate::markdown::{
     Markdown, MarkdownError,
@@ -2736,15 +2740,36 @@ impl LineWrapper {
     }
 }
 
+/// Resolve a [`Layout`](biscuit_terminal::utils::layout::Layout) margin side
+/// to a whole-cell count for the terminal target.
+///
+/// Universal `Ch` and `Zero` lengths resolve directly; `Percent` is resolved
+/// against `terminal_width`. Per-target and CSS-only values resolve to `0`.
+fn resolve_terminal_margin(
+    side: &biscuit_terminal::utils::layout::TargetValue<
+        biscuit_terminal::utils::layout::Length,
+    >,
+    terminal_width: u32,
+) -> u32 {
+    use biscuit_terminal::utils::layout::Length;
+    use renderable::target::RenderTarget;
+    match side.resolve(RenderTarget::Terminal) {
+        Some(Length::Zero) | None => 0,
+        Some(Length::Ch(n)) => *n,
+        Some(Length::Percent(p)) => ((terminal_width as f32) * p / 100.0).round() as u32,
+        Some(Length::Css(_)) => 0,
+    }
+}
+
 /// Emits a rendered [`HorizontalRule`] into `wrapper`, honoring the rule's
 /// [`Layout`](biscuit_terminal::utils::layout::Layout) margins (B3) and using
 /// the outer [`Terminal`] context (B2).
 ///
-/// The rule's `top_margin` and `bottom_margin` are resolved to character
-/// counts via [`Layout::resolve_margin`](biscuit_terminal::utils::layout::Layout::resolve_margin)
-/// and emitted as blank lines. A default-layout rule (`Margin::None`) produces
-/// a single trailing blank line to match the surrounding markdown rhythm —
-/// replacing the previous hardcoded double `\n\n` spacing.
+/// The rule's top and bottom margins are resolved to character counts via
+/// [`resolve_terminal_margin`] and emitted as blank lines. A default-layout
+/// rule (zero bottom margin) produces a single trailing blank line to match
+/// the surrounding markdown rhythm — replacing the previous hardcoded double
+/// `\n\n` spacing.
 fn write_horizontal_rule(
     wrapper: &mut LineWrapper,
     rule: &HorizontalRule,
@@ -2752,7 +2777,7 @@ fn write_horizontal_rule(
     terminal_width: u16,
 ) {
     use biscuit_terminal::components::renderable::TerminalRenderable;
-    use biscuit_terminal::utils::layout::{Layout, Margin};
+    use biscuit_terminal::utils::layout::{Length, TargetValue};
 
     // If we're mid-line, break to column 0 before emitting margins.
     if wrapper.current_col() > 0 {
@@ -2760,7 +2785,7 @@ fn write_horizontal_rule(
     }
 
     let layout = rule.layout();
-    let top = Layout::resolve_margin(&layout.top_margin, terminal_width as u32);
+    let top = resolve_terminal_margin(&layout.margin.top, terminal_width as u32);
     for _ in 0..top {
         wrapper.newline();
     }
@@ -2771,12 +2796,13 @@ fn write_horizontal_rule(
     wrapper.push_with_newlines(&rule.render(term));
     wrapper.push_with_newlines("\n");
 
-    let bottom = Layout::resolve_margin(&layout.bottom_margin, terminal_width as u32);
-    if matches!(layout.bottom_margin, Margin::None) {
+    let bottom_is_default = layout.margin.bottom == TargetValue::universal(Length::Zero);
+    let bottom = resolve_terminal_margin(&layout.margin.bottom, terminal_width as u32);
+    if bottom_is_default {
         // Default behavior: one blank line after the rule so subsequent
         // blocks visually separate without forcing authors to set an
         // explicit margin. Callers that want tighter or looser spacing can
-        // configure `layout.bottom_margin` on the rule.
+        // configure `layout.margin.bottom` on the rule.
         wrapper.push_with_newlines("\n");
     } else {
         for _ in 0..bottom {
@@ -2799,6 +2825,7 @@ fn write_horizontal_rule(
 /// For [`PageFill::Full`], [`PageFill::Max`] and [`PageFill::Explicit`] the
 /// component renders at the resolved width and is then aligned within the
 /// effective page width via [`LayoutContext::alignment_padding`].
+#[allow(deprecated)]
 fn apply_component_layout(
     text: &str,
     component: PageComponent,

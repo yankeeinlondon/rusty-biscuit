@@ -1,5 +1,15 @@
 //! Page-layout configuration types used by
 //! [`DarkmatterPage`](super::DarkmatterPage).
+//!
+//! These page-layout types are deprecated in favor of
+//! [`renderable::layout::Layout`]. They remain `pub` because the darkmatter
+//! CLI still constructs them through the [`DarkmatterPage`](super::DarkmatterPage)
+//! builder. The `From`/`TryFrom` conversions below bridge them onto the new
+//! [`renderable::layout`] primitives.
+
+// This module is the home of the deprecated page-layout types; its own
+// `impl`s, conversions, and tests legitimately reference them.
+#![allow(deprecated)]
 
 use super::error::PageRenderError;
 
@@ -7,6 +17,10 @@ use super::error::PageRenderError;
 ///
 /// Margins are specified in terminal cells: rows for vertical sides, columns
 /// for horizontal sides.
+#[deprecated(
+    since = "0.1.0",
+    note = "use renderable::layout::Layout (via renderable::layout::Margin)"
+)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct PageMargin {
     /// Top margin in rows.
@@ -53,6 +67,10 @@ impl PageMargin {
 ///
 /// When [`PageBackground`] is non-transparent, padded cells are filled with
 /// the page background color.
+#[deprecated(
+    since = "0.1.0",
+    note = "use renderable::layout::Layout (via renderable::layout::Margin)"
+)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct PagePadding {
     /// Top padding in rows.
@@ -140,6 +158,7 @@ impl PageComponent {
 }
 
 /// Horizontal alignment for a [`PageComponent`].
+#[deprecated(since = "0.1.0", note = "use renderable::layout::Alignment")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum PageAlignment {
     /// Left-aligned (default; preserves current behavior).
@@ -212,6 +231,7 @@ impl WidthUnit {
 ///
 /// `Pad` and `Indent` reduce the component's available width. `Max` and
 /// `Explicit` advise the component on its target render width.
+#[deprecated(since = "0.1.0", note = "use renderable::layout::Layout")]
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub enum PageFill {
     /// Default. Component may use the full content width.
@@ -246,6 +266,143 @@ impl PageFill {
             | PageFill::Indent(unit)
             | PageFill::Max(unit)
             | PageFill::Explicit(unit) => unit.validate(),
+        }
+    }
+}
+
+// ---------- Deprecation bridges onto `renderable::layout` ----------
+
+impl From<PageMargin> for renderable::layout::Margin {
+    /// Map a [`PageMargin`] (terminal cells) onto a
+    /// [`renderable::layout::Margin`] of universal `Ch` lengths.
+    fn from(m: PageMargin) -> renderable::layout::Margin {
+        use renderable::layout::{Length, TargetValue};
+        let cell = |n: u16| TargetValue::universal(Length::ch(u32::from(n)));
+        renderable::layout::Margin {
+            top: cell(m.top),
+            right: cell(m.right),
+            bottom: cell(m.bottom),
+            left: cell(m.left),
+        }
+    }
+}
+
+impl From<PagePadding> for renderable::layout::Margin {
+    /// Map a [`PagePadding`] (terminal cells) onto a
+    /// [`renderable::layout::Margin`] of universal `Ch` lengths.
+    ///
+    /// The new [`Layout`](renderable::layout::Layout) primitive has no
+    /// separate padding concept; page padding is expressed as additional
+    /// margin cells. Background-fill semantics that previously distinguished
+    /// margin from padding are a `Style` concern and are not represented here.
+    fn from(p: PagePadding) -> renderable::layout::Margin {
+        use renderable::layout::{Length, TargetValue};
+        let cell = |n: u16| TargetValue::universal(Length::ch(u32::from(n)));
+        renderable::layout::Margin {
+            top: cell(p.top),
+            right: cell(p.right),
+            bottom: cell(p.bottom),
+            left: cell(p.left),
+        }
+    }
+}
+
+impl From<PageAlignment> for renderable::layout::Alignment {
+    /// Map a [`PageAlignment`] onto a [`renderable::layout::Alignment`].
+    fn from(a: PageAlignment) -> renderable::layout::Alignment {
+        match a {
+            PageAlignment::Left => renderable::layout::Alignment::Left,
+            PageAlignment::Center => renderable::layout::Alignment::Center,
+            PageAlignment::Right => renderable::layout::Alignment::Right,
+        }
+    }
+}
+
+impl TryFrom<WidthUnit> for renderable::layout::Length {
+    type Error = PageRenderError;
+
+    /// Map a [`WidthUnit`] onto a universal [`renderable::layout::Length`].
+    ///
+    /// `Fixed(n)` becomes `Length::Ch(n)`; `Percent(p)` becomes
+    /// `Length::Percent(p)` after range validation.
+    ///
+    /// ## Errors
+    ///
+    /// Returns [`PageRenderError::InvalidPercent`] when a percent value is
+    /// outside `0.0..=100.0`.
+    fn try_from(unit: WidthUnit) -> Result<renderable::layout::Length, PageRenderError> {
+        use renderable::layout::Length;
+        match unit {
+            WidthUnit::Fixed(n) => Ok(Length::ch(u32::from(n))),
+            WidthUnit::Percent(p) => {
+                Length::percent(p).map_err(|_| PageRenderError::InvalidPercent(p))
+            }
+        }
+    }
+}
+
+impl TryFrom<PageFill> for Option<renderable::layout::TargetValue<renderable::layout::Length>> {
+    type Error = PageRenderError;
+
+    /// Map a [`PageFill`] onto an optional max-width
+    /// [`TargetValue<Length>`](renderable::layout::TargetValue).
+    ///
+    /// Only the width-capping variants convert here:
+    ///
+    /// - `Max(unit)` / `Explicit(unit)` → `Some(universal(length))`
+    /// - `Full` → `None` (component may use the full content width)
+    ///
+    /// `Pad` and `Indent` are *margin* contributions, not width caps, so they
+    /// also resolve to `None` for the max-width slot; callers that need their
+    /// indent should route the contained [`WidthUnit`] through
+    /// [`PageFill::margin_contribution`] instead. See that method for the
+    /// margin-side conversion.
+    ///
+    /// ## Errors
+    ///
+    /// Returns [`PageRenderError::InvalidPercent`] when a percent value is
+    /// outside `0.0..=100.0`.
+    fn try_from(
+        fill: PageFill,
+    ) -> Result<
+        Option<renderable::layout::TargetValue<renderable::layout::Length>>,
+        PageRenderError,
+    > {
+        use renderable::layout::TargetValue;
+        match fill {
+            PageFill::Full | PageFill::Pad(_) | PageFill::Indent(_) => Ok(None),
+            PageFill::Max(unit) | PageFill::Explicit(unit) => {
+                let length = renderable::layout::Length::try_from(unit)?;
+                Ok(Some(TargetValue::universal(length)))
+            }
+        }
+    }
+}
+
+impl PageFill {
+    /// The margin contribution of this fill, if any.
+    ///
+    /// `Pad` and `Indent` reduce a component's available width by inset cells;
+    /// expressed against the new [`Layout`](renderable::layout::Layout)
+    /// primitive that inset is a margin. This returns the resolved
+    /// [`Length`](renderable::layout::Length) for those variants and `None`
+    /// for `Full` / `Max` / `Explicit` (which are width caps, not margins).
+    ///
+    /// One-sided vs. symmetric placement depends on the component's
+    /// [`PageAlignment`]; callers decide which side(s) to apply the length to.
+    ///
+    /// ## Errors
+    ///
+    /// Returns [`PageRenderError::InvalidPercent`] when a percent value is
+    /// outside `0.0..=100.0`.
+    pub fn margin_contribution(
+        &self,
+    ) -> Result<Option<renderable::layout::Length>, PageRenderError> {
+        match self {
+            PageFill::Full | PageFill::Max(_) | PageFill::Explicit(_) => Ok(None),
+            PageFill::Pad(unit) | PageFill::Indent(unit) => {
+                Ok(Some(renderable::layout::Length::try_from(*unit)?))
+            }
         }
     }
 }
@@ -333,5 +490,108 @@ mod tests {
     #[test]
     fn page_component_all_covers_every_variant() {
         assert_eq!(PageComponent::ALL.len(), 5);
+    }
+
+    // ---------- Deprecation-bridge conversions ----------
+
+    #[test]
+    fn page_margin_converts_to_layout_margin() {
+        use renderable::layout::{Length, Margin as RMargin, TargetValue};
+
+        let page = PageMargin::all(2);
+        let rendered: RMargin = page.into();
+        assert_eq!(rendered.left, TargetValue::universal(Length::ch(2)));
+        assert_eq!(rendered.top, TargetValue::universal(Length::ch(2)));
+        assert_eq!(rendered.right, TargetValue::universal(Length::ch(2)));
+        assert_eq!(rendered.bottom, TargetValue::universal(Length::ch(2)));
+    }
+
+    #[test]
+    fn page_alignment_converts_to_layout_alignment() {
+        use renderable::layout::Alignment;
+        assert_eq!(Alignment::from(PageAlignment::Center), Alignment::Center);
+        assert_eq!(Alignment::from(PageAlignment::Left), Alignment::Left);
+        assert_eq!(Alignment::from(PageAlignment::Right), Alignment::Right);
+    }
+
+    #[test]
+    fn page_padding_converts_to_layout_margin() {
+        use renderable::layout::{Length, Margin as RMargin, TargetValue};
+
+        let padding = PagePadding::all(3);
+        let rendered: RMargin = padding.into();
+        assert_eq!(rendered.left, TargetValue::universal(Length::ch(3)));
+        assert_eq!(rendered.bottom, TargetValue::universal(Length::ch(3)));
+    }
+
+    #[test]
+    fn width_unit_converts_to_length() {
+        use renderable::layout::Length;
+        assert_eq!(Length::try_from(WidthUnit::Fixed(5)).unwrap(), Length::ch(5));
+        assert_eq!(
+            Length::try_from(WidthUnit::Percent(50.0)).unwrap(),
+            Length::Percent(50.0)
+        );
+        assert_eq!(
+            Length::try_from(WidthUnit::Percent(150.0)).unwrap_err(),
+            PageRenderError::InvalidPercent(150.0)
+        );
+    }
+
+    #[test]
+    fn page_fill_converts_to_max_width_target_value() {
+        use renderable::layout::{Length, TargetValue};
+
+        type MaxWidth = Option<TargetValue<Length>>;
+
+        // Full / Pad / Indent carry no width cap.
+        assert_eq!(MaxWidth::try_from(PageFill::Full).unwrap(), None);
+        assert_eq!(
+            MaxWidth::try_from(PageFill::Pad(WidthUnit::Fixed(4))).unwrap(),
+            None
+        );
+        assert_eq!(
+            MaxWidth::try_from(PageFill::Indent(WidthUnit::Fixed(4))).unwrap(),
+            None
+        );
+
+        // Max / Explicit produce a universal max-width.
+        assert_eq!(
+            MaxWidth::try_from(PageFill::Max(WidthUnit::Fixed(60))).unwrap(),
+            Some(TargetValue::universal(Length::ch(60)))
+        );
+        assert_eq!(
+            MaxWidth::try_from(PageFill::Explicit(WidthUnit::Percent(75.0))).unwrap(),
+            Some(TargetValue::universal(Length::Percent(75.0)))
+        );
+
+        // Invalid percent propagates.
+        assert_eq!(
+            MaxWidth::try_from(PageFill::Max(WidthUnit::Percent(150.0))).unwrap_err(),
+            PageRenderError::InvalidPercent(150.0)
+        );
+    }
+
+    #[test]
+    fn page_fill_margin_contribution() {
+        use renderable::layout::Length;
+
+        assert_eq!(PageFill::Full.margin_contribution().unwrap(), None);
+        assert_eq!(
+            PageFill::Max(WidthUnit::Fixed(4)).margin_contribution().unwrap(),
+            None
+        );
+        assert_eq!(
+            PageFill::Pad(WidthUnit::Fixed(6))
+                .margin_contribution()
+                .unwrap(),
+            Some(Length::ch(6))
+        );
+        assert_eq!(
+            PageFill::Indent(WidthUnit::Percent(10.0))
+                .margin_contribution()
+                .unwrap(),
+            Some(Length::Percent(10.0))
+        );
     }
 }

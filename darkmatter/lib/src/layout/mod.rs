@@ -36,6 +36,13 @@
 //!
 //! [`TerminalOptions`]: crate::markdown::output::terminal::TerminalOptions
 
+// The page-layout types (`PageMargin`, `PagePadding`, `PageAlignment`,
+// `PageFill`) are deprecated in favor of `renderable::layout::Layout`. They
+// remain part of this module's public surface because the darkmatter CLI
+// still drives them through the `DarkmatterPage` builder; the re-exports
+// below legitimately reference them.
+#![allow(deprecated)]
+
 mod context;
 mod error;
 mod page;

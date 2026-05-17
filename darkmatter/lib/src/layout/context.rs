@@ -1,6 +1,12 @@
 //! Internal layout context computed at render time from [`DarkmatterPage`](super::DarkmatterPage)
 //! state and the captured terminal dimensions.
 
+// `LayoutContext` is derived from the deprecated page-layout types
+// (`PageMargin`, `PagePadding`, `PageAlignment`, `PageFill`). It remains the
+// internal render-time representation; deprecation is suppressed here while
+// the bespoke row-decoration pipeline coexists with `renderable::layout`.
+#![allow(deprecated)]
+
 use super::PageRenderError;
 use super::types::{
     PageAlignment, PageBackground, PageComponent, PageFill, PageMargin, PagePadding, WidthUnit,

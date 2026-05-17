@@ -10,8 +10,29 @@ use biscuit_terminal::prelude::strip_escape_codes;
 use biscuit_terminal::render_tree::{TerminalRenderOptions, render_terminal_node};
 use biscuit_terminal::terminal::Terminal;
 use darkmatter::markdown::YamlBlock;
-use renderable::layout::{Alignment, Layout, Margin, RowFill, WordWrap};
+use renderable::layout::{Alignment, Layout, Length, Margin, TargetValue, WordWrap};
 use renderable::tree::{RenderNode, RenderStrictness};
+
+/// A `Margin` with a single side set to `length`, all other sides zero.
+fn one_side(side: Side, length: Length) -> Margin {
+    let value = TargetValue::universal(length);
+    let mut margin = Margin::default();
+    match side {
+        Side::Top => margin.top = value,
+        Side::Right => margin.right = value,
+        Side::Bottom => margin.bottom = value,
+        Side::Left => margin.left = value,
+    }
+    margin
+}
+
+/// Which side of a [`Margin`] a scenario sets.
+enum Side {
+    Top,
+    Right,
+    Bottom,
+    Left,
+}
 
 /// One cell of the matrix: a layout configuration applied at a width.
 #[derive(Clone)]
@@ -35,7 +56,7 @@ pub fn scenarios() -> Vec<Scenario> {
         Scenario {
             name: "left_margin_4",
             layout: Layout {
-                left_margin: Margin::Chars(4),
+                margin: one_side(Side::Left, Length::ch(4)),
                 ..Layout::default()
             },
             width: 80,
@@ -43,7 +64,7 @@ pub fn scenarios() -> Vec<Scenario> {
         Scenario {
             name: "right_margin_4",
             layout: Layout {
-                right_margin: Margin::Chars(4),
+                margin: one_side(Side::Right, Length::ch(4)),
                 ..Layout::default()
             },
             width: 80,
@@ -51,7 +72,7 @@ pub fn scenarios() -> Vec<Scenario> {
         Scenario {
             name: "top_margin_2",
             layout: Layout {
-                top_margin: Margin::Chars(2),
+                margin: one_side(Side::Top, Length::ch(2)),
                 ..Layout::default()
             },
             width: 80,
@@ -59,7 +80,7 @@ pub fn scenarios() -> Vec<Scenario> {
         Scenario {
             name: "bottom_margin_2",
             layout: Layout {
-                bottom_margin: Margin::Chars(2),
+                margin: one_side(Side::Bottom, Length::ch(2)),
                 ..Layout::default()
             },
             width: 80,
@@ -67,7 +88,7 @@ pub fn scenarios() -> Vec<Scenario> {
         Scenario {
             name: "left_margin_pct_10",
             layout: Layout {
-                left_margin: Margin::Percent(10.0),
+                margin: one_side(Side::Left, Length::Percent(10.0)),
                 ..Layout::default()
             },
             width: 80,
@@ -84,14 +105,6 @@ pub fn scenarios() -> Vec<Scenario> {
             name: "align_right",
             layout: Layout {
                 alignment: Alignment::Right,
-                ..Layout::default()
-            },
-            width: 80,
-        },
-        Scenario {
-            name: "row_fill_fill",
-            layout: Layout {
-                row_fill_strategy: RowFill::Fill,
                 ..Layout::default()
             },
             width: 80,
