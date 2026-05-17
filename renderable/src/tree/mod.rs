@@ -43,6 +43,9 @@ pub use render::{
     MarkdownStyleOptions, RawHtmlPolicy, render_browser_document, render_browser_node,
     render_markdown_document, render_markdown_node,
 };
+
+// Re-export terminal capability types for tree-render consumers.
+pub use crate::color::{ColorDepth, ColorMode, TerminalCodeContext};
 pub use source::{
     Provenance, SourceDescriptor, SourceId, SourceLocation, SourceRegistry, SourceSpan,
 };

@@ -23,6 +23,7 @@ pub use markdown::{
 };
 
 use crate::browser::fragment::{BrowserFragment, Ready};
+use crate::color::TerminalCodeContext;
 use crate::tree::NodeAttrs;
 
 /// A hook for custom code-block rendering (e.g. syntax highlighting).
@@ -34,26 +35,47 @@ use crate::tree::NodeAttrs;
 ///
 /// ## Architecture note
 ///
-/// The terminal hook takes a primitive `width: u32` rather than a
-/// `TerminalRenderContext`. `TerminalRenderContext` lives in `biscuit-terminal`,
-/// and `renderable` must not depend on `biscuit-terminal` — the dependency
-/// runs the other way. The biscuit-terminal tree renderer extracts `width`
-/// from its `TerminalRenderContext` when invoking [`render_terminal_code`].
+/// The terminal hook takes a [`TerminalCodeContext`] containing width, color
+/// depth, and color mode. This struct lives in `renderable::color` so that
+/// `CodeRenderer` can accept it without depending on `biscuit-terminal` — the
+/// dependency runs the other way. `biscuit-terminal` populates the context
+/// from its `TerminalRenderContext` and passes it through.
+///
+/// ## No-color contract
+///
+/// - Implementors SHOULD treat [`ColorDepth::None`] as "emit no ANSI styling."
+/// - If unable to honor the supplied context, implementors SHOULD return `None`
+///   to let the tree renderer fall back to plain rendering.
+/// - Implementors MUST NOT perform ambient capability detection (reading
+///   `$COLORTERM`, `$NO_COLOR`, etc.). All capability information is passed
+///   explicitly via [`TerminalCodeContext`].
 ///
 /// [`NodeKind::Code`]: crate::tree::NodeKind::Code
 /// [`render_terminal_code`]: CodeRenderer::render_terminal_code
+/// [`ColorDepth::None`]: crate::color::ColorDepth::None
 pub trait CodeRenderer {
-    /// Renders a code block to a terminal string. Returns `None` to fall
+    /// Renders a code block to a terminal string.
+    ///
+    /// Returns `Some(output)` with styled terminal output, or `None` to fall
     /// back to plain rendering.
+    ///
+    /// ## Arguments
+    ///
+    /// - `lang`: The language tag (e.g., `"rust"`, `"yaml"`), if any.
+    /// - `value`: The raw code content.
+    /// - `attrs`: Node attributes including optional code render hints.
+    /// - `context`: Terminal capability context (width, color depth, mode).
     fn render_terminal_code(
         &self,
         lang: Option<&str>,
         value: &str,
         attrs: &NodeAttrs,
-        width: u32,
+        context: TerminalCodeContext,
     ) -> Option<String>;
 
-    /// Renders a code block to an HTML fragment. Returns `None` to fall
+    /// Renders a code block to an HTML fragment.
+    ///
+    /// Returns `Some(fragment)` with styled HTML output, or `None` to fall
     /// back to plain rendering.
     fn render_browser_code(
         &self,
