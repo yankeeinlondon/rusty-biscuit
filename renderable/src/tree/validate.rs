@@ -115,6 +115,24 @@ fn is_block(kind: &NodeKind) -> bool {
     )
 }
 
+/// Returns `true` if `kind` is an inline (phrasing-level) node.
+fn is_inline_kind(kind: &NodeKind) -> bool {
+    matches!(
+        kind,
+        NodeKind::Text { .. }
+            | NodeKind::Emphasis { .. }
+            | NodeKind::Strong { .. }
+            | NodeKind::Delete { .. }
+            | NodeKind::Span { .. }
+            | NodeKind::InlineCode { .. }
+            | NodeKind::Link { .. }
+            | NodeKind::Image { .. }
+            | NodeKind::FootnoteReference { .. }
+            | NodeKind::SoftBreak
+            | NodeKind::HardBreak
+    )
+}
+
 /// Returns `true` if `kind` is a container that may hold only phrasing content.
 fn is_phrasing_only(kind: &NodeKind) -> bool {
     matches!(
@@ -291,6 +309,14 @@ fn check_node(
                 kind_name(&node.kind),
                 kind_name(parent_kind),
             ),
+            span.clone(),
+        ));
+    }
+
+    // Layout attributes are permitted only on block-level nodes.
+    if node.attrs.layout().is_some() && is_inline_kind(&node.kind) {
+        report.findings.push(error(
+            "layout attributes are permitted only on block-level nodes",
             span,
         ));
     }
@@ -501,6 +527,33 @@ mod tests {
             )],
         )]);
         assert!(ensure_valid(&tree).is_ok());
+    }
+
+    #[test]
+    fn layout_on_inline_node_is_a_validation_error() {
+        use crate::layout::Layout;
+
+        let mut text = RenderNode::text("hello");
+        text.attrs.set_layout(&Layout::default());
+        let root = RenderNode::root(vec![RenderNode::paragraph(vec![text])]);
+
+        let report = validate(&root, ValidationMode::Full);
+        assert!(
+            report.has_errors(),
+            "layout on an inline Text node must be an error"
+        );
+    }
+
+    #[test]
+    fn layout_on_block_node_is_valid() {
+        use crate::layout::Layout;
+
+        let mut para = RenderNode::paragraph(vec![RenderNode::text("hi")]);
+        para.attrs.set_layout(&Layout::default());
+        let root = RenderNode::root(vec![para]);
+
+        let report = validate(&root, ValidationMode::Full);
+        assert!(!report.has_errors());
     }
 
     #[test]
