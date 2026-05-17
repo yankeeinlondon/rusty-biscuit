@@ -13,6 +13,7 @@ use biscuit_terminal::prelude::strip_escape_codes;
 use biscuit_terminal::render_tree::{TerminalRenderOptions, render_terminal_node};
 use biscuit_terminal::terminal::Terminal;
 use darkmatter::markdown::YamlBlock;
+use renderable::color::TerminalCodeContext;
 use renderable::tree::{
     CodeRenderer, MarkdownRenderOptions, NodeAttrs, NodeKind, RenderStrictness, ValidationMode,
     render_markdown_node, validate,
@@ -128,13 +129,13 @@ impl CodeRenderer for StubCodeRenderer {
         lang: Option<&str>,
         value: &str,
         attrs: &NodeAttrs,
-        width: u32,
+        context: TerminalCodeContext,
     ) -> Option<String> {
         let hints = attrs.code_hints();
         Some(format!(
             "STUB[lang={};width={};header={};body={}]",
             lang.unwrap_or("?"),
-            width,
+            context.width(),
             hints.header_row,
             value,
         ))
@@ -209,5 +210,181 @@ fn render_markdown_node_preserves_yaml_fence() {
         rendered.output.trim_end().ends_with("```"),
         "markdown output should close the fence: {:?}",
         rendered.output
+    );
+}
+
+// ---------------------------------------------------------------------------
+// TerminalCodeContext pass-through tests
+// ---------------------------------------------------------------------------
+
+use biscuit_terminal::discovery::detection::{ColorDepth, ColorMode};
+use renderable::color::{ColorDepth as RenderColorDepth, ColorMode as RenderColorMode};
+use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::Mutex;
+
+/// A stub [`CodeRenderer`] that captures the context it receives.
+struct CapturingCodeRenderer {
+    captured_width: AtomicU32,
+    captured_color_depth: Mutex<Option<RenderColorDepth>>,
+    captured_color_mode: Mutex<Option<RenderColorMode>>,
+}
+
+impl CapturingCodeRenderer {
+    fn new() -> Self {
+        Self {
+            captured_width: AtomicU32::new(0),
+            captured_color_depth: Mutex::new(None),
+            captured_color_mode: Mutex::new(None),
+        }
+    }
+
+    fn captured_width(&self) -> u32 {
+        self.captured_width.load(Ordering::Relaxed)
+    }
+
+    fn captured_color_depth(&self) -> Option<RenderColorDepth> {
+        *self.captured_color_depth.lock().unwrap()
+    }
+
+    fn captured_color_mode(&self) -> Option<RenderColorMode> {
+        *self.captured_color_mode.lock().unwrap()
+    }
+}
+
+impl CodeRenderer for CapturingCodeRenderer {
+    fn render_terminal_code(
+        &self,
+        _lang: Option<&str>,
+        _value: &str,
+        _attrs: &NodeAttrs,
+        context: TerminalCodeContext,
+    ) -> Option<String> {
+        self.captured_width.store(context.width(), Ordering::Relaxed);
+        *self.captured_color_depth.lock().unwrap() = Some(context.color_depth());
+        *self.captured_color_mode.lock().unwrap() = Some(context.color_mode());
+        Some("CAPTURED".to_string())
+    }
+
+    fn render_browser_code(
+        &self,
+        _lang: Option<&str>,
+        _value: &str,
+        _attrs: &NodeAttrs,
+    ) -> Option<renderable::browser::fragment::BrowserFragment<renderable::browser::fragment::Ready>>
+    {
+        None
+    }
+}
+
+/// Test (a): available_width is passed through, NOT root width.
+#[test]
+fn context_passes_available_width_not_root_width() {
+    use biscuit_terminal::render_tree::TerminalRenderContext;
+
+    let block = YamlBlock::new("foo: 1").unwrap();
+    let node = block.render_tree_node().expect("tree node");
+
+    // Build a context where available_width differs from root width
+    let term = Terminal::new_optimistic(120);
+    let mut context = TerminalRenderContext::from_terminal(&term);
+    context.available_width = 80; // Different from root width (120)
+
+    let renderer = Rc::new(CapturingCodeRenderer::new());
+    let opts = TerminalRenderOptions::from_context(context, RenderStrictness::Warn)
+        .with_code_renderer(renderer.clone());
+
+    let _ = render_terminal_node(&node, &opts).expect("render");
+
+    assert_eq!(
+        renderer.captured_width(),
+        80,
+        "should pass available_width (80), not root width (120)"
+    );
+}
+
+/// Test (b): ColorDepth is mapped correctly from terminal context.
+#[test]
+fn context_passes_color_depth() {
+    use biscuit_terminal::render_tree::TerminalRenderContext;
+
+    let block = YamlBlock::new("foo: 1").unwrap();
+    let node = block.render_tree_node().expect("tree node");
+
+    // Manually set color_depth to Enhanced
+    let term = Terminal::new_optimistic(80);
+    let mut context = TerminalRenderContext::from_terminal(&term);
+    context.color_depth = ColorDepth::Enhanced;
+
+    let renderer = Rc::new(CapturingCodeRenderer::new());
+    let opts = TerminalRenderOptions::from_context(context, RenderStrictness::Warn)
+        .with_code_renderer(renderer.clone());
+
+    let _ = render_terminal_node(&node, &opts).expect("render");
+
+    assert_eq!(
+        renderer.captured_color_depth(),
+        Some(RenderColorDepth::Enhanced),
+        "ColorDepth::Enhanced should map to renderable's ColorDepth::Enhanced"
+    );
+}
+
+/// Test (c): ColorMode is mapped correctly, including Unknown.
+#[test]
+fn context_passes_color_mode_including_unknown() {
+    use biscuit_terminal::render_tree::TerminalRenderContext;
+
+    let block = YamlBlock::new("foo: 1").unwrap();
+    let node = block.render_tree_node().expect("tree node");
+
+    // Test Unknown specifically
+    let term = Terminal::new_optimistic(80);
+    let mut context = TerminalRenderContext::from_terminal(&term);
+    context.color_mode = ColorMode::Unknown;
+
+    let renderer = Rc::new(CapturingCodeRenderer::new());
+    let opts = TerminalRenderOptions::from_context(context, RenderStrictness::Warn)
+        .with_code_renderer(renderer.clone());
+
+    let _ = render_terminal_node(&node, &opts).expect("render");
+
+    assert_eq!(
+        renderer.captured_color_mode(),
+        Some(RenderColorMode::Unknown),
+        "ColorMode::Unknown should map to renderable's ColorMode::Unknown"
+    );
+}
+
+/// Test (d): No ambient influence — explicit context values override environment.
+#[test]
+fn context_ignores_ambient_environment() {
+    use biscuit_terminal::render_tree::TerminalRenderContext;
+
+    let block = YamlBlock::new("foo: 1").unwrap();
+    let node = block.render_tree_node().expect("tree node");
+
+    // Set explicit context to None (no color)
+    let term = Terminal::new_optimistic(80);
+    let mut context = TerminalRenderContext::from_terminal(&term);
+    context.color_depth = ColorDepth::None;
+    context.color_mode = ColorMode::Light;
+
+    let renderer = Rc::new(CapturingCodeRenderer::new());
+    let opts = TerminalRenderOptions::from_context(context, RenderStrictness::Warn)
+        .with_code_renderer(renderer.clone());
+
+    // Even if environment has conflicting values, the explicit context should win.
+    // (We can't easily set env vars in a test without affecting other tests,
+    // but the point is that the context is passed directly without re-detection.)
+    let _ = render_terminal_node(&node, &opts).expect("render");
+
+    assert_eq!(
+        renderer.captured_color_depth(),
+        Some(RenderColorDepth::None),
+        "explicit ColorDepth::None should be passed, not ambient detection"
+    );
+    assert_eq!(
+        renderer.captured_color_mode(),
+        Some(RenderColorMode::Light),
+        "explicit ColorMode::Light should be passed, not ambient detection"
     );
 }
