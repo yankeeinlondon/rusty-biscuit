@@ -63,9 +63,13 @@ pub enum ColorDepth {
 ///
 /// - `Light`: Light background (dark text preferred).
 /// - `Dark`: Dark background (light text preferred).
-/// - `Unknown`: Background color could not be detected. Implementors SHOULD
-///   fall back to a conservative palette that works on both light and dark
-///   backgrounds when this variant is received.
+/// - `Unknown`: The terminal renderer could not determine the background. This
+///   is a faithful signal, not an error. A code renderer MUST NOT run ambient
+///   capability detection to resolve `Unknown` — doing so reintroduces the
+///   inconsistency the supplied context exists to prevent. When a renderer
+///   must pick a concrete light/dark treatment, it resolves `Unknown` against
+///   its own configured option, and defaults to [`ColorMode::Dark`] when no
+///   such option is configured.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ColorMode {

@@ -74,8 +74,22 @@ structure:
 doc open="false":
     @just _doc renderable "{{ open }}"
 
-# No-op recipe: reference color vars so linters won't report them as unused.
+# test parity between old and new rendering
+parity:
+    @echo Parity Test for biscuit-terminal
+    @echo
+    @cargo run -p biscuit-terminal --example parity
+    @echo
+    @cargo run -p darkmatter --example parity
 
+layout_matrix:
+    @echo Layout Matrix Test for Renderers
+    @echo
+    @cargo run -p biscuit-terminal --example layout_matrix
+    @echo
+    @cargo run -p darkmatter --example layout_matrix
+
+# No-op recipe: reference color vars so linters won't report them as unused.
 # Run `just _colors` if you want to exercise this (it does nothing).
 _colors:
     @: {{ BOLD }} {{ ITALIC }} {{ RESET }} {{ BLACK }} {{ RED }} {{ GREEN }} {{ YELLOW }} {{ BLUE }} {{ MAGENTA }} {{ CYAN }} {{ WHITE }} {{ DIM }} >/dev/null || true
