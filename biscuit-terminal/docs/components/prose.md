@@ -3,21 +3,21 @@ blast_radius: biscuit-terminal/lib/src/components/prose.rs
 ---
 # Prose
 
-Styled text component with token and block tag support for rich terminal output. Prose is the primary text styling component in biscuit-terminal, supporting three input grammars that all resolve to ANSI escape codes:
+Styled inline text component for rich terminal output. Prose is the primary inline text styling component in biscuit-terminal and renders to the **Terminal**, **Browser**, and **Markdown** targets from one shared parsed representation. It supports two input grammars:
 
-1. **Atomic tokens** — `{{bold}}…{{reset}}` (require manual `{{reset}}`).
-2. **Block tags** — `<bold>text</bold>` (auto-reset on close, nestable).
-3. **Markdown subset** — `[desc](url)`, `**bold**`, `_italics_` (per the [Prose+ spec](../../features/2026-05-05-prose-plus/spec.md)).
+1. **Block tags** — `<bold>text</bold>` (auto-reset on close, nestable).
+2. **Markdown subset** — `[desc](url)`, `**bold**`, `_italics_` (per the [Prose+ spec](../../features/2026-05-05-prose-plus/spec.md)).
 
-The three grammars compose freely; they are processed in a fixed order (links → bold → italics → block tags / atomic tokens) so URL contents, bold runs, and tag attribute values are protected from later phases.
+The two grammars compose freely; they are processed in a fixed order (links → bold → italics → block tags) so URL contents, bold runs, and tag attribute values are protected from later phases.
+
+> The atomic-token grammar (`{{bold}}…{{reset}}`) was removed in the
+> 2026-05-17 Prose cross-target work. A stray `{{…}}` now renders as
+> ordinary literal text on every target.
 
 ## Programmatic Use
 
 ```rust
 use biscuit_terminal::prelude::*;
-
-// Atomic tokens (require manual {{reset}})
-let prose = Prose::new("{{bold}}Important:{{reset}} normal text");
 
 // Block tags (auto-reset after closing tag)
 let prose = Prose::new("<bold>This is bold</bold> and <red>this is red</red>");
@@ -98,7 +98,21 @@ In practice, dynamic content interpolated into a Prose format string usually doe
 
 **Background Colors**: Prefix with `bg-` (e.g., `<bg-blue>`, `<bg-coral>`)
 
-**Special**: `<a href="url">text</a>` for hyperlinks, `<rgb #hex>text</rgb>` for arbitrary colors, `{{reset}}` to clear all styles
+**Special**: `<a href="url">text</a>` for hyperlinks, `<rgb #hex>text</rgb>` for arbitrary colors. Styles auto-reset when their tag closes — there is no standalone reset token.
+
+### Cross-Target Rendering
+
+`Prose` parses its input once into a target-neutral tree and renders that
+tree to three targets:
+
+| Target | Trait | Notes |
+|--------|-------|-------|
+| Terminal | `TerminalRenderable` | ANSI/OSC8; the behavioral oracle. Capability-aware degradation. |
+| Browser | `BrowserRenderable` | Semantic HTML (`<strong>`, `<em>`, `<s>`, `<a>`, `<pre><code>`); presentational styles use `<span style="…">`. User text and attribute values are escaped. |
+| Markdown | `MarkdownRenderable` | Portable Markdown — bold/italic/strikethrough/links/code blocks. Colors and underline variants degrade to readable inner text. |
+
+Unknown tags and former atomic-token syntax (`{{…}}`) render as escaped
+literal text on every target.
 
 ### Prose in Other Components
 
@@ -131,8 +145,7 @@ that low-capability emulators (Apple Terminal being the canonical example) see
 clean, readable text instead of literal escape-code garbage.
 
 Two markup categories degrade today: **OSC8 hyperlinks** and the
-**double-underline** style (both as a `<double-underline>` block tag and as the
-`{{double-underline}}` atomic token).
+**double-underline** style (the `<double-underline>` block tag).
 
 ### OSC8 Hyperlinks
 
@@ -151,18 +164,13 @@ PTY tests against a spoofed `TERM_PROGRAM=Apple_Terminal` profile.
 ### Double Underline
 
 When `Terminal.underline_support.double == false`, the `<double-underline>`
-block tag and `{{double-underline}}` atomic token degrade according to the
-straight-underline capability:
+block tag degrades according to the straight-underline capability:
 
 | `double` | `straight` | Behavior |
 |----------|------------|----------|
 | `true`   | `true`     | Emit `\x1b[4:2m … \x1b[0m` (double underline) |
 | `false`  | `true`     | Emit `\x1b[4m … \x1b[0m` (straight underline) |
 | `false`  | `false`    | Emit plain text — no underline SGR codes |
-
-Both the block tag form (`<double-underline>important</double-underline>`) and
-the atomic token form (`{{double-underline}}important{{reset}}`) share the same
-policy; they route through the same capability check inside `Prose`.
 
 The `\x1b[4:2m` sequence is **never** emitted when the active terminal does not
 report double-underline support — verified by Level-1 PTY tests and Level-2
@@ -174,4 +182,12 @@ Exposed via `bt prose`:
 
 ```bash
 bt prose "<bold>Hello</bold> <red>world</red>"
+```
+
+By default `bt prose` renders to the terminal. Pass `--html` to render an
+HTML fragment or `--md` to render portable Markdown instead:
+
+```bash
+bt prose "<bold>Hello</bold> [docs](https://example.com)" --html
+bt prose "<bold>Hello</bold> [docs](https://example.com)" --md
 ```
