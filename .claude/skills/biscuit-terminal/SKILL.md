@@ -299,10 +299,14 @@ biscuit-terminal follows the Level 1 / 2 / 3 testing vocabulary from the
   validate escape-sequence output, glyph widths, scroll behaviour, and
   image protocol bytes against the actual terminal's display path.
 - **Level 3** — Not applicable (biscuit-terminal has no interactive input).
+  OS keyboard injection is documented in `biscuit-test-harness/README.md`.
 
 ### biscuit-test-harness (shared crate)
 
-The `biscuit-test-harness` workspace member provides:
+The `biscuit-test-harness` workspace member provides the following. Its
+`biscuit-test-harness/README.md` is the full reference — harness variants,
+when to use each, the `SpawnVisibility` background/foreground choice, and
+the environment each harness requires.
 
 - `TerminalHarness` trait — `spawn`, `send_text`, `capture`, `settle`.
 - `WezTermHarness`, `KittyHarness`, `TmuxHarness`, `AppleTerminalHarness`
