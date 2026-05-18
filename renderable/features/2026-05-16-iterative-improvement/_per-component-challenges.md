@@ -1,19 +1,15 @@
 ---
 sequence:
-    - name: Section
+    - name: HorizontalRule
       area: biscuit-terminal
-    - name: UnorderedList
+    - name: StatusBlock
       area: biscuit-terminal
-    - name: OrderedList
+    - name: Todo
       area: biscuit-terminal
-    - name: TwoColumn
+    - name: FileTree
       area: biscuit-terminal
-    - name: Progress
+    - name: GraphExpression
       area: biscuit-terminal
-    - name: Table
-      area: biscuit-terminal
-    - name: YamlBlock
-      area: darkmatter
 ---
 ## Context
 
