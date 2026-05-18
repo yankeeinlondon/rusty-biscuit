@@ -190,17 +190,19 @@ pub struct Style {
     pub fill: Option<Fill>,
 }
 
-/// Shared appearance leaf, defined in `renderable::style` and reused by both
-/// `Style` and the `Prose` IR's `ProseStyle`. All-default is no emphasis.
+/// Shared appearance leaf — **already implemented** in `renderable::style`
+/// (shipped by the Prose cross-target feature) and reused by `Prose`'s
+/// `ProseStyle`. `Style` embeds it as-is. All-default is no emphasis.
 pub struct TextEmphasis {
     pub bold: bool,
-    pub italic: bool,
     pub dim: bool,
-    /// `None` / `Single` / `Double`. The terminal emitter degrades `Double`
-    /// per terminal capability.
-    pub underline: Underline,
+    pub italic: bool,
     pub strikethrough: bool,
     pub blink: bool,
+    /// Underline variant, if any. `UnderlineStyle` is
+    /// `Straight | Double | Curly | Dotted | Dashed`; the terminal emitter
+    /// degrades unsupported variants per terminal capability.
+    pub underline: Option<UnderlineStyle>,
 }
 ```
 
@@ -209,7 +211,17 @@ pub struct TextEmphasis {
 `HorizontalRule` weights). `Fill` likely carries a background `Color` and an
 intensity, re-homing `PageBackground`.
 
-This is a plain serde data struct, like `Layout`.
+`renderable::style` already ships, alongside `TextEmphasis`, the shared
+emitters Spec B consumes: `TextEmphasis::sgr_ops` + `EmphasisLayer` (terminal
+SGR, with per-layer parent restoration) and `TextEmphasis::html_wrappers`
+(browser semantic-HTML / CSS). `Style` calls these rather than re-deriving
+emphasis emission.
+
+This is a plain serde data struct, like `Layout`. **D8 note:** the shipped
+`TextEmphasis` / `UnderlineStyle` derive only `Debug, Clone, Copy, Default,
+PartialEq, Eq` — Spec B must add `Serialize` / `Deserialize` to them when
+`Style` embeds `TextEmphasis`, since `Style` rides on `NodeAttrs` and must
+round-trip (D8).
 
 ### D5 — The slot system — styling named sub-parts **(OPEN — the hard part)**
 
@@ -284,10 +296,12 @@ Mirrors Spec A D7. Terminal is implemented first.
 
 ### D8 — Serialization
 
-`Style` rides on `NodeAttrs` and serializes with the tree. `Style`, `Emphasis`,
-`Border`, `Fill`, and any slot keying derive `Serialize` / `Deserialize` with
-`snake_case` enum casing. A documented JSON sample must appear in the `Style`
-rustdoc with a round-trip test, exactly as Spec A D8 requires for `Layout`.
+`Style` rides on `NodeAttrs` and serializes with the tree. `Style`, `Border`,
+`Fill`, and any slot keying derive `Serialize` / `Deserialize` with
+`snake_case` enum casing; the embedded shared leaves `TextEmphasis` /
+`UnderlineStyle` need those derives **added** (they ship without them — see the
+D4 note). A documented JSON sample must appear in the `Style` rustdoc with a
+round-trip test, exactly as Spec A D8 requires for `Layout`.
 
 ### D9 — Migration
 
@@ -307,9 +321,9 @@ rustdoc with a round-trip test, exactly as Spec A D8 requires for `Layout`.
 
 ## Success Criteria (DRAFT)
 
-- A single `Style` type exists in `renderable::style` (or
-  `renderable::stylesheet`), declared by components, applied by the terminal
-  tree renderer without the component hand-writing ANSI.
+- A single `Style` type exists in `renderable::style` (the module already
+  ships with the shared leaves), declared by components, applied by the
+  terminal tree renderer without the component hand-writing ANSI.
 - The bespoke appearance fields on `BlockQuote`, `Section`, `Table`, `Progress`
   are expressed as `Style`; `darkmatter`'s `PageBackground` is a deprecated
   shim onto `Style`.
@@ -348,10 +362,11 @@ These must be resolved before this draft becomes an implementation plan.
    wrapper, or component-handled?
 5. **Semantic tier (D1/D2).** Does `Style` get named intents ("callout",
    "hero"), or stay plain data like `Layout`?
-6. **Module home.** *Resolved:* a new `renderable::style` module, the home for
-   both the shared leaves (`TextEmphasis`, …) and the `Style` primitive — a
-   neighbor of `renderable::color`. Still open: does `Style` *contain* a
-   `CssStyle` for the browser path, or lower to one?
+6. **Module home.** *Resolved:* `renderable::style` — the module **already
+   exists** (`renderable/src/style.rs`, shipped by the Prose cross-target
+   feature) and holds the shared leaves (`TextEmphasis`, `UnderlineStyle`,
+   `EmphasisLayer`). Spec B adds the `Style` primitive to it. Still open: does
+   `Style` *contain* a `CssStyle` for the browser path, or lower to one?
 7. **Border / fill modeling (D2/D4).** One concept or two; what does `Border`
    carry beyond color (weight, line style)?
 8. **`Style` ↔ `CodeRenderer`.** Confirmed separate — but a code block's
@@ -365,7 +380,7 @@ These must be resolved before this draft becomes an implementation plan.
 | Aspect | Spec A — `Layout` | Spec B — `Style` |
 |---|---|---|
 | Concern | where the box sits | what the box looks like |
-| Scope | block-level only | block **and** inline (OPEN) |
+| Scope | block-level only | block **and** inline `Span` (settled, D6) |
 | Inheritance | non-inherited | OPEN |
 | Per-target machinery | `TargetValue<T>` | `TargetValue<T>` (reused) |
 | Tree attachment | `NodeAttrs` `renderable.layout` | `NodeAttrs` `renderable.style` |
