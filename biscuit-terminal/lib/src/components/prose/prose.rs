@@ -6,31 +6,18 @@ use crate::{
     utils::wrap_policy::WordWrap,
 };
 
-use super::markdown::preprocess_markdown;
-use super::styles::StyleState;
-use super::tokens::parse_tokens_inner;
+use super::ir::ProseDocument;
 
 /// Styled text with token and block tag support for rich terminal output.
 ///
 /// This struct wraps text content that gets parsed for styling tokens and
 /// rendered with ANSI escape codes.
 ///
-/// ## Token Types
+/// ## Input Grammars
 ///
-/// ### Atomic Tokens (`{{token}}`)
-/// Single-use tokens that apply styling and require manual `{{reset}}`:
-///
-/// ```rust
-/// use biscuit_terminal::components::prose::Prose;
-/// use biscuit_terminal::components::renderable::TerminalRenderable;
-///
-/// let prose = Prose::new("{{bold}}Important:{{reset}} This is bold text");
-/// let rendered = prose.render_optimistic(None);
-/// // Contains ANSI bold escape codes
-/// ```
-///
-/// Supported tokens: `{{bold}}`, `{{dim}}`, `{{italic}}`, `{{underline}}`,
-/// `{{red}}`, `{{bg-blue}}`, `{{reset}}`, etc.
+/// `Prose` accepts **bracketed tags** and a **Markdown subset**. The
+/// atomic-token grammar (`{{token}}`) has been removed — `{{…}}` now renders
+/// as ordinary literal text.
 ///
 /// ### Block Tags (`<tag>content</tag>`)
 /// Self-closing tags that auto-reset:
@@ -192,20 +179,21 @@ impl Prose {
         }
     }
 
-    /// Parse and render the content, replacing tokens with ANSI escape codes.
+    /// Parse the raw content into the target-neutral [`ProseDocument`] IR.
     ///
-    /// Pre-processes the raw content for the supported Markdown subset
-    /// (`**bold**`, `_italics_`, `[desc](ref)`) before delegating to the
-    /// existing block-tag parser. Only this outermost call emits the
-    /// final `\x1b[0m` reset.
+    /// Pre-processes the supported Markdown subset (`**bold**`, `_italics_`,
+    /// `[desc](ref)`) and parses bracketed tags. Former atomic-token syntax
+    /// (`{{…}}`) is treated as ordinary literal text.
+    pub(super) fn document(&self) -> ProseDocument {
+        ProseDocument::parse(&self.content)
+    }
+
+    /// Parse and render the content to terminal ANSI/OSC8 output.
+    ///
+    /// Builds the [`ProseDocument`] IR and renders it through the terminal
+    /// emitter. Only the outermost emit produces the final `\x1b[0m` reset.
     pub(super) fn parse_tokens(&self, term: Option<&Terminal>) -> String {
-        let preprocessed = preprocess_markdown(&self.content);
-        let mut state = StyleState::default();
-        let mut result = parse_tokens_inner(&preprocessed, term, &mut state);
-        if state.used_styles {
-            result.push_str("\x1b[0m");
-        }
-        result
+        super::terminal::render(&self.document(), term)
     }
 }
 
