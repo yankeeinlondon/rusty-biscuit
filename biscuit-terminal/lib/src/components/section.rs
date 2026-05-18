@@ -128,7 +128,7 @@ impl Section {
     ///
     /// let mut section = Section::new(HeadingLevel::h2, "My Section");
     /// section.push("Plain text");
-    /// section.push(Prose::new("{{bold}}Styled{{reset}} text"));
+    /// section.push(Prose::new("<bold>Styled</bold> text"));
     /// ```
     pub fn push<T: Into<RenderableTerminalContent>>(&mut self, item: T) -> &mut Self {
         self.content.push(item.into());

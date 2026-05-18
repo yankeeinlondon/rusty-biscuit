@@ -1091,7 +1091,7 @@ mod tests {
     fn test_prose_bold_renders_inline() {
         let inline = InlineContent::default()
             .with("normal ")
-            .with(Prose::new("{{bold}}bold{{reset}}"))
+            .with(Prose::new("<bold>bold</bold>"))
             .with(" normal");
         let output = inline.render_optimistic(Some(80));
         // Bold wraps with escape codes: \x1b[1m ... \x1b[22m
@@ -1114,9 +1114,9 @@ mod tests {
     #[test]
     fn test_multiple_styled_prose_inline() {
         let inline = InlineContent::default()
-            .with(Prose::new("{{bold}}key{{reset}}"))
+            .with(Prose::new("<bold>key</bold>"))
             .with(": ")
-            .with(Prose::new("{{dim}}value{{reset}}"));
+            .with(Prose::new("<dim>value</dim>"));
         let output = inline.render_optimistic(Some(80));
         assert!(output.contains("key"));
         assert!(output.contains(": "));

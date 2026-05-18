@@ -518,7 +518,7 @@ impl Terminal {
     /// use biscuit_terminal::terminal::Terminal;
     ///
     /// Terminal::render("Hello, world!");
-    /// Terminal::render("Formatted {{bold}}text{{reset}}");
+    /// Terminal::render("Formatted <bold>text</bold>");
     /// ```
     pub fn render<T: Into<String>>(content: T) {
         use crate::utils::layout::{Layout, LayoutTerminalExt};

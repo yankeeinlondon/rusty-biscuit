@@ -25,7 +25,7 @@ use crate::utils::layout::Layout;
 /// // From a vec of pre-converted items
 /// let compose = Compose::new(vec![
 ///     RenderableTerminalContent::from("Hello, "),
-///     RenderableTerminalContent::from(Prose::new("{{bold}}world{{reset}}!")),
+///     RenderableTerminalContent::from(Prose::new("<bold>world</bold>!")),
 /// ]);
 /// ```
 ///
@@ -36,7 +36,7 @@ use crate::utils::layout::Layout;
 /// let mut compose = Compose::default();
 /// compose
 ///     .add_text("Hello, ")
-///     .add_prose(Prose::new("{{bold}}world{{reset}}!"));
+///     .add_prose(Prose::new("<bold>world</bold>!"));
 /// ```
 ///
 /// ```
@@ -44,7 +44,7 @@ use crate::utils::layout::Layout;
 ///
 /// // Using From implementations for ergonomic creation
 /// let text: Compose = "Hello, ".into();
-/// let prose = Prose::new("{{bold}}bold text{{reset}}");
+/// let prose = Prose::new("<bold>bold text</bold>");
 /// let combined = Compose::new(vec![text.into(), RenderableTerminalContent::from(prose)]);
 /// ```
 ///
@@ -56,7 +56,7 @@ use crate::utils::layout::Layout;
 /// doc
 ///     .add_heading("Project Overview", 1)
 ///     .add_text("This project contains ")
-///     .add_prose(Prose::new("{{bold}}important{{reset}} files"))
+///     .add_prose(Prose::new("<bold>important</bold> files"))
 ///     .add_text(" for processing.");
 /// ```
 #[derive(Debug)]
@@ -360,7 +360,7 @@ mod tests {
     #[test]
     fn test_add_prose_with_bold_tokens() {
         let mut compose = Compose::default();
-        compose.add_prose(Prose::new("{{bold}}bold{{reset}}"));
+        compose.add_prose(Prose::new("<bold>bold</bold>"));
         let output = compose.render_optimistic(Some(80));
         assert!(output.contains("\x1b[1m"));
         assert!(output.contains("bold"));
@@ -469,7 +469,7 @@ mod tests {
         let (_tmp, fs) = make_fs_fixture();
         let mut compose = Compose::default();
         compose
-            .add_prose(Prose::new("{{bold}}Directory listing{{reset}}\n"))
+            .add_prose(Prose::new("<bold>Directory listing</bold>\n"))
             .add_file_system(fs);
         let output = compose.render_optimistic(Some(80));
         assert!(output.contains("Directory listing"));
@@ -553,7 +553,7 @@ mod tests {
             .with_data(vec![vec!["k".into(), "v".into()]]);
         let mut compose = Compose::default();
         compose
-            .add_prose(Prose::new("{{bold}}Table:{{reset}}\n"))
+            .add_prose(Prose::new("<bold>Table:</bold>\n"))
             .add_table(table);
         let output = compose.render_optimistic(Some(80));
         assert!(output.contains("Table:"));
@@ -907,7 +907,7 @@ mod tests {
         let mut compose = Compose::default();
         compose
             .add_text("normal ")
-            .add_prose(Prose::new("{{bold}}bold{{reset}}"))
+            .add_prose(Prose::new("<bold>bold</bold>"))
             .add_text(" normal");
         let output = compose.render_optimistic(Some(80));
         assert!(output.contains("\x1b[1m"));
@@ -920,9 +920,9 @@ mod tests {
     fn test_multiple_styled_prose() {
         let mut compose = Compose::default();
         compose
-            .add_prose(Prose::new("{{bold}}key{{reset}}"))
+            .add_prose(Prose::new("<bold>key</bold>"))
             .add_text(": ")
-            .add_prose(Prose::new("{{dim}}value{{reset}}"));
+            .add_prose(Prose::new("<dim>value</dim>"));
         let output = compose.render_optimistic(Some(80));
         assert!(output.contains("key"));
         assert!(output.contains(": "));
