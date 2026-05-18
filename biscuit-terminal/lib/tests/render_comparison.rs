@@ -13,7 +13,7 @@
 
 mod layout_matrix_support;
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use biscuit_terminal::prelude::strip_escape_codes;
 use layout_matrix_support::{component_cases, scenarios};
@@ -33,6 +33,25 @@ enum Facet {
     Width,
     /// Identical SGR sequences at identical visible offsets.
     Styling,
+}
+
+/// Which renderer is preferred for a recorded drift entry, and whether the
+/// difference is functionally important or cosmetic.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[allow(dead_code)]
+enum Verdict {
+    /// The render-tree output is wrong or incomplete versus the bespoke
+    /// renderer; the render-tree has not caught up. The headline metric.
+    TreeBehind,
+    /// The render-tree output is more correct; the bespoke renderer is the
+    /// laggard. Acceptable drift; may never reach zero.
+    BespokeBehind,
+    /// Cosmetic-only drift where the bespoke renderer is still preferred.
+    CosmeticTreeBehind,
+    /// Cosmetic-only drift where the render-tree output is preferred.
+    CosmeticBespokeBehind,
+    /// Cosmetic-only drift with no preferred renderer yet recorded.
+    CosmeticNeutral,
 }
 
 /// Every facet, in the stable ordering used for ledger output.
@@ -55,208 +74,185 @@ struct DriftKey {
 
 /// The committed drift ledger.
 ///
-/// Each tuple is `(component, scenario, facet)`. Regenerate with
-/// `RECORD_DRIFT=1`. An empty ledger means the bespoke and tree paths agree
-/// across every facet of every matrix cell.
-const KNOWN_DRIFT: &[(&str, &str, Facet)] = &[
-    ("BlockQuote", "align_center", Facet::Exact),
-    ("BlockQuote", "align_center", Facet::Text),
-    ("BlockQuote", "align_center", Facet::Styling),
-    ("BlockQuote", "align_right", Facet::Exact),
-    ("BlockQuote", "align_right", Facet::Text),
-    ("BlockQuote", "align_right", Facet::Styling),
-    ("BlockQuote", "baseline", Facet::Exact),
-    ("BlockQuote", "baseline", Facet::Text),
-    ("BlockQuote", "baseline", Facet::Styling),
-    ("BlockQuote", "bottom_margin_2", Facet::Exact),
-    ("BlockQuote", "bottom_margin_2", Facet::Text),
-    ("BlockQuote", "bottom_margin_2", Facet::Indent),
-    ("BlockQuote", "bottom_margin_2", Facet::BlankLines),
-    ("BlockQuote", "bottom_margin_2", Facet::Styling),
-    ("BlockQuote", "left_margin_4", Facet::Exact),
-    ("BlockQuote", "left_margin_4", Facet::Text),
-    ("BlockQuote", "left_margin_4", Facet::Styling),
-    ("BlockQuote", "left_margin_pct_10", Facet::Exact),
-    ("BlockQuote", "left_margin_pct_10", Facet::Text),
-    ("BlockQuote", "left_margin_pct_10", Facet::Styling),
-    ("BlockQuote", "max_width_40", Facet::Exact),
-    ("BlockQuote", "max_width_40", Facet::Text),
-    ("BlockQuote", "max_width_40", Facet::Styling),
-    ("BlockQuote", "right_margin_4", Facet::Exact),
-    ("BlockQuote", "right_margin_4", Facet::Text),
-    ("BlockQuote", "right_margin_4", Facet::Styling),
-    ("BlockQuote", "top_margin_2", Facet::Exact),
-    ("BlockQuote", "top_margin_2", Facet::Text),
-    ("BlockQuote", "top_margin_2", Facet::Indent),
-    ("BlockQuote", "top_margin_2", Facet::BlankLines),
-    ("BlockQuote", "top_margin_2", Facet::Styling),
-    ("BlockQuote", "width_120", Facet::Exact),
-    ("BlockQuote", "width_120", Facet::Text),
-    ("BlockQuote", "width_120", Facet::Styling),
-    ("BlockQuote", "width_40", Facet::Exact),
-    ("BlockQuote", "width_40", Facet::Text),
-    ("BlockQuote", "width_40", Facet::Width),
-    ("BlockQuote", "width_40", Facet::Styling),
-    ("BlockQuote", "word_wrap_prose", Facet::Exact),
-    ("BlockQuote", "word_wrap_prose", Facet::Text),
-    ("BlockQuote", "word_wrap_prose", Facet::Styling),
-    ("Progress", "bottom_margin_2", Facet::Exact),
-    ("Progress", "bottom_margin_2", Facet::Text),
-    ("Progress", "bottom_margin_2", Facet::Indent),
-    ("Progress", "bottom_margin_2", Facet::BlankLines),
-    ("Progress", "top_margin_2", Facet::Exact),
-    ("Progress", "top_margin_2", Facet::Text),
-    ("Progress", "top_margin_2", Facet::Indent),
-    ("Progress", "top_margin_2", Facet::BlankLines),
-    ("Section", "align_center", Facet::Exact),
-    ("Section", "align_center", Facet::Text),
-    ("Section", "align_center", Facet::Indent),
-    ("Section", "align_center", Facet::BlankLines),
-    ("Section", "align_center", Facet::Styling),
-    ("Section", "align_right", Facet::Exact),
-    ("Section", "align_right", Facet::Text),
-    ("Section", "align_right", Facet::Indent),
-    ("Section", "align_right", Facet::BlankLines),
-    ("Section", "align_right", Facet::Styling),
-    ("Section", "baseline", Facet::Exact),
-    ("Section", "baseline", Facet::Text),
-    ("Section", "baseline", Facet::Indent),
-    ("Section", "baseline", Facet::BlankLines),
-    ("Section", "bottom_margin_2", Facet::Exact),
-    ("Section", "bottom_margin_2", Facet::Text),
-    ("Section", "bottom_margin_2", Facet::Indent),
-    ("Section", "bottom_margin_2", Facet::BlankLines),
-    ("Section", "left_margin_4", Facet::Exact),
-    ("Section", "left_margin_4", Facet::Text),
-    ("Section", "left_margin_4", Facet::Indent),
-    ("Section", "left_margin_4", Facet::BlankLines),
-    ("Section", "left_margin_pct_10", Facet::Exact),
-    ("Section", "left_margin_pct_10", Facet::Text),
-    ("Section", "left_margin_pct_10", Facet::Indent),
-    ("Section", "left_margin_pct_10", Facet::BlankLines),
-    ("Section", "max_width_40", Facet::Exact),
-    ("Section", "max_width_40", Facet::Text),
-    ("Section", "max_width_40", Facet::Indent),
-    ("Section", "max_width_40", Facet::BlankLines),
-    ("Section", "right_margin_4", Facet::Exact),
-    ("Section", "right_margin_4", Facet::Text),
-    ("Section", "right_margin_4", Facet::Indent),
-    ("Section", "right_margin_4", Facet::BlankLines),
-    ("Section", "top_margin_2", Facet::Exact),
-    ("Section", "top_margin_2", Facet::Text),
-    ("Section", "top_margin_2", Facet::Indent),
-    ("Section", "top_margin_2", Facet::BlankLines),
-    ("Section", "top_margin_2", Facet::Styling),
-    ("Section", "width_120", Facet::Exact),
-    ("Section", "width_120", Facet::Text),
-    ("Section", "width_120", Facet::Indent),
-    ("Section", "width_120", Facet::BlankLines),
-    ("Section", "width_40", Facet::Exact),
-    ("Section", "width_40", Facet::Text),
-    ("Section", "width_40", Facet::Indent),
-    ("Section", "width_40", Facet::BlankLines),
-    ("Section", "word_wrap_prose", Facet::Exact),
-    ("Section", "word_wrap_prose", Facet::Text),
-    ("Section", "word_wrap_prose", Facet::Indent),
-    ("Section", "word_wrap_prose", Facet::BlankLines),
-    ("Table", "bottom_margin_2", Facet::Exact),
-    ("Table", "bottom_margin_2", Facet::Text),
-    ("Table", "bottom_margin_2", Facet::Indent),
-    ("Table", "bottom_margin_2", Facet::BlankLines),
-    ("Table", "top_margin_2", Facet::Exact),
-    ("Table", "top_margin_2", Facet::Text),
-    ("Table", "top_margin_2", Facet::Indent),
-    ("Table", "top_margin_2", Facet::BlankLines),
-    ("TwoColumn", "align_center", Facet::Exact),
-    ("TwoColumn", "align_center", Facet::Text),
-    ("TwoColumn", "align_center", Facet::Indent),
-    ("TwoColumn", "align_center", Facet::Width),
-    ("TwoColumn", "align_right", Facet::Exact),
-    ("TwoColumn", "align_right", Facet::Text),
-    ("TwoColumn", "align_right", Facet::Indent),
-    ("TwoColumn", "baseline", Facet::Exact),
-    ("TwoColumn", "baseline", Facet::Text),
-    ("TwoColumn", "baseline", Facet::Width),
-    ("TwoColumn", "bottom_margin_2", Facet::Exact),
-    ("TwoColumn", "bottom_margin_2", Facet::Text),
-    ("TwoColumn", "bottom_margin_2", Facet::Indent),
-    ("TwoColumn", "bottom_margin_2", Facet::BlankLines),
-    ("TwoColumn", "bottom_margin_2", Facet::Width),
-    ("TwoColumn", "left_margin_4", Facet::Exact),
-    ("TwoColumn", "left_margin_4", Facet::Text),
-    ("TwoColumn", "left_margin_4", Facet::Width),
-    ("TwoColumn", "left_margin_pct_10", Facet::Exact),
-    ("TwoColumn", "left_margin_pct_10", Facet::Text),
-    ("TwoColumn", "left_margin_pct_10", Facet::Width),
-    ("TwoColumn", "max_width_40", Facet::Exact),
-    ("TwoColumn", "max_width_40", Facet::Text),
-    ("TwoColumn", "max_width_40", Facet::Width),
-    ("TwoColumn", "right_margin_4", Facet::Exact),
-    ("TwoColumn", "right_margin_4", Facet::Text),
-    ("TwoColumn", "right_margin_4", Facet::Width),
-    ("TwoColumn", "top_margin_2", Facet::Exact),
-    ("TwoColumn", "top_margin_2", Facet::Text),
-    ("TwoColumn", "top_margin_2", Facet::Indent),
-    ("TwoColumn", "top_margin_2", Facet::BlankLines),
-    ("TwoColumn", "top_margin_2", Facet::Width),
-    ("TwoColumn", "width_120", Facet::Exact),
-    ("TwoColumn", "width_120", Facet::Text),
-    ("TwoColumn", "width_120", Facet::Width),
-    ("TwoColumn", "width_40", Facet::Exact),
-    ("TwoColumn", "width_40", Facet::Text),
-    ("TwoColumn", "width_40", Facet::Indent),
-    ("TwoColumn", "width_40", Facet::Width),
-    ("TwoColumn", "word_wrap_prose", Facet::Exact),
-    ("TwoColumn", "word_wrap_prose", Facet::Text),
-    ("TwoColumn", "word_wrap_prose", Facet::Width),
-    ("UnorderedList", "align_center", Facet::Exact),
-    ("UnorderedList", "align_center", Facet::Text),
-    ("UnorderedList", "align_center", Facet::Indent),
-    ("UnorderedList", "align_center", Facet::BlankLines),
-    ("UnorderedList", "align_right", Facet::Exact),
-    ("UnorderedList", "align_right", Facet::Text),
-    ("UnorderedList", "align_right", Facet::Indent),
-    ("UnorderedList", "align_right", Facet::BlankLines),
-    ("UnorderedList", "baseline", Facet::Exact),
-    ("UnorderedList", "baseline", Facet::Text),
-    ("UnorderedList", "baseline", Facet::Indent),
-    ("UnorderedList", "baseline", Facet::BlankLines),
-    ("UnorderedList", "bottom_margin_2", Facet::Exact),
-    ("UnorderedList", "bottom_margin_2", Facet::Text),
-    ("UnorderedList", "bottom_margin_2", Facet::Indent),
-    ("UnorderedList", "bottom_margin_2", Facet::BlankLines),
-    ("UnorderedList", "left_margin_4", Facet::Exact),
-    ("UnorderedList", "left_margin_4", Facet::Text),
-    ("UnorderedList", "left_margin_4", Facet::Indent),
-    ("UnorderedList", "left_margin_4", Facet::BlankLines),
-    ("UnorderedList", "left_margin_pct_10", Facet::Exact),
-    ("UnorderedList", "left_margin_pct_10", Facet::Text),
-    ("UnorderedList", "left_margin_pct_10", Facet::Indent),
-    ("UnorderedList", "left_margin_pct_10", Facet::BlankLines),
-    ("UnorderedList", "max_width_40", Facet::Exact),
-    ("UnorderedList", "max_width_40", Facet::Text),
-    ("UnorderedList", "max_width_40", Facet::Indent),
-    ("UnorderedList", "max_width_40", Facet::BlankLines),
-    ("UnorderedList", "right_margin_4", Facet::Exact),
-    ("UnorderedList", "right_margin_4", Facet::Text),
-    ("UnorderedList", "right_margin_4", Facet::Indent),
-    ("UnorderedList", "right_margin_4", Facet::BlankLines),
-    ("UnorderedList", "top_margin_2", Facet::Exact),
-    ("UnorderedList", "top_margin_2", Facet::Text),
-    ("UnorderedList", "top_margin_2", Facet::Indent),
-    ("UnorderedList", "top_margin_2", Facet::BlankLines),
-    ("UnorderedList", "width_120", Facet::Exact),
-    ("UnorderedList", "width_120", Facet::Text),
-    ("UnorderedList", "width_120", Facet::Indent),
-    ("UnorderedList", "width_120", Facet::BlankLines),
-    ("UnorderedList", "width_40", Facet::Exact),
-    ("UnorderedList", "width_40", Facet::Text),
-    ("UnorderedList", "width_40", Facet::Indent),
-    ("UnorderedList", "width_40", Facet::BlankLines),
-    ("UnorderedList", "word_wrap_prose", Facet::Exact),
-    ("UnorderedList", "word_wrap_prose", Facet::Text),
-    ("UnorderedList", "word_wrap_prose", Facet::Indent),
-    ("UnorderedList", "word_wrap_prose", Facet::BlankLines),
+/// Each tuple is `(component, scenario, facet, verdict)`. The first three
+/// fields identify the divergence; the `Verdict` records which renderer is
+/// preferred (see [`Verdict`]). Regenerate with `RECORD_DRIFT=1`: regeneration
+/// preserves the verdict of every still-present entry, and any genuinely new
+/// entry is emitted as `Verdict::TreeBehind` and must be reviewed and
+/// reclassified by hand. An empty ledger means the bespoke and tree paths
+/// agree across every facet of every matrix cell.
+#[rustfmt::skip]
+const KNOWN_DRIFT: &[(&str, &str, Facet, Verdict)] = &[
+    ("BlockQuote", "align_center", Facet::Exact, Verdict::CosmeticNeutral),
+    ("BlockQuote", "align_center", Facet::Text, Verdict::CosmeticNeutral),
+    ("BlockQuote", "align_center", Facet::Styling, Verdict::CosmeticNeutral),
+    ("BlockQuote", "align_right", Facet::Exact, Verdict::CosmeticNeutral),
+    ("BlockQuote", "align_right", Facet::Text, Verdict::CosmeticNeutral),
+    ("BlockQuote", "align_right", Facet::Styling, Verdict::CosmeticNeutral),
+    ("BlockQuote", "baseline", Facet::Exact, Verdict::CosmeticNeutral),
+    ("BlockQuote", "baseline", Facet::Text, Verdict::CosmeticNeutral),
+    ("BlockQuote", "baseline", Facet::Styling, Verdict::CosmeticNeutral),
+    ("BlockQuote", "bottom_margin_2", Facet::Exact, Verdict::BespokeBehind),
+    ("BlockQuote", "bottom_margin_2", Facet::Text, Verdict::BespokeBehind),
+    ("BlockQuote", "bottom_margin_2", Facet::Indent, Verdict::BespokeBehind),
+    ("BlockQuote", "bottom_margin_2", Facet::BlankLines, Verdict::BespokeBehind),
+    ("BlockQuote", "bottom_margin_2", Facet::Styling, Verdict::BespokeBehind),
+    ("BlockQuote", "left_margin_4", Facet::Exact, Verdict::CosmeticNeutral),
+    ("BlockQuote", "left_margin_4", Facet::Text, Verdict::CosmeticNeutral),
+    ("BlockQuote", "left_margin_4", Facet::Styling, Verdict::CosmeticNeutral),
+    ("BlockQuote", "left_margin_pct_10", Facet::Exact, Verdict::CosmeticNeutral),
+    ("BlockQuote", "left_margin_pct_10", Facet::Text, Verdict::CosmeticNeutral),
+    ("BlockQuote", "left_margin_pct_10", Facet::Styling, Verdict::CosmeticNeutral),
+    ("BlockQuote", "max_width_40", Facet::Exact, Verdict::CosmeticNeutral),
+    ("BlockQuote", "max_width_40", Facet::Text, Verdict::CosmeticNeutral),
+    ("BlockQuote", "max_width_40", Facet::Indent, Verdict::CosmeticNeutral),
+    ("BlockQuote", "max_width_40", Facet::Width, Verdict::CosmeticNeutral),
+    ("BlockQuote", "max_width_40", Facet::Styling, Verdict::CosmeticNeutral),
+    ("BlockQuote", "right_margin_4", Facet::Exact, Verdict::CosmeticNeutral),
+    ("BlockQuote", "right_margin_4", Facet::Text, Verdict::CosmeticNeutral),
+    ("BlockQuote", "right_margin_4", Facet::Styling, Verdict::CosmeticNeutral),
+    ("BlockQuote", "top_margin_2", Facet::Exact, Verdict::BespokeBehind),
+    ("BlockQuote", "top_margin_2", Facet::Text, Verdict::BespokeBehind),
+    ("BlockQuote", "top_margin_2", Facet::Indent, Verdict::BespokeBehind),
+    ("BlockQuote", "top_margin_2", Facet::BlankLines, Verdict::BespokeBehind),
+    ("BlockQuote", "top_margin_2", Facet::Styling, Verdict::BespokeBehind),
+    ("BlockQuote", "width_120", Facet::Exact, Verdict::CosmeticNeutral),
+    ("BlockQuote", "width_120", Facet::Text, Verdict::CosmeticNeutral),
+    ("BlockQuote", "width_120", Facet::Styling, Verdict::CosmeticNeutral),
+    ("BlockQuote", "width_40", Facet::Exact, Verdict::CosmeticNeutral),
+    ("BlockQuote", "width_40", Facet::Text, Verdict::CosmeticNeutral),
+    ("BlockQuote", "width_40", Facet::Width, Verdict::CosmeticNeutral),
+    ("BlockQuote", "width_40", Facet::Styling, Verdict::CosmeticNeutral),
+    ("BlockQuote", "word_wrap_prose", Facet::Exact, Verdict::CosmeticNeutral),
+    ("BlockQuote", "word_wrap_prose", Facet::Text, Verdict::CosmeticNeutral),
+    ("BlockQuote", "word_wrap_prose", Facet::Styling, Verdict::CosmeticNeutral),
+    ("Progress", "bottom_margin_2", Facet::Exact, Verdict::BespokeBehind),
+    ("Progress", "bottom_margin_2", Facet::Text, Verdict::BespokeBehind),
+    ("Progress", "bottom_margin_2", Facet::Indent, Verdict::BespokeBehind),
+    ("Progress", "bottom_margin_2", Facet::BlankLines, Verdict::BespokeBehind),
+    ("Progress", "top_margin_2", Facet::Exact, Verdict::BespokeBehind),
+    ("Progress", "top_margin_2", Facet::Text, Verdict::BespokeBehind),
+    ("Progress", "top_margin_2", Facet::Indent, Verdict::BespokeBehind),
+    ("Progress", "top_margin_2", Facet::BlankLines, Verdict::BespokeBehind),
+    ("Section", "align_center", Facet::Exact, Verdict::BespokeBehind),
+    ("Section", "align_center", Facet::Text, Verdict::BespokeBehind),
+    ("Section", "align_center", Facet::Indent, Verdict::BespokeBehind),
+    ("Section", "align_center", Facet::BlankLines, Verdict::BespokeBehind),
+    ("Section", "align_center", Facet::Styling, Verdict::BespokeBehind),
+    ("Section", "align_right", Facet::Exact, Verdict::BespokeBehind),
+    ("Section", "align_right", Facet::Text, Verdict::BespokeBehind),
+    ("Section", "align_right", Facet::Indent, Verdict::BespokeBehind),
+    ("Section", "align_right", Facet::BlankLines, Verdict::BespokeBehind),
+    ("Section", "align_right", Facet::Styling, Verdict::BespokeBehind),
+    ("Section", "baseline", Facet::Exact, Verdict::BespokeBehind),
+    ("Section", "baseline", Facet::Text, Verdict::BespokeBehind),
+    ("Section", "baseline", Facet::Indent, Verdict::BespokeBehind),
+    ("Section", "baseline", Facet::BlankLines, Verdict::BespokeBehind),
+    ("Section", "bottom_margin_2", Facet::Exact, Verdict::BespokeBehind),
+    ("Section", "bottom_margin_2", Facet::Text, Verdict::BespokeBehind),
+    ("Section", "bottom_margin_2", Facet::Indent, Verdict::BespokeBehind),
+    ("Section", "bottom_margin_2", Facet::BlankLines, Verdict::BespokeBehind),
+    ("Section", "left_margin_4", Facet::Exact, Verdict::BespokeBehind),
+    ("Section", "left_margin_4", Facet::Text, Verdict::BespokeBehind),
+    ("Section", "left_margin_4", Facet::Indent, Verdict::BespokeBehind),
+    ("Section", "left_margin_4", Facet::BlankLines, Verdict::BespokeBehind),
+    ("Section", "left_margin_pct_10", Facet::Exact, Verdict::BespokeBehind),
+    ("Section", "left_margin_pct_10", Facet::Text, Verdict::BespokeBehind),
+    ("Section", "left_margin_pct_10", Facet::Indent, Verdict::BespokeBehind),
+    ("Section", "left_margin_pct_10", Facet::BlankLines, Verdict::BespokeBehind),
+    ("Section", "max_width_40", Facet::Exact, Verdict::BespokeBehind),
+    ("Section", "max_width_40", Facet::Text, Verdict::BespokeBehind),
+    ("Section", "max_width_40", Facet::Indent, Verdict::BespokeBehind),
+    ("Section", "max_width_40", Facet::BlankLines, Verdict::BespokeBehind),
+    ("Section", "right_margin_4", Facet::Exact, Verdict::BespokeBehind),
+    ("Section", "right_margin_4", Facet::Text, Verdict::BespokeBehind),
+    ("Section", "right_margin_4", Facet::Indent, Verdict::BespokeBehind),
+    ("Section", "right_margin_4", Facet::BlankLines, Verdict::BespokeBehind),
+    ("Section", "top_margin_2", Facet::Exact, Verdict::BespokeBehind),
+    ("Section", "top_margin_2", Facet::Text, Verdict::BespokeBehind),
+    ("Section", "top_margin_2", Facet::Indent, Verdict::BespokeBehind),
+    ("Section", "top_margin_2", Facet::BlankLines, Verdict::BespokeBehind),
+    ("Section", "top_margin_2", Facet::Styling, Verdict::BespokeBehind),
+    ("Section", "width_120", Facet::Exact, Verdict::BespokeBehind),
+    ("Section", "width_120", Facet::Text, Verdict::BespokeBehind),
+    ("Section", "width_120", Facet::Indent, Verdict::BespokeBehind),
+    ("Section", "width_120", Facet::BlankLines, Verdict::BespokeBehind),
+    ("Section", "width_40", Facet::Exact, Verdict::BespokeBehind),
+    ("Section", "width_40", Facet::Text, Verdict::BespokeBehind),
+    ("Section", "width_40", Facet::Indent, Verdict::BespokeBehind),
+    ("Section", "width_40", Facet::BlankLines, Verdict::BespokeBehind),
+    ("Section", "word_wrap_prose", Facet::Exact, Verdict::BespokeBehind),
+    ("Section", "word_wrap_prose", Facet::Text, Verdict::BespokeBehind),
+    ("Section", "word_wrap_prose", Facet::Indent, Verdict::BespokeBehind),
+    ("Section", "word_wrap_prose", Facet::BlankLines, Verdict::BespokeBehind),
+    ("Table", "bottom_margin_2", Facet::Exact, Verdict::BespokeBehind),
+    ("Table", "bottom_margin_2", Facet::Text, Verdict::BespokeBehind),
+    ("Table", "bottom_margin_2", Facet::Indent, Verdict::BespokeBehind),
+    ("Table", "bottom_margin_2", Facet::BlankLines, Verdict::BespokeBehind),
+    ("Table", "top_margin_2", Facet::Exact, Verdict::BespokeBehind),
+    ("Table", "top_margin_2", Facet::Text, Verdict::BespokeBehind),
+    ("Table", "top_margin_2", Facet::Indent, Verdict::BespokeBehind),
+    ("Table", "top_margin_2", Facet::BlankLines, Verdict::BespokeBehind),
+    ("TwoColumn", "bottom_margin_2", Facet::Exact, Verdict::CosmeticNeutral),
+    ("TwoColumn", "bottom_margin_2", Facet::Text, Verdict::CosmeticNeutral),
+    ("TwoColumn", "bottom_margin_2", Facet::Indent, Verdict::CosmeticNeutral),
+    ("TwoColumn", "bottom_margin_2", Facet::BlankLines, Verdict::CosmeticNeutral),
+    ("TwoColumn", "max_width_40", Facet::Exact, Verdict::BespokeBehind),
+    ("TwoColumn", "max_width_40", Facet::Text, Verdict::BespokeBehind),
+    ("TwoColumn", "max_width_40", Facet::Indent, Verdict::BespokeBehind),
+    ("TwoColumn", "max_width_40", Facet::Width, Verdict::BespokeBehind),
+    ("TwoColumn", "top_margin_2", Facet::Exact, Verdict::BespokeBehind),
+    ("TwoColumn", "top_margin_2", Facet::Text, Verdict::BespokeBehind),
+    ("TwoColumn", "top_margin_2", Facet::Indent, Verdict::BespokeBehind),
+    ("TwoColumn", "top_margin_2", Facet::BlankLines, Verdict::BespokeBehind),
+    ("UnorderedList", "align_center", Facet::Exact, Verdict::CosmeticNeutral),
+    ("UnorderedList", "align_center", Facet::Text, Verdict::CosmeticNeutral),
+    ("UnorderedList", "align_center", Facet::Indent, Verdict::CosmeticNeutral),
+    ("UnorderedList", "align_center", Facet::BlankLines, Verdict::CosmeticNeutral),
+    ("UnorderedList", "align_right", Facet::Exact, Verdict::CosmeticNeutral),
+    ("UnorderedList", "align_right", Facet::Text, Verdict::CosmeticNeutral),
+    ("UnorderedList", "align_right", Facet::Indent, Verdict::CosmeticNeutral),
+    ("UnorderedList", "align_right", Facet::BlankLines, Verdict::CosmeticNeutral),
+    ("UnorderedList", "baseline", Facet::Exact, Verdict::CosmeticNeutral),
+    ("UnorderedList", "baseline", Facet::Text, Verdict::CosmeticNeutral),
+    ("UnorderedList", "baseline", Facet::Indent, Verdict::CosmeticNeutral),
+    ("UnorderedList", "baseline", Facet::BlankLines, Verdict::CosmeticNeutral),
+    ("UnorderedList", "bottom_margin_2", Facet::Exact, Verdict::CosmeticNeutral),
+    ("UnorderedList", "bottom_margin_2", Facet::Text, Verdict::CosmeticNeutral),
+    ("UnorderedList", "bottom_margin_2", Facet::Indent, Verdict::CosmeticNeutral),
+    ("UnorderedList", "bottom_margin_2", Facet::BlankLines, Verdict::CosmeticNeutral),
+    ("UnorderedList", "left_margin_4", Facet::Exact, Verdict::CosmeticNeutral),
+    ("UnorderedList", "left_margin_4", Facet::Text, Verdict::CosmeticNeutral),
+    ("UnorderedList", "left_margin_4", Facet::Indent, Verdict::CosmeticNeutral),
+    ("UnorderedList", "left_margin_4", Facet::BlankLines, Verdict::CosmeticNeutral),
+    ("UnorderedList", "left_margin_pct_10", Facet::Exact, Verdict::CosmeticNeutral),
+    ("UnorderedList", "left_margin_pct_10", Facet::Text, Verdict::CosmeticNeutral),
+    ("UnorderedList", "left_margin_pct_10", Facet::Indent, Verdict::CosmeticNeutral),
+    ("UnorderedList", "left_margin_pct_10", Facet::BlankLines, Verdict::CosmeticNeutral),
+    ("UnorderedList", "max_width_40", Facet::Exact, Verdict::CosmeticNeutral),
+    ("UnorderedList", "max_width_40", Facet::Text, Verdict::CosmeticNeutral),
+    ("UnorderedList", "max_width_40", Facet::Indent, Verdict::CosmeticNeutral),
+    ("UnorderedList", "max_width_40", Facet::BlankLines, Verdict::CosmeticNeutral),
+    ("UnorderedList", "right_margin_4", Facet::Exact, Verdict::CosmeticNeutral),
+    ("UnorderedList", "right_margin_4", Facet::Text, Verdict::CosmeticNeutral),
+    ("UnorderedList", "right_margin_4", Facet::Indent, Verdict::CosmeticNeutral),
+    ("UnorderedList", "right_margin_4", Facet::BlankLines, Verdict::CosmeticNeutral),
+    ("UnorderedList", "top_margin_2", Facet::Exact, Verdict::BespokeBehind),
+    ("UnorderedList", "top_margin_2", Facet::Text, Verdict::BespokeBehind),
+    ("UnorderedList", "top_margin_2", Facet::Indent, Verdict::BespokeBehind),
+    ("UnorderedList", "top_margin_2", Facet::BlankLines, Verdict::BespokeBehind),
+    ("UnorderedList", "width_120", Facet::Exact, Verdict::CosmeticNeutral),
+    ("UnorderedList", "width_120", Facet::Text, Verdict::CosmeticNeutral),
+    ("UnorderedList", "width_120", Facet::Indent, Verdict::CosmeticNeutral),
+    ("UnorderedList", "width_120", Facet::BlankLines, Verdict::CosmeticNeutral),
+    ("UnorderedList", "width_40", Facet::Exact, Verdict::CosmeticNeutral),
+    ("UnorderedList", "width_40", Facet::Text, Verdict::CosmeticNeutral),
+    ("UnorderedList", "width_40", Facet::Indent, Verdict::CosmeticNeutral),
+    ("UnorderedList", "width_40", Facet::BlankLines, Verdict::CosmeticNeutral),
+    ("UnorderedList", "word_wrap_prose", Facet::Exact, Verdict::CosmeticNeutral),
+    ("UnorderedList", "word_wrap_prose", Facet::Text, Verdict::CosmeticNeutral),
+    ("UnorderedList", "word_wrap_prose", Facet::Indent, Verdict::CosmeticNeutral),
+    ("UnorderedList", "word_wrap_prose", Facet::BlankLines, Verdict::CosmeticNeutral),
 ];
 
 /// Returns `true` when `a` and `b` are byte-for-byte identical.
@@ -363,11 +359,12 @@ fn record_mode() -> bool {
     }
 }
 
-/// Formats a `DriftKey` as a pasteable `KNOWN_DRIFT` tuple literal.
-fn ledger_line(key: &DriftKey) -> String {
+/// Formats a `DriftKey` plus its `Verdict` as a pasteable `KNOWN_DRIFT`
+/// tuple literal.
+fn ledger_line(key: &DriftKey, verdict: Verdict) -> String {
     format!(
-        "    ({:?}, {:?}, Facet::{:?}),",
-        key.component, key.scenario, key.facet
+        "    ({:?}, {:?}, Facet::{:?}, Verdict::{:?}),",
+        key.component, key.scenario, key.facet, verdict
     )
 }
 
@@ -385,7 +382,7 @@ fn truncate(s: &str, max: usize) -> String {
 fn render_matches_bespoke() {
     let known: BTreeSet<DriftKey> = KNOWN_DRIFT
         .iter()
-        .map(|(c, s, f)| DriftKey {
+        .map(|(c, s, f, _)| DriftKey {
             component: c,
             scenario: s,
             facet: *f,
@@ -396,6 +393,23 @@ fn render_matches_bespoke() {
         KNOWN_DRIFT.len(),
         "duplicate KNOWN_DRIFT entry"
     );
+
+    // Verdict is metadata: it never affects regression/fixed detection, it is
+    // only carried through to `RECORD_DRIFT` output so hand-assigned
+    // classifications survive regeneration.
+    let verdicts: BTreeMap<DriftKey, Verdict> = KNOWN_DRIFT
+        .iter()
+        .map(|(c, s, f, v)| {
+            (
+                DriftKey {
+                    component: c,
+                    scenario: s,
+                    facet: *f,
+                },
+                *v,
+            )
+        })
+        .collect();
 
     let mut live = BTreeSet::<DriftKey>::new();
     for case in component_cases() {
@@ -424,7 +438,8 @@ fn render_matches_bespoke() {
     if record_mode() {
         println!("=== BEGIN KNOWN_DRIFT (paste between `&[` and `]`) ===");
         for key in &live {
-            println!("{}", ledger_line(key));
+            let verdict = verdicts.get(key).copied().unwrap_or(Verdict::TreeBehind);
+            println!("{}", ledger_line(key, verdict));
         }
         println!("=== END KNOWN_DRIFT ({} entries) ===", live.len());
         return;
@@ -466,7 +481,8 @@ fn render_matches_bespoke() {
     if !fixed.is_empty() {
         msg.push_str("\nFIXED — remove from KNOWN_DRIFT:\n");
         for key in &fixed {
-            msg.push_str(&format!("{}\n", ledger_line(key)));
+            let verdict = verdicts.get(*key).copied().unwrap_or(Verdict::TreeBehind);
+            msg.push_str(&format!("{}\n", ledger_line(key, verdict)));
         }
     }
 

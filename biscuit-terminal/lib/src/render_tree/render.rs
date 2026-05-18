@@ -51,7 +51,7 @@ use crate::components::table::{
     ColumnType, Conditional, Table, TableCellContent, TableColumn, TableWidthPlan, VerticalAlign,
 };
 use crate::discovery::detection::ColorDepth;
-use crate::utils::block_constraint::visible_width;
+use crate::utils::block_constraint::{visible_width, wrap_lines};
 use crate::utils::layout::{Alignment, WordWrap};
 
 use super::options::TerminalRenderOptions;
@@ -154,8 +154,10 @@ impl Writer<'_> {
     /// vertical margins emit leading/trailing blank lines.
     fn render(&mut self, node: &RenderNode) -> Result<String, RenderError> {
         match node.attrs.layout() {
-            Some(layout) => self.render_with_layout(node, &layout),
-            None => self.render_kind(node),
+            Some(layout) if !is_inline_kind(&node.kind) => {
+                self.render_with_layout(node, &layout)
+            }
+            _ => self.render_kind(node),
         }
     }
 
@@ -178,7 +180,17 @@ impl Writer<'_> {
         // Render the content within the width left after horizontal margins.
         // Clamp to at least 1: a width-0 sub-render is degenerate for the
         // downstream components (matching `render_columns`'s `.max(1)`).
-        let content_width = available.saturating_sub(left + right).max(1);
+        let mut content_width = available.saturating_sub(left + right).max(1);
+
+        // Apply max_width cap if declared. The resolved cap further narrows
+        // the available width so children receive a reduced inner width and
+        // alignment is observable within the capped region.
+        if let Some(mw) = &layout.max_width {
+            let cap = resolve_cells(mw, available);
+            if cap > 0 {
+                content_width = content_width.min(cap);
+            }
+        }
         let content = {
             let mut narrowed = self.opts.clone();
             narrowed.context.available_width = content_width;
@@ -385,8 +397,15 @@ impl Writer<'_> {
             return self.render_columns_stacked(left_children, right_children);
         }
 
+        // Render each column's blocks within its resolved width, then wrap
+        // the result to that width. The wrap mirrors the bespoke `TwoColumn`
+        // renderer, which wraps every column with `WrapProse`; without it a
+        // paragraph (whose `Layout` default is `WordWrap::None`) would overrun
+        // a narrow column instead of flowing onto extra rows.
         let left = self.render_blocks_in_width(left_children, left_width.max(1))?;
         let right = self.render_blocks_in_width(right_children, right_width.max(1))?;
+        let left = wrap_column_lines(&left, left_width.max(1));
+        let right = wrap_column_lines(&right, right_width.max(1));
 
         let left_lines: Vec<&str> = left.split('\n').collect();
         let right_lines: Vec<&str> = right.split('\n').collect();
@@ -397,8 +416,16 @@ impl Writer<'_> {
         for i in 0..rows {
             let l = left_lines.get(i).copied().unwrap_or("");
             let r = right_lines.get(i).copied().unwrap_or("");
-            let pad = left_width.saturating_sub(visible_width(l));
-            out.push(format!("{l}{}{gutter}{r}", " ".repeat(pad as usize)));
+            // Pad both columns to their resolved widths so the block stays
+            // rectangular and the gutter aligns, matching the bespoke
+            // `TwoColumn` renderer.
+            let left_pad = left_width.saturating_sub(visible_width(l));
+            let right_pad = right_width.saturating_sub(visible_width(r));
+            out.push(format!(
+                "{l}{}{gutter}{r}{}",
+                " ".repeat(left_pad as usize),
+                " ".repeat(right_pad as usize),
+            ));
         }
         Ok(out.join("\n"))
     }
@@ -956,6 +983,18 @@ impl Writer<'_> {
 /// `paragraph_text` is the projected paragraph's visible text
 /// (`"{label} {pct}%"` or `"{pct}%"`); any label portion is the text before
 /// the trailing ` {pct}%` token and is preserved before the bar.
+/// Wraps each line of a rendered column to `width`.
+///
+/// Mirrors the bespoke `TwoColumn` renderer, which flows every column through
+/// `WrapProse` so content longer than the column width spills onto extra rows
+/// rather than overrunning the gutter. Lines already within `width` pass
+/// through unchanged, so columns holding pre-formatted block content (lists,
+/// tables) are unaffected.
+fn wrap_column_lines(rendered: &str, width: u32) -> String {
+    let lines: Vec<String> = rendered.split('\n').map(str::to_string).collect();
+    wrap_lines(lines, &WordWrap::WrapProse(None, None), width).join("\n")
+}
+
 fn render_progress_bar(hints: &ProgressHints, paragraph_text: &str) -> String {
     let value = hints.value.clamp(0.0, 1.0);
     let percentage = (value * 100.0).round() as u32;
@@ -1012,15 +1051,14 @@ fn is_known_class(class: &str) -> bool {
     matches!(class, "mark" | "dim" | "sup" | "sub")
 }
 
-/// Returns `true` when `node` is a paragraph or an inline-level node.
+/// Returns `true` when `kind` is an inline (phrasing-level) node kind.
 ///
-/// Inside a list item, such nodes flow on the prefixed line; every other
-/// node is block-level and is indented without a prefix.
-fn is_inline_block(node: &RenderNode) -> bool {
+/// Layout is only applied to block-level nodes. When an inline node carries
+/// a layout (a warning-severity validation finding), the renderer drops it.
+fn is_inline_kind(kind: &NodeKind) -> bool {
     matches!(
-        node.kind,
-        NodeKind::Paragraph { .. }
-            | NodeKind::Text { .. }
+        kind,
+        NodeKind::Text { .. }
             | NodeKind::Emphasis { .. }
             | NodeKind::Strong { .. }
             | NodeKind::Delete { .. }
@@ -1032,6 +1070,14 @@ fn is_inline_block(node: &RenderNode) -> bool {
             | NodeKind::SoftBreak
             | NodeKind::HardBreak
     )
+}
+
+/// Returns `true` when `node` is a paragraph or an inline-level node.
+///
+/// Inside a list item, such nodes flow on the prefixed line; every other
+/// node is block-level and is indented without a prefix.
+fn is_inline_block(node: &RenderNode) -> bool {
+    matches!(node.kind, NodeKind::Paragraph { .. }) || is_inline_kind(&node.kind)
 }
 
 /// Indents every line of `body` by `indent` spaces.
@@ -1731,5 +1777,147 @@ mod render_tree_tests {
         assert!(plain.contains("Intro"));
         assert!(plain.contains("Child"));
         assert!(plain.contains("Content"));
+    }
+
+    #[test]
+    fn render_tree_max_width_caps_content_width() {
+        use renderable::layout::{Layout, Length, TargetValue};
+
+        let term = Terminal::new_optimistic(80);
+        let mut para = RenderNode::paragraph(vec![RenderNode::text("hello world")]);
+        para.attrs.set_layout(&Layout {
+            max_width: Some(TargetValue::universal(Length::ch(20))),
+            ..Layout::default()
+        });
+        let tree = RenderNode::root(vec![para]);
+        let out =
+            render_terminal_node(&tree, &TerminalRenderOptions::new(&term, RenderStrictness::Warn))
+                .expect("render");
+        let plain = strip_escape_codes(&out.output);
+        assert!(plain.contains("hello world"));
+        let max_line = plain.lines().map(|l| l.len()).max().unwrap_or(0);
+        assert!(
+            max_line <= 20,
+            "max_width=20 should cap lines to 20ch, got {max_line}"
+        );
+    }
+
+    #[test]
+    fn render_tree_max_width_with_center_alignment() {
+        use renderable::layout::{Alignment, Layout, Length, TargetValue};
+
+        let term = Terminal::new_optimistic(80);
+        let mut para = RenderNode::paragraph(vec![RenderNode::text("hi")]);
+        para.attrs.set_layout(&Layout {
+            max_width: Some(TargetValue::universal(Length::ch(10))),
+            alignment: Alignment::Center,
+            ..Layout::default()
+        });
+        let tree = RenderNode::root(vec![para]);
+        let out =
+            render_terminal_node(&tree, &TerminalRenderOptions::new(&term, RenderStrictness::Warn))
+                .expect("render");
+        let plain = strip_escape_codes(&out.output);
+        let line = plain.lines().next().unwrap_or("");
+        assert!(
+            line.starts_with(' '),
+            "center-aligned content with max_width should have leading space, got: {line:?}"
+        );
+    }
+
+    #[test]
+    fn render_tree_max_width_with_margins() {
+        use renderable::layout::{Layout, Length, Margin, TargetValue};
+
+        let term = Terminal::new_optimistic(80);
+        let mut para = RenderNode::paragraph(vec![RenderNode::text("hello")]);
+        para.attrs.set_layout(&Layout {
+            margin: Margin::x(Length::ch(4)),
+            max_width: Some(TargetValue::universal(Length::ch(20))),
+            ..Layout::default()
+        });
+        let tree = RenderNode::root(vec![para]);
+        let out =
+            render_terminal_node(&tree, &TerminalRenderOptions::new(&term, RenderStrictness::Warn))
+                .expect("render");
+        let plain = strip_escape_codes(&out.output);
+        let line = plain.lines().next().unwrap_or("");
+        assert!(
+            line.starts_with("    "),
+            "4ch left margin should produce 4 leading spaces, got: {line:?}"
+        );
+    }
+
+    #[test]
+    fn render_tree_nested_layout_composition_under_max_width() {
+        use renderable::layout::{Alignment, Layout, Length, Margin, TargetValue};
+
+        let term = Terminal::new_optimistic(80);
+
+        // A root holding a block with both `max_width` and margins, so the
+        // child resolves against the width left by the parent's constraints.
+        let mut block = RenderNode::block_quote(vec![RenderNode::paragraph(vec![
+            RenderNode::text("content"),
+        ])]);
+        block.attrs.set_layout(&Layout {
+            margin: Margin::x(Length::ch(2)),
+            max_width: Some(TargetValue::universal(Length::ch(30))),
+            alignment: Alignment::Right,
+            ..Layout::default()
+        });
+        let tree = RenderNode::root(vec![block]);
+        let out =
+            render_terminal_node(&tree, &TerminalRenderOptions::new(&term, RenderStrictness::Warn))
+                .expect("render");
+        let plain = strip_escape_codes(&out.output);
+        assert!(
+            plain.contains("content"),
+            "nested content should still be rendered"
+        );
+        let max_line = plain.lines().map(|l| l.len()).max().unwrap_or(0);
+        assert!(
+            max_line <= 34,
+            "inner 2ch margins + max_width 30 should keep lines <= 34, got {max_line}"
+        );
+    }
+
+    #[test]
+    fn render_tree_layout_on_inline_node_warn_strictness() {
+        use renderable::layout::Layout;
+
+        let term = Terminal::new_optimistic(80);
+
+        let mut text = RenderNode::text("hello");
+        text.attrs.set_layout(&Layout::default());
+        let tree = RenderNode::root(vec![RenderNode::paragraph(vec![text])]);
+
+        let out = render_terminal_node(
+            &tree,
+            &TerminalRenderOptions::new(&term, RenderStrictness::Warn),
+        )
+        .expect("warn should succeed");
+        assert!(
+            out.diagnostics
+                .iter()
+                .any(|d| d.message.contains("block-level")),
+            "warn strictness should produce a diagnostic about block-level"
+        );
+        assert!(strip_escape_codes(&out.output).contains("hello"));
+
+        let out = render_terminal_node(
+            &tree,
+            &TerminalRenderOptions::new(&term, RenderStrictness::Lossy),
+        )
+        .expect("lossy should succeed");
+        assert!(strip_escape_codes(&out.output).contains("hello"));
+
+        let result = render_terminal_node(
+            &tree,
+            &TerminalRenderOptions::new(&term, RenderStrictness::Strict),
+        );
+        assert!(
+            matches!(result, Err(RenderError::InvalidTree { .. })),
+            "strict should escalate inline-layout warning to error"
+        );
     }
 }
