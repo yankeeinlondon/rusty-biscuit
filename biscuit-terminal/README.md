@@ -249,13 +249,16 @@ let rendered = component.render_optimistic(Some(80));
 
 ## Testing
 
-biscuit-terminal follows the **Level 1 / 2 / 3** testing vocabulary:
+biscuit-terminal follows the **Level 1 / 2 / 3** testing vocabulary. The
+Level 2 and Level 3 harnesses, the choice of harness variant, and the
+environment they require are documented in
+[`biscuit-test-harness/README.md`](../biscuit-test-harness/README.md).
 
 | Level | Description | Location |
 |-------|-------------|----------|
 | **Level 1** | PTY-based tests using `expectrl` — no real terminal required | `lib/tests/level1_*.rs` |
 | **Level 2** | Real-terminal tests using the shared `biscuit-test-harness` crate | `cli/tests/level2_*.rs` |
-| **Level 3** | OS-level keyboard injection (not applicable — biscuit-terminal has no interactive input) | — |
+| **Level 3** | OS-level keyboard injection (not applicable — biscuit-terminal has no interactive input). See [`biscuit-test-harness/README.md`](../biscuit-test-harness/README.md). | — |
 
 ### Running Level-2 tests locally
 
