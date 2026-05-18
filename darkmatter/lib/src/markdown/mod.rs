@@ -58,6 +58,7 @@ pub use normalize::{
     StructureIssueKind, StructureValidation, ViolationCorrection,
 };
 pub use reference::file_tree::{FileTree, FileTreeError};
+pub use render_tree::TerminalCodeRenderer;
 pub use reference::{
     ReferenceError, ReferenceGraph, ReferenceGraphOptions, ReferenceKind, ReferenceRecord,
     ReferenceSet, TransclusionRef,

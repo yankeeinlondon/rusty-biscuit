@@ -594,4 +594,212 @@ mod tests {
             Some(Length::Percent(10.0))
         );
     }
+
+    #[test]
+    fn deprecation_bridge_produces_valid_layout() {
+        use renderable::layout::{Alignment, Layout, Length, Margin, TargetValue};
+
+        // Page margin + padding are summed into the layout margin, exactly as
+        // `DarkmatterPage::rebuild_layout` documents (the `Layout` primitive
+        // has no separate padding concept).
+        let page_margin = PageMargin::all(2);
+        let page_padding = PagePadding::all(1);
+        let page_alignment = PageAlignment::Center;
+
+        let margin: Margin = page_margin.into();
+        let padding: Margin = page_padding.into();
+        let alignment: Alignment = page_alignment.into();
+
+        let cells = |tv: &TargetValue<Length>| match tv {
+            TargetValue::Universal(Length::Ch(n)) => *n,
+            _ => 0,
+        };
+        let sum = |a: &TargetValue<Length>, b: &TargetValue<Length>| {
+            TargetValue::universal(Length::ch(cells(a) + cells(b)))
+        };
+        let combined_margin = Margin {
+            top: sum(&margin.top, &padding.top),
+            right: sum(&margin.right, &padding.right),
+            bottom: sum(&margin.bottom, &padding.bottom),
+            left: sum(&margin.left, &padding.left),
+        };
+        // 2 (margin) + 1 (padding) = 3 cells per side.
+        assert_eq!(cells(&combined_margin.left), 3);
+
+        let layout = Layout {
+            margin: combined_margin,
+            alignment,
+            max_width: None,
+            word_wrap: renderable::wrap_policy::WordWrap::None,
+        };
+
+        assert!(
+            layout.validate().is_ok(),
+            "bridge-produced Layout must pass validation"
+        );
+    }
+
+    #[test]
+    fn deprecation_bridge_page_fill_max_width_produces_valid_layout() {
+        use renderable::layout::{Alignment, Layout, Length, Margin, TargetValue};
+
+        let fill = PageFill::Max(WidthUnit::Fixed(60));
+        let max_width: Option<TargetValue<Length>> = fill.try_into().unwrap();
+        assert_eq!(max_width, Some(TargetValue::universal(Length::ch(60))));
+
+        let layout = Layout {
+            margin: Margin::default(),
+            alignment: Alignment::default(),
+            max_width,
+            word_wrap: renderable::wrap_policy::WordWrap::None,
+        };
+        assert!(layout.validate().is_ok());
+    }
+
+    #[test]
+    fn deprecation_bridge_rejects_invalid_percent() {
+        let fill = PageFill::Max(WidthUnit::Percent(150.0));
+        let result: Result<Option<renderable::layout::TargetValue<renderable::layout::Length>>, _> =
+            fill.try_into();
+        assert!(result.is_err());
+    }
+
+    // ---------- Deferral compatibility boundary (Finding 3) ----------
+    //
+    // `layout/mod.rs` documents that constructing a `DarkmatterPage` via the
+    // builder produces results identical to constructing the equivalent
+    // `renderable::layout::Layout` and converting through the bridge. The
+    // tests below prove that claim against rendered output, not just
+    // `Layout::validate`.
+
+    /// Builds the `Layout` that the documented bridge produces for a page with
+    /// the given margin/padding/max-width — independently of `DarkmatterPage`.
+    ///
+    /// This mirrors `DarkmatterPage::rebuild_layout`'s documented contract:
+    /// page margin and padding are both transparent space outside the content
+    /// rectangle, so the bridge sums them into the single `Layout` margin, and
+    /// the max-width cap is a universal `Ch` length.
+    fn bridge_layout(
+        margin: PageMargin,
+        padding: PagePadding,
+        max_width: Option<u16>,
+    ) -> renderable::layout::Layout {
+        use renderable::layout::{Layout, Length, Margin as RMargin, TargetValue};
+
+        let m: RMargin = margin.into();
+        let p: RMargin = padding.into();
+        let cells = |tv: &TargetValue<Length>| match tv {
+            TargetValue::Universal(Length::Ch(n)) => *n,
+            _ => 0,
+        };
+        let sum = |a: &TargetValue<Length>, b: &TargetValue<Length>| {
+            TargetValue::universal(Length::ch(cells(a) + cells(b)))
+        };
+        Layout {
+            margin: RMargin {
+                top: sum(&m.top, &p.top),
+                right: sum(&m.right, &p.right),
+                bottom: sum(&m.bottom, &p.bottom),
+                left: sum(&m.left, &p.left),
+            },
+            alignment: renderable::layout::Alignment::default(),
+            max_width: max_width.map(|w| TargetValue::universal(Length::ch(u32::from(w)))),
+            word_wrap: renderable::wrap_policy::WordWrap::None,
+        }
+    }
+
+    /// The `Layout` a `DarkmatterPage` builder exposes via `TerminalRenderable`
+    /// is byte-identical to the `Layout` produced by the documented bridge —
+    /// for margin, padding, and max-width cases.
+    #[test]
+    fn darkmatter_page_layout_matches_bridge_layout() {
+        use biscuit_terminal::components::renderable::TerminalRenderable;
+        use biscuit_terminal::terminal::Terminal;
+        use crate::layout::DarkmatterPage;
+
+        let term = Terminal::new_optimistic(80);
+
+        // Margin-only.
+        let page = DarkmatterPage::new(&term).with_margin(4);
+        assert_eq!(
+            page.layout(),
+            &bridge_layout(PageMargin::all(4), PagePadding::all(0), None),
+            "margin-only builder must match bridge Layout"
+        );
+
+        // Margin + padding (summed into the layout margin).
+        let page = DarkmatterPage::new(&term).with_margin(2).with_padding(3);
+        assert_eq!(
+            page.layout(),
+            &bridge_layout(PageMargin::all(2), PagePadding::all(3), None),
+            "margin+padding builder must match bridge Layout"
+        );
+
+        // Max-width cap.
+        let page = DarkmatterPage::new(&term)
+            .with_margin(1)
+            .with_max_width(60);
+        assert_eq!(
+            page.layout(),
+            &bridge_layout(PageMargin::all(1), PagePadding::all(0), Some(60)),
+            "max-width builder must match bridge Layout"
+        );
+    }
+
+    /// `DarkmatterPage::render` produces visible output whose left-margin
+    /// indent on content rows matches the left margin of the bridge `Layout`.
+    ///
+    /// `DarkmatterPage` applies margins through its row-decoration pass while
+    /// `renderable::layout::Layout::apply_layout` applies them per line; they
+    /// share no code, so this proves the documented equivalence on rendered
+    /// output. Vertical margins and per-component alignment live on different
+    /// code paths (`DarkmatterPage` emits blank margin rows itself and tracks
+    /// alignment per component, not as a single `Layout::alignment`), so this
+    /// test is deliberately scoped to the provable horizontal-margin and
+    /// max-width facets.
+    #[test]
+    fn darkmatter_page_render_margin_matches_bridge_layout() {
+        use biscuit_terminal::terminal::Terminal;
+        use biscuit_terminal::utils::layout::LayoutTerminalExt;
+        use crate::layout::DarkmatterPage;
+        use crate::markdown::Markdown;
+
+        let term = Terminal::new_optimistic(80);
+        let md: Markdown = "Hello world".into();
+
+        // Render the body with no layout, then apply the bridge Layout's
+        // margins exactly as a `renderable::layout::Layout` consumer would.
+        let plain = DarkmatterPage::new(&term)
+            .render(&md)
+            .expect("default render succeeds");
+        let bridge = bridge_layout(PageMargin::all(5), PagePadding::all(0), None);
+        let via_bridge = bridge.apply_layout(&plain, 80);
+
+        // Render the same markdown through the DarkmatterPage builder.
+        let via_page = DarkmatterPage::new(&term)
+            .with_margin(5)
+            .render(&md)
+            .expect("margin render succeeds");
+
+        // Compare the visible left-margin indent on every content row.
+        let indent_of = |s: &str| -> Vec<usize> {
+            let stripped = biscuit_terminal::prelude::strip_escape_codes(s);
+            stripped
+                .lines()
+                .filter(|l| !l.trim().is_empty())
+                .map(|l| l.chars().take_while(|c| *c == ' ').count())
+                .collect()
+        };
+
+        let page_indents = indent_of(&via_page);
+        let bridge_indents = indent_of(&via_bridge);
+        assert!(!page_indents.is_empty(), "expected rendered content rows");
+        assert_eq!(
+            page_indents, bridge_indents,
+            "DarkmatterPage margin indent must match the bridge Layout's"
+        );
+        for indent in &page_indents {
+            assert_eq!(*indent, 5, "every content row carries the 5-cell margin");
+        }
+    }
 }

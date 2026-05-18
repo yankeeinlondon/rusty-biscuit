@@ -47,8 +47,10 @@
 //! [`fold_markdown_to_document`] is the public entry point: it walks a
 //! `pulldown-cmark` event stream and builds a [`renderable::tree::Document`].
 
+pub mod code_renderer;
 pub mod fold;
 pub mod inventory;
 pub mod source;
 
+pub use code_renderer::TerminalCodeRenderer;
 pub use fold::fold_markdown_to_document;

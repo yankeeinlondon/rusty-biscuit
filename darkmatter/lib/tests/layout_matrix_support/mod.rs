@@ -5,11 +5,13 @@
 //! `layout_matrix` snapshot test so they render through identical code.
 #![allow(dead_code)]
 
+use std::rc::Rc;
+
 use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::prelude::strip_escape_codes;
 use biscuit_terminal::render_tree::{TerminalRenderOptions, render_terminal_node};
 use biscuit_terminal::terminal::Terminal;
-use darkmatter::markdown::YamlBlock;
+use darkmatter::markdown::{TerminalCodeRenderer, YamlBlock};
 use renderable::layout::{Alignment, Layout, Length, Margin, TargetValue, WordWrap};
 use renderable::tree::{RenderNode, RenderStrictness};
 
@@ -190,7 +192,8 @@ pub struct ComponentCase {
 /// Folds a `RenderNode` into terminal output at the given width.
 fn render_tree_string(node: &RenderNode, width: u32) -> String {
     let term = Terminal::new_optimistic(width);
-    let opts = TerminalRenderOptions::new(&term, RenderStrictness::Warn);
+    let opts = TerminalRenderOptions::new(&term, RenderStrictness::Warn)
+        .with_code_renderer(Rc::new(TerminalCodeRenderer::new()));
     match render_terminal_node(node, &opts) {
         Ok(rendered) => rendered.output,
         Err(error) => format!("<render error: {error}>"),

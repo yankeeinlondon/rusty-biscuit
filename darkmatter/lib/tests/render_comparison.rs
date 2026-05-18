@@ -13,7 +13,7 @@
 
 mod layout_matrix_support;
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use biscuit_terminal::prelude::strip_escape_codes;
 use layout_matrix_support::{component_cases, scenarios};
@@ -33,6 +33,29 @@ enum Facet {
     Width,
     /// Identical SGR sequences at identical visible offsets.
     Styling,
+}
+
+/// Which renderer is preferred for a recorded drift entry, and whether the
+/// difference is functionally important or cosmetic.
+///
+/// All current darkmatter entries are `BespokeBehind`; the other variants
+/// exist so the ledger can carry hand-assigned classifications after
+/// regeneration.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[allow(dead_code)]
+enum Verdict {
+    /// The render-tree output is wrong or incomplete versus the bespoke
+    /// renderer — the render-tree has not caught up. The headline metric.
+    TreeBehind,
+    /// The render-tree output is more correct; the bespoke renderer is the
+    /// laggard. Acceptable drift; may never reach zero.
+    BespokeBehind,
+    /// Cosmetic-only drift where the bespoke renderer is still preferred.
+    CosmeticTreeBehind,
+    /// Cosmetic-only drift where the render-tree output is preferred.
+    CosmeticBespokeBehind,
+    /// Cosmetic-only drift with no preferred renderer yet recorded.
+    CosmeticNeutral,
 }
 
 /// Every facet, in the stable ordering used for ledger output.
@@ -55,70 +78,71 @@ struct DriftKey {
 
 /// The committed drift ledger.
 ///
-/// Each tuple is `(component, scenario, facet)`. Regenerate with
-/// `RECORD_DRIFT=1`. An empty ledger means the bespoke and tree paths agree
-/// across every facet of every matrix cell.
-const KNOWN_DRIFT: &[(&str, &str, Facet)] = &[
-    ("YamlBlock", "align_center", Facet::Exact),
-    ("YamlBlock", "align_center", Facet::Text),
-    ("YamlBlock", "align_center", Facet::Indent),
-    ("YamlBlock", "align_center", Facet::Width),
-    ("YamlBlock", "align_center", Facet::Styling),
-    ("YamlBlock", "align_right", Facet::Exact),
-    ("YamlBlock", "align_right", Facet::Text),
-    ("YamlBlock", "align_right", Facet::Indent),
-    ("YamlBlock", "align_right", Facet::Styling),
-    ("YamlBlock", "baseline", Facet::Exact),
-    ("YamlBlock", "baseline", Facet::Text),
-    ("YamlBlock", "baseline", Facet::Indent),
-    ("YamlBlock", "baseline", Facet::BlankLines),
-    ("YamlBlock", "baseline", Facet::Width),
-    ("YamlBlock", "baseline", Facet::Styling),
-    ("YamlBlock", "bottom_margin_2", Facet::Exact),
-    ("YamlBlock", "bottom_margin_2", Facet::Text),
-    ("YamlBlock", "bottom_margin_2", Facet::Indent),
-    ("YamlBlock", "bottom_margin_2", Facet::BlankLines),
-    ("YamlBlock", "bottom_margin_2", Facet::Width),
-    ("YamlBlock", "bottom_margin_2", Facet::Styling),
-    ("YamlBlock", "left_margin_4", Facet::Exact),
-    ("YamlBlock", "left_margin_4", Facet::Text),
-    ("YamlBlock", "left_margin_4", Facet::Indent),
-    ("YamlBlock", "left_margin_4", Facet::Width),
-    ("YamlBlock", "left_margin_4", Facet::Styling),
-    ("YamlBlock", "left_margin_pct_10", Facet::Exact),
-    ("YamlBlock", "left_margin_pct_10", Facet::Text),
-    ("YamlBlock", "left_margin_pct_10", Facet::Indent),
-    ("YamlBlock", "left_margin_pct_10", Facet::Width),
-    ("YamlBlock", "left_margin_pct_10", Facet::Styling),
-    ("YamlBlock", "right_margin_4", Facet::Exact),
-    ("YamlBlock", "right_margin_4", Facet::Text),
-    ("YamlBlock", "right_margin_4", Facet::Indent),
-    ("YamlBlock", "right_margin_4", Facet::BlankLines),
-    ("YamlBlock", "right_margin_4", Facet::Width),
-    ("YamlBlock", "right_margin_4", Facet::Styling),
-    ("YamlBlock", "top_margin_2", Facet::Exact),
-    ("YamlBlock", "top_margin_2", Facet::Text),
-    ("YamlBlock", "top_margin_2", Facet::Indent),
-    ("YamlBlock", "top_margin_2", Facet::BlankLines),
-    ("YamlBlock", "top_margin_2", Facet::Width),
-    ("YamlBlock", "top_margin_2", Facet::Styling),
-    ("YamlBlock", "width_120", Facet::Exact),
-    ("YamlBlock", "width_120", Facet::Text),
-    ("YamlBlock", "width_120", Facet::Indent),
-    ("YamlBlock", "width_120", Facet::BlankLines),
-    ("YamlBlock", "width_120", Facet::Width),
-    ("YamlBlock", "width_120", Facet::Styling),
-    ("YamlBlock", "width_40", Facet::Exact),
-    ("YamlBlock", "width_40", Facet::Text),
-    ("YamlBlock", "width_40", Facet::Indent),
-    ("YamlBlock", "width_40", Facet::BlankLines),
-    ("YamlBlock", "width_40", Facet::Width),
-    ("YamlBlock", "width_40", Facet::Styling),
-    ("YamlBlock", "word_wrap_prose", Facet::Exact),
-    ("YamlBlock", "word_wrap_prose", Facet::Text),
-    ("YamlBlock", "word_wrap_prose", Facet::Indent),
-    ("YamlBlock", "word_wrap_prose", Facet::Width),
-    ("YamlBlock", "word_wrap_prose", Facet::Styling),
+/// Each tuple is `(component, scenario, facet, verdict)`. The first three
+/// fields identify the divergence; the `Verdict` records which renderer is
+/// preferred (see [`Verdict`]). Regenerate with `RECORD_DRIFT=1`: regeneration
+/// preserves the verdict of every still-present entry, and any genuinely new
+/// entry is emitted as `Verdict::TreeBehind` and must be reviewed and
+/// reclassified by hand. An empty ledger means the bespoke and tree paths
+/// agree across every facet of every matrix cell.
+///
+/// The render-tree path now syntax-highlights `YamlBlock` through darkmatter's
+/// `TerminalCodeRenderer` `CodeRenderer` hook, so the `baseline`, `width_40`,
+/// and `width_120` scenarios — which exercise no node layout — agree across
+/// every facet and carry no ledger entries.
+///
+/// Every remaining entry is `BespokeBehind`: the divergences are confined to
+/// the layout scenarios (margins, alignment, word-wrap), and in each one the
+/// render-tree output is *more* correct. The bespoke renderer applies layout
+/// by calling `Layout::apply_layout` on an already-built, full-width
+/// `{header}\n{body}` string, which (a) builds the header at the full terminal
+/// width and then prefixes the margin, overflowing the line; (b) ragged-centers
+/// individual code lines instead of shifting the block as a unit; and (c) loses
+/// the code block's intrinsic top/bottom padding rows and the vertical-margin
+/// blank lines. The render tree instead renders the code body within the
+/// margin-reduced width and applies block-level alignment and vertical margins
+/// around it. No entry is `TreeBehind`.
+#[rustfmt::skip]
+const KNOWN_DRIFT: &[(&str, &str, Facet, Verdict)] = &[
+    ("YamlBlock", "align_center", Facet::Exact, Verdict::BespokeBehind),
+    ("YamlBlock", "align_center", Facet::Text, Verdict::BespokeBehind),
+    ("YamlBlock", "align_center", Facet::Indent, Verdict::BespokeBehind),
+    ("YamlBlock", "align_center", Facet::BlankLines, Verdict::BespokeBehind),
+    ("YamlBlock", "align_center", Facet::Styling, Verdict::BespokeBehind),
+    ("YamlBlock", "align_right", Facet::Exact, Verdict::BespokeBehind),
+    ("YamlBlock", "align_right", Facet::Text, Verdict::BespokeBehind),
+    ("YamlBlock", "align_right", Facet::Indent, Verdict::BespokeBehind),
+    ("YamlBlock", "align_right", Facet::BlankLines, Verdict::BespokeBehind),
+    ("YamlBlock", "align_right", Facet::Styling, Verdict::BespokeBehind),
+    ("YamlBlock", "bottom_margin_2", Facet::Exact, Verdict::BespokeBehind),
+    ("YamlBlock", "bottom_margin_2", Facet::Text, Verdict::BespokeBehind),
+    ("YamlBlock", "bottom_margin_2", Facet::Indent, Verdict::BespokeBehind),
+    ("YamlBlock", "bottom_margin_2", Facet::BlankLines, Verdict::BespokeBehind),
+    ("YamlBlock", "left_margin_4", Facet::Exact, Verdict::BespokeBehind),
+    ("YamlBlock", "left_margin_4", Facet::Text, Verdict::BespokeBehind),
+    ("YamlBlock", "left_margin_4", Facet::Indent, Verdict::BespokeBehind),
+    ("YamlBlock", "left_margin_4", Facet::Width, Verdict::BespokeBehind),
+    ("YamlBlock", "left_margin_4", Facet::Styling, Verdict::BespokeBehind),
+    ("YamlBlock", "left_margin_pct_10", Facet::Exact, Verdict::BespokeBehind),
+    ("YamlBlock", "left_margin_pct_10", Facet::Text, Verdict::BespokeBehind),
+    ("YamlBlock", "left_margin_pct_10", Facet::Indent, Verdict::BespokeBehind),
+    ("YamlBlock", "left_margin_pct_10", Facet::Width, Verdict::BespokeBehind),
+    ("YamlBlock", "left_margin_pct_10", Facet::Styling, Verdict::BespokeBehind),
+    ("YamlBlock", "right_margin_4", Facet::Exact, Verdict::BespokeBehind),
+    ("YamlBlock", "right_margin_4", Facet::Text, Verdict::BespokeBehind),
+    ("YamlBlock", "right_margin_4", Facet::Indent, Verdict::BespokeBehind),
+    ("YamlBlock", "right_margin_4", Facet::Width, Verdict::BespokeBehind),
+    ("YamlBlock", "right_margin_4", Facet::Styling, Verdict::BespokeBehind),
+    ("YamlBlock", "top_margin_2", Facet::Exact, Verdict::BespokeBehind),
+    ("YamlBlock", "top_margin_2", Facet::Text, Verdict::BespokeBehind),
+    ("YamlBlock", "top_margin_2", Facet::Indent, Verdict::BespokeBehind),
+    ("YamlBlock", "top_margin_2", Facet::BlankLines, Verdict::BespokeBehind),
+    ("YamlBlock", "top_margin_2", Facet::Styling, Verdict::BespokeBehind),
+    ("YamlBlock", "word_wrap_prose", Facet::Exact, Verdict::BespokeBehind),
+    ("YamlBlock", "word_wrap_prose", Facet::Text, Verdict::BespokeBehind),
+    ("YamlBlock", "word_wrap_prose", Facet::Indent, Verdict::BespokeBehind),
+    ("YamlBlock", "word_wrap_prose", Facet::BlankLines, Verdict::BespokeBehind),
+    ("YamlBlock", "word_wrap_prose", Facet::Styling, Verdict::BespokeBehind),
 ];
 
 /// Returns `true` when `a` and `b` are byte-for-byte identical.
@@ -225,11 +249,12 @@ fn record_mode() -> bool {
     }
 }
 
-/// Formats a `DriftKey` as a pasteable `KNOWN_DRIFT` tuple literal.
-fn ledger_line(key: &DriftKey) -> String {
+/// Formats a `DriftKey` plus its `Verdict` as a pasteable `KNOWN_DRIFT`
+/// tuple literal.
+fn ledger_line(key: &DriftKey, verdict: Verdict) -> String {
     format!(
-        "    ({:?}, {:?}, Facet::{:?}),",
-        key.component, key.scenario, key.facet
+        "    ({:?}, {:?}, Facet::{:?}, Verdict::{:?}),",
+        key.component, key.scenario, key.facet, verdict
     )
 }
 
@@ -247,7 +272,7 @@ fn truncate(s: &str, max: usize) -> String {
 fn render_matches_bespoke() {
     let known: BTreeSet<DriftKey> = KNOWN_DRIFT
         .iter()
-        .map(|(c, s, f)| DriftKey {
+        .map(|(c, s, f, _)| DriftKey {
             component: c,
             scenario: s,
             facet: *f,
@@ -258,6 +283,23 @@ fn render_matches_bespoke() {
         KNOWN_DRIFT.len(),
         "duplicate KNOWN_DRIFT entry"
     );
+
+    // Verdict is metadata: it never affects regression/fixed detection, it is
+    // only carried through to `RECORD_DRIFT` output so hand-assigned
+    // classifications survive regeneration.
+    let verdicts: BTreeMap<DriftKey, Verdict> = KNOWN_DRIFT
+        .iter()
+        .map(|(c, s, f, v)| {
+            (
+                DriftKey {
+                    component: c,
+                    scenario: s,
+                    facet: *f,
+                },
+                *v,
+            )
+        })
+        .collect();
 
     let mut live = BTreeSet::<DriftKey>::new();
     for case in component_cases() {
@@ -286,7 +328,8 @@ fn render_matches_bespoke() {
     if record_mode() {
         println!("=== BEGIN KNOWN_DRIFT (paste between `&[` and `]`) ===");
         for key in &live {
-            println!("{}", ledger_line(key));
+            let verdict = verdicts.get(key).copied().unwrap_or(Verdict::TreeBehind);
+            println!("{}", ledger_line(key, verdict));
         }
         println!("=== END KNOWN_DRIFT ({} entries) ===", live.len());
         return;
@@ -328,7 +371,8 @@ fn render_matches_bespoke() {
     if !fixed.is_empty() {
         msg.push_str("\nFIXED — remove from KNOWN_DRIFT:\n");
         for key in &fixed {
-            msg.push_str(&format!("{}\n", ledger_line(key)));
+            let verdict = verdicts.get(*key).copied().unwrap_or(Verdict::TreeBehind);
+            msg.push_str(&format!("{}\n", ledger_line(key, verdict)));
         }
     }
 
