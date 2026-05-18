@@ -342,9 +342,12 @@ levels:
 | **2** | Spawn binary in real terminal (`wezterm cli` / `kitty @` / `tmux`); capture rendered pane text via the terminal's own CLI | Glyphs, widths, SGR styling, scroll, cursor position render correctly through a real terminal. Input is still byte-injected, so the terminal's input encoder isn't exercised. |
 | **3** | Real OS keyboard injection (`cliclick` on macOS, `xdotool` on Linux) into the spawned terminal window | The terminal's *input encoder* fires. The only level that can verify "what bytes does the terminal emit when key X is pressed?" |
 
-The harness implementations live in `cli/tests/common/real_terminal/` and
-include `WezTermHarness`, `KittyHarness`, `TmuxHarness`, and a `cliclick`
-helper. Tests in `cli/tests/real_terminal_render.rs` use them.
+The harness implementations live in the shared
+[`biscuit-test-harness`](../../biscuit-test-harness/README.md) crate and
+include `WezTermHarness`, `KittyHarness`, `TmuxHarness`, `AppleTerminalHarness`,
+and a `cliclick` helper. Tests in `cli/tests/real_terminal_render.rs` use them.
+Its README documents each harness variant, when to use which, and the
+environment each requires.
 
 Skip semantics: each harness's `available()` probe checks for the required
 binary on `$PATH` plus any required env (`WEZTERM_UNIX_SOCKET`,

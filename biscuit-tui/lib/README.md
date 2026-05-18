@@ -182,7 +182,10 @@ them with `cargo test -p tui-chrome --lib`.
 For end-to-end and real-terminal verification (Level 1 / Level 2 /
 Level 3 testing rigor — including the `wezterm cli` / `kitty @` / `tmux`
 harnesses and `cliclick` keyboard injection on macOS), see the
-[`tui-chrome-cli` README's "Test Rigor" section](../cli/README.md#test-rigor--level-1--level-2--level-3).
+[`tui-chrome-cli` README's "Test Rigor" section](../cli/README.md#test-rigor--level-1--level-2--level-3)
+and the shared harness crate's
+[`biscuit-test-harness/README.md`](../../biscuit-test-harness/README.md),
+which documents the harness variants and the environment each requires.
 
 The lib's render correctness for hotkey badges is verified at Level 2 by
 piping kitty keyboard-protocol bytes into a real WezTerm pane via
