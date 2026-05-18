@@ -640,6 +640,9 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                     perf.emit_stderr(None);
                     std::process::exit(1);
                 };
+                // git2's workdir() yields a trailing separator; collecting
+                // components drops it so downstream consumers get a clean path.
+                let workdir: std::path::PathBuf = workdir.components().collect();
                 if cli.json {
                     let json = serde_json::json!({
                         "root": workdir.display().to_string(),

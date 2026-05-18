@@ -8,9 +8,8 @@
 //! access [Codeberg](https://codeberg.org), a popular public Gitea instance.
 
 use async_trait::async_trait;
-use schematic_define::{AuthStrategy, UpdateStrategy};
 use schematic_schema::gitea::*;
-use schematic_schema::shared::SchematicError;
+use schematic_schema::shared::{AuthStrategy, SchematicError, UpdateStrategy};
 
 use super::{
     provider::RemoteRepoProvider,
