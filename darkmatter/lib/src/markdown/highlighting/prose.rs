@@ -235,24 +235,6 @@ mod tests {
     }
 
     #[test]
-    fn test_initialization_performance() {
-        use std::time::Instant;
-
-        let theme = load_test_theme();
-
-        let start = Instant::now();
-        let _highlighter = ProseHighlighter::new(&theme);
-        let duration = start.elapsed();
-
-        // Initialization should be fast (< 1ms)
-        assert!(
-            duration.as_millis() < 1,
-            "Initialization took {}ms",
-            duration.as_millis()
-        );
-    }
-
-    #[test]
     fn test_style_for_tag_link() {
         // Test that link styling is returned correctly from the highlighter.
         // Note: Whether the theme provides a distinct link color depends on the theme.
