@@ -35,6 +35,30 @@ terminal behavior.
 `Prose` should become a cross-target inline component without making the
 render tree the source of truth for the Prose grammar.
 
+As part of this work the **atomic-token grammar (`{{token}}`) is removed**.
+`Prose` will accept only bracketed tags and the Markdown subset. This is a
+deliberate breaking grammar change — see [Grammar Change](#grammar-change) and
+[Migration](#migration-atomic-token-removal).
+
+## Grammar Change
+
+The atomic-token grammar is unscoped: `{{bold}}` turns a style on with no
+matching close, and atomic tokens can outlive an enclosing bracketed tag
+(`<b>x {{red}}y</b> z` leaves `z` red but not bold). That produces overlapping,
+non-nestable style ranges, which cannot be represented as a tree and cannot be
+emitted as open/close pairs for Browser or Markdown without a reconstruction
+algorithm.
+
+Bracketed tags (`<bold>…</bold>`) and the Markdown subset are well-nested by
+construction. Removing atomic tokens lets the parsed representation be a pure
+tree and removes the only construct that does not map cleanly to every target.
+
+Call-site analysis (2026-05-17): atomic tokens remain in live use in ~218
+matches across 12 non-test files, concentrated in Claudine hook/action UI
+code. Bracketed tags are already the dominant authoring style across the
+monorepo and the form emitted by the render-tree terminal projection. Every
+atomic use has a bracketed equivalent (`{{bold}}x{{reset}}` → `<bold>x</bold>`).
+
 ## Non-Goals
 
 - Replacing the render tree or changing its `NodeKind` vocabulary.
@@ -42,18 +66,22 @@ render tree the source of truth for the Prose grammar.
 - Making every Prose feature lossless in plain Markdown.
 - Implementing a production `TreeRenderable for Prose` in this feature.
 - Reworking higher-level components such as `Section`, `List`, or `Table`.
-- Changing the public Prose input grammar.
+- Changing the bracketed-tag or Markdown-subset input grammar (only the atomic
+  grammar is removed).
 - Removing terminal capability-aware behavior.
 
 ## Current Behavior
 
-`Prose` accepts three input forms:
+`Prose` currently accepts three input forms. **This feature removes the first
+one** (atomic tokens); the table below describes today's behavior:
 
 | Input form | Examples | Notes |
 |------------|----------|-------|
-| Atomic tokens | `{{bold}}`, `{{reset}}`, `{{bg-red}}` | Some tokens set styles until reset. |
+| Atomic tokens *(being removed)* | `{{bold}}`, `{{reset}}`, `{{bg-red}}` | Unscoped — set styles until an explicit reset. |
 | Block tags | `<bold>text</bold>`, `<a href="url">text</a>`, `<rgb #ff0000>text</rgb>` | Nestable, auto-reset on close. |
-| Markdown subset | `[desc](url)`, `**bold**`, `_italic_`, fenced code blocks | Pre-processed into block tags before token parsing. |
+| Markdown subset | `[desc](url)`, `**bold**`, `_italic_`, fenced code blocks | Pre-processed into block tags before parsing. |
+
+After this feature, only **block tags** and the **Markdown subset** remain.
 
 The terminal renderer also handles target-specific behavior:
 
@@ -69,10 +97,13 @@ The terminal renderer also handles target-specific behavior:
 Introduce an internal parsed Prose representation and render all Prose targets
 from it.
 
+Because the atomic grammar is removed, every styled region is well-nested and
+the representation is a **pure tree** — no flat style-operation or reset
+variants are needed.
+
 ```rust
 enum ProseNode {
     Text(String),
-    Sequence(Vec<ProseNode>),
     Span {
         style: ProseStyle,
         children: Vec<ProseNode>,
@@ -85,7 +116,6 @@ enum ProseNode {
         lang: Option<String>,
         value: String,
     },
-    Literal(String),
 }
 
 struct ProseDocument {
@@ -96,30 +126,39 @@ struct ProseDocument {
 The concrete names are not settled. The important requirement is that parsing
 produces a target-neutral semantic model before any target emits output.
 
+There is deliberately **no `Literal` variant**: unknown tags route to `Text`,
+so every target escapes them by its own rules (a target-neutral IR cannot hold
+target-specific escaped strings). `Text` holds **fully decoded** content —
+backslash escapes resolved, no input syntax — and each emitter re-escapes for
+its target on output (Terminal: none; Browser: HTML-escape; Markdown: escape
+Markdown sigils).
+
 ### Style Model
 
 `ProseStyle` should represent Prose intent, not emitted escape strings:
 
-- text weight: bold, dim, normal reset
+- text weight: bold, dim
 - text style: italic, underline variants, strikethrough, blink, inverse, hidden
 - foreground color: basic, bright, Tailwind, web color, RGB
 - background color: basic, bright, Tailwind, web color, RGB
-- reset semantics needed by atomic tokens
 
-The parser must preserve enough structure for the terminal renderer to keep
-its existing layer behavior. If atomic reset semantics cannot be represented
-cleanly as nested spans, they should remain explicit operations in the IR
-rather than being approximated.
+Each `Span` carries the styles its bracketed tag applies; closing the tag ends
+the span. No standalone reset operations are needed — with the atomic grammar
+removed, resets are implicit at span boundaries. The terminal emitter keeps its
+existing layer-restoration behavior for *nested* spans.
 
 ### Parser Boundary
 
-The existing Markdown pre-processor and token parser should be refactored, not
-replaced wholesale.
+The existing Markdown pre-processor and tag parser should be refactored, not
+replaced wholesale. The atomic-token parsing path is deleted (see
+[Migration](#migration-atomic-token-removal)).
 
 The new parser should:
 
-- keep the existing input grammar and escaping rules,
-- preserve unknown tags/tokens as literal text,
+- keep the bracketed-tag and Markdown-subset grammar and escaping rules,
+- drop atomic-token recognition — `{{...}}` becomes ordinary literal text,
+- route unknown tags to `Text` (escaped per target, never emitted verbatim),
+- store `Text` as fully decoded content (backslash escapes resolved),
 - keep fenced code-block contents opaque,
 - preserve link href values without markdown emphasis interpretation,
 - build `ProseDocument` once per render call,
@@ -227,6 +266,35 @@ be explicitly lossy or metadata-bearing:
 That adapter is optional and should be gated by a concrete use case and parity
 tests.
 
+## Migration: Atomic Token Removal
+
+Removing the atomic grammar is a breaking change to `Prose` input. Once removed,
+a stray `{{bold}}` renders as the literal text `{{bold}}` — visible and easy to
+spot, but wrong. Migration must therefore be sequenced as a **prerequisite
+phase**, completed before the IR work lands:
+
+1. **Migrate call sites first.** Convert every atomic-token use to the
+   equivalent bracketed tag (`{{bold}}x{{reset}}` → `<bold>x</bold>`). Scope:
+   ~218 matches across 12 non-test files, concentrated in Claudine hook/action
+   UI code (`claudine/cli/src/commands/hooks/` and `actions.rs`).
+2. **Audit for incremental construction.** Most uses are inline open/reset
+   pairs and convert mechanically. Some build a styled region across multiple
+   `push_str` / `format!` calls (e.g. `hooks/list.rs`); these need a real
+   refactor to collect the region into one string before wrapping it in a tag.
+   This is not a find-and-replace.
+3. **Remove the atomic grammar.** Delete the atomic-token parsing path and the
+   `atomic_token_*` tables. The reset tokens (`{{reset}}`, `{{reset-fg}}`,
+   `{{not-italic}}`, `{{normal-font-weight}}`, …) are removed with it — closing
+   a bracketed tag resets implicitly.
+4. **Update `bt prose` CLI** help text and examples, and `prose.md` docs.
+
+Keeping atomic-token *recognition* while internally rewriting it to bracketed
+form is **not** an option: that rewrite is exactly the overlapping-range
+reconstruction problem the removal exists to avoid. The cut must be genuine.
+
+This is an internal monorepo with no external `Prose` consumers, so a clean cut
+(no deprecation-warning release) is acceptable.
+
 ## Requirements
 
 - **FR-1** — `Prose` MUST implement `BrowserRenderable`.
@@ -237,8 +305,9 @@ tests.
 - **FR-5** — Markdown rendering MUST escape Markdown-significant literal text
   where needed to avoid changing content meaning.
 - **FR-6** — MarkdownPlus MAY use inline HTML but MUST NOT require JavaScript.
-- **FR-7** — Unknown Prose tags and tokens MUST remain visible as literal text
-  across all targets.
+- **FR-7** — Unknown Prose tags MUST remain visible across all targets as
+  `Text`, escaped per target (never emitted verbatim). Former atomic-token
+  syntax (`{{...}}`) is likewise treated as ordinary text.
 - **FR-8** — The parser MUST keep target-specific capability decisions out of
   the parsed representation.
 - **FR-9** — Layout remains applied by the terminal `TerminalRenderable` path.
@@ -252,8 +321,8 @@ Add tests at three levels.
 ### Parser tests
 
 - Markdown subset converts into the expected IR.
-- Backslash escapes remain literal.
-- Unknown tags/tokens are literal.
+- Backslash escapes resolve in the IR (e.g. `\_` parses to `Text("_")`).
+- Unknown tags, and former atomic syntax (`{{...}}`), parse to `Text`.
 - Nested spans preserve order and nesting.
 - Links protect href contents from emphasis parsing.
 - Fenced code blocks are opaque.
@@ -290,7 +359,9 @@ explicit expected strings or structural fragment properties.
   - code block,
   - unknown tag,
   - escaped Markdown sigils.
-- No public Prose grammar changes are required by callers.
+- The atomic-token grammar is removed; all monorepo call sites are migrated to
+  bracketed tags first (see [Migration](#migration-atomic-token-removal)).
+- No bracketed-tag or Markdown-subset grammar changes are required by callers.
 - No render-tree `NodeKind` changes are required.
 
 ## Open Questions
