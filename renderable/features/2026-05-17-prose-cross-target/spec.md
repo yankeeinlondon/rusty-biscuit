@@ -142,6 +142,22 @@ Markdown sigils).
 - foreground color: basic, bright, Tailwind, web color, RGB
 - background color: basic, bright, Tailwind, web color, RGB
 
+`ProseStyle` is built from **shared leaf primitives** in `renderable::style`,
+not a parallel style system:
+
+- foreground / background color use the `renderable::color::Color` enum
+  directly — `Prose` does not keep its own color type.
+- bold, italic, dim, underline (variants), strikethrough, and blink are the
+  shared `renderable::style::TextEmphasis` leaf, reused by the render-tree
+  `Style` primitive ([Spec B](../2026-04-17-layout-and-style/style-spec.md)). A
+  single terminal-SGR emitter and a single browser-CSS emitter for
+  `TextEmphasis` are written once and shared by both subsystems.
+- `inverse` and `hidden` are `Prose`-only fields on `ProseStyle`.
+
+`ProseStyle` and `Style` remain **separate container types**. `Prose` depends
+only on the two small shared leaves (`Color`, `TextEmphasis`) — never on the
+`Style` primitive itself — so this feature is not blocked on Spec B.
+
 Each `Span` carries the styles its bracketed tag applies; closing the tag ends
 the span. No standalone reset operations are needed — with the atomic grammar
 removed, resets are implicit at span boundaries. The terminal emitter keeps its
@@ -378,8 +394,8 @@ explicit expected strings or structural fragment properties.
 ## Future Work
 
 - Optional `TreeRenderable for Prose` projection with documented lossiness.
-- Shared color/style conversion helpers between Prose, render tree, and
-  `renderable::color`.
+- Broader `ProseStyle` ↔ render-tree `Style` conversion helpers, beyond the
+  shared `Color` / `TextEmphasis` leaves already adopted in the Style Model.
 - Browser accessibility review for hidden, blink, inverse, and low-contrast
   color combinations.
 - Broader adoption by higher-level components once `Prose` is cross-target.

@@ -9,6 +9,9 @@
 > **Relationship:** Sibling of [Spec A — The `Layout` Primitive](./spec.md),
 > which is implemented and shipped. Spec A built `Layout`; this spec builds the
 > appearance sibling, `Style`. Spec A explicitly deferred everything here.
+> `Prose`'s own cross-target rendering is a **separate, decoupled** feature —
+> see [`2026-05-17-prose-cross-target/spec.md`](../2026-05-17-prose-cross-target/spec.md);
+> `Style` does not absorb `Prose` (see D6).
 > **Initial scope (this pass):** styling for the **`biscuit-terminal`
 > components**, proven on the **Terminal** target first. Browser and Markdown
 > lowering are designed here but implemented later.
@@ -142,7 +145,7 @@ The properties `Style` should express, drawn from the bespoke material above:
 |---|---|---|
 | foreground color | `Option<TargetValue<Color>>` | `BlockQuote.text_color`, section heading color |
 | background color | `Option<TargetValue<Color>>` | `BlockQuote.bg_color`, `Table` row tint, `PageBackground` |
-| text emphasis | `Emphasis` (bold, italic, dim, underline, strikethrough) | `Section` heading bold/italic |
+| text emphasis | shared `TextEmphasis` leaf (bold, italic, dim, underline, strikethrough, blink) | `Section` heading bold/italic |
 | border | `Option<Border>` (color, and possibly weight/style) | `BlockQuote.left_block_color` |
 | fill / background band | `Option<Fill>` — paint a width band behind the block | `PageBackground` intensity, `RowFill` coloring |
 
@@ -175,21 +178,29 @@ pub struct Style {
     pub color: Option<TargetValue<Color>>,
     /// Background color of the component's box.
     pub background: Option<TargetValue<Color>>,
-    /// Text emphasis flags.
-    pub emphasis: Emphasis,
+    /// Text emphasis — the shared `renderable::style::TextEmphasis` leaf
+    /// (also reused by `Prose`'s `ProseStyle`). For *inline* content prefer the
+    /// `Strong` / `Emphasis` / `Delete` node kinds; the `bold` / `italic` /
+    /// `strikethrough` flags here exist for block-component slot styling and
+    /// because the leaf is shared.
+    pub emphasis: TextEmphasis,
     /// Border appearance, if any.
     pub border: Option<Border>,
     /// Fill — how/whether the component paints its band of available width.
     pub fill: Option<Fill>,
 }
 
-/// Text emphasis. All-false is the default (no emphasis).
-pub struct Emphasis {
+/// Shared appearance leaf, defined in `renderable::style` and reused by both
+/// `Style` and the `Prose` IR's `ProseStyle`. All-default is no emphasis.
+pub struct TextEmphasis {
     pub bold: bool,
     pub italic: bool,
     pub dim: bool,
-    pub underline: bool,
+    /// `None` / `Single` / `Double`. The terminal emitter degrades `Double`
+    /// per terminal capability.
+    pub underline: Underline,
     pub strikethrough: bool,
+    pub blink: bool,
 }
 ```
 
@@ -229,15 +240,22 @@ Trade-off: (a)/(b) are uniform and serialize cleanly but stringly-typed;
 - `Style` (and any slot styles) ride on `NodeAttrs` under a new
   `HintNamespace::STYLE` (`renderable.style`), with typed accessors
   `set_style` / `style`, exactly mirroring `set_layout` / `layout`.
-- **Inline vs block — a key difference from `Layout`.** Spec A D5 made `Layout`
-  **block-only** (layout on an inline node is a validation error). `Style`
-  **cannot** be block-only — coloring and emphasis on inline runs (`Span`,
-  `Emphasis`, `Strong`, `InlineCode`) is the core of text appearance. **(OPEN)**
-  how this reconciles with `Prose`, which *already* performs inline styling via
-  its own grammar (`**bold**`, block tags, atomic tokens). Options: `Style`
-  covers block-level appearance only and `Prose` keeps inline; or `Style`
-  becomes the substrate `Prose` lowers onto. This is the single biggest
-  unresolved interaction and must be settled early.
+- **Inline vs block — settled.** Spec A D5 made `Layout` **block-only**.
+  `Style` is **not** block-only: it carries *appearance* (`color`,
+  `background`, `border`, `fill`) and may attach to block nodes **and** inline
+  `Span` nodes — the latter matters for inline-HTML appearance carried into the
+  tree from Markdown. `Style` does **not** carry **semantic emphasis**: bold /
+  italic / strikethrough / links / inline code are the existing inline **node
+  kinds** (`Strong`, `Emphasis`, `Delete`, `Link`, `InlineCode`), which
+  round-trip to Markdown natively. Because semantic emphasis lives in node
+  kinds, `Style` never needs to emit Markdown — D7 holds with no exception.
+- **`Prose` is decoupled — settled.** `Prose`'s cross-target rendering is
+  handled by its own IR (`ProseNode` / `ProseStyle`), specified separately in
+  [`2026-05-17-prose-cross-target/spec.md`](../2026-05-17-prose-cross-target/spec.md).
+  `Style` does **not** absorb `Prose` and is **not** the substrate `Prose`
+  lowers onto. The two subsystems share only **leaf primitives** — the
+  `renderable::color::Color` enum and the `renderable::style::TextEmphasis`
+  decoration leaf (D4) — never the container types.
 - **Composition / inheritance — (OPEN).** `Layout` is non-inherited (Spec A
   D6). CSS `color` *does* inherit. A non-inherited `Style` is simpler and
   matches `Layout`; an inherited `color`/`emphasis` is more ergonomic (set the
@@ -318,9 +336,10 @@ rustdoc with a round-trip test, exactly as Spec A D8 requires for `Layout`.
 
 These must be resolved before this draft becomes an implementation plan.
 
-1. **Inline vs block (D6).** Does `Style` apply to inline nodes, and how does it
-   reconcile with `Prose`'s existing inline-styling grammar? The biggest
-   unresolved interaction.
+1. **Inline vs block (D6).** *Resolved.* `Style` applies to block nodes and
+   inline `Span` nodes for *appearance*; semantic emphasis stays in the
+   inline node kinds. `Prose` is decoupled — it has its own IR and shares only
+   leaf primitives with `Style`. See D6.
 2. **The slot system (D5).** Slot map, per-slot namespaces, or typed
    per-component style structs — or a hybrid?
 3. **Inheritance (D6).** Non-inherited (uniform with `Layout`) or a `color`/
@@ -329,9 +348,10 @@ These must be resolved before this draft becomes an implementation plan.
    wrapper, or component-handled?
 5. **Semantic tier (D1/D2).** Does `Style` get named intents ("callout",
    "hero"), or stay plain data like `Layout`?
-6. **Module home.** New `renderable::style` module, or fold into the existing
-   `renderable::stylesheet`? Does `Style` *contain* a `CssStyle` for the browser
-   path, or lower to one?
+6. **Module home.** *Resolved:* a new `renderable::style` module, the home for
+   both the shared leaves (`TextEmphasis`, …) and the `Style` primitive — a
+   neighbor of `renderable::color`. Still open: does `Style` *contain* a
+   `CssStyle` for the browser path, or lower to one?
 7. **Border / fill modeling (D2/D4).** One concept or two; what does `Border`
    carry beyond color (weight, line style)?
 8. **`Style` ↔ `CodeRenderer`.** Confirmed separate — but a code block's
