@@ -113,6 +113,30 @@ let style = CssStyle::new()
 └────────┘ └────────┘ └────────┘
 ```
 
+## Relationship to other Packages
+
+The **renderable** library can and should be used by any renderable components which need to render to markdown, the terminal, the browser, or to an AST form. The packages which already play a big role in this ecosystem are:
+
+- `biscuit-terminal` 
+    - provides all sorts of utilities for discovering features of a given terminal as well as how to render to a terminal (with good fallbacks)
+    - because it is so concentrated on terminal features, the `TerminalRenderable` trait resides in **biscuit-terminal** instead of **renderable**
+    - **biscuit-terminal** also provides these important components:
+        - `Prose`
+        - `Table`
+        - `BlockQuote`
+        - `TwoColumn`
+        - `UnorderedList` / `OrderedList`
+        - and several more
+- `darkmatter`
+    - The **darkmatter** library provides two important pipelines:
+        - a **composition** pipeline that uses Darkmatter's DSL to transform a graph of documents into valid Markdown content
+        - a **render** pipeline that is able to render markdown content into:
+            - Markdown (2 variants)
+            - HTML
+            - Terminal
+    - The render pipeline currently provides strong capability but is not _yet_ implementing all of the "renderable" traits it should.
+
+
 ## Migration from Pre-Renderable
 
 **15 May 2026**
