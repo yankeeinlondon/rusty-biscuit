@@ -1,8 +1,11 @@
 //! Real-terminal rendering tests.
 //!
-//! See `cli/tests/common/real_terminal/mod.rs` for the harness contract
-//! and Level-1 / Level-2 / Level-3 vocabulary. The tests in this file
-//! are deliberately written so that:
+//! The harness contract, the Level-1 / Level-2 / Level-3 vocabulary, the
+//! harness variants (and when to use each), and the environment each
+//! requires are documented in the shared harness crate's README:
+//! `biscuit-test-harness/README.md`. `cli/tests/common/real_terminal/mod.rs`
+//! is a thin re-export shim over that crate. The tests in this file are
+//! deliberately written so that:
 //!
 //! - they **skip cleanly** (printing `skipping: requires <tool>`) when
 //!   the host lacks the required terminal — no `#[ignore]` markers,
