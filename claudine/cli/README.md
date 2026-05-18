@@ -292,7 +292,7 @@ All user-facing output goes through `log.rs`:
 | `warn()` | stderr | Yellow "warning:" prefix |
 | `error()` | stderr | Red "Error:" prefix (with leading blank line) |
 
-Rich formatting uses biscuit-terminal components (Table, Prose with `{{bold}}` / `{{cyan}}` / `{{dim}}` markup, UnorderedList, OSC8 hyperlinks).
+Rich formatting uses biscuit-terminal components (Table, Prose with `<b>` / `<cyan>` / `<dim>` bracketed-tag markup, UnorderedList, OSC8 hyperlinks).
 
 ## Key Dependencies
 

@@ -1,9 +1,11 @@
 //! Integration tests for the `claudine hooks` command family.
 //!
 //! These tests guard the migration of hook-related output from atomic
-//! Prose tokens (`{{bold}}`, `{{reset}}`, …) to bracketed tags. They run
-//! the real binary with `NO_COLOR=1` so stdout is plain text and assert
-//! on the rendered content rather than ANSI escape sequences.
+//! Prose tokens (`{{bold}}`, `{{reset}}`, …) to bracketed tags. The
+//! plain-text suite runs the real binary with `NO_COLOR=1` and asserts on
+//! rendered content; the Level-1 ANSI suite runs it with `FORCE_COLOR=1`
+//! and asserts the migrated tags emit real SGR styling with no raw tag
+//! markup left behind.
 
 use std::fs;
 
@@ -145,5 +147,87 @@ fn hooks_views_emit_no_atomic_style_tokens() {
     ] {
         let output = run_hooks(&home, &["hooks", view]);
         assert_no_atomic_tokens(&output);
+    }
+}
+
+// ── Level-1 ANSI styling verification ────────────────────────────────
+//
+// The tests above run with `NO_COLOR=1` and assert on plain text. These
+// run the binary with `FORCE_COLOR=1` so the migrated bracketed tags
+// actually emit ANSI SGR sequences, verifying that the tag grammar both
+// (a) produces real styling and (b) leaves no raw tag markup in output.
+
+/// Run `claudine` with color forced on, returning stdout.
+fn run_hooks_colored(home: &std::path::Path, args: &[&str]) -> String {
+    let assert = cargo_bin_cmd!("claudine")
+        .env("HOME", home)
+        .env("FORCE_COLOR", "1")
+        .env_remove("NO_COLOR")
+        .args(args)
+        .assert()
+        .success();
+    String::from_utf8(assert.get_output().stdout.clone()).expect("stdout is utf-8")
+}
+
+/// Raw bracketed style tags that must never survive into rendered output.
+const RAW_STYLE_TAGS: &[&str] = &[
+    "<dim>", "</dim>", "<bold>", "</bold>", "<blue>", "</blue>", "<cyan>", "</cyan>",
+    "<red>", "</red>", "<green>", "</green>", "<yellow>", "</yellow>",
+];
+
+/// Assert rendered output emits ANSI styling and leaks no raw tag markup.
+fn assert_styled(output: &str) {
+    assert!(
+        output.contains('\x1b'),
+        "expected ANSI SGR escapes in colored output:\n{output:?}"
+    );
+    assert!(
+        output.contains("\x1b[0m"),
+        "expected at least one SGR reset in colored output:\n{output:?}"
+    );
+    for tag in RAW_STYLE_TAGS {
+        assert!(
+            !output.contains(tag),
+            "raw bracketed tag `{tag}` leaked into rendered output:\n{output:?}"
+        );
+    }
+    assert_no_atomic_tokens(output);
+}
+
+#[test]
+fn hooks_support_view_emits_ansi_styling() {
+    let workspace = TestWorkspace::named("claudine-hooks-it");
+    let home = workspace.path().join("home");
+    fs::create_dir_all(&home).unwrap();
+
+    let output = run_hooks_colored(&home, &["hooks", "--support"]);
+    assert_styled(&output);
+    assert!(output.contains('❌'), "support legend missing glyph:\n{output:?}");
+}
+
+#[test]
+fn hooks_capture_method_view_emits_ansi_styling() {
+    let workspace = TestWorkspace::named("claudine-hooks-it");
+    let home = workspace.path().join("home");
+    fs::create_dir_all(&home).unwrap();
+
+    let output = run_hooks_colored(&home, &["hooks", "--capture-method"]);
+    assert_styled(&output);
+}
+
+#[test]
+fn hooks_variables_view_styles_and_keeps_template_placeholders() {
+    let workspace = TestWorkspace::named("claudine-hooks-it");
+    let home = workspace.path().join("home");
+    fs::create_dir_all(&home).unwrap();
+
+    let output = run_hooks_colored(&home, &["hooks", "--variables"]);
+    assert_styled(&output);
+    // Literal template placeholders must survive styled rendering.
+    for placeholder in ["{{tool_name}}", "{{git.branch}}", "{{error}}"] {
+        assert!(
+            output.contains(placeholder),
+            "styled variables output dropped placeholder `{placeholder}`:\n{output:?}"
+        );
     }
 }
