@@ -7,7 +7,7 @@ use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::components::renderable::{RenderableTerminalContent, TerminalRenderable};
 use biscuit_terminal::components::status::StatusState;
 use biscuit_terminal::utils::color::{Color, Tailwind};
-use biscuit_terminal::utils::layout::{Margin, WordWrap};
+use biscuit_terminal::utils::layout::{Length, Margin, TargetValue, WordWrap};
 use claudine::stream::semantic::SemanticEvent;
 use claudine::stream::tool_display::{ToolCallDisplay, ToolDirection, ToolStatus};
 use serde_json::Value;
@@ -24,8 +24,8 @@ impl LiveSemanticSink {
             .with_text_color(Color::Tailwind(Tailwind::Gray500))
             .with_left_block_color(Color::Tailwind(Tailwind::Purple700))
             .with_border("\u{2503} ");
-        block.layout_mut().left_margin = Margin::Chars(0);
-        block.layout_mut().right_margin = Margin::Chars(0);
+        block.layout_mut().margin = Margin::x(Length::ch(0));
+        block.layout_mut().margin = Margin::x(Length::ch(0));
         let rendered = block.render(&self.terminal);
         for line in rendered.lines() {
             self.emit_section_line(section, line);
@@ -37,8 +37,8 @@ impl LiveSemanticSink {
                 BlockQuote::new(RenderableTerminalContent::from(note), None::<&str>)
                     .with_left_block_color(Color::Tailwind(Tailwind::Orange700))
                     .with_border("\u{2503} ");
-            note_block.layout_mut().left_margin = Margin::Chars(0);
-            note_block.layout_mut().right_margin = Margin::Chars(0);
+            note_block.layout_mut().margin = Margin::x(Length::ch(0));
+            note_block.layout_mut().margin = Margin::x(Length::ch(0));
             let rendered = note_block.render(&self.terminal);
             for line in rendered.lines() {
                 self.emit_section_line(section, line);
