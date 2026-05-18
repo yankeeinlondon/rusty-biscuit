@@ -1,0 +1,149 @@
+//! Integration tests for the `claudine hooks` command family.
+//!
+//! These tests guard the migration of hook-related output from atomic
+//! Prose tokens (`{{bold}}`, `{{reset}}`, …) to bracketed tags. They run
+//! the real binary with `NO_COLOR=1` so stdout is plain text and assert
+//! on the rendered content rather than ANSI escape sequences.
+
+use std::fs;
+
+use assert_cmd::cargo::cargo_bin_cmd;
+
+mod common;
+use common::{TestWorkspace, write};
+
+/// Atomic style tokens that must no longer appear in any hooks output.
+const ATOMIC_STYLE_TOKENS: &[&str] = &[
+    "{{bold}}",
+    "{{dim}}",
+    "{{italic}}",
+    "{{reset}}",
+    "{{red}}",
+    "{{green}}",
+    "{{yellow}}",
+    "{{blue}}",
+    "{{cyan}}",
+    "{{magenta}}",
+    "{{strikethrough}}",
+    "{{normal-font-weight}}",
+    "{{not-italic}}",
+];
+
+/// Run `claudine` with `NO_COLOR` set and an isolated `HOME`, returning
+/// stdout as a string. Asserts the command exited successfully.
+fn run_hooks(home: &std::path::Path, args: &[&str]) -> String {
+    let assert = cargo_bin_cmd!("claudine")
+        .env("HOME", home)
+        .env("NO_COLOR", "1")
+        .args(args)
+        .assert()
+        .success();
+    String::from_utf8(assert.get_output().stdout.clone()).expect("stdout is utf-8")
+}
+
+/// Assert that no atomic style token leaked into rendered output.
+fn assert_no_atomic_tokens(output: &str) {
+    for token in ATOMIC_STYLE_TOKENS {
+        assert!(
+            !output.contains(token),
+            "atomic style token `{token}` leaked into hooks output:\n{output}"
+        );
+    }
+}
+
+/// Regression test for finding F1: the support legend must interpolate
+/// the `NO_SUPPORT` constant via `format!` and render the `❌` glyph,
+/// never the literal placeholder text `{{NO_SUPPORT}}` (or `{NO_SUPPORT}`).
+#[test]
+fn hooks_support_legend_renders_no_support_glyph() {
+    let workspace = TestWorkspace::named("claudine-hooks-it");
+    let home = workspace.path().join("home");
+    fs::create_dir_all(&home).unwrap();
+
+    let output = run_hooks(&home, &["hooks", "--support"]);
+
+    assert!(
+        output.contains('❌'),
+        "support legend should render the ❌ glyph:\n{output}"
+    );
+    assert!(
+        !output.contains("{{NO_SUPPORT}}") && !output.contains("{NO_SUPPORT}"),
+        "support legend leaked the literal NO_SUPPORT placeholder:\n{output}"
+    );
+    assert_no_atomic_tokens(&output);
+}
+
+/// The template-variables view must preserve literal `{{...}}` placeholders
+/// (template syntax) as display text while still applying styling.
+#[test]
+fn hooks_variables_preserves_literal_template_placeholders() {
+    let workspace = TestWorkspace::named("claudine-hooks-it");
+    let home = workspace.path().join("home");
+    fs::create_dir_all(&home).unwrap();
+
+    let output = run_hooks(&home, &["hooks", "--variables"]);
+
+    for placeholder in ["{{tool_name}}", "{{git.branch}}", "{{error}}"] {
+        assert!(
+            output.contains(placeholder),
+            "variables output dropped literal placeholder `{placeholder}`:\n{output}"
+        );
+    }
+    assert_no_atomic_tokens(&output);
+}
+
+/// An invalid sound effect whose name contains Prose-significant
+/// characters (`<`, `>`) must be escaped so the characters render as
+/// literal text and are not swallowed as a bracketed tag.
+#[test]
+fn hooks_invalid_sound_effect_escapes_prose_characters() {
+    let workspace = TestWorkspace::named("claudine-hooks-it");
+    let home = workspace.path().join("home");
+    fs::create_dir_all(&home).unwrap();
+
+    write(
+        &home.join(".claudine/config.json"),
+        r#"{
+  "actions": {
+    "human_in_the_loop": [
+      { "type": "sound_effect", "effect": "bell<x>" }
+    ]
+  }
+}"#,
+    );
+
+    let output = run_hooks(&home, &["hooks"]);
+
+    assert!(
+        output.contains("Invalid sound effects:"),
+        "expected the invalid sound effects warning section:\n{output}"
+    );
+    assert!(
+        output.contains("bell<x>"),
+        "invalid effect name with `<x>` was not rendered literally:\n{output}"
+    );
+    assert!(
+        !output.contains(r"bell\<x\>"),
+        "escape backslashes leaked into rendered output:\n{output}"
+    );
+    assert_no_atomic_tokens(&output);
+}
+
+/// None of the static `hooks` views may emit atomic style tokens.
+#[test]
+fn hooks_views_emit_no_atomic_style_tokens() {
+    let workspace = TestWorkspace::named("claudine-hooks-it");
+    let home = workspace.path().join("home");
+    fs::create_dir_all(&home).unwrap();
+
+    for view in [
+        "--support",
+        "--mapping",
+        "--describe",
+        "--variables",
+        "--capture-method",
+    ] {
+        let output = run_hooks(&home, &["hooks", view]);
+        assert_no_atomic_tokens(&output);
+    }
+}
