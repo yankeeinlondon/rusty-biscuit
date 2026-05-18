@@ -89,7 +89,7 @@ layout_matrix:
     @echo
     @cargo run -p darkmatter --example layout_matrix
 
-# Report tree-vs-bespoke render drift (RECORD_DRIFT ledger sizes)
+# Report tree-vs-bespoke render drift, split by which renderer is correct
 drift-report:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -98,22 +98,65 @@ drift-report:
     echo -e "{{ BOLD }}Render Drift Report{{ RESET }}"
     echo -e "{{ DIM }}render-tree engine vs bespoke renderer — KNOWN_DRIFT ledger{{ RESET }}"
     echo
+    echo -e "{{ DIM }}non-cosmetic = one renderer is semantically/capability correct{{ RESET }}"
+    echo -e "{{ DIM }}cosmetic = semantically equivalent drift, such as trailing spaces or equivalent styling encoding{{ RESET }}"
+    echo -e "{{ DIM }}neutral/unclassified = cosmetic drift whose preferred renderer has not been reviewed yet{{ RESET }}"
+    echo
 
-    total=0
+    tree_total=0
+    cosmetic_tree_total=0
     for crate in biscuit-terminal darkmatter; do
         out=$(RECORD_DRIFT=1 cargo test -q -p "$crate" --test render_comparison -- --nocapture)
-        count=$(echo "$out" | sed -n 's/.*END KNOWN_DRIFT (\([0-9]*\) entries).*/\1/p')
-        count=${count:-0}
-        total=$((total + count))
-        echo -e "  {{ BOLD }}${crate}{{ RESET }}: ${count} drift entries"
-        echo "$out" \
-            | awk '/=== BEGIN KNOWN_DRIFT/{f=1;next} /=== END KNOWN_DRIFT/{f=0} f' \
-            | sed -n 's/.*("\([^"]*\)".*/\1/p' \
-            | sort | uniq -c | sed 's/^/  /'
+        # Isolate the recorded ledger block.
+        ledger=$(echo "$out" \
+            | awk '/=== BEGIN KNOWN_DRIFT/{f=1;next} /=== END KNOWN_DRIFT/{f=0} f')
+
+        tree_lines=$(echo "$ledger" | grep -F 'Verdict::TreeBehind' || true)
+        cosmetic_tree_lines=$(echo "$ledger" | grep -F 'Verdict::CosmeticTreeBehind' || true)
+        cosmetic_neutral_lines=$(echo "$ledger" | grep -F 'Verdict::CosmeticNeutral' || true)
+        tree=$(echo "$tree_lines" | grep -c . || true)
+        bespoke=$(echo "$ledger" | grep -cF 'Verdict::BespokeBehind' || true)
+        cosmetic_tree=$(echo "$cosmetic_tree_lines" | grep -c . || true)
+        cosmetic_bespoke=$(echo "$ledger" | grep -cF 'Verdict::CosmeticBespokeBehind' || true)
+        cosmetic_neutral=$(echo "$cosmetic_neutral_lines" | grep -c . || true)
+        tree_total=$((tree_total + tree))
+        cosmetic_tree_total=$((cosmetic_tree_total + cosmetic_tree))
+
+        echo -e "  {{ BOLD }}${crate}{{ RESET }}"
+        echo -e "    {{ BOLD }}non-cosmetic{{ RESET }}"
+        echo -e "      {{ BOLD }}render-tree behind:{{ RESET }}   ${tree}   {{ DIM }}<- entries where the render-tree must catch up{{ RESET }}"
+        echo -e "      bespoke behind:       ${bespoke}"
+        echo -e "    {{ BOLD }}cosmetic{{ RESET }}"
+        echo -e "      render-tree behind:   ${cosmetic_tree}"
+        echo -e "      bespoke behind:       ${cosmetic_bespoke}"
+        echo -e "      neutral/unclassified: ${cosmetic_neutral}"
+        if [ "${tree}" -gt 0 ]; then
+            echo -e "    {{ DIM }}non-cosmetic render-tree behind, by component:{{ RESET }}"
+            echo "$tree_lines" \
+                | sed -n 's/.*("\([^"]*\)".*/\1/p' \
+                | sort | uniq -c | sed 's/^/    /'
+        fi
+        if [ "${cosmetic_tree}" -gt 0 ]; then
+            echo -e "    {{ DIM }}cosmetic render-tree behind, by component:{{ RESET }}"
+            echo "$cosmetic_tree_lines" \
+                | sed -n 's/.*("\([^"]*\)".*/\1/p' \
+                | sort | uniq -c | sed 's/^/    /'
+        fi
+        if [ "${cosmetic_neutral}" -gt 0 ]; then
+            echo -e "    {{ DIM }}cosmetic neutral/unclassified, by component:{{ RESET }}"
+            echo "$cosmetic_neutral_lines" \
+                | sed -n 's/.*("\([^"]*\)".*/\1/p' \
+                | sort | uniq -c | sed 's/^/    /'
+            echo -e "    {{ DIM }}cosmetic neutral/unclassified, by facet:{{ RESET }}"
+            echo "$cosmetic_neutral_lines" \
+                | sed -n 's/.*, Facet::\([A-Za-z]*\),.*/\1/p' \
+                | sort | uniq -c | sed 's/^/    /'
+        fi
         echo
     done
-    echo -e "  {{ BOLD }}total{{ RESET }}: ${total} drift entries"
-    echo -e "  {{ DIM }}exit condition: 0 entries in both crates{{ RESET }}"
+    echo -e "  {{ BOLD }}total non-cosmetic render-tree behind{{ RESET }}: ${tree_total}"
+    echo -e "  {{ BOLD }}total cosmetic render-tree behind{{ RESET }}: ${cosmetic_tree_total}"
+    echo -e "  {{ DIM }}exit condition: 0 non-cosmetic render-tree-behind entries{{ RESET }}"
     echo
 
 # No-op recipe: reference color vars so linters won't report them as unused.

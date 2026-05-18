@@ -275,8 +275,9 @@ impl Writer<'_> {
         attrs: &NodeAttrs,
         children: &[RenderNode],
     ) -> Result<BrowserFragment<Ready>, RenderError> {
+        let inline = is_inline_block_tag(&tag);
         let mut fragment = BrowserFragment::new().define_as_block_tag(tag, "");
-        for attr in node_attributes(attrs) {
+        for attr in node_attributes(attrs, inline) {
             fragment = fragment.add_attribute(attr);
         }
         for child in children {
@@ -287,8 +288,9 @@ impl Writer<'_> {
 
     /// Builds a void-tag fragment carrying `attrs`.
     fn void(&self, tag: VoidTag, attrs: &NodeAttrs) -> BrowserFragment<Ready> {
+        let inline = is_inline_void_tag(&tag);
         let mut fragment = BrowserFragment::new().define_as_void_tag(tag);
-        for attr in node_attributes(attrs) {
+        for attr in node_attributes(attrs, inline) {
             fragment = fragment.add_attribute(attr);
         }
         fragment.finalize()
@@ -303,7 +305,7 @@ impl Writer<'_> {
         children: &[RenderNode],
     ) -> Result<BrowserFragment<Ready>, RenderError> {
         let mut fragment = BrowserFragment::new().define_as_block_tag(BlockTag::Section, "");
-        for attr in node_attributes(&node.attrs) {
+        for attr in node_attributes(&node.attrs, false) {
             fragment = fragment.add_attribute(attr);
         }
 
@@ -341,7 +343,7 @@ impl Writer<'_> {
 
         let mut container = BrowserFragment::new().define_as_block_tag(BlockTag::Div, "");
         container = container.add_attribute(HtmlAttribute::Class(ClassDefinition::new("columns")));
-        for attr in node_attributes(&node.attrs) {
+        for attr in node_attributes(&node.attrs, false) {
             container = container.add_attribute(attr);
         }
 
@@ -367,7 +369,7 @@ impl Writer<'_> {
     ) -> Result<BrowserFragment<Ready>, RenderError> {
         let tag = if ordered { BlockTag::Ol } else { BlockTag::Ul };
         let mut fragment = BrowserFragment::new().define_as_block_tag(tag, "");
-        for attr in node_attributes(&node.attrs) {
+        for attr in node_attributes(&node.attrs, false) {
             fragment = fragment.add_attribute(attr);
         }
         // `<ol start="N">` controls the first item's number.
@@ -395,7 +397,7 @@ impl Writer<'_> {
         }
 
         let mut fragment = BrowserFragment::new().define_as_block_tag(BlockTag::Li, "");
-        for attr in node_attributes(&attrs) {
+        for attr in node_attributes(&attrs, false) {
             fragment = fragment.add_attribute(attr);
         }
         if let Some(checked) = checked {
@@ -424,7 +426,7 @@ impl Writer<'_> {
         let code = code.add_child(ComposableNode::TextFragment(value.to_string()));
 
         let mut pre = BrowserFragment::new().define_as_block_tag(BlockTag::Pre, "");
-        for attr in node_attributes(&node.attrs) {
+        for attr in node_attributes(&node.attrs, false) {
             pre = pre.add_attribute(attr);
         }
         pre.add_component(code.finalize()).finalize()
@@ -433,7 +435,7 @@ impl Writer<'_> {
     /// Renders inline code as `<code>` carrying escaped text.
     fn render_inline_code(&self, node: &RenderNode, value: &str) -> BrowserFragment<Ready> {
         let mut fragment = BrowserFragment::new().define_as_block_tag(BlockTag::Code, "");
-        for attr in node_attributes(&node.attrs) {
+        for attr in node_attributes(&node.attrs, true) {
             fragment = fragment.add_attribute(attr);
         }
         fragment
@@ -451,7 +453,7 @@ impl Writer<'_> {
         children: &[RenderNode],
     ) -> Result<BrowserFragment<Ready>, RenderError> {
         let mut table = BrowserFragment::new().define_as_block_tag(BlockTag::Table, "");
-        for attr in node_attributes(&node.attrs) {
+        for attr in node_attributes(&node.attrs, false) {
             table = table.add_attribute(attr);
         }
 
@@ -487,7 +489,7 @@ impl Writer<'_> {
             _ => &[],
         };
         let mut fragment = BrowserFragment::new().define_as_block_tag(BlockTag::Tr, "");
-        for attr in node_attributes(&row.attrs) {
+        for attr in node_attributes(&row.attrs, false) {
             fragment = fragment.add_attribute(attr);
         }
         for (index, cell) in cells.iter().enumerate() {
@@ -513,7 +515,7 @@ impl Writer<'_> {
         };
         let tag = if header { BlockTag::Th } else { BlockTag::Td };
         let mut fragment = BrowserFragment::new().define_as_block_tag(tag, "");
-        for attr in node_attributes(&cell.attrs) {
+        for attr in node_attributes(&cell.attrs, false) {
             fragment = fragment.add_attribute(attr);
         }
         if let Some(value) = align_value(align) {
@@ -542,7 +544,7 @@ impl Writer<'_> {
         fragment = fragment.add_attribute(HtmlAttribute::Class(ClassDefinition::new(
             "footnote-definition",
         )));
-        for attr in node_attributes(&node.attrs) {
+        for attr in node_attributes(&node.attrs, false) {
             fragment = fragment.add_attribute(attr);
         }
         for child in children {
@@ -558,7 +560,7 @@ impl Writer<'_> {
         identifier: &str,
     ) -> BrowserFragment<Ready> {
         let mut fragment = BrowserFragment::new().define_as_block_tag(BlockTag::A, "");
-        for attr in node_attributes(&node.attrs) {
+        for attr in node_attributes(&node.attrs, true) {
             fragment = fragment.add_attribute(attr);
         }
         fragment
@@ -579,7 +581,7 @@ impl Writer<'_> {
         children: &[RenderNode],
     ) -> Result<BrowserFragment<Ready>, RenderError> {
         let mut fragment = BrowserFragment::new().define_as_block_tag(BlockTag::A, "");
-        for attr in node_attributes(&node.attrs) {
+        for attr in node_attributes(&node.attrs, true) {
             fragment = fragment.add_attribute(attr);
         }
         // `href` carries an arbitrary (possibly relative) URL, which the
@@ -604,7 +606,7 @@ impl Writer<'_> {
         alt: &str,
     ) -> BrowserFragment<Ready> {
         let mut fragment = BrowserFragment::new().define_as_void_tag(VoidTag::Img);
-        for attr in node_attributes(&node.attrs) {
+        for attr in node_attributes(&node.attrs, true) {
             fragment = fragment.add_attribute(attr);
         }
         // `src` carries an arbitrary (possibly relative) URL — see the note
@@ -717,10 +719,31 @@ fn align_value(align: ColumnAlign) -> Option<&'static str> {
     }
 }
 
+/// Returns `true` for [`BlockTag`] variants that represent inline elements.
+fn is_inline_block_tag(tag: &BlockTag) -> bool {
+    matches!(
+        tag,
+        BlockTag::Em
+            | BlockTag::Strong
+            | BlockTag::S
+            | BlockTag::Span
+            | BlockTag::Code
+            | BlockTag::A
+    )
+}
+
+/// Returns `true` for [`VoidTag`] variants that represent inline elements.
+fn is_inline_void_tag(tag: &VoidTag) -> bool {
+    matches!(tag, VoidTag::Br | VoidTag::Img)
+}
+
 /// Translates a node's [`NodeAttrs`] into HTML attributes: `id` to the `id`
-/// attribute, `classes` to a single `class` attribute, and a stored
+/// attribute, `classes` to a `class` attribute, and a stored
 /// [`Layout`](crate::layout::Layout) to an inline `style` attribute.
-fn node_attributes(attrs: &NodeAttrs) -> Vec<HtmlAttribute> {
+///
+/// Layout is skipped for inline nodes; the validation gate records a warning
+/// when an inline node carries a layout, and the renderer drops it per D5.
+fn node_attributes(attrs: &NodeAttrs, inline: bool) -> Vec<HtmlAttribute> {
     let mut out = Vec::new();
     if let Some(id) = &attrs.id {
         out.push(HtmlAttribute::Id(DomId::new(id.clone())));
@@ -730,7 +753,9 @@ fn node_attributes(attrs: &NodeAttrs) -> Vec<HtmlAttribute> {
             attrs.classes.join(" "),
         )));
     }
-    if let Some(layout) = attrs.layout() {
+    if !inline
+        && let Some(layout) = attrs.layout()
+    {
         let css = layout_to_css(&layout);
         if !css.is_empty() {
             out.push(HtmlAttribute::Other("style".into(), css));

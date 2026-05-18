@@ -314,11 +314,21 @@ fn check_node(
     }
 
     // Layout attributes are permitted only on block-level nodes.
-    if node.attrs.layout().is_some() && is_inline_kind(&node.kind) {
-        report.findings.push(error(
-            "layout attributes are permitted only on block-level nodes",
-            span,
-        ));
+    if let Some(layout) = node.attrs.layout() {
+        if is_inline_kind(&node.kind) {
+            report.findings.push(ValidationFinding {
+                severity: Severity::Warning,
+                message: "layout attributes are permitted only on block-level nodes".into(),
+                span: span.clone(),
+            });
+        }
+
+        if let Err(err) = layout.validate() {
+            report.findings.push(error(
+                format!("invalid layout: {err}"),
+                span,
+            ));
+        }
     }
 }
 
@@ -530,7 +540,7 @@ mod tests {
     }
 
     #[test]
-    fn layout_on_inline_node_is_a_validation_error() {
+    fn layout_on_inline_node_is_a_warning() {
         use crate::layout::Layout;
 
         let mut text = RenderNode::text("hello");
@@ -539,9 +549,15 @@ mod tests {
 
         let report = validate(&root, ValidationMode::Full);
         assert!(
-            report.has_errors(),
-            "layout on an inline Text node must be an error"
+            !report.has_errors(),
+            "layout on an inline Text node must be a warning, not an error"
         );
+        assert!(
+            report.findings.iter().any(|f| f.severity == Severity::Warning
+                && f.message.contains("block-level")),
+            "should contain a warning about block-level"
+        );
+        assert!(ensure_valid(&root).is_ok());
     }
 
     #[test]
@@ -570,6 +586,68 @@ mod tests {
             report
                 .errors()
                 .any(|f| f.message.contains("block-level Section"))
+        );
+    }
+
+    #[test]
+    fn invalid_layout_rejected_by_tree_validation() {
+        use crate::layout::{Layout, Length, TargetValue};
+
+        let mut para = RenderNode::paragraph(vec![RenderNode::text("hi")]);
+        para.attrs.set_layout(&Layout {
+            max_width: Some(TargetValue::universal(Length::Percent(200.0))),
+            ..Layout::default()
+        });
+        let root = RenderNode::root(vec![para]);
+        let report = validate(&root, ValidationMode::Full);
+        assert!(report.has_errors());
+        assert!(
+            report
+                .errors()
+                .any(|f| f.message.contains("invalid layout")),
+            "invalid layout values should produce an error finding"
+        );
+    }
+
+    #[test]
+    fn invalid_universal_css_unit_rejected_by_tree_validation() {
+        use crate::layout::{Layout, Length, TargetValue};
+        use crate::stylesheet::CssSizing;
+
+        let mut para = RenderNode::paragraph(vec![RenderNode::text("hi")]);
+        para.attrs.set_layout(&Layout {
+            max_width: Some(TargetValue::universal(Length::css(CssSizing::rem(1.0)))),
+            ..Layout::default()
+        });
+        let root = RenderNode::root(vec![para]);
+        let report = validate(&root, ValidationMode::Full);
+        assert!(report.has_errors());
+        assert!(
+            report
+                .errors()
+                .any(|f| f.message.contains("invalid layout")),
+            "CSS units in universal branch should produce an error finding"
+        );
+    }
+
+    #[test]
+    fn empty_per_target_map_rejected_by_tree_validation() {
+        use std::collections::BTreeMap;
+        use crate::layout::{Layout, TargetValue};
+
+        let mut para = RenderNode::paragraph(vec![RenderNode::text("hi")]);
+        para.attrs.set_layout(&Layout {
+            max_width: Some(TargetValue::PerTarget(BTreeMap::new())),
+            ..Layout::default()
+        });
+        let root = RenderNode::root(vec![para]);
+        let report = validate(&root, ValidationMode::Full);
+        assert!(report.has_errors());
+        assert!(
+            report
+                .errors()
+                .any(|f| f.message.contains("invalid layout")),
+            "empty per-target map should produce an error finding"
         );
     }
 }
