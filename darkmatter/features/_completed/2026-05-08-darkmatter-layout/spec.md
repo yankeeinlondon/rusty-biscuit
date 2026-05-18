@@ -5,7 +5,6 @@ created: 2026-05-08
 owner: Ken Snyder
 package: darkmatter
 ---
-
 # Darkmatter Layout
 
 ## Summary
