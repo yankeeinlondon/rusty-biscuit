@@ -4,6 +4,7 @@ pub mod layout;
 pub mod markdown;
 pub mod microdata;
 pub mod prelude;
+pub mod style;
 pub mod stylesheet;
 pub mod target;
 pub mod tokens;
