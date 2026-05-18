@@ -3,7 +3,7 @@ phase: 1
 total_phases: 0
 plan: ""
 dir: "$(dirname '{{plan}}')"
-area: "{{ctx.current_package_area}}"
+area: "{{ctx.current_package_area == 'root' ? ctx.current_package : ctx.current_package_area}}"
 pass_icon: "{{ _loop_is_last ? '✅' : '🧑‍💻' }}"
 start:
     message: "🎬  starting the implementation of phase **#{{phase}}** of `{{ctx.current_package_area}}/{{plan}}`"
