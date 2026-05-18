@@ -12,7 +12,7 @@ description: >
 
 - Read [references/architecture.md](references/architecture.md) for module layout, feature flags, and re-exports
 
-- Read [../docs/topics/file-references.md](../docs/topics/file-references.md) for the authoritative file reference topic doc
+- Read [../docs/topics/file-references.md](../../biscuit-file/docs/topics/file-references.md) for the authoritative file reference topic doc
 - Read [../docs/dependencies.md](../docs/dependencies.md) for dependency versions reference
 
  |
