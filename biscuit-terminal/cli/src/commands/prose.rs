@@ -5,8 +5,10 @@ use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::terminal::Terminal;
 use biscuit_terminal::utils::layout::{Length, TargetValue, WordWrap};
 use clap::Args as ClapArgs;
+use renderable::browser::BrowserRenderable;
+use renderable::markdown::MarkdownRenderable;
 
-/// Render prose text with inline styling tokens
+/// Render prose text with inline styling tags
 #[derive(ClapArgs, Debug, Clone)]
 pub struct ProseArgs {
     #[arg(value_name = "CONTENT")]
@@ -21,6 +23,14 @@ pub struct ProseArgs {
     #[arg(long = "print-bytes")]
     pub print_bytes: bool,
 
+    /// Render to an HTML fragment instead of the terminal.
+    #[arg(long, conflicts_with = "md")]
+    pub html: bool,
+
+    /// Render to portable Markdown instead of the terminal.
+    #[arg(long, conflicts_with = "html")]
+    pub md: bool,
+
     #[command(flatten)]
     pub layout: LayoutArgs,
 }
@@ -31,7 +41,7 @@ impl Run for ProseArgs {
 
         if text.is_empty() {
             return Err(color_eyre::eyre::eyre!(
-                "No content provided. Usage: bt prose \"Hello {{bold}}world{{reset}}!\""
+                "No content provided. Usage: bt prose \"Hello <bold>world</bold>!\""
             ));
         }
 
@@ -53,6 +63,17 @@ impl Run for ProseArgs {
         }
         if let Some(align) = self.layout.alignment {
             prose = prose.alignment(align);
+        }
+
+        // Cross-target output: HTML fragment or portable Markdown. Layout
+        // and terminal capability detection do not apply to these targets.
+        if self.html {
+            println!("{}", prose.render_html_fragment().render());
+            return Ok(());
+        }
+        if self.md {
+            println!("{}", prose.render_markdown());
+            return Ok(());
         }
 
         let term = if self.force_color {

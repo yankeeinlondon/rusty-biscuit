@@ -31,12 +31,14 @@ fn level2_prose_emits_sgr_in_real_terminal() {
         return;
     }
 
+    // `WezTermHarness::new()` spawns into a dedicated background
+    // workspace, so the pane never grabs focus or steals the desktop.
     let mut harness = WezTermHarness::new();
     harness.spawn_shell().expect("spawn_shell failed");
 
-    // Belt-and-braces: scope FORCE_COLOR=1 to the spawned `bt` and use
-    // the CLI `--force-color` flag so styling is decoupled from both
-    // the spawned shell's environment AND from `bt`'s TTY detection.
+    // Scope FORCE_COLOR=1 to the spawned `bt` and use the CLI
+    // `--force-color` flag so styling is decoupled from both the
+    // spawned shell's environment AND from `bt`'s TTY detection.
     harness
         .send_command_with_env(
             "bt prose --force-color \"<red>x</red>\"",
@@ -54,43 +56,17 @@ fn level2_prose_emits_sgr_in_real_terminal() {
     std::thread::sleep(std::time::Duration::from_millis(200));
     let frame_b = harness.capture().expect("capture B failed");
 
-    // Backstop: ask `bt prose --print-bytes` to print the rendered
-    // byte stream as a hex dump. This is independent of the WezTerm
-    // capture path and proves the renderer's output contains SGR red.
-    harness
-        .send_command_with_env(
-            "bt prose --force-color --print-bytes \"<red>x</red>\"",
-            &[("FORCE_COLOR", "1")],
-        )
-        .expect("send_command_with_env (print-bytes) failed");
-    let _ = biscuit_test_harness::wait_for_prompt(&mut harness);
-    std::thread::sleep(std::time::Duration::from_millis(200));
-    let frame_dbg = harness.capture().expect("capture debug failed");
-
-    let raw_has_sgr =
-        |frame: &CapturedFrame| frame.raw.contains("\x1b[31m") || frame.raw.contains("\x1b[91m");
-    let dbg_has_sgr_hex = |frame: &CapturedFrame| {
-        // Hex encodings of \x1b[31m and \x1b[91m respectively. Match
-        // on either the raw or plain capture form so the assertion
-        // succeeds whether or not WezTerm filtered SGR from the dump.
-        let needles = ["1b5b33316d", "1b5b39316d"];
-        let haystacks = [&frame.raw, &frame.plain];
-        needles
-            .iter()
-            .any(|needle| haystacks.iter().any(|hay| hay.contains(needle)))
-    };
-
+    // Strict Level 2: the proof is the real terminal's own `get-text
+    // --escapes` capture path. We isolate the rendered `x` output line
+    // (so a colored shell prompt cannot satisfy the assertion) and
+    // require SGR red in the cells WezTerm actually displayed.
     assert!(
-        raw_has_sgr(&frame_a) || raw_has_sgr(&frame_b) || dbg_has_sgr_hex(&frame_dbg),
-        "expected SGR red in raw capture OR in --print-bytes hex dump.\n\
+        output_line_has_sgr_red(&frame_a) || output_line_has_sgr_red(&frame_b),
+        "expected SGR red in the captured `x` output line.\n\
          capture A raw:\n{}\n\
-         capture B raw:\n{}\n\
-         debug plain:\n{}\n\
-         debug raw:\n{}",
+         capture B raw:\n{}",
         frame_a.raw,
         frame_b.raw,
-        frame_dbg.plain,
-        frame_dbg.raw,
     );
 }
 
@@ -154,14 +130,13 @@ fn level2_prose_emits_sgr_in_kitty() {
         return;
     }
 
+    // `KittyHarness::new()` passes `--keep-focus` so the spawned OS
+    // window never steals focus from the developer's session.
     let mut harness = KittyHarness::new();
     harness.spawn_shell().expect("spawn_shell failed");
 
-    // Belt-and-braces: scope FORCE_COLOR=1 and use the CLI
-    // `--force-color` flag for symmetry with the WezTerm test. Kitty
-    // preserves SGR in `get-text --ansi`, so the primary path
-    // typically wins; the `--print-bytes` backstop is redundant but
-    // cheap and keeps the two tests symmetric.
+    // Scope FORCE_COLOR=1 and use the CLI `--force-color` flag for
+    // symmetry with the WezTerm test.
     harness
         .send_command_with_env(
             "bt prose --force-color \"<red>x</red>\"",
@@ -173,37 +148,15 @@ fn level2_prose_emits_sgr_in_kitty() {
     std::thread::sleep(std::time::Duration::from_millis(200));
     let frame_b = harness.capture().expect("capture B failed");
 
-    harness
-        .send_command_with_env(
-            "bt prose --force-color --print-bytes \"<red>x</red>\"",
-            &[("FORCE_COLOR", "1")],
-        )
-        .expect("send_command_with_env (print-bytes) failed");
-    let _ = biscuit_test_harness::wait_for_prompt(&mut harness);
-    std::thread::sleep(std::time::Duration::from_millis(200));
-    let frame_dbg = harness.capture().expect("capture debug failed");
-
-    let raw_has_sgr =
-        |frame: &CapturedFrame| frame.raw.contains("\x1b[31m") || frame.raw.contains("\x1b[91m");
-    let dbg_has_sgr_hex = |frame: &CapturedFrame| {
-        let needles = ["1b5b33316d", "1b5b39316d"];
-        let haystacks = [&frame.raw, &frame.plain];
-        needles
-            .iter()
-            .any(|needle| haystacks.iter().any(|hay| hay.contains(needle)))
-    };
-
+    // Strict Level 2: assert SGR red in the cells Kitty actually
+    // displayed, isolated to the rendered `x` output line.
     assert!(
-        raw_has_sgr(&frame_a) || raw_has_sgr(&frame_b) || dbg_has_sgr_hex(&frame_dbg),
-        "expected SGR red in raw capture OR in --print-bytes hex dump.\n\
+        output_line_has_sgr_red(&frame_a) || output_line_has_sgr_red(&frame_b),
+        "expected SGR red in the captured `x` output line.\n\
          capture A raw:\n{}\n\
-         capture B raw:\n{}\n\
-         debug plain:\n{}\n\
-         debug raw:\n{}",
+         capture B raw:\n{}",
         frame_a.raw,
         frame_b.raw,
-        frame_dbg.plain,
-        frame_dbg.raw,
     );
 }
 
@@ -393,6 +346,265 @@ fn level2_columns_word_wrap_in_pane() {
         continuation.starts_with('a'),
         "expected continuation row to start with 'a'; got {continuation:?}",
     );
+}
+
+// ------------------------------------------------------------------
+// Rich styling — nested emphasis, fg/bg RGB color, strikethrough,
+// underline, code-block indentation through the IR-backed renderer
+// ------------------------------------------------------------------
+
+/// Rich `bt prose` input exercising nested bold/italic, strikethrough,
+/// underline, foreground and background RGB color, and a fenced code
+/// block — the styling the IR-backed terminal renderer must preserve.
+///
+/// The visible output collapses (whitespace removed) to `bisufgq`, which
+/// [`find_bt_output_line`] uses to isolate the rendered row from the
+/// shell prompt and the command echo.
+const RICH_PROSE_INPUT: &str = "<b><i>bi</i></b> <~>s</~> <u>u</u> \
+     <rgb 4,5,6>f</rgb> <bg-rgb 1,2,3>g</bg-rgb> \
+     <code-block lang=rust>q</code-block>";
+
+/// SGR effects [`RICH_PROSE_INPUT`] must produce, decoded from the real
+/// terminal's `get-text` capture (not the renderer's own byte stream).
+const RICH_EXPECTED_SGR: &[Sgr] = &[
+    Sgr::Bold,
+    Sgr::Italic,
+    Sgr::Strikethrough,
+    Sgr::Underline,
+    Sgr::FgRgb(4, 5, 6),
+    Sgr::BgRgb(1, 2, 3),
+    Sgr::Dim,
+];
+
+/// Runs [`RICH_PROSE_INPUT`] through `bt prose` in the given real
+/// terminal and asserts every [`RICH_EXPECTED_SGR`] effect is present in
+/// the styled cells the emulator actually displayed.
+///
+/// This is a strict Level 2 check: the proof is the terminal's own
+/// `get-text` capture path (`wezterm cli get-text --escapes` /
+/// `kitty @ get-text --ansi`), decoded by [`decode_sgr_effects`]. The
+/// assertion fails when the capture does not contain the rendered style
+/// evidence — the renderer's own byte stream is never consulted.
+fn assert_rich_prose_sgr<H: TerminalHarness>(harness: &mut H) {
+    harness
+        .send_command_with_env(
+            &format!("bt prose --force-color \"{RICH_PROSE_INPUT}\""),
+            &[("FORCE_COLOR", "1")],
+        )
+        .expect("send_command_with_env failed");
+    let _ = biscuit_test_harness::wait_for_prompt(harness);
+    std::thread::sleep(std::time::Duration::from_millis(200));
+    let frame = harness.capture().expect("capture failed");
+
+    // Isolate the rendered output row so SGR carried by a colored shell
+    // prompt (bold/italic/dim in a starship theme, etc.) cannot satisfy
+    // the assertion.
+    let output_line = find_bt_output_line(&frame, "bisufgq").unwrap_or_else(|| {
+        panic!(
+            "could not locate the rich-prose output row (compact `bisufgq`).\nraw:\n{}",
+            frame.raw
+        )
+    });
+    let effects = decode_sgr_effects(output_line);
+
+    for expected in RICH_EXPECTED_SGR {
+        assert!(
+            effects.contains(expected),
+            "expected {expected:?} in the captured output row's SGR.\n\
+             decoded effects: {effects:?}\noutput row:\n{output_line:?}\nraw:\n{}",
+            frame.raw,
+        );
+    }
+}
+
+#[test]
+#[serial(level2_terminal)]
+fn level2_prose_rich_styling_emits_sgr_in_wezterm() {
+    use biscuit_test_harness::wezterm::WezTermHarness;
+
+    if !WezTermHarness::available() {
+        skip_with_reason("WezTerm CLI (set WEZTERM_UNIX_SOCKET)");
+        return;
+    }
+
+    let mut harness = WezTermHarness::new();
+    harness.spawn_shell().expect("spawn_shell failed");
+    assert_rich_prose_sgr(&mut harness);
+}
+
+#[test]
+#[serial(level2_terminal)]
+fn level2_prose_rich_styling_emits_sgr_in_kitty() {
+    use biscuit_test_harness::kitty::KittyHarness;
+
+    if !KittyHarness::available() {
+        skip_with_reason("Kitty remote control (set KITTY_LISTEN_ON)");
+        return;
+    }
+
+    let mut harness = KittyHarness::new();
+    harness.spawn_shell().expect("spawn_shell failed");
+    assert_rich_prose_sgr(&mut harness);
+}
+
+#[test]
+#[serial(level2_terminal)]
+fn level2_prose_nested_emphasis_visible_text_in_wezterm() {
+    use biscuit_test_harness::wezterm::WezTermHarness;
+
+    if !WezTermHarness::available() {
+        skip_with_reason("WezTerm CLI (set WEZTERM_UNIX_SOCKET)");
+        return;
+    }
+
+    let mut harness = WezTermHarness::new();
+    harness.spawn_shell().expect("spawn_shell failed");
+
+    send_bt_command(&mut harness, "prose \"<b><i>nested</i></b> tail\"");
+    let _ = biscuit_test_harness::wait_for_prompt(&mut harness);
+
+    let frame = harness.capture().expect("capture failed");
+    // The styled and trailing text must remain visible with no escape
+    // garbage leaking into the captured plain cells.
+    assert!(
+        frame.plain.contains("nested") && frame.plain.contains("tail"),
+        "expected visible 'nested' and 'tail' text. plain:\n{}",
+        frame.plain
+    );
+    assert!(
+        !frame.plain.contains("\x1b") && !frame.plain.contains("[1m"),
+        "expected no raw escape text in the visible capture. plain:\n{}",
+        frame.plain
+    );
+}
+
+// ------------------------------------------------------------------
+// SGR decoding — strict Level 2 capture verification
+// ------------------------------------------------------------------
+
+/// A single SGR effect decoded from a CSI `m` sequence in a terminal
+/// `get-text` capture.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Sgr {
+    Bold,
+    Dim,
+    Italic,
+    Underline,
+    Strikethrough,
+    FgRgb(i64, i64, i64),
+    BgRgb(i64, i64, i64),
+}
+
+/// Decode every [`Sgr`] effect present in `raw`, across all CSI `m`
+/// sequences.
+///
+/// Terminal `get-text` capture paths re-emit cell attributes in their
+/// own normalized form rather than echoing the renderer's bytes: WezTerm
+/// coalesces attributes (`\x1b[0;1;4m`) and emits truecolor in the
+/// colon form (`\x1b[38:2::r:g:bm`); Kitty uses the semicolon form.
+/// Both separators are accepted and empty sub-parameters (the colon-form
+/// colorspace slot) are dropped before decoding.
+fn decode_sgr_effects(raw: &str) -> Vec<Sgr> {
+    let mut effects = Vec::new();
+    let bytes = raw.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == 0x1b && bytes.get(i + 1) == Some(&b'[') {
+            let start = i + 2;
+            let mut j = start;
+            while j < bytes.len()
+                && (bytes[j].is_ascii_digit() || bytes[j] == b';' || bytes[j] == b':')
+            {
+                j += 1;
+            }
+            if bytes.get(j) == Some(&b'm') {
+                let params: Vec<i64> = raw[start..j]
+                    .split([';', ':'])
+                    .filter(|s| !s.is_empty())
+                    .filter_map(|s| s.parse().ok())
+                    .collect();
+                decode_sgr_params(&params, &mut effects);
+                i = j + 1;
+                continue;
+            }
+        }
+        i += 1;
+    }
+    effects
+}
+
+/// Decode one SGR sequence's parameter list into [`Sgr`] effects.
+///
+/// `38`/`48` (set foreground/background) consume the following
+/// parameters: `2;r;g;b` for truecolor and `5;n` for indexed color.
+fn decode_sgr_params(params: &[i64], out: &mut Vec<Sgr>) {
+    let mut i = 0;
+    while i < params.len() {
+        match params[i] {
+            1 => out.push(Sgr::Bold),
+            2 => out.push(Sgr::Dim),
+            3 => out.push(Sgr::Italic),
+            4 => out.push(Sgr::Underline),
+            9 => out.push(Sgr::Strikethrough),
+            38 | 48 => {
+                let is_fg = params[i] == 38;
+                match params.get(i + 1) {
+                    Some(&2) => {
+                        if let (Some(&r), Some(&g), Some(&b)) =
+                            (params.get(i + 2), params.get(i + 3), params.get(i + 4))
+                        {
+                            out.push(if is_fg {
+                                Sgr::FgRgb(r, g, b)
+                            } else {
+                                Sgr::BgRgb(r, g, b)
+                            });
+                        }
+                        i += 5;
+                        continue;
+                    }
+                    Some(&5) => {
+                        i += 3;
+                        continue;
+                    }
+                    _ => {}
+                }
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+}
+
+/// Return the raw (escape-bearing) capture line for the `bt prose`
+/// output row whose visible text, with all whitespace removed, equals
+/// `compact_plain`.
+///
+/// The search starts after the command-echo line so the echoed input
+/// (which contains the literal markup, not rendered cells) is skipped.
+/// Isolating the output row keeps a colored shell prompt from
+/// satisfying SGR assertions.
+fn find_bt_output_line<'a>(frame: &'a CapturedFrame, compact_plain: &str) -> Option<&'a str> {
+    let raw_lines: Vec<&str> = frame.raw.lines().collect();
+    let plain_lines: Vec<&str> = frame.plain.lines().collect();
+    let cmd_idx = plain_lines.iter().position(|l| l.contains("bt prose"))?;
+    for (i, plain) in plain_lines.iter().enumerate().skip(cmd_idx + 1) {
+        let compact: String = plain.chars().filter(|c| !c.is_whitespace()).collect();
+        if compact == compact_plain {
+            return raw_lines.get(i).copied();
+        }
+    }
+    None
+}
+
+/// Whether the isolated `<red>x</red>` output row carries SGR red.
+///
+/// The renderer emits `\x1b[31m`; both WezTerm and Kitty re-emit basic
+/// colors faithfully, so a standalone `31`/`91` SGR parameter on the
+/// row is the strict capture proof.
+fn output_line_has_sgr_red(frame: &CapturedFrame) -> bool {
+    find_bt_output_line(frame, "x")
+        .map(|line| line.contains("\x1b[31m") || line.contains("\x1b[91m"))
+        .unwrap_or(false)
 }
 
 // ------------------------------------------------------------------

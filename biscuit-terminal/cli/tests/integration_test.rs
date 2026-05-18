@@ -1361,7 +1361,7 @@ fn test_graph_expression_rejects_mixed_edge_kinds() {
 fn test_prose_snapshot() {
     let output = cargo_bin_cmd!("bt")
         .arg("prose")
-        .arg("Hello {{bold}}world{{reset}}!")
+        .arg("Hello <bold>world</bold>!")
         .env("NO_COLOR", "1")
         .output()
         .expect("Failed to execute command");
@@ -1762,6 +1762,55 @@ fn test_padright_snapshot() {
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     insta::assert_snapshot!(stdout);
+}
+
+/// Public docs and examples must not advertise the removed Prose
+/// atomic-token grammar (`{{bold}}`, `{{reset}}`, …).
+///
+/// The atomic-token grammar was removed in the prose-cross-target feature;
+/// only bracketed tags and the Markdown subset remain. A user copying a
+/// stale `{{bold}}` example would render the literal text `{{bold}}`. Lines
+/// that explicitly document the removal are exempt.
+#[test]
+fn public_docs_do_not_advertise_removed_atomic_tokens() {
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let docs = [
+        format!("{manifest_dir}/README.md"),
+        format!("{manifest_dir}/../README.md"),
+        format!("{manifest_dir}/../docs/components/compose.md"),
+        format!("{manifest_dir}/../docs/components/index.md"),
+        format!("{manifest_dir}/../docs/components/prose.md"),
+    ];
+
+    let banned = [
+        "{{bold}}",
+        "{{reset}}",
+        "{{italic}}",
+        "{{red}}",
+        "{{dim}}",
+        "{{cyan}}",
+        "{{bg-",
+    ];
+
+    for path in &docs {
+        let Ok(text) = std::fs::read_to_string(path) else {
+            continue; // file moved/renamed — not this test's concern
+        };
+        for (idx, line) in text.lines().enumerate() {
+            // Lines that document the grammar removal may name the old
+            // syntax legitimately.
+            if line.contains("removed") {
+                continue;
+            }
+            for token in &banned {
+                assert!(
+                    !line.contains(token),
+                    "{path}:{} advertises removed Prose atomic token {token:?}:\n{line}",
+                    idx + 1,
+                );
+            }
+        }
+    }
 }
 
 #[test]

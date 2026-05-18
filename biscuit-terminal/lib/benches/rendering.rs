@@ -43,10 +43,10 @@ fn bench_strip_escape_codes(c: &mut Criterion) {
 
 fn bench_prose_render(c: &mut Criterion) {
     let simple = "Hello world, this is a simple prose string.";
-    let tokens = "Hello {{bold}}world{{reset}}! This is {{red}}important{{reset}} text with {{italic}}emphasis{{reset}}.";
+    let tokens = "Hello <bold>world</bold>! This is <red>important</red> text with <italic>emphasis</italic>.";
     let long_tokens = (0..20)
         .map(|i| {
-            format!("Item {{bold}}{i}{{reset}}: description of item {i} with {{red}}color{{reset}}")
+            format!("Item <bold>{i}</bold>: description of item {i} with <red>color</red>")
         })
         .collect::<Vec<_>>()
         .join(". ");
@@ -80,7 +80,7 @@ fn bench_prose_render(c: &mut Criterion) {
 fn bench_word_wrap(c: &mut Criterion) {
     let short = "A short line that fits.";
     let paragraph = "This is a longer paragraph that will definitely need to be wrapped because it exceeds eighty columns when rendered in a typical terminal window and contains multiple clauses separated by conjunctions.";
-    let multiline = "First line of content here.\nSecond line with more text that may wrap.\nThird line is short.\nFourth line has {{bold}}tokens{{reset}} interspersed throughout the content for styling.";
+    let multiline = "First line of content here.\nSecond line with more text that may wrap.\nThird line is short.\nFourth line has <bold>tokens</bold> interspersed throughout the content for styling.";
 
     let mut group = c.benchmark_group("word_wrap");
     group.bench_function("short_no_wrap", |b| {

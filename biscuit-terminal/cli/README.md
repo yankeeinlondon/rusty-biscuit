@@ -78,20 +78,21 @@ Protocol selection:
 
 ### Prose Rendering
 
-Render styled text with inline tokens:
+Render styled text with bracketed tags or a Markdown subset:
 
 ```bash
-bt prose "Hello {{bold}}world{{reset}}!"
-bt prose "{{red}}Error:{{reset}} Something went wrong"
+bt prose "Hello <b>world</b>!"
+bt prose "<red>Error:</red> Something went wrong"
 bt prose "<b>Bold</b> and <i>italic</i> text"
+bt prose "**Bold** and _italic_ via Markdown"
 bt prose "<a href='https://example.com'>Click here</a>"
 bt prose --margin-left 4 "Indented content"
 bt prose --no-wrap "Long line without wrapping"
 ```
 
-Token types:
-- **Atomic tokens**: `{{bold}}`, `{{italic}}`, `{{red}}`, `{{bg-blue}}`, `{{reset}}`
+Grammar:
 - **Block tags**: `<b>`, `<i>`, `<u>`, `<uu>`, `<~>`, `<a href="...">`, `<red>`, `<rgb R,G,B>`, `<bg-rgb R,G,B>`, `<bg-coral>`, `<bg-red-800>`
+- **Markdown subset**: `**bold**`, `_italic_`, `[desc](url)`, fenced code blocks
 - **Color support**: Basic colors, bright colors, web colors, Tailwind colors (foreground and background)
 
 Options:
