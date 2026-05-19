@@ -13,6 +13,7 @@
 
 pub mod browser;
 pub mod markdown;
+mod shared;
 
 pub use browser::{
     BrowserRenderOptions, RawHtmlPolicy, render_browser_document, render_browser_node,

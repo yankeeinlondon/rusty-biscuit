@@ -32,7 +32,8 @@ mod validate;
 
 pub use attrs::{
     CodeRenderHints, ColumnConditional, ColumnWidthKind, ColumnsHints, HintNamespace,
-    ListRenderHints, NodeAttrs, ProgressHints, TableCellHints, TableColumnHints, TableTerminalHints,
+    ListMarkerPolicy, ListRenderHints, NodeAttrs, ProgressHints, SequenceJoin, TableCellHints,
+    TableColumnHints, TableTerminalHints, TaskHints, TaskState,
 };
 pub use diagnostic::{Diagnostic, DiagnosticKind, Severity};
 pub use document::{Document, DocumentMetadata, Frontmatter, FrontmatterFormat};

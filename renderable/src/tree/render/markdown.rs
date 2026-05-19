@@ -100,6 +100,7 @@ pub fn render_markdown_node(
     let mut writer = Writer {
         opts,
         diagnostics: Vec::new(),
+        table_cell_depth: 0,
     };
 
     // Warning-severity validation findings escalate to an error under Strict
@@ -167,13 +168,25 @@ pub fn render_markdown_document(
 struct Writer<'a> {
     opts: &'a MarkdownRenderOptions,
     diagnostics: Vec<Diagnostic>,
+    /// Non-zero while rendering descendants of a [`NodeKind::TableCell`].
+    /// Inside a table cell, text is escaped so literal pipes and newlines
+    /// cannot corrupt the GFM pipe-delimited table structure.
+    table_cell_depth: u32,
 }
 
 impl Writer<'_> {
     /// Renders a single node and its subtree.
     fn render(&mut self, node: &RenderNode) -> Result<String, RenderError> {
         match &node.kind {
-            NodeKind::Root { children } => self.render_blocks(children),
+            NodeKind::Root { children } => {
+                // A `Compose`-style sequence joins children in order with no
+                // renderer-inserted separator; a normal document root joins
+                // children as blocks with blank-line separators.
+                match node.attrs.sequence_join() {
+                    Some(crate::tree::SequenceJoin::None) => self.render_sequence(children),
+                    None => self.render_blocks(children),
+                }
+            }
             NodeKind::Heading { depth, children } => {
                 let hashes = "#".repeat(usize::from(depth.get()));
                 Ok(format!("{hashes} {}", self.render_inline(children)?))
@@ -192,7 +205,18 @@ impl Writer<'_> {
                     Ok(format!("{heading_line}\n\n{body}"))
                 }
             }
-            NodeKind::Paragraph { children } => self.render_inline(children),
+            NodeKind::Paragraph { children } => {
+                // A projected `Progress` widget carries `ProgressHints`. Plain
+                // Markdown renders the paragraph fallback text; MarkdownPlus
+                // emits the same semantic progress HTML as the browser.
+                match node.attrs.progress_hints() {
+                    Some(hints) if self.opts.dialect == MarkdownDialect::MarkdownPlus => {
+                        let text = self.render_inline(children)?;
+                        Ok(progress_html(&hints, &text))
+                    }
+                    _ => self.render_inline(children),
+                }
+            }
             NodeKind::BlockQuote { children } => {
                 if let Some(hints) = node.attrs.columns_hints() {
                     self.render_columns(children, &hints)
@@ -205,7 +229,7 @@ impl Writer<'_> {
                 ordered,
                 start,
                 children,
-            } => self.render_list(*ordered, *start, children),
+            } => self.render_list(node, *ordered, *start, children),
             NodeKind::ListItem { checked, children } => {
                 let body = self.render_blocks(children)?;
                 Ok(match checked {
@@ -227,9 +251,27 @@ impl Writer<'_> {
                 Ok(format!("{fence}\n{body}\n```"))
             }
             NodeKind::ThematicBreak => Ok("---".to_string()),
-            NodeKind::Table { align, children } => self.render_table(align, children),
+            NodeKind::Table { align, children } => {
+                let table = self.render_table(align, children)?;
+                // A table title/caption is emitted as escaped plain text on
+                // its own line before the table, separated by a blank line.
+                // An empty or whitespace-only title is ignored.
+                match node.attrs.table_title() {
+                    Some(title) if !title.trim().is_empty() => {
+                        Ok(format!("{}\n\n{table}", escape_text(title.trim())))
+                    }
+                    _ => Ok(table),
+                }
+            }
             NodeKind::TableRow { children } => self.render_table_row(children),
-            NodeKind::TableCell { children } => self.render_inline(children),
+            NodeKind::TableCell { children } => {
+                // Descendants of a table cell render in cell-escaping mode so
+                // literal pipes and newlines cannot break GFM table structure.
+                self.table_cell_depth += 1;
+                let result = self.render_inline(children);
+                self.table_cell_depth -= 1;
+                result
+            }
             NodeKind::FootnoteDefinition {
                 identifier,
                 children,
@@ -237,12 +279,22 @@ impl Writer<'_> {
                 let body = self.render_blocks(children)?;
                 Ok(format!("[^{identifier}]: {body}"))
             }
-            NodeKind::Text { value } => Ok(value.clone()),
+            NodeKind::Text { value } => Ok(if self.table_cell_depth > 0 {
+                escape_table_cell_text(value)
+            } else {
+                value.clone()
+            }),
             NodeKind::Emphasis { children } => Ok(format!("_{}_", self.render_inline(children)?)),
             NodeKind::Strong { children } => Ok(format!("**{}**", self.render_inline(children)?)),
             NodeKind::Delete { children } => Ok(format!("~~{}~~", self.render_inline(children)?)),
             NodeKind::Span { children } => self.render_span(node, children),
-            NodeKind::InlineCode { value } => Ok(format!("`{value}`")),
+            NodeKind::InlineCode { value } => Ok(if self.table_cell_depth > 0 {
+                // A literal pipe inside inline code still breaks a GFM table
+                // cell, so it is escaped even though the run is code.
+                format!("`{}`", value.replace('|', "\\|"))
+            } else {
+                format!("`{value}`")
+            }),
             NodeKind::Link {
                 url,
                 title,
@@ -256,10 +308,20 @@ impl Writer<'_> {
             }
             NodeKind::FootnoteReference { identifier } => Ok(format!("[^{identifier}]")),
             // A soft break is rendered as a newline; the surrounding block
-            // is responsible for any further wrapping.
-            NodeKind::SoftBreak => Ok("\n".to_string()),
+            // is responsible for any further wrapping. Inside a table cell a
+            // soft break collapses to a single space.
+            NodeKind::SoftBreak => Ok(if self.table_cell_depth > 0 {
+                " ".to_string()
+            } else {
+                "\n".to_string()
+            }),
             // A hard break is two trailing spaces followed by a newline.
-            NodeKind::HardBreak => Ok("  \n".to_string()),
+            // Inside a table cell it becomes `<br>` so the row stays valid.
+            NodeKind::HardBreak => Ok(if self.table_cell_depth > 0 {
+                "<br>".to_string()
+            } else {
+                "  \n".to_string()
+            }),
             NodeKind::Html { value, block } => self.render_html(node, value, *block),
             NodeKind::Unsupported { label } => self.render_unsupported(node, label),
         }
@@ -274,6 +336,19 @@ impl Writer<'_> {
         Ok(parts.join("\n\n"))
     }
 
+    /// Renders a sequence of children in order with no inserted separator.
+    ///
+    /// This is the `Compose`-style join: adjacent children concatenate
+    /// directly, preserving the component's no-separator contract instead of
+    /// the document-block blank-line spacing of [`Self::render_blocks`].
+    fn render_sequence(&mut self, children: &[RenderNode]) -> Result<String, RenderError> {
+        let mut output = String::new();
+        for child in children {
+            output.push_str(&self.render(child)?);
+        }
+        Ok(output)
+    }
+
     /// Renders a sequence of inline nodes, concatenated without separators.
     fn render_inline(&mut self, children: &[RenderNode]) -> Result<String, RenderError> {
         let mut output = String::new();
@@ -283,10 +358,12 @@ impl Writer<'_> {
         Ok(output)
     }
 
-    /// Renders a two-column block quote as two sequential sections.
+    /// Renders a two-column block quote.
     ///
-    /// Markdown has no side-by-side layout; the left column's blocks are
-    /// emitted first, then a blank line, then the right column's blocks.
+    /// Portable [`MarkdownDialect::Markdown`] has no side-by-side layout: the
+    /// left column's blocks are emitted first, then a blank line, then the
+    /// right column's blocks. [`MarkdownDialect::MarkdownPlus`] emits a block
+    /// HTML flex container equivalent to the browser shape.
     fn render_columns(
         &mut self,
         children: &[RenderNode],
@@ -294,6 +371,11 @@ impl Writer<'_> {
     ) -> Result<String, RenderError> {
         let split = hints.left_count.min(children.len());
         let (left, right) = children.split_at(split);
+
+        if self.opts.dialect == MarkdownDialect::MarkdownPlus {
+            return self.render_columns_html(left, right, hints);
+        }
+
         let left = self.render_blocks(left)?;
         let right = self.render_blocks(right)?;
         Ok(match (left.is_empty(), right.is_empty()) {
@@ -304,13 +386,87 @@ impl Writer<'_> {
         })
     }
 
+    /// Renders a two-column layout as a block HTML flex container for
+    /// MarkdownPlus.
+    ///
+    /// The shape mirrors the browser renderer: an outer
+    /// `<div class="columns" style="display:flex;gap:{gap}ch">` with two
+    /// `<div class="column">` children. The left column carries the width CSS
+    /// from [`ColumnsHints::left_width`]; the right column flexes to fill.
+    /// `Layout` is not applied — Markdown ignores layout by contract.
+    ///
+    /// Child blocks are rendered through the active Markdown renderer and
+    /// joined with blank lines, the same as any block sequence. A column with
+    /// multiple blocks therefore contains a blank line inside the raw HTML
+    /// container. This is the accepted parser constraint: a strict CommonMark
+    /// parser may treat that blank line as terminating the raw HTML block, so
+    /// the trailing `</div>` markup can leak into the rendered output. The
+    /// shape is correct for non-strict/MarkdownPlus consumers; single-block
+    /// columns are unaffected.
+    fn render_columns_html(
+        &mut self,
+        left: &[RenderNode],
+        right: &[RenderNode],
+        hints: &crate::tree::ColumnsHints,
+    ) -> Result<String, RenderError> {
+        let container_css = super::shared::columns_container_css(hints, "");
+        let left_css = super::shared::left_column_css(hints.left_width);
+        let right_css = super::shared::right_column_css();
+
+        let left_body = self.render_blocks(left)?;
+        let right_body = self.render_blocks(right)?;
+
+        Ok(format!(
+            concat!(
+                r#"<div class="columns" style="{container}">"#,
+                r#"<div class="column" style="{left_css}">{left}</div>"#,
+                r#"<div class="column" style="{right_css}">{right}</div>"#,
+                "</div>",
+            ),
+            container = container_css,
+            left_css = left_css,
+            left = left_body,
+            right_css = right_css,
+            right = right_body,
+        ))
+    }
+
     /// Renders a list, numbering ordered items from `start`.
+    ///
+    /// A typed list marker policy other than
+    /// [`ListMarkerPolicy::Default`](crate::tree::ListMarkerPolicy::Default)
+    /// cannot be faithfully represented in portable Markdown — Markdown has no
+    /// no-marker list and no connector geometry. The list degrades to native
+    /// CommonMark list syntax: under [`RenderStrictness::Strict`] this is a
+    /// [`RenderError::LossyRejected`]; under [`RenderStrictness::Warn`] a
+    /// lossy diagnostic is recorded; under [`RenderStrictness::Lossy`] it is
+    /// silent.
     fn render_list(
         &mut self,
+        node: &RenderNode,
         ordered: bool,
         start: Option<u64>,
         children: &[RenderNode],
     ) -> Result<String, RenderError> {
+        let policy = node.attrs.list_marker_policy();
+        if policy != crate::tree::ListMarkerPolicy::Default {
+            let message = format!(
+                "list marker policy '{}' has no portable Markdown equivalent; \
+                 degraded to a native list",
+                policy.to_token()
+            );
+            match self.opts.strictness {
+                RenderStrictness::Strict => {
+                    return Err(RenderError::LossyRejected { message });
+                }
+                RenderStrictness::Warn => {
+                    self.diagnostics
+                        .push(Diagnostic::lossy(message, Some(node.span.clone())));
+                }
+                RenderStrictness::Lossy => {}
+            }
+        }
+
         let mut lines = Vec::with_capacity(children.len());
         let first_index = start.unwrap_or(1);
         for (offset, child) in children.iter().enumerate() {
@@ -477,6 +633,34 @@ fn prefix_lines(text: &str, prefix: &str) -> String {
         })
         .collect::<Vec<_>>()
         .join("\n")
+}
+
+/// HTML-escapes text for embedding in inline/block HTML or as plain text.
+fn escape_text(text: &str) -> String {
+    text.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+}
+
+/// Escapes a text node for safe placement inside a GFM table cell.
+///
+/// Literal pipes are escaped as `\|`; literal newlines become `<br>` so the
+/// cell does not split the pipe-delimited row.
+fn escape_table_cell_text(text: &str) -> String {
+    text.replace('|', "\\|")
+        .replace("\r\n", "<br>")
+        .replace('\n', "<br>")
+}
+
+/// Builds the semantic progress-widget HTML emitted by MarkdownPlus.
+///
+/// The shape mirrors the browser renderer's progress HTML: an outer element
+/// with `role="progressbar"` and ARIA attributes, plus `progress-*` classes.
+/// Color slots lower to inline CSS; non-default glyphs and brackets are
+/// preserved in `data-*` attributes. `Layout` is not applied — Markdown
+/// ignores layout by contract — so the outer style carries only color.
+fn progress_html(hints: &crate::tree::ProgressHints, fallback_text: &str) -> String {
+    super::shared::progress_html(hints, fallback_text, "")
 }
 
 /// Indents continuation lines (every line after the first) by `indent`.
@@ -959,6 +1143,541 @@ mod tests {
             b.diagnostics.is_empty(),
             "dropping layout from the Markdown body is by design — no diagnostics"
         );
+    }
+
+    // ── RT-COMPOSE-001: sequence join ──────────────────────────────────────
+
+    #[test]
+    fn root_without_sequence_join_keeps_blank_line_separators() {
+        let root = RenderNode::root(vec![
+            RenderNode::paragraph(vec![RenderNode::text("foo")]),
+            RenderNode::paragraph(vec![RenderNode::text("bar")]),
+        ]);
+        assert_eq!(render(&root).output, "foo\n\nbar");
+    }
+
+    #[test]
+    fn root_with_sequence_join_concatenates_without_separator() {
+        let mut root = RenderNode::root(vec![
+            RenderNode::text("foo"),
+            RenderNode::text("bar"),
+        ]);
+        root.attrs.set_sequence_join(crate::tree::SequenceJoin::None);
+        assert_eq!(render(&root).output, "foobar");
+    }
+
+    #[test]
+    fn nested_sequence_children_keep_own_block_semantics() {
+        // A sequence join is Root-only and does not propagate: a nested
+        // BlockQuote inside a sequence still joins its own blocks normally.
+        let inner = RenderNode::block_quote(vec![
+            RenderNode::paragraph(vec![RenderNode::text("one")]),
+            RenderNode::paragraph(vec![RenderNode::text("two")]),
+        ]);
+        let mut outer = RenderNode::root(vec![RenderNode::text("lead"), inner]);
+        outer.attrs.set_sequence_join(crate::tree::SequenceJoin::None);
+        // The two text/blockquote children concatenate with no separator;
+        // the block quote internally keeps its `>` blank-line spacing.
+        assert_eq!(render(&outer).output, "lead> one\n>\n> two");
+    }
+
+    #[test]
+    fn sequence_join_mixed_inline_and_block_children() {
+        let mut root = RenderNode::root(vec![
+            RenderNode::text("inline"),
+            RenderNode::paragraph(vec![RenderNode::text("para")]),
+        ]);
+        root.attrs.set_sequence_join(crate::tree::SequenceJoin::None);
+        assert_eq!(render(&root).output, "inlinepara");
+    }
+
+    // ── RT-PROGRESS-002: MarkdownPlus progress ─────────────────────────────
+
+    #[test]
+    fn progress_plain_markdown_renders_fallback_text() {
+        let mut para = RenderNode::paragraph(vec![RenderNode::text("Loading 60%")]);
+        para.attrs
+            .set_progress_hints(&crate::tree::ProgressHints { value: 0.6, ..Default::default() });
+        let rendered = render_with(
+            &para,
+            &opts(MarkdownDialect::Markdown, RenderStrictness::Warn),
+        );
+        assert_eq!(rendered.output, "Loading 60%");
+    }
+
+    #[test]
+    fn progress_markdown_plus_emits_progress_html() {
+        let mut para = RenderNode::paragraph(vec![RenderNode::text("Loading 60%")]);
+        para.attrs
+            .set_progress_hints(&crate::tree::ProgressHints { value: 0.6, ..Default::default() });
+        let rendered = render_with(
+            &para,
+            &opts(MarkdownDialect::MarkdownPlus, RenderStrictness::Warn),
+        );
+        let out = rendered.output;
+        assert!(out.contains(r#"role="progressbar""#), "{out}");
+        assert!(out.contains(r#"aria-valuenow="60""#), "{out}");
+        assert!(out.contains(r#"aria-label="Loading""#), "{out}");
+        assert!(out.contains("progress-percentage"), "{out}");
+    }
+
+    #[test]
+    fn progress_markdown_plus_preserves_custom_glyphs_in_data_attrs() {
+        let mut para = RenderNode::paragraph(vec![RenderNode::text("75%")]);
+        para.attrs.set_progress_hints(&crate::tree::ProgressHints {
+            value: 0.75,
+            fill_char: '#',
+            empty_char: '-',
+            ..Default::default()
+        });
+        let rendered = render_with(
+            &para,
+            &opts(MarkdownDialect::MarkdownPlus, RenderStrictness::Warn),
+        );
+        assert!(rendered.output.contains(r##"data-fill-char="#""##));
+        assert!(rendered.output.contains(r#"data-empty-char="-""#));
+    }
+
+    #[test]
+    fn progress_markdown_plus_lowers_color_slots() {
+        use crate::color::{BasicColor, Color};
+        let mut para = RenderNode::paragraph(vec![RenderNode::text("50%")]);
+        para.attrs.set_progress_hints(&crate::tree::ProgressHints {
+            value: 0.5,
+            filled_color: Some(Color::BasicColor(BasicColor::Green)),
+            ..Default::default()
+        });
+        let rendered = render_with(
+            &para,
+            &opts(MarkdownDialect::MarkdownPlus, RenderStrictness::Warn),
+        );
+        assert!(rendered.output.contains("background-color:#"), "{}", rendered.output);
+    }
+
+    #[test]
+    fn plain_paragraph_without_progress_unchanged_in_markdown_plus() {
+        let para = RenderNode::paragraph(vec![RenderNode::text("ordinary")]);
+        let rendered = render_with(
+            &para,
+            &opts(MarkdownDialect::MarkdownPlus, RenderStrictness::Warn),
+        );
+        assert_eq!(rendered.output, "ordinary");
+    }
+
+    // ── RT-TABLE-001: table title ──────────────────────────────────────────
+
+    fn sample_table() -> RenderNode {
+        RenderNode::table(
+            vec![ColumnAlign::Left],
+            vec![
+                RenderNode::table_row(vec![RenderNode::table_cell(vec![RenderNode::text(
+                    "H",
+                )])]),
+                RenderNode::table_row(vec![RenderNode::table_cell(vec![RenderNode::text(
+                    "a",
+                )])]),
+            ],
+        )
+    }
+
+    #[test]
+    fn table_title_emitted_as_plain_text_before_table() {
+        let mut table = sample_table();
+        table.attrs.set_table_title("Results & Notes");
+        let out = render(&table).output;
+        // The title appears, escaped, on its own line before the table.
+        assert!(out.starts_with("Results &amp; Notes\n\n| H |"), "{out}");
+    }
+
+    #[test]
+    fn whitespace_only_table_title_is_ignored() {
+        let mut table = sample_table();
+        table.attrs.set_table_title("   ");
+        let out = render(&table).output;
+        assert!(out.starts_with("| H |"), "{out}");
+    }
+
+    // ── RT-TABLE-002: table-cell escaping ──────────────────────────────────
+
+    fn one_cell_table(cell: RenderNode) -> RenderNode {
+        RenderNode::table(
+            vec![ColumnAlign::None],
+            vec![
+                RenderNode::table_row(vec![RenderNode::table_cell(vec![RenderNode::text(
+                    "H",
+                )])]),
+                RenderNode::table_row(vec![RenderNode::table_cell(vec![cell])]),
+            ],
+        )
+    }
+
+    #[test]
+    fn table_cell_escapes_literal_pipe() {
+        let table = one_cell_table(RenderNode::text("a | b"));
+        let out = render(&table).output;
+        assert!(out.contains(r"a \| b"), "{out}");
+    }
+
+    #[test]
+    fn table_cell_normalizes_literal_newline_to_br() {
+        let table = one_cell_table(RenderNode::text("line1\nline2"));
+        let out = render(&table).output;
+        assert!(out.contains("line1<br>line2"), "{out}");
+    }
+
+    #[test]
+    fn table_cell_soft_break_collapses_to_space() {
+        let table = one_cell_table(RenderNode::span(
+            vec![],
+            vec![
+                RenderNode::text("a"),
+                RenderNode::soft_break(),
+                RenderNode::text("b"),
+            ],
+        ));
+        let out = render(&table).output;
+        assert!(out.contains("| a b |"), "{out}");
+    }
+
+    #[test]
+    fn table_cell_hard_break_becomes_br() {
+        let table = one_cell_table(RenderNode::span(
+            vec![],
+            vec![
+                RenderNode::text("a"),
+                RenderNode::hard_break(),
+                RenderNode::text("b"),
+            ],
+        ));
+        let out = render(&table).output;
+        assert!(out.contains("a<br>b"), "{out}");
+    }
+
+    #[test]
+    fn table_cell_inline_code_escapes_pipe() {
+        let table = one_cell_table(RenderNode::inline_code("a|b"));
+        let out = render(&table).output;
+        assert!(out.contains(r"`a\|b`"), "{out}");
+    }
+
+    #[test]
+    fn text_outside_table_keeps_literal_pipe_and_newline() {
+        let para = RenderNode::paragraph(vec![RenderNode::text("a | b\nc")]);
+        assert_eq!(render(&para).output, "a | b\nc");
+    }
+
+    // ── RT-TWOCOLUMN-002: MarkdownPlus columns ─────────────────────────────
+
+    fn columns_node(hints: crate::tree::ColumnsHints, children: Vec<RenderNode>) -> RenderNode {
+        let mut bq = RenderNode::block_quote(children);
+        bq.attrs.set_columns_hints(&hints);
+        bq
+    }
+
+    #[test]
+    fn columns_plain_markdown_stays_sequential() {
+        let node = columns_node(
+            crate::tree::ColumnsHints { left_count: 1, ..Default::default() },
+            vec![
+                RenderNode::paragraph(vec![RenderNode::text("left")]),
+                RenderNode::paragraph(vec![RenderNode::text("right")]),
+            ],
+        );
+        let rendered = render_with(
+            &node,
+            &opts(MarkdownDialect::Markdown, RenderStrictness::Warn),
+        );
+        assert_eq!(rendered.output, "left\n\nright");
+    }
+
+    #[test]
+    fn columns_markdown_plus_emits_flex_container() {
+        let node = columns_node(
+            crate::tree::ColumnsHints { left_count: 1, gap: 4, ..Default::default() },
+            vec![
+                RenderNode::paragraph(vec![RenderNode::text("left")]),
+                RenderNode::paragraph(vec![RenderNode::text("right")]),
+            ],
+        );
+        let rendered = render_with(
+            &node,
+            &opts(MarkdownDialect::MarkdownPlus, RenderStrictness::Warn),
+        );
+        let out = rendered.output;
+        assert!(out.contains(r#"<div class="columns" style="display:flex;gap:4ch">"#), "{out}");
+        assert!(out.contains(r#"<div class="column""#), "{out}");
+        assert!(out.contains("left"), "{out}");
+        assert!(out.contains("right"), "{out}");
+    }
+
+    #[test]
+    fn columns_markdown_plus_fixed_left_width() {
+        let node = columns_node(
+            crate::tree::ColumnsHints {
+                left_count: 1,
+                left_width: crate::tree::ColumnWidthKind::Fixed(30),
+                ..Default::default()
+            },
+            vec![
+                RenderNode::paragraph(vec![RenderNode::text("L")]),
+                RenderNode::paragraph(vec![RenderNode::text("R")]),
+            ],
+        );
+        let out = render_with(
+            &node,
+            &opts(MarkdownDialect::MarkdownPlus, RenderStrictness::Warn),
+        )
+        .output;
+        assert!(out.contains("flex:0 0 30ch;max-width:30ch"), "{out}");
+        assert!(out.contains("flex:1 1 0"), "{out}");
+    }
+
+    #[test]
+    fn columns_markdown_plus_percent_left_width() {
+        let node = columns_node(
+            crate::tree::ColumnsHints {
+                left_count: 1,
+                left_width: crate::tree::ColumnWidthKind::Percent(0.4),
+                ..Default::default()
+            },
+            vec![
+                RenderNode::paragraph(vec![RenderNode::text("L")]),
+                RenderNode::paragraph(vec![RenderNode::text("R")]),
+            ],
+        );
+        let out = render_with(
+            &node,
+            &opts(MarkdownDialect::MarkdownPlus, RenderStrictness::Warn),
+        )
+        .output;
+        assert!(out.contains("flex:0 0 40%"), "{out}");
+    }
+
+    #[test]
+    fn columns_markdown_plus_empty_columns() {
+        let node = columns_node(
+            crate::tree::ColumnsHints { left_count: 0, ..Default::default() },
+            vec![],
+        );
+        let out = render_with(
+            &node,
+            &opts(MarkdownDialect::MarkdownPlus, RenderStrictness::Warn),
+        )
+        .output;
+        assert!(out.contains(r#"<div class="columns""#), "{out}");
+        assert!(out.contains(r#"<div class="column""#), "{out}");
+    }
+
+    #[test]
+    fn columns_markdown_plus_emphasis_and_prose_content() {
+        let node = columns_node(
+            crate::tree::ColumnsHints { left_count: 1, ..Default::default() },
+            vec![
+                RenderNode::paragraph(vec![
+                    RenderNode::text("plain "),
+                    RenderNode::strong(vec![RenderNode::text("bold")]),
+                ]),
+                RenderNode::paragraph(vec![RenderNode::emphasis(vec![RenderNode::text(
+                    "italic",
+                )])]),
+            ],
+        );
+        let out = render_with(
+            &node,
+            &opts(MarkdownDialect::MarkdownPlus, RenderStrictness::Warn),
+        )
+        .output;
+        assert!(out.contains("**bold**"), "{out}");
+        assert!(out.contains("_italic_"), "{out}");
+    }
+
+    #[test]
+    fn columns_markdown_plus_nested_block_content() {
+        let node = columns_node(
+            crate::tree::ColumnsHints { left_count: 1, ..Default::default() },
+            vec![
+                RenderNode::list(
+                    false,
+                    None,
+                    vec![RenderNode::list_item(
+                        None,
+                        vec![RenderNode::paragraph(vec![RenderNode::text("li")])],
+                    )],
+                ),
+                RenderNode::paragraph(vec![RenderNode::text("R")]),
+            ],
+        );
+        let out = render_with(
+            &node,
+            &opts(MarkdownDialect::MarkdownPlus, RenderStrictness::Warn),
+        )
+        .output;
+        // The container is well-formed: one opening and one closing div trio.
+        assert_eq!(out.matches("<div").count(), 3, "{out}");
+        assert_eq!(out.matches("</div>").count(), 3, "{out}");
+        assert!(out.contains("- li"), "{out}");
+    }
+
+    #[test]
+    fn columns_markdown_plus_image_column_renders_without_malformed_html() {
+        // An image is valid Markdown image syntax embedded in the HTML
+        // container; the column markup stays well-formed under Warn.
+        let warn = columns_node(
+            crate::tree::ColumnsHints { left_count: 1, ..Default::default() },
+            vec![
+                RenderNode::paragraph(vec![RenderNode::image("pic.png", None, "alt")]),
+                RenderNode::paragraph(vec![RenderNode::text("R")]),
+            ],
+        );
+        let out = render_with(
+            &warn,
+            &opts(MarkdownDialect::MarkdownPlus, RenderStrictness::Warn),
+        )
+        .output;
+        assert!(out.contains("![alt](pic.png)"), "{out}");
+        assert_eq!(out.matches("<div").count(), 3, "{out}");
+        assert_eq!(out.matches("</div>").count(), 3, "{out}");
+
+        // Under Strict the same content renders without error — an image is a
+        // portable Markdown construct, so no lossy rejection is triggered.
+        let strict = columns_node(
+            crate::tree::ColumnsHints { left_count: 1, ..Default::default() },
+            vec![
+                RenderNode::paragraph(vec![RenderNode::image("pic.png", None, "alt")]),
+                RenderNode::paragraph(vec![RenderNode::text("R")]),
+            ],
+        );
+        let result = render_markdown_node(
+            &strict,
+            &opts(MarkdownDialect::MarkdownPlus, RenderStrictness::Strict),
+        );
+        assert!(result.is_ok(), "image column must not fail under Strict");
+    }
+
+    #[test]
+    fn columns_markdown_plus_multiple_blocks_per_column_documents_parser_constraint() {
+        // A column with two blocks renders them joined by a blank line, the
+        // same as any block sequence. That blank line lives inside the raw
+        // HTML container. This test documents the accepted parser constraint:
+        // a strict CommonMark parser may treat the blank line as ending the
+        // raw HTML block, so the markup is well-formed at the renderer level
+        // but a downstream strict parser may not nest the second block.
+        let node = columns_node(
+            crate::tree::ColumnsHints { left_count: 2, ..Default::default() },
+            vec![
+                RenderNode::paragraph(vec![RenderNode::text("left-one")]),
+                RenderNode::paragraph(vec![RenderNode::text("left-two")]),
+                RenderNode::paragraph(vec![RenderNode::text("right")]),
+            ],
+        );
+        let out = render_with(
+            &node,
+            &opts(MarkdownDialect::MarkdownPlus, RenderStrictness::Warn),
+        )
+        .output;
+        // The renderer output itself is well-formed: one div trio, both left
+        // blocks present, joined by the standard blank-line block separator.
+        assert_eq!(out.matches("<div").count(), 3, "{out}");
+        assert_eq!(out.matches("</div>").count(), 3, "{out}");
+        assert!(out.contains("left-one\n\nleft-two"), "{out}");
+        assert!(out.contains("right"), "{out}");
+    }
+
+    #[test]
+    fn block_quote_without_columns_unchanged() {
+        let bq = RenderNode::block_quote(vec![RenderNode::paragraph(vec![RenderNode::text(
+            "q",
+        )])]);
+        let rendered = render_with(
+            &bq,
+            &opts(MarkdownDialect::MarkdownPlus, RenderStrictness::Warn),
+        );
+        assert_eq!(rendered.output, "> q");
+    }
+
+    // ── RT-FILESYSTEM-001: list marker policy degradation ──────────────────
+
+    #[test]
+    fn list_marker_policy_degrades_with_diagnostic_under_warn() {
+        let mut list = RenderNode::list(
+            false,
+            None,
+            vec![RenderNode::list_item(
+                None,
+                vec![RenderNode::paragraph(vec![RenderNode::text("a")])],
+            )],
+        );
+        list.attrs
+            .set_list_marker_policy(crate::tree::ListMarkerPolicy::TreeConnectors);
+        let rendered = render_with(
+            &list,
+            &opts(MarkdownDialect::Markdown, RenderStrictness::Warn),
+        );
+        // Degrades to a native list, with a lossy diagnostic.
+        assert_eq!(rendered.output, "- a");
+        assert_eq!(rendered.diagnostics.len(), 1);
+    }
+
+    #[test]
+    fn list_marker_policy_rejected_under_strict() {
+        let mut list = RenderNode::list(
+            false,
+            None,
+            vec![RenderNode::list_item(None, vec![])],
+        );
+        list.attrs
+            .set_list_marker_policy(crate::tree::ListMarkerPolicy::None);
+        let result = render_markdown_node(
+            &list,
+            &opts(MarkdownDialect::Markdown, RenderStrictness::Strict),
+        );
+        assert!(matches!(result, Err(RenderError::LossyRejected { .. })));
+    }
+
+    #[test]
+    fn default_list_marker_policy_renders_unchanged() {
+        let list = RenderNode::list(
+            false,
+            None,
+            vec![RenderNode::list_item(
+                None,
+                vec![RenderNode::paragraph(vec![RenderNode::text("a")])],
+            )],
+        );
+        let rendered = render(&list);
+        assert_eq!(rendered.output, "- a");
+        assert!(rendered.diagnostics.is_empty());
+    }
+
+    // ── RT-TODO-001: Markdown task-list degradation ────────────────────────
+
+    #[test]
+    fn task_hint_item_keeps_gfm_checkbox_in_markdown() {
+        // Completed → [x]; every other state → [ ]. Markdown reads the
+        // ListItem `checked` field, not the task hint.
+        let completed = {
+            let mut item = RenderNode::list_item(
+                Some(true),
+                vec![RenderNode::paragraph(vec![RenderNode::text("done")])],
+            );
+            item.attrs.set_task_hints(&crate::tree::TaskHints {
+                state: crate::tree::TaskState::Completed,
+            });
+            RenderNode::list(false, None, vec![item])
+        };
+        assert_eq!(render(&completed).output, "- [x] done");
+
+        let blocked = {
+            let mut item = RenderNode::list_item(
+                Some(false),
+                vec![RenderNode::paragraph(vec![RenderNode::text("stuck")])],
+            );
+            item.attrs.set_task_hints(&crate::tree::TaskHints {
+                state: crate::tree::TaskState::Blocked,
+            });
+            RenderNode::list(false, None, vec![item])
+        };
+        assert_eq!(render(&blocked).output, "- [ ] stuck");
     }
 
     #[test]

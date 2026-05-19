@@ -153,3 +153,111 @@ The migration pattern is to keep the tree semantically valid as a one-item
 `List` with a `ListItem`, use `checked: Some(false)` for every non-completed
 state, and carry the richer state in typed task hints. CSS classes remain useful
 browser hooks, but renderer behavior should not depend on parsing class names.
+
+## TwoColumn: compatibility hooks can hide missing canonical adoption
+
+`TwoColumn` looked tree-ready because it already had
+`TerminalRenderable::render_tree_node()` and renderer tests for
+`ColumnsHints`. That hook is still a terminal compatibility surface, not the
+canonical `TreeRenderable` trait that `TreeComponent` and
+`BrowserTreeComponent` consume.
+
+The migration pattern is to factor the projection into one private helper,
+make `TreeRenderable::render_tree()` and the compatibility hook delegate to it,
+then flip terminal/browser/Markdown output through the shared renderers. Tests
+should include a serialized-node parity check between the two hooks so the
+compatibility path cannot drift.
+
+## TwoColumn: a structural carrier can be right while target lowering is incomplete
+
+`ColumnsHints` on a `BlockQuote` carrier are enough to keep TwoColumn out of a
+dedicated node kind, and all three renderers already recognize the hint. The
+surprise is that recognition is not the same as preserving the full component
+contract: Browser currently emits class hooks without width/gap CSS, and
+plain Markdown necessarily loses side-by-side layout.
+
+The migration pattern is to keep the tree shape stable, approve renderer
+lowering only where the target can represent the semantics, and explicitly
+document target loss. Browser and MarkdownPlus should preserve width/gap with
+HTML/CSS; portable Markdown should stay sequential.
+
+## SequenceJoin: a Root-only hint reuses the layout namespace and validation gate
+
+`SequenceJoin` looked like it might need a dedicated `NodeKind` variant or a
+new hint namespace, but the smallest faithful change is a typed hint on the
+existing `Root` node stored under the `renderable.layout` namespace. The
+surprise was how cheap the "structurally invalid positions" requirement turned
+out to be: tree validation already rejects a nested `Root`, so the only extra
+rule needed is "sequence-join hint must be on a `Root`." A nested sequence is
+therefore expressible only as the top-level sequence — a test that nests one
+`Root`-with-sequence-join inside another fails validation, and the correct
+"nested sequence" test is a sequence whose children are ordinary blocks that
+keep their own internal spacing.
+
+Browser needed no Root change at all: HTML block elements never receive
+renderer-inserted blank-line separators, so a sequence-join `Root` and a
+document `Root` already render identically. The no-separator contract only
+diverges on the Terminal and Markdown targets, which do insert `\n\n` between
+document blocks.
+
+## Table title: a hint on Table, not a NodeKind field, keeps the JSON shape stable
+
+Adding `title: Option<String>` to `NodeKind::Table` would have changed the
+serialized tree shape for every table. A namespaced `renderable.table.title`
+hint with typed `set_table_title` / `table_title` accessors carries the same
+information with no variant change. The renderers each place it differently —
+`<caption>` before `<thead>` for Browser, a line above the top border for
+Terminal, escaped plain text before the table for Markdown — but they share one
+rule: an empty or whitespace-only title is ignored at render time, not at
+storage time, so a component can set a title unconditionally.
+
+## Table-cell Markdown escaping: a Writer depth counter, not a node-kind check
+
+GFM table cells need pipe/newline escaping, but a node-kind check ("am I inside
+a `TableCell`?") cannot see the ancestor chain during a depth-first fold. The
+working pattern is a `table_cell_depth` counter on the Markdown `Writer`,
+incremented around the `TableCell` arm and decremented after. Every leaf arm
+(`Text`, `InlineCode`, `SoftBreak`, `HardBreak`) then branches on
+`table_cell_depth > 0`. The subtle part is inline code: a literal `|` inside
+`` `code` `` still breaks the pipe-delimited row, so the pipe must be escaped
+*inside* the backticks even though escaping code content normally feels wrong.
+
+## Browser Style lowering: emphasis splits into semantic wrappers and CSS
+
+`Style` browser lowering is not a single CSS string. The spec deliberately
+splits emphasis: bold/italic/strikethrough become semantic elements
+(`<strong>`/`<em>`/`<s>`), while underline/dim/blink and color/background
+become inline CSS. That forced a two-part implementation — `node_attributes`
+gained style CSS declarations, and a separate `wrap_style_emphasis` post-pass
+wraps the finalized fragment in the semantic tags. Splitting `render` into a
+thin wrapper plus `render_kind` was the clean seam: `render_kind` does the
+kind dispatch, `render` applies the emphasis wrappers exactly once per node.
+`UnderlineStyle::css_declaration()` returns human-spaced CSS
+(`text-decoration: underline`); the compact inline-style convention used
+elsewhere needed a `": " → ":"` and `"; " → ";"` normalization pass.
+
+## TreeConnectors: connector geometry is a recursive walk, not a per-item prefix
+
+The terminal `render_list` builds one prefix per item, which is enough for
+bullets and ordinals but not for `├──`/`└──`/`│` geometry. Connector geometry
+needs depth, last-child state, and an accumulated ancestor continuation string
+— information that only a recursive walk over the nested `List`/`ListItem`
+structure carries. The working shape is a dedicated
+`render_tree_connector_list(children, ancestor_prefix)` that splits each
+item's own inline content (rides the branch line) from its nested `List`
+children (recurse with `ancestor_prefix + "│   "` or `+ "    "`). Browser and
+Markdown deliberately do *not* reimplement this: they degrade `TreeConnectors`
+to a native nested list (Browser adds `list-style:none`; Markdown emits a
+strictness-gated lossy diagnostic), because terminal box-drawing text has no
+place in HTML or portable Markdown output.
+
+## Shared lowering helpers prevent two targets from drifting
+
+Progress HTML and two-column flex CSS are emitted by both the Browser renderer
+and the MarkdownPlus path of the Markdown renderer. Rather than copy the HTML
+shape twice, a small `tree::render::shared` module owns `progress_html`,
+`columns_container_css`, `left_column_css`, and `color_to_css`. The browser
+passes its layout CSS into `progress_html`'s `outer_style` parameter; Markdown
+passes an empty string because Markdown ignores layout by contract. The single
+shared definition is what makes "the same semantic progress HTML shape used by
+the browser renderer" a checkable property rather than an aspiration.

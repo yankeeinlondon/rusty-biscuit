@@ -191,7 +191,19 @@ struct Writer<'a> {
 
 impl Writer<'_> {
     /// Renders a single node and its subtree to a [`BrowserFragment<Ready>`].
+    ///
+    /// A node carrying a [`Style`](crate::style::Style) with bold / italic /
+    /// strikethrough emphasis has its rendered fragment wrapped in the
+    /// matching semantic HTML elements. The color, background, underline,
+    /// dim, and blink layers are lowered to inline CSS by [`node_attributes`].
     fn render(&mut self, node: &RenderNode) -> Result<BrowserFragment<Ready>, RenderError> {
+        let fragment = self.render_kind(node)?;
+        Ok(wrap_style_emphasis(&node.attrs, fragment))
+    }
+
+    /// Renders a single node by its [`NodeKind`], without applying the
+    /// semantic emphasis wrappers of a declared [`Style`](crate::style::Style).
+    fn render_kind(&mut self, node: &RenderNode) -> Result<BrowserFragment<Ready>, RenderError> {
         match &node.kind {
             NodeKind::Root { children } => self.block(BlockTag::Div, &node.attrs, children),
             NodeKind::Heading { depth, children } => {
@@ -202,7 +214,16 @@ impl Writer<'_> {
                 heading,
                 children,
             } => self.render_section(node, *depth, heading, children),
-            NodeKind::Paragraph { children } => self.block(BlockTag::P, &node.attrs, children),
+            NodeKind::Paragraph { children } => {
+                // A projected `Progress` widget carries `ProgressHints`. The
+                // browser emits a semantic CSS progress bar before falling
+                // back to normal paragraph rendering.
+                if let Some(hints) = node.attrs.progress_hints() {
+                    self.render_progress(node, &hints, children)
+                } else {
+                    self.block(BlockTag::P, &node.attrs, children)
+                }
+            }
             NodeKind::BlockQuote { children } => {
                 if let Some(hints) = node.attrs.columns_hints() {
                     self.render_columns(node, &hints, children)
@@ -329,9 +350,14 @@ impl Writer<'_> {
     ///
     /// The flat child list is split at [`ColumnsHints::left_count`]; the left
     /// children fill the first column `<div>`, the rest fill the second. The
-    /// classes are CSS-ready hooks — the renderer emits no inline styles.
+    /// `columns` / `column` classes are preserved as external-CSS hooks. The
+    /// container additionally gets inline `display:flex` and `gap` CSS, plus
+    /// any layout CSS from [`NodeAttrs::layout`]. The left column carries the
+    /// width CSS from [`ColumnsHints::left_width`]; the right column flexes to
+    /// fill the remaining width.
     ///
     /// [`ColumnsHints::left_count`]: crate::tree::ColumnsHints::left_count
+    /// [`ColumnsHints::left_width`]: crate::tree::ColumnsHints::left_width
     fn render_columns(
         &mut self,
         node: &RenderNode,
@@ -341,22 +367,91 @@ impl Writer<'_> {
         let split = hints.left_count.min(children.len());
         let (left, right) = children.split_at(split);
 
+        // The node's `id` / `class` / layout / `Style` attributes are lowered
+        // through the shared `node_attributes` helper so user-supplied class
+        // hooks and node `Style` are preserved alongside the literal `columns`
+        // class and the inline `display`/`gap` flex CSS.
         let mut container = BrowserFragment::new().define_as_block_tag(BlockTag::Div, "");
-        container = container.add_attribute(HtmlAttribute::Class(ClassDefinition::new("columns")));
-        for attr in node_attributes(&node.attrs, false) {
-            container = container.add_attribute(attr);
+        let attributes = node_attributes(&node.attrs, false);
+        let mut class_emitted = false;
+        let mut style_emitted = false;
+        for attr in attributes {
+            match attr {
+                // Merge the literal `columns` class ahead of any user classes.
+                HtmlAttribute::Class(class) => {
+                    container = container.add_attribute(HtmlAttribute::Class(
+                        ClassDefinition::new(format!("columns {}", class.as_str())),
+                    ));
+                    class_emitted = true;
+                }
+                // Merge node layout / `Style` CSS into the flex container
+                // `style` without overwriting the `display`/`gap` declarations.
+                HtmlAttribute::Other(key, value) if key == "style" => {
+                    container = container.add_attribute(HtmlAttribute::Other(
+                        "style".into(),
+                        super::shared::columns_container_css(hints, &value),
+                    ));
+                    style_emitted = true;
+                }
+                other => container = container.add_attribute(other),
+            }
+        }
+        if !class_emitted {
+            container =
+                container.add_attribute(HtmlAttribute::Class(ClassDefinition::new("columns")));
+        }
+        if !style_emitted {
+            container = container.add_attribute(HtmlAttribute::Other(
+                "style".into(),
+                super::shared::columns_container_css(hints, ""),
+            ));
         }
 
-        for group in [left, right] {
+        for (group, column_css) in [
+            (left, super::shared::left_column_css(hints.left_width)),
+            (right, super::shared::right_column_css().to_string()),
+        ] {
             let mut column = BrowserFragment::new().define_as_block_tag(BlockTag::Div, "");
-            column =
-                column.add_attribute(HtmlAttribute::Class(ClassDefinition::new("column")));
+            column = column.add_attribute(HtmlAttribute::Class(ClassDefinition::new("column")));
+            column = column.add_attribute(HtmlAttribute::Other("style".into(), column_css));
             for child in group {
                 column = column.add_component(self.render(child)?);
             }
             container = container.add_component(column.finalize());
         }
         Ok(container.finalize())
+    }
+
+    /// Renders a projected `Progress` widget as a semantic CSS progress bar.
+    ///
+    /// The HTML carries `role="progressbar"` plus ARIA value attributes and
+    /// `progress-*` classes. Color slots lower to inline `background-color`;
+    /// non-default glyphs and brackets are preserved as `data-*` attributes.
+    /// Node [`Layout`](crate::layout::Layout) is lowered onto the outer
+    /// element through the existing browser layout lowering.
+    fn render_progress(
+        &mut self,
+        node: &RenderNode,
+        hints: &crate::tree::ProgressHints,
+        children: &[RenderNode],
+    ) -> Result<BrowserFragment<Ready>, RenderError> {
+        // The accessible label is recovered from the paragraph's fallback
+        // text — the same `"{label} {pct}%"` shape the terminal renderer uses.
+        let fallback_text = self.render_each(children)?.iter().fold(
+            String::new(),
+            |mut acc, fragment| {
+                acc.push_str(&fragment.render());
+                acc
+            },
+        );
+        let layout_css = node
+            .attrs
+            .layout()
+            .map(|layout| layout_to_css(&layout))
+            .filter(|css| !css.is_empty())
+            .unwrap_or_default();
+        let html = super::shared::progress_html(hints, &fallback_text, &layout_css);
+        Ok(BrowserFragment::new().define_as_raw_html(html).finalize())
     }
 
     /// Renders a list as `<ol>` (respecting `start`) or `<ul>`.
@@ -369,8 +464,36 @@ impl Writer<'_> {
     ) -> Result<BrowserFragment<Ready>, RenderError> {
         let tag = if ordered { BlockTag::Ol } else { BlockTag::Ul };
         let mut fragment = BrowserFragment::new().define_as_block_tag(tag, "");
-        for attr in node_attributes(&node.attrs, false) {
-            fragment = fragment.add_attribute(attr);
+        // A typed list marker policy degrades to native nested lists in the
+        // browser. `None` and `TreeConnectors` both suppress the default
+        // bullet via `list-style:none`; the browser never emits terminal
+        // box-drawing connector text.
+        let marker_css = match node.attrs.list_marker_policy() {
+            crate::tree::ListMarkerPolicy::Default => None,
+            crate::tree::ListMarkerPolicy::None
+            | crate::tree::ListMarkerPolicy::TreeConnectors => Some("list-style:none"),
+        };
+        let attributes = node_attributes(&node.attrs, false);
+        let has_style = attributes
+            .iter()
+            .any(|a| matches!(a, HtmlAttribute::Other(k, _) if k == "style"));
+        for attr in attributes {
+            // Merge the marker-policy CSS into the existing style attribute
+            // rather than emitting a second, conflicting one.
+            match (&attr, marker_css) {
+                (HtmlAttribute::Other(key, value), Some(extra)) if key == "style" => {
+                    fragment = fragment.add_attribute(HtmlAttribute::Other(
+                        "style".into(),
+                        format!("{value};{extra}"),
+                    ));
+                }
+                _ => fragment = fragment.add_attribute(attr),
+            }
+        }
+        // When no style attribute was emitted, add one for the marker policy.
+        if let Some(extra) = marker_css.filter(|_| !has_style) {
+            fragment =
+                fragment.add_attribute(HtmlAttribute::Other("style".into(), extra.to_string()));
         }
         // `<ol start="N">` controls the first item's number.
         if ordered && let Some(start) = start.filter(|s| *s != 1) {
@@ -455,6 +578,18 @@ impl Writer<'_> {
         let mut table = BrowserFragment::new().define_as_block_tag(BlockTag::Table, "");
         for attr in node_attributes(&node.attrs, false) {
             table = table.add_attribute(attr);
+        }
+
+        // A table title/caption is emitted as a `<caption>` before `<thead>`
+        // and `<tbody>`. An empty or whitespace-only title is ignored.
+        if let Some(title) = node.attrs.table_title()
+            && !title.trim().is_empty()
+        {
+            let caption = BrowserFragment::new()
+                .define_as_block_tag(BlockTag::Caption, "")
+                .add_component(text_fragment(title.trim()))
+                .finalize();
+            table = table.add_component(caption);
         }
 
         let mut rows = children.iter();
@@ -739,10 +874,14 @@ fn is_inline_void_tag(tag: &VoidTag) -> bool {
 
 /// Translates a node's [`NodeAttrs`] into HTML attributes: `id` to the `id`
 /// attribute, `classes` to a `class` attribute, and a stored
-/// [`Layout`](crate::layout::Layout) to an inline `style` attribute.
+/// [`Layout`](crate::layout::Layout) plus the CSS-bearing layers of a stored
+/// [`Style`](crate::style::Style) to an inline `style` attribute.
 ///
 /// Layout is skipped for inline nodes; the validation gate records a warning
 /// when an inline node carries a layout, and the renderer drops it per D5.
+/// `Style` is applied to both block nodes and inline `Span` nodes. The
+/// layout and style declarations share a single `style` attribute and never
+/// overwrite each other.
 fn node_attributes(attrs: &NodeAttrs, inline: bool) -> Vec<HtmlAttribute> {
     let mut out = Vec::new();
     if let Some(id) = &attrs.id {
@@ -753,15 +892,109 @@ fn node_attributes(attrs: &NodeAttrs, inline: bool) -> Vec<HtmlAttribute> {
             attrs.classes.join(" "),
         )));
     }
+
+    let mut decls: Vec<String> = Vec::new();
     if !inline
         && let Some(layout) = attrs.layout()
     {
         let css = layout_to_css(&layout);
         if !css.is_empty() {
-            out.push(HtmlAttribute::Other("style".into(), css));
+            decls.push(css);
         }
     }
+    // `Style` text-appearance/box-color CSS rides on both block and inline
+    // nodes. The emphasis wrappers (`<strong>`, `<em>`, `<s>`) are applied
+    // separately by `wrap_style_emphasis`.
+    if let Some(style) = attrs.style().filter(|s| !s.is_empty()) {
+        let css = style_css_declarations(&style);
+        if !css.is_empty() {
+            decls.push(css);
+        }
+    }
+    if !decls.is_empty() {
+        out.push(HtmlAttribute::Other("style".into(), decls.join(";")));
+    }
     out
+}
+
+/// Lowers the CSS-bearing layers of a [`Style`](crate::style::Style) to an
+/// inline CSS declaration string.
+///
+/// Covers `color`, `background` (as `background-color`), and the
+/// underline / dim / blink emphasis layers. The bold / italic / strikethrough
+/// layers are lowered to semantic wrappers by [`wrap_style_emphasis`] instead.
+/// `border` and `fill` are intentionally ignored until the broader Browser
+/// Style box-painting work defines those semantics.
+fn style_css_declarations(style: &crate::style::Style) -> String {
+    use crate::color::ColorMode;
+    use crate::target::RenderTarget;
+
+    let mut decls: Vec<String> = Vec::new();
+
+    let resolve_color = |tv: &crate::layout::TargetValue<crate::style::PerMode<crate::color::Color>>|
+     -> Option<String> {
+        tv.resolve(RenderTarget::Browser)
+            .map(|per_mode| *per_mode.resolve(ColorMode::Dark))
+            .and_then(super::shared::color_to_css)
+    };
+
+    if let Some(color) = style.color.as_ref().and_then(&resolve_color) {
+        decls.push(format!("color:{color}"));
+    }
+    if let Some(bg) = style.background.as_ref().and_then(&resolve_color) {
+        decls.push(format!("background-color:{bg}"));
+    }
+    if let Some(underline) = style.emphasis.underline {
+        // `css_declaration()` is human-spaced (`prop: value; prop: value`);
+        // normalize to the compact `prop:value;prop:value` form used here.
+        decls.push(
+            underline
+                .css_declaration()
+                .replace("; ", ";")
+                .replace(": ", ":"),
+        );
+    }
+    if style.emphasis.dim {
+        decls.push("opacity:0.6".into());
+    }
+    if style.emphasis.blink {
+        decls.push("text-decoration:blink".into());
+    }
+    decls.join(";")
+}
+
+/// Wraps `fragment` in semantic emphasis tags (`<strong>`, `<em>`, `<s>`) for
+/// a node's declared [`Style`](crate::style::Style), preserving nesting.
+///
+/// The underline / dim / blink layers are applied as CSS by
+/// [`style_css_declarations`]; this function applies only the bold / italic /
+/// strikethrough layers, which map to semantic HTML elements.
+fn wrap_style_emphasis(attrs: &NodeAttrs, fragment: BrowserFragment<Ready>) -> BrowserFragment<Ready> {
+    let Some(style) = attrs.style().filter(|s| !s.is_empty()) else {
+        return fragment;
+    };
+    let emphasis = style.emphasis;
+    let mut wrapped = fragment;
+    // Innermost-first so the rendered nesting is `<strong><em><s>…`.
+    if emphasis.strikethrough {
+        wrapped = BrowserFragment::new()
+            .define_as_block_tag(BlockTag::S, "")
+            .add_component(wrapped)
+            .finalize();
+    }
+    if emphasis.italic {
+        wrapped = BrowserFragment::new()
+            .define_as_block_tag(BlockTag::Em, "")
+            .add_component(wrapped)
+            .finalize();
+    }
+    if emphasis.bold {
+        wrapped = BrowserFragment::new()
+            .define_as_block_tag(BlockTag::Strong, "")
+            .add_component(wrapped)
+            .finalize();
+    }
+    wrapped
 }
 
 /// Lowers a [`Layout`](crate::layout::Layout) to an inline CSS declaration
@@ -1340,6 +1573,440 @@ mod tests {
             .output
             .render();
         assert!(html.contains("1lh"), "vertical Ch margin must lower to lh: {html}");
+    }
+
+    // ── RT-PROGRESS-001: browser progress ──────────────────────────────────
+
+    fn progress_para(text: &str, hints: crate::tree::ProgressHints) -> RenderNode {
+        let mut para = RenderNode::paragraph(vec![RenderNode::text(text)]);
+        para.attrs.set_progress_hints(&hints);
+        para
+    }
+
+    #[test]
+    fn progress_emits_progressbar_role_and_aria() {
+        let node = progress_para(
+            "Loading 60%",
+            crate::tree::ProgressHints { value: 0.6, ..Default::default() },
+        );
+        let out = html(&node);
+        assert!(out.contains(r#"role="progressbar""#), "{out}");
+        assert!(out.contains(r#"aria-valuemin="0""#), "{out}");
+        assert!(out.contains(r#"aria-valuemax="100""#), "{out}");
+        assert!(out.contains(r#"aria-valuenow="60""#), "{out}");
+        assert!(out.contains(r#"aria-label="Loading""#), "{out}");
+    }
+
+    #[test]
+    fn progress_uses_stable_classes_and_clamps_value() {
+        let node = progress_para(
+            "150%",
+            crate::tree::ProgressHints { value: 1.5, ..Default::default() },
+        );
+        let out = html(&node);
+        assert!(out.contains(r#"class="progress""#), "{out}");
+        assert!(out.contains("progress-track"), "{out}");
+        assert!(out.contains("progress-filled"), "{out}");
+        assert!(out.contains("progress-percentage"), "{out}");
+        // The value clamps to 1.0 → 100%.
+        assert!(out.contains("width:100%"), "{out}");
+    }
+
+    #[test]
+    fn progress_track_width_uses_bar_width_in_ch() {
+        let node = progress_para(
+            "25%",
+            crate::tree::ProgressHints { value: 0.25, bar_width: 30, ..Default::default() },
+        );
+        let out = html(&node);
+        assert!(out.contains("width:30ch"), "{out}");
+    }
+
+    #[test]
+    fn progress_lowers_color_slots_to_background_color() {
+        use crate::color::{BasicColor, Color};
+        let node = progress_para(
+            "50%",
+            crate::tree::ProgressHints {
+                value: 0.5,
+                filled_color: Some(Color::BasicColor(BasicColor::Green)),
+                empty_color: Some(Color::BasicColor(BasicColor::Red)),
+                ..Default::default()
+            },
+        );
+        let out = html(&node);
+        // Two distinct background-color declarations.
+        assert_eq!(out.matches("background-color:#").count(), 2, "{out}");
+    }
+
+    #[test]
+    fn progress_preserves_custom_glyphs_in_data_attributes() {
+        let node = progress_para(
+            "10%",
+            crate::tree::ProgressHints {
+                value: 0.1,
+                fill_char: '#',
+                left_bracket: '(',
+                right_bracket: ')',
+                ..Default::default()
+            },
+        );
+        let out = html(&node);
+        assert!(out.contains(r##"data-fill-char="#""##), "{out}");
+        assert!(out.contains(r#"data-left-bracket="(""#), "{out}");
+        assert!(out.contains(r#"data-right-bracket=")""#), "{out}");
+    }
+
+    #[test]
+    fn progress_applies_node_layout_to_outer_element() {
+        use crate::layout::{Layout, Length, Margin};
+        let mut node = progress_para(
+            "40%",
+            crate::tree::ProgressHints { value: 0.4, ..Default::default() },
+        );
+        node.attrs.set_layout(&Layout {
+            margin: Margin::x(Length::ch(3)),
+            ..Layout::default()
+        });
+        let out = html(&node);
+        assert!(out.contains("margin-left:3ch"), "{out}");
+    }
+
+    #[test]
+    fn plain_paragraph_without_progress_unchanged() {
+        let para = RenderNode::paragraph(vec![RenderNode::text("hi")]);
+        assert_eq!(html(&para), "<p>hi</p>");
+    }
+
+    // ── RT-TEXTBLOCK-001: browser Style lowering ───────────────────────────
+
+    fn styled_para(style: crate::style::Style) -> RenderNode {
+        let mut para = RenderNode::paragraph(vec![RenderNode::text("text")]);
+        para.attrs.set_style(&style);
+        para
+    }
+
+    fn universal_color(c: crate::color::Color) -> crate::layout::TargetValue<crate::style::PerMode<crate::color::Color>> {
+        crate::layout::TargetValue::universal(crate::style::PerMode::universal(c))
+    }
+
+    #[test]
+    fn style_foreground_lowers_to_css_color() {
+        use crate::color::{BasicColor, Color};
+        let node = styled_para(crate::style::Style {
+            color: Some(universal_color(Color::BasicColor(BasicColor::Red))),
+            ..Default::default()
+        });
+        let out = html(&node);
+        assert!(out.contains("color:#"), "{out}");
+    }
+
+    #[test]
+    fn style_background_lowers_to_background_color() {
+        use crate::color::{BasicColor, Color};
+        let node = styled_para(crate::style::Style {
+            background: Some(universal_color(Color::BasicColor(BasicColor::Blue))),
+            ..Default::default()
+        });
+        let out = html(&node);
+        assert!(out.contains("background-color:#"), "{out}");
+    }
+
+    #[test]
+    fn style_bold_italic_strikethrough_use_semantic_wrappers() {
+        use crate::style::{Style, TextEmphasis};
+        let node = styled_para(Style {
+            emphasis: TextEmphasis {
+                bold: true,
+                italic: true,
+                strikethrough: true,
+                ..Default::default()
+            },
+            ..Default::default()
+        });
+        let out = html(&node);
+        assert!(out.contains("<strong>"), "{out}");
+        assert!(out.contains("<em>"), "{out}");
+        assert!(out.contains("<s>"), "{out}");
+        // Nesting is preserved (strong outermost).
+        assert!(out.starts_with("<strong><em><s>"), "{out}");
+    }
+
+    #[test]
+    fn style_underline_variants_lower_with_css_declaration() {
+        use crate::style::{Style, TextEmphasis, UnderlineStyle};
+        for variant in [
+            UnderlineStyle::Straight,
+            UnderlineStyle::Double,
+            UnderlineStyle::Curly,
+            UnderlineStyle::Dotted,
+            UnderlineStyle::Dashed,
+        ] {
+            let node = styled_para(Style {
+                emphasis: TextEmphasis {
+                    underline: Some(variant),
+                    ..Default::default()
+                },
+                ..Default::default()
+            });
+            let out = html(&node);
+            assert!(
+                out.contains("text-decoration:underline"),
+                "{variant:?}: {out}"
+            );
+        }
+    }
+
+    #[test]
+    fn style_dim_lowers_to_opacity() {
+        use crate::style::{Style, TextEmphasis};
+        let node = styled_para(Style {
+            emphasis: TextEmphasis { dim: true, ..Default::default() },
+            ..Default::default()
+        });
+        assert!(html(&node).contains("opacity:0.6"));
+    }
+
+    #[test]
+    fn style_blink_lowers_to_text_decoration_blink() {
+        use crate::style::{Style, TextEmphasis};
+        let node = styled_para(Style {
+            emphasis: TextEmphasis { blink: true, ..Default::default() },
+            ..Default::default()
+        });
+        assert!(html(&node).contains("text-decoration:blink"));
+    }
+
+    #[test]
+    fn style_and_layout_share_one_style_attribute() {
+        use crate::color::{BasicColor, Color};
+        use crate::layout::{Layout, Length, Margin};
+        let mut para = RenderNode::paragraph(vec![RenderNode::text("text")]);
+        para.attrs.set_style(&crate::style::Style {
+            color: Some(universal_color(Color::BasicColor(BasicColor::Red))),
+            ..Default::default()
+        });
+        para.attrs.set_layout(&Layout {
+            margin: Margin::x(Length::ch(2)),
+            ..Layout::default()
+        });
+        let out = html(&RenderNode::root(vec![para]));
+        // A single style attribute carrying both layout and style CSS.
+        assert_eq!(out.matches("style=").count(), 1, "{out}");
+        assert!(out.contains("margin-left:2ch"), "{out}");
+        assert!(out.contains("color:#"), "{out}");
+    }
+
+    #[test]
+    fn style_applies_to_inline_span() {
+        use crate::color::{BasicColor, Color};
+        let mut span = RenderNode::span(vec![], vec![RenderNode::text("x")]);
+        span.attrs.set_style(&crate::style::Style {
+            color: Some(universal_color(Color::BasicColor(BasicColor::Red))),
+            ..Default::default()
+        });
+        let out = html(&span);
+        assert!(out.contains("color:#"), "{out}");
+    }
+
+    #[test]
+    fn paragraph_without_style_unchanged() {
+        let para = RenderNode::paragraph(vec![RenderNode::text("plain")]);
+        assert_eq!(html(&para), "<p>plain</p>");
+    }
+
+    // ── RT-TWOCOLUMN-001: browser columns CSS ──────────────────────────────
+
+    fn columns_bq(hints: crate::tree::ColumnsHints, children: Vec<RenderNode>) -> RenderNode {
+        let mut bq = RenderNode::block_quote(children);
+        bq.attrs.set_columns_hints(&hints);
+        bq
+    }
+
+    #[test]
+    fn columns_default_emits_flex_container_and_classes() {
+        let node = columns_bq(
+            crate::tree::ColumnsHints { left_count: 1, ..Default::default() },
+            vec![
+                RenderNode::paragraph(vec![RenderNode::text("L")]),
+                RenderNode::paragraph(vec![RenderNode::text("R")]),
+            ],
+        );
+        let out = html(&node);
+        assert!(out.contains(r#"<div class="columns""#), "{out}");
+        assert!(out.contains("display:flex"), "{out}");
+        assert!(out.contains("gap:3ch"), "{out}");
+        assert_eq!(out.matches(r#"class="column""#).count(), 2, "{out}");
+    }
+
+    #[test]
+    fn columns_fixed_left_width_lowers_to_flex_and_max_width() {
+        let node = columns_bq(
+            crate::tree::ColumnsHints {
+                left_count: 1,
+                left_width: crate::tree::ColumnWidthKind::Fixed(40),
+                ..Default::default()
+            },
+            vec![
+                RenderNode::paragraph(vec![RenderNode::text("L")]),
+                RenderNode::paragraph(vec![RenderNode::text("R")]),
+            ],
+        );
+        let out = html(&node);
+        assert!(out.contains("flex:0 0 40ch;max-width:40ch"), "{out}");
+        assert!(out.contains("flex:1 1 0"), "{out}");
+    }
+
+    #[test]
+    fn columns_percent_left_width_clamps_and_lowers_to_flex() {
+        let node = columns_bq(
+            crate::tree::ColumnsHints {
+                left_count: 1,
+                left_width: crate::tree::ColumnWidthKind::Percent(1.5),
+                ..Default::default()
+            },
+            vec![
+                RenderNode::paragraph(vec![RenderNode::text("L")]),
+                RenderNode::paragraph(vec![RenderNode::text("R")]),
+            ],
+        );
+        let out = html(&node);
+        // The fraction clamps to 1.0 → 100%.
+        assert!(out.contains("flex:0 0 100%"), "{out}");
+    }
+
+    #[test]
+    fn columns_custom_gap_lowers_to_gap_ch() {
+        let node = columns_bq(
+            crate::tree::ColumnsHints { gap: 8, ..Default::default() },
+            vec![],
+        );
+        assert!(html(&node).contains("gap:8ch"));
+    }
+
+    #[test]
+    fn columns_layout_and_column_css_coexist() {
+        use crate::layout::{Layout, Length, Margin};
+        let mut node = columns_bq(
+            crate::tree::ColumnsHints::default(),
+            vec![],
+        );
+        node.attrs.set_layout(&Layout {
+            margin: Margin::x(Length::ch(2)),
+            ..Layout::default()
+        });
+        let out = html(&node);
+        assert!(out.contains("display:flex"), "{out}");
+        assert!(out.contains("margin-left:2ch"), "{out}");
+    }
+
+    #[test]
+    fn columns_empty_left_and_right() {
+        let node = columns_bq(
+            crate::tree::ColumnsHints { left_count: 0, ..Default::default() },
+            vec![],
+        );
+        let out = html(&node);
+        assert_eq!(out.matches(r#"class="column""#).count(), 2, "{out}");
+    }
+
+    #[test]
+    fn columns_preserve_user_supplied_classes() {
+        // A columns node carrying user classes keeps them as external-CSS
+        // hooks, merged after the literal `columns` class.
+        let mut node = columns_bq(
+            crate::tree::ColumnsHints { left_count: 1, ..Default::default() },
+            vec![
+                RenderNode::paragraph(vec![RenderNode::text("L")]),
+                RenderNode::paragraph(vec![RenderNode::text("R")]),
+            ],
+        );
+        node.attrs.classes = vec!["hero".into(), "wide".into()];
+        let out = html(&node);
+        assert!(out.contains(r#"class="columns hero wide""#), "{out}");
+        // The flex CSS still rides on the container alongside the user classes.
+        assert!(out.contains("display:flex"), "{out}");
+    }
+
+    #[test]
+    fn block_quote_without_columns_renders_normally() {
+        let bq =
+            RenderNode::block_quote(vec![RenderNode::paragraph(vec![RenderNode::text("q")])]);
+        assert_eq!(html(&bq), "<blockquote><p>q</p></blockquote>");
+    }
+
+    // ── RT-TABLE-001: browser caption ──────────────────────────────────────
+
+    #[test]
+    fn table_title_emitted_as_caption_before_thead() {
+        let mut table = RenderNode::table(
+            vec![ColumnAlign::Left],
+            vec![
+                RenderNode::table_row(vec![RenderNode::table_cell(vec![RenderNode::text(
+                    "H",
+                )])]),
+            ],
+        );
+        table.attrs.set_table_title("Sales <2024>");
+        let out = html(&table);
+        assert!(
+            out.contains("<table><caption>Sales &lt;2024&gt;</caption><thead>"),
+            "{out}"
+        );
+    }
+
+    #[test]
+    fn whitespace_only_table_title_emits_no_caption() {
+        let mut table = RenderNode::table(
+            vec![ColumnAlign::Left],
+            vec![RenderNode::table_row(vec![RenderNode::table_cell(vec![
+                RenderNode::text("H"),
+            ])])],
+        );
+        table.attrs.set_table_title("  ");
+        assert!(!html(&table).contains("<caption>"));
+    }
+
+    // ── RT-FILESYSTEM-001: browser marker policy ───────────────────────────
+
+    #[test]
+    fn list_marker_policy_none_suppresses_bullet_via_css() {
+        let mut list = RenderNode::list(
+            false,
+            None,
+            vec![RenderNode::list_item(None, vec![RenderNode::text("a")])],
+        );
+        list.attrs
+            .set_list_marker_policy(crate::tree::ListMarkerPolicy::None);
+        let out = html(&list);
+        assert!(out.contains("list-style:none"), "{out}");
+        // No terminal box-drawing connector text.
+        assert!(!out.contains("├"), "{out}");
+    }
+
+    #[test]
+    fn list_marker_policy_tree_connectors_degrades_to_native_list() {
+        let mut list = RenderNode::list(
+            false,
+            None,
+            vec![RenderNode::list_item(None, vec![RenderNode::text("a")])],
+        );
+        list.attrs
+            .set_list_marker_policy(crate::tree::ListMarkerPolicy::TreeConnectors);
+        let out = html(&list);
+        assert!(out.starts_with("<ul"), "{out}");
+        assert!(!out.contains("└──"), "{out}");
+        assert!(out.contains("list-style:none"), "{out}");
+    }
+
+    #[test]
+    fn default_list_marker_policy_emits_plain_list() {
+        let list = RenderNode::list(
+            false,
+            None,
+            vec![RenderNode::list_item(None, vec![RenderNode::text("a")])],
+        );
+        assert_eq!(html(&list), "<ul><li>a</li></ul>");
     }
 
     #[test]

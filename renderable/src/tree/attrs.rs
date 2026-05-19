@@ -41,6 +41,192 @@ impl HintNamespace {
     pub const WIDGET_PROGRESS: HintNamespace = HintNamespace("renderable.widget.progress");
     /// Column widget hints.
     pub const WIDGET_COLUMNS: HintNamespace = HintNamespace("renderable.widget.columns");
+    /// Task-list widget hints.
+    pub const WIDGET_TASK: HintNamespace = HintNamespace("renderable.widget.task");
+}
+
+/// How a sequence of children is joined when rendered.
+///
+/// Normal document [`NodeKind::Root`] rendering treats children as document
+/// blocks and joins them with blank-line separators. A `Compose`-style
+/// sequence preserves ordered children without that document-block spacing.
+///
+/// [`NodeKind::Root`]: crate::tree::NodeKind::Root
+///
+/// ## Examples
+///
+/// ```
+/// use renderable::tree::{NodeAttrs, RenderNode, SequenceJoin};
+///
+/// let mut root = RenderNode::root(vec![RenderNode::text("foo")]);
+/// root.attrs.set_sequence_join(SequenceJoin::None);
+/// assert_eq!(root.attrs.sequence_join(), Some(SequenceJoin::None));
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SequenceJoin {
+    /// Render children in order with no renderer-inserted separator.
+    #[default]
+    None,
+}
+
+impl SequenceJoin {
+    /// Returns the compact string token for this join policy.
+    #[must_use]
+    pub fn to_token(self) -> &'static str {
+        match self {
+            SequenceJoin::None => "none",
+        }
+    }
+
+    /// Parses a compact string token into a join policy.
+    ///
+    /// Returns `None` for an unrecognized token.
+    #[must_use]
+    pub fn from_token(token: &str) -> Option<Self> {
+        match token {
+            "none" => Some(SequenceJoin::None),
+            _ => None,
+        }
+    }
+}
+
+/// How a list presents its item markers.
+///
+/// Normal ordered and unordered lists use the default marker presentation
+/// ([`ListMarkerPolicy::Default`]). A component with a bespoke marker layout —
+/// such as `FileSystem`, whose terminal output uses connector geometry — can
+/// request a different policy without baking presentation into text nodes.
+///
+/// ## Examples
+///
+/// ```
+/// use renderable::tree::ListMarkerPolicy;
+///
+/// assert_eq!(ListMarkerPolicy::default(), ListMarkerPolicy::Default);
+/// assert_eq!(ListMarkerPolicy::TreeConnectors.to_token(), "tree_connectors");
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ListMarkerPolicy {
+    /// The renderer's normal marker presentation (ordinal numbers or bullets).
+    #[default]
+    Default,
+    /// No marker at all — items render without a leading bullet or number.
+    None,
+    /// Terminal box-drawing connector geometry (`├──`, `└──`, `│`).
+    ///
+    /// Renderers that cannot faithfully represent connector geometry degrade
+    /// this to a native nested list or no-marker presentation.
+    TreeConnectors,
+}
+
+impl ListMarkerPolicy {
+    /// Returns the compact string token for this marker policy.
+    #[must_use]
+    pub fn to_token(self) -> &'static str {
+        match self {
+            ListMarkerPolicy::Default => "default",
+            ListMarkerPolicy::None => "none",
+            ListMarkerPolicy::TreeConnectors => "tree_connectors",
+        }
+    }
+
+    /// Parses a compact string token into a marker policy.
+    ///
+    /// Returns `None` for an unrecognized token.
+    #[must_use]
+    pub fn from_token(token: &str) -> Option<Self> {
+        match token {
+            "default" => Some(ListMarkerPolicy::Default),
+            "none" => Some(ListMarkerPolicy::None),
+            "tree_connectors" => Some(ListMarkerPolicy::TreeConnectors),
+            _ => None,
+        }
+    }
+}
+
+/// The state of a task-list item.
+///
+/// A `Todo` component has five public states, but GFM task-list syntax only
+/// distinguishes checked from unchecked. The render tree carries the richer
+/// state in [`TaskHints`] so terminal rendering can present a state-specific
+/// glyph while Markdown degrades to portable `- [x]` / `- [ ]` syntax.
+///
+/// ## Examples
+///
+/// ```
+/// use renderable::tree::TaskState;
+///
+/// assert_eq!(TaskState::default(), TaskState::Open);
+/// assert_eq!(TaskState::Completed.to_token(), "completed");
+/// assert_eq!(TaskState::from_token("blocked"), Some(TaskState::Blocked));
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum TaskState {
+    /// An open, not-yet-started task.
+    #[default]
+    Open,
+    /// A task that is in progress.
+    InProgress,
+    /// A finished task.
+    Completed,
+    /// A task that is blocked.
+    Blocked,
+    /// A task that has been cancelled.
+    Cancelled,
+}
+
+impl TaskState {
+    /// Returns the compact string token for this task state.
+    #[must_use]
+    pub fn to_token(self) -> &'static str {
+        match self {
+            TaskState::Open => "open",
+            TaskState::InProgress => "in_progress",
+            TaskState::Completed => "completed",
+            TaskState::Blocked => "blocked",
+            TaskState::Cancelled => "cancelled",
+        }
+    }
+
+    /// Parses a compact string token into a task state.
+    ///
+    /// Returns `None` for an unrecognized token.
+    #[must_use]
+    pub fn from_token(token: &str) -> Option<Self> {
+        match token {
+            "open" => Some(TaskState::Open),
+            "in_progress" => Some(TaskState::InProgress),
+            "completed" => Some(TaskState::Completed),
+            "blocked" => Some(TaskState::Blocked),
+            "cancelled" => Some(TaskState::Cancelled),
+            _ => None,
+        }
+    }
+}
+
+/// Render hints for a task-list item.
+///
+/// A `Todo` component projects to a one-item [`NodeKind::List`] with a
+/// [`NodeKind::ListItem`] carrying these hints. Renderers that recognize the
+/// hint present a state-specific marker; renderers that do not fall back to
+/// the GFM checkbox derived from the item's `checked` field.
+///
+/// [`NodeKind::List`]: crate::tree::NodeKind::List
+/// [`NodeKind::ListItem`]: crate::tree::NodeKind::ListItem
+///
+/// ## Examples
+///
+/// ```
+/// use renderable::tree::{NodeAttrs, TaskHints, TaskState};
+///
+/// let mut attrs = NodeAttrs::default();
+/// attrs.set_task_hints(&TaskHints { state: TaskState::InProgress });
+/// assert_eq!(attrs.task_hints().unwrap().state, TaskState::InProgress);
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct TaskHints {
+    /// The task's state.
+    pub state: TaskState,
 }
 
 /// Render hints for list nodes.
@@ -1272,6 +1458,176 @@ impl NodeAttrs {
         let value = self.get_hint(HintNamespace::STYLE, "style")?;
         serde_json::from_value(value.clone()).ok()
     }
+
+    /// Stores a [`SequenceJoin`] policy under the [`HintNamespace::LAYOUT`]
+    /// namespace.
+    ///
+    /// A node carrying this hint is rendered as an ordered sequence with no
+    /// renderer-inserted block separators.
+    ///
+    /// ## Examples
+    ///
+    /// ```
+    /// use renderable::tree::{NodeAttrs, SequenceJoin};
+    ///
+    /// let mut attrs = NodeAttrs::default();
+    /// attrs.set_sequence_join(SequenceJoin::None);
+    /// assert_eq!(attrs.sequence_join(), Some(SequenceJoin::None));
+    /// ```
+    pub fn set_sequence_join(&mut self, join: SequenceJoin) {
+        self.set_hint(
+            HintNamespace::LAYOUT,
+            "sequence_join",
+            serde_json::Value::String(join.to_token().to_string()),
+        );
+    }
+
+    /// Reads the [`SequenceJoin`] policy stored on this node, if any.
+    ///
+    /// Returns `None` when no sequence-join hint is present or the stored
+    /// token is unrecognized.
+    ///
+    /// ## Examples
+    ///
+    /// ```
+    /// use renderable::tree::NodeAttrs;
+    ///
+    /// assert!(NodeAttrs::default().sequence_join().is_none());
+    /// ```
+    #[must_use]
+    pub fn sequence_join(&self) -> Option<SequenceJoin> {
+        self.get_hint(HintNamespace::LAYOUT, "sequence_join")
+            .and_then(serde_json::Value::as_str)
+            .and_then(SequenceJoin::from_token)
+    }
+
+    /// Stores a [`ListMarkerPolicy`] under the [`HintNamespace::LIST`]
+    /// namespace.
+    ///
+    /// [`ListMarkerPolicy::Default`] is the implicit policy and is left
+    /// unset so the hint footprint stays minimal.
+    ///
+    /// ## Examples
+    ///
+    /// ```
+    /// use renderable::tree::{ListMarkerPolicy, NodeAttrs};
+    ///
+    /// let mut attrs = NodeAttrs::default();
+    /// attrs.set_list_marker_policy(ListMarkerPolicy::TreeConnectors);
+    /// assert_eq!(attrs.list_marker_policy(), ListMarkerPolicy::TreeConnectors);
+    /// ```
+    pub fn set_list_marker_policy(&mut self, policy: ListMarkerPolicy) {
+        if policy == ListMarkerPolicy::Default {
+            self.remove_hint(HintNamespace::LIST, "marker_policy");
+        } else {
+            self.set_hint(
+                HintNamespace::LIST,
+                "marker_policy",
+                serde_json::Value::String(policy.to_token().to_string()),
+            );
+        }
+    }
+
+    /// Reads the [`ListMarkerPolicy`] stored on this node.
+    ///
+    /// Missing or unrecognized hints fall back to
+    /// [`ListMarkerPolicy::Default`].
+    ///
+    /// ## Examples
+    ///
+    /// ```
+    /// use renderable::tree::{ListMarkerPolicy, NodeAttrs};
+    ///
+    /// assert_eq!(NodeAttrs::default().list_marker_policy(), ListMarkerPolicy::Default);
+    /// ```
+    #[must_use]
+    pub fn list_marker_policy(&self) -> ListMarkerPolicy {
+        self.get_hint(HintNamespace::LIST, "marker_policy")
+            .and_then(serde_json::Value::as_str)
+            .and_then(ListMarkerPolicy::from_token)
+            .unwrap_or_default()
+    }
+
+    /// Stores [`TaskHints`] under the [`HintNamespace::WIDGET_TASK`] namespace.
+    ///
+    /// ## Examples
+    ///
+    /// ```
+    /// use renderable::tree::{NodeAttrs, TaskHints, TaskState};
+    ///
+    /// let mut attrs = NodeAttrs::default();
+    /// attrs.set_task_hints(&TaskHints { state: TaskState::Completed });
+    /// assert_eq!(attrs.task_hints().unwrap().state, TaskState::Completed);
+    /// ```
+    pub fn set_task_hints(&mut self, hints: &TaskHints) {
+        self.set_hint(
+            HintNamespace::WIDGET_TASK,
+            "state",
+            serde_json::Value::String(hints.state.to_token().to_string()),
+        );
+    }
+
+    /// Reads [`TaskHints`] from the [`HintNamespace::WIDGET_TASK`] namespace.
+    ///
+    /// Returns `None` when no `state` hint is present, so renderers can detect
+    /// whether a list item is a projected task-list item.
+    ///
+    /// ## Examples
+    ///
+    /// ```
+    /// use renderable::tree::NodeAttrs;
+    ///
+    /// assert!(NodeAttrs::default().task_hints().is_none());
+    /// ```
+    #[must_use]
+    pub fn task_hints(&self) -> Option<TaskHints> {
+        let state = self
+            .get_hint(HintNamespace::WIDGET_TASK, "state")
+            .and_then(serde_json::Value::as_str)
+            .and_then(TaskState::from_token)?;
+        Some(TaskHints { state })
+    }
+
+    /// Stores a table title/caption under the [`HintNamespace::TABLE`]
+    /// namespace.
+    ///
+    /// A whitespace-only title is stored as-is; renderers are responsible for
+    /// ignoring an empty or whitespace-only title.
+    ///
+    /// ## Examples
+    ///
+    /// ```
+    /// use renderable::tree::NodeAttrs;
+    ///
+    /// let mut attrs = NodeAttrs::default();
+    /// attrs.set_table_title("Quarterly Results");
+    /// assert_eq!(attrs.table_title().as_deref(), Some("Quarterly Results"));
+    /// ```
+    pub fn set_table_title(&mut self, title: impl Into<String>) {
+        self.set_hint(
+            HintNamespace::TABLE,
+            "title",
+            serde_json::Value::String(title.into()),
+        );
+    }
+
+    /// Reads the table title/caption stored on this node, if any.
+    ///
+    /// Returns `None` when no title hint is present.
+    ///
+    /// ## Examples
+    ///
+    /// ```
+    /// use renderable::tree::NodeAttrs;
+    ///
+    /// assert!(NodeAttrs::default().table_title().is_none());
+    /// ```
+    #[must_use]
+    pub fn table_title(&self) -> Option<String> {
+        self.get_hint(HintNamespace::TABLE, "title")
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_string)
+    }
 }
 
 #[cfg(test)]
@@ -1689,6 +2045,87 @@ mod tests {
         attrs.set_table_terminal_hints(&TableTerminalHints::default());
         assert!(attrs.data.is_empty());
         assert_eq!(attrs.table_terminal_hints(), TableTerminalHints::default());
+    }
+
+    #[test]
+    fn sequence_join_round_trip() {
+        let mut attrs = NodeAttrs::default();
+        assert!(attrs.sequence_join().is_none());
+        attrs.set_sequence_join(SequenceJoin::None);
+        assert_eq!(attrs.sequence_join(), Some(SequenceJoin::None));
+        assert_eq!(SequenceJoin::from_token("none"), Some(SequenceJoin::None));
+        assert_eq!(SequenceJoin::from_token("bogus"), None);
+    }
+
+    #[test]
+    fn list_marker_policy_round_trip() {
+        let mut attrs = NodeAttrs::default();
+        // The default policy is left unset so the hint footprint stays minimal.
+        attrs.set_list_marker_policy(ListMarkerPolicy::Default);
+        assert!(attrs.data.is_empty());
+        assert_eq!(attrs.list_marker_policy(), ListMarkerPolicy::Default);
+
+        attrs.set_list_marker_policy(ListMarkerPolicy::None);
+        assert_eq!(attrs.list_marker_policy(), ListMarkerPolicy::None);
+
+        attrs.set_list_marker_policy(ListMarkerPolicy::TreeConnectors);
+        assert_eq!(attrs.list_marker_policy(), ListMarkerPolicy::TreeConnectors);
+
+        // Setting back to Default clears the hint.
+        attrs.set_list_marker_policy(ListMarkerPolicy::Default);
+        assert!(attrs.data.is_empty());
+
+        for p in [
+            ListMarkerPolicy::Default,
+            ListMarkerPolicy::None,
+            ListMarkerPolicy::TreeConnectors,
+        ] {
+            assert_eq!(ListMarkerPolicy::from_token(p.to_token()), Some(p));
+        }
+        assert_eq!(ListMarkerPolicy::from_token("bogus"), None);
+    }
+
+    #[test]
+    fn task_hints_round_trip_all_states() {
+        for state in [
+            TaskState::Open,
+            TaskState::InProgress,
+            TaskState::Completed,
+            TaskState::Blocked,
+            TaskState::Cancelled,
+        ] {
+            let mut attrs = NodeAttrs::default();
+            assert!(attrs.task_hints().is_none());
+            attrs.set_task_hints(&TaskHints { state });
+            assert_eq!(attrs.task_hints().unwrap().state, state);
+            assert_eq!(TaskState::from_token(state.to_token()), Some(state));
+        }
+        assert_eq!(TaskState::from_token("bogus"), None);
+    }
+
+    #[test]
+    fn task_hints_stored_under_widget_task_namespace() {
+        let mut attrs = NodeAttrs::default();
+        attrs.set_task_hints(&TaskHints {
+            state: TaskState::Blocked,
+        });
+        assert_eq!(
+            attrs.data.get("renderable.widget.task.state"),
+            Some(&json!("blocked"))
+        );
+    }
+
+    #[test]
+    fn table_title_round_trip() {
+        let mut attrs = NodeAttrs::default();
+        assert!(attrs.table_title().is_none());
+        attrs.set_table_title("Quarterly Results");
+        assert_eq!(attrs.table_title().as_deref(), Some("Quarterly Results"));
+        // The title is stored under the table hint namespace.
+        assert_eq!(
+            attrs.data.get("renderable.table.title"),
+            Some(&json!("Quarterly Results"))
+        );
     }
 
     #[test]

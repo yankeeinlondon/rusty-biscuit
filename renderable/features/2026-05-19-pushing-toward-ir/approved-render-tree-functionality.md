@@ -256,3 +256,76 @@ Required behavior:
   Markdown degradation for non-completed states, Browser checkbox/class
   preservation, and default task-list rendering unchanged when no task hints are
   present.
+
+## RT-TWOCOLUMN-001: Browser CSS lowering for `ColumnsHints`
+
+**APPROVED**
+
+this feature request has been approved and WILL be included as part of the render-tree implementation BEFORE you are asked to implement this solution. Always refer to the @renderable/docs/tree-rendering.md and @renderable/docs/layout-and-style.md documents as the definitive guide.
+
+Why: the browser renderer already recognizes `ColumnsHints`, but it currently
+emits only CSS-ready classes. That preserves the existence of two columns but
+loses the component's public width and gap contract. Because `ColumnsHints`
+are already target-agnostic tree data, browser lowering belongs in the
+render-tree renderer rather than in a bespoke `TwoColumn` browser
+implementation.
+
+Required behavior:
+
+- In `renderable/src/tree/render/browser.rs`, enhance the existing
+  `render_columns` path for `ColumnsHints`.
+- Keep the existing outer `<div class="columns">` and two
+  `<div class="column">` children.
+- Add inline CSS to the outer container for `display: flex`, `gap: {gap}ch`,
+  and any layout CSS already derived from `NodeAttrs::layout()`. Do not
+  overwrite layout declarations when combining style strings.
+- Lower `ColumnWidthKind::Fixed(n)` on the left column to
+  `flex: 0 0 {n}ch; max-width: {n}ch`.
+- Lower `ColumnWidthKind::Percent(p)` on the left column to
+  `flex: 0 0 {p * 100}%`, clamping `p` to `0.0..=1.0` before formatting.
+- Give the right column `flex: 1 1 0` so it consumes the remaining width.
+- Preserve the existing plain class hooks for external CSS.
+- HTML escaping remains handled by the existing child renderers.
+- Tests must cover default columns, fixed left width, percent left width,
+  custom gap, layout plus column CSS on the same container, empty left/right
+  columns, and normal `BlockQuote` rendering unchanged when no `ColumnsHints`
+  are present.
+
+## RT-TWOCOLUMN-002: MarkdownPlus HTML lowering for `ColumnsHints`
+
+**APPROVED**
+
+this feature request has been approved and WILL be included as part of the render-tree implementation BEFORE you are asked to implement this solution. Always refer to the @renderable/docs/tree-rendering.md and @renderable/docs/layout-and-style.md documents as the definitive guide.
+
+Why: portable Markdown has no side-by-side layout, so the existing sequential
+fallback is correct for `MarkdownDialect::Markdown`. MarkdownPlus is explicitly
+the richer dialect for inline/block HTML, and it should preserve the
+component's two-column layout from the same canonical tree projection instead
+of requiring a bespoke MarkdownPlus renderer.
+
+Required behavior:
+
+- In `renderable/src/tree/render/markdown.rs`, keep
+  `MarkdownDialect::Markdown` behavior unchanged: render left blocks, a blank
+  line when both sides are non-empty, then right blocks.
+- For `MarkdownDialect::MarkdownPlus`, render a block HTML flex container
+  equivalent to the browser shape: an outer
+  `<div class="columns" style="display:flex;gap:{gap}ch">` with two
+  `<div class="column">` children.
+- Lower `ColumnWidthKind::Fixed(n)` and `ColumnWidthKind::Percent(p)` on the
+  left column using the same CSS semantics as the browser renderer.
+- Do not apply `Layout` in either Markdown dialect; this matches the
+  documented Markdown layout contract in `layout-and-style.md`.
+- Render child content through the Markdown renderer for the active dialect
+  before embedding it in the HTML container. Escape text through the existing
+  child rendering paths; do not concatenate raw `Text` node values directly
+  into HTML.
+- If a child render would produce Markdown block syntax that is unsafe inside
+  a raw HTML block for the target Markdown parser, prefer rendering those
+  children through the browser fragment renderer for MarkdownPlus or document
+  the accepted parser constraint in tests. The implementation must not produce
+  malformed HTML.
+- Tests must cover portable Markdown unchanged, MarkdownPlus default columns,
+  fixed width, percent width, custom gap, empty columns, emphasis/prose
+  content, nested block content, and unsupported image columns under Warn and
+  Strict.

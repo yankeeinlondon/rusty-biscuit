@@ -313,6 +313,55 @@ fn check_node(
         ));
     }
 
+    // A sequence-join policy is a Root-only render contract.
+    if node.attrs.sequence_join().is_some() && !matches!(node.kind, NodeKind::Root { .. }) {
+        report.findings.push(error(
+            format!(
+                "sequence-join policy is permitted only on a Root node, found on {}",
+                kind_name(&node.kind),
+            ),
+            span.clone(),
+        ));
+    }
+
+    // A list marker policy is a List-only hint.
+    if node
+        .attrs
+        .get_hint(crate::tree::HintNamespace::LIST, "marker_policy")
+        .is_some()
+        && !matches!(node.kind, NodeKind::List { .. })
+    {
+        report.findings.push(error(
+            format!(
+                "list marker policy is permitted only on a List node, found on {}",
+                kind_name(&node.kind),
+            ),
+            span.clone(),
+        ));
+    }
+
+    // Task hints are a ListItem-only hint.
+    if node.attrs.task_hints().is_some() && !matches!(node.kind, NodeKind::ListItem { .. }) {
+        report.findings.push(error(
+            format!(
+                "task hints are permitted only on a ListItem node, found on {}",
+                kind_name(&node.kind),
+            ),
+            span.clone(),
+        ));
+    }
+
+    // A table title/caption is a Table-only hint.
+    if node.attrs.table_title().is_some() && !matches!(node.kind, NodeKind::Table { .. }) {
+        report.findings.push(error(
+            format!(
+                "table title is permitted only on a Table node, found on {}",
+                kind_name(&node.kind),
+            ),
+            span.clone(),
+        ));
+    }
+
     // Layout attributes are permitted only on block-level nodes.
     if let Some(layout) = node.attrs.layout() {
         if is_inline_kind(&node.kind) {
@@ -628,6 +677,108 @@ mod tests {
                 .any(|f| f.message.contains("invalid layout")),
             "CSS units in universal branch should produce an error finding"
         );
+    }
+
+    #[test]
+    fn sequence_join_on_non_root_is_an_error() {
+        use crate::tree::SequenceJoin;
+        let mut para = RenderNode::paragraph(vec![RenderNode::text("x")]);
+        para.attrs.set_sequence_join(SequenceJoin::None);
+        let root = RenderNode::root(vec![para]);
+        let report = validate(&root, ValidationMode::Full);
+        assert!(report.has_errors());
+        assert!(
+            report
+                .errors()
+                .any(|f| f.message.contains("sequence-join policy is permitted only"))
+        );
+    }
+
+    #[test]
+    fn sequence_join_on_root_is_valid() {
+        use crate::tree::SequenceJoin;
+        let mut root = RenderNode::root(vec![RenderNode::text("foo")]);
+        root.attrs.set_sequence_join(SequenceJoin::None);
+        assert!(ensure_valid(&root).is_ok());
+    }
+
+    #[test]
+    fn list_marker_policy_on_non_list_is_an_error() {
+        use crate::tree::ListMarkerPolicy;
+        let mut para = RenderNode::paragraph(vec![RenderNode::text("x")]);
+        para.attrs.set_list_marker_policy(ListMarkerPolicy::TreeConnectors);
+        let root = RenderNode::root(vec![para]);
+        let report = validate(&root, ValidationMode::Full);
+        assert!(report.has_errors());
+        assert!(
+            report
+                .errors()
+                .any(|f| f.message.contains("list marker policy is permitted only"))
+        );
+    }
+
+    #[test]
+    fn list_marker_policy_on_list_is_valid() {
+        use crate::tree::ListMarkerPolicy;
+        let mut list = RenderNode::list(false, None, vec![RenderNode::list_item(None, vec![])]);
+        list.attrs.set_list_marker_policy(ListMarkerPolicy::None);
+        let root = RenderNode::root(vec![list]);
+        assert!(ensure_valid(&root).is_ok());
+    }
+
+    #[test]
+    fn task_hints_on_non_list_item_is_an_error() {
+        use crate::tree::{TaskHints, TaskState};
+        let mut para = RenderNode::paragraph(vec![RenderNode::text("x")]);
+        para.attrs.set_task_hints(&TaskHints {
+            state: TaskState::Open,
+        });
+        let root = RenderNode::root(vec![para]);
+        let report = validate(&root, ValidationMode::Full);
+        assert!(report.has_errors());
+        assert!(
+            report
+                .errors()
+                .any(|f| f.message.contains("task hints are permitted only"))
+        );
+    }
+
+    #[test]
+    fn task_hints_on_list_item_is_valid() {
+        use crate::tree::{TaskHints, TaskState};
+        let mut item = RenderNode::list_item(Some(false), vec![]);
+        item.attrs.set_task_hints(&TaskHints {
+            state: TaskState::InProgress,
+        });
+        let root = RenderNode::root(vec![RenderNode::list(false, None, vec![item])]);
+        assert!(ensure_valid(&root).is_ok());
+    }
+
+    #[test]
+    fn table_title_on_non_table_is_an_error() {
+        let mut para = RenderNode::paragraph(vec![RenderNode::text("x")]);
+        para.attrs.set_table_title("Bad");
+        let root = RenderNode::root(vec![para]);
+        let report = validate(&root, ValidationMode::Full);
+        assert!(report.has_errors());
+        assert!(
+            report
+                .errors()
+                .any(|f| f.message.contains("table title is permitted only"))
+        );
+    }
+
+    #[test]
+    fn table_title_on_table_is_valid() {
+        let mut table = RenderNode::table(
+            vec![ColumnAlign::Left],
+            vec![RenderNode::table_row(vec![RenderNode::table_cell(vec![
+                RenderNode::text("H"),
+            ])])],
+        );
+        table.attrs.set_table_title("Caption");
+        let root = RenderNode::root(vec![table]);
+        assert!(ensure_valid(&root).is_ok());
     }
 
     #[test]
