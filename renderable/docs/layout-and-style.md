@@ -1,16 +1,17 @@
 # Layout and Style
 
-This document describes the **layout primitive** introduced into the
-`renderable`, `biscuit-terminal`, and `darkmatter` crates: one target-agnostic
-`Layout` type that every block-level component declares and the tree renderers
-apply across Terminal, Browser, and Markdown.
+This document describes the **layout and style primitives** introduced into
+the `renderable`, `biscuit-terminal`, and `darkmatter` crates: two
+target-agnostic, sibling types — `Layout` (where a block sits) and `Style`
+(what a box looks like) — that components declare and the tree renderers apply
+across Terminal, Browser, and Markdown.
 
 It is a status-and-direction document. Like `tree-rendering.md`, it is
-deliberately honest about what is *proven* versus what is only *wired up*, and
-about what the feature's name promises but does not yet deliver — the **style**
-half (Spec B) is not implemented.
+deliberately honest about what is *proven* versus what is only *wired up*.
 
-The feature spec is `renderable/features/2026-04-17-layout-and-style/spec.md`.
+The feature is specified across two documents in
+`renderable/features/2026-04-17-layout-and-style/`: `layout-spec.md` (Spec A —
+`Layout`) and `style-spec.md` (Spec B — `Style`).
 
 ## 1. The problem this replaced
 
@@ -184,20 +185,116 @@ Known gaps and loose ends:
   margins the bespoke path never honored) — those are deliberately left, not
   "fixed" by regressing the tree path.
 
-## 6. Style — the unbuilt half (Spec B)
+## 6. The style primitive — `renderable::style`
 
-This feature is named "layout **and style**." Only layout (Spec A) is built.
+The feature is named "layout **and style**." Both halves are now built.
+`Style` is the appearance sibling of `Layout`: `Layout` decides *where the box
+sits*, `Style` decides *what the box looks like*. A component declares a
+`Style`; the tree renderers apply it. A component never hand-writes ANSI.
 
-Spec B — a `style` frontmatter schema, a `Style` slot system, and appearance
-properties (background, fill, color tiers) — is **not implemented**. `Layout`
-was deliberately scoped to *positioning only* so that `Style` can later be a
-separate, orthogonal primitive riding alongside it on `NodeAttrs`. Appearance
-concerns intentionally left out of `Layout`: page/row background, row fill
-(the removed `RowFill`), and color.
+### The `Style` struct
 
-When Spec B is taken up it should follow the same discipline: one primitive,
-declared once by components, lowered per target, parity-gated against the
-renderer it replaces.
+```rust
+pub struct Style {
+    pub color: Option<TargetValue<PerMode<Color>>>,
+    pub background: Option<TargetValue<PerMode<Color>>>,
+    pub emphasis: TextEmphasis,
+    pub border: Option<Border>,
+    pub fill: Option<Fill>,
+}
+```
+
+- **`color` / `background`** — foreground and box background color.
+- **`emphasis`** — the shared `TextEmphasis` leaf (bold, dim, italic,
+  underline, strikethrough, blink), also reused by `Prose`.
+- **`border`** — `Border { color, weight, line_style, sides, radius }`.
+- **`fill`** — `Fill { color, intensity, band, inset }`: painted-band
+  behavior, deliberately distinct from `background`.
+
+`PerMode<T>` (`Universal` / `Adaptive { light, dark }`) is the light/dark
+adaptation wrapper, composed with `TargetValue` for color-bearing fields as
+`TargetValue<PerMode<Color>>` — `TargetValue` selects per render target,
+`PerMode` then adapts to light/dark within a target.
+
+### Style on the render tree
+
+`Style` rides on `NodeAttrs` under the `renderable.style` hint namespace, with
+`set_style` / `style` accessors mirroring `set_layout` / `layout`. Unlike
+`Layout`, `Style` may attach to block nodes **and** inline `Span` nodes.
+
+Inheritance is **limited**: only the text-appearance fields — `color` and
+`emphasis` — cascade through tree traversal (`Style::inherited_from`). The
+box-painting fields — `background`, `border`, `fill` — never inherit and stay
+explicit on the node that paints them.
+
+### Per-target consumption
+
+**Terminal** (`biscuit-terminal`, `render_tree::style::apply_style`) lowers
+`Style` during the fold, the same step `Layout` is applied:
+
+- `color` / `background` degrade to the terminal's `ColorDepth`
+  (truecolor → 256 → 16) and emit foreground / background SGR; `PerMode`
+  selects the light- or dark-mode value.
+- `emphasis` lowers to SGR; an unsupported underline variant degrades against
+  the terminal's reported underline support.
+- `border` draws box-drawing glyphs — thin / heavy / double weight, solid /
+  dashed / dotted line style, per-side selection, and **rounded corners** via
+  `Border::radius` (any non-zero radius selects the light-arc corner set; a
+  heavy or double border has no arc variant and keeps square corners).
+- `fill` paints a background band: `FillBand::Full` (the available width),
+  `Padded` (the content band), or `Indented` (inset from both edges).
+  `Fill::inset` adds leading unpainted columns and narrows the band.
+
+**Browser** lowering of `Style` to CSS is designed (Spec B D7) but not yet
+wired; the terminal target is implemented first.
+
+**Markdown** ignores `Style` entirely — Markdown body output is byte-identical
+whether or not a node carries a style, with no diagnostic.
+
+### Migrated components
+
+The bespoke appearance fields scattered across components were re-homed onto
+`Style` or typed component style structs (Spec B D5):
+
+- **`BlockQuote`** — `text_color` / `bg_color` / `left_block_color` → a
+  declared `Style` (text color, background, left `Border`).
+- **`Section`** — hard-coded heading SGR → declared emphasis.
+- **`Table`** — alternating-row flags → the typed `TableStyle` with
+  `stripe_bg` / `stripe_text` `Color` slots.
+- **`Progress`** — glyph `char` fields → the typed `ProgressStyle`, which also
+  carries `filled_color` / `empty_color` / `bracket_color` slots.
+
+Old component builders remain as deprecated compatibility shims that write to
+the declared style.
+
+### CLI surface
+
+Three `bt` subcommands render through the terminal tree renderer
+(`render_terminal_node`) and exercise `Style` end-to-end: `bt block` (generic
+`Style` on a text block), `bt progress` (`ProgressStyle` slot colors), and
+`bt table` (`TableStyle` striping). They back the Level-2 real-terminal tests
+in `biscuit-terminal/cli/tests/level2_render_tree_style.rs`.
+
+### Proven vs. wired — honest gaps
+
+Proven: the `Style` types and serde round-trips; terminal lowering of every
+layer — color-depth degradation, light/dark adaptation, emphasis, border
+glyphs (including rounded corners), and fill bands with inset — is unit-tested
+at Level 1 and captured through real terminals (WezTerm / Kitty / tmux) at
+Level 2.
+
+Known gaps:
+
+- **Browser `Style` lowering is unbuilt.** The CSS mapping is designed in
+  Spec B D7 but no browser renderer wiring exists yet — the terminal target is
+  the only implemented `Style` consumer.
+- **`render_border` width mismatch.** The terminal border's top/bottom rule is
+  two columns narrower than the content row — the interior padding spaces are
+  not counted in the rule width. It affects square and rounded borders alike
+  and predates the `Style` migration; tracked for a separate fix.
+- **The `style` frontmatter namespace and `hr_css_variables` retirement** are
+  deferred to a follow-on sub-spec (Spec B D9), as is full darkmatter
+  page-style migration.
 
 ## 7. darkmatter migration
 
@@ -222,6 +319,7 @@ conversion bridges:
 - `renderable/docs/tree-rendering.md` — the render-tree architecture `Layout`
   rides on.
 - `.claude/skills/renderable/layout.md` — the `renderable::layout` API.
+- `.claude/skills/renderable/style.md` — the `renderable::style` API.
 - `.claude/skills/biscuit-terminal/render-tree.md` — terminal layout
   application.
 - `renderable/features/2026-04-17-layout-and-style/` — the feature spec and
