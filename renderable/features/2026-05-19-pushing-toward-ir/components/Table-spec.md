@@ -11,9 +11,10 @@
 | Markdown      | ❌                                                  |
 | Tree          | ✅                                                  |
 
-The Table already has a `render_tree_node()` projection (`table.rs:1484-1574`) that produces a canonical `NodeKind::Table` subtree. The `bt table` CLI already renders through the tree renderer (`cli/src/commands/table.rs:134-141`). However:
+The Table already has a `TerminalRenderable::render_tree_node()` compatibility projection (`biscuit-terminal/lib/src/components/table/table.rs:1484-1574`) that produces a canonical `NodeKind::Table` subtree. The `bt table` CLI already renders through the tree renderer (`biscuit-terminal/cli/src/commands/table.rs:134-141`). However:
 
-- The default `TerminalRenderable::render()` still uses the bespoke path (`table.rs:1429-1453`).
+- The default `TerminalRenderable::render()` still uses the bespoke path (`biscuit-terminal/lib/src/components/table/table.rs:1429-1453`).
+- `TreeRenderable` is not implemented, so `Table` cannot yet use the canonical `TreeComponent` / `BrowserTreeComponent` adapters directly.
 - `BrowserRenderable` and `MarkdownRenderable` are not implemented.
 - The `bt table` CLI has no `--md`, `--html`, or `--md-plus` switches.
 
@@ -24,25 +25,45 @@ The Table already has a `render_tree_node()` projection (`table.rs:1484-1574`) t
 - The **Table** component already has a `render_tree_node()` projection that produces a `NodeKind::Table` with header and data rows, per-column hints (`TableColumnHints`), terminal-specific hints (`TableTerminalHints` for striping and cursor alignment), cell-level hints (`TableCellHints` for kind/raw-value/alignment), and `Layout` on the table node.
 - The tree renderer (`biscuit-terminal/lib/src/render_tree/render.rs:941-1042`) already handles `NodeKind::Table` with a native two-pass renderer (width planning via `Table::plan_widths`, then border/header/data emit). It reconstructs a `Table` purely as a width-planning input and emits borders, header, and data rows itself.
 - What remains is:
+    - Factor the existing projection into a private helper and implement canonical `TreeRenderable` for `Table`; keep `TerminalRenderable::render_tree_node()` as a compatibility hook that delegates to the same helper.
     - Flip `TerminalRenderable::render()` to delegate through the tree path instead of the bespoke `render_content` / `render_with_cursor_positioning` methods.
-    - The IR implementation already drives the `TerminalRenderable` contract — the tree renderer produces the same box-drawing output as the bespoke path.
+    - The IR implementation already drives the `bt table` terminal contract. It must still be parity-gated before replacing the default `TerminalRenderable` path.
     - The IR implementation is already what is used by the `bt` CLI.
 
 #### Flipping Strategy
 
-1. Replace the body of `TerminalRenderable::render()` and `render_optimistic()` with:
+1. Add a private projection helper and canonical `TreeRenderable` implementation:
+   ```rust
+   impl Table {
+       fn to_render_tree_node(&self) -> RenderNode {
+           // Existing render_tree_node projection body.
+       }
+   }
+
+   impl TreeRenderable for Table {
+       fn render_tree(&self) -> RenderNode {
+           self.to_render_tree_node()
+       }
+   }
+
+   impl TerminalRenderable for Table {
+       fn render_tree_node(&self) -> Option<RenderNode> {
+           Some(self.to_render_tree_node())
+       }
+   }
+   ```
+2. Replace the body of `TerminalRenderable::render()` and `render_optimistic()` with:
    ```rust
    fn render(&self, term: &Terminal) -> String {
-       let node = self.render_tree_node().expect("table always projects");
-       let root = RenderNode::root(vec![node]);
+       let root = RenderNode::root(vec![self.render_tree()]);
        let opts = TerminalRenderOptions::new(term, RenderStrictness::Warn);
        render_terminal_node(&root, &opts)
            .map(|r| r.output)
-           .unwrap_or_default()
+           .unwrap_or_else(|e| format!("[render-tree error: {e}]"))
    }
    ```
-2. Keep the old `render_content` and `render_with_cursor_positioning` methods as `#[cfg(test)]`-gated methods so parity tests can still call them directly.
-3. Add a parity test that renders the same `Table` through both paths and asserts semantic equivalence (ANSI-stripped content identical, border structure preserved, stripe colors match). Follow the discipline established by `BlockQuote` in `render_tree_component_parity.rs`.
+3. Keep the old `render_content` and `render_with_cursor_positioning` methods as private methods until parity is complete. Only make them `#[cfg(test)]` after no production call path uses them.
+4. Add a parity test that renders the same `Table` through both paths and asserts semantic equivalence (ANSI-stripped content identical, border structure preserved, stripe colors match). Follow the discipline established by `BlockQuote` in `render_tree_component_parity.rs`.
 
 #### Parity Test Variants
 
@@ -75,6 +96,10 @@ The following test variants will ensure high confidence in the tree renderer and
 
 ##### FR-1: Title Node on Table
 
+**DENIED**
+
+this feature will not be added to the render-tree tree implementation. You should try to still use the render-tree where practical and work around the complexity but if the complexity is too great then you have permission to create a bespoke IR implementation for this component.
+
 **What:** Add a first-class `title` field to the `NodeKind::Table` variant (or a dedicated hint on the table node's attrs). Currently the `render_tree_node()` projection encodes the title only as a side-channel not carried by the tree — the tree renderer's `render_table` method has no awareness of the table title.
 
 **Why:** The tree renderer currently drops the table title because the `NodeKind::Table` variant does not carry it. The bespoke renderer includes it. Without this feature, the tree renderer would produce output missing the title line, creating a parity gap.
@@ -87,24 +112,61 @@ node.attrs.set_table_title(&title); // new hint
 
 **Impact without:** The Table would need to prepend the title manually after tree rendering, which is a minor but inelegant workaround. The title is a core table feature; it should be first-class.
 
+**Review decision:** Denied as an enum change. A table caption is valid semantic metadata for a `Table`, but changing `NodeKind::Table` is unnecessary and would force every renderer and serialized tree snapshot to change for a component-level feature. The narrower `NodeAttrs` hint in FR-2 preserves the information, keeps exhaustive `NodeKind` handling stable, and still gives all renderers a typed hook.
+
 ##### FR-2: Table Title Hint on NodeAttrs
+
+**APPROVED**
+
+this feature request has been approved and WILL be included as part of the render-tree implementation BEFORE you are asked to implement this solution. Always refer to the @renderable/docs/tree-rendering.md and @renderable/docs/layout-and-style.md documents as the definitive guide.
 
 **What:** Add `set_table_title` / `table_title` accessors on `NodeAttrs`, analogous to `set_layout` / `layout`. The terminal renderer would emit the title above the top border when present.
 
-**Why:** This avoids changing the `NodeKind::Table` enum variant while keeping the title information available to all three renderers. The Markdown renderer would emit it as a heading before the table; the Browser renderer would emit it as a `<caption>` element.
+**Why:** This avoids changing the `NodeKind::Table` enum variant while keeping the title information available to all three renderers. The Browser renderer should emit it as a `<caption>` element. The Terminal renderer should emit it as the existing table title line above the top border. The Markdown renderer should emit it as a plain paragraph before the table with a blank line separator; it must not invent a heading because that changes document outline semantics.
 
 **Impact without:** Minor — the Table's `render()` wrapper would prepend the title after tree rendering. Not a blocker.
 
+**Required behavior:**
+
+- Store the value in a typed table-caption/table-title hint on `NodeAttrs`; use a namespaced key consistent with the existing table hint helpers.
+- Validation must reject the hint on non-`Table` nodes.
+- Renderers must ignore an empty or whitespace-only title.
+- Browser output must place the title inside the `<table>` as the first child `<caption>`.
+- Terminal output must place the title above the top border, preserving the existing title behavior as closely as possible under normal and cursor-alignment rendering.
+- Markdown and MarkdownPlus output must place the title as escaped plain text before the table, followed by a blank line. This is a caption degradation, not a heading.
+- Tests must cover the hint accessor round-trip, validation on the wrong node kind, and all three renderer outputs.
+
+##### FR-3: Markdown table cell escaping and hard-break normalization
+
+**APPROVED**
+
+this feature request has been approved and WILL be included as part of the render-tree implementation BEFORE you are asked to implement this solution. Always refer to the @renderable/docs/tree-rendering.md and @renderable/docs/layout-and-style.md documents as the definitive guide.
+
+**What:** Teach the Markdown tree renderer to render table cell content with table-cell-safe escaping instead of using raw child text. At minimum, literal `|` must be escaped, literal newlines and `HardBreak` inside a cell must be normalized to `<br>` for GFM compatibility, and `SoftBreak` must become a single space.
+
+**Why:** The current Markdown renderer renders `NodeKind::Text` as raw text and `render_table_row` joins cells with ` | `. That corrupts tables when a cell contains `|` and breaks GFM table structure when a cell contains a newline. The Table component supports arbitrary text and multi-line cells, so cross-target Markdown cannot be considered complete until this is handled in the render-tree Markdown renderer.
+
+**Impact without:** `Table::render_markdown()` would need a bespoke Markdown serializer or would emit invalid Markdown for common cell content. That would undercut the goal of moving Table to the render tree.
+
+**Required behavior:**
+
+- Apply table-cell escaping only while rendering descendants of `NodeKind::TableCell`; normal paragraph/list text behavior must remain unchanged.
+- Escape literal pipe characters as `\|`.
+- Normalize `SoftBreak` to a single space in table cells.
+- Normalize literal newlines in text nodes and `HardBreak` nodes to `<br>` in table cells for Markdown and MarkdownPlus.
+- Preserve existing inline emphasis/link/code rendering where possible, but make their rendered text safe for a pipe-delimited table cell.
+- Add tests for pipes, multiline text, explicit soft/hard breaks, inline code containing `|`, and ordinary non-table text unchanged.
+
 #### Assessment
 
-The existing tree renderer is a **good fit** for Table. The two-pass architecture (width planning then native emit) mirrors the bespoke renderer's approach. The `TableColumnHints`, `TableCellHints`, and `TableTerminalHints` already carry all the metadata needed for faithful rendering. The only gap is the title, which is a small feature request.
+The existing tree renderer is a **good fit** for Table. The two-pass architecture (width planning then native emit) mirrors the bespoke renderer's approach. The `TableColumnHints`, `TableCellHints`, and `TableTerminalHints` already carry the metadata needed for faithful terminal rendering. The remaining render-tree gaps are title/caption preservation and Markdown-safe cell serialization.
 
 - `will_use_tree_renderer`: **true** — the tree renderer already handles Table in the `bt` CLI and produces correct output. The title can be prepended as a temporary workaround.
-- `will_use_tree_renderer_with_feature`: **true** — with FR-1/FR-2 (title hint), the tree renderer would be feature-complete for Table.
+- `will_use_tree_renderer_with_feature`: **true** — with FR-2 (title hint) and FR-3 (Markdown cell escaping/newline normalization), the tree renderer would be feature-complete enough for Table's terminal, browser, Markdown, and MarkdownPlus targets.
 
 ### Browser IR Implementation
 
-- in this section we will provide a design specification for the **Table** component's implementation of the `BrowserRenderable` trait
+This section specifies the **Table** component's implementation of the `BrowserRenderable` trait.
 
 The Browser tree renderer (`renderable/src/tree/render/browser.rs:448-531`) already handles `NodeKind::Table`:
 
@@ -112,27 +174,28 @@ The Browser tree renderer (`renderable/src/tree/render/browser.rs:448-531`) alre
 - `render_table_row` emits `<tr>` with column alignment as `style="text-align:..."`.
 - `render_table_cell` emits `<th>` (header) or `<td>` (body), carrying column alignment.
 
-The Table's `render_tree_node()` projection already produces the canonical tree. The `BrowserTreeComponent<T>` adapter (`biscuit-terminal/lib/src/render_tree/browser_adapter.rs`) wraps any `TreeRenderable` and provides an infallible `BrowserRenderable` impl by calling `render_tree_node()` then `render_browser_node()`.
+The Table's current `render_tree_node()` projection already produces the right `NodeKind::Table` tree shape, but Table still needs a canonical `TreeRenderable` implementation before it can use the adapter. The `BrowserTreeComponent<T>` adapter (`biscuit-terminal/lib/src/render_tree/browser_adapter.rs`) wraps any `TreeRenderable` and provides an infallible `BrowserRenderable` impl by calling `render_tree()` then `render_browser_node()`.
 
 #### Design
 
-1. **Implement `BrowserRenderable` for Table** using the `BrowserTreeComponent` adapter pattern — or directly by projecting to the tree and rendering through `render_browser_node`.
+1. **Implement `TreeRenderable` for Table** by delegating to the same private projection helper used by `TerminalRenderable::render_tree_node()`.
 
-2. **Styling considerations:**
+2. **Implement `BrowserRenderable` for Table** using the `BrowserTreeComponent` adapter pattern — or directly by projecting to the tree and rendering through `render_browser_node`.
+
+3. **Styling considerations:**
    - The `TableStyle` slot (header/body emphasis and color, stripe colors) rides on the tree as `Style` on individual `TableCell` nodes. The browser renderer does not yet lower `Style` to CSS (see layout-and-style.md gap: "Browser `Style` lowering is unbuilt"). When browser `Style` lowering lands, header/body cell styles and stripe colors will automatically be applied as CSS.
    - In the interim, the browser output will be a semantically correct `<table>` with proper `<thead>`/`<tbody>` structure, column alignment, and escaped cell text — but without the styled appearance the terminal renderer applies.
 
-3. **Title handling:**
+4. **Title handling:**
    - When FR-2 (title hint) is implemented, the browser renderer should emit the title as a `<caption>` element inside the `<table>`.
-   - As an interim workaround, `render_html_fragment()` can prepend the title as a heading or `<caption>` before the table fragment.
+   - Do not prepend an external heading as a workaround; if FR-2 is not available yet, the temporary direct implementation may wrap the rendered table and inject a typed `<caption>` only when it can keep the caption inside the `<table>`.
 
 #### Implementation Approach
 
 ```rust
 impl BrowserRenderable for Table {
     fn render_html_fragment(&self) -> BrowserFragment<Ready> {
-        let node = self.render_tree_node().expect("table always projects");
-        let root = RenderNode::root(vec![node]);
+        let root = RenderNode::root(vec![self.render_tree()]);
         let opts = BrowserRenderOptions::default();
         match render_browser_node(&root, &opts) {
             Ok(rendered) => rendered.output,
@@ -147,9 +210,9 @@ impl BrowserRenderable for Table {
 #### Key Test Variants
 
 1. Simple two-column table — produces `<table><thead><tr><th>...</th></tr></thead><tbody>...</tbody></table>`.
-2. Table with title — includes `<caption>` (or interim heading).
+2. Table with title — includes `<caption>` inside the `<table>`.
 3. Column alignment — right-aligned column gets `style="text-align:right"`.
-4. Empty table — produces empty `<div>` or empty fragment.
+4. Empty table — produces an empty `<table>` fragment or an empty fragment, matching the renderer's table behavior.
 5. Single row (header only) — `<thead>` with no `<tbody>`.
 6. Multi-line cell content — content is joined, `<td>` contains the full text.
 7. Striped table — until browser `Style` lowering lands, striping is absent from HTML output. A future test will verify stripe colors become CSS classes/backgrounds once the feature is built.
@@ -162,7 +225,7 @@ The Markdown tree renderer (`renderable/src/tree/render/markdown.rs:332-357`) al
 - `render_table_row` joins cell content with ` | ` delimiters and wraps in `| ... |`.
 - `delimiter_row` emits `:---` (left), `---:` (right), `:---:` (center), or `---` (none) based on `ColumnAlign`.
 
-The Table's `render_tree_node()` projection already produces the canonical tree. The `MarkdownRenderable` trait requires two methods: `render_markdown()` and `render_markdown_plus()`.
+The Table's current `render_tree_node()` projection already produces the right table tree shape, but Table still needs `TreeRenderable` so the cross-target implementations share the canonical producer. The `MarkdownRenderable` trait requires two methods: `render_markdown()` and `render_markdown_plus()`.
 
 #### Design
 
@@ -173,7 +236,7 @@ The Table's `render_tree_node()` projection already produces the canonical tree.
    - **Cell styling** (header emphasis, body color, stripe colors) is where the two formats diverge:
      - **Markdown**: drops all color/styling. Cells are plain text.
      - **MarkdownPlus**: could wrap styled cells in `<span style="color:...">` or `<td style="...">` to preserve appearance. However, since the Markdown tree renderer currently ignores `Style` entirely (by design — see layout-and-style.md), both outputs will be identical until style-aware Markdown rendering is added.
-   - **Title**: prepended as a Markdown heading (`### Title`) above the table in both formats.
+   - **Title**: rendered through the approved table title hint. Portable Markdown and MarkdownPlus should emit it as escaped plain text before the table with a blank line separator, not as a heading.
    - **Conclusion**: For the Table component, `render_markdown()` and `render_markdown_plus()` will return identical output in the initial implementation. The divergence point (cell colors/styling) will be addressed when Markdown `Style` lowering is built.
 
 #### Implementation Approach
@@ -191,18 +254,10 @@ impl MarkdownRenderable for Table {
 
 impl Table {
     fn render_markdown_target(&self, dialect: MarkdownDialect) -> String {
-        let node = self.render_tree_node().expect("table always projects");
-        let root = RenderNode::root(vec![node]);
+        let root = RenderNode::root(vec![self.render_tree()]);
         let opts = MarkdownRenderOptions { dialect, ..Default::default() };
         match render_markdown_node(&root, &opts) {
-            Ok(rendered) => {
-                let mut output = String::new();
-                if let Some(ref title) = self.title {
-                    output.push_str(&format!("### {title}\n\n"));
-                }
-                output.push_str(&rendered.output);
-                output
-            }
+            Ok(rendered) => rendered.output,
             Err(_) => String::new(),
         }
     }
@@ -212,13 +267,13 @@ impl Table {
 #### Testing Strategy
 
 1. **Simple table** — GFM pipe output with header, delimiter, and data rows.
-2. **Table with title** — title appears as `### Title\n\n` before the table.
+2. **Table with title** — title appears as escaped plain text followed by a blank line before the table.
 3. **Column alignment** — delimiter row uses `:---`, `---:`, `:---:` appropriately.
 4. **Empty table** — returns empty string.
 5. **Numeric cell values** — currency/integer/float values are rendered as their formatted text representation.
-6. **Multi-line cells** — newlines within cells are preserved in the Markdown output (GFM allows inline content; multi-line cells may degrade).
+6. **Multi-line cells** — newlines within cells are normalized to `<br>` so the emitted GFM table remains valid.
 7. **Markdown vs MarkdownPlus parity** — for the Table component, both outputs are identical. A test asserts `render_markdown() == render_markdown_plus()`.
-8. **Escaping** — cell content containing `|` or other Markdown-special characters is properly escaped.
+8. **Escaping** — cell content containing `|`, inline code containing `|`, and text containing literal newlines are table-cell safe; ordinary non-table Markdown output remains unchanged.
 
 ### `bt` CLI
 

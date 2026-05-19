@@ -8,10 +8,10 @@
 | Kind       | Block                                                                              |
 | Location   | `biscuit-terminal/lib/src/components/list.rs`                                      |
 | Terminal   | ✅ bespoke `TerminalRenderable`                                                     |
-| Browser    | ❌                                                                                  |
-| Markdown   | ❌                                                                                  |
-| Tree       | ✅ `render_tree_node()` exists (projects to `NodeKind::List { ordered: false }`)    |
-| IR State   | both avail, old renders                                                            |
+| Browser    | ❌ native impl; possible through `BrowserTreeComponent` after `TreeRenderable`       |
+| Markdown   | ❌ native impl; possible through tree renderer after projection helper is canonical  |
+| Tree       | ⚠️ terminal hook exists; canonical `TreeRenderable` impl is still required          |
+| IR State   | projection exists, but old terminal render path still owns behavior                 |
 | bt CLI     | bespoke (via `bt list`)                                                            |
 
 UnorderedList holds a `Vec<RenderableTerminalContent>` and renders items with a
@@ -20,12 +20,20 @@ alignment, and word-wrap, plus `hanging_indent: bool` (default: true) and an
 optional `indent_children: Option<u32>` that controls the indentation of nested
 block-level children (defaults to the visible width of the bullet).
 
-A tree projection already exists via `render_tree_node()`, producing a
+A terminal compatibility projection already exists via `render_tree_node()`, producing a
 `NodeKind::List { ordered: false, start: None, children }` with each item
 projected into `NodeKind::ListItem` nodes. The projection seeds the component's
 `Layout` onto the root node and records `ListRenderHints` with the bullet,
 hanging-indent flag, and any explicit `indent_children`. However, the default
 `TerminalRenderable::render()` still uses the bespoke `render_content()` path.
+
+Important: `render_tree_node()` is a `TerminalRenderable` compatibility hook,
+not the canonical render-tree producer contract. Cross-target adapters such as
+`TreeComponent<T>` and `BrowserTreeComponent<T>` require
+`renderable::tree::TreeRenderable`. The implementation must therefore factor
+the existing projection into one private helper and make both
+`TerminalRenderable::render_tree_node()` and `TreeRenderable::render_tree()`
+delegate to it.
 
 The terminal tree renderer (`render_tree::render`) already has **native list
 rendering** — it handles `NodeKind::List` and `NodeKind::ListItem` directly,
@@ -38,7 +46,7 @@ without delegating back to the bespoke `UnorderedList` component.
 
 ### Terminal IR Implementation
 
-- The **UnorderedList** component does not currently have a IR based rendering solution
+- The **UnorderedList** component does not currently have an IR-based rendering solution
 - This section will describe what is required to ensure that the **UnorderedList** component:
     - has an IR implementation
     - the IR implementation drives the TerminalRenderable contract
@@ -60,6 +68,42 @@ UnorderedList already has a working tree projection via `render_tree_node()` at
 
 The native terminal tree renderer handles this structure at
 `render_tree::render.rs:762` (`render_list`) and `:809` (`render_list_item`).
+
+Before switching render paths, refactor the projection into a private helper
+that returns a concrete `RenderNode` rather than an `Option<RenderNode>`:
+
+```rust
+impl UnorderedList {
+    fn to_render_tree_node(&self) -> RenderNode {
+        let children = project_list_items(&self.items);
+        let mut node = RenderNode::list(false, None, children);
+        let bullet = if self.bullet == "- " {
+            None
+        } else {
+            Some(self.bullet.clone())
+        };
+        node.attrs.set_list_hints(&ListRenderHints {
+            bullet,
+            hanging_indent: self.hanging_indent,
+            indent_children: self.indent_children,
+        });
+        if self.layout != Layout::default() {
+            node.attrs.set_layout(&self.layout);
+        }
+        node
+    }
+}
+
+impl renderable::tree::TreeRenderable for UnorderedList {
+    fn render_tree(&self) -> RenderNode {
+        self.to_render_tree_node()
+    }
+}
+```
+
+`TerminalRenderable::render_tree_node()` should then become
+`Some(self.to_render_tree_node())`. This avoids drift between the terminal hook
+and the canonical tree producer, and it makes `BrowserTreeComponent` usable.
 
 #### Switching the Default Render Path
 
@@ -87,13 +131,13 @@ impl TerminalRenderable for UnorderedList {
     // ... layout, is_block_level, as_any unchanged ...
 
     fn render_tree_node(&self) -> Option<RenderNode> {
-        // existing projection unchanged
+        Some(self.to_render_tree_node())
     }
 }
 
 impl UnorderedList {
     fn render_via_tree(&self, term: &Terminal) -> String {
-        let node = self.render_tree_node().expect("UnorderedList always projects");
+        let node = self.to_render_tree_node();
         let opts = TerminalRenderOptions::new(term, RenderStrictness::Warn);
         match render_terminal_node(&node, &opts) {
             Ok(rendered) => rendered.output,
@@ -166,27 +210,33 @@ Critical test variants for the IR vs bespoke comparison:
 | Empty UnorderedList                                          | Both paths produce `""`                                                                 |
 | Single string item                                           | Output is `"- Item\n"` in both paths                                                    |
 | Three string items                                           | Bullet prefix preserved on all lines                                                    |
-| Long string item requiring word wrap                         | Hanging indent on continuation lines matches                                            |
+| Long string item requiring word wrap                         | Hanging indent on continuation lines matches or is recorded in `KNOWN_DRIFT`            |
 | Custom bullet (`"→ "`)                                       | Custom bullet used in both paths                                                        |
 | Custom bullet with different visible width (`"*) "`)         | Width computation correct; hanging indent adjusted                                      |
 | Disable hanging indent                                       | Continuation lines have no extra indent                                                 |
-| String item + Prose component item                           | Content survives both paths; Prose styling loss in tree path is documented              |
+| String item + Prose component item                           | Content survives both paths; any Prose styling loss in tree path is documented          |
 | String item + nested UnorderedList (block child)             | Block child is indented by `indent_children`; bullets at correct indent                 |
 | String item + nested OrderedList (block child)               | Block child renders with numbered prefix at correct indent                              |
 | Three-level nesting (UL > UL > UL)                           | Indent compounds: 2 + 2 + 2 spaces; no width overflow                                  |
-| Empty nested UnorderedList                                   | Produces blank line between siblings                                                   |
+| Empty nested UnorderedList                                   | Empty child list behavior is explicit and covered by parity/structural tests            |
 | UnorderedList with left/right margins                        | Layout is applied via `set_layout`; margins narrow the available width                  |
 | UnorderedList with alignment                                 | Block alignment applied as a unit                                                       |
 | UnorderedList with custom `indent_children`                  | Block children indented by specified amount                                             |
 | Mixed inline + block children                                | First child gets prefix, block children get indent, no prefix                           |
 | `From<Vec<RenderableTerminalContent>>` with hanging indent   | Component items receive automatic hanging indent configuration                          |
 | `From<Prose>` conversion                                     | Single Prose item renders correctly as a one-item list                                  |
-| Very narrow terminal width (e.g. 10)                         | No line exceeds available width in either path                                          |
+| Very narrow terminal width (e.g. 10)                         | Content remains present; accepted wrap drift is captured rather than hidden             |
 | Bullet changed after construction (`with_bullet`)            | Bullet and hanging indent updated on existing items                                     |
 
-Parity is asserted on **ANSI-stripped content equality** (not byte-identical
-output), following the BlockQuote parity discipline. Known accepted divergences
-should be documented in a `KNOWN_DRIFT` ledger:
+Parity should use two levels:
+
+1. **Semantic invariants**: ANSI-stripped token presence, item ordering, marker
+   presence, and no dropped children. These are required for every case.
+2. **Exact or facet parity where feasible**: compare stripped output, indent
+   shape, blank-line shape, and line widths. Any accepted difference goes into
+   the existing `KNOWN_DRIFT` ledger in `render_comparison.rs` with a verdict.
+
+Known accepted divergences should be documented in `KNOWN_DRIFT`:
 
 - **Prose styling loss**: Items that are Prose components lose styling in the
   tree path because Prose's `render_tree_node()` returns `None`, triggering
@@ -200,10 +250,21 @@ should be documented in a `KNOWN_DRIFT` ledger:
   term_width - bullet_width` for each item. The tree renderer's width
   management may produce slightly different line breaks in edge cases at very
   narrow widths.
+- **Top/bottom margin behavior**: the tree renderer applies vertical margins
+  from `Layout`; some bespoke layout paths historically ignored them. If the
+  bespoke output is behind the tree behavior, classify it as `BespokeBehind`
+  rather than changing the tree renderer to match the old behavior.
+- **Canonical default bullet vs CLI default bullet**: the component's canonical
+  default bullet is `"- "`, while `bt list` currently defaults to `"• "`.
+  The CLI default is user-facing terminal presentation. Markdown output must
+  still use standard `- ` syntax.
 
 #### Feature Requests for Tree Rendering
 
-No feature requests are needed. The existing tree renderer already has native
+No feature requests are needed, so there are no render-tree implementation
+requests to approve or deny for this component.
+
+The existing tree renderer already has native
 support for unordered lists with:
 
 - Configurable bullet prefix via `ListRenderHints::bullet`
@@ -240,13 +301,14 @@ this is the same as above.
 
 ### Browser IR Implementation
 
-- In this section we will provide a design specification for the **UnorderedList** component's implementation of the BrowserRenderable trait
+- In this section we will provide a design specification for the **UnorderedList** component's browser output through the render-tree adapter
 
 UnorderedList does not currently have a bespoke browser rendering implementation.
 Since Terminal IR is designed first and UnorderedList already projects to a
-`NodeKind::List { ordered: false }` render tree node, the browser path is handled
-entirely by the existing `BrowserTreeComponent<T>` adapter in
-`biscuit-terminal/lib/src/render_tree/browser_adapter.rs`.
+`NodeKind::List { ordered: false }` render tree node, the browser path should be
+handled by the existing `BrowserTreeComponent<T>` adapter in
+`biscuit-terminal/lib/src/render_tree/browser_adapter.rs` **after**
+`UnorderedList` implements `TreeRenderable`.
 
 The browser tree renderer already handles `NodeKind::List` at
 `renderable/src/tree/render/browser.rs:363`:
@@ -269,13 +331,19 @@ let html = fragment.render();
 // Produces: <ul><li>First</li><li>Second</li><li>Third</li></ul>
 ```
 
+Do not implement a separate bespoke browser serializer for `UnorderedList`
+unless the tree adapter proves structurally unable to represent list semantics.
+The adapter's infallible error policy is acceptable for the trait boundary:
+structural errors become a visible fallback fragment, while normal list output
+is rendered through `render_browser_node`.
+
 #### Layout to CSS Mapping
 
 UnorderedList's `Layout` maps to CSS via the existing `layout_to_css` lowering in
 `renderable/src/tree/render/browser.rs`:
 
 - Margins → `margin-*` properties on the `<ul>` wrapper
-- Alignment → `text-align` when `max_width` is present
+- Alignment → `margin-left:auto` / `margin-right:auto` when `max_width` is present
 - `max_width` → `max-width` CSS property
 
 No additional CSS mapping is needed beyond what the tree renderer already provides.
@@ -292,9 +360,10 @@ No additional CSS mapping is needed beyond what the tree renderer already provid
 | Nested OrderedList (block child)             | HTML contains `<ol>` inside an `<li>`                                           |
 | String + Prose item                          | HTML contains text content (Prose renders as fallback text since no tree)        |
 | Layout with margins                          | `<ul>` wrapper has `margin-left` / `margin-right` CSS                           |
-| Layout with alignment and max-width          | `<ul>` wrapper has `text-align` and `max-width` CSS                             |
+| Layout with alignment and max-width          | `<ul>` wrapper has `max-width` and auto margin CSS for block alignment           |
 | Custom `indent_children`                     | No effect on HTML output (indent is a terminal concern)                          |
 | Long text item                               | Content is present in the `<li>`; wrapping is CSS-driven                        |
+| Invalid projected tree via adapter fixture   | Adapter emits visible fallback fragment instead of panicking                     |
 
 ---
 
@@ -326,8 +395,13 @@ The Markdown tree renderer already handles `NodeKind::List` at
 `renderable/src/tree/render/markdown.rs:308`:
 
 - Unordered lists produce `- First\n- Second\n- Third`
-- Continuation lines are indented to align under the marker
+- Existing continuation lines are indented to align under the marker
 - Block children within list items are indented correctly
+
+The Markdown renderer does **not** perform width-based word wrapping. Long item
+text remains a single Markdown line unless the projected child content already
+contains line breaks. This is intentional because Markdown output is structural
+source text, not terminal layout.
 
 UnorderedList projects to `NodeKind::List { ordered: false, start: None }`, so
 the Markdown renderer will produce standard bullet list syntax.
@@ -336,7 +410,7 @@ the Markdown renderer will produce standard bullet list syntax.
 use renderable::tree::render::{render_markdown_node, MarkdownRenderOptions};
 
 let ul = UnorderedList::new(vec!["First", "Second", "Third"]);
-let node = ul.render_tree_node().unwrap();
+let node = ul.to_render_tree_node();
 let rendered = render_markdown_node(&node, &MarkdownRenderOptions::default());
 // Produces: "- First\n- Second\n- Third"
 ```
@@ -349,7 +423,7 @@ calling `render_markdown_node`:
 ```rust
 impl MarkdownRenderable for UnorderedList {
     fn render_markdown(&self) -> String {
-        let node = self.render_tree_node().unwrap();
+        let node = self.to_render_tree_node();
         render_markdown_node(&node, &MarkdownRenderOptions::default())
             .map(|r| r.output)
             .unwrap_or_default()
@@ -369,7 +443,8 @@ impl MarkdownRenderable for UnorderedList {
 | Empty UnorderedList                      | Produces `""`                                                                     |
 | Single item                              | Markdown is `"- Item"`                                                            |
 | Three items                              | Markdown is `"- First\n- Second\n- Third"`                                       |
-| Long item requiring wrap                 | Continuation lines indented to marker width                                       |
+| Long item                                | Remains one Markdown line unless source content contains line breaks              |
+| Item containing explicit newline         | Continuation lines are indented to marker width                                   |
 | Nested UnorderedList                     | Markdown contains indented bullet sublist                                         |
 | Nested OrderedList                       | Markdown contains indented numbered sublist                                       |
 | Mixed string + component items           | Content appears in Markdown; components without tree render as plain text         |
@@ -377,6 +452,7 @@ impl MarkdownRenderable for UnorderedList {
 | Markdown equals MarkdownPlus             | Both methods produce identical output                                             |
 | Item with inline styling (Prose)         | Styled text is degraded to plain text in both Markdown and MarkdownPlus           |
 | Custom bullet                            | Markdown uses standard `- ` regardless of custom bullet                           |
+| Invalid list structure fixture           | Strict rendering fails validation rather than silently dropping content            |
 
 ---
 
@@ -449,6 +525,17 @@ bt list --md-plus "First" "Second" "Third"
 7. **Markdown** (`--md`): Project tree → `render_markdown_node()`.
 8. **MarkdownPlus** (`--md-plus`): Same as `--md` for lists (outputs are identical).
 
+For `--md` and `--md-plus`, layout flags should not change the Markdown body.
+This follows the render-tree contract: Markdown ignores `Layout`. If the CLI
+keeps the broader `bt prose` convention of serializing layout as frontmatter,
+that must be an explicit CLI-layer addition and covered by tests; it should not
+be attributed to the tree Markdown renderer.
+
+For `--html`, layout flags should be visible as inline CSS on the rendered
+`<ul>` through `layout_to_css`; avoid wrapping the fragment in an extra
+layout-only `<div>` unless a browser parity test proves the adapter cannot put
+the style on the list node.
+
 **Example definitions** (unchanged from existing):
 
 ```rust
@@ -473,6 +560,8 @@ projected tree. Both follow the existing adapter patterns.
 ## Acceptance Criteria Summary
 
 - [ ] `UnorderedList`'s `TerminalRenderable::render()` delegates to the tree path by default
+- [ ] `UnorderedList` has one private projection helper used by both tree-related traits
+- [ ] `UnorderedList` implements `renderable::tree::TreeRenderable`
 - [ ] Bespoke render path retained as `render_bespoke()` for parity testing
 - [ ] `BrowserRenderable` achieved via `BrowserTreeComponent<UnorderedList>`
 - [ ] `MarkdownRenderable` implemented on `UnorderedList` via tree renderer's Markdown path

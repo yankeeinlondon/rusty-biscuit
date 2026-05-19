@@ -8,267 +8,307 @@
 
 FileSystem renders directory trees with Unicode box-drawing characters (`├──`, `└──`, `│`), Nerd Font icons, gitignore-aware dimming, optional file metrics (size, tokens, timestamps, permissions), OSC8 hyperlinks, and configurable styling (italic dotfiles, highlight patterns).
 
+## Review Notes
+
+This specification has been reviewed against `@renderable/docs/tree-rendering.md` and `@renderable/docs/layout-and-style.md`.
+
+The important correction is that the render tree must stay **semantic and target-agnostic**. Terminal box-drawing prefixes are presentation, not document structure. The canonical `TreeRenderable` projection should therefore preserve directory/list nesting, entry names, links, metrics, classes, and typed `Style` hints, but it should not bake terminal connector text into normal `Text` nodes except as a temporary terminal-only compatibility path.
+
+Semantic classes such as `fs-dir` and `fs-ignored` are still useful as browser CSS hooks and debugging metadata, but generic renderers must not be required to understand arbitrary `fs-*` classes. Terminal styling should be expressed through typed `Style` attributes, and Markdown/MarkdownPlus behavior should be implemented by `FileSystem`'s Markdown adapter instead of by changing the generic Markdown renderer to special-case filesystem classes.
+
 ## Design Steps
 
 ### Terminal IR Implementation
 
 - The **FileSystem** component does not currently have an IR-based rendering solution.
-- This section will describe what is required to ensure that the **FileSystem** component:
-    - has an IR implementation
-    - the IR implementation drives the TerminalRenderable contract
-    - the IR implementation is what is used by the bt CLI (note: **FileSystem** does already have a `bt dir` subcommand but it uses bespoke rendering — the bt CLI section below will cover the migration)
+- This section describes what is required to ensure that the **FileSystem** component:
+    - has a `TreeRenderable` implementation
+    - can eventually drive the `TerminalRenderable` contract through the tree renderer
+    - can keep `bt dir` behavior stable while the tree path is parity-gated
 
 #### Tree Projection Design
 
-FileSystem is a structurally unique component: it produces a **visual tree** with box-drawing connectors that have no direct analogue in the `NodeKind` vocabulary. The existing `NodeKind` variants — `List`, `ListItem`, `Code`, `BlockQuote`, `Table`, etc. — describe document-structural semantics, not visual-tree layout.
+FileSystem is a structurally unique component: it produces a **visual tree** with box-drawing connectors that have no direct analogue in the current `NodeKind` vocabulary. The existing `NodeKind` variants (`List`, `ListItem`, `Paragraph`, `Span`, `Link`, `Text`, etc.) describe document structure, not terminal connector geometry.
 
-The recommended projection maps the FileSystem's internal `TreeNode` tree into the render-tree as follows:
+The canonical projection maps the FileSystem's internal `TreeNode` tree into the render tree as follows:
 
-**Root node:** `NodeKind::Root` — wraps the entire output.
+**Root node:** `NodeKind::Root` wraps the entire output. The root node receives `FileSystem`'s block `Layout` through `tree_layout()`.
 
-**Root header line:** When `show_root` is true, the root directory name (e.g., ` my-project`) is projected as a `NodeKind::Paragraph` containing `Text` with the directory name. The terminal tree renderer must be able to apply bold-blue styling to this line; this is expressed through a `Style` on the paragraph node (bold emphasis, blue color).
+**Root header line:** When `show_root` is true, the root directory is projected as a `Paragraph`. The paragraph contains an optional icon `Span`, followed by the root directory name as `Text` or `Link`. It carries typed `Style` equivalent to the bespoke root styling: bold emphasis plus blue foreground. It also carries classes such as `fs-root` and `fs-dir` for browser CSS hooks.
 
-**Each tree entry:** Each `TreeNode` (file or directory) is projected as a `NodeKind::ListItem` within an unordered `NodeKind::List`. The list is purely structural — it provides nesting semantics that the terminal tree renderer can walk. The visual prefix (`├── `, `└── `, `│   `, `    `) and icons are terminal-renderer concerns, not tree-node concerns.
+**Entry list:** Children are projected into an unordered `NodeKind::List`. The list remains structural. It must not contain pre-rendered terminal bullets unless the implementation is using the temporary compatibility mode described below.
 
-**Node payload per entry:** Each `ListItem` contains a `Paragraph` with:
-1. An inline `Image` node carrying the resolved icon character (or a `Text` for the icon glyph) — alternatively, the icon can be a `Text` node with a semantic class (e.g., `class="fs-icon"`) so the terminal renderer substitutes the appropriate Nerd Font or Unicode icon based on capability.
-2. A `Text` node for the entry name.
-3. If file metrics are present, a `Span` with class `fs-metrics` containing the formatted metrics text.
-4. If file links are enabled, the filename is wrapped in a `Link` node with the file's absolute path as the URL.
+**Each tree entry:** Each `TreeNode` is projected as a `NodeKind::ListItem`. The item receives semantic classes:
 
-**Semantic classes:** Each `ListItem` receives semantic classes to communicate entry metadata:
 - `fs-dir` or `fs-file` — entry type
-- `fs-ignored` — gitignored entry (enables dim styling)
-- `fs-symlink` — symlink entry (enables cyan styling)
-- `fs-error` — permission-error directory (enables red styling)
-- `fs-dot` — dotfile/dotdir (enables italic when configured)
+- `fs-ignored` — gitignored entry
+- `fs-symlink` — symlink entry
+- `fs-error` — permission-error directory
+- `fs-depth-limit` — directory stopped at `max_depth`
+- `fs-dot` — dotfile or dotdir when dot styling is configured
 - `fs-highlight-red` / `fs-highlight-green` — pattern-based highlighting
 
-These classes are the bridge between the component's rich styling logic and the terminal tree renderer's `Style` application. The terminal tree renderer, when encountering a `ListItem` with these classes, applies the corresponding ANSI styling exactly as the bespoke renderer does today.
+The same visual information must also be represented as a typed `Style` on the entry's paragraph or inline spans. Do not rely on the terminal renderer to recognize `fs-*` classes. The current generic terminal renderer only has a small documented semantic class vocabulary (`mark`, `dim`, `sup`, `sub`) and otherwise consumes `Style`.
 
-**Directory nesting:** A directory `ListItem` contains its children as a nested `List`. This naturally produces the indentation semantics.
+**Node payload per entry:** Each `ListItem` contains a `Paragraph` with:
 
-**Metrics:** Metrics are attached as additional `Text` content within the `ListItem`'s `Paragraph`, formatted identically to the bespoke renderer's output. The metrics formatting (dim labels, highlight thresholds) uses the same functions and is computed during tree projection.
+1. An icon `Span` with class `fs-icon` and a target-appropriate glyph stored as text. The terminal projection may choose Nerd Font or Unicode based on the available terminal context only when rendering through a terminal adapter; the canonical tree should prefer stable Unicode fallback or semantic classes unless terminal context is explicitly available.
+2. The entry name as `Text`, or as a `Link` wrapping the entry name when file links are enabled.
+3. A metrics `Span` with class `fs-metrics` when metrics are present and configured for the entry.
+4. Optional marker spans for symlink, error, or depth-limit annotations when needed by Markdown/MarkdownPlus.
+
+**Directory nesting:** A directory `ListItem` contains its children as a nested `List`. This preserves the semantic tree and lets browser and Markdown renderers produce native nested-list output.
+
+**Metrics:** Metrics are computed during tree projection with the same formatting rules as the bespoke renderer. Styling within metrics must use typed `Style` on `Span` nodes. Plain Markdown will drop that styling; MarkdownPlus can preserve classes or inline HTML via the component's Markdown adapter.
+
+#### Terminal Connector Strategy
+
+The terminal output needs box-drawing connectors. The renderer can produce them cleanly only if the render tree supports a typed list marker policy. Until that feature is implemented, do **not** flip `FileSystem::render(&Terminal)` to the generic tree renderer.
+
+Accepted migration sequence:
+
+1. Add `TreeRenderable` for FileSystem using structural `List`/`ListItem` nodes and typed `Style`.
+2. Keep the existing bespoke `TerminalRenderable` implementation as the production path.
+3. Add tree-rendered terminal tests behind an explicit helper/adapter only after the approved list marker policy exists.
+4. Flip the production terminal path only after parity tests prove connector geometry, icons, truncation, OSC8 links, metrics, ANSI styling, and layout behavior match the bespoke renderer on semantic invariants.
+
+Temporary compatibility mode is allowed only for tests or transitional adapters: the component may render one preformatted line per entry into `Text` nodes when comparing terminal behavior before the list marker policy lands. That mode must be marked as lossy/terminal-specific and must not become the canonical projection used for Markdown or Browser.
 
 #### Layout and Style Mapping
 
 **Layout:**
-- `FileSystem` already owns a `Layout` with margins, alignment, and word-wrap. This maps directly to `tree_layout()` on the root `RenderNode`. Tree connectors (`├──`, `│`) are never wrapped, so `word_wrap` should be `None` at the tree level — consistent with the bespoke renderer which does not apply word-wrap to tree lines.
-- `max_width` is not used by the terminal renderer (per layout-and-style.md §4) and can be left as `None`.
+
+- `FileSystem` already owns a `Layout` with margins, alignment, and word-wrap. This maps directly to `tree_layout()` on the root `RenderNode`.
+- Tree connectors must never be wrapped. The FileSystem tree projection should force `WordWrap::None` for the root tree block, matching the bespoke renderer's connector-preserving behavior.
+- `max_width` is currently not applied by the terminal renderer, per `layout-and-style.md`. Do not rely on it for terminal truncation. Name truncation remains a FileSystem responsibility because it depends on connector and icon visible widths.
 
 **Style:**
-- The bespoke renderer applies per-entry styling (bold blue for dirs, cyan for symlinks, red for errors, dim for ignored, italic for dotfiles, color for highlights). These map to per-`ListItem` `Style` attributes in the IR, keyed by the semantic classes described above.
-- The root header line carries a `Style` with bold emphasis and blue color.
-- Metrics labels use dim emphasis; highlight-threshold values use bold yellow.
+
+- Entry styling must be lowered into typed `Style` attributes, not only semantic classes.
+- Current styling precedence must be preserved:
+    - highlight red / highlight green have highest priority
+    - error directories are red
+    - ignored entries are dim when `dim_gitignore` is true
+    - configured dotfiles/dotdirs are italic
+    - directories are bold blue unless overridden by error/highlight behavior
+    - symlinks are cyan
+- The root header line carries bold blue `Style`.
+- Metrics labels use dim emphasis; threshold-highlighted metric values use bold yellow.
+- Browser CSS classes are additive hooks and should not be treated as the source of terminal truth.
 
 #### Feature Requests for Tree Rendering
 
-##### Feature 1: Custom List Bullet/Prefix Rendering
+##### Feature 1: Custom List Marker Policy
 
-**What it looks like:** A new hint on `NodeKind::List` or `ListItem` that tells the terminal renderer "do not emit default bullet/number prefixes for this list; the component will supply its own line prefixes." This could be a `NodeAttrs` hint like `list-hints.render-bullets: false` or a dedicated `ListRenderHints` field.
+**APPROVED**
 
-```rust
-// Usage in FileSystem tree projection:
-let mut list_node = RenderNode::list(false, None, children);
-list_node.attrs.set_hint(
-    HintNamespace::List,
-    "render-bullets",
-    serde_json::Value::Bool(false),
-);
-```
+this feature request has been approved and WILL be included as part of the render-tree implementation BEFORE you are asked to implement this solution. Always refer to the @renderable/docs/tree-rendering.md and @renderable/docs/layout-and-style.md documents as the definitive guide.
 
-**Why FileSystem needs it:** The box-drawing tree connectors (`├── `, `└── `, `│   `, `    `) are the visual heart of the FileSystem component. The default terminal list renderer emits `- ` or `1. ` prefixes. Without this feature, the tree renderer would need to be told to suppress its own prefix so the FileSystem can inject box-drawing characters instead — but there is no existing mechanism for this.
+**Improved request:** Add a typed, target-agnostic list marker policy to the render tree. The smallest acceptable design is a typed `ListMarkerPolicy` hint on `NodeKind::List` with at least:
 
-**Without this feature:** The FileSystem component would need to embed the full visual prefix (`├── ` + icon) directly into each `Text` node. This defeats the purpose of the tree renderer's list handling and essentially makes the tree renderer a passthrough. The component would still use `List`/`ListItem` for nesting but each item's text would already contain the fully-formatted line — a degenerate case where the IR adds overhead without abstraction value.
+- `Default` — current ordered/unordered renderer behavior
+- `None` — render list item bodies without renderer-inserted bullets or numbers
+- `TreeConnectors` — terminal renderer may render filesystem-style connector prefixes from nested `List`/`ListItem` structure; Browser and Markdown may degrade to native nested lists or no-marker lists according to strictness and dialect
+
+The policy must be represented through a typed helper instead of ad hoc JSON string reads at call sites. The normal list behavior must remain unchanged when no policy is present.
+
+**Why this is approved:** FileSystem's terminal contract depends on connector geometry that is neither a normal Markdown bullet nor an ordered-list marker. Suppressing or replacing the default marker is a general render-tree concern, not a FileSystem-only hack: it applies to any component that has semantic list nesting but needs target-specific marker presentation. This keeps connector rendering in the renderer where width, layout, and terminal capability information are available.
+
+Required behavior:
+
+- Validation must reject invalid marker policies on non-list nodes.
+- Terminal rendering must preserve child order and infer connector geometry from nested list structure.
+- Markdown rendering must keep valid Markdown output. In plain Markdown, `TreeConnectors` may degrade to normal nested `- ` lists with a diagnostic in `Warn` mode; `None` may render item bodies without bullets only when doing so does not create invalid block structure.
+- MarkdownPlus and Browser may use classes/CSS (`list-style: none`, connector pseudo-elements, or nested-list styling) without embedding terminal box-drawing text by default.
+- Tests must cover default list behavior unchanged, no-marker lists, tree-connector lists, nested lists, single-child lists, and strict/warn/lossy behavior for targets that cannot faithfully represent a marker policy.
 
 ##### Feature 2: Per-Item Indentation Depth Control
 
-**What it looks like:** A `ListItem` hint that specifies the visual indentation depth, allowing the terminal renderer to calculate the correct box-drawing prefix (`│   ` vs `    ` at each ancestor level) from structural nesting alone.
+**DENIED**
 
-```rust
-// Each ListItem at depth N knows its prefix components:
-// - For each ancestor that is NOT the last child: "│   "
-// - For each ancestor that IS the last child: "    "
-// The terminal renderer builds: prefix + ("├── " or "└── ") + icon + name
-```
+this feature will not be added to the render-tree tree implementation. You should try to still use the render-tree where practical and work around the complexity but if the complexity is too great then you have permission to create a bespoke IR implementation for this component.
 
-**Why FileSystem needs it:** The box-drawing prefix depends on whether each ancestor was the last child in its sibling list. This is structural information available during tree projection but not naturally expressed in the `List`/`ListItem` nesting. Without this feature, the FileSystem must either (a) embed the full prefix as text content (same degenerate case as Feature 1), or (b) rely on the terminal renderer to infer prefixes from the tree structure.
+**Why this is denied:** Explicit per-item depth hints duplicate information already present in nested `List`/`ListItem` structure and can become inconsistent with the actual tree. The terminal renderer can infer depth and "last child" state while walking the list. If connector rendering needs ancestor continuation state, that state belongs in the renderer traversal stack, not in serialized per-item hints.
 
-**Without this feature:** Same degenerate case as Feature 1 — the component embeds fully-formatted lines in text nodes and the tree renderer becomes a passthrough.
+The approved list marker policy above is the right place to request connector-style rendering. It keeps the canonical tree normalized and avoids invalid states such as a depth-3 item physically nested at depth 1.
 
 #### Recommendation
 
-The current tree renderer is **not a natural fit** for the FileSystem component. The box-drawing tree layout is a domain-specific visual structure that does not map cleanly onto the `List`/`ListItem` document-structural model without at least Feature 1 (custom prefix suppression). Feature 2 (per-item indentation) would make the mapping truly clean and composable.
+The current tree renderer is **not yet a natural production replacement** for FileSystem's terminal renderer. FileSystem should add a semantic `TreeRenderable` projection now, but the production `TerminalRenderable` path should remain bespoke until the approved list marker policy is implemented and parity-gated.
 
-Without either feature, the FileSystem would embed fully-formatted lines in `Text` nodes wrapped in `List`/`ListItem` shells — adding IR overhead without meaningful abstraction. The tree renderer would not be applying its own list layout logic; it would simply be concatenating pre-formatted text.
-
-**However**, with Feature 1 alone, the mapping becomes viable: the tree renderer delegates prefix rendering to the component, and the component uses its internal `TreeNode` structure to compute the correct box-drawing prefix during projection. The tree renderer still handles layout (margins, alignment), style application (from semantic classes to ANSI), and the overall block-level rendering contract.
-
-With both features, the mapping becomes genuinely clean: the component supplies nesting structure and metadata, and the terminal renderer produces the visual output from that structure.
-
-- `will_use_tree_renderer`: **false** — without at least Feature 1, the tree renderer adds no value over the bespoke renderer for this component.
-- `will_use_tree_renderer_with_features`: **true** — with Feature 1 (and ideally Feature 2), the tree renderer provides real value: layout application, style lowering, and cross-target rendering from a single IR.
+- `will_use_tree_renderer`: **false** for production terminal rendering today
+- `will_use_tree_renderer_with_features`: **true** after the approved list marker policy lands and parity tests pass
+- `canonical_tree_projection`: **true** now, as structural `Root`/`List`/`ListItem`/`Paragraph`/`Span`/`Link` nodes with typed `Style`
+- `temporary_preformatted_terminal_projection`: **allowed only as a transitional test aid**, not as the canonical IR
 
 #### Critical Test Variants
 
-1. **Basic tree rendering** — a directory with a mix of files and subdirectories, verifying connector characters (`├──`, `└──`, `│`), icon placement, and name display.
-2. **Single-entry directory** — only one child, verifying `└──` is used (not `├──`).
-3. **Deeply nested tree** — 3+ levels of nesting, verifying vertical continuation lines and indentation accuracy at each level.
-4. **Empty directory** — a directory with no entries, verifying no output (or just the root line if `show_root` is true).
-5. **Dotfiles and dotdirs** — files and directories starting with `.`, verifying italic styling when configured, and hiding when configured.
-6. **Gitignored entries** — entries marked as ignored, verifying dim styling when `dim_gitignore` is true.
-7. **Symlinks** — symlink entries, verifying cyan styling and that children are not followed.
-8. **Error directories** — permission-denied directories, verifying red styling and error icon.
-9. **Depth limit** — directories at `max_depth`, verifying depth-limit icon and no children.
-10. **Filter patterns** — filter patterns that match some entries but not others, verifying only matching entries appear and non-matching directories are included only when they have matching descendants.
-11. **Highlight patterns** — `highlight_red` and `highlight_green` patterns, verifying color application takes priority over other styling.
-12. **File metrics** — `--size`, `--tokens`, `--modified`, etc., verifying metric formatting and placement.
-13. **Metric highlight threshold** — values exceeding thresholds, verifying bold-yellow highlighting.
-14. **OSC8 file links** — `file_links` enabled, verifying filenames become clickable hyperlinks.
-15. **Name truncation** — long filenames exceeding terminal width, verifying truncation with ellipsis.
-16. **No root line** — `show_root(false)`, verifying the root directory header is omitted.
-17. **Parity with bespoke renderer** — every variant above rendered both ways (bespoke vs tree), comparing stripped-ANSI output for content equivalence.
-18. **Layout margins** — left/right margins, verifying the tree block is offset correctly.
-19. **Nerd Font vs Unicode icons** — rendering with and without Nerd Font support, verifying correct icon selection.
+1. **Basic tree rendering** — directory with files and subdirectories, verifying connector characters, icon placement, and name display in terminal output once list marker policy exists.
+2. **Single-entry directory** — one child uses `└──`, not `├──`.
+3. **Deeply nested tree** — 3+ levels verify vertical continuation lines and indentation.
+4. **Empty directory** — no entries; root line appears only when `show_root` is true.
+5. **Dotfiles and dotdirs** — italic styling when configured and hiding when configured.
+6. **Gitignored entries** — dim styling when `dim_gitignore` is true; skip recursion when configured.
+7. **Symlinks** — cyan styling and no following children.
+8. **Error directories** — red styling and error/depth indicators.
+9. **Depth limit** — directories at `max_depth` show depth-limit state and no children.
+10. **Filter patterns** — only matching entries appear; directories with matching descendants are retained.
+11. **Highlight patterns** — highlight colors take precedence over directory, symlink, dotfile, and ignored styling.
+12. **File metrics** — size, tokens, modified, updated, and permissions formatting and placement.
+13. **Metric highlight threshold** — threshold values use bold yellow styling.
+14. **OSC8 file links** — terminal links target absolute file paths when enabled.
+15. **Name truncation** — long filenames truncate with ellipsis without breaking connector or icon columns.
+16. **No root line** — `show_root(false)` omits the root directory header.
+17. **Parity with bespoke renderer** — terminal tree path vs bespoke path compare stripped-ANSI content and connector geometry after the approved marker policy lands.
+18. **Layout margins** — root `Layout` margins and alignment offset the whole tree block consistently.
+19. **Nerd Font vs Unicode icons** — terminal-aware icon selection uses Nerd Font only when capability indicates support; fallback remains stable.
+20. **Style projection tests** — inspect the render tree directly to verify `Style` and classes are placed on the intended nodes.
+21. **Validation tests** — invalid marker-policy placement is rejected once the approved render-tree feature is implemented.
 
 ### Browser IR Implementation
 
-- In this section we will provide a design specification for the **FileSystem** component's implementation of the BrowserRenderable trait.
-
-The FileSystem component has no existing browser rendering implementation. The browser target will render the directory tree as an HTML nested list (`<ul>`/`<li>`) with CSS styling.
+FileSystem has no existing browser rendering implementation. The browser target should render the directory tree as a nested HTML list (`<ul>`/`<li>`) with CSS styling.
 
 #### Browser Rendering Design
 
-The IR already produced for the terminal target (via `TreeRenderable`) maps naturally to the browser through the existing `render_browser_node` renderer. The projection structure — `Root` → `List`/`ListItem` tree — is consumed by the browser renderer to produce:
+The canonical `TreeRenderable` projection maps naturally to the existing browser tree renderer:
 
-- A `<ul>` for each `List` node
-- A `<li>` for each `ListItem` node
-- Text content, links, and styling from the node's children
+- `List` renders as `<ul>`
+- `ListItem` renders as `<li>`
+- `Span` classes become `class` attributes
+- `Link` nodes render as anchors
+- root `Layout` becomes inline layout CSS through the existing layout lowering
+
+The browser tree renderer does **not** currently lower `Style` to CSS. Therefore FileSystem's `BrowserRenderable` implementation should wrap the projected tree through `BrowserTreeComponent<FileSystem>` and provide a component stylesheet or direct wrapper classes for the filesystem-specific visual treatment. The CSS classes are the browser contract; typed `Style` remains the terminal contract until browser style lowering is implemented.
 
 **Semantic class → CSS mapping:**
 
 | Class | CSS |
 |-------|-----|
-| `fs-dir` | `font-weight: bold; color: #5c94fc;` |
-| `fs-file` | (default text) |
-| `fs-ignored` | `opacity: 0.5;` |
-| `fs-symlink` | `color: #56d4dd;` |
-| `fs-error` | `color: #ff5f5f;` |
+| `fs-root` | `font-weight: 700; color: #2563eb;` |
+| `fs-dir` | `font-weight: 700; color: #2563eb;` |
+| `fs-file` | default text |
+| `fs-ignored` | `opacity: 0.55;` |
+| `fs-symlink` | `color: #0891b2;` |
+| `fs-error` | `color: #dc2626;` |
+| `fs-depth-limit` | `color: #ca8a04;` |
 | `fs-dot` | `font-style: italic;` |
-| `fs-highlight-red` | `color: #ff5f5f;` |
-| `fs-highlight-green` | `color: #5fff5f;` |
-| `fs-icon` | `margin-right: 0.25em;` |
-| `fs-metrics` | `color: #888; font-size: 0.85em; margin-left: 0.5em;` |
+| `fs-highlight-red` | `color: #dc2626;` |
+| `fs-highlight-green` | `color: #16a34a;` |
+| `fs-icon` | `display: inline-block; margin-right: 0.25em; width: 1.25em;` |
+| `fs-metrics` | `color: #6b7280; font-size: 0.85em; margin-left: 0.5em;` |
 
-**Tree connectors:** The browser rendering replaces box-drawing characters with CSS-based tree indentation. Each nested `<ul>` receives `padding-left` and a left border (`border-left: 1px solid #444`) to produce a visual tree similar to GitHub's file browser. This is a deliberate divergence from the terminal's `├──`/`└──` connectors, which are terminal-specific and do not translate to HTML.
+**Tree connectors:** Browser rendering should use nested-list CSS, not terminal box-drawing text. The approved `TreeConnectors` marker policy may be represented with CSS classes and pseudo-elements later, but the baseline browser output should remain readable nested HTML.
 
-**Icons:** Nerd Font icons are Private Use Area glyphs that may not render in a browser. The browser target substitutes Nerd Font icons with either:
-- Inline SVG icons (preferred for fidelity)
-- Unicode emoji fallbacks (`📂`, `📄`)
-- Or omits icons entirely and uses CSS-based visual differentiation (folder color, font weight)
+**Icons:** Nerd Font PUA glyphs are not portable in browsers. Browser output should prefer Unicode fallback glyphs or CSS/SVG icons selected from semantic classes. The exact SVG icon set is an implementation detail, but the tree projection must expose enough class metadata to make that substitution possible.
 
-The exact icon strategy is deferred to implementation; the tree projection stores semantic class information (e.g., `fs-icon-rust`, `fs-icon-dir-git`) so the browser renderer can make the substitution.
+**File links:** File links render as `<a href="file:///absolute/path">name</a>` or another explicit URL policy chosen by implementation. Raw local paths should not be emitted as ambiguous relative web URLs.
 
-**File links:** The `Link` nodes in the tree projection naturally render as `<a href="...">` in the browser, so file hyperlinks work automatically.
-
-**Root header:** The root paragraph renders as a styled heading or `<div>` with the directory name.
+**Root header:** The root paragraph renders as a styled root line before the list.
 
 #### Key Test Variants
 
-1. **Basic nested list** — verifying correct `<ul>`/`<li>` nesting for a multi-level directory tree.
-2. **Semantic classes** — verifying each entry type (dir, file, symlink, ignored, error, dot, highlighted) maps to the expected CSS classes.
-3. **File links** — verifying `<a href="...">` tags are present when `file_links` is enabled.
-4. **Metrics** — verifying metric text is present in the output with appropriate styling classes.
-5. **Empty directory** — verifying empty `<ul>` or no list items.
-6. **Deep nesting** — verifying 3+ levels of nested `<ul>` with correct indentation styles.
-7. **Icons** — verifying icon nodes are present (content TBD based on icon strategy).
+1. **Basic nested list** — verifies correct `<ul>`/`<li>` nesting.
+2. **Semantic classes** — verifies each entry type class appears on the expected node.
+3. **Component CSS** — verifies filesystem CSS classes or stylesheet hooks are emitted.
+4. **File links** — verifies anchor tags and URL policy.
+5. **Metrics** — verifies metric spans and classes.
+6. **Empty directory** — verifies empty output/root-only behavior.
+7. **Deep nesting** — verifies 3+ nested `<ul>` levels.
+8. **Icons** — verifies portable icon output or semantic icon classes.
+9. **Layout** — verifies root layout CSS is present when margins/alignment are configured.
+10. **No terminal connectors** — verifies browser output does not contain `├──`, `└──`, or `│` unless an explicit future connector CSS feature chooses to display them.
 
 ### Markdown IR Implementation
 
-The FileSystem component has no existing Markdown rendering implementation. The Markdown and MarkdownPlus outputs render the directory tree as a nested Markdown list.
+FileSystem has no existing Markdown rendering implementation. Markdown and MarkdownPlus outputs should render the directory tree as nested Markdown lists.
 
 #### Markdown vs MarkdownPlus Divergence
 
-Both targets produce a nested Markdown list representing the directory tree. The key divergence points:
+Both targets produce a nested Markdown list representing the directory tree.
 
-1. **Styling/Color:** The terminal applies ANSI styling (bold blue dirs, cyan symlinks, red errors, dim ignored, italic dotfiles). Markdown has no native syntax for these colors.
-   - **Markdown:** All styling is dropped. Directories are rendered as bold (`**src/**`) to distinguish them from files. No color information is preserved.
-   - **MarkdownPlus:** Inline HTML `<span>` elements preserve color/italic/dim styling where it adds value: `<span style="color:blue;font-weight:bold">src/</span>`, `<span style="opacity:0.5">target/</span>`, `<span style="font-style:italic">.gitignore</span>`. Highlight patterns use inline color spans.
+1. **Styling/Color:**
+   - **Markdown:** Drop color and most styling. Directories may be rendered as bold (`**src/**`) by FileSystem's Markdown adapter because this is component-specific semantic presentation.
+   - **MarkdownPlus:** Preserve classes with inline HTML spans where useful, for example `<span class="fs-dir">src/</span>`. Prefer classes over inline style declarations so the HTML/CSS contract matches browser output.
 
-2. **Icons:** Nerd Font PUA glyphs are meaningless in Markdown.
-   - **Markdown:** Icons are omitted entirely.
-   - **MarkdownPlus:** Unicode emoji icons (`📂`, `📄`, `⚠`) may be included since they are valid Unicode that most Markdown renderers handle.
+2. **Icons:**
+   - **Markdown:** Omit Nerd Font PUA glyphs and terminal icons.
+   - **MarkdownPlus:** Use portable Unicode icons or classed spans if icons add value.
 
-3. **Tree connectors:** Box-drawing characters (`├──`, `└──`) are Unicode and valid in Markdown. However, they do not produce a native Markdown list structure.
-   - **Both:** Use native Markdown nested list syntax (unordered, with `- ` bullets). The visual tree is conveyed through indentation levels, not box-drawing characters. This is more idiomatic for Markdown consumers.
-   - A code-block fallback is possible (````tree ... ````) but would lose hyperlink/metric information and is not recommended as the primary output.
+3. **Tree connectors:**
+   - **Both:** Use native nested Markdown list syntax. Do not use terminal box-drawing characters as the primary Markdown representation.
 
 4. **File links:**
-   - **Markdown:** Native Markdown links: `[name](file:///path/to/name)`.
-   - **MarkdownPlus:** Same — no divergence for links.
+   - **Both:** Use native Markdown links with an explicit URL policy, e.g. `[name](file:///path/to/name)`.
 
 5. **Metrics:**
-   - **Both:** Metrics appear as parenthetical text after the entry name: `- src/ (file size: 1.2 KB)`. Identical in both targets since metrics are plain text.
+   - **Both:** Metrics appear as parenthetical text after the entry name.
 
 #### Markdown Rendering Design
 
-The `render_markdown_node` renderer consumes the same `List`/`ListItem` tree produced by `TreeRenderable`. The existing Markdown list rendering already handles nested `List` → `ListItem` → content, so the FileSystem projection maps naturally.
+There is no generic `MarkdownTreeComponent` adapter today. `FileSystem` should implement `MarkdownRenderable` directly and may internally call `render_markdown_node` / `render_markdown_document` for the structural tree where that output is sufficient.
 
-The projection stores entry metadata as semantic classes. The Markdown renderer:
-- Ignores all `fs-*` styling classes (consistent with layout-and-style.md §4: "Markdown deliberately ignores Style entirely")
-- Uses the `Text` content of each `ListItem` for the bullet text
-- Maps `Link` nodes to `[text](url)` syntax
+Do not modify the generic Markdown renderer to special-case `fs-dir` or other FileSystem classes. The generic Markdown renderer's current behavior is:
 
-For Markdown bold directory names: the `fs-dir` class is checked during Markdown rendering. When present, the entry name is wrapped in `**...**`. This is a lightweight semantic-to-presentation mapping that does not require inline HTML.
+- plain Markdown degrades classed spans to their inner text according to strictness
+- MarkdownPlus renders classed spans as `<span class="...">...</span>`
+- `Style` is ignored
 
-For MarkdownPlus: the `fs-*` classes drive inline `<span>` elements with `style` attributes as described in the Browser section's CSS table.
+Therefore any FileSystem-specific bold directory names, symlink annotations, error annotations, icon omissions, and metric formatting belong in FileSystem's Markdown adapter or in the canonical tree content itself.
 
 #### Testing Strategy
 
-1. **Basic nested list** — verifying correct Markdown nested `- ` list structure.
-2. **Directory bold** — verifying directory names are wrapped in `**...**` in Markdown output.
-3. **Styling stripped in Markdown** — verifying no inline HTML or color styling in Markdown output.
-4. **Styling preserved in MarkdownPlus** — verifying inline `<span>` elements with appropriate `style` attributes.
-5. **File links** — verifying `[name](file:///path)` syntax in both targets.
-6. **Metrics** — verifying plain-text metrics in parenthetical form.
-7. **Icons omitted in Markdown** — verifying no PUA glyphs or emoji in Markdown output.
-8. **Icons present in MarkdownPlus** — verifying Unicode emoji icons appear.
-9. **Symlink indicator** — verifying symlink entries are noted (e.g., `name@` or `(symlink)` annotation).
-10. **Error entries** — verifying error directories are annotated (e.g., `(error)` or `⚠` in MarkdownPlus).
-11. **Filter patterns** — verifying filtered output includes only matching entries.
-12. **Empty directory** — verifying no list items for an empty directory.
+1. **Basic nested list** — verifies nested `- ` structure.
+2. **Directory bold** — verifies directory names are bold in plain Markdown if that policy is implemented.
+3. **Styling stripped in Markdown** — verifies no inline HTML or color styling in plain Markdown.
+4. **Classes preserved in MarkdownPlus** — verifies classed `<span>` output for entries/metrics where used.
+5. **File links** — verifies `[name](file:///path)` syntax.
+6. **Metrics** — verifies plain-text parenthetical metrics.
+7. **Icons omitted in Markdown** — verifies no PUA glyphs or emoji in plain Markdown.
+8. **Icons portable in MarkdownPlus** — verifies Unicode or classed icon strategy.
+9. **Symlink indicator** — verifies symlink entries are annotated.
+10. **Error entries** — verifies error directories are annotated.
+11. **Depth-limit entries** — verifies depth-limited directories are annotated.
+12. **Filter patterns** — verifies filtered output.
+13. **Empty directory** — verifies no list items for an empty directory.
+14. **No terminal connectors** — verifies Markdown output does not contain terminal connector glyphs.
+15. **Strictness behavior** — verifies class/style loss is intentional in plain Markdown and does not fail unexpectedly under the chosen adapter policy.
 
 ### `bt` CLI
 
 - This specification will ensure that the **FileSystem** component:
-    - has a 'bt' CLI subcommand for rendering this component
-    - that the '--md' and '--html' CLI switches are available to render to Markdown and HTML targets respectively (the default render is always for the Terminal)
-    - that the '--example' CLI switch is in place to provide a thoughtful example of how this command should be used with the CLI (see other working examples for a template)
+    - keeps the existing `bt dir` subcommand
+    - adds `--md`, `--md-plus`, and `--html` target switches
+    - keeps terminal rendering as the default
+    - keeps `--example` functional
 
 #### Current State
 
 The `bt dir` CLI command exists at `biscuit-terminal/cli/src/commands/dir.rs`.
 
 | Aspect | Current State |
-|--------|--------------|
+|--------|---------------|
 | CLI command exists | Yes — `bt dir [PATH]` |
 | Render method | Bespoke — calls `fs.render(&term)` directly via `TerminalRenderable` |
 | `--md` switch | No |
+| `--md-plus` switch | No |
 | `--html` switch | No |
 | `--example` switch | Yes — `bt dir --example` renders `bt dir . --depth 1 --filter ".rs"` |
 
 The existing `DirArgs` struct has:
+
 - `path` (positional, default `.`)
 - `--example` / `-e`
 - `--depth` / `-d`
 - `--filter` / `-f`
 - `--skip-root`
 - `--size`, `--tokens`, `--modified`, `--updated`
-- `--margin-left`, `--margin-right`, `--alignment` (via `LayoutArgs`)
+- `--margin-left`, `--margin-right`, `--alignment` through `LayoutArgs`
 
 #### Specification for bt CLI Completion
 
 1. **Add `--md`, `--md-plus`, and `--html` switches** to `DirArgs`, following the same `conflicts_with_all` pattern used by `bt prose`:
+
    ```rust
    #[arg(long, conflicts_with_all = ["md", "md_plus"])]
    pub html: bool,
@@ -280,23 +320,27 @@ The existing `DirArgs` struct has:
    pub md_plus: bool,
    ```
 
-2. **When `--md` or `--md-plus` is set:** The command calls `FileSystem`'s `MarkdownRenderable::render_markdown()` or `render_markdown_plus()` instead of the terminal `render()`. The output is printed to STDOUT with optional layout frontmatter (following the `render_markdown_with_layout_frontmatter` pattern from `prose.rs`).
+2. **When `--md` or `--md-plus` is set:** The command calls `FileSystem`'s `MarkdownRenderable::render_markdown()` or `render_markdown_plus()`. Output is printed to STDOUT. If layout frontmatter is used, follow the pattern already used by `bt prose`.
 
-3. **When `--html` is set:** The command calls `FileSystem`'s `BrowserRenderable::render_html_fragment()` and wraps it with layout CSS (following the `render_html_with_layout` pattern from `prose.rs`).
+3. **When `--html` is set:** The command calls `FileSystem`'s `BrowserRenderable::render_html_fragment()` or a `BrowserTreeComponent<FileSystem>` wrapper and wraps it with the same layout-aware HTML helper pattern used by `bt prose`.
 
-4. **Default (no target switch):** The command calls the terminal renderer. If the tree-render features are approved and implemented, this goes through `TreeComponent<FileSystem>` via `render_terminal_node`. If not approved, the existing bespoke `render()` path is retained.
+4. **Default (no target switch):** The command keeps calling the terminal renderer. This remains the bespoke `fs.render(&term)` path until the approved list marker policy is implemented and FileSystem terminal parity tests pass.
 
-5. **`--example` remains as-is** — the example command `bt dir . --depth 1 --filter ".rs"` already exists and is functional. The example should be updated to also mention the new `--md` and `--html` switches in a comment or secondary example line, but the primary example remains terminal-focused.
+5. **`--example` remains terminal-focused**. The primary example remains `bt dir . --depth 1 --filter ".rs"`. The example output may add secondary lines showing `--md` and `--html`, but must not change the existing successful terminal example.
 
-6. **Import updates:** `DirArgs::run()` must import `BrowserRenderable` and `MarkdownRenderable` when the target switches are added, following the import pattern in `prose.rs`.
+6. **Import updates:** `DirArgs::run()` must import `BrowserRenderable` and `MarkdownRenderable` when target switches are added, following the import pattern in `prose.rs`.
+
+7. **Tests:** Add CLI tests for target-switch conflicts, terminal default behavior, `--md`, `--md-plus`, `--html`, and `--example`.
 
 ## Acceptance Criteria Summary
 
-- `FileSystem` implements `TerminalRenderable` (existing, retained)
-- `FileSystem` implements `TreeRenderable` (new, projects to `List`/`ListItem` tree)
-- `FileSystem` implements `BrowserRenderable` (new, via `BrowserTreeComponent` adapter or direct impl)
-- `FileSystem` implements `MarkdownRenderable` (new, renders as nested Markdown list)
-- `bt dir` gains `--md`, `--md-plus`, `--html` switches
-- `bt dir --example` continues to work with terminal rendering
-- Parity tests compare bespoke vs tree terminal output across all critical variants
-- Browser and Markdown rendering tests cover all key variants
+- `FileSystem` implements `TreeRenderable` with a semantic `Root`/`List`/`ListItem` projection.
+- The tree projection contains typed `Style` where terminal styling is required and classes where browser/MarkdownPlus hooks are useful.
+- Existing `FileSystem` `TerminalRenderable` behavior is retained until the approved list marker policy exists and parity tests pass.
+- `FileSystem` implements `BrowserRenderable`, either directly or through `BrowserTreeComponent<FileSystem>` plus component CSS.
+- `FileSystem` implements `MarkdownRenderable` directly, using the tree where practical but keeping FileSystem-specific Markdown policy out of the generic Markdown renderer.
+- `bt dir` gains `--md`, `--md-plus`, and `--html` switches.
+- `bt dir --example` continues to work with terminal rendering.
+- Parity tests compare bespoke vs tree terminal output across all critical variants before any production terminal flip.
+- Browser and Markdown rendering tests cover the listed key variants.
+- Approved render-tree functionality is tracked in `@renderable/features/2026-05-19-pushing-toward-ir/approved-render-tree-functionality.md`.

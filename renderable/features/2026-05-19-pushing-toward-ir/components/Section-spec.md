@@ -10,23 +10,26 @@
 | Terminal   | ✅ bespoke `TerminalRenderable`                                               |
 | Browser    | ❌                                                                            |
 | Markdown   | ❌                                                                            |
-| Tree       | ✅ `render_tree_node()` exists (projects to `NodeKind::Section`)             |
-| IR State   | both avail, old renders                                                      |
+| Tree       | ⚠️ compatibility `render_tree_node()` exists; canonical `TreeRenderable` missing |
+| IR State   | compatibility projection exists; old terminal renderer is still default      |
 | bt CLI     | — (no CLI subcommand exists)                                                 |
 
 Section renders a Markdown-style heading (h1-h6) followed by arbitrary block
 content. The heading level controls both visual styling (bold for h1-h3,
 italic for h4-h5, plain for h6) and the Markdown prefix (`#`, `##`, etc.).
 
-A tree projection already exists via `render_tree_node()` at `section.rs:274`,
-producing `NodeKind::Section { depth, heading, children }`. The terminal tree
-renderer handles `NodeKind::Section` natively at `render_tree/render.rs:335`,
-and the browser and markdown tree renderers also have native Section handling
-(`browser.rs:300`, `markdown.rs:181`).
+A compatibility tree projection already exists via
+`TerminalRenderable::render_tree_node()` at `section.rs:274`, producing
+`NodeKind::Section { depth, heading, children }`. This is not the canonical
+`renderable::tree::TreeRenderable` implementation required by
+`TreeComponent`, `BrowserTreeComponent`, and future cross-target adapters.
+Terminal, Browser, and Markdown tree renderers already handle
+`NodeKind::Section` natively.
 
 However, the default `TerminalRenderable::render()` still uses the bespoke
-`render_content()` path. Section has no `BrowserRenderable` or
-`MarkdownRenderable` impl. There is no `bt section` CLI subcommand.
+`render_content()` path. Section has no `TreeRenderable`,
+`BrowserRenderable`, or `MarkdownRenderable` impl. There is no `bt section`
+CLI subcommand.
 
 ---
 
@@ -42,8 +45,8 @@ However, the default `TerminalRenderable::render()` still uses the bespoke
 
 #### Tree Projection Status
 
-Section already has a working tree projection via `render_tree_node()` at
-`section.rs:274`. The projection:
+Section already has a working compatibility tree projection via
+`render_tree_node()` at `section.rs:274`. The projection:
 
 1. Maps `HeadingLevel` to `HeadingDepth` (1-6, validated by `HeadingDepth::new`).
 2. Creates the heading as `vec![RenderNode::text(&self.title)]` — a single text
@@ -67,12 +70,52 @@ This produces output semantically equivalent to the bespoke `render_content()`,
 which also applies heading emphasis via `apply_style()`, emits the same `# `-
 style prefix, and renders content items sequentially.
 
+#### Canonical `TreeRenderable` Requirement
+
+Before switching Terminal, Browser, Markdown, or CLI output to the tree path,
+Section must implement `renderable::tree::TreeRenderable`. The existing
+`TerminalRenderable::render_tree_node()` hook should remain as a compatibility
+adapter and delegate to the same private projection helper as
+`TreeRenderable::render_tree()`.
+
+Required shape:
+
+```rust
+impl Section {
+    fn project_tree(&self) -> RenderNode {
+        // current render_tree_node body, except it returns RenderNode directly
+        // because HeadingLevel::level() is guaranteed to be 1..=6.
+    }
+}
+
+impl TreeRenderable for Section {
+    fn render_tree(&self) -> RenderNode {
+        self.project_tree()
+    }
+}
+
+impl TerminalRenderable for Section {
+    fn render_tree_node(&self) -> Option<RenderNode> {
+        Some(self.project_tree())
+    }
+}
+```
+
+The projection helper must seed layout exactly once on the returned node's
+`NodeAttrs`, matching the current `BlockQuote` pattern. Do not rely on
+`TreeRenderable::tree_layout()` for this migration: the current adapters render
+the `RenderNode` returned by `render_tree()` and do not apply that optional
+hook. Callers must not also wrap the result in a `TreeComponent` carrying a
+separate layout.
+
 #### Switching the Default Render Path
 
 The goal is to make the IR path the default for `TerminalRenderable::render()`
 while **retaining the bespoke path** for parity testing.
 
-The switch follows the same pattern as Progress:
+The switch follows the same error policy as `TreeComponent`: render with
+`RenderStrictness::Warn`, return a visible fallback string on structural
+errors, and never panic in the infallible `TerminalRenderable` methods.
 
 ```rust
 impl TerminalRenderable for Section {
@@ -103,13 +146,13 @@ impl TerminalRenderable for Section {
     }
 
     fn render_tree_node(&self) -> Option<RenderNode> {
-        // existing projection unchanged
+        Some(self.project_tree())
     }
 }
 
 impl Section {
     fn render_via_tree(&self, term: &Terminal) -> String {
-        let node = self.render_tree_node().expect("Section always projects");
+        let node = self.project_tree();
         let opts = TerminalRenderOptions::new(term, RenderStrictness::Warn);
         match render_terminal_node(&node, &opts) {
             Ok(rendered) => rendered.output,
@@ -118,7 +161,7 @@ impl Section {
     }
 
     /// Retained for parity testing. Renders via the pre-tree bespoke path.
-    fn render_bespoke(&self, term: &Terminal) -> String {
+    pub(crate) fn render_bespoke_for_comparison(&self, term: &Terminal) -> String {
         let width = term.width();
         let available = self.layout.available_width(width);
         let content = self.render_content(Some(term), available);
@@ -130,9 +173,9 @@ impl Section {
 #### Layout Mapping
 
 Section's `Layout` already seeds onto the projected `RenderNode` via
-`node.attrs.set_layout(&self.layout)` (line 288). The terminal tree renderer's
-`render_with_layout` applies it during rendering. No additional Layout
-parameters are needed.
+`node.attrs.set_layout(&self.layout)` when non-default. The terminal tree
+renderer's `render_with_layout` applies it during rendering. No additional
+Layout parameters are needed.
 
 Section is a block-level component; the Layout properties that matter are:
 - `margin` — left/right/top/bottom spacing around the entire section
@@ -176,9 +219,22 @@ comparison:
 | Empty section (title only, no content)                        | Only heading rendered, no trailing blank lines                                   |
 | Section with layout at all parity widths                      | Width matrix covers 40/60/80/100/120/160/200                                     |
 
-Parity is asserted on **ANSI-stripped content equality** (not byte-identical
-output), following the BlockQuote parity discipline. Known accepted divergences
-should be documented in a `KNOWN_DRIFT` ledger:
+Parity must use both the existing semantic tests in `section_parity.rs` and
+the broader facet-based `render_comparison.rs` matrix. The existing
+`section_parity.rs` tests only prove projection validity and semantic token
+presence; they are not sufficient to flip the default render path by
+themselves.
+
+For the flip, update comparison coverage so it renders:
+
+- the retained bespoke helper, `render_bespoke_for_comparison()`
+- the default `TerminalRenderable::render()` tree path
+- the direct `render_terminal_node(section.render_tree())` path
+
+Parity is asserted on structural facets rather than only ANSI-stripped token
+presence: exact bytes, visible text, indentation, blank-line positions,
+maximum visible width, and SGR styling offsets. Known accepted divergences
+must be documented in the existing `KNOWN_DRIFT` ledger with a verdict:
 
 - **Blank line between heading and body**: The tree renderer emits
   `{heading}\n\n{body}` (double newline). The bespoke renderer emits
@@ -189,11 +245,16 @@ should be documented in a `KNOWN_DRIFT` ledger:
   the tree path does so through `render_with_layout` while the bespoke path
   uses `LayoutTerminalExt::apply_layout`. These should produce the same result
   but exercise different code paths.
+- **Style offsets**: Heading styling is applied through the same style lowering
+  helper, but the extra blank line can shift visible offsets. Record this only
+  when the rendered heading itself is still styled correctly.
 
 #### Feature Requests for Tree Rendering
 
-No feature requests are needed. The existing tree renderer already has native
-support for Section via `NodeKind::Section`:
+No render-tree feature requests are needed for Section. No APPROVED or DENIED
+stamp is required because this spec does not request a render-tree
+implementation change. The existing tree renderer already has native support
+for Section via `NodeKind::Section`:
 
 - `render_heading_line()` reconstructs the heading with the correct prefix and
   emphasis style
@@ -208,7 +269,7 @@ of the simplest structural components: a heading followed by block content. The
 tree renderer already has native support that mirrors the bespoke rendering
 logic exactly:
 
-1. The tree projection already exists and passes structural + parity tests
+1. The compatibility tree projection already exists and passes structural tests
 2. The terminal tree renderer handles `NodeKind::Section` natively
 3. Heading emphasis is applied via the same `apply_style()` path in both
    bespoke and tree rendering
@@ -220,12 +281,14 @@ Section is an ideal candidate for tree-first rendering because:
   renderer already handles
 - There are no widget-specific hints or custom rendering hooks needed
 - The component has no visual complexity beyond heading styling and content layout
+- The only missing component work is canonical trait adoption and parity
+  hardening, not new render-tree vocabulary
 
 `will_use_tree_renderer`: **true** — the existing tree renderer handles
 Section's needs without any feature additions.
 
-`will_use_tree_renderer_with_features`: **true** — no features requested, so
-this is the same as above.
+`will_use_tree_renderer_with_features`: **false** — no render-tree features
+are requested or required.
 
 ---
 
@@ -234,15 +297,13 @@ this is the same as above.
 - in this section we will provide a design specification for the **Section** component's implementation of the BrowserRenderable trait
 
 Section does not currently have a bespoke browser rendering implementation.
-Since Terminal IR is designed first and Section already projects to a
-`NodeKind::Section`, the browser rendering can leverage the existing browser
-tree renderer.
+Once Section implements `TreeRenderable`, browser rendering can leverage the
+existing browser tree renderer.
 
 #### Browser Rendering Design
 
 The browser tree renderer (`renderable/src/tree/render/browser.rs`) already
-handles `NodeKind::Section` natively at line 200 via `render_section()` (line
-300). It produces:
+handles `NodeKind::Section` natively via `render_section()`. It produces:
 
 ```html
 <section>
@@ -264,7 +325,8 @@ the existing `NodeKind::Section` handling.
 
 **BrowserTreeComponent adapter:**
 
-Section gains `BrowserRenderable` by wrapping in the adapter:
+Call sites that own a `Section` can render through the adapter after
+`TreeRenderable` is implemented:
 
 ```rust
 use biscuit_terminal::render_tree::BrowserTreeComponent;
@@ -276,15 +338,15 @@ let fragment = component.render_html_fragment();
 let html = fragment.render();
 ```
 
-Alternatively, Section can implement `BrowserRenderable` directly by projecting
-its tree and calling the browser renderer:
+Section itself should implement `BrowserRenderable` directly by projecting its
+tree and calling the browser renderer. The direct impl cannot use
+`BrowserTreeComponent::new(self)` because `render_html_fragment(&self)` only
+has a shared borrow and the adapter owns its inner component.
 
 ```rust
 impl BrowserRenderable for Section {
     fn render_html_fragment(&self) -> BrowserFragment<Ready> {
-        let node = self.render_tree_node().expect("Section always projects");
-        let root = RenderNode::root(vec![node]);
-        render_browser_node(&root, &BrowserRenderOptions::default())
+        render_browser_node(&self.render_tree(), &BrowserRenderOptions::default())
             .expect("browser render of Section should succeed")
             .output
     }
@@ -295,9 +357,9 @@ impl BrowserRenderable for Section {
 }
 ```
 
-The `BrowserTreeComponent` adapter is preferred because it avoids duplicating
-the projection/render logic and is the established pattern for tree-backed
-browser rendering.
+The direct impl is the public component surface. `BrowserTreeComponent` remains
+useful in generic call sites and tests that already traffic in owned
+`TreeRenderable` values.
 
 #### Layout to CSS Mapping
 
@@ -321,7 +383,7 @@ No additional CSS mapping is needed.
 | h5 section                                 | `<h5>` heading tag                                                           |
 | h6 section                                 | `<h6>` heading tag                                                           |
 | Section with Layout margins                | `<section>` has `margin-left` / `margin-right` inline style                  |
-| Section with Layout alignment + max-width  | `<section>` has `text-align` and `max-width` inline style                    |
+| Section with Layout alignment + max-width  | `<section>` has `max-width` and auto horizontal margins; no `text-align` expectation |
 | Empty section                              | Only `<section><hN>Title</hN></section>`, no body children                   |
 | Section with nested component content      | Nested component renders as expected within `<section>`                      |
 
@@ -383,17 +445,17 @@ Markdown renderer:
 ```rust
 impl MarkdownRenderable for Section {
     fn render_markdown(&self) -> String {
-        let node = self.render_tree_node().unwrap();
-        let root = RenderNode::root(vec![node]);
-        render_markdown_node(&root, &MarkdownRenderOptions::default())
+        render_markdown_node(&self.render_tree(), &MarkdownRenderOptions::default())
             .map(|r| r.output)
             .unwrap_or_else(|_| self.title.clone())
     }
 
     fn render_markdown_plus(&self) -> String {
-        let node = self.render_tree_node().unwrap();
-        let root = RenderNode::root(vec![node]);
-        render_markdown_node(&root, &MarkdownRenderOptions::default_plus())
+        let opts = MarkdownRenderOptions {
+            dialect: MarkdownDialect::MarkdownPlus,
+            ..MarkdownRenderOptions::default()
+        };
+        render_markdown_node(&self.render_tree(), &opts)
             .map(|r| r.output)
             .unwrap_or_else(|_| self.title.clone())
     }
@@ -455,7 +517,7 @@ Add a new `bt section` subcommand, following the pattern established by
 | `--html`                      | `bool`         | Render to HTML fragment (conflicts with `--md`, `--md-plus`)      |
 | `--md`                        | `bool`         | Render to portable Markdown (conflicts with `--html`, `--md-plus`)|
 | `--md-plus`                   | `bool`         | Render to MarkdownPlus (conflicts with `--html`, `--md`)          |
-| `#[command(flatten)] layout`  | `LayoutArgs`   | Shared margin/alignment arguments                                 |
+| `#[command(flatten)] layout`  | `LayoutArgs`   | Shared margin/alignment arguments; currently left/right/top/bottom/alignment only |
 
 **Implementation in `commands/section.rs`:**
 
@@ -534,13 +596,7 @@ impl Run for SectionArgs {
             section.push(item.as_str());
         }
 
-        // Apply layout
-        apply_renderable_layout(&mut section, &self.layout);
-
-        let node = section.render_tree_node().ok_or_else(|| {
-            color_eyre::eyre::eyre!("Section component produced no render-tree node")
-        })?;
-        let root = RenderNode::root(vec![node]);
+        apply_section_layout(&mut section, &self.layout);
 
         // Cross-target output
         if self.html {
@@ -549,13 +605,17 @@ impl Run for SectionArgs {
             return Ok(());
         }
         if self.md {
-            let rendered = render_markdown_node(&root, &MarkdownRenderOptions::default())
+            let rendered = render_markdown_node(&section.render_tree(), &MarkdownRenderOptions::default())
                 .map_err(|e| color_eyre::eyre::eyre!("markdown render failed: {e}"))?;
             println!("{}", rendered.output);
             return Ok(());
         }
         if self.md_plus {
-            let rendered = render_markdown_node(&root, &MarkdownRenderOptions::default_plus())
+            let opts = MarkdownRenderOptions {
+                dialect: MarkdownDialect::MarkdownPlus,
+                ..MarkdownRenderOptions::default()
+            };
+            let rendered = render_markdown_node(&section.render_tree(), &opts)
                 .map_err(|e| color_eyre::eyre::eyre!("markdown render failed: {e}"))?;
             println!("{}", rendered.output);
             return Ok(());
@@ -564,13 +624,10 @@ impl Run for SectionArgs {
         // Terminal (default)
         let term = detect_terminal_honoring_force_color();
         let opts = TerminalRenderOptions::new(&term, RenderStrictness::Warn);
-        let rendered = render_terminal_node(&root, &opts)
+        let rendered = render_terminal_node(&section.render_tree(), &opts)
             .map_err(|e| color_eyre::eyre::eyre!("render failed: {e}"))?;
 
-        emit_vertical_margins(&self.layout, || {
-            println!("{}", rendered.output);
-            Ok(())
-        })?;
+        println!("{}", rendered.output);
 
         if self.example {
             print_example_command(SECTION_EXAMPLE_CMD);
@@ -579,6 +636,12 @@ impl Run for SectionArgs {
     }
 }
 ```
+
+`apply_section_layout()` should map all fields in `LayoutArgs` onto
+`section.layout_mut()` before tree projection, including `margin_top` and
+`margin_bottom`. Do not also call `emit_vertical_margins()` for the same output;
+the tree renderer already applies vertical margins from node `Layout`, and
+using both would double the top/bottom spacing.
 
 **Example command:**
 
@@ -599,11 +662,12 @@ Add `Section(section::SectionArgs)` to the `Command` enum with an appropriate
 ## Acceptance Criteria Summary
 
 - [ ] `Section`'s `TerminalRenderable::render()` delegates to the tree path by default
-- [ ] Bespoke render path retained as `render_bespoke()` for parity testing
+- [ ] Section implements canonical `TreeRenderable`; `render_tree_node()` delegates to the same projection helper
+- [ ] Bespoke render path retained as `render_bespoke_for_comparison()` or equivalent for parity testing
 - [ ] `BrowserRenderable` achieved — Section renders to `<section>` with appropriate `<h1>`-`<h6>` heading
 - [ ] `MarkdownRenderable` implemented on Section — both Markdown and MarkdownPlus output `## Title\n\nbody` format
 - [ ] `bt section` CLI subcommand exists with `--html`, `--md`, `--md-plus`, `--level`, `--content`, and `--example` switches
 - [ ] `bt section --example` renders example output with the full CLI command displayed
-- [ ] Parity tests (bespoke vs tree) cover all heading levels, content variants, and layout configurations
-- [ ] `KNOWN_DRIFT` ledger documents accepted divergences between bespoke and tree paths
+- [ ] Parity tests (bespoke vs tree/default tree/direct tree) cover all heading levels, content variants, and layout configurations
+- [ ] `render_comparison.rs` `KNOWN_DRIFT` ledger documents accepted divergences between bespoke and tree paths
 - [ ] Existing parity tests in `section_parity.rs` continue to pass with the new default render path

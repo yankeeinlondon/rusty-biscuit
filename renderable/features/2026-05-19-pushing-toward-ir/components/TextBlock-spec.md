@@ -9,78 +9,85 @@
 | Browser | ❌ |
 | Markdown | ❌ |
 | Tree | ❌ |
-| IR State | `no changes` |
-| bt CLI | `—` |
+| IR State | `needs TreeRenderable; terminal can delegate after parity` |
+| bt CLI | `none; bt block is adjacent but not TextBlock-backed` |
 | `will_use_tree_renderer` | `true` |
-| `will_use_tree_renderer_with_features` | `true` |
+| `will_use_tree_renderer_with_features` | `true` for Terminal and Browser, `false` for styled MarkdownPlus |
 
 ## Current State
 
-TextBlock is a uniformly styled block of text. Its bespoke terminal renderer wraps a plain `String` in ANSI escape sequences for bold, dim, italic, strikethrough, blink, underline, foreground color, and background color. It carries a `Layout` for margins and alignment.
+`TextBlock` is intended to be a uniformly styled block of text with optional layout. Its public builder surface stores text, font weight, foreground/background color, italic, strikethrough, blink, underline, and `Layout`.
+
+The current bespoke terminal renderer does **not** apply every stored field. `to_terminal()` currently applies only:
+
+- italic, gated by `term.supports_italic`
+- `font_weight`, gated by `term.is_tty` through `FontWeight::term_wrap`
+- layout, through `LayoutTerminalExt::apply_layout`
+
+The following stored fields are currently inert in `TextBlock::render()` / `render_optimistic()`:
+
+- `fg_color`
+- `bg_color`
+- `strikethrough`
+- `blink`
+- `underline`
+
+That makes the migration partly parity work and partly bug-fix/field-activation work. The tree projection can represent all stored fields losslessly, but re-pointing terminal rendering through the tree will intentionally make previously inert fields visible.
 
 Fields on the struct today:
 
-| Field | Type | Maps to |
-|-------|------|---------|
-| `content` | `String` | `NodeKind::Text` value inside a `NodeKind::Paragraph` |
-| `font_weight` | `FontWeight` (Normal / Bold / Dim) | `Style.emphasis.bold` / `Style.emphasis.dim` |
-| `fg_color` | `Option<Color>` | `Style.color` |
-| `bg_color` | `Option<Color>` | `Style.background` |
-| `italic` | `bool` | `Style.emphasis.italic` |
-| `strikethrough` | `bool` | `Style.emphasis.strikethrough` |
-| `blink` | `bool` | `Style.emphasis.blink` |
-| `underline` | `UnderliningRequest` | `Style.emphasis.underline` (mapped to `UnderlineStyle`) |
-| `layout` | `Layout` | `NodeAttrs::layout()` on the projected node |
+| Field | Type | Tree mapping | Current bespoke terminal behavior |
+|-------|------|--------------|-----------------------------------|
+| `content` | `String` | `NodeKind::Text` inside `NodeKind::Paragraph` | rendered |
+| `font_weight` | `FontWeight` (`Normal` / `Bold` / `Dim`) | `Style.emphasis.bold` / `Style.emphasis.dim` | rendered |
+| `fg_color` | `Option<Color>` | `Style.color` | stored but not rendered |
+| `bg_color` | `Option<Color>` | `Style.background` | stored but not rendered |
+| `italic` | `bool` | `Style.emphasis.italic` | rendered when supported |
+| `strikethrough` | `bool` | `Style.emphasis.strikethrough` | stored but not rendered |
+| `blink` | `bool` | `Style.emphasis.blink` | stored but not rendered |
+| `underline` | `UnderliningRequest` | `Style.emphasis.underline` | stored but not rendered |
+| `layout` | `Layout` | `NodeAttrs::layout()` on the projected node | rendered |
 
-Every field has a direct, lossless mapping into the existing `renderable::style::Style` and `renderable::layout::Layout` primitives. The tree model already handles the combination (`Paragraph` + `Text` + `Style` + `Layout`) — `bt block` exercises this exact path today.
+## Terminal IR Implementation
 
-## Design Steps
+### Tree Projection
 
-### Terminal IR Implementation
+`TextBlock` projects into the canonical render tree as:
 
-- The **TextBlock** component does not currently have a IR based rendering solution
-- This section will describe what is required to ensure that the **TextBlock** component:
-    - has an IR implementation
-    - the IR implementation drives the TerminalRenderable contract
-    - the IR implementation is what is used by the bt CLI (note: TextBlock doesn't yet have a bt CLI subcommand; it will be designed below in the bt CLI section)
-
-#### Tree Projection
-
-TextBlock projects into the canonical render tree as:
-
-```
+```text
 Paragraph [Style, Layout]
   └─ Text { value: <content> }
 ```
 
-- **Root node:** `NodeKind::Paragraph` with a single `NodeKind::Text` child.
-- **Style:** A `renderable::style::Style` constructed from the component's styling fields. `fg_color` → `Style.color`, `bg_color` → `Style.background`, emphasis flags → `Style.emphasis`. Only non-default values are recorded.
-- **Layout:** The component's existing `Layout` is recorded on the paragraph node via `node.attrs.set_layout(&self.layout)` when it differs from `Layout::default()`.
+- **Root node:** `NodeKind::Paragraph` with one `NodeKind::Text` child.
+- **Style:** a `renderable::style::Style` constructed from the component's stored fields. Only non-default values are recorded.
+- **Layout:** the existing `Layout` is recorded on the paragraph node via `node.attrs.set_layout(&self.layout)` when it differs from `Layout::default()`.
 
-This projection is lossless: every styling field the bespoke renderer uses has a direct counterpart in `Style` / `Layout`, and the terminal tree renderer already lowers those into SGR sequences and margin application.
+This shape matches the documented tree model: `Layout` is block-only and belongs on the paragraph node; `Style` may attach to block nodes and is already consumed by the terminal tree renderer.
 
-The projection mirrors what `bt block` already builds inline — a `RenderNode::paragraph(vec![RenderNode::text(...)])` with `Style` and `Layout` attached. TextBlock as a component simply encapsulates that pattern behind a typed builder API.
-
-#### Field Mapping Detail
+### Field Mapping Detail
 
 | TextBlock field | `Style` / `Layout` target | Notes |
 |-----------------|---------------------------|-------|
 | `font_weight = Bold` | `emphasis.bold = true` | |
 | `font_weight = Dim` | `emphasis.dim = true` | |
-| `font_weight = Normal` | (default, not set) | |
-| `fg_color = Some(c)` | `color = Some(TargetValue::universal(PerMode::universal(c)))` | `Color` converts directly; `biscuit_terminal::Color` and `renderable::color::Color` are the same type |
-| `bg_color = Some(c)` | `background = Some(TargetValue::universal(PerMode::universal(c)))` | Same wrapping as `fg_color` |
+| `font_weight = Normal` | default | |
+| `fg_color = Some(c)` | `color = Some(TargetValue::Universal(PerMode::Universal(c)))` | Use the shared `renderable::color::Color` type. |
+| `bg_color = Some(c)` | `background = Some(TargetValue::Universal(PerMode::Universal(c)))` | |
 | `italic = true` | `emphasis.italic = true` | |
-| `strikethrough = true` | `emphasis.strikethrough = true` | |
-| `blink = true` | `emphasis.blink = true` | |
-| `underline = Straight` | `emphasis.underline = Some(UnderlineStyle::Straight)` | All `UnderliningRequest` variants map to `UnderlineStyle` variants |
-| `underline = Double` | `emphasis.underline = Some(UnderlineStyle::Double)` | |
-| `underline = Curly` | `emphasis.underline = Some(UnderlineStyle::Curly)` | |
-| `underline = Dotted` | `emphasis.underline = Some(UnderlineStyle::Dotted)` | |
-| `underline = Dashed` | `emphasis.underline = Some(UnderlineStyle::Dashed)` | |
-| `layout` | `node.attrs.set_layout(&layout)` | When non-default |
+| `strikethrough = true` | `emphasis.strikethrough = true` | Activates a currently inert stored field. |
+| `blink = true` | `emphasis.blink = true` | Activates a currently inert stored field. |
+| `underline = Straight(color)` | `emphasis.underline = Some(UnderlineStyle::Straight)` | Underline color has no current `Style` slot; see Notes. |
+| `underline = Double(color)` | `emphasis.underline = Some(UnderlineStyle::Double)` | |
+| `underline = Curly(color)` | `emphasis.underline = Some(UnderlineStyle::Curly)` | |
+| `underline = Dotted(color)` | `emphasis.underline = Some(UnderlineStyle::Dotted)` | |
+| `underline = Dashed(color)` | `emphasis.underline = Some(UnderlineStyle::Dashed)` | |
+| `underline = None` | default | |
+| `layout` | `node.attrs.set_layout(&layout)` | When non-default. |
 
-#### TreeRenderable Implementation
+`UnderliningRequest` can carry an optional underline color. `renderable::style::UnderlineStyle` currently records underline shape only. Do not add underline color to the render tree for this migration; the current `TextBlock` terminal path does not render underline at all, so preserving underline color is not required for parity. If colored underlines become a public requirement later, they should be designed as a general `TextEmphasis`/`Style` feature, not as a `TextBlock`-only hint.
+
+### TreeRenderable Implementation
 
 ```rust
 impl renderable::tree::TreeRenderable for TextBlock {
@@ -98,11 +105,11 @@ impl renderable::tree::TreeRenderable for TextBlock {
 }
 ```
 
-A private `build_style(&self) -> Style` helper maps the component's fields to a `Style` struct, following the same pattern used by `BlockQuote`.
+Add a private `build_style(&self) -> renderable::style::Style` helper. Keep it private unless another component needs the same conversion.
 
-#### TerminalRenderable Delegation
+### TerminalRenderable Delegation
 
-Once the tree projection and parity test are in place, the bespoke `render()` and `render_optimistic()` implementations are re-pointed to delegate through the tree:
+After tree structure tests and terminal parity tests are in place, re-point `TerminalRenderable` to the tree renderer:
 
 ```rust
 fn render(&self, term: &Terminal) -> String {
@@ -114,276 +121,228 @@ fn render(&self, term: &Terminal) -> String {
 }
 ```
 
-The old bespoke path is retained as `bespoke_render()` as a fallback during the transition period.
+Retain the old implementation as a private `bespoke_render()` fallback during the transition. The fallback preserves the infallible `TerminalRenderable` contract if tree validation fails unexpectedly.
 
-#### Test Variants
+### Terminal Test Strategy
 
-**Parity tests** (matching the BlockQuote parity discipline):
+Split tests into two groups so the intentional behavior change is explicit.
+
+**Legacy parity tests** compare current bespoke output with tree output only for behavior the bespoke path actually implements:
 
 | # | Variant | Asserts |
 |---|---------|---------|
-| 1 | Plain text, no styling | Tree output equals bespoke output (both plain) |
-| 2 | Bold only | Tree output contains same SGR codes as bespoke |
-| 3 | Dim only | Same as above for dim SGR |
-| 4 | Italic only | Same, checking `\x1b[3m` |
-| 5 | Bold + italic combined | Tree output has both SGR codes |
-| 6 | Foreground color (basic) | Tree output contains `\x1b[31m` etc. |
-| 7 | Foreground color (RGB) | Tree output contains `\x1b[38;2;…m` |
-| 8 | Background color | Tree output contains `\x1b[48;…m` |
-| 9 | Underline (straight) | Tree output contains `\x1b[4m` |
-| 10 | Underline (curly) | Tree output contains `\x1b[4:3m` |
-| 11 | Strikethrough | Tree output contains `\x1b[9m` |
-| 12 | All styles combined | Tree output has all expected SGR codes |
-| 13 | Layout with left margin | Both outputs have same left padding |
-| 14 | Layout with alignment center | Both outputs centered identically |
-| 15 | Empty content | Both produce empty string |
-| 16 | Unicode content | Content preserved in both paths |
+| 1 | Plain text | Text content matches after ANSI stripping. |
+| 2 | Bold | Both paths contain bold SGR when `term.is_tty`. |
+| 3 | Dim | Both paths contain dim SGR when `term.is_tty`. |
+| 4 | Italic | Both paths contain italic SGR when supported. |
+| 5 | Bold + italic | Both visible styles are present. |
+| 6 | Layout with left margin | Both outputs have equivalent left padding. |
+| 7 | Layout with center alignment | Both outputs center equivalently for a fixed optimistic width. |
+| 8 | Empty content | Both paths produce an empty/blank-equivalent output after layout. |
+| 9 | Unicode content | Unicode content is preserved. |
+
+**Activated stored-field tests** assert the new tree-backed behavior for fields that were previously stored but inert:
+
+| # | Variant | Asserts |
+|---|---------|---------|
+| 10 | Foreground basic color | Tree terminal output contains the expected foreground SGR. |
+| 11 | Foreground RGB/Tailwind color | Tree terminal output uses the shared color degradation path. |
+| 12 | Background color | Tree terminal output contains a background SGR. |
+| 13 | Straight underline | Tree terminal output contains underline SGR when supported. |
+| 14 | Curly underline with limited support | Tree terminal output degrades to straight underline when needed. |
+| 15 | Strikethrough | Tree terminal output contains strikethrough SGR. |
+| 16 | Blink | Tree terminal output contains blink SGR. |
+| 17 | All stored styles combined | All applicable SGR layers are present and reset safely. |
 
 **Tree structure tests:**
 
 | # | Variant | Asserts |
 |---|---------|---------|
-| 17 | Plain text projection | Root is `Paragraph`, single child is `Text` |
-| 18 | Style on node | `node.attrs.style()` returns the expected emphasis/color |
-| 19 | Layout on node | `node.attrs.layout()` returns the component's layout |
-| 20 | Default layout not recorded | When `Layout::default()`, no layout on node attrs |
+| 18 | Plain text projection | Root is `Paragraph`, single child is `Text`. |
+| 19 | Style on node | `node.attrs.style()` returns expected emphasis/color/background. |
+| 20 | Layout on node | `node.attrs.layout()` returns the component layout. |
+| 21 | Default layout not recorded | Default layout does not create a layout attr. |
+| 22 | Underline color ignored | `UnderliningRequest::*Some(color)` maps shape only, with no ad hoc data hint. |
 
-**Cross-target tests** (once Browser and Markdown are implemented):
+## Browser IR Implementation
 
-| # | Variant | Asserts |
-|---|---------|---------|
-| 21 | Markdown render | `render_markdown_node` produces plain text (no colors) |
-| 22 | Browser render | `render_browser_node` produces `<p>` with inline styles |
+`TextBlock` has no existing bespoke browser implementation. Browser output should be derived from the tree projection through `BrowserTreeComponent<TextBlock>` or direct `render_browser_node()` delegation.
 
-#### Feature Requests for Tree Rendering
+The existing browser tree renderer already handles `Paragraph`, `Text`, and `Layout`, but it currently does **not** lower `Style` to CSS or semantic wrappers. Therefore styled browser output requires a render-tree implementation change.
 
-None. TextBlock's needs — a styled paragraph with layout — are already well-served by the existing `Paragraph` + `Text` + `Style` + `Layout` primitives. The `bt block` command exercises this exact combination today through the tree renderer. No new tree-renderer features are required.
+### Feature Requests for Tree Rendering
 
-#### Tree Renderer Fit
+#### RT-TEXTBLOCK-001: Browser lowering for `Style` text appearance and colors
 
-The existing tree renderer is a strong fit for TextBlock. The component is structurally simple (a paragraph of plain text) and its entire styling surface maps one-to-one onto `Style` and `Layout`. The terminal tree renderer already lowers these into ANSI SGR sequences and margin application — exactly what the bespoke `TextBlock::to_terminal()` does today. The only difference is that the bespoke path checks individual terminal capabilities (`term.supports_italic`, `term.underline_support`) inline, while the tree renderer handles that in its style-lowering pass. This is an architectural improvement, not a limitation.
+**APPROVED**
 
-I recommend using the tree renderer without reservation.
+this feature request has been approved and WILL be included as part of the render-tree implementation BEFORE you are asked to implement this solution. Always refer to the @renderable/docs/tree-rendering.md and @renderable/docs/layout-and-style.md documents as the definitive guide.
 
-### Browser IR Implementation
+Why: `TextBlock` is exactly the simple styled-paragraph case that `Style` was created to support. The terminal renderer already consumes `Style`; leaving browser output unstyled would make `TextBlock` browser support structurally present but visually incomplete. Browser `Style` lowering is already called out as designed but unwired in `layout-and-style.md`, so approving it here closes a known render-tree gap rather than adding a component-specific special case.
 
-- In this section we will provide a design specification for the **TextBlock** component's implementation of the BrowserRenderable trait.
+Required behavior:
 
-TextBlock has no existing bespoke browser implementation — Browser is currently `❌` in the component table. The browser output will be derived entirely from the tree projection.
+- Lower `Style.color` to CSS `color`.
+- Lower `Style.background` to CSS `background-color`.
+- Lower `TextEmphasis.bold`, `italic`, and `strikethrough` to semantic wrappers (`<strong>`, `<em>`, `<s>`) or equivalent valid HTML that preserves nesting.
+- Lower underline variants with `UnderlineStyle::css_declaration()`.
+- Lower dim to `opacity: 0.6`.
+- Lower blink to `text-decoration: blink`, accepting that browser support is limited.
+- Apply style to block nodes and inline `Span` nodes without overwriting existing layout CSS in the same `style` attribute.
+- Continue to ignore `border` and `fill` in the browser until the broader Browser Style lowering work defines those box-painting semantics.
+- Preserve current plain paragraph output when no `Style` is present.
+- Tests must cover foreground, background, bold, italic, strikethrough, each underline variant, dim, blink, style plus layout on the same node, and no-style output unchanged.
 
-#### Design
+### Browser Output Examples
 
-The tree projection (`Paragraph` → `Text` + `Style` + `Layout`) is consumed by the existing `render_browser_node` renderer. No component-specific browser code is needed; the adapter path is:
+These examples assume RT-TEXTBLOCK-001 has landed:
 
-1. `TextBlock` implements `TreeRenderable` (designed above), producing a `Paragraph` node with `Style` and `Layout`.
-2. `BrowserTreeComponent<TextBlock>` wraps the component and implements `BrowserRenderable` by calling `render_tree()` then `render_browser_node()`.
-3. The browser renderer lowers `Paragraph` to `<p>`, `Text` to the text value, `Style.emphasis` to semantic HTML wrappers (`<strong>`, `<em>`, `<s>`) and `<span style="…">` for underline/dim/blink, `Style.color` to `color: …`, and `Style.background` to `background-color: …`.
-4. `Layout` is lowered to inline CSS margins, alignment, and `max-width`.
-
-The existing `TextEmphasis::html_wrappers()` method already defines the semantic HTML mapping for bold, italic, strikethrough, underline, dim, and blink. The browser tree renderer applies these. No new browser-side code is needed for TextBlock specifically.
-
-#### Browser Output Examples
-
-| TextBlock config | Browser output |
-|-----------------|----------------|
+| TextBlock config | Browser output shape |
+|------------------|----------------------|
 | Plain text | `<p>Hello world</p>` |
-| Bold + red fg | `<p style="color: red"><strong>Hello</strong></p>` |
+| Bold + red fg | `<p style="color:..."><strong>Hello</strong></p>` or equivalent |
 | Bold + italic | `<p><strong><em>Hello</em></strong></p>` |
-| Blue fg, gray bg | `<p style="color: blue; background-color: gray">Hello</p>` |
-| Underline (curly) | `<p><span style="text-decoration: underline; text-decoration-style: wavy">Hello</span></p>` |
-| Strikethrough | `<p><s>Hello</s></p>` |
-| With left margin | `<p style="margin-left: 4ch">Hello</p>` |
+| Blue fg, gray bg | `<p style="color:...;background-color:...">Hello</p>` |
+| Curly underline | element with `text-decoration: underline; text-decoration-style: wavy` |
+| Strikethrough | `<s>Hello</s>` or equivalent |
+| With left margin | same node also includes `margin-left:4ch` from `Layout` |
 
-#### Test Variants
+### Browser Test Strategy
 
 | # | Variant | Asserts |
 |---|---------|---------|
-| 1 | Plain text | HTML contains `<p>` with text, no inline styles |
-| 2 | Bold | HTML contains `<strong>` |
-| 3 | Italic | HTML contains `<em>` |
-| 4 | Strikethrough | HTML contains `<s>` |
-| 5 | Bold + italic | HTML contains `<strong><em>` nesting |
-| 6 | Foreground color | HTML has `color:` in style attribute |
-| 7 | Background color | HTML has `background-color:` in style attribute |
-| 8 | Underline (straight) | HTML has `text-decoration: underline` |
-| 9 | Underline (curly) | HTML has `text-decoration-style: wavy` |
-| 10 | Dim | HTML has `opacity: 0.6` |
-| 11 | Blink | HTML has `text-decoration: blink` |
-| 12 | Layout margins | HTML has `margin-left` / `margin-right` |
-| 13 | Layout alignment center | HTML has `text-align: center` |
-| 14 | Empty content | HTML is `<p></p>` |
-| 15 | Unicode content | Unicode characters preserved |
+| 1 | Plain text | HTML contains `<p>` and escaped text, no style attribute from `Style`. |
+| 2 | Bold | HTML preserves bold semantics. |
+| 3 | Italic | HTML preserves italic semantics. |
+| 4 | Strikethrough | HTML preserves strikethrough semantics. |
+| 5 | Foreground color | HTML has `color:` in CSS. |
+| 6 | Background color | HTML has `background-color:` in CSS. |
+| 7 | Underline variants | HTML has the expected underline CSS declaration. |
+| 8 | Dim | HTML has `opacity: 0.6`. |
+| 9 | Blink | HTML has `text-decoration: blink`. |
+| 10 | Style + layout | One valid `style` attribute contains both style and layout declarations. |
+| 11 | Empty content | HTML is an empty paragraph. |
+| 12 | Unicode and HTML-sensitive content | Unicode is preserved and `<`, `>`, `&` are escaped. |
 
-### Markdown IR Implementation
+## Markdown IR Implementation
 
-TextBlock will implement `MarkdownRenderable` with two output methods: `render_markdown()` for ergonomic Markdown and `render_markdown_plus()` for high-fidelity Markdown Plus.
+The current Markdown tree renderer ignores `Style` entirely for both `Markdown` and `MarkdownPlus`, per `layout-and-style.md`. It renders `Paragraph(Text)` as plain text and does not inspect `NodeAttrs::style()`.
 
-#### Distinguishing Markdown from MarkdownPlus
+For this migration, `TextBlock` should still implement `MarkdownRenderable` by delegating to `render_markdown_node()`, but the output contract must be plain-text Markdown. Do not add bespoke Markdown styling logic to `TextBlock`; that would immediately fork behavior away from the canonical tree renderer.
 
-For TextBlock, the divergence between Markdown and MarkdownPlus is straightforward:
+### Feature Requests for Tree Rendering
 
-- **Markdown** strips all color and styling information that cannot be expressed in pure Markdown syntax. Bold maps to `**text**`, italic to `_text_`, strikethrough to `~~text~~`. Colors, underline variants, blink, and dim have no Markdown equivalent and are dropped.
-- **MarkdownPlus** preserves inline HTML for styling that Markdown cannot express. Colors become `<span style="color: red">text</span>`, backgrounds become `<span style="background-color: gray">text</span>`, underline variants become `<span style="text-decoration: underline">text</span>`, dim becomes `<span style="opacity: 0.6">text</span>`, and blink becomes `<span style="text-decoration: blink">text</span>`.
+#### RT-TEXTBLOCK-002: MarkdownPlus lowering for `Style`
 
-Both outputs are valid Markdown. When no colors, underline, dim, or blink are present, the two outputs are identical.
+**DENIED**
 
-#### Mapping Table
+this feature will not be added to the render-tree tree implementation. You should try to still use the render-tree where practical and work around the complexity but if the complexity is too great then you have permission to create a bespoke IR implementation for this component.
 
-| Style | Markdown | MarkdownPlus |
-|-------|----------|-------------|
-| Plain text | `Hello` | `Hello` |
-| Bold | `**Hello**` | `**Hello**` |
-| Italic | `_Hello_` | `_Hello_` |
-| Bold + italic | `**_Hello_**` | `**_Hello_**` |
-| Strikethrough | `~~Hello~~` | `~~Hello~~` |
-| Foreground color (red) | `Hello` | `<span style="color: red">Hello</span>` |
-| Background color (gray) | `Hello` | `<span style="background-color: gray">Hello</span>` |
-| Underline (straight) | `Hello` | `<span style="text-decoration: underline">Hello</span>` |
-| Underline (curly) | `Hello` | `<span style="text-decoration: underline; text-decoration-style: wavy">Hello</span>` |
-| Dim | `Hello` | `<span style="opacity: 0.6">Hello</span>` |
-| Blink | `Hello` | `<span style="text-decoration: blink">Hello</span>` |
-| Bold + red fg | `**Hello**` | `<span style="color: red">**Hello****</span>` |
-| Layout margins | Not represented in body | Not represented in body (could be in frontmatter `styles`) |
+Why: `layout-and-style.md` explicitly documents that Markdown ignores `Style` entirely and emits no diagnostic. Adding MarkdownPlus style lowering as part of the `TextBlock` migration would change a cross-cutting Markdown renderer contract for one component. TextBlock can still use the render tree for Markdown by emitting plain text. Rich MarkdownPlus styling should be handled later by the dedicated Markdown styling work, with a renderer-wide design for escaping, nesting, strictness diagnostics, and interaction with semantic inline nodes.
 
-#### Implementation Approach
+Required behavior for this component:
 
-The tree projection already captures the complete style. The `render_markdown_node` renderer walks the tree and produces Markdown. For TextBlock, this means:
+- `render_markdown()` delegates to `render_markdown_node()` with `MarkdownDialect::Markdown`.
+- `render_markdown_plus()` delegates to `render_markdown_node()` with `MarkdownDialect::MarkdownPlus`.
+- Both methods currently produce the same plain text for styled `TextBlock` values.
+- Tests must assert that color, background, underline, dim, blink, bold, italic, and strikethrough stored in `Style` do not change Markdown output until the renderer-wide Markdown styling feature exists.
 
-1. Build the tree node via `render_tree()`.
-2. Call `render_markdown_node()` — the Markdown renderer already handles `Paragraph`, `Text`, and `Style`.
-3. For Markdown target, the renderer drops color/background/underline/dim/blink (no Markdown equivalent) and keeps emphasis that maps to Markdown syntax.
-4. For MarkdownPlus target, the renderer emits inline HTML for non-Markdown-representable styles.
-
-Since the Markdown renderer is target-aware and already handles this distinction, TextBlock does not need custom Markdown rendering logic. The `MarkdownRenderable` impl delegates to the tree:
-
-```rust
-impl MarkdownRenderable for TextBlock {
-    fn render_markdown(&self) -> String {
-        let node = self.render_tree();
-        let opts = MarkdownRenderOptions::default();
-        render_markdown_node(&node, &opts)
-            .map(|r| r.output)
-            .unwrap_or_default()
-    }
-
-    fn render_markdown_plus(&self) -> String {
-        let node = self.render_tree();
-        let opts = MarkdownPlusRenderOptions::default();
-        render_markdown_node(&node, &opts)
-            .map(|r| r.output)
-            .unwrap_or_default()
-    }
-}
-```
-
-> **Note:** The exact option types for Markdown vs MarkdownPlus rendering will depend on how the tree's Markdown renderer distinguishes the two targets. If a single `MarkdownRenderOptions` with a `plus: bool` flag is used instead, the impl adjusts accordingly.
-
-#### Test Variants
+### Markdown Test Strategy
 
 | # | Variant | Markdown asserts | MarkdownPlus asserts |
-|---|---------|-----------------|---------------------|
+|---|---------|------------------|----------------------|
 | 1 | Plain text | `Hello` | `Hello` |
-| 2 | Bold | `**Hello**` | `**Hello**` |
-| 3 | Italic | `_Hello_` | `_Hello_` |
-| 4 | Strikethrough | `~~Hello~~` | `~~Hello~~` |
-| 5 | Bold + italic | `**_Hello_**` | `**_Hello_**` |
-| 6 | Red foreground | `Hello` (no color) | `style="color: red">Hello` |
-| 7 | Gray background | `Hello` (no bg) | `style="background-color: gray">Hello` |
-| 8 | Underline straight | `Hello` (no underline) | `style="text-decoration: underline">Hello` |
-| 9 | Underline curly | `Hello` | `text-decoration-style: wavy` |
-| 10 | Dim | `Hello` | `opacity: 0.6` |
-| 11 | Blink | `Hello` | `text-decoration: blink` |
-| 12 | Bold + red fg | `**Hello**` | `style="color: red">**Hello**` |
-| 13 | All emphasis combined | `**_~~Hello~~_**` | inline HTML for color/underline + markdown for bold/italic/strike |
-| 14 | Empty content | `""` | `""` |
-| 15 | Identity when no color styles | output == MarkdownPlus output | (same) |
+| 2 | Bold stored as `Style` | `Hello` | `Hello` |
+| 3 | Italic stored as `Style` | `Hello` | `Hello` |
+| 4 | Strikethrough stored as `Style` | `Hello` | `Hello` |
+| 5 | Red foreground | `Hello` | `Hello` |
+| 6 | Gray background | `Hello` | `Hello` |
+| 7 | Underline | `Hello` | `Hello` |
+| 8 | Dim | `Hello` | `Hello` |
+| 9 | Blink | `Hello` | `Hello` |
+| 10 | Empty content | `""` | `""` |
+| 11 | HTML-sensitive content | Markdown text is not interpreted as raw HTML by the renderer. | Same. |
 
-### `bt` CLI
+## `bt` CLI
 
-- This specification will ensure that the **TextBlock** component:
-    - has a 'bt' CLI subcommand for rendering this component
-    - that the '--md' and '--html' CLI switches are available to render to Markdown and HTML targets respectively (the default render is always for the Terminal)
-    - that the '--example' CLI switch is in place to provide a thoughtful example of how this command should be used with the CLI (see other working examples for a template)
-
-#### Current State
+### Current State
 
 | Aspect | Status |
 |--------|--------|
-| CLI command exists | No (`TextBlock` has no subcommand; `bt block` exists but is a generic tree-based command, not a TextBlock component command) |
-| Render method used | N/A — no CLI command |
+| CLI command exists | No (`TextBlock` has no subcommand; `bt block` is a generic tree-based command) |
+| Render method used | N/A |
 | Has `--md` / `--html` switches | No |
 | Has `--example` switch | No |
 
-#### Relationship to `bt block`
+### CLI Decision
 
-The existing `bt block` command already renders a text block through the tree with a `Style` and `Layout`, accepting `--fg`, `--bg`, `--bold`, `--italic`, `--underline`, `--strike`, `--border`, `--fill`, and `--fill-band` flags. It builds a `RenderNode::paragraph(vec![RenderNode::text(...)])` with style attached.
+Add a dedicated `bt text-block` command rather than reusing `bt block`.
 
-`bt text-block` (or simply reusing `bt block` as the CLI entry point for TextBlock) is architecturally the same operation. The **TextBlock component** and the **`bt block` command** share the same tree shape. The design choice is:
+Why: `bt block` is a generic render-tree style exerciser and includes box concepts such as border/fill that `TextBlock` does not expose. `bt text-block` should instantiate the actual component and exercise its migration path. Keeping the command separate makes it useful as a component parity surface without overloading `bt block`.
 
-**Option A:** Add a dedicated `bt text-block` subcommand that instantiates a `TextBlock` component and renders it via the tree. This keeps the CLI command aligned with the component (matching the `bt quote` / `BlockQuote` pattern).
+### CLI Specification
 
-**Option B:** Point the existing `bt block` command at the `TextBlock` component. The `bt block` command would construct a `TextBlock`, call `render_tree()`, and render through the tree. This avoids a redundant CLI command.
-
-**Recommendation:** Option A — add a `bt text-block` subcommand. While `bt block` and `bt text-block` produce the same tree shape, `bt block` is a lower-level "build a styled paragraph from flags" command, while `bt text-block` is the component's CLI surface. Keeping them separate allows `bt text-block` to add TextBlock-specific options (e.g., `--underline-style curly`) without crowding `bt block`. Additionally, `bt text-block` should support `--md` and `--html` targets, which `bt block` does not.
-
-#### Specification
-
-Add a `TextBlock(TextBlockArgs)` variant to the `Command` enum in `args.rs` and create a new `commands/text_block.rs` module.
-
-**CLI flags:**
+Add a `TextBlock(TextBlockArgs)` variant to the CLI `Command` enum and create a `commands/text_block.rs` module.
 
 | Flag | Type | Description |
 |------|------|-------------|
-| `TEXT` | positional (required) | Text content; multiple values joined with spaces |
-| `--example` / `-e` | flag | Render an example with the command used |
-| `--bold` | flag | Bold text |
-| `--dim` | flag | Dim text |
-| `--italic` | flag | Italic text |
-| `--strikethrough` / `--strike` | flag | Strikethrough text |
-| `--underline` | flag | Straight underline |
-| `--double-underline` | flag | Double underline |
-| `--curly-underline` | flag | Curly (wavy) underline |
-| `--blink` | flag | Blinking text |
-| `--fg` | string | Foreground color (named or `#rrggbb`) |
-| `--bg` | string | Background color (named or `#rrggbb`) |
-| `--html` | flag | Render to HTML fragment instead of terminal |
-| `--md` | flag | Render to portable Markdown instead of terminal |
-| `--md-plus` | flag | Render to MarkdownPlus instead of terminal |
-| Layout flags | `LayoutArgs` (flattened) | `--margin-left`, `--margin-right`, `--margin-top`, `--margin-bottom`, `--alignment` |
+| `TEXT` | positional, required, variadic | Text content; multiple values joined with spaces. |
+| `--example` / `-e` | flag | Render a representative example and the command used. |
+| `--bold` | flag | Bold text. |
+| `--dim` | flag | Dim text. |
+| `--italic` | flag | Italic text. |
+| `--strikethrough` / `--strike` | flag | Strikethrough text. |
+| `--underline` | flag | Straight underline. |
+| `--double-underline` | flag | Double underline. |
+| `--curly-underline` | flag | Curly/wavy underline. |
+| `--dotted-underline` | flag | Dotted underline. |
+| `--dashed-underline` | flag | Dashed underline. |
+| `--blink` | flag | Blinking text. |
+| `--fg` | string | Foreground color accepted by the existing CLI color parser. |
+| `--bg` | string | Background color accepted by the existing CLI color parser. |
+| `--html` | flag | Render an HTML fragment instead of terminal output. |
+| `--md` | flag | Render portable Markdown instead of terminal output. |
+| `--md-plus` | flag | Render MarkdownPlus instead of terminal output. Currently plain text for `TextBlock` style. |
+| Layout flags | flattened existing layout args | Margins, alignment, and other supported layout options. |
 
-**Example:**
+`--html`, `--md`, and `--md-plus` are mutually exclusive. Terminal remains the default target.
 
-```
+Example:
+
+```text
 bt text-block "Release candidate passed" --fg green --bold --underline
 ```
 
-Example output for `--example`:
+Implementation:
 
-```
-Release candidate passed        (bold, green, underlined in terminal)
+1. Parse args into a `TextBlock` via the builder API.
+2. Terminal target: render through `render_tree()` -> `render_terminal_node()`.
+3. Browser target: render through `render_tree()` -> `render_browser_node()` once RT-TEXTBLOCK-001 is available.
+4. Markdown targets: call the component's `MarkdownRenderable` methods, which delegate to the tree renderer.
+5. `--example`: use preset values (`--fg green --bold --underline`) and print both rendered output and the exact command.
 
-Command:
-bt text-block "Release candidate passed" --fg green --bold --underline
-```
+## Documentation Updates
 
-**Implementation:**
+Update alongside implementation:
 
-1. Parse args into a `TextBlock` component via the builder API.
-2. For terminal rendering: call `render_tree()` → `render_terminal_node()`.
-3. For `--html`: call `render_tree()` → `render_browser_node()` → print HTML.
-4. For `--md`: call `render_markdown()` on the component (which delegates to the tree's Markdown renderer).
-5. For `--md-plus`: call `render_markdown_plus()` on the component.
-6. For `--example`: use preset values (`--fg green --bold --underline`) and print the command.
-
-The command follows the same pattern as `bt prose` for cross-target switches (`--html`, `--md`, `--md-plus` are mutually exclusive) and the same pattern as `bt block` for style flags.
+- `biscuit-terminal/docs/components/text_block.md`: document that foreground/background, underline, strikethrough, and blink are now active through the tree renderer.
+- `biscuit-terminal/docs/components/index.md`: update target support for `TextBlock`.
+- `renderable/docs/components.md` if present in the implementation branch: mark Tree/Browser/Markdown support according to the final implemented state.
+- Per-area `docs/dependencies.md` only if new crates are added; none should be needed for this migration.
 
 ## Acceptance Criteria Summary
 
-1. `TextBlock` implements `TreeRenderable` with a `render_tree()` method that produces a `Paragraph(Text)` node with `Style` and `Layout`.
-2. `TextBlock` implements `BrowserRenderable` (via `BrowserTreeComponent` or direct delegation to `render_browser_node`).
-3. `TextBlock` implements `MarkdownRenderable` with `render_markdown()` and `render_markdown_plus()`.
-4. The bespoke `TerminalRenderable` impl is re-pointed to delegate through the tree; the old path is retained as fallback.
-5. A `bt text-block` CLI subcommand exists with `--bold`, `--dim`, `--italic`, `--strikethrough`, `--underline`, `--double-underline`, `--curly-underline`, `--blink`, `--fg`, `--bg`, `--html`, `--md`, `--md-plus`, `--example`, and layout flags.
-6. Parity tests compare bespoke-vs-tree terminal output across all style combinations.
-7. Cross-target tests cover Browser HTML and Markdown/MarkdownPlus output.
-8. The component table in `renderable/docs/components.md` is updated to reflect the new state (Tree: ✅, Browser: ✅, Markdown: ✅, IR State: `both avail, tree renders`, bt CLI: `tree`).
+1. `TextBlock` implements `TreeRenderable` with a `Paragraph(Text)` projection carrying non-default `Style` and `Layout`.
+2. Terminal rendering delegates to the tree renderer after parity coverage is in place, with the old bespoke path retained as a private fallback.
+3. Tests distinguish legacy parity from newly activated stored fields.
+4. Browser rendering is implemented through `BrowserTreeComponent` or direct tree delegation after RT-TEXTBLOCK-001 lands.
+5. Markdown and MarkdownPlus rendering delegate to the tree renderer and currently produce plain text for style-only formatting.
+6. A `bt text-block` subcommand exists with style flags, target switches, `--example`, and layout flags.
+7. Cross-target tests cover Terminal, Browser, Markdown, and MarkdownPlus behavior.
+8. Documentation is updated for the public behavior change that previously inert stored fields now render.
+
+## Follow-up Clarifications and Design Decisions
+
+- Design decision: activate the stored `fg_color`, `bg_color`, `underline`, `strikethrough`, and `blink` fields when rendering through the tree. These fields are already part of `TextBlock`'s public API and map cleanly to `Style`; leaving them inert would preserve a bug rather than preserve meaningful compatibility.
+- Design decision: do not preserve `UnderliningRequest`'s optional underline color in the tree projection. The current component does not render underline at all, and `Style` has no underline-color slot. A future underline-color feature should be renderer-wide.
+- Design decision: keep Markdown and MarkdownPlus plain-text for this migration. Styled MarkdownPlus should wait for a renderer-wide Markdown style design rather than a component-specific workaround.

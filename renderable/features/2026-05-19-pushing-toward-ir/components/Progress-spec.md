@@ -2,107 +2,126 @@
 
 ## Component Status
 
-| Field      | Value                                                                                 |
-|------------|---------------------------------------------------------------------------------------|
-| Name       | Progress                                                                              |
-| Kind       | Block (rendered as inline-block; visually a single line)                              |
-| Location   | `biscuit-terminal/lib/src/components/progress.rs`                                     |
-| Terminal   | ✅ bespoke `TerminalRenderable`                                                        |
-| Browser    | ❌                                                                                     |
-| Markdown   | ❌                                                                                     |
-| Tree       | ✅ `render_tree_node()` exists (projects to `NodeKind::Paragraph` with `ProgressHints`)|
-| IR State   | both avail, old renders                                                               |
-| bt CLI     | tree (already routes through `render_terminal_node`)                                  |
+| Field      | Value                                                                                  |
+|------------|----------------------------------------------------------------------------------------|
+| Name       | Progress                                                                               |
+| Kind       | Block component rendered as one visual line                                            |
+| Location   | `biscuit-terminal/lib/src/components/progress.rs`                                      |
+| Terminal   | Bespoke `TerminalRenderable` still owns default `.render()`                            |
+| Browser    | No direct `BrowserRenderable`; adapter path exists only for `TreeRenderable` producers |
+| Markdown   | No direct `MarkdownRenderable`                                                         |
+| Tree       | Compatibility `render_tree_node()` exists; canonical `TreeRenderable` is still missing |
+| bt CLI     | `bt progress` exists and already renders Terminal output through `render_terminal_node` |
 
-Progress renders a horizontal progress bar showing completion percentage with
-configurable width, fill/empty characters, bracket glyphs, and slot colors
-(`filled_color`, `empty_color`, `bracket_color`). The bar is a single visual
-line: `[████████░░░░░░░░░░░░]  40%`, optionally preceded by a label.
+Progress renders a horizontal completion bar with an optional label:
 
-A tree projection already exists via `render_tree_node()`, producing a
-`NodeKind::Paragraph` carrying `ProgressHints` on `NodeAttrs`. The paragraph's
-visible text is `"{label} {percentage}%"` (or `"{percentage}%"` without a label)
-so renderers without progress hint support degrade gracefully to plain text.
-The bt CLI already uses the tree renderer path.
+```text
+Loading [████████░░░░░░░░░░░░]  40%
+```
 
-However, the default `TerminalRenderable::render()` still uses the bespoke
-`render_bar()` path. The browser and markdown tree renderers do not handle
-`ProgressHints` — they render the paragraph as-is (`<p>` / plain text).
+The component owns:
 
----
+- a clamped numeric value (`0.0..=1.0`);
+- an optional label;
+- a bar width in terminal cells / CSS `ch` units;
+- a typed `ProgressStyle` carrying fill/empty/bracket glyphs plus
+  `filled_color`, `empty_color`, and `bracket_color` slots;
+- a block `Layout`.
 
-## Design Steps
+Progress already projects to a `NodeKind::Paragraph` carrying
+`ProgressHints` on `NodeAttrs`. The paragraph text is the semantic fallback:
+`"{label} {percentage}%"` or `"{percentage}%"`. Renderers that understand
+`ProgressHints` may draw a visual bar; renderers that do not still produce
+readable text.
 
-### Terminal IR Implementation
+## Review Decisions
 
-- The **Progress** component does not currently have a IR based rendering solution
-- This section will describe what is required to ensure that the **Progress** component:
-    - has an IR implementation
-    - the IR implementation drives the TerminalRenderable contract
-    - the IR implementation is what is used by the bt CLI (note if **Progress** doesn't yet have bt CLI subcommand then it will be designed below in the bt CLI section)
+- Keep `NodeKind::Paragraph + ProgressHints`; do not add a dedicated
+  `NodeKind::Progress`. Progress is a widget-specific presentation of a
+  paragraph-level status, and `ProgressHints` already carry the required typed
+  payload without expanding the structural Markdown-like node vocabulary.
+- Add canonical `TreeRenderable` for `Progress`. The existing
+  `TerminalRenderable::render_tree_node()` hook is a biscuit-terminal
+  compatibility hook, not the canonical producer trait required by
+  `TreeComponent`, `BrowserTreeComponent`, and future cross-target adapters.
+- Make Terminal default rendering delegate through the tree only after a
+  bespoke-vs-tree parity test is green. Keep the old implementation as an
+  internal test helper until the parity ledger is stable.
+- Treat portable Markdown as semantic text only. Markdown has no native
+  progress bar or color model, so it should output the label and percentage and
+  intentionally ignore bar glyphs, colors, and layout.
+- Treat Browser and MarkdownPlus as visual targets. They should render a
+  semantic HTML progress widget from `ProgressHints`, not a terminal
+  character-art bar.
 
-#### Tree Projection Status
+## Tree Projection
 
-Progress already has a working tree projection via `render_tree_node()` at
-`progress.rs:268`. The projection:
-
-1. Computes the percentage string (`"{label} {pct}%"` or `"{pct}%"`).
-2. Creates `RenderNode::paragraph(vec![RenderNode::text(visible)])`.
-3. Seeds `ProgressHints` onto the node's `NodeAttrs` with all bar parameters
-   (`value`, `bar_width`, `fill_char`, `empty_char`, `left_bracket`,
-   `right_bracket`, `filled_color`, `empty_color`, `bracket_color`).
-4. Seeds the component's `Layout` if non-default.
-
-The native terminal tree renderer already handles `ProgressHints` at
-`render_tree::render.rs:357`: when a `NodeKind::Paragraph` carries progress
-hints, it calls `render_progress_bar()` (line 1202), which reconstructs the
-full bar from the hints — fill/empty segments, bracket glyphs, color
-application via `paint_fg`, and label extraction. This produces output
-identical to the bespoke `Progress::render_bar()`.
-
-#### Switching the Default Render Path
-
-The goal is to make the IR path the default for `TerminalRenderable::render()`
-while **retaining the bespoke path** for parity testing.
-
-The switch follows the same pattern as OrderedList/UnorderedList: Progress's
-`render()` and `render_optimistic()` delegate to a `render_via_tree()` helper,
-and the old bespoke logic is preserved as `render_bespoke()`.
-
-**Implementation approach:**
+Factor Progress projection into one private helper so all producer surfaces
+stay in lockstep:
 
 ```rust
-impl TerminalRenderable for Progress {
-    fn render_optimistic(&self, term_width: Option<u32>) -> String {
-        let width = term_width.unwrap_or(80);
-        let term = Terminal::new_optimistic(width);
-        self.render_via_tree(&term)
-    }
+impl Progress {
+    fn to_render_node(&self) -> RenderNode {
+        let percentage = (self.value * 100.0).round() as u32;
+        let visible = match &self.label {
+            Some(label) => format!("{label} {percentage}%"),
+            None => format!("{percentage}%"),
+        };
 
-    fn render(&self, term: &Terminal) -> String {
-        self.render_via_tree(term)
+        let mut node = RenderNode::paragraph(vec![RenderNode::text(visible)]);
+        node.attrs.set_progress_hints(&ProgressHints {
+            value: self.value,
+            bar_width: self.bar_width,
+            fill_char: self.style.fill_char,
+            empty_char: self.style.empty_char,
+            left_bracket: self.style.left_bracket,
+            right_bracket: self.style.right_bracket,
+            filled_color: self.style.filled_color,
+            empty_color: self.style.empty_color,
+            bracket_color: self.style.bracket_color,
+        });
+        if self.layout != Layout::default() {
+            node.attrs.set_layout(&self.layout);
+        }
+        node
     }
+}
+```
 
-    fn layout(&self) -> &Layout {
-        &self.layout
-    }
+Then wire both traits to the helper:
 
-    fn layout_mut(&mut self) -> &mut Layout {
-        &mut self.layout
-    }
-
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
-    fn render_tree_node(&self) -> Option<RenderNode> {
-        // existing projection unchanged
+```rust
+impl renderable::tree::TreeRenderable for Progress {
+    fn render_tree(&self) -> RenderNode {
+        self.to_render_node()
     }
 }
 
+impl TerminalRenderable for Progress {
+    fn render_tree_node(&self) -> Option<RenderNode> {
+        Some(self.to_render_node())
+    }
+}
+```
+
+`ProgressHints` should remain typed and accessed through
+`NodeAttrs::set_progress_hints()` / `NodeAttrs::progress_hints()`. Renderers
+must not inspect raw `data` strings at call sites.
+
+## Terminal IR Implementation
+
+The terminal tree renderer already handles `ProgressHints` on paragraphs. It
+reconstructs the bar from the hints, applies slot colors through the shared
+terminal color lowering path, extracts the label from the paragraph fallback
+text, and applies node `Layout` through `render_with_layout`.
+
+Switch `TerminalRenderable::render()` and `render_optimistic()` to this tree
+path:
+
+```rust
 impl Progress {
     fn render_via_tree(&self, term: &Terminal) -> String {
-        let node = self.render_tree_node().expect("Progress always projects");
+        let node = self.to_render_node();
         let opts = TerminalRenderOptions::new(term, RenderStrictness::Warn);
         match render_terminal_node(&node, &opts) {
             Ok(rendered) => rendered.output,
@@ -110,534 +129,225 @@ impl Progress {
         }
     }
 
-    /// Retained for parity testing. Renders via the pre-tree bespoke path.
-    fn render_bespoke(&self, term: &Terminal) -> String {
-        let width = term.width();
+    #[cfg(test)]
+    fn render_bespoke_for_parity(&self, term: &Terminal) -> String {
         let bar_content = self.render_bar(term.color_depth);
-        self.layout.apply_block_layout(&bar_content, width)
+        self.layout.apply_block_layout(&bar_content, term.width())
     }
 }
 ```
 
-#### Layout Mapping
+`render_optimistic()` should construct `Terminal::new_optimistic(width)` and
+then call `render_via_tree()` so optimistic rendering uses the same code path
+as normal rendering.
 
-Progress's `Layout` already seeds onto the projected `RenderNode` via
-`node.attrs.set_layout(&self.layout)` (line 288). The terminal tree renderer's
-`render_with_layout` applies it during rendering. No additional Layout
-parameters are needed.
+### Layout Mapping
 
-Progress is a single-line component; the only Layout properties that matter are
-`margin` (left/right/top/bottom spacing) and `alignment` (horizontal position).
-`max_width` is a Browser-only property and `word_wrap` does not apply to a
-progress bar (it is inherently non-wrapping).
+Progress attaches `Layout` to the projected paragraph when the layout is
+non-default. Terminal layout applies to the whole single-line visual block:
 
-#### Style Considerations
+- left/right margins add horizontal space and narrow the available width;
+- top/bottom margins add blank rows;
+- alignment positions the whole label/bar/percentage unit;
+- `word_wrap` is ignored in practice because the progress bar is inherently
+  non-wrapping;
+- terminal `max_width` remains a no-op, matching `layout-and-style.md`.
 
-Progress uses a typed `ProgressStyle` struct (not the shared `renderable::style::Style`)
-for its visual appearance. The `ProgressStyle` carries glyph characters and slot
-colors, which are encoded into `ProgressHints` on the projected node. The
-terminal tree renderer reads these hints directly in `render_progress_bar()`,
-bypassing the generic `Style` system.
+### Terminal Test Strategy
 
-This is the correct approach: progress bar glyphs and track colors are
-widget-specific concepts that don't map naturally to `Style`'s box-painting
-model (border, fill, background). `ProgressStyle` is already a Spec B D5
-compliant typed component style struct.
+Add or keep a dedicated `progress_parity.rs` gate that compares:
 
-#### Parity Test Strategy
+| Variant                                                | Required assertion                                                   |
+|--------------------------------------------------------|----------------------------------------------------------------------|
+| `0.0`, `0.5`, `1.0`                                    | Fill count, empty count, and formatted percentage match              |
+| Label and no label                                     | Label placement and unlabeled leading bracket match                  |
+| Custom width                                           | Filled + empty glyph count equals requested width                    |
+| Custom fill/empty/bracket glyphs                       | Hints carry glyphs and tree output uses them                         |
+| Filled, empty, and bracket colors                      | SGR is present at capable color depths and absent at `ColorDepth::None` |
+| RGB color degradation                                  | Truecolor, 16-color fallback, and no-color behavior are covered      |
+| Clamping below `0.0` and above `1.0`                    | Projection and output show `0%` / `100%`                             |
+| Percentage alignment (`  0%`, ` 75%`, `100%`)          | Right-aligned percentage formatting is preserved                     |
+| Layout left/right/top/bottom margins and center align  | Tree layout matches bespoke layout semantics                         |
+| Small terminal widths                                  | Output remains deterministic and does not panic                      |
+| `ProgressStyle` serde round trip                       | Glyphs and color slots survive serialization                         |
 
-Critical test variants for the IR vs bespoke comparison:
+Parity should assert ANSI-stripped content equality for the full line and
+separate color-specific assertions for SGR behavior. Any accepted divergence
+must be listed in a local `KNOWN_DRIFT` ledger with the reason.
 
-| Variant                                                       | Validates                                                                        |
-|---------------------------------------------------------------|----------------------------------------------------------------------------------|
-| Zero progress (`0.0`)                                         | No fill chars, all empty chars, `"  0%"`                                         |
-| Full progress (`1.0`)                                         | All fill chars, no empty chars, `"100%"`                                         |
-| Half progress (`0.5`)                                         | Equal fill and empty counts, `"50%"`                                             |
-| Progress with label                                           | Label precedes bar in both paths                                                 |
-| Custom bar width (e.g., 10)                                   | 5 fill + 5 empty at 50%                                                          |
-| Custom glyphs (fill='#', empty='-', brackets='(', ')')        | All custom glyphs present in output                                              |
-| Custom fill color (green)                                     | SGR escape `\x1b[32m` wraps fill chars in both paths                            |
-| Custom bracket color (cyan)                                   | SGR escape `\x1b[36m` wraps brackets in both paths                              |
-| All three slot colors set                                     | All three color SGR sequences present                                            |
-| Color depth degradation (truecolor → basic → none)            | RGB color degrades to basic, then strips entirely at `ColorDepth::None`          |
-| No colors (default)                                           | No SGR escapes in output                                                         |
-| Value clamped above 1.0                                       | Both paths produce `100%`                                                        |
-| Value clamped below 0.0                                       | Both paths produce `0%`                                                          |
-| Percentage alignment (`0%`, `75%`, `100%`)                    | Right-aligned format `{percentage:3}%` preserved                                 |
-| Left margin applied                                           | Layout margin prefixes the line with spaces                                      |
-| Right margin applied                                          | Available width is narrowed                                                      |
-| Center alignment                                              | Bar is centered within the available width                                       |
-| Small terminal width (bar wider than terminal)                | Behavior is defined and consistent                                               |
-| `ProgressStyle` serde roundtrip                               | JSON serialization preserves all fields                                          |
+## Browser IR Implementation
 
-Parity is asserted on **ANSI-stripped content equality** (not byte-identical
-output), following the BlockQuote parity discipline. The content semantics —
-fill count, empty count, label text, percentage — must be identical. Known
-accepted divergences should be documented in a `KNOWN_DRIFT` ledger:
+Progress should not get a bespoke browser renderer. Browser support should
+come from the canonical tree path:
 
-- **SGR sequence ordering**: The bespoke path emits color escapes in
-  `render_bar()`'s direct `paint_fg` calls. The tree path emits them in
-  `render_progress_bar()` which follows the same logic but may produce
-  slightly different escape ordering. After ANSI stripping, content must
-  be identical.
-- **Layout application**: Both paths apply layout (margins, alignment), but
-  the tree path does so through `render_with_layout` while the bespoke path
-  uses `LayoutTerminalExt::apply_block_layout`. These should produce the
-  same result but exercise different code paths.
+1. `Progress` implements `TreeRenderable`.
+2. `BrowserTreeComponent<Progress>` projects to the tree.
+3. `renderable::tree::render_browser_node()` handles `ProgressHints`.
 
-#### Feature Requests for Tree Rendering
+### Render-Tree Feature Request RT-PROGRESS-001
 
-No feature requests are needed. The existing tree renderer already has native
-support for progress bars via `ProgressHints` on `NodeKind::Paragraph`:
+**APPROVED**
 
-- `render_progress_bar()` reconstructs the full bar from hints
-- Color slot degradation through `paint_fg` matches the bespoke path
-- Label extraction from paragraph text
-- Layout application via `render_with_layout`
+this feature request has been approved and WILL be included as part of the render-tree implementation BEFORE you are asked to implement this solution. Always refer to the @renderable/docs/tree-rendering.md and @renderable/docs/layout-and-style.md documents as the definitive guide.
 
-#### Tree Renderer Fit Assessment
+Why: the tree already carries a target-agnostic `ProgressHints` payload, and
+the terminal renderer already treats that payload as native widget semantics.
+Adding browser handling to the tree renderer keeps the tree as the single
+source of truth and avoids a second bespoke `Progress` browser implementation.
 
-The existing tree renderer is an **excellent fit** for Progress. The component's
-entire rendering logic — fill/empty glyph painting, bracket rendering, slot
-color application with depth degradation, percentage formatting, and label
-prefix — has a corresponding native implementation in `render_progress_bar()`.
+Required behavior:
 
-The `ProgressHints` mechanism is a clean, well-designed bridge: all bar
-parameters are carried on the node, and the renderer reconstructs the visual
-bar from those parameters. The paragraph's visible text provides a graceful
-degradation path for renderers that don't understand progress hints.
+- In the browser renderer, handle `ProgressHints` in the
+  `NodeKind::Paragraph` branch before normal paragraph rendering.
+- Emit semantic HTML with `role="progressbar"`, `aria-valuemin="0"`,
+  `aria-valuemax="100"`, `aria-valuenow`, and an accessible label derived from
+  the component label when present.
+- Use stable classes such as `progress`, `progress-label`, `progress-track`,
+  `progress-filled`, and `progress-percentage`.
+- Apply node `Layout` to the outer progress element via the existing browser
+  layout lowering.
+- Clamp `hints.value` to `0.0..=1.0`; render filled width as
+  `round(value * 100)%`; render track width as `bar_width` in `ch`.
+- Lower `filled_color` and `empty_color` to CSS `background-color` values on
+  the filled segment and track. Lower `bracket_color` only if the browser
+  output chooses to render bracket affordances; otherwise preserve it as a
+  typed hint and do not invent terminal glyph output.
+- Do not render terminal fill/empty glyph repetition by default. Browser output
+  is a CSS progress bar, not terminal character art.
+- Preserve non-default glyph and bracket values in `data-fill-char`,
+  `data-empty-char`, `data-left-bracket`, and `data-right-bracket` attributes
+  so the information is not silently discarded from the HTML surface.
+- HTML-escape all label and percentage text.
+- Normal paragraph rendering must remain unchanged when no `ProgressHints` are
+  present.
 
-Progress is one of the simplest components to migrate because:
-1. The tree projection already exists and is well-tested
-2. The terminal tree renderer already has native progress bar support
-3. The bt CLI already uses the tree path
-4. The component is a single-line widget with no nesting or complex layout
+### Browser Test Strategy
 
-`will_use_tree_renderer`: **true** — the existing tree renderer handles
-Progress's needs without any feature additions.
+| Variant                              | Required assertion                                           |
+|--------------------------------------|--------------------------------------------------------------|
+| `0.0`, `0.5`, `1.0`                  | `aria-valuenow` and filled width are `0`, `50`, `100`        |
+| Label and no label                   | Label span appears only when label exists                    |
+| Custom bar width                     | Track width uses requested `ch` value                        |
+| Filled and empty colors              | CSS background colors are emitted on the correct elements    |
+| Bracket color                        | Either bracket affordance color is used or no glyph is emitted |
+| Custom glyphs/brackets               | Values are preserved in `data-*` attributes                  |
+| Layout with margin/alignment/width   | Existing `layout_to_css` output appears on the outer element |
+| Fallback paragraph                   | Plain paragraphs without hints still render as `<p>`         |
+| Escaping                             | Label text is escaped in HTML and attributes                 |
 
-`will_use_tree_renderer_with_features`: **true** — no features requested, so
-this is the same as above.
+## Markdown IR Implementation
 
----
+Portable Markdown should continue to render the paragraph fallback text:
 
-### Browser IR Implementation
+- `Progress::new(0.75).with_label("Loading")` -> `Loading 75%`
+- `Progress::new(0.5)` -> `50%`
 
-- In this section we will provide a design specification for the **Progress** component's implementation of the BrowserRenderable trait
+This output intentionally drops colors, glyphs, bracket presentation, and
+layout because portable Markdown has no native representation for them.
 
-Progress does not currently have a bespoke browser rendering implementation.
-Since Terminal IR is designed first and Progress already projects to a
-`NodeKind::Paragraph` with `ProgressHints`, the browser rendering must handle
-the progress hints to produce a visual progress bar in HTML.
+MarkdownPlus can preserve the visual widget because inline HTML is allowed.
 
-#### Browser Rendering Design
+### Render-Tree Feature Request RT-PROGRESS-002
 
-Unlike terminal rendering where `ProgressHints` are handled by the terminal tree
-renderer, the browser tree renderer (`renderable/src/tree/render/browser.rs`)
-does **not** handle `ProgressHints`. It treats a `NodeKind::Paragraph` as `<p>`
-with inline children, ignoring the progress hints entirely. The visible text
-degrades to `"{label} {percentage}%"` — functional but not visual.
+**APPROVED**
 
-There are two design options:
+this feature request has been approved and WILL be included as part of the render-tree implementation BEFORE you are asked to implement this solution. Always refer to the @renderable/docs/tree-rendering.md and @renderable/docs/layout-and-style.md documents as the definitive guide.
 
-**Option A: Handle `ProgressHints` in the browser tree renderer.** Add a check
-in the browser renderer's `NodeKind::Paragraph` branch (line 205): when
-`progress_hints()` is present, emit a `<div class="progress">` with inline
-styles instead of `<p>`. This mirrors what the terminal renderer does.
+Why: MarkdownPlus is the rich Markdown dialect in this codebase. Rendering
+`ProgressHints` as inline HTML in MarkdownPlus gives components one canonical
+projection while allowing richer outputs to preserve the progress widget
+visually. Portable Markdown remains clean, valid, and semantic by using the
+paragraph fallback text.
 
-**Option B: Implement `BrowserRenderable` directly on `Progress`.** Write a
-bespoke browser emitter that produces the HTML fragment, bypassing the tree.
+Required behavior:
 
-**Recommendation: Option A** — extending the browser tree renderer is the
-correct architectural choice because:
+- In the Markdown renderer, keep `MarkdownDialect::Markdown` behavior as plain
+  text from the paragraph children.
+- In `MarkdownDialect::MarkdownPlus`, handle `ProgressHints` on paragraphs by
+  emitting the same semantic progress HTML shape used by the browser renderer,
+  serialized as inline/block HTML acceptable in MarkdownPlus.
+- Apply color slots as inline CSS when present.
+- Do not apply `Layout` in either Markdown dialect; this matches the documented
+  Markdown layout contract in `layout-and-style.md`.
+- Preserve non-default glyph and bracket values in `data-*` attributes for the
+  same reason as browser rendering.
+- Plain paragraphs without `ProgressHints` must remain unchanged.
 
-1. It follows the established pattern (terminal renderer already handles
-   `ProgressHints`).
-2. It ensures the tree is the single source of truth — any component that
-   projects `ProgressHints` gets browser support automatically.
-3. It avoids duplicating the bar reconstruction logic in a second location.
+### Markdown Test Strategy
 
-**Implementation for browser tree renderer:**
+| Variant                                      | Required assertion                                      |
+|----------------------------------------------|---------------------------------------------------------|
+| Markdown, no label                           | Output is `50%` style semantic text                     |
+| Markdown, with label                         | Output is `Loading 50%`                                 |
+| Markdown, with colors/custom glyphs/layout   | Output is still only label + percentage                 |
+| MarkdownPlus, default style                  | Output contains progress HTML and visible percentage    |
+| MarkdownPlus, with label                     | Label appears in the HTML and accessible label          |
+| MarkdownPlus, with colors                    | Inline CSS color slots are present                      |
+| MarkdownPlus, custom glyphs/brackets         | `data-*` attributes preserve the values                 |
+| MarkdownPlus, with layout                    | Layout has no effect on output                          |
+| Plain paragraph without hints                | Existing Markdown and MarkdownPlus output is unchanged  |
 
-In `renderable/src/tree/render/browser.rs`, the `NodeKind::Paragraph` arm
-checks for progress hints:
+## `bt progress` CLI
+
+`bt progress` already exists and renders terminal output through the tree. It
+should gain cross-target switches once Browser and MarkdownPlus tree support
+exists.
+
+| Flag              | Type             | Description                                                       |
+|-------------------|------------------|-------------------------------------------------------------------|
+| `PERCENT`         | `Option<u8>`     | Completion percentage 0-100, required unless `--example`          |
+| `--example`, `-e` | `bool`           | Render example and print the example command                      |
+| `--label`         | `Option<String>` | Label shown before the bar                                        |
+| `--width`         | `Option<u32>`    | Width of the bar portion                                          |
+| `--fill-color`    | `Option<String>` | Filled segment color                                              |
+| `--empty-color`   | `Option<String>` | Empty track color                                                 |
+| `--bracket-color` | `Option<String>` | Bracket color, retained for terminal and hint-preserving outputs  |
+| `--html`          | `bool`           | Render an HTML fragment; conflicts with `--md` and `--md-plus`    |
+| `--md`            | `bool`           | Render portable Markdown; conflicts with `--html` and `--md-plus` |
+| `--md-plus`       | `bool`           | Render MarkdownPlus; conflicts with `--html` and `--md`           |
+
+Render paths:
+
+1. Terminal default: `Progress::render_tree()` or `render_tree_node()` ->
+   `render_terminal_node()`.
+2. `--html`: `BrowserTreeComponent::new(progress).render_html_fragment()`.
+3. `--md`: `render_markdown_node()` with `MarkdownDialect::Markdown`.
+4. `--md-plus`: `render_markdown_node()` with
+   `MarkdownDialect::MarkdownPlus`.
+
+The CLI should not use `MarkdownRenderOptions::default_plus()` unless that
+helper is added; today the precise option is:
 
 ```rust
-NodeKind::Paragraph { children } => {
-    if let Some(hints) = node.attrs.progress_hints() {
-        self.render_progress(node, &hints, children)
-    } else {
-        self.block(BlockTag::P, &node.attrs, children)
-    }
+MarkdownRenderOptions {
+    dialect: MarkdownDialect::MarkdownPlus,
+    ..Default::default()
 }
 ```
 
-`render_progress` produces an HTML progress bar:
-
-```html
-<div class="progress" style="...">
-  <span class="progress-label">Loading</span>
-  <div class="progress-track" style="width: 28ch">
-    <div class="progress-filled" style="width: 75%; background-color: green;"></div>
-  </div>
-  <span class="progress-percentage">75%</span>
-</div>
-```
-
-CSS properties:
-- The outer `div` carries Layout as inline `style` (via `layout_to_css`).
-- The track width is `bar_width` in `ch` units.
-- The filled portion width is `value * 100%`.
-- Colors are rendered as CSS color values (`rgb(r,g,b)` or named colors).
-- The label and percentage are text nodes.
-- Brackets are not rendered in the browser — the CSS visual is a modern
-  progress bar, not a terminal character-art bar.
-
-**BrowserTreeComponent adapter:**
-
-Progress gains `BrowserRenderable` by wrapping in the adapter:
-
-```rust
-use biscuit_terminal::render_tree::BrowserTreeComponent;
-use renderable::browser::BrowserRenderable;
-
-let bar = Progress::new(0.75).with_label("Loading");
-let component = BrowserTreeComponent::new(bar);
-let fragment = component.render_html_fragment();
-let html = fragment.render();
-```
-
-#### Layout to CSS Mapping
-
-Progress's `Layout` maps to CSS via the existing `layout_to_css` lowering in
-`renderable/src/tree/render/browser.rs`:
-
-- Margins → `margin-*` properties on the outer `<div>`
-- Alignment → `text-align` when `max_width` is present
-- `max_width` → `max-width` CSS property
-
-No additional CSS mapping is needed beyond what the tree renderer already
-provides.
-
-#### Key Test Variants
-
-| Variant                                    | Asserts                                                                      |
-|--------------------------------------------|------------------------------------------------------------------------------|
-| Zero progress (`0.0`)                      | `width: 0%` on filled div, `"0%"` text                                      |
-| Full progress (`1.0`)                      | `width: 100%` on filled div, `"100%"` text                                  |
-| Half progress (`0.5`)                      | `width: 50%` on filled div, `"50%"` text                                    |
-| With label                                 | HTML contains `<span class="progress-label">Loading</span>`                 |
-| Without label                              | No label span in output                                                      |
-| Custom bar width                           | Track width matches (e.g., `width: 28ch`)                                    |
-| Fill color                                 | `background-color` on filled div matches the color                           |
-| Empty color                                | `background-color` on track div matches the color                            |
-| No colors (default)                        | No `background-color` on filled or track div                                 |
-| Layout with margins                        | Outer `div` has `margin-left` / `margin-right` CSS                           |
-| Layout with alignment and max-width        | Outer `div` has `text-align` and `max-width` CSS                             |
-| Glyph characters are not rendered          | No fill/empty char glyphs in HTML (visual is CSS-based)                      |
-| Bracket characters are not rendered        | No `[` `]` characters in HTML                                                |
-
----
-
-### Markdown IR Implementation
-
-#### Markdown vs MarkdownPlus for Progress
-
-Progress is a visual widget — its rendering is based on character glyphs,
-fill/empty ratios, and colored segments. This creates a clear separation point
-between Markdown and MarkdownPlus:
-
-- **Markdown**: The progress bar's semantic content is the label, percentage,
-  and value. Markdown cannot represent the visual bar, colors, or glyphs.
-  Output degrades to plain text: `"Loading 75%"` (with label) or `"75%"`.
-- **MarkdownPlus**: Inline HTML can represent the bar as a styled `<div>`.
-  The MarkdownPlus output uses an inline HTML `<div>` with a CSS-styled
-  progress bar, preserving the visual representation.
-
-For a progress bar without colors, MarkdownPlus could render a text-based bar
-using Markdown-compatible characters: `Loading [████████████████░░░░░░░░] 75%`.
-However, since this is a text-art representation and not true Markdown syntax,
-the MarkdownPlus output should use inline HTML for fidelity.
-
-**Divergence examples:**
-
-For `Progress::new(0.75).with_label("Loading")` with green fill color:
-
-- **Markdown**: `Loading 75%`
-- **MarkdownPlus**: `<div class="progress">Loading <div style="display:inline-block;width:28ch"><div style="width:75%;background-color:green">&nbsp;</div></div> 75%</div>`
-
-For `Progress::new(0.5)` with no colors:
-
-- **Markdown**: `50%`
-- **MarkdownPlus**: `50%` (identical — no colors to preserve, no bar to render)
-
-The key insight: **when there are no colors, both Markdown and MarkdownPlus
-should produce the same output** (just the label and percentage). When there
-are colors or the visual bar is semantically important, MarkdownPlus uses
-inline HTML.
-
-#### Markdown Rendering Design
-
-The Markdown tree renderer (`renderable/src/tree/render/markdown.rs`) currently
-does not handle `ProgressHints`. It renders a `NodeKind::Paragraph` as inline
-text — which correctly produces `"Loading 75%"` for Markdown output.
-
-This means:
-
-1. **Markdown**: The default behavior (ignoring `ProgressHints` and rendering
-   paragraph text) is already correct. No changes needed in the markdown tree
-   renderer for plain Markdown.
-
-2. **MarkdownPlus**: The renderer needs to detect `ProgressHints` and produce
-   inline HTML when the bar has visual elements (colors, or explicit visual
-   rendering requested).
-
-**Implementation approach for MarkdownPlus:**
-
-Add a check in the markdown renderer's `NodeKind::Paragraph` branch:
-
-```rust
-NodeKind::Paragraph { children } => {
-    if self.mode == MarkdownMode::Plus {
-        if let Some(hints) = node.attrs.progress_hints() {
-            return self.render_progress_markdown_plus(&hints, children);
-        }
-    }
-    self.render_inline(children)
-}
-```
-
-`render_progress_markdown_plus` produces inline HTML only when there are colors:
-
-```rust
-fn render_progress_markdown_plus(&self, hints: &ProgressHints, children: &[RenderNode]) -> Result<String, RenderError> {
-    if hints.filled_color.is_none() && hints.empty_color.is_none() && hints.bracket_color.is_none() {
-        // No colors — degrade to plain text (same as Markdown)
-        return self.render_inline(children);
-    }
-    // Produce inline HTML progress bar
-    let percentage = (hints.value * 100.0).round() as u32;
-    let label = /* extract from children */;
-    let mut html = String::new();
-    if let Some(label) = label {
-        html.push_str(&format!("{label} "));
-    }
-    html.push_str(&format!(
-        "<span style=\"display:inline-block;width:{}ch\">",
-        hints.bar_width
-    ));
-    html.push_str(&format!(
-        "<span style=\"display:inline-block;width:{}%;background-color:{}\">&nbsp;</span>",
-        percentage,
-        css_color_for(hints.filled_color)
-    ));
-    html.push_str("</span>");
-    html.push_str(&format!(" {percentage}%"));
-    Ok(html)
-}
-```
-
-Progress can implement `MarkdownRenderable` by projecting its tree and calling
-the markdown renderer:
-
-```rust
-impl MarkdownRenderable for Progress {
-    fn render_markdown(&self) -> String {
-        let node = self.render_tree_node().unwrap();
-        render_markdown_node(&node, &MarkdownRenderOptions::default())
-            .map(|r| r.output)
-            .unwrap_or_else(|_| format!("{}%", (self.value * 100.0).round() as u32))
-    }
-
-    fn render_markdown_plus(&self) -> String {
-        let node = self.render_tree_node().unwrap();
-        render_markdown_node(&node, &MarkdownRenderOptions::default_plus())
-            .map(|r| r.output)
-            .unwrap_or_else(|_| format!("{}%", (self.value * 100.0).round() as u32))
-    }
-}
-```
-
-Layout is ignored by the Markdown renderer (by design — locked by test).
-
-#### Key Test Variants
-
-| Variant                                    | Asserts                                                                      |
-|--------------------------------------------|------------------------------------------------------------------------------|
-| Zero progress — Markdown                   | Output is `"0%"`                                                             |
-| Zero progress — MarkdownPlus               | Output is `"0%"` (identical when no colors)                                  |
-| Half progress — Markdown                   | Output is `"50%"`                                                            |
-| Half progress with label — Markdown        | Output is `"Loading 50%"`                                                    |
-| Full progress — Markdown                   | Output is `"100%"`                                                           |
-| With colors — Markdown                     | Output is `"50%"` (colors dropped)                                           |
-| With colors — MarkdownPlus                 | Output contains inline HTML `<span style=...>`                               |
-| Without colors — Markdown                  | Output is `"50%"`                                                            |
-| Without colors — MarkdownPlus              | Output is `"50%"` (identical to Markdown)                                    |
-| With label and colors — Markdown           | Output is `"Loading 50%"`                                                    |
-| With label and colors — MarkdownPlus       | Output is `"Loading <span ...>...</span> 50%"`                                |
-| Markdown equals MarkdownPlus (no colors)   | Both methods produce identical output                                         |
-| Progress with Layout — Markdown            | Layout has no effect on Markdown output (regression test)                     |
-| Progress with Layout — MarkdownPlus        | Layout has no effect on MarkdownPlus output (regression test)                 |
-
----
-
-### `bt` CLI
-
-- This specification will ensure that the **Progress** component:
-    - has a 'bt' CLI subcommand for rendering this component
-    - that the '--md' and '--html' CLI switches are available to render to Markdown and HTML targets respectively (the default render is always for the Terminal)
-    - that the '--example' CLI switch is in place to provide a thoughtful example of how this command should be used with the CLI (see other working examples for a template)
-
-#### Current State
-
-| Aspect              | Status                                                                |
-|---------------------|-----------------------------------------------------------------------|
-| CLI command exists  | Yes — `bt progress`                                                   |
-| Render method       | Tree — calls `render_tree_node()` then `render_terminal_node()`      |
-| Has `--md` switch   | No                                                                    |
-| Has `--html` switch | No                                                                    |
-| Has `--example`     | Yes (`bt progress --example`)                                         |
-
-The existing `bt progress` command (`biscuit-terminal/cli/src/commands/progress.rs`)
-creates a `Progress`, projects it to a `RenderNode`, and renders via
-`render_terminal_node()`. It has `--example`, `--label`, `--width`,
-`--fill-color`, `--empty-color`, and `--bracket-color` flags. It does not have
-`--md`, `--md-plus`, or `--html` switches.
-
-#### Specification Design
-
-Add `--md`, `--md-plus`, and `--html` switches to the existing `bt progress`
-command, following the pattern established by `bt prose`.
-
-**Updated args:**
-
-| Flag                          | Type           | Description                                                       |
-|-------------------------------|----------------|-------------------------------------------------------------------|
-| `PERCENT`                     | `Option<u8>`   | Completion percentage 0-100 (required unless `--example`)         |
-| `--example` / `-e`            | `bool`         | Render example and show command                                   |
-| `--label`                     | `Option<String>` | Label shown before the bar                                       |
-| `--width`                     | `Option<u32>`  | Width of the bar portion in characters                            |
-| `--fill-color`                | `Option<String>` | Color of filled portion (named or `#rrggbb`)                    |
-| `--empty-color`               | `Option<String>` | Color of empty portion (named or `#rrggbb`)                     |
-| `--bracket-color`             | `Option<String>` | Color of bracket glyphs (named or `#rrggbb`)                    |
-| `--html`                      | `bool`         | Render to HTML fragment (conflicts with `--md`, `--md-plus`)      |
-| `--md`                        | `bool`         | Render to portable Markdown (conflicts with `--html`, `--md-plus`)|
-| `--md-plus`                   | `bool`         | Render to MarkdownPlus (conflicts with `--html`, `--md`)          |
-
-**Render path:**
-
-1. Build `Progress` from flags (percent, label, width, colors).
-2. **Terminal** (default): Project tree → `render_terminal_node()` (existing path).
-3. **HTML** (`--html`): Wrap in `BrowserTreeComponent` → `render_html_fragment()`.
-4. **Markdown** (`--md`): Project tree → `render_markdown_node()`.
-5. **MarkdownPlus** (`--md-plus`): Project tree → `render_markdown_node()` with
-   MarkdownPlus mode.
-
-**Implementation in `progress.rs`:**
-
-```rust
-#[derive(ClapArgs, Debug, Clone)]
-pub struct ProgressArgs {
-    #[arg(long, short = 'e')]
-    pub example: bool,
-
-    #[arg(value_name = "PERCENT", required_unless_present = "example")]
-    pub percent: Option<u8>,
-
-    #[arg(long)]
-    pub label: Option<String>,
-
-    #[arg(long)]
-    pub width: Option<u32>,
-
-    #[arg(long = "fill-color")]
-    pub fill_color: Option<String>,
-
-    #[arg(long = "empty-color")]
-    pub empty_color: Option<String>,
-
-    #[arg(long = "bracket-color")]
-    pub bracket_color: Option<String>,
-
-    /// Render to an HTML fragment instead of the terminal.
-    #[arg(long, conflicts_with_all = ["md", "md_plus"])]
-    pub html: bool,
-
-    /// Render to portable Markdown instead of the terminal.
-    #[arg(long, conflicts_with_all = ["html", "md_plus"])]
-    pub md: bool,
-
-    /// Render to MarkdownPlus instead of the terminal.
-    #[arg(long = "md-plus", conflicts_with_all = ["html", "md"])]
-    pub md_plus: bool,
-}
-```
-
-The `run()` method adds cross-target branches after building the `Progress`:
-
-```rust
-impl Run for ProgressArgs {
-    fn run(self, _ctx: &CliContext) -> color_eyre::Result<()> {
-        // ... existing Progress construction ...
-
-        let node = progress.render_tree_node().ok_or_else(|| {
-            color_eyre::eyre::eyre!("Progress component produced no render-tree node")
-        })?;
-        let root = RenderNode::root(vec![node]);
-
-        // Cross-target output
-        if self.html {
-            let component = BrowserTreeComponent::new(progress);
-            println!("{}", component.render_html_fragment().render());
-            return Ok(());
-        }
-        if self.md {
-            let rendered = render_markdown_node(&root, &MarkdownRenderOptions::default())
-                .map_err(|e| color_eyre::eyre::eyre!("markdown render failed: {e}"))?;
-            println!("{}", rendered.output);
-            return Ok(());
-        }
-        if self.md_plus {
-            let rendered = render_markdown_node(&root, &MarkdownRenderOptions::default_plus())
-                .map_err(|e| color_eyre::eyre::eyre!("markdown render failed: {e}"))?;
-            println!("{}", rendered.output);
-            return Ok(());
-        }
-
-        // Terminal (existing path)
-        let term = detect_terminal_honoring_force_color();
-        let opts = TerminalRenderOptions::new(&term, RenderStrictness::Warn);
-        let rendered = render_terminal_node(&root, &opts)
-            .map_err(|e| color_eyre::eyre::eyre!("render failed: {e}"))?;
-        println!("{}", rendered.output);
-
-        if self.example {
-            print_example_command(PROGRESS_EXAMPLE_CMD);
-        }
-        Ok(())
-    }
-}
-```
-
-**Example command** (unchanged):
-
-```rust
-const PROGRESS_EXAMPLE_CMD: &str =
-    r#"bt progress 72 --label "Indexing" --width 28 --fill-color green --bracket-color cyan"#;
-```
-
----
+CLI tests should cover default terminal output, the existing `--example`
+behavior, flag conflict validation, `--html`, `--md`, `--md-plus`, color flag
+parsing for every target, and invalid percentages above 100.
 
 ## Acceptance Criteria Summary
 
-- [ ] `Progress`'s `TerminalRenderable::render()` delegates to the tree path by default
-- [ ] Bespoke render path retained as `render_bespoke()` for parity testing
-- [ ] `BrowserRenderable` achieved — browser tree renderer handles `ProgressHints` producing an HTML progress bar
-- [ ] `MarkdownRenderable` implemented on `Progress` — Markdown outputs label + percentage, MarkdownPlus outputs inline HTML when colors are present
-- [ ] `bt progress --html` renders HTML output (CSS-styled progress bar)
-- [ ] `bt progress --md` renders Markdown output (`Loading 75%`)
-- [ ] `bt progress --md-plus` renders MarkdownPlus output (inline HTML when colors present)
-- [ ] `bt progress --example` continues to render example with command display
-- [ ] Parity tests (bespoke vs tree) cover all variants listed in Terminal IR section
-- [ ] `KNOWN_DRIFT` ledger documents accepted divergences
-- [ ] `bt progress` existing flags (`--label`, `--width`, `--fill-color`, `--empty-color`, `--bracket-color`) continue to work unchanged
+- [ ] `Progress` has one private tree projection helper.
+- [ ] `Progress` implements canonical `TreeRenderable`.
+- [ ] `TerminalRenderable::render_tree_node()` delegates to the shared helper.
+- [ ] `TerminalRenderable::render()` and `render_optimistic()` delegate to the
+      tree renderer by default.
+- [ ] The old bespoke rendering logic is retained only as a test-only parity
+      helper until migration confidence is established.
+- [ ] Browser tree rendering handles `ProgressHints` as approved in
+      RT-PROGRESS-001.
+- [ ] MarkdownPlus tree rendering handles `ProgressHints` as approved in
+      RT-PROGRESS-002.
+- [ ] Portable Markdown output remains label + percentage text.
+- [ ] `Progress` can be rendered through `BrowserTreeComponent`.
+- [ ] `Progress` implements `MarkdownRenderable` by delegating to the tree
+      renderer for Markdown and MarkdownPlus.
+- [ ] `bt progress --html`, `--md`, and `--md-plus` are added with conflicts.
+- [ ] Existing `bt progress` terminal flags and `--example` behavior remain
+      unchanged.
+- [ ] Terminal, Browser, Markdown, MarkdownPlus, CLI, serde, layout, and
+      parity tests cover the variants listed above.

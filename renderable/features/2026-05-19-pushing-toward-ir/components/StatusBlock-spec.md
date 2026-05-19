@@ -1,151 +1,240 @@
 # StatusBlock IR Design Specification
 
 `will_use_tree_renderer: true`
-`will_use_tree_renderer_with_feature: true`
+`will_use_tree_renderer_with_feature: false`
 
 ## Current Status
 
 | Property | Value |
 |----------|-------|
-| Terminal | ✅ |
-| Browser | ❌ |
-| Markdown | ❌ |
-| Tree | ❌ |
+| Terminal | yes, bespoke |
+| Browser | no |
+| Markdown | no |
+| Tree | no |
 | IR State | no changes |
-| bt CLI | — |
+| bt CLI | no subcommand |
 
-StatusBlock is a composite component that wraps three sub-renderables: a `Status` header line (severity icon + text), a `BlockQuote` body (severity-colored left border), and an optional `Prose` hint. All three are rendered via bespoke terminal-only paths. StatusBlock has no `TreeRenderable` implementation, no browser or markdown rendering, and no `bt` CLI subcommand.
+StatusBlock is a composite component that wraps three sub-renderables: a
+`Status` header line, a `BlockQuote` body, and an optional `Prose` hint. It is
+currently terminal-only. The existing implementation preserves a few terminal
+compatibility details that should be treated carefully during tree adoption:
 
-## Design Steps
+- `StatusBlock::new()` defaults to a right margin of `5` cells and
+  `WordWrap::WrapProse(Some(8), None)`.
+- The body border defaults to `"┃ "`, which maps cleanly to a thick left
+  `Style::Border`.
+- `StatusBlock::border(String)` accepts an arbitrary terminal prefix. That is
+  not target-agnostic and must not be promoted into the canonical render tree.
+- Header and hint strings are prose-formatted today; the first tree projection
+  may flatten that styling to text, matching the existing `BlockQuote`
+  component migration precedent.
 
-### Terminal IR Implementation
+Success means StatusBlock has one canonical `TreeRenderable` projection used by
+the new Markdown and Browser render paths, and by the terminal render path when
+the component is using target-agnostic settings. The arbitrary custom border
+prefix remains a compatibility-only escape hatch.
 
-- The **StatusBlock** component does not currently have a IR based rendering solution
-- This section will describe what is required to ensure that the **StatusBlock** component:
-    - has an IR implementation
-    - the IR implementation drives the TerminalRenderable contract
-    - the IR implementation is what is used by the bt CLI (note if **StatusBlock** doesn't yet have bt CLI subcommand then it will be designed below in the bt CLI section)
+## Terminal IR Implementation
 
-#### Tree projection strategy
+### Tree projection strategy
 
-StatusBlock has no direct `NodeKind` variant (the 25-variant vocabulary does not include a "StatusBlock" or "Callout" kind). The projection composes existing node kinds to represent the three visual sections:
+StatusBlock does not need a dedicated `NodeKind`. The existing node vocabulary
+can represent it as a composition of a root container, an optional header
+paragraph, an optional block quote body, and an optional hint paragraph:
 
-```
-Root [Layout: margins, word-wrap]
-  ├── Paragraph [Style: severity color]     // header
-  │   └── Text "✗ Shell expansion failed"
-  ├── BlockQuote [Style: left border severity color]  // body
+```text
+Root [Layout: component layout, classes: status-block status-block--error]
+  ├── Paragraph [Style: severity color, classes: status-block__header]
+  │   └── Text "⤫ Shell expansion failed"
+  ├── BlockQuote [Style: thick left border in severity color, classes: status-block__body]
   │   └── Paragraph
   │       └── Text "Missing closing brace"
-  └── Paragraph                              // hint
+  └── Paragraph [classes: status-block__hint]
       └── Text "Check the template syntax and retry."
 ```
 
-Each section is only present when the corresponding field is non-empty. A body-only StatusBlock produces just the `BlockQuote`; a header-only block produces just a `Paragraph`.
+Only present sections should be emitted. A body-only block emits a root with one
+`BlockQuote`; a header-only block emits a root with one `Paragraph`.
 
-**Status icon resolution.** The `Status` component's icon rendering is terminal-specific (Nerd Font detection, theme selection, color-depth adaptation). At tree-projection time the icon is pre-resolved against a default `Terminal::new_optimistic(80)` and embedded as plain text — the same lossy-but-pragmatic approach `BlockQuote` uses when extracting text from `Prose`. The severity color rides on `Style.color` for the header paragraph and `Style.border.color` for the body block quote, so the terminal tree renderer lowers them through `render_styled`.
+The root node must always carry the component layout directly in `NodeAttrs`
+because `StatusBlock::new()` has non-empty default layout. Do not rely only on
+`TreeRenderable::tree_layout()`: the current `TreeComponent` and
+`BrowserTreeComponent` adapters render the node returned by `render_tree()` and
+do not add the optional hook afterward.
 
-**Body text extraction.** The body is a `Vec<Prose>`. Each `Prose` is rendered optimistically and ANSI-stripped (via `strip_escape_codes`), then joined with `\n\n` separators into a single text block inside the `BlockQuote`. This matches the bespoke renderer's visual behavior (stacked paragraphs separated by blank lines inside a continuous border) while accepting the same styling loss as `BlockQuote::plain_text()`.
+### Status and severity mapping
 
-**Layout and Style mapping.**
+The status icon should be resolved to the stable Unicode fallback form at tree
+projection time, not to Nerd Font-specific glyphs. Use an explicit no-color,
+non-Nerd terminal or an equivalent helper so Markdown and Browser output remain
+portable:
 
-| StatusBlock field | Tree target |
+| StatusState | Fallback icon |
+|-------------|---------------|
+| `NotStarted` | `◻` |
+| `Active` | `◽` |
+| `Success` | `✓` |
+| `Error` | `⤫` |
+| `Warning` | `⚠` |
+| `Info` | `ℹ` |
+| `ToolUse` | `🔧` |
+| `Subagent` | `🤖` |
+
+Do not include the deprecated `Failure` variant in new CLI or documentation
+surfaces. Persisted JSON compatibility for `"Failure"` remains a `StatusState`
+concern, not a StatusBlock rendering concern.
+
+Severity should be represented in three ways:
+
+- Header paragraph `Style.color` uses the resolved severity color.
+- Body `BlockQuote` `Style.border.color` uses the resolved severity color.
+- Root and child nodes carry stable classes such as `status-block`,
+  `status-block--error`, `status-block__header`, `status-block__body`, and
+  `status-block__hint` so Browser output has styling hooks even before browser
+  `Style` lowering is implemented.
+
+### Body text extraction
+
+The body is a `Vec<Prose>`. For this migration, render each `Prose`
+optimistically, strip ANSI escape codes, and join items with `\n\n` before
+placing the result in a `BlockQuote` paragraph. This matches the current
+stacked body behavior while accepting the same styling loss already documented
+for `BlockQuote::plain_text()`.
+
+Header and hint text should go through the same prose-to-plain-text treatment
+instead of inserting raw strings directly. That prevents bracketed prose tags
+such as `<b>Shell Expansion Failed</b>` from leaking into Markdown or Browser
+output.
+
+### Layout and Style mapping
+
+| StatusBlock input | Tree mapping |
 |---|---|
-| `layout.margin` | Root node `NodeAttrs::set_layout` |
-| `layout.word_wrap` | Root node `NodeAttrs::set_layout` (carried through to children) |
-| `severity` → default color | Header `Style.color`, body `BlockQuote` `Style.border.color` |
-| `border_color` override | Same two Style slots, overriding severity default |
-| `border` glyph | Not carried on the tree — the terminal tree renderer's `BlockQuote` lowering draws its own `│ ` border from `Style.border`. The bespoke `border` field (`┃ ` default) is a StatusBlock-specific concern that diverges from the tree renderer's border. This is an accepted visual divergence (see parity test design). |
+| `layout` | Root `NodeAttrs::set_layout` |
+| `severity.default_color()` | Header `Style.color`; body left border color |
+| `border_color` override | Same style slots, overriding severity default |
+| Default `border == "┃ "` | Body `Style.border` with `BorderWeight::Thick`, `BorderLineStyle::Solid`, and left-only `BorderSides` |
+| Custom `border != "┃ "` | Do not encode in tree; keep a bespoke terminal fallback for this compatibility path |
+| Header/body/hint prose styling | Flattened to text for the first migration |
 
-#### Implementation sketch
+The default border is not an accepted divergence: it can be represented by the
+existing thick border primitive and should render as `┃` in the terminal tree
+renderer. Arbitrary border prefixes are a separate compatibility issue.
+
+### Implementation sketch
 
 ```rust
 impl TreeRenderable for StatusBlock {
     fn render_tree(&self) -> RenderNode {
-        use renderable::style::{Border, BorderSides, PerMode, Style};
+        use renderable::style::{
+            Border, BorderLineStyle, BorderSides, BorderWeight, PerMode, Style,
+        };
         use renderable::tree::RenderNode;
 
         let severity_color = self.resolved_border_color();
+        let severity_class = format!("status-block--{}", self.severity_class());
         let mut children = Vec::new();
 
-        if let Some(ref header_text) = self.header {
-            let status = Status::from_prose(header_text).state(self.severity.clone());
-            let term = Terminal::new_optimistic(80);
-            let rendered_header = strip_escape_codes(&status.render(&term));
-            let mut header_node = RenderNode::paragraph(vec![RenderNode::text(rendered_header)]);
-            header_node.attrs.set_style(&Style {
-                color: Some(TargetValue::universal(PerMode::universal(severity_color.clone()))),
+        if let Some(header_text) = &self.header {
+            let header = self.render_header_fallback_text(header_text);
+            let mut node = RenderNode::paragraph(vec![RenderNode::text(header)]);
+            node.attrs.classes = vec!["status-block__header".into()];
+            node.attrs.set_style(&Style {
+                color: Some(TargetValue::universal(PerMode::universal(
+                    severity_color.clone(),
+                ))),
                 ..Style::default()
             });
-            children.push(header_node);
+            children.push(node);
         }
 
         if !self.body.is_empty() {
-            let body_text: String = self.body.iter()
-                .map(|p| strip_escape_codes(&p.render_optimistic(None)))
-                .collect::<Vec<_>>()
-                .join("\n\n");
-            let mut bq_node = RenderNode::block_quote(vec![
-                RenderNode::paragraph(vec![RenderNode::text(body_text)])
-            ]);
-            bq_node.attrs.set_style(&Style {
+            let body_text = self.body_plain_text();
+            let mut node = RenderNode::block_quote(vec![RenderNode::paragraph(vec![
+                RenderNode::text(body_text),
+            ])]);
+            node.attrs.classes = vec!["status-block__body".into()];
+            node.attrs.set_style(&Style {
                 border: Some(Border {
-                    color: Some(TargetValue::universal(PerMode::universal(severity_color))),
-                    sides: BorderSides::left_only(),
+                    color: Some(TargetValue::universal(PerMode::universal(
+                        severity_color.clone(),
+                    ))),
+                    weight: BorderWeight::Thick,
+                    line_style: BorderLineStyle::Solid,
+                    sides: BorderSides::Sides {
+                        top: false,
+                        right: false,
+                        bottom: false,
+                        left: true,
+                    },
                     ..Border::default()
                 }),
                 ..Style::default()
             });
-            children.push(bq_node);
+            children.push(node);
         }
 
-        if let Some(ref hint_text) = self.hint {
-            children.push(RenderNode::paragraph(vec![RenderNode::text(hint_text.clone())]));
+        if let Some(hint_text) = &self.hint {
+            let hint = self.prose_plain_text(hint_text);
+            let mut node = RenderNode::paragraph(vec![RenderNode::text(hint)]);
+            node.attrs.classes = vec!["status-block__hint".into()];
+            children.push(node);
         }
 
         let mut root = RenderNode::root(children);
-        if self.layout != StatusBlock::new(StatusState::NotStarted).layout {
-            root.attrs.set_layout(&self.layout);
-        }
+        root.attrs.classes = vec!["status-block".into(), severity_class];
+        root.attrs.set_layout(&self.layout);
         root
     }
 }
 ```
 
-#### Parity test design
+The exact helper names can differ, but the implementation should keep the
+projection helper private and reusable so `TreeRenderable`, tests, and any
+legacy compatibility hooks do not drift.
 
-A new parity test file (`biscuit-terminal/lib/tests/status_block_parity.rs`) follows the pattern established by `render_tree_component_parity.rs`:
+### TerminalRenderable strategy
 
-**Semantic token parity** (bespoke vs. `TreeComponent<StatusBlock>`):
-1. Header-only: status icon text + header words survive both paths
-2. Body-only: body text survives, bordered on both paths
-3. Body with Prose content: words survive (styling loss accepted)
-4. Header + body: both sections' words survive
-5. Header + body + hint: all three sections' words survive
-6. Multiple body Prose items: all items' words survive
-7. Custom border color: colored output on both paths (SGR present)
-8. Margins applied: layout content appears indented on both paths
+Implement `TerminalRenderable` with a small branch:
 
-**Accepted divergences** (same discipline as BlockQuote parity):
-- **Border glyph**: Bespoke uses `┃ ` (StatusBlock default); tree renderer uses `│ ` (BlockQuote native). Both are valid left-border glyphs; the visual difference is accepted.
-- **Prose styling is flattened** in the tree projection (same as BlockQuote).
-- **Status icon rendering**: The bespoke path resolves the icon against the actual `Terminal` passed to `render()`; the tree path resolves it at projection time against `Terminal::new_optimistic(80)`. In a no-color terminal the icon character matches; with Nerd Fonts the tree path may use the fallback icon since the optimistic terminal does not detect Nerd Fonts.
+- If `self.border == "┃ "`, delegate to `TreeComponent::new(self.clone())`.
+- If `self.border != "┃ "`, keep the existing bespoke terminal renderer and
+  document the branch as a compatibility fallback for arbitrary terminal
+  prefixes.
 
-#### Feature Requests for Tree Rendering
+This preserves public behavior for the existing `border(String)` API without
+adding terminal-specific presentation strings to the canonical tree model.
 
-No feature requests are needed. The existing 25-variant `NodeKind` vocabulary adequately represents a StatusBlock as a composition of `Root` + `Paragraph` + `BlockQuote` + `Paragraph`. The severity state is encoded at projection time through `Style` (color, border) and pre-resolved icon text. This is the same pragmatic approach `BlockQuote` uses for text extraction and works well for a composite component.
+### Parity test design
 
-A future `NodeKind::Callout { severity, children }` variant would allow each renderer to apply target-native treatment (e.g., browser CSS classes, markdown emoji prefixes) rather than pre-rendering terminal-biased icon text. This is a nice-to-have optimization, not a blocker.
+Add `biscuit-terminal/lib/tests/status_block_parity.rs`, following the pattern
+in `render_tree_component_parity.rs`.
 
-#### Recommendation
+Semantic token parity between bespoke rendering and the tree route must cover:
 
-The existing tree renderer is a good fit for StatusBlock. The composition of `Root`, `Paragraph`, and `BlockQuote` nodes captures the structural intent, `Style` carries the severity-driven coloring, and `Layout` handles the margins. The only accepted loss is Prose styling in the body (already an established precedent) and the border glyph difference (`┃` vs `│`). I recommend using the tree renderer.
+1. Header-only content.
+2. Body-only content.
+3. Body with styled `Prose` content, accepting flattened styling.
+4. Header plus body.
+5. Header plus body plus hint.
+6. Multiple body `Prose` items joined with a blank line.
+7. Custom `border_color`, with SGR present in both paths on a color terminal.
+8. Default layout, including right-margin-driven wrapping.
+9. Explicit left and right margins.
+10. Every non-deprecated `StatusState` and its fallback icon.
 
-### Browser IR Implementation
+Accepted divergences:
 
-- in this section we will provide a design specification for the **StatusBlock** component's implementation of the `BrowserRenderable` trait
+- Prose styling is flattened in the tree projection.
+- Header icon rendering is stable fallback Unicode in the tree path, while the
+  legacy path may render Nerd Font icons on terminals that advertise them.
+- A custom arbitrary border prefix uses the bespoke compatibility path and is
+  not part of tree parity.
 
-StatusBlock has no existing browser rendering implementation. The tree projection designed above produces a `Root` node containing `Paragraph` and `BlockQuote` children. The browser tree renderer already handles all three node kinds (`Root`, `Paragraph`, `BlockQuote`), so the `BrowserRenderable` impl is a thin delegation through `BrowserTreeComponent`:
+## Browser IR Implementation
+
+StatusBlock should implement `BrowserRenderable` by delegating through the
+existing `BrowserTreeComponent` adapter:
 
 ```rust
 impl BrowserRenderable for StatusBlock {
@@ -157,42 +246,51 @@ impl BrowserRenderable for StatusBlock {
         BrowserTreeComponent::new(self.clone()).render_html_page(page)
     }
 
-    fn as_any(&self) -> &dyn Any { self }
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
 }
 ```
 
-The rendered output for a full StatusBlock (Error severity, all parts present):
+Expected fragment shape for an error StatusBlock with all parts present:
 
 ```html
-<p>✗ Shell expansion failed</p>
-<blockquote><p>Missing closing brace</p></blockquote>
-<p>Check the template syntax and retry.</p>
+<div class="status-block status-block--error">
+  <p class="status-block__header">⤫ Shell expansion failed</p>
+  <blockquote class="status-block__body"><p>Missing closing brace</p></blockquote>
+  <p class="status-block__hint">Check the template syntax and retry.</p>
+</div>
 ```
 
-The severity color encoded on `Style` is not yet consumed by the browser renderer (browser `Style` lowering is designed but not wired — per `layout-and-style.md` §6). The browser output will use default styling until that cross-component work lands.
+The current browser renderer emits classes and layout-derived inline style, but
+browser `Style` lowering is still listed as a known gap in
+`layout-and-style.md`. Therefore color and border visuals are preserved in the
+tree but may not be visible in browser output until that shared renderer work
+lands.
 
-#### Key test variants for Browser
+Browser tests should cover:
 
-1. Body-only StatusBlock → `<blockquote>` present, no `<p>` before or after
-2. Header + body → `<p>` with icon/header text, then `<blockquote>`
-3. Header + body + hint → three elements: `<p>`, `<blockquote>`, `<p>`
-4. Header-only (empty body, no hint) → single `<p>` with icon text
-5. `render_html_page(None)` → full `<html>` page wrapping the fragment
-6. All severity states (Error, Warning, Info, Success, Active) → text content reflects correct icon
-7. Custom border color → `Style` carried on the tree (visual enforcement deferred to browser `Style` lowering)
+1. Body-only output contains one `<blockquote>` and no header or hint class.
+2. Header plus body preserves element order.
+3. Header plus body plus hint emits all three classes.
+4. Header-only output contains one paragraph.
+5. `render_html_page(None)` returns a complete HTML page.
+6. Every non-deprecated severity emits the expected fallback icon and root
+   severity class.
+7. Custom `border_color` is present in the tree style, with visual HTML
+   enforcement deferred to browser `Style` lowering.
 
-### Markdown IR Implementation
+## Markdown IR Implementation
 
-- in this section we will provide a design specification for the **StatusBlock** component's implementation of the `MarkdownRenderable` trait
-
-The markdown tree renderer already handles `Root`, `Paragraph`, and `BlockQuote`. StatusBlock's `MarkdownRenderable` impl delegates through the tree:
+StatusBlock should implement `MarkdownRenderable` through
+`render_markdown_node` on its tree projection:
 
 ```rust
 impl MarkdownRenderable for StatusBlock {
     fn render_markdown(&self) -> String {
         let node = self.render_tree();
         render_markdown_node(&node, &MarkdownRenderOptions::default())
-            .map(|r| r.output)
+            .map(|rendered| rendered.output)
             .unwrap_or_default()
     }
 
@@ -202,85 +300,66 @@ impl MarkdownRenderable for StatusBlock {
 }
 ```
 
-#### Markdown vs MarkdownPlus divergence for StatusBlock
-
-There is **no divergence** between Markdown and MarkdownPlus for StatusBlock because:
-
-- The tree projection carries no inline color styling that would require `<span style="color:...">` in MarkdownPlus. The severity colors are on `Style.color` and `Style.border`, which the Markdown renderer ignores entirely (per `layout-and-style.md` §4).
-- The status icon is embedded as plain text (e.g., `✗`, `⚠`, `ℹ`) — valid in both Markdown and MarkdownPlus without inline HTML.
-- The body is projected as a `BlockQuote` containing plain text — standard Markdown.
-- The hint is projected as a `Paragraph` of plain text — standard Markdown.
-- No inline HTML is needed for either output target.
-
-If future work preserves Prose styling in the tree projection (e.g., `<red>error</red>` → `<span style="color:red">error</span>` in MarkdownPlus), the `render_markdown_plus()` implementation should be revisited. For now, the Prose styling is flattened at projection time, matching the BlockQuote precedent.
-
-#### Example Markdown output
-
-For `StatusBlock::new(Error).header("<b>Shell expansion failed</b>").body("Missing closing brace").hint("Check syntax")`:
+Markdown and MarkdownPlus intentionally match for this first migration. The
+projection carries severity visuals in `Style`, and Markdown renderers ignore
+`Style` by contract. The portable output is structural Markdown:
 
 ```markdown
-✗ Shell expansion failed
+⤫ Shell expansion failed
 
 > Missing closing brace
 
 Check syntax
 ```
 
-#### Test strategy for Markdown
+Markdown tests should cover:
 
-1. Body-only → single block quote: `> Body text`
-2. Header + body → paragraph with icon text, blank line, block quote
-3. Header + body + hint → three sections separated by blank lines
-4. All severity states → correct fallback icon character present in output
-5. Multiple body Prose items → all items' text inside the block quote
-6. Empty body (header + hint only) → two paragraphs, no block quote
-7. Verify `render_markdown()` and `render_markdown_plus()` produce identical output
-8. Custom border color → no effect on markdown output (color is not rendered)
+1. Body-only output is a single block quote.
+2. Header plus body uses a paragraph, blank line, and block quote.
+3. Header plus body plus hint has three sections separated by blank lines.
+4. Header plus hint with no body has two paragraphs and no block quote.
+5. Every non-deprecated severity emits the expected fallback icon.
+6. Multiple body `Prose` items survive inside the block quote.
+7. `render_markdown()` and `render_markdown_plus()` produce identical output.
+8. `border_color` has no effect on Markdown output.
+9. Prose tags in header/body/hint are flattened rather than emitted as raw
+   angle-bracket text.
 
-### `bt` CLI
+## `bt` CLI
 
-- this specification will ensure that the **StatusBlock** component:
-    - has a 'bt' CLI subcommand for rendering this component
-    - that the '--md' and '--html' CLI switches are available to render to Markdown and HTML targets respectively (the default render is always for the Terminal)
-    - that the '--example' CLI switch is in place to provide a thoughtful example of how this command should be used with the CLI (see other working examples for a template)
+Add a `bt status-block` subcommand. It should render through the component APIs
+so the CLI exercises the same projection and adapters as library users.
 
-#### Current State
+### Current State
 
 | Property | Status |
 |----------|--------|
-| CLI command exists | No |
+| CLI command exists | no |
 | Render method | N/A |
-| Has `--md` switch | No |
-| Has `--html` switch | No |
-| Has `--example` switch | No |
-| Uses tree renderer | No |
+| Has `--md` switch | no |
+| Has `--html` switch | no |
+| Has `--example` switch | no |
+| Uses tree renderer | no |
 
-StatusBlock has no `bt` CLI subcommand. The component is currently only used programmatically via its `TerminalRenderable` implementation.
+### Specification Design
 
-#### Specification Design
+1. Register `bt status-block` in `args.rs` and add
+   `cli/src/commands/status_block.rs`.
+2. Add `--md` and `--html` as mutually exclusive switches.
+3. Add `--severity`, required unless `--example`, accepting
+   `error`, `warning`, `info`, `success`, `active`, `not-started`,
+   `tool-use`, and `subagent`.
+4. Add optional `--header`, `--hint`, and `--border-color`.
+5. Accept positional body text, with multiple values joined by spaces.
+6. Add `--example`, using all parts of the component and printing the command.
+7. Flatten shared `LayoutArgs`; apply left/right/top/bottom/alignment through
+   the component layout helpers or direct `layout_mut()` updates.
 
-1. **Add `bt status-block` subcommand.** Register in `args.rs` as a new variant in the `Command` enum, following the established display-order convention. Create a new command module at `cli/src/commands/status_block.rs`.
+Do not add a CLI flag for arbitrary `border(String)` in the first tree-backed
+command. That API is terminal-only compatibility surface and would make the CLI
+less portable across `--md` and `--html`.
 
-2. **Render via tree for all targets.** The command projects StatusBlock to a `RenderNode` via `render_tree()`, wraps it in `RenderNode::root`, and dispatches to the appropriate renderer:
-   - Default (terminal): `render_terminal_node`
-   - `--md`: `render_markdown_node`
-   - `--html`: `render_browser_node`
-
-3. **Add `--md` and `--html` flags.** Mutually exclusive, matching the BlockQuote spec pattern.
-
-4. **Add `--severity` flag.** Required (unless `--example`), accepts `error`, `warning`, `info`, `success`, `active`, `not-started`, `tool-use`, `subagent`. Maps to `StatusState`.
-
-5. **Add `--header` flag.** Optional prose-formatted header text.
-
-6. **Add `--hint` flag.** Optional hint text.
-
-7. **Add `--border-color` flag.** Optional named color or `#rrggbb` override for the severity-derived border color.
-
-8. **Positional body text.** Multiple values joined with spaces, treated as the body content.
-
-9. **Add `--example` flag.** Shows a representative example with all parts populated.
-
-#### CLI argument sketch
+### CLI argument sketch
 
 ```rust
 #[derive(ClapArgs, Debug, Clone)]
@@ -314,99 +393,89 @@ pub struct StatusBlockArgs {
 }
 ```
 
-#### Example constants
+### Example constants
 
 ```rust
 const STATUS_BLOCK_EXAMPLE_CMD: &str =
     r#"bt status-block --severity error --header "<b>Shell Expansion Failed</b>" --hint "Check the template syntax and retry." "Missing closing brace in `${...}` directive.""#;
 ```
 
-#### Implementation sketch
+### Implementation notes
 
-```rust
-impl Run for StatusBlockArgs {
-    fn run(self, _ctx: &CliContext) -> color_eyre::Result<()> {
-        let severity = self.severity
-            .or_else(|| self.example.then_some(StatusSeverityArg::Error))
-            .ok_or_else(|| color_eyre::eyre::eyre!("--severity is required"))?;
+- For default terminal output, call `block.render(&term)` after constructing the
+  component. The component's `TerminalRenderable` impl decides whether it can
+  use the tree route or must use the compatibility fallback.
+- For Markdown, call `block.render_markdown()`.
+- For HTML, call `block.render_html_fragment().render()` or
+  `block.render_html_page(None).render()` according to the CLI pattern used by
+  neighboring commands.
+- Do not wrap `block.render_tree()` in another `RenderNode::root`; the
+  StatusBlock projection already returns a root node.
+- `LayoutArgs` currently exposes `margin_left`, `margin_right`, `margin_top`,
+  `margin_bottom`, and `alignment`. The implementation sketch must not assume
+  old fields such as `layout.margin_left`.
 
-        let state = severity.to_status_state();
-        let body_text = if self.example {
-            "Missing closing brace in `${...}` directive.".to_string()
-        } else {
-            self.body.join(" ")
-        };
+## Feature Requests for Tree Rendering
 
-        let mut block = StatusBlock::new(state);
+### RT-STATUSBLOCK-001: Arbitrary terminal border prefix in render-tree Style
 
-        let header = self.header
-            .or_else(|| self.example.then(|| "<b>Shell Expansion Failed</b>".to_string()));
-        if let Some(h) = header {
-            block = block.header(h);
-        }
+**DENIED**
 
-        if !body_text.is_empty() {
-            block = block.body(body_text);
-        }
+this feature will not be added to the render-tree tree implementation. You
+should try to still use the render-tree where practical and work around the
+complexity but if the complexity is too great then you have permission to
+create a bespoke IR implementation for this component.
 
-        let hint = self.hint
-            .or_else(|| self.example.then(|| "Check the template syntax and retry.".to_string()));
-        if let Some(h) = hint {
-            block = block.hint(h);
-        }
+Why: `StatusBlock::border(String)` is an arbitrary terminal prefix, not a
+target-agnostic structural or style concept. The existing `Style::Border`
+already represents the default `"┃ "` case with a thick left border. Promoting
+custom prefix strings into the render tree would leak terminal presentation
+into Browser and Markdown targets. Preserve custom prefixes with a narrow
+bespoke terminal fallback instead.
 
-        if let Some(color) = &self.border_color {
-            block = block.border_color(parse_color(color)?);
-        }
+### RT-STATUSBLOCK-002: Dedicated `NodeKind::Callout`
 
-        // Apply layout
-        if let Some(left) = self.layout.margin_left {
-            block = block.left_margin(TargetValue::universal(Length::ch(left)));
-        }
-        if let Some(right) = self.layout.margin_right {
-            block = block.right_margin(TargetValue::universal(Length::ch(right)));
-        }
+**DENIED**
 
-        let node = block.render_tree();
-        let root = RenderNode::root(vec![node]);
+this feature will not be added to the render-tree tree implementation. You
+should try to still use the render-tree where practical and work around the
+complexity but if the complexity is too great then you have permission to
+create a bespoke IR implementation for this component.
 
-        if self.md {
-            let rendered = render_markdown_node(&root, &MarkdownRenderOptions::default())
-                .map_err(|e| color_eyre::eyre::eyre!("markdown render failed: {e}"))?;
-            println!("{}", rendered.output);
-        } else if self.html {
-            let rendered = render_browser_node(&root, &BrowserRenderOptions::default())
-                .map_err(|e| color_eyre::eyre::eyre!("browser render failed: {e}"))?;
-            println!("{}", rendered.output.render());
-        } else {
-            let term = detect_terminal_honoring_force_color();
-            let opts = TerminalRenderOptions::new(&term, RenderStrictness::Warn);
-            let rendered = render_terminal_node(&root, &opts)
-                .map_err(|e| color_eyre::eyre::eyre!("render failed: {e}"))?;
-            println!("{}", rendered.output);
-        }
+Why: StatusBlock can be represented faithfully enough with existing `Root`,
+`Paragraph`, and `BlockQuote` nodes plus `Style`, `Layout`, and classes. A
+future callout node might be useful after multiple components prove a shared
+severity/callout abstraction, but adding it now would be speculative and would
+force every renderer to handle a new variant without a demonstrated need.
 
-        if self.example {
-            print_example_command(STATUS_BLOCK_EXAMPLE_CMD);
-        }
-        Ok(())
-    }
-}
-```
+No StatusBlock-related render-tree feature request is approved. Nothing needs
+to be added to `approved-render-tree-functionality.md`.
 
 ## Acceptance Criteria for Implementation
 
-- [ ] `StatusBlock` implements `TreeRenderable` (projects to `Root` + `Paragraph` + `BlockQuote` composition)
-- [ ] `StatusBlock` implements `TerminalRenderable` via the tree renderer (`TreeComponent<StatusBlock>`)
-- [ ] `StatusBlock` implements `BrowserRenderable` (delegating through `BrowserTreeComponent`)
-- [ ] `StatusBlock` implements `MarkdownRenderable` (delegating through `render_markdown_node`)
-- [ ] `bt status-block` command registered with `--severity`, `--header`, `--body`, `--hint`, `--border-color` flags
-- [ ] `bt status-block --md` outputs Markdown-formatted output
-- [ ] `bt status-block --html` outputs HTML-formatted output
-- [ ] `bt status-block --example` shows a representative example with all parts and the command that produced it
-- [ ] `--md` and `--html` are mutually exclusive
-- [ ] Parity test (`status_block_parity.rs`) validates semantic content survives both bespoke and tree paths
-- [ ] Unit tests for `BrowserRenderable` and `MarkdownRenderable` impls
-- [ ] Unit tests for `TreeRenderable` projection (node structure, Style, Layout)
-- [ ] CLI integration tests for `--md`, `--html`, `--example`, and all severity states
-- [ ] Components table updated: StatusBlock Tree ❌→✅, Browser ❌→✅, Markdown ❌→✅, IR State → `both avail, old renders`, bt CLI → `tree`
+- [ ] `StatusBlock` implements `TreeRenderable` as a root containing optional
+      header, body, and hint sections.
+- [ ] The projected root carries layout directly in `NodeAttrs`.
+- [ ] The projected root and children carry stable StatusBlock classes.
+- [ ] The default `"┃ "` body border is represented as a thick left
+      `Style::Border`.
+- [ ] Arbitrary custom `border(String)` remains a documented terminal
+      compatibility fallback and is not encoded in the tree.
+- [ ] `TerminalRenderable` uses the tree route for target-agnostic
+      StatusBlocks.
+- [ ] `BrowserRenderable` delegates through `BrowserTreeComponent`.
+- [ ] `MarkdownRenderable` delegates through `render_markdown_node`.
+- [ ] `bt status-block` is registered with `--severity`, `--header`, `--hint`,
+      `--border-color`, positional body text, `--md`, `--html`, and
+      `--example`.
+- [ ] `--md` and `--html` are mutually exclusive.
+- [ ] No new CLI flag exposes arbitrary custom border prefixes.
+- [ ] Parity tests validate semantic content, fallback icons, default thick
+      border behavior, color output, layout, and custom-border fallback.
+- [ ] Unit tests cover tree structure, classes, style, and layout.
+- [ ] Unit tests cover Browser and Markdown implementations.
+- [ ] CLI integration tests cover terminal, `--md`, `--html`, `--example`, all
+      non-deprecated severities, and validation of mutually exclusive flags.
+- [ ] Components table updated: StatusBlock Tree `no` -> `yes`, Browser `no` ->
+      `yes`, Markdown `no` -> `yes`, IR State -> `tree default + bespoke
+      compatibility fallback`, bt CLI -> `tree`.

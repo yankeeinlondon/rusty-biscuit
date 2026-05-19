@@ -5,13 +5,13 @@
 | Field      | Value                                                                             |
 |------------|-----------------------------------------------------------------------------------|
 | Name       | Todo                                                                              |
-| Kind       | Block (reports `is_block_level() -> false`)                                       |
+| Kind       | Terminal component that currently reports `is_block_level() -> false`; tree output is a one-item `List` |
 | Location   | `biscuit-terminal/lib/src/components/todo.rs`                                     |
 | Terminal   | ✅ bespoke `TerminalRenderable`                                                    |
 | Browser    | ❌                                                                                 |
 | Markdown   | ❌                                                                                 |
 | Tree       | ❌                                                                                 |
-| IR State   | no changes                                                                        |
+| IR State   | reviewed; requires typed task-state hints for full terminal parity                |
 | bt CLI     | —                                                                                 |
 
 Todo represents a task item with five visual states: Open, InProgress, Completed,
@@ -34,23 +34,26 @@ component also carries `created` and `last_updated` timestamps.
 
 #### Tree Projection Design
 
-Todo maps most naturally to `NodeKind::ListItem` with `checked: Option<bool>`, which
-is the GFM task-list representation. However, Todo has five states while `ListItem`
-only carries a boolean checkbox. The projection strategy is:
+Todo maps most naturally to a single `NodeKind::List` containing one
+`NodeKind::ListItem` with `checked: Option<bool>`, which is the GFM task-list
+representation. A bare `ListItem` is structurally invalid because tree validation
+requires `ListItem` nodes to appear directly inside a `List`.
+
+Todo has five states while `ListItem` only carries a binary checkbox. The projection
+strategy is:
 
 | TodoState    | `checked`   | CSS class            | Style treatment                                     |
 |--------------|-------------|----------------------|-----------------------------------------------------|
-| Open         | `Some(false)` | `todo-open`        | No emphasis                                         |
-| InProgress   | `None`        | `todo-in-progress`  | Green color on the checkbox glyph                   |
+| Open         | `Some(false)` | `todo-open`         | No emphasis                                         |
+| InProgress   | `Some(false)` | `todo-in-progress`  | Green color on the checkbox glyph                   |
 | Completed    | `Some(true)`  | `todo-completed`    | Green color on the checkbox glyph                   |
-| Blocked      | `None`        | `todo-blocked`      | Red color on the checkbox glyph                     |
-| Cancelled    | `None`        | `todo-cancelled`    | Dim emphasis + strikethrough on description text    |
+| Blocked      | `Some(false)` | `todo-blocked`      | Red color on the checkbox glyph                     |
+| Cancelled    | `Some(false)` | `todo-cancelled`    | Dim emphasis + strikethrough on description text    |
 
-The `checked` field is set to `Some(true)` only for `Completed` and `Some(false)`
-only for `Open`. The three intermediate/failure states (`InProgress`, `Blocked`,
-`Cancelled`) use `None` with a distinguishing CSS class. This preserves GFM task
-list semantics for the two states Markdown supports while carrying the extended
-state via classes.
+The `checked` field is set to `Some(true)` only for `Completed`; all other states
+use `Some(false)` so Markdown and Browser output remain valid unchecked task-list
+items. The extended state is carried through stable `todo-*` classes for CSS hooks
+and a typed task-state render hint for renderers that need state fidelity.
 
 **Implementation:**
 
@@ -65,11 +68,7 @@ impl TreeRenderable for Todo {
             TodoState::Cancelled => "todo-cancelled",
         };
 
-        let checked = match self.state {
-            TodoState::Completed => Some(true),
-            TodoState::Open => Some(false),
-            _ => None,
-        };
+        let checked = Some(matches!(self.state, TodoState::Completed));
 
         let desc_text = if self.use_prose {
             prose_to_plain_text(&self.description)
@@ -82,18 +81,29 @@ impl TreeRenderable for Todo {
             _ => RenderNode::text(desc_text),
         };
 
-        let mut node = RenderNode::list_item(checked, vec![desc_node]);
-        node.attrs.classes = vec![state_class.to_string()];
+        let mut item = RenderNode::list_item(checked, vec![
+            RenderNode::paragraph(vec![desc_node]),
+        ]);
+        item.attrs.classes = vec![state_class.to_string()];
+        item.attrs.set_task_hints(&TaskHints {
+            state: TaskState::from(self.state.clone()),
+        });
 
         if self.layout != Layout::default() {
-            node.attrs.set_layout(&self.layout);
+            item.attrs.set_layout(&self.layout);
         }
 
         if let Some(style) = self.state_style() {
-            node.attrs.set_style(&style);
+            item.attrs.set_style(&style);
         }
 
-        node
+        let mut list = RenderNode::list(false, None, vec![item]);
+        list.attrs.set_list_hints(&ListRenderHints {
+            bullet: Some(String::new()),
+            hanging_indent: true,
+            indent_children: Some(0),
+        });
+        list
     }
 }
 ```
@@ -101,25 +111,23 @@ impl TreeRenderable for Todo {
 The `state_style()` helper returns a `Style` with state-appropriate emphasis:
 
 - **Cancelled**: `TextEmphasis { dim: true, strikethrough: true, .. }`
-- **Other states**: No style on the `ListItem` itself — the checkbox glyph styling
-  is handled by the terminal tree renderer's native `ListItem` rendering.
+- **Other states**: No style on the `ListItem` itself. The checkbox glyph styling
+  is handled by the terminal tree renderer from typed task-state hints.
 
-The tree projection wraps the `ListItem` in a `List` node so the terminal renderer
-processes it correctly:
+The list-level `ListRenderHints` use an empty terminal bullet so terminal output
+matches the current Todo contract (`[ ] description`) instead of gaining a normal
+list marker (`- [ ] description`). Markdown ignores list hints by design and still
+serializes valid GFM task-list syntax.
 
-```rust
-fn render_tree_node(&self) -> Option<RenderNode> {
-    let item = self.render_tree();
-    Some(RenderNode::root(vec![
-        RenderNode::list(false, None, vec![item]),
-    ]))
-}
-```
+The legacy `TerminalRenderable::render_tree_node()` compatibility hook, if kept,
+must delegate to the same projection helper as `TreeRenderable::render_tree()` so
+CLI, terminal, browser, and Markdown paths cannot drift.
 
 #### Checkbox Glyph Rendering
 
 The terminal tree renderer already handles `NodeKind::ListItem` with `checked`
-states, rendering `- [x]` or `- [ ]`. However, Todo needs richer checkbox glyphs:
+states, rendering `[x]` or `[ ]` after the list prefix. However, Todo needs richer
+checkbox glyphs:
 
 | State      | Nerd Font glyph         | Fallback (color)     | Fallback (no color) |
 |------------|-------------------------|----------------------|---------------------|
@@ -129,10 +137,10 @@ states, rendering `- [x]` or `- [ ]`. However, Todo needs richer checkbox glyphs
 | Blocked    | `\u{f0117}` (badge)       | `[⏺]` (red)        | `[!]`               |
 | Cancelled  | `\u{f12ed}` (box off)     | `[-]` (dim)        | `[-]`               |
 
-The existing terminal tree renderer's `ListItem` handler produces only `- [x]` and
-`- [ ]`. To preserve Todo's rich glyph rendering, the tree renderer needs to
-recognize the `todo-*` classes and apply the state-specific checkbox rendering.
-This is detailed in the Feature Requests section below.
+The existing terminal tree renderer's `ListItem` handler produces only `[x]` and
+`[ ]`. To preserve Todo's rich glyph rendering, the tree renderer needs typed
+task-state hints on `ListItem` and state-specific checkbox rendering. This is
+detailed in the Feature Requests section below.
 
 An alternative is to encode the checkbox glyph into the node's visible text, but
 this would pollute the semantic structure and produce incorrect Markdown output
@@ -141,8 +149,9 @@ this would pollute the semantic structure and produce incorrect Markdown output
 #### Layout Mapping
 
 Todo already owns a `Layout` with margins and alignment. The tree projection seeds
-this onto the root node via `attrs.set_layout(&self.layout)`. The terminal tree
-renderer's `render_with_layout` applies it.
+this onto the `ListItem` node via `attrs.set_layout(&self.layout)`, because the
+item is the component's visible block. The terminal tree renderer's
+`render_with_layout` applies it.
 
 Todo is a single-line component; only `margin` and `alignment` are relevant.
 `max_width` is Browser-only and `word_wrap` does not apply to a single-line item.
@@ -195,7 +204,21 @@ a `KNOWN_DRIFT` ledger documenting accepted divergences:
 
 #### Feature Requests for Tree Rendering
 
-##### Feature 1: Extended Task State Checkbox Rendering
+##### Feature 1: Extended Task State Checkbox Rendering via `todo-*` Classes
+
+**DENIED**
+
+this feature will not be added to the render-tree tree implementation. You should
+try to still use the render-tree where practical and work around the complexity
+but if the complexity is too great then you have permission to create a bespoke IR
+implementation for this component.
+
+Why: class names are an appropriate browser/CSS hook, but they are too fragile as
+the primary terminal rendering contract. The render tree already uses typed hint
+payloads for component semantics that affect renderer behavior (`ProgressHints`,
+`ListRenderHints`, table hints). Todo should follow that pattern with typed
+task-state hints instead of requiring the terminal renderer to parse CSS class
+strings.
 
 **What it looks like:**
 
@@ -248,63 +271,96 @@ glyph embedded in the text. This would:
 The alternative would be a component-local bespoke IR, which defeats the purpose
 of using the shared tree renderer.
 
-##### Feature 2: `TodoHints` on `NodeAttrs` (optional, lower priority)
+##### Feature 2: Typed task-state hints on `NodeAttrs`
+
+**APPROVED**
+
+this feature request has been approved and WILL be included as part of the
+render-tree implementation BEFORE you are asked to implement this solution. Always
+refer to the @renderable/docs/tree-rendering.md and
+@renderable/docs/layout-and-style.md documents as the definitive guide.
 
 **What it looks like:**
 
-A `TodoHints` struct carried on `NodeAttrs`, similar to `ProgressHints`:
+A task hint struct carried on `NodeAttrs`, similar to `ProgressHints`:
 
 ```rust
-pub struct TodoHints {
-    pub state: TodoState,
-    pub created: Option<DateTime<Utc>>,
-    pub last_updated: Option<DateTime<Utc>>,
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum TaskState {
+    Open,
+    InProgress,
+    Completed,
+    Blocked,
+    Cancelled,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TaskHints {
+    pub state: TaskState,
 }
 ```
 
-The terminal tree renderer reads `TodoHints` to apply state-specific rendering
-instead of parsing CSS classes. This is a cleaner alternative to Feature 1's
-class-based dispatch.
+Store the hint under a new `renderable.widget.task` namespace with typed
+`NodeAttrs::set_task_hints(&TaskHints)` and `NodeAttrs::task_hints() ->
+Option<TaskHints>` helpers. Validation must reject task hints on any node other
+than `NodeKind::ListItem`.
+
+The terminal tree renderer reads `TaskHints` to select Todo's existing
+Nerd Font / colored fallback / no-color fallback checkbox marker. The renderer
+must apply the custom marker only to the checkbox marker, not the description
+text, except for `Cancelled`, where the projected `Delete` node and/or declared
+`Style` continues to handle description strikethrough/dim behavior.
+
+Browser rendering does not need special logic for the first implementation:
+`checked: Some(false)` / `Some(true)` already emits a disabled checkbox, and
+`todo-*` classes remain available for CSS. Markdown and MarkdownPlus deliberately
+degrade to `- [ ]` / `- [x]` task-list syntax while preserving cancelled
+strikethrough.
+
+Do not add `chrono` or `biscuit-terminal` component types to `renderable` for this
+feature. The `created` and `last_updated` fields remain component metadata until a
+cross-target metadata display contract is designed.
 
 **Why Todo would benefit:**
 
 Parsing CSS classes for rendering logic is fragile. A dedicated hint struct
-provides type-safe access to the full state and timestamp metadata, enabling
- richer terminal rendering (e.g., showing timestamps in a future enhancement).
+provides type-safe access to the full state and keeps renderer behavior explicit
+and testable.
 
 **Impact of not having this feature:**
 
-Low — the class-based approach in Feature 1 works. This is a quality-of-life
-improvement, not a blocker.
+High for terminal parity. Without typed hints, the tree path can still produce
+valid Markdown and Browser task-list output, but terminal rendering cannot
+faithfully preserve InProgress, Blocked, or Cancelled checkbox markers without
+either class parsing or embedding glyphs into visible text.
 
 #### Tree Renderer Fit Assessment
 
-The tree renderer is a **good fit** for Todo with the Feature 1 extension
-(extended checkbox rendering via class-based dispatch). The `NodeKind::ListItem`
-with `checked` is the semantically correct representation for a task item, and
-the existing list rendering infrastructure handles indentation and bullet prefix
-generation.
+The tree renderer is a **good fit** for Todo with Feature 2 (typed task-state
+hints). A one-item `NodeKind::List` containing a `NodeKind::ListItem` is the
+semantically correct representation for a task item, and the existing list
+rendering infrastructure handles indentation and task-list syntax.
 
-Without Feature 1, the tree renderer would be a **poor fit** because it cannot
-represent three of Todo's five visual states. The component would be forced to
-either lose state fidelity or embed glyphs in text, both of which degrade the
-output across targets.
+Without Feature 2, the tree renderer would be a **partial fit** because it cannot
+represent three of Todo's five terminal visual states. The component would be
+forced to either accept terminal marker drift or embed glyphs in text, both of
+which degrade the output across targets.
 
 The tree renderer is the recommended approach because:
-1. `ListItem` is the correct semantic node for a task item
-2. The Feature 1 extension is a small, well-scoped addition to the existing
-   `ListItem` handler
+1. `List` / `ListItem` is the correct semantic shape for a task item
+2. The Feature 2 extension is a small, well-scoped typed hint addition to the
+   existing `ListItem` handler
 3. The same tree serves all three targets (Terminal, Browser, Markdown) from a
    single projection
 4. The component is simple (single line, no nesting) so the tree overhead is
    minimal
 
-`will_use_tree_renderer`: **false** — without Feature 1, the tree renderer cannot
-represent InProgress, Blocked, or Cancelled states, making it an unacceptable
-default.
+`will_use_tree_renderer`: **false** — without Feature 2, the tree renderer cannot
+faithfully render InProgress, Blocked, or Cancelled terminal markers, making it an
+unacceptable default for replacing `TerminalRenderable::render()`.
 
-`will_use_tree_renderer_with_features`: **true** — with Feature 1 (class-based
-extended checkbox rendering), the tree renderer handles all five Todo states
+`will_use_tree_renderer_with_features`: **true** — with Feature 2 (typed
+task-state hints), the tree renderer handles all five Todo states
 correctly and is the recommended path.
 
 ---
@@ -314,16 +370,17 @@ correctly and is the recommended path.
 - In this section we will provide a design specification for the **Todo** component's implementation of the BrowserRenderable trait
 
 Todo does not currently have a bespoke browser rendering implementation. Since
-Terminal IR is designed first and Todo projects to a `NodeKind::ListItem` with
-`todo-*` classes, the browser rendering handles the node through the tree.
+Terminal IR is designed first and Todo projects to a one-item `NodeKind::List`
+with `todo-*` classes on its `ListItem`, browser rendering handles the node
+through the tree.
 
 #### Browser Rendering Design
 
 The browser tree renderer currently handles `NodeKind::ListItem` as `<li>` with an
 optional `<input type="checkbox">`. For a `ListItem` with `checked: Some(true)`,
 it renders `<input type="checkbox" checked disabled>`. For `checked: Some(false)`,
-it renders `<input type="checkbox" disabled>`. For `checked: None`, no checkbox
-is rendered.
+it renders `<input type="checkbox" disabled>`. Todo uses `Some(false)` for every
+non-completed state, so all five states render as task-list items.
 
 For Todo's extended states, the browser rendering uses the `todo-*` classes to
 produce richer output:
@@ -356,10 +413,11 @@ The `todo-*` classes enable CSS styling by consumers:
 }
 ```
 
-The browser tree renderer's `NodeKind::ListItem` arm checks for `todo-*` classes
-and applies the appropriate HTML structure. For Cancelled, the description is
-wrapped in `<del>` (the `NodeKind::Delete` child from the tree projection maps to
-`<del>` in the browser renderer).
+No browser renderer change is required for the initial migration. The existing
+`NodeKind::ListItem` arm preserves `todo-*` classes and emits the checkbox from
+the `checked` field. For Cancelled, the description is wrapped in `<del>` because
+the `NodeKind::Delete` child from the tree projection maps to `<del>` in the
+browser renderer.
 
 **BrowserTreeComponent adapter:**
 
@@ -378,7 +436,8 @@ let html = fragment.render();
 Todo's `Layout` maps to CSS via the existing `layout_to_css` lowering:
 
 - Margins → `margin-*` on the `<li>` element
-- Alignment → `text-align` when `max_width` is present
+- Alignment → auto side margins when `max_width` is present, matching the
+  existing browser layout lowering
 - `max_width` → `max-width` CSS property
 
 No additional CSS mapping is needed beyond what the tree renderer already provides.
@@ -412,7 +471,8 @@ The key divergence point is the Cancelled state's strikethrough:
   is representable in pure Markdown syntax.
 
 For all other states, Markdown and MarkdownPlus produce the same output:
-`- [ ] description` (Open/InProgress/Blocked) or `- [x] description` (Completed).
+`- [ ] description` (Open/InProgress/Blocked/Cancelled before strikethrough) or
+`- [x] description` (Completed).
 
 **Divergence summary:**
 
@@ -427,10 +487,13 @@ For `Todo::new("Task").with_state(TodoState::InProgress)`:
   to unchecked)
 - **MarkdownPlus**: `- [ ] Task` (same — no inline HTML needed for plain text)
 
-**When colors are present** (from Prose descriptions):
+**When Prose markup is present**:
 
-- **Markdown**: Inline HTML colors are stripped. `<red>Error</red>` becomes `Error`.
-- **MarkdownPlus**: Inline HTML is preserved. `<span style="color:red">Error</span>`.
+- **Markdown**: Inline styles are flattened to plain text.
+- **MarkdownPlus**: Initially identical to Markdown because Todo's projection uses
+  the same lossy plain-text extraction as BlockQuote. Rich Prose preservation can
+  be added later only if Prose exposes a tree projection that preserves inline
+  semantics.
 
 Since the `todo-*` classes carry state semantics but Markdown cannot express them,
 both targets degrade to the standard GFM `- [ ]` / `- [x]` syntax. The state class
@@ -440,12 +503,13 @@ optimizes for ergonomics, not for state fidelity.
 #### Markdown Rendering Design
 
 The Markdown tree renderer already handles `NodeKind::ListItem` with `checked`:
-`Some(true)` produces `- [x] text` and `Some(false)` produces `- [ ] text`. For
-`checked: None`, the renderer produces `- text` (no checkbox).
+inside a `List`, `Some(true)` produces `- [x] text` and `Some(false)` produces
+`- [ ] text`. For `checked: None`, the renderer produces `- text` (no checkbox),
+so Todo must not use `None` for its extended states.
 
-For Todo's `checked: None` states (InProgress, Blocked, Cancelled), the Markdown
-output is `- [ ] text` for InProgress/Blocked (unchecked, since Markdown cannot
-represent the extended state) and `- [ ] ~~text~~` for Cancelled (unchecked with
+For Todo's extended states (InProgress, Blocked, Cancelled), the projection uses
+`checked: Some(false)`. The Markdown output is `- [ ] text` for
+InProgress/Blocked and `- [ ] ~~text~~` for Cancelled (unchecked with
 strikethrough via the `NodeKind::Delete` child).
 
 The Markdown renderer does not need to be modified — the existing `ListItem`
@@ -457,14 +521,14 @@ produces the correct output for all five states.
 ```rust
 impl MarkdownRenderable for Todo {
     fn render_markdown(&self) -> String {
-        let node = self.render_tree_node().unwrap();
+        let node = self.render_tree();
         render_markdown_node(&node, &MarkdownRenderOptions::default())
             .map(|r| r.output)
             .unwrap_or_else(|_| self.description.clone())
     }
 
     fn render_markdown_plus(&self) -> String {
-        let node = self.render_tree_node().unwrap();
+        let node = self.render_tree();
         render_markdown_node(&node, &MarkdownRenderOptions::default_plus())
             .map(|r| r.output)
             .unwrap_or_else(|_| self.description.clone())
@@ -489,8 +553,8 @@ Layout is ignored by the Markdown renderer (by design — locked by test).
 | Cancelled state — Markdown                 | Output is `- [ ] ~~description~~` (strikethrough)                            |
 | Cancelled state — MarkdownPlus             | Identical to Markdown                                                        |
 | Markdown equals MarkdownPlus (all states)  | Both methods produce identical output for all five states                    |
-| Prose description — Markdown               | Inline styles stripped to plain text                                         |
-| Prose description — MarkdownPlus           | Inline styles preserved as HTML spans                                        |
+| Prose description — Markdown               | Inline styles flattened to plain text                                        |
+| Prose description — MarkdownPlus           | Same as Markdown until Prose has a lossless tree projection                  |
 | Layout applied — Markdown                  | Layout has no effect on output (regression test)                             |
 
 ---
@@ -566,7 +630,10 @@ pub enum TodoStateArg {
 
 **Render path:**
 
-1. Build `Todo` from flags (description, state, prose).
+1. Build `Todo` from flags (description, state, prose). Add a public
+   `Todo::with_state(TodoState)` builder or equivalent setter, because `state`
+   and `description` are private fields today and the CLI crate cannot construct
+   arbitrary states with a struct literal.
 2. **Terminal** (default): Project tree → `render_terminal_node()`.
 3. **HTML** (`--html`): Wrap in `BrowserTreeComponent` → `render_html_fragment()`.
 4. **Markdown** (`--md`): Project tree → `render_markdown_node()`.
@@ -591,11 +658,14 @@ impl Run for TodoArgs {
             TodoStateArg::Cancelled => TodoState::Cancelled,
         };
 
-        let mut todo = Todo { state, description: desc, ..Todo::default() };
+        let todo = if self.prose {
+            Todo::from_prose(desc)
+        } else {
+            Todo::new(desc)
+        }
+        .with_state(state);
 
-        let node = todo.render_tree_node().ok_or_else(|| {
-            color_eyre::eyre::eyre!("Todo component produced no render-tree node")
-        })?;
+        let node = todo.render_tree();
 
         if self.html {
             let component = BrowserTreeComponent::new(todo);
@@ -662,12 +732,14 @@ bt todo "Review pull request #42" --state completed
 
 ## Acceptance Criteria Summary
 
-- [ ] `Todo` implements `TreeRenderable`, projecting to `NodeKind::ListItem` with `todo-*` classes
+- [ ] `Todo` implements `TreeRenderable`, projecting to a one-item `NodeKind::List` with a `ListItem` carrying `todo-*` classes and typed task-state hints
+- [ ] `Todo` exposes a public state builder/setter so CLI and external callers can construct all five states without accessing private fields
 - [ ] `Todo`'s `TerminalRenderable::render()` delegates to the tree path by default
 - [ ] Bespoke render path retained as `render_bespoke()` for parity testing
 - [ ] `BrowserRenderable` achieved — browser tree renderer produces `<li>` with state-specific classes and checkbox
 - [ ] `MarkdownRenderable` implemented on `Todo` — both Markdown and MarkdownPlus produce GFM task list syntax
-- [ ] Terminal tree renderer handles `todo-*` classes for extended checkbox glyph rendering (Feature 1)
+- [ ] Render tree adds typed task-state hints on `NodeAttrs` and validates that they only appear on `ListItem` nodes (Feature 2, APPROVED)
+- [ ] Terminal tree renderer handles typed task-state hints for extended checkbox glyph rendering
 - [ ] `bt todo "description" --state <state>` renders a Todo item to the terminal
 - [ ] `bt todo --html` renders HTML output
 - [ ] `bt todo --md` renders Markdown output (`- [ ]` / `- [x]`)

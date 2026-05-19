@@ -10,7 +10,8 @@
 | Terminal   | ✅ bespoke `TerminalRenderable`                                                   |
 | Browser    | ❌                                                                                |
 | Markdown   | ❌                                                                                |
-| Tree       | ✅ `render_tree_node()` exists (projects to `NodeKind::List { ordered: true }`)   |
+| Tree hook  | ✅ `TerminalRenderable::render_tree_node()` exists (projects to `NodeKind::List { ordered: true }`) |
+| TreeRenderable | ❌ not implemented yet; required before using `TreeComponent` / `BrowserTreeComponent` |
 | IR State   | both avail, old renders                                                          |
 | bt CLI     | bespoke (via `bt list` which only renders `UnorderedList`)                       |
 
@@ -19,7 +20,7 @@ numeric prefixes (`1.`, `2.`, `3.`, etc.). It owns a `Layout` for margins,
 alignment, and word-wrap, and an `indent_children: u32` (default 4) that
 controls the indentation of nested block-level children.
 
-A tree projection already exists via `render_tree_node()`, producing a
+A tree projection already exists via `TerminalRenderable::render_tree_node()`, producing a
 `NodeKind::List { ordered: true, start: None, children }` with each item
 projected into `NodeKind::ListItem` nodes. The projection also seeds the
 component's `Layout` onto the root node and records `ListRenderHints` with
@@ -65,13 +66,26 @@ The native terminal tree renderer already handles this structure at
 The goal is to make the IR path the default for both `TerminalRenderable::render()`
 and the bt CLI, while **retaining the bespoke path** for parity testing.
 
-The switch follows the `TreeComponent` adapter pattern: OrderedList's
-`TerminalRenderable::render()` and `render_optimistic()` delegates are changed
-to project the tree and call `render_terminal_node()`.
+The switch follows the `TreeComponent` adapter pattern, but should not wrap
+`self` by value from inside the trait impl. OrderedList should first implement
+`renderable::tree::TreeRenderable` by delegating to its existing projection
+logic, then `TerminalRenderable::render()` and `render_optimistic()` should call
+a shared `render_via_tree()` helper that invokes `render_terminal_node()`.
+
+The old `TerminalRenderable::render_tree_node()` hook should remain for
+compatibility with existing `RenderableTerminalContent` projection code, but it
+should delegate to the same private projection helper as `TreeRenderable` so the
+two tree entry points cannot drift.
 
 **Implementation approach:**
 
 ```rust
+impl renderable::tree::TreeRenderable for OrderedList {
+    fn render_tree(&self) -> RenderNode {
+        self.to_render_tree_node()
+    }
+}
+
 impl TerminalRenderable for OrderedList {
     fn render_optimistic(&self, term_width: Option<u32>) -> String {
         let width = term_width.unwrap_or(80);
@@ -86,13 +100,27 @@ impl TerminalRenderable for OrderedList {
     // ... layout, is_block_level, as_any unchanged ...
 
     fn render_tree_node(&self) -> Option<RenderNode> {
-        // existing projection unchanged
+        Some(self.to_render_tree_node())
     }
 }
 
 impl OrderedList {
+    fn to_render_tree_node(&self) -> RenderNode {
+        let children = project_list_items(&self.items);
+        let mut node = RenderNode::list(true, None, children);
+        node.attrs.set_list_hints(&ListRenderHints {
+            bullet: None,
+            hanging_indent: true,
+            indent_children: Some(self.indent_children),
+        });
+        if self.layout != Layout::default() {
+            node.attrs.set_layout(&self.layout);
+        }
+        node
+    }
+
     fn render_via_tree(&self, term: &Terminal) -> String {
-        let node = self.render_tree_node().expect("OrderedList always projects");
+        let node = self.to_render_tree_node();
         let opts = TerminalRenderOptions::new(term, RenderStrictness::Warn);
         match render_terminal_node(&node, &opts) {
             Ok(rendered) => rendered.output,
@@ -101,7 +129,7 @@ impl OrderedList {
     }
 
     /// Retained for parity testing. Renders via the pre-tree bespoke path.
-    fn render_bespoke(&self, term: &Terminal) -> String {
+    pub(crate) fn render_bespoke(&self, term: &Terminal) -> String {
         let width = term.width();
         let available = self.layout.available_width(width);
         let content = self.render_content(Some(term), available);
@@ -165,7 +193,16 @@ should be documented in a `KNOWN_DRIFT` ledger:
   management may produce slightly different line breaks in edge cases at very
   narrow widths.
 
+Existing `biscuit-terminal/lib/tests/list_parity.rs` tests are useful
+projection and native tree-renderer coverage, but they are not sufficient for
+this migration by themselves. The flip must add explicit default-render parity:
+`OrderedList::render_bespoke(&term)` versus `OrderedList::render(&term)` after
+`render()` delegates to the tree path. That test should fail if the component
+silently falls back to the old renderer.
+
 #### Feature Requests for Tree Rendering
+
+**APPROVED: no render-tree feature change is required.**
 
 No feature requests are needed. The existing tree renderer already has native
 support for ordered lists with:
@@ -178,6 +215,15 @@ support for ordered lists with:
 
 The `NodeKind::List { ordered: true }` node kind and the native rendering in
 `render_tree::render.rs` are a direct match for OrderedList's semantics.
+
+Why: OrderedList's semantics are already covered by the canonical tree model:
+ordered `NodeKind::List`, `NodeKind::ListItem`, list start offsets, typed
+`ListRenderHints`, and block-level `Layout`. Adding a new render-tree feature
+would duplicate existing list behavior and make the migration less direct.
+
+This is an approval of the existing render-tree functionality, not a request
+for new functionality. Therefore nothing is added to
+`@renderable/features/2026-05-19-pushing-toward-ir/approved-render-tree-functionality.md`.
 
 #### Tree Renderer Fit Assessment
 
@@ -195,8 +241,8 @@ parity tests.
 `will_use_tree_renderer`: **true** — the existing tree renderer handles
 OrderedList's needs without any feature additions.
 
-`will_use_tree_renderer_with_features`: **true** — no features requested, so
-this is the same as above.
+`will_use_tree_renderer_with_features`: **false** — no additional render-tree
+features are required.
 
 ---
 
@@ -206,9 +252,14 @@ this is the same as above.
 
 OrderedList does not currently have a bespoke browser rendering implementation.
 Since Terminal IR is designed first and OrderedList already projects to a
-`NodeKind::List { ordered: true }` render tree node, the browser path is handled
-entirely by the existing `BrowserTreeComponent<T>` adapter in
+`NodeKind::List { ordered: true }` render tree node, the browser path should be
+handled by the existing `BrowserTreeComponent<T>` adapter in
 `biscuit-terminal/lib/src/render_tree/browser_adapter.rs`.
+
+Important prerequisite: `BrowserTreeComponent<T>` requires `T:
+TreeRenderable + Debug`. OrderedList must implement `TreeRenderable` before
+this adapter can be used. The existing `TerminalRenderable::render_tree_node()`
+hook alone is not sufficient.
 
 The browser tree renderer already handles `NodeKind::List` at
 `renderable/src/tree/render/browser.rs:363`:
@@ -219,7 +270,7 @@ The browser tree renderer already handles `NodeKind::List` at
   items.
 - Child content (text, paragraphs, nested lists) is rendered recursively.
 
-OrderedList gains `BrowserRenderable` by wrapping itself in the adapter:
+OrderedList gains browser output by wrapping itself in the adapter:
 
 ```rust
 use biscuit_terminal::render_tree::BrowserTreeComponent;
@@ -231,6 +282,11 @@ let fragment = component.render_html_fragment();
 let html = fragment.render();
 // Produces: <ol><li>First</li><li>Second</li><li>Third</li></ol>
 ```
+
+If OrderedList itself implements `BrowserRenderable`, the impl should call
+`self.render_tree()` and `render_browser_node()` directly with the same visible
+fallback policy used by `BrowserTreeComponent`. Do not create a second bespoke
+HTML serializer for OrderedList.
 
 #### Layout to CSS Mapping
 
@@ -292,9 +348,10 @@ Markdown renderer will produce standard numbered list syntax starting from 1.
 
 ```rust
 use renderable::tree::render::{render_markdown_node, MarkdownRenderOptions};
+use renderable::tree::TreeRenderable;
 
 let ol = OrderedList::new(vec!["First", "Second", "Third"]);
-let node = ol.render_tree_node().unwrap();
+let node = ol.render_tree();
 let rendered = render_markdown_node(&node, &MarkdownRenderOptions::default());
 // Produces: "1. First\n2. Second\n3. Third"
 ```
@@ -307,10 +364,10 @@ calling `render_markdown_node`:
 ```rust
 impl MarkdownRenderable for OrderedList {
     fn render_markdown(&self) -> String {
-        let node = self.render_tree_node().unwrap();
+        let node = self.render_tree();
         render_markdown_node(&node, &MarkdownRenderOptions::default())
             .map(|r| r.output)
-            .unwrap_or_default()
+            .unwrap_or_else(|error| format!("[render-tree error: {error}]"))
     }
 
     fn render_markdown_plus(&self) -> String {
@@ -334,6 +391,11 @@ impl MarkdownRenderable for OrderedList {
 | OrderedList with Layout                  | Layout has no effect on Markdown output (regression test)                         |
 | Markdown equals MarkdownPlus             | Both methods produce identical output                                             |
 | Item with inline styling (Prose)         | Styled text is degraded to plain text in both Markdown and MarkdownPlus           |
+
+The implementation must also test that `MarkdownRenderable::render_markdown()`
+and `TreeRenderable::render_tree()` use the same projection as
+`TerminalRenderable::render_tree_node()`. This catches future drift between the
+compatibility hook and the canonical tree entry point.
 
 ---
 
@@ -400,7 +462,10 @@ bt list -o --example
 3. Else:
    - Build `UnorderedList::from(items).with_bullet(&bullet)`.
    - Apply `--no-hanging-indent` if set.
-4. Apply `LayoutArgs` to the component's layout.
+4. Apply `LayoutArgs` to the component's layout. For `--html`, rely on the
+   tree renderer's `Layout` to CSS lowering once the list component is rendered
+   through the tree; do not wrap the result in an extra layout `<div>` unless
+   the tree path cannot express a requested CLI option.
 5. **Terminal** (default): Render via `render(&term)`.
 6. **HTML** (`--html`): Wrap in `BrowserTreeComponent` → `render_html_fragment()`.
 7. **Markdown** (`--md`): Project tree → `render_markdown_node()`.
@@ -437,9 +502,10 @@ logic (following the pattern from `prose.rs`).
 
 ## Acceptance Criteria Summary
 
+- [ ] `OrderedList` implements `TreeRenderable` and delegates to the same private projection helper as `render_tree_node()`
 - [ ] `OrderedList`'s `TerminalRenderable::render()` delegates to the tree path by default
 - [ ] Bespoke render path retained as `render_bespoke()` for parity testing
-- [ ] `BrowserRenderable` achieved via `BrowserTreeComponent<OrderedList>`
+- [ ] Browser output is achieved through the tree path, either via `BrowserTreeComponent<OrderedList>` at call sites or a direct `BrowserRenderable for OrderedList` impl that calls `render_browser_node()`
 - [ ] `MarkdownRenderable` implemented on `OrderedList` via tree renderer's Markdown path
 - [ ] `bt list --ordered` / `bt list -o` renders an `OrderedList`
 - [ ] `bt list -o --md` renders Markdown output (`1. First\n2. Second\n3. Third`)
