@@ -775,6 +775,29 @@ impl StyleState {
         self.get(layer).unwrap_or(layer.default_reset())
     }
 
+    /// Re-emit the opening escape for every currently-active layer.
+    ///
+    /// Used after a hard `\x1b[0m` reset — such as the one closing a
+    /// fenced code block — to restore an enclosing span's styling so
+    /// following sibling text is not left unstyled.
+    pub(super) fn reapply_active_layers(&self, out: &mut String) {
+        for slot in [
+            &self.font_weight,
+            &self.foreground,
+            &self.background,
+            &self.italic,
+            &self.underline,
+            &self.strikethrough,
+            &self.blink,
+            &self.inverse,
+            &self.hidden,
+        ] {
+            if let Some(code) = slot {
+                out.push_str(code);
+            }
+        }
+    }
+
     fn slot_mut(&mut self, layer: StyleLayer) -> &mut Option<String> {
         match layer {
             StyleLayer::FontWeight => &mut self.font_weight,

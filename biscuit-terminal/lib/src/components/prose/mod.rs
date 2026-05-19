@@ -613,4 +613,55 @@ mod tests {
         assert!(result.contains("**not bold**"), "got: {result:?}");
         assert!(!result.contains("\x1b[1m"));
     }
+
+    #[test]
+    fn code_block_inside_span_restores_enclosing_style() {
+        // Regression (review-5): a fenced code block nested inside an
+        // active style must restore the enclosing span's SGR after its
+        // hard `\x1b[0m` reset, so following sibling text stays styled.
+        let prose = Prose::new("<red>before\n```\ncode\n```\nafter</red>");
+        let result = prose.parse_tokens(None);
+        // The code line resets, then the enclosing red foreground is
+        // re-emitted before the trailing `after` text.
+        assert!(
+            result.contains("\x1b[2m  code\x1b[0m\x1b[31m"),
+            "got: {result:?}"
+        );
+        let restore_idx = result
+            .find("\x1b[0m\x1b[31m")
+            .expect("code-block reset followed by restored red");
+        let after_idx = result.find("after").expect("trailing text present");
+        assert!(
+            restore_idx < after_idx,
+            "red must be restored before `after`; got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn standalone_code_block_emits_no_restoration_escape() {
+        // A code block with no enclosing span re-emits nothing after its
+        // reset — the standalone dim output is unchanged.
+        let prose = Prose::new("```\ncode\n```");
+        let result = prose.parse_tokens(None);
+        let dim = "\x1b[2m  code\x1b[0m";
+        assert!(result.starts_with(dim), "got: {result:?}");
+        // Nothing is re-applied after the code-block reset; only the
+        // document's own final reset may follow.
+        let tail = &result[dim.len()..];
+        assert!(tail.is_empty() || tail == "\x1b[0m", "got: {result:?}");
+    }
+
+    #[test]
+    fn fenced_code_block_with_closing_tag_in_body_stays_opaque() {
+        // Regression: a fenced body containing the synthetic
+        // `</code-block>` tag plus `<red>` markup must render verbatim as
+        // dim code — no red foreground color escape may leak out.
+        let prose = Prose::new("```\n</code-block><red>x</red>\n```");
+        let result = prose.parse_tokens(None);
+        assert!(
+            result.contains("</code-block><red>x</red>"),
+            "got: {result:?}"
+        );
+        assert!(!result.contains("\x1b[31m"), "got: {result:?}");
+    }
 }

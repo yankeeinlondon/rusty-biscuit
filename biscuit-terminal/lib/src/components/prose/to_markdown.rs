@@ -289,6 +289,26 @@ mod tests {
     }
 
     #[test]
+    fn code_block_with_tag_delimiters_in_body_stays_in_fence() {
+        // Regression: a fenced body containing the synthetic
+        // `</code-block>` tag plus `<red>` markup must round-trip
+        // verbatim inside the fence — not collapse to an empty fence
+        // with escaped tail text.
+        assert_eq!(
+            md("```\n</code-block><red>x</red>\n```"),
+            "```\n</code-block><red>x</red>\n```",
+        );
+    }
+
+    #[test]
+    fn code_block_with_unknown_tag_and_backslashes_is_verbatim() {
+        assert_eq!(
+            md("```\n<unknown> \\* \\\\path\n```"),
+            "```\n<unknown> \\* \\\\path\n```",
+        );
+    }
+
+    #[test]
     fn unknown_tag_is_escaped_text() {
         assert_eq!(md("<unknown>x</unknown>"), r"\<unknown\>x\</unknown\>");
     }

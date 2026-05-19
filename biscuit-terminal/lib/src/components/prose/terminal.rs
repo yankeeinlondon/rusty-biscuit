@@ -43,6 +43,12 @@ fn render_nodes(
 }
 
 /// Render a fenced code block as dim, 2-space-indented text.
+///
+/// Each code line is closed with a hard `\x1b[0m` so the dim attribute
+/// never bleeds. When the block is nested inside an active span, that
+/// reset would also clear the enclosing span's attributes, leaving
+/// following sibling text unstyled — so the enclosing layers are
+/// re-emitted from [`StyleState`] once the block is complete.
 fn render_code_block(value: &str, state: &mut StyleState, out: &mut String) {
     state.used_styles = true;
     for (idx, line) in value.lines().enumerate() {
@@ -53,6 +59,7 @@ fn render_code_block(value: &str, state: &mut StyleState, out: &mut String) {
         out.push_str(line);
         out.push_str("\x1b[0m");
     }
+    state.reapply_active_layers(out);
 }
 
 /// Render a hyperlink: OSC8 when supported, Markdown fallback otherwise.

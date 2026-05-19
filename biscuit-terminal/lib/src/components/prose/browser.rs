@@ -187,6 +187,30 @@ mod tests {
     }
 
     #[test]
+    fn code_block_with_tag_delimiters_in_body_is_escaped_and_opaque() {
+        // Regression: a fenced body containing the synthetic
+        // `</code-block>` tag plus `<red>` markup must render as one
+        // escaped `<pre><code>` body — no styled span leaks outside it.
+        let h = html("```\n</code-block><red>x</red>\n```");
+        assert!(
+            h.contains(
+                "<pre><code>&lt;/code-block&gt;&lt;red&gt;x&lt;/red&gt;</code></pre>"
+            ),
+            "got: {h}"
+        );
+        assert!(!h.contains("<span style=\"color"), "got: {h}");
+    }
+
+    #[test]
+    fn code_block_with_unknown_tag_and_backslashes_is_escaped_verbatim() {
+        let h = html("```\n<unknown> \\* \\\\path\n```");
+        assert!(
+            h.contains("<pre><code>&lt;unknown&gt; \\* \\\\path</code></pre>"),
+            "got: {h}"
+        );
+    }
+
+    #[test]
     fn unknown_tag_is_escaped_text() {
         let h = html("<unknown>x</unknown>");
         assert!(h.contains("&lt;unknown&gt;x&lt;/unknown&gt;"), "got: {h}");

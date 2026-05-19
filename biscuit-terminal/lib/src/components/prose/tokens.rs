@@ -15,6 +15,7 @@ use renderable::color::{BasicColor, Color, RgbColor};
 use renderable::style::UnderlineStyle;
 
 use super::ir::{ProseNode, ProseStyle};
+use super::markdown::{CODE_BLOCK_PLACEHOLDER_MARK, FencedCode};
 use super::styles::{parse_rgb, tailwind_by_name, web_color_by_name};
 
 /// Parse an opening tag into its name and attributes.
@@ -244,6 +245,34 @@ fn scan_inner(chars: &mut Peekable<Chars<'_>>, tag_name: &str) -> String {
     inner
 }
 
+/// Consume a `CODE<n>\u{0002}` placeholder body from `chars`, assuming the
+/// opening `\u{0002}` sentinel has already been taken.
+///
+/// Returns the parsed block index, or `None` when the following
+/// characters are not a well-formed placeholder (in which case the caller
+/// treats the sentinel as literal text).
+fn take_code_placeholder(chars: &mut Peekable<Chars<'_>>) -> Option<usize> {
+    for expected in ['C', 'O', 'D', 'E'] {
+        chars.next_if_eq(&expected)?;
+    }
+
+    let mut digits = String::new();
+    while let Some(&d) = chars.peek() {
+        if d.is_ascii_digit() {
+            digits.push(d);
+            chars.next();
+        } else {
+            break;
+        }
+    }
+    if digits.is_empty() {
+        return None;
+    }
+
+    chars.next_if_eq(&CODE_BLOCK_PLACEHOLDER_MARK)?;
+    digits.parse().ok()
+}
+
 /// Push the accumulated literal text (if any) as a [`ProseNode::Text`].
 fn flush_text(text: &mut String, nodes: &mut Vec<ProseNode>) {
     if !text.is_empty() {
@@ -254,13 +283,33 @@ fn flush_text(text: &mut String, nodes: &mut Vec<ProseNode>) {
 /// Parse pre-processed Prose `content` into a flat list of [`ProseNode`]s.
 ///
 /// Recurses into recognized bracketed tags. Unknown tags and former
-/// atomic-token syntax become literal [`ProseNode::Text`].
-pub(super) fn parse_nodes(content: &str) -> Vec<ProseNode> {
+/// atomic-token syntax become literal [`ProseNode::Text`]. Fenced
+/// code-block placeholders are resolved against `code_blocks` and emitted
+/// as opaque [`ProseNode::CodeBlock`]s — their bodies are never scanned
+/// for markup, so a body containing `</code-block>`, `<red>`, or any
+/// other delimiter stays inert.
+pub(super) fn parse_nodes(content: &str, code_blocks: &[FencedCode]) -> Vec<ProseNode> {
     let mut nodes: Vec<ProseNode> = Vec::new();
     let mut text = String::new();
     let mut chars = content.chars().peekable();
 
     while let Some(ch) = chars.next() {
+        // ── Fenced-code placeholders: \u{0002}CODE<n>\u{0002} ────────────
+        if ch == CODE_BLOCK_PLACEHOLDER_MARK {
+            if let Some(block) = take_code_placeholder(&mut chars)
+                .and_then(|index| code_blocks.get(index))
+            {
+                flush_text(&mut text, &mut nodes);
+                nodes.push(ProseNode::CodeBlock {
+                    lang: Some(block.lang.clone()).filter(|s| !s.is_empty()),
+                    value: block.body.clone(),
+                });
+            }
+            // A malformed placeholder leaves the sentinel dropped; it is a
+            // control character with no visible rendering either way.
+            continue;
+        }
+
         // ── Backslash escapes: \< \> \{ \\ \* \_ \[ \] \( \) ─────────────
         if ch == '\\' {
             match chars.peek() {
@@ -297,19 +346,19 @@ pub(super) fn parse_nodes(content: &str) -> Vec<ProseNode> {
                             flush_text(&mut text, &mut nodes);
                             nodes.push(ProseNode::Span {
                                 style,
-                                children: parse_nodes(&inner),
+                                children: parse_nodes(&inner, code_blocks),
                             });
                         }
                         TagResolution::Link(href) => {
                             flush_text(&mut text, &mut nodes);
                             nodes.push(ProseNode::Link {
                                 href,
-                                children: parse_nodes(&inner),
+                                children: parse_nodes(&inner, code_blocks),
                             });
                         }
                         TagResolution::Transparent => {
                             flush_text(&mut text, &mut nodes);
-                            nodes.extend(parse_nodes(&inner));
+                            nodes.extend(parse_nodes(&inner, code_blocks));
                         }
                         TagResolution::Code(lang) => {
                             flush_text(&mut text, &mut nodes);

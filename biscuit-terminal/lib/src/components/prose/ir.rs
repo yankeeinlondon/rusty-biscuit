@@ -89,7 +89,10 @@ impl ProseDocument {
     pub(super) fn parse(content: &str) -> ProseDocument {
         let preprocessed = super::markdown::preprocess_markdown(content);
         ProseDocument {
-            children: super::tokens::parse_nodes(&preprocessed),
+            children: super::tokens::parse_nodes(
+                &preprocessed.text,
+                &preprocessed.code_blocks,
+            ),
         }
     }
 }
@@ -213,6 +216,65 @@ mod tests {
                 lang: Some("yaml".into()),
                 value: "**x**".into(),
             }]
+        );
+    }
+
+    #[test]
+    fn fenced_code_block_with_synthetic_closing_tag_stays_one_opaque_block() {
+        // Regression: a body containing the parser's own synthetic
+        // `</code-block>` tag must not terminate the block early or let
+        // the trailing `<red>` markup escape into the tree.
+        assert_eq!(
+            parse("```\n</code-block><red>x</red>\n```"),
+            vec![ProseNode::CodeBlock {
+                lang: None,
+                value: "</code-block><red>x</red>".into(),
+            }]
+        );
+    }
+
+    #[test]
+    fn fenced_code_block_with_unknown_tag_and_backslashes_is_verbatim() {
+        let body = r"<unknown attr> \* \_ \\path </unknown>";
+        assert_eq!(
+            parse(&format!("```\n{body}\n```")),
+            vec![ProseNode::CodeBlock {
+                lang: None,
+                value: body.into(),
+            }]
+        );
+    }
+
+    #[test]
+    fn text_around_fenced_code_block_is_preserved() {
+        assert_eq!(
+            parse("before\n```\ncode\n```\nafter"),
+            vec![
+                ProseNode::Text("before\n".into()),
+                ProseNode::CodeBlock {
+                    lang: None,
+                    value: "code".into(),
+                },
+                ProseNode::Text("\nafter".into()),
+            ]
+        );
+    }
+
+    #[test]
+    fn two_fenced_code_blocks_resolve_to_distinct_bodies() {
+        assert_eq!(
+            parse("```\nfirst\n```\n```\nsecond\n```"),
+            vec![
+                ProseNode::CodeBlock {
+                    lang: None,
+                    value: "first".into(),
+                },
+                ProseNode::Text("\n".into()),
+                ProseNode::CodeBlock {
+                    lang: None,
+                    value: "second".into(),
+                },
+            ]
         );
     }
 }
