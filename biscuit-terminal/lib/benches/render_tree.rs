@@ -75,6 +75,12 @@ fn large_table_tree() -> RenderNode {
 }
 
 /// Builds a tree with deeply nested unordered lists.
+///
+/// `nest` recurses into *every* sibling, so the item count is
+/// `siblings·(siblings^depth − 1)/(siblings − 1)` — exponential in `depth`.
+/// Keep `depth`/`siblings` small: `(10, 2)` yields ~2k list items, the same
+/// order of magnitude as the other stress trees. Larger values blow up fast
+/// (`(14, 3)` is ~7M items and takes ~24 s per render iteration).
 fn deeply_nested_list_tree() -> RenderNode {
     fn nest(level: usize, depth: usize, siblings: usize) -> RenderNode {
         let items: Vec<RenderNode> = (0..siblings)
@@ -90,7 +96,7 @@ fn deeply_nested_list_tree() -> RenderNode {
             .collect();
         RenderNode::list(false, None, items)
     }
-    RenderNode::root(vec![nest(0, 14, 3)])
+    RenderNode::root(vec![nest(0, 10, 2)])
 }
 
 /// Builds a tree dense with links and image references.
