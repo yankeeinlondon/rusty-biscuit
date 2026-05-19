@@ -1,3 +1,4 @@
+use renderable::color::{BasicColor, Color, RgbColor};
 use renderable::tree::{
     ColumnAlign, ColumnConditional, RenderNode, TableCellHints, TableColumnHints,
     TableTerminalHints,
@@ -6,6 +7,7 @@ use renderable::tree::{
 use crate::{
     components::renderable::TerminalRenderable,
     render_tree::render::resolve_cells,
+    render_tree::style::color_sgr,
     terminal::Terminal,
     utils::{
         block_constraint::{sanitize_wrapped_lines, split_lines, visible_width, wrap_lines},
@@ -17,7 +19,7 @@ use crate::{
 pub use super::cell::TableCellContent;
 use super::cell::pad_cell;
 pub use super::column::TableColumn;
-use super::types::{Currency, VerticalAlign};
+use super::types::{Currency, TableStyle, VerticalAlign};
 use super::width::{MeasuredColumn, TableWidthError, TableWidthMeasurements, TableWidthPlan};
 use crate::discovery::detection::{ColorDepth, ColorMode};
 
@@ -113,14 +115,9 @@ pub struct Table {
     /// space-based padding. This can improve alignment when glyphs render
     /// narrower than their computed Unicode width.
     prefer_cursor_alignment: bool,
-    /// When true, apply a subtle background color to even data rows (0-indexed,
-    /// so the second, fourth, etc. rows get the stripe). Requires true color
-    /// support; silently ignored otherwise.
-    alternate_background_color: bool,
-    /// When true, apply a subtle text color shift to even data rows (0-indexed,
-    /// so the second, fourth, etc. rows get the tint). Requires true color
-    /// support; silently ignored otherwise.
-    alternate_text_color: bool,
+    /// Typed style slot for row striping — the migrated home of the former
+    /// `alternate_background_color` / `alternate_text_color` boolean fields.
+    style: TableStyle,
 }
 
 impl Table {
@@ -169,27 +166,52 @@ impl Table {
     /// Enable alternating row background colors.
     ///
     /// When enabled, even data rows (0-indexed: rows 1, 3, 5, ...) receive a
-    /// very subtle background tint. The tint adapts to the terminal's light or
-    /// dark color mode.
+    /// background stripe in the adaptive default color for the terminal's
+    /// light or dark mode. The color is degraded across color depths, so the
+    /// stripe still renders on 256-color and 16-color terminals.
     ///
-    /// Requires true-color (24-bit) support. On terminals without true color
-    /// the setting is silently ignored and rows render without background.
+    /// Compatibility shim: the toggle is stored on the typed [`TableStyle`]
+    /// slot. Pair with [`with_stripe_bg`](Self::with_stripe_bg) to override
+    /// the default stripe color.
     pub fn alternate_background_color(mut self) -> Self {
-        self.alternate_background_color = true;
+        self.style.striped_rows = true;
         self
     }
 
     /// Enable alternating row text colors.
     ///
     /// When enabled, even data rows (0-indexed: rows 1, 3, 5, ...) receive a
-    /// subtle text color shift. The tint adapts to the terminal's light or
-    /// dark color mode.
+    /// text-color stripe in the adaptive default color for the terminal's
+    /// light or dark mode, degraded across color depths.
     ///
-    /// Requires true-color (24-bit) support. On terminals without true color
-    /// the setting is silently ignored and rows render without text tint.
+    /// Compatibility shim: the toggle is stored on the typed [`TableStyle`]
+    /// slot. Pair with [`with_stripe_text`](Self::with_stripe_text) to
+    /// override the default stripe color.
     pub fn alternate_text_color(mut self) -> Self {
-        self.alternate_text_color = true;
+        self.style.striped_text = true;
         self
+    }
+
+    /// Set an explicit background stripe color and enable row striping.
+    ///
+    /// The [`Color`] is stored on the typed [`TableStyle`] slot and lowered
+    /// through the shared, capability-aware color path when the table renders.
+    pub fn with_stripe_bg(mut self, color: Color) -> Self {
+        self.style.striped_rows = true;
+        self.style.stripe_bg = Some(color);
+        self
+    }
+
+    /// Set an explicit text stripe color and enable text striping.
+    pub fn with_stripe_text(mut self, color: Color) -> Self {
+        self.style.striped_text = true;
+        self.style.stripe_text = Some(color);
+        self
+    }
+
+    /// The typed [`TableStyle`] slot for this table's row striping.
+    pub fn style(&self) -> TableStyle {
+        self.style
     }
 
     /// Returns a new `Table` containing only the columns (and their
@@ -231,8 +253,7 @@ impl Table {
                 .collect(),
             layout: self.layout.clone(),
             prefer_cursor_alignment: self.prefer_cursor_alignment,
-            alternate_background_color: self.alternate_background_color,
-            alternate_text_color: self.alternate_text_color,
+            style: self.style,
         })
     }
 
@@ -812,18 +833,46 @@ impl Table {
             .collect()
     }
 
+    /// Resolves the background and text stripe SGR escapes for the given
+    /// terminal color mode and depth.
+    ///
+    /// A stripe is produced only when its [`TableStyle`] toggle is enabled.
+    /// The declared slot color — or the adaptive default when the slot is
+    /// `None` — is degraded against `depth` through the shared color path, so
+    /// striping renders on truecolor, 256-color, and 16-color terminals and
+    /// yields `None` only when the terminal has no color support at all.
+    fn resolve_stripe_escapes(
+        &self,
+        color_mode: &ColorMode,
+        depth: ColorDepth,
+    ) -> (Option<String>, Option<String>) {
+        let bg = self
+            .style
+            .striped_rows
+            .then(|| stripe_bg_escape(self.style.stripe_bg, color_mode, depth))
+            .flatten();
+        let fg = self
+            .style
+            .striped_text
+            .then(|| stripe_fg_escape(self.style.stripe_text, color_mode, depth))
+            .flatten();
+        (bg, fg)
+    }
+
     /// Render the table content with multi-line cell support.
     ///
     /// If `available_width` is provided, columns will be constrained to fit
     /// within that space (accounting for border overhead).
     ///
-    /// If `stripe_color_mode` is `Some`, even data rows (0-indexed: 1, 3, 5, ...)
-    /// receive a subtle background tint adapted to the given color mode.
+    /// `stripe_bg` / `stripe_fg`, when `Some`, are the pre-resolved SGR
+    /// escape sequences applied to even data rows (0-indexed: 1, 3, 5, ...).
+    /// They are resolved by the caller through the shared, capability-aware
+    /// color path so striping degrades with the terminal's color depth.
     fn render_content(
         &self,
         available_width: Option<u32>,
-        stripe_color_mode: Option<&ColorMode>,
-        text_color_mode: Option<&ColorMode>,
+        stripe_bg: Option<&str>,
+        stripe_fg: Option<&str>,
     ) -> String {
         if self.total_column_count() == 0 {
             return self.title.clone().unwrap_or_default();
@@ -918,10 +967,6 @@ impl Table {
 
         // Calculate row heights for multi-line support
         let row_heights = self.calculate_row_heights_for_plan(&plan);
-
-        // Resolve stripe escape once (if enabled)
-        let stripe_bg = stripe_color_mode.map(stripe_bg_escape);
-        let stripe_fg = text_color_mode.map(stripe_fg_escape);
 
         // Render data rows with multi-line support
         for (row_idx, row) in self.data.iter().enumerate() {
@@ -1061,8 +1106,8 @@ impl Table {
     fn render_with_cursor_positioning(
         &self,
         term_width: u32,
-        stripe_color_mode: Option<&ColorMode>,
-        text_color_mode: Option<&ColorMode>,
+        stripe_bg: Option<&str>,
+        stripe_fg: Option<&str>,
     ) -> String {
         if self.total_column_count() == 0 {
             return self.title.clone().unwrap_or_default();
@@ -1222,10 +1267,6 @@ impl Table {
         // Calculate row heights for multi-line support
         let row_heights = self.calculate_row_heights_for_plan(&plan);
 
-        // Resolve stripe escapes once (if enabled)
-        let stripe_bg = stripe_color_mode.map(stripe_bg_escape);
-        let stripe_fg = text_color_mode.map(stripe_fg_escape);
-
         // Data rows with multi-line support
         for (row_idx, row) in self.data.iter().enumerate() {
             let row_height = row_heights.get(row_idx).copied().unwrap_or(1);
@@ -1308,22 +1349,15 @@ impl Table {
 impl TerminalRenderable for Table {
     fn render_optimistic(&self, term_width: Option<u32>) -> String {
         let width = term_width.unwrap_or(80);
-        // Opportunistic render assumes full capability; stripe if requested
-        let stripe = if self.alternate_background_color {
-            Some(ColorMode::Dark)
-        } else {
-            None
-        };
-        let text_tint = if self.alternate_text_color {
-            Some(ColorMode::Dark)
-        } else {
-            None
-        };
+        // Opportunistic render assumes a truecolor dark terminal.
+        let (stripe_bg, stripe_fg) =
+            self.resolve_stripe_escapes(&ColorMode::Dark, ColorDepth::TrueColor);
         if self.prefer_cursor_alignment {
-            self.render_with_cursor_positioning(width, stripe.as_ref(), text_tint.as_ref())
+            self.render_with_cursor_positioning(width, stripe_bg.as_deref(), stripe_fg.as_deref())
         } else {
             let available = self.layout.available_width(width);
-            let content = self.render_content(Some(available), stripe.as_ref(), text_tint.as_ref());
+            let content =
+                self.render_content(Some(available), stripe_bg.as_deref(), stripe_fg.as_deref());
             // Box-drawing borders and column edges must stay vertically
             // aligned across all rows — align as a block.
             self.layout.apply_block_layout(&content, width)
@@ -1332,23 +1366,17 @@ impl TerminalRenderable for Table {
 
     fn render(&self, term: &Terminal) -> String {
         let width = term.width();
-        let has_true_color = term.color_depth == ColorDepth::TrueColor;
-        // Only stripe when the terminal actually supports true color
-        let stripe = if self.alternate_background_color && has_true_color {
-            Some(term.color_mode())
-        } else {
-            None
-        };
-        let text_tint = if self.alternate_text_color && has_true_color {
-            Some(term.color_mode())
-        } else {
-            None
-        };
+        // Striping degrades with the terminal's color depth rather than
+        // being disabled outright below truecolor; `resolve_stripe_escapes`
+        // returns `None` only when the terminal has no color support.
+        let (stripe_bg, stripe_fg) =
+            self.resolve_stripe_escapes(&term.color_mode(), term.color_depth);
         if self.prefer_cursor_alignment && term.is_tty {
-            self.render_with_cursor_positioning(width, stripe.as_ref(), text_tint.as_ref())
+            self.render_with_cursor_positioning(width, stripe_bg.as_deref(), stripe_fg.as_deref())
         } else {
             let available = self.layout.available_width(width);
-            let content = self.render_content(Some(available), stripe.as_ref(), text_tint.as_ref());
+            let content =
+                self.render_content(Some(available), stripe_bg.as_deref(), stripe_fg.as_deref());
             self.layout.apply_block_layout(&content, width)
         }
     }
@@ -1441,11 +1469,14 @@ impl TerminalRenderable for Table {
             node.attrs.set_table_column_hints(idx, &hints);
         }
 
-        // Terminal hints on the table node.
+        // Terminal hints on the table node — including any explicit stripe
+        // slot colors so the tree renderer lowers the same appearance.
         node.attrs.set_table_terminal_hints(&TableTerminalHints {
             prefer_cursor_alignment: self.prefer_cursor_alignment,
-            alternate_background: self.alternate_background_color,
-            alternate_text_color: self.alternate_text_color,
+            alternate_background: self.style.striped_rows,
+            alternate_text_color: self.style.striped_text,
+            stripe_bg: self.style.stripe_bg,
+            stripe_text: self.style.stripe_text,
         });
 
         // Carry the consolidated layout when it differs from the default.
@@ -2068,28 +2099,57 @@ pub(crate) fn apply_vertical_padding(
     result
 }
 
-/// Returns the ANSI escape sequence for the alternating row background color.
+/// The adaptive default background stripe [`Color`] for a color mode.
 ///
-/// Produces a very subtle tint that adapts to the terminal's color mode:
-/// - **Dark mode**: a faint warm gray (`rgb(30, 30, 34)`)
-/// - **Light mode**: a faint cool gray (`rgb(235, 235, 238)`)
-pub(crate) fn stripe_bg_escape(color_mode: &ColorMode) -> &'static str {
+/// A very subtle tint: a faint warm gray in dark mode, a faint cool gray in
+/// light mode. Each carries a [`BasicColor`] fallback so it degrades on
+/// 16-color terminals.
+pub(crate) fn default_stripe_bg(color_mode: &ColorMode) -> Color {
     match color_mode {
-        ColorMode::Light => "\x1b[48;2;235;235;238m",
-        ColorMode::Dark | ColorMode::Unknown => "\x1b[48;2;30;30;34m",
+        ColorMode::Light => Color::Rgb(RgbColor::new(235, 235, 238, BasicColor::White)),
+        ColorMode::Dark | ColorMode::Unknown => {
+            Color::Rgb(RgbColor::new(30, 30, 34, BasicColor::Black))
+        }
     }
 }
 
-/// Returns the ANSI escape sequence for the alternating row text color.
-///
-/// Produces a subtle shift from the default foreground:
-/// - **Dark mode**: a slightly muted light gray (`rgb(180, 180, 190)`)
-/// - **Light mode**: a slightly softened dark gray (`rgb(80, 80, 90)`)
-pub(crate) fn stripe_fg_escape(color_mode: &ColorMode) -> &'static str {
+/// The adaptive default text stripe [`Color`] for a color mode.
+pub(crate) fn default_stripe_text(color_mode: &ColorMode) -> Color {
     match color_mode {
-        ColorMode::Light => "\x1b[38;2;80;80;90m",
-        ColorMode::Dark | ColorMode::Unknown => "\x1b[38;2;180;180;190m",
+        ColorMode::Light => Color::Rgb(RgbColor::new(80, 80, 90, BasicColor::Black)),
+        ColorMode::Dark | ColorMode::Unknown => {
+            Color::Rgb(RgbColor::new(180, 180, 190, BasicColor::White))
+        }
     }
+}
+
+/// Lowers the alternating-row background stripe to an SGR escape.
+///
+/// `explicit` is the component's declared [`TableStyle`](super::types::TableStyle)
+/// slot color; `None` selects [`default_stripe_bg`] for `color_mode`. Either
+/// way the [`Color`] is degraded against `depth` through the shared
+/// [`color_sgr`] path, so striping renders on truecolor, 256-color, and
+/// 16-color terminals and is dropped only when the terminal has no color
+/// support.
+pub(crate) fn stripe_bg_escape(
+    explicit: Option<Color>,
+    color_mode: &ColorMode,
+    depth: ColorDepth,
+) -> Option<String> {
+    let color = explicit.unwrap_or_else(|| default_stripe_bg(color_mode));
+    color_sgr(color, &depth, true)
+}
+
+/// Lowers the alternating-row text stripe to an SGR escape.
+///
+/// See [`stripe_bg_escape`]; this is the foreground counterpart.
+pub(crate) fn stripe_fg_escape(
+    explicit: Option<Color>,
+    color_mode: &ColorMode,
+    depth: ColorDepth,
+) -> Option<String> {
+    let color = explicit.unwrap_or_else(|| default_stripe_text(color_mode));
+    color_sgr(color, &depth, false)
 }
 
 /// The escape sequence that resets only the background color.
@@ -2126,6 +2186,26 @@ mod tests {
     use super::super::column::Conditional;
     use super::super::types::{ColumnType, Currency};
     use super::*;
+
+    /// The default truecolor background stripe escape for a color mode.
+    ///
+    /// Test-only convenience mirroring [`stripe_bg_escape`]'s no-explicit /
+    /// truecolor result as a static string, so striping tests can build
+    /// expected substrings without unwrapping.
+    fn bg_escape(mode: &ColorMode) -> &'static str {
+        match mode {
+            ColorMode::Light => "\x1b[48;2;235;235;238m",
+            ColorMode::Dark | ColorMode::Unknown => "\x1b[48;2;30;30;34m",
+        }
+    }
+
+    /// The default truecolor text stripe escape for a color mode.
+    fn fg_escape(mode: &ColorMode) -> &'static str {
+        match mode {
+            ColorMode::Light => "\x1b[38;2;80;80;90m",
+            ColorMode::Dark | ColorMode::Unknown => "\x1b[38;2;180;180;190m",
+        }
+    }
 
     // ── Existing tests ────────────────────────────────────────────
 
@@ -3799,31 +3879,103 @@ mod tests {
         let table = Table::new()
             .with_columns(vec![TableColumn::new("X")])
             .alternate_background_color();
-        assert!(table.alternate_background_color);
+        assert!(table.style().striped_rows);
     }
 
     #[test]
     fn test_alternate_background_color_default_is_false() {
         let table = Table::new();
-        assert!(!table.alternate_background_color);
+        assert!(!table.style().striped_rows);
     }
 
     #[test]
-    fn test_stripe_bg_escape_dark_mode() {
-        let esc = stripe_bg_escape(&ColorMode::Dark);
-        assert_eq!(esc, "\x1b[48;2;30;30;34m");
-    }
-
-    #[test]
-    fn test_stripe_bg_escape_light_mode() {
-        let esc = stripe_bg_escape(&ColorMode::Light);
-        assert_eq!(esc, "\x1b[48;2;235;235;238m");
+    fn test_stripe_bg_escape_truecolor_modes() {
+        assert_eq!(
+            stripe_bg_escape(None, &ColorMode::Dark, ColorDepth::TrueColor),
+            Some("\x1b[48;2;30;30;34m".to_string())
+        );
+        assert_eq!(
+            stripe_bg_escape(None, &ColorMode::Light, ColorDepth::TrueColor),
+            Some("\x1b[48;2;235;235;238m".to_string())
+        );
     }
 
     #[test]
     fn test_stripe_bg_escape_unknown_uses_dark() {
-        let esc = stripe_bg_escape(&ColorMode::Unknown);
-        assert_eq!(esc, stripe_bg_escape(&ColorMode::Dark));
+        assert_eq!(
+            stripe_bg_escape(None, &ColorMode::Unknown, ColorDepth::TrueColor),
+            stripe_bg_escape(None, &ColorMode::Dark, ColorDepth::TrueColor),
+        );
+    }
+
+    #[test]
+    fn test_stripe_bg_escape_degrades_across_color_depths() {
+        // 256-color: the color cube; 16-color: the basic-palette fallback;
+        // no color support: the stripe is dropped entirely.
+        let enhanced =
+            stripe_bg_escape(None, &ColorMode::Dark, ColorDepth::Enhanced).unwrap();
+        assert!(enhanced.contains("\x1b[48;5;"), "got {enhanced:?}");
+
+        let basic = stripe_bg_escape(None, &ColorMode::Dark, ColorDepth::Basic).unwrap();
+        assert!(
+            !basic.contains("\x1b[48;2;") && !basic.contains("\x1b[48;5;"),
+            "16-color terminal should degrade to a basic escape: {basic:?}"
+        );
+
+        assert_eq!(
+            stripe_bg_escape(None, &ColorMode::Dark, ColorDepth::None),
+            None,
+            "a terminal with no color support emits no stripe"
+        );
+    }
+
+    #[test]
+    fn test_stripe_bg_escape_explicit_color_overrides_default() {
+        let esc = stripe_bg_escape(
+            Some(Color::BasicColor(BasicColor::Blue)),
+            &ColorMode::Dark,
+            ColorDepth::TrueColor,
+        );
+        // Basic blue as a background lowers to SGR code 44.
+        assert_eq!(esc, Some("\x1b[44m".to_string()));
+    }
+
+    #[test]
+    fn striped_table_degrades_below_truecolor() {
+        let table = Table::new()
+            .with_columns(vec![TableColumn::new("X")])
+            .with_data(vec![vec!["A".into()], vec!["B".into()]])
+            .alternate_background_color();
+
+        let mut term = Terminal::new_optimistic(40);
+
+        // 16-color terminal: striping still renders, degraded to the basic
+        // background fallback (code 40) rather than being silently disabled.
+        term.color_depth = ColorDepth::Basic;
+        let basic = table.render(&term);
+        assert!(
+            basic.contains("\x1b[40m"),
+            "striping must still render (degraded) on a 16-color terminal: {basic:?}"
+        );
+        assert!(
+            !basic.contains("\x1b[48;2;"),
+            "no truecolor escape on a 16-color terminal: {basic:?}"
+        );
+
+        // 256-color terminal: degrades to the color cube.
+        term.color_depth = ColorDepth::Enhanced;
+        assert!(
+            table.render(&term).contains("\x1b[48;5;"),
+            "striping should degrade to the 256-color cube"
+        );
+
+        // No color support: the stripe is dropped.
+        term.color_depth = ColorDepth::None;
+        let none = table.render(&term);
+        assert!(
+            !none.contains("\x1b[40m") && !none.contains("\x1b[48"),
+            "no stripe escape on a terminal without color support: {none:?}"
+        );
     }
 
     #[test]
@@ -3851,7 +4003,7 @@ mod tests {
                 vec!["Row3".into()],
             ]);
 
-        let result = table.render_content(None, Some(&ColorMode::Dark), None);
+        let result = table.render_content(None, Some(bg_escape(&ColorMode::Dark)), None);
         let lines: Vec<&str> = result.lines().collect();
 
         // Data rows start at line 3 (border=0, header=1, separator=2)
@@ -3860,7 +4012,7 @@ mod tests {
         // Row 2 (line 5): no stripe
         // Row 3 (line 6): stripe
 
-        let bg_dark = stripe_bg_escape(&ColorMode::Dark);
+        let bg_dark = bg_escape(&ColorMode::Dark);
         assert!(!lines[3].contains(bg_dark), "Row 0 should not be striped");
         assert!(
             lines[4].contains(bg_dark),
@@ -3881,7 +4033,7 @@ mod tests {
             .with_columns(vec![TableColumn::new("X")])
             .with_data(vec![vec!["A".into()], vec!["B".into()]]);
 
-        let result = table.render_content(None, Some(&ColorMode::Dark), None);
+        let result = table.render_content(None, Some(bg_escape(&ColorMode::Dark)), None);
         // Striped rows should have a background reset at the end
         let striped_lines: Vec<&str> = result
             .lines()
@@ -3904,8 +4056,8 @@ mod tests {
             .with_columns(vec![TableColumn::new("X")])
             .with_data(vec![vec!["A".into()], vec!["B".into()]]);
 
-        let result = table.render_content(None, Some(&ColorMode::Light), None);
-        let bg_light = stripe_bg_escape(&ColorMode::Light);
+        let result = table.render_content(None, Some(bg_escape(&ColorMode::Light)), None);
+        let bg_light = bg_escape(&ColorMode::Light);
         assert!(
             result.contains(bg_light),
             "Light mode should use light stripe color"
@@ -3918,7 +4070,7 @@ mod tests {
             .with_columns(vec![TableColumn::new("X")])
             .with_data(vec![vec!["Only".into()]]);
 
-        let result = table.render_content(None, Some(&ColorMode::Dark), None);
+        let result = table.render_content(None, Some(bg_escape(&ColorMode::Dark)), None);
         // Single row at index 0 should not be striped
         assert!(
             !result.contains("\x1b[48;2;"),
@@ -3933,8 +4085,8 @@ mod tests {
             .with_data(vec![vec!["A".into()], vec!["B".into()]])
             .prefer_cursor_alignment();
 
-        let result = table.render_with_cursor_positioning(80, Some(&ColorMode::Dark), None);
-        let bg_dark = stripe_bg_escape(&ColorMode::Dark);
+        let result = table.render_with_cursor_positioning(80, Some(bg_escape(&ColorMode::Dark)), None);
+        let bg_dark = bg_escape(&ColorMode::Dark);
         // Row 1 (index 1) should be striped
         assert!(
             result.contains(bg_dark),
@@ -3952,8 +4104,8 @@ mod tests {
             .with_columns(vec![TableColumn::new("X")])
             .with_data(vec![vec!["A".into()], vec!["B".into()]]);
 
-        let result = table.render_content(None, Some(&ColorMode::Dark), None);
-        let bg = stripe_bg_escape(&ColorMode::Dark);
+        let result = table.render_content(None, Some(bg_escape(&ColorMode::Dark)), None);
+        let bg = bg_escape(&ColorMode::Dark);
 
         // Find the striped line (row index 1 = second data row)
         let striped_line = result
@@ -3983,8 +4135,8 @@ mod tests {
             .with_data(vec![vec!["A".into()], vec!["B".into()]])
             .prefer_cursor_alignment();
 
-        let result = table.render_with_cursor_positioning(80, Some(&ColorMode::Dark), None);
-        let bg = stripe_bg_escape(&ColorMode::Dark);
+        let result = table.render_with_cursor_positioning(80, Some(bg_escape(&ColorMode::Dark)), None);
+        let bg = bg_escape(&ColorMode::Dark);
 
         // Find the striped line
         let striped_line = result
@@ -4025,8 +4177,8 @@ mod tests {
                 ],
             ]);
 
-        let bg = stripe_bg_escape(&ColorMode::Dark);
-        let result = table.render_content(None, Some(&ColorMode::Dark), None);
+        let bg = bg_escape(&ColorMode::Dark);
+        let result = table.render_content(None, Some(bg_escape(&ColorMode::Dark)), None);
 
         // Find the striped line (row 1)
         let striped_line = result
@@ -4062,8 +4214,8 @@ mod tests {
             ])
             .prefer_cursor_alignment();
 
-        let bg = stripe_bg_escape(&ColorMode::Dark);
-        let result = table.render_with_cursor_positioning(80, Some(&ColorMode::Dark), None);
+        let bg = bg_escape(&ColorMode::Dark);
+        let result = table.render_with_cursor_positioning(80, Some(bg_escape(&ColorMode::Dark)), None);
 
         // Find the striped data line containing "row1"
         let striped_line = result
@@ -4097,8 +4249,8 @@ mod tests {
                 vec!["row1".into(), TableCellContent::Text(content.to_string())],
             ]);
 
-        let bg = stripe_bg_escape(&ColorMode::Dark);
-        let result = table.render_content(None, Some(&ColorMode::Dark), None);
+        let bg = bg_escape(&ColorMode::Dark);
+        let result = table.render_content(None, Some(bg_escape(&ColorMode::Dark)), None);
 
         let striped_line = result
             .lines()
@@ -4139,8 +4291,8 @@ mod tests {
             ])
             .prefer_cursor_alignment();
 
-        let bg = stripe_bg_escape(&ColorMode::Dark);
-        let result = table.render_with_cursor_positioning(80, Some(&ColorMode::Dark), None);
+        let bg = bg_escape(&ColorMode::Dark);
+        let result = table.render_with_cursor_positioning(80, Some(bg_escape(&ColorMode::Dark)), None);
 
         let striped_line = result
             .lines()
@@ -4171,31 +4323,62 @@ mod tests {
         let table = Table::new()
             .with_columns(vec![TableColumn::new("X")])
             .alternate_text_color();
-        assert!(table.alternate_text_color);
+        assert!(table.style().striped_text);
     }
 
     #[test]
     fn test_alternate_text_color_default_is_false() {
         let table = Table::new();
-        assert!(!table.alternate_text_color);
+        assert!(!table.style().striped_text);
     }
 
     #[test]
-    fn test_stripe_fg_escape_dark_mode() {
-        let esc = stripe_fg_escape(&ColorMode::Dark);
-        assert_eq!(esc, "\x1b[38;2;180;180;190m");
-    }
-
-    #[test]
-    fn test_stripe_fg_escape_light_mode() {
-        let esc = stripe_fg_escape(&ColorMode::Light);
-        assert_eq!(esc, "\x1b[38;2;80;80;90m");
+    fn test_stripe_fg_escape_truecolor_modes() {
+        assert_eq!(
+            stripe_fg_escape(None, &ColorMode::Dark, ColorDepth::TrueColor),
+            Some("\x1b[38;2;180;180;190m".to_string())
+        );
+        assert_eq!(
+            stripe_fg_escape(None, &ColorMode::Light, ColorDepth::TrueColor),
+            Some("\x1b[38;2;80;80;90m".to_string())
+        );
     }
 
     #[test]
     fn test_stripe_fg_escape_unknown_uses_dark() {
-        let esc = stripe_fg_escape(&ColorMode::Unknown);
-        assert_eq!(esc, stripe_fg_escape(&ColorMode::Dark));
+        assert_eq!(
+            stripe_fg_escape(None, &ColorMode::Unknown, ColorDepth::TrueColor),
+            stripe_fg_escape(None, &ColorMode::Dark, ColorDepth::TrueColor),
+        );
+    }
+
+    #[test]
+    fn test_stripe_fg_escape_degrades_across_color_depths() {
+        let enhanced =
+            stripe_fg_escape(None, &ColorMode::Dark, ColorDepth::Enhanced).unwrap();
+        assert!(enhanced.contains("\x1b[38;5;"), "got {enhanced:?}");
+
+        let basic = stripe_fg_escape(None, &ColorMode::Dark, ColorDepth::Basic).unwrap();
+        assert!(
+            !basic.contains("\x1b[38;2;") && !basic.contains("\x1b[38;5;"),
+            "16-color terminal should degrade to a basic escape: {basic:?}"
+        );
+
+        assert_eq!(
+            stripe_fg_escape(None, &ColorMode::Dark, ColorDepth::None),
+            None
+        );
+    }
+
+    #[test]
+    fn test_stripe_fg_escape_explicit_color_overrides_default() {
+        let esc = stripe_fg_escape(
+            Some(Color::BasicColor(BasicColor::Blue)),
+            &ColorMode::Dark,
+            ColorDepth::TrueColor,
+        );
+        // Basic blue as a foreground lowers to SGR code 34.
+        assert_eq!(esc, Some("\x1b[34m".to_string()));
     }
 
     #[test]
@@ -4222,10 +4405,10 @@ mod tests {
                 vec!["Row3".into()],
             ]);
 
-        let result = table.render_content(None, None, Some(&ColorMode::Dark));
+        let result = table.render_content(None, None, Some(fg_escape(&ColorMode::Dark)));
         let lines: Vec<&str> = result.lines().collect();
 
-        let fg_dark = stripe_fg_escape(&ColorMode::Dark);
+        let fg_dark = fg_escape(&ColorMode::Dark);
         // Data rows start at line 3
         assert!(
             !lines[3].contains(fg_dark),
@@ -4253,7 +4436,7 @@ mod tests {
             .with_columns(vec![TableColumn::new("X")])
             .with_data(vec![vec!["A".into()], vec!["B".into()]]);
 
-        let result = table.render_content(None, None, Some(&ColorMode::Dark));
+        let result = table.render_content(None, None, Some(fg_escape(&ColorMode::Dark)));
         let tinted_lines: Vec<&str> = result
             .lines()
             .filter(|l| l.contains("\x1b[38;2;"))
@@ -4275,8 +4458,8 @@ mod tests {
             .with_columns(vec![TableColumn::new("X")])
             .with_data(vec![vec!["A".into()], vec!["B".into()]]);
 
-        let result = table.render_content(None, None, Some(&ColorMode::Light));
-        let fg_light = stripe_fg_escape(&ColorMode::Light);
+        let result = table.render_content(None, None, Some(fg_escape(&ColorMode::Light)));
+        let fg_light = fg_escape(&ColorMode::Light);
         assert!(
             result.contains(fg_light),
             "Light mode should use light text tint color"
@@ -4289,7 +4472,7 @@ mod tests {
             .with_columns(vec![TableColumn::new("X")])
             .with_data(vec![vec!["Only".into()]]);
 
-        let result = table.render_content(None, None, Some(&ColorMode::Dark));
+        let result = table.render_content(None, None, Some(fg_escape(&ColorMode::Dark)));
         assert!(
             !result.contains("\x1b[38;2;"),
             "Single row should not have text tint (row 0 is untinted)"
@@ -4302,8 +4485,8 @@ mod tests {
             .with_columns(vec![TableColumn::new("X")])
             .with_data(vec![vec!["A".into()], vec!["B".into()]]);
 
-        let result = table.render_content(None, None, Some(&ColorMode::Dark));
-        let fg = stripe_fg_escape(&ColorMode::Dark);
+        let result = table.render_content(None, None, Some(fg_escape(&ColorMode::Dark)));
+        let fg = fg_escape(&ColorMode::Dark);
 
         let tinted_line = result
             .lines()
@@ -4332,8 +4515,8 @@ mod tests {
             .with_data(vec![vec!["A".into()], vec!["B".into()]])
             .prefer_cursor_alignment();
 
-        let result = table.render_with_cursor_positioning(80, None, Some(&ColorMode::Dark));
-        let fg_dark = stripe_fg_escape(&ColorMode::Dark);
+        let result = table.render_with_cursor_positioning(80, None, Some(fg_escape(&ColorMode::Dark)));
+        let fg_dark = fg_escape(&ColorMode::Dark);
         assert!(
             result.contains(fg_dark),
             "Cursor-positioned table should support text tinting"
@@ -4350,9 +4533,9 @@ mod tests {
             .with_columns(vec![TableColumn::new("X")])
             .with_data(vec![vec!["A".into()], vec!["B".into()]]);
 
-        let result = table.render_content(None, Some(&ColorMode::Dark), Some(&ColorMode::Dark));
-        let bg = stripe_bg_escape(&ColorMode::Dark);
-        let fg = stripe_fg_escape(&ColorMode::Dark);
+        let result = table.render_content(None, Some(bg_escape(&ColorMode::Dark)), Some(fg_escape(&ColorMode::Dark)));
+        let bg = bg_escape(&ColorMode::Dark);
+        let fg = fg_escape(&ColorMode::Dark);
 
         // Striped row should contain both bg and fg escapes
         let tinted_line = result
@@ -4380,8 +4563,8 @@ mod tests {
                 ],
             ]);
 
-        let fg = stripe_fg_escape(&ColorMode::Dark);
-        let result = table.render_content(None, None, Some(&ColorMode::Dark));
+        let fg = fg_escape(&ColorMode::Dark);
+        let result = table.render_content(None, None, Some(fg_escape(&ColorMode::Dark)));
 
         let tinted_line = result
             .lines()

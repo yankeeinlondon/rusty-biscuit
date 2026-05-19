@@ -34,6 +34,7 @@ mod component;
 mod options;
 pub mod projection;
 pub(crate) mod render;
+pub(crate) mod style;
 
 pub use browser_adapter::BrowserTreeComponent;
 pub use component::TreeComponent;

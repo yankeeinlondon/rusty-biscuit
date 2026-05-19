@@ -1,5 +1,50 @@
+use renderable::color::Color;
+use serde::{Deserialize, Serialize};
+
 use crate::utils::layout::Alignment;
 use crate::utils::wrap_policy::WordWrap;
+
+/// Typed style slot for a [`Table`](crate::components::table::Table)'s row
+/// striping.
+///
+/// Spec B D5 model: a rich component exposes a typed component style struct
+/// rather than scattered bespoke fields. `TableStyle` is the migrated home of
+/// `Table`'s former `alternate_background_color` / `alternate_text_color`
+/// boolean fields. Each toggle, when enabled, paints even data rows
+/// (0-indexed) with a stripe.
+///
+/// The stripe color is a typed [`Color`] slot — [`stripe_bg`](Self::stripe_bg)
+/// and [`stripe_text`](Self::stripe_text). When a slot is `None` the renderer
+/// picks a subtle default that adapts to the terminal's light or dark color
+/// mode. Either way the `Color` is lowered through the shared, capability-aware
+/// path, so striping degrades across truecolor, 256-color, and 16-color
+/// terminals instead of being silently disabled.
+///
+/// ## Examples
+///
+/// ```
+/// use biscuit_terminal::components::table::types::TableStyle;
+///
+/// let style = TableStyle {
+///     striped_rows: true,
+///     striped_text: false,
+///     ..TableStyle::default()
+/// };
+/// assert!(style.striped_rows);
+/// assert!(style.stripe_bg.is_none()); // uses the adaptive default
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct TableStyle {
+    /// When `true`, even data rows receive a background stripe.
+    pub striped_rows: bool,
+    /// When `true`, even data rows receive a text-color stripe.
+    pub striped_text: bool,
+    /// Explicit background stripe color. `None` selects the adaptive default.
+    pub stripe_bg: Option<Color>,
+    /// Explicit text stripe color. `None` selects the adaptive default.
+    pub stripe_text: Option<Color>,
+}
 
 /// Vertical alignment for table cells with multi-line content.
 ///
@@ -275,5 +320,27 @@ mod tests {
     #[test]
     fn column_type_currency_disallows_word_wrap_override() {
         assert!(!ColumnType::Currency(Currency::EUR).allows_word_wrap_override());
+    }
+
+    // ── TableStyle tests ───────────────────────────────────────────
+
+    #[test]
+    fn table_style_default_is_unstriped() {
+        let style = TableStyle::default();
+        assert!(!style.striped_rows);
+        assert!(!style.striped_text);
+    }
+
+    #[test]
+    fn table_style_serde_roundtrip() {
+        let style = TableStyle {
+            striped_rows: true,
+            striped_text: true,
+            stripe_bg: Some(Color::BasicColor(renderable::color::BasicColor::Blue)),
+            stripe_text: None,
+        };
+        let json = serde_json::to_string(&style).unwrap();
+        let back: TableStyle = serde_json::from_str(&json).unwrap();
+        assert_eq!(style, back);
     }
 }

@@ -26,13 +26,14 @@
 //! The following differences between the bespoke and tree-routed paths are
 //! expected and deliberately NOT asserted against:
 //!
-//! - **Border treatment.** The bespoke renderer prefixes every content line
-//!   with a colored `│ ` border, including a bare border line before the
-//!   attribution. The tree-routed path projects to a `NodeKind::BlockQuote`
-//!   whose children are independent paragraphs; the renderer re-wraps that
-//!   inner block in a *fresh* `BlockQuote::from(&str)` (see
-//!   `render::Writer::render` for `NodeKind::BlockQuote`). Border glyphs,
-//!   counts, and the blank-border separator therefore differ between paths.
+//! - **Border treatment.** Both paths now prefix every content line with a
+//!   `│ ` left border: the bespoke renderer draws it directly, and the
+//!   tree-routed path carries the component's declared `Style` (left border
+//!   plus any colors) on the projected `NodeKind::BlockQuote`, which the
+//!   terminal tree renderer lowers through `render_styled`. The blank-border
+//!   separator before an attribution still differs between paths and is not
+//!   asserted. The dedicated `render_tree_carries_blockquote_style` test below
+//!   checks the styled SGR/glyph output on the tree path directly.
 //! - **Attribution placement.** Bespoke renders the attribution as a final
 //!   `│ — {attribution}` line inside the same quote. The tree projection
 //!   emits the attribution as a *separate child paragraph* (`— {attribution}`)
@@ -214,6 +215,40 @@ fn render_tree_component_parity_prose_with_attribution() {
         "prose_with_attribution",
         quote,
         &["error", "something went", "wrong", "— Anonymous"],
+    );
+}
+
+/// A styled [`BlockQuote`]'s declared [`Style`] survives the render-tree
+/// projection: the tree-routed path carries the left border and the text and
+/// border colors onto the projected node, and the terminal tree renderer
+/// lowers them to real SGR and box-drawing output.
+///
+/// This is the Level 1 byte/SGR guard the bespoke vs. tree semantic-token
+/// comparison above intentionally does not cover.
+#[test]
+fn render_tree_carries_blockquote_style() {
+    use biscuit_terminal::utils::color::{Color, Tailwind};
+
+    let term = test_terminal();
+    let quote = BlockQuote::from("Styled quote text")
+        .with_text_color(Color::Tailwind(Tailwind::Red500))
+        .with_left_block_color(Color::Tailwind(Tailwind::Blue500));
+
+    let tree_routed = TreeComponent::new(quote).render(&term);
+
+    // The left border glyph is drawn from the declared `Style.border`.
+    assert!(
+        tree_routed.contains('│'),
+        "tree-routed styled block quote dropped its left border: {tree_routed:?}"
+    );
+    // The declared text and border colors lower to truecolor SGR escapes.
+    assert!(
+        tree_routed.contains("\x1b[38;2;"),
+        "tree-routed styled block quote dropped its declared colors: {tree_routed:?}"
+    );
+    assert!(
+        strip_escape_codes(&tree_routed).contains("Styled quote text"),
+        "tree-routed styled block quote dropped its text: {tree_routed:?}"
     );
 }
 

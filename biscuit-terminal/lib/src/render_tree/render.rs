@@ -32,6 +32,7 @@
 //! ```
 
 use renderable::color::TerminalCodeContext;
+use renderable::style::Style;
 use renderable::tree::{
     ColumnAlign, ColumnConditional, Diagnostic, Document, NodeKind, ProgressHints, RenderError,
     RenderNode, RenderStrictness, Rendered, Severity, TableColumnHints,
@@ -51,10 +52,11 @@ use crate::components::table::{
     ColumnType, Conditional, Table, TableCellContent, TableColumn, TableWidthPlan, VerticalAlign,
 };
 use crate::discovery::detection::ColorDepth;
-use crate::utils::block_constraint::{visible_width, wrap_lines};
+use crate::utils::block_constraint::{split_lines, visible_width, wrap_lines};
 use crate::utils::layout::{Alignment, WordWrap};
 
 use super::options::TerminalRenderOptions;
+use super::style;
 
 /// Renders a render-tree node to a terminal string.
 ///
@@ -90,6 +92,7 @@ pub fn render_terminal_node(
     let mut writer = Writer {
         opts,
         diagnostics: Vec::new(),
+        effective: Style::default(),
     };
 
     // Warning-severity validation findings escalate to an error under Strict
@@ -142,6 +145,13 @@ pub fn render_terminal_document(
 struct Writer<'a> {
     opts: &'a TerminalRenderOptions,
     diagnostics: Vec<Diagnostic>,
+    /// The text appearance (`color`, `emphasis`) inherited from styled
+    /// ancestor blocks. Per Spec B D6 only these fields inherit; the
+    /// box-painting fields (`background`, `border`, `fill`) never do and are
+    /// kept cleared here. A styled node folds its own text appearance into
+    /// this before rendering its subtree (see [`Writer::render_styled`]) so
+    /// descendant paragraphs and inline spans see the ancestor color/emphasis.
+    effective: Style,
 }
 
 impl Writer<'_> {
@@ -157,8 +167,84 @@ impl Writer<'_> {
             Some(layout) if !is_inline_kind(&node.kind) => {
                 self.render_with_layout(node, &layout)
             }
-            _ => self.render_kind(node),
+            _ => self.render_styled(node),
         }
+    }
+
+    /// Renders a node's content and applies its [`Style`], if any.
+    ///
+    /// The text-appearance, fill, and border layers are lowered by the
+    /// `style` module — the same fold step where [`Layout`] is applied. When
+    /// the style declares a border, the content is rendered within a width
+    /// reduced by the border's horizontal overhead so the bordered block stays
+    /// within the available width.
+    ///
+    /// [`Style`]: renderable::style::Style
+    /// [`Layout`]: renderable::layout::Layout
+    fn render_styled(&mut self, node: &RenderNode) -> Result<String, RenderError> {
+        let Some(style) = node.attrs.style().filter(|s| !s.is_empty()) else {
+            return self.render_kind(node);
+        };
+
+        let overhead = style::border_horizontal_overhead(&style);
+        let inner_width = self
+            .opts
+            .context
+            .available_width
+            .saturating_sub(overhead)
+            .max(1);
+
+        // Fold this node's text appearance into the inherited `effective`
+        // style for the duration of its subtree, so descendant paragraphs and
+        // inline spans see the ancestor color/emphasis (Spec B D6). Only the
+        // inheriting fields are carried — the box-painting layers are cleared.
+        let prev_effective = std::mem::take(&mut self.effective);
+        let merged = style.inherited_from(&prev_effective);
+        self.effective = Style {
+            color: merged.color,
+            emphasis: merged.emphasis,
+            ..Style::default()
+        };
+
+        let content = if overhead > 0 {
+            self.render_kind_in_width(node, inner_width)
+        } else {
+            self.render_kind(node)
+        };
+
+        self.effective = prev_effective;
+        let content = content?;
+
+        Ok(style::apply_style(
+            &content,
+            &style,
+            &self.opts.context.terminal,
+            inner_width,
+        ))
+    }
+
+    /// Renders a single node by kind within a constrained width.
+    ///
+    /// Mirrors [`Self::render_blocks_in_width`] for a single node: the
+    /// renderer's context is temporarily narrowed so the node's content wraps
+    /// to `width`, then the sub-render's diagnostics are merged back.
+    fn render_kind_in_width(
+        &mut self,
+        node: &RenderNode,
+        width: u32,
+    ) -> Result<String, RenderError> {
+        let mut narrowed = self.opts.clone();
+        narrowed.context.available_width = width;
+        narrowed.context.width = width;
+        narrowed.context.terminal.fixed_width = Some(width);
+        let mut sub = Writer {
+            opts: &narrowed,
+            diagnostics: Vec::new(),
+            effective: self.effective.clone(),
+        };
+        let result = sub.render_kind(node);
+        self.diagnostics.append(&mut sub.diagnostics);
+        result
     }
 
     /// Renders a node's content within the constraints of a [`Layout`].
@@ -199,8 +285,9 @@ impl Writer<'_> {
             let mut sub = Writer {
                 opts: &narrowed,
                 diagnostics: Vec::new(),
+                effective: self.effective.clone(),
             };
-            let rendered = sub.render_kind(node);
+            let rendered = sub.render_styled(node);
             self.diagnostics.append(&mut sub.diagnostics);
             rendered?
         };
@@ -247,7 +334,8 @@ impl Writer<'_> {
         match &node.kind {
             NodeKind::Root { children } => self.render_blocks(children),
             NodeKind::Heading { depth, children } => {
-                let markup = self.render_inline(children)?;
+                let effective = heading_effective(depth.get()).inherited_from(&self.effective);
+                let markup = self.render_inline(children, &effective)?;
                 Ok(self.render_heading_line(depth.get(), &markup))
             }
             NodeKind::Section {
@@ -255,7 +343,8 @@ impl Writer<'_> {
                 heading,
                 children,
             } => {
-                let markup = self.render_inline(heading)?;
+                let effective = heading_effective(depth.get()).inherited_from(&self.effective);
+                let markup = self.render_inline(heading, &effective)?;
                 let heading_output = self.render_heading_line(depth.get(), &markup);
                 let body = self.render_blocks(children)?;
                 if body.is_empty() {
@@ -265,9 +354,16 @@ impl Writer<'_> {
                 }
             }
             NodeKind::Paragraph { children } => {
-                let markup = self.render_inline(children)?;
+                // The inherited `effective` style already folds in this
+                // paragraph's own appearance (via `render_styled`) and any
+                // styled ancestor block, so a nested styled span restores the
+                // ancestor color/emphasis after it.
+                let effective = self.effective.clone();
+                let markup = self.render_inline(children, &effective)?;
                 if let Some(hints) = node.attrs.progress_hints() {
-                    Ok(self.render_prose(&render_progress_bar(&hints, &markup)))
+                    let bar =
+                        render_progress_bar(&hints, &markup, self.opts.context.color_depth);
+                    Ok(self.render_prose(&bar))
                 } else {
                     Ok(self.render_prose(&markup))
                 }
@@ -275,6 +371,28 @@ impl Writer<'_> {
             NodeKind::BlockQuote { children } => {
                 if let Some(hints) = node.attrs.columns_hints() {
                     self.render_columns(children, &hints)
+                } else if node.attrs.style().is_some_and(|s| !s.is_empty()) {
+                    // The node carries a declared `Style` — a migrated
+                    // `BlockQuote` component projects its border, fill, and
+                    // colors onto the node. `render_styled` lowers that
+                    // `Style` (border glyphs, fill band, text color), so the
+                    // inner blocks render without a reconstituted bespoke
+                    // border that would double up with the styled one.
+                    //
+                    // The content is still word-wrapped to the width left
+                    // after the border, matching the bespoke `BlockQuote`'s
+                    // intrinsic `WrapProse` behavior — without it the inner
+                    // text would overrun the bordered band. The context width
+                    // is already narrowed by the border overhead at this
+                    // point (see `render_styled`).
+                    let inner = self.render_blocks(children)?;
+                    let lines = split_lines(&inner);
+                    let wrapped = wrap_lines(
+                        lines,
+                        &WordWrap::WrapProse(Some(8), None),
+                        self.opts.context.available_width,
+                    );
+                    Ok(wrapped.join("\n"))
                 } else {
                     let inner = self.render_blocks(children)?;
                     let quote = BlockQuote::from(inner.as_str());
@@ -317,7 +435,7 @@ impl Writer<'_> {
                 Ok(cells.join("\t"))
             }
             NodeKind::TableCell { children } => {
-                let markup = self.render_inline(children)?;
+                let markup = self.render_inline(children, &Style::default())?;
                 Ok(self.render_prose(&markup))
             }
             NodeKind::FootnoteDefinition {
@@ -340,7 +458,7 @@ impl Writer<'_> {
             | NodeKind::FootnoteReference { .. }
             | NodeKind::SoftBreak
             | NodeKind::HardBreak => {
-                let markup = self.render_inline(std::slice::from_ref(node))?;
+                let markup = self.render_inline(std::slice::from_ref(node), &Style::default())?;
                 Ok(self.render_prose(&markup))
             }
             NodeKind::Html { value, block } => self.render_html(node, value, *block),
@@ -462,6 +580,7 @@ impl Writer<'_> {
         let mut sub = Writer {
             opts: &narrowed,
             diagnostics: Vec::new(),
+            effective: self.effective.clone(),
         };
         let result = sub.render_blocks(children);
         self.diagnostics.append(&mut sub.diagnostics);
@@ -473,45 +592,81 @@ impl Writer<'_> {
     /// Literal text is escaped with [`Prose::escape_text`] so document text
     /// never accidentally triggers Prose markup; styling wraps the escaped
     /// runs in block tags the [`Prose`] parser already understands.
-    fn render_inline(&mut self, children: &[RenderNode]) -> Result<String, RenderError> {
+    ///
+    /// `effective` is the text appearance (color, emphasis) inherited from the
+    /// enclosing block and ancestor spans. A nested
+    /// [`Span`](renderable::tree::NodeKind::Span) with its own [`Style`]
+    /// applies its effective appearance and restores `effective` afterwards.
+    fn render_inline(
+        &mut self,
+        children: &[RenderNode],
+        effective: &Style,
+    ) -> Result<String, RenderError> {
         let mut output = String::new();
         for child in children {
-            output.push_str(&self.render_inline_node(child)?);
+            output.push_str(&self.render_inline_node(child, effective)?);
         }
         Ok(output)
     }
 
     /// Projects a single inline node into [`Prose`] markup.
-    fn render_inline_node(&mut self, node: &RenderNode) -> Result<String, RenderError> {
+    fn render_inline_node(
+        &mut self,
+        node: &RenderNode,
+        effective: &Style,
+    ) -> Result<String, RenderError> {
         match &node.kind {
             NodeKind::Text { value } => Ok(apply_classes(
                 &Prose::escape_text(value),
                 &node.attrs.classes,
             )),
             NodeKind::Emphasis { children } => {
-                let inner = self.render_inline(children)?;
+                let inner = self.render_inline(children, effective)?;
                 Ok(apply_classes(
                     &format!("<italic>{inner}</italic>"),
                     &node.attrs.classes,
                 ))
             }
             NodeKind::Strong { children } => {
-                let inner = self.render_inline(children)?;
+                let inner = self.render_inline(children, effective)?;
                 Ok(apply_classes(
                     &format!("<bold>{inner}</bold>"),
                     &node.attrs.classes,
                 ))
             }
             NodeKind::Delete { children } => {
-                let inner = self.render_inline(children)?;
+                let inner = self.render_inline(children, effective)?;
                 Ok(apply_classes(
                     &format!("<strikethrough>{inner}</strikethrough>"),
                     &node.attrs.classes,
                 ))
             }
             NodeKind::Span { children } => {
-                let inner = self.render_inline(children)?;
-                self.render_span_classes(node, &inner)
+                // An inline `Span` may carry a declared `Style`. Its
+                // text-appearance layers (color, emphasis) inherit from the
+                // enclosing `effective` appearance; box-painting layers
+                // (border, fill) and background have no inline meaning here.
+                match node.attrs.style().filter(|s| !s.is_empty()) {
+                    Some(span_style) => {
+                        let child_effective = span_style.inherited_from(effective);
+                        let inner = self.render_inline(children, &child_effective)?;
+                        let styled = self.render_span_classes(node, &inner)?;
+                        let term = &self.opts.context.terminal;
+                        let open = style::text_appearance_sgr(&child_effective, term);
+                        // Reset, then restore the ancestor appearance so the
+                        // run after the span keeps the inherited color/emphasis.
+                        let close = format!(
+                            "{}{}",
+                            style::SGR_RESET,
+                            style::text_appearance_sgr(effective, term),
+                        );
+                        Ok(format!("{open}{styled}{close}"))
+                    }
+                    None => {
+                        let inner = self.render_inline(children, effective)?;
+                        self.render_span_classes(node, &inner)
+                    }
+                }
             }
             NodeKind::InlineCode { value } => Ok(apply_classes(
                 &format!("<dim>{}</dim>", Prose::escape_text(value)),
@@ -522,7 +677,7 @@ impl Writer<'_> {
                 title: _,
                 children,
             } => {
-                let inner = self.render_inline(children)?;
+                let inner = self.render_inline(children, effective)?;
                 Ok(format!(
                     "<a href=\"{}\">{inner}</a>",
                     Prose::escape_text(url)
@@ -572,21 +727,31 @@ impl Writer<'_> {
 
     /// Renders a heading line from a depth and pre-rendered inline `markup`.
     ///
-    /// Matches the bespoke `Section` heading output: a Markdown-style prefix
-    /// (`# `..`###### `) plus the title, wrapped in a heading SGR style — bold
-    /// (`\x1b[1m`/`\x1b[22m`) for depths 1-3, italic (`\x1b[3m`/`\x1b[23m`) for
-    /// depths 4-5, and plain for depth 6.
+    /// A Markdown-style prefix (`# `..`###### `) plus the title, wrapped in the
+    /// heading's declared [`Style`] — bold for depths 1-3, italic for depths
+    /// 4-5, and plain for depth 6. The renderer consumes the declared
+    /// [`TextEmphasis`](renderable::style::TextEmphasis) through
+    /// [`style::apply_style`] rather than splicing SGR strings directly.
     fn render_heading_line(&self, depth: u8, markup: &str) -> String {
-        let (prefix, style_open, style_close) = match depth {
-            1 => ("# ", "\x1b[1m", "\x1b[22m"),
-            2 => ("## ", "\x1b[1m", "\x1b[22m"),
-            3 => ("### ", "\x1b[1m", "\x1b[22m"),
-            4 => ("#### ", "\x1b[3m", "\x1b[23m"),
-            5 => ("##### ", "\x1b[3m", "\x1b[23m"),
-            _ => ("###### ", "", ""),
+        let prefix = match depth {
+            1 => "# ",
+            2 => "## ",
+            3 => "### ",
+            4 => "#### ",
+            5 => "##### ",
+            _ => "###### ",
         };
         let title = self.render_prose(markup);
-        format!("{style_open}{prefix}{title}{style_close}")
+        let heading_style = Style {
+            emphasis: crate::components::section::heading_emphasis(depth),
+            ..Style::default()
+        };
+        style::apply_style(
+            &format!("{prefix}{title}"),
+            &heading_style,
+            &self.opts.context.terminal,
+            self.opts.context.available_width,
+        )
     }
 
     /// Renders a list natively, reproducing the bespoke `OrderedList` /
@@ -678,8 +843,10 @@ impl Writer<'_> {
                 // Inline/paragraph child: carries the prefix, with the
                 // prefix width as hanging indent for continuation lines.
                 let markup = match &child.kind {
-                    NodeKind::Paragraph { children } => self.render_inline(children)?,
-                    _ => self.render_inline(std::slice::from_ref(child))?,
+                    NodeKind::Paragraph { children } => {
+                        self.render_inline(children, &Style::default())?
+                    }
+                    _ => self.render_inline(std::slice::from_ref(child), &Style::default())?,
                 };
                 out.push_str(&self.render_list_text(&full_prefix, &markup, hanging_indent));
                 prefix_used = true;
@@ -841,19 +1008,26 @@ impl Writer<'_> {
         };
 
         // ── Pass 2: native emit ────────────────────────────────────────────
-        let has_true_color = self.opts.context.color_depth == ColorDepth::TrueColor;
-        let stripe_bg = if terminal_hints.alternate_background && has_true_color {
-            Some(stripe_bg_escape(&self.opts.context.color_mode))
-        } else {
-            None
-        };
-        let stripe_fg = if terminal_hints.alternate_text_color && has_true_color {
-            Some(stripe_fg_escape(&self.opts.context.color_mode))
-        } else {
-            None
-        };
+        // Striping degrades with the terminal's color depth through the
+        // shared color path rather than being gated to truecolor.
+        let mode = &self.opts.context.color_mode;
+        let depth = self.opts.context.color_depth;
+        let stripe_bg = terminal_hints
+            .alternate_background
+            .then(|| stripe_bg_escape(terminal_hints.stripe_bg, mode, depth))
+            .flatten();
+        let stripe_fg = terminal_hints
+            .alternate_text_color
+            .then(|| stripe_fg_escape(terminal_hints.stripe_text, mode, depth))
+            .flatten();
 
-        Ok(emit_table(&columns, &data, &plan, stripe_bg, stripe_fg))
+        Ok(emit_table(
+            &columns,
+            &data,
+            &plan,
+            stripe_bg.as_deref(),
+            stripe_fg.as_deref(),
+        ))
     }
 
     /// Extracts the plain-text cells of a table row.
@@ -868,7 +1042,7 @@ impl Writer<'_> {
                 cells.push(self.render(cell)?);
                 continue;
             };
-            cells.push(self.render_inline(children)?);
+            cells.push(self.render_inline(children, &Style::default())?);
         }
         Ok(cells)
     }
@@ -894,7 +1068,7 @@ impl Writer<'_> {
                 cells.push(TableCellContent::from(self.render(cell)?));
                 continue;
             };
-            let text = self.render_inline(cell_children)?;
+            let text = self.render_inline(cell_children, &Style::default())?;
             cells.push(reconstruct_cell(&cell.attrs, text));
         }
         Ok(cells)
@@ -995,17 +1169,28 @@ fn wrap_column_lines(rendered: &str, width: u32) -> String {
     wrap_lines(lines, &WordWrap::WrapProse(None, None), width).join("\n")
 }
 
-fn render_progress_bar(hints: &ProgressHints, paragraph_text: &str) -> String {
+fn render_progress_bar(hints: &ProgressHints, paragraph_text: &str, depth: ColorDepth) -> String {
+    use crate::components::progress::paint_fg;
+
     let value = hints.value.clamp(0.0, 1.0);
     let percentage = (value * 100.0).round() as u32;
     let filled_count = ((value * hints.bar_width as f32).round() as u32).min(hints.bar_width);
     let empty_count = hints.bar_width.saturating_sub(filled_count);
 
-    let bar = format!(
-        "{}{}",
-        hints.fill_char.to_string().repeat(filled_count as usize),
-        hints.empty_char.to_string().repeat(empty_count as usize),
+    // Each segment's declared slot color is degraded against `depth` through
+    // the shared lowering, matching the bespoke `Progress::render_bar`.
+    let filled = paint_fg(
+        &hints.fill_char.to_string().repeat(filled_count as usize),
+        hints.filled_color,
+        depth,
     );
+    let empty = paint_fg(
+        &hints.empty_char.to_string().repeat(empty_count as usize),
+        hints.empty_color,
+        depth,
+    );
+    let left = paint_fg(&hints.left_bracket.to_string(), hints.bracket_color, depth);
+    let right = paint_fg(&hints.right_bracket.to_string(), hints.bracket_color, depth);
     let percentage_str = format!("{percentage:3}%");
 
     // The label is everything before the trailing percentage token.
@@ -1015,14 +1200,8 @@ fn render_progress_bar(hints: &ProgressHints, paragraph_text: &str) -> String {
         .filter(|label| !label.is_empty());
 
     match label {
-        Some(label) => format!(
-            "{label} {}{bar}{} {percentage_str}",
-            hints.left_bracket, hints.right_bracket
-        ),
-        None => format!(
-            "{}{bar}{} {percentage_str}",
-            hints.left_bracket, hints.right_bracket
-        ),
+        Some(label) => format!("{label} {left}{filled}{empty}{right} {percentage_str}"),
+        None => format!("{left}{filled}{empty}{right} {percentage_str}"),
     }
 }
 
@@ -1043,6 +1222,19 @@ pub(crate) fn resolve_cells(
         Some(Length::Ch(n)) => *n,
         Some(Length::Percent(p)) => ((width as f32) * p / 100.0).round() as u32,
         Some(Length::Css(_)) => 0,
+    }
+}
+
+/// The inherited text appearance for a heading's inline content.
+///
+/// A heading's declared emphasis (bold for depths 1-3, italic for 4-5) seeds
+/// the `effective` style threaded through inline rendering, so a nested
+/// styled [`Span`](renderable::tree::NodeKind::Span) restores the heading
+/// emphasis after it.
+fn heading_effective(depth: u8) -> Style {
+    Style {
+        emphasis: crate::components::section::heading_emphasis(depth),
+        ..Style::default()
     }
 }
 
@@ -1918,6 +2110,167 @@ mod render_tree_tests {
         assert!(
             matches!(result, Err(RenderError::InvalidTree { .. })),
             "strict should escalate inline-layout warning to error"
+        );
+    }
+
+    #[test]
+    fn render_tree_applies_style_color_during_fold() {
+        use renderable::color::{BasicColor, Color};
+        use renderable::layout::TargetValue;
+        use renderable::style::{PerMode, Style};
+
+        let mut para = RenderNode::paragraph(vec![RenderNode::text("hello")]);
+        para.attrs.set_style(&Style {
+            color: Some(TargetValue::universal(PerMode::universal(
+                Color::BasicColor(BasicColor::Red),
+            ))),
+            ..Style::default()
+        });
+        let out = render(&para);
+        assert!(out.output.contains("\x1b[31m"), "got {:?}", out.output);
+        assert!(strip_escape_codes(&out.output).contains("hello"));
+    }
+
+    #[test]
+    fn render_tree_applies_style_border_during_fold() {
+        use renderable::style::{Border, BorderSides, Style};
+
+        let mut para = RenderNode::paragraph(vec![RenderNode::text("hi")]);
+        para.attrs.set_style(&Style {
+            border: Some(Border {
+                sides: BorderSides::All,
+                ..Border::default()
+            }),
+            ..Style::default()
+        });
+        let out = render(&para);
+        let plain = strip_escape_codes(&out.output);
+        assert!(plain.contains('┌') && plain.contains('┘'), "got {plain:?}");
+        // The bordered block stays within the available width.
+        let widest = plain.split('\n').map(visible_width).max().unwrap_or(0);
+        assert!(widest <= 80, "bordered block overflowed: {widest}");
+    }
+
+    /// Builds a universal foreground-color [`Style`] for a [`BasicColor`].
+    #[cfg(test)]
+    fn fg_style(color: renderable::color::BasicColor) -> Style {
+        use renderable::color::Color;
+        use renderable::layout::TargetValue;
+        use renderable::style::PerMode;
+        Style {
+            color: Some(TargetValue::universal(PerMode::universal(
+                Color::BasicColor(color),
+            ))),
+            ..Style::default()
+        }
+    }
+
+    #[test]
+    fn render_tree_applies_inline_span_style() {
+        use renderable::color::BasicColor;
+
+        // A `Span` carrying its own `Style` lowers that style to SGR around
+        // just the span's text — the rest of the paragraph is unaffected.
+        let mut span = RenderNode::span(vec![], vec![RenderNode::text("loud")]);
+        span.attrs.set_style(&fg_style(BasicColor::Red));
+        let para = RenderNode::paragraph(vec![
+            RenderNode::text("a "),
+            span,
+            RenderNode::text(" b"),
+        ]);
+        let out = render(&para).output;
+        assert!(out.contains("\x1b[31m"), "span color missing: {out:?}");
+        let plain = strip_escape_codes(&out);
+        assert!(plain.contains("a loud b"), "got {plain:?}");
+    }
+
+    #[test]
+    fn render_tree_inline_span_inherits_parent_color() {
+        use renderable::color::BasicColor;
+
+        // An unstyled child span inside a colored paragraph inherits the
+        // paragraph's color; a styled child span overrides it and the run
+        // after the span is restored to the inherited color.
+        let plain_span = RenderNode::span(vec![], vec![RenderNode::text("inherits")]);
+        let mut green_span = RenderNode::span(vec![], vec![RenderNode::text("override")]);
+        green_span.attrs.set_style(&fg_style(BasicColor::Green));
+        let mut para = RenderNode::paragraph(vec![
+            plain_span,
+            RenderNode::text(" "),
+            green_span,
+            RenderNode::text(" tail"),
+        ]);
+        para.attrs.set_style(&fg_style(BasicColor::Red));
+
+        let out = render(&para).output;
+        // The paragraph color (red) and the span override (green) both appear.
+        assert!(out.contains("\x1b[31m"), "parent red missing: {out:?}");
+        assert!(out.contains("\x1b[32m"), "span green missing: {out:?}");
+        // The span's close restores the inherited red so the tail is red again.
+        let after_green = out.split("\x1b[32m").nth(1).expect("green run");
+        assert!(
+            after_green.contains("\x1b[31m"),
+            "inherited color not restored after span: {out:?}"
+        );
+        assert!(strip_escape_codes(&out).contains("inherits override tail"));
+    }
+
+    #[test]
+    fn render_tree_inline_span_inherits_ancestor_block_color() {
+        use renderable::color::BasicColor;
+
+        // A styled ancestor *block* (a red `BlockQuote`) must propagate its
+        // color to descendant paragraphs and inline spans: a green child span
+        // overrides it, and the run after the span is restored to the
+        // ancestor block's red — not to the terminal default.
+        let mut green_span = RenderNode::span(vec![], vec![RenderNode::text("override")]);
+        green_span.attrs.set_style(&fg_style(BasicColor::Green));
+        let paragraph = RenderNode::paragraph(vec![
+            RenderNode::text("head "),
+            green_span,
+            RenderNode::text(" tail"),
+        ]);
+        let mut quote = RenderNode::block_quote(vec![paragraph]);
+        quote.attrs.set_style(&fg_style(BasicColor::Red));
+
+        let out = render(&quote).output;
+        assert!(out.contains("\x1b[31m"), "ancestor red missing: {out:?}");
+        assert!(out.contains("\x1b[32m"), "span green missing: {out:?}");
+        // The span's close restores the inherited ancestor red.
+        let after_green = out.split("\x1b[32m").nth(1).expect("green run");
+        assert!(
+            after_green.contains("\x1b[31m"),
+            "ancestor block color not restored after span: {out:?}"
+        );
+        assert!(strip_escape_codes(&out).contains("head override tail"));
+    }
+
+    #[test]
+    fn render_tree_inline_span_emphasis_does_not_leak_box_layers() {
+        use renderable::style::{Border, BorderSides, Fill, Style, TextEmphasis};
+
+        // Border and fill are box-painting layers with no inline meaning: a
+        // `Span` declaring them must not draw box-drawing glyphs inline.
+        let mut span = RenderNode::span(vec![], vec![RenderNode::text("word")]);
+        span.attrs.set_style(&Style {
+            emphasis: TextEmphasis {
+                bold: true,
+                ..TextEmphasis::default()
+            },
+            border: Some(Border {
+                sides: BorderSides::All,
+                ..Border::default()
+            }),
+            fill: Some(Fill::default()),
+            ..Style::default()
+        });
+        let para = RenderNode::paragraph(vec![RenderNode::text("x "), span]);
+        let out = render(&para).output;
+        assert!(out.contains("\x1b[1m"), "span bold missing: {out:?}");
+        let plain = strip_escape_codes(&out);
+        assert!(
+            !plain.contains('┌') && !plain.contains('│'),
+            "inline span must not draw a border: {plain:?}"
         );
     }
 }

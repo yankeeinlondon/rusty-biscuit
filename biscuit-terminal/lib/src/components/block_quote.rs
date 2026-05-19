@@ -1,5 +1,9 @@
 use std::rc::Rc;
 
+use renderable::layout::TargetValue;
+use renderable::style::{Border, BorderSides, PerMode, Style};
+use renderable::target::RenderTarget;
+
 use crate::{
     components::{
         prose::Prose,
@@ -12,6 +16,37 @@ use crate::{
         layout::{Layout, LayoutTerminalExt},
     },
 };
+
+/// Wraps a plain [`Color`] as a universal [`Style`] color value.
+fn universal_color(color: Color) -> TargetValue<PerMode<Color>> {
+    TargetValue::universal(PerMode::universal(color))
+}
+
+/// Extracts the terminal [`Color`] from an optional `Style` color slot.
+///
+/// A universal value resolves directly; an adaptive value resolves to its
+/// dark-mode branch — the migrated builder shims only ever store universal
+/// values, so this is a lossless inverse for the compatibility path.
+fn color_of(slot: &Option<TargetValue<PerMode<Color>>>) -> Option<Color> {
+    match slot.as_ref()?.resolve(RenderTarget::Terminal)? {
+        PerMode::Universal(color) => Some(*color),
+        PerMode::Adaptive { dark, .. } => Some(*dark),
+    }
+}
+
+/// Builds a left-only [`Border`] carrying `color`.
+fn left_border(color: Color) -> Border {
+    Border {
+        color: Some(universal_color(color)),
+        sides: BorderSides::Sides {
+            top: false,
+            right: false,
+            bottom: false,
+            left: true,
+        },
+        ..Border::default()
+    }
+}
 
 /// Renders quoted text with a distinctive left border.
 ///
@@ -76,9 +111,11 @@ pub struct BlockQuote {
     /// you can add that and it will be placed
     attribution: Option<String>,
 
-    text_color: Option<Color>,
-    bg_color: Option<Color>,
-    left_block_color: Option<Color>,
+    /// Declared appearance — the migrated home of the former `text_color`,
+    /// `bg_color`, and `left_block_color` fields. Foreground color rides on
+    /// [`Style::color`], background on [`Style::background`], and the left
+    /// border color on [`Style::border`].
+    style: Style,
     /// The border string prefixed to each line (default: `"│ "`).
     border: String,
     layout: Layout,
@@ -90,9 +127,10 @@ impl Default for BlockQuote {
         BlockQuote {
             content: RenderableTerminalContent::String("".to_string()),
             attribution: None,
-            text_color: None,
-            bg_color: None,
-            left_block_color: Some(Color::Tailwind(Tailwind::Gray500)),
+            style: Style {
+                border: Some(left_border(Color::Tailwind(Tailwind::Gray500))),
+                ..Style::default()
+            },
             border: "│ ".to_string(),
             layout: Layout {
                 word_wrap: WordWrap::WrapProse(Some(8), None),
@@ -158,21 +196,51 @@ impl BlockQuote {
     }
 
     /// Set the text color.
+    ///
+    /// Compatibility shim: the color is stored on the declared [`Style`]'s
+    /// [`color`](Style::color) slot.
     pub fn with_text_color(mut self, color: Color) -> Self {
-        self.text_color = Some(color);
+        self.style.color = Some(universal_color(color));
         self
     }
 
     /// Set the background color.
+    ///
+    /// Compatibility shim: the color is stored on the declared [`Style`]'s
+    /// [`background`](Style::background) slot.
     pub fn with_bg_color(mut self, color: Color) -> Self {
-        self.bg_color = Some(color);
+        self.style.background = Some(universal_color(color));
         self
     }
 
     /// Set the left block/border color.
+    ///
+    /// Compatibility shim: the color is stored on the declared [`Style`]'s
+    /// left [`border`](Style::border) slot.
     pub fn with_left_block_color(mut self, color: Color) -> Self {
-        self.left_block_color = Some(color);
+        match &mut self.style.border {
+            Some(border) => border.color = Some(universal_color(color)),
+            None => self.style.border = Some(left_border(color)),
+        }
         self
+    }
+
+    /// The declared text color, if any.
+    pub fn text_color(&self) -> Option<Color> {
+        color_of(&self.style.color)
+    }
+
+    /// The declared background color, if any.
+    pub fn bg_color(&self) -> Option<Color> {
+        color_of(&self.style.background)
+    }
+
+    /// The declared left block/border color, if any.
+    pub fn left_block_color(&self) -> Option<Color> {
+        self.style
+            .border
+            .as_ref()
+            .and_then(|border| color_of(&border.color))
     }
 
     /// Set a custom border string (default: `"│ "`).
@@ -243,9 +311,9 @@ impl BlockQuote {
         result
     }
 
-    /// Apply `left_block_color` to a border string segment.
+    /// Apply the declared left block color to a border string segment.
     fn colorize_border(&self, border: &str) -> String {
-        match &self.left_block_color {
+        match self.left_block_color() {
             Some(color) => match color.to_rgb() {
                 Some((r, g, b)) => {
                     format!("\x1b[38;2;{r};{g};{b}m{border}\x1b[39m")
@@ -320,8 +388,13 @@ impl renderable::tree::TreeRenderable for BlockQuote {
     ///
     /// A non-default [`Layout`] (margin, alignment, max-width, word wrap) is
     /// recorded on the root node's attributes so the tree renderers apply it,
-    /// matching the bespoke `render` path. Color and border remain terminal
-    /// presentation concerns and are intentionally omitted.
+    /// matching the bespoke `render` path.
+    ///
+    /// The declared [`Style`] — the left border plus any text and background
+    /// color set through the builder shims — is recorded on the node so the
+    /// terminal tree renderer lowers the same appearance the bespoke renderer
+    /// produces. The Markdown and Browser renderers ignore the style, so their
+    /// output is unaffected.
     fn render_tree(&self) -> renderable::tree::RenderNode {
         use renderable::tree::RenderNode;
 
@@ -341,6 +414,9 @@ impl renderable::tree::TreeRenderable for BlockQuote {
         // — only a caller-customized layout is recorded on the node.
         if self.layout != Self::default().layout {
             node.attrs.set_layout(&self.layout);
+        }
+        if !self.style.is_empty() {
+            node.attrs.set_style(&self.style);
         }
         node
     }
@@ -480,14 +556,14 @@ mod tests {
     fn test_with_text_color() {
         let quote =
             BlockQuote::from("Colored text").with_text_color(Color::Tailwind(Tailwind::Blue500));
-        assert!(quote.text_color.is_some());
+        assert!(quote.text_color().is_some());
     }
 
     #[test]
     fn test_with_bg_color() {
         let quote =
             BlockQuote::from("Background").with_bg_color(Color::Tailwind(Tailwind::Gray100));
-        assert!(quote.bg_color.is_some());
+        assert!(quote.bg_color().is_some());
     }
 
     #[test]
@@ -495,7 +571,7 @@ mod tests {
         let quote = BlockQuote::from("Custom border")
             .with_left_block_color(Color::Tailwind(Tailwind::Red500));
         assert_eq!(
-            quote.left_block_color,
+            quote.left_block_color(),
             Some(Color::Tailwind(Tailwind::Red500))
         );
     }
@@ -507,9 +583,9 @@ mod tests {
             .with_bg_color(Color::Tailwind(Tailwind::Gray800))
             .with_left_block_color(Color::Tailwind(Tailwind::Green500));
 
-        assert!(quote.text_color.is_some());
-        assert!(quote.bg_color.is_some());
-        assert!(quote.left_block_color.is_some());
+        assert!(quote.text_color().is_some());
+        assert!(quote.bg_color().is_some());
+        assert!(quote.left_block_color().is_some());
     }
 
     // =========================================================================
@@ -520,7 +596,7 @@ mod tests {
     fn test_default_has_gray_left_block() {
         let quote = BlockQuote::default();
         assert_eq!(
-            quote.left_block_color,
+            quote.left_block_color(),
             Some(Color::Tailwind(Tailwind::Gray500))
         );
     }
@@ -528,13 +604,13 @@ mod tests {
     #[test]
     fn test_default_has_no_text_color() {
         let quote = BlockQuote::default();
-        assert!(quote.text_color.is_none());
+        assert!(quote.text_color().is_none());
     }
 
     #[test]
     fn test_default_has_no_bg_color() {
         let quote = BlockQuote::default();
-        assert!(quote.bg_color.is_none());
+        assert!(quote.bg_color().is_none());
     }
 
     #[test]
@@ -620,8 +696,8 @@ mod tests {
             quote.render_optimistic(None),
             cloned.render_optimistic(None)
         );
-        assert_eq!(quote.text_color, cloned.text_color);
-        assert_eq!(quote.left_block_color, cloned.left_block_color);
+        assert_eq!(quote.text_color(), cloned.text_color());
+        assert_eq!(quote.left_block_color(), cloned.left_block_color());
     }
 
     #[test]

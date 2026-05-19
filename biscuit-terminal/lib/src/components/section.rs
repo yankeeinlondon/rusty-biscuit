@@ -1,3 +1,4 @@
+use renderable::style::{Style, TextEmphasis};
 use renderable::tree::{HeadingDepth, RenderNode};
 
 use crate::{
@@ -48,6 +49,36 @@ impl HeadingLevel {
             HeadingLevel::h5 => 5,
             HeadingLevel::h6 => 6,
         }
+    }
+
+    /// The declared heading [`Style`] for this level.
+    ///
+    /// Replaces the hard-coded heading SGR: levels h1-h3 declare bold
+    /// emphasis, h4-h5 declare italic, and h6 declares no emphasis. The
+    /// renderers lower the [`TextEmphasis`] to the target instead of
+    /// hand-writing escape codes.
+    pub fn heading_style(&self) -> Style {
+        Style {
+            emphasis: heading_emphasis(self.level()),
+            ..Style::default()
+        }
+    }
+}
+
+/// The [`TextEmphasis`] declared for a heading depth (1-6).
+///
+/// Depths 1-3 are bold, 4-5 italic, and 6 carries no emphasis.
+pub(crate) fn heading_emphasis(depth: u8) -> TextEmphasis {
+    match depth {
+        1..=3 => TextEmphasis {
+            bold: true,
+            ..TextEmphasis::default()
+        },
+        4 | 5 => TextEmphasis {
+            italic: true,
+            ..TextEmphasis::default()
+        },
+        _ => TextEmphasis::default(),
     }
 }
 
@@ -139,21 +170,37 @@ impl Section {
     fn render_content(&self, term: Option<&Terminal>, term_width: u32) -> String {
         let mut result = String::new();
 
-        // Apply heading style based on level
-        let (prefix, style_open, style_close) = match self.level {
-            HeadingLevel::h1 => ("# ", "\x1b[1m", "\x1b[22m"), // Bold
-            HeadingLevel::h2 => ("## ", "\x1b[1m", "\x1b[22m"), // Bold
-            HeadingLevel::h3 => ("### ", "\x1b[1m", "\x1b[22m"), // Bold
-            HeadingLevel::h4 => ("#### ", "\x1b[3m", "\x1b[23m"), // Italic
-            HeadingLevel::h5 => ("##### ", "\x1b[3m", "\x1b[23m"), // Italic
-            HeadingLevel::h6 => ("###### ", "", ""),           // Plain
+        // The Markdown-style prefix per level.
+        let prefix = match self.level {
+            HeadingLevel::h1 => "# ",
+            HeadingLevel::h2 => "## ",
+            HeadingLevel::h3 => "### ",
+            HeadingLevel::h4 => "#### ",
+            HeadingLevel::h5 => "##### ",
+            HeadingLevel::h6 => "###### ",
         };
 
+        // The heading is rendered by lowering the level's declared `Style`
+        // through the shared terminal style applier — the same path the tree
+        // renderer uses — rather than hand-splicing SGR escapes. A `Terminal`
+        // is required; the optimistic-width path manufactures one.
+        let owned_term;
+        let term_ref = match term {
+            Some(t) => t,
+            None => {
+                owned_term = Terminal::new_optimistic(term_width);
+                &owned_term
+            }
+        };
+        let styled_heading = crate::render_tree::style::apply_style(
+            &format!("{prefix}{}", self.title),
+            &self.level.heading_style(),
+            term_ref,
+            term_width,
+        );
+
         // Render the heading
-        result.push_str(style_open);
-        result.push_str(prefix);
-        result.push_str(&self.title);
-        result.push_str(style_close);
+        result.push_str(&styled_heading);
         result.push('\n');
 
         // Render content
@@ -252,7 +299,9 @@ mod tests {
     fn test_h1_section() {
         let section = Section::new(HeadingLevel::h1, "Title");
         let result = section.render_optimistic(None);
-        assert_eq!(result, "\x1b[1m# Title\x1b[22m");
+        // The heading lowers the declared bold `Style`: a `\x1b[1m` open run
+        // and a single `\x1b[0m` reset, matching the shared style applier.
+        assert_eq!(result, "\x1b[1m# Title\x1b[0m");
     }
 
     #[test]
@@ -260,7 +309,7 @@ mod tests {
         let mut section = Section::new(HeadingLevel::h2, "Header");
         section.add_string("Some content here.");
         let result = section.render_optimistic(None);
-        assert_eq!(result, "\x1b[1m## Header\x1b[22m\nSome content here.");
+        assert_eq!(result, "\x1b[1m## Header\x1b[0m\nSome content here.");
     }
 
     #[test]

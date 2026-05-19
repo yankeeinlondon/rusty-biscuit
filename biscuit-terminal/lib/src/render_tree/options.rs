@@ -90,7 +90,7 @@ impl TerminalRenderContext {
         let width = term.width();
         Self {
             width,
-            color_depth: term.color_depth.clone(),
+            color_depth: term.color_depth,
             color_mode: term.color_mode.clone(),
             hyperlinks: term.osc_link_support,
             image_support: term.image_support.clone(),

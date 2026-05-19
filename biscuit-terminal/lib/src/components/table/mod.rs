@@ -4,7 +4,7 @@
 //! - [`column`] — `TableColumn`, `Conditional`, and column metadata
 //! - [`width`] — width planning types: `MeasuredColumn`, `TableWidthMeasurements`,
 //!   `TableWidthPlan`, `TableWidthError`
-//! - [`types`] — `ColumnType`, `Currency`, `VerticalAlign`
+//! - [`types`] — `ColumnType`, `Currency`, `TableStyle`, `VerticalAlign`
 //! - [`table`] — `Table` struct, `impl Table`, `impl TerminalRenderable for Table`,
 //!   and rendering helpers
 //!
@@ -21,5 +21,5 @@ pub mod width;
 pub use cell::TableCellContent;
 pub use column::{Conditional, TableColumn};
 pub use table::Table;
-pub use types::{ColumnType, Currency, VerticalAlign};
+pub use types::{ColumnType, Currency, TableStyle, VerticalAlign};
 pub use width::{MeasuredColumn, TableWidthError, TableWidthMeasurements, TableWidthPlan};

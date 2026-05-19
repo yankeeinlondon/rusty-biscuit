@@ -1,10 +1,67 @@
 use crate::{
     components::renderable::TerminalRenderable,
+    discovery::detection::ColorDepth,
+    render_tree::style::color_sgr,
     terminal::Terminal,
     utils::layout::{Layout, LayoutTerminalExt},
 };
+use renderable::color::Color;
 use renderable::tree::{ProgressHints, RenderNode};
+use serde::{Deserialize, Serialize};
 use std::any::Any;
+
+/// Typed style slot for a [`Progress`] bar's track and bracket appearance.
+///
+/// Spec B D5 model: a rich component exposes a typed component style struct
+/// rather than scattered bespoke fields. `ProgressStyle` is the migrated home
+/// of `Progress`'s former `fill_char` / `empty_char` / `left_bracket` /
+/// `right_bracket` glyph fields, and also carries the optional slot colors
+/// for the filled track, empty track, and brackets. A slot color is a
+/// [`Color`] so it degrades across terminal color depths through the same
+/// shared lowering the [`Style`](renderable::style::Style) primitive uses.
+///
+/// ## Examples
+///
+/// ```
+/// use biscuit_terminal::components::progress::ProgressStyle;
+///
+/// let style = ProgressStyle::default();
+/// assert_eq!(style.fill_char, '█');
+/// assert_eq!(style.empty_char, '·');
+/// assert!(style.filled_color.is_none());
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct ProgressStyle {
+    /// Glyph painted for the filled portion of the track.
+    pub fill_char: char,
+    /// Glyph painted for the empty portion of the track.
+    pub empty_char: char,
+    /// Glyph painted at the left bracket.
+    pub left_bracket: char,
+    /// Glyph painted at the right bracket.
+    pub right_bracket: char,
+    /// Color of the filled portion of the track, if any.
+    pub filled_color: Option<Color>,
+    /// Color of the empty portion of the track, if any.
+    pub empty_color: Option<Color>,
+    /// Color of the left and right bracket glyphs, if any.
+    pub bracket_color: Option<Color>,
+}
+
+impl Default for ProgressStyle {
+    fn default() -> Self {
+        Self {
+            fill_char: '█',  // U+2588
+            empty_char: '·', // U+00B7 (middle dot)
+            left_bracket: '[',
+            right_bracket: ']',
+            filled_color: None,
+            empty_color: None,
+            bracket_color: None,
+        }
+    }
+}
 
 /// A horizontal progress bar for terminal display.
 ///
@@ -29,14 +86,8 @@ pub struct Progress {
     label: Option<String>,
     /// Width of the bar portion in characters (default: 20)
     bar_width: u32,
-    /// Character for filled portion
-    fill_char: char,
-    /// Character for empty portion
-    empty_char: char,
-    /// Left bracket character
-    left_bracket: char,
-    /// Right bracket character
-    right_bracket: char,
+    /// Typed style slot for the track and bracket glyphs.
+    style: ProgressStyle,
     /// Layout configuration
     layout: Layout,
 }
@@ -48,10 +99,7 @@ impl Progress {
             value: value.clamp(0.0, 1.0),
             label: None,
             bar_width: 20,
-            fill_char: '█',  // U+2588
-            empty_char: '·', // U+00B7 (middle dot)
-            left_bracket: '[',
-            right_bracket: ']',
+            style: ProgressStyle::default(),
             layout: Layout::default(),
         }
     }
@@ -69,65 +117,130 @@ impl Progress {
     }
 
     /// Sets the character used for the filled portion of the bar.
+    ///
+    /// Compatibility shim: the glyph is stored on the typed [`ProgressStyle`]
+    /// slot.
     pub fn with_fill_char(mut self, ch: char) -> Self {
-        self.fill_char = ch;
+        self.style.fill_char = ch;
         self
     }
 
     /// Sets the character used for the empty portion of the bar.
+    ///
+    /// Compatibility shim: the glyph is stored on the typed [`ProgressStyle`]
+    /// slot.
     pub fn with_empty_char(mut self, ch: char) -> Self {
-        self.empty_char = ch;
+        self.style.empty_char = ch;
         self
     }
 
     /// Sets the bracket characters (left and right).
+    ///
+    /// Compatibility shim: the glyphs are stored on the typed
+    /// [`ProgressStyle`] slot.
     pub fn with_brackets(mut self, left: char, right: char) -> Self {
-        self.left_bracket = left;
-        self.right_bracket = right;
+        self.style.left_bracket = left;
+        self.style.right_bracket = right;
         self
     }
 
+    /// Sets the color of the filled portion of the track.
+    ///
+    /// Stored on the typed [`ProgressStyle`] slot and lowered through the
+    /// shared, capability-aware color path when the bar renders.
+    pub fn with_filled_color(mut self, color: Color) -> Self {
+        self.style.filled_color = Some(color);
+        self
+    }
+
+    /// Sets the color of the empty portion of the track.
+    pub fn with_empty_color(mut self, color: Color) -> Self {
+        self.style.empty_color = Some(color);
+        self
+    }
+
+    /// Sets the color of the left and right bracket glyphs.
+    pub fn with_bracket_color(mut self, color: Color) -> Self {
+        self.style.bracket_color = Some(color);
+        self
+    }
+
+    /// The typed [`ProgressStyle`] slot for this bar's glyphs and colors.
+    pub fn style(&self) -> ProgressStyle {
+        self.style
+    }
+
     /// Renders the progress bar content (without layout application).
-    fn render_bar(&self) -> String {
+    ///
+    /// `depth` is the terminal's [`ColorDepth`]; any declared slot colors are
+    /// degraded against it through the shared lowering path so the colored
+    /// track and brackets render on truecolor, 256-color, and 16-color
+    /// terminals and are dropped only when the terminal has no color support.
+    fn render_bar(&self, depth: ColorDepth) -> String {
         let percentage = (self.value * 100.0).round() as u32;
         let filled_count =
             ((self.value * self.bar_width as f32).round() as u32).min(self.bar_width);
         let empty_count = self.bar_width.saturating_sub(filled_count);
 
-        let bar = format!(
-            "{}{}{}",
-            self.fill_char.to_string().repeat(filled_count as usize),
-            self.empty_char.to_string().repeat(empty_count as usize),
-            ""
+        let filled = paint_fg(
+            &self.style.fill_char.to_string().repeat(filled_count as usize),
+            self.style.filled_color,
+            depth,
+        );
+        let empty = paint_fg(
+            &self.style.empty_char.to_string().repeat(empty_count as usize),
+            self.style.empty_color,
+            depth,
+        );
+        let left = paint_fg(
+            &self.style.left_bracket.to_string(),
+            self.style.bracket_color,
+            depth,
+        );
+        let right = paint_fg(
+            &self.style.right_bracket.to_string(),
+            self.style.bracket_color,
+            depth,
         );
 
-        let percentage_str = format!("{:3}%", percentage);
+        let percentage_str = format!("{percentage:3}%");
 
         if let Some(ref label) = self.label {
-            format!(
-                "{} {}{}{} {}",
-                label, self.left_bracket, bar, self.right_bracket, percentage_str
-            )
+            format!("{label} {left}{filled}{empty}{right} {percentage_str}")
         } else {
-            format!(
-                "{}{}{} {}",
-                self.left_bracket, bar, self.right_bracket, percentage_str
-            )
+            format!("{left}{filled}{empty}{right} {percentage_str}")
         }
+    }
+}
+
+/// Wraps `text` in a foreground SGR escape for `color`, degraded to `depth`.
+///
+/// Returns `text` unchanged when there is no color, when the text is empty,
+/// or when `depth` is [`ColorDepth::None`] — the shared `color_sgr` lowering
+/// yields `None` in the last case.
+pub(crate) fn paint_fg(text: &str, color: Option<Color>, depth: ColorDepth) -> String {
+    if text.is_empty() {
+        return String::new();
+    }
+    match color.and_then(|c| color_sgr(c, &depth, false)) {
+        Some(sgr) => format!("{sgr}{text}\x1b[39m"),
+        None => text.to_string(),
     }
 }
 
 impl TerminalRenderable for Progress {
     fn render_optimistic(&self, term_width: Option<u32>) -> String {
         let width = term_width.unwrap_or(80);
-        let bar_content = self.render_bar();
+        // The optimistic path assumes a truecolor terminal, matching the
+        // other components' `render_optimistic` (`Terminal::new_optimistic`).
+        let bar_content = self.render_bar(ColorDepth::TrueColor);
         // Label and bar segments form a single visual unit — align as a block.
         self.layout.apply_block_layout(&bar_content, width)
     }
 
     fn render(&self, term: &Terminal) -> String {
         let width = term.width();
-        let bar_content = self.render_bar();
+        let bar_content = self.render_bar(term.color_depth);
         self.layout.apply_block_layout(&bar_content, width)
     }
 
@@ -163,10 +276,13 @@ impl TerminalRenderable for Progress {
         node.attrs.set_progress_hints(&ProgressHints {
             value: self.value,
             bar_width: self.bar_width,
-            fill_char: self.fill_char,
-            empty_char: self.empty_char,
-            left_bracket: self.left_bracket,
-            right_bracket: self.right_bracket,
+            fill_char: self.style.fill_char,
+            empty_char: self.style.empty_char,
+            left_bracket: self.style.left_bracket,
+            right_bracket: self.style.right_bracket,
+            filled_color: self.style.filled_color,
+            empty_color: self.style.empty_color,
+            bracket_color: self.style.bracket_color,
         });
         if self.layout != Layout::default() {
             node.attrs.set_layout(&self.layout);
@@ -313,6 +429,126 @@ mod tests {
             output.starts_with("    "),
             "Should have left margin of 4 spaces"
         );
+    }
+
+    #[test]
+    fn progress_style_default_glyphs() {
+        let style = ProgressStyle::default();
+        assert_eq!(style.fill_char, '█');
+        assert_eq!(style.empty_char, '·');
+        assert_eq!(style.left_bracket, '[');
+        assert_eq!(style.right_bracket, ']');
+    }
+
+    #[test]
+    fn progress_style_serde_roundtrip() {
+        let style = ProgressStyle {
+            fill_char: '#',
+            empty_char: '-',
+            left_bracket: '(',
+            right_bracket: ')',
+            filled_color: Some(Color::BasicColor(renderable::color::BasicColor::Green)),
+            empty_color: None,
+            bracket_color: Some(Color::BasicColor(renderable::color::BasicColor::Cyan)),
+        };
+        let json = serde_json::to_string(&style).unwrap();
+        let back: ProgressStyle = serde_json::from_str(&json).unwrap();
+        assert_eq!(style, back);
+    }
+
+    #[test]
+    fn progress_builder_shims_write_to_style_slot() {
+        let bar = Progress::new(0.5)
+            .with_fill_char('#')
+            .with_empty_char('-')
+            .with_brackets('(', ')');
+        assert_eq!(bar.style().fill_char, '#');
+        assert_eq!(bar.style().empty_char, '-');
+        assert_eq!(bar.style().left_bracket, '(');
+        assert_eq!(bar.style().right_bracket, ')');
+    }
+
+    #[test]
+    fn progress_slot_color_builders_write_to_style() {
+        use renderable::color::BasicColor;
+        let bar = Progress::new(0.5)
+            .with_filled_color(Color::BasicColor(BasicColor::Green))
+            .with_empty_color(Color::BasicColor(BasicColor::Black))
+            .with_bracket_color(Color::BasicColor(BasicColor::Cyan));
+        assert_eq!(
+            bar.style().filled_color,
+            Some(Color::BasicColor(BasicColor::Green))
+        );
+        assert_eq!(
+            bar.style().empty_color,
+            Some(Color::BasicColor(BasicColor::Black))
+        );
+        assert_eq!(
+            bar.style().bracket_color,
+            Some(Color::BasicColor(BasicColor::Cyan))
+        );
+    }
+
+    #[test]
+    fn progress_renders_slot_colors_as_sgr() {
+        use renderable::color::BasicColor;
+        let bar = Progress::new(0.5)
+            .with_filled_color(Color::BasicColor(BasicColor::Green))
+            .with_bracket_color(Color::BasicColor(BasicColor::Cyan));
+        let output = bar.render_optimistic(Some(80));
+        // Green fg (code 32) for the filled track, cyan fg (code 36) for the
+        // brackets — both lowered through the shared color path.
+        assert!(output.contains("\x1b[32m"), "filled color SGR missing: {output:?}");
+        assert!(output.contains("\x1b[36m"), "bracket color SGR missing: {output:?}");
+    }
+
+    #[test]
+    fn progress_slot_colors_degrade_with_color_depth() {
+        use crate::discovery::detection::ColorDepth;
+        use renderable::color::{BasicColor, RgbColor};
+
+        // An RGB filled color degrades across color depths.
+        let bar = Progress::new(0.5).with_filled_color(Color::Rgb(RgbColor::new(
+            10,
+            200,
+            40,
+            BasicColor::Green,
+        )));
+
+        let mut term = Terminal::new_optimistic(80);
+        term.color_depth = ColorDepth::TrueColor;
+        assert!(
+            bar.render(&term).contains("\x1b[38;2;10;200;40m"),
+            "truecolor terminal should get a 24-bit fill color"
+        );
+
+        term.color_depth = ColorDepth::Basic;
+        let basic = bar.render(&term);
+        assert!(
+            !basic.contains("\x1b[38;2;") && basic.contains("\x1b[32m"),
+            "16-color terminal should degrade to the basic fallback: {basic:?}"
+        );
+
+        term.color_depth = ColorDepth::None;
+        let none = bar.render(&term);
+        assert!(
+            !none.contains('\x1b'),
+            "a terminal with no color support must emit no color SGR: {none:?}"
+        );
+    }
+
+    #[test]
+    fn progress_render_tree_node_carries_slot_colors() {
+        use renderable::color::BasicColor;
+        let bar = Progress::new(0.5)
+            .with_filled_color(Color::BasicColor(BasicColor::Green));
+        let node = bar.render_tree_node().unwrap();
+        let hints = node.attrs.progress_hints().expect("progress hints");
+        assert_eq!(
+            hints.filled_color,
+            Some(Color::BasicColor(BasicColor::Green))
+        );
+        assert_eq!(hints.empty_color, None);
     }
 
     #[test]

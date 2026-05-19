@@ -3,7 +3,7 @@ use std::env;
 use serde::{Deserialize, Serialize};
 use termini::{NumberCapability, TermInfo};
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ColorDepth {
     /// no color support
     None,

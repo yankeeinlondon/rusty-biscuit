@@ -781,7 +781,7 @@ impl StyleState {
     /// fenced code block — to restore an enclosing span's styling so
     /// following sibling text is not left unstyled.
     pub(super) fn reapply_active_layers(&self, out: &mut String) {
-        for slot in [
+        for code in [
             &self.font_weight,
             &self.foreground,
             &self.background,
@@ -791,10 +791,11 @@ impl StyleState {
             &self.blink,
             &self.inverse,
             &self.hidden,
-        ] {
-            if let Some(code) = slot {
-                out.push_str(code);
-            }
+        ]
+        .into_iter()
+        .flatten()
+        {
+            out.push_str(code);
         }
     }
 
