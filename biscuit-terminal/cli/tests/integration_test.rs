@@ -44,6 +44,42 @@ fn test_columns_help() {
 }
 
 #[test]
+fn test_every_subcommand_help_exposes_example_flag() {
+    let subcommands = [
+        "image",
+        "flowchart",
+        "quadrant",
+        "pie-chart",
+        "git-graph",
+        "bar-chart",
+        "line-chart",
+        "timeline",
+        "state-diagram",
+        "graph-expression",
+        "erd",
+        "prose",
+        "quote",
+        "list",
+        "padleft",
+        "padright",
+        "columns",
+        "dir",
+        "block",
+        "progress",
+        "table",
+    ];
+
+    for subcommand in subcommands {
+        cargo_bin_cmd!("bt")
+            .arg(subcommand)
+            .arg("--help")
+            .assert()
+            .success()
+            .stdout(predicate::str::contains("--example"));
+    }
+}
+
+#[test]
 fn test_version_flag() {
     cargo_bin_cmd!("bt")
         .arg("--version")

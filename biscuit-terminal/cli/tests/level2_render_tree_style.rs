@@ -203,9 +203,7 @@ fn assert_styled_inline_content<H: TerminalHarness>(harness: &mut H) {
         .lines()
         .enumerate()
         .find(|(_, plain)| {
-            !plain.contains("bt quote")
-                && plain.contains(BORDER_GLYPH)
-                && plain.contains("alpha")
+            !plain.contains("bt quote") && plain.contains(BORDER_GLYPH) && plain.contains("alpha")
         })
         .and_then(|(i, _)| raw_lines.get(i).copied())
         .unwrap_or_else(|| {
@@ -302,9 +300,8 @@ fn output_row(frame: &CapturedFrame, echo_marker: &str, needle: &str) -> Option<
 /// Asserts a `bt block --fg red` foreground SGR survives to the captured row.
 fn assert_block_fg<H: TerminalHarness>(harness: &mut H) {
     let frame = capture_bt(harness, "bt block \"crimson glyphwork\" --fg red");
-    let row = output_row(&frame, "bt block", "crimson glyphwork").unwrap_or_else(|| {
-        panic!("could not locate `bt block` row.\nplain:\n{}", frame.plain)
-    });
+    let row = output_row(&frame, "bt block", "crimson glyphwork")
+        .unwrap_or_else(|| panic!("could not locate `bt block` row.\nplain:\n{}", frame.plain));
     // A named basic color lowers to a 16-color SGR; some terminals re-emit it
     // as truecolor on capture. Accept the documented forms.
     assert!(
@@ -324,13 +321,10 @@ fn assert_block_fg<H: TerminalHarness>(harness: &mut H) {
 /// Asserts a `bt block --bg blue` background SGR survives to the captured row.
 fn assert_block_bg<H: TerminalHarness>(harness: &mut H) {
     let frame = capture_bt(harness, "bt block \"azureground marker\" --bg blue");
-    let row = output_row(&frame, "bt block", "azureground marker").unwrap_or_else(|| {
-        panic!("could not locate `bt block` row.\nplain:\n{}", frame.plain)
-    });
+    let row = output_row(&frame, "bt block", "azureground marker")
+        .unwrap_or_else(|| panic!("could not locate `bt block` row.\nplain:\n{}", frame.plain));
     assert!(
-        row.contains("\x1b[44m")
-            || row.contains("\x1b[48;2;")
-            || row.contains("\x1b[48:2:"),
+        row.contains("\x1b[44m") || row.contains("\x1b[48;2;") || row.contains("\x1b[48:2:"),
         "expected a background SGR escape in the captured row: {row:?}",
     );
 }
@@ -343,9 +337,8 @@ fn assert_block_bg<H: TerminalHarness>(harness: &mut H) {
 /// sequence in the row.
 fn assert_block_bold<H: TerminalHarness>(harness: &mut H) {
     let frame = capture_bt(harness, "bt block \"weighty pronouncement\" --bold");
-    let row = output_row(&frame, "bt block", "weighty pronouncement").unwrap_or_else(|| {
-        panic!("could not locate `bt block` row.\nplain:\n{}", frame.plain)
-    });
+    let row = output_row(&frame, "bt block", "weighty pronouncement")
+        .unwrap_or_else(|| panic!("could not locate `bt block` row.\nplain:\n{}", frame.plain));
     assert!(
         sgr_carries_bold(&row),
         "expected a bold (`1`) SGR attribute in the captured row: {row:?}",
@@ -363,7 +356,9 @@ fn sgr_carries_bold(row: &str) -> bool {
         };
         let params = &after[..end];
         // SGR parameters are digits separated by `;` (or `:`).
-        if params.chars().all(|c| c.is_ascii_digit() || c == ';' || c == ':')
+        if params
+            .chars()
+            .all(|c| c.is_ascii_digit() || c == ';' || c == ':')
             && params.split([';', ':']).any(|p| p == "1")
         {
             return true;
@@ -380,9 +375,8 @@ fn assert_block_fill_indented<H: TerminalHarness>(harness: &mut H) {
         harness,
         "bt block \"insetband content\" --fill subtle --fill-band indented",
     );
-    let raw = output_row(&frame, "bt block", "insetband content").unwrap_or_else(|| {
-        panic!("could not locate `bt block` row.\nplain:\n{}", frame.plain)
-    });
+    let raw = output_row(&frame, "bt block", "insetband content")
+        .unwrap_or_else(|| panic!("could not locate `bt block` row.\nplain:\n{}", frame.plain));
     assert!(
         raw.contains("\x1b[48;2;") || raw.contains("\x1b[48:2:") || raw.contains("\x1b[48;5;"),
         "expected a background fill SGR escape in the captured row: {raw:?}",
@@ -393,9 +387,7 @@ fn assert_block_fill_indented<H: TerminalHarness>(harness: &mut H) {
         .plain
         .lines()
         .find(|p| !p.contains("bt block") && p.contains("insetband content"))
-        .unwrap_or_else(|| {
-            panic!("could not locate plain block row.\nplain:\n{}", frame.plain)
-        });
+        .unwrap_or_else(|| panic!("could not locate plain block row.\nplain:\n{}", frame.plain));
     assert!(
         plain_row.starts_with(' '),
         "expected the indented fill band to inset the text: {plain_row:?}",
@@ -409,9 +401,8 @@ fn assert_block_fill_full<H: TerminalHarness>(harness: &mut H) {
         harness,
         "bt block \"fullband content\" --fill subtle --fill-band full",
     );
-    let raw = output_row(&frame, "bt block", "fullband content").unwrap_or_else(|| {
-        panic!("could not locate `bt block` row.\nplain:\n{}", frame.plain)
-    });
+    let raw = output_row(&frame, "bt block", "fullband content")
+        .unwrap_or_else(|| panic!("could not locate `bt block` row.\nplain:\n{}", frame.plain));
     assert!(
         raw.contains("\x1b[48;2;") || raw.contains("\x1b[48:2:") || raw.contains("\x1b[48;5;"),
         "expected a background fill SGR escape in the full-band row: {raw:?}",
@@ -422,9 +413,7 @@ fn assert_block_fill_full<H: TerminalHarness>(harness: &mut H) {
 fn assert_block_border<H: TerminalHarness>(harness: &mut H) {
     let frame = capture_bt(harness, "bt block \"bordered notice\" --border all");
     assert!(
-        frame.plain.contains('┌')
-            && frame.plain.contains('│')
-            && frame.plain.contains('└'),
+        frame.plain.contains('┌') && frame.plain.contains('│') && frame.plain.contains('└'),
         "expected box-drawing border glyphs in the capture.\nplain:\n{}",
         frame.plain,
     );
@@ -451,11 +440,43 @@ fn assert_block_rounded_border<H: TerminalHarness>(harness: &mut H) {
          capture.\nplain:\n{}",
         frame.plain,
     );
+    // `--border-radius` must select the rounded corner set *for this block*,
+    // never the square set. A whole-frame `!contains('┌')` check is invalid:
+    // an earlier `bt block --border all` leaves a square-bordered block in
+    // scrollback. Scope the negative check to the rounded block's own border
+    // rows — the line carrying `╭`/`╮` (top) and the line carrying `╰`/`╯`
+    // (bottom) — which sit on different rows from any earlier square block.
+    let top_border = frame
+        .plain
+        .lines()
+        .find(|line| line.contains('╭'))
+        .unwrap_or_else(|| {
+            panic!(
+                "could not locate the rounded block's top border row.\n\
+                 plain:\n{}",
+                frame.plain,
+            )
+        });
     assert!(
-        !frame.plain.contains('┌'),
-        "expected no square corner glyph alongside the rounded border.\n\
-         plain:\n{}",
-        frame.plain,
+        !top_border.contains('┌') && !top_border.contains('┐'),
+        "expected the rounded block's top border row to use arc corners \
+         exclusively, found a square corner glyph: {top_border:?}",
+    );
+    let bottom_border = frame
+        .plain
+        .lines()
+        .find(|line| line.contains('╰'))
+        .unwrap_or_else(|| {
+            panic!(
+                "could not locate the rounded block's bottom border row.\n\
+                 plain:\n{}",
+                frame.plain,
+            )
+        });
+    assert!(
+        !bottom_border.contains('└') && !bottom_border.contains('┘'),
+        "expected the rounded block's bottom border row to use arc corners \
+         exclusively, found a square corner glyph: {bottom_border:?}",
     );
     assert!(
         frame.plain.contains("rounded notice"),
@@ -472,7 +493,10 @@ fn assert_progress_slot_colors<H: TerminalHarness>(harness: &mut H) {
         "bt progress 50 --fill-color green --bracket-color cyan",
     );
     let row = output_row(&frame, "bt progress", "50%").unwrap_or_else(|| {
-        panic!("could not locate `bt progress` row.\nplain:\n{}", frame.plain)
+        panic!(
+            "could not locate `bt progress` row.\nplain:\n{}",
+            frame.plain
+        )
     });
     // Green filled track (fg 32) and cyan brackets (fg 36); truecolor
     // re-emission is accepted for terminals that promote basic colors.
@@ -509,7 +533,10 @@ fn assert_table_striped<H: TerminalHarness>(harness: &mut H) {
         .find(|(_, plain)| plain.contains('│') && plain.contains("Bertrand"))
         .and_then(|(i, _)| raw_lines.get(i).map(|r| (*r).to_string()))
         .unwrap_or_else(|| {
-            panic!("could not locate striped `bt table` row.\nplain:\n{}", frame.plain)
+            panic!(
+                "could not locate striped `bt table` row.\nplain:\n{}",
+                frame.plain
+            )
         });
     assert!(
         row.contains("\x1b[48;2;") || row.contains("\x1b[48:2:") || row.contains("\x1b[48;5;"),
@@ -518,6 +545,69 @@ fn assert_table_striped<H: TerminalHarness>(harness: &mut H) {
     assert!(
         frame.plain.contains("Annwyl") && frame.plain.contains("Bertrand"),
         "expected the table cell text to remain visible. plain:\n{}",
+        frame.plain,
+    );
+}
+
+/// Asserts a `bt table` with typed header / body slot styling renders those
+/// slots visibly in a real terminal: the header row carries a bold SGR
+/// attribute and a data row carries a foreground-color SGR.
+fn assert_table_styled<H: TerminalHarness>(harness: &mut H) {
+    let frame = capture_bt(
+        harness,
+        "bt table --columns \"Pipeline,Verdict\" --row \"Quokka,Affirmed\" \
+         --bold-header --body-color red",
+    );
+    // The header row is the one that carries the column name but no data.
+    let header = frame
+        .plain
+        .lines()
+        .enumerate()
+        .find(|(_, plain)| {
+            !plain.contains("bt table")
+                && plain.contains('│')
+                && plain.contains("Pipeline")
+        })
+        .and_then(|(i, _)| frame.raw.lines().nth(i).map(str::to_string))
+        .unwrap_or_else(|| {
+            panic!(
+                "could not locate styled `bt table` header row.\nplain:\n{}",
+                frame.plain
+            )
+        });
+    assert!(
+        sgr_carries_bold(&header),
+        "expected a bold SGR attribute in the styled table header: {header:?}",
+    );
+
+    // The data row carries the body slot's red foreground color.
+    let body = frame
+        .plain
+        .lines()
+        .enumerate()
+        .find(|(_, plain)| {
+            !plain.contains("bt table")
+                && plain.contains('│')
+                && plain.contains("Quokka")
+        })
+        .and_then(|(i, _)| frame.raw.lines().nth(i).map(str::to_string))
+        .unwrap_or_else(|| {
+            panic!(
+                "could not locate styled `bt table` body row.\nplain:\n{}",
+                frame.plain
+            )
+        });
+    assert!(
+        body.contains("\x1b[31m")
+            || body.contains("\x1b[91m")
+            || body.contains("\x1b[38;2;")
+            || body.contains("\x1b[38:2:")
+            || body.contains("\x1b[38;5;"),
+        "expected a body foreground-color SGR in the styled table row: {body:?}",
+    );
+    assert!(
+        frame.plain.contains("Pipeline") && frame.plain.contains("Quokka"),
+        "expected the styled table text to remain visible. plain:\n{}",
         frame.plain,
     );
 }
@@ -543,6 +633,7 @@ fn level2_render_tree_style_in_wezterm() {
     assert_block_rounded_border(&mut harness);
     assert_progress_slot_colors(&mut harness);
     assert_table_striped(&mut harness);
+    assert_table_styled(&mut harness);
 }
 
 #[test]
@@ -566,6 +657,7 @@ fn level2_render_tree_style_in_kitty() {
     assert_block_rounded_border(&mut harness);
     assert_progress_slot_colors(&mut harness);
     assert_table_striped(&mut harness);
+    assert_table_styled(&mut harness);
 }
 
 #[test]
@@ -586,9 +678,7 @@ fn level2_render_tree_style_in_tmux() {
     // no raw escape garbage leaks into the displayed cells.
     let frame = capture_bt(&mut harness, "bt block \"bordered notice\" --border all");
     assert!(
-        frame.plain.contains('┌')
-            && frame.plain.contains('│')
-            && frame.plain.contains('└'),
+        frame.plain.contains('┌') && frame.plain.contains('│') && frame.plain.contains('└'),
         "expected box-drawing border glyphs in the tmux capture.\nplain:\n{}",
         frame.plain,
     );
@@ -634,6 +724,24 @@ fn level2_render_tree_style_in_tmux() {
     assert!(
         !frame.plain.contains('\x1b'),
         "expected no raw escape bytes in the tmux table capture. plain:\n{}",
+        frame.plain,
+    );
+
+    // A table with typed header / body slot styling relays its text faithfully
+    // through tmux with no escape garbage in the displayed cells.
+    let frame = capture_bt(
+        &mut harness,
+        "bt table --columns \"Pipeline,Verdict\" --row \"Quokka,Affirmed\" \
+         --bold-header --body-color red",
+    );
+    assert!(
+        frame.plain.contains("Pipeline") && frame.plain.contains("Quokka"),
+        "expected the styled table text in tmux. plain:\n{}",
+        frame.plain,
+    );
+    assert!(
+        !frame.plain.contains('\x1b'),
+        "expected no raw escape bytes in the tmux styled-table capture. plain:\n{}",
         frame.plain,
     );
 }
