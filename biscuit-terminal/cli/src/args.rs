@@ -156,4 +156,13 @@ pub enum Command {
 
     #[command(display_order = 15)]
     Dir(dir::DirArgs),
+
+    #[command(display_order = 16)]
+    Block(block::BlockArgs),
+
+    #[command(display_order = 17)]
+    Progress(progress::ProgressArgs),
+
+    #[command(display_order = 18)]
+    Table(table::TableArgs),
 }

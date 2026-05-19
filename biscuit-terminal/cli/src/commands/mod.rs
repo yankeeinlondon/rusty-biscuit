@@ -1,5 +1,6 @@
 use color_eyre::Result;
 
+pub mod block;
 pub mod color_parse;
 pub mod columns;
 pub mod dir;
@@ -12,11 +13,13 @@ pub mod list;
 pub mod mermaid;
 pub mod pad;
 pub mod pie;
+pub mod progress;
 pub mod prose;
 pub mod quadrant;
 pub mod quote;
 pub mod shared;
 pub mod state_diagram;
+pub mod table;
 pub mod timeline;
 pub mod xy_chart;
 
