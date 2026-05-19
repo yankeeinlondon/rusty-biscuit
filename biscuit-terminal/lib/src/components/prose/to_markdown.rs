@@ -20,11 +20,11 @@ use super::styles::{css_color, resolve_href};
 
 impl MarkdownRenderable for Prose {
     fn render_markdown(&self) -> String {
-        emit(&self.document().children, false)
+        emit(&self.document().children, false, false)
     }
 
     fn render_markdown_plus(&self) -> String {
-        emit(&self.document().children, true)
+        emit(&self.document().children, true, false)
     }
 }
 
@@ -32,18 +32,23 @@ impl MarkdownRenderable for Prose {
 ///
 /// `plus` selects MarkdownPlus, which keeps color and underline styling via
 /// inline HTML; plain Markdown degrades those to inner text.
-fn emit(nodes: &[ProseNode], plus: bool) -> String {
+///
+/// `html` is set once the nodes are being rendered as the body of an inline
+/// HTML element (a MarkdownPlus `<span>`); it propagates to every descendant
+/// so literal `<`, `>`, and `&` are emitted as HTML entities rather than
+/// reopening as live markup.
+fn emit(nodes: &[ProseNode], plus: bool, html: bool) -> String {
     let mut out = String::new();
     for node in nodes {
-        node_to_markdown(node, plus, &mut out);
+        node_to_markdown(node, plus, html, &mut out);
     }
     out
 }
 
 /// Append the Markdown for a single node to `out`.
-fn node_to_markdown(node: &ProseNode, plus: bool, out: &mut String) {
+fn node_to_markdown(node: &ProseNode, plus: bool, html: bool, out: &mut String) {
     match node {
-        ProseNode::Text(text) => out.push_str(&escape_markdown(text)),
+        ProseNode::Text(text) => out.push_str(&escape_markdown(text, html)),
         ProseNode::CodeBlock { lang, value } => {
             out.push_str("```");
             if let Some(lang) = lang {
@@ -58,7 +63,7 @@ fn node_to_markdown(node: &ProseNode, plus: bool, out: &mut String) {
         }
         ProseNode::Link { href, children } => {
             let resolved = resolve_href(href);
-            let desc = emit(children, plus);
+            let desc = emit(children, plus, html);
             if resolved.is_empty() {
                 out.push_str(&desc);
             } else {
@@ -74,7 +79,14 @@ fn node_to_markdown(node: &ProseNode, plus: bool, out: &mut String) {
             }
         }
         ProseNode::Span { style, children } => {
-            let inner = emit(children, plus);
+            // Decide *before* rendering children whether this span emits an
+            // inline HTML wrapper, so its children (and their descendants)
+            // are HTML-escaped when they become that wrapper's body.
+            let wraps_html = plus
+                && (style.fg.is_some()
+                    || style.bg.is_some()
+                    || style.emphasis.underline.is_some());
+            let inner = emit(children, plus, html || wraps_html);
             out.push_str(&wrap_span(style, &inner, plus));
         }
     }
@@ -164,10 +176,20 @@ fn escape_markdown_destination(href: &str) -> String {
 }
 
 /// Escape Markdown-significant characters so literal text keeps its meaning.
-fn escape_markdown(text: &str) -> String {
+///
+/// When `html` is set the text becomes the body of an inline HTML element
+/// (a MarkdownPlus `<span>`). `<`, `>`, and `&` are then emitted as HTML
+/// entities so literal markup — escaped `<script>`, unknown tags, raw `&` —
+/// stays inert visible text instead of reopening as live HTML. The Markdown
+/// sigils are still backslash-escaped because CommonMark continues to parse
+/// Markdown inside inline HTML.
+fn escape_markdown(text: &str, html: bool) -> String {
     let mut out = String::with_capacity(text.len());
     for c in text.chars() {
         match c {
+            '<' if html => out.push_str("&lt;"),
+            '>' if html => out.push_str("&gt;"),
+            '&' if html => out.push_str("&amp;"),
             '\\' | '`' | '*' | '_' | '[' | ']' | '<' | '>' => {
                 out.push('\\');
                 out.push(c);
@@ -252,6 +274,25 @@ mod tests {
         assert_eq!(
             md(r#"<a href="https://example.com/a b">go</a>"#),
             "[go](<https://example.com/a b>)"
+        );
+    }
+
+    #[test]
+    fn link_destination_from_quoted_attr_preserves_escaped_delimiter() {
+        let attr = Prose::quoted_attr("https://example.com/a>b");
+        assert_eq!(
+            md(&format!("<a href={attr}>x</a>")),
+            "[x](https://example.com/a>b)"
+        );
+    }
+
+    #[test]
+    fn link_destination_from_quoted_attr_with_both_quote_types() {
+        let value = r#"https://example.com/a>b?q='x'&r="y""#;
+        let attr = Prose::quoted_attr(value);
+        assert_eq!(
+            md(&format!("<a href={attr}>x</a>")),
+            format!("[x]({value})")
         );
     }
 
@@ -377,6 +418,67 @@ mod tests {
         assert_eq!(
             md_plus("<red><b>x</b></red>"),
             "<span style=\"color: rgb(128, 0, 0)\">**x**</span>"
+        );
+    }
+
+    #[test]
+    fn markdown_plus_html_escapes_literal_script_in_color_span() {
+        // Literal `<script>` text inside a color span must stay inert:
+        // backslash escapes do not escape `<` in HTML, so the span body
+        // must use HTML entities.
+        assert_eq!(
+            md_plus("<red><script>alert(1)</script></red>"),
+            "<span style=\"color: rgb(128, 0, 0)\">\
+             &lt;script&gt;alert(1)&lt;/script&gt;</span>"
+        );
+    }
+
+    #[test]
+    fn markdown_plus_html_escapes_literal_script_in_underline_span() {
+        assert_eq!(
+            md_plus("<u><script>x</script></u>"),
+            "<span style=\"text-decoration: underline\">\
+             &lt;script&gt;x&lt;/script&gt;</span>"
+        );
+    }
+
+    #[test]
+    fn markdown_plus_html_escapes_unknown_tag_in_color_span() {
+        assert_eq!(
+            md_plus("<red><unknown>x</unknown></red>"),
+            "<span style=\"color: rgb(128, 0, 0)\">\
+             &lt;unknown&gt;x&lt;/unknown&gt;</span>"
+        );
+    }
+
+    #[test]
+    fn markdown_plus_html_escapes_ampersand_in_style_span() {
+        assert_eq!(
+            md_plus("<red>a & b</red>"),
+            "<span style=\"color: rgb(128, 0, 0)\">a &amp; b</span>"
+        );
+    }
+
+    #[test]
+    fn markdown_plus_html_escapes_text_nested_under_color_span() {
+        // The `<b>` span carries no HTML wrapper itself, but it sits inside
+        // a color span, so its text still becomes inline-HTML body and must
+        // be HTML-escaped.
+        assert_eq!(
+            md_plus("<red><b><script>x</script></b></red>"),
+            "<span style=\"color: rgb(128, 0, 0)\">\
+             **&lt;script&gt;x&lt;/script&gt;**</span>"
+        );
+    }
+
+    #[test]
+    fn plain_markdown_does_not_html_escape() {
+        // Plain Markdown has no inline-HTML wrappers, so `&` stays literal
+        // and unknown tags keep their backslash escapes.
+        assert_eq!(md("a & b"), "a & b");
+        assert_eq!(
+            md("<red><script>x</script></red>"),
+            r"\<script\>x\</script\>"
         );
     }
 }

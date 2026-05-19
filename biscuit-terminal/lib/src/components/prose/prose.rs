@@ -133,15 +133,16 @@ impl Prose {
 
     /// Build a safely-quoted attribute value for Prose block tags.
     ///
-    /// Escapes only the characters that would break tag-level parsing
-    /// (`<`, `>`, `\`) and wraps the result in single or double quotes,
-    /// choosing the quote character that does not appear in the value so
-    /// the attribute parser never mis-identifies the end of the value.
+    /// Backslash-escapes the characters that would break tag-level parsing
+    /// (`<`, `>`, `\`), wraps the result in single or double quotes —
+    /// preferring the quote character that does not already appear in the
+    /// value — and escapes any occurrence of the chosen wrapping quote.
+    /// The Prose tag parser resolves these escapes inside attribute values,
+    /// so a value containing both quote types still round-trips exactly.
     ///
     /// Markdown-emphasis characters (`_`, `*`, `[`, `]`, `(`, `)`, `{`)
     /// are passed through verbatim: the markdown pre-processor treats tag
-    /// declarations opaquely, and the attribute parser does not unescape
-    /// backslash sequences, so escaping them here would leak literal
+    /// declarations opaquely, and escaping them here would leak literal
     /// backslashes into href URLs and other consumers.
     ///
     /// ## Examples
@@ -172,11 +173,16 @@ impl Prose {
                 _ => escaped.push(c),
             }
         }
-        if escaped.contains('"') && !escaped.contains('\'') {
-            format!("'{}'", escaped)
+        // Wrap in the quote character least likely to collide; escape any
+        // occurrence of the chosen quote so a value carrying both quote
+        // types still parses back to its exact bytes.
+        let quote = if escaped.contains('"') && !escaped.contains('\'') {
+            '\''
         } else {
-            format!("\"{}\"", escaped)
-        }
+            '"'
+        };
+        let body = escaped.replace(quote, &format!("\\{quote}"));
+        format!("{quote}{body}{quote}")
     }
 
     /// Parse the raw content into the target-neutral [`ProseDocument`] IR.

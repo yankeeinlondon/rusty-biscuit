@@ -45,8 +45,20 @@ pub(super) fn parse_opening_tag(tag_content: &str) -> Option<(String, Vec<(Strin
             let mut in_value = false;
             let mut quote_char: Option<char> = None;
 
-            for c in attr_str.chars() {
+            let mut chars = attr_str.chars().peekable();
+            while let Some(c) = chars.next() {
                 if in_value {
+                    // Resolve the `\<`, `\>`, `\\`, `\"`, `\'` escapes that
+                    // `Prose::quoted_attr` applies so the value boundary
+                    // survives parsing; the backslash itself is dropped.
+                    if c == '\\'
+                        && chars
+                            .peek()
+                            .is_some_and(|&n| matches!(n, '<' | '>' | '\\' | '"' | '\''))
+                    {
+                        current_value.push(chars.next().unwrap());
+                        continue;
+                    }
                     if let Some(qc) = quote_char {
                         if c == qc {
                             attrs.push((current_attr.clone(), current_value.clone()));
@@ -324,14 +336,42 @@ pub(super) fn parse_nodes(content: &str, code_blocks: &[FencedCode]) -> Vec<Pros
 
         // ── Block tags: <tag>content</tag> ────────────────────────────────
         if ch == '<' {
+            // Scan the tag declaration up to its terminating `>`. The scan
+            // is quote-aware (a `>` inside a quoted attribute value is not
+            // the terminator) and escape-aware (the `\<`, `\>`, `\\`, `\"`,
+            // `\'` sequences produced by `Prose::quoted_attr` are preserved
+            // verbatim, so an escaped delimiter never ends the tag).
+            // `parse_opening_tag` resolves the escapes inside attribute
+            // values; keeping `tag_content` raw here lets an unrecognized
+            // declaration fall back to literal text intact.
             let mut tag_content = String::new();
             let mut found_close = false;
-            for c in chars.by_ref() {
-                if c == '>' {
-                    found_close = true;
-                    break;
+            let mut quote: Option<char> = None;
+            while let Some(c) = chars.next() {
+                match c {
+                    '\\' => {
+                        tag_content.push('\\');
+                        if let Some(&next) = chars.peek()
+                            && matches!(next, '<' | '>' | '\\' | '"' | '\'')
+                        {
+                            tag_content.push(next);
+                            chars.next();
+                        }
+                    }
+                    '"' | '\'' => {
+                        match quote {
+                            Some(q) if q == c => quote = None,
+                            None => quote = Some(c),
+                            Some(_) => {}
+                        }
+                        tag_content.push(c);
+                    }
+                    '>' if quote.is_none() => {
+                        found_close = true;
+                        break;
+                    }
+                    _ => tag_content.push(c),
                 }
-                tag_content.push(c);
             }
 
             if found_close

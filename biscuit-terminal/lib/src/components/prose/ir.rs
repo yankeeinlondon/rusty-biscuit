@@ -209,6 +209,38 @@ mod tests {
     }
 
     #[test]
+    fn quoted_attr_escaped_delimiter_survives_tag_scan() {
+        use crate::components::prose::Prose;
+        // `quoted_attr` escapes `>` so the tag-declaration scanner does not
+        // mistake it for the tag terminator; the parser must recover the
+        // exact, un-escaped href.
+        let attr = Prose::quoted_attr("https://example.com/a>b");
+        assert_eq!(
+            parse(&format!("<a href={attr}>x</a>")),
+            vec![ProseNode::Link {
+                href: "https://example.com/a>b".into(),
+                children: vec![ProseNode::Text("x".into())],
+            }]
+        );
+    }
+
+    #[test]
+    fn quoted_attr_value_with_both_quote_types_round_trips() {
+        use crate::components::prose::Prose;
+        // A value carrying `>`, single quotes, and double quotes must
+        // survive the quote-aware, escape-aware tag scan intact.
+        let value = r#"https://example.com/a>b?q='x'&r="y""#;
+        let attr = Prose::quoted_attr(value);
+        assert_eq!(
+            parse(&format!("<a href={attr}>x</a>")),
+            vec![ProseNode::Link {
+                href: value.into(),
+                children: vec![ProseNode::Text("x".into())],
+            }]
+        );
+    }
+
+    #[test]
     fn fenced_code_block_is_opaque() {
         assert_eq!(
             parse("```yaml\n**x**\n```"),

@@ -162,6 +162,28 @@ mod tests {
     }
 
     #[test]
+    fn link_href_from_quoted_attr_preserves_escaped_delimiter() {
+        let attr = Prose::quoted_attr("https://example.com/a>b");
+        let h = html(&format!("<a href={attr}>x</a>"));
+        assert!(
+            h.contains(r#"<a href="https://example.com/a>b">x</a>"#),
+            "got: {h}"
+        );
+    }
+
+    #[test]
+    fn link_href_from_quoted_attr_with_both_quote_types_is_attribute_escaped() {
+        let attr = Prose::quoted_attr(r#"https://example.com/a>b?q='x'&r="y""#);
+        let h = html(&format!("<a href={attr}>x</a>"));
+        assert!(
+            h.contains(
+                r#"<a href="https://example.com/a>b?q=&#39;x&#39;&amp;r=&quot;y&quot;">x</a>"#
+            ),
+            "got: {h}"
+        );
+    }
+
+    #[test]
     fn foreground_color_uses_span_style() {
         let h = html("<red>x</red>");
         assert!(h.contains("<span style=\"color: rgb("), "got: {h}");
