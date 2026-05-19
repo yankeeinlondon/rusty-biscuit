@@ -2081,6 +2081,29 @@ mod render_tree_tests {
     }
 
     #[test]
+    fn render_tree_task_hint_marker_color_fallback_all_states() {
+        use renderable::tree::TaskState;
+        // Color but no Nerd Font: the colored ASCII fallback is used for
+        // every state. Escape codes are stripped so the glyph is asserted
+        // exactly. `InProgress` and `Blocked` share the `⏺` glyph (they
+        // differ only by color), the rest are distinct.
+        let opts = opts_with(ColorDepth::TrueColor, Some(false));
+        let expected = [
+            (TaskState::Open, "[ ]"),
+            (TaskState::InProgress, "[⏺]"),
+            (TaskState::Completed, "[✔]"),
+            (TaskState::Blocked, "[⏺]"),
+            (TaskState::Cancelled, "[-]"),
+        ];
+        for (state, marker) in expected {
+            let list = RenderNode::list(false, None, vec![task_item(state, "task")]);
+            let out = render_terminal_node(&list, &opts).expect("render").output;
+            let plain = strip_escape_codes(&out);
+            assert_eq!(plain, format!("- {marker} task"), "{state:?}");
+        }
+    }
+
+    #[test]
     fn render_tree_default_task_list_without_hints_unchanged() {
         // A plain task list with no task hints keeps the GFM checkbox.
         let list = RenderNode::list(
