@@ -362,6 +362,11 @@ fn check_node(
         ));
     }
 
+    // Typed render hints with a known key but a malformed token or value are
+    // rejected, so a serialized-and-reloaded tree cannot silently lose hint
+    // intent by falling back to a default.
+    check_hints(node, &span, report);
+
     // Layout attributes are permitted only on block-level nodes.
     if let Some(layout) = node.attrs.layout() {
         if is_inline_kind(&node.kind) {
@@ -377,6 +382,92 @@ fn check_node(
                 format!("invalid layout: {err}"),
                 span,
             ));
+        }
+    }
+}
+
+/// Validates typed render hints whose key is present but whose serialized
+/// token or value is malformed.
+///
+/// The hint accessors deliberately fall back to a default for unrecognized
+/// tokens so a renderer never panics. That makes a malformed hint *invisible*
+/// once a tree is serialized and reloaded, which weakens the render tree as a
+/// typed IR. This check restores a hard signal: a known hint key carrying an
+/// invalid token or wrong value type becomes an error-severity finding.
+fn check_hints(node: &RenderNode, span: &Option<SourceSpan>, report: &mut ValidationReport) {
+    use crate::tree::{HintNamespace, ListMarkerPolicy, SequenceJoin, TaskState};
+
+    // Sequence-join token must be a recognized join policy.
+    if let Some(value) = node.attrs.get_hint(HintNamespace::LAYOUT, "sequence_join") {
+        let valid = value
+            .as_str()
+            .is_some_and(|token| SequenceJoin::from_token(token).is_some());
+        if !valid {
+            report.findings.push(error(
+                format!("invalid sequence-join hint value: {value}"),
+                span.clone(),
+            ));
+        }
+    }
+
+    // List marker policy token must be a recognized policy.
+    if let Some(value) = node.attrs.get_hint(HintNamespace::LIST, "marker_policy") {
+        let valid = value
+            .as_str()
+            .is_some_and(|token| ListMarkerPolicy::from_token(token).is_some());
+        if !valid {
+            report.findings.push(error(
+                format!("invalid list marker policy hint value: {value}"),
+                span.clone(),
+            ));
+        }
+    }
+
+    // Task-state token must be a recognized state.
+    if let Some(value) = node.attrs.get_hint(HintNamespace::WIDGET_TASK, "state") {
+        let valid = value
+            .as_str()
+            .is_some_and(|token| TaskState::from_token(token).is_some());
+        if !valid {
+            report.findings.push(error(
+                format!("invalid task state hint value: {value}"),
+                span.clone(),
+            ));
+        }
+    }
+
+    // The two-column `left_width_kind` must be `fixed` or `percent`, and the
+    // paired `left_width` value must match the kind's expected JSON type.
+    if let Some(kind) = node
+        .attrs
+        .get_hint(HintNamespace::WIDGET_COLUMNS, "left_width_kind")
+    {
+        let width = node.attrs.get_hint(HintNamespace::WIDGET_COLUMNS, "left_width");
+        match kind.as_str() {
+            Some("fixed") => {
+                if let Some(width) = width
+                    && u32::try_from(width.as_u64().unwrap_or(u64::MAX)).is_err()
+                {
+                    report.findings.push(error(
+                        format!("invalid columns left_width for 'fixed' kind: {width}"),
+                        span.clone(),
+                    ));
+                }
+            }
+            Some("percent") => {
+                if let Some(width) = width
+                    && width.as_f64().is_none()
+                {
+                    report.findings.push(error(
+                        format!("invalid columns left_width for 'percent' kind: {width}"),
+                        span.clone(),
+                    ));
+                }
+            }
+            _ => report.findings.push(error(
+                format!("invalid columns left_width_kind hint value: {kind}"),
+                span.clone(),
+            )),
         }
     }
 }
@@ -778,6 +869,128 @@ mod tests {
         );
         table.attrs.set_table_title("Caption");
         let root = RenderNode::root(vec![table]);
+        assert!(ensure_valid(&root).is_ok());
+    }
+
+    // ── Malformed typed-hint validation ────────────────────────────────────
+
+    #[test]
+    fn invalid_sequence_join_token_is_an_error() {
+        use crate::tree::HintNamespace;
+        let mut root = RenderNode::root(vec![RenderNode::text("x")]);
+        root.attrs.set_hint(
+            HintNamespace::LAYOUT,
+            "sequence_join",
+            serde_json::json!("bogus"),
+        );
+        let report = validate(&root, ValidationMode::Full);
+        assert!(
+            report
+                .errors()
+                .any(|f| f.message.contains("invalid sequence-join hint value"))
+        );
+    }
+
+    #[test]
+    fn invalid_list_marker_policy_token_is_an_error() {
+        use crate::tree::HintNamespace;
+        let mut list = RenderNode::list(false, None, vec![RenderNode::list_item(None, vec![])]);
+        list.attrs.set_hint(
+            HintNamespace::LIST,
+            "marker_policy",
+            serde_json::json!("bogus"),
+        );
+        let root = RenderNode::root(vec![list]);
+        let report = validate(&root, ValidationMode::Full);
+        assert!(
+            report
+                .errors()
+                .any(|f| f.message.contains("invalid list marker policy hint value"))
+        );
+    }
+
+    #[test]
+    fn invalid_task_state_token_is_an_error() {
+        use crate::tree::HintNamespace;
+        let mut item = RenderNode::list_item(Some(false), vec![]);
+        item.attrs
+            .set_hint(HintNamespace::WIDGET_TASK, "state", serde_json::json!("bogus"));
+        let root = RenderNode::root(vec![RenderNode::list(false, None, vec![item])]);
+        let report = validate(&root, ValidationMode::Full);
+        assert!(
+            report
+                .errors()
+                .any(|f| f.message.contains("invalid task state hint value"))
+        );
+    }
+
+    #[test]
+    fn wrong_type_task_state_hint_is_an_error() {
+        use crate::tree::HintNamespace;
+        let mut item = RenderNode::list_item(Some(false), vec![]);
+        item.attrs
+            .set_hint(HintNamespace::WIDGET_TASK, "state", serde_json::json!(42));
+        let root = RenderNode::root(vec![RenderNode::list(false, None, vec![item])]);
+        let report = validate(&root, ValidationMode::Full);
+        assert!(
+            report
+                .errors()
+                .any(|f| f.message.contains("invalid task state hint value"))
+        );
+    }
+
+    #[test]
+    fn invalid_columns_left_width_kind_is_an_error() {
+        use crate::tree::HintNamespace;
+        let mut bq = RenderNode::block_quote(vec![]);
+        bq.attrs.set_hint(
+            HintNamespace::WIDGET_COLUMNS,
+            "left_width_kind",
+            serde_json::json!("bogus"),
+        );
+        let root = RenderNode::root(vec![bq]);
+        let report = validate(&root, ValidationMode::Full);
+        assert!(
+            report
+                .errors()
+                .any(|f| f.message.contains("invalid columns left_width_kind"))
+        );
+    }
+
+    #[test]
+    fn invalid_columns_left_width_value_is_an_error() {
+        use crate::tree::HintNamespace;
+        let mut bq = RenderNode::block_quote(vec![]);
+        bq.attrs.set_hint(
+            HintNamespace::WIDGET_COLUMNS,
+            "left_width_kind",
+            serde_json::json!("fixed"),
+        );
+        bq.attrs.set_hint(
+            HintNamespace::WIDGET_COLUMNS,
+            "left_width",
+            serde_json::json!("not-a-number"),
+        );
+        let root = RenderNode::root(vec![bq]);
+        let report = validate(&root, ValidationMode::Full);
+        assert!(
+            report
+                .errors()
+                .any(|f| f.message.contains("invalid columns left_width for 'fixed'"))
+        );
+    }
+
+    #[test]
+    fn well_formed_typed_hints_pass_validation() {
+        use crate::tree::{ListMarkerPolicy, SequenceJoin, TaskHints, TaskState};
+        let mut item = RenderNode::list_item(Some(false), vec![]);
+        item.attrs.set_task_hints(&TaskHints {
+            state: TaskState::Blocked,
+        });
+        let mut list = RenderNode::list(false, None, vec![item]);
+        list.attrs.set_list_marker_policy(ListMarkerPolicy::TreeConnectors);
+        let mut root = RenderNode::root(vec![list]);
+        root.attrs.set_sequence_join(SequenceJoin::None);
         assert!(ensure_valid(&root).is_ok());
     }
 

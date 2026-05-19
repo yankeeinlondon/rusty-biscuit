@@ -44,11 +44,20 @@ pub(crate) fn progress_html(
     let value = hints.value.clamp(0.0, 1.0);
     let percentage = (value * 100.0).round() as u32;
 
-    // The label is everything before the trailing percentage token.
-    let pct_suffix = format!(" {percentage}%");
-    let label = fallback_text
-        .strip_suffix(&pct_suffix)
-        .filter(|label| !label.is_empty());
+    // The label is everything before a trailing numeric percentage token
+    // (`"Loading 60%"` → `"Loading"`). The token is stripped by *shape* — a
+    // run of digits followed by `%` — rather than by the clamped percentage,
+    // so the label stays stable even when the component value clamps to a
+    // different percentage than the one written in the fallback text.
+    let label = {
+        let trimmed = fallback_text.trim_end();
+        let stripped = trimmed
+            .strip_suffix('%')
+            .map(|head| head.trim_end_matches(|c: char| c.is_ascii_digit()))
+            .unwrap_or(trimmed)
+            .trim_end();
+        (stripped != trimmed && !stripped.is_empty()).then_some(stripped)
+    };
 
     let defaults = ProgressHints::default();
     let mut data_attrs = String::new();
@@ -84,11 +93,15 @@ pub(crate) fn progress_html(
         format!(r#" style="{outer_style}""#)
     };
 
-    let filled_style = hints
-        .filled_color
-        .and_then(color_to_css)
-        .map(|css| format!(r#" style="background-color:{css}""#))
-        .unwrap_or_default();
+    // The filled span carries width and (optional) color in a single `style`
+    // attribute — emitting a second `style` would be invalid HTML.
+    let filled_style = {
+        let mut decls = vec![format!("width:{percentage}%")];
+        if let Some(css) = hints.filled_color.and_then(color_to_css) {
+            decls.push(format!("background-color:{css}"));
+        }
+        format!(r#" style="{}""#, decls.join(";"))
+    };
     let track_style = {
         let mut decls = vec![format!("width:{}ch", hints.bar_width)];
         if let Some(css) = hints.empty_color.and_then(color_to_css) {
@@ -107,7 +120,7 @@ pub(crate) fn progress_html(
             r#"aria-valuemax="100" aria-valuenow="{now}"{label_attr}{data}{style}>"#,
             r#"{label_html}"#,
             r#"<span class="progress-track"{track}>"#,
-            r#"<span class="progress-filled"{filled} style="width:{pct}%"></span>"#,
+            r#"<span class="progress-filled"{filled}></span>"#,
             r#"</span>"#,
             r#"<span class="progress-percentage">{pct}%</span>"#,
             r#"</span>"#,

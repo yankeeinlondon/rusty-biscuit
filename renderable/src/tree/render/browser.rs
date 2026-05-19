@@ -192,13 +192,21 @@ struct Writer<'a> {
 impl Writer<'_> {
     /// Renders a single node and its subtree to a [`BrowserFragment<Ready>`].
     ///
-    /// A node carrying a [`Style`](crate::style::Style) with bold / italic /
-    /// strikethrough emphasis has its rendered fragment wrapped in the
-    /// matching semantic HTML elements. The color, background, underline,
-    /// dim, and blink layers are lowered to inline CSS by [`node_attributes`].
+    /// A node's bold / italic / strikethrough [`Style`](crate::style::Style)
+    /// emphasis is lowered differently by element category: an **inline** node
+    /// has its fragment wrapped in the matching semantic elements
+    /// (`<strong>`, `<em>`, `<s>`); a **block** node lowers the same emphasis
+    /// to inline CSS via [`node_attributes`], because wrapping a block element
+    /// inside `<strong>`/`<em>`/`<s>` is invalid HTML. The color, background,
+    /// underline, dim, and blink layers always lower to CSS.
     fn render(&mut self, node: &RenderNode) -> Result<BrowserFragment<Ready>, RenderError> {
         let fragment = self.render_kind(node)?;
-        Ok(wrap_style_emphasis(&node.attrs, fragment))
+        if is_inline_node_kind(&node.kind) {
+            Ok(wrap_style_emphasis(&node.attrs, fragment))
+        } else {
+            // Block emphasis is already lowered to CSS by `node_attributes`.
+            Ok(fragment)
+        }
     }
 
     /// Renders a single node by its [`NodeKind`], without applying the
@@ -437,13 +445,9 @@ impl Writer<'_> {
     ) -> Result<BrowserFragment<Ready>, RenderError> {
         // The accessible label is recovered from the paragraph's fallback
         // text — the same `"{label} {pct}%"` shape the terminal renderer uses.
-        let fallback_text = self.render_each(children)?.iter().fold(
-            String::new(),
-            |mut acc, fragment| {
-                acc.push_str(&fragment.render());
-                acc
-            },
-        );
+        // The *plain text* of the children is collected (not their rendered
+        // HTML) so the label is escaped exactly once by `progress_html`.
+        let fallback_text = plain_text(children);
         let layout_css = node
             .attrs
             .layout()
@@ -464,14 +468,33 @@ impl Writer<'_> {
     ) -> Result<BrowserFragment<Ready>, RenderError> {
         let tag = if ordered { BlockTag::Ol } else { BlockTag::Ul };
         let mut fragment = BrowserFragment::new().define_as_block_tag(tag, "");
-        // A typed list marker policy degrades to native nested lists in the
-        // browser. `None` and `TreeConnectors` both suppress the default
-        // bullet via `list-style:none`; the browser never emits terminal
-        // box-drawing connector text.
+        // A typed list marker policy lowers per its browser fidelity:
+        //
+        // - `None` is *faithful* — the browser genuinely has a no-marker list
+        //   (`list-style:none`), so it degrades silently with no diagnostic.
+        // - `TreeConnectors` is *lossy* — the browser cannot draw terminal
+        //   box-drawing connector geometry, so it degrades to a plain
+        //   no-marker list and reports the loss per the strictness model.
         let marker_css = match node.attrs.list_marker_policy() {
             crate::tree::ListMarkerPolicy::Default => None,
-            crate::tree::ListMarkerPolicy::None
-            | crate::tree::ListMarkerPolicy::TreeConnectors => Some("list-style:none"),
+            crate::tree::ListMarkerPolicy::None => Some("list-style:none"),
+            crate::tree::ListMarkerPolicy::TreeConnectors => {
+                let message = "list marker policy 'tree_connectors' has no \
+                               browser equivalent; degraded to a plain \
+                               no-marker list"
+                    .to_string();
+                match self.opts.strictness {
+                    RenderStrictness::Strict => {
+                        return Err(RenderError::LossyRejected { message });
+                    }
+                    RenderStrictness::Warn => {
+                        self.diagnostics
+                            .push(Diagnostic::lossy(message, Some(node.span.clone())));
+                    }
+                    RenderStrictness::Lossy => {}
+                }
+                Some("list-style:none")
+            }
         };
         let attributes = node_attributes(&node.attrs, false);
         let has_style = attributes
@@ -650,14 +673,25 @@ impl Writer<'_> {
         };
         let tag = if header { BlockTag::Th } else { BlockTag::Td };
         let mut fragment = BrowserFragment::new().define_as_block_tag(tag, "");
+        // Column alignment merges into the cell's existing `style` attribute
+        // (from node `Style` / `Layout`) rather than emitting a second,
+        // conflicting `style` — the same merge the columns and list paths use.
+        let align_css = align_value(align).map(|value| format!("text-align:{value}"));
+        let mut style_emitted = false;
         for attr in node_attributes(&cell.attrs, false) {
-            fragment = fragment.add_attribute(attr);
+            match (&attr, &align_css) {
+                (HtmlAttribute::Other(key, value), Some(extra)) if key == "style" => {
+                    fragment = fragment.add_attribute(HtmlAttribute::Other(
+                        "style".into(),
+                        format!("{value};{extra}"),
+                    ));
+                    style_emitted = true;
+                }
+                _ => fragment = fragment.add_attribute(attr),
+            }
         }
-        if let Some(value) = align_value(align) {
-            fragment = fragment.add_attribute(HtmlAttribute::Other(
-                "style".into(),
-                format!("text-align:{value}"),
-            ));
+        if let Some(extra) = align_css.filter(|_| !style_emitted) {
+            fragment = fragment.add_attribute(HtmlAttribute::Other("style".into(), extra));
         }
         for child in children {
             fragment = fragment.add_component(self.render(child)?);
@@ -854,6 +888,54 @@ fn align_value(align: ColumnAlign) -> Option<&'static str> {
     }
 }
 
+/// Returns `true` for [`NodeKind`] variants that are inline (phrasing-level).
+///
+/// Inline nodes have their bold / italic / strikethrough `Style` emphasis
+/// lowered to semantic element wrappers; block nodes lower the same emphasis
+/// to CSS, because wrapping a block element in `<strong>`/`<em>`/`<s>` is
+/// invalid HTML.
+fn is_inline_node_kind(kind: &NodeKind) -> bool {
+    matches!(
+        kind,
+        NodeKind::Text { .. }
+            | NodeKind::Emphasis { .. }
+            | NodeKind::Strong { .. }
+            | NodeKind::Delete { .. }
+            | NodeKind::Span { .. }
+            | NodeKind::InlineCode { .. }
+            | NodeKind::Link { .. }
+            | NodeKind::Image { .. }
+            | NodeKind::FootnoteReference { .. }
+            | NodeKind::SoftBreak
+            | NodeKind::HardBreak
+    )
+}
+
+/// Collects the plain text content of a phrasing subtree.
+///
+/// Used to recover a `Progress` widget's accessible label from its paragraph
+/// children without HTML-escaping noise — the collected text is escaped
+/// exactly once, by `progress_html`.
+fn plain_text(nodes: &[RenderNode]) -> String {
+    fn collect(node: &RenderNode, out: &mut String) {
+        match &node.kind {
+            NodeKind::Text { value } | NodeKind::InlineCode { value } => out.push_str(value),
+            NodeKind::Image { alt, .. } => out.push_str(alt),
+            NodeKind::SoftBreak | NodeKind::HardBreak => out.push(' '),
+            _ => {
+                for child in node.children() {
+                    collect(child, out);
+                }
+            }
+        }
+    }
+    let mut out = String::new();
+    for node in nodes {
+        collect(node, &mut out);
+    }
+    out
+}
+
 /// Returns `true` for [`BlockTag`] variants that represent inline elements.
 fn is_inline_block_tag(tag: &BlockTag) -> bool {
     matches!(
@@ -903,10 +985,11 @@ fn node_attributes(attrs: &NodeAttrs, inline: bool) -> Vec<HtmlAttribute> {
         }
     }
     // `Style` text-appearance/box-color CSS rides on both block and inline
-    // nodes. The emphasis wrappers (`<strong>`, `<em>`, `<s>`) are applied
-    // separately by `wrap_style_emphasis`.
+    // nodes. Bold / italic / strikethrough emphasis lowers to CSS here for
+    // block nodes; for inline nodes it is applied as semantic wrappers by
+    // `wrap_style_emphasis` instead, so the CSS form is suppressed.
     if let Some(style) = attrs.style().filter(|s| !s.is_empty()) {
-        let css = style_css_declarations(&style);
+        let css = style_css_declarations(&style, !inline);
         if !css.is_empty() {
             decls.push(css);
         }
@@ -920,12 +1003,17 @@ fn node_attributes(attrs: &NodeAttrs, inline: bool) -> Vec<HtmlAttribute> {
 /// Lowers the CSS-bearing layers of a [`Style`](crate::style::Style) to an
 /// inline CSS declaration string.
 ///
-/// Covers `color`, `background` (as `background-color`), and the
-/// underline / dim / blink emphasis layers. The bold / italic / strikethrough
-/// layers are lowered to semantic wrappers by [`wrap_style_emphasis`] instead.
+/// Always covers `color`, `background` (as `background-color`), and the
+/// underline / dim / blink emphasis layers. When `emit_emphasis` is `true`
+/// (a block node) the bold / italic / strikethrough layers are *also* lowered
+/// here, to `font-weight` / `font-style` / `text-decoration-line` — wrapping a
+/// block element in `<strong>`/`<em>`/`<s>` would be invalid HTML. When it is
+/// `false` (an inline node) those three layers are left to the semantic
+/// wrappers applied by [`wrap_style_emphasis`].
+///
 /// `border` and `fill` are intentionally ignored until the broader Browser
 /// Style box-painting work defines those semantics.
-fn style_css_declarations(style: &crate::style::Style) -> String {
+fn style_css_declarations(style: &crate::style::Style, emit_emphasis: bool) -> String {
     use crate::color::ColorMode;
     use crate::target::RenderTarget;
 
@@ -960,15 +1048,30 @@ fn style_css_declarations(style: &crate::style::Style) -> String {
     if style.emphasis.blink {
         decls.push("text-decoration:blink".into());
     }
+    // Block emphasis: lower bold / italic / strikethrough to CSS rather than
+    // to the semantic element wrappers used for inline nodes.
+    if emit_emphasis {
+        if style.emphasis.bold {
+            decls.push("font-weight:bold".into());
+        }
+        if style.emphasis.italic {
+            decls.push("font-style:italic".into());
+        }
+        if style.emphasis.strikethrough {
+            decls.push("text-decoration-line:line-through".into());
+        }
+    }
     decls.join(";")
 }
 
 /// Wraps `fragment` in semantic emphasis tags (`<strong>`, `<em>`, `<s>`) for
 /// a node's declared [`Style`](crate::style::Style), preserving nesting.
 ///
-/// The underline / dim / blink layers are applied as CSS by
-/// [`style_css_declarations`]; this function applies only the bold / italic /
-/// strikethrough layers, which map to semantic HTML elements.
+/// This applies only the bold / italic / strikethrough layers and is invoked
+/// only for **inline** nodes — wrapping a block element in these tags is
+/// invalid HTML, so a block node lowers the same layers to CSS through
+/// [`style_css_declarations`]. The underline / dim / blink layers are always
+/// applied as CSS by [`style_css_declarations`].
 fn wrap_style_emphasis(attrs: &NodeAttrs, fragment: BrowserFragment<Ready>) -> BrowserFragment<Ready> {
     let Some(style) = attrs.style().filter(|s| !s.is_empty()) else {
         return fragment;
@@ -1678,6 +1781,77 @@ mod tests {
         assert_eq!(html(&para), "<p>hi</p>");
     }
 
+    /// Extracts the attribute list of the `<span class="progress-filled">`
+    /// element so its `style` attributes can be asserted exactly.
+    fn progress_filled_attrs(out: &str) -> &str {
+        let after = out
+            .split(r#"class="progress-filled""#)
+            .nth(1)
+            .expect("progress-filled span");
+        &after[..after.find('>').expect("filled span close")]
+    }
+
+    #[test]
+    fn progress_filled_color_and_width_share_one_style_attribute() {
+        use crate::color::{BasicColor, Color};
+        let node = progress_para(
+            "50%",
+            crate::tree::ProgressHints {
+                value: 0.5,
+                filled_color: Some(Color::BasicColor(BasicColor::Green)),
+                ..Default::default()
+            },
+        );
+        let out = html(&node);
+        let filled = progress_filled_attrs(&out);
+        // Exactly one `style` attribute, carrying both width and color.
+        assert_eq!(filled.matches("style=").count(), 1, "{out}");
+        assert!(filled.contains("width:50%"), "{out}");
+        assert!(filled.contains("background-color:#"), "{out}");
+    }
+
+    #[test]
+    fn progress_filled_without_color_has_single_width_style() {
+        let node = progress_para(
+            "25%",
+            crate::tree::ProgressHints { value: 0.25, ..Default::default() },
+        );
+        let out = html(&node);
+        let filled = progress_filled_attrs(&out);
+        assert_eq!(filled.matches("style=").count(), 1, "{out}");
+        assert!(filled.contains("width:25%"), "{out}");
+        assert!(!filled.contains("background-color"), "{out}");
+    }
+
+    #[test]
+    fn progress_label_with_special_chars_is_escaped_once() {
+        let node = progress_para(
+            r#"A < B & "C" 50%"#,
+            crate::tree::ProgressHints { value: 0.5, ..Default::default() },
+        );
+        let out = html(&node);
+        assert!(
+            out.contains(r#"aria-label="A &lt; B &amp; &quot;C&quot;""#),
+            "{out}"
+        );
+        // The label must be escaped exactly once — never double-escaped.
+        assert!(!out.contains("&amp;lt;"), "double-escaped label: {out}");
+    }
+
+    #[test]
+    fn progress_label_survives_value_clamp_mismatch() {
+        // The fallback text says 150% but the value clamps to 100%; the label
+        // is stripped by token shape, not by the clamped percentage, so it
+        // does not disappear.
+        let node = progress_para(
+            "Loading 150%",
+            crate::tree::ProgressHints { value: 1.5, ..Default::default() },
+        );
+        let out = html(&node);
+        assert!(out.contains(r#"aria-label="Loading""#), "{out}");
+        assert!(out.contains(r#"aria-valuenow="100""#), "{out}");
+    }
+
     // ── RT-TEXTBLOCK-001: browser Style lowering ───────────────────────────
 
     fn styled_para(style: crate::style::Style) -> RenderNode {
@@ -1713,8 +1887,10 @@ mod tests {
     }
 
     #[test]
-    fn style_bold_italic_strikethrough_use_semantic_wrappers() {
+    fn style_emphasis_on_block_node_lowers_to_css() {
         use crate::style::{Style, TextEmphasis};
+        // A styled *block* node lowers bold / italic / strikethrough to CSS —
+        // wrapping a `<p>` in `<strong>`/`<em>`/`<s>` is invalid HTML.
         let node = styled_para(Style {
             emphasis: TextEmphasis {
                 bold: true,
@@ -1724,12 +1900,31 @@ mod tests {
             },
             ..Default::default()
         });
-        let out = html(&node);
-        assert!(out.contains("<strong>"), "{out}");
-        assert!(out.contains("<em>"), "{out}");
-        assert!(out.contains("<s>"), "{out}");
-        // Nesting is preserved (strong outermost).
-        assert!(out.starts_with("<strong><em><s>"), "{out}");
+        assert_eq!(
+            html(&node),
+            r#"<p style="font-weight:bold;font-style:italic;text-decoration-line:line-through">text</p>"#
+        );
+    }
+
+    #[test]
+    fn style_emphasis_on_inline_span_uses_semantic_wrappers() {
+        use crate::style::{Style, TextEmphasis};
+        // A styled *inline* `Span` keeps the semantic emphasis wrappers, with
+        // `<strong>` outermost so the nesting is preserved.
+        let mut span = RenderNode::span(vec![], vec![RenderNode::text("x")]);
+        span.attrs.set_style(&Style {
+            emphasis: TextEmphasis {
+                bold: true,
+                italic: true,
+                strikethrough: true,
+                ..Default::default()
+            },
+            ..Default::default()
+        });
+        assert_eq!(
+            html(&span),
+            "<strong><em><s><span>x</span></s></em></strong>"
+        );
     }
 
     #[test]
@@ -1967,6 +2162,31 @@ mod tests {
         assert!(!html(&table).contains("<caption>"));
     }
 
+    #[test]
+    fn table_cell_alignment_merges_with_existing_style() {
+        use crate::color::{BasicColor, Color};
+        // A body cell carrying a foreground `Style` and a column alignment
+        // must emit exactly one `style` attribute holding both.
+        let mut cell = RenderNode::table_cell(vec![RenderNode::text("a")]);
+        cell.attrs.set_style(&crate::style::Style {
+            color: Some(universal_color(Color::BasicColor(BasicColor::Red))),
+            ..Default::default()
+        });
+        let table = RenderNode::table(
+            vec![ColumnAlign::Right],
+            vec![
+                RenderNode::table_row(vec![RenderNode::table_cell(vec![RenderNode::text("H")])]),
+                RenderNode::table_row(vec![cell]),
+            ],
+        );
+        let out = html(&table);
+        let after = out.split("<td").nth(1).expect("body cell");
+        let td_attrs = &after[..after.find('>').expect("td close")];
+        assert_eq!(td_attrs.matches("style=").count(), 1, "{out}");
+        assert!(td_attrs.contains("text-align:right"), "{out}");
+        assert!(td_attrs.contains("color:#"), "{out}");
+    }
+
     // ── RT-FILESYSTEM-001: browser marker policy ───────────────────────────
 
     #[test]
@@ -2007,6 +2227,122 @@ mod tests {
             vec![RenderNode::list_item(None, vec![RenderNode::text("a")])],
         );
         assert_eq!(html(&list), "<ul><li>a</li></ul>");
+    }
+
+    fn marker_policy_list(policy: crate::tree::ListMarkerPolicy) -> RenderNode {
+        let mut list = RenderNode::list(
+            false,
+            None,
+            vec![RenderNode::list_item(None, vec![RenderNode::text("a")])],
+        );
+        list.attrs.set_list_marker_policy(policy);
+        list
+    }
+
+    #[test]
+    fn marker_policy_none_is_faithful_with_no_diagnostic() {
+        // `None` maps faithfully to the browser's own no-marker list, so it
+        // degrades silently in every strictness mode.
+        for strictness in [
+            RenderStrictness::Strict,
+            RenderStrictness::Warn,
+            RenderStrictness::Lossy,
+        ] {
+            let list = marker_policy_list(crate::tree::ListMarkerPolicy::None);
+            let rendered =
+                render_browser_node(&list, &opts(strictness, RawHtmlPolicy::Escape))
+                    .expect("None marker policy is faithful in every mode");
+            assert!(rendered.output.render().contains("list-style:none"));
+            assert!(
+                rendered.diagnostics.is_empty(),
+                "None is faithful — no diagnostic: {strictness:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn marker_policy_tree_connectors_rejected_under_strict() {
+        let list = marker_policy_list(crate::tree::ListMarkerPolicy::TreeConnectors);
+        let result =
+            render_browser_node(&list, &opts(RenderStrictness::Strict, RawHtmlPolicy::Escape));
+        assert!(matches!(result, Err(RenderError::LossyRejected { .. })));
+    }
+
+    #[test]
+    fn marker_policy_tree_connectors_degrades_with_diagnostic_under_warn() {
+        let list = marker_policy_list(crate::tree::ListMarkerPolicy::TreeConnectors);
+        let rendered =
+            render_browser_node(&list, &opts(RenderStrictness::Warn, RawHtmlPolicy::Escape))
+                .expect("Warn degrades TreeConnectors");
+        assert!(rendered.output.render().contains("list-style:none"));
+        assert_eq!(rendered.diagnostics.len(), 1, "one lossy diagnostic");
+    }
+
+    #[test]
+    fn marker_policy_tree_connectors_silent_under_lossy() {
+        let list = marker_policy_list(crate::tree::ListMarkerPolicy::TreeConnectors);
+        let rendered =
+            render_browser_node(&list, &opts(RenderStrictness::Lossy, RawHtmlPolicy::Escape))
+                .expect("Lossy degrades TreeConnectors silently");
+        assert!(rendered.output.render().contains("list-style:none"));
+        assert!(rendered.diagnostics.is_empty());
+    }
+
+    // ── RT-TODO-001: browser task-state ────────────────────────────────────
+
+    #[test]
+    fn task_state_cancelled_and_in_progress_keep_portable_checkbox() {
+        use crate::tree::{TaskHints, TaskState};
+        for state in [TaskState::Cancelled, TaskState::InProgress] {
+            let mut item = RenderNode::list_item(Some(false), vec![RenderNode::text("t")]);
+            item.attrs.set_task_hints(&TaskHints { state });
+            let list = RenderNode::list(false, None, vec![item]);
+            let out = html(&list);
+            assert!(out.contains(r#"type="checkbox""#), "{state:?}: {out}");
+            assert!(out.contains(r#"class="task-list-item""#), "{state:?}: {out}");
+            assert!(out.contains("disabled"), "{state:?}: {out}");
+            // Terminal-only task glyphs must never leak into browser output.
+            for glyph in ['✔', '✗', '⏺', '☐', '⊝'] {
+                assert!(
+                    !out.contains(glyph),
+                    "{state:?} leaked terminal glyph {glyph}: {out}"
+                );
+            }
+        }
+    }
+
+    // ── RT-COMPOSE-001: browser sequence join ──────────────────────────────
+
+    #[test]
+    fn root_with_sequence_join_renders_children_in_div() {
+        // The browser ignores the sequence-join policy (it has no block
+        // separators to suppress); children still render in order in a `div`.
+        let mut root = RenderNode::root(vec![
+            RenderNode::text("inline"),
+            RenderNode::paragraph(vec![RenderNode::text("para")]),
+        ]);
+        root.attrs.set_sequence_join(crate::tree::SequenceJoin::None);
+        let rendered =
+            render_browser_node(&root, &BrowserRenderOptions::default()).expect("render");
+        assert_eq!(rendered.output.render(), "<div>inline<p>para</p></div>");
+    }
+
+    #[test]
+    fn document_with_sequence_join_root_renders_through_entry_point() {
+        let mut root = RenderNode::root(vec![RenderNode::paragraph(vec![RenderNode::text("x")])]);
+        root.attrs.set_sequence_join(crate::tree::SequenceJoin::None);
+        let doc = Document {
+            sources: SourceRegistry::default(),
+            metadata: DocumentMetadata::default(),
+            root,
+        };
+        let rendered =
+            render_browser_document(&doc, &BrowserRenderOptions::default()).expect("render");
+        assert!(
+            rendered.output.render().contains("<body><p>x</p></body>"),
+            "{}",
+            rendered.output.render()
+        );
     }
 
     #[test]

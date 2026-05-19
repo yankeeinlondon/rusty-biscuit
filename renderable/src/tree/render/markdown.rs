@@ -301,10 +301,17 @@ impl Writer<'_> {
                 children,
             } => {
                 let text = self.render_inline(children)?;
-                Ok(format!("[{text}]({})", link_target(url, title)))
+                Ok(format!("[{text}]({})", self.link_target(url, title)))
             }
             NodeKind::Image { url, title, alt } => {
-                Ok(format!("![{alt}]({})", link_target(url, title)))
+                // The alt text is a literal Markdown segment, so inside a
+                // table cell it is escaped just like a `Text` node.
+                let alt = if self.table_cell_depth > 0 {
+                    escape_table_cell_text(alt)
+                } else {
+                    alt.clone()
+                };
+                Ok(format!("![{alt}]({})", self.link_target(url, title)))
             }
             NodeKind::FootnoteReference { identifier } => Ok(format!("[^{identifier}]")),
             // A soft break is rendered as a newline; the surrounding block
@@ -573,6 +580,25 @@ impl Writer<'_> {
         }
     }
 
+    /// Formats a link/image target, appending a quoted title when present.
+    ///
+    /// Inside a table cell the URL and title are escaped the same way a
+    /// `Text` node is — a literal `|` or newline in either value would
+    /// otherwise split the GFM pipe-delimited row.
+    fn link_target(&self, url: &str, title: &Option<String>) -> String {
+        let escape = |text: &str| {
+            if self.table_cell_depth > 0 {
+                escape_table_cell_text(text)
+            } else {
+                text.to_string()
+            }
+        };
+        match title {
+            Some(title) => format!("{} \"{}\"", escape(url), escape(title)),
+            None => escape(url),
+        }
+    }
+
     /// Renders an unsupported node according to strictness.
     fn render_unsupported(
         &mut self,
@@ -596,14 +622,6 @@ impl Writer<'_> {
             }
             RenderStrictness::Lossy => Ok(String::new()),
         }
-    }
-}
-
-/// Formats a link/image target, appending a quoted title when present.
-fn link_target(url: &str, title: &Option<String>) -> String {
-    match title {
-        Some(title) => format!("{url} \"{title}\""),
-        None => url.to_string(),
     }
 }
 
@@ -1364,6 +1382,37 @@ mod tests {
     fn text_outside_table_keeps_literal_pipe_and_newline() {
         let para = RenderNode::paragraph(vec![RenderNode::text("a | b\nc")]);
         assert_eq!(render(&para).output, "a | b\nc");
+    }
+
+    #[test]
+    fn table_cell_escapes_pipe_in_link_url_and_title() {
+        let link = RenderNode::link(
+            "a|b",
+            Some("t|t".into()),
+            vec![RenderNode::text("label")],
+        );
+        let out = render(&one_cell_table(link)).output;
+        assert!(out.contains(r#"[label](a\|b "t\|t")"#), "{out}");
+    }
+
+    #[test]
+    fn table_cell_escapes_newline_in_link_url() {
+        let link = RenderNode::link("a\nb", None, vec![RenderNode::text("x")]);
+        let out = render(&one_cell_table(link)).output;
+        assert!(out.contains("(a<br>b)"), "{out}");
+    }
+
+    #[test]
+    fn table_cell_escapes_pipe_in_image_alt_and_url() {
+        let image = RenderNode::image("img|x.png", None, "a|b");
+        let out = render(&one_cell_table(image)).output;
+        assert!(out.contains(r"![a\|b](img\|x.png)"), "{out}");
+    }
+
+    #[test]
+    fn link_outside_table_keeps_literal_pipe() {
+        let link = RenderNode::link("a|b", Some("t|t".into()), vec![RenderNode::text("x")]);
+        assert_eq!(render(&link).output, r#"[x](a|b "t|t")"#);
     }
 
     // ── RT-TWOCOLUMN-002: MarkdownPlus columns ─────────────────────────────
