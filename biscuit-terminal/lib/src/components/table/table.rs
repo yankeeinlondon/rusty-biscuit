@@ -4,10 +4,12 @@ use renderable::tree::{
     TableTerminalHints,
 };
 
+use renderable::style::Style;
+
 use crate::{
     components::renderable::TerminalRenderable,
     render_tree::render::resolve_cells,
-    render_tree::style::color_sgr,
+    render_tree::style::{SGR_RESET, color_sgr, text_appearance_sgr},
     terminal::Terminal,
     utils::{
         block_constraint::{sanitize_wrapped_lines, split_lines, visible_width, wrap_lines},
@@ -209,9 +211,39 @@ impl Table {
         self
     }
 
-    /// The typed [`TableStyle`] slot for this table's row striping.
+    /// The typed [`TableStyle`] slots for this table — row striping plus the
+    /// header and body appearance slots.
     pub fn style(&self) -> TableStyle {
-        self.style
+        self.style.clone()
+    }
+
+    /// Set the typed appearance [`Style`] applied to every header cell.
+    ///
+    /// A per-column override is merged on top via
+    /// [`TableColumn::with_header_style`]. The slot is lowered to ANSI by both
+    /// the bespoke renderer and the render-tree renderer.
+    ///
+    /// ## Examples
+    ///
+    /// ```
+    /// use biscuit_terminal::components::table::Table;
+    /// use renderable::style::{Style, TextEmphasis};
+    ///
+    /// let table = Table::new().with_header_style(Style {
+    ///     emphasis: TextEmphasis { bold: true, ..Default::default() },
+    ///     ..Style::default()
+    /// });
+    /// assert!(table.style().header.emphasis.bold);
+    /// ```
+    pub fn with_header_style(mut self, style: Style) -> Self {
+        self.style.header = style;
+        self
+    }
+
+    /// Set the typed appearance [`Style`] applied to every data (body) cell.
+    pub fn with_body_style(mut self, style: Style) -> Self {
+        self.style.body = style;
+        self
     }
 
     /// Returns a new `Table` containing only the columns (and their
@@ -253,7 +285,7 @@ impl Table {
                 .collect(),
             layout: self.layout.clone(),
             prefer_cursor_alignment: self.prefer_cursor_alignment,
-            style: self.style,
+            style: self.style.clone(),
         })
     }
 
@@ -576,11 +608,10 @@ impl Table {
         let column = self
             .column_definition(column_index)
             .unwrap_or(&default_column);
-        let header_content = column
-            .header_prose
-            .as_ref()
-            .map(|prose| prose.content())
-            .unwrap_or(&column.header);
+        // Width is measured from the plain header text: the typed header slot
+        // style is lowered to ANSI at render time and contributes no visible
+        // width.
+        let header_content = column.header.as_str();
         let header_lines = split_lines(header_content);
         let header_width = visible_width(header_content) as usize;
         let header_line_width = measure_max_explicit_line_width(header_content);
@@ -868,11 +899,15 @@ impl Table {
     /// escape sequences applied to even data rows (0-indexed: 1, 3, 5, ...).
     /// They are resolved by the caller through the shared, capability-aware
     /// color path so striping degrades with the terminal's color depth.
+    ///
+    /// `term` supplies the capability context for lowering the typed
+    /// [`TableStyle`] header and body appearance slots to ANSI.
     fn render_content(
         &self,
         available_width: Option<u32>,
         stripe_bg: Option<&str>,
         stripe_fg: Option<&str>,
+        term: &Terminal,
     ) -> String {
         if self.total_column_count() == 0 {
             return self.title.clone().unwrap_or_default();
@@ -906,10 +941,18 @@ impl Table {
                 .iter()
                 .map(|column_plan| {
                     let column = self.column_definition(column_plan.original_index);
-                    let header_content = column
-                        .and_then(|col| col.header_prose.as_ref().map(|p| p.content()))
-                        .unwrap_or_else(|| column.map(|col| col.header.as_str()).unwrap_or(""));
-                    wrap_cell_content(header_content, &WordWrap::None, column_plan.resolved_width)
+                    let header_content = column.map(|col| col.header.as_str()).unwrap_or("");
+                    let lines = wrap_cell_content(
+                        header_content,
+                        &WordWrap::None,
+                        column_plan.resolved_width,
+                    );
+                    // Apply the typed header slot style as ANSI per line, so
+                    // each wrapped line is self-contained and survives padding.
+                    let header_style = column
+                        .map(|col| col.effective_header_style(&self.style.header))
+                        .unwrap_or_default();
+                    apply_slot_style_lines(lines, &header_style, term)
                 })
                 .collect();
 
@@ -1001,6 +1044,7 @@ impl Table {
                     .map(ToString::to_string)
                     .unwrap_or_default();
                 let wrapped = wrap_cell_content(&content, &strategy, width);
+                let wrapped = apply_slot_style_lines(wrapped, &self.style.body, term);
                 let padded = apply_vertical_padding(wrapped, row_height, vertical_align, width);
                 cell_lines.push(padded);
             }
@@ -1108,6 +1152,7 @@ impl Table {
         term_width: u32,
         stripe_bg: Option<&str>,
         stripe_fg: Option<&str>,
+        term: &Terminal,
     ) -> String {
         if self.total_column_count() == 0 {
             return self.title.clone().unwrap_or_default();
@@ -1198,10 +1243,16 @@ impl Table {
                 .iter()
                 .map(|column_plan| {
                     let column = self.column_definition(column_plan.original_index);
-                    let header_content = column
-                        .and_then(|col| col.header_prose.as_ref().map(|p| p.content()))
-                        .unwrap_or_else(|| column.map(|col| col.header.as_str()).unwrap_or(""));
-                    wrap_cell_content(header_content, &WordWrap::None, column_plan.resolved_width)
+                    let header_content = column.map(|col| col.header.as_str()).unwrap_or("");
+                    let lines = wrap_cell_content(
+                        header_content,
+                        &WordWrap::None,
+                        column_plan.resolved_width,
+                    );
+                    let header_style = column
+                        .map(|col| col.effective_header_style(&self.style.header))
+                        .unwrap_or_default();
+                    apply_slot_style_lines(lines, &header_style, term)
                 })
                 .collect();
 
@@ -1289,6 +1340,7 @@ impl Table {
                     .map(ToString::to_string)
                     .unwrap_or_default();
                 let wrapped = wrap_cell_content(&content, &strategy, width);
+                let wrapped = apply_slot_style_lines(wrapped, &self.style.body, term);
                 let padded = apply_vertical_padding(wrapped, row_height, vertical_align, width);
                 cell_lines.push(padded);
             }
@@ -1350,14 +1402,24 @@ impl TerminalRenderable for Table {
     fn render_optimistic(&self, term_width: Option<u32>) -> String {
         let width = term_width.unwrap_or(80);
         // Opportunistic render assumes a truecolor dark terminal.
+        let term = Terminal::new_optimistic(width);
         let (stripe_bg, stripe_fg) =
             self.resolve_stripe_escapes(&ColorMode::Dark, ColorDepth::TrueColor);
         if self.prefer_cursor_alignment {
-            self.render_with_cursor_positioning(width, stripe_bg.as_deref(), stripe_fg.as_deref())
+            self.render_with_cursor_positioning(
+                width,
+                stripe_bg.as_deref(),
+                stripe_fg.as_deref(),
+                &term,
+            )
         } else {
             let available = self.layout.available_width(width);
-            let content =
-                self.render_content(Some(available), stripe_bg.as_deref(), stripe_fg.as_deref());
+            let content = self.render_content(
+                Some(available),
+                stripe_bg.as_deref(),
+                stripe_fg.as_deref(),
+                &term,
+            );
             // Box-drawing borders and column edges must stay vertically
             // aligned across all rows — align as a block.
             self.layout.apply_block_layout(&content, width)
@@ -1372,11 +1434,20 @@ impl TerminalRenderable for Table {
         let (stripe_bg, stripe_fg) =
             self.resolve_stripe_escapes(&term.color_mode(), term.color_depth);
         if self.prefer_cursor_alignment && term.is_tty {
-            self.render_with_cursor_positioning(width, stripe_bg.as_deref(), stripe_fg.as_deref())
+            self.render_with_cursor_positioning(
+                width,
+                stripe_bg.as_deref(),
+                stripe_fg.as_deref(),
+                term,
+            )
         } else {
             let available = self.layout.available_width(width);
-            let content =
-                self.render_content(Some(available), stripe_bg.as_deref(), stripe_fg.as_deref());
+            let content = self.render_content(
+                Some(available),
+                stripe_bg.as_deref(),
+                stripe_fg.as_deref(),
+                term,
+            );
             self.layout.apply_block_layout(&content, width)
         }
     }
@@ -1419,15 +1490,27 @@ impl TerminalRenderable for Table {
 
         let mut rows: Vec<RenderNode> = Vec::with_capacity(self.data.len() + 1);
 
-        // Header row: each cell is the column header text.
+        // Header row: each cell is the column header text. The effective
+        // header slot style (table-wide `TableStyle::header` merged with the
+        // per-column override) is projected onto the cell node so the tree
+        // renderer lowers the same appearance the bespoke renderer does.
         let header_cells: Vec<RenderNode> = self
             .columns
             .iter()
-            .map(|col| RenderNode::table_cell(vec![RenderNode::text(col.header.clone())]))
+            .map(|col| {
+                let mut cell =
+                    RenderNode::table_cell(vec![RenderNode::text(col.header.clone())]);
+                let header_style = col.effective_header_style(&self.style.header);
+                if !header_style.is_empty() {
+                    cell.attrs.set_style(&header_style);
+                }
+                cell
+            })
             .collect();
         rows.push(RenderNode::table_row(header_cells));
 
         // Data rows: each cell is the readable pre-formatted string plus hints.
+        // The table-wide body slot style is projected onto every data cell.
         for row in &self.data {
             let cells: Vec<RenderNode> = row
                 .iter()
@@ -1448,6 +1531,9 @@ impl TerminalRenderable for Table {
                         alignment: alignment_token(alignment).to_string(),
                         vertical_alignment: vertical_align_token(vertical).to_string(),
                     });
+                    if !self.style.body.is_empty() {
+                        cell.attrs.set_style(&self.style.body);
+                    }
                     cell
                 })
                 .collect();
@@ -2011,6 +2097,33 @@ fn render_row_with_cursor_positioning(
 ///
 /// Returns a vector of lines representing the wrapped content. Handles both
 /// explicit newlines in the content and word wrap overflow.
+/// Wraps each line of cell content in the SGR run of a typed slot [`Style`].
+///
+/// The header and body appearance slots ([`TableStyle`]) are lowered to ANSI
+/// through the shared, capability-aware [`text_appearance_sgr`] path. Each
+/// non-empty line is opened with the slot's SGR run and closed with
+/// [`SGR_RESET`], so a line stays self-contained across padding and column
+/// boundaries. An empty slot style returns the lines unchanged.
+fn apply_slot_style_lines(lines: Vec<String>, style: &Style, term: &Terminal) -> Vec<String> {
+    if style.is_empty() {
+        return lines;
+    }
+    let open = text_appearance_sgr(style, term);
+    if open.is_empty() {
+        return lines;
+    }
+    lines
+        .into_iter()
+        .map(|line| {
+            if line.is_empty() {
+                line
+            } else {
+                format!("{open}{line}{SGR_RESET}")
+            }
+        })
+        .collect()
+}
+
 pub(crate) fn wrap_cell_content(content: &str, strategy: &WordWrap, width: usize) -> Vec<String> {
     if width == 0 {
         return vec![String::new()];
@@ -2418,7 +2531,7 @@ mod tests {
                 vec!["Bob".into(), TableCellContent::Text("Inactive".to_string())],
             ]);
 
-        let result = table.render_content(None, None, None);
+        let result = table.render_content(None, None, None, &Terminal::default());
         let lines: Vec<&str> = result.lines().collect();
         // Top border, header, separator, row1, row2, bottom border
         assert_eq!(lines.len(), 6);
@@ -2440,7 +2553,7 @@ mod tests {
                 vec!["Python".into(), "1991".into()],
             ]);
 
-        let result = table.render_content(None, None, None);
+        let result = table.render_content(None, None, None, &Terminal::default());
         let lines: Vec<&str> = result.lines().collect();
         assert_eq!(lines.len(), 6);
         let header_width = visible_width(lines[1]);
@@ -2459,7 +2572,7 @@ mod tests {
                 vec!["".into(), "42".into()],
             ]);
 
-        let result = table.render_content(None, None, None);
+        let result = table.render_content(None, None, None, &Terminal::default());
         let lines: Vec<&str> = result.lines().collect();
         let header_width = visible_width(lines[1]);
         let row1_width = visible_width(lines[3]);
@@ -2488,7 +2601,7 @@ mod tests {
                 ],
             ]);
 
-        let result = table.render_content(None, None, None);
+        let result = table.render_content(None, None, None, &Terminal::default());
         let lines: Vec<&str> = result.lines().collect();
         // Both values should start at the same position (aligned by max content width).
         // With max_width alignment, content is positioned consistently across rows.
@@ -2533,7 +2646,7 @@ mod tests {
             ])
             .with_data(vec![vec![TableCellContent::Integer(42)]]);
 
-        let result = table.render_content(None, None, None);
+        let result = table.render_content(None, None, None, &Terminal::default());
         let lines: Vec<&str> = result.lines().collect();
         // Header line (index 1) should have right-aligned "ID" (integer type defaults to right)
         // "│      ID │" - ID right-aligned in 8-char width
@@ -2552,7 +2665,7 @@ mod tests {
             .with_columns(vec![TableColumn::new("X").with_fixed_width(10)])
             .with_data(vec![vec!["A".into()]]);
 
-        let result = table.render_content(None, None, None);
+        let result = table.render_content(None, None, None, &Terminal::default());
         let lines: Vec<&str> = result.lines().collect();
         let header_width = visible_width(lines[1]);
         let row_width = visible_width(lines[3]);
@@ -2569,7 +2682,7 @@ mod tests {
             .with_columns(vec![TableColumn::new("Name"), TableColumn::new("Age")])
             .with_data(vec![vec!["Alice".into(), "30".into()]]);
 
-        let result = table.render_content(None, None, None);
+        let result = table.render_content(None, None, None, &Terminal::default());
         // First line must be the top border, not a title
         assert!(
             result.starts_with('┌'),
@@ -3173,7 +3286,7 @@ mod tests {
         assert_eq!(plan.dropped_column_indices, vec![2]);
         assert_eq!(plan.dropped_notes, vec!["Notes hidden on narrow terminals"]);
 
-        let rendered = table.render_content(Some(28), None, None);
+        let rendered = table.render_content(Some(28), None, None, &Terminal::default());
         assert!(rendered.contains("- Notes hidden on narrow terminals"));
     }
 
@@ -3323,7 +3436,7 @@ mod tests {
                 vec!["Bob".into(), "25".into()],
             ]);
 
-        let result = table.render_content(None, None, None);
+        let result = table.render_content(None, None, None, &Terminal::default());
         // Should have: top border, header, separator, 2 data rows, bottom border = 6 lines
         assert_eq!(result.lines().count(), 6);
     }
@@ -3337,7 +3450,7 @@ mod tests {
             ])
             .with_data(vec![vec!["Rust".into(), TableCellContent::Integer(99800)]]);
 
-        let result = table.render_content(None, None, None);
+        let result = table.render_content(None, None, None, &Terminal::default());
         let lines: Vec<&str> = result.lines().collect();
 
         // Should have: top border, 2 header lines, separator, 1 data row, bottom border = 6 lines
@@ -3373,7 +3486,7 @@ mod tests {
                 "Line 1\nLine 2\nLine 3".to_string(),
             )]]);
 
-        let result = table.render_content(None, None, None);
+        let result = table.render_content(None, None, None, &Terminal::default());
         // Should have: top border, header, separator, 3 data lines, bottom border = 7 lines
         let lines: Vec<&str> = result.lines().collect();
         assert_eq!(
@@ -3400,7 +3513,7 @@ mod tests {
                 TableCellContent::Text("B\nC".to_string()),
             ]]);
 
-        let result = table.render_content(None, None, None);
+        let result = table.render_content(None, None, None, &Terminal::default());
         // Row should span 2 lines
         let lines: Vec<&str> = result.lines().collect();
         // top border, header, separator, 2 data lines, bottom border = 6 lines
@@ -3419,7 +3532,7 @@ mod tests {
                 TableCellContent::Text("Line1\nLine2\nLine3".to_string()),
             ]]);
 
-        let result = table.render_content(None, None, None);
+        let result = table.render_content(None, None, None, &Terminal::default());
         let lines: Vec<&str> = result.lines().collect();
 
         // Data starts at line 3 (after border, header, separator)
@@ -3443,7 +3556,7 @@ mod tests {
                 TableCellContent::Text("Line1\nLine2\nLine3".to_string()),
             ]]);
 
-        let result = table.render_content(None, None, None);
+        let result = table.render_content(None, None, None, &Terminal::default());
         let lines: Vec<&str> = result.lines().collect();
 
         // Data is at lines 3, 4, 5 (3 lines for 3-line content)
@@ -3467,7 +3580,7 @@ mod tests {
                 TableCellContent::Text("Line1\nLine2\nLine3".to_string()),
             ]]);
 
-        let result = table.render_content(None, None, None);
+        let result = table.render_content(None, None, None, &Terminal::default());
         let lines: Vec<&str> = result.lines().collect();
 
         // Data is at lines 3, 4, 5 (3 lines for 3-line content)
@@ -3485,7 +3598,7 @@ mod tests {
             .with_columns(vec![TableColumn::new("X")])
             .with_data(vec![vec![TableCellContent::Text("A\nB".to_string())]]);
 
-        let result = table.render_content(None, None, None);
+        let result = table.render_content(None, None, None, &Terminal::default());
         let lines: Vec<&str> = result.lines().collect();
 
         // All content lines should have consistent border positions
@@ -3624,7 +3737,7 @@ mod tests {
                 TableCellContent::Text("A\nB\nC".to_string()),
             ]]);
 
-        let result = table.render_content(None, None, None);
+        let result = table.render_content(None, None, None, &Terminal::default());
         let lines: Vec<&str> = result.lines().collect();
 
         // Row should have 3 data lines
@@ -3651,7 +3764,7 @@ mod tests {
             .with_columns(vec![TableColumn::new("Colored")])
             .with_data(vec![vec![TableCellContent::Text(colored_multiline)]]);
 
-        let result = table.render_content(None, None, None);
+        let result = table.render_content(None, None, None, &Terminal::default());
 
         // ANSI codes should be preserved
         assert!(
@@ -3681,7 +3794,7 @@ mod tests {
                 TableCellContent::Integer(12345),
             ]]);
 
-        let result = table.render_content(None, None, None);
+        let result = table.render_content(None, None, None, &Terminal::default());
         let lines: Vec<&str> = result.lines().collect();
 
         // Row should span 2 lines
@@ -3701,7 +3814,7 @@ mod tests {
             ])
             .with_data(vec![vec![TableCellContent::Integer(1_000_000)]]);
 
-        let result = table.render_content(None, None, None);
+        let result = table.render_content(None, None, None, &Terminal::default());
 
         // Number should NOT be wrapped even if exceeds width
         // (word wrap is forced to None for numeric columns)
@@ -3793,7 +3906,7 @@ mod tests {
                 vec![TableCellContent::Text("One\nTwo\nThree".to_string())],
             ]);
 
-        let result = table.render_content(None, None, None);
+        let result = table.render_content(None, None, None, &Terminal::default());
         let lines: Vec<&str> = result.lines().collect();
 
         // Total: border + header + sep + 1 + 2 + 3 + border = 10 lines
@@ -3813,7 +3926,7 @@ mod tests {
             .with_columns(vec![TableColumn::new("Links")])
             .with_data(vec![vec![TableCellContent::Text(link_multiline)]]);
 
-        let result = table.render_content(None, None, None);
+        let result = table.render_content(None, None, None, &Terminal::default());
 
         // OSC8 sequences should be preserved
         assert!(
@@ -3835,7 +3948,7 @@ mod tests {
                 TableCellContent::Text("Line 1\nLine 2".to_string()),
             ]]);
 
-        let result = table.render_content(None, None, None);
+        let result = table.render_content(None, None, None, &Terminal::default());
         let lines: Vec<&str> = result.lines().collect();
 
         // All content lines (non-border) should have the same visible width
@@ -3861,7 +3974,7 @@ mod tests {
             .with_columns(vec![TableColumn::new("Desc").with_max_width(10)])
             .with_data(vec![vec!["This is a longer text that should wrap".into()]]);
 
-        let result = table.render_content(None, None, None);
+        let result = table.render_content(None, None, None, &Terminal::default());
 
         // Content should wrap at column width
         let lines: Vec<&str> = result.lines().collect();
@@ -3912,8 +4025,7 @@ mod tests {
     fn test_stripe_bg_escape_degrades_across_color_depths() {
         // 256-color: the color cube; 16-color: the basic-palette fallback;
         // no color support: the stripe is dropped entirely.
-        let enhanced =
-            stripe_bg_escape(None, &ColorMode::Dark, ColorDepth::Enhanced).unwrap();
+        let enhanced = stripe_bg_escape(None, &ColorMode::Dark, ColorDepth::Enhanced).unwrap();
         assert!(enhanced.contains("\x1b[48;5;"), "got {enhanced:?}");
 
         let basic = stripe_bg_escape(None, &ColorMode::Dark, ColorDepth::Basic).unwrap();
@@ -3984,7 +4096,7 @@ mod tests {
             .with_columns(vec![TableColumn::new("X")])
             .with_data(vec![vec!["A".into()], vec!["B".into()]]);
 
-        let result = table.render_content(None, None, None);
+        let result = table.render_content(None, None, None, &Terminal::default());
         // No background escape codes should be present
         assert!(
             !result.contains("\x1b[48;2;"),
@@ -4003,7 +4115,7 @@ mod tests {
                 vec!["Row3".into()],
             ]);
 
-        let result = table.render_content(None, Some(bg_escape(&ColorMode::Dark)), None);
+        let result = table.render_content(None, Some(bg_escape(&ColorMode::Dark)), None, &Terminal::default());
         let lines: Vec<&str> = result.lines().collect();
 
         // Data rows start at line 3 (border=0, header=1, separator=2)
@@ -4033,7 +4145,7 @@ mod tests {
             .with_columns(vec![TableColumn::new("X")])
             .with_data(vec![vec!["A".into()], vec!["B".into()]]);
 
-        let result = table.render_content(None, Some(bg_escape(&ColorMode::Dark)), None);
+        let result = table.render_content(None, Some(bg_escape(&ColorMode::Dark)), None, &Terminal::default());
         // Striped rows should have a background reset at the end
         let striped_lines: Vec<&str> = result
             .lines()
@@ -4056,7 +4168,7 @@ mod tests {
             .with_columns(vec![TableColumn::new("X")])
             .with_data(vec![vec!["A".into()], vec!["B".into()]]);
 
-        let result = table.render_content(None, Some(bg_escape(&ColorMode::Light)), None);
+        let result = table.render_content(None, Some(bg_escape(&ColorMode::Light)), None, &Terminal::default());
         let bg_light = bg_escape(&ColorMode::Light);
         assert!(
             result.contains(bg_light),
@@ -4070,7 +4182,7 @@ mod tests {
             .with_columns(vec![TableColumn::new("X")])
             .with_data(vec![vec!["Only".into()]]);
 
-        let result = table.render_content(None, Some(bg_escape(&ColorMode::Dark)), None);
+        let result = table.render_content(None, Some(bg_escape(&ColorMode::Dark)), None, &Terminal::default());
         // Single row at index 0 should not be striped
         assert!(
             !result.contains("\x1b[48;2;"),
@@ -4085,7 +4197,8 @@ mod tests {
             .with_data(vec![vec!["A".into()], vec!["B".into()]])
             .prefer_cursor_alignment();
 
-        let result = table.render_with_cursor_positioning(80, Some(bg_escape(&ColorMode::Dark)), None);
+        let result =
+            table.render_with_cursor_positioning(80, Some(bg_escape(&ColorMode::Dark)), None, &Terminal::default());
         let bg_dark = bg_escape(&ColorMode::Dark);
         // Row 1 (index 1) should be striped
         assert!(
@@ -4104,7 +4217,7 @@ mod tests {
             .with_columns(vec![TableColumn::new("X")])
             .with_data(vec![vec!["A".into()], vec!["B".into()]]);
 
-        let result = table.render_content(None, Some(bg_escape(&ColorMode::Dark)), None);
+        let result = table.render_content(None, Some(bg_escape(&ColorMode::Dark)), None, &Terminal::default());
         let bg = bg_escape(&ColorMode::Dark);
 
         // Find the striped line (row index 1 = second data row)
@@ -4135,7 +4248,8 @@ mod tests {
             .with_data(vec![vec!["A".into()], vec!["B".into()]])
             .prefer_cursor_alignment();
 
-        let result = table.render_with_cursor_positioning(80, Some(bg_escape(&ColorMode::Dark)), None);
+        let result =
+            table.render_with_cursor_positioning(80, Some(bg_escape(&ColorMode::Dark)), None, &Terminal::default());
         let bg = bg_escape(&ColorMode::Dark);
 
         // Find the striped line
@@ -4178,7 +4292,7 @@ mod tests {
             ]);
 
         let bg = bg_escape(&ColorMode::Dark);
-        let result = table.render_content(None, Some(bg_escape(&ColorMode::Dark)), None);
+        let result = table.render_content(None, Some(bg_escape(&ColorMode::Dark)), None, &Terminal::default());
 
         // Find the striped line (row 1)
         let striped_line = result
@@ -4215,7 +4329,8 @@ mod tests {
             .prefer_cursor_alignment();
 
         let bg = bg_escape(&ColorMode::Dark);
-        let result = table.render_with_cursor_positioning(80, Some(bg_escape(&ColorMode::Dark)), None);
+        let result =
+            table.render_with_cursor_positioning(80, Some(bg_escape(&ColorMode::Dark)), None, &Terminal::default());
 
         // Find the striped data line containing "row1"
         let striped_line = result
@@ -4250,7 +4365,7 @@ mod tests {
             ]);
 
         let bg = bg_escape(&ColorMode::Dark);
-        let result = table.render_content(None, Some(bg_escape(&ColorMode::Dark)), None);
+        let result = table.render_content(None, Some(bg_escape(&ColorMode::Dark)), None, &Terminal::default());
 
         let striped_line = result
             .lines()
@@ -4292,7 +4407,8 @@ mod tests {
             .prefer_cursor_alignment();
 
         let bg = bg_escape(&ColorMode::Dark);
-        let result = table.render_with_cursor_positioning(80, Some(bg_escape(&ColorMode::Dark)), None);
+        let result =
+            table.render_with_cursor_positioning(80, Some(bg_escape(&ColorMode::Dark)), None, &Terminal::default());
 
         let striped_line = result
             .lines()
@@ -4354,8 +4470,7 @@ mod tests {
 
     #[test]
     fn test_stripe_fg_escape_degrades_across_color_depths() {
-        let enhanced =
-            stripe_fg_escape(None, &ColorMode::Dark, ColorDepth::Enhanced).unwrap();
+        let enhanced = stripe_fg_escape(None, &ColorMode::Dark, ColorDepth::Enhanced).unwrap();
         assert!(enhanced.contains("\x1b[38;5;"), "got {enhanced:?}");
 
         let basic = stripe_fg_escape(None, &ColorMode::Dark, ColorDepth::Basic).unwrap();
@@ -4387,7 +4502,7 @@ mod tests {
             .with_columns(vec![TableColumn::new("X")])
             .with_data(vec![vec!["A".into()], vec!["B".into()]]);
 
-        let result = table.render_content(None, None, None);
+        let result = table.render_content(None, None, None, &Terminal::default());
         assert!(
             !result.contains("\x1b[38;2;"),
             "Should not contain foreground color escapes without text color flag"
@@ -4405,7 +4520,7 @@ mod tests {
                 vec!["Row3".into()],
             ]);
 
-        let result = table.render_content(None, None, Some(fg_escape(&ColorMode::Dark)));
+        let result = table.render_content(None, None, Some(fg_escape(&ColorMode::Dark)), &Terminal::default());
         let lines: Vec<&str> = result.lines().collect();
 
         let fg_dark = fg_escape(&ColorMode::Dark);
@@ -4436,7 +4551,7 @@ mod tests {
             .with_columns(vec![TableColumn::new("X")])
             .with_data(vec![vec!["A".into()], vec!["B".into()]]);
 
-        let result = table.render_content(None, None, Some(fg_escape(&ColorMode::Dark)));
+        let result = table.render_content(None, None, Some(fg_escape(&ColorMode::Dark)), &Terminal::default());
         let tinted_lines: Vec<&str> = result
             .lines()
             .filter(|l| l.contains("\x1b[38;2;"))
@@ -4458,7 +4573,7 @@ mod tests {
             .with_columns(vec![TableColumn::new("X")])
             .with_data(vec![vec!["A".into()], vec!["B".into()]]);
 
-        let result = table.render_content(None, None, Some(fg_escape(&ColorMode::Light)));
+        let result = table.render_content(None, None, Some(fg_escape(&ColorMode::Light)), &Terminal::default());
         let fg_light = fg_escape(&ColorMode::Light);
         assert!(
             result.contains(fg_light),
@@ -4472,7 +4587,7 @@ mod tests {
             .with_columns(vec![TableColumn::new("X")])
             .with_data(vec![vec!["Only".into()]]);
 
-        let result = table.render_content(None, None, Some(fg_escape(&ColorMode::Dark)));
+        let result = table.render_content(None, None, Some(fg_escape(&ColorMode::Dark)), &Terminal::default());
         assert!(
             !result.contains("\x1b[38;2;"),
             "Single row should not have text tint (row 0 is untinted)"
@@ -4485,7 +4600,7 @@ mod tests {
             .with_columns(vec![TableColumn::new("X")])
             .with_data(vec![vec!["A".into()], vec!["B".into()]]);
 
-        let result = table.render_content(None, None, Some(fg_escape(&ColorMode::Dark)));
+        let result = table.render_content(None, None, Some(fg_escape(&ColorMode::Dark)), &Terminal::default());
         let fg = fg_escape(&ColorMode::Dark);
 
         let tinted_line = result
@@ -4515,7 +4630,8 @@ mod tests {
             .with_data(vec![vec!["A".into()], vec!["B".into()]])
             .prefer_cursor_alignment();
 
-        let result = table.render_with_cursor_positioning(80, None, Some(fg_escape(&ColorMode::Dark)));
+        let result =
+            table.render_with_cursor_positioning(80, None, Some(fg_escape(&ColorMode::Dark)), &Terminal::default());
         let fg_dark = fg_escape(&ColorMode::Dark);
         assert!(
             result.contains(fg_dark),
@@ -4533,7 +4649,12 @@ mod tests {
             .with_columns(vec![TableColumn::new("X")])
             .with_data(vec![vec!["A".into()], vec!["B".into()]]);
 
-        let result = table.render_content(None, Some(bg_escape(&ColorMode::Dark)), Some(fg_escape(&ColorMode::Dark)));
+        let result = table.render_content(
+            None,
+            Some(bg_escape(&ColorMode::Dark)),
+            Some(fg_escape(&ColorMode::Dark)),
+            &Terminal::default(),
+        );
         let bg = bg_escape(&ColorMode::Dark);
         let fg = fg_escape(&ColorMode::Dark);
 
@@ -4564,7 +4685,7 @@ mod tests {
             ]);
 
         let fg = fg_escape(&ColorMode::Dark);
-        let result = table.render_content(None, None, Some(fg_escape(&ColorMode::Dark)));
+        let result = table.render_content(None, None, Some(fg_escape(&ColorMode::Dark)), &Terminal::default());
 
         let tinted_line = result
             .lines()
@@ -4609,7 +4730,7 @@ mod tests {
             ]);
 
         // Render at a width that forces Author wrapping
-        let output = table.render_with_cursor_positioning(50, None, None);
+        let output = table.render_with_cursor_positioning(50, None, None, &Terminal::default());
         let border_width = output.lines().next().map(visible_width).unwrap_or(0);
 
         for (i, line) in output.lines().enumerate() {
@@ -4709,7 +4830,7 @@ mod tests {
             .with_data(vec![vec!["Alice".into(), "detail".into()]]);
 
         // Narrow: Extra column should be hidden
-        let narrow = table.render_content(Some(50), None, None);
+        let narrow = table.render_content(Some(50), None, None, &Terminal::default());
         assert!(narrow.contains("Name"), "Should contain Name header");
         assert!(
             !narrow.contains("Extra"),
@@ -4719,7 +4840,7 @@ mod tests {
         assert!(narrow.contains("Alice"), "Name data should be present");
 
         // Wide: both columns should appear
-        let wide = table.render_content(Some(100), None, None);
+        let wide = table.render_content(Some(100), None, None, &Terminal::default());
         assert!(wide.contains("Name"));
         assert!(wide.contains("Extra"));
         assert!(wide.contains("Alice"));
@@ -4757,7 +4878,7 @@ mod tests {
             ])
             .with_data(vec![vec!["x".into()]]);
 
-        let result = table.render_content(Some(50), None, None);
+        let result = table.render_content(Some(50), None, None, &Terminal::default());
         // All columns filtered out → no header, no column data
         assert!(!result.contains("A"), "Header should not appear");
         assert!(!result.contains("x"), "Data should not appear");
@@ -4773,11 +4894,11 @@ mod tests {
             .with_data(vec![vec!["Alice".into(), "short".into()]]);
 
         // Narrow: both visible
-        let narrow = table.render_content(Some(40), None, None);
+        let narrow = table.render_content(Some(40), None, None, &Terminal::default());
         assert!(narrow.contains("Compact"));
 
         // Wide: Compact hidden
-        let wide = table.render_content(Some(80), None, None);
+        let wide = table.render_content(Some(80), None, None, &Terminal::default());
         assert!(!wide.contains("Compact"));
         assert!(wide.contains("Name"));
     }
@@ -4795,7 +4916,7 @@ mod tests {
             ]);
 
         // At narrow width, table should still have consistent row widths
-        let result = table.render_content(Some(50), None, None);
+        let result = table.render_content(Some(50), None, None, &Terminal::default());
         let lines: Vec<&str> = result.lines().collect();
         let content_lines: Vec<&str> = lines
             .iter()
@@ -4825,7 +4946,7 @@ mod tests {
             .with_data(vec![vec!["Alice".into(), "detail".into()]]);
 
         // Without available_width, render_content does not filter
-        let result = table.render_content(None, None, None);
+        let result = table.render_content(None, None, None, &Terminal::default());
         assert!(result.contains("Details"), "No width = no filtering");
     }
 

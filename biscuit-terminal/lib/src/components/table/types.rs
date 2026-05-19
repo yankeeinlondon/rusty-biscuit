@@ -1,24 +1,36 @@
 use renderable::color::Color;
+use renderable::style::Style;
 use serde::{Deserialize, Serialize};
 
 use crate::utils::layout::Alignment;
 use crate::utils::wrap_policy::WordWrap;
 
-/// Typed style slot for a [`Table`](crate::components::table::Table)'s row
-/// striping.
+/// Typed style slots for a [`Table`](crate::components::table::Table).
 ///
 /// Spec B D5 model: a rich component exposes a typed component style struct
 /// rather than scattered bespoke fields. `TableStyle` is the migrated home of
 /// `Table`'s former `alternate_background_color` / `alternate_text_color`
-/// boolean fields. Each toggle, when enabled, paints even data rows
-/// (0-indexed) with a stripe.
+/// boolean fields, and it also carries the table's typed **header** and
+/// **body** appearance slots.
 ///
+/// ## Row striping
+///
+/// Each toggle, when enabled, paints even data rows (0-indexed) with a stripe.
 /// The stripe color is a typed [`Color`] slot — [`stripe_bg`](Self::stripe_bg)
 /// and [`stripe_text`](Self::stripe_text). When a slot is `None` the renderer
 /// picks a subtle default that adapts to the terminal's light or dark color
 /// mode. Either way the `Color` is lowered through the shared, capability-aware
 /// path, so striping degrades across truecolor, 256-color, and 16-color
 /// terminals instead of being silently disabled.
+///
+/// ## Header and body slots
+///
+/// [`header`](Self::header) styles every header cell; [`body`](Self::body)
+/// styles every data cell. Both are typed [`Style`] values, so a styled table
+/// header survives projection onto the render tree and is lowered to ANSI by
+/// the terminal tree renderer instead of being flattened away. A per-column
+/// header override lives on
+/// [`TableColumn::header_style`](crate::components::table::TableColumn::header_style).
 ///
 /// ## Examples
 ///
@@ -32,8 +44,9 @@ use crate::utils::wrap_policy::WordWrap;
 /// };
 /// assert!(style.striped_rows);
 /// assert!(style.stripe_bg.is_none()); // uses the adaptive default
+/// assert!(style.header.is_empty()); // no header styling by default
 /// ```
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub struct TableStyle {
     /// When `true`, even data rows receive a background stripe.
@@ -44,6 +57,15 @@ pub struct TableStyle {
     pub stripe_bg: Option<Color>,
     /// Explicit text stripe color. `None` selects the adaptive default.
     pub stripe_text: Option<Color>,
+    /// Typed appearance slot applied to every header cell.
+    ///
+    /// A per-column override is merged on top via
+    /// [`TableColumn::header_style`](crate::components::table::TableColumn::header_style).
+    #[serde(default)]
+    pub header: Style,
+    /// Typed appearance slot applied to every data (body) cell.
+    #[serde(default)]
+    pub body: Style,
 }
 
 /// Vertical alignment for table cells with multi-line content.
@@ -338,6 +360,39 @@ mod tests {
             striped_text: true,
             stripe_bg: Some(Color::BasicColor(renderable::color::BasicColor::Blue)),
             stripe_text: None,
+            ..TableStyle::default()
+        };
+        let json = serde_json::to_string(&style).unwrap();
+        let back: TableStyle = serde_json::from_str(&json).unwrap();
+        assert_eq!(style, back);
+    }
+
+    #[test]
+    fn table_style_header_body_slots_default_empty() {
+        let style = TableStyle::default();
+        assert!(style.header.is_empty());
+        assert!(style.body.is_empty());
+    }
+
+    #[test]
+    fn table_style_serde_roundtrip_with_slot_styles() {
+        let style = TableStyle {
+            header: renderable::style::Style {
+                emphasis: renderable::style::TextEmphasis {
+                    bold: true,
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
+            body: renderable::style::Style {
+                color: Some(renderable::layout::TargetValue::universal(
+                    renderable::style::PerMode::universal(Color::BasicColor(
+                        renderable::color::BasicColor::Cyan,
+                    )),
+                )),
+                ..Default::default()
+            },
+            ..TableStyle::default()
         };
         let json = serde_json::to_string(&style).unwrap();
         let back: TableStyle = serde_json::from_str(&json).unwrap();
