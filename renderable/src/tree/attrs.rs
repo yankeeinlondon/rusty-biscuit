@@ -148,6 +148,13 @@ pub struct ProgressHints {
     pub left_bracket: char,
     /// Right bracket character.
     pub right_bracket: char,
+    /// Color for the filled portion of the track, if any. A `Color` so it
+    /// degrades across terminal color depths through the shared lowering.
+    pub filled_color: Option<crate::color::Color>,
+    /// Color for the empty portion of the track, if any.
+    pub empty_color: Option<crate::color::Color>,
+    /// Color for the left and right bracket glyphs, if any.
+    pub bracket_color: Option<crate::color::Color>,
 }
 
 impl Default for ProgressHints {
@@ -159,6 +166,9 @@ impl Default for ProgressHints {
             empty_char: '·',
             left_bracket: '[',
             right_bracket: ']',
+            filled_color: None,
+            empty_color: None,
+            bracket_color: None,
         }
     }
 }
@@ -389,6 +399,12 @@ pub struct TableTerminalHints {
     pub alternate_background: bool,
     /// Whether even data rows receive an alternating text tint.
     pub alternate_text_color: bool,
+    /// Explicit background stripe color. `None` selects the renderer's
+    /// adaptive default. A [`Color`](crate::color::Color) so it degrades
+    /// across terminal color depths through the shared lowering.
+    pub stripe_bg: Option<crate::color::Color>,
+    /// Explicit text stripe color. `None` selects the adaptive default.
+    pub stripe_text: Option<crate::color::Color>,
 }
 
 /// Optional presentational attributes carried by every render node.
@@ -716,6 +732,19 @@ impl NodeAttrs {
             "right_bracket",
             serde_json::Value::String(hints.right_bracket.to_string()),
         );
+        // Slot colors are optional: stored only when set, so a glyph-only
+        // progress bar carries no color keys.
+        for (key, color) in [
+            ("filled_color", hints.filled_color),
+            ("empty_color", hints.empty_color),
+            ("bracket_color", hints.bracket_color),
+        ] {
+            if let Some(color) = color
+                && let Ok(value) = serde_json::to_value(color)
+            {
+                self.set_hint(HintNamespace::WIDGET_PROGRESS, key, value);
+            }
+        }
     }
 
     /// Reads [`ProgressHints`] from the [`HintNamespace::WIDGET_PROGRESS`]
@@ -754,6 +783,11 @@ impl NodeAttrs {
                 .unwrap_or(fallback)
         };
 
+        let read_color = |key: &str| -> Option<crate::color::Color> {
+            self.get_hint(HintNamespace::WIDGET_PROGRESS, key)
+                .and_then(|value| serde_json::from_value(value.clone()).ok())
+        };
+
         Some(ProgressHints {
             value,
             bar_width,
@@ -761,6 +795,9 @@ impl NodeAttrs {
             empty_char: read_char("empty_char", defaults.empty_char),
             left_bracket: read_char("left_bracket", defaults.left_bracket),
             right_bracket: read_char("right_bracket", defaults.right_bracket),
+            filled_color: read_color("filled_color"),
+            empty_color: read_color("empty_color"),
+            bracket_color: read_color("bracket_color"),
         })
     }
 
@@ -1104,6 +1141,18 @@ impl NodeAttrs {
                 self.remove_hint(HintNamespace::TERMINAL, key);
             }
         }
+        // Explicit stripe colors are optional: stored only when set.
+        for (key, color) in [
+            ("stripe_bg", hints.stripe_bg),
+            ("stripe_text", hints.stripe_text),
+        ] {
+            match color.and_then(|c| serde_json::to_value(c).ok()) {
+                Some(value) => self.set_hint(HintNamespace::TERMINAL, key, value),
+                None => {
+                    self.remove_hint(HintNamespace::TERMINAL, key);
+                }
+            }
+        }
     }
 
     /// Reads [`TableTerminalHints`] from the [`HintNamespace::TERMINAL`]
@@ -1127,11 +1176,17 @@ impl NodeAttrs {
                 .and_then(serde_json::Value::as_bool)
                 .unwrap_or(false)
         };
+        let read_color = |key: &str| -> Option<crate::color::Color> {
+            self.get_hint(HintNamespace::TERMINAL, key)
+                .and_then(|value| serde_json::from_value(value.clone()).ok())
+        };
 
         TableTerminalHints {
             prefer_cursor_alignment: read_flag("prefer_cursor_alignment"),
             alternate_background: read_flag("alternate_background"),
             alternate_text_color: read_flag("alternate_text_color"),
+            stripe_bg: read_color("stripe_bg"),
+            stripe_text: read_color("stripe_text"),
         }
     }
 
@@ -1418,6 +1473,13 @@ mod tests {
             empty_char: '-',
             left_bracket: '(',
             right_bracket: ')',
+            filled_color: Some(crate::color::Color::BasicColor(
+                crate::color::BasicColor::Green,
+            )),
+            empty_color: None,
+            bracket_color: Some(crate::color::Color::BasicColor(
+                crate::color::BasicColor::Cyan,
+            )),
         });
 
         let hints = attrs.progress_hints().expect("progress hints present");
@@ -1427,6 +1489,15 @@ mod tests {
         assert_eq!(hints.empty_char, '-');
         assert_eq!(hints.left_bracket, '(');
         assert_eq!(hints.right_bracket, ')');
+        assert_eq!(
+            hints.filled_color,
+            Some(crate::color::Color::BasicColor(crate::color::BasicColor::Green))
+        );
+        assert_eq!(hints.empty_color, None);
+        assert_eq!(
+            hints.bracket_color,
+            Some(crate::color::Color::BasicColor(crate::color::BasicColor::Cyan))
+        );
     }
 
     #[test]
@@ -1596,11 +1667,20 @@ mod tests {
             prefer_cursor_alignment: true,
             alternate_background: true,
             alternate_text_color: false,
+            stripe_bg: Some(crate::color::Color::BasicColor(
+                crate::color::BasicColor::Blue,
+            )),
+            stripe_text: None,
         });
         let hints = attrs.table_terminal_hints();
         assert!(hints.prefer_cursor_alignment);
         assert!(hints.alternate_background);
         assert!(!hints.alternate_text_color);
+        assert_eq!(
+            hints.stripe_bg,
+            Some(crate::color::Color::BasicColor(crate::color::BasicColor::Blue))
+        );
+        assert_eq!(hints.stripe_text, None);
     }
 
     #[test]
