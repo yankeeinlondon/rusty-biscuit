@@ -183,7 +183,7 @@ and override knobs.
 
 \* Requires `terminal.integrated.enableImages` and GPU acceleration enabled in VS Code settings.
 
-## bt CLI Commands (17 commands)
+## bt CLI Commands (20 commands)
 
 ```bash
 # Terminal inspection
@@ -196,6 +196,11 @@ bt prose "<red>Error</red>: message"
 bt quote --attribution "Shakespeare" "To be or not to be"
 bt list "First item" "Second item" "Third item"
 bt columns --gap 6 --left 40% "Title" "Description"
+
+# Render-tree Style components (fg/bg/emphasis/fill/border, slot colors)
+bt block "Styled block" --fg red --border all --fill subtle --fill-band indented
+bt progress 60 --label Loading --fill-color green --bracket-color cyan
+bt table --columns "Name,Score" --row "Ann,90" --row "Bob,75" --striped
 
 # Filesystem
 bt dir src --depth 2 --filter ".rs"

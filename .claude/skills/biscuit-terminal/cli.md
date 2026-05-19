@@ -22,6 +22,9 @@ cargo install --path biscuit-terminal/cli
 | `bt quote` | Block quote with left border |
 | `bt list` | Bulleted list with hanging indents |
 | `bt columns` | Two-column text layout |
+| `bt block` | Styled text block via the render tree (fg/bg/emphasis/fill/border `Style`) |
+| `bt progress` | Progress bar via the render tree (slot colors) |
+| `bt table` | Table via the render tree (column headers, rows, striping) |
 | `bt dir` | Directory tree with icons and gitignore awareness |
 | `bt flowchart` | Flowchart diagrams |
 | `bt quadrant` | Quadrant charts |
