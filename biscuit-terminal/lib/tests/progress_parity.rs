@@ -226,7 +226,10 @@ fn markdown_fallback_unlabeled_keeps_percentage() {
 }
 
 #[test]
-fn browser_fallback_keeps_label_and_percentage() {
+fn browser_renders_semantic_progress_bar() {
+    // RT-PROGRESS-001: the browser renderer now emits a semantic CSS progress
+    // bar (not the old `<p>` paragraph fallback) when a paragraph carries
+    // `ProgressHints`.
     let bar = Progress::new(0.75).with_label("Loading");
     let node = bar.render_tree_node().expect("tree node");
     let html = render_html(&node);
@@ -235,7 +238,14 @@ fn browser_fallback_keeps_label_and_percentage() {
         html.contains("75%"),
         "percentage survives in HTML: {html:?}"
     );
-    assert!(html.contains("<p>"), "rendered as a paragraph: {html:?}");
+    assert!(
+        html.contains(r#"role="progressbar""#),
+        "rendered as a semantic progress bar: {html:?}"
+    );
+    assert!(
+        html.contains(r#"aria-valuenow="75""#),
+        "ARIA value reflects completion: {html:?}"
+    );
 }
 
 // ---------------------------------------------------------------------------

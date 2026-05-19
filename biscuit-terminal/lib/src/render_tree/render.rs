@@ -326,7 +326,15 @@ impl Writer<'_> {
     /// any node-level [`Layout`].
     fn render_kind(&mut self, node: &RenderNode) -> Result<String, RenderError> {
         match &node.kind {
-            NodeKind::Root { children } => self.render_blocks(children),
+            NodeKind::Root { children } => {
+                // A `Compose`-style sequence joins children in order with no
+                // renderer-inserted separator; a normal document root joins
+                // children as blocks with blank-line separators.
+                match node.attrs.sequence_join() {
+                    Some(renderable::tree::SequenceJoin::None) => self.render_sequence(children),
+                    None => self.render_blocks(children),
+                }
+            }
             NodeKind::Heading { depth, children } => {
                 let effective = heading_effective(depth.get()).inherited_from(&self.effective);
                 let markup = self.render_inline(children, &effective)?;
@@ -417,7 +425,18 @@ impl Writer<'_> {
                 let rule = HorizontalRule::new();
                 Ok(rule.render(&self.opts.context.terminal))
             }
-            NodeKind::Table { align, children } => self.render_table(align, children, node),
+            NodeKind::Table { align, children } => {
+                let table = self.render_table(align, children, node)?;
+                // A table title/caption is emitted above the top border. An
+                // empty or whitespace-only title is ignored.
+                match node.attrs.table_title() {
+                    Some(title) if !title.trim().is_empty() => {
+                        let heading = self.render_prose(&Prose::escape_text(title.trim()));
+                        Ok(format!("{heading}\n{table}"))
+                    }
+                    _ => Ok(table),
+                }
+            }
             NodeKind::TableRow { children } => {
                 // A row rendered on its own (outside a Table) degrades to a
                 // tab-joined line of its cells.
@@ -470,6 +489,19 @@ impl Writer<'_> {
             parts.push(self.render(child)?);
         }
         Ok(parts.join("\n\n"))
+    }
+
+    /// Renders a sequence of children in order with no inserted separator.
+    ///
+    /// This is the `Compose`-style join: adjacent children concatenate
+    /// directly, preserving the component's no-separator contract instead of
+    /// the document-block blank-line spacing of [`Self::render_blocks`].
+    fn render_sequence(&mut self, children: &[RenderNode]) -> Result<String, RenderError> {
+        let mut output = String::new();
+        for child in children {
+            output.push_str(&self.render(child)?);
+        }
+        Ok(output)
     }
 
     /// Renders a two-column block quote: a [`NodeKind::BlockQuote`] carrying
@@ -766,6 +798,18 @@ impl Writer<'_> {
         children: &[RenderNode],
         attrs: &renderable::tree::NodeAttrs,
     ) -> Result<String, RenderError> {
+        // A typed list marker policy can override the normal marker
+        // presentation. `Default` keeps the bullet/ordinal rendering below.
+        match attrs.list_marker_policy() {
+            renderable::tree::ListMarkerPolicy::Default => {}
+            renderable::tree::ListMarkerPolicy::None => {
+                return self.render_marker_free_list(children);
+            }
+            renderable::tree::ListMarkerPolicy::TreeConnectors => {
+                return self.render_tree_connector_list(children, "");
+            }
+        }
+
         let hints = attrs.list_hints();
         let bullet = hints.bullet.unwrap_or_else(|| "- ".to_string());
         let origin = start.unwrap_or(1);
@@ -789,6 +833,114 @@ impl Writer<'_> {
                 hints.hanging_indent,
                 indent_children,
             )?);
+        }
+        Ok(lines.join("\n"))
+    }
+
+    /// Renders a list with no item markers ([`ListMarkerPolicy::None`]).
+    ///
+    /// Each item's children render as plain blocks; nested lists inherit the
+    /// same no-marker policy. No bullet, ordinal, or connector is emitted.
+    ///
+    /// [`ListMarkerPolicy::None`]: renderable::tree::ListMarkerPolicy::None
+    fn render_marker_free_list(
+        &mut self,
+        children: &[RenderNode],
+    ) -> Result<String, RenderError> {
+        let mut lines = Vec::with_capacity(children.len());
+        for child in children {
+            let body = match &child.kind {
+                NodeKind::ListItem {
+                    children: item_children,
+                    ..
+                } => self.render_blocks(item_children)?,
+                // Defensive: a non-ListItem child is a structural problem the
+                // validator rejects; render it as a plain block.
+                _ => self.render(child)?,
+            };
+            lines.push(body);
+        }
+        Ok(lines.join("\n"))
+    }
+
+    /// Renders a list with terminal box-drawing connectors
+    /// ([`ListMarkerPolicy::TreeConnectors`]).
+    ///
+    /// Each item gets a `├── ` branch, or `└── ` when it is the last child.
+    /// Depth, last-child state, and ancestor continuation lines (`│   ` for a
+    /// non-last ancestor, four spaces for a last ancestor) are inferred from
+    /// the nested `List` / `ListItem` structure: `ancestor_prefix` is the
+    /// accumulated continuation string for every enclosing list level.
+    ///
+    /// [`ListMarkerPolicy::TreeConnectors`]: renderable::tree::ListMarkerPolicy::TreeConnectors
+    fn render_tree_connector_list(
+        &mut self,
+        children: &[RenderNode],
+        ancestor_prefix: &str,
+    ) -> Result<String, RenderError> {
+        let mut lines = Vec::with_capacity(children.len());
+        let count = children.len();
+        for (index, child) in children.iter().enumerate() {
+            let is_last = index + 1 == count;
+            let branch = if is_last { "└── " } else { "├── " };
+            // The continuation prefix for this item's own nested content: a
+            // last item's descendants align under blank space, a non-last
+            // item's descendants keep a `│` rail.
+            let continuation = if is_last {
+                format!("{ancestor_prefix}    ")
+            } else {
+                format!("{ancestor_prefix}│   ")
+            };
+
+            let item_children: &[RenderNode] = match &child.kind {
+                NodeKind::ListItem {
+                    children: item_children,
+                    ..
+                } => item_children,
+                // Defensive: a non-ListItem child is rejected by the
+                // validator; render it on a branch line.
+                _ => {
+                    let body = self.render(child)?;
+                    lines.push(format!("{ancestor_prefix}{branch}{body}"));
+                    continue;
+                }
+            };
+
+            // Split the item's own content (inline / paragraph) from any
+            // nested lists. The content rides the branch line; nested lists
+            // recurse with the deeper continuation prefix.
+            let mut label_parts: Vec<String> = Vec::new();
+            let mut nested: Vec<String> = Vec::new();
+            for item_child in item_children {
+                if let NodeKind::List {
+                    children: nested_children,
+                    ..
+                } = &item_child.kind
+                {
+                    nested.push(
+                        self.render_tree_connector_list(nested_children, &continuation)?,
+                    );
+                } else if is_inline_block(item_child) {
+                    let markup = match &item_child.kind {
+                        NodeKind::Paragraph { children } => {
+                            self.render_inline(children, &Style::default())?
+                        }
+                        _ => self.render_inline(
+                            std::slice::from_ref(item_child),
+                            &Style::default(),
+                        )?,
+                    };
+                    label_parts.push(self.render_prose(&markup));
+                } else {
+                    label_parts.push(self.render(item_child)?);
+                }
+            }
+
+            let label = label_parts.join(" ");
+            lines.push(format!("{ancestor_prefix}{branch}{label}"));
+            for nested_list in nested {
+                lines.push(nested_list);
+            }
         }
         Ok(lines.join("\n"))
     }
@@ -823,10 +975,17 @@ impl Writer<'_> {
             }
         };
 
-        let check_marker = match checked {
-            Some(true) => "[x] ",
-            Some(false) => "[ ] ",
-            None => "",
+        // A projected `Todo` carries typed task hints on the `ListItem`; the
+        // task-state glyph replaces the default `[ ] ` / `[x] ` checkbox. The
+        // marker applies only to the checkbox — description styling stays in
+        // the item's child nodes and `Style`.
+        let check_marker = match node.attrs.task_hints() {
+            Some(hints) => task_state_marker(hints.state, &self.opts.context.terminal),
+            None => match checked {
+                Some(true) => "[x] ".to_string(),
+                Some(false) => "[ ] ".to_string(),
+                None => String::new(),
+            },
         };
         let full_prefix = format!("{prefix}{check_marker}");
 
@@ -1341,6 +1500,48 @@ fn apply_classes(inner: &str, classes: &[String]) -> String {
     out
 }
 
+/// The terminal checkbox marker for a task-list item in a given [`TaskState`].
+///
+/// Mirrors the bespoke `Todo` component's marker selection: a Nerd Font
+/// terminal uses the state's icon glyph; otherwise a colored or no-color
+/// ASCII fallback is used. The returned string includes a single trailing
+/// space so it slots in where the default `[ ] ` / `[x] ` marker would.
+///
+/// The marker applies only to the checkbox; description styling (a `Cancelled`
+/// item's strikethrough/dim) is carried by the item's child nodes and `Style`.
+fn task_state_marker(state: renderable::tree::TaskState, term: &crate::terminal::Terminal) -> String {
+    use crate::components::todo::{
+        FB_CHECKBOX_BLOCKED_NOCOLOR, FB_CHECKBOX_CANCELLED_NOCOLOR, FB_CHECKBOX_COMPLETED_NOCOLOR,
+        FB_CHECKBOX_IN_PROGRESS_NOCOLOR, FB_CHECKBOX_OPEN, TODO_CHAR_LOOKUP, TodoState,
+    };
+    use renderable::tree::TaskState;
+
+    let todo_state = match state {
+        TaskState::Open => TodoState::Open,
+        TaskState::InProgress => TodoState::InProgress,
+        TaskState::Completed => TodoState::Completed,
+        TaskState::Blocked => TodoState::Blocked,
+        TaskState::Cancelled => TodoState::Cancelled,
+    };
+    let icon = &TODO_CHAR_LOOKUP[&todo_state];
+    let has_color = term.color_depth != ColorDepth::None;
+
+    let glyph = if term.is_nerd_font == Some(true) {
+        icon.nerd.to_string()
+    } else if has_color {
+        icon.fallback.to_string()
+    } else {
+        match todo_state {
+            TodoState::Open => FB_CHECKBOX_OPEN.to_string(),
+            TodoState::InProgress => FB_CHECKBOX_IN_PROGRESS_NOCOLOR.to_string(),
+            TodoState::Completed => FB_CHECKBOX_COMPLETED_NOCOLOR.to_string(),
+            TodoState::Cancelled => FB_CHECKBOX_CANCELLED_NOCOLOR.to_string(),
+            TodoState::Blocked => FB_CHECKBOX_BLOCKED_NOCOLOR.to_string(),
+        }
+    };
+    format!("{glyph} ")
+}
+
 /// Maps a render-tree column alignment to a layout alignment.
 fn column_alignment(align: ColumnAlign) -> Alignment {
     match align {
@@ -1676,6 +1877,255 @@ mod render_tree_tests {
         let node = RenderNode::paragraph(vec![RenderNode::text("hello world")]);
         let out = render(&node);
         assert!(strip_escape_codes(&out.output).contains("hello world"));
+    }
+
+    /// Builds render options with a terminal of explicit color / nerd-font
+    /// capabilities.
+    fn opts_with(color_depth: ColorDepth, nerd_font: Option<bool>) -> TerminalRenderOptions {
+        let mut term = Terminal::new_optimistic(80);
+        term.color_depth = color_depth;
+        term.is_nerd_font = nerd_font;
+        TerminalRenderOptions::new(&term, RenderStrictness::Warn)
+    }
+
+    // ── RT-COMPOSE-001: sequence join ──────────────────────────────────────
+
+    #[test]
+    fn render_tree_root_without_sequence_join_keeps_blank_separators() {
+        let root = RenderNode::root(vec![
+            RenderNode::paragraph(vec![RenderNode::text("foo")]),
+            RenderNode::paragraph(vec![RenderNode::text("bar")]),
+        ]);
+        let out = strip_escape_codes(&render(&root).output);
+        assert_eq!(out, "foo\n\nbar");
+    }
+
+    #[test]
+    fn render_tree_root_with_sequence_join_has_no_separator() {
+        let mut root = RenderNode::root(vec![
+            RenderNode::text("foo"),
+            RenderNode::text("bar"),
+        ]);
+        root.attrs.set_sequence_join(renderable::tree::SequenceJoin::None);
+        let out = strip_escape_codes(&render(&root).output);
+        assert_eq!(out, "foobar");
+    }
+
+    #[test]
+    fn render_tree_sequence_join_mixed_inline_and_block() {
+        let mut root = RenderNode::root(vec![
+            RenderNode::text("inline"),
+            RenderNode::paragraph(vec![RenderNode::text("para")]),
+        ]);
+        root.attrs.set_sequence_join(renderable::tree::SequenceJoin::None);
+        let out = strip_escape_codes(&render(&root).output);
+        assert_eq!(out, "inlinepara");
+    }
+
+    // ── RT-FILESYSTEM-001: list marker policy ──────────────────────────────
+
+    fn item(text: &str, nested: Vec<RenderNode>) -> RenderNode {
+        let mut children = vec![RenderNode::paragraph(vec![RenderNode::text(text)])];
+        children.extend(nested);
+        RenderNode::list_item(None, children)
+    }
+
+    #[test]
+    fn render_tree_list_default_policy_unchanged() {
+        let list = RenderNode::list(
+            false,
+            None,
+            vec![item("a", vec![]), item("b", vec![])],
+        );
+        let out = strip_escape_codes(&render(&list).output);
+        assert_eq!(out, "- a\n- b");
+    }
+
+    #[test]
+    fn render_tree_list_marker_policy_none_emits_no_marker() {
+        let mut list = RenderNode::list(
+            false,
+            None,
+            vec![item("a", vec![]), item("b", vec![])],
+        );
+        list.attrs
+            .set_list_marker_policy(renderable::tree::ListMarkerPolicy::None);
+        let out = strip_escape_codes(&render(&list).output);
+        assert_eq!(out, "a\nb");
+    }
+
+    #[test]
+    fn render_tree_list_tree_connectors_branch_and_last_child() {
+        let mut list = RenderNode::list(
+            false,
+            None,
+            vec![item("first", vec![]), item("last", vec![])],
+        );
+        list.attrs
+            .set_list_marker_policy(renderable::tree::ListMarkerPolicy::TreeConnectors);
+        let out = strip_escape_codes(&render(&list).output);
+        assert_eq!(out, "├── first\n└── last");
+    }
+
+    #[test]
+    fn render_tree_list_tree_connectors_single_child() {
+        let mut list = RenderNode::list(false, None, vec![item("only", vec![])]);
+        list.attrs
+            .set_list_marker_policy(renderable::tree::ListMarkerPolicy::TreeConnectors);
+        let out = strip_escape_codes(&render(&list).output);
+        assert_eq!(out, "└── only");
+    }
+
+    #[test]
+    fn render_tree_list_tree_connectors_nested_continuation_lines() {
+        // A nested list under a non-last item keeps a `│` rail; under the last
+        // item the descendants align under blank space.
+        let inner_under_first = {
+            let mut inner = RenderNode::list(false, None, vec![item("child", vec![])]);
+            inner
+                .attrs
+                .set_list_marker_policy(renderable::tree::ListMarkerPolicy::TreeConnectors);
+            inner
+        };
+        let inner_under_last = {
+            let mut inner = RenderNode::list(false, None, vec![item("leaf", vec![])]);
+            inner
+                .attrs
+                .set_list_marker_policy(renderable::tree::ListMarkerPolicy::TreeConnectors);
+            inner
+        };
+        let mut list = RenderNode::list(
+            false,
+            None,
+            vec![
+                item("dir1", vec![inner_under_first]),
+                item("dir2", vec![inner_under_last]),
+            ],
+        );
+        list.attrs
+            .set_list_marker_policy(renderable::tree::ListMarkerPolicy::TreeConnectors);
+        let out = strip_escape_codes(&render(&list).output);
+        assert_eq!(
+            out,
+            "├── dir1\n│   └── child\n└── dir2\n    └── leaf"
+        );
+    }
+
+    // ── RT-TODO-001: task-state hints ──────────────────────────────────────
+
+    fn task_item(state: renderable::tree::TaskState, text: &str) -> RenderNode {
+        let mut node = RenderNode::list_item(
+            Some(matches!(state, renderable::tree::TaskState::Completed)),
+            vec![RenderNode::paragraph(vec![RenderNode::text(text)])],
+        );
+        node.attrs
+            .set_task_hints(&renderable::tree::TaskHints { state });
+        node
+    }
+
+    #[test]
+    fn render_tree_task_hint_marker_nerd_font_all_states() {
+        use renderable::tree::TaskState;
+        let opts = opts_with(ColorDepth::TrueColor, Some(true));
+        for state in [
+            TaskState::Open,
+            TaskState::InProgress,
+            TaskState::Completed,
+            TaskState::Blocked,
+            TaskState::Cancelled,
+        ] {
+            let list = RenderNode::list(false, None, vec![task_item(state, "task")]);
+            let out = render_terminal_node(&list, &opts).expect("render").output;
+            let plain = strip_escape_codes(&out);
+            // The Nerd Font marker replaces the default `[ ]`/`[x]` checkbox.
+            assert!(!plain.contains("[ ]"), "{state:?}: {plain:?}");
+            assert!(!plain.contains("[x]"), "{state:?}: {plain:?}");
+            assert!(plain.contains("task"), "{state:?}: {plain:?}");
+        }
+    }
+
+    #[test]
+    fn render_tree_task_hint_marker_no_color_fallback() {
+        use renderable::tree::TaskState;
+        let opts = opts_with(ColorDepth::None, Some(false));
+        let expected = [
+            (TaskState::Open, "[ ]"),
+            (TaskState::InProgress, "[>]"),
+            (TaskState::Completed, "[x]"),
+            (TaskState::Blocked, "[!]"),
+            (TaskState::Cancelled, "[-]"),
+        ];
+        for (state, marker) in expected {
+            let list = RenderNode::list(false, None, vec![task_item(state, "task")]);
+            let out = render_terminal_node(&list, &opts).expect("render").output;
+            let plain = strip_escape_codes(&out);
+            // The list bullet `- ` precedes the state marker.
+            assert_eq!(plain, format!("- {marker} task"), "{state:?}");
+        }
+    }
+
+    #[test]
+    fn render_tree_task_hint_marker_color_fallback() {
+        use renderable::tree::TaskState;
+        // Color but no Nerd Font: the colored ASCII fallback is used.
+        let opts = opts_with(ColorDepth::TrueColor, Some(false));
+        let list = RenderNode::list(
+            false,
+            None,
+            vec![task_item(TaskState::Completed, "done")],
+        );
+        let out = render_terminal_node(&list, &opts).expect("render").output;
+        // The fallback for Completed contains a ✔ glyph.
+        assert!(out.contains('✔'), "{out:?}");
+        assert!(strip_escape_codes(&out).contains("done"));
+    }
+
+    #[test]
+    fn render_tree_default_task_list_without_hints_unchanged() {
+        // A plain task list with no task hints keeps the GFM checkbox.
+        let list = RenderNode::list(
+            false,
+            None,
+            vec![RenderNode::list_item(
+                Some(false),
+                vec![RenderNode::paragraph(vec![RenderNode::text("todo")])],
+            )],
+        );
+        let out = strip_escape_codes(&render(&list).output);
+        assert_eq!(out, "- [ ] todo");
+    }
+
+    // ── RT-TABLE-001: table title ──────────────────────────────────────────
+
+    fn titled_table(title: &str) -> RenderNode {
+        let mut table = RenderNode::table(
+            vec![ColumnAlign::Left],
+            vec![
+                RenderNode::table_row(vec![RenderNode::table_cell(vec![RenderNode::text(
+                    "Name",
+                )])]),
+                RenderNode::table_row(vec![RenderNode::table_cell(vec![RenderNode::text(
+                    "Ann",
+                )])]),
+            ],
+        );
+        table.attrs.set_table_title(title);
+        table
+    }
+
+    #[test]
+    fn render_tree_table_title_above_top_border() {
+        let out = strip_escape_codes(&render(&titled_table("Roster")).output);
+        let first = out.lines().next().unwrap_or_default();
+        assert_eq!(first.trim(), "Roster");
+        // The title line precedes the table's top border.
+        assert!(out.contains("Roster\n┌"), "{out:?}");
+    }
+
+    #[test]
+    fn render_tree_table_whitespace_title_ignored() {
+        let out = strip_escape_codes(&render(&titled_table("   ")).output);
+        assert!(out.starts_with('┌'), "{out:?}");
     }
 
     #[test]
