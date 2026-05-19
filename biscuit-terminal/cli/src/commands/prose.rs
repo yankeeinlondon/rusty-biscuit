@@ -3,7 +3,7 @@ use crate::commands::shared::*;
 use crate::commands::{CliContext, Run};
 use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::terminal::Terminal;
-use biscuit_terminal::utils::layout::{Length, TargetValue, WordWrap};
+use biscuit_terminal::utils::layout::{Alignment, Length, TargetValue, WordWrap};
 use clap::Args as ClapArgs;
 use renderable::browser::BrowserRenderable;
 use renderable::markdown::MarkdownRenderable;
@@ -24,12 +24,16 @@ pub struct ProseArgs {
     pub print_bytes: bool,
 
     /// Render to an HTML fragment instead of the terminal.
-    #[arg(long, conflicts_with = "md")]
+    #[arg(long, conflicts_with_all = ["md", "md_plus"])]
     pub html: bool,
 
     /// Render to portable Markdown instead of the terminal.
-    #[arg(long, conflicts_with = "html")]
+    #[arg(long, conflicts_with_all = ["html", "md_plus"])]
     pub md: bool,
+
+    /// Render to MarkdownPlus instead of the terminal.
+    #[arg(long = "md-plus", conflicts_with_all = ["html", "md"])]
+    pub md_plus: bool,
 
     #[command(flatten)]
     pub layout: LayoutArgs,
@@ -65,14 +69,31 @@ impl Run for ProseArgs {
             prose = prose.alignment(align);
         }
 
-        // Cross-target output: HTML fragment or portable Markdown. Layout
-        // and terminal capability detection do not apply to these targets.
+        // Cross-target output: HTML fragment or portable Markdown. Terminal
+        // capability detection does not apply to these targets; layout flags
+        // are preserved as target-native metadata/CSS.
         if self.html {
-            println!("{}", prose.render_html_fragment().render());
+            println!(
+                "{}",
+                render_html_with_layout(&prose.render_html_fragment().render(), &self.layout)
+            );
             return Ok(());
         }
         if self.md {
-            println!("{}", prose.render_markdown());
+            println!(
+                "{}",
+                render_markdown_with_layout_frontmatter(&prose.render_markdown(), &self.layout)
+            );
+            return Ok(());
+        }
+        if self.md_plus {
+            println!(
+                "{}",
+                render_markdown_with_layout_frontmatter(
+                    &prose.render_markdown_plus(),
+                    &self.layout
+                )
+            );
             return Ok(());
         }
 
@@ -104,4 +125,60 @@ impl Run for ProseArgs {
             Ok(())
         })
     }
+}
+
+fn render_markdown_with_layout_frontmatter(body: &str, layout: &LayoutArgs) -> String {
+    let Some(frontmatter) = layout_style_frontmatter(layout) else {
+        return body.to_string();
+    };
+    format!("---\n{frontmatter}---\n\n{body}")
+}
+
+fn layout_style_frontmatter(layout: &LayoutArgs) -> Option<String> {
+    if layout.margin_left.is_none() && layout.margin_right.is_none() {
+        return None;
+    }
+
+    let mut out = String::from("style:\n  page:\n");
+    if let Some(left) = layout.margin_left {
+        out.push_str(&format!("    margin-left: {left}ch\n"));
+    }
+    if let Some(right) = layout.margin_right {
+        out.push_str(&format!("    margin-right: {right}ch\n"));
+    }
+    Some(out)
+}
+
+fn render_html_with_layout(fragment: &str, layout: &LayoutArgs) -> String {
+    let Some(style) = layout_css_style(layout) else {
+        return fragment.to_string();
+    };
+    format!("<div style=\"{style}\">{fragment}</div>")
+}
+
+fn layout_css_style(layout: &LayoutArgs) -> Option<String> {
+    let mut declarations = Vec::new();
+
+    if let Some(left) = layout.margin_left {
+        declarations.push(format!("margin-left: {left}ch"));
+    }
+    if let Some(right) = layout.margin_right {
+        declarations.push(format!("margin-right: {right}ch"));
+    }
+    if let Some(top) = layout.margin_top {
+        declarations.push(format!("margin-top: {top}lh"));
+    }
+    if let Some(bottom) = layout.margin_bottom {
+        declarations.push(format!("margin-bottom: {bottom}lh"));
+    }
+    if let Some(alignment) = layout.alignment {
+        let text_align = match alignment {
+            Alignment::Left => "left",
+            Alignment::Center => "center",
+            Alignment::Right => "right",
+        };
+        declarations.push(format!("text-align: {text_align}"));
+    }
+
+    (!declarations.is_empty()).then(|| declarations.join("; "))
 }

@@ -1577,6 +1577,143 @@ fn test_prose_print_bytes_flag_dumps_hex_to_stderr() {
 }
 
 #[test]
+fn test_prose_markdown_margin_left_emits_style_frontmatter() {
+    let output = cargo_bin_cmd!("bt")
+        .arg("prose")
+        .arg("<b>bold</b>")
+        .arg("--margin-left")
+        .arg("4")
+        .arg("--md")
+        .output()
+        .expect("Failed to execute command");
+
+    assert!(
+        output.status.success(),
+        "bt prose --md should succeed, stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(
+        stdout,
+        "---\nstyle:\n  page:\n    margin-left: 4ch\n---\n\n**bold**\n"
+    );
+}
+
+#[test]
+fn test_prose_markdown_without_layout_omits_frontmatter() {
+    let output = cargo_bin_cmd!("bt")
+        .arg("prose")
+        .arg("<b>bold</b>")
+        .arg("--md")
+        .output()
+        .expect("Failed to execute command");
+
+    assert!(
+        output.status.success(),
+        "bt prose --md should succeed, stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout, "**bold**\n");
+}
+
+#[test]
+fn test_prose_markdown_plus_preserves_color_as_inline_html() {
+    let output = cargo_bin_cmd!("bt")
+        .arg("prose")
+        .arg("<purple-800>dark purple</purple-800>")
+        .arg("--md-plus")
+        .output()
+        .expect("Failed to execute command");
+
+    assert!(
+        output.status.success(),
+        "bt prose --md-plus should succeed, stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.starts_with("<span style=\"color: rgb("),
+        "MarkdownPlus should preserve color as inline HTML, got: {stdout}"
+    );
+    assert!(
+        stdout.contains(">dark purple</span>\n"),
+        "MarkdownPlus should preserve inner text, got: {stdout}"
+    );
+}
+
+#[test]
+fn test_prose_markdown_plus_margin_left_emits_style_frontmatter() {
+    let output = cargo_bin_cmd!("bt")
+        .arg("prose")
+        .arg("<blue>blue</blue>")
+        .arg("--margin-left")
+        .arg("4")
+        .arg("--md-plus")
+        .output()
+        .expect("Failed to execute command");
+
+    assert!(
+        output.status.success(),
+        "bt prose --md-plus should succeed, stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.starts_with("---\nstyle:\n  page:\n    margin-left: 4ch\n---\n\n"),
+        "MarkdownPlus layout should be preserved in frontmatter, got: {stdout}"
+    );
+    assert!(
+        stdout.contains("<span style=\"color: "),
+        "MarkdownPlus body should preserve color as inline HTML, got: {stdout}"
+    );
+}
+
+#[test]
+fn test_prose_html_margin_left_emits_layout_wrapper() {
+    let output = cargo_bin_cmd!("bt")
+        .arg("prose")
+        .arg("<b>bold</b>")
+        .arg("--margin-left")
+        .arg("4")
+        .arg("--html")
+        .output()
+        .expect("Failed to execute command");
+
+    assert!(
+        output.status.success(),
+        "bt prose --html should succeed, stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(
+        stdout,
+        "<div style=\"margin-left: 4ch\"><span class=\"prose\"><strong>bold</strong></span></div>\n"
+    );
+}
+
+#[test]
+fn test_prose_html_without_layout_omits_layout_wrapper() {
+    let output = cargo_bin_cmd!("bt")
+        .arg("prose")
+        .arg("<b>bold</b>")
+        .arg("--html")
+        .output()
+        .expect("Failed to execute command");
+
+    assert!(
+        output.status.success(),
+        "bt prose --html should succeed, stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(
+        stdout,
+        "<span class=\"prose\"><strong>bold</strong></span>\n"
+    );
+}
+
+#[test]
 fn test_quote_empty_errors_to_stderr() {
     let output = cargo_bin_cmd!("bt")
         .arg("quote")
