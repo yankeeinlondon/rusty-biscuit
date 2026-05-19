@@ -5,7 +5,7 @@ description: Guide for building professional desktop apps with Tauri 2.0, Rust b
 
 # Tauri 2.0 Desktop App Development
 
-This skill provides guidance for building professional cross-platform desktop applications using Tauri 2.0 with a Rust backend and modern React frontend following MVVM architecture.
+This skill provides guidance for building professional cross-platform desktop applications using Tauri 2.0 with a Rust backend and modern VueJS frontend following MVVM architecture.
 
 ## When to Use This Skill
 

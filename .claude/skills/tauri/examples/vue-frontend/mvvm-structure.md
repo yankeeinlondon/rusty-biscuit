@@ -1,4 +1,4 @@
-# MVVM Architecture for React Frontend
+# MVVM Architecture for Vue Frontend
 
 ## Overview
 
@@ -8,26 +8,31 @@ MVVM (Model-View-ViewModel) separates concerns into three layers:
 |-------|----------------|----------|
 | **Model** | Data, types, stores | `models/`, `stores/` |
 | **View** | UI rendering (dumb) | `views/`, `components/` |
-| **ViewModel** | Business logic | `viewmodels/` hooks |
+| **ViewModel** | Business logic | `viewmodels/` composables |
+
+Vue is inherently MVVM — the reactive component instance created by
+`<script setup>` is the ViewModel for its template. This skill keeps an explicit
+`viewmodels/` layer so view logic can be unit tested and reused without mounting
+a component.
 
 ## Data Flow
 
 ```
 ┌─────────────────────────────────────────────────┐
 │                    View                         │
-│  (React component - presentation only)          │
+│  (.vue component - template + minimal script)   │
 │                      │                          │
 │              useXxxViewModel()                  │
 │                      ▼                          │
 ├─────────────────────────────────────────────────┤
 │                 ViewModel                       │
-│  (Custom hook - business logic, state binding)  │
+│  (Composable - business logic, reactive state)  │
 │         │                    │                  │
 │    useAppStore()      tauriService              │
 │         ▼                    ▼                  │
 ├─────────────────────────────────────────────────┤
 │                    Model                        │
-│  (Zustand stores, types, Tauri bridge)          │
+│  (Pinia stores, types, Tauri bridge)            │
 └─────────────────────────────────────────────────┘
 ```
 
@@ -57,34 +62,32 @@ export interface AppSettings {
 }
 ```
 
-### 2. Store Layer (Zustand)
+### 2. Store Layer (Pinia)
 
 ```typescript
 // stores/useAppStore.ts
-import { create } from 'zustand';
-import { persist } from 'zustand/middleware';
+import { defineStore } from 'pinia';
+import { ref } from 'vue';
 import type { AppSettings } from '../models';
 
-interface AppState {
-  settings: AppSettings;
-  updateSettings: (partial: Partial<AppSettings>) => void;
-}
+export const useAppStore = defineStore(
+  'app',
+  () => {
+    const settings = ref<AppSettings>({
+      theme: 'dark',
+      language: 'en',
+      autoSave: true,
+    });
 
-export const useAppStore = create<AppState>()(
-  persist(
-    (set) => ({
-      settings: {
-        theme: 'dark',
-        language: 'en',
-        autoSave: true,
-      },
-      updateSettings: (partial) =>
-        set((state) => ({
-          settings: { ...state.settings, ...partial },
-        })),
-    }),
-    { name: 'app-settings' }
-  )
+    function updateSettings(partial: Partial<AppSettings>) {
+      settings.value = { ...settings.value, ...partial };
+    }
+
+    return { settings, updateSettings };
+  },
+  {
+    persist: { key: 'app-settings' },
+  },
 );
 ```
 
@@ -120,45 +123,43 @@ export const tauriService = {
 };
 ```
 
-### 4. ViewModel Layer (Custom Hooks)
+### 4. ViewModel Layer (Composables)
 
 ```typescript
 // viewmodels/useFileExplorerViewModel.ts
-import { useState, useCallback, useEffect } from 'react';
+import { ref, toValue, watch, type MaybeRefOrGetter } from 'vue';
 import { tauriService } from '../services/tauriService';
 import type { FileInfo } from '../models';
 
-export function useFileExplorerViewModel(initialDir: string) {
-  const [files, setFiles] = useState<FileInfo[]>([]);
-  const [currentDir, setCurrentDir] = useState(initialDir);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+export function useFileExplorerViewModel(initialDir: MaybeRefOrGetter<string>) {
+  const files = ref<FileInfo[]>([]);
+  const currentDir = ref(toValue(initialDir));
+  const loading = ref(false);
+  const error = ref<string | null>(null);
 
-  const loadFiles = useCallback(async (dir: string) => {
-    setLoading(true);
-    setError(null);
+  async function loadFiles(dir: string) {
+    loading.value = true;
+    error.value = null;
     try {
-      const data = await tauriService.listFiles(dir);
-      setFiles(data);
-      setCurrentDir(dir);
+      files.value = await tauriService.listFiles(dir);
+      currentDir.value = dir;
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to load files');
+      error.value = e instanceof Error ? e.message : 'Failed to load files';
     } finally {
-      setLoading(false);
+      loading.value = false;
     }
-  }, []);
+  }
 
-  const navigateTo = useCallback((dir: string) => {
+  function navigateTo(dir: string) {
     loadFiles(dir);
-  }, [loadFiles]);
+  }
 
-  const refresh = useCallback(() => {
-    loadFiles(currentDir);
-  }, [currentDir, loadFiles]);
+  function refresh() {
+    loadFiles(currentDir.value);
+  }
 
-  useEffect(() => {
-    loadFiles(initialDir);
-  }, [initialDir, loadFiles]);
+  // Initial load + react to a changing initialDir
+  watch(() => toValue(initialDir), loadFiles, { immediate: true });
 
   return {
     files,
@@ -171,59 +172,46 @@ export function useFileExplorerViewModel(initialDir: string) {
 }
 ```
 
-### 5. View Layer (React Components)
+### 5. View Layer (Vue Components)
 
-```tsx
-// views/FileExplorer/FileExplorerView.tsx
+```vue
+<!-- views/FileExplorer/FileExplorerView.vue -->
+<script setup lang="ts">
 import { useFileExplorerViewModel } from '../../viewmodels/useFileExplorerViewModel';
-import { FileList } from '../../components/FileList';
-import { LoadingSpinner } from '../../components/LoadingSpinner';
-import { ErrorMessage } from '../../components/ErrorMessage';
+import FileList from '../../components/FileList.vue';
+import LoadingSpinner from '../../components/LoadingSpinner.vue';
+import ErrorMessage from '../../components/ErrorMessage.vue';
+import type { FileInfo } from '../../models';
 
-interface Props {
-  initialDir: string;
+const props = defineProps<{ initialDir: string }>();
+
+const { files, currentDir, loading, error, navigateTo, refresh } =
+  useFileExplorerViewModel(() => props.initialDir);
+
+function onFileClick(file: FileInfo) {
+  if (file.isDir) navigateTo(file.path);
 }
+</script>
 
-export function FileExplorerView({ initialDir }: Props) {
-  const {
-    files,
-    currentDir,
-    loading,
-    error,
-    navigateTo,
-    refresh,
-  } = useFileExplorerViewModel(initialDir);
-
-  if (loading) return <LoadingSpinner />;
-  if (error) return <ErrorMessage message={error} onRetry={refresh} />;
-
-  return (
-    <div className="p-4">
-      <div className="flex items-center justify-between mb-4">
-        <h1 className="text-xl font-semibold">{currentDir}</h1>
-        <button onClick={refresh} className="btn-secondary">
-          Refresh
-        </button>
-      </div>
-      
-      <FileList
-        files={files}
-        onFileClick={(file) => {
-          if (file.isDir) {
-            navigateTo(file.path);
-          }
-        }}
-      />
+<template>
+  <LoadingSpinner v-if="loading" />
+  <ErrorMessage v-else-if="error" :message="error" @retry="refresh" />
+  <div v-else class="p-4">
+    <div class="flex items-center justify-between mb-4">
+      <h1 class="text-xl font-semibold">{{ currentDir }}</h1>
+      <button class="btn-secondary" @click="refresh">Refresh</button>
     </div>
-  );
-}
+
+    <FileList :files="files" @file-click="onFileClick" />
+  </div>
+</template>
 ```
 
 ## Benefits
 
 | Benefit | Description |
 |---------|-------------|
-| **Testability** | ViewModels can be unit tested without UI |
+| **Testability** | ViewModels are plain composables — test without mounting |
 | **Reusability** | Same ViewModel for different Views |
 | **Separation** | Clear boundaries between layers |
 | **Maintainability** | Changes in one layer don't affect others |

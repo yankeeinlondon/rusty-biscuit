@@ -46,7 +46,7 @@
     ],
     "category": "Productivity",
     "shortDescription": "A professional desktop application",
-    "longDescription": "Built with Tauri 2.0, Rust, and React for cross-platform deployment.",
+    "longDescription": "Built with Tauri 2.0, Rust, and Vue for cross-platform deployment.",
     "macOS": {
       "minimumSystemVersion": "10.15",
       "entitlements": null,

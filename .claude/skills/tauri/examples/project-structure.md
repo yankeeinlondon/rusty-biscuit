@@ -28,31 +28,30 @@ my-tauri-app/
 │   ├── Cargo.toml
 │   └── tauri.conf.json           # Tauri config
 │
-├── src/                          # React frontend
-│   ├── main.tsx                  # Entry point
-│   ├── App.tsx                   # Root component
+├── src/                          # Vue frontend
+│   ├── main.ts                   # Entry point
+│   ├── App.vue                   # Root component
 │   ├── router/                   # Routing
-│   │   └── index.tsx
+│   │   └── index.ts
 │   ├── views/                    # Pages (View)
 │   │   ├── Home/
-│   │   │   ├── index.tsx
-│   │   │   └── HomeView.tsx
+│   │   │   └── HomeView.vue
 │   │   └── Settings/
-│   │       └── index.tsx
-│   ├── viewmodels/               # Logic hooks (ViewModel)
+│   │       └── SettingsView.vue
+│   ├── viewmodels/               # Logic composables (ViewModel)
 │   │   ├── useHomeViewModel.ts
 │   │   └── useSettingsViewModel.ts
 │   ├── models/                   # Types (Model)
 │   │   └── index.ts
-│   ├── stores/                   # Zustand stores
+│   ├── stores/                   # Pinia stores
 │   │   └── useAppStore.ts
 │   ├── services/                 # Tauri bridge
 │   │   └── tauriService.ts
-│   ├── components/               # Reusable UI
-│   │   ├── Button/
-│   │   ├── Input/
-│   │   └── Layout/
-│   ├── hooks/                    # Custom hooks
+│   ├── components/               # Reusable UI (.vue)
+│   │   ├── BaseButton.vue
+│   │   ├── BaseInput.vue
+│   │   └── AppLayout.vue
+│   ├── composables/              # Generic composables
 │   │   └── useDebounce.ts
 │   └── styles/
 │       └── globals.css
@@ -60,6 +59,7 @@ my-tauri-app/
 ├── public/                       # Static assets
 ├── index.html
 ├── package.json
+├── uno.config.ts                 # UnoCSS config
 ├── vite.config.ts
 └── tsconfig.json
 ```
@@ -72,6 +72,6 @@ my-tauri-app/
 | **Commands** | Thin layer, delegate to services |
 | **Services** | Pure Rust, no Tauri dependencies |
 | **Views** | Presentation only, no logic |
-| **ViewModels** | All business logic as hooks |
-| **Stores** | Global state with Zustand |
+| **ViewModels** | All business logic as composables |
+| **Stores** | Global state with Pinia |
 | **Services (TS)** | Single point for Tauri IPC |
