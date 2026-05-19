@@ -57,6 +57,9 @@ install *args="":
 test *args="":
     @just _test biscuit-terminal {{ args }}
     @just _test biscuit-terminal-cli {{ args }}
+    @echo
+    @echo "👀 {{ BOLD }}Note:{{ RESET }} running {{ BLUE }}just test{{ RESET }} runs level 1 and 2 test but not level 3"
+    @echo
 
 # Run only Level-2 real-terminal tests
 test-l2 *args="":
