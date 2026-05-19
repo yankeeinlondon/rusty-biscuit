@@ -137,6 +137,34 @@ Target-agnostic layout configuration for block-level components.
 - **`Alignment`** — horizontal alignment (`Left`, `Center`, `Right`)
 - **`LayoutError`** — invalid percentage, non-universal unit, or empty per-target map
 
+### Style (`style.rs`)
+
+The target-agnostic **appearance** primitive — the sibling of `Layout`.
+`Layout` decides *where the box sits*; `Style` decides *what the box looks
+like*. Components declare a `Style`; the tree renderers apply it (the
+Terminal renderer first). A component never hand-writes ANSI or CSS.
+
+- **`Style`** — foreground `color`, `background`, `emphasis`, `border`, and
+  `fill`. Only `color` and `emphasis` inherit through the render tree;
+  `background`, `border`, and `fill` are box-painting properties that stay
+  explicit on the painting node
+- **`TextEmphasis`** / **`UnderlineStyle`** / **`EmphasisLayer`** — shared
+  text weight and decoration leaves (bold, dim, italic, underline,
+  strikethrough, blink); reused by `biscuit-terminal`'s `Prose`
+- **`PerMode<T>`** — a value that is `Universal` or `Adaptive { light, dark }`,
+  resolved against the terminal/page `ColorMode`; composes with `TargetValue`
+  as `TargetValue<PerMode<Color>>`
+- **`Border`** — `color`, `weight` (`BorderWeight`), `line_style`
+  (`BorderLineStyle`), `sides` (`BorderSides`), and `radius`
+- **`Fill`** — painted-band behavior: `color`, `intensity` (`FillIntensity`),
+  `band` (`FillBand`), and `inset`
+
+`Style` rides on render-tree nodes via `NodeAttrs::set_style` / `style` (the
+`renderable.style` hint namespace) and may attach to block nodes *and* inline
+`Span` nodes. `Style`, `PerMode`, `Border`, `Fill`, and the emphasis leaves
+all derive `serde` with `snake_case` casing. The Markdown renderer ignores
+`Style` entirely, so Markdown output is unaffected by appearance.
+
 ### Markdown (`markdown.rs`)
 
 The `MarkdownRenderable` trait and related types.
