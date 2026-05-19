@@ -27,6 +27,8 @@ pub struct HintNamespace(pub &'static str);
 impl HintNamespace {
     /// Layout hints (margins, alignment, etc.).
     pub const LAYOUT: HintNamespace = HintNamespace("renderable.layout");
+    /// Style hints (color, background, emphasis, border, fill).
+    pub const STYLE: HintNamespace = HintNamespace("renderable.style");
     /// List-specific hints (bullet style, numbering, etc.).
     pub const LIST: HintNamespace = HintNamespace("renderable.list");
     /// Table-specific hints (column widths, borders, etc.).
@@ -1173,6 +1175,48 @@ impl NodeAttrs {
         let value = self.get_hint(HintNamespace::LAYOUT, "layout")?;
         serde_json::from_value(value.clone()).ok()
     }
+
+    /// Stores a [`Style`](crate::style::Style) under the
+    /// [`HintNamespace::STYLE`] namespace.
+    ///
+    /// The style is serialized to JSON and recovered by
+    /// [`NodeAttrs::style`]. `Style` may attach to block nodes and inline
+    /// `Span` nodes — it is not block-only.
+    ///
+    /// ## Examples
+    ///
+    /// ```
+    /// use renderable::style::Style;
+    /// use renderable::tree::NodeAttrs;
+    ///
+    /// let mut attrs = NodeAttrs::default();
+    /// attrs.set_style(&Style::default());
+    /// assert_eq!(attrs.style(), Some(Style::default()));
+    /// ```
+    pub fn set_style(&mut self, style: &crate::style::Style) {
+        if let Ok(value) = serde_json::to_value(style) {
+            self.set_hint(HintNamespace::STYLE, "style", value);
+        }
+    }
+
+    /// Reads the [`Style`](crate::style::Style) stored on this node, if any.
+    ///
+    /// Returns `None` when no style hint is present or the stored value
+    /// fails to deserialize.
+    ///
+    /// ## Examples
+    ///
+    /// ```
+    /// use renderable::tree::NodeAttrs;
+    ///
+    /// // An empty attribute set carries no style.
+    /// assert!(NodeAttrs::default().style().is_none());
+    /// ```
+    #[must_use]
+    pub fn style(&self) -> Option<crate::style::Style> {
+        let value = self.get_hint(HintNamespace::STYLE, "style")?;
+        serde_json::from_value(value.clone()).ok()
+    }
 }
 
 #[cfg(test)]
@@ -1287,6 +1331,37 @@ mod tests {
         assert!(attrs.layout().is_none());
         attrs.set_layout(&layout);
         assert_eq!(attrs.layout(), Some(layout));
+    }
+
+    #[test]
+    fn style_roundtrips_through_node_attrs() {
+        use crate::color::{Color, Tailwind};
+        use crate::layout::TargetValue;
+        use crate::style::{PerMode, Style, TextEmphasis};
+
+        let style = Style {
+            color: Some(TargetValue::universal(PerMode::universal(
+                Color::Tailwind(Tailwind::Blue500),
+            ))),
+            emphasis: TextEmphasis {
+                bold: true,
+                ..Default::default()
+            },
+            ..Style::default()
+        };
+        let mut attrs = NodeAttrs::default();
+        assert!(attrs.style().is_none());
+        attrs.set_style(&style);
+        assert_eq!(attrs.style(), Some(style));
+    }
+
+    #[test]
+    fn style_namespace_is_distinct_from_layout() {
+        let mut attrs = NodeAttrs::default();
+        attrs.set_hint(HintNamespace::STYLE, "style", json!("a"));
+        attrs.set_hint(HintNamespace::LAYOUT, "layout", json!("b"));
+        assert_eq!(attrs.data.get("renderable.style.style"), Some(&json!("a")));
+        assert_eq!(attrs.data.get("renderable.layout.layout"), Some(&json!("b")));
     }
 
     #[test]
