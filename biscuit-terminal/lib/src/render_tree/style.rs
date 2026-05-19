@@ -403,13 +403,41 @@ struct BorderGlyphs {
     vertical: char,
 }
 
+/// Whether a [`Border`] requests rounded (arc) corners.
+///
+/// A terminal corner is a single glyph, so a radius is binary: any non-zero
+/// [`Border::radius`] selects the light-arc corner set. The arc glyphs exist
+/// only for the thin/light box-drawing weight — a heavy or double border has
+/// no arc variant and keeps square corners (see [`border_glyphs`]).
+fn border_is_rounded(border: &Border) -> bool {
+    border
+        .radius
+        .as_ref()
+        .and_then(|tv| tv.resolve(RenderTarget::Terminal))
+        .is_some_and(|length| match length {
+            Length::Zero => false,
+            Length::Ch(n) => *n > 0,
+            Length::Percent(pct) => *pct > 0.0,
+            // A target-native CSS radius is a positive request; round.
+            Length::Css(_) => true,
+        })
+}
+
 /// Selects the box-drawing glyph set for a [`Border`].
 ///
 /// [`BorderLineStyle::Double`] uses the double-line set; otherwise the weight
 /// chooses thin or heavy corners and the line style chooses the edge glyph.
 /// [`BorderWeight::Medium`] renders as thin — the terminal box-drawing set has
 /// no medium weight.
-fn border_glyphs(weight: BorderWeight, line_style: BorderLineStyle) -> BorderGlyphs {
+///
+/// `rounded` selects the light-arc corner glyphs (`╭╮╰╯`). The arc set exists
+/// only for the thin/light weight, so a heavy or double border keeps its
+/// square corners regardless of `rounded`.
+fn border_glyphs(
+    weight: BorderWeight,
+    line_style: BorderLineStyle,
+    rounded: bool,
+) -> BorderGlyphs {
     if line_style == BorderLineStyle::Double {
         return BorderGlyphs {
             top_left: '╔',
@@ -435,6 +463,15 @@ fn border_glyphs(weight: BorderWeight, line_style: BorderLineStyle) -> BorderGly
             top_right: '┓',
             bottom_left: '┗',
             bottom_right: '┛',
+            horizontal,
+            vertical,
+        }
+    } else if rounded {
+        BorderGlyphs {
+            top_left: '╭',
+            top_right: '╮',
+            bottom_left: '╰',
+            bottom_right: '╯',
             horizontal,
             vertical,
         }
@@ -467,7 +504,7 @@ fn render_border(
         return content.to_string();
     }
 
-    let glyphs = border_glyphs(border.weight, border.line_style);
+    let glyphs = border_glyphs(border.weight, border.line_style, border_is_rounded(border));
     let color = border
         .color
         .as_ref()
@@ -862,9 +899,56 @@ mod tests {
 
     #[test]
     fn border_thick_double_use_distinct_glyphs() {
-        let thick = border_glyphs(BorderWeight::Thick, BorderLineStyle::Solid);
+        let thick = border_glyphs(BorderWeight::Thick, BorderLineStyle::Solid, false);
         assert_eq!(thick.top_left, '┏');
-        let double = border_glyphs(BorderWeight::Thin, BorderLineStyle::Double);
+        let double = border_glyphs(BorderWeight::Thin, BorderLineStyle::Double, false);
+        assert_eq!(double.top_left, '╔');
+    }
+
+    #[test]
+    fn border_radius_selects_arc_corners() {
+        let style = Style {
+            border: Some(Border {
+                sides: BorderSides::All,
+                radius: Some(TargetValue::universal(Length::ch(1))),
+                ..Border::default()
+            }),
+            ..Style::default()
+        };
+        let out = apply_style("x", &style, &truecolor_term(), 3);
+        let lines: Vec<&str> = out.split('\n').collect();
+        assert!(
+            lines[0].starts_with('╭') && lines[0].ends_with('╮'),
+            "got {:?}",
+            lines[0]
+        );
+        assert!(
+            lines[2].starts_with('╰') && lines[2].ends_with('╯'),
+            "got {:?}",
+            lines[2]
+        );
+    }
+
+    #[test]
+    fn border_zero_radius_keeps_square_corners() {
+        let style = Style {
+            border: Some(Border {
+                sides: BorderSides::All,
+                radius: Some(TargetValue::universal(Length::Zero)),
+                ..Border::default()
+            }),
+            ..Style::default()
+        };
+        let out = apply_style("x", &style, &truecolor_term(), 3);
+        assert!(out.split('\n').next().unwrap().starts_with('┌'));
+    }
+
+    #[test]
+    fn border_radius_ignored_for_heavy_and_double() {
+        // The light-arc corner set has no heavy or double variant.
+        let heavy = border_glyphs(BorderWeight::Thick, BorderLineStyle::Solid, true);
+        assert_eq!(heavy.top_left, '┏');
+        let double = border_glyphs(BorderWeight::Thin, BorderLineStyle::Double, true);
         assert_eq!(double.top_left, '╔');
     }
 

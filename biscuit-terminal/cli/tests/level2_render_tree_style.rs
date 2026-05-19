@@ -435,6 +435,35 @@ fn assert_block_border<H: TerminalHarness>(harness: &mut H) {
     );
 }
 
+/// Asserts a `bt block --border all --border-radius 1` row carries the
+/// light-arc (rounded) corner glyphs rather than the square set.
+fn assert_block_rounded_border<H: TerminalHarness>(harness: &mut H) {
+    let frame = capture_bt(
+        harness,
+        "bt block \"rounded notice\" --border all --border-radius 1",
+    );
+    assert!(
+        frame.plain.contains('╭')
+            && frame.plain.contains('╮')
+            && frame.plain.contains('╰')
+            && frame.plain.contains('╯'),
+        "expected light-arc corner glyphs from --border-radius in the \
+         capture.\nplain:\n{}",
+        frame.plain,
+    );
+    assert!(
+        !frame.plain.contains('┌'),
+        "expected no square corner glyph alongside the rounded border.\n\
+         plain:\n{}",
+        frame.plain,
+    );
+    assert!(
+        frame.plain.contains("rounded notice"),
+        "expected the block text inside the rounded border. plain:\n{}",
+        frame.plain,
+    );
+}
+
 /// Asserts `bt progress` slot colors survive: the filled track is green and
 /// the brackets are cyan, with the `50%` text visible.
 fn assert_progress_slot_colors<H: TerminalHarness>(harness: &mut H) {
@@ -511,6 +540,7 @@ fn level2_render_tree_style_in_wezterm() {
     assert_block_fill_indented(&mut harness);
     assert_block_fill_full(&mut harness);
     assert_block_border(&mut harness);
+    assert_block_rounded_border(&mut harness);
     assert_progress_slot_colors(&mut harness);
     assert_table_striped(&mut harness);
 }
@@ -533,6 +563,7 @@ fn level2_render_tree_style_in_kitty() {
     assert_block_fill_indented(&mut harness);
     assert_block_fill_full(&mut harness);
     assert_block_border(&mut harness);
+    assert_block_rounded_border(&mut harness);
     assert_progress_slot_colors(&mut harness);
     assert_table_striped(&mut harness);
 }
@@ -569,6 +600,17 @@ fn level2_render_tree_style_in_tmux() {
     assert!(
         !frame.plain.contains('\x1b'),
         "expected no raw escape bytes in the tmux plain capture. plain:\n{}",
+        frame.plain,
+    );
+
+    // A rounded border must relay its light-arc corner glyphs through tmux.
+    let frame = capture_bt(
+        &mut harness,
+        "bt block \"rounded notice\" --border all --border-radius 1",
+    );
+    assert!(
+        frame.plain.contains('╭') && frame.plain.contains('╯'),
+        "expected light-arc corner glyphs in the tmux capture.\nplain:\n{}",
         frame.plain,
     );
 

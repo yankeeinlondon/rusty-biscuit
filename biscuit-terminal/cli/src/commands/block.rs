@@ -94,6 +94,10 @@ pub struct BlockArgs {
     /// Border color (named or #rrggbb).
     #[arg(long = "border-color")]
     pub border_color: Option<String>,
+
+    /// Corner radius, in columns; any non-zero value rounds the corners.
+    #[arg(long = "border-radius")]
+    pub border_radius: Option<u32>,
 }
 
 impl BlockArgs {
@@ -174,6 +178,9 @@ impl BlockArgs {
             style.border = Some(Border {
                 color,
                 sides,
+                radius: self
+                    .border_radius
+                    .map(|n| TargetValue::universal(Length::ch(n))),
                 ..Border::default()
             });
         }
