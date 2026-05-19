@@ -447,6 +447,118 @@ fn level2_prose_rich_styling_emits_sgr_in_kitty() {
     assert_rich_prose_sgr(&mut harness);
 }
 
+// ------------------------------------------------------------------
+// Nested code block — enclosing style restoration (review-5)
+// ------------------------------------------------------------------
+
+/// `bt prose` input where a fenced code block sits inside an active
+/// `<red>` span with sibling text on both sides.
+///
+/// The compact visible form is `beforecodeafter`, which
+/// [`find_bt_output_line`] uses to isolate the rendered row.
+const NESTED_CODE_BLOCK_INPUT: &str =
+    "<red>before <code-block lang=rust>code</code-block> after</red>";
+
+/// Runs [`NESTED_CODE_BLOCK_INPUT`] through `bt prose` in the given real
+/// terminal and asserts the enclosing red style is restored after the
+/// code block — i.e. the trailing `after` text is still red.
+///
+/// Regression for review-5: the code block's hard `\x1b[0m` reset
+/// previously cleared the enclosing span, leaving `after` unstyled. The
+/// proof is the terminal's own `get-text` capture: the SGR run between
+/// the dim `code` cells and the `after` cells must re-select red.
+fn assert_code_block_restores_parent_style<H: TerminalHarness>(harness: &mut H) {
+    harness
+        .send_command_with_env(
+            &format!("bt prose --force-color \"{NESTED_CODE_BLOCK_INPUT}\""),
+            &[("FORCE_COLOR", "1")],
+        )
+        .expect("send_command_with_env failed");
+    let _ = biscuit_test_harness::wait_for_prompt(harness);
+    std::thread::sleep(std::time::Duration::from_millis(200));
+    let frame = harness.capture().expect("capture failed");
+
+    let row = find_bt_output_line(&frame, "beforecodeafter").unwrap_or_else(|| {
+        panic!(
+            "could not locate the nested code-block output row (compact \
+             `beforecodeafter`).\nraw:\n{}",
+            frame.raw
+        )
+    });
+    let code_pos = row.find("code").expect("`code` text present in row");
+    let after_pos = row.find("after").expect("`after` text present in row");
+    assert!(
+        code_pos < after_pos,
+        "expected `code` before `after` in the output row: {row:?}",
+    );
+    let between = &row[code_pos + "code".len()..after_pos];
+    assert!(
+        segment_selects_red(between),
+        "expected the enclosing red style to be restored before the \
+         post-code-block `after` text.\nbetween: {between:?}\nrow: {row:?}",
+    );
+}
+
+/// Whether `segment` contains an SGR sequence that selects basic red
+/// (`31`) or bright red (`91`) foreground.
+fn segment_selects_red(segment: &str) -> bool {
+    let bytes = segment.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == 0x1b && bytes.get(i + 1) == Some(&b'[') {
+            let start = i + 2;
+            let mut j = start;
+            while j < bytes.len()
+                && (bytes[j].is_ascii_digit() || bytes[j] == b';' || bytes[j] == b':')
+            {
+                j += 1;
+            }
+            if bytes.get(j) == Some(&b'm') {
+                let selects_red = segment[start..j]
+                    .split([';', ':'])
+                    .any(|p| p == "31" || p == "91");
+                if selects_red {
+                    return true;
+                }
+                i = j + 1;
+                continue;
+            }
+        }
+        i += 1;
+    }
+    false
+}
+
+#[test]
+#[serial(level2_terminal)]
+fn level2_prose_code_block_restores_parent_style_in_wezterm() {
+    use biscuit_test_harness::wezterm::WezTermHarness;
+
+    if !WezTermHarness::available() {
+        skip_with_reason("WezTerm CLI (set WEZTERM_UNIX_SOCKET)");
+        return;
+    }
+
+    let mut harness = WezTermHarness::new();
+    harness.spawn_shell().expect("spawn_shell failed");
+    assert_code_block_restores_parent_style(&mut harness);
+}
+
+#[test]
+#[serial(level2_terminal)]
+fn level2_prose_code_block_restores_parent_style_in_kitty() {
+    use biscuit_test_harness::kitty::KittyHarness;
+
+    if !KittyHarness::available() {
+        skip_with_reason("Kitty remote control (set KITTY_LISTEN_ON)");
+        return;
+    }
+
+    let mut harness = KittyHarness::new();
+    harness.spawn_shell().expect("spawn_shell failed");
+    assert_code_block_restores_parent_style(&mut harness);
+}
+
 #[test]
 #[serial(level2_terminal)]
 fn level2_prose_nested_emphasis_visible_text_in_wezterm() {

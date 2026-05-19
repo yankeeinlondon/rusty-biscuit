@@ -38,18 +38,28 @@ mod common;
 
 use biscuit_test_harness::{TerminalHarness, skip_with_reason};
 use common::pane_geometry::{extract_kitty_apc_columns, parse_debug_image_width};
-use common::send_bt_command;
+use common::{capture_until, send_bt_command};
 use serial_test::serial;
 use sha2::{Digest, Sha256};
 use std::time::Duration;
 
-/// Extra settle time after spawning a WezTerm shell to avoid racing
-/// shell initialization (custom prompts, completions, etc.).
-const SHELL_READY_MS: u64 = 1500;
+/// Short settle buffer after spawning a WezTerm shell.
+///
+/// `spawn_shell()` already calls `wait_for_prompt()`, and every diagram
+/// capture polls for real render evidence via [`capture_until`], so any
+/// remaining shell-init slack is absorbed by polling. This buffer only
+/// covers the brief gap between prompt detection and the shell being
+/// ready to read stdin.
+const SHELL_READY_MS: u64 = 500;
 
-/// Extra settle time for diagram renders, which involve SVG generation
-/// and rasterization and can take 500 ms+ on first run.
-const DIAGRAM_SETTLE_MS: u64 = 1200;
+/// Upper bound on how long a diagram render may take before its
+/// terminal evidence (APC graphics bytes or `--meta` JSON) appears.
+///
+/// SVG generation plus rasterization can take 500 ms+ on a cold cache.
+/// This is a *poll deadline*, not a blind sleep — [`capture_until`]
+/// returns as soon as the evidence shows up, so the common (warm)
+/// render costs only a poll interval, not the full bound.
+const DIAGRAM_RENDER_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// One row of the Phase-4 coverage matrix: a diagram subcommand and the
 /// argument string that produces a valid render.
@@ -133,9 +143,9 @@ fn assert_renders_in_kitty(case: &DiagramCase) {
     harness.spawn_shell().expect("spawn_shell failed");
 
     send_bt_command(&mut harness, &format!("{} {}", case.cmd, case.arg));
-    std::thread::sleep(Duration::from_millis(DIAGRAM_SETTLE_MS));
-
-    let frame = harness.capture().expect("capture failed");
+    let frame = capture_until(&mut harness, DIAGRAM_RENDER_TIMEOUT, |f| {
+        f.raw.contains("\x1b_G")
+    });
     assert!(
         frame.raw.contains("\x1b_G"),
         "expected raw output to contain Kitty graphics protocol APC \
@@ -166,9 +176,10 @@ fn assert_renders_in_wezterm(case: &DiagramCase) {
     std::thread::sleep(Duration::from_millis(SHELL_READY_MS));
 
     send_bt_command(&mut harness, &format!("{} --meta {}", case.cmd, case.arg));
-    std::thread::sleep(Duration::from_millis(DIAGRAM_SETTLE_MS));
-
-    let frame = harness.capture().expect("capture failed");
+    let frame = capture_until(&mut harness, DIAGRAM_RENDER_TIMEOUT, |f| {
+        let joined: String = f.plain.lines().collect();
+        joined.contains("\"filename\"") && joined.contains("\"render_time_ms\"")
+    });
     let joined: String = frame.plain.lines().collect();
 
     // The presence of meta JSON in stderr proves the renderer ran the
@@ -361,9 +372,9 @@ fn level2_diagram_width_respects_pane_columns() {
     assert!(pane_cols > 0, "pane_size.cols was zero");
 
     send_bt_command(&mut harness, "pie-chart --debug --width 50% \"A: 1\"");
-    std::thread::sleep(Duration::from_millis(DIAGRAM_SETTLE_MS));
-
-    let frame = harness.capture().expect("capture failed");
+    let frame = capture_until(&mut harness, DIAGRAM_RENDER_TIMEOUT, |f| {
+        parse_debug_image_width(&f.plain).is_some()
+    });
     let actual = parse_debug_image_width(&frame.plain).unwrap_or_else(|| {
         panic!(
             "could not parse `image width:` line from `bt pie-chart --debug` output.\n\
@@ -414,9 +425,9 @@ fn level2_diagram_width_kitty_apc_columns() {
     assert!(pane_cols > 0, "kitty pane_cols was zero");
 
     send_bt_command(&mut harness, "pie-chart --width 50% \"A: 1\"");
-    std::thread::sleep(Duration::from_millis(DIAGRAM_SETTLE_MS));
-
-    let frame = harness.capture().expect("capture failed");
+    let frame = capture_until(&mut harness, DIAGRAM_RENDER_TIMEOUT, |f| {
+        extract_kitty_apc_payload(&f.raw).is_some()
+    });
     let payload = extract_kitty_apc_payload(&frame.raw).unwrap_or_else(|| {
         panic!(
             "could not extract Kitty APC payload from --width 50% render.\n\
@@ -441,8 +452,9 @@ fn level2_diagram_width_kitty_apc_columns() {
         // `--debug` parsing strategy used by the WezTerm test, run
         // under the Kitty harness so the protocol path is unchanged.
         send_bt_command(&mut harness, "pie-chart --debug --width 50% \"A: 1\"");
-        std::thread::sleep(Duration::from_millis(DIAGRAM_SETTLE_MS));
-        let frame_dbg = harness.capture().expect("capture (debug) failed");
+        let frame_dbg = capture_until(&mut harness, DIAGRAM_RENDER_TIMEOUT, |f| {
+            parse_debug_image_width(&f.plain).is_some()
+        });
         let actual = parse_debug_image_width(&frame_dbg.plain).unwrap_or_else(|| {
             panic!(
                 "Kitty APC payload had no `c=` parameter AND `--debug` did not emit \
@@ -491,8 +503,9 @@ fn level2_inverse_flag_changes_background_in_capture() {
     let mut h1 = KittyHarness::new();
     h1.spawn_shell().expect("spawn_shell failed");
     send_bt_command(&mut h1, "flowchart \"A --> B\"");
-    std::thread::sleep(Duration::from_millis(DIAGRAM_SETTLE_MS));
-    let frame1 = h1.capture().expect("capture failed");
+    let frame1 = capture_until(&mut h1, DIAGRAM_RENDER_TIMEOUT, |f| {
+        extract_kitty_apc_payload(&f.raw).is_some()
+    });
     let payload1 = extract_kitty_apc_payload(&frame1.raw).unwrap_or_else(|| {
         panic!(
             "could not extract Kitty APC payload from default render.\n\
@@ -505,8 +518,9 @@ fn level2_inverse_flag_changes_background_in_capture() {
     let mut h2 = KittyHarness::new();
     h2.spawn_shell().expect("spawn_shell failed");
     send_bt_command(&mut h2, "flowchart --inverse \"A --> B\"");
-    std::thread::sleep(Duration::from_millis(DIAGRAM_SETTLE_MS));
-    let frame2 = h2.capture().expect("capture failed");
+    let frame2 = capture_until(&mut h2, DIAGRAM_RENDER_TIMEOUT, |f| {
+        extract_kitty_apc_payload(&f.raw).is_some()
+    });
     let payload2 = extract_kitty_apc_payload(&frame2.raw).unwrap_or_else(|| {
         panic!(
             "could not extract Kitty APC payload from --inverse render.\n\
@@ -547,7 +561,9 @@ fn level2_diagram_fallback_when_no_image_protocol() {
 
     send_bt_command(&mut harness, "flowchart \"A --> B\"");
 
-    let frame = harness.capture().expect("capture failed");
+    let frame = capture_until(&mut harness, DIAGRAM_RENDER_TIMEOUT, |f| {
+        f.plain.contains("```mermaid")
+    });
     assert!(
         frame.plain.contains("```mermaid"),
         "expected fallback fenced code block in tmux (no image protocol). plain:\n{}",
