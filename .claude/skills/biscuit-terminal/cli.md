@@ -172,6 +172,66 @@ Options:
 - `--margin-top` (alias `--mt`): Top margin in blank lines
 - `--margin-bottom` (alias `--mb`): Bottom margin in blank lines
 
+## Block Command
+
+Render a text block through the render tree carrying a declared `Style`
+(foreground/background, emphasis, fill band, border). `bt block` renders via
+`render_terminal_node`, so it exercises the render-tree `Style` primitive
+directly:
+
+```bash
+bt block "Plain styled text" --fg red
+bt block "Inverted notice" --fg white --bg blue --bold
+bt block "Bordered notice" --border all
+bt block "Rounded notice" --border all --border-radius 1
+bt block "Indented band" --fill pronounced --fill-band indented --inset 4
+```
+
+Options:
+- `--fg` / `--bg`: Foreground / background color (named or `#rrggbb`)
+- `--bold` / `--italic` / `--underline` / `--strike`: Text emphasis
+- `--fill`: Paint a background fill band — `subtle` or `pronounced`
+- `--fill-band`: Band painted by `--fill` — `full` (default), `padded`, `indented`
+- `--inset`: Inset, in columns, applied to the fill band
+- `--border`: Draw a border — `all`, `left`, `right`, `top`, `bottom`
+- `--border-color`: Border color (named or `#rrggbb`)
+- `--border-radius`: Corner radius in columns; any non-zero value rounds corners
+
+## Progress Command
+
+Render a progress bar through the render tree:
+
+```bash
+bt progress 60
+bt progress 60 --label Loading
+bt progress 75 --width 30 --fill-color green --bracket-color cyan
+```
+
+Options:
+- `<PERCENT>`: Completion percentage, `0`–`100` (positional, required)
+- `--label`: Text shown before the bar
+- `--width`: Width of the bar portion in characters
+- `--fill-color` / `--empty-color` / `--bracket-color`: Slot colors (named or `#rrggbb`)
+
+## Table Command
+
+Render a data table through the render tree:
+
+```bash
+bt table --columns "Name,Score" --row "Ann,90" --row "Bob,75"
+bt table --columns "Name,Score" --row "Ann,90" --row "Bob,75" --striped
+bt table --columns "Name,Score" --row "Ann,90" --row "Bob,75" --striped --stripe-bg blue
+bt table --columns "Name,Score" --row "Ann,90" --bold-header --body-color cyan
+```
+
+Options:
+- `--columns`: Comma-separated column headers (required)
+- `--row`: Comma-separated cell values (repeatable — one per data row)
+- `--striped`: Apply an alternating background stripe to even data rows
+- `--stripe-bg` / `--stripe-text`: Explicit stripe colors (named or `#rrggbb`)
+- `--bold-header`: Render every column header in bold
+- `--header-color` / `--body-color`: Header / body text colors (named or `#rrggbb`)
+
 ## Directory Tree Command
 
 Display a filesystem tree with Nerd Font icons and gitignore-aware dimming:

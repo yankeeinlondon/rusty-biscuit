@@ -221,7 +221,8 @@ bt graph-expression "a -- b -- c"          # Dash syntax (undirected)
 bt graph-expression --syntax dot "digraph { A -> B; }"  # DOT syntax
 ```
 
-Diagram options: `--example`, `--width`, `--inverse`, `--title`, `--json`, `--meta`
+All `bt <subcommand>` commands support `--example` / `-e`, which renders a representative example and prints the command that produced it.
+Diagram options: `--width`, `--inverse`, `--title`, `--json`, `--meta`
 Bar/line chart extras: `--horizontal`, `--show-data-label`, `--aspect-ratio`
 Graph extras: `--syntax` (auto, expression, dot), `--orientation` (left-to-right, top-to-bottom)
 Graph note: mixed `->` and `--` expression syntax is rejected; use separate graphs instead.
