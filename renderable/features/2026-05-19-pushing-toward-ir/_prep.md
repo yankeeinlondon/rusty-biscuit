@@ -45,6 +45,13 @@ You are responsible for helping to design the movement of the **{{state.name}}**
 
         > if the "IR State" says "both avail, old renders" _or_ "component IR" then this is **done** and you can skip design for this work
 
+        - Write the following static text into this H3 section:
+            - "- The **{{state.name}}** component does not currently have a IR based rendering solution"
+            - "- This section will describe what is required to ensure that the **{{state.name}}** component:"
+            - "    - has an IR implementation"
+            - "    - the IR implementation drives the TerminalRenderable contract"
+            - "    - the IR implementation is what is used by the bt CLI (note if **{{state.name}}** doesn't yet have bt CLI subcommand then it will be designed below in the bt CLI section)"
+
         - Evaluate how to render **{{state.main}}** into the render tree
         - Consider what Layout and Style parameters this component should have and map them into the render tree's Style and Layout features
         - Describe the critical test variants that will be needed to have high confidence in this new IR rendering as well as be able to detect variance from the prior rendering approach
@@ -54,6 +61,10 @@ You are responsible for helping to design the movement of the **{{state.name}}**
                 - What does the new feature look like? Give examples of how it would be used.
                 - Why you feel the {{state.name}} component needs it (or at least how it benefits from it)
                 - Whether NOT having this feature would force the {{state.name}} to use it's own bespoke IR instead of the tree-render
+        - Make sure to indicate whether you think the current tree-render is a good fit and whether you recommend using it (assuming none of your suggested feature requests are approved)
+            - write this as prose into the document
+            - set the `will_use_tree_renderer` to a boolean value indicating whether you would implement (with no features approved) the existing tree-renderer (over a bespoke IR)
+            - set the `will_use_tree_renderer_with_feature` to a boolean value indicating whether you would recommend using the tree renderer (over a bespoke IR) if the features you've specified were implemented
 
     - Browser IR Implementation (add as H3 heading in doc, when design is needed)
 
