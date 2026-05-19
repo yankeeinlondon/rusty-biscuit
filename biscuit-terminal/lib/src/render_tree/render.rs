@@ -164,9 +164,7 @@ impl Writer<'_> {
     /// vertical margins emit leading/trailing blank lines.
     fn render(&mut self, node: &RenderNode) -> Result<String, RenderError> {
         match node.attrs.layout() {
-            Some(layout) if !is_inline_kind(&node.kind) => {
-                self.render_with_layout(node, &layout)
-            }
+            Some(layout) if !is_inline_kind(&node.kind) => self.render_with_layout(node, &layout),
             _ => self.render_styled(node),
         }
     }
@@ -294,11 +292,7 @@ impl Writer<'_> {
 
         // Alignment offset: extra left padding when the content is narrower
         // than the space available between the horizontal margins.
-        let widest = content
-            .split('\n')
-            .map(visible_width)
-            .max()
-            .unwrap_or(0);
+        let widest = content.split('\n').map(visible_width).max().unwrap_or(0);
         let slack = content_width.saturating_sub(widest);
         let align_offset = match layout.alignment {
             Alignment::Left => 0,
@@ -361,8 +355,7 @@ impl Writer<'_> {
                 let effective = self.effective.clone();
                 let markup = self.render_inline(children, &effective)?;
                 if let Some(hints) = node.attrs.progress_hints() {
-                    let bar =
-                        render_progress_bar(&hints, &markup, self.opts.context.color_depth);
+                    let bar = render_progress_bar(&hints, &markup, self.opts.context.color_depth);
                     Ok(self.render_prose(&bar))
                 } else {
                     Ok(self.render_prose(&markup))
@@ -435,8 +428,12 @@ impl Writer<'_> {
                 Ok(cells.join("\t"))
             }
             NodeKind::TableCell { children } => {
+                // A cell rendered on its own (outside a Table) still honors a
+                // declared slot `Style` so styled header/body cells render
+                // visibly rather than flattening through `Style::default()`.
                 let markup = self.render_inline(children, &Style::default())?;
-                Ok(self.render_prose(&markup))
+                let styled = self.apply_cell_style(node, markup);
+                Ok(self.render_prose(&styled))
             }
             NodeKind::FootnoteDefinition {
                 identifier,
@@ -1021,12 +1018,26 @@ impl Writer<'_> {
             .then(|| stripe_fg_escape(terminal_hints.stripe_text, mode, depth))
             .flatten();
 
+        // The table's body slot style rides on every data cell node; resolve
+        // it once to an SGR run so `emit_table` paints data cells visibly.
+        let body_sgr = data_rows
+            .first()
+            .and_then(|row| match &row.kind {
+                NodeKind::TableRow { children } => children.first(),
+                _ => None,
+            })
+            .and_then(|cell| cell.attrs.style())
+            .filter(|s| !s.is_empty())
+            .map(|s| style::text_appearance_sgr(&s, &self.opts.context.terminal))
+            .filter(|sgr| !sgr.is_empty());
+
         Ok(emit_table(
             &columns,
             &data,
             &plan,
             stripe_bg.as_deref(),
             stripe_fg.as_deref(),
+            body_sgr.as_deref(),
         ))
     }
 
@@ -1042,9 +1053,28 @@ impl Writer<'_> {
                 cells.push(self.render(cell)?);
                 continue;
             };
-            cells.push(self.render_inline(children, &Style::default())?);
+            let markup = self.render_inline(children, &Style::default())?;
+            cells.push(self.apply_cell_style(cell, markup));
         }
         Ok(cells)
+    }
+
+    /// Wraps a rendered table-cell string in its declared slot [`Style`].
+    ///
+    /// A `Table`'s header and body appearance slots ride onto the individual
+    /// `TableCell` nodes via `set_style`. This lowers a cell's style to ANSI
+    /// through the shared [`style::text_appearance_sgr`] path so the styled
+    /// cell renders visibly instead of being flattened. A cell with no
+    /// declared style (or one that lowers to nothing) is returned unchanged.
+    fn apply_cell_style(&self, cell: &RenderNode, content: String) -> String {
+        let Some(cell_style) = cell.attrs.style().filter(|s| !s.is_empty()) else {
+            return content;
+        };
+        let open = style::text_appearance_sgr(&cell_style, &self.opts.context.terminal);
+        if open.is_empty() {
+            return content;
+        }
+        format!("{open}{content}{}", style::SGR_RESET)
     }
 
     /// Reconstructs the typed cell values of a data row.
@@ -1442,6 +1472,7 @@ fn emit_table(
     plan: &TableWidthPlan,
     stripe_bg: Option<&str>,
     stripe_fg: Option<&str>,
+    body_sgr: Option<&str>,
 ) -> String {
     let widths: Vec<usize> = plan.columns.iter().map(|c| c.resolved_width).collect();
     if widths.is_empty() {
@@ -1519,6 +1550,21 @@ fn emit_table(
                 .map(ToString::to_string)
                 .unwrap_or_default();
             let wrapped = wrap_cell_content(&content, &strategy, width);
+            // Apply the table's body slot style as ANSI per wrapped line so
+            // each line stays self-contained across padding and striping.
+            let wrapped: Vec<String> = match body_sgr {
+                Some(sgr) => wrapped
+                    .into_iter()
+                    .map(|line| {
+                        if line.is_empty() {
+                            line
+                        } else {
+                            format!("{sgr}{line}{}", style::SGR_RESET)
+                        }
+                    })
+                    .collect(),
+                None => wrapped,
+            };
             row_height = row_height.max(wrapped.len());
             cell_lines.push(wrapped);
         }
@@ -1982,9 +2028,11 @@ mod render_tree_tests {
             ..Layout::default()
         });
         let tree = RenderNode::root(vec![para]);
-        let out =
-            render_terminal_node(&tree, &TerminalRenderOptions::new(&term, RenderStrictness::Warn))
-                .expect("render");
+        let out = render_terminal_node(
+            &tree,
+            &TerminalRenderOptions::new(&term, RenderStrictness::Warn),
+        )
+        .expect("render");
         let plain = strip_escape_codes(&out.output);
         assert!(plain.contains("hello world"));
         let max_line = plain.lines().map(|l| l.len()).max().unwrap_or(0);
@@ -2006,9 +2054,11 @@ mod render_tree_tests {
             ..Layout::default()
         });
         let tree = RenderNode::root(vec![para]);
-        let out =
-            render_terminal_node(&tree, &TerminalRenderOptions::new(&term, RenderStrictness::Warn))
-                .expect("render");
+        let out = render_terminal_node(
+            &tree,
+            &TerminalRenderOptions::new(&term, RenderStrictness::Warn),
+        )
+        .expect("render");
         let plain = strip_escape_codes(&out.output);
         let line = plain.lines().next().unwrap_or("");
         assert!(
@@ -2029,9 +2079,11 @@ mod render_tree_tests {
             ..Layout::default()
         });
         let tree = RenderNode::root(vec![para]);
-        let out =
-            render_terminal_node(&tree, &TerminalRenderOptions::new(&term, RenderStrictness::Warn))
-                .expect("render");
+        let out = render_terminal_node(
+            &tree,
+            &TerminalRenderOptions::new(&term, RenderStrictness::Warn),
+        )
+        .expect("render");
         let plain = strip_escape_codes(&out.output);
         let line = plain.lines().next().unwrap_or("");
         assert!(
@@ -2048,9 +2100,10 @@ mod render_tree_tests {
 
         // A root holding a block with both `max_width` and margins, so the
         // child resolves against the width left by the parent's constraints.
-        let mut block = RenderNode::block_quote(vec![RenderNode::paragraph(vec![
-            RenderNode::text("content"),
-        ])]);
+        let mut block =
+            RenderNode::block_quote(vec![RenderNode::paragraph(vec![RenderNode::text(
+                "content",
+            )])]);
         block.attrs.set_layout(&Layout {
             margin: Margin::x(Length::ch(2)),
             max_width: Some(TargetValue::universal(Length::ch(30))),
@@ -2058,9 +2111,11 @@ mod render_tree_tests {
             ..Layout::default()
         });
         let tree = RenderNode::root(vec![block]);
-        let out =
-            render_terminal_node(&tree, &TerminalRenderOptions::new(&term, RenderStrictness::Warn))
-                .expect("render");
+        let out = render_terminal_node(
+            &tree,
+            &TerminalRenderOptions::new(&term, RenderStrictness::Warn),
+        )
+        .expect("render");
         let plain = strip_escape_codes(&out.output);
         assert!(
             plain.contains("content"),
@@ -2173,11 +2228,8 @@ mod render_tree_tests {
         // just the span's text — the rest of the paragraph is unaffected.
         let mut span = RenderNode::span(vec![], vec![RenderNode::text("loud")]);
         span.attrs.set_style(&fg_style(BasicColor::Red));
-        let para = RenderNode::paragraph(vec![
-            RenderNode::text("a "),
-            span,
-            RenderNode::text(" b"),
-        ]);
+        let para =
+            RenderNode::paragraph(vec![RenderNode::text("a "), span, RenderNode::text(" b")]);
         let out = render(&para).output;
         assert!(out.contains("\x1b[31m"), "span color missing: {out:?}");
         let plain = strip_escape_codes(&out);
@@ -2272,5 +2324,115 @@ mod render_tree_tests {
             !plain.contains('┌') && !plain.contains('│'),
             "inline span must not draw a border: {plain:?}"
         );
+    }
+
+    // ── Table slot styling (Spec B D5) ─────────────────────────────────
+
+    /// Builds a one-column, one-row table render tree from a `Table`.
+    fn table_tree(table: &crate::components::table::Table) -> RenderNode {
+        use crate::components::renderable::TerminalRenderable;
+        table.render_tree_node().expect("table projects to a node")
+    }
+
+    #[test]
+    fn render_tree_table_header_slot_emits_bold_sgr() {
+        use renderable::style::{Style, TextEmphasis};
+
+        let table = crate::components::table::Table::new()
+            .with_columns(vec![crate::components::table::TableColumn::new("Name")])
+            .with_data(vec![vec!["Ann".into()]])
+            .with_header_style(Style {
+                emphasis: TextEmphasis {
+                    bold: true,
+                    ..TextEmphasis::default()
+                },
+                ..Style::default()
+            });
+        let out = render(&table_tree(&table)).output;
+        assert!(
+            out.contains("\x1b[1m"),
+            "styled header must emit bold SGR: {out:?}"
+        );
+        assert!(strip_escape_codes(&out).contains("Name"));
+    }
+
+    #[test]
+    fn render_tree_table_body_slot_emits_color_sgr() {
+        use renderable::color::{BasicColor, Color};
+        use renderable::layout::TargetValue;
+        use renderable::style::{PerMode, Style};
+
+        let table = crate::components::table::Table::new()
+            .with_columns(vec![crate::components::table::TableColumn::new("Name")])
+            .with_data(vec![vec!["Ann".into()]])
+            .with_body_style(Style {
+                color: Some(TargetValue::universal(PerMode::universal(
+                    Color::BasicColor(BasicColor::Red),
+                ))),
+                ..Style::default()
+            });
+        let out = render(&table_tree(&table)).output;
+        assert!(
+            out.contains("\x1b[31m"),
+            "styled body must emit red fg SGR: {out:?}"
+        );
+        assert!(strip_escape_codes(&out).contains("Ann"));
+    }
+
+    #[test]
+    fn render_tree_table_cell_slot_emits_sgr_for_standalone_cell() {
+        use renderable::style::{Style, TextEmphasis};
+
+        // The standalone `TableCell` render arm must honor a declared slot
+        // style rather than flattening through `Style::default()`. A bare
+        // `TableCell` is rejected by tree validation, so the arm is exercised
+        // by driving the `Writer` directly.
+        let mut cell = RenderNode::table_cell(vec![RenderNode::text("Cell")]);
+        cell.attrs.set_style(&Style {
+            emphasis: TextEmphasis {
+                bold: true,
+                ..TextEmphasis::default()
+            },
+            ..Style::default()
+        });
+        let options = opts(RenderStrictness::Warn);
+        let mut writer = Writer {
+            opts: &options,
+            diagnostics: Vec::new(),
+            effective: Style::default(),
+        };
+        let out = writer.render(&cell).expect("render cell");
+        assert!(
+            out.contains("\x1b[1m"),
+            "standalone styled cell must emit bold SGR: {out:?}"
+        );
+    }
+
+    #[test]
+    fn render_tree_table_new_with_bold_reaches_parity_with_bespoke() {
+        use crate::components::renderable::TerminalRenderable;
+        use crate::components::table::{Table, TableColumn};
+
+        // A bold-header table must render identically through the render-tree
+        // path and the bespoke `Table::render` path.
+        let build = || {
+            Table::new()
+                .with_columns(vec![
+                    TableColumn::new_with_bold("Name"),
+                    TableColumn::new_with_bold("Score"),
+                ])
+                .with_data(vec![vec!["Ann".into(), "90".into()]])
+        };
+        let term = Terminal::new_optimistic(80);
+        let bespoke = build().render(&term);
+
+        let tree_out = render(&build().render_tree_node().expect("table node")).output;
+
+        assert_eq!(
+            tree_out, bespoke,
+            "tree path must match bespoke output for a bold-header table"
+        );
+        // And the styling must actually be present (not flattened away).
+        assert!(tree_out.contains("\x1b[1m"), "bold SGR missing: {tree_out:?}");
     }
 }

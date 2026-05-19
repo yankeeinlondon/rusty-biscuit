@@ -88,7 +88,10 @@ fn paint_text(
 
     // The background is the explicit `background` color when set, otherwise a
     // non-transparent `fill` contributes one. Both lower to a background SGR.
-    let fill = style.fill.as_ref().filter(|f| f.intensity != FillIntensity::Transparent);
+    let fill = style
+        .fill
+        .as_ref()
+        .filter(|f| f.intensity != FillIntensity::Transparent);
     let background = style
         .background
         .as_ref()
@@ -237,11 +240,7 @@ pub(crate) fn color_sgr(color: Color, depth: &ColorDepth, background: bool) -> O
 ///
 /// On an 8-color terminal a bright variant is degraded to its non-bright
 /// counterpart.
-fn basic_sgr(
-    basic: renderable::color::BasicColor,
-    depth: &ColorDepth,
-    background: bool,
-) -> String {
+fn basic_sgr(basic: renderable::color::BasicColor, depth: &ColorDepth, background: bool) -> String {
     let mut code = u16::from(color_code(basic));
     if matches!(depth, ColorDepth::Minimal) && code >= 90 {
         // No bright palette on an 8-color terminal: 90..97 -> 30..37.
@@ -433,11 +432,7 @@ fn border_is_rounded(border: &Border) -> bool {
 /// `rounded` selects the light-arc corner glyphs (`╭╮╰╯`). The arc set exists
 /// only for the thin/light weight, so a heavy or double border keeps its
 /// square corners regardless of `rounded`.
-fn border_glyphs(
-    weight: BorderWeight,
-    line_style: BorderLineStyle,
-    rounded: bool,
-) -> BorderGlyphs {
+fn border_glyphs(weight: BorderWeight, line_style: BorderLineStyle, rounded: bool) -> BorderGlyphs {
     if line_style == BorderLineStyle::Double {
         return BorderGlyphs {
             top_left: '╔',
@@ -528,12 +523,7 @@ fn render_border(
 
     if top {
         out.push(horizontal_rule(
-            &glyphs,
-            interior,
-            left,
-            right,
-            true,
-            &paint,
+            &glyphs, interior, left, right, true, &paint,
         ));
     }
     for line in &lines {
@@ -559,12 +549,7 @@ fn render_border(
     }
     if bottom {
         out.push(horizontal_rule(
-            &glyphs,
-            interior,
-            left,
-            right,
-            false,
-            &paint,
+            &glyphs, interior, left, right, false, &paint,
         ));
     }
     out.join("\n")
@@ -573,7 +558,8 @@ fn render_border(
 /// Builds a top or bottom border rule.
 ///
 /// `interior` is the column count between (and excluding) the vertical edges;
-/// a corner glyph is used at an end only when that vertical edge is drawn.
+/// the horizontal run spans it in full so the rule lines up with the content
+/// row. A corner glyph is used at an end only when that vertical edge is drawn.
 fn horizontal_rule(
     glyphs: &BorderGlyphs,
     interior: u32,
@@ -587,7 +573,7 @@ fn horizontal_rule(
     } else {
         (glyphs.bottom_left, glyphs.bottom_right)
     };
-    let run = interior - u32::from(left) - u32::from(right);
+    let run = interior;
     let mut rule = String::new();
     if left {
         rule.push(left_corner);
@@ -875,6 +861,52 @@ mod tests {
         assert!(lines[0].starts_with('┌') && lines[0].ends_with('┐'));
         assert!(lines[1].starts_with('│') && lines[1].ends_with('│'));
         assert!(lines[2].starts_with('└') && lines[2].ends_with('┘'));
+    }
+
+    #[test]
+    fn border_rules_match_content_row_width() {
+        // Regression: the top/bottom rules must be exactly as wide as the
+        // content row so the corners line up with the vertical edges. The
+        // content row adds one space of padding inside each edge, so the
+        // horizontal run has to cover that padding too.
+        let style = Style {
+            border: Some(Border {
+                sides: BorderSides::All,
+                ..Border::default()
+            }),
+            ..Style::default()
+        };
+        let out = apply_style("hello world", &style, &truecolor_term(), 15);
+        let lines: Vec<&str> = out.split('\n').collect();
+        assert_eq!(lines.len(), 3);
+        let widths: Vec<u32> = lines.iter().copied().map(visible_width).collect();
+        assert_eq!(
+            widths[0], widths[1],
+            "top rule must match content row width, got {widths:?}"
+        );
+        assert_eq!(
+            widths[2], widths[1],
+            "bottom rule must match content row width, got {widths:?}"
+        );
+        // │ + space + 11 + space + │ = 15 columns.
+        assert_eq!(widths[1], 15, "got {widths:?}");
+    }
+
+    #[test]
+    fn rounded_border_rules_match_content_row_width() {
+        let style = Style {
+            border: Some(Border {
+                sides: BorderSides::All,
+                radius: Some(TargetValue::universal(Length::ch(1))),
+                ..Border::default()
+            }),
+            ..Style::default()
+        };
+        let out = apply_style("the quick brown fox", &style, &truecolor_term(), 23);
+        let lines: Vec<&str> = out.split('\n').collect();
+        let widths: Vec<u32> = lines.iter().copied().map(visible_width).collect();
+        assert_eq!(widths[0], widths[1], "got {widths:?}");
+        assert_eq!(widths[2], widths[1], "got {widths:?}");
     }
 
     #[test]
