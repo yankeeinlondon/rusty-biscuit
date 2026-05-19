@@ -74,20 +74,77 @@ pub fn truncate_front_back(text: &str, front_count: usize, back_count: usize) ->
     result
 }
 
-/// Strips all leading whitespace from each line of the text.
+/// Removes the common leading-whitespace prefix shared by every non-blank
+/// line (a "dedent").
+///
+/// Only the minimum indentation common to all non-blank lines is removed,
+/// so *relative* indentation — nested Markdown lists, indented code blocks,
+/// continuation lines — is preserved. Blank lines are emitted as-is and are
+/// ignored when computing the common prefix.
+///
+/// The prefix is compared character-by-character, so tabs and spaces are
+/// never treated as equivalent: a line indented with a tab and a line
+/// indented with spaces share an empty common prefix and the text is
+/// returned unchanged.
 ///
 /// ## Examples
 ///
 /// ```
 /// use claudine::prompt_reporting::strip_leading_whitespace;
 ///
-/// let text = "  Line 1\n    Line 2\n\tLine 3";
+/// // Common 4-space indent is removed; the inner 4-space indent of the
+/// // sub-bullet is preserved relative to its parent.
+/// let text = "    - parent\n        - child";
 /// let result = strip_leading_whitespace(text);
-/// assert_eq!(result, "Line 1\nLine 2\nLine 3");
+/// assert_eq!(result, "- parent\n    - child");
 /// ```
 pub fn strip_leading_whitespace(text: &str) -> String {
+    fn leading_whitespace(line: &str) -> &str {
+        let end = line
+            .char_indices()
+            .find(|(_, c)| !c.is_whitespace())
+            .map(|(i, _)| i)
+            .unwrap_or(line.len());
+        &line[..end]
+    }
+
+    fn common_prefix_len(a: &str, b: &str) -> usize {
+        a.char_indices()
+            .zip(b.chars())
+            .take_while(|((_, x), y)| x == y)
+            .last()
+            .map(|((i, c), _)| i + c.len_utf8())
+            .unwrap_or(0)
+    }
+
+    let mut common: Option<&str> = None;
+    for line in text.lines() {
+        if line.trim().is_empty() {
+            continue;
+        }
+        let leading = leading_whitespace(line);
+        common = Some(match common {
+            Some(prev) => &prev[..common_prefix_len(prev, leading)],
+            None => leading,
+        });
+        if common.map(str::is_empty).unwrap_or(true) {
+            break;
+        }
+    }
+
+    let prefix_len = common.map(str::len).unwrap_or(0);
+    if prefix_len == 0 {
+        return text.to_string();
+    }
+
     text.lines()
-        .map(|line| line.trim_start())
+        .map(|line| {
+            if line.trim().is_empty() {
+                line
+            } else {
+                &line[prefix_len..]
+            }
+        })
         .collect::<Vec<&str>>()
         .join("\n")
 }
@@ -184,21 +241,52 @@ mod tests {
     // --- strip_leading_whitespace tests ---
 
     #[test]
-    fn strips_spaces() {
+    fn dedents_common_space_prefix() {
+        // Common indent is two spaces; relative indent of the second line is
+        // preserved.
         let text = "  hello\n    world";
-        assert_eq!(strip_leading_whitespace(text), "hello\nworld");
+        assert_eq!(strip_leading_whitespace(text), "hello\n  world");
     }
 
     #[test]
-    fn strips_tabs() {
+    fn dedents_common_tab_prefix() {
         let text = "\thello\n\t\tworld";
-        assert_eq!(strip_leading_whitespace(text), "hello\nworld");
+        assert_eq!(strip_leading_whitespace(text), "hello\n\tworld");
+    }
+
+    #[test]
+    fn mixed_tab_and_space_leaves_text_unchanged() {
+        // Tab and space share an empty common prefix; the input is returned
+        // as-is so neither indentation style is silently rewritten.
+        let text = "  hello\n\tworld";
+        assert_eq!(strip_leading_whitespace(text), text);
+    }
+
+    #[test]
+    fn unindented_line_blocks_dedent() {
+        // The minimum common indent is empty when any non-blank line has no
+        // leading whitespace.
+        let text = "hello\n  world";
+        assert_eq!(strip_leading_whitespace(text), text);
     }
 
     #[test]
     fn empty_lines_preserved() {
-        let text = "hello\n\n  world";
+        // Blank lines are ignored when computing the common prefix and are
+        // emitted unchanged.
+        let text = "  hello\n\n  world";
         assert_eq!(strip_leading_whitespace(text), "hello\n\nworld");
+    }
+
+    #[test]
+    fn preserves_nested_list_indentation() {
+        // The regression that motivated dedent semantics: a top-level
+        // four-space block indent should be stripped, but the bullet's
+        // four-space sub-indent must survive so the Markdown parser still
+        // sees a nested list.
+        let text = "    - parent\n        - child\n        - sibling";
+        let result = strip_leading_whitespace(text);
+        assert_eq!(result, "- parent\n    - child\n    - sibling");
     }
 
     #[test]
