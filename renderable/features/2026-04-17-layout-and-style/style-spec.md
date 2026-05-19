@@ -133,9 +133,12 @@ Settled by Spec A D1/D2 and restated here:
 - **`Style`** — how a component **paints itself and its named sub-parts**:
   color, background, text emphasis, borders, fills. *What the box looks like.*
 
-`Layout` is non-semantic plain data. Whether `Style` gets a **semantic tier**
-(named intents like "callout" / "hero" / "de-emphasized" that resolve to
-concrete appearance) is **(OPEN)** — see Open Questions.
+`Layout` is non-semantic plain data. For v1, `Style` does not get a
+**semantic tier** (named intents like "callout" / "hero" / "de-emphasized"):
+`Style` remains plain concrete serde data, like `Layout`. Higher-level APIs,
+component helpers, or darkmatter shims may expose semantic concepts, but they
+resolve to concrete `Style` before entering the render tree. `StyleIntent` does
+not enter the render tree in v1.
 
 ### D2 — Appearance vocabulary
 
@@ -143,31 +146,33 @@ The properties `Style` should express, drawn from the bespoke material above:
 
 | Property | Type sketch | Re-homes |
 |---|---|---|
-| foreground color | `Option<TargetValue<Color>>` | `BlockQuote.text_color`, section heading color |
-| background color | `Option<TargetValue<Color>>` | `BlockQuote.bg_color`, `Table` row tint, `PageBackground` |
+| foreground color | `Option<TargetValue<PerMode<Color>>>` | `BlockQuote.text_color`, section heading color |
+| background color | `Option<TargetValue<PerMode<Color>>>` | `BlockQuote.bg_color`, `Table` row tint, `PageBackground` |
 | text emphasis | shared `TextEmphasis` leaf (bold, italic, dim, underline, strikethrough, blink) | `Section` heading bold/italic |
-| border | `Option<Border>` (color, and possibly weight/style) | `BlockQuote.left_block_color` |
-| fill / background band | `Option<Fill>` — paint a width band behind the block | `PageBackground` intensity, `RowFill` coloring |
+| border | `Option<Border>` — color, weight, line style, sides, radius | `BlockQuote.left_block_color` |
+| fill / background band | `Option<Fill>` — color, intensity, band, inset | `PageBackground` intensity, `RowFill` coloring |
 
-**(OPEN)** Exact field set and whether `border`/`fill` are one concept or two.
-`PageBackground`'s `Subtle` / `Pronounced` are *mode-relative* (defined against
-the terminal's light/dark mode) — `Style` color values may therefore need a
-mode-relative form, not just absolute `Color`s. See Open Questions.
+**Settled:** `fill` remains separate from adaptive color. `Fill` models
+band-painting behavior — how/whether the available width is painted — while
+adaptive light/dark values are represented by `PerMode<T>` (D3). v1 uses the
+rich visual model for both `Border` and `Fill` (D4).
 
 ### D3 — Per-target values and capability degradation
 
-- Per-target overrides reuse `TargetValue<T>` (e.g. `TargetValue<Color>` for a
-  color that differs between Browser and Terminal). Universal is the common
-  case; `PerTarget` is the escape hatch.
+- Per-target overrides reuse `TargetValue<T>` (e.g.
+  `TargetValue<PerMode<Color>>` for a color that differs between Browser and
+  Terminal). Universal is the common case; `PerTarget` is the escape hatch.
+- Light/dark adaptation uses a new `PerMode<T>` wrapper, composed with
+  `TargetValue` for color-bearing style values. The common shape is
+  `TargetValue<PerMode<Color>>`, with convenience constructors for universal
+  values and light/dark pairs so callers do not hand-build nested enums for the
+  common cases.
+- `Fill` is not the general adaptive color mechanism. A fill may contain a
+  color-bearing value, but its reason to exist is band-painting behavior.
 - **Capability degradation is part of the contract.** A `Color` is authored
   once; the terminal renderer degrades it to the terminal's `ColorDepth`
   (truecolor → 256 → 16) using `renderable::color`'s existing machinery. The
   component never branches on color depth.
-- **(OPEN)** Light/dark adaptation. `Table` already adapts its tints to
-  `ColorMode`; `PageBackground::Subtle` is mode-relative by definition. Options:
-  (a) a mode-relative color variant (`Color::adaptive(light, dark)`), (b) a
-  `PerMode` wrapper analogous to `TargetValue`, (c) leave adaptation to the
-  component. Needs a decision.
 
 ### D4 — The `Style` struct (DRAFT sketch)
 
@@ -175,9 +180,9 @@ mode-relative form, not just absolute `Color`s. See Open Questions.
 /// How a block-level component paints itself. Sibling of `Layout`.
 pub struct Style {
     /// Foreground (text) color.
-    pub color: Option<TargetValue<Color>>,
+    pub color: Option<TargetValue<PerMode<Color>>>,
     /// Background color of the component's box.
-    pub background: Option<TargetValue<Color>>,
+    pub background: Option<TargetValue<PerMode<Color>>>,
     /// Text emphasis — the shared `renderable::style::TextEmphasis` leaf
     /// (also reused by `Prose`'s `ProseStyle`). For *inline* content prefer the
     /// `Strong` / `Emphasis` / `Delete` node kinds; the `bold` / `italic` /
@@ -206,10 +211,45 @@ pub struct TextEmphasis {
 }
 ```
 
-`Border` and `Fill` are **(OPEN)** — sketches only. `Border` likely carries a
-`color` and possibly a `weight` (thin/medium/thick, mirroring darkmatter's
-`HorizontalRule` weights). `Fill` likely carries a background `Color` and an
-intensity, re-homing `PageBackground`.
+`Border` and `Fill` use the v1 rich visual model:
+
+```rust
+pub struct Border {
+    pub color: Option<TargetValue<PerMode<Color>>>,
+    pub weight: BorderWeight,
+    pub line_style: BorderLineStyle,
+    pub sides: BorderSides,
+    pub radius: Option<TargetValue<Length>>,
+}
+
+pub struct Fill {
+    pub color: Option<TargetValue<PerMode<Color>>>,
+    pub intensity: FillIntensity,
+    pub band: FillBand,
+    pub inset: Option<TargetValue<Length>>,
+}
+```
+
+`Border` is one aggregate entity with uniform defaults plus side-specific
+addressing. Authors can apply one border style to all sides, enable only
+selected sides, or override an individual side such as `left` without
+introducing a separate conceptual type like `LeftBorder`. Side-specific
+settings override aggregate border defaults. `Fill` remains separate from
+`background`: it models painted-band behavior, not adaptive color selection
+(D2/D3).
+
+`PerMode<T>` is the light/dark adaptation wrapper used by color-bearing style
+values:
+
+```rust
+pub enum PerMode<T> {
+    Universal(T),
+    Adaptive { light: T, dark: T },
+}
+```
+
+It should provide convenience constructors for universal values and adaptive
+light/dark pairs, plus resolution against `ColorMode`.
 
 `renderable::style` already ships, alongside `TextEmphasis`, the shared
 emitters Spec B consumes: `TextEmphasis::sgr_ops` + `EmphasisLayer` (terminal
@@ -223,35 +263,30 @@ PartialEq, Eq` — Spec B must add `Serialize` / `Deserialize` to them when
 `Style` embeds `TextEmphasis`, since `Style` rides on `NodeAttrs` and must
 round-trip (D8).
 
-### D5 — The slot system — styling named sub-parts **(OPEN — the hard part)**
+### D5 — The slot system — styling named sub-parts
 
 A single `Style` per component is not enough. A `Table` has rows, columns,
 cells, a header, borders; a `Section` has a heading and a body; a `BlockQuote`
 has a bar and content; a `Progress` has a filled track, an empty track, and
 brackets. Spec A D1 explicitly says `Style` covers *"named sub-parts."*
 
-Candidate approaches (to be decided):
+**Settled:** v1 uses a hybrid model.
 
-- **(a) Slot map on the node** — the component attaches a
-  `BTreeMap<SlotName, Style>` where `SlotName` is a component-defined string
-  (`"heading"`, `"row.odd"`, `"cell"`, `"bar.filled"`). One `renderable.style`
-  hint namespace, keyed by slot.
-- **(b) Per-slot hint sub-namespaces** — `renderable.style.table.row`,
-  `renderable.style.table.cell`, mirroring how `renderable.widget.progress`
-  already namespaces widget hints.
-- **(c) Typed per-component style structs** — `TableStyle { header, row_odd,
-  row_even, cell, border }`, each field a `Style`. Type-safe; not generic.
-
-Trade-off: (a)/(b) are uniform and serialize cleanly but stringly-typed;
-(c) is type-safe but every component needs its own struct. A hybrid — generic
-`Style` for the common case, typed component structs where slots are rich
-(`Table`) — is plausible. **Needs a decision before planning.**
+- `Style` remains the universal primitive on `NodeAttrs`.
+- Simple components may use the node's generic `Style` directly.
+- Components with rich slot surfaces use typed component style structs, e.g.
+  `TableStyle` or `ProgressStyle`, whose fields are `Style` values or richer
+  typed leaves where needed.
+- v1 should avoid making fully stringly typed slots the stable public API.
+  Internal serialization may still use stable field names, but the public
+  authoring surface for rich components should be typed.
 
 ### D6 — `Style` on the render tree
 
-- `Style` (and any slot styles) ride on `NodeAttrs` under a new
-  `HintNamespace::STYLE` (`renderable.style`), with typed accessors
-  `set_style` / `style`, exactly mirroring `set_layout` / `layout`.
+- `Style` rides on `NodeAttrs` under a new `HintNamespace::STYLE`
+  (`renderable.style`), with typed accessors `set_style` / `style`, exactly
+  mirroring `set_layout` / `layout`. Rich component slot surfaces ride through
+  typed component style structs (D5).
 - **Inline vs block — settled.** Spec A D5 made `Layout` **block-only**.
   `Style` is **not** block-only: it carries *appearance* (`color`,
   `background`, `border`, `fill`) and may attach to block nodes **and** inline
@@ -268,12 +303,11 @@ Trade-off: (a)/(b) are uniform and serialize cleanly but stringly-typed;
   lowers onto. The two subsystems share only **leaf primitives** — the
   `renderable::color::Color` enum and the `renderable::style::TextEmphasis`
   decoration leaf (D4) — never the container types.
-- **Composition / inheritance — (OPEN).** `Layout` is non-inherited (Spec A
-  D6). CSS `color` *does* inherit. A non-inherited `Style` is simpler and
-  matches `Layout`; an inherited `color`/`emphasis` is more ergonomic (set the
-  accent on a `Section`, children pick it up) but complicates every renderer.
-  Recommendation leans **non-inherited for v1** (uniform with `Layout`, no
-  cascade engine), revisited if authoring proves painful — but this is open.
+- **Composition / inheritance — settled, limited.** Only text appearance
+  fields inherit through render tree traversal: `color` and `emphasis`.
+  Box-painting properties do not inherit: `background`, `border`, and `fill`
+  remain explicit on the node or typed slot that paints them. This keeps the
+  useful text cascade without making `Style` a full CSS cascade engine.
 
 ### D7 — Per-target consumption
 
@@ -296,40 +330,45 @@ Mirrors Spec A D7. Terminal is implemented first.
 
 ### D8 — Serialization
 
-`Style` rides on `NodeAttrs` and serializes with the tree. `Style`, `Border`,
-`Fill`, and any slot keying derive `Serialize` / `Deserialize` with
-`snake_case` enum casing; the embedded shared leaves `TextEmphasis` /
-`UnderlineStyle` need those derives **added** (they ship without them — see the
-D4 note). A documented JSON sample must appear in the `Style` rustdoc with a
-round-trip test, exactly as Spec A D8 requires for `Layout`.
+`Style` rides on `NodeAttrs` and serializes with the tree. `Style`,
+`PerMode<T>`, `Border`, `Fill`, and typed component style structs derive
+`Serialize` / `Deserialize` with `snake_case` enum casing; the embedded shared
+leaves `TextEmphasis` / `UnderlineStyle` need those derives **added** (they ship
+without them — see the D4 note). A documented JSON sample must appear in the
+`Style` rustdoc with a round-trip test, exactly as Spec A D8 requires for
+`Layout`.
 
 ### D9 — Migration
 
-- **Re-home evicted appearance.** `PageBackground` → `Style` background/fill;
-  the *coloring* half of `RowFill` → `Style` (its *width* half already went to
-  `Layout` in Spec A D9). `darkmatter`'s `PageBackground` becomes a
-  `#[deprecated]` shim converting to `Style`, mirroring the `PageMargin` →
-  `Margin` bridge Spec A established.
-- **Migrate bespoke component fields.** `BlockQuote.text_color` /
-  `bg_color` / `left_block_color`, `Section`'s heading SGR, `Table`'s
-  alternating-color flags, `Progress`'s glyphs become a declared `Style` (or
-  per-slot styles per D5). The bespoke `TerminalRenderable` renderers keep
-  working during migration — not a big-bang cutover (Spec A D9 pattern).
+- **Core component v1.** Add `Style`, terminal support, and migrate
+  `BlockQuote`, `Section`, `Table` stripe colors, and `Progress` slot colors /
+  glyph styling into declared styles or typed component style structs per D5.
+  Existing builders stay available as deprecated compatibility shims and
+  internally write or convert to `Style`.
+- **Narrow darkmatter bridge only as needed.** Use a small bridge for drift
+  parity if the migrated component slice needs one. Full page-style migration
+  is deferred.
 - **`hr_css_variables`** — retire the ad-hoc `:root` CSS map in favor of `Style`
   + the `style` frontmatter schema. This is the most entangled piece and is
   **deferred** to the frontmatter sub-spec (see Non-Goals).
+- **Frontmatter** — the `style` frontmatter namespace is deferred with
+  `hr_css_variables`; it is not required for the component-styling v1.
 
 ## Success Criteria (DRAFT)
 
 - A single `Style` type exists in `renderable::style` (the module already
   ships with the shared leaves), declared by components, applied by the
   terminal tree renderer without the component hand-writing ANSI.
-- The bespoke appearance fields on `BlockQuote`, `Section`, `Table`, `Progress`
-  are expressed as `Style`; `darkmatter`'s `PageBackground` is a deprecated
-  shim onto `Style`.
+- `BlockQuote`, `Section`, `Table` stripe colors, and `Progress` slot colors /
+  glyph styling are expressed as declared styles or typed component style
+  structs. Old component builders still work and internally write or convert to
+  `Style`.
+- Render-tree terminal output matches current bespoke output for the migrated
+  components.
+- Markdown output is unchanged.
 - A `Color` in a `Style` renders correctly on 16-color, 256-color, and
-  truecolor terminals (capability degradation), and adapts to light/dark mode
-  where required.
+  truecolor terminals (capability degradation), and `PerMode<Color>` adapts to
+  light/dark mode where required.
 - The `Styling`-facet drift attributable to dropped appearance is burned down
   in `just drift-report`.
 - `cargo test` / `cargo clippy` pass for `renderable`, `biscuit-terminal`,
@@ -341,39 +380,55 @@ round-trip test, exactly as Spec A D8 requires for `Layout`.
   target.
 - Emphasis (bold / italic / dim / underline / strikethrough) → correct SGR.
 - Color degradation at each `ColorDepth`.
-- Light/dark adaptation for a mode-relative value.
-- Per-slot styling (once D5 is decided) — e.g. a styled table header vs body.
+- Light/dark adaptation for a `PerMode<Color>` value.
+- Typed component slot styling — e.g. a styled table header vs body.
 - Serde round-trip of the documented `Style` JSON shape.
+- Serde round-trip coverage for migrated component style structs and the old
+  builder compatibility path.
+- Terminal parity fixtures for migrated components: render-tree output matches
+  current bespoke output.
 - Markdown body unchanged when a node carries a `Style` (no diagnostic).
 
 ## Open Questions
 
-These must be resolved before this draft becomes an implementation plan.
+Resolved decisions and remaining questions to track before this draft becomes
+an implementation plan.
 
 1. **Inline vs block (D6).** *Resolved.* `Style` applies to block nodes and
    inline `Span` nodes for *appearance*; semantic emphasis stays in the
    inline node kinds. `Prose` is decoupled — it has its own IR and shares only
    leaf primitives with `Style`. See D6.
-2. **The slot system (D5).** Slot map, per-slot namespaces, or typed
-   per-component style structs — or a hybrid?
-3. **Inheritance (D6).** Non-inherited (uniform with `Layout`) or a `color`/
-   `emphasis` cascade?
-4. **Light/dark adaptation (D3).** Mode-relative color variant, a `PerMode`
-   wrapper, or component-handled?
-5. **Semantic tier (D1/D2).** Does `Style` get named intents ("callout",
-   "hero"), or stay plain data like `Layout`?
+2. **The slot system (D5).** *Resolved.* Hybrid: `Style` remains the universal
+   primitive on `NodeAttrs`; rich slot surfaces use typed component style
+   structs. v1 does not commit fully stringly typed slots as the stable public
+   API.
+3. **Inheritance (D6).** *Resolved.* Limited inheritance for text appearance
+   only: `color` and `emphasis` cascade; `background`, `border`, and `fill` do
+   not.
+4. **Light/dark adaptation (D3).** *Resolved.* Add `PerMode<T>` with
+   convenience constructors, composed with `TargetValue` for adaptive
+   light/dark style values. `Fill` remains band-painting behavior.
+5. **Semantic tier (D1/D2).** *Resolved.* `Style` stays plain concrete serde
+   data like `Layout`. Higher-level APIs, component helpers, or darkmatter
+   shims may expose semantic concepts, but they resolve to concrete `Style`
+   before entering the render tree. No `StyleIntent` enters the render tree in
+   v1.
 6. **Module home.** *Resolved:* `renderable::style` — the module **already
    exists** (`renderable/src/style.rs`, shipped by the Prose cross-target
    feature) and holds the shared leaves (`TextEmphasis`, `UnderlineStyle`,
    `EmphasisLayer`). Spec B adds the `Style` primitive to it. Still open: does
    `Style` *contain* a `CssStyle` for the browser path, or lower to one?
-7. **Border / fill modeling (D2/D4).** One concept or two; what does `Border`
-   carry beyond color (weight, line style)?
+7. **Border / fill modeling (D2/D4).** *Resolved.* v1 uses the rich visual
+   model: `Border { color, weight, line_style, sides, radius }` and
+   `Fill { color, intensity, band, inset }`. `Border` is one aggregate entity
+   with uniform defaults plus side-specific addressing; side-specific settings
+   override aggregate border defaults. `Fill` remains separate from
+   `background` and models painted-band behavior.
 8. **`Style` ↔ `CodeRenderer`.** Confirmed separate — but a code block's
    *frame* (border/background) is `Style` while its *content* highlighting is
    `CodeRenderer`. Confirm the seam holds.
-9. **Frontmatter & `hr_css_variables`.** Sequenced as a follow-on sub-spec —
-   confirm it is not needed for the component-styling pass.
+9. **Frontmatter & `hr_css_variables`.** Sequenced as a follow-on sub-spec and
+   not needed for the component-styling v1.
 
 ## Relationship to Spec A
 
@@ -381,7 +436,7 @@ These must be resolved before this draft becomes an implementation plan.
 |---|---|---|
 | Concern | where the box sits | what the box looks like |
 | Scope | block-level only | block **and** inline `Span` (settled, D6) |
-| Inheritance | non-inherited | OPEN |
+| Inheritance | non-inherited | limited: `color` / `emphasis` only |
 | Per-target machinery | `TargetValue<T>` | `TargetValue<T>` (reused) |
 | Tree attachment | `NodeAttrs` `renderable.layout` | `NodeAttrs` `renderable.style` |
 | Targets | Terminal + Browser; Markdown ignores | Terminal first; Browser later; Markdown ignores |
