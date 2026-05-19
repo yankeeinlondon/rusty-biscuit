@@ -1,18 +1,43 @@
 ---
-blast_radius: biscuit-terminal/lib/src/components/prose.rs
+blast_radius: biscuit-terminal/lib/src/components/prose/
 ---
 # Prose
 
-Styled inline text component for rich terminal output. Prose is the primary inline text styling component in biscuit-terminal and renders to the **Terminal**, **Browser**, and **Markdown** targets from one shared parsed representation. It supports two input grammars:
+Styled inline text component for rich cross-target output. Prose is the primary inline text styling component in biscuit-terminal and renders to the **Terminal**, **Browser**, and **Markdown** targets from one shared [`ProseDocument`](../../lib/src/components/prose/ir.rs) IR. It supports two input grammars:
 
 1. **Block tags** — `<bold>text</bold>` (auto-reset on close, nestable).
 2. **Markdown subset** — `[desc](url)`, `**bold**`, `_italics_` (per the [Prose+ spec](../../features/2026-05-05-prose-plus/spec.md)).
 
-The two grammars compose freely; they are processed in a fixed order (links → bold → italics → block tags) so URL contents, bold runs, and tag attribute values are protected from later phases.
+The two grammars compose freely. Raw input is first lowered by the Markdown pre-processor (fenced code blocks → links → bold → italics), then parsed by the bracketed-tag parser into the target-neutral `ProseDocument` tree. Terminal, browser, and Markdown output all render from that IR; there is no remaining non-IR Prose render path.
 
 > The atomic-token grammar (`{{bold}}…{{reset}}`) was removed in the
 > 2026-05-17 Prose cross-target work. A stray `{{…}}` now renders as
 > ordinary literal text on every target.
+
+## Rendering Model
+
+`Prose` is fully IR-rendered, but it does **not** use the shared
+`renderable::tree::RenderNode` path. Its IR is `ProseDocument`, a pure tree of
+text, spans, links, and fenced code blocks. This keeps inline styling precise
+while still sharing the cross-target primitives from `renderable` for colors
+and text emphasis.
+
+```text
+raw Prose input
+      │
+      ▼
+Markdown subset pre-processor
+      │
+      ▼
+bracketed-tag parser
+      │
+      ▼
+ProseDocument IR
+      │
+      ├── TerminalRenderable  → ANSI / OSC8
+      ├── BrowserRenderable   → HTML fragment
+      └── MarkdownRenderable  → Markdown / MarkdownPlus
+```
 
 ## Programmatic Use
 
@@ -51,7 +76,7 @@ println!("{}", prose.display(&term));
 
 ### Markdown Subset
 
-Three Markdown forms are recognized in addition to the tag and token grammars. They are pre-processed into the equivalent block-tag form before rendering.
+Three Markdown forms are recognized in addition to bracketed tags. They are pre-processed into an equivalent internal tag form before the `ProseDocument` IR is built.
 
 | Markdown        | Equivalent tag                | Notes                                   |
 |-----------------|-------------------------------|-----------------------------------------|
@@ -90,7 +115,7 @@ A backslash escapes the immediately following character, treating it as literal 
 
 In practice, dynamic content interpolated into a Prose format string usually does **not** require escaping — the flanking rule already protects identifier-shaped values. Reach for the escape mechanism when you need a literal sigil at a position where it *would* otherwise trigger emphasis (e.g. `\_emphasis_` where you want a leading literal `_`).
 
-### Supported Tags/Tokens
+### Supported Tags
 
 **Text Styling**: `bold`, `dim`, `italic`, `underline`, `strikethrough`, `blink`
 
@@ -98,18 +123,24 @@ In practice, dynamic content interpolated into a Prose format string usually doe
 
 **Background Colors**: Prefix with `bg-` (e.g., `<bg-blue>`, `<bg-coral>`)
 
-**Special**: `<a href="url">text</a>` for hyperlinks, `<rgb #hex>text</rgb>` for arbitrary colors. Styles auto-reset when their tag closes — there is no standalone reset token.
+**Special**: `<a href="url">text</a>` for hyperlinks, fenced code blocks from the Markdown subset, and `<rgb #hex>text</rgb>` for arbitrary colors. Styles auto-reset when their tag closes — there is no standalone reset token.
 
 ### Cross-Target Rendering
 
-`Prose` parses its input once into a target-neutral tree and renders that
-tree to three targets:
+`Prose` parses its input into a target-neutral `ProseDocument` tree and renders
+that tree to three targets:
 
 | Target | Trait | Notes |
 |--------|-------|-------|
 | Terminal | `TerminalRenderable` | ANSI/OSC8; the behavioral oracle. Capability-aware degradation. |
 | Browser | `BrowserRenderable` | Semantic HTML (`<strong>`, `<em>`, `<s>`, `<a>`, `<pre><code>`); presentational styles use `<span style="…">`. User text and attribute values are escaped. |
-| Markdown | `MarkdownRenderable` | Portable Markdown — bold/italic/strikethrough/links/code blocks. Colors and underline variants degrade to readable inner text. |
+| Markdown | `MarkdownRenderable` | Portable Markdown and MarkdownPlus. Portable Markdown keeps semantic styles and degrades color/underline variants to readable inner text; MarkdownPlus preserves more presentation with inline HTML. |
+
+`Prose` does not currently implement `TreeRenderable` or expose a
+`render_tree_node()` projection. In component inventories, this means
+`Tree = false` but `IR State = tree render only`: Prose is fully IR-backed,
+just through its dedicated inline IR rather than the shared block-level render
+tree.
 
 Unknown tags and former atomic-token syntax (`{{…}}`) render as escaped
 literal text on every target.
@@ -136,6 +167,9 @@ let status = Status::from_prose("this is a <b>test</b>")
 | `.with_left_margin(Margin)` | Set left margin |
 | `.with_right_margin(Margin)` | Set right margin |
 | `.with_layout(Layout)` | Set full layout configuration |
+| `.render_html_fragment()` | Render the `ProseDocument` IR as a browser fragment |
+| `.render_markdown()` | Render the `ProseDocument` IR as portable Markdown |
+| `.render_markdown_plus()` | Render the `ProseDocument` IR as MarkdownPlus with inline HTML for richer styling |
 
 ## Graceful Degradation
 
@@ -185,9 +219,47 @@ bt prose "<bold>Hello</bold> <red>world</red>"
 ```
 
 By default `bt prose` renders to the terminal. Pass `--html` to render an
-HTML fragment or `--md` to render portable Markdown instead:
+HTML fragment, `--md` to render portable Markdown, or `--md-plus` to render
+MarkdownPlus instead:
 
 ```bash
 bt prose "<bold>Hello</bold> [docs](https://example.com)" --html
 bt prose "<bold>Hello</bold> [docs](https://example.com)" --md
+bt prose "<purple-800>Dark purple</purple-800>" --md-plus
+```
+
+Portable Markdown keeps semantic styling and drops terminal/browser-only
+presentation such as colors. MarkdownPlus preserves richer styling with inline
+HTML, for example:
+
+```markdown
+<span style="color: rgb(107, 33, 168)">Dark purple</span>
+```
+
+When `--md` is combined with horizontal layout flags, the CLI preserves those
+page-level layout hints in YAML frontmatter:
+
+```bash
+bt prose "<b>bold</b>" --margin-left 4 --md
+```
+
+```markdown
+---
+style:
+  page:
+    margin-left: 4ch
+---
+
+**bold**
+```
+
+When `--html` is combined with layout flags, the CLI preserves them as CSS on
+an outer wrapper around the Prose fragment:
+
+```bash
+bt prose "<b>bold</b>" --margin-left 4 --html
+```
+
+```html
+<div style="margin-left: 4ch"><span class="prose"><strong>bold</strong></span></div>
 ```
