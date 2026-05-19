@@ -78,13 +78,17 @@ converts `RenderableTerminalContent` into tree nodes:
 ## Render Hints
 
 Presentational hints ride on `NodeAttrs.data` under namespaced keys via
-`HintNamespace` (`LAYOUT`, `LIST`, `TABLE`, `CODE`, `TERMINAL`,
+`HintNamespace` (`LAYOUT`, `STYLE`, `LIST`, `TABLE`, `CODE`, `TERMINAL`,
 `WIDGET_PROGRESS`, `WIDGET_COLUMNS`). `NodeAttrs::set_hint` / `get_hint` /
 `remove_hint` are the low-level accessors; typed helper structs wrap them:
 
 - **`Layout`** — margins, alignment, max-width, word wrap. Stored via
   `NodeAttrs::set_layout` / read with `NodeAttrs::layout`; permitted on
   block-level nodes only. See `layout.md`.
+- **`Style`** — color, background, emphasis, border, fill. Stored via
+  `NodeAttrs::set_style` / read with `NodeAttrs::style`; permitted on block
+  nodes and inline `Span` nodes. `Style::inherited_from` cascades the text
+  appearance fields (`color`, `emphasis`) only. See `style.rs`.
 - **`ListRenderHints`** — bullet, hanging indent, child indent.
 - **`CodeRenderHints`** — header row, language label, highlight flag.
 - **`ProgressHints`** — value, bar width, glyphs, brackets.
