@@ -6,14 +6,26 @@ use biscuit_terminal::components::two_column::TwoColumn;
 use biscuit_terminal::utils::layout::{Length, TargetValue};
 use clap::Args as ClapArgs;
 
+const COLUMNS_EXAMPLE_LEFT: &str = "<b>Release</b>";
+const COLUMNS_EXAMPLE_RIGHT: &str = "Build passed, smoke tests are green, and docs were updated.";
+const COLUMNS_EXAMPLE_CMD: &str = r#"bt columns --gap 6 --left 18 "<b>Release</b>" "Build passed, smoke tests are green, and docs were updated.""#;
+
 /// Render two columns of text side by side
 #[derive(ClapArgs, Debug, Clone)]
 pub struct ColumnsArgs {
-    #[arg(value_name = "LEFT", id = "left_content")]
-    pub left: String,
+    /// Render an example and show the command used
+    #[arg(long, short = 'e')]
+    pub example: bool,
 
-    #[arg(value_name = "RIGHT")]
-    pub right: String,
+    #[arg(
+        value_name = "LEFT",
+        id = "left_content",
+        required_unless_present = "example"
+    )]
+    pub left: Option<String>,
+
+    #[arg(value_name = "RIGHT", required_unless_present = "example")]
+    pub right: Option<String>,
 
     #[arg(long, default_value_t = 3)]
     pub gap: u32,
@@ -27,12 +39,25 @@ pub struct ColumnsArgs {
 
 impl Run for ColumnsArgs {
     fn run(self, _ctx: &CliContext) -> color_eyre::Result<()> {
-        let left_text = crate::types::unescape_shell_escapes(&self.left);
-        let right_text = crate::types::unescape_shell_escapes(&self.right);
+        let left = self
+            .left
+            .unwrap_or_else(|| COLUMNS_EXAMPLE_LEFT.to_string());
+        let right = self
+            .right
+            .unwrap_or_else(|| COLUMNS_EXAMPLE_RIGHT.to_string());
+        let left_text = crate::types::unescape_shell_escapes(&left);
+        let right_text = crate::types::unescape_shell_escapes(&right);
 
-        let mut columns = TwoColumn::new(left_text, right_text).with_gap(self.gap);
+        let gap = if self.example && self.gap == 3 {
+            6
+        } else {
+            self.gap
+        };
+        let mut columns = TwoColumn::new(left_text, right_text).with_gap(gap);
 
-        if let Some(spec) = &self.left_width {
+        let example_left_width = self.example.then_some(crate::types::WidthSpec::Chars(18));
+        let left_width = self.left_width.as_ref().or(example_left_width.as_ref());
+        if let Some(spec) = left_width {
             columns = columns.with_left_width(parse_column_width(&spec.to_string())?);
         }
 
@@ -52,6 +77,12 @@ impl Run for ColumnsArgs {
         emit_vertical_margins(&self.layout, || {
             println!("{}", output);
             Ok(())
-        })
+        })?;
+
+        if self.example {
+            print_example_command(COLUMNS_EXAMPLE_CMD);
+        }
+
+        Ok(())
     }
 }

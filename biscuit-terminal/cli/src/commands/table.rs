@@ -1,5 +1,5 @@
 use crate::commands::color_parse::parse_color;
-use crate::commands::shared::detect_terminal_honoring_force_color;
+use crate::commands::shared::{detect_terminal_honoring_force_color, print_example_command};
 use crate::commands::{CliContext, Run};
 use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::components::table::{Table, TableCellContent, TableColumn};
@@ -7,12 +7,33 @@ use biscuit_terminal::render_tree::{TerminalRenderOptions, render_terminal_node}
 use clap::Args as ClapArgs;
 use renderable::tree::{RenderNode, RenderStrictness};
 
+/// Wraps a [`Color`](renderable::color::Color) into the universal
+/// `TargetValue<PerMode<Color>>` shape a [`Style`](renderable::style::Style)
+/// color slot expects.
+fn color_style_value(
+    color: renderable::color::Color,
+) -> renderable::layout::TargetValue<renderable::style::PerMode<renderable::color::Color>> {
+    renderable::layout::TargetValue::universal(renderable::style::PerMode::universal(color))
+}
+
+const TABLE_EXAMPLE_COLUMNS: &str = "Area,Status,Owner";
+const TABLE_EXAMPLE_ROWS: &[&str] = &[
+    "Parser,Green,Lin",
+    "Renderer,Review,Mara",
+    "Docs,Updated,Noor",
+];
+const TABLE_EXAMPLE_CMD: &str = r#"bt table --columns "Area,Status,Owner" --row "Parser,Green,Lin" --row "Renderer,Review,Mara" --row "Docs,Updated,Noor" --striped"#;
+
 /// Render a table through the render tree
 #[derive(ClapArgs, Debug, Clone)]
 pub struct TableArgs {
+    /// Render an example and show the command used
+    #[arg(long, short = 'e')]
+    pub example: bool,
+
     /// Comma-separated column headers.
-    #[arg(long, required = true)]
-    pub columns: String,
+    #[arg(long, required_unless_present = "example")]
+    pub columns: Option<String>,
 
     /// A comma-separated row of cells; repeat for multiple rows.
     #[arg(long = "row")]
@@ -29,12 +50,26 @@ pub struct TableArgs {
     /// Stripe text color (named or #rrggbb).
     #[arg(long = "stripe-text")]
     pub stripe_text: Option<String>,
+
+    /// Render every column header in bold.
+    #[arg(long = "bold-header")]
+    pub bold_header: bool,
+
+    /// Header text color (named or #rrggbb).
+    #[arg(long = "header-color")]
+    pub header_color: Option<String>,
+
+    /// Body (data cell) text color (named or #rrggbb).
+    #[arg(long = "body-color")]
+    pub body_color: Option<String>,
 }
 
 impl Run for TableArgs {
     fn run(self, _ctx: &CliContext) -> color_eyre::Result<()> {
-        let headers: Vec<&str> = self
+        let columns_arg = self
             .columns
+            .unwrap_or_else(|| TABLE_EXAMPLE_COLUMNS.to_string());
+        let headers: Vec<&str> = columns_arg
             .split(',')
             .map(str::trim)
             .filter(|h| !h.is_empty())
@@ -45,11 +80,18 @@ impl Run for TableArgs {
             ));
         }
 
-        let columns: Vec<TableColumn> =
-            headers.iter().map(|h| TableColumn::new(*h)).collect();
+        let columns: Vec<TableColumn> = headers.iter().map(|h| TableColumn::new(*h)).collect();
 
-        let data: Vec<Vec<TableCellContent>> = self
-            .rows
+        let rows = if self.example && self.rows.is_empty() {
+            TABLE_EXAMPLE_ROWS
+                .iter()
+                .map(|row| row.to_string())
+                .collect()
+        } else {
+            self.rows
+        };
+
+        let data: Vec<Vec<TableCellContent>> = rows
             .iter()
             .map(|row| {
                 row.split(',')
@@ -60,7 +102,7 @@ impl Run for TableArgs {
 
         let mut table = Table::new().with_columns(columns).with_data(data);
 
-        if self.striped {
+        if self.striped || self.example {
             table = table.alternate_background_color();
         }
         if let Some(color) = &self.stripe_bg {
@@ -68,6 +110,25 @@ impl Run for TableArgs {
         }
         if let Some(color) = &self.stripe_text {
             table = table.with_stripe_text(parse_color(color)?);
+        }
+
+        // Typed header / body slot styling (Spec B D5).
+        let mut header_style = renderable::style::Style::default();
+        if self.bold_header {
+            header_style.emphasis.bold = true;
+        }
+        if let Some(color) = &self.header_color {
+            header_style.color = Some(color_style_value(parse_color(color)?));
+        }
+        if !header_style.is_empty() {
+            table = table.with_header_style(header_style);
+        }
+        if let Some(color) = &self.body_color {
+            let body_style = renderable::style::Style {
+                color: Some(color_style_value(parse_color(color)?)),
+                ..renderable::style::Style::default()
+            };
+            table = table.with_body_style(body_style);
         }
 
         let node = table.render_tree_node().ok_or_else(|| {
@@ -81,6 +142,9 @@ impl Run for TableArgs {
             .map_err(|e| color_eyre::eyre::eyre!("render failed: {e}"))?;
 
         println!("{}", rendered.output);
+        if self.example {
+            print_example_command(TABLE_EXAMPLE_CMD);
+        }
         Ok(())
     }
 }

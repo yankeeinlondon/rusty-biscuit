@@ -8,10 +8,21 @@ use biscuit_terminal::utils::layout::{Length, TargetValue};
 use clap::Args as ClapArgs;
 use std::rc::Rc;
 
+const LIST_EXAMPLE: &[&str] = &[
+    "<b>Plan</b> the change",
+    "<green>Run</green> focused tests",
+    "Ship the smallest useful fix",
+];
+const LIST_EXAMPLE_CMD: &str = r#"bt list "<b>Plan</b> the change" "<green>Run</green> focused tests" "Ship the smallest useful fix""#;
+
 /// Render a bulleted list with hanging indents
 #[derive(ClapArgs, Debug, Clone)]
 pub struct ListArgs {
-    #[arg(value_name = "ITEMS", required = true)]
+    /// Render an example and show the command used
+    #[arg(long, short = 'e')]
+    pub example: bool,
+
+    #[arg(value_name = "ITEMS", required_unless_present = "example")]
     pub items: Vec<String>,
 
     #[arg(long, short = 'b', default_value = "• ")]
@@ -26,14 +37,19 @@ pub struct ListArgs {
 
 impl Run for ListArgs {
     fn run(self, _ctx: &CliContext) -> color_eyre::Result<()> {
-        if self.items.is_empty() {
+        let items = if self.example {
+            LIST_EXAMPLE.iter().map(|item| item.to_string()).collect()
+        } else {
+            self.items
+        };
+
+        if items.is_empty() {
             return Err(color_eyre::eyre::eyre!(
                 "No items provided. Usage: bt list \"First item\" \"Second item\" \"Third item\""
             ));
         }
 
-        let prose_items: Vec<RenderableTerminalContent> = self
-            .items
+        let prose_items: Vec<RenderableTerminalContent> = items
             .iter()
             .map(|item| {
                 let text = crate::types::unescape_shell_escapes(item);
@@ -64,6 +80,12 @@ impl Run for ListArgs {
         emit_vertical_margins(&self.layout, || {
             println!("{}", output);
             Ok(())
-        })
+        })?;
+
+        if self.example {
+            print_example_command(LIST_EXAMPLE_CMD);
+        }
+
+        Ok(())
     }
 }

@@ -8,10 +8,18 @@ use biscuit_terminal::utils::layout::{Length, TargetValue};
 use clap::Args as ClapArgs;
 use std::rc::Rc;
 
+const QUOTE_EXAMPLE: &str = "<b>Clarity</b> is kind when the work gets complex.";
+const QUOTE_EXAMPLE_ATTRIBUTION: &str = "Engineering Notes";
+const QUOTE_EXAMPLE_CMD: &str = r#"bt quote --attribution "Engineering Notes" "<b>Clarity</b> is kind when the work gets complex.""#;
+
 /// Render styled text in a block quote
 #[derive(ClapArgs, Debug, Clone)]
 pub struct QuoteArgs {
-    #[arg(value_name = "CONTENT")]
+    /// Render an example and show the command used
+    #[arg(long, short = 'e')]
+    pub example: bool,
+
+    #[arg(value_name = "CONTENT", required_unless_present = "example")]
     pub content: Vec<String>,
 
     #[arg(long)]
@@ -23,7 +31,11 @@ pub struct QuoteArgs {
 
 impl Run for QuoteArgs {
     fn run(self, _ctx: &CliContext) -> color_eyre::Result<()> {
-        let text = self.content.join(" ");
+        let text = if self.example {
+            QUOTE_EXAMPLE.to_string()
+        } else {
+            self.content.join(" ")
+        };
 
         if text.is_empty() {
             return Err(color_eyre::eyre::eyre!(
@@ -33,10 +45,14 @@ impl Run for QuoteArgs {
 
         let text = crate::types::unescape_shell_escapes(&text);
         let prose = Prose::new(&text);
+        let attribution = self
+            .attribution
+            .as_deref()
+            .or_else(|| self.example.then_some(QUOTE_EXAMPLE_ATTRIBUTION));
 
         let mut quote = BlockQuote::new(
             RenderableTerminalContent::Component(Rc::new(prose)),
-            self.attribution.as_deref(),
+            attribution,
         );
 
         if let Some(left) = self.layout.margin_left {
@@ -55,6 +71,12 @@ impl Run for QuoteArgs {
         emit_vertical_margins(&self.layout, || {
             println!("{}", output);
             Ok(())
-        })
+        })?;
+
+        if self.example {
+            print_example_command(QUOTE_EXAMPLE_CMD);
+        }
+
+        Ok(())
     }
 }

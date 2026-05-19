@@ -6,6 +6,9 @@ use biscuit_terminal::terminal::Terminal;
 use biscuit_terminal::utils::layout::{Length, TargetValue};
 use clap::Args as ClapArgs;
 
+const DIR_EXAMPLE_PATH: &str = ".";
+const DIR_EXAMPLE_CMD: &str = r#"bt dir . --depth 1 --filter ".rs""#;
+
 /// Options for rendering a directory tree.
 #[derive(Debug, Clone, Default)]
 pub struct DirOptions {
@@ -20,6 +23,10 @@ pub struct DirOptions {
 pub struct DirArgs {
     #[arg(value_name = "PATH", default_value = ".")]
     pub path: String,
+
+    /// Render an example and show the command used
+    #[arg(long, short = 'e')]
+    pub example: bool,
 
     #[arg(long, short = 'd', value_name = "N")]
     pub depth: Option<u32>,
@@ -48,20 +55,34 @@ pub struct DirArgs {
 
 impl Run for DirArgs {
     fn run(self, _ctx: &CliContext) -> color_eyre::Result<()> {
+        let path = if self.example {
+            DIR_EXAMPLE_PATH
+        } else {
+            &self.path
+        };
+        let depth = if self.example && self.depth.is_none() {
+            Some(1)
+        } else {
+            self.depth
+        };
+        let filter = if self.example && self.filter.is_empty() {
+            vec![".rs".to_string()]
+        } else {
+            self.filter
+        };
         let options = DirOptions {
             show_size: self.size,
             show_token: self.tokens,
             show_modified: self.modified,
             show_updated: self.updated,
         };
-        render_dir(
-            &self.path,
-            self.depth,
-            &self.filter,
-            self.skip_root,
-            &self.layout,
-            &options,
-        )
+        render_dir(path, depth, &filter, self.skip_root, &self.layout, &options)?;
+
+        if self.example {
+            crate::commands::shared::print_example_command(DIR_EXAMPLE_CMD);
+        }
+
+        Ok(())
     }
 }
 

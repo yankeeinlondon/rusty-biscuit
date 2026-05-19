@@ -8,10 +8,18 @@ use clap::Args as ClapArgs;
 use renderable::browser::BrowserRenderable;
 use renderable::markdown::MarkdownRenderable;
 
+const PROSE_EXAMPLE: &str = "<b>Deploy status:</b> <green>healthy</green> after _3 checks_";
+const PROSE_EXAMPLE_CMD: &str =
+    r#"bt prose "<b>Deploy status:</b> <green>healthy</green> after _3 checks_""#;
+
 /// Render prose text with inline styling tags
 #[derive(ClapArgs, Debug, Clone)]
 pub struct ProseArgs {
-    #[arg(value_name = "CONTENT")]
+    /// Render an example and show the command used
+    #[arg(long, short = 'e')]
+    pub example: bool,
+
+    #[arg(value_name = "CONTENT", required_unless_present = "example")]
     pub content: Vec<String>,
 
     #[arg(long)]
@@ -41,7 +49,11 @@ pub struct ProseArgs {
 
 impl Run for ProseArgs {
     fn run(self, _ctx: &CliContext) -> color_eyre::Result<()> {
-        let text = self.content.join(" ");
+        let text = if self.example {
+            PROSE_EXAMPLE.to_string()
+        } else {
+            self.content.join(" ")
+        };
 
         if text.is_empty() {
             return Err(color_eyre::eyre::eyre!(
@@ -123,7 +135,13 @@ impl Run for ProseArgs {
         emit_vertical_margins(&self.layout, || {
             println!("{}", output);
             Ok(())
-        })
+        })?;
+
+        if self.example {
+            print_example_command(PROSE_EXAMPLE_CMD);
+        }
+
+        Ok(())
     }
 }
 
