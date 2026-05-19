@@ -1,6 +1,6 @@
 ---
 description: used to build detailed research into each component we're going to tackle in this feature
-feature: "@renderable/feature/2026-05-19-pushing-toward-ir"
+feature: "@renderable/features/2026-05-19-pushing-toward-ir"
 sequence: 
     - name: BlockQuote
     - name: Compose
@@ -14,7 +14,13 @@ sequence:
     - name: TextBlock
     - name: Todo
     - name: TwoColumn
+
+success: 
+    message: "completed spec for **{{state.name}** component"
+failure:
+    message: "failed to complete spec for **{{state.name}}** component"
 ---
+> **IMPORTANT:** if the file '{{ feature }}/components/{{state.name}}-spec.md' already exists then that means this task is already done. You should tell the caller that this task was already complete and there is nothing left to be done. Once communicating to the caller you are done and do not continue on investigating or designing anything.
 
 # Moving Toward IR Rendering
 
@@ -68,11 +74,63 @@ You are responsible for helping to design the movement of the **{{state.name}}**
 
     - Browser IR Implementation (add as H3 heading in doc, when design is needed)
 
-        > the IR implementation will be in place now because we've ensured that Terminal IR is done first
+        > - the IR implementation will be in place now because we've ensured that Terminal IR is done first
+        > 
+        > - you can skip this section if the "Browser" column is marked as complete AND "IR State" is not "bespoke" or "-"
 
-        - Evaluate how the IR Implementation for the browser 
+        - write the following static text:
+            - `- in this section we will provide a design specification for the **{{state.name}}** component's implementation of the BrowserRenderable trait`
 
-    - `bt` CLI uses IR rn
+        - if you have an existing bespoke rendering implementation for the browser make sure you take the time to understand it fully first before moving onto the next step
+        - Evaluate how the IR Implementation for the browser was implemented and create a design on how to render the Browser implementation
+            - If you find that the IR that the Terminal needed doesn't support the Browser's rendering then you are allowed to modify it but you will then need to review and update the Terminal IR section to make sure it's aligned with your design changes
+        - List out all the key variants to testing that must be covered for this component
+
+    - Markdown IR Implementation (add as H3 heading in doc, when design is needed)
+
+        > this design can be skipped only if the "Markdown" column has been checked AND the "bt CLI" column is neither "bespoke" or "-"
+
+        - First take a moment to distinguish the difference between a **Markdown** output and a **MarkdownPlus** output:
+            - Both outputs are valid Markdown content
+            - However, **Markdown** tries to optimize for "ergonomics" whereas **MarkdownProse** tries to optimize for "features" and "fidelity"
+            - These preferences largely come down to how much inline HTML is allowed for
+            - If the content provided as input can be represented purely using Markdown syntax (no inline-html) then both the **Markdown** and **MarkdownProse** should be the same!
+            - If there is representation of text or background colors in the input then this is a clear separation point because Markdown does not provide for specifying inline colors in a document. 
+            - If the input were something like `<span>Hello <b>Bob</b></span>` then we could comfortably reduce this to just `Hello **Bob**` and not loose any fidelity; this means both Markdown and MarkdownPlus would return this.
+            - If the input were something like `<span style="color:red">Hello <b>Bob</b></span>` then you'd see the two Markdown target's diverge:
+                - Markdown: `Hello **Bob**`
+                - MarkdownPlus: `<span style="color:red">Hello <b>Bob</b></span>`
+            - Both `Markdown` and `MarkdownPlus` allow for assigning styles in Markdown to the `styles` Frontmatter property.
+        - Based on the IR that has already been developed for the Terminal and Browser you should be able to create a design for rendering the two Markdown formats
+        - Make sure to explicitly call out situations where Markdown diverges from MarkdownPlus for this component
+        - Describe your testing strategy for **{{state.name}}**'s implementation of `BrowserRenderable`
+
+    - `bt` CLI (add as H3 heading in doc, when design is needed)
+
+        - start with the following static text:
+            - `- this specification will ensure that the **{{status.name}}** component:`
+            - `    - has a 'bt' CLI subcommand for rendering this component`
+            - `    - that the '--md' and '--html' CLI switches are available to render to Markdown and HTML targets respectively (the default render is always for the Terminal)`
+            - `    - that the '--example' CLI switch is in place to provide a thoughtful example of how this command should be used with the CLI (see other working examples for a template)`
+        - Now check the source code for the **{state.name}** component and represent what the "current state is" with regards to:
+            - CLI command exists or doesn't
+            - render method used in CLI (IR or bespoke)
+            - has target switches (--md, --html)
+            - has example switch (--example)
+        - with the current state documented, now create a specification design for what must be done to make sure that the `bt` ClI is complete with all required CLI switches
+
+## Acceptance Criteria for Implementation
+
+- the **{{state.name}}** component has implemented all renderable traits:
+    - `TerminalRenderable`
+    - `MarkdownRenderable`
+    - and `BrowserRenderable`
+- the `bt` CLI has a subcommand for **{{state.name}}** which:
+    - has a valid implementation for rendering with `--md` and `--html` (aka, can target Markdown and HTML outputs)
+    - by default will render for the terminal
+    - has a valid implementation for the `--example` CLI switch which shows an example output of the command as well as the full CLI request that would be used to present that example output (note: must be formatted like other --example implementations)
+- we have strong test coverage across all functionality this component exposes
+- we make sure that the `bt` CLI follows all best practices mentioned in the 'cli' skill
 
 ## Important References and Skills
 
