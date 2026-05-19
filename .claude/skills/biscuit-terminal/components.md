@@ -44,7 +44,7 @@ Combines multiple renderable parts into a single output.
 use biscuit_terminal::prelude::*;
 
 let mut compose = Compose::new();
-compose.add_text("Hello, ").add_prose(Prose::new("{{bold}}world{{reset}}!"));
+compose.add_text("Hello, ").add_prose(Prose::new("<b>world</b>!"));
 
 // Can also add lists, other components
 compose.add_unordered_list(UnorderedList::new(vec!["Item A", "Item B"]));

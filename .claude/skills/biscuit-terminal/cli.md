@@ -204,16 +204,19 @@ Options:
 
 ## Prose Command
 
-Render styled prose text with inline tokens:
+Render styled prose text with bracketed tags or a Markdown subset:
 
 ```bash
-# Atomic tokens
-bt prose "Hello {{bold}}world{{reset}}!"
-bt prose "{{red}}Error:{{reset}} Something went wrong"
-
 # Block tags
+bt prose "Hello <b>world</b>!"
+bt prose "<red>Error:</red> Something went wrong"
 bt prose "<b>Bold</b> and <i>italic</i> text"
 bt prose "<a href='https://example.com'>Click here</a>"
+
+# Cross-target output
+bt prose "<purple-800>Dark purple</purple-800>" --md-plus
+bt prose "<b>Bold</b>" --margin-left 4 --md
+bt prose "<b>Bold</b>" --margin-left 4 --html
 
 # With margins and alignment
 bt prose --margin-left 4 "Indented content"
@@ -229,10 +232,13 @@ Options:
 - `--margin-bottom` (alias `--mb`): Bottom margin in blank lines
 - `--alignment` (alias `--align`): Text alignment (`left`, `center`, `right`)
 - `--no-wrap`: Disable word wrapping
+- `--html`: Render an HTML fragment instead of terminal output
+- `--md`: Render portable Markdown instead of terminal output
+- `--md-plus`: Render MarkdownPlus instead of terminal output
 
-Supported tokens:
-- **Atomic**: `{{bold}}`, `{{italic}}`, `{{red}}`, `{{bg-blue}}`, `{{reset}}`
-- **Block**: `<b>`, `<i>`, `<u>`, `<uu>`, `<~>`, `<a href="...">`, `<red>`, `<rgb R,G,B>`, `<bg-rgb R,G,B>`, `<bg-coral>`, `<bg-red-800>`
+Supported syntax:
+- **Block tags**: `<b>`, `<i>`, `<u>`, `<uu>`, `<~>`, `<a href="...">`, `<red>`, `<rgb R,G,B>`, `<bg-rgb R,G,B>`, `<bg-coral>`, `<bg-red-800>`
+- **Markdown subset**: `[desc](url)`, `**bold**`, `_italic_`
 
 ## Content Analysis
 

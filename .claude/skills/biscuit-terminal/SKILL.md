@@ -1,6 +1,6 @@
 ---
 name: biscuit-terminal
-description: Expert knowledge for the biscuit-terminal Rust library - the authority for terminal capability detection (13+ emulators) and rich terminal rendering. Provides inline image rendering (Kitty/iTerm2 protocols), terminal-facing Mermaid and graph adapters backed by biscuit-visualized, OS/font detection, escape code analysis, color system (BasicColor, WebColor, Tailwind), and composable rendering components. The `Prose` component supports three input grammars — atomic tokens (`{{bold}}`), block tags (`<bold>...</bold>`), and a Markdown subset (`**bold**`, `_italics_`, `[desc](url)`) with intra-word flanking rules so identifiers like `OPENCODE_CONFIG_CONTENT` pass through unmangled. Use when building CLI apps with terminal-aware features, rendering images or diagrams inline, detecting color/underline/italics/dim support, or querying terminal environment. Darkmatter depends on this for terminal Mermaid rendering.
+description: Expert knowledge for the biscuit-terminal Rust library - the authority for terminal capability detection (13+ emulators) and rich terminal rendering. Provides inline image rendering (Kitty/iTerm2 protocols), terminal-facing Mermaid and graph adapters backed by biscuit-visualized, OS/font detection, escape code analysis, color system (BasicColor, WebColor, Tailwind), and composable rendering components. The `Prose` component renders Terminal, Browser, Markdown, and MarkdownPlus from a shared `ProseDocument` IR, using bracketed tags (`<bold>...</bold>`) and a Markdown subset (`**bold**`, `_italics_`, `[desc](url)`) with intra-word flanking rules so identifiers like `OPENCODE_CONFIG_CONTENT` pass through unmangled. Use when building CLI apps with terminal-aware features, rendering images or diagrams inline, detecting color/underline/italics/dim support, or querying terminal environment. Darkmatter depends on this for terminal Mermaid rendering.
 ---
 
 # biscuit-terminal
@@ -45,7 +45,7 @@ if term.supports_italic { println!("\x1b[3mItalic\x1b[0m"); }
 | [Detection Functions](./discovery.md) | App, color, underline, italics, dim, multiplex detection |
 | [OS & Environment](./os-environment.md) | OS, distro, CI, fonts, locale |
 | [Escape Codes](./escape-codes.md) | Strip, analyze, visual width calculation |
-| [Styling](./styling.md) | Terminal-aware styling, Prose component (atomic tokens, block tags, Markdown subset with flanking rules), TextBlock |
+| [Styling](./styling.md) | Terminal-aware styling, Prose component (bracketed tags, Markdown subset with flanking rules), TextBlock |
 | [bt Command](./cli.md) | CLI tool: 17 commands for inspection, diagrams, text, and filesystem |
 
 ## Common Patterns
@@ -191,7 +191,7 @@ bt                              # Pretty-printed capabilities
 bt --json                       # JSON output for scripting
 
 # Styled text and layout
-bt prose "Hello {{bold}}world{{reset}}!"
+bt prose "Hello <b>world</b>!"
 bt prose "<red>Error</red>: message"
 bt quote --attribution "Shakespeare" "To be or not to be"
 bt list "First item" "Second item" "Third item"

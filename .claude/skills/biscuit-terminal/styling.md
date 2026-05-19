@@ -46,14 +46,16 @@ let text = curly_underline("error", &term);
 
 ## Prose Component
 
-The `Prose` struct allows styled text with inline tokens:
+The `Prose` struct allows styled text with bracketed tags and a Markdown subset.
+It renders Terminal, Browser, Markdown, and MarkdownPlus from a shared
+`ProseDocument` IR.
 
 ```rust
 use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::components::renderable::TerminalRenderable;
 
 // Create prose with inline styling
-let prose = Prose::new("Hello {{bold}}world{{reset}}!");
+let prose = Prose::new("Hello <b>world</b>!");
 let output = prose.render_optimistic(None);
 // → "Hello \x1b[1mworld\x1b[0m!\x1b[0m"
 
@@ -63,34 +65,11 @@ let prose = Prose::new("<b>Important</b> message")
     .with_left_margin(Margin::Chars(4));
 ```
 
-### Atomic Tokens
+### Block Tags
 
-Single-point style changes that require manual reset:
-
-```
-{{bold}}      {{dim}}       {{italic}}
-{{underline}} {{strikethrough}}
-{{double-underline}} {{curly-underline}} {{dotted-underline}} {{dashed-underline}}
-{{blink}}     {{inverse}}   {{hidden}}
-{{red}}       {{green}}     {{blue}}
-{{yellow}}    {{cyan}}      {{magenta}}
-{{bright-red}} {{bright-green}} ...
-{{bg-red}}    {{bg-blue}}   ...
-{{reset}}     {{reset-fg}}  {{reset-bg}}
-{{normal-font-weight}} {{not-italic}} {{not-underline}} {{not-strikethrough}}
-```
-
-**Note:** Reset tokens (`reset`, `reset-fg`, `not-italic`, etc.) are atomic-only.
-
-Example:
-```
-"This is {{bold}}important{{reset}} text"
-→ "This is \x1b[1mimportant\x1b[0m text"
-```
-
-### Block Tokens
-
-HTML-like tags that auto-reset. Same names as atomic tokens, with short aliases:
+HTML-like tags that auto-reset. Former atomic tokens (`{{bold}}`,
+`{{reset}}`, etc.) were removed in the 2026-05-17 Prose cross-target work and
+now render as literal text.
 
 | Token | Alias | Effect |
 |-------|-------|--------|
@@ -156,7 +135,7 @@ Example:
 
 ### Markdown Subset
 
-A third grammar — a strict CommonMark subset — is recognised in addition to atomic tokens and block tags. Markdown forms are pre-processed into the equivalent block-tag form before rendering:
+A strict CommonMark subset is recognised in addition to block tags. Markdown forms are pre-processed into the equivalent internal tag form before rendering:
 
 | Markdown        | Equivalent block tag           |
 |-----------------|--------------------------------|
@@ -164,7 +143,7 @@ A third grammar — a strict CommonMark subset — is recognised in addition to 
 | `**text**`      | `<b>text</b>`                  |
 | `_text_`        | `<i>text</i>`                  |
 
-Strict subset — `__bold__` and `*italics*` are **not** recognised; both pass through as literal text. The pre-processor runs in a fixed order: links → bold → italics → block-tag/atomic-token parser. Link URLs are placeholdered before the bold/italics phases so a URL like `https://example.com/path_with_underscores` is never re-interpreted.
+Strict subset — `__bold__` and `*italics*` are **not** recognised; both pass through as literal text. The pre-processor runs in a fixed order: links → bold → italics → block-tag parser. Link URLs are placeholdered before the bold/italics phases so a URL like `https://example.com/path_with_underscores` is never re-interpreted.
 
 #### Flanking rule (intra-word inhibition)
 
