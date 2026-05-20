@@ -2,12 +2,22 @@
 
 ## Status
 
-Baseline spec for iteration.
+Ready for implementation. The supporting design notes in this directory have
+been reviewed and their decisions are referenced below; they remain the
+detailed source of truth for implementation-specific fixtures, API shapes, and
+benchmark commands.
 
 This spec assumes renderable Stage 3 has completed: the migrated
 `biscuit-terminal` components project structurally through `TreeRenderable`,
 nested component projections no longer flatten to ANSI-stripped text, and the
 remaining terminal-only escape hatches are documented.
+
+If Stage 3 review keeps any deliberately-inline component exceptions (for
+example a container that must flatten block children to satisfy its own
+contract), record those as component-backend caveats. They do not block this
+Darkmatter parsed-Markdown fold, whose primary producer is `pulldown-cmark`,
+but they matter for any future Darkmatter feature that splices component
+projections into parsed documents.
 
 ## Goal
 
@@ -43,8 +53,9 @@ renderers lower from.
 - Do not replace `pulldown-cmark`.
 - Do not rewrite the compose pipeline as a tree-native transform pipeline in
   this stage.
-- Do not flip `Markdown::as_html` or `for_terminal` wholesale before parity and
-  benchmark evidence exist.
+- Do not flip `Markdown::as_html` or `Markdown::as_terminal` (or the free
+  function `for_terminal` that backs it) wholesale before parity and benchmark
+  evidence exist.
 - Do not route ordinary parsed Markdown through `TerminalRenderable`,
   `MarkdownRenderable`, or `BrowserRenderable` component trait objects.
 - Do not do aggressive performance tuning yet: no arenas, string interning,
@@ -106,9 +117,9 @@ section.
 ### Preserve Public Behavior While Proving the New Path
 
 Tree-backed rendering should land behind explicit internal or experimental
-entry points first. Public `Markdown::as_html`, `for_terminal`, and CLI render
-behavior should flip only after parity gaps are closed or deliberately
-accepted.
+entry points first. Public `Markdown::as_html`, `Markdown::as_terminal` (and
+its underlying free function `for_terminal`), and CLI render behavior should
+flip only after parity gaps are closed or deliberately accepted.
 
 ### Optimize Obvious Clones, Defer Aggressive Tuning
 
@@ -128,6 +139,38 @@ The design prerequisites for this work live alongside this spec:
 
 Implementation should follow that order, with raw HTML policy documented before
 any public Browser/HTML cutover.
+
+### Supporting Design Coverage
+
+The companion documents are intentionally detailed. The main implementation
+contract is:
+
+- `parser-options.md` classifies parser flags as public now
+  (`ENABLE_TABLES`, `ENABLE_STRIKETHROUGH`), tree-experimental only
+  (`ENABLE_TASKLISTS`, `ENABLE_FOOTNOTES`, `ENABLE_SUPERSCRIPT`,
+  `ENABLE_SUBSCRIPT`), or deferred. The fold must list enabled flags
+  explicitly and must not use `Options::all()` or `ENABLE_GFM` as shorthand.
+- `span-aware-processor-design.md` defines the internal
+  `SpannedInlineEvent` / `SpannedEventProvenance` transport, exact byte-range
+  policy for split text, escaped delimiters, generated HR provenance, and
+  `darkmatter.hr` hint storage for HR attributes.
+- `entry-point-shape.md` chooses internal, module-level experimental
+  functions under `darkmatter::markdown::render_tree`, including
+  `to_render_document`, `render_tree_html`, `render_tree_terminal`, and
+  `render_tree_markdown`. No new public `Markdown` methods are part of this
+  stage.
+- `diagnostic-model.md` defines `PipelineResult<T>` and
+  `PipelineRenderResult<T>`, keeping fold diagnostics and render diagnostics
+  in separate vectors.
+- `benchmark-harness-shape.md` defines the Criterion bench target
+  `darkmatter/lib/benches/migration_parity.rs`, the paired legacy/tree groups,
+  pinned terminal/browser options, the `terminal_no_color` benchmark group,
+  and the command `cargo bench -p darkmatter --bench migration_parity`.
+
+Known experimental adapter gaps from `entry-point-shape.md` are accepted only
+for the internal tree path: browser code highlighting, Mermaid lowering, HR CSS
+variables, and terminal image rendering. They must be represented in parity
+ledgers before any public target cutover.
 
 ### DMTR-1: Add Explicit Tree Rendering Entry Points
 
@@ -163,6 +206,10 @@ Acceptance criteria:
 The current fold and current public renderers do not use the same
 `pulldown-cmark` option set. This must become deliberate before cutover.
 
+The full classification — public-now options, tree-experimental options, and
+deferred options — lives in `parser-options.md` alongside this spec. That
+document is the source of truth; this work item gates on it landing first.
+
 Requirements:
 
 - Define a shared rendering parse-options function or policy document.
@@ -171,6 +218,10 @@ Requirements:
 - Decide whether each widened option is accepted now, deferred, or kept only on
   the experimental tree path.
 - Add fixtures that make the behavior visible.
+- Fix the pre-existing legacy `as_html` gap (it currently parses with only
+  `ENABLE_STRIKETHROUGH`, so GFM tables are dropped in HTML) by adding
+  `ENABLE_TABLES`, or record the gap as accepted in the parity ledger. See
+  `parser-options.md` decision #1.
 
 Acceptance criteria:
 
@@ -401,15 +452,11 @@ Performance tuning posture:
 
 ## Open Questions
 
-- Which parser options should become part of the public render contract during
-  the first tree cutover?
-- What is the exact range policy for split text events in
-  `InlineStyleProcessor`?
-- Should HR attributes stay in namespaced `NodeAttrs` data or become typed
-  hints?
-- How much raw HTML behavior should the tree renderers preserve versus escape?
-- Which target should be the first public cutover after parity fixtures land?
 - What memory profiler should become the standard for this workspace?
+- After internal parity is established, what exact semantic threshold is
+  required before the first public Browser/HTML cutover?
+- Once the tree path is public, should the non-spanned legacy processors be
+  retired or should all render paths converge on the spanned chain?
 
 ## Out of Scope for This Stage
 
@@ -422,7 +469,8 @@ Performance tuning posture:
 ## Acceptance Criteria
 
 - [ ] Experimental tree-backed Darkmatter render entry points exist for
-  Markdown, MarkdownPlus, Browser, and Terminal.
+  Markdown, MarkdownPlus (a `MarkdownDialect` of the Markdown renderer),
+  Browser, and Terminal.
 - [ ] Parser option policy is documented and fixture-backed.
 - [ ] Mark, dim, and HR-attribute processors have a span-aware path or are
   explicitly recorded as the blocking parity gap.

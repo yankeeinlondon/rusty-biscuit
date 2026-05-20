@@ -63,7 +63,12 @@ Five top-level benchmark groups. Each group runs both the legacy and tree paths 
 | `migration/browser`       | `Markdown::from` + `as_html`                                | `Markdown::from` + `fold_markdown_to_document` + `render_browser_document`                            | All four fixtures |
 | `migration/markdown`      | *(no legacy equivalent — Markdown roundtrip is tree-only)*  | `Markdown::from` + `fold_markdown_to_document` + `render_markdown_document`                           | All four fixtures |
 | `migration/fold_only`     | `Markdown::from` + legacy parser/processor drain            | `Markdown::from` + `fold_markdown_to_document`                                                        | All four fixtures |
-| `migration/full_pipeline` | `Markdown::from` + `compose_with(default)` + `for_terminal` | `Markdown::from` + `compose_with(default)` + `fold_markdown_to_document` + `render_terminal_document` | All four fixtures |
+| `migration/full_pipeline` | `Markdown::from` + `compose_with(default).0` + `for_terminal` | `Markdown::from` + `compose_with(default).0` + `fold_markdown_to_document` + `render_terminal_document` | All four fixtures |
+
+`compose_with` returns `MarkdownResult<(Markdown, ComposeReport)>`; the bench
+unwraps the result and uses the first tuple element (the composed
+`Markdown`). The `ComposeReport` is dropped because the bench is measuring the
+hot path, not validating composition output.
 
 Within each group, bench functions are named `{fixture}/legacy` and `{fixture}/tree` so Criterion's HTML report places them side by side.
 
