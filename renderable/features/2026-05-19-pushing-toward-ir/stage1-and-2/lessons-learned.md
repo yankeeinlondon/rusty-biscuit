@@ -1619,3 +1619,192 @@ under `renderable/docs/` that codifies these six points plus the
 escape-hatch knobs (`render_bespoke`, `Unsupported` node, strictness
 behavior) so the next contributor does not have to re-derive the
 pattern from twelve worked examples.
+
+## Stage 3, Task 3a.2 — render_tree_node parity audit (2026-05-20)
+
+Audited the nine pre-existing `TerminalRenderable::render_tree_node`
+overrides for explicit parity coverage against
+`TreeRenderable::render_tree`. Eight already had a structural-equality
+assertion; only `Compose` lacked dedicated coverage — fixed in this
+task by adding `biscuit-terminal/lib/tests/compose_parity.rs` (empty,
+text-only, and mixed-parts cases).
+
+Per-component result:
+
+| Component     | Override (src)                                         | Parity test                                                              | Result |
+|---------------|--------------------------------------------------------|--------------------------------------------------------------------------|--------|
+| Compose       | `components/compose.rs:157`                            | `tests/compose_parity.rs` (3 new tests)                                  | ADDED  |
+| OrderedList   | `components/list.rs:935`                               | `tests/ordered_list_parity.rs:71` (`tree_renderable_and_compat_hook_…`)  | PASS   |
+| Progress      | `components/progress.rs:371`                           | `tests/progress_parity.rs:361` (`tree_renderable_and_render_tree_node_…`)| PASS   |
+| Section       | `components/section.rs:393` (→ private `to_render_node`)| `tests/section_parity.rs:221` (`tree_renderable_and_render_tree_node_…`) | PASS   |
+| Table         | `components/table/table.rs:1677`                       | `tests/table_parity.rs` (shared-projection coverage via `render_tree_node` asserts) | PASS |
+| TextBlock     | `components/text_block.rs:355` (→ private `to_render_node`)| `tests/text_block_parity.rs:175` (`tree_renderable_and_render_tree_node_…`)| PASS |
+| Todo          | `components/todo.rs:549`                               | `tests/todo_parity.rs:243` (`tree_renderable_and_render_tree_node_share_projection`) | PASS |
+| TwoColumn     | `components/two_column.rs:624`                         | `tests/two_column_parity.rs:337` (`tree_renderable_matches_terminal_render_tree_node`) | PASS |
+| UnorderedList | `components/list.rs:377`                               | `tests/unordered_list_parity.rs:68` (`tree_renderable_and_compat_hook_…`)| PASS   |
+
+Notes:
+
+- `Section` and `TextBlock` both delegate through a private
+  `to_render_node` helper called by both trait entry points; the
+  parity tests still assert byte-equal `RenderNode`s, so structural
+  drift in either path will trip the gate.
+- `Compose`'s override is a one-liner delegate to
+  `<Self as TreeRenderable>::render_tree(self)`; the added tests pin
+  this invariant against future refactors that might insert
+  post-processing in only one path.
+
+## Stage 3, Task 3a.3 — `FileSystem::render` decision (2026-05-20)
+
+### Decision: outcome (iii) — defer to Stage 4
+
+The bespoke `FileSystem::render` path is kept. The flip to
+`render_via_tree` is deferred to Stage 4 behind a single, named
+acceptance criterion (see "Stage 4 acceptance criterion" below).
+
+This is the same posture the FileSystem spec already documented as
+the recommendation; Stage 3a.3 confirms it with parity evidence and
+pins the present-day gap as `#[test]`s in
+`biscuit-terminal/lib/tests/filesystem_parity.rs` so the decision is
+observable rather than tribal.
+
+### Why not outcome (i)
+
+The canonical render-tree path cannot reproduce the bespoke output
+today. Concretely, `TerminalRenderer::render_tree_connector_list`
+(`biscuit-terminal/lib/src/render_tree/render.rs:905`) renders each
+list-item paragraph with `self.render_inline(children,
+&Style::default())` — discarding the per-item paragraph `Style`
+attribute set by `FileSystem::fs_project_tree_node` (via
+`fs_entry_style`). The projection correctly carries bold/blue, cyan,
+italic, dim, and red intent on the paragraph; the connector-list
+renderer simply does not lower it. This is provable from inspection,
+and the new fixtures observe the symptom directly.
+
+Bespoke also formats Unicode icons as `📂name` (no separator) while
+the tree projection emits `📂 name` because the projection inserts a
+literal `" "` text node between the icon span and the name span. Even
+if the SGR gap were closed, the plain-text content would still differ
+until either the projection drops the literal space or the bespoke
+renderer adds one.
+
+### Why not outcome (ii)
+
+Outcome (ii) would mean "bespoke forever". The spec already approves
+`ListMarkerPolicy::TreeConnectors` and the projection already targets
+it; the only thing standing between the bespoke and tree paths is the
+connector-list renderer (a generic renderer concern, not a
+FileSystem-specific one) and the icon-spacing presentation choice.
+Both are tractable in Stage 4.
+
+### Fixture parity table
+
+| Fixture | Bespoke | Tree | Parity | Notes |
+|---|---|---|---|---|
+| connector geometry | `├── 📄a.txt` / `└── 📄b.txt` | `├── 📄 a.txt` / `└── 📄 b.txt` | N | Tree inserts a literal space between icon span and name; connector glyphs themselves match. |
+| gitignore styling | no dim SGR | no dim SGR | Y (today) | `is_ignored` is hardcoded `false` (Phase 8 placeholder); neither path exercises dim today. When Phase 8 lands, tree will fail until the Style lowering gap is closed. |
+| errors and permissions | red SGR on error node (when sandbox honors `0o000`) | no SGR | N | When the scanner records `has_error: true`, bespoke emits `\x1b[31m`; tree drops it via the connector-list Style gap. Sandbox-dependent. |
+| depth limit | only depth-1 entries visible | only depth-1 entries visible | Y | Both paths honor `max_depth`. |
+| highlight precedence | red SGR on TODO-dir (bold suppressed) | no SGR | N | Same Style-lowering gap as dotfile/symlink. |
+| metric annotations | `( file size: 42 B )` | `( file size: 42 B )` | Y | Metric pair text matches; per-pair SGR styling (dim label / bold-yellow value) is a follow-on assertion to add when the Style gap is closed. |
+| dotfile italic | italic SGR (`\x1b[3m`) | no SGR | N | Canonical proof: projection sets `emphasis.italic = true`, the connector-list renderer ignores it. |
+| symlink styling | cyan SGR (when scanner flags symlink) | no SGR | N | Scanner-and-renderer dependent; identical root cause as dotfile/highlight. |
+| link behavior (OSC8) | `\x1b]8;;file://...` | `\x1b]8;;file://...` | Y | Both paths emit OSC8 hyperlinks with `file://` URLs when `with_file_links()` is set. |
+
+Six of nine fixtures have parity (Y) today; three fail because the
+tree path cannot lower per-item paragraph `Style`, and one (gitignore)
+is latent — it will fail the same way once Phase 8 actually marks
+entries as ignored. The icon-spacing divergence affects every line but
+is a single source-edit away in either path.
+
+### Stage 4 acceptance criterion
+
+Flip `FileSystem::render` to `self.render_via_tree(term)` once **all**
+of the following hold:
+
+1. **Connector-list Style lowering.**
+   `TerminalRenderer::render_tree_connector_list` lowers each
+   `ListItem`'s child paragraph `Style` (and the paragraph children's
+   own styles) into the inline rendering call, instead of always
+   passing `&Style::default()`. The fix likely mirrors what
+   `render_list_item` does for the default-marker path.
+
+2. **Icon-name spacing reconciled.** Either:
+   - the canonical projection drops the literal `" "` text node it
+     inserts between the icon span and the name span (and the bespoke
+     renderer continues to emit `📂name`), or
+   - the bespoke renderer adds a single space between the Unicode icon
+     and the name (and the projection keeps the explicit space).
+
+   Pick one. Either choice is fine; the parity fixture will pin it.
+
+3. **Parity fixtures flip from "GAP" to byte-for-byte equality** in
+   `biscuit-terminal/lib/tests/filesystem_parity.rs`. The three
+   currently-failing-by-design fixtures
+   (`fixture_dotfile_italic_records_divergence`,
+   `fixture_highlight_precedence_records_divergence`,
+   `fixture_errors_and_permissions_records_divergence`) must invert
+   from `assert!(!styled_in_tree, …)` to `assert!(styled_in_tree, …)`
+   plus a stripped-ANSI equality check between bespoke and tree
+   output.
+
+4. **Layout matrix.** Add `FileSystem` to the default rows of the
+   layout-matrix harness (Stage 3c work; tracked separately as Task
+   3c.3).
+
+Acceptance is satisfied when `cargo test -p biscuit-terminal --test
+filesystem_parity` passes with every fixture asserting equality rather
+than divergence, and `FileSystem::render`'s body is the same one-line
+`self.render_via_tree(term)` as the other twelve flipped components.
+
+### What did NOT move
+
+- `FileSystem::render` still calls the bespoke renderer.
+- `FileSystem::render_tree_node` continues to delegate to
+  `TreeRenderable::render_tree` (Stage 3a.1 contract — required so
+  cross-target adapters consume `FileSystem` structurally).
+- No layout-matrix work was done here; Task 3c.3 will pick that up iff
+  outcome (i) is reached in Stage 4.
+
+### Evidence
+
+- Fixtures: `biscuit-terminal/lib/tests/filesystem_parity.rs` (36
+  tests, all passing; nine of them are §3a.3 decision-gate fixtures).
+- Bespoke renderer:
+  `biscuit-terminal/lib/src/components/filesystem/mod.rs:1610`.
+- Projection:
+  `biscuit-terminal/lib/src/components/filesystem/mod.rs:2745`.
+- Connector-list renderer (gap source):
+  `biscuit-terminal/lib/src/render_tree/render.rs:905`.
+
+### Final action (Task 3c.3, 2026-05-20)
+
+Per the §3a.3 outcome (iii) branch of the Stage 3 plan:
+
+- **Kept bespoke.** `FileSystem::render` is unchanged and still calls
+  the bespoke renderer at
+  `biscuit-terminal/lib/src/components/filesystem/mod.rs:1610`.
+- **No public `render_bespoke` hook added.** `FileSystem` deliberately
+  does not expose a `pub fn render_bespoke`; the bespoke output is
+  reachable only via `<FileSystem as TerminalRenderable>::render`. This
+  matches the §3c.2 escape-hatch policy: only `StatusBlock`, `Table`,
+  and `TwoColumn` retain sanctioned `render_bespoke` hooks.
+- **Excluded from default layout-matrix parity.** The Task 3c layout
+  matrix harness must omit `FileSystem` from its default
+  `via_render == via_tree_direct` rows for the duration of Stage 3,
+  because the tree path cannot reproduce the bespoke output until the
+  Stage 4 acceptance criteria above are met. Task 3c picks this up.
+- **Stage 4 flip is gated by the acceptance criteria above** (connector-
+  list Style lowering, icon-name spacing reconciliation, parity-fixture
+  flip, and re-adding `FileSystem` to the layout matrix). No new gates
+  are introduced here.
+
+## Stage 3 Task 3c.1 — retired bespoke hooks
+
+- `OrderedList::render_bespoke` retired (no escape-hatch knob); `list.rs` private `render_content` helper removed alongside it.
+- `UnorderedList::render_bespoke` retired; `list.rs` second `render_content` helper removed alongside it.
+- `Progress::render_bespoke` retired; private `render_bar` helper removed (only caller was the bespoke path; `paint_fg` kept — still used by the tree renderer).
+- `Section::render_bespoke` retired; private `render_content` helper and the in-source `render_bespoke_still_available_for_parity` test removed.
+- `TextBlock::render_bespoke` retired; private `to_terminal` helper and the in-source `render_bespoke_still_available_for_parity` test removed; `styling::{Style, Stylist}` imports orphaned and dropped.
+- `Todo::render_bespoke` retired; private `to_terminal` helper and six in-source `test_*_todo` tests (which only exercised the bespoke `to_terminal`) removed; `discovery::detection::ColorDepth`, `components::prose::Prose`, and `styling::{FontWeight, Style, Stylist}` imports re-pruned.
+- Six `*_parity.rs` files collapsed: bespoke-vs-tree comparison tests deleted (tautological once `render_bespoke` is gone); tests that pin tree-path behaviour kept and rephrased; `assert_semantic_match` helper imports dropped where unused.
