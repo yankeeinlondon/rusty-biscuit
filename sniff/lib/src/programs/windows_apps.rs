@@ -41,7 +41,7 @@ pub(super) fn get_or_build_windows_index() -> &'static WindowsIndex {
 /// Typical warm-cache cost: 40–80 ms serial. Called once per
 /// `ExecutableIndex::build()` on Windows, and once for
 /// [`find_program_with_source`] fallback lookups.
-pub(super) fn build_windows_index() -> WindowsIndex {
+pub(crate) fn build_windows_index() -> WindowsIndex {
     WindowsIndex {
         app_paths: scan_app_paths(),
         install_roots: scan_install_roots(),
@@ -54,7 +54,7 @@ pub(super) fn build_windows_index() -> WindowsIndex {
 /// (`app_paths` before `install_roots`) after PATH by
 /// [`crate::executable_index::ExecutableIndex::find_with_source`].
 #[derive(Debug, Default, Clone)]
-pub(super) struct WindowsIndex {
+pub(crate) struct WindowsIndex {
     /// Name → path map built from the App Paths registry key.
     pub app_paths: HashMap<String, PathBuf>,
     /// Name → path map built from a shallow walk of install roots.
