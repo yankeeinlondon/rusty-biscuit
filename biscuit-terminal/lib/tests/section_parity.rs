@@ -212,3 +212,408 @@ fn tree_output_renders_at_all_parity_widths() {
         assert_contains_tokens(&tree, &["Getting Started", "Welcome", "installation"]);
     }
 }
+
+// ---------------------------------------------------------------------------
+// TreeRenderable canonical adoption
+// ---------------------------------------------------------------------------
+
+#[test]
+fn tree_renderable_and_render_tree_node_share_one_projection() {
+    // The migration pattern: the canonical `TreeRenderable::render_tree`
+    // entry point and the terminal compatibility
+    // `TerminalRenderable::render_tree_node` hook MUST share one private
+    // projection helper so they cannot drift.
+    use renderable::tree::TreeRenderable;
+    let section = sample_section();
+    let canonical = <Section as TreeRenderable>::render_tree(&section);
+    let compat = section.render_tree_node().expect("tree node");
+    assert_eq!(
+        serde_json::to_value(&canonical).unwrap(),
+        serde_json::to_value(&compat).unwrap(),
+        "canonical and compatibility projections must serialize identically"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Bespoke vs tree parity (after the flip)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn render_via_tree_matches_render_bespoke_ansi_stripped() {
+    // After the IR flip, `Section::render(&term)` routes through the tree.
+    // Visible text and ordering must match the retained bespoke renderer
+    // (modulo accepted blank-line divergence — the tree renderer joins
+    // heading and body with `\n\n` while bespoke used a single `\n`).
+    let section = sample_section();
+    let term = test_terminal(80);
+    let bespoke = strip_ansi(&section.render_bespoke(&term));
+    let tree = strip_ansi(&section.render(&term));
+
+    let bespoke_tokens: Vec<&str> = bespoke
+        .split_whitespace()
+        .filter(|t| !t.is_empty())
+        .collect();
+    let tree_tokens: Vec<&str> = tree
+        .split_whitespace()
+        .filter(|t| !t.is_empty())
+        .collect();
+    assert_eq!(
+        bespoke_tokens, tree_tokens,
+        "bespoke and tree paths agree on tokens after ANSI stripping"
+    );
+}
+
+#[test]
+fn bespoke_and_tree_agree_for_every_heading_level() {
+    let term = test_terminal(80);
+    for level in [
+        HeadingLevel::h1,
+        HeadingLevel::h2,
+        HeadingLevel::h3,
+        HeadingLevel::h4,
+        HeadingLevel::h5,
+        HeadingLevel::h6,
+    ] {
+        let mut section = Section::new(level, "Title");
+        section.push("Body line.");
+        let bespoke = strip_ansi(&section.render_bespoke(&term));
+        let tree = strip_ansi(&section.render(&term));
+
+        let bespoke_tokens: Vec<&str> = bespoke.split_whitespace().collect();
+        let tree_tokens: Vec<&str> = tree.split_whitespace().collect();
+        assert_eq!(
+            bespoke_tokens, tree_tokens,
+            "bespoke/tree disagree for level {level:?}"
+        );
+    }
+}
+
+#[test]
+fn empty_section_bespoke_and_tree_emit_identical_output() {
+    // An empty section is the simplest case — bespoke and tree both emit
+    // just the styled heading line with no body and no trailing newline.
+    let section = Section::new(HeadingLevel::h1, "Solo");
+    let term = test_terminal(80);
+    assert_eq!(
+        section.render_bespoke(&term),
+        section.render(&term),
+        "empty section bytes match exactly"
+    );
+}
+
+#[test]
+fn heading_styles_survive_tree_render() {
+    // h1-h3 use bold, h4-h5 italic, h6 plain.
+    let term = test_terminal(80);
+    let bold_levels = [HeadingLevel::h1, HeadingLevel::h2, HeadingLevel::h3];
+    for level in bold_levels {
+        let section = Section::new(level, "Title");
+        let out = section.render(&term);
+        assert!(
+            out.contains("\x1b[1m"),
+            "level {level:?} should carry bold SGR: {out:?}"
+        );
+    }
+    let italic_levels = [HeadingLevel::h4, HeadingLevel::h5];
+    for level in italic_levels {
+        let section = Section::new(level, "Title");
+        let out = section.render(&term);
+        assert!(
+            out.contains("\x1b[3m"),
+            "level {level:?} should carry italic SGR: {out:?}"
+        );
+    }
+    let h6_section = Section::new(HeadingLevel::h6, "Title");
+    let h6_out = h6_section.render(&term);
+    assert!(
+        !h6_out.contains("\x1b[1m") && !h6_out.contains("\x1b[3m"),
+        "h6 should not carry bold or italic SGR: {h6_out:?}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Layout flows through the tree path
+// ---------------------------------------------------------------------------
+
+#[test]
+fn left_margin_is_honored_through_tree_path() {
+    use biscuit_terminal::utils::layout::{Length, TargetValue};
+    let mut section = Section::new(HeadingLevel::h1, "Title");
+    section.layout_mut().margin.left = TargetValue::universal(Length::ch(4));
+    let term = test_terminal(80);
+    let out = strip_ansi(&section.render(&term));
+    assert!(
+        out.lines().next().is_some_and(|first| first.starts_with("    ")),
+        "left margin of 4 spaces applied through tree: {out:?}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Markdown renderable
+// ---------------------------------------------------------------------------
+
+#[test]
+fn markdown_renders_heading_and_body() {
+    use renderable::markdown::MarkdownRenderable;
+    let section = sample_section();
+    let md = section.render_markdown();
+    assert!(md.contains("## Getting Started"), "heading prefix: {md:?}");
+    assert!(md.contains("Welcome to the tutorial."), "body item 1: {md:?}");
+    assert!(
+        md.contains("Let's begin with installation."),
+        "body item 2: {md:?}"
+    );
+}
+
+#[test]
+fn markdown_empty_section_is_just_heading() {
+    use renderable::markdown::MarkdownRenderable;
+    let section = Section::new(HeadingLevel::h1, "Solo");
+    let md = section.render_markdown();
+    assert_eq!(md.trim(), "# Solo");
+}
+
+#[test]
+fn markdown_heading_level_maps_to_hash_count() {
+    use renderable::markdown::MarkdownRenderable;
+    let cases = [
+        (HeadingLevel::h1, "# "),
+        (HeadingLevel::h2, "## "),
+        (HeadingLevel::h3, "### "),
+        (HeadingLevel::h4, "#### "),
+        (HeadingLevel::h5, "##### "),
+        (HeadingLevel::h6, "###### "),
+    ];
+    for (level, expected_prefix) in cases {
+        let section = Section::new(level, "Title");
+        let md = section.render_markdown();
+        assert!(
+            md.starts_with(expected_prefix),
+            "level {level:?} prefix: {md:?}"
+        );
+    }
+}
+
+#[test]
+fn markdown_and_markdown_plus_match_for_pure_section() {
+    // Section's structure is pure CommonMark — Markdown and MarkdownPlus
+    // should produce identical output when content is plain text.
+    use renderable::markdown::MarkdownRenderable;
+    let section = sample_section();
+    assert_eq!(section.render_markdown(), section.render_markdown_plus());
+}
+
+#[test]
+fn markdown_ignores_layout_by_contract() {
+    // Layout is intentionally not lowered to Markdown output — CommonMark
+    // has no portable layout primitive.
+    use biscuit_terminal::utils::layout::{Length, TargetValue};
+    use renderable::markdown::MarkdownRenderable;
+    let mut section = Section::new(HeadingLevel::h2, "Header");
+    section.push("Body.");
+    let without_layout = section.render_markdown();
+    section.layout_mut().margin.left = TargetValue::universal(Length::ch(8));
+    let with_layout = section.render_markdown();
+    assert_eq!(
+        without_layout, with_layout,
+        "layout must not change Markdown output"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Browser renderable
+// ---------------------------------------------------------------------------
+
+#[test]
+fn browser_emits_section_element_with_heading_tag() {
+    use renderable::browser::BrowserRenderable;
+    let section = sample_section();
+    let html = section.render_html_fragment().render();
+    assert!(html.contains("<section"), "section element: {html:?}");
+    assert!(html.contains("</section>"), "section close: {html:?}");
+    assert!(html.contains("<h2"), "h2 heading tag: {html:?}");
+    assert!(html.contains("Getting Started"), "title text: {html:?}");
+}
+
+#[test]
+fn browser_heading_tag_tracks_level() {
+    use renderable::browser::BrowserRenderable;
+    let cases = [
+        (HeadingLevel::h1, "<h1"),
+        (HeadingLevel::h2, "<h2"),
+        (HeadingLevel::h3, "<h3"),
+        (HeadingLevel::h4, "<h4"),
+        (HeadingLevel::h5, "<h5"),
+        (HeadingLevel::h6, "<h6"),
+    ];
+    for (level, expected_tag) in cases {
+        let section = Section::new(level, "Title");
+        let html = section.render_html_fragment().render();
+        assert!(
+            html.contains(expected_tag),
+            "level {level:?} should emit {expected_tag}: {html:?}"
+        );
+    }
+}
+
+#[test]
+fn browser_empty_section_omits_body_paragraph() {
+    use renderable::browser::BrowserRenderable;
+    let section = Section::new(HeadingLevel::h1, "Solo");
+    let html = section.render_html_fragment().render();
+    assert!(html.contains("<h1"), "heading: {html:?}");
+    assert!(html.contains("Solo"), "title: {html:?}");
+    assert!(
+        !html.contains("<p>") && !html.contains("<p "),
+        "no paragraph in empty body: {html:?}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Prose content: structured inline projection (not flattened text)
+// ---------------------------------------------------------------------------
+
+/// A `Section` pushed a `Prose` child must project that child as **structured
+/// inline nodes** (Strong/Emphasis/Span — whatever the prose markup demands),
+/// not as a flat `Text` blob. This protects against an accidental regression
+/// to the ANSI-strip-and-flatten fallback that the BlockQuote / Compose /
+/// OrderedList / UnorderedList migrations consolidated into
+/// `project_renderable_content` with `ProjectionMode::Structural`.
+#[test]
+fn render_tree_node_projects_prose_child_as_structured_inline() {
+    use biscuit_terminal::components::prose::Prose;
+    use renderable::tree::NodeKind;
+
+    let mut section = Section::new(HeadingLevel::h2, "Styled");
+    section.push(Prose::new("<bold>Bold</bold> tail"));
+
+    let node = section.render_tree_node().expect("tree node");
+    let children = match &node.kind {
+        NodeKind::Section { children, .. } => children,
+        other => panic!("expected NodeKind::Section, got {other:?}"),
+    };
+
+    // The structural projection must not flatten Prose to a single Text node.
+    // We expect at least one non-Text inline node corresponding to the
+    // `<bold>Bold</bold>` segment — Strong is the canonical mapping for pure
+    // bold emphasis, but Span-with-bold-style would also be acceptable; we
+    // assert "not flat text" rather than pinning a specific inline kind.
+    let has_structured_inline = children
+        .iter()
+        .any(|child| !matches!(child.kind, NodeKind::Text { .. }));
+    assert!(
+        has_structured_inline,
+        "Prose child must project to structured inline nodes, not flat text: {children:?}"
+    );
+
+    // And the literal "Bold" text must still appear somewhere in the
+    // projection so the structural assertion above is not a false-positive
+    // for an empty inline wrapper.
+    let plain = strip_ansi(&render_tree(&node, 80));
+    assert!(
+        plain.contains("Bold"),
+        "Prose content text must survive projection: {plain:?}"
+    );
+    assert!(
+        plain.contains("tail"),
+        "Prose trailing text must survive projection: {plain:?}"
+    );
+}
+
+/// The terminal target must lower the structured inline projection back to
+/// SGR — a `<bold>` segment inside the section's `Prose` child should appear
+/// as a bold-open escape (`\x1b[1m`) in the terminal output, not as plain
+/// text.
+#[test]
+fn prose_child_inline_emphasis_survives_terminal_render() {
+    use biscuit_terminal::components::prose::Prose;
+
+    let mut section = Section::new(HeadingLevel::h2, "Styled");
+    section.push(Prose::new("<bold>Bold</bold> tail"));
+
+    let term = test_terminal(80);
+    let out = section.render(&term);
+    assert!(
+        out.contains("\x1b[1m"),
+        "Prose bold emphasis must lower to SGR in terminal output: {out:?}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Nested Component content: block structure preserved across targets
+// ---------------------------------------------------------------------------
+
+/// A `Section` pushed a nested block component (here, another `Section`) must
+/// carry that child's canonical block structure into the projected tree
+/// rather than flattening it to plain text. This validates the
+/// `ProjectionMode::Structural` path for non-Prose block-capable children.
+#[test]
+fn render_tree_node_preserves_nested_block_component_structure() {
+    use renderable::tree::NodeKind;
+
+    let nested = Section::new(HeadingLevel::h3, "Subsection");
+    let mut outer = Section::new(HeadingLevel::h2, "Outer");
+    outer.push(nested);
+
+    let node = outer.render_tree_node().expect("tree node");
+    let children = match &node.kind {
+        NodeKind::Section { children, .. } => children,
+        other => panic!("expected NodeKind::Section, got {other:?}"),
+    };
+
+    // The nested section must appear as a structured `Section` child (with
+    // its own depth and heading), not as a flat text node.
+    let nested_kind = children
+        .iter()
+        .find_map(|child| match &child.kind {
+            NodeKind::Section { depth, heading, .. } => Some((depth.get(), heading.clone())),
+            _ => None,
+        })
+        .expect("nested Section must appear as a Section child");
+
+    assert_eq!(nested_kind.0, 3, "nested section depth preserved");
+    assert!(
+        matches!(&nested_kind.1[0].kind, NodeKind::Text { value } if value == "Subsection"),
+        "nested heading text preserved: {:?}",
+        nested_kind.1
+    );
+}
+
+#[test]
+fn nested_block_component_renders_across_all_targets() {
+    use renderable::browser::BrowserRenderable;
+    use renderable::markdown::MarkdownRenderable;
+
+    let nested = Section::new(HeadingLevel::h3, "Subsection");
+    let mut outer = Section::new(HeadingLevel::h2, "Outer");
+    outer.push(nested);
+
+    // Terminal — both headings appear with their respective Markdown-style
+    // prefixes (`##` and `###`).
+    let term = test_terminal(80);
+    let terminal_out = strip_ansi(&outer.render(&term));
+    assert!(
+        terminal_out.contains("## Outer"),
+        "outer heading present in terminal: {terminal_out:?}"
+    );
+    assert!(
+        terminal_out.contains("### Subsection"),
+        "nested heading present in terminal: {terminal_out:?}"
+    );
+
+    // Markdown — same hash prefixes, separated by blank lines.
+    let md = outer.render_markdown();
+    assert!(md.contains("## Outer"), "outer heading in md: {md:?}");
+    assert!(
+        md.contains("### Subsection"),
+        "nested heading in md: {md:?}"
+    );
+
+    // Browser — semantic `<h2>` and `<h3>` tags inside `<section>` elements.
+    let html = outer.render_html_fragment().render();
+    assert!(html.contains("<section"), "section element: {html:?}");
+    assert!(html.contains("<h2"), "outer h2 tag: {html:?}");
+    assert!(html.contains("<h3"), "nested h3 tag: {html:?}");
+    assert!(html.contains("Outer"), "outer title: {html:?}");
+    assert!(html.contains("Subsection"), "nested title: {html:?}");
+}

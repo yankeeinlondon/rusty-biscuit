@@ -1,9 +1,24 @@
+use renderable::browser::PageOptions;
+use renderable::browser::fragment::{BrowserFragment, Ready};
+use renderable::html::HtmlPage;
+use renderable::markdown::MarkdownRenderable;
 use renderable::style::{Style, TextEmphasis};
-use renderable::tree::{HeadingDepth, RenderNode};
+use renderable::tree::render::{
+    BrowserRenderOptions, MarkdownDialect, MarkdownRenderOptions, render_browser_node,
+    render_markdown_node,
+};
+use renderable::tree::{HeadingDepth, RenderNode, RenderStrictness, TreeRenderable};
+use std::any::Any;
 
 use crate::{
-    components::renderable::{RenderableTerminalContent, TerminalRenderable},
-    render_tree::projection::TreeProjectionContext,
+    components::renderable::{
+        BrowserRenderable, RenderableTerminalContent, TerminalRenderable,
+    },
+    render_tree::{
+        TerminalRenderOptions,
+        projection::{ProjectionMode, project_renderable_content},
+        render_terminal_node,
+    },
     terminal::Terminal,
     utils::layout::{Layout, LayoutTerminalExt},
 };
@@ -40,6 +55,14 @@ pub enum HeadingLevel {
 
 impl HeadingLevel {
     /// Get the numeric level (1-6).
+    ///
+    /// ## Returns
+    ///
+    /// A value in `1..=6`. The mapping is exhaustive over the enum and total:
+    /// every [`HeadingLevel`] variant produces a distinct level in this range,
+    /// so callers can safely feed the result into APIs that demand a 1-6
+    /// heading depth (e.g. [`renderable::tree::HeadingDepth::new`]) without
+    /// additional bounds checking.
     pub fn level(&self) -> u8 {
         match self {
             HeadingLevel::h1 => 1,
@@ -167,6 +190,11 @@ impl Section {
     }
 
     /// Render the section with heading styling based on level.
+    ///
+    /// This is the pre-tree bespoke renderer. The active
+    /// [`TerminalRenderable::render`] path now routes through
+    /// [`Self::render_via_tree`]; this helper is retained for parity testing
+    /// only.
     fn render_content(&self, term: Option<&Terminal>, term_width: u32) -> String {
         let mut result = String::new();
 
@@ -226,24 +254,119 @@ impl Section {
 
         result
     }
-}
 
-impl TerminalRenderable for Section {
-    fn render_optimistic(&self, term_width: Option<u32>) -> String {
-        let width = term_width.unwrap_or(80);
-        let available = self.layout.available_width(width);
-        let content = self.render_content(None, available);
-        self.layout.apply_layout(&content, width)
+    /// Builds the canonical [`NodeKind::Section`] tree node for this section.
+    ///
+    /// This is the **single private projection helper**. Both
+    /// [`TreeRenderable::render_tree`] and the legacy
+    /// [`TerminalRenderable::render_tree_node`] hook delegate to it, so the
+    /// terminal compatibility surface cannot drift from the canonical
+    /// tree-renderable producer.
+    ///
+    /// The heading level maps to a [`HeadingDepth`]; the title becomes a single
+    /// [`RenderNode::text`] in the heading's phrasing content; each content
+    /// item is projected through [`project_renderable_content`] using
+    /// [`ProjectionMode::Structural`] so block-capable children (lists,
+    /// tables, nested sections) keep their canonical tree shape while a
+    /// `Prose` child's inline emphasis projects into structured inline nodes.
+    ///
+    /// A non-default [`Layout`] is seeded onto the returned node's `attrs`
+    /// exactly once. Adapters that consume the node (`TreeComponent`,
+    /// `BrowserTreeComponent`) render this node directly and do not apply the
+    /// optional [`TreeRenderable::tree_layout`] hook — so the layout must live
+    /// on the projected node itself, not on a separate adapter-level layout.
+    ///
+    /// [`NodeKind::Section`]: renderable::tree::NodeKind::Section
+    fn to_render_node(&self, terminal_hint: Option<&Terminal>) -> RenderNode {
+        // HeadingLevel::level() is guaranteed to be 1..=6, which
+        // HeadingDepth::new accepts.
+        let depth = HeadingDepth::new(self.level.level())
+            .expect("HeadingLevel::level() always returns 1..=6");
+        let heading = vec![RenderNode::text(&self.title)];
+
+        let mut children = Vec::new();
+        for item in &self.content {
+            children.extend(project_renderable_content(
+                item,
+                ProjectionMode::Structural { terminal_hint },
+            ));
+        }
+
+        let mut node = RenderNode::section(depth, heading, children);
+        if self.layout != Layout::default() {
+            node.attrs.set_layout(&self.layout);
+        }
+        node
     }
 
-    fn render(&self, term: &Terminal) -> String {
+    /// Renders the section through the canonical render tree.
+    ///
+    /// Used by the [`TerminalRenderable`] impl to route Terminal output
+    /// through the same tree the Browser and Markdown paths consume.
+    ///
+    /// Failures are logged via `tracing::error!` and fall back to an empty
+    /// string: the [`TerminalRenderable::render`] trait is infallible by
+    /// contract, and surfacing a `[render-tree error: …]` sentinel as in-band
+    /// terminal text would pollute user output.
+    fn render_via_tree(&self, term: &Terminal) -> String {
+        let node = self.to_render_node(Some(term));
+        let opts = TerminalRenderOptions::new(term, RenderStrictness::Warn);
+        match render_terminal_node(&node, &opts) {
+            Ok(rendered) => rendered.output,
+            Err(error) => {
+                tracing::error!(
+                    component = "Section",
+                    error = %error,
+                    "render_terminal_node failed; emitting empty output"
+                );
+                String::new()
+            }
+        }
+    }
+
+    /// Renders via the pre-tree bespoke path.
+    ///
+    /// Retained for parity testing — the active [`TerminalRenderable::render`]
+    /// path now delegates to [`Self::render_via_tree`] so the user-facing
+    /// output flows through the canonical tree. Integration parity tests can
+    /// call this method directly to compare the legacy bespoke output against
+    /// the tree renderer's output.
+    ///
+    /// ## Notes
+    ///
+    /// Not part of the stable surface; will be removed once the tree renderer
+    /// is the universal default and no parity comparison is needed.
+    #[doc(hidden)]
+    pub fn render_bespoke(&self, term: &Terminal) -> String {
         let width = term.width();
         let available = self.layout.available_width(width);
         let content = self.render_content(Some(term), available);
         self.layout.apply_layout(&content, width)
     }
+}
 
-    fn as_any(&self) -> &dyn std::any::Any {
+impl TerminalRenderable for Section {
+    /// Renders to a terminal string at an explicit width.
+    ///
+    /// Routes through the canonical render tree via [`Self::render_via_tree`]
+    /// so terminal output matches the Browser and Markdown paths for the same
+    /// component. The legacy bespoke output is retained on
+    /// [`Self::render_bespoke`] for parity testing.
+    fn render_optimistic(&self, term_width: Option<u32>) -> String {
+        let term = Terminal::new_optimistic(term_width.unwrap_or(80));
+        self.render_via_tree(&term)
+    }
+
+    /// Renders to the supplied terminal.
+    ///
+    /// Routes through the canonical render tree via [`Self::render_via_tree`].
+    /// The legacy bespoke output is retained on [`Self::render_bespoke`] for
+    /// parity testing.
+    fn render(&self, term: &Terminal) -> String {
+        self.render_via_tree(term)
+    }
+
+    fn as_any(&self) -> &dyn Any {
         self
     }
 
@@ -259,35 +382,122 @@ impl TerminalRenderable for Section {
         true
     }
 
-    /// Projects this section into a [`NodeKind::Section`](renderable::tree::NodeKind::Section)
-    /// render-tree node.
+    /// Projects this section into a [`NodeKind::Section`] render-tree node.
     ///
-    /// The heading level maps to a [`HeadingDepth`]; the title becomes a single
-    /// [`RenderNode::text`] in the heading's phrasing content; each content item
-    /// is projected via [`to_tree_nodes`](RenderableTerminalContent::to_tree_nodes)
-    /// and collected into the section body.
+    /// Delegates to the single private projection helper
+    /// [`Self::to_render_node`], shared with [`TreeRenderable::render_tree`] so
+    /// the terminal compatibility hook and the canonical tree producer cannot
+    /// drift.
     ///
-    /// ## Notes
-    ///
-    /// Projection diagnostics are discarded here because `render_tree_node`
-    /// returns `Option<RenderNode>` and cannot carry them.
+    /// [`NodeKind::Section`]: renderable::tree::NodeKind::Section
     fn render_tree_node(&self) -> Option<RenderNode> {
-        // HeadingLevel::level() always returns 1..=6, which HeadingDepth accepts.
-        let depth = HeadingDepth::new(self.level.level()).ok()?;
-        let heading = vec![RenderNode::text(&self.title)];
+        Some(self.to_render_node(None))
+    }
+}
 
-        let mut children = Vec::new();
-        for item in &self.content {
-            let mut ctx = TreeProjectionContext::default();
-            let result = item.to_tree_nodes(&mut ctx);
-            children.extend(result.nodes);
-        }
+impl TreeRenderable for Section {
+    /// Projects the section into the canonical render tree.
+    ///
+    /// Delegates to the single private projection helper
+    /// [`Section::to_render_node`] so this canonical entry point and the
+    /// terminal-compatibility [`TerminalRenderable::render_tree_node`] hook
+    /// share one source of truth.
+    ///
+    /// [`NodeKind::Section`]: renderable::tree::NodeKind::Section
+    fn render_tree(&self) -> RenderNode {
+        self.to_render_node(None)
+    }
+}
 
-        let mut node = RenderNode::section(depth, heading, children);
-        if self.layout != Layout::default() {
-            node.attrs.set_layout(&self.layout);
+impl MarkdownRenderable for Section {
+    /// Renders the section as portable Markdown via the canonical render tree.
+    ///
+    /// Output is a heading line (`# Title`/`## Title`/…) followed by the body
+    /// content separated by a blank line. Layout is intentionally ignored —
+    /// CommonMark has no portable layout primitive.
+    fn render_markdown(&self) -> String {
+        let node = <Self as TreeRenderable>::render_tree(self);
+        match render_markdown_node(&node, &MarkdownRenderOptions::default()) {
+            Ok(rendered) => rendered.output,
+            Err(error) => {
+                tracing::error!(
+                    component = "Section",
+                    dialect = "Markdown",
+                    error = %error,
+                    "render_markdown_node failed; emitting empty output"
+                );
+                String::new()
+            }
         }
-        Some(node)
+    }
+
+    /// Renders the section as MarkdownPlus via the canonical render tree.
+    ///
+    /// Section's structure is pure CommonMark (heading + paragraphs), so the
+    /// MarkdownPlus output is structurally identical to portable Markdown for
+    /// the section itself. Inline HTML may still appear inside child content
+    /// when those children's MarkdownPlus dialects emit it.
+    fn render_markdown_plus(&self) -> String {
+        let node = <Self as TreeRenderable>::render_tree(self);
+        let opts = MarkdownRenderOptions {
+            dialect: MarkdownDialect::MarkdownPlus,
+            ..MarkdownRenderOptions::default()
+        };
+        match render_markdown_node(&node, &opts) {
+            Ok(rendered) => rendered.output,
+            Err(error) => {
+                tracing::error!(
+                    component = "Section",
+                    dialect = "MarkdownPlus",
+                    error = %error,
+                    "render_markdown_node failed; emitting empty output"
+                );
+                String::new()
+            }
+        }
+    }
+}
+
+impl BrowserRenderable for Section {
+    /// Renders the section as an HTML fragment via the canonical render tree.
+    ///
+    /// The browser tree renderer emits a semantic `<section>` element with the
+    /// heading as `<h1>`-`<h6>` matching the section's level, body children
+    /// as block elements, and `Layout` lowered to inline CSS where the tree
+    /// path supports it.
+    ///
+    /// Failures are logged via `tracing::error!` and fall back to an empty
+    /// [`BrowserFragment`]: the [`BrowserRenderable`] contract is infallible,
+    /// and surfacing a `[render-tree error: …]` sentinel as in-band HTML would
+    /// pollute the rendered page. This mirrors the Terminal path's behavior.
+    fn render_html_fragment(&self) -> BrowserFragment<Ready> {
+        let node = <Self as TreeRenderable>::render_tree(self);
+        let opts = BrowserRenderOptions::default();
+        match render_browser_node(&node, &opts) {
+            Ok(rendered) => rendered.output,
+            Err(error) => {
+                tracing::error!(
+                    component = "Section",
+                    error = %error,
+                    "render_browser_node failed; emitting empty fragment"
+                );
+                BrowserFragment::new()
+                    .define_as_text_fragment(String::new())
+                    .finalize()
+            }
+        }
+    }
+
+    fn render_html_page(&self, page: Option<PageOptions>) -> HtmlPage {
+        let mut html_page = HtmlPage::from(self.render_html_fragment());
+        if let Some(options) = page {
+            html_page.apply_page_options(options);
+        }
+        html_page
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
     }
 }
 
@@ -296,20 +506,29 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_h1_section() {
+    fn test_h1_section_via_tree() {
         let section = Section::new(HeadingLevel::h1, "Title");
         let result = section.render_optimistic(None);
-        // The heading lowers the declared bold `Style`: a `\x1b[1m` open run
-        // and a single `\x1b[0m` reset, matching the shared style applier.
+        // After the IR flip, `render_optimistic` routes through the tree
+        // renderer. An empty section emits just the heading line via
+        // `render_heading_line`, which uses the same `apply_style` lowering
+        // as the bespoke path — bold open + single reset.
         assert_eq!(result, "\x1b[1m# Title\x1b[0m");
     }
 
     #[test]
-    fn test_section_with_content() {
+    fn test_section_with_content_via_tree() {
         let mut section = Section::new(HeadingLevel::h2, "Header");
         section.add_string("Some content here.");
         let result = section.render_optimistic(None);
-        assert_eq!(result, "\x1b[1m## Header\x1b[0m\nSome content here.");
+        // KNOWN_DRIFT: the tree renderer joins the heading and body with a
+        // blank line (`{heading}\n\n{body}`), where the bespoke renderer
+        // used a single newline. This is the user-facing canonical shape
+        // after the flip.
+        assert_eq!(
+            result,
+            "\x1b[1m## Header\x1b[0m\n\nSome content here."
+        );
     }
 
     #[test]
@@ -325,5 +544,34 @@ mod tests {
         section.layout.margin = Margin::x(Length::ch(2));
         let node = section.render_tree_node().unwrap();
         assert!(node.attrs.layout().is_some());
+    }
+
+    #[test]
+    fn tree_renderable_and_compatibility_hook_share_projection() {
+        // The migration pattern: `TreeRenderable::render_tree` and the
+        // terminal compatibility `TerminalRenderable::render_tree_node` hook
+        // MUST share one private projection helper so they cannot drift.
+        let mut section = Section::new(HeadingLevel::h2, "Header");
+        section.add_string("Body");
+
+        let canonical = <Section as TreeRenderable>::render_tree(&section);
+        let compat = section.render_tree_node().expect("tree node");
+        assert_eq!(
+            serde_json::to_value(&canonical).unwrap(),
+            serde_json::to_value(&compat).unwrap(),
+            "canonical and compatibility projections must serialize identically"
+        );
+    }
+
+    #[test]
+    fn render_bespoke_still_available_for_parity() {
+        // The bespoke renderer is retained as a `#[doc(hidden)]` surface for
+        // parity testing — the active render path now goes through the tree.
+        let section = Section::new(HeadingLevel::h1, "Title");
+        let term = Terminal::new_optimistic(80);
+        let bespoke = section.render_bespoke(&term);
+        // Empty section: bespoke emits the styled heading with no trailing
+        // newline.
+        assert_eq!(bespoke, "\x1b[1m# Title\x1b[0m");
     }
 }

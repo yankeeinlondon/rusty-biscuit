@@ -41,6 +41,13 @@ fn stacked_stripped_has_no_ansi() {
     let block = stacked_stripped("\x1b[1mhi\x1b[0m", "\x1b[2mbye\x1b[0m");
     assert!(!block.contains('\x1b'), "snapshot block must be ANSI-free");
     assert!(block.contains("hi") && block.contains("bye"));
+    // The header text reflects the post-flip semantics: the left half is the
+    // public `render(&term)` output (which itself routes through the tree),
+    // not a separate bespoke renderer.
+    assert!(
+        block.starts_with("VIA_RENDER\n"),
+        "snapshot header is VIA_RENDER, not BESPOKE: {block:?}"
+    );
 }
 
 #[test]
@@ -61,10 +68,10 @@ fn component_case_count_is_six() {
 fn every_case_renders_non_empty() {
     for case in component_cases() {
         for scenario in scenarios() {
-            let (bespoke, tree) = (case.render)(&scenario);
+            let (via_render, tree) = (case.render)(&scenario);
             assert!(
-                !bespoke.is_empty(),
-                "{}/{}: bespoke output was empty",
+                !via_render.is_empty(),
+                "{}/{}: render(&term) output was empty",
                 case.name,
                 scenario.name
             );
@@ -82,8 +89,8 @@ fn every_case_renders_non_empty() {
 fn layout_matrix_snapshots() {
     for case in component_cases() {
         for scenario in scenarios() {
-            let (bespoke, tree) = (case.render)(&scenario);
-            let block = stacked_stripped(&bespoke, &tree);
+            let (via_render, tree) = (case.render)(&scenario);
+            let block = stacked_stripped(&via_render, &tree);
             insta::assert_snapshot!(format!("{}__{}", case.name, scenario.name), block);
         }
     }

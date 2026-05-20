@@ -1,15 +1,24 @@
+use renderable::browser::PageOptions;
+use renderable::browser::fragment::{BrowserFragment, Ready};
 use renderable::color::{BasicColor, Color, RgbColor};
+use renderable::html::HtmlPage;
+use renderable::markdown::MarkdownRenderable;
+use renderable::tree::render::{
+    BrowserRenderOptions, MarkdownDialect, MarkdownRenderOptions, render_browser_node,
+    render_markdown_node,
+};
 use renderable::tree::{
-    ColumnAlign, ColumnConditional, RenderNode, TableCellHints, TableColumnHints,
-    TableTerminalHints,
+    ColumnAlign, ColumnConditional, RenderNode, RenderStrictness, TableCellHints,
+    TableColumnHints, TableTerminalHints, TreeRenderable,
 };
 
 use renderable::style::Style;
 
 use crate::{
-    components::renderable::TerminalRenderable,
+    components::renderable::{BrowserRenderable, TerminalRenderable},
     render_tree::render::resolve_cells,
     render_tree::style::{SGR_RESET, color_sgr, text_appearance_sgr},
+    render_tree::{TerminalRenderOptions, render_terminal_node},
     terminal::Terminal,
     utils::{
         block_constraint::{sanitize_wrapped_lines, split_lines, visible_width, wrap_lines},
@@ -1398,90 +1407,32 @@ impl Table {
     }
 }
 
-impl TerminalRenderable for Table {
-    fn render_optimistic(&self, term_width: Option<u32>) -> String {
-        let width = term_width.unwrap_or(80);
-        // Opportunistic render assumes a truecolor dark terminal.
-        let term = Terminal::new_optimistic(width);
-        let (stripe_bg, stripe_fg) =
-            self.resolve_stripe_escapes(&ColorMode::Dark, ColorDepth::TrueColor);
-        if self.prefer_cursor_alignment {
-            self.render_with_cursor_positioning(
-                width,
-                stripe_bg.as_deref(),
-                stripe_fg.as_deref(),
-                &term,
-            )
-        } else {
-            let available = self.layout.available_width(width);
-            let content = self.render_content(
-                Some(available),
-                stripe_bg.as_deref(),
-                stripe_fg.as_deref(),
-                &term,
-            );
-            // Box-drawing borders and column edges must stay vertically
-            // aligned across all rows — align as a block.
-            self.layout.apply_block_layout(&content, width)
-        }
-    }
-
-    fn render(&self, term: &Terminal) -> String {
-        let width = term.width();
-        // Striping degrades with the terminal's color depth rather than
-        // being disabled outright below truecolor; `resolve_stripe_escapes`
-        // returns `None` only when the terminal has no color support.
-        let (stripe_bg, stripe_fg) =
-            self.resolve_stripe_escapes(&term.color_mode(), term.color_depth);
-        if self.prefer_cursor_alignment && term.is_tty {
-            self.render_with_cursor_positioning(
-                width,
-                stripe_bg.as_deref(),
-                stripe_fg.as_deref(),
-                term,
-            )
-        } else {
-            let available = self.layout.available_width(width);
-            let content = self.render_content(
-                Some(available),
-                stripe_bg.as_deref(),
-                stripe_fg.as_deref(),
-                term,
-            );
-            self.layout.apply_block_layout(&content, width)
-        }
-    }
-
-    fn as_any(&self) -> &dyn std::any::Any {
-        self
-    }
-
-    fn layout(&self) -> &Layout {
-        &self.layout
-    }
-
-    fn layout_mut(&mut self) -> &mut Layout {
-        &mut self.layout
-    }
-
-    fn is_block_level(&self) -> bool {
-        true
-    }
-
-    /// Projects this table into a canonical [`NodeKind::Table`] render node.
+impl Table {
+    /// Builds the canonical [`NodeKind::Table`] tree node for this table.
+    ///
+    /// This is the **single private projection helper**. Both
+    /// [`TreeRenderable::render_tree`] and the legacy
+    /// [`TerminalRenderable::render_tree_node`] hook delegate to it so the
+    /// terminal compatibility surface cannot drift from the canonical
+    /// tree-renderable producer.
     ///
     /// The first child row is the header row; each remaining child row is a
     /// data row. Every cell carries the readable pre-formatted text as a
     /// [`NodeKind::Text`] node, plus [`TableCellHints`] recording the cell
     /// kind, the original typed value as JSON, and alignment. The table node
     /// carries per-column [`TableColumnHints`] and [`TableTerminalHints`], and
-    /// the consolidated [`Layout`] when margins are non-default.
+    /// the consolidated [`Layout`] when margins are non-default. When the
+    /// component carries a non-empty title, it is seeded onto the projected
+    /// node as the [`set_table_title`](renderable::tree::NodeAttrs::set_table_title)
+    /// hint so each renderer can lower it appropriately
+    /// (Terminal: caption above the top border; Browser: `<caption>` inside
+    /// `<table>`; Markdown: escaped plain text preceding the table).
     ///
     /// [`Layout`]: renderable::layout::Layout
     ///
     /// [`NodeKind::Table`]: renderable::tree::NodeKind::Table
     /// [`NodeKind::Text`]: renderable::tree::NodeKind::Text
-    fn render_tree_node(&self) -> Option<RenderNode> {
+    fn to_render_tree_node(&self) -> RenderNode {
         let align: Vec<ColumnAlign> = self
             .columns
             .iter()
@@ -1570,15 +1521,271 @@ impl TerminalRenderable for Table {
             node.attrs.set_layout(&self.layout);
         }
 
-        // A bespoke `Table` honors a caller-supplied title via the
-        // typed render-tree caption hint (`RT-TABLE-001`). The terminal
-        // tree renderer emits the trimmed title above the top border;
-        // empty or whitespace-only titles are ignored at render time.
+        // Honor the caller-supplied title via the typed render-tree caption
+        // hint (`RT-TABLE-001`). Renderers ignore empty or whitespace-only
+        // titles at render time; this avoids encoding the predicate twice.
         if let Some(title) = self.title.as_ref() {
             node.attrs.set_table_title(title);
         }
 
-        Some(node)
+        node
+    }
+
+    /// Renders the table through the canonical render tree.
+    ///
+    /// Used by the [`TerminalRenderable`] impl to route Terminal output
+    /// through the same tree the Browser and Markdown paths consume.
+    ///
+    /// ## Notes
+    ///
+    /// Failures are logged via `tracing::error!` and fall back to an empty
+    /// string rather than the spec's `[render-tree error: …]` sentinel.
+    /// The [`TerminalRenderable::render`] trait is infallible by contract,
+    /// and emitting an in-band sentinel would pollute user-facing terminal
+    /// output for the 30+ CLI consumers. The structured `tracing::error!`
+    /// event preserves diagnosability without that user-visible cost; this
+    /// is an intentional, documented divergence from the spec's textual
+    /// fallback.
+    fn render_via_tree(&self, term: &Terminal) -> String {
+        let node = self.to_render_tree_node();
+        let opts = TerminalRenderOptions::new(term, RenderStrictness::Warn);
+        match render_terminal_node(&node, &opts) {
+            Ok(rendered) => rendered.output,
+            Err(error) => {
+                tracing::error!(
+                    component = "Table",
+                    error = %error,
+                    "render_terminal_node failed; emitting empty output"
+                );
+                String::new()
+            }
+        }
+    }
+
+    /// Renders via the pre-tree bespoke path.
+    ///
+    /// Retained for parity testing — the active [`TerminalRenderable::render`]
+    /// path now delegates to [`Self::render_via_tree`] so the user-facing
+    /// output flows through the canonical tree. Integration parity tests can
+    /// call this method directly to compare the legacy bespoke output against
+    /// the tree renderer's output.
+    ///
+    /// ## Notes
+    ///
+    /// Not part of the stable surface; will be removed once the tree
+    /// renderer is the universal default and no parity comparison is needed.
+    #[doc(hidden)]
+    pub fn render_bespoke(&self, term: &Terminal) -> String {
+        let width = term.width();
+        // Striping degrades with the terminal's color depth rather than
+        // being disabled outright below truecolor; `resolve_stripe_escapes`
+        // returns `None` only when the terminal has no color support.
+        let (stripe_bg, stripe_fg) =
+            self.resolve_stripe_escapes(&term.color_mode(), term.color_depth);
+        if self.prefer_cursor_alignment && term.is_tty {
+            self.render_with_cursor_positioning(
+                width,
+                stripe_bg.as_deref(),
+                stripe_fg.as_deref(),
+                term,
+            )
+        } else {
+            let available = self.layout.available_width(width);
+            let content = self.render_content(
+                Some(available),
+                stripe_bg.as_deref(),
+                stripe_fg.as_deref(),
+                term,
+            );
+            self.layout.apply_block_layout(&content, width)
+        }
+    }
+}
+
+impl TerminalRenderable for Table {
+    /// Renders to a terminal string at an explicit width.
+    ///
+    /// Routes through the canonical render tree via [`Self::render_via_tree`]
+    /// so terminal output matches the Browser and Markdown paths for the same
+    /// component. The legacy bespoke output is retained on
+    /// [`Self::render_bespoke`] for parity testing.
+    ///
+    /// ## Notes
+    ///
+    /// When [`Self::prefer_cursor_alignment`] is set the call delegates to
+    /// [`Self::render_bespoke`] so the documented cursor-positioning escape
+    /// hatch (used by ~30 production CLI call sites — `claudine`, `sniff`,
+    /// `model-citizen`, `messenger`, …) is preserved through the tree-routing
+    /// migration. The optimistic terminal is a TTY by construction, so the
+    /// inner `is_tty` guard in `render_bespoke` is satisfied.
+    fn render_optimistic(&self, term_width: Option<u32>) -> String {
+        let term = Terminal::new_optimistic(term_width.unwrap_or(80));
+        if self.prefer_cursor_alignment && term.is_tty {
+            self.render_bespoke(&term)
+        } else {
+            self.render_via_tree(&term)
+        }
+    }
+
+    /// Renders to the supplied terminal.
+    ///
+    /// Routes through the canonical render tree via [`Self::render_via_tree`].
+    /// The legacy bespoke output is retained on [`Self::render_bespoke`] for
+    /// parity testing.
+    ///
+    /// ## Notes
+    ///
+    /// When [`Self::prefer_cursor_alignment`] is set **and** the terminal is
+    /// a TTY, the call delegates to [`Self::render_bespoke`] so the documented
+    /// cursor-positioning escape hatch (used by ~30 production CLI call sites)
+    /// keeps emitting ANSI column-move sequences (`CSI N G`) rather than
+    /// silently degrading to tree-rendered space padding. Non-TTY destinations
+    /// (pipes, file redirects, capture buffers) always take the tree path so
+    /// captured output stays free of cursor-control bytes.
+    fn render(&self, term: &Terminal) -> String {
+        if self.prefer_cursor_alignment && term.is_tty {
+            self.render_bespoke(term)
+        } else {
+            self.render_via_tree(term)
+        }
+    }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+
+    fn layout(&self) -> &Layout {
+        &self.layout
+    }
+
+    fn layout_mut(&mut self) -> &mut Layout {
+        &mut self.layout
+    }
+
+    fn is_block_level(&self) -> bool {
+        true
+    }
+
+    /// Projects this table into a canonical [`NodeKind::Table`] render node.
+    ///
+    /// Delegates to the single private projection helper
+    /// [`Self::to_render_tree_node`], shared with
+    /// [`TreeRenderable::render_tree`] so the terminal compatibility hook and
+    /// the canonical tree producer cannot drift.
+    ///
+    /// [`NodeKind::Table`]: renderable::tree::NodeKind::Table
+    fn render_tree_node(&self) -> Option<RenderNode> {
+        Some(self.to_render_tree_node())
+    }
+}
+
+impl TreeRenderable for Table {
+    /// Projects the table into the canonical render tree.
+    ///
+    /// Delegates to the single private projection helper
+    /// [`Table::to_render_tree_node`] so this canonical entry point and the
+    /// terminal-compatibility [`TerminalRenderable::render_tree_node`] hook
+    /// share one source of truth.
+    ///
+    /// [`NodeKind::Table`]: renderable::tree::NodeKind::Table
+    fn render_tree(&self) -> RenderNode {
+        self.to_render_tree_node()
+    }
+}
+
+impl Table {
+    /// Shared Markdown lowering for both portable Markdown and MarkdownPlus.
+    ///
+    /// Centralises the tree-projection + `render_markdown_node` invocation
+    /// so the two `MarkdownRenderable` entry points cannot drift on error
+    /// handling or option construction. The `dialect` parameter is passed
+    /// straight through to [`MarkdownRenderOptions`], keeping the function
+    /// faithful to whatever distinction the dialects encode.
+    fn render_markdown_for_dialect(&self, dialect: MarkdownDialect) -> String {
+        let node = <Self as TreeRenderable>::render_tree(self);
+        let opts = MarkdownRenderOptions {
+            dialect,
+            ..MarkdownRenderOptions::default()
+        };
+        match render_markdown_node(&node, &opts) {
+            Ok(rendered) => rendered.output,
+            Err(error) => {
+                tracing::error!(
+                    component = "Table",
+                    dialect = ?dialect,
+                    error = %error,
+                    "render_markdown_node failed; emitting empty output"
+                );
+                String::new()
+            }
+        }
+    }
+}
+
+impl MarkdownRenderable for Table {
+    /// Renders the table as portable Markdown (GFM) via the canonical render
+    /// tree.
+    ///
+    /// Output is a pipe-delimited GFM table. Cell content is escaped to keep
+    /// the table structure valid: literal `|` becomes `\|`, soft breaks become
+    /// spaces, and hard breaks plus literal newlines become `<br>`. A
+    /// non-empty title is emitted as escaped plain text on its own line
+    /// followed by a blank line before the table.
+    fn render_markdown(&self) -> String {
+        self.render_markdown_for_dialect(MarkdownDialect::Markdown)
+    }
+
+    /// Renders the table as MarkdownPlus via the canonical render tree.
+    ///
+    /// Table structure is pure GFM, so MarkdownPlus output is structurally
+    /// identical to portable Markdown. Inline emphasis/code/link rendering
+    /// may diverge once style-aware Markdown lowering lands, but the
+    /// pipe-delimited table shape is unchanged.
+    fn render_markdown_plus(&self) -> String {
+        self.render_markdown_for_dialect(MarkdownDialect::MarkdownPlus)
+    }
+}
+
+impl BrowserRenderable for Table {
+    /// Renders the table as an HTML fragment via the canonical render tree.
+    ///
+    /// The browser tree renderer emits a `<table>` with `<thead>` (first
+    /// row), `<tbody>` (remaining rows), and column alignment as
+    /// `style="text-align:…"`. A non-empty title is emitted as the first
+    /// child `<caption>` element inside the `<table>`.
+    ///
+    /// Failures are logged via `tracing::error!` and fall back to an empty
+    /// [`BrowserFragment`]: the [`BrowserRenderable`] contract is infallible,
+    /// and surfacing a `[render-tree error: …]` sentinel as in-band HTML
+    /// would pollute the rendered page.
+    fn render_html_fragment(&self) -> BrowserFragment<Ready> {
+        let node = <Self as TreeRenderable>::render_tree(self);
+        let opts = BrowserRenderOptions::default();
+        match render_browser_node(&node, &opts) {
+            Ok(rendered) => rendered.output,
+            Err(error) => {
+                tracing::error!(
+                    component = "Table",
+                    error = %error,
+                    "render_browser_node failed; emitting empty fragment"
+                );
+                BrowserFragment::new()
+                    .define_as_text_fragment(String::new())
+                    .finalize()
+            }
+        }
+    }
+
+    fn render_html_page(&self, page: Option<PageOptions>) -> HtmlPage {
+        let mut html_page = HtmlPage::from(self.render_html_fragment());
+        if let Some(options) = page {
+            html_page.apply_page_options(options);
+        }
+        html_page
+    }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
     }
 }
 
@@ -2736,6 +2943,14 @@ mod tests {
         assert!(!table.prefer_cursor_alignment);
     }
 
+    // The cursor-alignment unit tests below cover the **bespoke**
+    // cursor-positioning path. The active `TerminalRenderable::render`
+    // routes through the canonical render tree, which does not (yet) lower
+    // the `prefer_cursor_alignment` terminal hint. These tests are pinned to
+    // [`Table::render_bespoke`] so they keep documenting the bespoke
+    // behavior precisely; cursor positioning at the tree-renderer level is
+    // tracked separately as a render-tree feature request.
+
     #[test]
     fn test_cursor_alignment_uses_escape_codes() {
         let table = Table::new()
@@ -2743,7 +2958,7 @@ mod tests {
             .with_data(vec![vec!["Alice".into()]])
             .prefer_cursor_alignment();
 
-        let result = table.render_optimistic(Some(80));
+        let result = table.render_bespoke(&Terminal::new_optimistic(80));
         // Should contain cursor positioning escape codes
         assert!(
             result.contains("\x1b["),
@@ -2766,7 +2981,7 @@ mod tests {
             .prefer_cursor_alignment();
         table.layout_mut().margin.left = TargetValue::universal(Length::ch(5));
 
-        let result = table.render_optimistic(Some(80));
+        let result = table.render_bespoke(&Terminal::new_optimistic(80));
         // Table should start at column 6 (5 margin + 1 for 1-indexed)
         assert!(
             result.contains("\x1b[6G"),
@@ -2783,7 +2998,7 @@ mod tests {
             .prefer_cursor_alignment();
         table.layout_mut().alignment = Alignment::Center;
 
-        let result = table.render_optimistic(Some(80));
+        let result = table.render_bespoke(&Terminal::new_optimistic(80));
         // With 80 width and small table, table_start should be > 1
         // The table width is about 5 chars (│ X │), so center offset should be ~37
         // Look for a column position > 30 (roughly centered)
@@ -2818,7 +3033,7 @@ mod tests {
             .prefer_cursor_alignment();
         table.layout_mut().alignment = Alignment::Right;
 
-        let result = table.render_optimistic(Some(80));
+        let result = table.render_bespoke(&Terminal::new_optimistic(80));
         // With 80 width and small table (~5 chars), table should start near column 75
         let has_right_position = result
             .lines()
@@ -3683,7 +3898,9 @@ mod tests {
             ]])
             .prefer_cursor_alignment();
 
-        let result = table.render_optimistic(Some(80));
+        // Bespoke path: cursor positioning is not yet lowered by the
+        // canonical render tree, so the test pins the legacy bespoke output.
+        let result = table.render_bespoke(&Terminal::new_optimistic(80));
 
         // Find data lines (skip header and borders)
         let content_lines: Vec<&str> = result
@@ -3722,7 +3939,8 @@ mod tests {
             .with_data(vec![vec![TableCellContent::Text("A\nB".to_string())]])
             .prefer_cursor_alignment();
 
-        let result = table.render_optimistic(Some(80));
+        // Bespoke path: see note above for cursor-alignment unit tests.
+        let result = table.render_bespoke(&Terminal::new_optimistic(80));
 
         // Every line should use cursor positioning
         for line in result.lines() {
@@ -3850,7 +4068,8 @@ mod tests {
         table.layout_mut().margin.left = TargetValue::universal(Length::ch(5));
         table.layout_mut().margin.right = TargetValue::universal(Length::ch(5));
 
-        let result = table.render_optimistic(Some(60));
+        // Bespoke path: see note above for cursor-alignment unit tests.
+        let result = table.render_bespoke(&Terminal::new_optimistic(60));
 
         // Table should respect available width (60 - 5 - 5 = 50)
         // Check that cursor positioning starts correctly

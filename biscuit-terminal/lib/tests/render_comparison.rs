@@ -98,77 +98,30 @@ const KNOWN_DRIFT: &[(&str, &str, Facet, Verdict)] = &[
     // bespoke output is still available via `Progress::render_bespoke` for
     // dedicated parity tests, but the layout matrix's side-by-side view is
     // tautological for `Progress` and is informational only.
-    ("Section", "align_center", Facet::Exact, Verdict::BespokeBehind),
-    ("Section", "align_center", Facet::Text, Verdict::BespokeBehind),
-    ("Section", "align_center", Facet::Indent, Verdict::BespokeBehind),
-    ("Section", "align_center", Facet::BlankLines, Verdict::BespokeBehind),
-    ("Section", "align_center", Facet::Styling, Verdict::BespokeBehind),
-    ("Section", "align_right", Facet::Exact, Verdict::BespokeBehind),
-    ("Section", "align_right", Facet::Text, Verdict::BespokeBehind),
-    ("Section", "align_right", Facet::Indent, Verdict::BespokeBehind),
-    ("Section", "align_right", Facet::BlankLines, Verdict::BespokeBehind),
-    ("Section", "align_right", Facet::Styling, Verdict::BespokeBehind),
-    ("Section", "baseline", Facet::Exact, Verdict::BespokeBehind),
-    ("Section", "baseline", Facet::Text, Verdict::BespokeBehind),
-    ("Section", "baseline", Facet::Indent, Verdict::BespokeBehind),
-    ("Section", "baseline", Facet::BlankLines, Verdict::BespokeBehind),
-    ("Section", "bottom_margin_2", Facet::Exact, Verdict::BespokeBehind),
-    ("Section", "bottom_margin_2", Facet::Text, Verdict::BespokeBehind),
-    ("Section", "bottom_margin_2", Facet::Indent, Verdict::BespokeBehind),
-    ("Section", "bottom_margin_2", Facet::BlankLines, Verdict::BespokeBehind),
-    ("Section", "left_margin_4", Facet::Exact, Verdict::BespokeBehind),
-    ("Section", "left_margin_4", Facet::Text, Verdict::BespokeBehind),
-    ("Section", "left_margin_4", Facet::Indent, Verdict::BespokeBehind),
-    ("Section", "left_margin_4", Facet::BlankLines, Verdict::BespokeBehind),
-    ("Section", "left_margin_pct_10", Facet::Exact, Verdict::BespokeBehind),
-    ("Section", "left_margin_pct_10", Facet::Text, Verdict::BespokeBehind),
-    ("Section", "left_margin_pct_10", Facet::Indent, Verdict::BespokeBehind),
-    ("Section", "left_margin_pct_10", Facet::BlankLines, Verdict::BespokeBehind),
-    ("Section", "max_width_40", Facet::Exact, Verdict::BespokeBehind),
-    ("Section", "max_width_40", Facet::Text, Verdict::BespokeBehind),
-    ("Section", "max_width_40", Facet::Indent, Verdict::BespokeBehind),
-    ("Section", "max_width_40", Facet::BlankLines, Verdict::BespokeBehind),
-    ("Section", "right_margin_4", Facet::Exact, Verdict::BespokeBehind),
-    ("Section", "right_margin_4", Facet::Text, Verdict::BespokeBehind),
-    ("Section", "right_margin_4", Facet::Indent, Verdict::BespokeBehind),
-    ("Section", "right_margin_4", Facet::BlankLines, Verdict::BespokeBehind),
-    ("Section", "top_margin_2", Facet::Exact, Verdict::BespokeBehind),
-    ("Section", "top_margin_2", Facet::Text, Verdict::BespokeBehind),
-    ("Section", "top_margin_2", Facet::Indent, Verdict::BespokeBehind),
-    ("Section", "top_margin_2", Facet::BlankLines, Verdict::BespokeBehind),
-    ("Section", "top_margin_2", Facet::Styling, Verdict::BespokeBehind),
-    ("Section", "width_120", Facet::Exact, Verdict::BespokeBehind),
-    ("Section", "width_120", Facet::Text, Verdict::BespokeBehind),
-    ("Section", "width_120", Facet::Indent, Verdict::BespokeBehind),
-    ("Section", "width_120", Facet::BlankLines, Verdict::BespokeBehind),
-    ("Section", "width_40", Facet::Exact, Verdict::BespokeBehind),
-    ("Section", "width_40", Facet::Text, Verdict::BespokeBehind),
-    ("Section", "width_40", Facet::Indent, Verdict::BespokeBehind),
-    ("Section", "width_40", Facet::BlankLines, Verdict::BespokeBehind),
-    ("Section", "word_wrap_prose", Facet::Exact, Verdict::BespokeBehind),
-    ("Section", "word_wrap_prose", Facet::Text, Verdict::BespokeBehind),
-    ("Section", "word_wrap_prose", Facet::Indent, Verdict::BespokeBehind),
-    ("Section", "word_wrap_prose", Facet::BlankLines, Verdict::BespokeBehind),
-    ("Table", "bottom_margin_2", Facet::Exact, Verdict::BespokeBehind),
-    ("Table", "bottom_margin_2", Facet::Text, Verdict::BespokeBehind),
-    ("Table", "bottom_margin_2", Facet::Indent, Verdict::BespokeBehind),
-    ("Table", "bottom_margin_2", Facet::BlankLines, Verdict::BespokeBehind),
-    ("Table", "top_margin_2", Facet::Exact, Verdict::BespokeBehind),
-    ("Table", "top_margin_2", Facet::Text, Verdict::BespokeBehind),
-    ("Table", "top_margin_2", Facet::Indent, Verdict::BespokeBehind),
-    ("Table", "top_margin_2", Facet::BlankLines, Verdict::BespokeBehind),
-    ("TwoColumn", "bottom_margin_2", Facet::Exact, Verdict::CosmeticNeutral),
-    ("TwoColumn", "bottom_margin_2", Facet::Text, Verdict::CosmeticNeutral),
-    ("TwoColumn", "bottom_margin_2", Facet::Indent, Verdict::CosmeticNeutral),
-    ("TwoColumn", "bottom_margin_2", Facet::BlankLines, Verdict::CosmeticNeutral),
-    ("TwoColumn", "max_width_40", Facet::Exact, Verdict::BespokeBehind),
-    ("TwoColumn", "max_width_40", Facet::Text, Verdict::BespokeBehind),
-    ("TwoColumn", "max_width_40", Facet::Indent, Verdict::BespokeBehind),
-    ("TwoColumn", "max_width_40", Facet::Width, Verdict::BespokeBehind),
-    ("TwoColumn", "top_margin_2", Facet::Exact, Verdict::BespokeBehind),
-    ("TwoColumn", "top_margin_2", Facet::Text, Verdict::BespokeBehind),
-    ("TwoColumn", "top_margin_2", Facet::Indent, Verdict::BespokeBehind),
-    ("TwoColumn", "top_margin_2", Facet::BlankLines, Verdict::BespokeBehind),
+    // Section bespoke ↔ tree drift was retired when `TerminalRenderable::render`
+    // for `Section` was re-pointed at the tree renderer (Section IR flip,
+    // 2026-05-19). The layout-matrix harness calls `section.render(&term)` for
+    // the "bespoke" half of the pair, which now routes through the canonical
+    // tree — so every cell agrees by construction. The pre-flip bespoke output
+    // is still available via `Section::render_bespoke` for dedicated parity
+    // tests, but the layout matrix's side-by-side view is tautological for
+    // `Section` and is informational only.
+    // Table bespoke ↔ tree drift was retired when `TerminalRenderable::render`
+    // for `Table` was re-pointed at the tree renderer (Table IR flip,
+    // 2026-05-19). The layout-matrix harness calls `table.render(&term)` for
+    // the "bespoke" half of the pair, which now routes through the canonical
+    // tree — so every cell agrees by construction. The pre-flip bespoke output
+    // is still available via `Table::render_bespoke` for dedicated parity tests,
+    // but the layout matrix's side-by-side view is tautological for `Table` and
+    // is informational only.
+    // TwoColumn bespoke ↔ tree drift was retired when `TerminalRenderable::render`
+    // for `TwoColumn` was re-pointed at the tree renderer (TwoColumn IR flip,
+    // 2026-05-19). The layout-matrix harness calls `columns.render(&term)` for
+    // the "bespoke" half of the pair, which now routes through the canonical
+    // tree — so every cell agrees by construction. The pre-flip bespoke output
+    // is still available via `TwoColumn::render_bespoke` for dedicated parity
+    // tests, but the layout matrix's side-by-side view is tautological for
+    // `TwoColumn` and is informational only.
     // UnorderedList bespoke ↔ tree drift was retired when `TerminalRenderable`
     // for `UnorderedList` was re-pointed at the tree renderer (UnorderedList
     // IR flip, 2026-05-19). The bespoke path now equals the tree path for

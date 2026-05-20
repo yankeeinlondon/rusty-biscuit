@@ -9,13 +9,15 @@
 
 mod parity_helpers;
 
-use biscuit_terminal::components::renderable::TerminalRenderable;
+use biscuit_terminal::components::renderable::{BrowserRenderable, TerminalRenderable};
 use biscuit_terminal::components::table::types::{ColumnType, Currency};
 use biscuit_terminal::components::table::{Conditional, Table, TableCellContent, TableColumn};
 use biscuit_terminal::render_tree::{TerminalRenderOptions, render_terminal_node};
+use biscuit_terminal::terminal::Terminal;
+use renderable::markdown::MarkdownRenderable;
 use renderable::tree::{
-    ColumnAlign, ColumnConditional, NodeKind, RenderNode, RenderStrictness, ValidationMode,
-    validate,
+    ColumnAlign, ColumnConditional, NodeKind, RenderNode, RenderStrictness, TreeRenderable,
+    ValidationMode, validate,
 };
 
 use parity_helpers::{PARITY_WIDTHS, assert_contains_tokens, strip_ansi, test_terminal};
@@ -444,4 +446,573 @@ fn malformed_conditional_token_defaults_to_always() {
         out.contains("Col") && out.contains("Val"),
         "malformed conditional defaults to always-visible:\n{out}"
     );
+}
+
+// ---------------------------------------------------------------------------
+// Canonical TreeRenderable + cross-target rendering
+// ---------------------------------------------------------------------------
+
+#[test]
+fn tree_renderable_and_terminal_hook_agree() {
+    // Both producers must delegate to the same private projection helper,
+    // so their outputs must be identical.
+    let table = typed_table();
+    let canonical = <Table as TreeRenderable>::render_tree(&table);
+    let compat = table
+        .render_tree_node()
+        .expect("compat hook should produce a node");
+    assert_eq!(
+        canonical, compat,
+        "TreeRenderable::render_tree and TerminalRenderable::render_tree_node must agree"
+    );
+}
+
+#[test]
+fn render_terminal_default_routes_through_tree() {
+    // The default render path should match what the tree renderer produces.
+    let table = sample_table();
+    let term = test_terminal(80);
+    let default = strip_ansi(&table.render(&term));
+    let via_tree = strip_ansi(&render_tree(
+        &<Table as TreeRenderable>::render_tree(&table),
+        80,
+    ));
+    assert_eq!(
+        default, via_tree,
+        "TerminalRenderable::render must route through the canonical tree"
+    );
+}
+
+#[test]
+fn render_bespoke_still_available_for_parity() {
+    // The bespoke path remains accessible for parity testing.
+    let table = sample_table();
+    let term = test_terminal(80);
+    let bespoke = strip_ansi(&table.render_bespoke(&term));
+    assert!(bespoke.contains("Name"));
+    assert!(bespoke.contains("Score"));
+    assert!(bespoke.contains("Ann"));
+    assert!(bespoke.contains("Bob"));
+}
+
+#[test]
+fn render_markdown_emits_gfm_pipe_table() {
+    let table = sample_table();
+    let md = table.render_markdown();
+    assert!(md.contains("| Name"), "header pipe row: {md}");
+    assert!(md.contains("| Score"), "header pipe row: {md}");
+    assert!(md.contains("--"), "GFM delimiter row: {md}");
+    assert!(md.contains("Ann"), "data row 1: {md}");
+    assert!(md.contains("Bob"), "data row 2: {md}");
+    // No box drawing in Markdown output.
+    assert!(!md.contains('┌'), "no terminal borders in Markdown");
+}
+
+#[test]
+fn render_markdown_and_markdown_plus_match_for_pure_gfm_table() {
+    let table = sample_table();
+    let md = table.render_markdown();
+    let md_plus = table.render_markdown_plus();
+    assert_eq!(
+        md, md_plus,
+        "Table's pure-GFM output is identical for Markdown and MarkdownPlus"
+    );
+}
+
+#[test]
+fn render_markdown_escapes_pipe_in_cells() {
+    let table = Table::new()
+        .with_columns(vec![TableColumn::new("Name"), TableColumn::new("Note")])
+        .with_data(vec![vec![
+            TableCellContent::Text("Ann".into()),
+            TableCellContent::Text("left|right".into()),
+        ]]);
+    let md = table.render_markdown();
+    assert!(
+        md.contains("left\\|right"),
+        "literal pipe escaped in cell: {md}"
+    );
+}
+
+#[test]
+fn render_markdown_normalizes_cell_newline_to_br() {
+    let table = Table::new()
+        .with_columns(vec![TableColumn::new("Task"), TableColumn::new("Status")])
+        .with_data(vec![vec![
+            TableCellContent::Text("line one\nline two".into()),
+            TableCellContent::Text("Done".into()),
+        ]]);
+    let md = table.render_markdown();
+    assert!(
+        md.contains("<br>"),
+        "literal newline normalized to <br> in cell: {md}"
+    );
+    // Table rows must remain single-line for GFM validity — no embedded `\n`
+    // inside the cell-text run.
+    let row_with_break = md
+        .lines()
+        .find(|l| l.contains("line one"))
+        .expect("found row containing the multi-line cell");
+    assert!(
+        row_with_break.contains("line two"),
+        "both lines must end up on the same Markdown row: {row_with_break}"
+    );
+}
+
+#[test]
+fn render_markdown_with_title_emits_caption_before_table() {
+    let table = sample_table().with_title("Roster");
+    let md = table.render_markdown();
+    let table_start = md.find("| Name").expect("table row present");
+    let title_pos = md.find("Roster").expect("title present");
+    assert!(
+        title_pos < table_start,
+        "title appears before the table: {md}"
+    );
+}
+
+#[test]
+fn render_markdown_ignores_whitespace_only_title() {
+    let table = sample_table().with_title("   ");
+    let md = table.render_markdown();
+    assert!(
+        !md.contains("   "),
+        "whitespace-only title not emitted: {md}"
+    );
+}
+
+#[test]
+fn render_html_emits_table_with_thead_and_tbody() {
+    let table = sample_table();
+    let html = table.render_html_fragment().render();
+    assert!(html.contains("<table"), "table element: {html}");
+    assert!(html.contains("</table>"), "table close: {html}");
+    assert!(html.contains("<thead"), "thead: {html}");
+    assert!(html.contains("<tbody"), "tbody: {html}");
+    assert!(html.contains("<th"), "th: {html}");
+    assert!(html.contains("<td"), "td: {html}");
+}
+
+#[test]
+fn render_html_with_title_emits_caption() {
+    let table = sample_table().with_title("Roster");
+    let html = table.render_html_fragment().render();
+    assert!(html.contains("<caption"), "caption element: {html}");
+    assert!(html.contains("Roster"), "title text: {html}");
+}
+
+#[test]
+fn render_html_right_aligned_column_carries_text_align() {
+    let table = typed_table();
+    let html = table.render_html_fragment().render();
+    assert!(
+        html.contains("text-align:right") || html.contains("text-align: right"),
+        "integer column lowers to text-align:right: {html}"
+    );
+}
+
+#[test]
+fn render_terminal_with_title_emits_title_above_top_border() {
+    let table = sample_table().with_title("Roster");
+    let term = test_terminal(80);
+    let out = strip_ansi(&table.render(&term));
+    let title = out.find("Roster").expect("title present");
+    let border = out.find('┌').expect("top border present");
+    assert!(
+        title < border,
+        "title appears above the top border:\n{out}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Spec variant #16: cursor-positioning escape hatch
+//
+// `prefer_cursor_alignment` is a documented opt-in used by ~30 production CLI
+// call sites (`claudine`, `sniff`, `model-citizen`, `messenger`, …). When the
+// caller sets it AND the terminal is a TTY, `render` must delegate to the
+// bespoke path so the column-move escape bytes (`CSI N G`) reach the user's
+// terminal. When unset — or when stdout is a pipe/redirect — the canonical
+// tree path applies so captured output stays free of cursor-control bytes.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn prefer_cursor_alignment_tty_emits_column_move_escapes() {
+    let table = sample_table().prefer_cursor_alignment();
+    let term = test_terminal(80); // optimistic terminal => is_tty == true
+    let out = table.render(&term);
+
+    // The bespoke cursor-positioning path emits a `CSI N G` sequence
+    // (`\x1b[<col>G`) at the start of every output line. The tree path
+    // emits no column-move bytes.
+    assert!(
+        out.contains("\x1b["),
+        "TTY + prefer_cursor_alignment must route through the bespoke path \
+         and emit ANSI escapes; got: {out:?}"
+    );
+    assert!(
+        out.contains('G'),
+        "TTY + prefer_cursor_alignment must emit `CSI N G` column-move \
+         escapes; got: {out:?}"
+    );
+}
+
+#[test]
+fn default_render_emits_no_column_move_escapes() {
+    // No `prefer_cursor_alignment` — the tree path must be taken, so no
+    // bare `CSI N G` cursor-move sequences should appear.
+    let table = sample_table();
+    let term = test_terminal(80);
+    let out = table.render(&term);
+
+    // Tree-path output may carry SGR escapes for color, but it must not
+    // emit `CSI N G` column-position sequences.
+    let mut bytes = out.bytes().peekable();
+    while let Some(b) = bytes.next() {
+        if b != 0x1B {
+            continue;
+        }
+        if bytes.next() != Some(b'[') {
+            continue;
+        }
+        // Collect the parameter digits.
+        let mut param_was_numeric = false;
+        let mut terminator = None;
+        for nb in bytes.by_ref() {
+            if nb.is_ascii_digit() {
+                param_was_numeric = true;
+                continue;
+            }
+            terminator = Some(nb);
+            break;
+        }
+        if param_was_numeric && terminator == Some(b'G') {
+            panic!(
+                "tree-rendered Table must not emit `CSI N G` cursor-move \
+                 escapes; got: {out:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn prefer_cursor_alignment_without_tty_routes_through_tree() {
+    // When stdout is not a TTY (e.g. piped to a file or another process),
+    // the bespoke cursor-positioning path is suppressed even if the
+    // caller opted in, because `render_bespoke`'s internal guard requires
+    // `term.is_tty`. The render must therefore fall through to the tree
+    // path and emit no `CSI N G` sequences.
+    let table = sample_table().prefer_cursor_alignment();
+    let term = Terminal::builder().is_tty(false).width(80).build();
+    let out = table.render(&term);
+
+    let mut bytes = out.bytes().peekable();
+    while let Some(b) = bytes.next() {
+        if b != 0x1B {
+            continue;
+        }
+        if bytes.next() != Some(b'[') {
+            continue;
+        }
+        let mut param_was_numeric = false;
+        let mut terminator = None;
+        for nb in bytes.by_ref() {
+            if nb.is_ascii_digit() {
+                param_was_numeric = true;
+                continue;
+            }
+            terminator = Some(nb);
+            break;
+        }
+        if param_was_numeric && terminator == Some(b'G') {
+            panic!(
+                "non-TTY + prefer_cursor_alignment must NOT emit `CSI N G` \
+                 cursor-move escapes (the bespoke guard requires is_tty); \
+                 got: {out:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn render_bespoke_emits_column_move_when_cursor_alignment_set() {
+    // Pins the documented divergence: `render_bespoke` honors
+    // `prefer_cursor_alignment`; `render_via_tree` does not.
+    let table = sample_table().prefer_cursor_alignment();
+    let term = test_terminal(80);
+    let bespoke = table.render_bespoke(&term);
+    assert!(
+        bespoke.contains("\x1b["),
+        "render_bespoke must emit cursor-move escapes when \
+         prefer_cursor_alignment is set: {bespoke:?}"
+    );
+
+    // The tree path, in contrast, does not lower the
+    // `prefer_cursor_alignment` terminal hint and therefore emits no
+    // `CSI N G` sequences.
+    let via_tree = render_tree(&<Table as TreeRenderable>::render_tree(&table), 80);
+    let mut bytes = via_tree.bytes().peekable();
+    while let Some(b) = bytes.next() {
+        if b != 0x1B {
+            continue;
+        }
+        if bytes.next() != Some(b'[') {
+            continue;
+        }
+        let mut param_was_numeric = false;
+        let mut terminator = None;
+        for nb in bytes.by_ref() {
+            if nb.is_ascii_digit() {
+                param_was_numeric = true;
+                continue;
+            }
+            terminator = Some(nb);
+            break;
+        }
+        if param_was_numeric && terminator == Some(b'G') {
+            panic!(
+                "render_via_tree must NOT emit `CSI N G` cursor-move escapes \
+                 (terminal hint is not yet lowered to the tree renderer); \
+                 got: {via_tree:?}"
+            );
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Spec variant #21: ANSI-colored cell content survives both targets.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn ansi_colored_cell_content_survives_terminal_render() {
+    // Cells containing pre-styled SGR bytes must round-trip through the
+    // terminal target with their visible text intact. The tree path
+    // currently escapes the literal `\x1b` byte to its `\\[…` sequence
+    // (so the structural box drawing is not corrupted), but the underlying
+    // text and color tokens reach the user — this test pins that behavior
+    // so a future change either keeps the escape OR consciously upgrades
+    // it to pass-through.
+    let table = Table::new()
+        .with_columns(vec![TableColumn::new("Name"), TableColumn::new("Status")])
+        .with_data(vec![vec![
+            TableCellContent::Text("Alice".into()),
+            TableCellContent::Text("\x1b[32mActive\x1b[0m".into()),
+        ]]);
+    let term = test_terminal(80);
+    let out = table.render(&term);
+
+    // The visible text reaches the user in every case.
+    assert!(out.contains("Active"), "cell text reaches output: {out:?}");
+    // The color token (`32m`) — whether emitted live or rendered as the
+    // backslash-escaped literal — must still appear so the user can see
+    // that the style was preserved through the pipeline.
+    assert!(
+        out.contains("32m"),
+        "SGR color token preserved (live or escaped) in output: {out:?}"
+    );
+    // The table's own border drawing must still be present and uncorrupted.
+    assert!(out.contains('│'), "borders intact: {out:?}");
+}
+
+#[test]
+fn ansi_colored_cell_content_sensibly_handled_in_markdown() {
+    // Markdown is a structural target with no SGR equivalent. The renderer
+    // should not crash and should preserve the underlying visible text;
+    // raw escape bytes either pass through inert or are dropped, but the
+    // table structure must remain valid GFM.
+    let table = Table::new()
+        .with_columns(vec![TableColumn::new("Name"), TableColumn::new("Status")])
+        .with_data(vec![vec![
+            TableCellContent::Text("Alice".into()),
+            TableCellContent::Text("\x1b[32mActive\x1b[0m".into()),
+        ]]);
+    let md = table.render_markdown();
+    assert!(
+        md.contains("Active"),
+        "visible text preserved in Markdown: {md:?}"
+    );
+    // GFM structural integrity: every data row line that contains a pipe
+    // must start and end with a pipe (after trimming whitespace).
+    for line in md.lines() {
+        let trimmed = line.trim();
+        if !trimmed.contains('|') {
+            continue;
+        }
+        assert!(
+            trimmed.starts_with('|') && trimmed.ends_with('|'),
+            "GFM row must be pipe-delimited end-to-end: {trimmed:?}"
+        );
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Spec variant #22: OSC8 hyperlink cells smoke test.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn osc8_hyperlink_cell_smoke_test() {
+    // An OSC8 hyperlink wrapper around cell content should not blow up the
+    // renderer in either Terminal or Markdown targets, and the visible link
+    // text must reach the output.
+    let hyperlink = "\x1b]8;;https://example.com/\x1b\\Example\x1b]8;;\x1b\\";
+    let table = Table::new()
+        .with_columns(vec![TableColumn::new("Label")])
+        .with_data(vec![vec![TableCellContent::Text(hyperlink.into())]]);
+
+    let term = test_terminal(80);
+    let term_out = table.render(&term);
+    assert!(
+        term_out.contains("Example"),
+        "visible hyperlink text reaches terminal output: {term_out:?}"
+    );
+
+    let md = table.render_markdown();
+    assert!(
+        md.contains("Example"),
+        "visible hyperlink text reaches Markdown output: {md:?}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Combined Markdown escape: all four normalizations apply simultaneously and
+// the result is valid GFM (single line per row, pipe-delimited).
+// ---------------------------------------------------------------------------
+
+#[test]
+fn render_markdown_combined_escape_pipe_newline_soft_and_hard_break() {
+    use renderable::tree::RenderNode;
+    use renderable::tree::render::{MarkdownRenderOptions, render_markdown_node};
+
+    // Mix all four escape triggers in a single hand-built table cell so the
+    // four normalizations apply simultaneously:
+    //
+    //   1. A literal `|` (must be escaped to `\|`).
+    //   2. A literal `\n` inside a Text node (must become `<br>`).
+    //   3. A `SoftBreak` node child (must become `<br>` inside a cell).
+    //   4. A `HardBreak` node child (must become `<br>` inside a cell).
+    //
+    // `TableCellContent::Text` is plain text only, so we cannot construct
+    // SoftBreak/HardBreak children through the public builder. We thread
+    // them through a hand-built `RenderNode::table_cell` and feed the
+    // resulting tree directly to `render_markdown_node`, which is exactly
+    // the call path that `Table::render_markdown` uses internally.
+    let mixed_cell = RenderNode::table_cell(vec![
+        RenderNode::text("left|right"),
+        RenderNode::soft_break(),
+        RenderNode::text("after-soft"),
+        RenderNode::hard_break(),
+        RenderNode::text("after-hard"),
+        RenderNode::text("line\nliteral"),
+    ]);
+    let header_cell = RenderNode::table_cell(vec![RenderNode::text("Mix")]);
+    let table = RenderNode::table(
+        vec![ColumnAlign::Left],
+        vec![
+            RenderNode::table_row(vec![header_cell]),
+            RenderNode::table_row(vec![mixed_cell]),
+        ],
+    );
+
+    let md = render_markdown_node(&table, &MarkdownRenderOptions::default())
+        .expect("hand-built mixed-escape table should render")
+        .output;
+
+    // 1. Literal pipe is escaped end-to-end.
+    assert!(
+        md.contains("left\\|right"),
+        "literal `|` escaped to `\\|`: {md}"
+    );
+    // 2. Literal `\n` inside a Text node collapses to `<br>` so the row
+    //    stays valid GFM.
+    assert!(
+        md.contains("line<br>literal"),
+        "literal `\\n` between adjacent text becomes `<br>`: {md}"
+    );
+    // 3. A `SoftBreak` node inside a cell collapses to a single space
+    //    (documented in `renderable/src/tree/render/markdown.rs`). This
+    //    pins the divergence from the spec's `<br>` suggestion.
+    assert!(
+        md.contains("left\\|right after-soft"),
+        "SoftBreak inside a cell collapses to a single space (not `<br>`); \
+         got: {md}"
+    );
+    // 4. A `HardBreak` node inside a cell becomes `<br>`.
+    assert!(
+        md.contains("after-soft<br>after-hard"),
+        "HardBreak inside a cell becomes `<br>`: {md}"
+    );
+
+    // All four escape sources land on the same single Markdown row.
+    let data_row = md
+        .lines()
+        .find(|l| l.contains("after-soft"))
+        .expect("data row present");
+    assert!(
+        data_row.contains("after-hard"),
+        "hard-break sibling on the same row: {data_row}"
+    );
+    assert!(
+        data_row.contains("literal"),
+        "literal-newline sibling on the same row: {data_row}"
+    );
+    assert!(
+        data_row.contains("left\\|right"),
+        "pipe-escape sibling on the same row: {data_row}"
+    );
+
+    // GFM validity: every pipe-containing row must be single-line and
+    // pipe-delimited end-to-end.
+    let mut pipe_rows = 0;
+    for line in md.lines() {
+        let trimmed = line.trim();
+        if !trimmed.contains('|') {
+            continue;
+        }
+        pipe_rows += 1;
+        assert!(
+            trimmed.starts_with('|') && trimmed.ends_with('|'),
+            "GFM row must be pipe-delimited end-to-end: {trimmed:?}"
+        );
+        assert!(
+            !trimmed.contains('\n'),
+            "GFM row must be a single line (no embedded \\n): {trimmed:?}"
+        );
+    }
+    assert!(pipe_rows >= 2, "expected at least header+data rows: {md}");
+}
+
+// ---------------------------------------------------------------------------
+// Broadened tree-vs-compat-hook agreement across representative tables.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn tree_renderable_and_terminal_hook_agree_across_table_shapes() {
+    use biscuit_terminal::utils::layout::{Length, TargetValue};
+
+    // Typed cells exercise typed-hint propagation.
+    let typed = typed_table();
+
+    // A captioned table exercises the title hint plumbing.
+    let with_title = sample_table().with_title("Roster");
+
+    // A table with non-default layout margins exercises the consolidated
+    // layout hint serialization.
+    let mut with_margins = sample_table();
+    with_margins.layout_mut().margin.left = TargetValue::universal(Length::ch(4));
+    with_margins.layout_mut().margin.right = TargetValue::universal(Length::ch(4));
+
+    for (label, table) in [
+        ("typed", typed),
+        ("with_title", with_title),
+        ("with_layout_margins", with_margins),
+    ] {
+        let canonical = <Table as TreeRenderable>::render_tree(&table);
+        let compat = table
+            .render_tree_node()
+            .expect("compat hook produces a node");
+        assert_eq!(
+            canonical, compat,
+            "TreeRenderable::render_tree and TerminalRenderable::render_tree_node \
+             must agree for `{label}` shape"
+        );
+    }
 }

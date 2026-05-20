@@ -198,6 +198,8 @@ impl Progress {
     ///
     /// [`NodeKind::Paragraph`]: renderable::tree::NodeKind::Paragraph
     fn to_render_node(&self) -> RenderNode {
+        // `self.value` is clamped to `0.0..=1.0` by `Progress::new`, so the
+        // product is in `0.0..=100.0` and the `as u32` cast is lossless.
         let percentage = (self.value * 100.0).round() as u32;
         let visible = match &self.label {
             Some(label) => format!("{label} {percentage}%"),
@@ -254,6 +256,11 @@ impl Progress {
     /// flows through the canonical tree. Integration parity tests can call
     /// this method directly to compare the legacy bespoke output against the
     /// tree renderer's output.
+    ///
+    /// ## Notes
+    ///
+    /// Not part of the stable surface; will be removed once the tree renderer
+    /// is the universal default and no parity comparison is needed.
     #[doc(hidden)]
     pub fn render_bespoke(&self, term: &Terminal) -> String {
         let width = term.width();
@@ -327,10 +334,7 @@ impl TerminalRenderable for Progress {
     /// component. The legacy bespoke output is retained on
     /// [`Self::render_bespoke`] for parity testing.
     fn render_optimistic(&self, term_width: Option<u32>) -> String {
-        let term = match term_width {
-            Some(width) => Terminal::new_optimistic(width),
-            None => Terminal::new_optimistic(80),
-        };
+        let term = Terminal::new_optimistic(term_width.unwrap_or(80));
         self.render_via_tree(&term)
     }
 
@@ -399,9 +403,18 @@ impl MarkdownRenderable for Progress {
     /// preserves them.
     fn render_markdown(&self) -> String {
         let node = <Self as TreeRenderable>::render_tree(self);
-        render_markdown_node(&node, &MarkdownRenderOptions::default())
-            .map(|r| r.output)
-            .unwrap_or_default()
+        match render_markdown_node(&node, &MarkdownRenderOptions::default()) {
+            Ok(rendered) => rendered.output,
+            Err(error) => {
+                tracing::error!(
+                    component = "Progress",
+                    dialect = "Markdown",
+                    error = %error,
+                    "render_markdown_node failed; emitting empty output"
+                );
+                String::new()
+            }
+        }
     }
 
     /// Renders the progress bar as MarkdownPlus via the canonical render tree.
@@ -416,9 +429,18 @@ impl MarkdownRenderable for Progress {
             dialect: MarkdownDialect::MarkdownPlus,
             ..MarkdownRenderOptions::default()
         };
-        render_markdown_node(&node, &opts)
-            .map(|r| r.output)
-            .unwrap_or_default()
+        match render_markdown_node(&node, &opts) {
+            Ok(rendered) => rendered.output,
+            Err(error) => {
+                tracing::error!(
+                    component = "Progress",
+                    dialect = "MarkdownPlus",
+                    error = %error,
+                    "render_markdown_node failed; emitting empty output"
+                );
+                String::new()
+            }
+        }
     }
 }
 
@@ -433,19 +455,25 @@ impl BrowserRenderable for Progress {
     /// lowered to inline CSS `background-color`, and non-default glyphs
     /// preserved in `data-*` attributes.
     ///
-    /// Failures fall back to a visible diagnostic fragment so the infallible
-    /// [`BrowserRenderable`] contract holds.
+    /// Failures are logged via `tracing::error!` and fall back to an empty
+    /// [`BrowserFragment`]: the [`BrowserRenderable`] contract is infallible,
+    /// and surfacing a `[render-tree error: …]` sentinel as in-band HTML would
+    /// pollute the rendered page. This mirrors the Terminal path's behavior.
     fn render_html_fragment(&self) -> BrowserFragment<Ready> {
         let node = <Self as TreeRenderable>::render_tree(self);
-        let opts = BrowserRenderOptions {
-            strictness: RenderStrictness::Warn,
-            ..BrowserRenderOptions::default()
-        };
+        let opts = BrowserRenderOptions::default();
         match render_browser_node(&node, &opts) {
             Ok(rendered) => rendered.output,
-            Err(error) => BrowserFragment::new()
-                .define_as_text_fragment(format!("[render-tree error: {error}]"))
-                .finalize(),
+            Err(error) => {
+                tracing::error!(
+                    component = "Progress",
+                    error = %error,
+                    "render_browser_node failed; emitting empty fragment"
+                );
+                BrowserFragment::new()
+                    .define_as_text_fragment(String::new())
+                    .finalize()
+            }
         }
     }
 

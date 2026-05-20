@@ -142,34 +142,47 @@ pub fn pad(s: &str, width: usize) -> String {
     }
 }
 
-/// Formats a bespoke/tree pair side by side, ANSI retained, for the harness.
+/// Formats a `render`/tree pair side by side, ANSI retained, for the harness.
+///
+/// Both halves now route through the tree path (every component is flipped),
+/// so the left column shows the result of the public `render(&term)` call and
+/// the right column shows the result of explicitly folding the projected
+/// `RenderNode` through `render_terminal_node`. The two columns therefore
+/// agree by construction; the harness is now an *informational* view that
+/// highlights any regression in the public render surface, not an oracle.
 ///
 /// The left column is padded to `width` cells — the scenario's render width —
-/// so the divider lines up with the right edge of the bespoke output.
-pub fn side_by_side(title: &str, bespoke: &str, tree: &str, width: u32) -> String {
+/// so the divider lines up with the right edge of the rendered output.
+pub fn side_by_side(title: &str, via_render: &str, tree: &str, width: u32) -> String {
     let col = width as usize;
-    let bespoke_lines: Vec<&str> = bespoke.lines().collect();
+    let render_lines: Vec<&str> = via_render.lines().collect();
     let tree_lines: Vec<&str> = tree.lines().collect();
-    let rows = bespoke_lines.len().max(tree_lines.len());
+    let rows = render_lines.len().max(tree_lines.len());
 
     let mut out = format!("\n\x1b[1m── {title} ──\x1b[0m\n");
     out.push_str(&format!(
         "\x1b[1;36m{}\x1b[0m \x1b[2m│\x1b[0m \x1b[1;36mTREE\x1b[0m\n",
-        pad("BESPOKE", col),
+        pad("VIA_RENDER", col),
     ));
     for i in 0..rows {
-        let left = bespoke_lines.get(i).copied().unwrap_or("");
+        let left = render_lines.get(i).copied().unwrap_or("");
         let right = tree_lines.get(i).copied().unwrap_or("");
         out.push_str(&format!("{} \x1b[2m│\x1b[0m {right}\n", pad(left, col)));
     }
     out
 }
 
-/// Formats a bespoke/tree pair as a stacked, ANSI-stripped block for snapshots.
-pub fn stacked_stripped(bespoke: &str, tree: &str) -> String {
+/// Formats a `render`/tree pair as a stacked, ANSI-stripped block for snapshots.
+///
+/// `via_render` is the output of the component's public `render(&term)` call —
+/// after the IR flip, every component routes that through the tree renderer
+/// internally. `tree` is the same projection rendered explicitly via
+/// `render_terminal_node`. The two halves agree by construction; the snapshot
+/// captures both so a regression in either path is immediately visible.
+pub fn stacked_stripped(via_render: &str, tree: &str) -> String {
     format!(
-        "BESPOKE\n{}\n---\nTREE\n{}",
-        strip_escape_codes(bespoke).trim_end(),
+        "VIA_RENDER\n{}\n---\nTREE\n{}",
+        strip_escape_codes(via_render).trim_end(),
         strip_escape_codes(tree).trim_end(),
     )
 }
@@ -186,15 +199,22 @@ use biscuit_terminal::terminal::Terminal;
 use renderable::tree::{RenderNode, RenderStrictness, TreeRenderable};
 
 /// A boxed closure that builds a component under a [`Scenario`] and renders
-/// it both ways, returning `(bespoke_output, tree_output)`.
+/// it both ways, returning `(via_render_output, tree_output)`.
+///
+/// After the IR flip in Stage 2, every component's public `render(&term)`
+/// itself routes through the tree path, so the two halves agree by
+/// construction. The pair is preserved so any regression in the public render
+/// surface (e.g. a bespoke-only fallback regressing on layout) shows up as a
+/// snapshot diff without needing a separate harness.
 type RenderFn = Box<dyn Fn(&Scenario) -> (String, String)>;
 
 /// A named component with a closure that builds it under a scenario and
-/// renders both the bespoke and tree paths.
+/// renders both `render(&term)` (the public API, which after the Stage 2 flip
+/// routes through the tree internally) and an explicit tree fold.
 pub struct ComponentCase {
     /// Component name, used in harness headers and snapshot names.
     pub name: &'static str,
-    /// Returns `(bespoke_output, tree_output)`, both with ANSI retained.
+    /// Returns `(via_render_output, tree_output)`, both with ANSI retained.
     pub render: RenderFn,
 }
 
@@ -220,12 +240,12 @@ pub fn component_cases() -> Vec<ComponentCase> {
                     .push("Let's begin with installation.");
                 let section = section.with_layout(s.layout.clone());
                 let term = Terminal::new_optimistic(s.width);
-                let bespoke = section.render(&term);
+                let via_render = section.render(&term);
                 let tree = section
                     .render_tree_node()
                     .map(|node| render_tree_string(&node, s.width))
                     .unwrap_or_else(|| "<no tree projection>".to_string());
-                (bespoke, tree)
+                (via_render, tree)
             }),
         },
         ComponentCase {
@@ -234,12 +254,12 @@ pub fn component_cases() -> Vec<ComponentCase> {
                 let list = UnorderedList::new(vec!["First item", "Second item", "Third item"])
                     .with_layout(s.layout.clone());
                 let term = Terminal::new_optimistic(s.width);
-                let bespoke = list.render(&term);
+                let via_render = list.render(&term);
                 let tree = list
                     .render_tree_node()
                     .map(|node| render_tree_string(&node, s.width))
                     .unwrap_or_else(|| "<no tree projection>".to_string());
-                (bespoke, tree)
+                (via_render, tree)
             }),
         },
         ComponentCase {
@@ -248,12 +268,12 @@ pub fn component_cases() -> Vec<ComponentCase> {
                 let columns = TwoColumn::new("Left column content.", "Right column content.")
                     .with_layout(s.layout.clone());
                 let term = Terminal::new_optimistic(s.width);
-                let bespoke = columns.render(&term);
+                let via_render = columns.render(&term);
                 let tree = columns
                     .render_tree_node()
                     .map(|node| render_tree_string(&node, s.width))
                     .unwrap_or_else(|| "<no tree projection>".to_string());
-                (bespoke, tree)
+                (via_render, tree)
             }),
         },
         ComponentCase {
@@ -263,12 +283,12 @@ pub fn component_cases() -> Vec<ComponentCase> {
                     .with_label("Loading")
                     .with_layout(s.layout.clone());
                 let term = Terminal::new_optimistic(s.width);
-                let bespoke = progress.render(&term);
+                let via_render = progress.render(&term);
                 let tree = progress
                     .render_tree_node()
                     .map(|node| render_tree_string(&node, s.width))
                     .unwrap_or_else(|| "<no tree projection>".to_string());
-                (bespoke, tree)
+                (via_render, tree)
             }),
         },
         ComponentCase {
@@ -288,12 +308,12 @@ pub fn component_cases() -> Vec<ComponentCase> {
                     ])
                     .with_layout(s.layout.clone());
                 let term = Terminal::new_optimistic(s.width);
-                let bespoke = table.render(&term);
+                let via_render = table.render(&term);
                 let tree = table
                     .render_tree_node()
                     .map(|node| render_tree_string(&node, s.width))
                     .unwrap_or_else(|| "<no tree projection>".to_string());
-                (bespoke, tree)
+                (via_render, tree)
             }),
         },
         ComponentCase {
@@ -305,9 +325,9 @@ pub fn component_cases() -> Vec<ComponentCase> {
                 )
                 .with_layout(s.layout.clone());
                 let term = Terminal::new_optimistic(s.width);
-                let bespoke = quote.render(&term);
+                let via_render = quote.render(&term);
                 let tree = render_tree_string(&quote.render_tree(), s.width);
-                (bespoke, tree)
+                (via_render, tree)
             }),
         },
     ]

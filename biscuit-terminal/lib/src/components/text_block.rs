@@ -1,5 +1,20 @@
+use std::any::Any;
+
+use renderable::browser::PageOptions;
+use renderable::browser::fragment::{BrowserFragment, Ready};
+use renderable::html::HtmlPage;
+use renderable::layout::TargetValue;
+use renderable::markdown::MarkdownRenderable;
+use renderable::style::{PerMode, Style as RStyle, TextEmphasis, UnderlineStyle};
+use renderable::tree::render::{
+    BrowserRenderOptions, MarkdownDialect, MarkdownRenderOptions, render_browser_node,
+    render_markdown_node,
+};
+use renderable::tree::{RenderNode, RenderStrictness, TreeRenderable};
+
 use crate::{
-    components::renderable::TerminalRenderable,
+    components::renderable::{BrowserRenderable, TerminalRenderable},
+    render_tree::{TerminalRenderOptions, render_terminal_node},
     terminal::Terminal,
     utils::{
         color::Color,
@@ -45,6 +60,15 @@ use crate::{
 /// - **Strikethrough**: Strikethrough text
 /// - **Blink**: Blinking text (rarely supported)
 /// - **Underline**: Single, double, or curl underlining
+///
+/// ## Notes
+///
+/// Previously the bespoke terminal renderer only applied italic and
+/// `FontWeight`, leaving the stored foreground/background color, underline,
+/// strikethrough, and blink fields inert. The render-tree path activates
+/// every stored field — when rendering through the canonical tree, all
+/// stored style fields now reach the terminal, Browser, and (for color slots
+/// only — Markdown ignores `Style` by contract) MarkdownPlus targets.
 #[derive(Debug)]
 pub struct TextBlock {
     content: String,
@@ -132,7 +156,128 @@ impl TextBlock {
         self
     }
 
-    /// Renders to a string with terminal escape sequences applied.
+    /// Builds the canonical [`Style`](renderable::style::Style) from the
+    /// component's stored fields.
+    ///
+    /// All stored style fields are mapped:
+    ///
+    /// - `font_weight` → `emphasis.bold` / `emphasis.dim`
+    /// - `fg_color` → `color`
+    /// - `bg_color` → `background`
+    /// - `italic` → `emphasis.italic`
+    /// - `strikethrough` → `emphasis.strikethrough`
+    /// - `blink` → `emphasis.blink`
+    /// - `underline` → `emphasis.underline` (shape only; underline color
+    ///   has no `Style` slot today and is intentionally dropped — see the
+    ///   spec's "Follow-up Clarifications" section).
+    fn build_style(&self) -> RStyle {
+        let emphasis = TextEmphasis {
+            bold: matches!(self.font_weight, FontWeight::Bold),
+            dim: matches!(self.font_weight, FontWeight::Dim),
+            italic: self.italic,
+            strikethrough: self.strikethrough,
+            blink: self.blink,
+            underline: underline_style_from_request(&self.underline),
+        };
+        let color = self
+            .fg_color
+            .map(|c| TargetValue::universal(PerMode::universal(c)));
+        let background = self
+            .bg_color
+            .map(|c| TargetValue::universal(PerMode::universal(c)));
+        RStyle {
+            color,
+            background,
+            emphasis,
+            border: None,
+            fill: None,
+        }
+    }
+
+    /// Single private projection helper.
+    ///
+    /// Returns a `NodeKind::Paragraph` with one `NodeKind::Text` child, with
+    /// `Style` and non-default `Layout` recorded on the node's `NodeAttrs`.
+    /// Both [`TreeRenderable::render_tree`] and the legacy
+    /// [`TerminalRenderable::render_tree_node`] hook delegate to this so the
+    /// terminal compatibility surface cannot drift from the canonical
+    /// producer.
+    fn to_render_node(&self) -> RenderNode {
+        let mut node = RenderNode::paragraph(vec![RenderNode::text(&self.content)]);
+        let style = self.build_style();
+        if !style.is_empty() {
+            node.attrs.set_style(&style);
+        }
+        if self.layout != Layout::default() {
+            node.attrs.set_layout(&self.layout);
+        }
+        node
+    }
+
+    /// Renders this `TextBlock` through the canonical render tree.
+    ///
+    /// Used by the [`TerminalRenderable`] impl to route Terminal output
+    /// through the same tree the Browser and Markdown paths consume.
+    ///
+    /// Failures are logged via `tracing::error!` and fall back to an empty
+    /// string: the [`TerminalRenderable::render`] trait is infallible by
+    /// contract, and surfacing a `[render-tree error: …]` sentinel as in-band
+    /// terminal text would pollute user output.
+    ///
+    /// ## Notes
+    ///
+    /// The TextBlock spec gestured at a bespoke per-failure recovery (e.g.
+    /// falling back to the legacy bespoke path on tree-render failure), but
+    /// every migrated component in this push uses the same "log + empty
+    /// string" policy. Keeping TextBlock aligned with the other components
+    /// means failures surface uniformly through `tracing` rather than via a
+    /// bespoke recovery that only TextBlock would exercise — and the
+    /// dedicated parity tests already cover the legacy path explicitly via
+    /// [`Self::render_bespoke`].
+    fn render_via_tree(&self, term: &Terminal) -> String {
+        let node = self.to_render_node();
+        let opts = TerminalRenderOptions::new(term, RenderStrictness::Warn);
+        match render_terminal_node(&node, &opts) {
+            Ok(rendered) => rendered.output,
+            Err(error) => {
+                tracing::error!(
+                    component = "TextBlock",
+                    error = %error,
+                    "render_terminal_node failed; emitting empty output"
+                );
+                String::new()
+            }
+        }
+    }
+
+    /// Renders via the pre-tree bespoke path.
+    ///
+    /// Retained for parity testing — the active [`TerminalRenderable::render`]
+    /// path now delegates to [`Self::render_via_tree`] so the user-facing
+    /// output flows through the canonical tree. Integration parity tests can
+    /// call this method directly to compare the legacy bespoke output against
+    /// the tree renderer's output.
+    ///
+    /// ## Notes
+    ///
+    /// Not part of the stable surface; will be removed once the tree renderer
+    /// is the universal default and no parity comparison is needed. The
+    /// bespoke path only applies italic and `FontWeight` — foreground color,
+    /// background color, underline, strikethrough, and blink are stored but
+    /// not rendered here. Use [`Self::render`] (which routes through
+    /// [`Self::render_via_tree`]) to activate every stored field.
+    #[doc(hidden)]
+    pub fn render_bespoke(&self, term: &Terminal) -> String {
+        let width = term.width();
+        let content = self.to_terminal(term);
+        self.layout.apply_layout(&content, width)
+    }
+
+    /// The pre-tree terminal renderer.
+    ///
+    /// Applies italic (when supported) and `FontWeight` only; all other
+    /// stored fields are inert here. Retained as the body of
+    /// [`Self::render_bespoke`].
     fn to_terminal(&self, term: &Terminal) -> String {
         let mut content = self.content.clone();
         let _underline = term.underline_support;
@@ -147,21 +292,48 @@ impl TextBlock {
     }
 }
 
+/// Maps the bespoke [`UnderliningRequest`] to a render-tree
+/// [`UnderlineStyle`].
+///
+/// The optional underline color carried by [`UnderliningRequest`] is dropped
+/// — [`UnderlineStyle`] records shape only. See the TextBlock spec's
+/// "Follow-up Clarifications" for the rationale: the existing bespoke path
+/// does not render underline at all, so preserving underline color is not a
+/// parity requirement, and a future colored-underline feature should be
+/// renderer-wide rather than `TextBlock`-only.
+fn underline_style_from_request(req: &UnderliningRequest) -> Option<UnderlineStyle> {
+    match req {
+        UnderliningRequest::None => None,
+        UnderliningRequest::Straight(_) => Some(UnderlineStyle::Straight),
+        UnderliningRequest::Double(_) => Some(UnderlineStyle::Double),
+        UnderliningRequest::Dotted(_) => Some(UnderlineStyle::Dotted),
+        UnderliningRequest::Curly(_) => Some(UnderlineStyle::Curly),
+        UnderliningRequest::Dashed(_) => Some(UnderlineStyle::Dashed),
+    }
+}
+
 impl TerminalRenderable for TextBlock {
+    /// Renders to a terminal string at an explicit width.
+    ///
+    /// Routes through the canonical render tree via [`Self::render_via_tree`]
+    /// so terminal output matches the Browser and Markdown paths for the same
+    /// component. The legacy bespoke output is retained on
+    /// [`Self::render_bespoke`] for parity testing.
     fn render_optimistic(&self, term_width: Option<u32>) -> String {
-        let width = term_width.unwrap_or(80);
-        let term = Terminal::new_optimistic(width);
-        let content = self.to_terminal(&term);
-        self.layout.apply_layout(&content, width)
+        let term = Terminal::new_optimistic(term_width.unwrap_or(80));
+        self.render_via_tree(&term)
     }
 
+    /// Renders to the supplied terminal.
+    ///
+    /// Routes through the canonical render tree via [`Self::render_via_tree`].
+    /// The legacy bespoke output is retained on [`Self::render_bespoke`] for
+    /// parity testing.
     fn render(&self, term: &Terminal) -> String {
-        let width = term.width();
-        let content = self.to_terminal(term);
-        self.layout.apply_layout(&content, width)
+        self.render_via_tree(term)
     }
 
-    fn as_any(&self) -> &dyn std::any::Any {
+    fn as_any(&self) -> &dyn Any {
         self
     }
 
@@ -171,5 +343,213 @@ impl TerminalRenderable for TextBlock {
 
     fn layout_mut(&mut self) -> &mut Layout {
         &mut self.layout
+    }
+
+    /// Projects this `TextBlock` into a `NodeKind::Paragraph` render-tree
+    /// node.
+    ///
+    /// Delegates to the single private projection helper
+    /// [`Self::to_render_node`], shared with [`TreeRenderable::render_tree`]
+    /// so the terminal compatibility hook and the canonical tree producer
+    /// cannot drift.
+    fn render_tree_node(&self) -> Option<RenderNode> {
+        Some(self.to_render_node())
+    }
+}
+
+impl TreeRenderable for TextBlock {
+    /// Projects the text block into the canonical render tree.
+    ///
+    /// Delegates to the single private projection helper
+    /// [`TextBlock::to_render_node`] so this canonical entry point and the
+    /// terminal-compatibility [`TerminalRenderable::render_tree_node`] hook
+    /// share one source of truth.
+    fn render_tree(&self) -> RenderNode {
+        self.to_render_node()
+    }
+}
+
+impl MarkdownRenderable for TextBlock {
+    /// Renders the text block as portable Markdown via the canonical render
+    /// tree.
+    ///
+    /// The Markdown tree renderer ignores `Style` by contract (per
+    /// `layout-and-style.md`), so styled text blocks emit plain text. Style
+    /// preservation for MarkdownPlus is a renderer-wide feature deferred
+    /// outside this migration (see spec RT-TEXTBLOCK-002, DENIED).
+    fn render_markdown(&self) -> String {
+        let node = <Self as TreeRenderable>::render_tree(self);
+        match render_markdown_node(&node, &MarkdownRenderOptions::default()) {
+            Ok(rendered) => rendered.output,
+            Err(error) => {
+                tracing::error!(
+                    component = "TextBlock",
+                    dialect = "Markdown",
+                    error = %error,
+                    "render_markdown_node failed; emitting empty output"
+                );
+                String::new()
+            }
+        }
+    }
+
+    /// Renders the text block as MarkdownPlus via the canonical render tree.
+    ///
+    /// Currently identical to portable Markdown for `TextBlock` style: the
+    /// canonical Markdown renderer does not lower `Style` on either dialect.
+    /// See spec RT-TEXTBLOCK-002 (DENIED) — styled MarkdownPlus is deferred
+    /// to a renderer-wide design.
+    fn render_markdown_plus(&self) -> String {
+        let node = <Self as TreeRenderable>::render_tree(self);
+        let opts = MarkdownRenderOptions {
+            dialect: MarkdownDialect::MarkdownPlus,
+            ..MarkdownRenderOptions::default()
+        };
+        match render_markdown_node(&node, &opts) {
+            Ok(rendered) => rendered.output,
+            Err(error) => {
+                tracing::error!(
+                    component = "TextBlock",
+                    dialect = "MarkdownPlus",
+                    error = %error,
+                    "render_markdown_node failed; emitting empty output"
+                );
+                String::new()
+            }
+        }
+    }
+}
+
+impl BrowserRenderable for TextBlock {
+    /// Renders the text block as an HTML fragment via the canonical render
+    /// tree.
+    ///
+    /// The browser tree renderer lowers `Style` per RT-TEXTBLOCK-001:
+    ///
+    /// - `Style.color` / `Style.background` → CSS `color` / `background-color`
+    /// - `TextEmphasis.bold` / `italic` / `strikethrough` → `<strong>` /
+    ///   `<em>` / `<s>` semantic wrappers
+    /// - Underline variants → `text-decoration: underline` (+ style)
+    /// - Dim → `opacity: 0.6`
+    /// - Blink → `text-decoration: blink`
+    ///
+    /// `Layout` is applied to the same `<p>` element via the existing browser
+    /// layout lowering, sharing the `style` attribute without overwriting it.
+    ///
+    /// Failures are logged via `tracing::error!` and fall back to an empty
+    /// [`BrowserFragment`]: the [`BrowserRenderable`] contract is infallible.
+    fn render_html_fragment(&self) -> BrowserFragment<Ready> {
+        let node = <Self as TreeRenderable>::render_tree(self);
+        let opts = BrowserRenderOptions::default();
+        match render_browser_node(&node, &opts) {
+            Ok(rendered) => rendered.output,
+            Err(error) => {
+                tracing::error!(
+                    component = "TextBlock",
+                    error = %error,
+                    "render_browser_node failed; emitting empty fragment"
+                );
+                BrowserFragment::new()
+                    .define_as_text_fragment(String::new())
+                    .finalize()
+            }
+        }
+    }
+
+    /// Wraps the HTML fragment in a complete [`HtmlPage`], optionally applying
+    /// the supplied [`PageOptions`].
+    ///
+    /// ## Notes
+    ///
+    /// If the underlying tree render fails, [`Self::render_html_fragment`]
+    /// returns an empty fragment (the [`BrowserRenderable`] contract is
+    /// infallible). The resulting page may therefore have an empty body; the
+    /// failure is surfaced via the `tracing::error!` log in
+    /// [`Self::render_html_fragment`] rather than via a page-level error
+    /// return.
+    fn render_html_page(&self, page: Option<PageOptions>) -> HtmlPage {
+        let mut html_page = HtmlPage::from(self.render_html_fragment());
+        if let Some(options) = page {
+            html_page.apply_page_options(options);
+        }
+        html_page
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::utils::color::BasicColor;
+
+    #[test]
+    fn render_optimistic_via_tree_for_plain_text() {
+        let block = TextBlock::new("Hello");
+        let out = block.render_optimistic(Some(80));
+        // Plain text routes through the tree and emits the text verbatim.
+        assert!(out.contains("Hello"));
+    }
+
+    #[test]
+    fn bold_via_tree_emits_bold_sgr() {
+        let mut block = TextBlock::new("Bold");
+        block.using_bold_text();
+        let out = block.render_optimistic(Some(80));
+        assert!(out.contains("\x1b[1m"), "expected bold SGR in {out:?}");
+    }
+
+    #[test]
+    fn fg_color_via_tree_is_now_active() {
+        // Foreground color was previously stored but inert in the bespoke
+        // path. After the IR flip it reaches the terminal.
+        let mut block = TextBlock::new("Red");
+        block.with_foreground_color(Color::BasicColor(BasicColor::Red));
+        let out = block.render_optimistic(Some(80));
+        assert!(
+            out.contains("\x1b["),
+            "expected an SGR sequence for fg color in {out:?}"
+        );
+    }
+
+    #[test]
+    fn underline_style_from_request_drops_color() {
+        let s = underline_style_from_request(&UnderliningRequest::Straight(Some(
+            Color::BasicColor(BasicColor::Red),
+        )));
+        assert_eq!(s, Some(UnderlineStyle::Straight));
+        let n = underline_style_from_request(&UnderliningRequest::None);
+        assert!(n.is_none());
+    }
+
+    #[test]
+    fn tree_renderable_and_compatibility_hook_share_projection() {
+        // The canonical `TreeRenderable::render_tree` entry point and the
+        // terminal compatibility `TerminalRenderable::render_tree_node` hook
+        // MUST share one private projection helper so they cannot drift.
+        let mut block = TextBlock::new("X");
+        block.using_bold_text();
+        block.with_foreground_color(Color::BasicColor(BasicColor::Red));
+
+        let canonical = <TextBlock as TreeRenderable>::render_tree(&block);
+        let compat = block.render_tree_node().expect("tree node");
+        assert_eq!(
+            serde_json::to_value(&canonical).unwrap(),
+            serde_json::to_value(&compat).unwrap(),
+            "canonical and compatibility projections must serialize identically"
+        );
+    }
+
+    #[test]
+    fn render_bespoke_still_available_for_parity() {
+        // The bespoke renderer is retained as a `#[doc(hidden)]` surface for
+        // parity testing — the active render path now goes through the tree.
+        let mut block = TextBlock::new("X");
+        block.using_bold_text();
+        let term = Terminal::new_optimistic(80);
+        let bespoke = block.render_bespoke(&term);
+        assert!(bespoke.contains("\x1b[1m"), "bespoke bold: {bespoke:?}");
     }
 }
