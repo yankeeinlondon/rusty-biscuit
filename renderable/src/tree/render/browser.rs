@@ -1761,6 +1761,37 @@ mod tests {
     }
 
     #[test]
+    fn progress_preserves_bracket_color_as_data_attribute() {
+        use crate::color::{BasicColor, Color};
+        let node = progress_para(
+            "50%",
+            crate::tree::ProgressHints {
+                value: 0.5,
+                bracket_color: Some(Color::BasicColor(BasicColor::Cyan)),
+                ..Default::default()
+            },
+        );
+        let out = html(&node);
+        assert!(
+            out.contains("data-bracket-color=\"#"),
+            "bracket color preserved as data attribute: {out}"
+        );
+    }
+
+    #[test]
+    fn progress_omits_bracket_color_attribute_when_unset() {
+        let node = progress_para(
+            "50%",
+            crate::tree::ProgressHints { value: 0.5, ..Default::default() },
+        );
+        let out = html(&node);
+        assert!(
+            !out.contains("data-bracket-color"),
+            "no bracket color attribute when unset: {out}"
+        );
+    }
+
+    #[test]
     fn progress_applies_node_layout_to_outer_element() {
         use crate::layout::{Layout, Length, Margin};
         let mut node = progress_para(

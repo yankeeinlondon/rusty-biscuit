@@ -1273,6 +1273,44 @@ mod tests {
     }
 
     #[test]
+    fn progress_markdown_plus_preserves_bracket_color_as_data_attribute() {
+        use crate::color::{BasicColor, Color};
+        let mut para = RenderNode::paragraph(vec![RenderNode::text("50%")]);
+        para.attrs.set_progress_hints(&crate::tree::ProgressHints {
+            value: 0.5,
+            bracket_color: Some(Color::BasicColor(BasicColor::Cyan)),
+            ..Default::default()
+        });
+        let rendered = render_with(
+            &para,
+            &opts(MarkdownDialect::MarkdownPlus, RenderStrictness::Warn),
+        );
+        assert!(
+            rendered.output.contains("data-bracket-color=\"#"),
+            "bracket color preserved as data attribute in MarkdownPlus: {}",
+            rendered.output
+        );
+    }
+
+    #[test]
+    fn progress_markdown_plus_omits_bracket_color_attribute_when_unset() {
+        let mut para = RenderNode::paragraph(vec![RenderNode::text("50%")]);
+        para.attrs.set_progress_hints(&crate::tree::ProgressHints {
+            value: 0.5,
+            ..Default::default()
+        });
+        let rendered = render_with(
+            &para,
+            &opts(MarkdownDialect::MarkdownPlus, RenderStrictness::Warn),
+        );
+        assert!(
+            !rendered.output.contains("data-bracket-color"),
+            "no bracket color attribute in MarkdownPlus when unset: {}",
+            rendered.output
+        );
+    }
+
+    #[test]
     fn plain_paragraph_without_progress_unchanged_in_markdown_plus() {
         let para = RenderNode::paragraph(vec![RenderNode::text("ordinary")]);
         let rendered = render_with(

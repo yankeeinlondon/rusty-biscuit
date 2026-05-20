@@ -81,6 +81,13 @@ pub(crate) fn progress_html(
         hints.right_bracket,
         defaults.right_bracket,
     );
+    // `bracket_color` has no semantic CSS slot in the rendered widget (the
+    // brackets sit inside text, not on a dedicated span), so it is preserved
+    // as a `data-bracket-color` attribute alongside the bracket *glyphs*.
+    // Consumers that want to repaint the brackets can pick it up there.
+    if let Some(css) = hints.bracket_color.and_then(color_to_css) {
+        data_attrs.push_str(&format!(r#" data-bracket-color="{}""#, escape_html(&css)));
+    }
 
     let aria_label = label
         .map(|label| format!(r#" aria-label="{}""#, escape_html(label)))
