@@ -235,6 +235,13 @@ Word-wrapping strategies for text rendering.
                     └───────────────────┘
 ```
 
+## Migrating a Component to the Render Tree IR
+
+See [`docs/migrate-component-to-ir.md`](./docs/migrate-component-to-ir.md) for
+the canonical recipe — both the flip-from-bespoke (Variant A) and
+born-on-the-tree (Variant B) paths, escape-hatch rules, and the
+documentation-update obligations a migration carries with it.
+
 ## Usage
 
 ### Implementing BrowserRenderable
