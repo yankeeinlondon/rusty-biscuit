@@ -22,6 +22,9 @@ on:
       - ".github/workflows/messenger-desktop-tests.yml"
   workflow_dispatch: {}
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 concurrency:
   group: messenger-desktop-tests-${{ github.ref }}
   cancel-in-progress: true
