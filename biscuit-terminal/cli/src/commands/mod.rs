@@ -18,10 +18,14 @@ pub mod progress;
 pub mod prose;
 pub mod quadrant;
 pub mod quote;
+pub mod section;
 pub mod shared;
 pub mod state_diagram;
+pub mod status_block;
 pub mod table;
+pub mod text_block;
 pub mod timeline;
+pub mod todo;
 pub mod xy_chart;
 
 /// Shared context passed to every command's `run` method.

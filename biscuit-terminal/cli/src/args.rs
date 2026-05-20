@@ -168,4 +168,16 @@ pub enum Command {
 
     #[command(display_order = 19)]
     Compose(compose::ComposeArgs),
+
+    #[command(display_order = 20)]
+    Section(section::SectionArgs),
+
+    #[command(name = "status-block", display_order = 21)]
+    StatusBlock(status_block::StatusBlockArgs),
+
+    #[command(name = "text-block", display_order = 22)]
+    TextBlock(text_block::TextBlockArgs),
+
+    #[command(display_order = 23)]
+    Todo(todo::TodoArgs),
 }

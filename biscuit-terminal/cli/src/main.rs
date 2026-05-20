@@ -166,6 +166,10 @@ impl Run for Command {
             Command::Progress(args) => args.run(ctx),
             Command::Table(args) => args.run(ctx),
             Command::Compose(args) => args.run(ctx),
+            Command::Section(args) => args.run(ctx),
+            Command::StatusBlock(args) => args.run(ctx),
+            Command::TextBlock(args) => args.run(ctx),
+            Command::Todo(args) => args.run(ctx),
         }
     }
 }

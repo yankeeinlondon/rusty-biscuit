@@ -1,11 +1,10 @@
 use crate::commands::color_parse::parse_color;
 use crate::commands::shared::{detect_terminal_honoring_force_color, print_example_command};
 use crate::commands::{CliContext, Run};
-use biscuit_terminal::components::renderable::TerminalRenderable;
+use biscuit_terminal::components::renderable::{BrowserRenderable, TerminalRenderable};
 use biscuit_terminal::components::table::{Table, TableCellContent, TableColumn};
-use biscuit_terminal::render_tree::{TerminalRenderOptions, render_terminal_node};
 use clap::Args as ClapArgs;
-use renderable::tree::{RenderNode, RenderStrictness};
+use renderable::markdown::MarkdownRenderable;
 
 /// Wraps a [`Color`](renderable::color::Color) into the universal
 /// `TargetValue<PerMode<Color>>` shape a [`Style`](renderable::style::Style)
@@ -24,7 +23,10 @@ const TABLE_EXAMPLE_ROWS: &[&str] = &[
 ];
 const TABLE_EXAMPLE_CMD: &str = r#"bt table --columns "Area,Status,Owner" --row "Parser,Green,Lin" --row "Renderer,Review,Mara" --row "Docs,Updated,Noor" --striped"#;
 
-/// Render a table through the render tree
+/// Render a table through the canonical render tree.
+///
+/// The default target is the terminal. Switch to a different render target
+/// with one of the mutually-exclusive `--html`, `--md`, or `--md-plus` flags.
 #[derive(ClapArgs, Debug, Clone)]
 pub struct TableArgs {
     /// Render an example and show the command used
@@ -38,6 +40,12 @@ pub struct TableArgs {
     /// A comma-separated row of cells; repeat for multiple rows.
     #[arg(long = "row")]
     pub rows: Vec<String>,
+
+    /// Optional table title. Renders as a caption above the table on every
+    /// target (terminal caption line, HTML `<caption>`, Markdown plain-text
+    /// line preceding the table).
+    #[arg(long)]
+    pub title: Option<String>,
 
     /// Stripe alternate rows with a background color.
     #[arg(long)]
@@ -62,6 +70,18 @@ pub struct TableArgs {
     /// Body (data cell) text color (named or #rrggbb).
     #[arg(long = "body-color")]
     pub body_color: Option<String>,
+
+    /// Render to an HTML fragment instead of the terminal.
+    #[arg(long, conflicts_with_all = ["md", "md_plus"])]
+    pub html: bool,
+
+    /// Render to portable Markdown (GFM) instead of the terminal.
+    #[arg(long, conflicts_with_all = ["html", "md_plus"])]
+    pub md: bool,
+
+    /// Render to MarkdownPlus (inline HTML allowed) instead of the terminal.
+    #[arg(long = "md-plus", conflicts_with_all = ["html", "md"])]
+    pub md_plus: bool,
 }
 
 impl Run for TableArgs {
@@ -102,6 +122,10 @@ impl Run for TableArgs {
 
         let mut table = Table::new().with_columns(columns).with_data(data);
 
+        if let Some(title) = self.title.as_ref() {
+            table = table.with_title(title.clone());
+        }
+
         if self.striped || self.example {
             table = table.alternate_background_color();
         }
@@ -131,17 +155,18 @@ impl Run for TableArgs {
             table = table.with_body_style(body_style);
         }
 
-        let node = table.render_tree_node().ok_or_else(|| {
-            color_eyre::eyre::eyre!("Table component produced no render-tree node")
-        })?;
-        let root = RenderNode::root(vec![node]);
+        // Dispatch by selected target. Mutual exclusion is enforced by clap.
+        if self.html {
+            println!("{}", table.render_html_fragment().render());
+        } else if self.md {
+            println!("{}", table.render_markdown());
+        } else if self.md_plus {
+            println!("{}", table.render_markdown_plus());
+        } else {
+            let term = detect_terminal_honoring_force_color();
+            println!("{}", table.render(&term));
+        }
 
-        let term = detect_terminal_honoring_force_color();
-        let opts = TerminalRenderOptions::new(&term, RenderStrictness::Warn);
-        let rendered = render_terminal_node(&root, &opts)
-            .map_err(|e| color_eyre::eyre::eyre!("render failed: {e}"))?;
-
-        println!("{}", rendered.output);
         if self.example {
             print_example_command(TABLE_EXAMPLE_CMD);
         }

@@ -1,16 +1,20 @@
 use crate::args::LayoutArgs;
 use crate::commands::shared::*;
 use crate::commands::{CliContext, Run};
-use biscuit_terminal::components::renderable::TerminalRenderable;
+use biscuit_terminal::components::renderable::{BrowserRenderable, TerminalRenderable};
 use biscuit_terminal::components::two_column::TwoColumn;
 use biscuit_terminal::utils::layout::{Length, TargetValue};
 use clap::Args as ClapArgs;
+use renderable::markdown::MarkdownRenderable;
 
 const COLUMNS_EXAMPLE_LEFT: &str = "<b>Release</b>";
 const COLUMNS_EXAMPLE_RIGHT: &str = "Build passed, smoke tests are green, and docs were updated.";
 const COLUMNS_EXAMPLE_CMD: &str = r#"bt columns --gap 6 --left 18 "<b>Release</b>" "Build passed, smoke tests are green, and docs were updated.""#;
 
-/// Render two columns of text side by side
+/// Render two columns of text side by side through the canonical render tree.
+///
+/// The default target is the terminal. Switch to a different render target
+/// with one of the mutually-exclusive `--html`, `--md`, or `--md-plus` flags.
 #[derive(ClapArgs, Debug, Clone)]
 pub struct ColumnsArgs {
     /// Render an example and show the command used
@@ -32,6 +36,25 @@ pub struct ColumnsArgs {
 
     #[arg(long = "left", value_name = "WIDTH")]
     pub left_width: Option<crate::types::WidthSpec>,
+
+    /// Render to an HTML fragment instead of the terminal.
+    #[arg(long, conflicts_with_all = ["md", "md_plus"])]
+    pub html: bool,
+
+    /// Render to portable Markdown instead of the terminal.
+    ///
+    /// Portable Markdown has no side-by-side layout, so the columns collapse
+    /// to sequential blocks (left, blank line, right). Width and gap are
+    /// dropped.
+    #[arg(long, conflicts_with_all = ["html", "md_plus"])]
+    pub md: bool,
+
+    /// Render to MarkdownPlus (inline HTML allowed) instead of the terminal.
+    ///
+    /// MarkdownPlus preserves the two-column layout as a `<div class="columns">`
+    /// flex container with width and gap encoded as inline CSS.
+    #[arg(long = "md-plus", conflicts_with_all = ["html", "md"])]
+    pub md_plus: bool,
 
     #[command(flatten)]
     pub layout: LayoutArgs,
@@ -71,13 +94,21 @@ impl Run for ColumnsArgs {
             columns = columns.alignment(align);
         }
 
-        let term = detect_terminal_honoring_force_color();
-        let output = columns.render(&term);
-
-        emit_vertical_margins(&self.layout, || {
-            println!("{}", output);
-            Ok(())
-        })?;
+        // Dispatch by selected target. Mutual exclusion is enforced by clap.
+        if self.html {
+            println!("{}", columns.render_html_fragment().render());
+        } else if self.md {
+            println!("{}", columns.render_markdown());
+        } else if self.md_plus {
+            println!("{}", columns.render_markdown_plus());
+        } else {
+            let term = detect_terminal_honoring_force_color();
+            let output = columns.render(&term);
+            emit_vertical_margins(&self.layout, || {
+                println!("{}", output);
+                Ok(())
+            })?;
+        }
 
         if self.example {
             print_example_command(COLUMNS_EXAMPLE_CMD);
