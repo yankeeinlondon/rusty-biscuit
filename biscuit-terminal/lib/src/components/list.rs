@@ -14,7 +14,7 @@ use renderable::tree::{ListRenderHints, RenderNode, RenderStrictness, TreeRender
 use crate::{
     components::renderable::{BrowserRenderable, RenderableTerminalContent, TerminalRenderable},
     prelude::Prose,
-    render_tree::projection::TreeProjectionContext,
+    render_tree::projection::{ProjectionMode, project_renderable_content},
     render_tree::{TerminalRenderOptions, render_terminal_node},
     terminal::Terminal,
     utils::{
@@ -192,7 +192,16 @@ impl OrderedList {
     /// [`NodeKind::List`]: renderable::tree::NodeKind::List
     /// [`NodeKind::ListItem`]: renderable::tree::NodeKind::ListItem
     fn to_render_tree_node(&self) -> RenderNode {
-        let children = project_list_items(&self.items);
+        self.to_render_tree_node_with_terminal(None)
+    }
+
+    /// Builds the canonical [`NodeKind::List`] tree node, threading an
+    /// optional `terminal_hint` through to [`project_list_items`] so that
+    /// bespoke-only child components get capability-honest fallback
+    /// rendering. Used by [`Self::render_via_tree`] which has the caller's
+    /// real terminal.
+    fn to_render_tree_node_with_terminal(&self, terminal_hint: Option<&Terminal>) -> RenderNode {
+        let children = project_list_items(&self.items, terminal_hint);
         let mut node = RenderNode::list(true, None, children);
         // Only emit `indent_children` when the caller customized it; emitting
         // the default would erase the "did the user customize?" signal in the
@@ -220,7 +229,10 @@ impl OrderedList {
     /// contract, and surfacing a `[render-tree error: …]` sentinel as in-band
     /// terminal text would pollute user output.
     fn render_via_tree(&self, term: &Terminal) -> String {
-        let node = self.to_render_tree_node();
+        // Thread the caller's real terminal through projection so any
+        // bespoke-only child (no `render_tree_node`) gets a capability-honest
+        // fallback — matching the pattern Compose established.
+        let node = self.to_render_tree_node_with_terminal(Some(term));
         let opts = TerminalRenderOptions::new(term, RenderStrictness::Warn);
         match render_terminal_node(&node, &opts) {
             Ok(rendered) => rendered.output,
@@ -458,29 +470,56 @@ impl BrowserRenderable for OrderedList {
 
 /// Projects a list's items into [`NodeKind::ListItem`] nodes.
 ///
-/// Each [`RenderableTerminalContent`] item becomes one `ListItem`. When an
-/// item is a [`RenderableTerminalContent::Component`] that downcasts to
-/// [`Prose`], its inline structure is projected via [`Prose::to_render_nodes`]
-/// so bold/italic/colored runs survive as structured inline `RenderNode`s
-/// (`Strong` / `Emphasis` / styled `Span`) — matching the
-/// [`BlockQuote`](crate::components::block_quote::BlockQuote) and
-/// [`Compose`](crate::components::compose::Compose) downcast pattern. All
-/// other items go through the generic
-/// [`RenderableTerminalContent::to_tree_nodes`] fallback.
+/// Each [`RenderableTerminalContent`] item becomes one `ListItem`. Inline
+/// projection delegates to the shared
+/// [`project_renderable_content`] helper (the fourth migrated container
+/// reusing the Prose-downcast pattern after `BlockQuote`,
+/// [`Compose`](crate::components::compose::Compose), and `OrderedList`).
+///
+/// When an item is a [`Prose`] component, the helper returns the inline
+/// nodes; this projection wraps them in a single [`Paragraph`](renderable::tree::NodeKind::Paragraph)
+/// so the terminal list renderer carries the prefix through to a single
+/// wrapped line. Without the wrapper, sibling inline children after the
+/// first would be misclassified as block children and get
+/// `indent_children`-style indentation.
+///
+/// For any other item the helper's structural fallback is used directly —
+/// block-level children (a nested `List`, `Section`, etc.) become the
+/// `ListItem`'s block children and are indented under the prefix.
+///
+/// `terminal_hint` threads the caller's real terminal context through the
+/// shared structural projection so any bespoke-only child component (one
+/// whose `render_tree_node()` returns `None`) gets rendered against that
+/// terminal's actual capabilities rather than the projection layer's
+/// optimistic default. This matches the pattern Compose established for
+/// `HorizontalRule`-style children (text-only terminals must stay on the
+/// Unicode/ASCII tier instead of jumping to the Kitty image tier). Pass
+/// `None` when no terminal is available (e.g. the canonical
+/// [`TreeRenderable::render_tree`] entry point, which is target-agnostic).
 ///
 /// [`NodeKind::ListItem`]: renderable::tree::NodeKind::ListItem
-fn project_list_items(items: &[RenderableTerminalContent]) -> Vec<RenderNode> {
+fn project_list_items(
+    items: &[RenderableTerminalContent],
+    terminal_hint: Option<&Terminal>,
+) -> Vec<RenderNode> {
     items
         .iter()
         .map(|item| {
-            if let RenderableTerminalContent::Component(component) = item
-                && let Some(prose) = component.as_any().downcast_ref::<Prose>()
-            {
-                return RenderNode::list_item(None, prose.to_render_nodes());
-            }
-            let mut ctx = TreeProjectionContext::default();
-            let result = item.to_tree_nodes(&mut ctx);
-            RenderNode::list_item(None, result.nodes)
+            let is_prose = matches!(
+                item,
+                RenderableTerminalContent::Component(c)
+                    if c.as_any().downcast_ref::<Prose>().is_some()
+            );
+            let projected = project_renderable_content(
+                item,
+                ProjectionMode::Structural { terminal_hint },
+            );
+            let children = if is_prose {
+                vec![RenderNode::paragraph(projected)]
+            } else {
+                projected
+            };
+            RenderNode::list_item(None, children)
         })
         .collect()
 }
@@ -686,6 +725,99 @@ impl UnorderedList {
         self
     }
 
+    /// Builds the canonical [`NodeKind::List`] tree node for this unordered
+    /// list.
+    ///
+    /// This is the **single private projection helper**. Both
+    /// [`TreeRenderable::render_tree`] and the legacy
+    /// [`TerminalRenderable::render_tree_node`] hook delegate to it, so the
+    /// terminal compatibility surface cannot drift away from the canonical
+    /// tree-renderable producer.
+    ///
+    /// Each item is projected into a [`NodeKind::ListItem`] via
+    /// [`project_list_items`]. Typed [`ListRenderHints`] carry the bullet
+    /// (omitted for the default `- `), the hanging-indent flag, and any
+    /// explicit `indent_children` onto the root node. A non-default
+    /// [`Layout`] is also recorded so renderers honor the list's margins,
+    /// alignment, and word-wrap.
+    ///
+    /// [`NodeKind::List`]: renderable::tree::NodeKind::List
+    /// [`NodeKind::ListItem`]: renderable::tree::NodeKind::ListItem
+    fn to_render_tree_node(&self) -> RenderNode {
+        self.to_render_tree_node_with_terminal(None)
+    }
+
+    /// Builds the canonical [`NodeKind::List`] tree node, threading an
+    /// optional `terminal_hint` through to [`project_list_items`] so that
+    /// bespoke-only child components get capability-honest fallback
+    /// rendering. Used by [`Self::render_via_tree`] which has the caller's
+    /// real terminal.
+    fn to_render_tree_node_with_terminal(&self, terminal_hint: Option<&Terminal>) -> RenderNode {
+        let children = project_list_items(&self.items, terminal_hint);
+        let mut node = RenderNode::list(false, None, children);
+        // Normalize the default `- ` bullet to `None` so the canonical tree
+        // does not carry redundant component-level styling. Markdown and
+        // Browser ignore the bullet hint entirely; the terminal renderer
+        // falls back to `- ` when no hint is set.
+        let bullet = if self.bullet == "- " {
+            None
+        } else {
+            Some(self.bullet.clone())
+        };
+        node.attrs.set_list_hints(&ListRenderHints {
+            bullet,
+            hanging_indent: self.hanging_indent,
+            indent_children: self.indent_children,
+        });
+        if self.layout != Layout::default() {
+            node.attrs.set_layout(&self.layout);
+        }
+        node
+    }
+
+    /// Renders the unordered list through the canonical render tree.
+    ///
+    /// Used by the [`TerminalRenderable`] impl to route Terminal output
+    /// through the same tree the Browser and Markdown paths consume.
+    ///
+    /// Failures are logged via `tracing::error!` and fall back to an empty
+    /// string: the [`TerminalRenderable::render`] trait is infallible by
+    /// contract, and surfacing a `[render-tree error: …]` sentinel as in-band
+    /// terminal text would pollute user output.
+    fn render_via_tree(&self, term: &Terminal) -> String {
+        // Thread the caller's real terminal through projection so any
+        // bespoke-only child (no `render_tree_node`) gets a capability-honest
+        // fallback — matching the pattern Compose established.
+        let node = self.to_render_tree_node_with_terminal(Some(term));
+        let opts = TerminalRenderOptions::new(term, RenderStrictness::Warn);
+        match render_terminal_node(&node, &opts) {
+            Ok(rendered) => rendered.output,
+            Err(error) => {
+                tracing::error!(
+                    component = "UnorderedList",
+                    error = %error,
+                    "render_terminal_node failed; emitting empty output"
+                );
+                String::new()
+            }
+        }
+    }
+
+    /// Renders via the pre-tree bespoke path.
+    ///
+    /// Retained for parity testing — the active [`TerminalRenderable::render`]
+    /// path delegates to [`Self::render_via_tree`] so the user-facing output
+    /// flows through the canonical tree. Integration parity tests can call
+    /// this method directly to compare the legacy bespoke output against the
+    /// tree renderer's output.
+    #[doc(hidden)]
+    pub fn render_bespoke(&self, term: &Terminal) -> String {
+        let width = term.width();
+        let available = self.layout.available_width(width);
+        let content = self.render_content(Some(term), available);
+        self.layout.apply_block_layout(&content, width)
+    }
+
     /// Render the list with bullets.
     ///
     /// - **String items** are word-wrapped with the bullet width as
@@ -753,20 +885,26 @@ impl UnorderedList {
 }
 
 impl TerminalRenderable for UnorderedList {
+    /// Renders to a terminal string at an explicit width.
+    ///
+    /// Routes through the canonical render tree via [`Self::render_via_tree`]
+    /// so terminal output matches the Browser and Markdown paths for the same
+    /// component.
     fn render_optimistic(&self, term_width: Option<u32>) -> String {
-        let width = term_width.unwrap_or(80);
-        let available = self.layout.available_width(width);
-        let content = self.render_content(None, available);
-        // Bullets form a vertical column — align the block as a unit so the
-        // bullets stay in line.
-        self.layout.apply_block_layout(&content, width)
+        let term = match term_width {
+            Some(width) => Terminal::new_optimistic(width),
+            None => Terminal::new_optimistic(80),
+        };
+        self.render_via_tree(&term)
     }
 
+    /// Renders to the supplied terminal.
+    ///
+    /// Routes through the canonical render tree via [`Self::render_via_tree`].
+    /// The legacy bespoke output is retained on [`Self::render_bespoke`] for
+    /// parity testing.
     fn render(&self, term: &Terminal) -> String {
-        let width = term.width();
-        let available = self.layout.available_width(width);
-        let content = self.render_content(Some(term), available);
-        self.layout.apply_block_layout(&content, width)
+        self.render_via_tree(term)
     }
 
     fn as_any(&self) -> &dyn std::any::Any {
@@ -785,32 +923,123 @@ impl TerminalRenderable for UnorderedList {
         true
     }
 
-    /// Projects this unordered list into a [`NodeKind::List`] render-tree node.
+    /// Projects this unordered list into a [`NodeKind::List`] render-tree
+    /// node.
     ///
-    /// Each item is projected into a [`NodeKind::ListItem`] whose children
-    /// come from [`RenderableTerminalContent::to_tree_nodes`]. A non-default
-    /// bullet, the hanging-indent flag, and any explicit `indent_children`
-    /// width are recorded as list hints on the node.
+    /// Delegates to the single private projection helper
+    /// [`Self::to_render_tree_node`], shared with
+    /// [`TreeRenderable::render_tree`] so the terminal compatibility hook and
+    /// the canonical tree producer cannot drift.
     ///
     /// [`NodeKind::List`]: renderable::tree::NodeKind::List
-    /// [`NodeKind::ListItem`]: renderable::tree::NodeKind::ListItem
     fn render_tree_node(&self) -> Option<RenderNode> {
-        let children = project_list_items(&self.items);
-        let mut node = RenderNode::list(false, None, children);
-        let bullet = if self.bullet == "- " {
-            None
-        } else {
-            Some(self.bullet.clone())
+        Some(self.to_render_tree_node())
+    }
+}
+
+impl TreeRenderable for UnorderedList {
+    /// Projects the unordered list into the canonical render tree.
+    ///
+    /// Delegates to the single private projection helper
+    /// [`UnorderedList::to_render_tree_node`] so this canonical entry point
+    /// and the terminal-compatibility
+    /// [`TerminalRenderable::render_tree_node`] hook share one source of
+    /// truth.
+    ///
+    /// The projected tree is a [`NodeKind::List`](renderable::tree::NodeKind::List)
+    /// with `ordered = false` and one
+    /// [`NodeKind::ListItem`](renderable::tree::NodeKind::ListItem) per
+    /// source item. Typed [`ListRenderHints`] carry the (optional) custom
+    /// bullet, the hanging-indent flag, and any explicit `indent_children`
+    /// width. A non-default [`Layout`] is recorded on the root node's
+    /// attributes.
+    ///
+    /// Note that the bullet hint is a **terminal-rendering concern only**.
+    /// The Markdown and Browser renderers ignore it — Markdown always emits
+    /// standard `- ` markers and Browser always emits `<ul>`/`<li>`.
+    fn render_tree(&self) -> RenderNode {
+        self.to_render_tree_node()
+    }
+}
+
+impl MarkdownRenderable for UnorderedList {
+    /// Renders the unordered list as portable Markdown via the canonical
+    /// render tree.
+    ///
+    /// The tree's [`NodeKind::List`](renderable::tree::NodeKind::List) lowers
+    /// to standard CommonMark bullet-list syntax (`- First\n- Second\n…`).
+    /// A custom terminal bullet (set via [`Self::with_bullet`]) does **not**
+    /// affect Markdown output — Markdown's unordered list syntax has no
+    /// facility for custom bullets, and round-tripping through a
+    /// `-`-using renderer is the portable contract.
+    ///
+    /// Layout is intentionally ignored by the Markdown renderer; styling on
+    /// child components (for example a [`Prose`] item with `<b>` tokens) is
+    /// degraded to plain text by the cross-target tree projection.
+    fn render_markdown(&self) -> String {
+        let node = self.render_tree();
+        render_markdown_node(&node, &MarkdownRenderOptions::default())
+            .map(|r| r.output)
+            .unwrap_or_default()
+    }
+
+    /// Renders the unordered list as MarkdownPlus.
+    ///
+    /// Output is identical to [`Self::render_markdown`] for unordered lists:
+    /// `UnorderedList` is a structural container with no color, border, or
+    /// fill of its own, so neither Markdown dialect has anything extra to
+    /// emit. The method is provided so callers do not need to special-case
+    /// lists when iterating over heterogeneous renderables.
+    fn render_markdown_plus(&self) -> String {
+        let node = self.render_tree();
+        let opts = MarkdownRenderOptions {
+            dialect: MarkdownDialect::MarkdownPlus,
+            ..MarkdownRenderOptions::default()
         };
-        node.attrs.set_list_hints(&ListRenderHints {
-            bullet,
-            hanging_indent: self.hanging_indent,
-            indent_children: self.indent_children,
-        });
-        if self.layout != Layout::default() {
-            node.attrs.set_layout(&self.layout);
+        render_markdown_node(&node, &opts)
+            .map(|r| r.output)
+            .unwrap_or_default()
+    }
+}
+
+impl BrowserRenderable for UnorderedList {
+    /// Renders the unordered list as an HTML fragment via the canonical
+    /// render tree.
+    ///
+    /// Calls [`render_browser_node`] directly on
+    /// [`TreeRenderable::render_tree`]'s output, applying the same
+    /// non-strict error policy as
+    /// [`crate::render_tree::BrowserTreeComponent`]: rendering failures fall
+    /// back to a visible diagnostic fragment so the infallible
+    /// [`BrowserRenderable`] contract holds.
+    ///
+    /// HTML output is a standard `<ul>` containing one `<li>` per item. A
+    /// custom terminal bullet does not affect HTML output (browsers control
+    /// list-marker presentation via CSS `list-style-type`).
+    fn render_html_fragment(&self) -> BrowserFragment<Ready> {
+        let node = self.render_tree();
+        let opts = BrowserRenderOptions {
+            strictness: RenderStrictness::Warn,
+            ..BrowserRenderOptions::default()
+        };
+        match render_browser_node(&node, &opts) {
+            Ok(rendered) => rendered.output,
+            Err(error) => BrowserFragment::new()
+                .define_as_text_fragment(format!("[render-tree error: {error}]"))
+                .finalize(),
         }
-        Some(node)
+    }
+
+    fn render_html_page(&self, page: Option<PageOptions>) -> HtmlPage {
+        let mut html_page = HtmlPage::from(self.render_html_fragment());
+        if let Some(options) = page {
+            html_page.apply_page_options(options);
+        }
+        html_page
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
     }
 }
 
@@ -830,16 +1059,20 @@ mod tests {
 
     #[test]
     fn test_unordered_list_simple() {
+        // UnorderedList now routes through the canonical render tree, which
+        // does not append a trailing newline. The bespoke path's trailing
+        // newline is therefore an accepted divergence (`KNOWN_DRIFT`).
         let list = UnorderedList::new(vec!["Apple", "Banana", "Cherry"]);
         let result = list.render_optimistic(None);
-        assert_eq!(result, "- Apple\n- Banana\n- Cherry\n");
+        assert_eq!(result, "- Apple\n- Banana\n- Cherry");
     }
 
     #[test]
     fn test_unordered_list_custom_bullet() {
+        // Tree renderer omits the trailing newline (`KNOWN_DRIFT`).
         let list = UnorderedList::new(vec!["Item 1", "Item 2"]).with_bullet("- ");
         let result = list.render_optimistic(None);
-        assert_eq!(result, "- Item 1\n- Item 2\n");
+        assert_eq!(result, "- Item 1\n- Item 2");
     }
 
     #[test]
@@ -904,6 +1137,7 @@ mod tests {
 
     #[test]
     fn test_nested_unordered_list() {
+        // Tree renderer omits the trailing newline (`KNOWN_DRIFT`).
         let inner = UnorderedList::new(vec!["Sub A", "Sub B"]);
         let items = vec![
             RenderableTerminalContent::String("Top".to_string()),
@@ -911,7 +1145,7 @@ mod tests {
         ];
         let list = UnorderedList::from(items);
         let result = list.render_optimistic(Some(80));
-        assert_eq!(result, "- Top\n  - Sub A\n  - Sub B\n");
+        assert_eq!(result, "- Top\n  - Sub A\n  - Sub B");
     }
 
     #[test]
@@ -1045,15 +1279,22 @@ mod tests {
 
     #[test]
     fn test_unordered_no_hanging_indent() {
+        // Tree renderer omits the trailing newline (`KNOWN_DRIFT`).
         let list = UnorderedList::new(vec!["Short"]).without_hanging_indent();
         let result = list.render_optimistic(Some(80));
-        assert_eq!(result, "- Short\n");
+        assert_eq!(result, "- Short");
     }
 
     #[test]
-    fn test_prose_explicit_indent_respected() {
-        // When a Prose explicitly sets its own hanging indent, the list
-        // should not override it.
+    fn test_prose_explicit_indent_dropped_under_tree_path() {
+        // Bespoke parity behavior: an explicit `WordWrap::WrapProse(_, Some(4))`
+        // on a Prose item produced 4-space continuation indent on the
+        // bespoke path. After the render-tree migration, the projection
+        // extracts Prose's inline structure (via `to_render_nodes`) but does
+        // not carry the per-Prose `word_wrap` field — the list renderer
+        // wraps using only the list's bullet width (2 spaces by default for
+        // `- `). This is an accepted divergence documented in `KNOWN_DRIFT`,
+        // following the same "Prose styling loss" pattern as OrderedList.
         use crate::components::prose::Prose;
 
         let prose = Prose::new("aaa bbb ccc ddd eee fff")
@@ -1064,11 +1305,11 @@ mod tests {
         let result = list.render_optimistic(Some(20));
         let lines: Vec<&str> = result.lines().collect();
         assert!(lines.len() > 1, "Expected wrapping: {:?}", lines);
-        // Explicit Some(4) should be preserved, not overwritten to 2
+        // Tree path: continuation lines align under the bullet width (2).
         for line in &lines[1..] {
             assert!(
-                line.starts_with("    "),
-                "Should have 4-space indent: {:?}",
+                line.starts_with("  "),
+                "Should align after bullet (2 spaces): {:?}",
                 line
             );
         }

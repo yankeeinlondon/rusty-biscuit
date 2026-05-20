@@ -33,6 +33,7 @@
 
 use renderable::tree::{Diagnostic, DiagnosticKind, RenderNode, RenderStrictness, Severity};
 
+use crate::components::prose::Prose;
 use crate::components::renderable::RenderableTerminalContent;
 use crate::discovery::eval::strip_ansi_codes;
 use crate::terminal::Terminal;
@@ -131,6 +132,141 @@ impl ProjectionResult {
     pub fn merge(&mut self, other: ProjectionResult) {
         self.nodes.extend(other.nodes);
         self.diagnostics.extend(other.diagnostics);
+    }
+}
+
+/// Mode for [`project_renderable_content`] controlling how a non-`Prose`
+/// component is projected.
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum ProjectionMode<'a> {
+    /// Allow block-level projections through the canonical render tree.
+    ///
+    /// When a non-`Prose` component implements
+    /// [`render_tree_node`](crate::components::renderable::TerminalRenderable::render_tree_node),
+    /// its returned node is used directly (block or inline). When the
+    /// component has no tree projection and `terminal_hint` is set, the
+    /// terminal is used to render an ANSI-stripped `Text` fallback. Used by
+    /// containers whose children may be block-level (e.g. `OrderedList`,
+    /// `UnorderedList`, `Compose`).
+    Structural { terminal_hint: Option<&'a Terminal> },
+
+    /// Force every non-`Prose` component to flatten into a single
+    /// ANSI-stripped `Text` node, regardless of whether the component
+    /// implements `render_tree_node`. Used by containers whose children must
+    /// be inline (e.g. `BlockQuote` wrapping content in a `Paragraph`).
+    InlineOnly,
+}
+
+/// Shared projection helper for container components.
+///
+/// This consolidates the Prose-downcast pattern used by container components
+/// ([`BlockQuote`](crate::components::block_quote::BlockQuote),
+/// [`Compose`](crate::components::compose::Compose),
+/// [`OrderedList`](crate::components::list::OrderedList),
+/// [`UnorderedList`](crate::components::list::UnorderedList)) when projecting
+/// their child [`RenderableTerminalContent`] into render-tree nodes.
+///
+/// ## Behavior
+///
+/// - [`RenderableTerminalContent::String`] becomes a single
+///   [`RenderNode::text`] regardless of mode.
+/// - [`RenderableTerminalContent::Component`]:
+///   - If the component downcasts to [`Prose`], its inline structure is
+///     projected through [`Prose::to_render_nodes`] so bold/italic/colored
+///     runs survive as structured inline nodes
+///     (`Strong` / `Emphasis` / styled `Span`) — preserving the terminal SGR
+///     lowering through the tree renderer.
+///   - Otherwise, behavior depends on `mode`:
+///     - [`ProjectionMode::Structural`] — preferred for block-level-capable
+///       containers. If the component has no canonical `render_tree_node`
+///       and a `terminal_hint` is provided, the component is rendered
+///       through that terminal and the ANSI-stripped output is wrapped as a
+///       single `Text` node. Threading the actual terminal keeps
+///       capability-sensitive fallbacks (for example a text-only terminal
+///       staying on `HorizontalRule`'s Unicode tier instead of jumping to
+///       the Kitty image tier) honest. Otherwise falls back to
+///       [`RenderableTerminalContent::to_tree_nodes`] under
+///       [`RenderStrictness::Warn`].
+///     - [`ProjectionMode::InlineOnly`] — forces every non-`Prose`
+///       component into a single ANSI-stripped `Text` node via the
+///       component's optimistic render. This preserves the historical
+///       `BlockQuote` flattening that keeps a `Paragraph`'s children
+///       inline.
+///
+/// Diagnostics from the structural fallback path are intentionally swallowed
+/// silently — this helper has no [`Diagnostic`] sink in its return type, and
+/// container callers (`OrderedList`, `UnorderedList`, `Compose`, `BlockQuote`)
+/// project many child nodes per render and have no clear place to surface
+/// per-child diagnostics in their user-facing output. Callers that need
+/// diagnostics should call [`RenderableTerminalContent::to_tree_nodes`]
+/// directly.
+///
+/// ## Wrapping
+///
+/// This helper deliberately does **not** wrap the returned nodes in a
+/// `Paragraph`, `ListItem`, or other container. Wrapping is a
+/// caller-dependent decision:
+///
+/// - `BlockQuote::paragraph_children` returns inline nodes; its caller wraps
+///   them in a single `Paragraph` so all siblings share one block.
+/// - `Compose::project_part` does not wrap because Compose's outer container
+///   is a `Root` whose children are explicit sequence siblings.
+/// - `OrderedList` / `UnorderedList` wrap the returned nodes in a
+///   `Paragraph` *inside* a `ListItem` so the list renderer's prefix attaches
+///   to a single inline block instead of misclassifying sibling inline nodes
+///   as block children.
+///
+/// ## Examples
+///
+/// ```ignore
+/// // `project_renderable_content` and `ProjectionMode` are `pub(crate)`;
+/// // this snippet illustrates the in-crate usage pattern and is therefore
+/// // not runnable from outside the crate.
+/// use biscuit_terminal::components::renderable::RenderableTerminalContent;
+/// use biscuit_terminal::render_tree::projection::{
+///     project_renderable_content, ProjectionMode,
+/// };
+///
+/// let content = RenderableTerminalContent::String("Hello".into());
+/// let nodes = project_renderable_content(
+///     &content,
+///     ProjectionMode::Structural { terminal_hint: None },
+/// );
+/// assert_eq!(nodes.len(), 1);
+/// ```
+#[must_use]
+pub(crate) fn project_renderable_content(
+    content: &RenderableTerminalContent,
+    mode: ProjectionMode<'_>,
+) -> Vec<RenderNode> {
+    match content {
+        RenderableTerminalContent::String(s) => vec![RenderNode::text(s)],
+        RenderableTerminalContent::Component(component) => {
+            if let Some(prose) = component.as_any().downcast_ref::<Prose>() {
+                return prose.to_render_nodes();
+            }
+            match mode {
+                ProjectionMode::InlineOnly => {
+                    let stripped = strip_ansi_codes(&component.render_optimistic(None));
+                    vec![RenderNode::text(stripped)]
+                }
+                ProjectionMode::Structural { terminal_hint } => {
+                    // For bespoke-only components, prefer rendering through
+                    // the caller's actual terminal so capability-sensitive
+                    // fallbacks (e.g. HR text tier vs. image tier) reflect
+                    // the real target.
+                    if component.render_tree_node().is_none()
+                        && let Some(term) = terminal_hint
+                    {
+                        let rendered = component.render(term);
+                        let stripped = strip_ansi_codes(&rendered);
+                        return vec![RenderNode::text(stripped)];
+                    }
+                    let mut ctx = TreeProjectionContext::default();
+                    content.to_tree_nodes(&mut ctx).nodes
+                }
+            }
+        }
     }
 }
 

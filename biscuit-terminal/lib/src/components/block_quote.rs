@@ -494,9 +494,11 @@ impl BlockQuote {
     /// Builds the inline children for the quote's main paragraph in the
     /// canonical render tree.
     ///
-    /// For [`RenderableTerminalContent::String`] the content becomes a single
-    /// `Text` node. For [`RenderableTerminalContent::Component`] the projection
-    /// downcasts to known structured types so inline styling survives:
+    /// Delegates to the shared
+    /// [`project_renderable_content`](crate::render_tree::projection::project_renderable_content)
+    /// helper. For [`RenderableTerminalContent::String`] the content becomes a
+    /// single `Text` node; for [`RenderableTerminalContent::Component`] the
+    /// helper downcasts known structured types so inline styling survives:
     ///
     /// - [`Prose`] is projected through [`Prose::to_render_nodes`], preserving
     ///   bold/italic/colored inline runs as `Strong` / `Emphasis` / styled
@@ -504,19 +506,17 @@ impl BlockQuote {
     /// - Any other component falls back to the ANSI-stripped optimistic render
     ///   — a deliberately lossy plain-text projection that keeps the tree
     ///   target-agnostic.
+    ///
+    /// `BlockQuote` runs the helper in
+    /// [`ProjectionMode::InlineOnly`](crate::render_tree::projection::ProjectionMode::InlineOnly)
+    /// so every non-`Prose` component is flattened to a single ANSI-stripped
+    /// `Text` node. This preserves the historical block-quote contract that
+    /// `paragraph_children` returns *inline* nodes only — wrapping them in a
+    /// single `Paragraph` is the caller's responsibility, and embedded
+    /// block-level components must not break that contract.
     fn paragraph_children(&self) -> Vec<RenderNode> {
-        match &self.content {
-            RenderableTerminalContent::String(s) => vec![RenderNode::text(s.clone())],
-            RenderableTerminalContent::Component(component) => {
-                if let Some(prose) = component.as_any().downcast_ref::<Prose>() {
-                    return prose.to_render_nodes();
-                }
-                let stripped = crate::utils::escape_codes::strip_escape_codes(
-                    component.render_optimistic(None),
-                );
-                vec![RenderNode::text(stripped)]
-            }
-        }
+        use crate::render_tree::projection::{ProjectionMode, project_renderable_content};
+        project_renderable_content(&self.content, ProjectionMode::InlineOnly)
     }
 }
 

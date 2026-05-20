@@ -1,12 +1,21 @@
 use crate::{
-    components::renderable::TerminalRenderable,
+    components::renderable::{BrowserRenderable, TerminalRenderable},
     discovery::detection::ColorDepth,
     render_tree::style::color_sgr,
+    render_tree::{TerminalRenderOptions, render_terminal_node},
     terminal::Terminal,
     utils::layout::{Layout, LayoutTerminalExt},
 };
+use renderable::browser::PageOptions;
+use renderable::browser::fragment::{BrowserFragment, Ready};
 use renderable::color::Color;
-use renderable::tree::{ProgressHints, RenderNode};
+use renderable::html::HtmlPage;
+use renderable::markdown::MarkdownRenderable;
+use renderable::tree::render::{
+    BrowserRenderOptions, MarkdownDialect, MarkdownRenderOptions, render_browser_node,
+    render_markdown_node,
+};
+use renderable::tree::{ProgressHints, RenderNode, RenderStrictness, TreeRenderable};
 use serde::{Deserialize, Serialize};
 use std::any::Any;
 
@@ -170,6 +179,88 @@ impl Progress {
         self.style
     }
 
+    /// Builds the canonical [`NodeKind::Paragraph`] tree node for this progress
+    /// bar, carrying [`ProgressHints`] on its `attrs`.
+    ///
+    /// This is the **single private projection helper**. Both
+    /// [`TreeRenderable::render_tree`] and the legacy
+    /// [`TerminalRenderable::render_tree_node`] hook delegate to it, so the
+    /// terminal compatibility surface cannot drift away from the canonical
+    /// tree-renderable producer.
+    ///
+    /// The paragraph's visible text is `"{label} {percentage}%"` (or just
+    /// `"{percentage}%"` when there is no label) so renderers without progress
+    /// hint support degrade to readable plain text. Renderers that recognize
+    /// the hints reconstruct the full bar.
+    ///
+    /// A non-default [`Layout`] is recorded on the node's `attrs` so renderers
+    /// honor the bar's margins, alignment, and width.
+    ///
+    /// [`NodeKind::Paragraph`]: renderable::tree::NodeKind::Paragraph
+    fn to_render_node(&self) -> RenderNode {
+        let percentage = (self.value * 100.0).round() as u32;
+        let visible = match &self.label {
+            Some(label) => format!("{label} {percentage}%"),
+            None => format!("{percentage}%"),
+        };
+
+        let mut node = RenderNode::paragraph(vec![RenderNode::text(visible)]);
+        node.attrs.set_progress_hints(&ProgressHints {
+            value: self.value,
+            bar_width: self.bar_width,
+            fill_char: self.style.fill_char,
+            empty_char: self.style.empty_char,
+            left_bracket: self.style.left_bracket,
+            right_bracket: self.style.right_bracket,
+            filled_color: self.style.filled_color,
+            empty_color: self.style.empty_color,
+            bracket_color: self.style.bracket_color,
+        });
+        if self.layout != Layout::default() {
+            node.attrs.set_layout(&self.layout);
+        }
+        node
+    }
+
+    /// Renders the progress bar through the canonical render tree.
+    ///
+    /// Used by the [`TerminalRenderable`] impl to route Terminal output
+    /// through the same tree the Browser and Markdown paths consume.
+    ///
+    /// Failures are logged via `tracing::error!` and fall back to an empty
+    /// string: the [`TerminalRenderable::render`] trait is infallible by
+    /// contract, and surfacing a `[render-tree error: …]` sentinel as in-band
+    /// terminal text would pollute user output.
+    fn render_via_tree(&self, term: &Terminal) -> String {
+        let node = self.to_render_node();
+        let opts = TerminalRenderOptions::new(term, RenderStrictness::Warn);
+        match render_terminal_node(&node, &opts) {
+            Ok(rendered) => rendered.output,
+            Err(error) => {
+                tracing::error!(
+                    component = "Progress",
+                    error = %error,
+                    "render_terminal_node failed; emitting empty output"
+                );
+                String::new()
+            }
+        }
+    }
+
+    /// Renders via the pre-tree bespoke path.
+    ///
+    /// Retained for parity testing — the active [`TerminalRenderable::render`]
+    /// path delegates to [`Self::render_via_tree`] so the user-facing output
+    /// flows through the canonical tree. Integration parity tests can call
+    /// this method directly to compare the legacy bespoke output against the
+    /// tree renderer's output.
+    #[doc(hidden)]
+    pub fn render_bespoke(&self, term: &Terminal) -> String {
+        let width = term.width();
+        let bar_content = self.render_bar(term.color_depth);
+        self.layout.apply_block_layout(&bar_content, width)
+    }
+
     /// Renders the progress bar content (without layout application).
     ///
     /// `depth` is the terminal's [`ColorDepth`]; any declared slot colors are
@@ -229,19 +320,27 @@ pub(crate) fn paint_fg(text: &str, color: Option<Color>, depth: ColorDepth) -> S
 }
 
 impl TerminalRenderable for Progress {
+    /// Renders to a terminal string at an explicit width.
+    ///
+    /// Routes through the canonical render tree via [`Self::render_via_tree`]
+    /// so terminal output matches the Browser and Markdown paths for the same
+    /// component. The legacy bespoke output is retained on
+    /// [`Self::render_bespoke`] for parity testing.
     fn render_optimistic(&self, term_width: Option<u32>) -> String {
-        let width = term_width.unwrap_or(80);
-        // The optimistic path assumes a truecolor terminal, matching the
-        // other components' `render_optimistic` (`Terminal::new_optimistic`).
-        let bar_content = self.render_bar(ColorDepth::TrueColor);
-        // Label and bar segments form a single visual unit — align as a block.
-        self.layout.apply_block_layout(&bar_content, width)
+        let term = match term_width {
+            Some(width) => Terminal::new_optimistic(width),
+            None => Terminal::new_optimistic(80),
+        };
+        self.render_via_tree(&term)
     }
 
+    /// Renders to the supplied terminal.
+    ///
+    /// Routes through the canonical render tree via [`Self::render_via_tree`].
+    /// The legacy bespoke output is retained on [`Self::render_bespoke`] for
+    /// parity testing.
     fn render(&self, term: &Terminal) -> String {
-        let width = term.width();
-        let bar_content = self.render_bar(term.color_depth);
-        self.layout.apply_block_layout(&bar_content, width)
+        self.render_via_tree(term)
     }
 
     fn layout(&self) -> &Layout {
@@ -256,38 +355,110 @@ impl TerminalRenderable for Progress {
         self
     }
 
-    /// Projects the progress bar to a [`NodeKind::Paragraph`] carrying
-    /// [`ProgressHints`].
+    /// Projects this progress bar into a [`NodeKind::Paragraph`] render-tree
+    /// node carrying [`ProgressHints`].
     ///
-    /// The paragraph's visible text is `"{label} {percentage}%"` (or just
-    /// `"{percentage}%"` when there is no label) so renderers without progress
-    /// hint support degrade to readable plain text. Renderers that recognize
-    /// the hints reconstruct the full bar.
+    /// Delegates to the single private projection helper
+    /// [`Self::to_render_node`], shared with [`TreeRenderable::render_tree`] so
+    /// the terminal compatibility hook and the canonical tree producer cannot
+    /// drift.
     ///
     /// [`NodeKind::Paragraph`]: renderable::tree::NodeKind::Paragraph
     fn render_tree_node(&self) -> Option<RenderNode> {
-        let percentage = (self.value * 100.0).round() as u32;
-        let visible = match &self.label {
-            Some(label) => format!("{label} {percentage}%"),
-            None => format!("{percentage}%"),
-        };
+        Some(self.to_render_node())
+    }
+}
 
-        let mut node = RenderNode::paragraph(vec![RenderNode::text(visible)]);
-        node.attrs.set_progress_hints(&ProgressHints {
-            value: self.value,
-            bar_width: self.bar_width,
-            fill_char: self.style.fill_char,
-            empty_char: self.style.empty_char,
-            left_bracket: self.style.left_bracket,
-            right_bracket: self.style.right_bracket,
-            filled_color: self.style.filled_color,
-            empty_color: self.style.empty_color,
-            bracket_color: self.style.bracket_color,
-        });
-        if self.layout != Layout::default() {
-            node.attrs.set_layout(&self.layout);
+impl TreeRenderable for Progress {
+    /// Projects the progress bar into the canonical render tree.
+    ///
+    /// Delegates to the single private projection helper
+    /// [`Progress::to_render_node`] so this canonical entry point and the
+    /// terminal-compatibility [`TerminalRenderable::render_tree_node`] hook
+    /// share one source of truth.
+    ///
+    /// The projected tree is a [`NodeKind::Paragraph`] carrying
+    /// [`ProgressHints`] on its `attrs`. Renderers that recognize the hints
+    /// reconstruct the bar; renderers that do not still produce readable
+    /// `"{label} {percentage}%"` text.
+    ///
+    /// [`NodeKind::Paragraph`]: renderable::tree::NodeKind::Paragraph
+    fn render_tree(&self) -> RenderNode {
+        self.to_render_node()
+    }
+}
+
+impl MarkdownRenderable for Progress {
+    /// Renders the progress bar as portable Markdown via the canonical render
+    /// tree.
+    ///
+    /// Portable Markdown has no native progress widget or color model, so the
+    /// output is the paragraph fallback text — `"{label} {percentage}%"` or
+    /// just `"{percentage}%"`. Glyphs, colors, bracket presentation, and
+    /// layout are intentionally dropped because no portable CommonMark form
+    /// preserves them.
+    fn render_markdown(&self) -> String {
+        let node = <Self as TreeRenderable>::render_tree(self);
+        render_markdown_node(&node, &MarkdownRenderOptions::default())
+            .map(|r| r.output)
+            .unwrap_or_default()
+    }
+
+    /// Renders the progress bar as MarkdownPlus via the canonical render tree.
+    ///
+    /// MarkdownPlus allows inline HTML, so the MarkdownPlus dialect of the
+    /// tree renderer emits the same semantic CSS progress bar shape used by
+    /// the browser renderer (RT-PROGRESS-002). Color slots are preserved as
+    /// inline CSS and non-default glyphs survive in `data-*` attributes.
+    fn render_markdown_plus(&self) -> String {
+        let node = <Self as TreeRenderable>::render_tree(self);
+        let opts = MarkdownRenderOptions {
+            dialect: MarkdownDialect::MarkdownPlus,
+            ..MarkdownRenderOptions::default()
+        };
+        render_markdown_node(&node, &opts)
+            .map(|r| r.output)
+            .unwrap_or_default()
+    }
+}
+
+impl BrowserRenderable for Progress {
+    /// Renders the progress bar as an HTML fragment via the canonical render
+    /// tree.
+    ///
+    /// The browser tree renderer (RT-PROGRESS-001) emits semantic
+    /// `role="progressbar"` HTML with the documented `progress` /
+    /// `progress-label` / `progress-track` / `progress-filled` /
+    /// `progress-percentage` classes, ARIA value attributes, color slots
+    /// lowered to inline CSS `background-color`, and non-default glyphs
+    /// preserved in `data-*` attributes.
+    ///
+    /// Failures fall back to a visible diagnostic fragment so the infallible
+    /// [`BrowserRenderable`] contract holds.
+    fn render_html_fragment(&self) -> BrowserFragment<Ready> {
+        let node = <Self as TreeRenderable>::render_tree(self);
+        let opts = BrowserRenderOptions {
+            strictness: RenderStrictness::Warn,
+            ..BrowserRenderOptions::default()
+        };
+        match render_browser_node(&node, &opts) {
+            Ok(rendered) => rendered.output,
+            Err(error) => BrowserFragment::new()
+                .define_as_text_fragment(format!("[render-tree error: {error}]"))
+                .finalize(),
         }
-        Some(node)
+    }
+
+    fn render_html_page(&self, page: Option<PageOptions>) -> HtmlPage {
+        let mut html_page = HtmlPage::from(self.render_html_fragment());
+        if let Some(options) = page {
+            html_page.apply_page_options(options);
+        }
+        html_page
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
     }
 }
 

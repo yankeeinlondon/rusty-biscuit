@@ -18,7 +18,6 @@ use crate::components::{
     section::{HeadingLevel, Section},
     table::table::Table,
 };
-use crate::render_tree::projection::TreeProjectionContext;
 use crate::render_tree::{render_terminal_node, TerminalRenderOptions};
 use crate::terminal::Terminal;
 use crate::utils::layout::Layout;
@@ -304,39 +303,25 @@ impl Compose {
         part: &RenderableTerminalContent,
         terminal_hint: Option<&Terminal>,
     ) -> Vec<RenderNode> {
-        if let RenderableTerminalContent::Component(component) = part {
-            if let Some(prose) = component.as_any().downcast_ref::<Prose>() {
-                return prose.to_render_nodes();
-            }
-            // For bespoke-only components, prefer rendering through the
-            // caller's actual terminal so capability-sensitive fallbacks
-            // (e.g. HR text tier vs. image tier) reflect the real target.
-            if component.render_tree_node().is_none()
-                && let Some(term) = terminal_hint
-            {
-                let rendered = component.render(term);
-                let stripped = crate::discovery::eval::strip_ansi_codes(&rendered);
-                return vec![RenderNode::text(stripped)];
-            }
-        }
-        let mut ctx = TreeProjectionContext::default();
-        // Projection diagnostics are intentionally discarded here —
-        // `render_tree()` returns a plain `RenderNode`. Strictness-driven
-        // fallback nodes themselves still appear in the projected tree
-        // and are exercised by the parity tests.
-        let mut nodes = part.to_tree_nodes(&mut ctx).nodes;
+        use crate::render_tree::projection::{ProjectionMode, project_renderable_content};
+        // The shared helper handles the Prose downcast + bespoke-only
+        // terminal-threaded fallback; Compose only adds its own `Root`
+        // flattening on top.
+        let nodes = project_renderable_content(
+            part,
+            ProjectionMode::Structural { terminal_hint },
+        );
         // A nested `Compose` (or any tree-renderable that returns a `Root`
         // node) is invalid as a child of our outer `Root`. Inline its
         // children so the nested sequence's contents become siblings —
         // preserving Compose's no-separator semantics recursively.
-        nodes = nodes
+        nodes
             .into_iter()
             .flat_map(|node| match node.kind {
                 renderable::tree::NodeKind::Root { children } => children,
                 _ => vec![node],
             })
-            .collect();
-        nodes
+            .collect()
     }
 
     /// Builds the canonical render tree using the supplied terminal as the
