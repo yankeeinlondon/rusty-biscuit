@@ -1808,3 +1808,64 @@ Per the §3a.3 outcome (iii) branch of the Stage 3 plan:
 - `TextBlock::render_bespoke` retired; private `to_terminal` helper and the in-source `render_bespoke_still_available_for_parity` test removed; `styling::{Style, Stylist}` imports orphaned and dropped.
 - `Todo::render_bespoke` retired; private `to_terminal` helper and six in-source `test_*_todo` tests (which only exercised the bespoke `to_terminal`) removed; `discovery::detection::ColorDepth`, `components::prose::Prose`, and `styling::{FontWeight, Style, Stylist}` imports re-pruned.
 - Six `*_parity.rs` files collapsed: bespoke-vs-tree comparison tests deleted (tautological once `render_bespoke` is gone); tests that pin tree-path behaviour kept and rephrased; `assert_semantic_match` helper imports dropped where unused.
+
+## Stage 3 Task 3e — NO_COLOR is enforced in the shared color-detection layer, not per-command
+
+Two unrelated NO_COLOR enforcement paths existed before Stage 3:
+
+1. **Per-command stripping** in `bt prose` (`biscuit-terminal/cli/src/commands/prose.rs:119-123`) — calls `strip_sgr_sequences` after rendering when `NO_COLOR` is set.
+2. **Shared detection** — `color_depth()` in `biscuit-terminal/lib/src/discovery/detection/color.rs` never read `NO_COLOR`, so any tree-rendered command other than `prose` (e.g. `bt quote`, `bt status-block`) would emit SGR codes despite the env var.
+
+The Stage 3 directive is single-source-of-truth: the *shared layer* honors `NO_COLOR`, components do not need per-command stripping. `color_depth()` now returns `ColorDepth::None` when `NO_COLOR` is set to a non-empty value, unless `FORCE_COLOR` or `CLICOLOR_FORCE` is also set (which acts as the conventional override, per the [NO_COLOR spec](https://no-color.org) and the `supports-color`/`chalk`/`clap` convention).
+
+`bt quote "Test"` under `NO_COLOR=1` (with `FORCE_COLOR` unset) now emits `│ Test\n` with no SGR bytes. Verified by `test_tree_rendered_quote_respects_no_color` in `biscuit-terminal/cli/tests/integration_test.rs`. The existing per-command stripping in `bt prose` is now redundant defense-in-depth, not the load-bearing path — it can be removed in a future cleanup but was left alone here per the Rule 3 "surgical changes" guideline.
+
+## Stage 3 complete (2026-05-20)
+
+Stage 3 of the IR push is complete. The structural-projection gap closed
+in Stage 2 is now closed across every adopted component, the
+projection-fallback path is observable in production, and the migration
+recipe is published so future component authors can flip-to-tree or
+born-on-tree confidently.
+
+Key deliverables:
+
+- Three missing `render_tree_node` overrides added on `BlockQuote`,
+  `StatusBlock`, and `FileSystem` (§3a.1).
+- Nine existing overrides audited and parity-tested; nested-component
+  tests tightened to assert structural `NodeKind`s and all
+  `TODO(stage-3)` markers removed (§3a.2).
+- `FileSystem::render` decision recorded as outcome (iii) — defer the
+  terminal flip to Stage 4, behind the connector-list `Style` lowering
+  and icon-name spacing reconciliation acceptance criteria (§3a.3,
+  §3c.3).
+- Projection fallback observable via `TerminalRenderable::type_name()`
+  with a warn-once-then-debug `tracing` surface (§3b).
+- Bespoke compatibility hooks retired on six components — `OrderedList`,
+  `UnorderedList`, `Progress`, `Section`, `TextBlock`, `Todo` (§3c.1).
+- Three sanctioned `render_bespoke` hooks retained and documented —
+  `StatusBlock` (arbitrary border), `Table` (`prefer_cursor_alignment` +
+  TTY path), `TwoColumn` (image overlay) — each marked
+  `#[doc(hidden)] pub` with rustdoc naming the capability gap (§3c.2).
+- Layout-matrix harness simplified: the right column compares
+  `TreeRenderable::render_tree` directly (§3c).
+- `NO_COLOR` honored at the shared color-detection layer rather than
+  per-command (§3e).
+- Migration recipe published at
+  [`renderable/docs/migrate-component-to-ir.md`](../../../docs/migrate-component-to-ir.md)
+  and linked from `renderable/README.md` and
+  `.claude/skills/renderable/SKILL.md` (§3d).
+
+The migration recipe is the canonical onward-path document for any
+future component flip — both the *flip-from-bespoke* (Variant A) and
+*born-on-the-tree* (Variant B) paths are prescribed there, alongside
+the escape-hatch rules and the documentation-update obligations.
+
+Outstanding follow-up for Stage 4:
+
+- **`FileSystem::render` flip.** The Browser and Markdown targets
+  already route through the tree; the terminal `render` body still
+  calls the bespoke directory-tree renderer. The Stage 4 acceptance
+  criteria are encoded in §3c.3 (connector-list `Style` lowering,
+  icon-name spacing reconciliation, parity-fixture flip, and re-adding
+  `FileSystem` to the default layout matrix).
