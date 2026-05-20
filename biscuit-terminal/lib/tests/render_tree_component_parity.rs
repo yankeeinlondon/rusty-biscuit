@@ -39,13 +39,18 @@
 //!   emits the attribution as a *separate child paragraph* (`— {attribution}`)
 //!   that the renderer joins with a blank line and re-borders. The visible
 //!   text `— {attribution}` survives on both paths, but its layout differs.
-//! - **`Prose` styling is flattened.** `BlockQuote::render_tree()` is a
-//!   deliberately lossy projection: a `Prose` content component is rendered
-//!   optimistically and its ANSI escapes are stripped to plain text (see
-//!   `BlockQuote::plain_text`). The bespoke path keeps the `Prose` component
-//!   live and renders its inline styling (bold/italic/color) as real SGR
-//!   sequences. After ANSI-stripping, the *words* match; the styling does
-//!   not, and is not asserted.
+//! - **`Prose` styling is preserved on the terminal target.**
+//!   `BlockQuote::render_tree()` projects a `Prose` content component
+//!   through `Prose::to_render_nodes`, lifting bold/italic/colored inline
+//!   runs into structured `Strong` / `Emphasis` / styled `Span` nodes that
+//!   the terminal tree renderer lowers back to SGR. Both paths emit the
+//!   same styled words; this token-level parity check focuses on visible
+//!   content presence, but the dedicated
+//!   `test_prose_bold_inline_styling_survives_terminal_tree_render` and
+//!   sibling tests in `block_quote.rs` pin the SGR byte-level guarantee.
+//!   Markdown and Browser still flatten emphasis to semantic wrappers via
+//!   the same projection (and Markdown ignores color, which has no
+//!   Markdown peer).
 //! - **Wrapping and color.** Wrap columns, the left-block color, and the
 //!   palette differ between paths and are formatting concerns, not semantics.
 //!
@@ -186,9 +191,12 @@ fn render_tree_component_parity_multiline() {
 
 /// A quote built from a `Prose` component (rich inline content).
 ///
-/// `render_tree()` flattens the `Prose` styling to plain text; the bespoke
-/// path keeps it live. After ANSI-stripping the *words* match on both paths,
-/// which is what is asserted — the styling divergence is accepted.
+/// `render_tree()` now projects the `Prose` IR into structured inline
+/// nodes (Strong / Emphasis / styled Span) so styling survives the
+/// render-tree path on the terminal target. After ANSI-stripping the
+/// *words* match on both paths, which is what this token-level test
+/// asserts; the SGR byte-level guarantee is covered by the dedicated
+/// styling tests in `block_quote.rs`.
 #[test]
 fn render_tree_component_parity_from_prose() {
     let prose = Prose::new("This is <b>bold</b> and <i>italic</i> emphasis text.");
@@ -202,8 +210,8 @@ fn render_tree_component_parity_from_prose() {
 
 /// A quote built from a `Prose` component that also carries an attribution.
 ///
-/// Exercises both accepted divergences at once: flattened `Prose` styling and
-/// attribution rendered as a separate child paragraph.
+/// Exercises the attribution divergence (separate child paragraph in the
+/// tree path) together with the structured Prose projection.
 #[test]
 fn render_tree_component_parity_prose_with_attribution() {
     let prose = Prose::new("<red>error</red>: something went <b>wrong</b>");

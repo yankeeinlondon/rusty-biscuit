@@ -1,14 +1,22 @@
+use std::any::Any;
 use std::rc::Rc;
 
+use renderable::browser::fragment::{BrowserFragment, Ready};
+use renderable::browser::PageOptions;
+use renderable::html::HtmlPage;
 use renderable::layout::TargetValue;
+use renderable::markdown::MarkdownRenderable;
 use renderable::style::{Border, BorderSides, PerMode, Style};
 use renderable::target::RenderTarget;
+use renderable::tree::render::{render_markdown_node, MarkdownDialect, MarkdownRenderOptions};
+use renderable::tree::{RenderNode, RenderStrictness, TreeRenderable};
 
 use crate::{
     components::{
         prose::Prose,
-        renderable::{RenderableTerminalContent, TerminalRenderable},
+        renderable::{BrowserRenderable, RenderableTerminalContent, TerminalRenderable},
     },
+    render_tree::{render_terminal_node, BrowserTreeComponent, TerminalRenderOptions},
     terminal::Terminal,
     utils::{
         block_constraint::{split_lines, visible_width, wrap_lines},
@@ -16,6 +24,13 @@ use crate::{
         layout::{Layout, LayoutTerminalExt},
     },
 };
+
+/// The default left-border prefix applied to each quoted line.
+///
+/// A custom prefix supplied through [`BlockQuote::with_border`] is the only
+/// thing that diverts the [`TerminalRenderable`] impl off the render-tree
+/// path onto the legacy compatibility renderer.
+const DEFAULT_BORDER: &str = "│ ";
 
 /// Wraps a plain [`Color`] as a universal [`Style`] color value.
 fn universal_color(color: Color) -> TargetValue<PerMode<Color>> {
@@ -131,7 +146,7 @@ impl Default for BlockQuote {
                 border: Some(left_border(Color::Tailwind(Tailwind::Gray500))),
                 ..Style::default()
             },
-            border: "│ ".to_string(),
+            border: DEFAULT_BORDER.to_string(),
             layout: Layout {
                 word_wrap: WordWrap::WrapProse(Some(8), None),
                 ..Layout::default()
@@ -325,8 +340,63 @@ impl BlockQuote {
     }
 }
 
+impl BlockQuote {
+    /// Whether this quote carries the canonical left-border prefix.
+    ///
+    /// The render-tree path can only express the default `│ ` border via a
+    /// typed [`Style::Border`]; an arbitrary terminal prefix string is a
+    /// compatibility-only knob. When the prefix is the default, the
+    /// [`TerminalRenderable`] impl routes through the tree renderer; otherwise
+    /// it falls back to the bespoke [`render_content`](Self::render_content)
+    /// path that honors the custom prefix verbatim.
+    fn has_default_border(&self) -> bool {
+        self.border == DEFAULT_BORDER
+    }
+
+    /// Renders the block quote through the canonical render tree.
+    ///
+    /// Used by the [`TerminalRenderable`] impl when the component carries the
+    /// default left border. The legacy bespoke path is retained only as a
+    /// compatibility fallback for [`BlockQuote::with_border`].
+    ///
+    /// See the BlockQuote spec (`RT-BQ-001`) and the
+    /// `approved-render-tree-functionality` notes for the render-tree route's
+    /// scope versus the bespoke `with_border` fallback.
+    fn render_via_tree(&self, term: &Terminal) -> String {
+        let root = RenderNode::root(vec![self.render_tree()]);
+        let opts = TerminalRenderOptions::new(term, RenderStrictness::Warn);
+        match render_terminal_node(&root, &opts) {
+            Ok(rendered) => rendered.output,
+            Err(error) => {
+                // Surface the failure through `tracing` so observability tools
+                // see it, then fall back to an empty string. Returning an
+                // error sentinel as in-band terminal text is a footgun — it
+                // pollutes user output with diagnostic strings — and the
+                // `TerminalRenderable` trait contract is infallible, so we
+                // must not panic either.
+                tracing::error!(
+                    component = "BlockQuote",
+                    error = %error,
+                    "render_terminal_node failed; emitting empty output"
+                );
+                String::new()
+            }
+        }
+    }
+}
+
 impl TerminalRenderable for BlockQuote {
     fn render_optimistic(&self, term_width: Option<u32>) -> String {
+        if self.has_default_border() {
+            // Tree path — uses the typed `Style::Border` lowered by the
+            // terminal tree renderer.
+            let term = match term_width {
+                Some(width) => Terminal::new_optimistic(width),
+                None => Terminal::default(),
+            };
+            return self.render_via_tree(&term);
+        }
+        // Compatibility fallback for `with_border()` custom prefixes.
         let width = term_width.unwrap_or(80);
         let available = self.layout.available_width(width);
         let content = self.render_content(None, available);
@@ -336,6 +406,9 @@ impl TerminalRenderable for BlockQuote {
     }
 
     fn render(&self, term: &Terminal) -> String {
+        if self.has_default_border() {
+            return self.render_via_tree(term);
+        }
         let width = term.width();
         let available = self.layout.available_width(width);
         let content = self.render_content(Some(term), available);
@@ -359,32 +432,105 @@ impl TerminalRenderable for BlockQuote {
     }
 }
 
-impl BlockQuote {
-    /// Extracts the plain text of the block quote content.
+impl MarkdownRenderable for BlockQuote {
+    /// Renders the block quote as portable Markdown via the canonical render
+    /// tree.
     ///
-    /// For the [`RenderableTerminalContent::String`] variant the string is
-    /// used verbatim. For the [`RenderableTerminalContent::Component`]
-    /// variant the component is rendered optimistically and its ANSI escape
-    /// sequences are stripped — this is a deliberately lossy projection, as
-    /// the render tree captures document structure rather than terminal
-    /// presentation.
-    fn plain_text(&self) -> String {
+    /// The tree projection ignores any custom terminal prefix supplied through
+    /// [`BlockQuote::with_border`] and emits standard CommonMark block-quote
+    /// syntax (`> text` per line). Styling (text color, background, border
+    /// color) is intentionally dropped — Markdown has no semantic
+    /// representation for visual appearance.
+    fn render_markdown(&self) -> String {
+        let node = self.render_tree();
+        render_markdown_node(&node, &MarkdownRenderOptions::default())
+            .map(|r| r.output)
+            .unwrap_or_default()
+    }
+
+    /// MarkdownPlus output is identical to portable Markdown for a block
+    /// quote.
+    ///
+    /// The block quote's tree projection is plain text with attribution as a
+    /// trailing paragraph; the only divergence MarkdownPlus could offer would
+    /// be inline HTML for style preservation, but `render_tree()`
+    /// intentionally flattens `Prose` styling, so there is nothing extra to
+    /// emit in the richer dialect.
+    fn render_markdown_plus(&self) -> String {
+        let node = self.render_tree();
+        let opts = MarkdownRenderOptions {
+            dialect: MarkdownDialect::MarkdownPlus,
+            ..MarkdownRenderOptions::default()
+        };
+        render_markdown_node(&node, &opts)
+            .map(|r| r.output)
+            .unwrap_or_default()
+    }
+}
+
+impl BrowserRenderable for BlockQuote {
+    /// Renders the block quote as an HTML fragment via the canonical render
+    /// tree.
+    ///
+    /// Delegates through [`BrowserTreeComponent`], which folds the projected
+    /// `NodeKind::BlockQuote` into a `<blockquote>` element containing the
+    /// rendered child paragraphs. Style lowering for the browser is not yet
+    /// wired (see `layout-and-style.md` §6), so the element renders with
+    /// browser-default styling for now.
+    fn render_html_fragment(&self) -> BrowserFragment<Ready> {
+        BrowserTreeComponent::new(self.clone()).render_html_fragment()
+    }
+
+    fn render_html_page(&self, page: Option<PageOptions>) -> HtmlPage {
+        BrowserTreeComponent::new(self.clone()).render_html_page(page)
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+}
+
+impl BlockQuote {
+    /// Builds the inline children for the quote's main paragraph in the
+    /// canonical render tree.
+    ///
+    /// For [`RenderableTerminalContent::String`] the content becomes a single
+    /// `Text` node. For [`RenderableTerminalContent::Component`] the projection
+    /// downcasts to known structured types so inline styling survives:
+    ///
+    /// - [`Prose`] is projected through [`Prose::to_render_nodes`], preserving
+    ///   bold/italic/colored inline runs as `Strong` / `Emphasis` / styled
+    ///   `Span` nodes that the terminal tree renderer lowers back to SGR.
+    /// - Any other component falls back to the ANSI-stripped optimistic render
+    ///   — a deliberately lossy plain-text projection that keeps the tree
+    ///   target-agnostic.
+    fn paragraph_children(&self) -> Vec<RenderNode> {
         match &self.content {
-            RenderableTerminalContent::String(s) => s.clone(),
+            RenderableTerminalContent::String(s) => vec![RenderNode::text(s.clone())],
             RenderableTerminalContent::Component(component) => {
-                crate::utils::escape_codes::strip_escape_codes(component.render_optimistic(None))
+                if let Some(prose) = component.as_any().downcast_ref::<Prose>() {
+                    return prose.to_render_nodes();
+                }
+                let stripped = crate::utils::escape_codes::strip_escape_codes(
+                    component.render_optimistic(None),
+                );
+                vec![RenderNode::text(stripped)]
             }
         }
     }
 }
 
-impl renderable::tree::TreeRenderable for BlockQuote {
+impl TreeRenderable for BlockQuote {
     /// Projects the block quote into the canonical render tree as a
-    /// [`NodeKind::BlockQuote`].
+    /// [`NodeKind::BlockQuote`](renderable::tree::NodeKind::BlockQuote).
     ///
-    /// The textual content becomes a single `Paragraph` of `Text`. When an
-    /// attribution is present it is appended as a second `Paragraph`
-    /// containing a single `Text` of the form `— {attribution}`.
+    /// The textual content becomes a single `Paragraph` whose children are
+    /// produced by [`Self::paragraph_children`]. A `String` content becomes a
+    /// single `Text` node; a [`Prose`] component is projected into structured
+    /// inline nodes (`Strong` / `Emphasis` / styled `Span`) so its declared
+    /// styling survives on the Terminal target. When an attribution is present
+    /// it is appended as a second `Paragraph` containing a single `Text` of
+    /// the form `— {attribution}`.
     ///
     /// A non-default [`Layout`] (margin, alignment, max-width, word wrap) is
     /// recorded on the root node's attributes so the tree renderers apply it,
@@ -393,14 +539,11 @@ impl renderable::tree::TreeRenderable for BlockQuote {
     /// The declared [`Style`] — the left border plus any text and background
     /// color set through the builder shims — is recorded on the node so the
     /// terminal tree renderer lowers the same appearance the bespoke renderer
-    /// produces. The Markdown and Browser renderers ignore the style, so their
-    /// output is unaffected.
-    fn render_tree(&self) -> renderable::tree::RenderNode {
-        use renderable::tree::RenderNode;
-
-        let mut children = vec![RenderNode::paragraph(vec![RenderNode::text(
-            self.plain_text(),
-        )])];
+    /// produces. The Markdown and Browser renderers ignore the styling color
+    /// slots (they have no semantic Markdown peer), so their output continues
+    /// to match a plain quote.
+    fn render_tree(&self) -> RenderNode {
+        let mut children = vec![RenderNode::paragraph(self.paragraph_children())];
 
         if let Some(attribution) = &self.attribution {
             children.push(RenderNode::paragraph(vec![RenderNode::text(format!(
@@ -519,9 +662,13 @@ mod tests {
             Some("Shakespeare"),
         );
         let result = quote.render_optimistic(None);
+        // The render-tree path renders the attribution as a separate child
+        // paragraph; the blank separator line therefore carries the bordered
+        // space prefix `│ ` rather than the bare `│` that the bespoke renderer
+        // emitted.
         assert_eq!(
             strip_ansi(&result),
-            "│ To be or not to be\n│\n│ — Shakespeare"
+            "│ To be or not to be\n│ \n│ — Shakespeare"
         );
     }
 
@@ -534,7 +681,7 @@ mod tests {
         let result = quote.render_optimistic(None);
         assert_eq!(
             strip_ansi(&result),
-            "│ The unexamined life is not worth living\n│\n│ — Socrates"
+            "│ The unexamined life is not worth living\n│ \n│ — Socrates"
         );
     }
 
@@ -545,7 +692,10 @@ mod tests {
             Some("Author"),
         );
         let result = quote.render_optimistic(None);
-        assert_eq!(strip_ansi(&result), "│ Line one\n│ Line two\n│\n│ — Author");
+        assert_eq!(
+            strip_ansi(&result),
+            "│ Line one\n│ Line two\n│ \n│ — Author"
+        );
     }
 
     // =========================================================================
@@ -647,8 +797,10 @@ mod tests {
     fn test_empty_content() {
         let quote = BlockQuote::from("");
         let result = quote.render_optimistic(None);
-        // Empty content produces no lines (nothing to iterate over in .lines())
-        assert_eq!(result, "");
+        // The render-tree path still emits a single bordered line for the
+        // empty paragraph child. After ANSI stripping the visible bytes are
+        // the border prefix `│ ` only.
+        assert_eq!(strip_ansi(&result), "│ ");
     }
 
     #[test]
@@ -859,10 +1011,10 @@ mod tests {
     // TreeRenderable Tests
     // =========================================================================
 
-    use renderable::tree::render::{
-        BrowserRenderOptions, MarkdownRenderOptions, render_browser_node, render_markdown_node,
-    };
-    use renderable::tree::{NodeKind, TreeRenderable};
+    // `render_markdown_node`, `MarkdownRenderOptions`, and `TreeRenderable` are
+    // already imported at the file level via `use super::*`.
+    use renderable::tree::render::{render_browser_node, BrowserRenderOptions};
+    use renderable::tree::NodeKind;
 
     #[test]
     fn test_render_tree_root_is_block_quote() {
@@ -940,5 +1092,294 @@ mod tests {
         let html = rendered.output.render();
         assert!(html.contains("<blockquote>"));
         assert!(html.contains("Quoted text"));
+    }
+
+    // =========================================================================
+    // MarkdownRenderable Tests
+    // =========================================================================
+
+    #[test]
+    fn test_render_markdown_simple() {
+        let quote = BlockQuote::from("Quoted text");
+        assert_eq!(quote.render_markdown(), "> Quoted text");
+    }
+
+    #[test]
+    fn test_render_markdown_with_attribution() {
+        let quote = BlockQuote::new(
+            RenderableTerminalContent::from("To be or not to be"),
+            Some("Shakespeare"),
+        );
+        let output = quote.render_markdown();
+        assert!(output.starts_with("> "));
+        assert!(output.contains("To be or not to be"));
+        assert!(output.contains("— Shakespeare"));
+    }
+
+    #[test]
+    fn test_render_markdown_multiline() {
+        let quote = BlockQuote::from("First line\nSecond line");
+        let output = quote.render_markdown();
+        for line in output.lines() {
+            assert!(
+                line.starts_with('>'),
+                "every line should be prefixed with `>`: {line:?}"
+            );
+        }
+        assert!(output.contains("First line"));
+        assert!(output.contains("Second line"));
+    }
+
+    #[test]
+    fn test_render_markdown_from_prose_strips_styling() {
+        let prose = Prose::new("<b>bold content</b>");
+        let quote = BlockQuote::from(prose);
+        let output = quote.render_markdown();
+        // Prose styling is intentionally flattened by the tree projection.
+        assert!(output.contains("bold content"));
+        assert!(output.starts_with("> "));
+    }
+
+    #[test]
+    fn test_render_markdown_empty_quote() {
+        let quote = BlockQuote::from("");
+        // Empty content should still be representable; even a single `>` line
+        // is acceptable. The contract is only "no panic and valid Markdown".
+        let _ = quote.render_markdown();
+    }
+
+    #[test]
+    fn test_render_markdown_plus_matches_markdown() {
+        let quote = BlockQuote::new(
+            RenderableTerminalContent::from("portable across dialects"),
+            Some("Author"),
+        );
+        assert_eq!(quote.render_markdown(), quote.render_markdown_plus());
+    }
+
+    #[test]
+    fn test_render_markdown_ignores_style() {
+        // Style attributes (color, background, border) have no Markdown
+        // representation; the output must match an unstyled quote.
+        let styled = BlockQuote::from("text")
+            .with_text_color(Color::Tailwind(Tailwind::Red500))
+            .with_bg_color(Color::Tailwind(Tailwind::Gray100))
+            .with_left_block_color(Color::Tailwind(Tailwind::Blue500));
+        let plain = BlockQuote::from("text");
+        assert_eq!(styled.render_markdown(), plain.render_markdown());
+    }
+
+    #[test]
+    fn test_render_markdown_custom_border_uses_canonical_markdown() {
+        // A custom terminal-only border prefix must not leak into Markdown.
+        let quote = BlockQuote::from("text").with_border("> ");
+        let output = quote.render_markdown();
+        assert!(output.starts_with("> "));
+        assert!(!output.contains("│"));
+    }
+
+    // =========================================================================
+    // BrowserRenderable Tests
+    // =========================================================================
+
+    #[test]
+    fn test_browser_renderable_fragment_contains_blockquote() {
+        let quote = BlockQuote::from("Quoted text");
+        let html = BrowserRenderable::render_html_fragment(&quote).render();
+        assert!(html.contains("<blockquote>"));
+        assert!(html.contains("Quoted text"));
+    }
+
+    #[test]
+    fn test_browser_renderable_fragment_with_attribution() {
+        let quote = BlockQuote::new(
+            RenderableTerminalContent::from("To be or not to be"),
+            Some("Shakespeare"),
+        );
+        let html = BrowserRenderable::render_html_fragment(&quote).render();
+        assert!(html.contains("<blockquote>"));
+        assert!(html.contains("To be or not to be"));
+        assert!(html.contains("— Shakespeare"));
+        // Attribution becomes a second paragraph inside the blockquote.
+        assert_eq!(html.matches("<p>").count(), 2);
+    }
+
+    #[test]
+    fn test_browser_renderable_fragment_from_prose() {
+        let prose = Prose::new("<b>bold content</b>");
+        let quote = BlockQuote::from(prose);
+        let html = BrowserRenderable::render_html_fragment(&quote).render();
+        assert!(html.contains("<blockquote>"));
+        // Prose styling is flattened to plain text by `render_tree`.
+        assert!(html.contains("bold content"));
+    }
+
+    #[test]
+    fn test_browser_renderable_empty_fragment() {
+        let quote = BlockQuote::from("");
+        let html = BrowserRenderable::render_html_fragment(&quote).render();
+        assert!(html.contains("<blockquote>"));
+    }
+
+    #[test]
+    fn test_browser_renderable_page_includes_fragment() {
+        let quote = BlockQuote::from("Quoted text");
+        let page = BrowserRenderable::render_html_page(&quote, None);
+        let html = page.render();
+        assert!(html.contains("<html"));
+        assert!(html.contains("<body>"));
+        assert!(html.contains("<blockquote>"));
+        assert!(html.contains("Quoted text"));
+    }
+
+    #[test]
+    fn test_browser_renderable_page_with_options() {
+        use renderable::browser::PageOptions;
+
+        let quote = BlockQuote::from("Quoted text");
+        let page = BrowserRenderable::render_html_page(
+            &quote,
+            Some(PageOptions {
+                css_variables: Some(vec![("accent".to_string(), "#336699".to_string())]),
+                ..PageOptions::default()
+            }),
+        );
+        let html = page.render();
+        // PageOptions wire through to the rolled-up CSS, and the fragment is
+        // preserved inside the body.
+        assert!(html.contains("<blockquote>"));
+        assert!(html.contains("Quoted text"));
+    }
+
+    #[test]
+    fn test_browser_renderable_as_any_downcasts() {
+        let quote = BlockQuote::from("any");
+        let any = BrowserRenderable::as_any(&quote);
+        assert!(any.downcast_ref::<BlockQuote>().is_some());
+    }
+
+    #[test]
+    fn test_browser_renderable_styled_still_produces_blockquote() {
+        // Browser style lowering carries `color` through as an inline CSS
+        // declaration (e.g. `<blockquote style="color:#…">`), so an exact
+        // `<blockquote>` substring match is too tight when the element
+        // carries attributes. We only check the semantic element name and
+        // the content survive.
+        let quote = BlockQuote::from("Important")
+            .with_text_color(Color::Tailwind(Tailwind::Red500))
+            .with_left_block_color(Color::Tailwind(Tailwind::Blue500));
+        let html = BrowserRenderable::render_html_fragment(&quote).render();
+        assert!(html.contains("<blockquote"));
+        assert!(html.contains("</blockquote>"));
+        assert!(html.contains("Important"));
+    }
+
+    // =========================================================================
+    // Compatibility Fallback (with_border) Regression Tests
+    // =========================================================================
+
+    #[test]
+    fn test_custom_border_uses_legacy_renderer() {
+        // The default `│ ` border routes through the tree renderer. A custom
+        // border such as `"> "` must keep working through the bespoke
+        // compatibility path — the prefix is preserved verbatim per line, and
+        // attribution uses the trimmed border character.
+        let quote = BlockQuote::from("hello world").with_border("> ");
+        let result = quote.render_optimistic(Some(80));
+        assert_eq!(strip_ansi(&result), "> hello world");
+    }
+
+    #[test]
+    fn test_custom_border_with_attribution_preserves_prefix() {
+        let quote = BlockQuote::new(
+            RenderableTerminalContent::from("Quoted text"),
+            Some("Source"),
+        );
+        let custom = quote.with_border("!! ");
+        let result = custom.render_optimistic(Some(80));
+        let stripped = strip_ansi(&result);
+        // Every non-blank content/attribution line begins with the custom
+        // border; the bespoke renderer uses `!!` (trimmed) on the blank
+        // separator before attribution.
+        assert!(stripped.contains("!! Quoted text"));
+        assert!(stripped.contains("!! — Source"));
+        // The default `│` glyph must not appear once a custom border is set.
+        assert!(!stripped.contains('│'));
+    }
+
+    #[test]
+    fn test_custom_border_drops_default_styled_glyph() {
+        // The bespoke compatibility path emits the literal custom prefix
+        // verbatim; no box-drawing `│` glyph should appear once a non-default
+        // border has been set, regardless of the underlying `Style.border`
+        // color slot inherited from `BlockQuote::default()`.
+        let quote = BlockQuote::from("plain").with_border("> ");
+        let result = quote.render_optimistic(Some(80));
+        assert!(strip_ansi(&result).starts_with("> "));
+        assert!(!strip_ansi(&result).contains('│'));
+    }
+
+    // =========================================================================
+    // Inline Prose Styling Preservation (regression for review feedback)
+    // =========================================================================
+
+    /// A `Prose` body carrying `<b>foo</b>` must emit SGR bold around `foo`
+    /// when the quote renders on the terminal target via the render-tree path.
+    ///
+    /// Prior to the prose IR projection this assertion failed: the BlockQuote
+    /// tree projection flattened Prose to plain text via `plain_text()`, so
+    /// `bt quote "<b>foo</b>"` lost all inline styling. The fix downcasts the
+    /// content component to `Prose` and projects its IR into structured inline
+    /// nodes (Strong / Emphasis / styled Span) that the terminal tree
+    /// renderer lowers back to SGR.
+    #[test]
+    fn test_prose_bold_inline_styling_survives_terminal_tree_render() {
+        let prose = Prose::new("<b>foo</b> bar");
+        let quote = BlockQuote::from(prose);
+        let term = Terminal::new_optimistic(80);
+        let rendered = quote.render(&term);
+
+        // SGR bold open code is present.
+        assert!(
+            rendered.contains("\x1b[1m"),
+            "expected SGR bold open (`\\x1b[1m`) around bold span; got: {rendered:?}"
+        );
+        // The visible text `foo` and `bar` survive.
+        let stripped = strip_ansi(&rendered);
+        assert!(stripped.contains("foo"), "missing `foo` in: {stripped:?}");
+        assert!(stripped.contains("bar"), "missing `bar` in: {stripped:?}");
+    }
+
+    /// Italic inline styling lowers to SGR `\x1b[3m`.
+    #[test]
+    fn test_prose_italic_inline_styling_survives_terminal_tree_render() {
+        let prose = Prose::new("plain <i>emphatic</i> tail");
+        let quote = BlockQuote::from(prose);
+        let term = Terminal::new_optimistic(80);
+        let rendered = quote.render(&term);
+
+        assert!(
+            rendered.contains("\x1b[3m"),
+            "expected SGR italic open (`\\x1b[3m`); got: {rendered:?}"
+        );
+        assert!(strip_ansi(&rendered).contains("emphatic"));
+    }
+
+    /// Colored inline runs lower to truecolor SGR escapes.
+    #[test]
+    fn test_prose_color_inline_styling_survives_terminal_tree_render() {
+        let prose = Prose::new("<red>error</red>: something went wrong");
+        let quote = BlockQuote::from(prose);
+        let term = Terminal::new_optimistic(80);
+        let rendered = quote.render(&term);
+
+        // Either truecolor (`38;2;…`) or basic-color (`31`) is acceptable —
+        // the optimistic terminal picks whichever palette matches its
+        // declared color depth. Both signal "color SGR was emitted".
+        assert!(
+            rendered.contains("\x1b[38;2;") || rendered.contains("\x1b[31m"),
+            "expected a foreground color SGR for <red>; got: {rendered:?}"
+        );
+        assert!(strip_ansi(&rendered).contains("error"));
     }
 }

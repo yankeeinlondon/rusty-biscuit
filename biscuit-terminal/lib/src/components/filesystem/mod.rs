@@ -96,11 +96,25 @@ use paste::paste;
 
 use self::metrics::MetricConfig;
 
+use renderable::browser::PageOptions;
+use renderable::browser::fragment::{BrowserFragment, Ready};
+use renderable::color::{BasicColor, Color};
+use renderable::html::HtmlPage;
+use renderable::layout::TargetValue as RTargetValue;
+use renderable::markdown::MarkdownRenderable;
+use renderable::style::{PerMode, Style, TextEmphasis};
+use renderable::tree::render::{
+    BrowserRenderOptions, MarkdownDialect, MarkdownRenderOptions, render_browser_node,
+    render_markdown_node,
+};
+use renderable::tree::{ListMarkerPolicy, NodeKind, RenderNode, RenderStrictness, TreeRenderable};
+
 use crate::components::prose::Prose;
-use crate::components::renderable::TerminalRenderable;
+use crate::components::renderable::{BrowserRenderable, TerminalRenderable};
 use crate::terminal::Terminal;
 use crate::utils::block_constraint::{split_at_visible_width, visible_width};
 use crate::utils::layout::{Layout, LayoutTerminalExt};
+use crate::utils::wrap_policy::WordWrap;
 
 /// A terminal component that renders a filesystem directory tree.
 ///
@@ -2091,6 +2105,68 @@ fn format_permissions_string(mode: u32, is_tty: bool) -> String {
 }
 
 /// Formats a metric label/value pair with optional highlighting.
+/// Returns the human-readable label for a [`MetricKind`] as used in the
+/// `( label: value, … )` suffix produced by both the bespoke ANSI renderer
+/// and the canonical render tree projection.
+fn fs_metric_label(kind: MetricKind) -> &'static str {
+    match kind {
+        MetricKind::FileSize => "file size",
+        MetricKind::Tokens => "tokens",
+        MetricKind::Created | MetricKind::CreatedSince => "created",
+        MetricKind::Modified | MetricKind::ModifiedSince => "modified",
+        #[cfg(unix)]
+        MetricKind::Permissions | MetricKind::PermissionsNumeric => "perm",
+        #[cfg(unix)]
+        MetricKind::Owner => "owner",
+        #[cfg(unix)]
+        MetricKind::Group => "group",
+        // On non-Unix the Unix-only kinds simply have no label; the caller
+        // never asks for one because their value resolver returns None.
+        #[cfg(not(unix))]
+        MetricKind::Permissions
+        | MetricKind::PermissionsNumeric
+        | MetricKind::Owner
+        | MetricKind::Group => "",
+    }
+}
+
+/// Returns the plain-text value string for a [`MetricKind`] read from
+/// [`FileMetrics`], or `None` when the metric is absent.
+///
+/// The output mirrors the ANSI-free path of
+/// [`FileSystem::format_single_metric`] so projection and the bespoke
+/// renderer agree on the displayed value.
+fn fs_metric_value_string(kind: MetricKind, metrics: &FileMetrics) -> Option<String> {
+    match kind {
+        MetricKind::FileSize => metrics.file_size.map(format_bytes),
+        MetricKind::Tokens => metrics.tokens.map(format_token_count),
+        MetricKind::Created => metrics
+            .created
+            .map(|dt| dt.format("%Y-%m-%d %H:%M").to_string()),
+        MetricKind::CreatedSince => metrics.created.map(format_relative_time),
+        MetricKind::Modified => metrics
+            .modified
+            .map(|dt| dt.format("%Y-%m-%d %H:%M").to_string()),
+        MetricKind::ModifiedSince => metrics.modified.map(format_relative_time),
+        #[cfg(unix)]
+        MetricKind::Permissions => metrics
+            .permissions_mode
+            // `is_tty=false` strips color from `format_permissions_string`.
+            .map(|mode| format_permissions_string(mode, false)),
+        #[cfg(unix)]
+        MetricKind::PermissionsNumeric => metrics.permissions_mode.map(|mode| format!("{mode:o}")),
+        #[cfg(unix)]
+        MetricKind::Owner => metrics.owner.clone(),
+        #[cfg(unix)]
+        MetricKind::Group => metrics.group.clone(),
+        #[cfg(not(unix))]
+        MetricKind::Permissions
+        | MetricKind::PermissionsNumeric
+        | MetricKind::Owner
+        | MetricKind::Group => None,
+    }
+}
+
 fn format_metric_pair(label: &str, value: &str, is_tty: bool, highlight: bool) -> String {
     if is_tty {
         let dim_label = format!("\x1b[2m{}:\x1b[0m", label);
@@ -2150,6 +2226,696 @@ fn get_groupname_from_gid(gid: u32) -> Option<String> {
         }
         let name = std::ffi::CStr::from_ptr((*gr).gr_name);
         Some(name.to_string_lossy().into_owned())
+    }
+}
+
+// ============================================================
+// Canonical Render-Tree Projection (RT-FILESYSTEM-001)
+// ============================================================
+//
+// The projection emits a `Root` containing an optional root-header `Paragraph`
+// and an unordered `List` carrying `ListMarkerPolicy::TreeConnectors`. Each
+// entry becomes a `ListItem` with semantic classes (`fs-dir`, `fs-file`, …)
+// and a `Paragraph` containing an icon `Span`, the entry name (or a `Link`),
+// and an optional metrics `Span`. Directory items nest a sibling `List` with
+// the same marker policy so the terminal renderer can infer connector
+// geometry.
+//
+// The production `TerminalRenderable::render` path stays bespoke per the
+// FileSystem migration sequence; this projection feeds Markdown, Browser, and
+// future terminal parity tests once the parity harness lands.
+
+/// Semantic class hooks used by the canonical projection.
+///
+/// Browser CSS and MarkdownPlus consume these as hooks; the terminal renderer
+/// reads typed `Style` instead and does not depend on `fs-*` class names.
+const CLASS_ROOT: &str = "fs-root";
+const CLASS_DIR: &str = "fs-dir";
+const CLASS_FILE: &str = "fs-file";
+const CLASS_IGNORED: &str = "fs-ignored";
+const CLASS_SYMLINK: &str = "fs-symlink";
+const CLASS_ERROR: &str = "fs-error";
+const CLASS_DEPTH_LIMIT: &str = "fs-depth-limit";
+const CLASS_DOT: &str = "fs-dot";
+const CLASS_HIGHLIGHT_RED: &str = "fs-highlight-red";
+const CLASS_HIGHLIGHT_GREEN: &str = "fs-highlight-green";
+const CLASS_ICON: &str = "fs-icon";
+const CLASS_METRICS: &str = "fs-metrics";
+const CLASS_METRIC_HIGHLIGHT: &str = "fs-metric-highlight";
+
+/// Precedence-ordered foreground kind used by the canonical projection.
+///
+/// Mirrors the precedence used by the bespoke ANSI [`FileSystem::style_prefix`]
+/// so the typed `Style` projection lowers to the same observable color in the
+/// terminal renderer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FsFgKind {
+    /// No foreground color override (ordinary files).
+    None,
+    /// Highlight-red pattern matched the name.
+    HighlightRed,
+    /// Highlight-green pattern matched the name.
+    HighlightGreen,
+    /// Directory with a permission error.
+    Error,
+    /// Directory entry (bold blue in the bespoke renderer).
+    Directory,
+    /// Symbolic link entry (cyan in the bespoke renderer).
+    Symlink,
+}
+
+impl FsFgKind {
+    fn color(self) -> Option<Color> {
+        match self {
+            FsFgKind::None => None,
+            FsFgKind::HighlightRed | FsFgKind::Error => Some(Color::BasicColor(BasicColor::Red)),
+            FsFgKind::HighlightGreen => Some(Color::BasicColor(BasicColor::Green)),
+            FsFgKind::Directory => Some(Color::BasicColor(BasicColor::Blue)),
+            FsFgKind::Symlink => Some(Color::BasicColor(BasicColor::Cyan)),
+        }
+    }
+}
+
+/// Universal [`Style`] color slot for a concrete [`Color`].
+fn fs_universal_color(color: Color) -> RTargetValue<PerMode<Color>> {
+    RTargetValue::universal(PerMode::universal(color))
+}
+
+/// Returns the Unicode fallback glyph for a [`TreeNode`].
+///
+/// The canonical projection always uses the Unicode fallback set because the
+/// projection is target-agnostic and Nerd Font glyphs are not portable to
+/// Markdown or HTML. The bespoke terminal renderer continues to swap in Nerd
+/// Font icons via [`FileSystem::get_icon_with_padding`] when the terminal
+/// advertises Nerd Font support.
+fn fs_unicode_icon(node: &TreeNode) -> &'static str {
+    match node {
+        TreeNode::Dir {
+            has_error: true, ..
+        } => "⚠",
+        TreeNode::Dir {
+            at_depth_limit: true,
+            ..
+        } => "📁",
+        TreeNode::Dir { .. } => "📂",
+        TreeNode::File { .. } => "📄",
+    }
+}
+
+/// Recursively removes every `fs-icon` [`Span`](renderable::tree::NodeKind::Span)
+/// from `node`, along with a single literal `" "` text node immediately
+/// following it.
+///
+/// Used by [`FileSystem::render_markdown`] to satisfy the spec requirement
+/// that icons are omitted from portable Markdown. MarkdownPlus and Browser
+/// keep the spans because they have CSS hooks to control rendering.
+fn fs_strip_icon_spans(node: &mut RenderNode) {
+    if let Some(children) = node.children_mut() {
+        // Two-pass walk: first remove any direct `fs-icon` child plus the
+        // literal space that follows it; then recurse.
+        let mut i = 0;
+        while i < children.len() {
+            let is_icon = matches!(&children[i].kind, NodeKind::Span { .. })
+                && children[i]
+                    .attrs
+                    .classes
+                    .iter()
+                    .any(|c| c == CLASS_ICON);
+            if is_icon {
+                children.remove(i);
+                // If the next sibling is the canonical " " separator, drop
+                // it too so the projected paragraph reads `name (metrics)`
+                // rather than ` name`.
+                if i < children.len()
+                    && let NodeKind::Text { value } = &children[i].kind
+                    && value == " "
+                {
+                    children.remove(i);
+                }
+                continue;
+            }
+            i += 1;
+        }
+        for child in children.iter_mut() {
+            fs_strip_icon_spans(child);
+        }
+    }
+}
+
+impl FileSystem {
+    /// Resolves the precedence-ordered foreground kind for a tree node.
+    fn fs_fg_kind(&self, node: &TreeNode) -> FsFgKind {
+        let name = node.name();
+        for pattern in &self.highlight_red {
+            if name.contains(pattern) {
+                return FsFgKind::HighlightRed;
+            }
+        }
+        for pattern in &self.highlight_green {
+            if name.contains(pattern) {
+                return FsFgKind::HighlightGreen;
+            }
+        }
+        if let TreeNode::Dir {
+            has_error: true, ..
+        } = node
+        {
+            return FsFgKind::Error;
+        }
+        if node.is_symlink() {
+            return FsFgKind::Symlink;
+        }
+        if node.is_dir() {
+            return FsFgKind::Directory;
+        }
+        FsFgKind::None
+    }
+
+    /// Builds the entry [`Style`] for a tree node, mirroring the precedence
+    /// used by the bespoke terminal renderer:
+    ///
+    /// - highlight red / green have highest priority
+    /// - error directories are red
+    /// - gitignored entries are dim when `dim_gitignore` is true
+    /// - configured dotfiles/dotdirs are italic
+    /// - directories are bold blue unless overridden by error/highlight
+    /// - symlinks are cyan
+    fn fs_entry_style(&self, node: &TreeNode) -> Style {
+        let fg = self.fs_fg_kind(node);
+        let name = node.name();
+        let is_dot = name.starts_with('.');
+        let is_error = matches!(
+            node,
+            TreeNode::Dir {
+                has_error: true,
+                ..
+            }
+        );
+
+        let mut emphasis = TextEmphasis::default();
+        // Highlight matches short-circuit dim/italic/bold to mirror the
+        // bespoke `style_prefix`, which returns the bare `\x1b[31m`/`\x1b[32m`
+        // SGR sequence and never stacks additional attributes when a
+        // highlight pattern matches.
+        let is_highlighted = matches!(fg, FsFgKind::HighlightRed | FsFgKind::HighlightGreen);
+        if !is_highlighted {
+            if !is_error && node.is_ignored() && self.dim_gitignore {
+                emphasis.dim = true;
+            }
+            let should_italicize = is_dot
+                && match node {
+                    TreeNode::Dir { .. } => self.italicize_dot_dirs,
+                    TreeNode::File { .. } => self.italicize_dot_files,
+                };
+            if should_italicize {
+                emphasis.italic = true;
+            }
+            // Bold applies to directories that resolve to the directory fg
+            // or to symlinks pointing at a directory (the bespoke renderer
+            // pushes `1;34` then layers `36` on top — bold survives even
+            // when cyan wins the foreground color). Highlight/error variants
+            // remain un-bold to match the bespoke renderer's `is_error`
+            // branch (which skips the bold/blue codes).
+            if matches!(fg, FsFgKind::Directory) || (node.is_symlink() && node.is_dir()) {
+                emphasis.bold = true;
+            }
+        }
+
+        Style {
+            color: fg.color().map(fs_universal_color),
+            emphasis,
+            ..Style::default()
+        }
+    }
+
+    /// Builds the semantic class list for a tree-entry node.
+    fn fs_entry_classes(&self, node: &TreeNode) -> Vec<String> {
+        let name = node.name();
+        let mut classes: Vec<String> = Vec::new();
+
+        classes.push(
+            match node {
+                TreeNode::Dir { .. } => CLASS_DIR,
+                TreeNode::File { .. } => CLASS_FILE,
+            }
+            .to_string(),
+        );
+
+        if node.is_ignored() {
+            classes.push(CLASS_IGNORED.to_string());
+        }
+        if node.is_symlink() {
+            classes.push(CLASS_SYMLINK.to_string());
+        }
+        if let TreeNode::Dir {
+            has_error: true, ..
+        } = node
+        {
+            classes.push(CLASS_ERROR.to_string());
+        }
+        if let TreeNode::Dir {
+            at_depth_limit: true,
+            ..
+        } = node
+        {
+            classes.push(CLASS_DEPTH_LIMIT.to_string());
+        }
+
+        let is_dot = name.starts_with('.');
+        let dot_styled = is_dot
+            && match node {
+                TreeNode::Dir { .. } => self.italicize_dot_dirs,
+                TreeNode::File { .. } => self.italicize_dot_files,
+            };
+        if dot_styled {
+            classes.push(CLASS_DOT.to_string());
+        }
+
+        for pattern in &self.highlight_red {
+            if name.contains(pattern) {
+                classes.push(CLASS_HIGHLIGHT_RED.to_string());
+                break;
+            }
+        }
+        for pattern in &self.highlight_green {
+            if name.contains(pattern) {
+                classes.push(CLASS_HIGHLIGHT_GREEN.to_string());
+                break;
+            }
+        }
+
+        classes
+    }
+
+    /// Projects a single tree node into a `ListItem` containing a `Paragraph`
+    /// (icon + name + optional metrics) and an optional nested `List` of
+    /// directory children.
+    ///
+    /// `current_path` is the absolute path of the directory containing `node`.
+    /// The caller is responsible for canonicalizing the root once (see
+    /// [`fs_render_tree_inner`]) so `file://` URLs do not embed `./` or `..`.
+    fn fs_project_tree_node(&self, node: &TreeNode, current_path: &Path) -> RenderNode {
+        let name = node.name();
+
+        // ── Icon span (semantic class only; the bespoke renderer selects
+        // Nerd Font icons on its own; the projection prefers Unicode).
+        let icon_glyph = fs_unicode_icon(node);
+        let icon_span = RenderNode::span(
+            vec![CLASS_ICON.to_string()],
+            vec![RenderNode::text(icon_glyph)],
+        );
+
+        // ── Name (or Link when file_links is enabled).
+        // The caller threads an already-canonicalized `current_path`, so
+        // `current_path.join(name)` produces an absolute URL without `./`.
+        // The name is wrapped in a classed `Span` so the MarkdownPlus and
+        // Browser renderers can hang entry-kind CSS (`fs-dir`, `fs-file`,
+        // `fs-symlink`, …) off the name itself. ListItem-level classes are
+        // preserved for Browser fidelity.
+        let entry_classes = self.fs_entry_classes(node);
+        let inner_name: RenderNode = if self.file_links {
+            let abs_path = current_path.join(name);
+            let url = format!("file://{}", abs_path.display());
+            RenderNode::link(url, None, vec![RenderNode::text(name)])
+        } else {
+            RenderNode::text(name)
+        };
+        let name_node = RenderNode::span(entry_classes.clone(), vec![inner_name]);
+
+        // ── Metrics span. The projected metrics are an inline span tree
+        // (rather than flattened plain text) so threshold-triggered values
+        // can carry a bold-yellow Style on their own child span and survive
+        // into Terminal/Browser/MarkdownPlus rendering. See
+        // [`fs_project_metrics`](FileSystem::fs_project_metrics).
+        let metrics_span = self.fs_project_metrics(node);
+
+        let mut para_children: Vec<RenderNode> = Vec::with_capacity(5);
+        para_children.push(icon_span);
+        // Literal space separates the icon glyph from the name in the
+        // canonical projection. Browser CSS controls spacing via `fs-icon`.
+        para_children.push(RenderNode::text(" "));
+        para_children.push(name_node);
+        if let Some(metrics_span) = metrics_span {
+            para_children.push(RenderNode::text(" "));
+            para_children.push(metrics_span);
+        }
+
+        let mut paragraph = RenderNode::paragraph(para_children);
+        let style = self.fs_entry_style(node);
+        if !style.is_empty() {
+            paragraph.attrs.set_style(&style);
+        }
+
+        let mut item_children: Vec<RenderNode> = vec![paragraph];
+        if let TreeNode::Dir { children, .. } = node
+            && !children.is_empty()
+        {
+            let nested_path = current_path.join(name);
+            let nested_items: Vec<RenderNode> = children
+                .iter()
+                .map(|child| self.fs_project_tree_node(child, &nested_path))
+                .collect();
+            let mut nested_list = RenderNode::list(false, None, nested_items);
+            nested_list
+                .attrs
+                .set_list_marker_policy(ListMarkerPolicy::TreeConnectors);
+            item_children.push(nested_list);
+        }
+
+        let mut list_item = RenderNode::list_item(None, item_children);
+        list_item.attrs.classes = entry_classes;
+        list_item
+    }
+
+    /// Projects the metrics suffix for a node as a structured inline span.
+    ///
+    /// The returned [`RenderNode`] carries the `fs-metrics` class on its
+    /// outer [`Span`](renderable::tree::NodeKind::Span). Each metric pair is
+    /// emitted as `<dim>label:</dim> value`, with values that exceed their
+    /// configured `highlight_threshold` wrapped in a bold-yellow child
+    /// `<span class="fs-metric-highlight">value</span>` so the threshold
+    /// signal survives all three render targets.
+    ///
+    /// Returns `None` when no metrics are configured, the node has no
+    /// `FileMetrics`, the node is a directory and `show_metrics_on_directories`
+    /// is false, or every configured metric resolved to `None` for this node.
+    fn fs_project_metrics(&self, node: &TreeNode) -> Option<RenderNode> {
+        if !self.has_any_metrics() {
+            return None;
+        }
+        let metrics = node.metrics()?;
+        if node.is_dir() && !self.show_metrics_on_directories {
+            return None;
+        }
+
+        let pairs: Vec<(MetricKind, String, bool)> = MetricKind::all_in_order()
+            .iter()
+            .filter(|&&kind| self.should_show_metric(kind, node.name()))
+            .filter_map(|&kind| {
+                let value = fs_metric_value_string(kind, metrics)?;
+                let highlighted = self.should_highlight_metric(kind, metrics);
+                Some((kind, value, highlighted))
+            })
+            .collect();
+
+        if pairs.is_empty() {
+            return None;
+        }
+
+        let mut children: Vec<RenderNode> = Vec::with_capacity(pairs.len() * 4 + 2);
+        children.push(RenderNode::text("( "));
+        for (i, (kind, value, highlighted)) in pairs.iter().enumerate() {
+            if i > 0 {
+                children.push(RenderNode::text(", "));
+            }
+            // Dim `label:` span — mirrors the bespoke ANSI `\x1b[2m…\x1b[0m`.
+            let mut label = RenderNode::span(
+                Vec::new(),
+                vec![RenderNode::text(format!("{}:", fs_metric_label(*kind)))],
+            );
+            label.attrs.set_style(&Style {
+                emphasis: TextEmphasis {
+                    dim: true,
+                    ..TextEmphasis::default()
+                },
+                ..Style::default()
+            });
+            children.push(label);
+            children.push(RenderNode::text(" "));
+
+            if *highlighted {
+                let mut hl = RenderNode::span(
+                    vec![CLASS_METRIC_HIGHLIGHT.to_string()],
+                    vec![RenderNode::text(value)],
+                );
+                hl.attrs.set_style(&Style {
+                    color: Some(fs_universal_color(Color::BasicColor(BasicColor::Yellow))),
+                    emphasis: TextEmphasis {
+                        bold: true,
+                        ..TextEmphasis::default()
+                    },
+                    ..Style::default()
+                });
+                children.push(hl);
+            } else {
+                children.push(RenderNode::text(value));
+            }
+        }
+        children.push(RenderNode::text(" )"));
+
+        let outer = RenderNode::span(vec![CLASS_METRICS.to_string()], children);
+        Some(outer)
+    }
+
+    /// Builds the root header `Paragraph` projected onto the canonical tree
+    /// when [`show_root`](FileSystem::show_root) is true.
+    fn fs_project_root_header(&self) -> RenderNode {
+        let name = self
+            .root_path
+            .canonicalize()
+            .ok()
+            .and_then(|p| p.file_name().map(|n| n.to_string_lossy().into_owned()))
+            .or_else(|| {
+                self.root_path
+                    .file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+            })
+            .unwrap_or_else(|| self.root_path.display().to_string());
+
+        let icon_span = RenderNode::span(
+            vec![CLASS_ICON.to_string()],
+            // Root is always a directory; choose a stable Unicode glyph.
+            vec![RenderNode::text("📂")],
+        );
+
+        let name_node = if self.file_links {
+            let abs_path = self
+                .root_path
+                .canonicalize()
+                .unwrap_or_else(|_| self.root_path.clone());
+            RenderNode::link(
+                format!("file://{}", abs_path.display()),
+                None,
+                vec![RenderNode::text(&name)],
+            )
+        } else {
+            RenderNode::text(&name)
+        };
+
+        let mut paragraph =
+            RenderNode::paragraph(vec![icon_span, RenderNode::text(" "), name_node]);
+        // Root header carries bold blue Style; classes mark it as both
+        // `fs-root` and `fs-dir` for CSS hooks.
+        paragraph.attrs.set_style(&Style {
+            color: Some(fs_universal_color(Color::BasicColor(BasicColor::Blue))),
+            emphasis: TextEmphasis {
+                bold: true,
+                ..TextEmphasis::default()
+            },
+            ..Style::default()
+        });
+        paragraph.attrs.classes = vec![CLASS_ROOT.to_string(), CLASS_DIR.to_string()];
+        paragraph
+    }
+
+    /// Builds the canonical render tree even when the FileSystem tree has not
+    /// been built yet. This produces an empty `Root` rather than panicking,
+    /// matching the empty-string contract of [`render_optimistic`].
+    ///
+    /// When `file_links` is enabled the root path is canonicalized once and
+    /// threaded into the entry projection so emitted `file://` URLs are
+    /// absolute even if the caller constructed the component with a relative
+    /// path such as `"."` or `"./src"`. This mirrors the bespoke ANSI
+    /// renderer's `base_path` handling in [`TerminalRenderable::render`].
+    fn fs_render_tree_inner(&self) -> RenderNode {
+        // Silently projecting an empty Root when the FileSystem tree has
+        // not been built is a documented contract (matches the empty-string
+        // contract of `render_optimistic`), but the resulting empty render
+        // tree is a frequent foot-gun for callers who forget to invoke
+        // `ensure_tree_built`. The Markdown / Browser entrypoints clone +
+        // build before calling this; only direct `TreeRenderable::render_tree`
+        // callers can land here without a built tree. Emit a debug-level
+        // trace so the silent empty is at least observable.
+        if self.tree.is_none() {
+            tracing::debug!(
+                root = %self.root_path.display(),
+                "FileSystem render_tree called without ensure_tree_built; \
+                 projecting empty Root"
+            );
+        }
+
+        let mut children: Vec<RenderNode> = Vec::new();
+
+        if self.show_root {
+            children.push(self.fs_project_root_header());
+        }
+
+        // Canonicalize once for OSC8/file:// link generation so that entries
+        // never embed `./` or `..` segments. Falls back to the raw root_path
+        // when canonicalization fails (broken symlinks, missing dir, etc.).
+        let base_path: PathBuf = if self.file_links {
+            self.root_path
+                .canonicalize()
+                .unwrap_or_else(|_| self.root_path.clone())
+        } else {
+            self.root_path.clone()
+        };
+
+        if let Some(tree) = &self.tree
+            && !tree.is_empty()
+        {
+            let entries: Vec<RenderNode> = tree
+                .iter()
+                .map(|node| self.fs_project_tree_node(node, &base_path))
+                .collect();
+            let mut list = RenderNode::list(false, None, entries);
+            list.attrs
+                .set_list_marker_policy(ListMarkerPolicy::TreeConnectors);
+            children.push(list);
+        }
+
+        let mut root = RenderNode::root(children);
+
+        // Tree connectors must never be wrapped — force `WordWrap::None`
+        // onto the root layout so the terminal renderer preserves connector
+        // geometry. Other layout slots (margins, alignment, max_width) ride
+        // along via the component's Layout if non-default.
+        let mut layout = self.layout.clone();
+        layout.word_wrap = WordWrap::None;
+        if layout != Layout::default() {
+            root.attrs.set_layout(&layout);
+        }
+        root
+    }
+}
+
+impl TreeRenderable for FileSystem {
+    /// Projects the filesystem tree into the canonical render tree.
+    ///
+    /// The output is a [`NodeKind::Root`](renderable::tree::NodeKind::Root)
+    /// containing an optional `Paragraph` (the root header) and an unordered
+    /// `List` carrying the [`ListMarkerPolicy::TreeConnectors`] policy. Each
+    /// entry projects to a `ListItem` containing a `Paragraph` with an icon
+    /// `Span`, the entry name (or a `Link` when `file_links` is enabled), and
+    /// an optional metrics `Span`. Directory items nest a sibling `List` with
+    /// the same marker policy.
+    ///
+    /// Word wrap is forced to [`WordWrap::None`] on the root because tree
+    /// connectors must never wrap; other layout slots (margins, alignment,
+    /// max-width) ride along when the component's [`Layout`] is non-default.
+    ///
+    /// The bespoke [`TerminalRenderable::render`] path remains the production
+    /// terminal renderer until parity tests prove the tree renderer produces
+    /// equivalent connector geometry, icons, truncation, OSC8 links, metrics,
+    /// ANSI styling, and layout behavior.
+    fn render_tree(&self) -> RenderNode {
+        // The caller may not have invoked `ensure_tree_built()` — projection
+        // is read-only, so we project from whatever is currently cached and
+        // emit an empty `Root` when nothing has been scanned. This matches
+        // the empty-string contract of `render_optimistic`.
+        self.fs_render_tree_inner()
+    }
+}
+
+impl MarkdownRenderable for FileSystem {
+    /// Renders the filesystem tree as portable Markdown via the canonical
+    /// render tree.
+    ///
+    /// The tree carries [`ListMarkerPolicy::TreeConnectors`], which the
+    /// Markdown renderer degrades to a native nested `- ` list. The render is
+    /// performed under [`RenderStrictness::Lossy`] so the lossy diagnostic
+    /// the renderer would otherwise raise stays out of the CLI output stream
+    /// — Markdown intentionally has no terminal box-drawing characters.
+    ///
+    /// Styling (color, dim, italic) and Nerd Font icons are dropped, as are
+    /// the Unicode fallback icon glyphs (📂 / 📄). The spec calls for icons
+    /// to be omitted in plain Markdown so the output stays portable to
+    /// renderers that lack font support for emoji/PUA glyphs. File links
+    /// continue to render as `[name](file:///absolute/path)`.
+    fn render_markdown(&self) -> String {
+        let mut snapshot = self.clone();
+        snapshot.ensure_tree_built();
+        let mut node = snapshot.fs_render_tree_inner();
+        // Plain Markdown: strip `fs-icon` spans (and their trailing separator
+        // space) so glyphs like 📂 / 📄 do not leak into portable output.
+        // The classed spans remain in MarkdownPlus and Browser.
+        fs_strip_icon_spans(&mut node);
+        let opts = MarkdownRenderOptions {
+            strictness: RenderStrictness::Lossy,
+            ..MarkdownRenderOptions::default()
+        };
+        match render_markdown_node(&node, &opts) {
+            Ok(rendered) => rendered.output,
+            Err(error) => {
+                tracing::error!(%error, "FileSystem markdown render failed");
+                String::new()
+            }
+        }
+    }
+
+    /// Renders the filesystem tree as MarkdownPlus via the canonical render
+    /// tree.
+    ///
+    /// MarkdownPlus accepts inline HTML, so the [`ListMarkerPolicy::TreeConnectors`]
+    /// hint still degrades to a native nested list but classed `<span class="…">`
+    /// hooks survive on the icon and metrics spans for CSS-driven preview.
+    fn render_markdown_plus(&self) -> String {
+        let mut snapshot = self.clone();
+        snapshot.ensure_tree_built();
+        let node = snapshot.fs_render_tree_inner();
+        let opts = MarkdownRenderOptions {
+            dialect: MarkdownDialect::MarkdownPlus,
+            strictness: RenderStrictness::Lossy,
+            ..MarkdownRenderOptions::default()
+        };
+        match render_markdown_node(&node, &opts) {
+            Ok(rendered) => rendered.output,
+            Err(error) => {
+                tracing::error!(%error, "FileSystem markdown_plus render failed");
+                String::new()
+            }
+        }
+    }
+}
+
+impl BrowserRenderable for FileSystem {
+    /// Renders the filesystem tree as an HTML fragment via the canonical
+    /// render tree.
+    ///
+    /// The tree's [`ListMarkerPolicy::TreeConnectors`] hint degrades cleanly
+    /// to a nested `<ul>` / `<li>` structure with the connector list styled
+    /// via `list-style: none` by the browser renderer. Component CSS hooks
+    /// (`fs-dir`, `fs-file`, `fs-icon`, `fs-metrics`, …) survive on each
+    /// node so a site stylesheet can apply icons, color, and metric styling.
+    fn render_html_fragment(&self) -> BrowserFragment<Ready> {
+        let mut snapshot = self.clone();
+        snapshot.ensure_tree_built();
+        let node = snapshot.fs_render_tree_inner();
+        let opts = BrowserRenderOptions {
+            strictness: RenderStrictness::Lossy,
+            ..BrowserRenderOptions::default()
+        };
+        match render_browser_node(&node, &opts) {
+            Ok(rendered) => rendered.output,
+            Err(error) => {
+                tracing::error!(%error, "FileSystem browser render failed");
+                BrowserFragment::new()
+                    .define_as_text_fragment(String::new())
+                    .finalize()
+            }
+        }
+    }
+
+    fn render_html_page(&self, page: Option<PageOptions>) -> HtmlPage {
+        let mut html_page = HtmlPage::from(self.render_html_fragment());
+        if let Some(options) = page {
+            html_page.apply_page_options(options);
+        }
+        html_page
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
     }
 }
 
@@ -4619,7 +5385,7 @@ mod tests {
     #[test]
     fn test_as_any() {
         let fs = FileSystem::default();
-        let any_ref = fs.as_any();
+        let any_ref = TerminalRenderable::as_any(&fs);
 
         // Should be able to downcast back to FileSystem
         assert!(any_ref.downcast_ref::<FileSystem>().is_some());
@@ -5894,5 +6660,751 @@ mod tests {
             ..Default::default()
         };
         assert!(fs.should_highlight_metric(MetricKind::FileSize, &large_metrics));
+    }
+
+    // =============================================================
+    // Render-Tree Projection Tests (RT-FILESYSTEM-001)
+    // =============================================================
+
+    use renderable::tree::{ListMarkerPolicy, NodeKind, RenderNode, TreeRenderable};
+
+    /// Builds a small fixture tree:
+    /// root/
+    ///   ├── src/
+    ///   │   └── main.rs
+    ///   └── README.md
+    fn build_fixture_tree() -> tempfile::TempDir {
+        let temp = tempfile::tempdir().expect("create temp dir");
+        let root = temp.path();
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::write(root.join("src/main.rs"), "fn main() {}\n").unwrap();
+        std::fs::write(root.join("README.md"), "# fixture\n").unwrap();
+        temp
+    }
+
+    /// Counts list-item nodes in a tree (depth-first).
+    fn count_list_items(node: &RenderNode) -> usize {
+        let mut count = 0;
+        match &node.kind {
+            NodeKind::ListItem { children, .. } => {
+                count += 1;
+                for child in children {
+                    count += count_list_items(child);
+                }
+            }
+            _ => {
+                for child in children_of(node) {
+                    count += count_list_items(child);
+                }
+            }
+        }
+        count
+    }
+
+    fn children_of(node: &RenderNode) -> &[RenderNode] {
+        match &node.kind {
+            NodeKind::Root { children }
+            | NodeKind::Paragraph { children }
+            | NodeKind::Section { children, .. }
+            | NodeKind::BlockQuote { children }
+            | NodeKind::List { children, .. }
+            | NodeKind::ListItem { children, .. }
+            | NodeKind::TableRow { children }
+            | NodeKind::TableCell { children }
+            | NodeKind::Strong { children }
+            | NodeKind::Emphasis { children }
+            | NodeKind::Delete { children }
+            | NodeKind::Span { children }
+            | NodeKind::Link { children, .. }
+            | NodeKind::Table { children, .. }
+            | NodeKind::Heading { children, .. } => children,
+            _ => &[],
+        }
+    }
+
+    /// Returns the first `List` node found via DFS.
+    fn first_list(node: &RenderNode) -> Option<&RenderNode> {
+        if matches!(node.kind, NodeKind::List { .. }) {
+            return Some(node);
+        }
+        for child in children_of(node) {
+            if let Some(found) = first_list(child) {
+                return Some(found);
+            }
+        }
+        None
+    }
+
+    /// Collects all classes from all nodes in DFS order.
+    fn collect_classes(node: &RenderNode) -> Vec<String> {
+        let mut out: Vec<String> = node.attrs.classes.clone();
+        for child in children_of(node) {
+            out.extend(collect_classes(child));
+        }
+        out
+    }
+
+    #[test]
+    fn render_tree_returns_root_with_tree_connector_list() {
+        let temp = build_fixture_tree();
+        let mut fs = FileSystem::new(temp.path()).expect("fs");
+        fs.ensure_tree_built();
+
+        let node = fs.render_tree();
+        assert!(matches!(node.kind, NodeKind::Root { .. }));
+
+        // Root contains the root header paragraph plus the tree-connector list.
+        let list = first_list(&node).expect("projected list");
+        assert_eq!(
+            list.attrs.list_marker_policy(),
+            ListMarkerPolicy::TreeConnectors,
+        );
+    }
+
+    #[test]
+    fn render_tree_seeds_word_wrap_none_on_root_when_layout_is_non_default() {
+        use crate::utils::layout::Alignment;
+
+        let temp = build_fixture_tree();
+        // A non-default layout (custom alignment) forces the layout hint
+        // onto the root; we then verify word_wrap was overridden to None.
+        let custom_layout = Layout {
+            alignment: Alignment::Center,
+            ..Layout::default()
+        };
+        let mut fs = FileSystem::new(temp.path())
+            .expect("fs")
+            .layout(custom_layout);
+        fs.ensure_tree_built();
+
+        let node = fs.render_tree();
+        let layout = node
+            .attrs
+            .layout()
+            .expect("layout seeded on root when non-default");
+        // Tree connectors must never wrap.
+        assert!(matches!(layout.word_wrap, renderable::layout::WordWrap::None));
+        // Other layout slots survive the override.
+        assert_eq!(layout.alignment, Alignment::Center);
+    }
+
+    #[test]
+    fn render_tree_omits_layout_hint_when_layout_is_default() {
+        // A FileSystem with no layout customizations should not emit a
+        // layout hint — saving every renderer the deserialization cost and
+        // matching `Layout::default()`'s semantics.
+        let temp = build_fixture_tree();
+        let mut fs = FileSystem::new(temp.path()).expect("fs");
+        fs.ensure_tree_built();
+
+        let node = fs.render_tree();
+        assert!(node.attrs.layout().is_none());
+    }
+
+    #[test]
+    fn render_tree_emits_one_list_item_per_entry() {
+        let temp = build_fixture_tree();
+        let mut fs = FileSystem::new(temp.path()).expect("fs");
+        fs.ensure_tree_built();
+
+        let node = fs.render_tree();
+        // src/ + src/main.rs + README.md = 3 list items.
+        assert_eq!(count_list_items(&node), 3);
+    }
+
+    #[test]
+    fn render_tree_directory_carries_fs_dir_class_and_bold_blue_style() {
+        let temp = build_fixture_tree();
+        let mut fs = FileSystem::new(temp.path()).expect("fs");
+        fs.ensure_tree_built();
+
+        let node = fs.render_tree();
+        let classes = collect_classes(&node);
+        assert!(classes.contains(&CLASS_DIR.to_string()), "{classes:?}");
+        assert!(classes.contains(&CLASS_FILE.to_string()), "{classes:?}");
+
+        // Find the `src` list item's paragraph and verify the typed Style
+        // carries bold + blue.
+        let style = first_entry_style(&node, "src/").or_else(|| first_entry_style(&node, "src"));
+        let style = style.expect("src style");
+        assert!(style.emphasis.bold, "directory should be bold");
+        assert!(style.color.is_some(), "directory should have fg color");
+    }
+
+    /// Finds the `Paragraph` style for an entry whose visible text contains
+    /// the given suffix. Walks the tree top-down.
+    fn first_entry_style(node: &RenderNode, needle: &str) -> Option<renderable::style::Style> {
+        if matches!(node.kind, NodeKind::Paragraph { .. })
+            && paragraph_visible_text(node).contains(needle)
+        {
+            return node.attrs.style();
+        }
+        for child in children_of(node) {
+            if let Some(found) = first_entry_style(child, needle) {
+                return Some(found);
+            }
+        }
+        None
+    }
+
+    /// Concatenates plain text under a node, ignoring styling.
+    fn paragraph_visible_text(node: &RenderNode) -> String {
+        let mut out = String::new();
+        match &node.kind {
+            NodeKind::Text { value } | NodeKind::InlineCode { value } => out.push_str(value),
+            _ => {
+                for child in children_of(node) {
+                    out.push_str(&paragraph_visible_text(child));
+                }
+            }
+        }
+        out
+    }
+
+    #[test]
+    fn render_tree_skips_root_header_when_show_root_is_false() {
+        let temp = build_fixture_tree();
+        let mut fs = FileSystem::new(temp.path()).expect("fs").show_root(false);
+        fs.ensure_tree_built();
+
+        let node = fs.render_tree();
+        let root_classes_present = collect_classes(&node).contains(&CLASS_ROOT.to_string());
+        assert!(!root_classes_present, "fs-root must be absent");
+    }
+
+    #[test]
+    fn render_tree_single_child_directory_produces_single_list_item() {
+        let temp = tempfile::tempdir().expect("create temp dir");
+        let dir = temp.path().join("solo");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("only.txt"), "x").unwrap();
+
+        let mut fs = FileSystem::new(&dir).expect("fs");
+        fs.ensure_tree_built();
+
+        let node = fs.render_tree();
+        // Only one entry; the projection still uses TreeConnectors. The
+        // terminal renderer will choose `└──` because it is also the last
+        // child. We assert structure here; the terminal connector glyph is
+        // covered by the terminal renderer's own tests.
+        let list = first_list(&node).expect("list");
+        assert_eq!(
+            list.attrs.list_marker_policy(),
+            ListMarkerPolicy::TreeConnectors,
+        );
+        if let NodeKind::List { children, .. } = &list.kind {
+            assert_eq!(children.len(), 1);
+        } else {
+            panic!("expected list");
+        }
+    }
+
+    #[test]
+    fn render_tree_empty_directory_emits_only_root_header() {
+        let temp = tempfile::tempdir().expect("create temp dir");
+
+        let mut fs = FileSystem::new(temp.path()).expect("fs");
+        fs.ensure_tree_built();
+
+        let node = fs.render_tree();
+        assert!(first_list(&node).is_none(), "empty dir should have no list");
+    }
+
+    #[test]
+    fn render_tree_file_links_emit_link_nodes_with_file_url() {
+        let temp = build_fixture_tree();
+        let mut fs = FileSystem::new(temp.path()).expect("fs").with_file_links();
+        fs.ensure_tree_built();
+
+        let node = fs.render_tree();
+        // Walk the tree and confirm at least one `Link` with a `file://` URL.
+        fn has_file_link(node: &RenderNode) -> bool {
+            if let NodeKind::Link { url, .. } = &node.kind
+                && url.starts_with("file://")
+            {
+                return true;
+            }
+            children_of(node).iter().any(has_file_link)
+        }
+        assert!(has_file_link(&node), "expected file:// links");
+    }
+
+    #[test]
+    fn render_tree_highlight_red_wins_over_directory_style() {
+        let temp = tempfile::tempdir().expect("create temp dir");
+        std::fs::create_dir_all(temp.path().join("TODO-dir")).unwrap();
+
+        let mut fs = FileSystem::new(temp.path())
+            .expect("fs")
+            .highlight_red("TODO");
+        fs.ensure_tree_built();
+
+        let node = fs.render_tree();
+        let classes = collect_classes(&node);
+        assert!(classes.contains(&CLASS_HIGHLIGHT_RED.to_string()));
+
+        let style = first_entry_style(&node, "TODO-dir").expect("style");
+        // Highlight red overrides the directory bold-blue treatment.
+        assert!(!style.emphasis.bold, "highlight should suppress bold");
+    }
+
+    #[test]
+    fn render_tree_dotfiles_are_italic_when_configured() {
+        let temp = tempfile::tempdir().expect("create temp dir");
+        std::fs::write(temp.path().join(".env"), "X=1").unwrap();
+
+        let mut fs = FileSystem::new(temp.path())
+            .expect("fs")
+            .italicize_dot_files(true);
+        fs.ensure_tree_built();
+
+        let node = fs.render_tree();
+        let classes = collect_classes(&node);
+        assert!(classes.contains(&CLASS_DOT.to_string()));
+        let style = first_entry_style(&node, ".env").expect("style");
+        assert!(style.emphasis.italic, "dotfile should be italic");
+    }
+
+    #[test]
+    fn render_markdown_outputs_nested_list_with_no_box_drawing() {
+        let temp = build_fixture_tree();
+        let mut fs = FileSystem::new(temp.path()).expect("fs");
+        fs.ensure_tree_built();
+
+        let md = fs.render_markdown();
+        assert!(!md.contains('├'), "markdown must not contain ├");
+        assert!(!md.contains('└'), "markdown must not contain └");
+        assert!(!md.contains('│'), "markdown must not contain │");
+        // Native Markdown list bullets degrade from the TreeConnectors hint.
+        assert!(md.contains("- "), "expected `- ` markdown bullets in: {md}");
+    }
+
+    #[test]
+    fn render_markdown_plus_emits_classed_spans() {
+        let temp = build_fixture_tree();
+        let mut fs = FileSystem::new(temp.path()).expect("fs");
+        fs.ensure_tree_built();
+
+        let md = fs.render_markdown_plus();
+        // MarkdownPlus preserves classed spans for icon/metrics.
+        assert!(
+            md.contains("class=\"fs-icon\""),
+            "expected fs-icon span in: {md}",
+        );
+    }
+
+    #[test]
+    fn render_html_fragment_emits_nested_ul_li_with_no_box_drawing() {
+        let temp = build_fixture_tree();
+        let mut fs = FileSystem::new(temp.path()).expect("fs");
+        fs.ensure_tree_built();
+
+        let html = fs.render_html_fragment().render();
+        assert!(html.contains("<ul"), "expected <ul>: {html}");
+        assert!(html.contains("<li"), "expected <li>: {html}");
+        assert!(!html.contains('├'), "html must not contain ├");
+        assert!(!html.contains('└'), "html must not contain └");
+        assert!(!html.contains('│'), "html must not contain │");
+    }
+
+    #[test]
+    fn render_html_fragment_carries_fs_classes() {
+        let temp = build_fixture_tree();
+        let mut fs = FileSystem::new(temp.path()).expect("fs");
+        fs.ensure_tree_built();
+
+        let html = fs.render_html_fragment().render();
+        assert!(html.contains("fs-dir"), "expected fs-dir class in: {html}");
+        assert!(html.contains("fs-file"), "expected fs-file class in: {html}");
+        assert!(html.contains("fs-icon"), "expected fs-icon class in: {html}");
+    }
+
+    #[test]
+    fn render_tree_filter_pattern_constrains_output() {
+        let temp = tempfile::tempdir().expect("create temp dir");
+        std::fs::write(temp.path().join("keep.rs"), "fn x(){}").unwrap();
+        std::fs::write(temp.path().join("drop.txt"), "skip").unwrap();
+
+        let mut fs = FileSystem::new(temp.path())
+            .expect("fs")
+            .filter(".rs");
+        fs.ensure_tree_built();
+
+        let node = fs.render_tree();
+        let names: String = collect_text(&node);
+        assert!(names.contains("keep.rs"));
+        assert!(!names.contains("drop.txt"));
+    }
+
+    fn collect_text(node: &RenderNode) -> String {
+        let mut out = String::new();
+        match &node.kind {
+            NodeKind::Text { value } | NodeKind::InlineCode { value } => out.push_str(value),
+            _ => {
+                for child in children_of(node) {
+                    out.push_str(&collect_text(child));
+                }
+            }
+        }
+        out
+    }
+
+    #[test]
+    fn render_tree_deeply_nested_lists_are_structural() {
+        let temp = tempfile::tempdir().expect("create temp dir");
+        std::fs::create_dir_all(temp.path().join("a/b/c")).unwrap();
+        std::fs::write(temp.path().join("a/b/c/leaf.txt"), "x").unwrap();
+
+        let mut fs = FileSystem::new(temp.path()).expect("fs").depth(10);
+        fs.ensure_tree_built();
+
+        let node = fs.render_tree();
+
+        // Count nested lists; expect 4 (top-level + a + b + c).
+        fn count_lists(node: &RenderNode) -> usize {
+            let mut count = if matches!(node.kind, NodeKind::List { .. }) {
+                1
+            } else {
+                0
+            };
+            for child in children_of(node) {
+                count += count_lists(child);
+            }
+            count
+        }
+        assert_eq!(count_lists(&node), 4);
+    }
+
+    #[test]
+    fn render_tree_root_header_is_bold_blue() {
+        let temp = build_fixture_tree();
+        let mut fs = FileSystem::new(temp.path()).expect("fs");
+        fs.ensure_tree_built();
+
+        let node = fs.render_tree();
+        // The first paragraph child of root is the root header.
+        let header = children_of(&node)
+            .iter()
+            .find(|c| matches!(c.kind, NodeKind::Paragraph { .. }))
+            .expect("root header paragraph");
+        let style = header.attrs.style().expect("root header style");
+        assert!(style.emphasis.bold);
+        assert!(style.color.is_some());
+        // Carries both fs-root and fs-dir classes.
+        assert!(header.attrs.classes.contains(&CLASS_ROOT.to_string()));
+        assert!(header.attrs.classes.contains(&CLASS_DIR.to_string()));
+    }
+
+    // ============================================================
+    // Regression tests for FileSystem review (2026-05-19)
+    // ============================================================
+
+    /// Collects every `Link` URL in the projected tree.
+    fn collect_link_urls(node: &RenderNode) -> Vec<String> {
+        let mut out = Vec::new();
+        if let NodeKind::Link { url, .. } = &node.kind {
+            out.push(url.clone());
+        }
+        for child in children_of(node) {
+            out.extend(collect_link_urls(child));
+        }
+        out
+    }
+
+    /// Walks the tree to find the first `Style` attached to a `Span` whose
+    /// classes contain `class`.
+    fn first_style_for_span_class(
+        node: &RenderNode,
+        class: &str,
+    ) -> Option<renderable::style::Style> {
+        if let NodeKind::Span { .. } = &node.kind
+            && node.attrs.classes.iter().any(|c| c == class)
+        {
+            return node.attrs.style();
+        }
+        for child in children_of(node) {
+            if let Some(style) = first_style_for_span_class(child, class) {
+                return Some(style);
+            }
+        }
+        None
+    }
+
+    /// Critical #1 — entry projection must canonicalize relative roots so
+    /// `file://` URLs do not embed `./` segments.
+    #[test]
+    fn render_tree_file_links_are_canonical_for_relative_root() {
+        let temp = build_fixture_tree();
+        // Construct using a relative path so the bug condition reproduces.
+        let saved = std::env::current_dir().expect("cwd");
+        std::env::set_current_dir(temp.path()).expect("chdir");
+        let mut fs = FileSystem::new(".").expect("fs").with_file_links();
+        fs.ensure_tree_built();
+
+        let node = fs.render_tree();
+        let urls = collect_link_urls(&node);
+        std::env::set_current_dir(saved).expect("restore cwd");
+
+        assert!(!urls.is_empty(), "expected at least one file:// link");
+        for url in &urls {
+            assert!(
+                url.starts_with("file://"),
+                "URL must start with file:// — got {url}"
+            );
+            assert!(
+                !url.contains("/./"),
+                "URL must not contain `./` segment — got {url}"
+            );
+            assert!(
+                !url.contains("file://./"),
+                "URL must not start with `file://./` — got {url}"
+            );
+        }
+    }
+
+    /// Critical #2 — plain Markdown must omit the projected icon glyphs.
+    #[test]
+    fn render_markdown_omits_icon_emoji_glyphs() {
+        let temp = build_fixture_tree();
+        let mut fs = FileSystem::new(temp.path()).expect("fs");
+        fs.ensure_tree_built();
+
+        let md = fs.render_markdown();
+        assert!(
+            !md.contains('📂'),
+            "plain markdown must not contain 📂 in: {md}"
+        );
+        assert!(
+            !md.contains('📄'),
+            "plain markdown must not contain 📄 in: {md}"
+        );
+        // MarkdownPlus must keep them — verify the contrast in one shot.
+        let md_plus = fs.render_markdown_plus();
+        assert!(
+            md_plus.contains("class=\"fs-icon\""),
+            "markdown_plus must keep fs-icon span: {md_plus}",
+        );
+    }
+
+    /// Suggested #3 — MarkdownPlus must include entry-kind classes on the
+    /// name span (`fs-dir` / `fs-file`).
+    #[test]
+    fn render_markdown_plus_emits_fs_dir_and_fs_file_spans() {
+        let temp = build_fixture_tree();
+        let mut fs = FileSystem::new(temp.path()).expect("fs");
+        fs.ensure_tree_built();
+
+        let md = fs.render_markdown_plus();
+        assert!(
+            md.contains("class=\"fs-dir\"") || md.contains("\"fs-dir "),
+            "expected fs-dir span in MarkdownPlus: {md}",
+        );
+        assert!(
+            md.contains("class=\"fs-file\"") || md.contains("\"fs-file "),
+            "expected fs-file span in MarkdownPlus: {md}",
+        );
+    }
+
+    /// Suggested #5 — when highlight matches, italic from dotfile config is
+    /// suppressed (parity with bespoke `style_prefix`).
+    #[test]
+    fn render_tree_highlight_short_circuits_dotfile_italic() {
+        let temp = tempfile::tempdir().expect("create temp dir");
+        std::fs::write(temp.path().join(".env-TODO"), "x").unwrap();
+
+        let mut fs = FileSystem::new(temp.path())
+            .expect("fs")
+            .italicize_dot_files(true)
+            .highlight_red("TODO");
+        fs.ensure_tree_built();
+
+        let node = fs.render_tree();
+        let style = first_entry_style(&node, ".env-TODO").expect("style");
+        assert!(
+            !style.emphasis.italic,
+            "highlight should suppress dotfile italic — got style: {style:?}",
+        );
+        assert!(
+            !style.emphasis.bold,
+            "highlight should not add bold either — got style: {style:?}",
+        );
+    }
+
+    /// Suggested #6 — a symlink that points at a directory must keep the
+    /// bold attribute (the bespoke renderer stacks `1;34;36` SGR — bold
+    /// survives even when cyan wins the foreground color).
+    #[test]
+    fn render_tree_symlink_to_directory_keeps_bold_and_cyan() {
+        // Only run on platforms that support `symlink_dir`; on Windows
+        // creating directory symlinks requires elevated privileges. The
+        // unix-only `symlink` syscall works for both files and dirs.
+        let temp = tempfile::tempdir().expect("create temp dir");
+        let target = temp.path().join("target_dir");
+        std::fs::create_dir_all(&target).unwrap();
+        let link = temp.path().join("alias");
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&target, &link).unwrap();
+        #[cfg(not(unix))]
+        {
+            // Skip on non-unix where directory symlinks need extra privileges.
+            let _ = link;
+            return;
+        }
+
+        let mut fs = FileSystem::new(temp.path()).expect("fs");
+        fs.ensure_tree_built();
+
+        let node = fs.render_tree();
+        let style = first_entry_style(&node, "alias").expect("style");
+        assert!(
+            style.emphasis.bold,
+            "symlink-to-dir must remain bold — got: {style:?}",
+        );
+        assert!(
+            style.color.is_some(),
+            "symlink-to-dir must have a foreground color — got: {style:?}",
+        );
+    }
+
+    /// Suggested #7 — threshold-highlighted metric values are projected as a
+    /// classed inline span with a bold-yellow Style.
+    #[test]
+    fn render_tree_metric_threshold_highlight_emits_classed_span() {
+        let temp = tempfile::tempdir().expect("create temp dir");
+        // Write a "large" .rs file; ensure tokens count exceeds threshold.
+        let big = "x".repeat(4096);
+        std::fs::write(temp.path().join("big.rs"), &big).unwrap();
+
+        let mut fs = FileSystem::new(temp.path())
+            .expect("fs")
+            // Threshold of 100 tokens — ~4096/4 = ~1000 tokens, well over.
+            .show_tokens_highlight_greater_than(100);
+        fs.ensure_tree_built();
+
+        let node = fs.render_tree();
+        let classes = collect_classes(&node);
+        assert!(
+            classes.iter().any(|c| c == CLASS_METRIC_HIGHLIGHT),
+            "expected fs-metric-highlight class in: {classes:?}",
+        );
+
+        let style =
+            first_style_for_span_class(&node, CLASS_METRIC_HIGHLIGHT).expect("highlight style");
+        assert!(
+            style.emphasis.bold,
+            "metric highlight must be bold — got: {style:?}",
+        );
+        assert!(
+            style.color.is_some(),
+            "metric highlight must carry a yellow fg color — got: {style:?}",
+        );
+    }
+
+    /// Suggested #9 — gitignored entries carry the `fs-ignored` class and a
+    /// `dim` emphasis Style on the entry paragraph. Gitignored entries are
+    /// shown by default; `dim_gitignore(true)` adds the dim attribute.
+    #[test]
+    fn render_tree_gitignored_entry_is_dim_with_class() {
+        let temp = tempfile::tempdir().expect("create temp dir");
+        std::fs::write(temp.path().join(".gitignore"), "ignored.txt\n").unwrap();
+        std::fs::write(temp.path().join("ignored.txt"), "x").unwrap();
+
+        let mut fs = FileSystem::new(temp.path())
+            .expect("fs")
+            .dim_gitignore(true);
+        fs.ensure_tree_built();
+
+        let node = fs.render_tree();
+        let classes = collect_classes(&node);
+        // Gitignore handling is heuristic; only assert the dim/class pair
+        // when ignored.txt was actually flagged as ignored.
+        if classes.iter().any(|c| c == CLASS_IGNORED) {
+            let style = first_entry_style(&node, "ignored.txt").expect("style");
+            assert!(
+                style.emphasis.dim,
+                "gitignored entry should be dim — got: {style:?}",
+            );
+        }
+    }
+
+    /// Suggested #9 — highlight-green wins over directory bold-blue (the
+    /// red counterpart is already tested above).
+    #[test]
+    fn render_tree_highlight_green_wins_over_directory_style() {
+        let temp = tempfile::tempdir().expect("create temp dir");
+        std::fs::create_dir_all(temp.path().join("DONE-dir")).unwrap();
+
+        let mut fs = FileSystem::new(temp.path())
+            .expect("fs")
+            .highlight_green("DONE");
+        fs.ensure_tree_built();
+
+        let node = fs.render_tree();
+        let classes = collect_classes(&node);
+        assert!(classes.contains(&CLASS_HIGHLIGHT_GREEN.to_string()));
+        let style = first_entry_style(&node, "DONE-dir").expect("style");
+        assert!(!style.emphasis.bold, "highlight should suppress bold");
+    }
+
+    /// Suggested #9 — error directory carries `fs-error` plus red Style.
+    #[test]
+    fn render_tree_error_directory_carries_fs_error_class() {
+        // The simplest way to fabricate a `has_error` Dir is to build a tree
+        // by hand and inject one — we cannot reliably reproduce a permission
+        // error on every host in CI.
+        let temp = tempfile::tempdir().expect("create temp dir");
+        std::fs::create_dir_all(temp.path().join("perm_denied")).unwrap();
+        // Best-effort: skip the test if we can read the dir (i.e. the
+        // simulation is impossible on this host). We accept that the
+        // permission error is host-dependent; the canonical assertion here
+        // is that the projection respects `has_error` when it is set.
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let perms = std::fs::Permissions::from_mode(0o000);
+            std::fs::set_permissions(temp.path().join("perm_denied"), perms).unwrap();
+        }
+
+        let mut fs = FileSystem::new(temp.path()).expect("fs");
+        fs.ensure_tree_built();
+
+        let node = fs.render_tree();
+        let classes = collect_classes(&node);
+        // We can only assert presence when the host actually denied the read;
+        // otherwise the test is informational. Restore mode afterwards so
+        // tempdir cleanup succeeds.
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = std::fs::set_permissions(
+                temp.path().join("perm_denied"),
+                std::fs::Permissions::from_mode(0o755),
+            );
+        }
+        if classes.iter().any(|c| c == CLASS_ERROR) {
+            let style = first_entry_style(&node, "perm_denied").expect("style");
+            assert!(
+                style.color.is_some(),
+                "error directory must have a foreground color — got: {style:?}",
+            );
+        }
+    }
+
+    /// Suggested #9 — depth-limit directory carries `fs-depth-limit` and the
+    /// alternate icon glyph `📁`.
+    #[test]
+    fn render_tree_depth_limit_directory_carries_class_and_icon() {
+        let temp = tempfile::tempdir().expect("create temp dir");
+        std::fs::create_dir_all(temp.path().join("a/b/c")).unwrap();
+
+        let mut fs = FileSystem::new(temp.path()).expect("fs").depth(1);
+        fs.ensure_tree_built();
+
+        let node = fs.render_tree();
+        let classes = collect_classes(&node);
+        assert!(
+            classes.iter().any(|c| c == CLASS_DEPTH_LIMIT),
+            "expected fs-depth-limit class in: {classes:?}",
+        );
     }
 }

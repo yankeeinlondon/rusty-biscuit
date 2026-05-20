@@ -1570,6 +1570,14 @@ impl TerminalRenderable for Table {
             node.attrs.set_layout(&self.layout);
         }
 
+        // A bespoke `Table` honors a caller-supplied title via the
+        // typed render-tree caption hint (`RT-TABLE-001`). The terminal
+        // tree renderer emits the trimmed title above the top border;
+        // empty or whitespace-only titles are ignored at render time.
+        if let Some(title) = self.title.as_ref() {
+            node.attrs.set_table_title(title);
+        }
+
         Some(node)
     }
 }

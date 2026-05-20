@@ -23,6 +23,7 @@ mod styles;
 mod terminal;
 mod to_markdown;
 mod tokens;
+mod tree;
 
 pub use self::prose::{IntoProseVec, Prose};
 

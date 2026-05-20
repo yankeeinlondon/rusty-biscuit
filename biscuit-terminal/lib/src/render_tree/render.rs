@@ -496,10 +496,39 @@ impl Writer<'_> {
     /// This is the `Compose`-style join: adjacent children concatenate
     /// directly, preserving the component's no-separator contract instead of
     /// the document-block blank-line spacing of [`Self::render_blocks`].
+    ///
+    /// Top-level [`NodeKind::Text`] children render their literal `value`
+    /// verbatim — including caller-supplied trailing newlines and
+    /// whitespace, which Compose's contract requires. Routing them through
+    /// [`Self::render_prose`] would trigger Prose word-wrap and trim trailing
+    /// whitespace. Other inline kinds (`Emphasis`, `Strong`, `Span`, …)
+    /// still flow through [`Self::render_inline_node`] so styling lowers to
+    /// SGR, but the resulting markup is then lowered without the
+    /// trailing-newline trim. Block kinds (`Section`, `Table`, `List`, …)
+    /// continue through the normal block path so their internal layout is
+    /// preserved.
     fn render_sequence(&mut self, children: &[RenderNode]) -> Result<String, RenderError> {
         let mut output = String::new();
         for child in children {
-            output.push_str(&self.render(child)?);
+            match &child.kind {
+                // Push `&str` directly — Compose's sequence-join hot path can
+                // hold many small text parts, and a `String::clone` per part
+                // would be a needless heap allocation. The borrowed value is
+                // already owned by the input tree for the duration of this
+                // call.
+                NodeKind::Text { value } => output.push_str(value),
+                kind if is_inline_kind(kind) => {
+                    let effective = self.effective.clone();
+                    let markup = self.render_inline_node(child, &effective)?;
+                    // Lower the Prose markup to terminal SGR without
+                    // applying Prose's word-wrap / trailing-newline trim.
+                    output.push_str(&Prose::new(&markup).render_optimistic(None));
+                }
+                _ => {
+                    let rendered = self.render(child)?;
+                    output.push_str(&rendered);
+                }
+            }
         }
         Ok(output)
     }
