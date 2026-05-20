@@ -274,6 +274,7 @@ exit 0
         .env("CLAUDINE_COUNT_FILE", &count_path)
         .env("FAIL_FAST", "true")
         .env_remove("CLAUDINE_FAIL_FAST")
+        .env("RUST_LOG", "warn")
         .current_dir(workspace.path())
         .args(["compose", "--goose", md_file.to_str().unwrap()])
         .assert()
@@ -743,7 +744,7 @@ Iteration {{counter}}
     )
     .unwrap();
 
-    // First call: emit a 429 with a reset clock ~3s in the future. Second
+    // First call: emit a 429 with a reset clock ~8s in the future. Second
     // call: just succeed. The engine should pause between iterations and
     // both calls should land.
     write_executable(
@@ -765,9 +766,9 @@ printf '%s\n' '{"type":"init","session_id":"loop-pause","model":"test-model"}'
 printf '%s\n' '{"type":"finish","sessionID":"loop-pause"}'
 
 if [ "$count" = "1" ]; then
-  # Reset ~3s in the future; far enough to detect a pause, short enough
-  # that the test stays fast.
-  reset_at=$(/bin/date -u -v+3S '+%Y-%m-%d %H:%M:%S' 2>/dev/null || /bin/date -u -d '+3 seconds' '+%Y-%m-%d %H:%M:%S')
+  # Reset ~8s in the future; far enough to stay ahead of iteration
+  # overhead (~3s) plus margin, short enough that the test stays fast.
+  reset_at=$(/bin/date -u -v+8S '+%Y-%m-%d %H:%M:%S' 2>/dev/null || /bin/date -u -d '+8 seconds' '+%Y-%m-%d %H:%M:%S')
   printf '%s\n' "ERROR 2026-04-15T19:26:02 +3054ms service=llm providerID=zai-coding-plan modelID=glm-5.1 error={\"error\":{\"name\":\"AI_RetryError\",\"reason\":\"maxRetriesExceeded\",\"errors\":[{\"name\":\"AI_APICallError\",\"statusCode\":429,\"responseBody\":\"{\\\"error\\\":{\\\"code\\\":\\\"1308\\\",\\\"message\\\":\\\"Usage limit reached. Your limit will reset at $reset_at\\\"}}\"}]}}" >&2
 fi
 exit 0
@@ -801,11 +802,11 @@ exit 0
         "pause policy must let the second iteration run; got {} calls",
         calls.trim()
     );
-    // 3s reset + 5s safety margin = ~8s pause baseline; allow a generous
+    // 8s reset + 5s safety margin = ~13s pause baseline; allow a generous
     // floor to account for stream/test overhead. Confirm it actually waited
     // (not zero).
     assert!(
-        elapsed >= std::time::Duration::from_secs(3),
+        elapsed >= std::time::Duration::from_secs(8),
         "pause should produce a noticeable delay; elapsed = {elapsed:?}"
     );
 }

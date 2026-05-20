@@ -30,14 +30,14 @@ fn enumerate_windows_scm_services() -> windows::core::Result<Vec<Service>> {
     use windows::Win32::Foundation::ERROR_MORE_DATA;
     use windows::Win32::System::Services::{
         CloseServiceHandle, ENUM_SERVICE_STATUS_PROCESSW, EnumServicesStatusExW, OpenSCManagerW,
-        SC_ENUM_PROCESS_INFO, SC_HANDLE, SC_MANAGER_ENUMERATE_SERVICE, SERVICE_RUNNING,
+        SC_ENUM_PROCESS_INFO, SC_HANDLE, SC_MANAGER_ENUMERATE_SERVICE,
         SERVICE_STATE_ALL, SERVICE_STATUS_PROCESS, SERVICE_WIN32,
     };
     use windows::core::PCWSTR;
 
     let scm: SC_HANDLE =
         unsafe { OpenSCManagerW(PCWSTR::null(), PCWSTR::null(), SC_MANAGER_ENUMERATE_SERVICE)? };
-    let _guard = ScopeGuard::new(|| unsafe { CloseServiceHandle(scm).ok() });
+    let _guard = ScopeGuard::new(|| unsafe { CloseServiceHandle(scm).ok(); });
 
     let mut bytes_needed: u32 = 0;
     let mut services_returned: u32 = 0;
@@ -49,8 +49,7 @@ fn enumerate_windows_scm_services() -> windows::core::Result<Vec<Service>> {
             SC_ENUM_PROCESS_INFO,
             SERVICE_WIN32,
             SERVICE_STATE_ALL,
-            Some(buf.as_mut_ptr()),
-            0,
+            Some(&mut buf),
             &mut bytes_needed,
             &mut services_returned,
             None,
@@ -67,8 +66,7 @@ fn enumerate_windows_scm_services() -> windows::core::Result<Vec<Service>> {
                 SC_ENUM_PROCESS_INFO,
                 SERVICE_WIN32,
                 SERVICE_STATE_ALL,
-                Some(buf.as_mut_ptr()),
-                bytes_needed,
+                Some(&mut buf),
                 &mut bytes_needed,
                 &mut services_returned,
                 None,
@@ -101,7 +99,7 @@ fn enumerate_windows_scm_services() -> windows::core::Result<Vec<Service>> {
         let status: SERVICE_STATUS_PROCESS = unsafe { entry.ServiceStatusProcess };
         services.push(service_from_raw_status(
             name,
-            status.dwCurrentState,
+            status.dwCurrentState.0,
             status.dwProcessId,
         ));
     }
