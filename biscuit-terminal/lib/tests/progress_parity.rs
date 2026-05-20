@@ -155,18 +155,19 @@ fn terminal_tree_render_shows_bar_label_and_percentage() {
 }
 
 #[test]
-fn terminal_tree_render_matches_bespoke_bar_content() {
-    // The tree-rendered bar reproduces the bespoke Progress::render output.
+fn terminal_tree_render_matches_render_optimistic() {
+    // `Progress::render_optimistic` and the direct tree render of the
+    // projected node must agree (both route through the canonical tree path).
     let bar = Progress::new(0.5).with_label("Loading");
-    let bespoke = strip_ansi(&bar.render_optimistic(Some(80)));
+    let via_optimistic = strip_ansi(&bar.render_optimistic(Some(80)));
 
     let node = bar.render_tree_node().expect("tree node");
-    let tree = strip_ansi(&render_tree(&node, 80));
+    let direct = strip_ansi(&render_tree(&node, 80));
 
     assert_eq!(
-        bespoke.trim(),
-        tree.trim(),
-        "tree render reproduces bespoke bar"
+        via_optimistic.trim(),
+        direct.trim(),
+        "render_optimistic and direct tree render agree"
     );
 }
 
@@ -373,41 +374,6 @@ fn tree_renderable_and_render_tree_node_share_one_projection() {
         serde_json::to_value(&compat).unwrap(),
         "canonical and compatibility projections must serialize identically"
     );
-}
-
-// ---------------------------------------------------------------------------
-// Bespoke vs tree parity
-// ---------------------------------------------------------------------------
-
-#[test]
-fn render_via_tree_matches_render_bespoke_ansi_stripped() {
-    // After the flip, `Progress::render(&term)` routes through the tree.
-    // For every default-style progress bar the bespoke output and the tree
-    // output should agree on visible content modulo trailing whitespace.
-    let bar = Progress::new(0.5).with_label("Build");
-    let term = test_terminal(80);
-    let bespoke = strip_ansi(&bar.render_bespoke(&term));
-    let tree = strip_ansi(&bar.render(&term));
-    assert_eq!(
-        bespoke.trim_end(),
-        tree.trim_end(),
-        "bespoke and tree output agree ignoring trailing whitespace"
-    );
-}
-
-#[test]
-fn bespoke_and_tree_agree_at_extremes() {
-    let term = test_terminal(80);
-    for value in [0.0, 0.25, 0.5, 0.75, 1.0] {
-        let bar = Progress::new(value);
-        let bespoke = strip_ansi(&bar.render_bespoke(&term));
-        let tree = strip_ansi(&bar.render(&term));
-        assert_eq!(
-            bespoke.trim_end(),
-            tree.trim_end(),
-            "bespoke/tree disagree for value={value}",
-        );
-    }
 }
 
 // ---------------------------------------------------------------------------

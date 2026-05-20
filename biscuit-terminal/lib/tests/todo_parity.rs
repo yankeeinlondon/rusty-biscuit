@@ -1,16 +1,14 @@
-//! Parity tests for the `Todo` component's IR migration.
+//! Tree-path tests for the `Todo` component's IR migration.
 //!
-//! The Todo spec splits coverage into three groups:
+//! Coverage splits into:
 //!
 //! 1. **Structural tests** — verify the tree projection shape: a one-item
 //!    `NodeKind::List` whose `ListItem` carries typed [`TaskHints`], the
 //!    state class (`todo-*`), and (for `Cancelled`) a `Delete` node wrapping
 //!    the description.
-//! 2. **Legacy parity** — for each of the five `TodoState` variants, compare
-//!    bespoke vs tree output on ANSI-stripped content. Identical visible text
-//!    is the contract; per-character byte equality is not guaranteed because
-//!    the tree path uses the canonical list-rendering pipeline rather than
-//!    the bespoke `to_terminal` formatter.
+//! 2. **Terminal tree output** — for each `TodoState` variant, the
+//!    canonical tree path preserves the description and applies the correct
+//!    state-class semantics.
 //! 3. **Cross-target tests** — Markdown and Browser output, asserting GFM
 //!    task-list syntax (`- [x]` / `- [ ]`), `~~text~~` strikethrough for
 //!    `Cancelled`, and `todo-*` state classes on `<li>`.
@@ -452,14 +450,14 @@ fn layout_left_margin_applies_through_tree() {
 }
 
 // ---------------------------------------------------------------------------
-// Legacy parity — bespoke vs tree ANSI-stripped content
+// Tree-path description preservation in a no-color terminal
 // ---------------------------------------------------------------------------
 
 #[test]
-fn bespoke_and_tree_share_description_in_no_color_terminal() {
-    // The no-color, no-nerd terminal is the cleanest parity case because both
-    // paths emit identical ASCII markers (`[ ]`, `[x]`, `[>]`, `[!]`, `[-]`)
-    // and no styling.
+fn tree_preserves_description_in_no_color_terminal() {
+    // The no-color, no-nerd terminal pins the cleanest contract: the tree
+    // path emits ASCII markers (`[ ]`, `[x]`, `[>]`, `[!]`, `[-]`) with no
+    // styling, and the description must round-trip verbatim.
     use biscuit_terminal::discovery::detection::ColorDepth;
     use biscuit_terminal::terminal::Terminal;
     let mut term = Terminal::builder()
@@ -469,11 +467,10 @@ fn bespoke_and_tree_share_description_in_no_color_terminal() {
     term.is_nerd_font = Some(false);
     for state in ALL_STATES {
         let todo = Todo::new("Description").with_state(state.clone());
-        let bespoke = strip_ansi(&todo.render_bespoke(&term));
         let tree = strip_ansi(&todo.render(&term));
         assert!(
-            bespoke.contains("Description") && tree.contains("Description"),
-            "{:?}: both paths preserve description (bespoke={bespoke:?}, tree={tree:?})",
+            tree.contains("Description"),
+            "{:?}: tree path preserves description (tree={tree:?})",
             state
         );
     }

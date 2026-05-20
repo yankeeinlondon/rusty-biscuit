@@ -1,7 +1,9 @@
 //! Render comparison assertions for the layout visual-test matrix.
 //!
-//! For every component/scenario cell this suite renders both the bespoke and
-//! render-tree paths, then analyzes the pair across six independent facets
+//! For every component/scenario cell this suite renders both public trait
+//! entry points — `TerminalRenderable::render` (`via_render`) and
+//! `TreeRenderable::render_tree` folded through `render_terminal_node`
+//! (`via_tree_direct`) — then analyzes the pair across six independent facets
 //! (exact bytes, visible text, indentation, blank lines, width, styling).
 //! Each detected divergence becomes a `DriftKey`. The live drift set is
 //! compared against the committed `KNOWN_DRIFT` ledger: a new divergence is a
@@ -18,7 +20,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use biscuit_terminal::prelude::strip_escape_codes;
 use layout_matrix_support::{component_cases, scenarios};
 
-/// One independent dimension along which a bespoke/tree pair can diverge.
+/// One independent dimension along which a `via_render` / `via_tree_direct`
+/// pair can diverge.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 enum Facet {
     /// Byte-for-byte identical output, ANSI retained.
@@ -35,22 +38,28 @@ enum Facet {
     Styling,
 }
 
-/// Which renderer is preferred for a recorded drift entry, and whether the
+/// Which entry point is preferred for a recorded drift entry, and whether the
 /// difference is functionally important or cosmetic.
+///
+/// The two entry points compared are `TerminalRenderable::render`
+/// (`via_render`) and `TreeRenderable::render_tree` folded through
+/// `render_terminal_node` (`via_tree_direct`). Historically the latter was
+/// referred to as the "tree" path and the former as the "bespoke" path; the
+/// variant names retain `Tree`/`Bespoke` for ledger stability.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[allow(dead_code)]
 enum Verdict {
-    /// The render-tree output is wrong or incomplete versus the bespoke
-    /// renderer; the render-tree has not caught up. The headline metric.
+    /// `via_tree_direct` is wrong or incomplete versus `via_render`; the
+    /// render-tree entry point has not caught up. The headline metric.
     TreeBehind,
-    /// The render-tree output is more correct; the bespoke renderer is the
-    /// laggard. Acceptable drift; may never reach zero.
+    /// `via_tree_direct` is more correct; `via_render` is the laggard.
+    /// Acceptable drift; may never reach zero.
     BespokeBehind,
-    /// Cosmetic-only drift where the bespoke renderer is still preferred.
+    /// Cosmetic-only drift where `via_render` is still preferred.
     CosmeticTreeBehind,
-    /// Cosmetic-only drift where the render-tree output is preferred.
+    /// Cosmetic-only drift where `via_tree_direct` is preferred.
     CosmeticBespokeBehind,
-    /// Cosmetic-only drift with no preferred renderer yet recorded.
+    /// Cosmetic-only drift with no preferred entry point yet recorded.
     CosmeticNeutral,
 }
 
@@ -75,59 +84,29 @@ struct DriftKey {
 /// The committed drift ledger.
 ///
 /// Each tuple is `(component, scenario, facet, verdict)`. The first three
-/// fields identify the divergence; the `Verdict` records which renderer is
-/// preferred (see [`Verdict`]). Regenerate with `RECORD_DRIFT=1`: regeneration
-/// preserves the verdict of every still-present entry, and any genuinely new
-/// entry is emitted as `Verdict::TreeBehind` and must be reviewed and
-/// reclassified by hand. An empty ledger means the bespoke and tree paths
-/// agree across every facet of every matrix cell.
+/// fields identify the divergence between `via_render`
+/// (`TerminalRenderable::render`) and `via_tree_direct`
+/// (`TreeRenderable::render_tree` folded through `render_terminal_node`);
+/// the `Verdict` records which entry point is preferred (see [`Verdict`]).
+/// Regenerate with `RECORD_DRIFT=1`: regeneration preserves the verdict of
+/// every still-present entry, and any genuinely new entry is emitted as
+/// `Verdict::TreeBehind` and must be reviewed and reclassified by hand.
+/// An empty ledger means `via_render` and `via_tree_direct` agree across
+/// every facet of every matrix cell.
+///
+/// History — `via_render` vs `via_tree_direct` agreement was established for
+/// every default-case component when each component's `TerminalRenderable`
+/// was re-pointed at the render-tree path (Stage 2 IR flips, 2026-05-19):
+/// `BlockQuote`, `Compose`, `OrderedList`, `Progress`, `Section`,
+/// `StatusBlock`, `Table`, `TextBlock`, `Todo`, `TwoColumn`, and
+/// `UnorderedList`. Components with sanctioned escape-hatch knobs
+/// (`BlockQuote::with_border(arbitrary)`, `StatusBlock::border(arbitrary)`,
+/// `Table::prefer_cursor_alignment`, `TwoColumn` with `TerminalImage`
+/// content) preserve dedicated `*_bespoke` hooks for parity tests, but the
+/// layout matrix only exercises the default configurations and so does not
+/// touch those paths.
 #[rustfmt::skip]
 const KNOWN_DRIFT: &[(&str, &str, Facet, Verdict)] = &[
-    // BlockQuote bespoke ↔ tree drift was retired when `TerminalRenderable`
-    // for `BlockQuote` was re-pointed at the tree renderer (BlockQuote IR
-    // flip, 2026-05-19). The bespoke path now equals the tree path for every
-    // default-border quote; the only remaining bespoke code path is the
-    // `with_border()` compatibility fallback, which the matrix does not
-    // exercise.
-    //
-    // Progress drift was retired when `TerminalRenderable::render` for
-    // `Progress` was re-pointed at the tree renderer (Progress IR flip,
-    // 2026-05-19). The layout-matrix harness calls `progress.render(&term)`
-    // for the "bespoke" half of the pair, which now routes through the
-    // canonical tree — so every cell agrees by construction. The pre-flip
-    // bespoke output is still available via `Progress::render_bespoke` for
-    // dedicated parity tests, but the layout matrix's side-by-side view is
-    // tautological for `Progress` and is informational only.
-    // Section bespoke ↔ tree drift was retired when `TerminalRenderable::render`
-    // for `Section` was re-pointed at the tree renderer (Section IR flip,
-    // 2026-05-19). The layout-matrix harness calls `section.render(&term)` for
-    // the "bespoke" half of the pair, which now routes through the canonical
-    // tree — so every cell agrees by construction. The pre-flip bespoke output
-    // is still available via `Section::render_bespoke` for dedicated parity
-    // tests, but the layout matrix's side-by-side view is tautological for
-    // `Section` and is informational only.
-    // Table bespoke ↔ tree drift was retired when `TerminalRenderable::render`
-    // for `Table` was re-pointed at the tree renderer (Table IR flip,
-    // 2026-05-19). The layout-matrix harness calls `table.render(&term)` for
-    // the "bespoke" half of the pair, which now routes through the canonical
-    // tree — so every cell agrees by construction. The pre-flip bespoke output
-    // is still available via `Table::render_bespoke` for dedicated parity tests,
-    // but the layout matrix's side-by-side view is tautological for `Table` and
-    // is informational only.
-    // TwoColumn bespoke ↔ tree drift was retired when `TerminalRenderable::render`
-    // for `TwoColumn` was re-pointed at the tree renderer (TwoColumn IR flip,
-    // 2026-05-19). The layout-matrix harness calls `columns.render(&term)` for
-    // the "bespoke" half of the pair, which now routes through the canonical
-    // tree — so every cell agrees by construction. The pre-flip bespoke output
-    // is still available via `TwoColumn::render_bespoke` for dedicated parity
-    // tests, but the layout matrix's side-by-side view is tautological for
-    // `TwoColumn` and is informational only.
-    // UnorderedList bespoke ↔ tree drift was retired when `TerminalRenderable`
-    // for `UnorderedList` was re-pointed at the tree renderer (UnorderedList
-    // IR flip, 2026-05-19). The bespoke path now equals the tree path for
-    // every default-bullet list; the only remaining bespoke code path is the
-    // `render_bespoke()` parity-test surface, which the matrix does not
-    // exercise.
 ];
 
 /// Returns `true` when `a` and `b` are byte-for-byte identical.
@@ -254,7 +233,7 @@ fn truncate(s: &str, max: usize) -> String {
 }
 
 #[test]
-fn render_matches_bespoke() {
+fn via_render_matches_via_tree_direct() {
     let known: BTreeSet<DriftKey> = KNOWN_DRIFT
         .iter()
         .map(|(c, s, f, _)| DriftKey {
@@ -289,15 +268,15 @@ fn render_matches_bespoke() {
     let mut live = BTreeSet::<DriftKey>::new();
     for case in component_cases() {
         for scenario in scenarios() {
-            let (bespoke, tree) = (case.render)(&scenario);
+            let (via_render, via_tree_direct) = (case.render)(&scenario);
             for facet in ALL_FACETS {
                 let drifts = match facet {
-                    Facet::Exact => !extract_exact(&bespoke, &tree),
-                    Facet::Text => !extract_text(&bespoke, &tree),
-                    Facet::Indent => !extract_indent(&bespoke, &tree),
-                    Facet::BlankLines => !extract_blank_lines(&bespoke, &tree),
-                    Facet::Width => !extract_width(&bespoke, &tree),
-                    Facet::Styling => !extract_styling(&bespoke, &tree),
+                    Facet::Exact => !extract_exact(&via_render, &via_tree_direct),
+                    Facet::Text => !extract_text(&via_render, &via_tree_direct),
+                    Facet::Indent => !extract_indent(&via_render, &via_tree_direct),
+                    Facet::BlankLines => !extract_blank_lines(&via_render, &via_tree_direct),
+                    Facet::Width => !extract_width(&via_render, &via_tree_direct),
+                    Facet::Styling => !extract_styling(&via_render, &via_tree_direct),
                 };
                 if drifts {
                     live.insert(DriftKey {
@@ -343,9 +322,15 @@ fn render_matches_bespoke() {
                 key.component, key.scenario, key.facet
             ));
             if matches!(key.facet, Facet::Exact | Facet::Text) {
-                let (bespoke, tree) = rendered_pair(key);
-                msg.push_str(&format!("    bespoke: {:?}\n", truncate(&bespoke, 200)));
-                msg.push_str(&format!("    tree:    {:?}\n", truncate(&tree, 200)));
+                let (via_render, via_tree_direct) = rendered_pair(key);
+                msg.push_str(&format!(
+                    "    via_render:      {:?}\n",
+                    truncate(&via_render, 200)
+                ));
+                msg.push_str(&format!(
+                    "    via_tree_direct: {:?}\n",
+                    truncate(&via_tree_direct, 200)
+                ));
             }
         }
         if unrecorded.len() > 5 {

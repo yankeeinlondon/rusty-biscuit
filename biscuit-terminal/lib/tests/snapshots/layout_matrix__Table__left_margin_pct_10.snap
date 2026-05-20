@@ -10,7 +10,7 @@ VIA_RENDER
         │ Bob  │ 17    │
         └──────┴───────┘
 ---
-TREE
+VIA_TREE_DIRECT
         ┌──────┬───────┐
         │ Name │ Score │
         ├──────┼───────┤

@@ -1,38 +1,26 @@
-//! Parity tests for `OrderedList` after its render-tree migration.
+//! Tree-path tests for `OrderedList` after its render-tree migration.
 //!
 //! These tests assert that:
 //!
 //! 1. `OrderedList::render(&term)` (the user-facing path) routes through the
 //!    canonical render tree.
-//! 2. The legacy bespoke output (preserved on
-//!    [`OrderedList::render_bespoke`]) and the tree output agree on semantic
-//!    content (ANSI-stripped, whitespace-normalized).
-//! 3. The single private projection helper drives both
+//! 2. The single private projection helper drives both
 //!    [`TreeRenderable::render_tree`] and
 //!    [`TerminalRenderable::render_tree_node`] so the two entry points cannot
 //!    drift.
-//! 4. `MarkdownRenderable` and `BrowserRenderable` impls produce the expected
+//! 3. `MarkdownRenderable` and `BrowserRenderable` impls produce the expected
 //!    CommonMark / HTML output, including layout-driven CSS where applicable.
 //!
-//! ## `KNOWN_DRIFT` ledger
+//! ## Nested OrderedList Markdown shape
 //!
-//! The following divergences are accepted at the byte level and tested
-//! semantically instead:
+//! A nested `OrderedList` passed as a `Component` item projects to a
+//! `NodeKind::List` child inside a `NodeKind::ListItem`. The Markdown
+//! renderer collapses that onto the item's line (`2. 1. Inner A`) instead of
+//! emitting a CommonMark sublist. The canonical tree's shape is correct;
+//! only the renderer's lowering diverges. Item ordering and inner numbering
+//! are still preserved.
 //!
-//! - **Trailing newline**: the bespoke path emits a trailing `"\n"` after the
-//!   last item; the tree renderer does not. Both forms carry the same item
-//!   content.
-//! - **Empty nested list blank line**: the bespoke path emits a true blank
-//!   line (`""`); the tree renderer emits a line padded to the indent width
-//!   (`"    "`). Both preserve the visual gap between items.
-//! - **Nested OrderedList Markdown shape**: a nested `OrderedList` passed as a
-//!   `Component` item projects to a `NodeKind::List` child inside a
-//!   `NodeKind::ListItem`. The Markdown renderer collapses that onto the
-//!   item's line (`2. 1. Inner A`) instead of emitting a CommonMark sublist.
-//!   The canonical tree's shape is correct; only the renderer's lowering
-//!   diverges. Item ordering and inner numbering are still preserved.
-//!
-//! ## Resolved divergences (no longer drift)
+//! ## Resolved divergences
 //!
 //! - **Prose inline styling on terminal**: previously items that were `Prose`
 //!   components lost their `<b>` / `<i>` / `<red>` styling because
@@ -53,10 +41,19 @@ use biscuit_terminal::components::renderable::{
     BrowserRenderable, RenderableTerminalContent, TerminalRenderable,
 };
 use renderable::markdown::MarkdownRenderable;
-use renderable::tree::TreeRenderable;
+use renderable::tree::{NodeKind, RenderNode, TreeRenderable};
 use std::rc::Rc;
 
-use parity_helpers::{assert_semantic_match, strip_ansi, test_terminal};
+use parity_helpers::{strip_ansi, test_terminal};
+
+/// Walks a `RenderNode` tree depth-first looking for a node whose `NodeKind`
+/// matches `pred`. Used by nested-component structural assertions.
+fn walk_has_kind(node: &RenderNode, pred: impl Fn(&NodeKind) -> bool + Copy) -> bool {
+    if pred(&node.kind) {
+        return true;
+    }
+    node.children().iter().any(|c| walk_has_kind(c, pred))
+}
 
 // ---------------------------------------------------------------------------
 // TreeRenderable / projection helper coherence
@@ -92,13 +89,12 @@ fn tree_renderable_preserves_list_hints() {
 }
 
 // ---------------------------------------------------------------------------
-// Bespoke vs tree parity (default render path now uses tree)
+// Tree-path rendering
 // ---------------------------------------------------------------------------
 
 /// Strips ANSI escape codes and trailing whitespace from each line, then
-/// drops trailing blank lines. Both the bespoke and tree paths produce the
-/// same item content under this lens, modulo the accepted
-/// trailing-newline drift documented at the top of this file.
+/// drops trailing blank lines. Used to normalize tree-rendered output for
+/// stable, layout-tolerant assertions.
 fn normalize_for_parity(s: &str) -> String {
     let stripped = strip_ansi(s);
     let lines: Vec<String> = stripped
@@ -116,7 +112,6 @@ fn normalize_for_parity(s: &str) -> String {
 fn parity_empty_list() {
     let list = OrderedList::new(Vec::<String>::new());
     let term = test_terminal(80);
-    assert_eq!(normalize_for_parity(&list.render_bespoke(&term)), "");
     assert_eq!(normalize_for_parity(&list.render(&term)), "");
 }
 
@@ -124,9 +119,7 @@ fn parity_empty_list() {
 fn parity_single_string_item() {
     let list = OrderedList::new(vec!["Item"]);
     let term = test_terminal(80);
-    let bespoke = normalize_for_parity(&list.render_bespoke(&term));
     let tree = normalize_for_parity(&list.render(&term));
-    assert_semantic_match(&tree, &bespoke);
     assert_eq!(tree, "1. Item");
 }
 
@@ -134,9 +127,7 @@ fn parity_single_string_item() {
 fn parity_three_string_items() {
     let list = OrderedList::new(vec!["First", "Second", "Third"]);
     let term = test_terminal(80);
-    let bespoke = normalize_for_parity(&list.render_bespoke(&term));
     let tree = normalize_for_parity(&list.render(&term));
-    assert_semantic_match(&tree, &bespoke);
     assert!(tree.contains("1. First"));
     assert!(tree.contains("2. Second"));
     assert!(tree.contains("3. Third"));
@@ -147,12 +138,10 @@ fn parity_double_digit_prefix() {
     let items: Vec<String> = (1..=12).map(|n| format!("item {n}")).collect();
     let list = OrderedList::new(items);
     let term = test_terminal(80);
-    let bespoke = normalize_for_parity(&list.render_bespoke(&term));
     let tree = normalize_for_parity(&list.render(&term));
     assert!(tree.contains("9. item 9"));
     assert!(tree.contains("10. item 10"));
     assert!(tree.contains("12. item 12"));
-    assert_semantic_match(&tree, &bespoke);
 }
 
 #[test]
@@ -309,14 +298,12 @@ fn parity_triple_digit_prefix() {
     let list = OrderedList::new(items);
     let term = test_terminal(80);
     let tree = strip_ansi(&list.render(&term));
-    let bespoke = normalize_for_parity(&list.render_bespoke(&term));
     let tree_norm = normalize_for_parity(&tree);
     // Verify presence of representative items at each prefix width.
     assert!(tree_norm.contains("9. item 9"), "single-digit row");
     assert!(tree_norm.contains("99. item 99"), "double-digit row");
     assert!(tree_norm.contains("100. item 100"), "triple-digit row");
     assert!(tree_norm.contains("105. item 105"), "final triple-digit row");
-    assert_semantic_match(&tree_norm, &bespoke);
 }
 
 #[test]
@@ -564,4 +551,130 @@ fn prose_inline_styling_degrades_in_markdown() {
     // emitted verbatim (the projection strips them).
     assert!(md.contains("Bold"), "content present: {md:?}");
     assert!(!md.contains("<b>"), "raw style tokens stripped: {md:?}");
+}
+
+// ---------------------------------------------------------------------------
+// Stage 3a: structural nested-component projection inside list items
+//
+// `project_list_items` runs `project_renderable_content` in
+// `ProjectionMode::Structural`. A nested block component inside an item
+// must therefore appear as the matching `NodeKind` (Section, BlockQuote,
+// Table, List) inside the projected `NodeKind::ListItem` — not flatten to
+// plain text.
+// ---------------------------------------------------------------------------
+
+/// Returns the `ListItem` children of a projected `NodeKind::List`.
+fn list_item_children(node: &RenderNode) -> &[RenderNode] {
+    match &node.kind {
+        NodeKind::List { children, .. } => children,
+        other => panic!("expected NodeKind::List, got {other:?}"),
+    }
+}
+
+#[test]
+fn nested_section_inside_ordered_list_item_projects_structural_section_node() {
+    use biscuit_terminal::components::section::{HeadingLevel, Section};
+
+    let nested = Section::new(HeadingLevel::h3, "Nested Title");
+    let list = OrderedList::from(vec![
+        RenderableTerminalContent::String("First".to_string()),
+        RenderableTerminalContent::Component(Rc::new(nested)),
+    ]);
+    let node = list.render_tree();
+    let items = list_item_children(&node);
+
+    assert!(
+        items
+            .iter()
+            .any(|item| walk_has_kind(item, |k| matches!(k, NodeKind::Section { .. }))),
+        "nested Section must appear as a structural Section node inside a ListItem: {items:?}"
+    );
+}
+
+#[test]
+fn nested_block_quote_inside_ordered_list_item_projects_structural_block_quote_node() {
+    use biscuit_terminal::components::block_quote::BlockQuote;
+
+    let nested = BlockQuote::new("quoted body".into(), None::<&str>);
+    let list = OrderedList::from(vec![
+        RenderableTerminalContent::String("Lead".to_string()),
+        RenderableTerminalContent::Component(Rc::new(nested)),
+    ]);
+    let node = list.render_tree();
+    let items = list_item_children(&node);
+
+    assert!(
+        items
+            .iter()
+            .any(|item| walk_has_kind(item, |k| matches!(k, NodeKind::BlockQuote { .. }))),
+        "nested BlockQuote must appear as a structural BlockQuote node inside a ListItem: \
+         {items:?}"
+    );
+}
+
+#[test]
+fn nested_table_inside_ordered_list_item_projects_structural_table_node() {
+    use biscuit_terminal::components::table::{Table, TableCellContent, TableColumn};
+
+    let table = Table::new()
+        .with_columns(vec![TableColumn::new("A"), TableColumn::new("B")])
+        .with_data(vec![vec![
+            TableCellContent::Text("x".into()),
+            TableCellContent::Text("y".into()),
+        ]]);
+    let list = OrderedList::from(vec![
+        RenderableTerminalContent::String("Row".to_string()),
+        RenderableTerminalContent::Component(Rc::new(table)),
+    ]);
+    let node = list.render_tree();
+    let items = list_item_children(&node);
+
+    assert!(
+        items
+            .iter()
+            .any(|item| walk_has_kind(item, |k| matches!(k, NodeKind::Table { .. }))),
+        "nested Table must appear as a structural Table node inside a ListItem: {items:?}"
+    );
+}
+
+#[test]
+fn nested_ordered_list_inside_ordered_list_item_projects_ordered_list_node() {
+    let inner = OrderedList::new(vec!["Inner A", "Inner B"]);
+    let list = OrderedList::from(vec![
+        RenderableTerminalContent::String("Outer".to_string()),
+        RenderableTerminalContent::Component(Rc::new(inner)),
+    ]);
+    let node = list.render_tree();
+    let items = list_item_children(&node);
+
+    assert!(
+        items.iter().any(|item| walk_has_kind(
+            item,
+            |k| matches!(k, NodeKind::List { ordered: true, .. })
+        )),
+        "nested OrderedList must appear as a structural ordered List node inside a ListItem: \
+         {items:?}"
+    );
+}
+
+#[test]
+fn nested_unordered_list_inside_ordered_list_item_projects_unordered_list_node() {
+    use biscuit_terminal::components::list::UnorderedList;
+
+    let inner = UnorderedList::new(vec!["Apple", "Banana"]);
+    let list = OrderedList::from(vec![
+        RenderableTerminalContent::String("Fruits".to_string()),
+        RenderableTerminalContent::Component(Rc::new(inner)),
+    ]);
+    let node = list.render_tree();
+    let items = list_item_children(&node);
+
+    assert!(
+        items.iter().any(|item| walk_has_kind(
+            item,
+            |k| matches!(k, NodeKind::List { ordered: false, .. })
+        )),
+        "nested UnorderedList must appear as a structural unordered List node inside a \
+         ListItem: {items:?}"
+    );
 }

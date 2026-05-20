@@ -1,16 +1,25 @@
-//! Parity tests for the `Section` component's tree projection.
+//! Tree-path tests for the `Section` component's projection.
 //!
 //! These tests verify that `Section::render_tree_node()` produces a
 //! well-formed `NodeKind::Section` tree, that the tree validates cleanly,
-//! and that the tree-rendered terminal output is semantically equivalent to
-//! the bespoke `Section::render()` output.
+//! and that the tree-rendered terminal output preserves heading and body
+//! tokens at every supported width.
 
 mod parity_helpers;
 
 use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::components::section::{HeadingLevel, Section};
 use biscuit_terminal::render_tree::{TerminalRenderOptions, render_terminal_node};
-use renderable::tree::{NodeKind, RenderStrictness, ValidationMode, validate};
+use renderable::tree::{NodeKind, RenderNode, RenderStrictness, ValidationMode, validate};
+
+/// Walks a `RenderNode` tree depth-first looking for a node whose `NodeKind`
+/// matches `pred`. Used by nested-component structural assertions.
+fn walk_has_kind(node: &RenderNode, pred: impl Fn(&NodeKind) -> bool + Copy) -> bool {
+    if pred(&node.kind) {
+        return true;
+    }
+    node.children().iter().any(|c| walk_has_kind(c, pred))
+}
 
 use parity_helpers::{PARITY_WIDTHS, assert_contains_tokens, strip_ansi, test_terminal};
 
@@ -235,71 +244,8 @@ fn tree_renderable_and_render_tree_node_share_one_projection() {
 }
 
 // ---------------------------------------------------------------------------
-// Bespoke vs tree parity (after the flip)
+// Tree-path heading style coverage
 // ---------------------------------------------------------------------------
-
-#[test]
-fn render_via_tree_matches_render_bespoke_ansi_stripped() {
-    // After the IR flip, `Section::render(&term)` routes through the tree.
-    // Visible text and ordering must match the retained bespoke renderer
-    // (modulo accepted blank-line divergence — the tree renderer joins
-    // heading and body with `\n\n` while bespoke used a single `\n`).
-    let section = sample_section();
-    let term = test_terminal(80);
-    let bespoke = strip_ansi(&section.render_bespoke(&term));
-    let tree = strip_ansi(&section.render(&term));
-
-    let bespoke_tokens: Vec<&str> = bespoke
-        .split_whitespace()
-        .filter(|t| !t.is_empty())
-        .collect();
-    let tree_tokens: Vec<&str> = tree
-        .split_whitespace()
-        .filter(|t| !t.is_empty())
-        .collect();
-    assert_eq!(
-        bespoke_tokens, tree_tokens,
-        "bespoke and tree paths agree on tokens after ANSI stripping"
-    );
-}
-
-#[test]
-fn bespoke_and_tree_agree_for_every_heading_level() {
-    let term = test_terminal(80);
-    for level in [
-        HeadingLevel::h1,
-        HeadingLevel::h2,
-        HeadingLevel::h3,
-        HeadingLevel::h4,
-        HeadingLevel::h5,
-        HeadingLevel::h6,
-    ] {
-        let mut section = Section::new(level, "Title");
-        section.push("Body line.");
-        let bespoke = strip_ansi(&section.render_bespoke(&term));
-        let tree = strip_ansi(&section.render(&term));
-
-        let bespoke_tokens: Vec<&str> = bespoke.split_whitespace().collect();
-        let tree_tokens: Vec<&str> = tree.split_whitespace().collect();
-        assert_eq!(
-            bespoke_tokens, tree_tokens,
-            "bespoke/tree disagree for level {level:?}"
-        );
-    }
-}
-
-#[test]
-fn empty_section_bespoke_and_tree_emit_identical_output() {
-    // An empty section is the simplest case — bespoke and tree both emit
-    // just the styled heading line with no body and no trailing newline.
-    let section = Section::new(HeadingLevel::h1, "Solo");
-    let term = test_terminal(80);
-    assert_eq!(
-        section.render_bespoke(&term),
-        section.render(&term),
-        "empty section bytes match exactly"
-    );
-}
 
 #[test]
 fn heading_styles_survive_tree_render() {
@@ -576,6 +522,62 @@ fn render_tree_node_preserves_nested_block_component_structure() {
         matches!(&nested_kind.1[0].kind, NodeKind::Text { value } if value == "Subsection"),
         "nested heading text preserved: {:?}",
         nested_kind.1
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Stage 3a: structural projection of additional nested block components
+// (BlockQuote-in-Section, Table-in-Section). These tests pin that the
+// canonical tree carries the nested component's `NodeKind` rather than
+// flattening to text.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn nested_block_quote_in_section_projects_structural_block_quote_node() {
+    use biscuit_terminal::components::block_quote::BlockQuote;
+
+    let mut outer = Section::new(HeadingLevel::h2, "Quote Holder");
+    outer.push(BlockQuote::new("nested quoted".into(), None::<&str>));
+
+    let node = outer.render_tree_node().expect("tree node");
+    let children = match &node.kind {
+        NodeKind::Section { children, .. } => children,
+        other => panic!("expected NodeKind::Section, got {other:?}"),
+    };
+
+    assert!(
+        children
+            .iter()
+            .any(|c| walk_has_kind(c, |k| matches!(k, NodeKind::BlockQuote { .. }))),
+        "nested BlockQuote must appear as a structural BlockQuote node: {children:?}"
+    );
+}
+
+#[test]
+fn nested_table_in_section_projects_structural_table_node() {
+    use biscuit_terminal::components::table::{Table, TableCellContent, TableColumn};
+
+    let table = Table::new()
+        .with_columns(vec![TableColumn::new("Name"), TableColumn::new("Value")])
+        .with_data(vec![vec![
+            TableCellContent::Text("alpha".into()),
+            TableCellContent::Text("beta".into()),
+        ]]);
+
+    let mut outer = Section::new(HeadingLevel::h2, "Table Holder");
+    outer.push(table);
+
+    let node = outer.render_tree_node().expect("tree node");
+    let children = match &node.kind {
+        NodeKind::Section { children, .. } => children,
+        other => panic!("expected NodeKind::Section, got {other:?}"),
+    };
+
+    assert!(
+        children
+            .iter()
+            .any(|c| walk_has_kind(c, |k| matches!(k, NodeKind::Table { .. }))),
+        "nested Table must appear as a structural Table node: {children:?}"
     );
 }
 

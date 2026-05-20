@@ -6,6 +6,14 @@
 //! validates cleanly, and that the native tree renderer reproduces the
 //! semantic content, column alignment, conditional-column behavior, typed
 //! cells, and multi-line layout of the bespoke `Table::render()` output.
+//!
+//! ## Escape-hatch coverage
+//!
+//! This file exercises the sanctioned `Table::render_bespoke` escape hatch
+//! (`prefer_cursor_alignment` knob plus the TTY-specific cursor-positioning
+//! path — capabilities the render tree cannot yet express). The hook is
+//! `#[doc(hidden)]` but `pub` so integration tests can reach it; see
+//! `table/table.rs::render_bespoke` for the policy rationale.
 
 mod parity_helpers;
 

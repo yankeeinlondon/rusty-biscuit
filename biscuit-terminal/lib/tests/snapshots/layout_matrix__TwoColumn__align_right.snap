@@ -5,5 +5,5 @@ expression: block
 VIA_RENDER
 Left column content.                     Right column content.
 ---
-TREE
+VIA_TREE_DIRECT
 Left column content.                     Right column content.

@@ -66,6 +66,16 @@ use biscuit_terminal::components::renderable::{RenderableTerminalContent, Termin
 use biscuit_terminal::render_tree::TreeComponent;
 use biscuit_terminal::terminal::Terminal;
 use biscuit_terminal::utils::escape_codes::strip_escape_codes;
+use renderable::tree::{NodeKind, RenderNode};
+
+/// Walks a `RenderNode` tree depth-first looking for a node whose `NodeKind`
+/// matches `pred`. Used by nested-component structural assertions.
+fn walk_has_kind(node: &RenderNode, pred: impl Fn(&NodeKind) -> bool + Copy) -> bool {
+    if pred(&node.kind) {
+        return true;
+    }
+    node.children().iter().any(|c| walk_has_kind(c, pred))
+}
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -258,6 +268,175 @@ fn render_tree_carries_blockquote_style() {
         strip_escape_codes(&tree_routed).contains("Styled quote text"),
         "tree-routed styled block quote dropped its text: {tree_routed:?}"
     );
+}
+
+/// `BlockQuote::render_tree_node` must delegate to `TreeRenderable::render_tree`
+/// so the structural-projection hook used for nested
+/// `RenderableTerminalContent::Component` matches the canonical tree producer
+/// byte-for-byte (Stage 3a.1).
+#[test]
+fn render_tree_node_matches_render_tree_for_block_quote() {
+    use renderable::tree::TreeRenderable;
+
+    let cases: Vec<BlockQuote> = vec![
+        BlockQuote::from("plain quote"),
+        BlockQuote::new(
+            RenderableTerminalContent::from("attributed quote"),
+            Some("Author"),
+        ),
+        BlockQuote::from("line one\nline two"),
+        BlockQuote::from(Prose::new("rich <b>content</b>")),
+    ];
+    for quote in cases {
+        let from_tree = <BlockQuote as TreeRenderable>::render_tree(&quote);
+        let from_hook = <BlockQuote as TerminalRenderable>::render_tree_node(&quote)
+            .expect("render_tree_node should return Some");
+        assert_eq!(
+            from_tree, from_hook,
+            "BlockQuote::render_tree_node must delegate to render_tree"
+        );
+    }
+}
+
+/// Custom borders still divert the terminal `render` path to the bespoke
+/// compatibility renderer, but the IR projection (used when this quote is
+/// nested inside a parent component) must remain the canonical one.
+#[test]
+fn render_tree_node_matches_render_tree_for_block_quote_with_custom_border() {
+    use renderable::tree::TreeRenderable;
+
+    let quote = BlockQuote::from("custom-prefixed").with_border("!! ");
+    let from_tree = <BlockQuote as TreeRenderable>::render_tree(&quote);
+    let from_hook = <BlockQuote as TerminalRenderable>::render_tree_node(&quote)
+        .expect("render_tree_node should return Some");
+    assert_eq!(from_tree, from_hook);
+}
+
+// ---------------------------------------------------------------------------
+// Stage 3a: nested-component projection inside BlockQuote
+//
+// `BlockQuote::paragraph_children` runs `project_renderable_content` in
+// `ProjectionMode::InlineOnly` by design — the block-quote contract is that
+// the projected node's main paragraph holds only *inline* nodes. A non-Prose
+// block-level child therefore flattens to an ANSI-stripped `Text` node
+// wrapped in the quote's `Paragraph` rather than projecting structurally.
+//
+// These tests pin that contract in both directions:
+//
+// 1. The projected `NodeKind::BlockQuote` does not gain a structural
+//    `NodeKind::Section` / `NodeKind::List` child for nested non-Prose
+//    components.
+// 2. The nested component's visible content still survives through the
+//    flattened text node.
+//
+// If `BlockQuote` ever gains a structural-projection mode, these tests are
+// the canonical place to flip the assertions.
+// ---------------------------------------------------------------------------
+
+/// Helper: return the inner children of a `NodeKind::BlockQuote` root, or
+/// panic with a descriptive message.
+fn block_quote_children(node: &RenderNode) -> &[RenderNode] {
+    match &node.kind {
+        NodeKind::BlockQuote { children } => children,
+        other => panic!("expected NodeKind::BlockQuote, got {other:?}"),
+    }
+}
+
+/// A `Section` content inside a `BlockQuote` flattens to inline text — the
+/// projected tree must NOT carry a structural `NodeKind::Section` child
+/// (InlineOnly contract). The visible heading text must still survive.
+#[test]
+fn nested_section_in_block_quote_flattens_per_inline_only_contract() {
+    use biscuit_terminal::components::section::{HeadingLevel, Section};
+    use renderable::tree::TreeRenderable;
+
+    let nested = Section::new(HeadingLevel::h3, "Nested Heading");
+    let quote = BlockQuote::new(
+        RenderableTerminalContent::Component(std::rc::Rc::new(nested)),
+        None::<&str>,
+    );
+
+    let node = <BlockQuote as TreeRenderable>::render_tree(&quote);
+    let children = block_quote_children(&node);
+
+    // No structural Section child — InlineOnly flattens it.
+    assert!(
+        !children
+            .iter()
+            .any(|c| walk_has_kind(c, |k| matches!(k, NodeKind::Section { .. }))),
+        "BlockQuote's InlineOnly contract must NOT structurally project a nested Section: \
+         {children:?}"
+    );
+
+    // Visible content still reaches the rendered output.
+    let term = test_terminal();
+    let plain = strip_escape_codes(quote.render(&term));
+    assert!(
+        plain.contains("Nested Heading"),
+        "nested Section content survives the flattened projection: {plain:?}"
+    );
+}
+
+/// An `OrderedList` inside a `BlockQuote` flattens to inline text — no
+/// structural `NodeKind::List` child appears in the projected tree, but the
+/// item content survives end-to-end.
+#[test]
+fn nested_ordered_list_in_block_quote_flattens_per_inline_only_contract() {
+    use biscuit_terminal::components::list::OrderedList;
+    use renderable::tree::TreeRenderable;
+
+    let list = OrderedList::new(vec!["First", "Second"]);
+    let quote = BlockQuote::new(
+        RenderableTerminalContent::Component(std::rc::Rc::new(list)),
+        None::<&str>,
+    );
+
+    let node = <BlockQuote as TreeRenderable>::render_tree(&quote);
+    let children = block_quote_children(&node);
+
+    assert!(
+        !children
+            .iter()
+            .any(|c| walk_has_kind(c, |k| matches!(k, NodeKind::List { .. }))),
+        "BlockQuote's InlineOnly contract must NOT structurally project a nested OrderedList: \
+         {children:?}"
+    );
+
+    let term = test_terminal();
+    let plain = strip_escape_codes(quote.render(&term));
+    assert!(plain.contains("First"), "nested ordered item survives: {plain:?}");
+    assert!(plain.contains("Second"), "nested ordered item survives: {plain:?}");
+}
+
+/// An `UnorderedList` inside a `BlockQuote` flattens to inline text — no
+/// structural `NodeKind::List` child appears in the projected tree, but the
+/// item content survives end-to-end.
+#[test]
+fn nested_unordered_list_in_block_quote_flattens_per_inline_only_contract() {
+    use biscuit_terminal::components::list::UnorderedList;
+    use renderable::tree::TreeRenderable;
+
+    let list = UnorderedList::new(vec!["Alpha", "Beta"]);
+    let quote = BlockQuote::new(
+        RenderableTerminalContent::Component(std::rc::Rc::new(list)),
+        None::<&str>,
+    );
+
+    let node = <BlockQuote as TreeRenderable>::render_tree(&quote);
+    let children = block_quote_children(&node);
+
+    assert!(
+        !children
+            .iter()
+            .any(|c| walk_has_kind(c, |k| matches!(k, NodeKind::List { .. }))),
+        "BlockQuote's InlineOnly contract must NOT structurally project a nested UnorderedList: \
+         {children:?}"
+    );
+
+    let term = test_terminal();
+    let plain = strip_escape_codes(quote.render(&term));
+    assert!(plain.contains("Alpha"), "nested unordered item survives: {plain:?}");
+    assert!(plain.contains("Beta"), "nested unordered item survives: {plain:?}");
 }
 
 /// Sanity check: every case renders through both paths without panicking.

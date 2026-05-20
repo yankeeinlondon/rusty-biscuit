@@ -1,19 +1,14 @@
-//! Parity tests for the `TextBlock` component's IR migration.
+//! Tree-path tests for the `TextBlock` component's IR migration.
 //!
-//! The TextBlock spec splits coverage into two groups:
+//! Coverage splits into:
 //!
-//! 1. **Legacy parity** — for the fields the bespoke renderer really applies
-//!    (italic, `FontWeight`, layout), the tree path must agree with
-//!    [`TextBlock::render_bespoke`] on visible text and SGR after ANSI
-//!    stripping.
-//! 2. **Activated stored-field tests** — for the fields the bespoke path
-//!    stored but never rendered (foreground color, background color,
-//!    underline, strikethrough, blink), the tree path must now make them
-//!    visible. This is the intentional public behavior fix documented in
-//!    `lessons-learned.md` under "TextBlock: stored style fields can reveal
-//!    dormant behavior".
-//!
-//! Plus structural tests verifying the projection shape and tree validation.
+//! 1. **Structural tests** — projection shape and tree validation.
+//! 2. **Tree SGR coverage** — italic, `FontWeight`, layout, foreground/
+//!    background color, underline, strikethrough, and blink all surface in
+//!    the rendered SGR via the canonical tree path.
+//! 3. **Markdown / Browser coverage** — Markdown ignores `Style` by contract;
+//!    the browser renderer lowers `Style` to semantic wrappers or inline CSS
+//!    per RT-TEXTBLOCK-001.
 
 mod parity_helpers;
 
@@ -187,87 +182,61 @@ fn tree_renderable_and_render_tree_node_share_one_projection() {
 }
 
 // ---------------------------------------------------------------------------
-// Legacy parity (spec §"Legacy parity tests": #1-#9)
+// Tree-path SGR coverage
 //
-// These compare bespoke vs tree output ONLY for fields the bespoke path
-// really renders: italic, FontWeight, and layout.
+// Every stored style field (italic, FontWeight, layout, fg/bg color,
+// underline, strikethrough, blink) must surface through the canonical tree
+// path. These tests pin tree-path behavior directly.
 // ---------------------------------------------------------------------------
 
 #[test]
-fn plain_text_legacy_parity() {
+fn plain_text_renders_through_tree() {
     let block = TextBlock::new("Hello World");
     let term = test_terminal(80);
-    let bespoke = strip_ansi(&block.render_bespoke(&term));
     let tree = strip_ansi(&block.render(&term));
-    assert!(bespoke.contains("Hello World"));
     assert!(tree.contains("Hello World"));
 }
 
 #[test]
-fn bold_legacy_parity_both_paths_emit_bold_sgr() {
+fn bold_emits_bold_sgr_through_tree() {
     let mut block = TextBlock::new("Bold");
     block.using_bold_text();
     let term = test_terminal(80);
-    assert!(
-        block.render_bespoke(&term).contains("\x1b[1m"),
-        "bespoke bold SGR"
-    );
     assert!(block.render(&term).contains("\x1b[1m"), "tree bold SGR");
 }
 
 #[test]
-fn dim_legacy_parity_both_paths_emit_dim_sgr() {
+fn dim_emits_dim_sgr_through_tree() {
     let mut block = TextBlock::new("Dim");
     block.using_dim_text();
     let term = test_terminal(80);
-    assert!(
-        block.render_bespoke(&term).contains("\x1b[2m"),
-        "bespoke dim SGR"
-    );
     assert!(block.render(&term).contains("\x1b[2m"), "tree dim SGR");
 }
 
 #[test]
-fn italic_legacy_parity_both_paths_emit_italic_sgr_when_supported() {
+fn italic_emits_italic_sgr_through_tree() {
     let mut block = TextBlock::new("It");
     block.using_italics();
     let term = test_terminal(80);
-    // test_terminal advertises italic support. The bespoke renderer's
-    // `Style::Italic.wrap()` emits an italic open without the trailing `m`
-    // (pre-existing quirk in `utils::styling::Stylist::wrap`), so search for
-    // the SGR open prefix `\x1b[3` rather than the canonical `\x1b[3m`.
-    // KNOWN_DRIFT: the tree path emits the correct `\x1b[3m`.
-    assert!(
-        block.render_bespoke(&term).contains("\x1b[3"),
-        "bespoke italic SGR open prefix"
-    );
     assert!(block.render(&term).contains("\x1b[3m"), "tree italic SGR");
 }
 
 #[test]
-fn bold_plus_italic_legacy_parity() {
+fn bold_plus_italic_emits_both_sgrs_through_tree() {
     let mut block = TextBlock::new("Both");
     block.using_bold_text().using_italics();
     let term = test_terminal(80);
-    let bespoke = block.render_bespoke(&term);
     let tree = block.render(&term);
-    // See `italic_legacy_parity_*` for the `\x1b[3` vs `\x1b[3m` divergence.
-    assert!(bespoke.contains("\x1b[1m") && bespoke.contains("\x1b[3"));
     assert!(tree.contains("\x1b[1m") && tree.contains("\x1b[3m"));
 }
 
 #[test]
-fn layout_left_margin_applied_through_both_paths() {
+fn layout_left_margin_applied_through_tree() {
     use biscuit_terminal::utils::layout::{Length, TargetValue};
     let mut block = TextBlock::new("Hello");
     block.layout_mut().margin.left = TargetValue::universal(Length::ch(4));
     let term = test_terminal(80);
-    let bespoke_plain = strip_ansi(&block.render_bespoke(&term));
     let tree_plain = strip_ansi(&block.render(&term));
-    assert!(
-        bespoke_plain.starts_with("    "),
-        "bespoke left margin: {bespoke_plain:?}"
-    );
     assert!(
         tree_plain.starts_with("    "),
         "tree left margin: {tree_plain:?}"
@@ -275,30 +244,19 @@ fn layout_left_margin_applied_through_both_paths() {
 }
 
 #[test]
-fn empty_content_produces_empty_output_through_both_paths() {
+fn empty_content_produces_empty_output_through_tree() {
     let block = TextBlock::new("");
     let term = test_terminal(80);
-    let bespoke_plain = strip_ansi(&block.render_bespoke(&term));
     let tree_plain = strip_ansi(&block.render(&term));
-    assert!(bespoke_plain.trim().is_empty(), "bespoke: {bespoke_plain:?}");
     assert!(tree_plain.trim().is_empty(), "tree: {tree_plain:?}");
 }
 
 #[test]
-fn unicode_content_preserved_through_both_paths() {
+fn unicode_content_preserved_through_tree() {
     let block = TextBlock::new("héllo 世界 ✨");
     let term = test_terminal(80);
-    assert!(strip_ansi(&block.render_bespoke(&term)).contains("héllo 世界 ✨"));
     assert!(strip_ansi(&block.render(&term)).contains("héllo 世界 ✨"));
 }
-
-// ---------------------------------------------------------------------------
-// Activated stored-field tests (spec §"Activated stored-field tests": #10-#17)
-//
-// These assert the new tree-backed behavior for fields that were previously
-// stored but inert in the bespoke renderer. The tests are intentionally
-// asymmetric — they pin only the tree path's behavior.
-// ---------------------------------------------------------------------------
 
 #[test]
 fn fg_basic_color_activates_through_tree() {
@@ -306,13 +264,6 @@ fn fg_basic_color_activates_through_tree() {
     block.with_foreground_color(Color::BasicColor(BasicColor::Red));
     let term = test_terminal(80);
     let tree = block.render(&term);
-    let bespoke = block.render_bespoke(&term);
-
-    // The bespoke path emits no color SGR for fg_color at all.
-    assert!(
-        !bespoke.contains("\x1b[31m") && !bespoke.contains("\x1b[91m"),
-        "bespoke still inert for fg color"
-    );
     // The tree path now emits a foreground color SGR. The exact code depends
     // on degradation; assert any 30/90-series open is present.
     assert!(
@@ -341,12 +292,6 @@ fn bg_color_activates_through_tree() {
     block.with_background_color(Color::BasicColor(BasicColor::Blue));
     let term = test_terminal(80);
     let tree = block.render(&term);
-    let bespoke = block.render_bespoke(&term);
-
-    assert!(
-        !bespoke.contains("\x1b[44m") && !bespoke.contains("\x1b[104m"),
-        "bespoke still inert for bg color"
-    );
     assert!(
         tree.contains("\x1b[44m") || tree.contains("\x1b[48;"),
         "tree bg SGR: {tree:?}"
@@ -359,12 +304,6 @@ fn straight_underline_activates_through_tree() {
     block.with_underline(UnderliningRequest::Straight(None));
     let term = test_terminal(80);
     let tree = block.render(&term);
-    let bespoke = block.render_bespoke(&term);
-
-    assert!(
-        !bespoke.contains("\x1b[4m") && !bespoke.contains("\x1b[4:"),
-        "bespoke still inert for underline"
-    );
     assert!(
         tree.contains("\x1b[4m") || tree.contains("\x1b[4:"),
         "tree underline SGR: {tree:?}"
@@ -391,12 +330,6 @@ fn strikethrough_activates_through_tree() {
     block.use_strikethrough_on_content();
     let term = test_terminal(80);
     let tree = block.render(&term);
-    let bespoke = block.render_bespoke(&term);
-
-    assert!(
-        !bespoke.contains("\x1b[9m"),
-        "bespoke still inert for strikethrough"
-    );
     assert!(
         tree.contains("\x1b[9m"),
         "tree strikethrough SGR: {tree:?}"
@@ -409,9 +342,6 @@ fn blink_activates_through_tree() {
     block.make_content_blink();
     let term = test_terminal(80);
     let tree = block.render(&term);
-    let bespoke = block.render_bespoke(&term);
-
-    assert!(!bespoke.contains("\x1b[5m"), "bespoke still inert for blink");
     assert!(tree.contains("\x1b[5m"), "tree blink SGR: {tree:?}");
 }
 

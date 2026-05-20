@@ -42,11 +42,16 @@ fn stacked_stripped_has_no_ansi() {
     assert!(!block.contains('\x1b'), "snapshot block must be ANSI-free");
     assert!(block.contains("hi") && block.contains("bye"));
     // The header text reflects the post-flip semantics: the left half is the
-    // public `render(&term)` output (which itself routes through the tree),
-    // not a separate bespoke renderer.
+    // public `render(&term)` output and the right half is
+    // `TreeRenderable::render_tree` folded through `render_terminal_node` —
+    // both are public trait entry points, not a separate bespoke renderer.
     assert!(
         block.starts_with("VIA_RENDER\n"),
         "snapshot header is VIA_RENDER, not BESPOKE: {block:?}"
+    );
+    assert!(
+        block.contains("\nVIA_TREE_DIRECT\n"),
+        "snapshot right-column header is VIA_TREE_DIRECT, not TREE: {block:?}"
     );
 }
 
@@ -60,15 +65,15 @@ fn side_by_side_includes_title_and_both_columns() {
 use layout_matrix_support::component_cases;
 
 #[test]
-fn component_case_count_is_six() {
-    assert_eq!(component_cases().len(), 6);
+fn component_case_count_is_eleven() {
+    assert_eq!(component_cases().len(), 11);
 }
 
 #[test]
 fn every_case_renders_non_empty() {
     for case in component_cases() {
         for scenario in scenarios() {
-            let (via_render, tree) = (case.render)(&scenario);
+            let (via_render, via_tree_direct) = (case.render)(&scenario);
             assert!(
                 !via_render.is_empty(),
                 "{}/{}: render(&term) output was empty",
@@ -76,8 +81,8 @@ fn every_case_renders_non_empty() {
                 scenario.name
             );
             assert!(
-                !tree.is_empty(),
-                "{}/{}: tree output was empty",
+                !via_tree_direct.is_empty(),
+                "{}/{}: via_tree_direct output was empty",
                 case.name,
                 scenario.name
             );
@@ -89,8 +94,8 @@ fn every_case_renders_non_empty() {
 fn layout_matrix_snapshots() {
     for case in component_cases() {
         for scenario in scenarios() {
-            let (via_render, tree) = (case.render)(&scenario);
-            let block = stacked_stripped(&via_render, &tree);
+            let (via_render, via_tree_direct) = (case.render)(&scenario);
+            let block = stacked_stripped(&via_render, &via_tree_direct);
             insta::assert_snapshot!(format!("{}__{}", case.name, scenario.name), block);
         }
     }

@@ -1,6 +1,5 @@
 ---
 source: biscuit-terminal/lib/tests/layout_matrix.rs
-assertion_line: 87
 expression: block
 ---
 VIA_RENDER
@@ -10,7 +9,7 @@ VIA_RENDER
 - Second item
 - Third item
 ---
-TREE
+VIA_TREE_DIRECT
 
 
 - First item

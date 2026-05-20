@@ -6,6 +6,14 @@
 //! `StatusBlock::render_bespoke()` output. They also pin the explicit
 //! "arbitrary `with_border(prefix)` keeps using the bespoke compatibility
 //! path" contract.
+//!
+//! ## Escape-hatch coverage
+//!
+//! This file exercises the sanctioned `StatusBlock::render_bespoke` escape
+//! hatch (arbitrary border prefix — a capability the render tree's
+//! standard `Border` enum cannot express). The hook is `#[doc(hidden)]`
+//! but `pub` so integration tests can reach it; see
+//! `status_block.rs::render_bespoke` for the policy rationale.
 
 mod parity_helpers;
 
@@ -376,6 +384,47 @@ fn default_border_terminal_render_matches_tree_byte_for_byte_with_bespoke_defaul
 // ---------------------------------------------------------------------------
 // Width matrix smoke
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// render_tree_node ↔ render_tree parity (Stage 3a.1)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn render_tree_node_matches_render_tree() {
+    let block = StatusBlock::new(StatusState::Error)
+        .header("Header")
+        .body("Body text")
+        .hint("Hint");
+    let from_tree = <StatusBlock as TreeRenderable>::render_tree(&block);
+    let from_hook = <StatusBlock as TerminalRenderable>::render_tree_node(&block)
+        .expect("render_tree_node should return Some");
+    assert_eq!(
+        from_tree, from_hook,
+        "render_tree_node must delegate to TreeRenderable::render_tree"
+    );
+}
+
+#[test]
+fn render_tree_node_matches_render_tree_body_only() {
+    let block = StatusBlock::new(StatusState::Info).body("body only");
+    let from_tree = <StatusBlock as TreeRenderable>::render_tree(&block);
+    let from_hook = <StatusBlock as TerminalRenderable>::render_tree_node(&block)
+        .expect("render_tree_node should return Some");
+    assert_eq!(from_tree, from_hook);
+}
+
+#[test]
+fn render_tree_node_matches_render_tree_with_custom_border() {
+    // Custom border keeps the bespoke terminal path but the IR projection
+    // (used by nested-component embedding) must still be canonical.
+    let block = StatusBlock::new(StatusState::Error)
+        .body("Body")
+        .border("!! ");
+    let from_tree = <StatusBlock as TreeRenderable>::render_tree(&block);
+    let from_hook = <StatusBlock as TerminalRenderable>::render_tree_node(&block)
+        .expect("render_tree_node should return Some");
+    assert_eq!(from_tree, from_hook);
+}
 
 #[test]
 fn renders_at_all_parity_widths() {

@@ -9,6 +9,15 @@
 //! A `TwoColumn` containing a `TerminalImage` cannot be projected — cursor
 //! overlay rendering has no tree representation — so it projects to an
 //! `Unsupported` node instead.
+//!
+//! ## Escape-hatch coverage
+//!
+//! This file exercises the sanctioned `TwoColumn::render_bespoke` and
+//! `TwoColumn::render_bespoke_optimistic` escape hatches (inline
+//! `TerminalImage` overlays via cursor positioning, plus the `Unsupported`
+//! content fallback — capabilities the render tree cannot represent). The
+//! hooks are `#[doc(hidden)]` but `pub` so integration tests can reach
+//! them; see `two_column.rs::render_bespoke` for the policy rationale.
 
 mod parity_helpers;
 
@@ -528,20 +537,10 @@ fn render_via_tree_honors_right_margin() {
 
 #[test]
 fn render_via_tree_preserves_nested_block_content() {
-    // Spec test variant 12 (relaxed): a `BlockQuote` inside a column projects
-    // through `RenderableTerminalContent::to_tree_nodes`. Because non-`Prose`
-    // components don't override `TerminalRenderable::render_tree_node`, the
-    // current accepted contract is that nested components flatten to
-    // ANSI-stripped text wrapped in a paragraph — the text survives, but the
-    // structural block kind does not.
-    //
-    // TODO(stage-3): Teach `project_renderable_content` (or each block
-    // component) to project nested `BlockQuote`/`Section` components through
-    // their `TreeRenderable` impls so they appear as structural block-level
-    // children of the columns carrier, rather than ANSI-stripped paragraphs.
-    // See `renderable/features/2026-05-19-pushing-toward-ir/lessons-learned.md`
-    // ("Nested non-`Prose` block components flatten to text") for the
-    // discussion and future plan.
+    // Stage 3a: a `BlockQuote` inside a column must project structurally
+    // through the canonical `TreeRenderable` impl — not flatten to an
+    // ANSI-stripped paragraph. We require an actual `NodeKind::BlockQuote`
+    // child in the left region of the columns carrier.
     let nested = BlockQuote::new("quoted inside".into(), None::<&str>);
     let cols = TwoColumn::new(nested, "Plain right");
     let node = <TwoColumn as TreeRenderable>::render_tree(&cols);
@@ -552,35 +551,12 @@ fn render_via_tree_preserves_nested_block_content() {
     let hints = node.attrs.columns_hints().expect("columns hints");
     let (left, _right) = children.split_at(hints.left_count);
 
-    // Current contract: the nested quote's rendered text reaches the left
-    // region (even if flattened to a paragraph). Search the left subtree's
-    // text content for the quoted phrase.
-    fn collect_text(node: &renderable::tree::RenderNode, sink: &mut String) {
-        use renderable::tree::NodeKind;
-        match &node.kind {
-            NodeKind::Text { value } => sink.push_str(value),
-            NodeKind::Paragraph { children }
-            | NodeKind::BlockQuote { children }
-            | NodeKind::Section { children, .. }
-            | NodeKind::Emphasis { children }
-            | NodeKind::Strong { children }
-            | NodeKind::Span { children, .. } => {
-                for child in children {
-                    collect_text(child, sink);
-                }
-            }
-            _ => {}
-        }
-    }
-
-    let mut left_text = String::new();
-    for child in left {
-        collect_text(child, &mut left_text);
-    }
+    // Structural: the left region must include a `NodeKind::BlockQuote` node
+    // somewhere in its subtree.
     assert!(
-        left_text.contains("quoted inside"),
-        "nested BlockQuote text reaches the left region of the columns carrier: \
-         left_text={left_text:?}, left={left:?}",
+        left.iter()
+            .any(|c| walk_has_kind(c, |k| matches!(k, NodeKind::BlockQuote { .. }))),
+        "left region must contain a structural BlockQuote child: left={left:?}"
     );
 
     // And the rendered terminal output retains the quoted content end-to-end.
@@ -590,6 +566,15 @@ fn render_via_tree_preserves_nested_block_content() {
         plain.contains("quoted inside"),
         "nested BlockQuote content survives rendering: {plain:?}"
     );
+}
+
+/// Walks a `RenderNode` tree depth-first looking for a node whose `NodeKind`
+/// matches `pred`. Used by nested-component structural assertions.
+fn walk_has_kind(node: &RenderNode, pred: impl Fn(&NodeKind) -> bool + Copy) -> bool {
+    if pred(&node.kind) {
+        return true;
+    }
+    node.children().iter().any(|c| walk_has_kind(c, pred))
 }
 
 #[test]
