@@ -115,15 +115,25 @@ fn render_tree_node_matches_render_tree_for_mixed_compose() {
 // spec (no idiomatic `Compose` fixture).
 // ---------------------------------------------------------------------------
 
+// Single-fixture Compose cases each assert that the projected component
+// appears as the Compose root's first (and only) child with the expected
+// `NodeKind`. Direct-index checks deliberately replace the earlier
+// `any + walk_has_kind` recursion so a misplaced or accidentally nested
+// match cannot mask a regression.
+
 #[test]
 fn compose_block_quote_projects_block_quote_node() {
     let node = compose_with(BlockQuote::new("quoted".into(), None::<&str>));
     let children = compose_root_children(&node);
+    assert_eq!(
+        children.len(),
+        1,
+        "Compose<BlockQuote> must carry exactly one top-level child: {children:?}"
+    );
     assert!(
-        children
-            .iter()
-            .any(|c| walk_has_kind(c, |k| matches!(k, NodeKind::BlockQuote { .. }))),
-        "Compose<BlockQuote> must carry a structural BlockQuote child: {children:?}"
+        matches!(&children[0].kind, NodeKind::BlockQuote { .. }),
+        "Compose<BlockQuote> top-level child must be BlockQuote, got {:?}",
+        children[0].kind,
     );
 }
 
@@ -133,11 +143,18 @@ fn compose_section_projects_section_node() {
     section.push("body");
     let node = compose_with(section);
     let children = compose_root_children(&node);
+    assert_eq!(
+        children.len(),
+        1,
+        "Compose<Section> must carry exactly one top-level child: {children:?}"
+    );
     assert!(
-        children.iter().any(|c| walk_has_kind(c, |k| {
-            matches!(k, NodeKind::Section { depth, .. } if depth.get() == 2)
-        })),
-        "Compose<Section> must carry a structural Section child at depth 2: {children:?}"
+        matches!(
+            &children[0].kind,
+            NodeKind::Section { depth, .. } if depth.get() == 2
+        ),
+        "Compose<Section> top-level child must be Section at depth 2, got {:?}",
+        children[0].kind,
     );
 }
 
@@ -151,11 +168,15 @@ fn compose_table_projects_table_node() {
         ]]);
     let node = compose_with(table);
     let children = compose_root_children(&node);
+    assert_eq!(
+        children.len(),
+        1,
+        "Compose<Table> must carry exactly one top-level child: {children:?}"
+    );
     assert!(
-        children
-            .iter()
-            .any(|c| walk_has_kind(c, |k| matches!(k, NodeKind::Table { .. }))),
-        "Compose<Table> must carry a structural Table child: {children:?}"
+        matches!(&children[0].kind, NodeKind::Table { .. }),
+        "Compose<Table> top-level child must be Table, got {:?}",
+        children[0].kind,
     );
 }
 
@@ -164,11 +185,15 @@ fn compose_ordered_list_projects_ordered_list_node() {
     let list = OrderedList::new(vec!["a", "b"]);
     let node = compose_with(list);
     let children = compose_root_children(&node);
+    assert_eq!(
+        children.len(),
+        1,
+        "Compose<OrderedList> must carry exactly one top-level child: {children:?}"
+    );
     assert!(
-        children
-            .iter()
-            .any(|c| walk_has_kind(c, |k| matches!(k, NodeKind::List { ordered: true, .. }))),
-        "Compose<OrderedList> must carry a structural ordered List child: {children:?}"
+        matches!(&children[0].kind, NodeKind::List { ordered: true, .. }),
+        "Compose<OrderedList> top-level child must be ordered List, got {:?}",
+        children[0].kind,
     );
 }
 
@@ -177,11 +202,15 @@ fn compose_unordered_list_projects_unordered_list_node() {
     let list = UnorderedList::new(vec!["a", "b"]);
     let node = compose_with(list);
     let children = compose_root_children(&node);
+    assert_eq!(
+        children.len(),
+        1,
+        "Compose<UnorderedList> must carry exactly one top-level child: {children:?}"
+    );
     assert!(
-        children
-            .iter()
-            .any(|c| walk_has_kind(c, |k| matches!(k, NodeKind::List { ordered: false, .. }))),
-        "Compose<UnorderedList> must carry a structural unordered List child: {children:?}"
+        matches!(&children[0].kind, NodeKind::List { ordered: false, .. }),
+        "Compose<UnorderedList> top-level child must be unordered List, got {:?}",
+        children[0].kind,
     );
 }
 
@@ -189,31 +218,37 @@ fn compose_unordered_list_projects_unordered_list_node() {
 fn compose_progress_projects_paragraph_node() {
     let node = compose_with(Progress::new(0.5).with_label("p"));
     let children = compose_root_children(&node);
+    assert_eq!(
+        children.len(),
+        1,
+        "Compose<Progress> must carry exactly one top-level child: {children:?}"
+    );
     assert!(
-        children
-            .iter()
-            .any(|c| walk_has_kind(c, |k| matches!(k, NodeKind::Paragraph { .. }))),
-        "Compose<Progress> must carry a structural Paragraph child: {children:?}"
+        matches!(&children[0].kind, NodeKind::Paragraph { .. }),
+        "Compose<Progress> top-level child must be Paragraph, got {:?}",
+        children[0].kind,
     );
 }
 
 #[test]
 fn compose_status_block_projects_root_or_paragraph_child() {
-    // StatusBlock projects into a composite root subtree (Paragraph header +
-    // optional BlockQuote body). We assert on the inner shape since
-    // `project_renderable_content` flattens a nested `Root` into its
-    // children rather than introducing a second `Root`.
+    // StatusBlock projects to a Root subtree (Paragraph header + optional
+    // BlockQuote body). `project_part` flattens the inner Root into its
+    // children, so the Compose root sees the header `Paragraph` directly as
+    // its first top-level child.
     let block = StatusBlock::new(StatusState::Warning)
         .header("warn header")
         .body(vec![Prose::new("body msg")]);
     let node = compose_with(block);
     let children = compose_root_children(&node);
     assert!(
-        children
-            .iter()
-            .any(|c| walk_has_kind(c, |k| matches!(k, NodeKind::Paragraph { .. }))),
-        "Compose<StatusBlock> must carry the StatusBlock's structural Paragraph header: \
-         {children:?}"
+        !children.is_empty(),
+        "Compose<StatusBlock> must carry the flattened StatusBlock children: {children:?}"
+    );
+    assert!(
+        matches!(&children[0].kind, NodeKind::Paragraph { .. }),
+        "Compose<StatusBlock> first top-level child must be the header Paragraph, got {:?}",
+        children[0].kind,
     );
 }
 
@@ -221,11 +256,15 @@ fn compose_status_block_projects_root_or_paragraph_child() {
 fn compose_text_block_projects_paragraph_node() {
     let node = compose_with(TextBlock::new("text"));
     let children = compose_root_children(&node);
+    assert_eq!(
+        children.len(),
+        1,
+        "Compose<TextBlock> must carry exactly one top-level child: {children:?}"
+    );
     assert!(
-        children
-            .iter()
-            .any(|c| walk_has_kind(c, |k| matches!(k, NodeKind::Paragraph { .. }))),
-        "Compose<TextBlock> must carry a structural Paragraph child: {children:?}"
+        matches!(&children[0].kind, NodeKind::Paragraph { .. }),
+        "Compose<TextBlock> top-level child must be Paragraph, got {:?}",
+        children[0].kind,
     );
 }
 
@@ -233,11 +272,15 @@ fn compose_text_block_projects_paragraph_node() {
 fn compose_todo_projects_list_node() {
     let node = compose_with(Todo::new("task"));
     let children = compose_root_children(&node);
+    assert_eq!(
+        children.len(),
+        1,
+        "Compose<Todo> must carry exactly one top-level child: {children:?}"
+    );
     assert!(
-        children
-            .iter()
-            .any(|c| walk_has_kind(c, |k| matches!(k, NodeKind::List { .. }))),
-        "Compose<Todo> must carry a structural List child: {children:?}"
+        matches!(&children[0].kind, NodeKind::List { .. }),
+        "Compose<Todo> top-level child must be List, got {:?}",
+        children[0].kind,
     );
 }
 
@@ -248,22 +291,27 @@ fn compose_two_column_projects_block_quote_columns_carrier() {
     // the columns-hints contract is covered by `two_column_parity.rs`.
     let node = compose_with(TwoColumn::new("L", "R"));
     let children = compose_root_children(&node);
+    assert_eq!(
+        children.len(),
+        1,
+        "Compose<TwoColumn> must carry exactly one top-level child: {children:?}"
+    );
     assert!(
-        children
-            .iter()
-            .any(|c| walk_has_kind(c, |k| matches!(k, NodeKind::BlockQuote { .. }))),
-        "Compose<TwoColumn> must carry a structural BlockQuote columns carrier: {children:?}"
+        matches!(&children[0].kind, NodeKind::BlockQuote { .. }),
+        "Compose<TwoColumn> top-level child must be the BlockQuote columns carrier, got {:?}",
+        children[0].kind,
     );
 }
 
 #[test]
 fn compose_nested_compose_projects_inner_structural_child() {
     // A `Compose` whose only part is another `Compose` must structurally
-    // surface the inner Compose's children. `project_renderable_content`
+    // surface the inner Compose's children. `project_part` deliberately
     // flattens a nested `NodeKind::Root` into its children rather than
-    // introducing a second `Root`. We use an inner part with a clearly
-    // identifiable `NodeKind` (a Section) so the discriminant check is
-    // unambiguous.
+    // introducing a second `Root`, so the inner Section appears directly at
+    // the outer Compose's top level. The `walk_has_kind` recursion is kept
+    // here so the assertion still holds if the spec ever pads the inner
+    // sequence with additional siblings.
     let mut inner = Compose::default();
     inner.add_heading("Inner", 2);
     let outer = compose_with(inner);
