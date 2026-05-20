@@ -116,11 +116,13 @@ let style = CssStyle::new()
 
 ## Relationship to other Packages
 
-The **renderable** library can and should be used by any renderable components which need to render to markdown, the terminal, the browser, or to an AST form. The packages which already play a big role in this ecosystem are:
+The **renderable** library can and should be used by any renderable components which need to render to Markdown, the terminal, or the browser from a shared render-tree IR. There is no AST render target; use `TreeRenderable` and the `renderable::tree` module for target-agnostic structure. The packages which already play a big role in this ecosystem are:
 
 - `biscuit-terminal` 
     - provides all sorts of utilities for discovering features of a given terminal as well as how to render to a terminal (with good fallbacks)
     - because it is so concentrated on terminal features, the `TerminalRenderable` trait resides in **biscuit-terminal** instead of **renderable**
+    - current IR migration goal: every IR-aware component should share one private projection helper between `TreeRenderable::render_tree` and `TerminalRenderable::render_tree_node`; nested `RenderableTerminalContent::Component` values should project structurally instead of falling back to ANSI-stripped text
+    - Stage 3 closes the remaining structural-projection gap for `BlockQuote`, `StatusBlock`, and `FileSystem`, decides whether `FileSystem::render` can flip from its bespoke terminal path, and retires or documents each remaining `render_bespoke` compatibility hook
     - **biscuit-terminal** also provides these important components:
         - `Prose`
         - `Table`

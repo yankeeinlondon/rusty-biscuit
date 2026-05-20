@@ -65,9 +65,11 @@ Two complementary entry points produce trees from existing components:
 - **`TreeRenderable::render_tree()`** — a component authored tree-first.
 - **`TerminalRenderable::render_tree_node(&self) -> Option<RenderNode>`** — an
   existing terminal component opts into tree rendering by overriding this
-  (default `None`). Lives in `biscuit-terminal`. The Group 1 components
-  (`Section`, `OrderedList`, `UnorderedList`, `Progress`, `TwoColumn`,
-  `Table`, darkmatter's `YamlBlock`) all implement it.
+  (default `None`). Lives in `biscuit-terminal`. For migrated
+  `biscuit-terminal` components, the override should delegate to the same
+  private projection helper used by `TreeRenderable::render_tree`; otherwise a
+  nested `RenderableTerminalContent::Component` can degrade to an
+  ANSI-stripped text fallback.
 
 The **projection layer** (`biscuit-terminal`'s `render_tree::projection`)
 converts `RenderableTerminalContent` into tree nodes:
@@ -94,6 +96,10 @@ Presentational hints ride on `NodeAttrs.data` under namespaced keys via
 - **`ProgressHints`** — value, bar width, glyphs, brackets.
 - **`ColumnsHints`** / **`ColumnWidthKind`** — gap, left width, `left_count`,
   stack threshold (two-column layout, carried on a `BlockQuote` node).
+- **`ListMarkerPolicy`**, **`TaskHints`**, table title/caption hints, and
+  table-cell serialization rules — approved Stage 2/3 additions that let
+  filesystem trees, Todo states, and table metadata stay semantic instead of
+  baking terminal glyphs or Markdown delimiters into text.
 - **`TableColumnHints`** / **`TableCellHints`** / **`TableTerminalHints`** —
   per-column width/conditional/drop metadata, per-cell typed value and
   alignment, terminal striping and cursor preference.
