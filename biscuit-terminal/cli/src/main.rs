@@ -165,6 +165,7 @@ impl Run for Command {
             Command::Block(args) => args.run(ctx),
             Command::Progress(args) => args.run(ctx),
             Command::Table(args) => args.run(ctx),
+            Command::Compose(args) => args.run(ctx),
         }
     }
 }

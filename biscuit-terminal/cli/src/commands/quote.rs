@@ -4,26 +4,49 @@ use crate::commands::{CliContext, Run};
 use biscuit_terminal::components::block_quote::BlockQuote;
 use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::components::renderable::{RenderableTerminalContent, TerminalRenderable};
+use biscuit_terminal::render_tree::{
+    render_terminal_node, BrowserTreeComponent, TerminalRenderOptions,
+};
 use biscuit_terminal::utils::layout::{Length, TargetValue};
 use clap::Args as ClapArgs;
+use renderable::browser::BrowserRenderable;
+use renderable::tree::render::{render_markdown_node, MarkdownRenderOptions};
+use renderable::tree::{RenderNode, RenderStrictness, TreeRenderable};
 use std::rc::Rc;
 
 const QUOTE_EXAMPLE: &str = "<b>Clarity</b> is kind when the work gets complex.";
 const QUOTE_EXAMPLE_ATTRIBUTION: &str = "Engineering Notes";
 const QUOTE_EXAMPLE_CMD: &str = r#"bt quote --attribution "Engineering Notes" "<b>Clarity</b> is kind when the work gets complex.""#;
+const QUOTE_EXAMPLE_MD_CMD: &str = r#"bt quote --md --attribution "Engineering Notes" "<b>Clarity</b> is kind when the work gets complex.""#;
+const QUOTE_EXAMPLE_HTML_CMD: &str = r#"bt quote --html --attribution "Engineering Notes" "<b>Clarity</b> is kind when the work gets complex.""#;
 
-/// Render styled text in a block quote
+/// Render styled text in a block quote.
+///
+/// By default the quote renders for the terminal through the canonical
+/// `renderable` tree renderer. Pass `--md` to emit portable Markdown or
+/// `--html` to emit an HTML fragment instead. The two output-target flags
+/// are mutually exclusive.
 #[derive(ClapArgs, Debug, Clone)]
 pub struct QuoteArgs {
-    /// Render an example and show the command used
+    /// Render an example and show the command used.
     #[arg(long, short = 'e')]
     pub example: bool,
 
+    /// Quote content (positional, joined with spaces).
     #[arg(value_name = "CONTENT", required_unless_present = "example")]
     pub content: Vec<String>,
 
+    /// Optional attribution (rendered as `— ATTRIBUTION`).
     #[arg(long)]
     pub attribution: Option<String>,
+
+    /// Render to portable Markdown instead of the terminal.
+    #[arg(long, conflicts_with = "html")]
+    pub md: bool,
+
+    /// Render to an HTML fragment instead of the terminal.
+    #[arg(long, conflicts_with = "md")]
+    pub html: bool,
 
     #[command(flatten)]
     pub layout: LayoutArgs,
@@ -65,11 +88,37 @@ impl Run for QuoteArgs {
             quote = quote.alignment(align);
         }
 
+        if self.md {
+            let root = RenderNode::root(vec![quote.render_tree()]);
+            let rendered = render_markdown_node(&root, &MarkdownRenderOptions::default())
+                .map_err(|e| color_eyre::eyre::eyre!("markdown render failed: {e}"))?;
+            println!("{}", rendered.output);
+            if self.example {
+                print_example_command(QUOTE_EXAMPLE_MD_CMD);
+            }
+            return Ok(());
+        }
+
+        if self.html {
+            let html = BrowserTreeComponent::new(quote)
+                .render_html_fragment()
+                .render();
+            println!("{html}");
+            if self.example {
+                print_example_command(QUOTE_EXAMPLE_HTML_CMD);
+            }
+            return Ok(());
+        }
+
+        // Default: render for the terminal through the canonical render tree.
         let term = detect_terminal_honoring_force_color();
-        let output = quote.render(&term);
+        let root = RenderNode::root(vec![quote.render_tree()]);
+        let opts = TerminalRenderOptions::new(&term, RenderStrictness::Warn);
+        let rendered = render_terminal_node(&root, &opts)
+            .map_err(|e| color_eyre::eyre::eyre!("render failed: {e}"))?;
 
         emit_vertical_margins(&self.layout, || {
-            println!("{}", output);
+            println!("{}", rendered.output);
             Ok(())
         })?;
 

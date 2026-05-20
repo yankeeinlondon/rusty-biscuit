@@ -3,6 +3,7 @@ use color_eyre::Result;
 pub mod block;
 pub mod color_parse;
 pub mod columns;
+pub mod compose;
 pub mod dir;
 pub mod erd;
 pub mod flowchart;

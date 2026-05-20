@@ -165,4 +165,7 @@ pub enum Command {
 
     #[command(display_order = 18)]
     Table(table::TableArgs),
+
+    #[command(display_order = 19)]
+    Compose(compose::ComposeArgs),
 }
