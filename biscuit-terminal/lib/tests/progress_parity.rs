@@ -353,3 +353,247 @@ fn progress_renders_at_all_parity_widths() {
         assert_contains_tokens(&render_tree(&node, width), &["Task", "60%"]);
     }
 }
+
+// ---------------------------------------------------------------------------
+// TreeRenderable canonical adoption
+// ---------------------------------------------------------------------------
+
+#[test]
+fn tree_renderable_and_render_tree_node_share_one_projection() {
+    // The migration pattern: the canonical `TreeRenderable::render_tree`
+    // entry point and the terminal compatibility
+    // `TerminalRenderable::render_tree_node` hook MUST share one private
+    // projection helper so they cannot drift.
+    use renderable::tree::TreeRenderable;
+    let bar = Progress::new(0.5).with_label("Sync");
+    let canonical = <Progress as TreeRenderable>::render_tree(&bar);
+    let compat = bar.render_tree_node().expect("tree node");
+    assert_eq!(
+        serde_json::to_value(&canonical).unwrap(),
+        serde_json::to_value(&compat).unwrap(),
+        "canonical and compatibility projections must serialize identically"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Bespoke vs tree parity
+// ---------------------------------------------------------------------------
+
+#[test]
+fn render_via_tree_matches_render_bespoke_ansi_stripped() {
+    // After the flip, `Progress::render(&term)` routes through the tree.
+    // For every default-style progress bar the bespoke output and the tree
+    // output should agree on visible content modulo trailing whitespace.
+    let bar = Progress::new(0.5).with_label("Build");
+    let term = test_terminal(80);
+    let bespoke = strip_ansi(&bar.render_bespoke(&term));
+    let tree = strip_ansi(&bar.render(&term));
+    assert_eq!(
+        bespoke.trim_end(),
+        tree.trim_end(),
+        "bespoke and tree output agree ignoring trailing whitespace"
+    );
+}
+
+#[test]
+fn bespoke_and_tree_agree_at_extremes() {
+    let term = test_terminal(80);
+    for value in [0.0, 0.25, 0.5, 0.75, 1.0] {
+        let bar = Progress::new(value);
+        let bespoke = strip_ansi(&bar.render_bespoke(&term));
+        let tree = strip_ansi(&bar.render(&term));
+        assert_eq!(
+            bespoke.trim_end(),
+            tree.trim_end(),
+            "bespoke/tree disagree for value={value}",
+        );
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Layout flows through the tree path
+// ---------------------------------------------------------------------------
+
+#[test]
+fn left_margin_is_honored_through_tree_path() {
+    use biscuit_terminal::utils::layout::{Length, TargetValue};
+    let bar =
+        Progress::new(0.5).left_margin(TargetValue::universal(Length::ch(4)));
+    let term = test_terminal(80);
+    let out = strip_ansi(&bar.render(&term));
+    assert!(
+        out.starts_with("    "),
+        "left margin of 4 spaces applied through tree: {out:?}"
+    );
+}
+
+#[test]
+fn percentage_alignment_preserved_through_tree_path() {
+    let term = test_terminal(80);
+    // 0% -> "  0%" (two leading spaces)
+    assert!(strip_ansi(&Progress::new(0.0).render(&term)).contains("  0%"));
+    // 75% -> " 75%" (one leading space)
+    assert!(strip_ansi(&Progress::new(0.75).render(&term)).contains(" 75%"));
+    // 100% -> "100%" (no leading space)
+    assert!(strip_ansi(&Progress::new(1.0).render(&term)).contains("100%"));
+}
+
+// ---------------------------------------------------------------------------
+// Markdown (portable): label + percentage only
+// ---------------------------------------------------------------------------
+
+#[test]
+fn markdown_renderable_unlabeled_emits_percentage_text() {
+    use renderable::markdown::MarkdownRenderable;
+    let md = Progress::new(0.5).render_markdown();
+    assert_eq!(md.trim(), "50%");
+}
+
+#[test]
+fn markdown_renderable_labeled_emits_label_and_percentage() {
+    use renderable::markdown::MarkdownRenderable;
+    let md = Progress::new(0.5)
+        .with_label("Loading")
+        .render_markdown();
+    assert_eq!(md.trim(), "Loading 50%");
+}
+
+#[test]
+fn markdown_renderable_drops_colors_glyphs_layout() {
+    use biscuit_terminal::utils::layout::{Length, TargetValue};
+    use renderable::color::{BasicColor, Color};
+    use renderable::markdown::MarkdownRenderable;
+    let bar = Progress::new(0.5)
+        .with_label("Sync")
+        .with_fill_char('#')
+        .with_empty_char('-')
+        .with_brackets('(', ')')
+        .with_filled_color(Color::BasicColor(BasicColor::Green))
+        .left_margin(TargetValue::universal(Length::ch(4)));
+    let md = bar.render_markdown();
+    let trimmed = md.trim();
+    assert_eq!(
+        trimmed, "Sync 50%",
+        "portable Markdown drops glyphs/colors/layout, keeps label+percentage"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// MarkdownPlus: inline progress HTML
+// ---------------------------------------------------------------------------
+
+#[test]
+fn markdown_plus_emits_progress_html_shape() {
+    use renderable::markdown::MarkdownRenderable;
+    let md = Progress::new(0.75)
+        .with_label("Loading")
+        .render_markdown_plus();
+    assert!(
+        md.contains(r#"role="progressbar""#),
+        "MarkdownPlus carries semantic progress widget: {md:?}"
+    );
+    assert!(
+        md.contains(r#"aria-valuenow="75""#),
+        "ARIA value reflects completion: {md:?}"
+    );
+    assert!(md.contains("Loading"), "label survives: {md:?}");
+    assert!(md.contains("75%"), "percentage survives: {md:?}");
+}
+
+#[test]
+fn markdown_plus_unlabeled_omits_label_span() {
+    use renderable::markdown::MarkdownRenderable;
+    let md = Progress::new(0.5).render_markdown_plus();
+    assert!(
+        md.contains(r#"role="progressbar""#),
+        "MarkdownPlus carries semantic widget: {md:?}"
+    );
+    // Markdown-plus without a label should NOT carry a `progress-label` span.
+    assert!(
+        !md.contains("progress-label"),
+        "unlabeled progress emits no label span: {md:?}"
+    );
+}
+
+#[test]
+fn markdown_falls_through_for_plain_paragraph() {
+    // A plain Paragraph (no ProgressHints) renders as ordinary Markdown.
+    use renderable::tree::{RenderNode, render_markdown_node};
+    use renderable::tree::render::MarkdownRenderOptions;
+    let para = RenderNode::paragraph(vec![RenderNode::text("Plain text.")]);
+    let out = render_markdown_node(&para, &MarkdownRenderOptions::default())
+        .expect("markdown ok");
+    assert_eq!(out.output.trim(), "Plain text.");
+}
+
+// ---------------------------------------------------------------------------
+// Browser
+// ---------------------------------------------------------------------------
+
+#[test]
+fn browser_renderable_emits_semantic_progress() {
+    use biscuit_terminal::components::renderable::BrowserRenderable;
+    let bar = Progress::new(0.5).with_label("Sync");
+    let html = bar.render_html_fragment().render();
+    assert!(
+        html.contains(r#"role="progressbar""#),
+        "BrowserRenderable emits semantic widget: {html:?}"
+    );
+    assert!(
+        html.contains(r#"aria-valuenow="50""#),
+        "ARIA value reflects completion: {html:?}"
+    );
+    assert!(html.contains("Sync"), "label preserved: {html:?}");
+    assert!(html.contains("50%"), "percentage preserved: {html:?}");
+}
+
+#[test]
+fn browser_renders_at_zero_and_full() {
+    use biscuit_terminal::components::renderable::BrowserRenderable;
+    let zero = Progress::new(0.0).render_html_fragment().render();
+    let full = Progress::new(1.0).render_html_fragment().render();
+    assert!(
+        zero.contains(r#"aria-valuenow="0""#),
+        "0% -> ARIA value 0: {zero:?}"
+    );
+    assert!(
+        full.contains(r#"aria-valuenow="100""#),
+        "100% -> ARIA value 100: {full:?}"
+    );
+}
+
+#[test]
+fn browser_escapes_label_text() {
+    // Label content with HTML-special characters must be escaped.
+    use biscuit_terminal::components::renderable::BrowserRenderable;
+    let bar = Progress::new(0.5).with_label("<script>");
+    let html = bar.render_html_fragment().render();
+    assert!(
+        !html.contains("<script>"),
+        "raw <script> must not appear in HTML: {html:?}"
+    );
+    assert!(
+        html.contains("&lt;script&gt;") || html.contains("&lt;script"),
+        "label is HTML-escaped: {html:?}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// SGR / ColorDepth degradation in the tree path
+// ---------------------------------------------------------------------------
+
+#[test]
+fn tree_render_skips_sgr_at_color_depth_none() {
+    use biscuit_terminal::discovery::detection::ColorDepth;
+    use biscuit_terminal::terminal::Terminal;
+    use renderable::color::{BasicColor, Color};
+    let bar = Progress::new(0.5)
+        .with_filled_color(Color::BasicColor(BasicColor::Green));
+    let mut term = Terminal::new_optimistic(80);
+    term.color_depth = ColorDepth::None;
+    let out = bar.render(&term);
+    assert!(
+        !out.contains('\x1b'),
+        "no ANSI escapes when terminal lacks color support: {out:?}"
+    );
+}

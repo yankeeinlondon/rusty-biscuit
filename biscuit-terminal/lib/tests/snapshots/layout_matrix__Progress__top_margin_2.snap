@@ -1,8 +1,11 @@
 ---
 source: biscuit-terminal/lib/tests/layout_matrix.rs
+assertion_line: 87
 expression: block
 ---
 BESPOKE
+
+
 Loading [███████████████·····]  75%
 ---
 TREE

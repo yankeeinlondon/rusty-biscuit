@@ -89,14 +89,15 @@ const KNOWN_DRIFT: &[(&str, &str, Facet, Verdict)] = &[
     // default-border quote; the only remaining bespoke code path is the
     // `with_border()` compatibility fallback, which the matrix does not
     // exercise.
-    ("Progress", "bottom_margin_2", Facet::Exact, Verdict::BespokeBehind),
-    ("Progress", "bottom_margin_2", Facet::Text, Verdict::BespokeBehind),
-    ("Progress", "bottom_margin_2", Facet::Indent, Verdict::BespokeBehind),
-    ("Progress", "bottom_margin_2", Facet::BlankLines, Verdict::BespokeBehind),
-    ("Progress", "top_margin_2", Facet::Exact, Verdict::BespokeBehind),
-    ("Progress", "top_margin_2", Facet::Text, Verdict::BespokeBehind),
-    ("Progress", "top_margin_2", Facet::Indent, Verdict::BespokeBehind),
-    ("Progress", "top_margin_2", Facet::BlankLines, Verdict::BespokeBehind),
+    //
+    // Progress drift was retired when `TerminalRenderable::render` for
+    // `Progress` was re-pointed at the tree renderer (Progress IR flip,
+    // 2026-05-19). The layout-matrix harness calls `progress.render(&term)`
+    // for the "bespoke" half of the pair, which now routes through the
+    // canonical tree — so every cell agrees by construction. The pre-flip
+    // bespoke output is still available via `Progress::render_bespoke` for
+    // dedicated parity tests, but the layout matrix's side-by-side view is
+    // tautological for `Progress` and is informational only.
     ("Section", "align_center", Facet::Exact, Verdict::BespokeBehind),
     ("Section", "align_center", Facet::Text, Verdict::BespokeBehind),
     ("Section", "align_center", Facet::Indent, Verdict::BespokeBehind),
@@ -168,54 +169,12 @@ const KNOWN_DRIFT: &[(&str, &str, Facet, Verdict)] = &[
     ("TwoColumn", "top_margin_2", Facet::Text, Verdict::BespokeBehind),
     ("TwoColumn", "top_margin_2", Facet::Indent, Verdict::BespokeBehind),
     ("TwoColumn", "top_margin_2", Facet::BlankLines, Verdict::BespokeBehind),
-    ("UnorderedList", "align_center", Facet::Exact, Verdict::CosmeticNeutral),
-    ("UnorderedList", "align_center", Facet::Text, Verdict::CosmeticNeutral),
-    ("UnorderedList", "align_center", Facet::Indent, Verdict::CosmeticNeutral),
-    ("UnorderedList", "align_center", Facet::BlankLines, Verdict::CosmeticNeutral),
-    ("UnorderedList", "align_right", Facet::Exact, Verdict::CosmeticNeutral),
-    ("UnorderedList", "align_right", Facet::Text, Verdict::CosmeticNeutral),
-    ("UnorderedList", "align_right", Facet::Indent, Verdict::CosmeticNeutral),
-    ("UnorderedList", "align_right", Facet::BlankLines, Verdict::CosmeticNeutral),
-    ("UnorderedList", "baseline", Facet::Exact, Verdict::CosmeticNeutral),
-    ("UnorderedList", "baseline", Facet::Text, Verdict::CosmeticNeutral),
-    ("UnorderedList", "baseline", Facet::Indent, Verdict::CosmeticNeutral),
-    ("UnorderedList", "baseline", Facet::BlankLines, Verdict::CosmeticNeutral),
-    ("UnorderedList", "bottom_margin_2", Facet::Exact, Verdict::CosmeticNeutral),
-    ("UnorderedList", "bottom_margin_2", Facet::Text, Verdict::CosmeticNeutral),
-    ("UnorderedList", "bottom_margin_2", Facet::Indent, Verdict::CosmeticNeutral),
-    ("UnorderedList", "bottom_margin_2", Facet::BlankLines, Verdict::CosmeticNeutral),
-    ("UnorderedList", "left_margin_4", Facet::Exact, Verdict::CosmeticNeutral),
-    ("UnorderedList", "left_margin_4", Facet::Text, Verdict::CosmeticNeutral),
-    ("UnorderedList", "left_margin_4", Facet::Indent, Verdict::CosmeticNeutral),
-    ("UnorderedList", "left_margin_4", Facet::BlankLines, Verdict::CosmeticNeutral),
-    ("UnorderedList", "left_margin_pct_10", Facet::Exact, Verdict::CosmeticNeutral),
-    ("UnorderedList", "left_margin_pct_10", Facet::Text, Verdict::CosmeticNeutral),
-    ("UnorderedList", "left_margin_pct_10", Facet::Indent, Verdict::CosmeticNeutral),
-    ("UnorderedList", "left_margin_pct_10", Facet::BlankLines, Verdict::CosmeticNeutral),
-    ("UnorderedList", "max_width_40", Facet::Exact, Verdict::CosmeticNeutral),
-    ("UnorderedList", "max_width_40", Facet::Text, Verdict::CosmeticNeutral),
-    ("UnorderedList", "max_width_40", Facet::Indent, Verdict::CosmeticNeutral),
-    ("UnorderedList", "max_width_40", Facet::BlankLines, Verdict::CosmeticNeutral),
-    ("UnorderedList", "right_margin_4", Facet::Exact, Verdict::CosmeticNeutral),
-    ("UnorderedList", "right_margin_4", Facet::Text, Verdict::CosmeticNeutral),
-    ("UnorderedList", "right_margin_4", Facet::Indent, Verdict::CosmeticNeutral),
-    ("UnorderedList", "right_margin_4", Facet::BlankLines, Verdict::CosmeticNeutral),
-    ("UnorderedList", "top_margin_2", Facet::Exact, Verdict::BespokeBehind),
-    ("UnorderedList", "top_margin_2", Facet::Text, Verdict::BespokeBehind),
-    ("UnorderedList", "top_margin_2", Facet::Indent, Verdict::BespokeBehind),
-    ("UnorderedList", "top_margin_2", Facet::BlankLines, Verdict::BespokeBehind),
-    ("UnorderedList", "width_120", Facet::Exact, Verdict::CosmeticNeutral),
-    ("UnorderedList", "width_120", Facet::Text, Verdict::CosmeticNeutral),
-    ("UnorderedList", "width_120", Facet::Indent, Verdict::CosmeticNeutral),
-    ("UnorderedList", "width_120", Facet::BlankLines, Verdict::CosmeticNeutral),
-    ("UnorderedList", "width_40", Facet::Exact, Verdict::CosmeticNeutral),
-    ("UnorderedList", "width_40", Facet::Text, Verdict::CosmeticNeutral),
-    ("UnorderedList", "width_40", Facet::Indent, Verdict::CosmeticNeutral),
-    ("UnorderedList", "width_40", Facet::BlankLines, Verdict::CosmeticNeutral),
-    ("UnorderedList", "word_wrap_prose", Facet::Exact, Verdict::CosmeticNeutral),
-    ("UnorderedList", "word_wrap_prose", Facet::Text, Verdict::CosmeticNeutral),
-    ("UnorderedList", "word_wrap_prose", Facet::Indent, Verdict::CosmeticNeutral),
-    ("UnorderedList", "word_wrap_prose", Facet::BlankLines, Verdict::CosmeticNeutral),
+    // UnorderedList bespoke ↔ tree drift was retired when `TerminalRenderable`
+    // for `UnorderedList` was re-pointed at the tree renderer (UnorderedList
+    // IR flip, 2026-05-19). The bespoke path now equals the tree path for
+    // every default-bullet list; the only remaining bespoke code path is the
+    // `render_bespoke()` parity-test surface, which the matrix does not
+    // exercise.
 ];
 
 /// Returns `true` when `a` and `b` are byte-for-byte identical.

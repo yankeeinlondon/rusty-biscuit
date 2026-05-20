@@ -25,13 +25,25 @@
 //! - **Empty nested list blank line**: the bespoke path emits a true blank
 //!   line (`""`); the tree renderer emits a line padded to the indent width
 //!   (`"    "`). Both preserve the visual gap between items.
-//! - **Prose styling loss**: items that are `Prose` components keep their
-//!   *content* through the tree path but lose inline styling (`<b>` /
-//!   `<red>`) because `Prose::render_tree_node()` returns `None`, so the
-//!   generic `RenderableTerminalContent::to_tree_nodes` fallback strips
-//!   ANSI and embeds plain text. Recovering Prose styling requires the
-//!   downcast pattern that `BlockQuote` / `Compose` use and is tracked
-//!   separately to keep this migration surgical.
+//! - **Nested OrderedList Markdown shape**: a nested `OrderedList` passed as a
+//!   `Component` item projects to a `NodeKind::List` child inside a
+//!   `NodeKind::ListItem`. The Markdown renderer collapses that onto the
+//!   item's line (`2. 1. Inner A`) instead of emitting a CommonMark sublist.
+//!   The canonical tree's shape is correct; only the renderer's lowering
+//!   diverges. Item ordering and inner numbering are still preserved.
+//!
+//! ## Resolved divergences (no longer drift)
+//!
+//! - **Prose inline styling on terminal**: previously items that were `Prose`
+//!   components lost their `<b>` / `<i>` / `<red>` styling because
+//!   `Prose::render_tree_node()` returns `None` and the generic
+//!   `RenderableTerminalContent::to_tree_nodes` fallback strips ANSI to plain
+//!   text. `project_list_items` now downcasts `Prose` components and
+//!   projects them through `Prose::to_render_nodes`, mirroring the
+//!   `BlockQuote` / `Compose` pattern. Inline styling now survives on the
+//!   Terminal target; the Markdown target still degrades to plain text
+//!   because the cross-target tree projection has no `<b>` peer in
+//!   CommonMark.
 
 mod parity_helpers;
 
@@ -237,6 +249,116 @@ fn parity_with_left_margin() {
     }
 }
 
+#[test]
+fn parity_with_right_margin_narrows_wrap_width() {
+    // A right margin must narrow the available content width, forcing items
+    // to wrap earlier than they would without it. Spec table row:
+    // "OrderedList with left/right margins → Layout is applied via set_layout;
+    // margins narrow the available width."
+    use biscuit_terminal::utils::layout::{Length, TargetValue};
+
+    let item = "alpha beta gamma delta epsilon zeta eta theta iota kappa";
+    let plain = OrderedList::new(vec![item]);
+    let mut narrowed = OrderedList::new(vec![item]);
+    narrowed.layout_mut().margin.right = TargetValue::universal(Length::ch(20));
+
+    let term = test_terminal(50);
+    let plain_lines = strip_ansi(&plain.render(&term))
+        .lines()
+        .filter(|l| !l.trim().is_empty())
+        .count();
+    let narrowed_lines = strip_ansi(&narrowed.render(&term))
+        .lines()
+        .filter(|l| !l.trim().is_empty())
+        .count();
+    assert!(
+        narrowed_lines > plain_lines,
+        "right margin must force earlier wrapping: plain={plain_lines}, narrowed={narrowed_lines}"
+    );
+}
+
+#[test]
+fn parity_with_alignment_set() {
+    // Alignment (without max_width) is recorded on the projected node's
+    // layout attribute. On the Terminal target it shifts the block as a
+    // unit; on Markdown it is ignored (locked by the tree-renderer
+    // contract). We verify both sides here so a regression in either
+    // target surfaces.
+    use biscuit_terminal::utils::layout::Alignment;
+
+    let mut list = OrderedList::new(vec!["First", "Second"]);
+    list.layout_mut().alignment = Alignment::Center;
+    let term = test_terminal(80);
+    let rendered = strip_ansi(&list.render(&term));
+    // Items still present and ordered.
+    assert!(rendered.contains("1. First"), "got: {rendered:?}");
+    assert!(rendered.contains("2. Second"), "got: {rendered:?}");
+    // Markdown is layout-agnostic.
+    let md = list.render_markdown();
+    assert!(md.contains("1. First"), "md: {md:?}");
+    assert!(md.contains("2. Second"), "md: {md:?}");
+}
+
+#[test]
+fn parity_triple_digit_prefix() {
+    // Once item count ≥ 100, the prefix width grows to 5 chars ("100. ").
+    // Wrapping must use the wider hanging indent so continuation lines align
+    // after the prefix. Spec table row: "Item count ≥ 100 (triple-digit
+    // prefix) → Prefix '100. ' = 5 chars; wrapping and alignment correct."
+    let items: Vec<String> = (1..=105).map(|n| format!("item {n}")).collect();
+    let list = OrderedList::new(items);
+    let term = test_terminal(80);
+    let tree = strip_ansi(&list.render(&term));
+    let bespoke = normalize_for_parity(&list.render_bespoke(&term));
+    let tree_norm = normalize_for_parity(&tree);
+    // Verify presence of representative items at each prefix width.
+    assert!(tree_norm.contains("9. item 9"), "single-digit row");
+    assert!(tree_norm.contains("99. item 99"), "double-digit row");
+    assert!(tree_norm.contains("100. item 100"), "triple-digit row");
+    assert!(tree_norm.contains("105. item 105"), "final triple-digit row");
+    assert_semantic_match(&tree_norm, &bespoke);
+}
+
+#[test]
+fn parity_triple_digit_prefix_wraps_with_5char_hanging_indent() {
+    // At a narrow width, a triple-digit item that wraps must align
+    // continuation lines under the "      " (6-space) indent: 5 chars
+    // for "100. " plus the hanging-indent that the tree renderer
+    // computes from the prefix width. (At very narrow widths the
+    // renderer may also break inside words; we only assert on the
+    // indent of continuation lines that exist.)
+    let mut items: Vec<String> = (1..=100).map(|n| format!("x{n}")).collect();
+    // Force the 100th item to be long enough to wrap.
+    items[99] = "alpha beta gamma delta epsilon zeta eta theta iota kappa".to_string();
+    let list = OrderedList::new(items);
+    let term = test_terminal(30);
+    let rendered = strip_ansi(&list.render(&term));
+    // Find the line that starts "100. " and inspect the following
+    // continuation lines until the next prefix or end of output.
+    let mut lines = rendered.lines();
+    let prefix_line = lines
+        .by_ref()
+        .find(|l| l.starts_with("100. "))
+        .expect("found 100. row");
+    let _ = prefix_line;
+    let mut saw_continuation = false;
+    for line in lines {
+        if line.is_empty() {
+            continue;
+        }
+        // Stop scanning when we reach an unrelated row.
+        if line.chars().next().is_some_and(|c| c.is_ascii_digit()) {
+            break;
+        }
+        saw_continuation = true;
+        assert!(
+            line.starts_with("     "),
+            "continuation under 100. row must indent ≥5 spaces: {line:?}"
+        );
+    }
+    assert!(saw_continuation, "expected at least one wrapped line for the 100. item");
+}
+
 // ---------------------------------------------------------------------------
 // Optimistic render parity
 // ---------------------------------------------------------------------------
@@ -401,14 +523,8 @@ fn html_nested_unordered_list_emits_ul() {
 
 #[test]
 fn prose_item_content_survives_terminal_render() {
-    // KNOWN_DRIFT: Per the OrderedList spec, items that are `Prose`
-    // components lose styling through the tree path because
-    // `Prose::render_tree_node()` returns `None`, so
-    // `RenderableTerminalContent::to_tree_nodes` falls back to
-    // ANSI-stripped plain text. Content is preserved; inline `<b>` / color
-    // styling is not. Recovering styling requires a downcast in the
-    // OrderedList projection — tracked separately to keep the migration
-    // surgical.
+    // Content always survives through the tree path; this is the baseline
+    // before any styling assertions.
     let mut list = OrderedList::empty();
     list.add(Prose::new("<b>Bold</b> item"));
     let term = test_terminal(80);
@@ -416,6 +532,26 @@ fn prose_item_content_survives_terminal_render() {
     assert!(
         strip_ansi(&rendered).contains("Bold item"),
         "content survives: {rendered:?}"
+    );
+}
+
+#[test]
+fn prose_inline_styling_survives_terminal_render() {
+    // After the project_list_items Prose-downcast fix (mirroring BlockQuote
+    // and Compose), inline `<b>` / `<i>` / `<red>` styling must survive on
+    // the Terminal target. We assert on the bold SGR open sequence; the
+    // exact close/reset bytes depend on the renderer's pairing strategy.
+    let mut list = OrderedList::empty();
+    list.add(Prose::new("<b>foo</b>"));
+    let term = test_terminal(80);
+    let rendered = list.render(&term);
+    assert!(
+        rendered.contains("\x1b[1m"),
+        "bold SGR must be present (regression for Prose-downcast fix): {rendered:?}"
+    );
+    assert!(
+        strip_ansi(&rendered).contains("foo"),
+        "content survives alongside styling: {rendered:?}"
     );
 }
 
