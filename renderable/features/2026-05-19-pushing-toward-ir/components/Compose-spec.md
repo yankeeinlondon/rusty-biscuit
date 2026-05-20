@@ -381,10 +381,20 @@ Arguments:
 | `--list <ITEMS>...`        | repeatable    | Add an unordered list part; use `--` to end values         |
 | `--ordered-list <ITEMS>...`| repeatable    | Add an ordered list part; use `--` to end values           |
 | `--table <COLS> <ROWS>...` | repeatable    | Add a table part, e.g. `"Name,Age" "Alice,30"`             |
-| `[command(flatten)]`       | `LayoutArgs`  | Shared margin, alignment, max-width, and wrapping flags    |
+| `[command(flatten)]`       | `LayoutArgs`  | Shared margins (`--margin-left/right/top/bottom`) and `--alignment` flags |
 
 The output target flags `--md`, `--md-plus`, and `--html` must be mutually
 exclusive. Terminal remains the default target.
+
+> **Deferred:** `--max-width` and `--word-wrap` are intentionally not part of
+> `LayoutArgs` as of the Compose migration. `Compose`'s in-code `Layout` API
+> already exposes both via `.max_width(..)` / `.word_wrap(..)`, and the tree
+> renderers honor them — only the CLI surface is deferred. Extending
+> `LayoutArgs` ripples through ~12 unrelated subcommands and would expose
+> flags that silently do nothing until each consumer wires them through. The
+> lessons-learned log captures the rationale; revisit once the bulk of the
+> migration is complete and the rollout can land coherently across the
+> shared arg struct.
 
 Render path:
 

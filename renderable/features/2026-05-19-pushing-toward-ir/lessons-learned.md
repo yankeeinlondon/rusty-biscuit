@@ -261,3 +261,390 @@ passes its layout CSS into `progress_html`'s `outer_style` parameter; Markdown
 passes an empty string because Markdown ignores layout by contract. The single
 shared definition is what makes "the same semantic progress HTML shape used by
 the browser renderer" a checkable property rather than an aspiration.
+
+## BlockQuote flip: the KNOWN_DRIFT ledger is part of the contract
+
+Flipping a component's `TerminalRenderable` to the tree path retires the
+component's entire `KNOWN_DRIFT` block in `render_comparison.rs` — once the
+bespoke path delegates to the tree, every cell of the matrix yields identical
+output by construction. The `render_matches_bespoke` test enforces this with a
+`FIXED — remove from KNOWN_DRIFT` diagnostic that names every now-clean
+`(component, scenario, facet, verdict)` row. The migration step is therefore
+not just "flip and re-snapshot" but also "delete the now-fixed drift entries";
+leaving them in fails the gate with a perfectly explicit error message. A
+brief comment in `KNOWN_DRIFT` recording why the entries were retired keeps
+the historical context discoverable when a later reader wonders whether the
+ledger was ever exercised for this component.
+
+## BlockQuote flip: side-by-side snapshots become tautological
+
+The `layout_matrix` snapshot pairs each component's bespoke output above its
+tree output, with the explicit goal of making divergences visible during
+migration. After the BlockQuote flip both rows are produced by the same tree
+renderer (`quote.render(&term)` now routes through `render_tree`), so the
+snapshot still guards the rendered output but the *side-by-side* comparison no
+longer demonstrates anything. That is acceptable as long as the snapshots are
+regenerated and the bespoke/tree harness keeps exercising the non-default
+`with_border()` compatibility path separately — which it does not, today.
+The bespoke fallback is covered only by unit tests inside
+`block_quote.rs`. If a future change wants to keep the matrix meaningful for
+flipped components, the harness needs an explicit "compatibility-fallback
+scenario" knob; otherwise the row reads as informational once a component
+flips.
+
+## BlockQuote inline Prose styling: project the IR, don't flatten ANSI
+
+The first BlockQuote tree projection collapsed a `Prose` content component
+through `plain_text()` — it rendered the prose optimistically and stripped
+ANSI to derive a single `Text` node. That kept Markdown and Browser output
+clean (their semantic projection of "quote a paragraph" doesn't need
+terminal SGR), but it silently dropped inline emphasis on the terminal
+target. `bt quote "<b>foo</b> ..."` rendered `foo` plain, contradicting
+the documented example that advertises bold.
+
+The fix is to project `Prose`'s private `ProseDocument` IR into
+structured inline `RenderNode`s (`Strong` / `Emphasis` / `Delete`
+wrappers for pure semantic emphasis; `Span` with a `Style` attribute for
+color/dim/blink/underline; `Link` and `Code` for the matching kinds).
+The renderable terminal tree renderer already lowers those inline kinds
+through `text_appearance_sgr`, so terminal output gets full SGR back
+"for free". Markdown and Browser fold the same structured nodes into
+semantic wrappers (`<strong>` / `<em>` / `<s>`) — better than flattened
+plain text — and Markdown still ignores color slots that have no peer.
+
+A guard test (`test_prose_bold_inline_styling_survives_terminal_tree_render`)
+pins the SGR byte-level expectation so a future regression that re-introduces
+ANSI stripping inside the projection fails loudly. The semantic
+parity-token comparison in `render_tree_component_parity.rs` is now too
+coarse to catch this regression on its own — both paths emit the same
+*words* — which is why an explicit byte-level positive pin matters.
+
+## BlockQuote render-tree path: errors must not become in-band text
+
+The first cut of `render_via_tree` surfaced a `RenderError` as a
+`[render-tree error: …]` literal in the terminal output stream. That
+satisfies the infallible `TerminalRenderable::render` trait contract but
+pollutes user output with diagnostic strings. The right shape is to log
+the failure through `tracing::error!` (which observability tooling
+picks up) and fall back to an empty string. Panicking is also wrong:
+`TerminalRenderable::render` is infallible by contract, and a panic
+inside an in-band CLI render would crash the host process for what is
+usually a transient render-tree validation failure.
+
+## Compose flip: sequence-join Text nodes must bypass Prose wrapping
+
+`SequenceJoin::None` was approved as the explicit no-separator render-tree
+contract, and the renderers were taught to honor it on the `Root` node. But
+the terminal renderer's default top-level rendering of an inline kind
+(`Text`, `Emphasis`, `Strong`, `Span`, …) wraps the markup in a fresh `Prose`
+instance via `render_prose` — and `Prose::render` strips trailing whitespace
+to keep prose paragraphs tidy. That meant a Compose part like
+`"Results:\n"` lost its caller-supplied newline when concatenated with a
+following `Table`, breaking the literal-concatenation contract.
+
+The fix is to special-case `render_sequence` in the terminal renderer: a
+`NodeKind::Text` child renders its literal `value` verbatim (no Prose
+instance), and other inline kinds run through `render_inline_node` to
+lower styling tokens but then bypass `render_prose`'s whitespace trim.
+Block kinds keep the normal block render path so a `Section`, `Table`, or
+`List` inside Compose still gets its proper layout.
+
+Markdown didn't have the same problem because the Markdown renderer
+already treats `Text` nodes verbatim (modulo table-cell escaping). Browser
+didn't have it either, because HTML block layout has no implicit
+blank-line separators between siblings.
+
+## Compose flip: nested Compose must inline its Root children
+
+`Compose::render_tree()` returns a `NodeKind::Root` carrying
+`SequenceJoin::None`. When a nested `Compose` appears as a child of an
+outer Compose, the projection layer treats it as a tree-renderable
+component and naively includes its `Root` node. The tree validator
+correctly rejects nested `Root` nodes — `Root` is only valid as the
+top-level container — so the outer tree would fail validation.
+
+The projection in `Compose::project_part` flattens any nested `Root` into
+its children before adding them to the outer sequence. This preserves
+Compose's recursive no-separator semantics without breaking the
+"`Root` only at top level" invariant: the inner sequence's contents
+become siblings in the outer sequence, which is the same observable
+output Compose's bespoke `render` produced.
+
+## Compose flip: bespoke-only children need the caller's terminal
+
+The shared `RenderableTerminalContent::to_tree_nodes` fallback uses
+`Terminal::new_optimistic(80)` for the ANSI-stripping rerender when a
+component lacks `render_tree_node`. That terminal advertises
+`ImageSupport::Kitty`, which sent `HorizontalRule` straight to its Kitty
+image tier and produced a base64 PNG blob — a frame full of binary that
+survived ANSI stripping because Kitty graphics are APC, not CSI. The
+sibling test (HR + plain prose inside a Compose) failed in a confusing
+way: the expected `╌` glyph never appeared.
+
+The pragmatic fix is to thread the caller's actual `Terminal` through
+`Compose::render(term)`'s projection step. When a child has no
+`render_tree_node` and a terminal context is available, render it through
+the real target, strip ANSI, and embed the result as a `Text` node — so a
+text-only terminal keeps HR on its Unicode tier. For pure `render_tree()`
+calls (no terminal in scope) the shared default still applies, which is
+the right policy for cross-target adapters.
+
+## Compose flip: bt CLI needs ordered subarg parsing, not interleaved flags
+
+The spec example `bt compose --heading 1 "Project Status" --text "Build:
+" --prose ...` reads like a CLI that preserves the exact declaration
+order across distinct flag types. Clap's derive macro doesn't natively
+preserve that order: each repeatable flag collects into its own `Vec`,
+and the order between, say, `--text` and `--prose` is lost. `ArgMatches`
+does expose per-occurrence indices, but the derive surface doesn't make
+that ergonomic.
+
+The pragmatic compromise is to use a fixed, documented assembly order
+(`heading → text → prose → list → ordered-list → table → positional
+ITEMS`) and keep within-kind order intact via clap's default `Vec`
+collection. Real `bt compose` invocations typically use one or two part
+kinds, so the spec example is reproducible under this policy. A future
+revision that needs strict interleaving can switch to manual
+`ArgMatches::indices_of` parsing without changing the public surface.
+
+## Compose flip: Table's `with_title` needed `set_table_title` on the projection
+
+The Table component already has a public `with_title` that the bespoke
+terminal renderer emits above the top border. The render-tree path for
+Compose runs Table through `Table::render_tree_node`, which builds the
+`NodeKind::Table` from columns/rows/hints — but it didn't carry the
+title hint. RT-TABLE-001 is approved and the typed `NodeAttrs::set_table_title`
+helper exists; Table's projection just needed one extra line to wire it
+up. This is a small surgical fix outside the Compose component itself
+but discovered by a Compose-level parity test (`test_add_table_with_title`).
+The fix belongs in Table because the gap is in Table's tree projection;
+Compose only revealed it.
+
+## BlockQuote flip: Browser Style color lowering is already partially wired
+
+`layout-and-style.md` §6 still says "Browser `Style` lowering of `Style` to
+CSS is designed but not yet wired." That is true of `border`, `fill`, and the
+emphasis-as-semantic-wrappers split, but the `color` slot is in fact lowered
+to an inline `style="color:#…"` declaration on the element today. An
+assertion like `html.contains("<blockquote>")` (with the closing `>`) on a
+styled quote will therefore fail because the element actually renders as
+`<blockquote style="color:#…">`. Tests for styled browser output should match
+on `<blockquote` (no closing `>`) and `</blockquote>` separately, and the
+status doc should be updated when color/background/emphasis lowering lands in
+full.
+
+## Compose polish: structural `is_empty` beats render-output probing
+
+A first cut of the `bt compose` CLI used `compose.render_markdown().is_empty()`
+as an "any parts provided?" probe. That works only because an empty Compose
+projects to an empty `Root`, but it couples the CLI's argument-validation
+path to renderer behavior and runs an entire Markdown pass to answer a
+constant-time question.
+
+The polish-pass migration is to expose a structural `Compose::is_empty()`
+that inspects the in-memory `parts` slice. Callers in tests and CLIs get a
+clearer intent line, and a future renderer change (e.g. emitting a placeholder
+for an empty document) cannot silently break the emptiness check.
+
+## Compose polish: LayoutArgs is a shared surface, not a per-command knob
+
+The Compose spec calls for `LayoutArgs` to expose `--max-width` and
+`--word-wrap`. Extending that struct would ripple through ~12 unrelated
+subcommands (`flowchart`, `xy_chart`, `pie`, `quote`, `quadrant`, `dir`, …)
+and surface flags that silently do nothing until each consumer wires them
+through its own `apply_layout_args`. That is a worse UX than not having the
+flags at all.
+
+The deferred path is to keep the in-code `Layout` API authoritative (Compose
+already honors `.max_width(..)` / `.word_wrap(..)` via `layout_mut()` and the
+tree renderers), document the deferral in the Compose spec, and revisit the
+`LayoutArgs` extension once the bulk of the migration is complete so the
+rollout can land coherently across the shared arg struct. Surgical-change
+discipline beats local optimization when the surface is genuinely shared.
+
+## Compose polish: per-child clone in `render_sequence` is a hot-path tax
+
+The sequence-join hot path in `Writer::render_sequence` originally did
+`NodeKind::Text { value } => value.clone()` for every text child. Compose
+documents typically hold many small text parts (UI labels, prefixes,
+separators), so each render performed `n_text_parts` `String` allocations
+that could simply push into the output buffer.
+
+Inlining the push (`output.push_str(value)`) preserves the same behavior
+without the per-child heap traffic. The lesson: the `match` arm pattern that
+binds an owned `String` from a value-collecting match is a clone trap; if
+the result is destined for `output.push_str(&part)` two lines later, push the
+borrowed `&str` directly.
+
+## FileSystem flip: `Layout::default()` already pins `WordWrap::None`
+
+Forcing `word_wrap = WordWrap::None` on the projected `Root` looks like a
+required guard against connector wrapping, but
+`renderable::layout::Layout::default()` already pins `word_wrap` to `None` —
+explicitly chosen for block components in the layout module's own default.
+That means a FileSystem with no layout customizations produces a layout
+equal to `Layout::default()` after the override, so the `if layout !=
+Layout::default()` gate skips seeding the layout hint entirely. The first
+parity test for the seeded hint failed not because the override was missing
+but because the no-customization case correctly avoided a redundant hint.
+
+The migration pattern is to split the test into two: one that proves a
+non-default layout (`Alignment::Center`) is seeded *and* has `WordWrap::None`
+applied, and one that proves the default layout intentionally omits the
+hint. The implementation is correct as-is — the test was the artifact that
+needed adjusting.
+
+## FileSystem flip: two `BrowserRenderable::as_any` ambiguities
+
+A component that implements both `TerminalRenderable` and `BrowserRenderable`
+gains two `fn as_any(&self) -> &dyn Any` methods. Existing unit tests that
+call `fs.as_any()` compile cleanly *until* the `BrowserRenderable` impl
+lands; the second trait makes the call site ambiguous (E0034) and the test
+must disambiguate with `TerminalRenderable::as_any(&fs)` (or
+`<FileSystem as BrowserRenderable>::as_any`). This is a one-line fix per
+call site, but it is invisible until the second trait is added — worth
+checking when migrating any component that already had `as_any` exercised in
+tests.
+
+## FileSystem flip: `MetricConfig` is `pub(super)`, not `pub(crate)`
+
+`MetricConfig` (the per-metric enable/threshold/filter struct) is declared
+`pub(super)` in `filesystem/metrics.rs`, so it is reachable from `mod.rs`
+but not from a sibling-of-`filesystem` projection module. The first cut of
+this migration tried to extract the projection into
+`filesystem/tree_projection.rs` and immediately had to either widen the
+visibility (a non-surgical change) or reach the field through unsafe
+casts (a worse mistake). The right call is to land the projection inside
+`mod.rs` next to the existing `TerminalRenderable` impl — the file is large
+but the projection is logically part of the same component surface, and
+sibling modules in `filesystem/` do not get crate-local access to
+`pub(super)` fields without bumping their visibility.
+
+## FileSystem markdown: `RenderStrictness::Lossy` is the right default for `TreeConnectors`
+
+The render-tree Markdown renderer raises a lossy diagnostic when it
+degrades `ListMarkerPolicy::TreeConnectors` to a native nested list under
+`RenderStrictness::Warn` (the default). For a component-driven Markdown
+adapter like `FileSystem`'s, that diagnostic is purely informational —
+the component *knows* the target lacks terminal box-drawing characters
+and chose this projection anyway — so propagating it would clutter the
+CLI output stream without giving the user new information. Setting
+`strictness: RenderStrictness::Lossy` on the per-render `MarkdownRenderOptions`
+suppresses the diagnostic at the renderer level, matching the component's
+deliberate Markdown contract. Browser rendering takes the same default
+because `<ul>`/`<li>` with `list-style: none` is the right baseline; the
+diagnostic is similarly redundant.
+
+## FileSystem: project portable icons separately from terminal/Plus icons
+
+The Unicode fallback icons (📂, 📄, ⚠, 📁) are correct for *terminal and
+MarkdownPlus and Browser* rendering — they're a portable contract that
+survives even when Nerd Fonts are absent. They are *not* correct for
+plain Markdown: the spec asks for icons to be omitted there entirely so
+the output round-trips through renderers that lack emoji-capable fonts.
+
+The clean projection pattern is to keep the icon as a classed `Span`
+(class `fs-icon`) in the canonical tree, then have the plain-Markdown
+adapter walk the tree and strip every `fs-icon` span (plus the literal
+" " separator that follows it) immediately before handing the tree to
+the Markdown renderer. MarkdownPlus and Browser keep the spans because
+they have CSS hooks to control whether to render them.
+
+This is cleaner than threading a "for_plain_markdown" flag through the
+projection itself — projection stays single-purpose, the adapter owns
+its dialect-specific transformations, and the in-tree class survives as
+a CSS hook in the dialects that want it.
+
+## FileSystem: file:// links need a canonicalized base, threaded once
+
+When `FileSystem::new(".")` projects entries, each entry computes its
+`file://` URL as `current_path.join(name)`. If `current_path` is the
+*raw* root_path (e.g. `.`), the URL embeds `./` — producing `file://./src`
+instead of `file:///abs/path/src`. The bespoke ANSI renderer already
+solved this by canonicalizing `root_path` once at the top of
+`render()` and threading the canonical `base_path` through
+`render_nodes`; the canonical-tree projection has to mirror that exactly,
+both for the root header *and* for every entry. Two separate fixes (one
+in `fs_project_root_header`, one in `fs_render_tree_inner` threading
+into `fs_project_tree_node`) are required — they cannot share state
+because the root header is a sibling of the entries' parent list, not
+an ancestor.
+
+## FileSystem: metric threshold highlight requires structural projection
+
+The projection's first attempt at metrics was to call
+`format_metrics(.., is_tty=false)` and embed the resulting plain-text
+string in a single `fs-metrics` span with a dim Style. This works for
+labels but flattens away the "value exceeds threshold → bold yellow"
+signal entirely, because `format_metric_pair` only emits the bold-yellow
+SGR sequence when `is_tty=true`.
+
+The fix is to project metrics as a structured inline-span sequence
+instead: dim `<span>label:</span>` nodes for each label, a plain
+`Text(value)` for unhighlighted values, and a
+`<span class="fs-metric-highlight" style="bold yellow">value</span>` for
+threshold-exceeded values. The Style now survives into Terminal, Browser,
+and MarkdownPlus rendering; plain Markdown drops the Style (as expected)
+but keeps the value text intact.
+
+## OrderedList flip: switching the default `render()` reshapes unit-test expectations
+
+Flipping `OrderedList::render(&term)` from the bespoke renderer to the
+canonical render tree turned several in-source unit tests into byte-level
+mismatches even though semantic content was unchanged. The bespoke path
+emitted a trailing `\n` after the final item and a true blank line (`""`)
+between the previous item and a following item when an empty nested list
+sat between them. The tree renderer omits the trailing newline and pads
+the blank line up to the indent width (`"    "`) so it visually lines up
+with sibling items.
+
+The cleanest migration is to update the in-source unit tests to assert
+the tree-renderer's output (the user-visible canonical behavior after
+the flip) and document the byte-level divergences as accepted
+`KNOWN_DRIFT` in comments. Integration parity tests in `tests/` then
+compare `OrderedList::render_bespoke(&term)` against
+`OrderedList::render(&term)` under ANSI-stripped, whitespace-normalized
+equality — they should agree on items, numbering, indentation, and order
+without being sensitive to the documented trailing-newline / padded-blank
+differences. Tightening unit tests to byte equality with the tree output
+is the right move because that *is* now the user-facing contract; the
+bespoke path is preserved only as a `#[doc(hidden)] pub fn render_bespoke`
+for parity tests, not as a behavior anyone should depend on.
+
+## OrderedList flip: Prose styling in items is a documented loss, not a regression
+
+The first parity-test attempt for an `OrderedList` containing a styled
+`Prose` item asserted that the bold SGR survives the tree path
+("`\x1b[1m`...`\x1b[22m`"). That fails today because
+`Prose::render_tree_node()` returns `None`, so the
+`RenderableTerminalContent::to_tree_nodes` fallback renders Prose to ANSI
+and then strips it before embedding into the projected tree as plain
+`Text`. The OrderedList spec explicitly lists this as a `KNOWN_DRIFT`:
+"Prose styling loss".
+
+Recovering Prose styling inside ordered-list items needs the same
+downcast pattern that `BlockQuote` and `Compose` use — convert
+`RenderableTerminalContent::Component` to a structured inline node
+sequence via `Prose::to_render_nodes()` before falling back to the
+generic projection. That is intentionally outside this migration's
+scope to keep the change surgical: `OrderedList` already had a working
+`render_tree_node()` projection, and the spec's acceptance criteria
+focus on flipping the default render path, not on rescuing per-item
+inline styling. The parity test should therefore assert that Prose
+*content* survives the tree path (which it does), not that *styling*
+does.
+
+## OrderedList flip: cross-target CLI flags require cross-target impls
+
+The spec's CLI section asks for `--md`, `--md-plus`, and `--html` switches
+on `bt list`. Adding those switches to a single `bt list` subcommand that
+serves *both* `OrderedList` and `UnorderedList` looks symmetric, but only
+`OrderedList` implements `MarkdownRenderable` and `BrowserRenderable`
+after this migration — `UnorderedList`'s own IR flip is still pending.
+The pragmatic shape is to keep one subcommand with the `--ordered` /
+`-o` switch, and reject `--md` / `--md-plus` / `--html` *without*
+`--ordered` at runtime with a clear error message that names the missing
+prerequisite. The CLI surface stays consistent (no per-list-kind
+subcommand split), the failure mode is explicit, and the unordered IR
+migration can later flip a single error site to "do the cross-target
+render" without renaming flags or breaking compatibility.

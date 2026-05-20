@@ -8,11 +8,11 @@
 | Property | Value |
 |----------|-------|
 | Terminal | ✅ |
-| Browser | ❌ |
-| Markdown | ❌ |
+| Browser | ✅ |
+| Markdown | ✅ |
 | Tree | ✅ |
-| IR State | both avail, old renders |
-| bt CLI | bespoke |
+| IR State | both avail, tree renders |
+| bt CLI | tree |
 
 BlockQuote already implements `TreeRenderable` (projects to `NodeKind::BlockQuote`), and the three tree renderers (Terminal, Browser, Markdown) all handle the `BlockQuote` variant. The bespoke `TerminalRenderable` impl is still the default render path. The `bt quote` CLI command calls the bespoke `render()` path.
 
@@ -130,11 +130,11 @@ The only scenario where divergence could occur is if BlockQuote's `Style` includ
 | Property | Status |
 |----------|--------|
 | CLI command exists | Yes — `bt quote` |
-| Render method | Bespoke (`BlockQuote::render(&term)`) |
-| Has `--md` switch | No |
-| Has `--html` switch | No |
+| Render method | Tree renderer (`render_terminal_node`) |
+| Has `--md` switch | Yes |
+| Has `--html` switch | Yes |
 | Has `--example` switch | Yes |
-| Uses tree renderer | No |
+| Uses tree renderer | Yes |
 
 #### Specification Design
 
@@ -197,20 +197,20 @@ impl Run for QuoteArgs {
 
 ## Acceptance Criteria for Implementation
 
-- [ ] `BlockQuote` implements `TerminalRenderable` via the tree renderer (flip from bespoke to tree)
-- [ ] `BlockQuote::with_border()` keeps its existing custom-prefix behavior through a documented bespoke compatibility fallback
-- [ ] `BlockQuote` implements `BrowserRenderable` (delegating through `BrowserTreeComponent`)
-- [ ] `BlockQuote` implements `MarkdownRenderable` (delegating through `render_markdown_node`)
-- [ ] `bt quote` renders via the tree renderer for terminal output
-- [ ] `bt quote --md "text"` outputs Markdown-formatted block quote
-- [ ] `bt quote --html "text"` outputs HTML-formatted block quote
-- [ ] `bt quote --example` shows a representative example with the command that produced it
-- [ ] `--md` and `--html` are mutually exclusive
-- [ ] Parity test (`render_tree_component_parity.rs`) continues to pass after the flip
-- [ ] Custom-border regression test proves the compatibility fallback preserves `with_border()`
-- [ ] New unit tests for `BrowserRenderable` and `MarkdownRenderable` impls
-- [ ] CLI integration tests for `--md` and `--html` flags
-- [ ] Components table updated: BlockQuote Browser ❌→✅, Markdown ❌→✅, IR State → `both avail, tree renders`, bt CLI → `tree`
+- [x] `BlockQuote` implements `TerminalRenderable` via the tree renderer (flip from bespoke to tree)
+- [x] `BlockQuote::with_border()` keeps its existing custom-prefix behavior through a documented bespoke compatibility fallback
+- [x] `BlockQuote` implements `BrowserRenderable` (delegating through `BrowserTreeComponent`)
+- [x] `BlockQuote` implements `MarkdownRenderable` (delegating through `render_markdown_node`)
+- [x] `bt quote` renders via the tree renderer for terminal output
+- [x] `bt quote --md "text"` outputs Markdown-formatted block quote
+- [x] `bt quote --html "text"` outputs HTML-formatted block quote
+- [x] `bt quote --example` shows a representative example with the command that produced it
+- [x] `--md` and `--html` are mutually exclusive
+- [x] Parity test (`render_tree_component_parity.rs`) continues to pass after the flip
+- [x] Custom-border regression test proves the compatibility fallback preserves `with_border()`
+- [x] New unit tests for `BrowserRenderable` and `MarkdownRenderable` impls
+- [x] CLI integration tests for `--md` and `--html` flags
+- [x] Components table updated: BlockQuote Browser ❌→✅, Markdown ❌→✅, IR State → `both avail, tree renders`, bt CLI → `tree`
 
 ## Render-tree Feature Requests
 
