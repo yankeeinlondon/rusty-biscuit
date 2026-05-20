@@ -8,7 +8,9 @@ use crate::discovery::raw_mode::{RawModeGuard, TERMINAL_QUERY_MUTEX};
 use crate::discovery::detection::{TerminalApp, get_terminal_app, is_tty};
 use crate::discovery::os_detection::is_ci;
 
-use super::parse::{ansi_index_to_rgb, parse_colorfgbg, parse_osc_color_response};
+use super::parse::{ansi_index_to_rgb, parse_colorfgbg};
+#[cfg(unix)]
+use super::parse::parse_osc_color_response;
 use super::types::{DEFAULT_TIMEOUT, OscQueryError, RgbValue};
 
 /// Human-readable name for an OSC color query code.
@@ -36,6 +38,9 @@ pub(super) fn query_osc_color(code: u8) -> Option<RgbValue> {
 
 /// Query terminal color with a custom timeout.
 pub(super) fn query_osc_color_with_timeout(code: u8, timeout: Duration) -> Option<RgbValue> {
+    // Silence unused warning on non-Unix platforms; used inside #[cfg(unix)] below.
+    let _ = timeout;
+
     // Skip if not a TTY or in CI
     if !is_tty() {
         tracing::debug!(code, "OSC{} query skipped: not a TTY", code);
