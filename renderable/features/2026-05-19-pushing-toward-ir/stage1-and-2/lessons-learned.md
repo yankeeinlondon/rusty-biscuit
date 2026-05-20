@@ -1739,14 +1739,26 @@ of the following hold:
    Pick one. Either choice is fine; the parity fixture will pin it.
 
 3. **Parity fixtures flip from "GAP" to byte-for-byte equality** in
-   `biscuit-terminal/lib/tests/filesystem_parity.rs`. The three
+   `biscuit-terminal/lib/tests/filesystem_parity.rs`. The four
    currently-failing-by-design fixtures
    (`fixture_dotfile_italic_records_divergence`,
    `fixture_highlight_precedence_records_divergence`,
-   `fixture_errors_and_permissions_records_divergence`) must invert
+   `fixture_errors_and_permissions_records_divergence`,
+   `fixture_gitignore_styling_records_divergence`) must invert
    from `assert!(!styled_in_tree, …)` to `assert!(styled_in_tree, …)`
    plus a stripped-ANSI equality check between bespoke and tree
    output.
+
+   `fixture_gitignore_styling_records_divergence` is latent today
+   because the scanner hardcodes `is_ignored: false`; it goes active
+   when Phase 8 wires the `ignore` crate. At that point bespoke will
+   emit `\x1b[2m` for ignored entries while the tree path drops the
+   per-item `Style` via the same connector-list gap as the dotfile
+   and highlight fixtures. Flipping it is gated on the same
+   `render_tree_connector_list` fix in item 1 above plus a real
+   ignored-entry fixture (constructed either via the `ignore` crate
+   or, if simpler at the time, by manually marking
+   `is_ignored: true` on a built `TreeNode`).
 
 4. **Layout matrix.** Add `FileSystem` to the default rows of the
    layout-matrix harness (Stage 3c work; tracked separately as Task

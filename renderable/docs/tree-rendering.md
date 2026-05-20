@@ -131,21 +131,31 @@ The shared shape per component is:
   tree the projector emits the structural subtree rather than falling
   back to "render to ANSI, strip, wrap in `Text`".
 
-**Caveat — `FileSystem` keeps its bespoke terminal path.** Its Browser and
-Markdown targets route through the tree, but `FileSystem::render` still
-calls the bespoke directory-tree renderer because the connector geometry
-(`├──`, `└──`, `│`) is presentation, not document structure, and the tree
-path is not at parity yet. The Stage 3 spec picks the resolution:
-flip, document, or defer (see `stage3-spec.md` §S3-1c).
+**Caveat — `FileSystem` keeps its bespoke terminal path (Stage 4
+deferral).** Its Browser and Markdown targets route through the tree, and
+its `render_tree_node` override is in place so cross-target adapters
+consume it structurally. However `FileSystem::render` still calls the
+bespoke directory-tree renderer because the connector geometry (`├──`,
+`└──`, `│`) plus per-entry `Style` lowering through
+`render_tree_connector_list` is not yet at parity. Per Stage 3 §S3-1c
+the resolution chose outcome (iii) — defer to Stage 4 — and the named
+follow-on criteria live in
+[`stage1-and-2/lessons-learned.md`](../features/2026-05-19-pushing-toward-ir/stage1-and-2/lessons-learned.md)
+("Stage 4 acceptance criterion" under the FileSystem decision).
 
-**Caveat — three components are missing the `render_tree_node` override.**
-`BlockQuote`, `StatusBlock`, and `FileSystem` implement
-`TreeRenderable::render_tree` but their `TerminalRenderable::render_tree_node`
-still returns `None`. Their own `.render(&term)` works correctly via the
-tree; the gap shows up only when one of them is nested inside another
-component's tree under `RenderStrictness::Warn`, where the container
-falls back to render-then-strip instead of pulling the structural
-subtree. Stage 3 §S3-1a adds these overrides.
+**Stage 3 closed the structural-projection gap.** After Stage 3 every
+one of the twelve components — including `BlockQuote`, `StatusBlock`, and
+`FileSystem` — implements `TerminalRenderable::render_tree_node` and
+returns the same node as `TreeRenderable::render_tree`. Containers that
+hold a non-`Prose` child component (`BlockQuote`, `Compose`,
+`OrderedList`, `UnorderedList`) now project that child structurally
+through `project_renderable_content(.., ProjectionMode::Structural)`
+instead of falling back to ANSI-stripped text. The `RenderStrictness::Warn`
+fallback in `RenderableTerminalContent::to_tree_nodes` and in the
+terminal-hint short-circuit of `project_renderable_content` emit a
+`tracing::warn!` (then `tracing::debug!`) keyed on
+`TerminalRenderable::type_name` so a future component that forgets the
+override is observable in logs and CI.
 
 Stage 1 also landed eleven render-tree-functionality additions consumed
 by the Stage 2 component impls — `SequenceJoin::None` (Compose),
