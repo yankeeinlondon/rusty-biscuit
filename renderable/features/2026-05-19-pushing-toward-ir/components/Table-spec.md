@@ -4,11 +4,11 @@
 
 | Property      | Value                                              |
 |---------------|----------------------------------------------------|
-| IR State      | both avail, old renders                            |
-| bt CLI        | tree                                               |
+| IR State      | tree renders, bespoke retained for parity tests    |
+| bt CLI        | tree (Terminal default; `--md`, `--md-plus`, `--html`) |
 | Terminal      | ✅                                                  |
-| Browser       | ❌                                                  |
-| Markdown      | ❌                                                  |
+| Browser       | ✅                                                  |
+| Markdown      | ✅                                                  |
 | Tree          | ✅                                                  |
 
 The Table already has a `TerminalRenderable::render_tree_node()` compatibility projection (`biscuit-terminal/lib/src/components/table/table.rs:1484-1574`) that produces a canonical `NodeKind::Table` subtree. The `bt table` CLI already renders through the tree renderer (`biscuit-terminal/cli/src/commands/table.rs:134-141`). However:

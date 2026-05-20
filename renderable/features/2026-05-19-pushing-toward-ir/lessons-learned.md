@@ -905,3 +905,717 @@ mutual-exclusion groups (`html`/`md`/`md_plus`) are independent of
 through the Markdown path. The lesson: `--example` is per-command UX
 and stays on every subcommand even when other cross-target flags are
 added.
+
+## Progress polish: infallible-trait fallbacks must log, not emit sentinels
+
+`Progress`'s tree-routed render paths originally split error-fallback policy
+across targets: the Terminal path silently emitted an empty string while the
+Browser path embedded an in-band `[render-tree error: …]` text fragment. Both
+trait contracts (`TerminalRenderable::render`, `BrowserRenderable::render_html_fragment`)
+are infallible, so the right response to a tree-render failure is the same on
+both targets — log the error via `tracing::error!` (with `component`, `error`,
+and the relevant dialect) and return an empty output. The Markdown path's
+`.unwrap_or_default()` had the right shape but no diagnostic; replacing it with
+an explicit `match` arm and an `error!` call closes the observability gap
+without changing the public contract. The lesson: when a trait is infallible
+but the implementation delegates to a fallible renderer, the fallback policy
+must be uniform across targets (empty output + structured log), never an
+in-band sentinel that pollutes user-visible output.
+
+## Progress polish: `bracket_color` has no semantic CSS slot — preserve as `data-*`
+
+The Progress widget's filled and empty colors lower to inline
+`background-color` declarations on the `progress-filled` and `progress-track`
+spans, but the bracket glyphs sit inside the percentage text node and have no
+dedicated element to paint. The spec sanctioned either dropping `bracket_color`
+or preserving it. Preserving it as a `data-bracket-color="#rrggbb"` attribute
+on the outer `progress` span (only when the slot is set) mirrors how
+non-default bracket *glyphs* are already preserved as `data-left-bracket` /
+`data-right-bracket`, keeps the lossless-when-possible posture of the
+MarkdownPlus/Browser shared HTML, and lets consumers repaint brackets in
+post-processing without inventing a synthetic CSS class. The lesson: when a
+component slot has no semantic element to paint, preserve it as a `data-*`
+attribute alongside the other lossless hints — don't drop it, and don't invent
+a sham element to paint it on.
+
+## Section flip: heading-only sections are byte-identical across the flip
+
+`Section`'s bespoke `render_content` already lowered the heading through the
+shared `apply_style` helper (the same helper the tree renderer's
+`render_heading_line` uses), so for an empty section the bespoke and tree
+paths produce **byte-identical** output (`\x1b[1m# Title\x1b[0m` for h1). The
+divergences only appear once body content is added, and they reduce to the
+documented blank-line difference between heading and body (`\n` for bespoke,
+`\n\n` for tree). Section's `render_bespoke` parity test therefore lands as
+exact-bytes for empty sections and token-list equality for sections with
+content — the same split the broader `KNOWN_DRIFT` ledger documented before
+the flip retired those entries.
+
+## Section flip: with_layout is a default trait method, not a missing builder
+
+`Section` exposes no `with_layout` builder of its own, but layout-matrix call
+sites such as `section.with_layout(s.layout.clone())` already compile. That
+is because `with_layout` is a default method on the `TerminalRenderable`
+trait that operates through `layout_mut()`, so any component implementing
+`layout_mut` inherits the builder for free. The migration pattern is to use
+the trait default unless a component needs to wrap a non-`Layout` value
+during construction, in which case a bespoke builder shadows the trait
+default — but Section, like the other flipped components, has no such need.
+
+## Section polish: parity coverage must include Prose and nested-component children, not just strings
+
+A `Section` parity suite that only exercises `push("string")` content cannot
+catch the most consequential drift mode for the IR flip — the
+`project_renderable_content` projection branch. With strings only, both the
+bespoke and tree paths funnel through `RenderableTerminalContent::String`
+and never touch the inline-vs-flat-text decision that Prose triggers or
+the block-structure-preservation decision that a nested block component
+triggers. The spec lists "Section with Prose content" and "Section with
+nested Component content" as critical variants for exactly this reason:
+without them, a future regression that re-introduces ANSI-strip-and-flatten
+inside the projection (the same trap the BlockQuote and OrderedList
+migrations called out separately) would land green.
+
+The migration pattern is to pin **two structural assertions** per polish
+pass:
+
+1. A Prose child must project to **at least one non-`Text` inline node**
+   (`Strong`/`Emphasis`/`Span` — assert "not flat text" rather than
+   pinning a specific kind, so the test survives a future canonical
+   choice between `Strong` and `Span` for pure bold), and the terminal
+   render must contain a bold-open SGR (`\x1b[1m`) so the inline lowering
+   actually fires.
+2. A nested block component (e.g. another `Section`) must appear in the
+   parent's projected `children` as **a structured node of its own kind**
+   (here, `NodeKind::Section { depth, heading, .. }` with the nested
+   depth preserved), and all three targets (Terminal, Markdown, Browser)
+   must render both headings with their respective prefixes/tags.
+
+Together these two tests close the loophole that string-only parity coverage
+leaves open, and they cost roughly fifty lines per component — well below
+the cost of debugging the regression they catch.
+
+## Section polish: shared `LayoutArgs` masks per-command vertical-margin asymmetry
+
+`bt section --html --margin-top 2` silently ignores the top margin because
+the cross-target branches in `SectionArgs::run` `return Ok(())` before
+`emit_vertical_margins` runs — terminal output is the only branch that
+threads the layout closure through that helper. The behavior is correct
+(HTML margins are emitted as CSS on the `<section>` itself via the tree
+path's `layout_to_css`, and Markdown has no portable vertical-margin
+primitive), but it is invisible at the flag's docstring because
+`LayoutArgs` is a *shared* struct used by ~12 subcommands.
+
+The polish-pass fix is to document the asymmetry in the **consuming
+command's** docstring rather than mutating `LayoutArgs` itself. Touching the
+shared struct would either (a) duplicate the note across every command
+that flatten-imports `LayoutArgs` or (b) push misleading semantics onto
+commands that *do* honor vertical margins on every target. A
+`#[command(flatten)] pub layout: LayoutArgs` field already has its own
+docstring slot in clap — that is the right place for "this command only
+honors `--margin-top`/`--margin-bottom` on the terminal target," and it
+matches the surgical-change discipline the Compose polish lesson called
+out for the same struct.
+
+## StatusBlock flip: portable icon ≠ Nerd Font icon ≠ existing component constant
+
+`StatusBlock` projects each `StatusState` to a stable portable Unicode glyph
+at tree-projection time so Markdown and Browser output remain identical
+across environments. The trap is that "portable Unicode glyph" is *not* the
+same as the existing `Status` component's `FB_*` constants: the
+StatusBlock spec specifies `⤫` (U+292B, RISING DIAGONAL CROSSING FALLING
+DIAGONAL) for `Error`, while `components::status::FB_FAILURE` uses
+`⨫` (U+2A2B, MINUS WITH FALLING DOTS). Both render as a small "x" in many
+fonts but are different code points — a bespoke `render_bespoke` path that
+goes through `Status::from_prose(...).state(...)` will emit `⨫` on a
+non-Nerd terminal while the canonical tree path emits `⤫`.
+
+The migration pattern is to **own the canonical icon in the projecting
+component**, not to thread the existing `Status::FB_*` constants into the
+projection. Parity tests then compare tokens with the leading icon glyph
+*dropped* — a `drop_icons` helper that strips a leading non-ASCII char per
+token is enough — so bespoke/tree parity can hold over visible content
+without forcing one path to adopt the other's icon choice. The spec's icon
+table is the contract; the existing `Status` constants are an unrelated
+bespoke detail.
+
+## StatusBlock flip: composite component projection vs bespoke wrap
+
+`StatusBlock` is a composite of three sub-renderables (`Status` header,
+`BlockQuote` body, `Prose` hint). The bespoke renderer composes those
+component instances and joins their output with `\n`. Reusing that same
+composition inside the tree projection (e.g. `Status::render_tree_node()`
++ `BlockQuote::render_tree_node()` + `Prose::to_render_nodes()`) initially
+seemed appealing because each sub-component already has a tree path — but
+this composes *block* trees inside the parent `Root`, and each child block
+brings its own layout/style/word-wrap defaults that conflict with
+StatusBlock's intended layout (right margin 5, `WrapProse(8, None)`).
+
+The cleaner shape is to project StatusBlock directly into `Root` →
+`Paragraph` / `BlockQuote` / `Paragraph` children, with severity color
+mapped via `Style.color` on the header and `Style.border` on the body,
+*without* delegating to sub-component tree projections. Header and hint
+text flatten through a dedicated `prose_plain_text` helper that uses a
+deliberately uncolored, non-Nerd terminal so bracketed markup like
+`<b>Bold</b>` collapses to `Bold` rather than leaking into Markdown or
+Browser output. This keeps StatusBlock's layout authoritative on the
+projected `Root` and avoids the impedance mismatch between sub-component
+defaults and the composite's intent.
+
+## Table flip: cursor-positioning unit tests must point at `render_bespoke`
+
+`Table`'s `prefer_cursor_alignment` mode is a terminal-specific compatibility
+knob that the canonical render tree does **not** lower today — the tree
+renderer's `render_table` has no awareness of the `TableTerminalHints
+.prefer_cursor_alignment` flag, even though the projection carries it. Seven
+in-source unit tests pinned byte-level `\x1b[NG` (column-move) escapes by
+calling `Table::render_optimistic(Some(80))`. After the flip those tests
+silently lost their cursor escapes because `render_optimistic` now routes
+through the tree path, which falls back to space-based padding.
+
+The migration pattern is to redirect *bespoke-only* byte-level tests at the
+preserved `Table::render_bespoke(&Terminal::new_optimistic(80))` entry point
+rather than relax the assertions. The bespoke `render_bespoke` still keys on
+`term.is_tty` for cursor positioning, and `Terminal::new_optimistic` sets
+`is_tty: true`, so the cursor path stays exercised. The block-level test
+file gets a one-paragraph comment explaining that those specific tests
+document bespoke behavior the tree renderer has not yet learned, and the
+flip is correct as-is — the tests are the artifact that needed adjusting,
+not the implementation.
+
+This is the same shape as OrderedList's "switching the default `render()`
+reshapes unit-test expectations" lesson, but it is sharper for Table
+because `prefer_cursor_alignment` is a discrete tree-renderer feature gap
+rather than a cosmetic byte-level divergence; the tree renderer cannot
+produce these escapes at all today.
+
+## Table flip: layout-matrix `top_margin_2` snapshot was lying before the flip
+
+Identical to the Progress lesson: the `Table__top_margin_2` and
+`Table__bottom_margin_2` `layout_matrix` snapshots were committed with the
+BESPOKE half showing no top-/bottom-margin newlines and the TREE half
+showing the correct margin. After the flip both halves match the tree
+output (the bespoke renderer never honored vertical margins on a Table),
+so the snapshot needed `INSTA_UPDATE=always` regeneration and the four
+matching `KNOWN_DRIFT` entries per axis retired with a comment in
+`render_comparison.rs` recording the retirement reason. The migration
+playbook should treat a `BespokeBehind` ledger entry on a vertical-margin
+facet as evidence that the flip will close a user-visible behavior gap,
+not as a parity regression.
+
+## StatusBlock flip: arbitrary border survives at the TerminalRenderable boundary
+
+The `StatusBlock::border(String)` compatibility knob is documented as
+terminal-only and explicitly excluded from the canonical tree. The
+implementation matches BlockQuote's pattern exactly: a `has_default_border()`
+predicate gates `render(&term)` between `render_via_tree` (default path) and
+`render_bespoke` (compatibility fallback). The two paths share no code below
+that gate — `render_bespoke` composes `Status` + `BlockQuote` instances
+verbatim, while `render_via_tree` builds the canonical projection — and the
+`BrowserRenderable` / `MarkdownRenderable` impls *always* use the tree path,
+so a custom prefix can never leak into a non-terminal target.
+
+A regression test that asserts `!html.contains("!! ")` and
+`!md.contains("!! ")` for a `with_border("!! ")` block makes this gate
+explicit and prevents a future "make the bespoke path the canonical source"
+refactor from accidentally pulling the prefix into structural output.
+
+## Table flip: cursor-positioning is a TTY-gated escape hatch, not a tree hint
+
+The `prefer_cursor_alignment` builder on `Table` is documented as a terminal
+escape hatch (`CSI N G` column-move bytes) used by 30+ production CLI call
+sites (`claudine`, `sniff`, `model-citizen`, `messenger`, …). The
+canonical render-tree does *not* yet lower this hint, so a naive flip of
+`TerminalRenderable::render` to `render_via_tree` silently degraded every
+opted-in consumer to space-padded columns without any test catching it.
+
+The correct gate is **two-condition, not one**: `prefer_cursor_alignment &&
+term.is_tty`. The `is_tty` half matters because the bespoke path itself
+already gates internally — emitting cursor-move bytes into a pipe or file
+capture corrupts the captured output. Tests must pin all three quadrants
+explicitly so a future refactor cannot silently re-introduce the
+regression:
+
+- TTY + opt-in → bespoke path, `CSI N G` bytes appear
+- TTY + opt-out (or non-TTY + opt-in) → tree path, no `CSI N G` bytes
+- non-TTY + opt-in → tree path (the bespoke guard wins, not the caller)
+
+The component-spec migration playbook should treat any documented
+"terminal-only escape hatch" attribute (`prefer_cursor_alignment`,
+`StatusBlock::border`, …) as requiring an explicit gate in `render()` even
+after the tree flip, until the tree renderer lowers the corresponding
+terminal hint.
+
+## Table flip: SoftBreak in a cell is a SPACE, not a `<br>`
+
+Reviewers naturally expect "all four break sources" (literal `|`, literal
+`\n`, `SoftBreak`, `HardBreak`) to map identically inside a Markdown table
+cell. The actual implementation in
+`renderable/src/tree/render/markdown.rs` is asymmetric and intentional:
+
+- literal `\n` between adjacent `Text` nodes → `<br>` (cell-text escape)
+- `SoftBreak` node inside a cell → single space (not `<br>`)
+- `HardBreak` node inside a cell → `<br>`
+- literal `|` anywhere → `\|`
+
+The space-mapping for SoftBreak is what makes GFM tables look right when
+source Markdown wraps cell prose across lines — collapsing to a space
+preserves the prose flow. A regression test that hand-builds a
+`RenderNode::table_cell` with all four siblings is the only way to pin
+this divergence; the public `TableCellContent::Text` API only exposes
+literal characters, so the SoftBreak/HardBreak path is otherwise
+unreachable from a tree built by `Table::to_render_tree_node`.
+
+## Table flip: SGR bytes in cell content survive as backslash-escaped text
+
+Cells containing pre-styled ANSI SGR sequences (e.g.
+`"\x1b[32mActive\x1b[0m"`) round-trip through the *terminal* target with
+the `\x1b` byte rendered as the literal text `\[…` rather than passing
+through live. This is a deliberate consequence of treating cell content
+as data, not control: it keeps the box-drawing borders uncorrupted when
+a typed cell is mis-classified, at the cost of losing live color in cells
+the caller specifically pre-styled.
+
+Pin the contract as "visible text reaches the user; the color token
+appears (live or escaped)" rather than "live SGR survives" — the latter
+would force the renderer to allow arbitrary cell content to escape the
+table structure.
+
+## TextBlock flip: the bespoke italic SGR open is malformed (`\x1b[3` not `\x1b[3m`)
+
+`utils::styling::Stylist::wrap` emits its open as `ESC + set_char + content
++ ESC + reset_char + TERMINAL`, which for `Style::Italic` (whose `set_char`
+returns `"3"`) yields `\x1b[3<content>\x1b[23m` — the trailing `m` on the
+open SGR is missing. Most terminals are still permissive enough to apply
+italic, but a byte-equality check for `\x1b[3m` against the bespoke output
+fails. The tree path emits the canonical `\x1b[3m...\x1b[23m`.
+
+The migration pattern for any italic-touching parity test is to grep for the
+SGR open *prefix* `\x1b[3` against the bespoke side and the canonical
+`\x1b[3m` against the tree side. Treat the divergence as accepted
+`KNOWN_DRIFT`: fixing the bespoke `wrap` would touch a shared helper that
+many other components still depend on, and the bespoke path is `#[doc(hidden)]
+pub fn render_bespoke` after the flip anyway. A future cleanup that
+retires bespoke renderers entirely retires the bug along with the helper.
+
+## TextBlock flip: block-level Style emphasis lowers to CSS, not semantic wrappers
+
+The RT-TEXTBLOCK-001 spec asks for emphasis lowering "to semantic wrappers
+(`<strong>`, `<em>`, `<s>`) **or equivalent valid HTML** that preserves
+nesting." The browser tree renderer takes that latitude and splits behavior
+by element category: an **inline** node lowers emphasis to semantic wrappers
+(`<strong>`/`<em>`/`<s>`), while a **block** node lowers the same emphasis
+to inline CSS on the element itself (`font-weight:bold`, `font-style:italic`,
+`text-decoration-line:line-through`). `TextBlock` projects to a block
+`Paragraph`, so its `<p>` element carries CSS — `<p style="font-weight:bold">Hello</p>`
+rather than `<p><strong>Hello</strong></p>`.
+
+Both shapes are spec-conformant; the parity test must accept either. The
+clean assertion shape is "bold semantics preserved" — `html.contains("<strong")
+|| html.contains("font-weight:bold")` — rather than pinning a specific
+wrapper choice. A future renderer change that flips block emphasis to
+semantic wrappers should not require updating every block-component parity
+test in lockstep.
+
+## TextBlock flip: `Color` is `Copy` — drop the `.as_ref().clone()` boilerplate
+
+`renderable::color::Color` derives `Copy`, so the projection's
+`Option<Color>` -> `Option<TargetValue<PerMode<Color>>>` lowering can be
+`self.fg_color.map(|c| TargetValue::universal(PerMode::universal(c)))`
+without an intermediate `.as_ref()` and without `.clone()`. The first cut of
+the TextBlock migration mirrored the `.as_ref().clone()` shape that other
+migrations use for non-`Copy` `Style` / `Layout` values, and clippy flagged
+three `clone_on_copy` warnings. The shape that compiles AND satisfies clippy
+for a `Copy` payload is the bare `Option::map` chain.
+
+## TextBlock flip: `UnderliningRequest` carries optional underline color with no Style slot
+
+The pre-IR `TextBlock` exposed underline color via `UnderliningRequest::*(Some(color))`,
+but the canonical `Style::emphasis.underline` is `Option<UnderlineStyle>` —
+shape only, no color slot. The TextBlock spec sanctions dropping the
+underline color at the projection boundary rather than smuggling it through
+a `data-underline-color` hint, because (a) the bespoke renderer never
+emitted underline at all, so there is nothing to be parity-with, and (b) a
+colored-underline feature should be designed renderer-wide rather than
+preserved as a `TextBlock`-only escape hatch.
+
+The migration pattern for any future component that exposes a component-only
+sub-slot with no `Style` peer is to drop the slot at the projection
+boundary, document the drop, and pin a structural test
+(`underline_color_is_dropped_from_projection`) that the projection records
+shape only. The drop is intentional and should not be papered over.
+
+## TextBlock review: `--example` injection must respect mutually-exclusive sibling flags
+
+The TextBlock CLI uses an `--example` flag that injects a representative
+style set (`bold = true`, `--fg green`, etc.) so the rendered output matches
+the documented command. The first cut wrote `effective.bold = true`
+unconditionally, which created an in-memory state with both `bold = true`
+and `dim = true` whenever the user combined `--example --dim`. clap's
+`conflicts_with = "bold"` on `--dim` only fires when both flags come from
+the command line; the implicit `--example` injection bypasses that gate
+entirely. The fix is to guard the injection with `if !self.dim` so `--dim`
+cleanly wins.
+
+The general pattern: any flag that injects values into clap state outside
+the normal parse path must mirror the `conflicts_with` graph manually for
+every pair it can disturb. Pin a test (`test_text_block_example_dim_wins_over_implicit_bold`)
+that checks the resulting render reflects the user's flag, not the
+injection's default. When asserting on `--example` output, split off the
+`print_example_command` trailer before searching for SGR — the trailer is
+intentionally styled bold and would mask any `\x1b[1m` assertion on the
+body.
+
+## TextBlock review: underline-color drop test should be parameterised over the enum
+
+The TextBlock projection drops underline color (`UnderliningRequest::*(Some(c))`)
+because `Style::emphasis.underline` is shape-only. The first cut only pinned
+the drop on `Curly`, which left four other variants unprotected against a
+future regression that smuggled underline color through a data hint. The
+fix is to parameterise the test over all five variants (`Straight`,
+`Double`, `Curly`, `Dotted`, `Dashed`) and assert (a) the projected
+`UnderlineStyle` matches the variant shape and (b) no `underline-color` /
+`underline_color` key appears in the serialised `NodeAttrs`. The
+serialise-then-grep check is a cheap structural assertion that any future
+"smuggle the color back in" attempt — whether as a `data-*` hint or an
+ad-hoc attrs field — will trip immediately.
+
+## TextBlock review: `render_optimistic` activates stored fields on the call-path
+
+A subtle implication of the TextBlock IR flip that's easy to miss: `render_optimistic`
+now routes through `render_via_tree`, which means every `Style` field the
+component stored — foreground color, background color, underline,
+strikethrough, blink — now emits SGR on the optimistic path too, even when
+the caller does not supply a real `Terminal`. Callers that previously held
+a `TextBlock` with `with_foreground_color(...)` set and called
+`render_optimistic(Some(80))` got plain text out (the bespoke path stored
+the color but never rendered it). The same call now emits a 30/90-series
+or TrueColor SGR.
+
+This is the intentional public-behavior fix — the dormant stored fields
+were always meant to render — but it's worth surfacing prominently because
+unit tests that asserted on stripped/plain output of `render_optimistic`
+may have silently relied on the inertness. The migration pin is
+`fg_color_via_tree_is_now_active` in `components/text_block.rs`'s unit
+tests and `fg_basic_color_activates_through_tree` in `text_block_parity.rs`.
+Any caller surprised by new ANSI in `render_optimistic` output is the
+expected outcome of the flip, not a regression.
+
+## Todo flip: list-rendering path bypasses ListItem Style
+
+The Todo spec called for setting `Style` on the projected `ListItem` so the
+terminal renderer would lower dim + strikethrough SGR for `Cancelled`. The
+test discovery was that `render_list_item` directly dispatches the item's
+children through the inline pipeline — it never calls `self.render(node)`
+on the `ListItem`, so the `Style` attribute attached there is silently
+ignored on terminal output. The `style` attribute *is* read by the browser
+renderer (it lowers to `opacity:0.6;text-decoration-line:line-through` on
+the `<li>` element), so the attribute is not dead weight, just
+target-specific.
+
+The migration pattern is to keep the `Style` on the `ListItem` for browser
+CSS lowering AND carry the same emphasis on an inline `Span` inside the
+item's `Paragraph`. The `Span` flows through `render_inline_node`, which
+*does* honor the declared style, so dim + strikethrough finally surface as
+SGR on the terminal target. For Cancelled the structural shape is:
+
+    Paragraph → Span (Style: dim+strikethrough)
+              → Delete
+              → Text
+
+The `Delete` is what serializes to GFM `~~text~~` in Markdown and `<s>` in
+the browser; the `Span` Style is the terminal-only carrier for dim. None
+of the layers fight: Markdown ignores `Style`; browser CSS dedupes
+line-through; terminal sees dim from the Span and strikethrough from the
+Delete-rendered Prose tag.
+
+## Todo flip: layout belongs on the List, not the ListItem
+
+A natural reading of the spec ("seed Layout onto the ListItem because the
+item is the visible block") fails in practice: the list-rendering path
+constructs its own prefix-and-indent geometry for each item and never
+consults the item's own `Layout`. The component's `Layout` only takes
+effect when it sits on a node whose `render()` call passes through
+`render_with_layout` — for a one-item list, that node is the top-level
+`List` itself.
+
+The migration pattern is to set Layout on the `List` node (the component's
+visible block) when the component's `Layout` is non-default. This is the
+same pattern Section uses for its top-level container and matches every
+other component whose layout is honored on the terminal target. The
+parity test pin is `non_default_layout_is_recorded_on_list` /
+`layout_left_margin_applies_through_tree`.
+
+## Todo flip: browser Delete lowers to `<s>`, not `<del>`
+
+The Todo spec listed `<del>` as the browser-side strikethrough wrapper for
+Cancelled items, but the browser tree renderer lowers `NodeKind::Delete`
+to a `<s>` element (`self.block(BlockTag::S, ...)`), not `<del>`. The two
+elements carry the same semantic ("content is no longer accurate") and
+both pick up `text-decoration: line-through` styling by default, so the
+difference is purely a question of which tag the renderer happens to
+emit. Tests that pinned `<del>` are wrong; they must assert on `<s>` (and
+optionally on the `<li>` carrying `text-decoration-line:line-through`
+CSS from the Style on the `ListItem`).
+
+## Todo flip: NoColor terminals still see strikethrough SGR via Delete
+
+The bespoke `Todo` renderer stripped strikethrough for Cancelled items
+when the terminal advertised `ColorDepth::None`. The tree path does not:
+the projected `Delete` node always lowers to a `<strikethrough>` Prose
+tag inside `render_inline_node`, and the Prose pipeline emits
+`\x1b[9m`/`\x1b[29m` regardless of color depth. The behavior is
+documented as a KNOWN_DRIFT for Todo cancelled items only — every other
+state preserves the bespoke "no ANSI in NoColor" contract because their
+projections carry no inline strikethrough/dim markup.
+
+The parity test pin is
+`no_color_no_nerd_non_cancelled_emits_no_ansi_escapes`, which loops over
+the four non-Cancelled states and asserts the output contains no `\x1b`,
+while `no_color_no_nerd_cancelled_state_uses_ascii_fallback` only asserts
+that the ASCII marker `[-]` and the description text are present
+post-strip. The drift is acceptable because the strikethrough SGR pair
+(`\x1b[9m...\x1b[29m`) is a visual no-op on terminals that lack ANSI
+support at all, and a graceful fallback on terminals that have ANSI but
+no color.
+
+## TwoColumn flip: image-overlay fallback is not a tree-render error path
+
+`Progress`, `Table`, and friends fall back to `render_bespoke()` when
+`render_terminal_node()` returns `Err`. For `TwoColumn` the
+terminal-image overlay scenario does not surface as an error — the
+projection itself returns a structurally-valid `NodeKind::Unsupported`
+node. `render_terminal_node` happily folds an `Unsupported` node into a
+diagnostic placeholder, so the tree path returns `Ok`, the `match` on the
+result never enters the fallback arm, and the user sees the placeholder
+instead of the image overlay.
+
+The fix is a kind check before the tree call:
+
+```rust
+let node = self.to_render_node();
+if matches!(node.kind, NodeKind::Unsupported { .. }) {
+    return self.render_bespoke(term);
+}
+let opts = TerminalRenderOptions::new(term, RenderStrictness::Warn);
+match render_terminal_node(&node, &opts) { ... }
+```
+
+`Err`-only fallback would have produced a regression visible only when
+an image column is present; the parity tests
+`render_with_image_column_uses_bespoke_path_not_unsupported_placeholder`
+and `render_with_image_column_in_right_uses_bespoke_path` pin both
+sides of the flip.
+
+## TwoColumn flip: layout-matrix snapshot lies were the most numerous yet
+
+The `Progress` and `Table` flips each retired a single
+`top_margin_2` snapshot whose BESPOKE half was lying — the pre-flip
+bespoke renderer was dropping the top margin entirely, so the snapshot
+recorded "BESPOKE: no margin / TREE: margin". `TwoColumn` retires
+*three* such snapshots (`top_margin_2`, `bottom_margin_2`, and
+`max_width_40`), plus twelve `KNOWN_DRIFT` ledger entries on the
+`render_matches_bespoke` matrix. The migration pattern stays the same:
+accept the new snapshot, drop the ledger entries, and prefer asserting
+parity at `render_bespoke` vs. `render(&term)` rather than trusting the
+pre-flip side-by-side harness.
+
+The deeper lesson: the layout-matrix harness records the bespoke path's
+*shape*, not its *correctness*. Every flip surfaces fresh "lies" because
+the bespoke shape never matched the layout contract; only the tree path
+does. Once the final component is flipped, the harness's side-by-side
+view becomes informational across all components.
+
+## Closing observation: a tree, not twelve components
+
+Twelve components were migrated to the canonical render tree under this
+feature: `BlockQuote`, `Compose`, `FileSystem`, `OrderedList`,
+`UnorderedList`, `Progress`, `Section`, `StatusBlock`, `Table`,
+`TextBlock`, `Todo`, and now `TwoColumn`. The pattern that emerged is
+almost mechanical, but the leverage it gives is not. Each flip swapped
+one bespoke renderer for one shared lowering, and each one tightened
+the contract that every other renderer now plays against.
+
+By the time `TwoColumn` landed, the renderable surface looked very
+different from the per-target traits it started with: the render tree
+is no longer "another target," it is the *origin* the targets fold
+from. Bespoke renderers became fallbacks. Compatibility hooks became
+delegates. Snapshots that recorded bespoke shape were retired in
+favour of bespoke-vs-tree parity at `render_bespoke`. The
+`KNOWN_DRIFT` ledger went from a real audit surface to a closed book —
+each entry was either retired with a flip comment or actively pinned a
+documented loss (Markdown list markers, Markdown table HTML escapes,
+Markdown progress widget loss, the Todo Cancelled strikethrough SGR).
+
+Three larger truths surfaced repeatedly:
+
+1. **Stored fields hide dormant behavior.** `TextBlock` stored an
+   `italic` field that no terminal path ever rendered; `Todo` stored
+   `Layout` on each item but the bespoke renderer only honored the
+   outer one; `TwoColumn` stored `gap` and `left_width` that Browser
+   simply dropped. Every flip is also a chance to walk the struct and
+   ask "what isn't this field doing today?"
+2. **Recognition is not preservation.** Every renderer recognised
+   `ColumnsHints` long before the canonical projection adopted them.
+   Recognition gave a working pixel; preservation kept the contract.
+   The same gap appeared for Browser-side `BlockQuote` border color,
+   Markdown table escaping, and `Progress` `bracket_color`. The
+   reverse — preserving without recognising — produced silent loss
+   diagnostics that only fire under `Strict`.
+3. **The bespoke path is the past, not the truth.** Twelve flips in,
+   every snapshot that compared "BESPOKE vs TREE" turned out to
+   record bespoke quirks the tree path was correct to abandon: top
+   margins that were silently dropped, max-widths that were ignored,
+   line wraps that were the wrong policy. The harness is useful as a
+   *change indicator*, not as an *oracle*. After every flip, expect
+   to update the snapshot; before every flip, expect to find the lie.
+
+The tree was always there. The migration was just the long process of
+asking each component to admit it.
+
+## Stage 2 complete: all twelve components flipped
+
+The TwoColumn flip closes Stage 2 of the IR push. With it, every one of
+`BlockQuote`, `Compose`, `FileSystem`, `OrderedList`, `Progress`,
+`Section`, `StatusBlock`, `Table`, `TextBlock`, `Todo`, `TwoColumn`, and
+`UnorderedList` now reaches the terminal, browser, and markdown targets
+through the canonical render tree. What started as twelve independent
+migrations converged on a single, repeatable recipe.
+
+### The recipe that emerged
+
+Each flip — by the time it landed — looked the same:
+
+1. **One private projection helper.** Every component now has a private
+   `fn build_<x>_node(&self) -> RenderNode` (often `build_tree_node`,
+   `render_columns_tree`, etc.) that owns the entire `Component → tree`
+   lowering. Both `TreeRenderable::render_tree()` *and* the legacy
+   `TerminalRenderable::render_tree_node()` delegate to it. There is
+   exactly one source of truth per component, and parity test 25 pins
+   them as serialization-equal.
+2. **`render_via_tree` with `tracing::error!` + bespoke fallback.** The
+   public `render(&term)` is rewritten to call the projection helper,
+   fold the resulting node through `render_terminal_node`, and *log*
+   any failure via `tracing::error!` before falling back to the bespoke
+   path (or an empty string for components that have no bespoke
+   fallback). Silent fallbacks would have masked regressions; logging
+   makes them visible without breaking the infallible `render` contract.
+3. **`#[doc(hidden)] pub fn render_bespoke()` retained.** The old
+   renderer is preserved as a doc-hidden public method so parity tests
+   can compare the two paths and so escape-hatch scenarios (notably
+   `TwoColumn`'s cursor-overlay image rendering) can opt out of the
+   tree. The visibility is `pub` for the test crate boundary but
+   `#[doc(hidden)]` so the public docs surface only `render`.
+4. **Direct `BrowserRenderable` and `MarkdownRenderable` impls.** Each
+   component now implements both trait targets directly on the
+   component type. Browser routes through `BrowserTreeComponent::new`;
+   Markdown routes through `MarkdownTreeComponent::new` (or the
+   equivalent fold). No component re-derives lowering rules — they
+   ride the tree renderers' shared CSS lowering, GFM emission, and
+   strictness gates.
+5. **`bt <x> --md / --md-plus / --html / --example` with
+   `conflicts_with_all`.** Every flipped component's CLI command grows
+   the three target flags, each declared with `conflicts_with_all =
+   [...]` so clap rejects mixed targets at parse time, and an
+   `--example` flag that composes with each. `bt columns --example
+   --md-plus`, `bt table --html`, `bt todo --md`, etc., all behave
+   identically.
+6. **Dedicated `*_parity.rs` test file using `render_bespoke()`.**
+   Each component owns a dedicated `lib/tests/<x>_parity.rs` that
+   compares `strip_ansi(component.render_bespoke(&term))` against
+   `strip_ansi(component.render(&term))` across the spec's full test
+   variant list (typically variants 1–12, 15–17). The harness's
+   side-by-side view is now informational; the parity file is the
+   oracle.
+
+### Notable cross-cutting refactors
+
+- **Shared `project_renderable_content` helper.** Multiple components
+  needed to project a `RenderableTerminalContent` (which may be a
+  string or an arbitrary nested component) into either inline-only
+  spans or structural block children. That logic was lifted into a
+  shared helper with a `ProjectionMode::{InlineOnly, Structural {
+  terminal_hint }}` discriminant so each call site picks the
+  appropriate flattening policy without duplicating the inline-run /
+  paragraph-wrap dance.
+- **`ColumnsHints` block-carrier pattern.** `TwoColumn` resisted a
+  dedicated `NodeKind` and instead rides a `BlockQuote` carrier with
+  typed `ColumnsHints` plus a `left_count` split index. The three
+  tree renderers special-case the hint so the quote border never
+  renders. This pattern — *attach typed hints to a generic carrier
+  rather than minting a new kind* — also turned out to fit the
+  `HorizontalRule` width/weight knobs and is a strong candidate for
+  future composite layouts.
+
+### Notable behavioral changes
+
+- **Activated dormant `TextBlock` style fields.** `TextBlock` stored
+  italic/style fields that no terminal path ever consulted. The flip
+  surfaced them as `Style::TextEmphasis` on the projected node, and
+  the terminal renderer now respects them. This was a behavioral
+  *gain*, not a regression — the bespoke path had been dropping the
+  field on the floor for years.
+- **Cursor-positioning TTY gate.** Several flips revealed bespoke
+  renderers that emitted cursor save/restore sequences regardless of
+  whether stdout was a TTY. The tree renderer gates cursor-positioning
+  output on `Terminal::is_tty`, so piping `bt columns ...` to a file
+  no longer leaks `\x1b[s` / `\x1b[u` into the captured bytes.
+- **Layout-matrix snapshots regenerated for 5+ components.**
+  `Progress`, `Table`, `Section`, `Todo`, and `TwoColumn` each retired
+  snapshots whose BESPOKE half had been recording a layout violation
+  (silently dropped top/bottom margins, ignored `max_width`, wrong
+  word-wrap policy). The new snapshots record both halves agreeing
+  through the tree path. The `KNOWN_DRIFT` ledger went from a real
+  audit surface to a closed book.
+
+### Nested non-`Prose` block components flatten to text
+
+The Stage 2 closeout uncovered one accepted limitation worth recording
+explicitly. When a container component (`TwoColumn`, `BlockQuote`,
+`Section`, …) holds a `RenderableTerminalContent::Component(c)` whose
+`c` is *not* a `Prose`, the projection path
+(`RenderableTerminalContent::to_tree_nodes` → `Component(c)` arm) calls
+`c.render_tree_node()`. That method defaults to `None`, so unless the
+inner component overrides it, the projector falls back — under
+`RenderStrictness::Warn` (the public default) — to rendering `c` to a
+plain terminal string, stripping ANSI, and wrapping the result in a
+`Text` node.
+
+The visible effect is that a `BlockQuote` nested inside a `TwoColumn`
+column projects to a `Paragraph { Text("│ quoted inside") }` rather
+than a structural `BlockQuote` child of the columns carrier. The text
+content (and its styling, once rendered) survives end-to-end, but the
+tree loses the `BlockQuote` *kind*. This matters only for downstream
+consumers that walk the tree structurally — every current tree
+renderer treats the flattened paragraph correctly.
+
+`Prose` escapes this trap because the `Component` arm of
+`to_tree_nodes` checks for the `Prose` type and projects its rich
+inline children directly, so styled emphasis/strong/spans survive
+through the tree.
+
+The Stage 2 parity test
+`render_via_tree_preserves_nested_block_content` (in
+`biscuit-terminal/lib/tests/two_column_parity.rs`) pins the *current*
+contract: nested block-component text reaches the column carrier's
+subtree. A future Stage 3 task is to teach `project_renderable_content`
+to downcast `BlockQuote` and `Section` the same way it downcasts
+`Prose` so they project to block render-nodes rather than flattened
+text — at which point the test can be tightened to assert the
+structural `BlockQuote { … }` child.
+
+### Is the recipe ready for extraction?
+
+Yes — with one caveat. The six recipe points above can be turned into
+a documented "IR migration checklist" today; every Stage 2 flip
+followed them and no flip needed a new step. The caveat: components
+with no bespoke fallback (e.g. a future component that exists *only*
+as a tree projection) skip points 3 and partially point 2. The
+checklist should document both shapes: "flip-from-bespoke" (the
+twelve we just shipped) and "born-on-the-tree" (the path forward).
+
+A useful next deliverable is a `migrate-component-to-ir.md` checklist
+under `renderable/docs/` that codifies these six points plus the
+escape-hatch knobs (`render_bespoke`, `Unsupported` node, strictness
+behavior) so the next contributor does not have to re-derive the
+pattern from twelve worked examples.

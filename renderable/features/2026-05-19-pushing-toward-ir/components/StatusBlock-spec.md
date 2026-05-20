@@ -7,12 +7,12 @@
 
 | Property | Value |
 |----------|-------|
-| Terminal | yes, bespoke |
-| Browser | no |
-| Markdown | no |
-| Tree | no |
-| IR State | no changes |
-| bt CLI | no subcommand |
+| Terminal | yes |
+| Browser | yes |
+| Markdown | yes |
+| Tree | yes |
+| IR State | tree default + bespoke compatibility fallback |
+| bt CLI | tree |
 
 StatusBlock is a composite component that wraps three sub-renderables: a
 `Status` header line, a `BlockQuote` body, and an optional `Prose` hint. It is
@@ -334,12 +334,12 @@ so the CLI exercises the same projection and adapters as library users.
 
 | Property | Status |
 |----------|--------|
-| CLI command exists | no |
-| Render method | N/A |
-| Has `--md` switch | no |
-| Has `--html` switch | no |
-| Has `--example` switch | no |
-| Uses tree renderer | no |
+| CLI command exists | yes (`bt status-block`) |
+| Render method | tree (terminal/Markdown/HTML) |
+| Has `--md` switch | yes |
+| Has `--html` switch | yes |
+| Has `--example` switch | yes |
+| Uses tree renderer | yes |
 
 ### Specification Design
 

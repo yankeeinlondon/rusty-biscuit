@@ -5,12 +5,12 @@
 | Component | `TwoColumn` |
 | Location | `biscuit-terminal/lib/src/components/two_column.rs` |
 | Kind | Block |
-| Terminal | ✅ (bespoke) |
-| Browser | ❌ |
-| Markdown | ❌ |
-| Tree | ✅ compatibility projection hook; ❌ canonical `TreeRenderable` |
-| IR State | `both avail, old renders` |
-| bt CLI | `bespoke` |
+| Terminal | ✅ (tree path; bespoke retained for image-overlay fallback) |
+| Browser | ✅ |
+| Markdown | ✅ (portable Markdown collapses to sequential blocks; MarkdownPlus retains flex layout) |
+| Tree | ✅ canonical `TreeRenderable` + compatibility `render_tree_node` hook |
+| IR State | `both avail, tree renders` |
+| bt CLI | `tree (Terminal default; --md, --md-plus, --html)` |
 | `will_use_tree_renderer` | `true` |
 | `will_use_tree_renderer_with_features` | `true` |
 
@@ -115,7 +115,7 @@ The old bespoke path is retained as `bespoke_render()` for:
 | 9 | With right margin | Same as above |
 | 10 | With alignment center | Block alignment applied identically |
 | 11 | Prose content in columns | Styled text content preserved in both paths |
-| 12 | Component content in columns | Component rendering matches between paths |
+| 12 | Component content in columns | Component rendering matches between paths. Note: nested non-`Prose` block components currently flatten to ANSI-stripped paragraph text in the projected tree (text survives, structural kind does not). See `lessons-learned.md` → "Nested non-`Prose` block components flatten to text" for the accepted limitation and Stage 3 plan. |
 | 13 | TerminalImage in left column | Bespoke path used (tree returns unsupported) |
 | 14 | TerminalImage in right column | Bespoke path used |
 | 15 | Empty left content | Both handle gracefully |
