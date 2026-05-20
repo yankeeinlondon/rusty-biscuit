@@ -648,3 +648,260 @@ prerequisite. The CLI surface stays consistent (no per-list-kind
 subcommand split), the failure mode is explicit, and the unordered IR
 migration can later flip a single error site to "do the cross-target
 render" without renaming flags or breaking compatibility.
+
+## OrderedList: third Prose-downcast site → consolidate the pattern next
+
+`OrderedList::project_list_items` is the **third** container that needed the
+`as_any().downcast_ref::<Prose>().to_render_nodes()` pattern after
+`BlockQuote::paragraph_children` and `Compose::project_part`. Each migration
+in this set initially accepted "Prose styling loss" as `KNOWN_DRIFT`, then
+reversed the decision after review pointed out that other containers had
+already established the precedent.
+
+The migration pattern is to **promote the downcast to a shared helper** the
+next time a container needs it — for example a `pub(crate)` function
+`project_terminal_content_with_prose(content) -> Vec<RenderNode>` in
+`biscuit-terminal/lib/src/render_tree/projection.rs`. The helper would
+encapsulate the `Prose` downcast plus the generic
+`RenderableTerminalContent::to_tree_nodes` fallback, so a fourth container
+(e.g. `TwoColumn`, `StatusBlock`, `Section`, `Table`) does not have to
+re-derive the pattern. Doing the refactor now would require re-running
+BlockQuote and Compose suites to confirm no regression, which is out of
+scope for surgical follow-ups but should be the *first* step of the next
+container migration that would otherwise add a fourth duplicate.
+
+## OrderedList: inline siblings must share one `Paragraph`
+
+When projecting a `Prose` item into a `ListItem`, returning
+`prose.to_render_nodes()` directly as the item's children produces
+**multiple top-level inline nodes** (e.g. `Strong("Bold")` + `Text(" item")`).
+The terminal list renderer (`render_list_item`) only attaches the prefix to
+the *first* inline child and treats every subsequent sibling as a block
+child — which then gets `indent_children` applied and lands on its own
+indented line. The visible failure for `<b>Bold</b> item` is:
+
+```
+1. Bold
+     item
+```
+
+The migration pattern is to wrap the inline projection in a single
+`Paragraph`: `RenderNode::list_item(None, vec![RenderNode::paragraph(prose.to_render_nodes())])`.
+`BlockQuote::paragraph_children` already does this implicitly because its
+caller wraps in `RenderNode::paragraph(...)`. `Compose::project_part` does
+not, because Compose's outer container is a `Root` that treats children as
+separate blocks — exactly the behavior Compose wants. The lesson is that
+the wrapping decision is **caller-dependent** and the shared downcast helper
+proposed above should not pre-wrap; each caller wraps as appropriate for
+its container semantics.
+
+## OrderedList: tree-path CSS already lowers `Layout` — don't wrap twice
+
+When the CLI dispatches `bt list -o --html --margin-left N`, the tree path
+already emits `margin-left:Nch` on the `<ol>` element via
+`layout_to_css` in `renderable/src/tree/render/browser.rs`. Wrapping the
+fragment in an additional `<div style="margin-left: Nch">` doubles the
+property's effective value and quietly breaks layouts.
+
+The migration pattern is to **only wrap the fragment for properties the
+tree path cannot express on the component's own root element**. For lists
+today that is `text-align` from `--alignment` *without* a `max_width` — the
+tree path emits `margin-left:auto` / `margin-right:auto` for centering only
+when `max_width` is present, so an alignment-without-max-width still needs
+a surrounding `<div style="text-align: …">`. Every other `LayoutArgs`
+property has an `<ol>`-level peer and should be applied via
+`list.layout_mut()` only, not re-applied on a wrapper.
+
+A regression test that asserts `stdout.matches("margin-left").count() == 1`
+makes this drift impossible to land silently.
+
+## UnorderedList flip: the Prose-downcast helper, finally consolidated
+
+The OrderedList migration explicitly called for promoting the
+`as_any().downcast_ref::<Prose>().to_render_nodes()` pattern to a shared
+helper "the next time a container needs it." UnorderedList was that next
+container, and the consolidation landed as
+`project_renderable_content(content, ProjectionMode)` in
+`biscuit-terminal/lib/src/render_tree/projection.rs`. The single helper now
+serves four migrated callers — `BlockQuote`, `Compose`, `OrderedList`, and
+`UnorderedList` — with one source of truth for the Prose-downcast escape
+hatch.
+
+The non-obvious shape of the API is `ProjectionMode` with two variants
+rather than a bool flag, because the "what does a non-Prose component
+become?" question has genuinely different answers:
+
+- `ProjectionMode::InlineOnly` — every non-Prose component flattens to an
+  ANSI-stripped `Text` node, matching `BlockQuote`'s wrap-in-`Paragraph`
+  semantics.
+- `ProjectionMode::Structural { terminal_hint }` — block-capable
+  containers (`Compose`, `OrderedList`, `UnorderedList`) keep their
+  child's `render_tree_node()` when available; an optional `terminal_hint`
+  lets `Compose` thread its caller's real terminal through for capability-
+  sensitive bespoke-only children (e.g. `HorizontalRule`'s text tier vs
+  image tier).
+
+The wrapping decision (`Paragraph` for list items, none for Compose, one
+big `Paragraph` for BlockQuote) is intentionally **left to the caller** —
+the helper returns inline nodes and trusts each container to know whether
+its outer kind treats children as block siblings or inline runs.
+
+## UnorderedList flip: cross-target CLI flags become per-list-kind impls
+
+The OrderedList CLI lesson called out that `--md`/`--html`/`--md-plus`
+returned a runtime error when used without `--ordered`, because
+UnorderedList did not yet implement `MarkdownRenderable` and
+`BrowserRenderable`. UnorderedList's IR flip retired that error gate: both
+list kinds now implement all three target traits, and the CLI dispatches
+to whichever target is selected without an `--ordered`-only prerequisite.
+
+The implementation pattern is a `render_terminal<L: TerminalRenderable>`
+helper that works for either list kind, and two `dispatch_*_render`
+methods (`dispatch_ordered_render` / `dispatch_unordered_render`) that pick
+the right list type at the boundary. The two methods are *not* one generic
+function, because `OrderedList` and `UnorderedList` do not share a
+"renders to all three targets" trait — adding one would be premature
+abstraction for two callers.
+
+The user-visible surface is also more consistent: a custom terminal
+`--bullet` is honored on the terminal target only, and the Markdown and
+HTML paths emit `- ` / `<ul>`/`<li>` regardless. The CLI tests
+(`test_list_unordered_md_ignores_custom_bullet`,
+`test_list_unordered_html_ignores_custom_bullet`) pin this contract so a
+future renderer change cannot leak the bullet into a non-terminal target.
+
+## UnorderedList review: "verbatim duplication" claims need a pre-flight diff
+
+The review of the UnorderedList migration flagged `render_html_with_layout`
+/ `render_markdown_with_layout_frontmatter` / `layout_style_frontmatter` /
+`wrapper_only_css` as "defined verbatim" in both `cli/src/commands/prose.rs`
+and `cli/src/commands/list.rs`, recommending promotion to a shared helper.
+A line-by-line diff showed only the Markdown pair (`render_markdown_with_layout_frontmatter`
+and `layout_style_frontmatter`) is byte-identical between the two files.
+
+The HTML pair is **deliberately different**:
+
+- `prose.rs::render_html_with_layout` wraps the fragment in a `<div>` and
+  applies every `LayoutArgs` property as inline CSS (margins on all four
+  sides plus `text-align`), because Prose's HTML fragment is a single
+  `<span>` and has no element of its own to receive layout.
+- `list.rs::render_html_with_layout` calls a `wrapper_only_css` helper that
+  emits **only** `text-align` (when `--alignment` is present without a
+  `max_width`), because the tree path already lowers margins onto the
+  component's own `<ol>` / `<ul>` via `layout_to_css` in
+  `renderable::tree::render::browser`. Wrapping in a `<div>` that also
+  carries `margin-left` would double-apply the property — a regression
+  that landed and got reverted in the OrderedList migration.
+
+The lesson: when a review highlights duplication, run the diff before
+promoting. Pure code duplication is a code-smell; deliberate
+shape-divergence dressed up as duplication is a footgun if you collapse it
+into one helper. Promoting only the truly-identical helpers
+(`render_markdown_with_layout_frontmatter` + `layout_style_frontmatter`)
+to `cli/src/commands/shared.rs` is the correct surgical fix; the
+component-specific HTML wrappers stay where they are, with a comment
+explaining why one wraps full layout and the other does not.
+
+## UnorderedList review: thread `terminal_hint` through every list projection
+
+The Compose migration was the first container to thread the caller's real
+`Terminal` into `project_renderable_content`, so bespoke-only children
+(notably `HorizontalRule`) honor the actual target's capability tier
+instead of the projection layer's optimistic default. `project_list_items`
+was originally added with `terminal_hint: None` and never updated, leaving
+the two list kinds inconsistent with Compose for the same fallback
+scenario.
+
+The fix is a private `to_render_tree_node_with_terminal(Option<&Terminal>)`
+on both `OrderedList` and `UnorderedList`, mirroring Compose's
+`render_tree_with_terminal`. `TreeRenderable::render_tree` continues to
+pass `None` (it is target-agnostic and has no terminal in hand), while
+`render_via_tree` — the bridge from the `TerminalRenderable` contract
+into the tree renderer — passes `Some(term)`. `project_list_items`
+itself now takes `terminal_hint: Option<&Terminal>` and forwards it
+straight to `ProjectionMode::Structural { terminal_hint }`.
+
+This is asymmetry-by-omission, not by intent. The migration playbook
+should record: **any container that calls `project_renderable_content`
+needs a `terminal_hint` plumbing pass when its `render_via_tree` runs.**
+The shared `ProjectionMode::Structural { terminal_hint }` field is the
+only documented place this affordance lives; helpers that paper over it
+with `None` silently degrade the capability story.
+
+## UnorderedList review: `pub(crate)` symbols are not doctest-runnable
+
+A doctest fenced with bare ` ``` ` on the `pub(crate)` helper
+`project_renderable_content` compiled fine in isolation (it lives inside
+the crate's lib) but **fails when rustdoc compiles it as an external
+crate** with `error[E0603]: enum 'ProjectionMode' is private`. Rustdoc
+builds doctests as if they were downstream consumers, so any item touched
+inside a doctest must be `pub`, not `pub(crate)`.
+
+The fix for crate-internal helpers is to fence the example with
+` ```ignore ` and add a one-line note that the snippet illustrates
+in-crate usage. The alternative — promoting the helper to `pub` purely
+to satisfy a doctest — would over-expose a deliberately-internal API.
+The lesson: every newly-added doctest on a `pub(crate)` item needs an
+`ignore` (or `no_run`/`compile_fail`) marker.
+
+## Progress flip: top-margin snapshot was lying before the flip
+
+The `layout_matrix` `Progress__top_margin_2` snapshot was committed in a
+shape where the BESPOKE half showed no leading newlines and the TREE half
+showed two. That looked like the bespoke renderer correctly skipping
+zero-content top-margin output and the tree renderer (incorrectly)
+emitting blank rows — but in reality the bespoke `apply_block_layout`
+path never honored `margin.top` on a single-line block. The snapshot was
+a faithful record of a renderer-divergence bug.
+
+Re-pointing `TerminalRenderable::render` at `render_via_tree` made both
+halves identical (`\n\n` + `Loading [...] 75%`), which is the correct
+top-margin behavior. The snapshot needed regeneration; the *user-visible
+fix* is that top margins on a `Progress` finally render. The migration
+playbook should record: a snapshot that "passes" under bespoke can still
+encode a behavior gap the flip will close, so snapshot diffs during the
+flip are evidence of the fix, not regressions.
+
+## Progress flip: the spec's `render_optimistic` shape needs `Terminal::new_optimistic`
+
+The Progress spec's `render_via_tree` example renders against the
+supplied `&Terminal`, and its note about `render_optimistic` says
+"construct `Terminal::new_optimistic(width)` and then call
+`render_via_tree()`." The trap is that the pre-flip `render_optimistic`
+called `render_bar(ColorDepth::TrueColor)` directly (no terminal), so
+re-routing through the tree requires materializing a terminal with
+`TrueColor` depth — and `Terminal::new_optimistic(width)` is exactly
+that. Using `Terminal::default()` instead would silently downgrade color
+behavior on environments where defaults differ. The lesson: when the
+spec says "construct an optimistic terminal," it really means
+`new_optimistic(width)`, not `default()`. The other migrated components
+(`OrderedList`, `UnorderedList`, `Compose`) follow this same pattern,
+which made the right choice obvious in context.
+
+## Progress flip: `BrowserRenderable` re-export, not the renderable crate path
+
+`biscuit-terminal::components::renderable` re-exports
+`renderable::browser::BrowserRenderable`, and the existing tree-flipped
+components (`OrderedList`, `UnorderedList`, `Compose`, `BlockQuote`) all
+import it from the local `crate::components::renderable` path. The
+renderable crate's own `BrowserRenderable` is the same trait — but
+mixing the two import paths leaks an extra dependency surface into
+biscuit-terminal that isn't there in the other migrated components.
+Following the established import convention keeps the per-component
+header consistent and avoids accidentally implementing the wrong
+"BrowserRenderable" if the workspace ever splits the traits.
+
+## Progress flip: every clap subcommand needs an `--example` flag, even cross-target ones
+
+The `bt` `test_every_subcommand_help_exposes_example_flag` smoke test
+iterates a fixed list of subcommands and asserts each one exposes
+`--example` in its help. Adding `--html`, `--md`, and `--md-plus` to
+`bt progress` doesn't change that contract, but a forgetful version of
+the migration that wired the new flags as a non-overlapping
+`OutputArgs`-style enum could remove the per-command `--example` knob.
+The Progress CLI keeps `--example` exactly where it was, and the
+mutual-exclusion groups (`html`/`md`/`md_plus`) are independent of
+`--example` — so `--example --md` correctly renders the example values
+through the Markdown path. The lesson: `--example` is per-command UX
+and stays on every subcommand even when other cross-target flags are
+added.

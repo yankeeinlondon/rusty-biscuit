@@ -181,9 +181,6 @@ Parity is asserted on **ANSI-stripped content equality** (not byte-identical
 output), following the BlockQuote parity discipline. Known accepted divergences
 should be documented in a `KNOWN_DRIFT` ledger:
 
-- **Prose styling loss**: Items that are Prose components lose styling in the
-  tree path because Prose's `render_tree_node()` returns `None`, triggering
-  ANSI-stripped fallback. Content is preserved; styling is not.
 - **Hanging indent computation**: The bespoke path computes hanging indent per
   item (`format!("{number}. ")`), while the tree renderer computes it from
   `origin + offset`. Both should produce the same result, but the code paths
@@ -192,6 +189,18 @@ should be documented in a `KNOWN_DRIFT` ledger:
   term_width - prefix_width` for each item. The tree renderer's width
   management may produce slightly different line breaks in edge cases at very
   narrow widths.
+
+**Resolved (no longer drift):**
+
+- **Prose styling on terminal target**: Previously items that were `Prose`
+  components lost their `<b>` / `<i>` / `<red>` styling because
+  `Prose::render_tree_node()` returns `None`, so the generic
+  `RenderableTerminalContent::to_tree_nodes` fallback stripped ANSI to plain
+  text. `project_list_items` now downcasts `Prose` components and projects
+  them through `Prose::to_render_nodes`, mirroring the `BlockQuote` and
+  `Compose` precedent. Inline styling now survives on Terminal output. The
+  Markdown target still degrades inline `<b>` / `<red>` to plain text because
+  the cross-target tree projection has no CommonMark peer for those tokens.
 
 Existing `biscuit-terminal/lib/tests/list_parity.rs` tests are useful
 projection and native tree-renderer coverage, but they are not sufficient for
