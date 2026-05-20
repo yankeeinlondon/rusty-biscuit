@@ -13,6 +13,7 @@ Terminal detection and rich rendering library for Rust. The authority for termin
 2. **Graceful fallback**: Use `fallback_render()` and explicit app-level text fallback where needed
 3. **Static vs dynamic**: `Terminal` struct fields for static properties, methods for dynamic
 4. **Input validation + policy**: `TerminalImage::new()` validates local paths; apply app-level policies with `TerminalImageOptions`
+5. **IR for cross-target components**: Components that render beyond the terminal should project through `renderable::tree` with a shared `TreeRenderable::render_tree` / `TerminalRenderable::render_tree_node` helper, so nested components remain structural instead of degrading to ANSI-stripped text
 
 ## Quick Start
 
@@ -138,7 +139,7 @@ overrides.insert("hr-weight".to_string(), "12".to_string());
 let svg_override = rule.render_to_browser_with_inline_variables(&overrides);
 ```
 
-The `HorizontalRule` component implements both `Renderable` (terminal output) and `BrowserRenderable` (HTML/SVG output).
+The `HorizontalRule` component implements both `TerminalRenderable` (terminal output) and `BrowserRenderable` (HTML/SVG output).
 
 **Supported attributes:**
 

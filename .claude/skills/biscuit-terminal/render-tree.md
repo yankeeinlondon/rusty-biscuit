@@ -48,9 +48,18 @@ under `Warn`, and are dropped under `Lossy`.
 fn render_tree_node(&self) -> Option<RenderNode> { None }
 ```
 
-A component overrides it to opt into tree rendering. Group 1 components that
-implement it: `Section`, `OrderedList`, `UnorderedList`, `Progress`,
-`TwoColumn`, `Table` (and darkmatter's `YamlBlock`).
+A component overrides it to opt into tree rendering. The first wave covered
+`Section`, `OrderedList`, `UnorderedList`, `Progress`, `TwoColumn`, and
+`Table` (plus darkmatter's `YamlBlock`). The current migration target is
+broader: IR-aware components should implement
+`TreeRenderable`, `MarkdownRenderable`, `BrowserRenderable`, and
+`TerminalRenderable::render_tree_node`, with `render_tree_node` delegating to
+the same private projection helper as `TreeRenderable::render_tree`.
+
+Stage 3 focuses on structural projection for nested components. As of the
+Stage 2 closeout, `BlockQuote`, `StatusBlock`, and `FileSystem` still need
+`render_tree_node` overrides; `FileSystem::render` also still uses its
+bespoke terminal path until parity work decides whether it can flip.
 
 The **projection layer** (`render_tree::projection`) converts
 `RenderableTerminalContent` into tree nodes:
@@ -67,6 +76,9 @@ RenderableTerminalContent::to_tree_nodes(
 - A `String` projects to a `Text` node; a `Component` calls its
   `render_tree_node()`. A component returning `None` becomes an `Unsupported`
   node (Strict) or an ANSI-stripped fallback + diagnostic (Warn / Lossy).
+  Stage 3 plans to make this fallback louder by logging once per concrete
+  component type, using a stable `TerminalRenderable::type_name()` helper
+  instead of parsing the component's `Debug` output.
 
 ## Native Rendering
 
@@ -87,7 +99,7 @@ against the available width via the shared `resolve_cells` helper
 resolving for `RenderTarget::Terminal`), narrows the child render width by
 left+right margins, prefixes each line, block-aligns the component as a unit,
 and emits top/bottom margins as blank rows. `max_width` is **not** applied
-(Browser-only). The Group 1 components seed their own `Layout` onto the
+(Browser-only). Migrated components seed their own `Layout` onto the
 projected node, so layout flows through whether a component is rendered via
 the tree or composed bespoke.
 
