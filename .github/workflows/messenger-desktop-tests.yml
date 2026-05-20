@@ -81,6 +81,8 @@ jobs:
         uses: Vampire/setup-wsl@v4
         with:
           distribution: Ubuntu-24.04
+          wsl-version: 1
+          set-as-default: true
           update: true
           additional-packages: pkg-config, libssl-dev, libdbus-1-dev
 
