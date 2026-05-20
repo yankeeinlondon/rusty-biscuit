@@ -68,15 +68,6 @@ use biscuit_terminal::terminal::Terminal;
 use biscuit_terminal::utils::escape_codes::strip_escape_codes;
 use renderable::tree::{NodeKind, RenderNode};
 
-/// Walks a `RenderNode` tree depth-first looking for a node whose `NodeKind`
-/// matches `pred`. Used by nested-component structural assertions.
-fn walk_has_kind(node: &RenderNode, pred: impl Fn(&NodeKind) -> bool + Copy) -> bool {
-    if pred(&node.kind) {
-        return true;
-    }
-    node.children().iter().any(|c| walk_has_kind(c, pred))
-}
-
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -315,22 +306,19 @@ fn render_tree_node_matches_render_tree_for_block_quote_with_custom_border() {
 // ---------------------------------------------------------------------------
 // Stage 3a: nested-component projection inside BlockQuote
 //
-// `BlockQuote::paragraph_children` runs `project_renderable_content` in
-// `ProjectionMode::InlineOnly` by design — the block-quote contract is that
-// the projected node's main paragraph holds only *inline* nodes. A non-Prose
-// block-level child therefore flattens to an ANSI-stripped `Text` node
-// wrapped in the quote's `Paragraph` rather than projecting structurally.
+// `BlockQuote::render_tree` runs `project_renderable_content` in
+// `ProjectionMode::Structural` for non-`Prose` content components, so nested
+// `Section`, `List`, `Table`, etc. appear as direct block-level children of
+// the projected `BlockQuote`. Inline content (`String`, `Prose`) still wraps
+// in a single `Paragraph`.
 //
-// These tests pin that contract in both directions:
+// These tests pin the structural contract in both directions:
 //
-// 1. The projected `NodeKind::BlockQuote` does not gain a structural
-//    `NodeKind::Section` / `NodeKind::List` child for nested non-Prose
-//    components.
+// 1. The projected `NodeKind::BlockQuote` carries a structural
+//    `NodeKind::Section` / `NodeKind::List` child for nested non-`Prose`
+//    components — no flattening to ANSI-stripped text.
 // 2. The nested component's visible content still survives through the
-//    flattened text node.
-//
-// If `BlockQuote` ever gains a structural-projection mode, these tests are
-// the canonical place to flip the assertions.
+//    terminal render path.
 // ---------------------------------------------------------------------------
 
 /// Helper: return the inner children of a `NodeKind::BlockQuote` root, or
@@ -342,11 +330,11 @@ fn block_quote_children(node: &RenderNode) -> &[RenderNode] {
     }
 }
 
-/// A `Section` content inside a `BlockQuote` flattens to inline text — the
-/// projected tree must NOT carry a structural `NodeKind::Section` child
-/// (InlineOnly contract). The visible heading text must still survive.
+/// A `Section` content inside a `BlockQuote` projects structurally — the
+/// projected tree must carry a `NodeKind::Section` child at index 0 of the
+/// quote so nested heading structure survives end-to-end.
 #[test]
-fn nested_section_in_block_quote_flattens_per_inline_only_contract() {
+fn nested_section_in_block_quote_projects_structural_section() {
     use biscuit_terminal::components::section::{HeadingLevel, Section};
     use renderable::tree::TreeRenderable;
 
@@ -359,13 +347,12 @@ fn nested_section_in_block_quote_flattens_per_inline_only_contract() {
     let node = <BlockQuote as TreeRenderable>::render_tree(&quote);
     let children = block_quote_children(&node);
 
-    // No structural Section child — InlineOnly flattens it.
+    // Structural Section child appears directly under the BlockQuote.
     assert!(
-        !children
-            .iter()
-            .any(|c| walk_has_kind(c, |k| matches!(k, NodeKind::Section { .. }))),
-        "BlockQuote's InlineOnly contract must NOT structurally project a nested Section: \
-         {children:?}"
+        matches!(&children[0].kind, NodeKind::Section { .. }),
+        "BlockQuote must structurally project a nested Section as its first child, \
+         got {:?}",
+        children[0].kind,
     );
 
     // Visible content still reaches the rendered output.
@@ -373,15 +360,15 @@ fn nested_section_in_block_quote_flattens_per_inline_only_contract() {
     let plain = strip_escape_codes(quote.render(&term));
     assert!(
         plain.contains("Nested Heading"),
-        "nested Section content survives the flattened projection: {plain:?}"
+        "nested Section heading text survives the structural projection: {plain:?}"
     );
 }
 
-/// An `OrderedList` inside a `BlockQuote` flattens to inline text — no
-/// structural `NodeKind::List` child appears in the projected tree, but the
-/// item content survives end-to-end.
+/// An `OrderedList` inside a `BlockQuote` projects structurally — a
+/// `NodeKind::List { ordered: true, .. }` child appears directly under the
+/// quote, and the item content survives end-to-end.
 #[test]
-fn nested_ordered_list_in_block_quote_flattens_per_inline_only_contract() {
+fn nested_ordered_list_in_block_quote_projects_structural_list() {
     use biscuit_terminal::components::list::OrderedList;
     use renderable::tree::TreeRenderable;
 
@@ -395,11 +382,10 @@ fn nested_ordered_list_in_block_quote_flattens_per_inline_only_contract() {
     let children = block_quote_children(&node);
 
     assert!(
-        !children
-            .iter()
-            .any(|c| walk_has_kind(c, |k| matches!(k, NodeKind::List { .. }))),
-        "BlockQuote's InlineOnly contract must NOT structurally project a nested OrderedList: \
-         {children:?}"
+        matches!(&children[0].kind, NodeKind::List { ordered: true, .. }),
+        "BlockQuote must structurally project a nested OrderedList as its first child, \
+         got {:?}",
+        children[0].kind,
     );
 
     let term = test_terminal();
@@ -408,11 +394,11 @@ fn nested_ordered_list_in_block_quote_flattens_per_inline_only_contract() {
     assert!(plain.contains("Second"), "nested ordered item survives: {plain:?}");
 }
 
-/// An `UnorderedList` inside a `BlockQuote` flattens to inline text — no
-/// structural `NodeKind::List` child appears in the projected tree, but the
-/// item content survives end-to-end.
+/// An `UnorderedList` inside a `BlockQuote` projects structurally — a
+/// `NodeKind::List { ordered: false, .. }` child appears directly under the
+/// quote, and the item content survives end-to-end.
 #[test]
-fn nested_unordered_list_in_block_quote_flattens_per_inline_only_contract() {
+fn nested_unordered_list_in_block_quote_projects_structural_list() {
     use biscuit_terminal::components::list::UnorderedList;
     use renderable::tree::TreeRenderable;
 
@@ -426,11 +412,10 @@ fn nested_unordered_list_in_block_quote_flattens_per_inline_only_contract() {
     let children = block_quote_children(&node);
 
     assert!(
-        !children
-            .iter()
-            .any(|c| walk_has_kind(c, |k| matches!(k, NodeKind::List { .. }))),
-        "BlockQuote's InlineOnly contract must NOT structurally project a nested UnorderedList: \
-         {children:?}"
+        matches!(&children[0].kind, NodeKind::List { ordered: false, .. }),
+        "BlockQuote must structurally project a nested UnorderedList as its first child, \
+         got {:?}",
+        children[0].kind,
     );
 
     let term = test_terminal();

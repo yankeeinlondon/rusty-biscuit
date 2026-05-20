@@ -9,7 +9,7 @@ use renderable::markdown::MarkdownRenderable;
 use renderable::style::{Border, BorderSides, PerMode, Style};
 use renderable::target::RenderTarget;
 use renderable::tree::render::{render_markdown_node, MarkdownDialect, MarkdownRenderOptions};
-use renderable::tree::{RenderNode, RenderStrictness, TreeRenderable};
+use renderable::tree::{NodeKind, RenderNode, RenderStrictness, TreeRenderable};
 
 use crate::{
     components::{
@@ -510,43 +510,102 @@ impl BlockQuote {
     /// Builds the inline children for the quote's main paragraph in the
     /// canonical render tree.
     ///
+    /// Used only when the content is inherently inline — a plain `String` or a
+    /// [`Prose`] component. Non-`Prose` block-level components project
+    /// structurally through [`Self::project_block_children`] instead.
+    ///
     /// Delegates to the shared
     /// [`project_renderable_content`](crate::render_tree::projection::project_renderable_content)
-    /// helper. For [`RenderableTerminalContent::String`] the content becomes a
-    /// single `Text` node; for [`RenderableTerminalContent::Component`] the
-    /// helper downcasts known structured types so inline styling survives:
-    ///
-    /// - [`Prose`] is projected through [`Prose::to_render_nodes`], preserving
-    ///   bold/italic/colored inline runs as `Strong` / `Emphasis` / styled
-    ///   `Span` nodes that the terminal tree renderer lowers back to SGR.
-    /// - Any other component falls back to the ANSI-stripped optimistic render
-    ///   — a deliberately lossy plain-text projection that keeps the tree
-    ///   target-agnostic.
-    ///
-    /// `BlockQuote` runs the helper in
+    /// helper in
     /// [`ProjectionMode::InlineOnly`](crate::render_tree::projection::ProjectionMode::InlineOnly)
-    /// so every non-`Prose` component is flattened to a single ANSI-stripped
-    /// `Text` node. This preserves the historical block-quote contract that
-    /// `paragraph_children` returns *inline* nodes only — wrapping them in a
-    /// single `Paragraph` is the caller's responsibility, and embedded
-    /// block-level components must not break that contract.
+    /// so [`Prose`] inline runs survive as `Strong` / `Emphasis` / styled
+    /// `Span` nodes that the terminal tree renderer lowers back to SGR.
     fn paragraph_children(&self) -> Vec<RenderNode> {
         use crate::render_tree::projection::{ProjectionMode, project_renderable_content};
         project_renderable_content(&self.content, ProjectionMode::InlineOnly)
     }
+
+    /// Builds the top-level children for the quote's projected
+    /// [`NodeKind::BlockQuote`].
+    ///
+    /// `String` content and [`Prose`] components are inline — they produce a
+    /// single `Paragraph` wrapping inline nodes. Any other component projects
+    /// structurally via
+    /// [`ProjectionMode::Structural`](crate::render_tree::projection::ProjectionMode::Structural):
+    /// its `render_tree_node` output (or the structural fallback) becomes a
+    /// direct block-level child of the `BlockQuote`. This closes the Stage 3
+    /// projection gap where nested `Section`, `List`, and `Table` components
+    /// inside a quote previously flattened to ANSI-stripped text.
+    ///
+    /// When structural projection yields inline-only nodes (the
+    /// `RenderStrictness::Warn` fallback emits a single `Text`), they are
+    /// wrapped in a `Paragraph` so the `BlockQuote` contract still has
+    /// block-level children.
+    fn project_block_children(&self) -> Vec<RenderNode> {
+        use crate::render_tree::projection::{ProjectionMode, project_renderable_content};
+
+        // Inline content (String, Prose) always wraps in a single Paragraph.
+        let is_inline_content = match &self.content {
+            RenderableTerminalContent::String(_) => true,
+            RenderableTerminalContent::Component(component) => {
+                component.as_any().downcast_ref::<Prose>().is_some()
+            }
+        };
+        if is_inline_content {
+            return vec![RenderNode::paragraph(self.paragraph_children())];
+        }
+
+        let nodes = project_renderable_content(
+            &self.content,
+            ProjectionMode::Structural { terminal_hint: None },
+        );
+
+        if nodes.iter().all(|n| is_inline_node_kind(&n.kind)) {
+            vec![RenderNode::paragraph(nodes)]
+        } else {
+            nodes
+        }
+    }
+}
+
+/// Returns `true` if a [`NodeKind`] is phrasing-level (inline).
+///
+/// Mirrors the validator's `is_inline_kind` so [`BlockQuote::project_block_children`]
+/// can decide whether to wrap a structural projection in a `Paragraph`. Kept
+/// local because the validator's helper is not part of the public render-tree
+/// API.
+fn is_inline_node_kind(kind: &NodeKind) -> bool {
+    matches!(
+        kind,
+        NodeKind::Text { .. }
+            | NodeKind::Emphasis { .. }
+            | NodeKind::Strong { .. }
+            | NodeKind::Delete { .. }
+            | NodeKind::Span { .. }
+            | NodeKind::InlineCode { .. }
+            | NodeKind::Link { .. }
+            | NodeKind::Image { .. }
+            | NodeKind::FootnoteReference { .. }
+            | NodeKind::SoftBreak
+            | NodeKind::HardBreak
+    )
 }
 
 impl TreeRenderable for BlockQuote {
     /// Projects the block quote into the canonical render tree as a
     /// [`NodeKind::BlockQuote`](renderable::tree::NodeKind::BlockQuote).
     ///
-    /// The textual content becomes a single `Paragraph` whose children are
-    /// produced by [`Self::paragraph_children`]. A `String` content becomes a
-    /// single `Text` node; a [`Prose`] component is projected into structured
-    /// inline nodes (`Strong` / `Emphasis` / styled `Span`) so its declared
-    /// styling survives on the Terminal target. When an attribution is present
-    /// it is appended as a second `Paragraph` containing a single `Text` of
-    /// the form `— {attribution}`.
+    /// `String` content and [`Prose`] components become a single `Paragraph`
+    /// wrapping inline children: `String` becomes one `Text` node and `Prose`
+    /// becomes structured inline nodes (`Strong` / `Emphasis` / styled
+    /// `Span`) so its declared styling survives on the Terminal target.
+    /// Non-`Prose` components project structurally via
+    /// [`Self::project_block_children`] — nested `Section`, `List`, `Table`,
+    /// etc. appear as direct block-level children of the projected
+    /// `BlockQuote` instead of flattening to ANSI-stripped text.
+    ///
+    /// When an attribution is present it is appended as a final `Paragraph`
+    /// containing a single `Text` of the form `— {attribution}`.
     ///
     /// A non-default [`Layout`] (margin, alignment, max-width, word wrap) is
     /// recorded on the root node's attributes so the tree renderers apply it,
@@ -559,7 +618,7 @@ impl TreeRenderable for BlockQuote {
     /// slots (they have no semantic Markdown peer), so their output continues
     /// to match a plain quote.
     fn render_tree(&self) -> RenderNode {
-        let mut children = vec![RenderNode::paragraph(self.paragraph_children())];
+        let mut children = self.project_block_children();
 
         if let Some(attribution) = &self.attribution {
             children.push(RenderNode::paragraph(vec![RenderNode::text(format!(

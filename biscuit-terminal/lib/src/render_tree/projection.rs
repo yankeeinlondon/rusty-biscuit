@@ -300,10 +300,16 @@ pub(crate) fn project_renderable_content(
                     // For bespoke-only components, prefer rendering through
                     // the caller's actual terminal so capability-sensitive
                     // fallbacks (e.g. HR text tier vs. image tier) reflect
-                    // the real target.
+                    // the real target. The warn-once fallback event still
+                    // fires here so a component that forgets to override
+                    // `render_tree_node` is observable in logs and CI even
+                    // when the projector takes this terminal-hint
+                    // short-circuit instead of routing through
+                    // `to_tree_nodes`'s strictness ladder.
                     if component.render_tree_node().is_none()
                         && let Some(term) = terminal_hint
                     {
+                        emit_fallback_event(component.type_name());
                         let rendered = component.render(term);
                         let stripped = strip_ansi_codes(&rendered);
                         return vec![RenderNode::text(stripped)];
@@ -721,6 +727,105 @@ mod tests {
             if debugs != 1 {
                 return Err(format!(
                     "expected exactly 1 DEBUG line referencing StubWarnOnceFallback, got {debugs}; lines={lines:?}"
+                ));
+            }
+            Ok(())
+        });
+    }
+
+    /// Distinct stub used by the terminal-hint warn-once regression so its
+    /// type name does not collide with `warn_once_stub::StubWarnOnceFallback`.
+    mod warn_once_terminal_hint_stub {
+        use std::any::Any;
+
+        use super::super::*;
+        use crate::components::renderable::TerminalRenderable;
+        use crate::utils::layout::Layout;
+
+        #[derive(Debug, Default)]
+        pub(super) struct StubWarnOnceTerminalHint {
+            layout: Layout,
+        }
+
+        impl TerminalRenderable for StubWarnOnceTerminalHint {
+            fn render(&self, _term: &Terminal) -> String {
+                "terminal-hint stub output".to_string()
+            }
+
+            fn layout(&self) -> &Layout {
+                &self.layout
+            }
+
+            fn layout_mut(&mut self) -> &mut Layout {
+                &mut self.layout
+            }
+
+            fn as_any(&self) -> &dyn Any {
+                self
+            }
+
+            // render_tree_node intentionally NOT overridden — defaults to None.
+        }
+    }
+
+    /// Regression: `project_renderable_content` with
+    /// `ProjectionMode::Structural { terminal_hint: Some(_) }` must still
+    /// emit the same warn-once-then-debug observability event as the
+    /// `to_tree_nodes` strictness ladder. Without this, containers that
+    /// thread a terminal hint (Compose, OrderedList, UnorderedList) would
+    /// silently flatten a component that forgot to override
+    /// `render_tree_node`.
+    #[test]
+    #[tracing_test::traced_test]
+    fn structural_terminal_hint_fallback_emits_warn_once_then_debug() {
+        reset_warned_types_for_test();
+
+        let term = Terminal::new_optimistic(80);
+
+        // First projection — should hit the terminal-hint fallback and emit `warn!`.
+        let content1 = RenderableTerminalContent::Component(Rc::new(
+            warn_once_terminal_hint_stub::StubWarnOnceTerminalHint::default(),
+        ));
+        let nodes1 = project_renderable_content(
+            &content1,
+            ProjectionMode::Structural {
+                terminal_hint: Some(&term),
+            },
+        );
+        assert_eq!(nodes1.len(), 1);
+        assert!(matches!(
+            &nodes1[0].kind,
+            NodeKind::Text { value } if value == "terminal-hint stub output"
+        ));
+
+        // Second projection — should downgrade to `debug!`.
+        let content2 = RenderableTerminalContent::Component(Rc::new(
+            warn_once_terminal_hint_stub::StubWarnOnceTerminalHint::default(),
+        ));
+        let _nodes2 = project_renderable_content(
+            &content2,
+            ProjectionMode::Structural {
+                terminal_hint: Some(&term),
+            },
+        );
+
+        logs_assert(|lines: &[&str]| {
+            let warns = lines
+                .iter()
+                .filter(|l| l.contains("WARN") && l.contains("StubWarnOnceTerminalHint"))
+                .count();
+            let debugs = lines
+                .iter()
+                .filter(|l| l.contains("DEBUG") && l.contains("StubWarnOnceTerminalHint"))
+                .count();
+            if warns != 1 {
+                return Err(format!(
+                    "expected exactly 1 WARN line referencing StubWarnOnceTerminalHint, got {warns}; lines={lines:?}"
+                ));
+            }
+            if debugs != 1 {
+                return Err(format!(
+                    "expected exactly 1 DEBUG line referencing StubWarnOnceTerminalHint, got {debugs}; lines={lines:?}"
                 ));
             }
             Ok(())
