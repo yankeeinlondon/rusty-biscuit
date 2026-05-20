@@ -30,14 +30,14 @@ fn enumerate_windows_scm_services() -> windows::core::Result<Vec<Service>> {
     use windows::Win32::Foundation::ERROR_MORE_DATA;
     use windows::Win32::System::Services::{
         CloseServiceHandle, ENUM_SERVICE_STATUS_PROCESSW, EnumServicesStatusExW, OpenSCManagerW,
-        SC_ENUM_PROCESS_INFO, SC_HANDLE, SC_MANAGER_ENUMERATE_SERVICE, SERVICE_RUNNING,
+        SC_ENUM_PROCESS_INFO, SC_HANDLE, SC_MANAGER_ENUMERATE_SERVICE,
         SERVICE_STATE_ALL, SERVICE_STATUS_PROCESS, SERVICE_WIN32,
     };
     use windows::core::PCWSTR;
 
     let scm: SC_HANDLE =
         unsafe { OpenSCManagerW(PCWSTR::null(), PCWSTR::null(), SC_MANAGER_ENUMERATE_SERVICE)? };
-    let _guard = ScopeGuard::new(|| unsafe { CloseServiceHandle(scm).ok() });
+    let _guard = ScopeGuard::new(|| unsafe { CloseServiceHandle(scm).ok(); });
 
     let mut bytes_needed: u32 = 0;
     let mut services_returned: u32 = 0;
@@ -49,8 +49,7 @@ fn enumerate_windows_scm_services() -> windows::core::Result<Vec<Service>> {
             SC_ENUM_PROCESS_INFO,
             SERVICE_WIN32,
             SERVICE_STATE_ALL,
-            Some(buf.as_mut_ptr()),
-            0,
+            Some(&mut buf),
             &mut bytes_needed,
             &mut services_returned,
             None,
@@ -67,8 +66,7 @@ fn enumerate_windows_scm_services() -> windows::core::Result<Vec<Service>> {
                 SC_ENUM_PROCESS_INFO,
                 SERVICE_WIN32,
                 SERVICE_STATE_ALL,
-                Some(buf.as_mut_ptr()),
-                bytes_needed,
+                Some(&mut buf),
                 &mut bytes_needed,
                 &mut services_returned,
                 None,
@@ -98,10 +96,10 @@ fn enumerate_windows_scm_services() -> windows::core::Result<Vec<Service>> {
             continue;
         }
 
-        let status: SERVICE_STATUS_PROCESS = unsafe { entry.ServiceStatusProcess };
+        let status: SERVICE_STATUS_PROCESS = entry.ServiceStatusProcess;
         services.push(service_from_raw_status(
             name,
-            status.dwCurrentState,
+            status.dwCurrentState.0,
             status.dwProcessId,
         ));
     }
@@ -119,22 +117,27 @@ const SERVICE_STOPPED_STATE: u32 = 1;
 
 /// The Windows `SERVICE_START_PENDING` state code (`dwCurrentState == 2`).
 #[cfg(any(target_os = "windows", test))]
+#[allow(dead_code)]
 const SERVICE_START_PENDING_STATE: u32 = 2;
 
 /// The Windows `SERVICE_STOP_PENDING` state code (`dwCurrentState == 3`).
 #[cfg(any(target_os = "windows", test))]
+#[allow(dead_code)]
 const SERVICE_STOP_PENDING_STATE: u32 = 3;
 
 /// The Windows `SERVICE_CONTINUE_PENDING` state code (`dwCurrentState == 5`).
 #[cfg(any(target_os = "windows", test))]
+#[allow(dead_code)]
 const SERVICE_CONTINUE_PENDING_STATE: u32 = 5;
 
 /// The Windows `SERVICE_PAUSE_PENDING` state code (`dwCurrentState == 6`).
 #[cfg(any(target_os = "windows", test))]
+#[allow(dead_code)]
 const SERVICE_PAUSE_PENDING_STATE: u32 = 6;
 
 /// The Windows `SERVICE_PAUSED` state code (`dwCurrentState == 7`).
 #[cfg(any(target_os = "windows", test))]
+#[allow(dead_code)]
 const SERVICE_PAUSED_STATE: u32 = 7;
 
 /// Classifies a raw Windows SCM `dwCurrentState` code into a filterable

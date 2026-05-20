@@ -22,6 +22,9 @@ on:
       - ".github/workflows/messenger-desktop-tests.yml"
   workflow_dispatch: {}
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 concurrency:
   group: messenger-desktop-tests-${{ github.ref }}
   cancel-in-progress: true
@@ -65,3 +68,49 @@ jobs:
 
       - name: Run messenger CLI tests
         run: cargo test -p messenger-cli
+
+  wsl-tests:
+    name: WSL2 Ubuntu
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup WSL
+        uses: Vampire/setup-wsl@v4
+        with:
+          distribution: Ubuntu-24.04
+          wsl-version: 1
+          set-as-default: true
+          update: true
+          additional-packages: pkg-config, libssl-dev, libdbus-1-dev
+
+      - name: Install Rust in WSL
+        shell: wsl-bash {0}
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+
+      - name: Cargo check in WSL (--all-features)
+        shell: wsl-bash {0}
+        run: |
+          source ~/.cargo/env
+          cargo check -p messenger --all-features
+
+      - name: Build desktop helper stubs in WSL
+        shell: wsl-bash {0}
+        run: |
+          source ~/.cargo/env
+          cargo build -p messenger --features desktop --bins
+
+      - name: Run messenger lib unit tests in WSL (desktop feature)
+        shell: wsl-bash {0}
+        run: |
+          source ~/.cargo/env
+          cargo test -p messenger --features desktop --lib
+
+      - name: Run messenger CLI tests in WSL
+        shell: wsl-bash {0}
+        run: |
+          source ~/.cargo/env
+          cargo test -p messenger-cli"
