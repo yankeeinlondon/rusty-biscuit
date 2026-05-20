@@ -157,10 +157,15 @@ What is proven:
 - All three renderers' consumption is tested: Browser CSS lowering (including
   vertical `lh`), terminal cell margins and percentage resolution, the
   Markdown-unchanged lock.
-- Seven components emit `Layout` (`Section`, `OrderedList`, `UnorderedList`,
-  `Progress`, `TwoColumn`, `Table`, `BlockQuote`, plus darkmatter's
-  `YamlBlock`). Their tree output is snapshot-tested in `layout_matrix` and
-  parity-checked against the bespoke renderers in `render_comparison`.
+- Thirteen components emit `Layout` — the twelve `biscuit-terminal`
+  components flipped to the render tree in Stage 2 (`BlockQuote`,
+  `Compose`, `FileSystem`, `OrderedList`, `UnorderedList`, `Progress`,
+  `Section`, `StatusBlock`, `Table`, `TextBlock`, `Todo`, `TwoColumn`)
+  plus darkmatter's `YamlBlock`. Their tree output is snapshot-tested in
+  `layout_matrix` and parity-checked against the bespoke renderers in
+  `render_comparison`. See
+  [`renderable/features/2026-05-19-pushing-toward-ir/lessons-learned.md`](../features/2026-05-19-pushing-toward-ir/lessons-learned.md)
+  for the per-component migration notes.
 
 Known gaps and loose ends:
 
@@ -245,8 +250,26 @@ explicit on the node that paints them.
   `Padded` (the content band), or `Indented` (inset from both edges).
   `Fill::inset` adds leading unpainted columns and narrows the band.
 
-**Browser** lowering of `Style` to CSS is designed (Spec B D7) but not yet
-wired; the terminal target is implemented first.
+**Browser** (`renderable/src/tree/render/browser.rs`, `style_css_declarations`
+plus `wrap_style_emphasis`) lowers `Style`'s text-appearance and box-color
+layers to CSS during fragment emission:
+
+- `color` and `background` resolve through `TargetValue` and `PerMode` and
+  emit `color:` / `background-color:` declarations on the node's inline
+  `style` attribute.
+- `emphasis` lowers in two paths. The strikethrough / italic / bold trio
+  on inline nodes lowers to semantic HTML wrappers (`<s>`, `<em>`,
+  `<strong>`); on block nodes it lowers to CSS (`text-decoration:line-through`,
+  `font-style:italic`, `font-weight:bold`) because nesting block content
+  inside `<strong>` is invalid HTML.
+- `underline` variants, `dim`, and `blink` always lower to CSS:
+  `text-decoration:underline` (with `wavy` / `double` / `dotted` style
+  selectors and the per-mode color), `opacity:0.6`, and a small CSS
+  keyframe animation respectively.
+
+`border` and `fill` lowering to CSS is **not yet wired** — the helper
+explicitly leaves those two layers for a follow-up. The terminal target
+remains the only consumer of border glyphs and fill bands today.
 
 **Markdown** ignores `Style` entirely — Markdown body output is byte-identical
 whether or not a node carries a style, with no diagnostic.
@@ -269,11 +292,20 @@ the declared style.
 
 ### CLI surface
 
-Three `bt` subcommands render through the terminal tree renderer
-(`render_terminal_node`) and exercise `Style` end-to-end: `bt block` (generic
-`Style` on a text block), `bt progress` (`ProgressStyle` slot colors), and
-`bt table` (`TableStyle` striping). They back the Level-2 real-terminal tests
-in `biscuit-terminal/cli/tests/level2_render_tree_style.rs`.
+A dozen `bt` subcommands now exercise the terminal tree renderer
+(`render_terminal_node`) end-to-end. Two — `bt block` and `bt quote` —
+call the renderer directly to demonstrate generic `Style` on a text block
+and `BlockQuote` projection. The rest reach it transitively: `bt list`,
+`bt progress`, `bt table`, `bt compose`, `bt section`, `bt status-block`,
+`bt text-block`, `bt todo`, `bt columns`, and (for the Markdown and
+HTML output modes only) `bt dir` all invoke their component's
+`render` / `render_markdown` / `render_html_fragment`, which the Stage 2
+flip routed through the tree. `bt dir` terminal default remains the
+bespoke `FileSystem` renderer pending the Stage 3 decision. The
+Level-2 real-terminal tests in
+`biscuit-terminal/cli/tests/level2_render_tree_style.rs` continue to
+back `bt block`, `bt progress`, and `bt table` specifically for
+`Style` coverage.
 
 ### Proven vs. wired — honest gaps
 
@@ -281,13 +313,20 @@ Proven: the `Style` types and serde round-trips; terminal lowering of every
 layer — color-depth degradation, light/dark adaptation, emphasis, border
 glyphs (including rounded corners), and fill bands with inset — is unit-tested
 at Level 1 and captured through real terminals (WezTerm / Kitty / tmux) at
-Level 2.
+Level 2. Browser lowering of the text-appearance and box-color layers
+(color, background, emphasis wrappers and CSS, underline variants, dim,
+blink) is unit-tested in `tree/render/browser.rs`'s test module.
 
 Known gaps:
 
-- **Browser `Style` lowering is unbuilt.** The CSS mapping is designed in
-  Spec B D7 but no browser renderer wiring exists yet — the terminal target is
-  the only implemented `Style` consumer.
+- **Browser `Style` lowering is partial.** Color, background, emphasis
+  (the `<strong>` / `<em>` / `<s>` wrappers for inline, the equivalent
+  CSS for block), underline variants, dim, and blink are wired. The
+  box-painting layers — `border` and `fill` — are intentionally **not**
+  lowered yet (`style_css_declarations` documents the gap explicitly).
+  Adding them requires defining the CSS semantics for the typed
+  `Border` weight / line-style / radius matrix and the `Fill` band /
+  inset model.
 - **`render_border` width mismatch.** The terminal border's top/bottom rule is
   two columns narrower than the content row — the interior padding spaces are
   not counted in the rule width. It affects square and rounded borders alike

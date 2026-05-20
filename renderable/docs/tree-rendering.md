@@ -106,28 +106,63 @@ The new fold (`fold_markdown_to_document`) is an **additional, parallel,
 experimental** path. It does not touch `as_html` / `for_terminal` / `compose`,
 and nothing public routes through it yet.
 
-## 3. The existing structural-component rendering path
+## 3. The structural-component rendering path
 
-Structural components such as `BlockQuote` (and `List`, `Table`, `Section`,
-`HorizontalRule`, …) live in `biscuit-terminal` and render with **bespoke,
-per-target trait implementations**:
+Twelve structural components in `biscuit-terminal` — `BlockQuote`, `Compose`,
+`FileSystem`, `OrderedList`, `UnorderedList`, `Progress`, `Section`,
+`StatusBlock`, `Table`, `TextBlock`, `Todo`, and `TwoColumn` — now implement
+`TreeRenderable`, `MarkdownRenderable`, and `BrowserRenderable`. The default
+`TerminalRenderable::render` path on each of them (with one caveat below)
+projects to a `RenderNode` and lowers through `render_terminal_node`. The
+Markdown and Browser targets render exclusively through the tree.
 
-- They implement `TerminalRenderable` directly (`render`, `render_optimistic`,
-  `layout`, …). Some also implement `BrowserRenderable`.
-- Each impl contains hand-written, target-specific layout and formatting code.
+The shared shape per component is:
 
-The render-tree work added exactly **one** adoption, as a proof of concept:
+- A private projection helper (`to_render_node()` or equivalent) builds the
+  canonical subtree.
+- `TreeRenderable::render_tree` calls that helper.
+- `TerminalRenderable::render` calls the helper, lowers via the tree
+  renderer, and falls back to a `render_bespoke` companion only for the
+  compatibility escape hatches the component still owns (e.g. a custom
+  `BlockQuote` border prefix, `Table::prefer_cursor_alignment`, the
+  `TwoColumn` image overlay).
+- `TerminalRenderable::render_tree_node` is overridden to return the same
+  projection, so when the component appears *inside* another component's
+  tree the projector emits the structural subtree rather than falling
+  back to "render to ANSI, strip, wrap in `Text`".
 
-- `BlockQuote` now also implements `TreeRenderable`, projecting its content and
-  attribution into a `BlockQuote` subtree.
-- This impl is **additive**. `BlockQuote`'s original `TerminalRenderable` impl is
-  unchanged and is still what runs on `quote.render(&term)`. The two renderers
-  are parallel and do not share code.
+**Caveat — `FileSystem` keeps its bespoke terminal path.** Its Browser and
+Markdown targets route through the tree, but `FileSystem::render` still
+calls the bespoke directory-tree renderer because the connector geometry
+(`├──`, `└──`, `│`) is presentation, not document structure, and the tree
+path is not at parity yet. The Stage 3 spec picks the resolution:
+flip, document, or defer (see `stage3-spec.md` §S3-1c).
 
-No other component implements `TreeRenderable`. No component's `TerminalRenderable`
-or `BrowserRenderable` impl has been re-pointed at the tree. Inherently visual
-components (`TerminalImage`, `GraphExpression`) are intentionally **not**
-intended to route through the tree — they keep bespoke renderers permanently.
+**Caveat — three components are missing the `render_tree_node` override.**
+`BlockQuote`, `StatusBlock`, and `FileSystem` implement
+`TreeRenderable::render_tree` but their `TerminalRenderable::render_tree_node`
+still returns `None`. Their own `.render(&term)` works correctly via the
+tree; the gap shows up only when one of them is nested inside another
+component's tree under `RenderStrictness::Warn`, where the container
+falls back to render-then-strip instead of pulling the structural
+subtree. Stage 3 §S3-1a adds these overrides.
+
+Stage 1 also landed eleven render-tree-functionality additions consumed
+by the Stage 2 component impls — `SequenceJoin::None` (Compose),
+`ListMarkerPolicy` (FileSystem), Browser and MarkdownPlus `ProgressHints`,
+`set_table_title` and Markdown-safe cell escaping (Table), Browser `Style`
+lowering for color, emphasis, underline, dim, and blink (TextBlock and
+all subsequent consumers), `TaskState` / `TaskHints` (Todo), and
+`ColumnsHints` lowering to Browser CSS and MarkdownPlus HTML (TwoColumn).
+See
+[`approved-render-tree-functionality.md`](../features/2026-05-19-pushing-toward-ir/approved-render-tree-functionality.md)
+for the full RT-* ledger.
+
+Inherently visual components (`TerminalImage`, `GraphExpression`) and
+simple non-block helpers (`PadLeft`, `PadRight`, `InlineContent`,
+`HorizontalRule`, `Status`) remain bespoke by design — they are out of
+scope for the tree. `Prose` is in a category of its own: it owns a
+component-local `ProseDocument` IR and does not project to a `RenderNode`.
 
 ## 4. Testing coverage — and the gaps
 
@@ -156,48 +191,70 @@ input:
 
 Flow A is genuinely proven at the test level, not theoretical.
 
-### Flow B — component → tree → render (one component, parity-gated)
+### Flow B — component → tree → render (twelve components, parity-gated)
 
-This is the `TreeRenderable` use case. One component is adopted and now has a
-parity gate; the rest of the component ecosystem is unadopted.
+This is the `TreeRenderable` use case. After Stage 2 of the IR push,
+twelve `biscuit-terminal` components are adopted and each has a parity gate.
+See
+[`renderable/features/2026-05-19-pushing-toward-ir/lessons-learned.md`](../features/2026-05-19-pushing-toward-ir/lessons-learned.md)
+for the per-component ledger.
 
-- Only `BlockQuote` implements `TreeRenderable`. Its 8 happy-path tests cover
-  tree structure (root kind, child counts), text extraction from a `Prose`, and
-  rendering the projected tree out through the Markdown and Browser renderers
-  (`render_markdown_node` → `> Quoted text`; `render_browser_node` → contains
-  `<blockquote>`).
+- `BlockQuote`, `Compose`, `FileSystem`, `OrderedList`, `UnorderedList`,
+  `Progress`, `Section`, `StatusBlock`, `Table`, `TextBlock`, `Todo`, and
+  `TwoColumn` each implement `TreeRenderable` (plus `MarkdownRenderable` and
+  `BrowserRenderable`). For all of them except `FileSystem`, the default
+  `TerminalRenderable::render` is the **tree** path; the bespoke renderer
+  is retained as a `render_bespoke` companion for parity comparison and
+  for the compatibility escape hatches the component still owns.
 - `TreeComponent` is unit-tested with synthetic stub types.
-- **Component parity** (`render_tree_component_parity.rs`, `biscuit-terminal`) —
-  `BlockQuote` is rendered *both* ways, its bespoke `TerminalRenderable` versus
-  `TreeComponent` through the tree, and the two outputs are compared on semantic
-  invariants (token presence after ANSI stripping). This is the Flow B
-  equivalent of the darkmatter parity gate: it demonstrates the tree path
-  preserves a component's content faithfully, with the accepted layout
-  divergences (border treatment, attribution placement, flattened `Prose`
-  styling) documented in the test.
+- **Per-component parity gates** live in
+  `biscuit-terminal/lib/tests/`: `ordered_list_parity.rs`,
+  `unordered_list_parity.rs`, `list_parity.rs`, `progress_parity.rs`,
+  `section_parity.rs`, `status_block_parity.rs`, `table_parity.rs`,
+  `text_block_parity.rs`, `todo_parity.rs`, `two_column_parity.rs`. The
+  `BlockQuote` parity gate is in `render_tree_component_parity.rs`.
+  `Compose` and `FileSystem` carry their parity / projection tests
+  in-module rather than in a dedicated parity file.
+- Each parity test renders the component *both* ways — the bespoke
+  `render_bespoke` versus the tree path through `render_terminal_node` —
+  and asserts semantic invariants (token presence after ANSI stripping,
+  structural `NodeKind` for nested cases). Accepted divergences (e.g.
+  border treatment, attribution placement, flattened nested non-`Prose`
+  styling) are documented in the test bodies.
 
-Flow B is now **parity-gated for `BlockQuote`** — for that component the tree
-path is demonstrated faithful, not merely wired. It remains a single-component
-proof: the parity discipline exists and is proven once, but no component more
-complex than `BlockQuote` has been put through it.
+Flow B is **parity-gated across the twelve adopted components**, with the
+discipline encoded as a separate test per component. The pattern that
+worked once on `BlockQuote` has now been applied to every component
+flipped to the tree.
 
 ### Known gaps
 
-- **Component parity covers only `BlockQuote`.** The component-side parity gate
-  (`render_tree_component_parity.rs`) demonstrates the tree path on `BlockQuote`
-  alone. Every further component adoption needs its own parity test before the
-  component is flipped — the discipline is established, but unproven on anything
-  more complex than `BlockQuote`.
-- **No production wiring.** `as_html`, `for_terminal`, and every component
-  `.render()` still run legacy code. The tree path is reachable only from tests.
-- **Lossy projection fidelity is characterized, not eliminated.** `BlockQuote`'s
-  text extraction from a `Prose` component is lossy (styling flattened); the
-  parity test asserts the *content* survives both paths and documents the
-  styling loss as accepted — it does not recover the lost styling.
-- **Hard components are unprojected.** `BlockQuote` is nearly the simplest
-  structural component. Tables, nested lists, and mixed inline/block content —
-  the cases that would actually stress the `NodeKind` vocabulary from the
-  component side — have no `TreeRenderable` impl.
+- **`FileSystem`'s terminal path is still bespoke.** Browser and Markdown
+  flow through the tree; `FileSystem::render` does not. The Stage 3 spec
+  (`stage3-spec.md` §S3-1c) decides between flipping, documenting as a
+  permanent escape hatch, or deferring.
+- **Three components are missing the `render_tree_node` override.**
+  `BlockQuote`, `StatusBlock`, and `FileSystem` implement
+  `TreeRenderable::render_tree` but their compat hook
+  (`TerminalRenderable::render_tree_node`) returns `None`. Their own
+  `.render` works correctly; the gap manifests only when one of them is
+  nested inside another component's tree, where the container falls back
+  to render-then-strip instead of pulling the structural subtree.
+  Stage 3 §S3-1a adds these overrides.
+- **Nested non-`Prose` block components flatten to text.** When a
+  container holds a nested component whose `render_tree_node` returns
+  `None`, the projector under `RenderStrictness::Warn` renders it to
+  ANSI, strips colors, and wraps the result in a `Text` node — so a
+  `BlockQuote` inside a `TwoColumn`, for example, appears as `Paragraph`
+  containing `Text("│ quoted")` instead of `NodeKind::BlockQuote`.
+  Stage 3 §S3-2 tightens the container parity tests once §S3-1 closes
+  the override gap.
+- **`as_html` and `for_terminal` still run legacy code.** The darkmatter
+  side of Flow A is parity-tested but not yet repointed at the tree.
+- **Lossy projection fidelity is characterized, not eliminated.** Text
+  extraction from a `Prose` component remains lossy (styling flattened);
+  the parity tests assert content survives and document styling loss
+  as accepted.
 - **Deferred fold coverage.** Custom darkmatter inline styles (`==mark==`, dim)
   and horizontal-rule attributes are not folded yet, because darkmatter's
   `InlineStyleProcessor` / `RuleProcessor` discard source offsets; reconciling
@@ -208,29 +265,50 @@ complex than `BlockQuote` has been put through it.
 This is a direction sketch, not a detailed plan. Each step should land as its
 own feature with its own parity gate.
 
-### Near term — close the Flow B confidence gap
+### Done in Stage 1–2 — component adoption (`biscuit-terminal`)
 
-1. **Component-side parity test — done.** `render_tree_component_parity.rs`
-   renders `BlockQuote` both ways — bespoke `TerminalRenderable` vs
-   `TreeComponent` through the tree — and asserts semantic equivalence. This
-   converts "the plumbing runs" into "the tree can faithfully render this
-   component." The pattern is now established; every further component adoption
-   must add its own parity test before the component is flipped.
-2. **Build the `BrowserRenderable` tree adapter.** `TreeComponent` only bridges
-   the terminal today. The browser adapter must define an error policy because
-   `BrowserRenderable::render_html_fragment` is infallible.
+1. **Component-side parity discipline established.** `BlockQuote`'s
+   `render_tree_component_parity.rs` set the pattern: render both ways,
+   assert semantic equivalence, document accepted divergences. Every
+   subsequent adoption added its own parity test file (or in-module
+   parity tests for `Compose` and `FileSystem`) before the component
+   was flipped.
+2. **Browser and Markdown adapters wired.** Both targets render the
+   twelve adopted components through `render_browser_node` /
+   `render_markdown_node`. The `BrowserRenderable` impls call the
+   shared projection and lower via the tree; the same applies to
+   `MarkdownRenderable`.
+3. **Twelve structural components flipped:** `BlockQuote`, `Compose`,
+   `FileSystem`, `OrderedList`, `UnorderedList`, `Progress`, `Section`,
+   `StatusBlock`, `Table`, `TextBlock`, `Todo`, `TwoColumn`. For all
+   except `FileSystem`, `TerminalRenderable::render` runs the tree
+   path by default and `render_bespoke` is retained for parity and
+   for the documented escape hatches.
+4. **Inherently visual components left bespoke** by design:
+   `TerminalImage`, `GraphExpression`. The simple non-block helpers
+   (`PadLeft`, `PadRight`, `InlineContent`, `HorizontalRule`, `Status`)
+   are likewise out of scope for the tree.
+5. **Stage 1 RT-\* additions landed.** Eleven render-tree-functionality
+   features (`SequenceJoin::None`, `ListMarkerPolicy`, `ProgressHints`
+   in Browser and MarkdownPlus, table title and Markdown-safe cell
+   escaping, Browser `Style` lowering, `TaskState` / `TaskHints`,
+   Browser CSS and MarkdownPlus HTML lowering for `ColumnsHints`)
+   gave Stage 2 the renderer vocabulary it needed.
 
-### Component adoption (`biscuit-terminal`)
+### Stage 3 — structural-projection completion
 
-3. Adopt structural components incrementally — `Section`, `List`, then `Table` —
-   each with a `TreeRenderable` impl and its own bespoke-vs-tree parity test.
-   Tables and nested lists will genuinely exercise the `NodeKind` vocabulary
-   from the producer side.
-4. Once a component's parity test is green, **flip it**: replace its bespoke
-   `TerminalRenderable` / `BrowserRenderable` bodies with delegation through the
-   tree, deleting the duplicated per-target formatting code.
-5. Leave inherently visual components (`TerminalImage`, `GraphExpression`) on
-   bespoke renderers — they are out of scope for the tree by design.
+See [`stage3-spec.md`](../features/2026-05-19-pushing-toward-ir/stage3-spec.md)
+for the full plan. The work items:
+
+- Add the missing `render_tree_node` overrides on `BlockQuote`,
+  `StatusBlock`, and `FileSystem`.
+- Decide `FileSystem`'s terminal `render` path (flip, document, or defer).
+- Tighten every container's nested-component parity test from "text
+  survives" to "structural `NodeKind` survives" once the overrides
+  land.
+- Strengthen the `to_tree_nodes` warn-once fallback policy and add a
+  stable `type_name()` hook to `TerminalRenderable` so missing overrides
+  are observable in CI.
 
 ### darkmatter migration
 
