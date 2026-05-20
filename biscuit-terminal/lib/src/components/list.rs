@@ -17,11 +17,7 @@ use crate::{
     render_tree::projection::{ProjectionMode, project_renderable_content},
     render_tree::{TerminalRenderOptions, render_terminal_node},
     terminal::Terminal,
-    utils::{
-        block_constraint::{split_lines, visible_width, wrap_lines},
-        layout::{Layout, LayoutTerminalExt},
-        wrap_policy::WordWrap,
-    },
+    utils::{block_constraint::visible_width, layout::Layout},
 };
 
 /// Configure word wrap on an inline component so that wrapped continuation
@@ -247,84 +243,6 @@ impl OrderedList {
         }
     }
 
-    /// Renders via the pre-tree bespoke path.
-    ///
-    /// Retained for parity testing — the active [`TerminalRenderable::render`]
-    /// path delegates to [`Self::render_via_tree`] so the user-facing output
-    /// flows through the canonical tree. Integration parity tests can call
-    /// this method directly to compare the legacy bespoke output against the
-    /// tree renderer's output.
-    #[doc(hidden)]
-    pub fn render_bespoke(&self, term: &Terminal) -> String {
-        let width = term.width();
-        let available = self.layout.available_width(width);
-        let content = self.render_content(Some(term), available);
-        self.layout.apply_block_layout(&content, width)
-    }
-
-    /// Render the list with numbering.
-    ///
-    /// - **String items** are word-wrapped with the prefix width as
-    ///   hanging indent so continuation lines align after the number.
-    /// - **Inline components** are rendered at `child_width`; their
-    ///   word wrap was configured at add time so they handle their own
-    ///   continuation alignment.
-    /// - **Block-level components** are rendered without a prefix and
-    ///   their output is indented by `indent_children` spaces.
-    fn render_content(&self, term: Option<&Terminal>, term_width: u32) -> String {
-        let mut result = String::new();
-        let indent = self.indent_children;
-
-        for (i, item) in self.items.iter().enumerate() {
-            let number = i + 1;
-            let prefix = format!("{number}. ");
-            let prefix_width = visible_width(&prefix);
-
-            match item {
-                RenderableTerminalContent::String(s) => {
-                    result.push_str(&prefix);
-                    let child_width = term_width.saturating_sub(prefix_width);
-                    let lines = split_lines(s.as_str());
-                    let wrapped = wrap_lines(
-                        lines,
-                        &WordWrap::WrapProse(None, Some(prefix_width)),
-                        child_width,
-                    );
-                    result.push_str(&wrapped.join("\n"));
-                }
-                RenderableTerminalContent::Component(component) if component.is_block_level() => {
-                    // Block-level child: no prefix, reduced width, indent output.
-                    let child_width = term_width.saturating_sub(indent);
-                    let content = term.map_or_else(
-                        || component.render_optimistic(Some(child_width)),
-                        |t| component.render_in_width(t, child_width),
-                    );
-                    let indent_str = " ".repeat(indent as usize);
-                    for (j, line) in content.lines().enumerate() {
-                        if j > 0 {
-                            result.push('\n');
-                        }
-                        result.push_str(&indent_str);
-                        result.push_str(line);
-                    }
-                }
-                RenderableTerminalContent::Component(component) => {
-                    // Inline component: word wrap was configured at add time.
-                    result.push_str(&prefix);
-                    let child_width = term_width.saturating_sub(prefix_width);
-                    let content = term.map_or_else(
-                        || component.render_optimistic(Some(child_width)),
-                        |t| component.render_in_width(t, child_width),
-                    );
-                    result.push_str(&content);
-                }
-            }
-
-            result.push('\n');
-        }
-
-        result
-    }
 }
 
 impl TerminalRenderable for OrderedList {
@@ -344,8 +262,6 @@ impl TerminalRenderable for OrderedList {
     /// Renders to the supplied terminal.
     ///
     /// Routes through the canonical render tree via [`Self::render_via_tree`].
-    /// The legacy bespoke output is retained on [`Self::render_bespoke`] for
-    /// parity testing.
     fn render(&self, term: &Terminal) -> String {
         self.render_via_tree(term)
     }
@@ -803,85 +719,6 @@ impl UnorderedList {
         }
     }
 
-    /// Renders via the pre-tree bespoke path.
-    ///
-    /// Retained for parity testing — the active [`TerminalRenderable::render`]
-    /// path delegates to [`Self::render_via_tree`] so the user-facing output
-    /// flows through the canonical tree. Integration parity tests can call
-    /// this method directly to compare the legacy bespoke output against the
-    /// tree renderer's output.
-    #[doc(hidden)]
-    pub fn render_bespoke(&self, term: &Terminal) -> String {
-        let width = term.width();
-        let available = self.layout.available_width(width);
-        let content = self.render_content(Some(term), available);
-        self.layout.apply_block_layout(&content, width)
-    }
-
-    /// Render the list with bullets.
-    ///
-    /// - **String items** are word-wrapped with the bullet width as
-    ///   hanging indent so continuation lines align after the bullet.
-    /// - **Inline components** are rendered at `child_width`; their
-    ///   word wrap was configured at add time so they handle their own
-    ///   continuation alignment.
-    /// - **Block-level components** are rendered without a bullet and
-    ///   their output is indented by `indent` spaces.
-    fn render_content(&self, term: Option<&Terminal>, term_width: u32) -> String {
-        let mut result = String::new();
-        let bullet_width = visible_width(&self.bullet);
-        let indent = self.indent_children.unwrap_or(bullet_width);
-
-        for item in &self.items {
-            match item {
-                RenderableTerminalContent::String(s) => {
-                    result.push_str(&self.bullet);
-                    if self.hanging_indent {
-                        let child_width = term_width.saturating_sub(bullet_width);
-                        let lines = split_lines(s.as_str());
-                        let wrapped = wrap_lines(
-                            lines,
-                            &WordWrap::WrapProse(None, Some(indent)),
-                            child_width,
-                        );
-                        result.push_str(&wrapped.join("\n"));
-                    } else {
-                        result.push_str(s);
-                    }
-                }
-                RenderableTerminalContent::Component(component) if component.is_block_level() => {
-                    // Block-level child: no bullet, reduced width, indent output.
-                    let child_width = term_width.saturating_sub(indent);
-                    let content = term.map_or_else(
-                        || component.render_optimistic(Some(child_width)),
-                        |t| component.render_in_width(t, child_width),
-                    );
-                    let indent_str = " ".repeat(indent as usize);
-                    for (j, line) in content.lines().enumerate() {
-                        if j > 0 {
-                            result.push('\n');
-                        }
-                        result.push_str(&indent_str);
-                        result.push_str(line);
-                    }
-                }
-                RenderableTerminalContent::Component(component) => {
-                    // Inline component: word wrap was configured at add time.
-                    result.push_str(&self.bullet);
-                    let child_width = term_width.saturating_sub(bullet_width);
-                    let content = term.map_or_else(
-                        || component.render_optimistic(Some(child_width)),
-                        |t| component.render_in_width(t, child_width),
-                    );
-                    result.push_str(&content);
-                }
-            }
-
-            result.push('\n');
-        }
-
-        result
-    }
 }
 
 impl TerminalRenderable for UnorderedList {
@@ -901,8 +738,6 @@ impl TerminalRenderable for UnorderedList {
     /// Renders to the supplied terminal.
     ///
     /// Routes through the canonical render tree via [`Self::render_via_tree`].
-    /// The legacy bespoke output is retained on [`Self::render_bespoke`] for
-    /// parity testing.
     fn render(&self, term: &Terminal) -> String {
         self.render_via_tree(term)
     }
@@ -1046,6 +881,7 @@ impl BrowserRenderable for UnorderedList {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::utils::wrap_policy::WordWrap;
 
     #[test]
     fn test_ordered_list_simple() {

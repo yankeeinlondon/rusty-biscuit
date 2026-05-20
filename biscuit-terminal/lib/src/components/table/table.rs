@@ -1562,18 +1562,21 @@ impl Table {
         }
     }
 
-    /// Renders via the pre-tree bespoke path.
+    /// Renders via the sanctioned bespoke escape hatch.
     ///
-    /// Retained for parity testing — the active [`TerminalRenderable::render`]
-    /// path now delegates to [`Self::render_via_tree`] so the user-facing
-    /// output flows through the canonical tree. Integration parity tests can
-    /// call this method directly to compare the legacy bespoke output against
-    /// the tree renderer's output.
+    /// Retained as a `#[doc(hidden)]` surface because [`Table`] supports the
+    /// `prefer_cursor_alignment` knob and a TTY-specific cursor-positioning
+    /// render path that the render tree cannot yet express. The active
+    /// [`TerminalRenderable::render`] path delegates to
+    /// [`Self::render_via_tree`] for the standard layout and falls back to
+    /// this method when cursor alignment on a TTY is required.
     ///
     /// ## Notes
     ///
-    /// Not part of the stable surface; will be removed once the tree
-    /// renderer is the universal default and no parity comparison is needed.
+    /// `#[doc(hidden)]` because this is an internal escape hatch, not part
+    /// of the public surface; `pub` so integration parity tests can reach
+    /// it. Removing this without first adding equivalent cursor-alignment
+    /// capability to the render tree is a regression.
     #[doc(hidden)]
     pub fn render_bespoke(&self, term: &Terminal) -> String {
         let width = term.width();

@@ -406,7 +406,7 @@ mod tests {
         // reach the OSC8 destination intact.
         let term = Terminal::builder().osc_link_support(true).build();
         let attr = Prose::quoted_attr("https://example.com/a>b");
-        let result = Prose::new(&format!("<a href={attr}>x</a>")).parse_tokens(Some(&term));
+        let result = Prose::new(format!("<a href={attr}>x</a>")).parse_tokens(Some(&term));
         assert!(
             result.contains("\x1b]8;;https://example.com/a>b\x1b\\"),
             "got: {result:?}"
@@ -418,7 +418,7 @@ mod tests {
         let term = Terminal::builder().osc_link_support(true).build();
         let value = r#"https://example.com/a>b?q='x'&r="y""#;
         let attr = Prose::quoted_attr(value);
-        let result = Prose::new(&format!("<a href={attr}>x</a>")).parse_tokens(Some(&term));
+        let result = Prose::new(format!("<a href={attr}>x</a>")).parse_tokens(Some(&term));
         assert!(
             result.contains(&format!("\x1b]8;;{value}\x1b\\")),
             "got: {result:?}"

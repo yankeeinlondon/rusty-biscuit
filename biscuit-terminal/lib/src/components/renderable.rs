@@ -207,6 +207,20 @@ pub trait TerminalRenderable: std::fmt::Debug + Any {
     fn render_tree_node(&self) -> Option<RenderNode> {
         None
     }
+
+    /// Returns the stable Rust type name for this component.
+    ///
+    /// Used by the render tree projection layer to produce stable, derive-free
+    /// diagnostic labels and observability events when a component falls back
+    /// from canonical tree projection to ANSI-stripped text.
+    ///
+    /// ## Default
+    ///
+    /// Returns [`std::any::type_name::<Self>()`]. Implementors should not
+    /// override this — the default is the authoritative source.
+    fn type_name(&self) -> &'static str {
+        std::any::type_name::<Self>()
+    }
 }
 
 /// Re-export of the browser render trait, now homed in `renderable`.

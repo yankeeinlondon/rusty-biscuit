@@ -547,33 +547,41 @@ impl TwoColumn {
         }
     }
 
-    /// Renders via the pre-tree bespoke path against the supplied terminal.
+    /// Renders via the sanctioned bespoke escape hatch.
     ///
-    /// Retained for parity testing and as the fallback for the
-    /// terminal-image-overlay scenario — the active
+    /// Retained as a `#[doc(hidden)]` surface because [`TwoColumn`] supports
+    /// inline [`TerminalImage`] overlays via cursor positioning — a
+    /// capability the render tree cannot represent, where the tree
+    /// projection falls back to an `Unsupported` node. The active
     /// [`TerminalRenderable::render`] path delegates to
-    /// [`Self::render_via_tree`] so the user-facing output flows through the
-    /// canonical tree.
+    /// [`Self::render_via_tree`] and routes through this method only when a
+    /// column holds a terminal image.
     ///
     /// ## Notes
     ///
-    /// Not part of the stable surface; will be removed once the tree
-    /// renderer is the universal default and no parity comparison is needed.
+    /// `#[doc(hidden)]` because this is an internal escape hatch, not part
+    /// of the public surface; `pub` so integration parity tests can reach
+    /// it. Removing this without first adding equivalent terminal-image /
+    /// cursor-overlay capability to the render tree is a regression.
     #[doc(hidden)]
     pub fn render_bespoke(&self, term: &Terminal) -> String {
         let width = term.width();
         self.render_with_width(width, Some(term))
     }
 
-    /// Renders via the pre-tree bespoke path at an explicit width.
+    /// Renders the sanctioned bespoke escape hatch at an explicit width.
     ///
     /// Companion to [`Self::render_bespoke`] for the
-    /// [`TerminalRenderable::render_optimistic`] path.
+    /// [`TerminalRenderable::render_optimistic`] path, retained for the same
+    /// terminal-image-overlay reason: the render tree cannot represent
+    /// cursor-positioned image overlays inside a two-column layout.
     ///
     /// ## Notes
     ///
-    /// Not part of the stable surface; will be removed once the tree
-    /// renderer is the universal default and no parity comparison is needed.
+    /// `#[doc(hidden)]` because this is an internal escape hatch, not part
+    /// of the public surface; `pub` so integration parity tests can reach
+    /// it. Removing this without first adding equivalent terminal-image /
+    /// cursor-overlay capability to the render tree is a regression.
     #[doc(hidden)]
     pub fn render_bespoke_optimistic(&self, term_width: Option<u32>) -> String {
         let width = term_width.unwrap_or(80);

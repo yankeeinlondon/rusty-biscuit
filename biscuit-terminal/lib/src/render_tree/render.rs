@@ -1369,8 +1369,8 @@ impl Writer<'_> {
     }
 }
 
-/// Renders a progress bar from [`ProgressHints`], reproducing the bespoke
-/// `Progress::render_bar()` output.
+/// Renders a progress bar from [`ProgressHints`], reproducing the legacy
+/// bespoke progress-bar output.
 ///
 /// `paragraph_text` is the projected paragraph's visible text
 /// (`"{label} {pct}%"` or `"{pct}%"`); any label portion is the text before
@@ -1396,7 +1396,7 @@ fn render_progress_bar(hints: &ProgressHints, paragraph_text: &str, depth: Color
     let empty_count = hints.bar_width.saturating_sub(filled_count);
 
     // Each segment's declared slot color is degraded against `depth` through
-    // the shared lowering, matching the bespoke `Progress::render_bar`.
+    // the shared lowering, matching the legacy bespoke progress bar.
     let filled = paint_fg(
         &hints.fill_char.to_string().repeat(filled_count as usize),
         hints.filled_color,

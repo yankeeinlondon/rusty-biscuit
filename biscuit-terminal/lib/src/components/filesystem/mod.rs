@@ -1672,6 +1672,21 @@ impl TerminalRenderable for FileSystem {
     fn is_block_level(&self) -> bool {
         true
     }
+
+    /// Exposes the tree projection through the canonical
+    /// [`TerminalRenderable::render_tree_node`] hook so cross-target adapters
+    /// (and nested [`RenderableTerminalContent`](crate::components::renderable::RenderableTerminalContent)`::Component`
+    /// projection) consume `FileSystem` structurally instead of degrading to
+    /// ANSI-stripped text.
+    ///
+    /// Delegates to [`TreeRenderable::render_tree`] so both public entry
+    /// points share one source of truth. The bespoke
+    /// [`TerminalRenderable::render`] path remains the production terminal
+    /// renderer (see Stage 3a.3); this hook only governs structural projection
+    /// into a parent render tree.
+    fn render_tree_node(&self) -> Option<RenderNode> {
+        Some(<Self as TreeRenderable>::render_tree(self))
+    }
 }
 
 impl FileSystem {

@@ -19,13 +19,11 @@ use serde::{Deserialize, Serialize};
 
 use crate::components::prose::Prose;
 use crate::components::renderable::{BrowserRenderable, TerminalRenderable};
-use crate::discovery::detection::ColorDepth;
 use crate::render_tree::{TerminalRenderOptions, render_terminal_node};
 use crate::terminal::Terminal;
-use crate::utils::styling::{FontWeight, Style, Stylist};
 use crate::utils::{
     color::{BasicColor, TermColor},
-    layout::{Layout, LayoutTerminalExt},
+    layout::Layout,
 };
 
 /// box outline shape for an _open_ **TODO**
@@ -424,87 +422,6 @@ impl Todo {
         }
     }
 
-    /// Renders via the pre-tree bespoke path.
-    ///
-    /// Retained for parity testing. The active [`TerminalRenderable::render`]
-    /// path now delegates to [`Self::render_via_tree`] so user-facing terminal
-    /// output flows through the canonical tree.
-    ///
-    /// ## Notes
-    ///
-    /// Not part of the stable surface; will be removed once the tree renderer
-    /// is the universal default and no parity comparison is needed.
-    #[doc(hidden)]
-    pub fn render_bespoke(&self, term: &Terminal) -> String {
-        let width = term.width();
-        let content = self.to_terminal(term);
-        self.layout.apply_layout(&content, width)
-    }
-
-    /// Reports the Todo item to the terminal. Using a nerd font representation
-    /// if the terminal has detected that the font is a nerd font. Otherwise it
-    /// uses basic characters which should be in all font variants.
-    ///
-    /// When the terminal does not support colors (`ColorDepth::None`), plain
-    /// ASCII fallbacks are used without any ANSI escape codes.
-    ///
-    /// Pre-tree implementation, used only by [`Self::render_bespoke`].
-    fn to_terminal(&self, term: &Terminal) -> String {
-        let todo_icon = TODO_CHAR_LOOKUP
-            .get(&self.state)
-            .unwrap_or(&TODO_CHAR_LOOKUP[&TodoState::Open]);
-
-        let desc = if self.use_prose {
-            Prose::new(&self.description).render(term)
-        } else {
-            self.description.clone()
-        };
-
-        // Check if terminal supports colors
-        let has_color = term.color_depth != ColorDepth::None;
-
-        // Get the appropriate fallback icon based on color support
-        let fallback_icon = if has_color {
-            todo_icon.fallback
-        } else {
-            match self.state {
-                TodoState::Open => FB_CHECKBOX_OPEN,
-                TodoState::InProgress => FB_CHECKBOX_IN_PROGRESS_NOCOLOR,
-                TodoState::Completed => FB_CHECKBOX_COMPLETED_NOCOLOR,
-                TodoState::Cancelled => FB_CHECKBOX_CANCELLED_NOCOLOR,
-                TodoState::Blocked => FB_CHECKBOX_BLOCKED_NOCOLOR,
-            }
-        };
-
-        match self.state {
-            TodoState::Cancelled => match term.is_nerd_font {
-                Some(true) if has_color => {
-                    FontWeight::Dim.wrap(format!("{} {}", todo_icon.nerd, desc))
-                }
-                Some(true) => {
-                    // Nerd font but no color - just use the icon without dim styling
-                    format!("{} {}", todo_icon.nerd, desc)
-                }
-                _ if has_color => FontWeight::Dim.wrap(format!(
-                    "{} {}",
-                    fallback_icon,
-                    Style::Strikethrough.term_wrap(&desc, term)
-                )),
-                _ => {
-                    // No color - plain text with no styling
-                    format!("{} {}", fallback_icon, desc)
-                }
-            },
-            _ => match term.is_nerd_font {
-                Some(true) => {
-                    format!("{} {}", todo_icon.nerd, desc)
-                }
-                _ => {
-                    format!("{} {}", fallback_icon, desc)
-                }
-            },
-        }
-    }
 }
 
 impl TerminalRenderable for Todo {
@@ -512,8 +429,7 @@ impl TerminalRenderable for Todo {
     ///
     /// Routes through the canonical render tree via [`Self::render_via_tree`]
     /// so terminal output matches the Browser and Markdown paths for the same
-    /// component. The legacy bespoke output is retained on
-    /// [`Self::render_bespoke`] for parity testing.
+    /// component.
     fn render_optimistic(&self, term_width: Option<u32>) -> String {
         let term = Terminal::new_optimistic(term_width.unwrap_or(80));
         self.render_via_tree(&term)
@@ -522,8 +438,6 @@ impl TerminalRenderable for Todo {
     /// Renders to the supplied terminal.
     ///
     /// Routes through the canonical render tree via [`Self::render_via_tree`].
-    /// The legacy bespoke output is retained on [`Self::render_bespoke`] for
-    /// parity testing.
     fn render(&self, term: &Terminal) -> String {
         self.render_via_tree(term)
     }
@@ -657,95 +571,6 @@ impl BrowserRenderable for Todo {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    /// Create a terminal with no color support for testing
-    fn no_color_terminal() -> Terminal {
-        let mut term = Terminal::builder()
-            .width(80)
-            .color_depth(ColorDepth::None)
-            .build();
-        // Ensure no nerd font support for consistent fallback output
-        term.is_nerd_font = Some(false);
-        term
-    }
-
-    /// Create a terminal with color support for testing
-    fn color_terminal() -> Terminal {
-        let mut term = Terminal::builder()
-            .width(80)
-            .color_depth(ColorDepth::TrueColor)
-            .build();
-        // Ensure no nerd font support for consistent fallback output
-        term.is_nerd_font = Some(false);
-        term
-    }
-
-    /// Helper to create Todo with a specific state
-    fn todo_with_state(desc: &str, state: TodoState) -> Todo {
-        Todo {
-            description: desc.to_string(),
-            state,
-            ..Todo::default()
-        }
-    }
-
-    #[test]
-    fn test_no_color_open_todo() {
-        let term = no_color_terminal();
-        let todo = Todo::new("Buy groceries");
-        let result = todo.to_terminal(&term);
-        // Should use plain ASCII fallback "[ ]" without color codes
-        assert_eq!(result, "[ ] Buy groceries");
-    }
-
-    #[test]
-    fn test_no_color_completed_todo() {
-        let term = no_color_terminal();
-        let todo = todo_with_state("Done task", TodoState::Completed);
-        let result = todo.to_terminal(&term);
-        // Should use plain "[x]" without color codes
-        assert_eq!(result, "[x] Done task");
-    }
-
-    #[test]
-    fn test_no_color_in_progress_todo() {
-        let term = no_color_terminal();
-        let todo = todo_with_state("Working on it", TodoState::InProgress);
-        let result = todo.to_terminal(&term);
-        // Should use plain "[>]" without color codes
-        assert_eq!(result, "[>] Working on it");
-    }
-
-    #[test]
-    fn test_no_color_cancelled_todo() {
-        let term = no_color_terminal();
-        let todo = todo_with_state("Dropped task", TodoState::Cancelled);
-        let result = todo.to_terminal(&term);
-        // Should use plain "[-]" without color codes or strikethrough
-        assert_eq!(result, "[-] Dropped task");
-    }
-
-    #[test]
-    fn test_no_color_blocked_todo() {
-        let term = no_color_terminal();
-        let todo = todo_with_state("Waiting on dependency", TodoState::Blocked);
-        let result = todo.to_terminal(&term);
-        // Should use plain "[!]" without color codes
-        assert_eq!(result, "[!] Waiting on dependency");
-    }
-
-    #[test]
-    fn test_color_completed_todo_has_ansi() {
-        let term = color_terminal();
-        let todo = todo_with_state("Done task", TodoState::Completed);
-        let result = todo.to_terminal(&term);
-        // With color support, should contain ANSI escape codes
-        assert!(
-            result.contains('\x1b'),
-            "Expected ANSI codes in colored output: {:?}",
-            result
-        );
-    }
 
     #[test]
     fn with_state_builder_sets_state() {

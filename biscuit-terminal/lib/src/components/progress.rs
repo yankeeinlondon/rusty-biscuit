@@ -4,7 +4,7 @@ use crate::{
     render_tree::style::color_sgr,
     render_tree::{TerminalRenderOptions, render_terminal_node},
     terminal::Terminal,
-    utils::layout::{Layout, LayoutTerminalExt},
+    utils::layout::Layout,
 };
 use renderable::browser::PageOptions;
 use renderable::browser::fragment::{BrowserFragment, Ready};
@@ -249,66 +249,6 @@ impl Progress {
         }
     }
 
-    /// Renders via the pre-tree bespoke path.
-    ///
-    /// Retained for parity testing — the active [`TerminalRenderable::render`]
-    /// path delegates to [`Self::render_via_tree`] so the user-facing output
-    /// flows through the canonical tree. Integration parity tests can call
-    /// this method directly to compare the legacy bespoke output against the
-    /// tree renderer's output.
-    ///
-    /// ## Notes
-    ///
-    /// Not part of the stable surface; will be removed once the tree renderer
-    /// is the universal default and no parity comparison is needed.
-    #[doc(hidden)]
-    pub fn render_bespoke(&self, term: &Terminal) -> String {
-        let width = term.width();
-        let bar_content = self.render_bar(term.color_depth);
-        self.layout.apply_block_layout(&bar_content, width)
-    }
-
-    /// Renders the progress bar content (without layout application).
-    ///
-    /// `depth` is the terminal's [`ColorDepth`]; any declared slot colors are
-    /// degraded against it through the shared lowering path so the colored
-    /// track and brackets render on truecolor, 256-color, and 16-color
-    /// terminals and are dropped only when the terminal has no color support.
-    fn render_bar(&self, depth: ColorDepth) -> String {
-        let percentage = (self.value * 100.0).round() as u32;
-        let filled_count =
-            ((self.value * self.bar_width as f32).round() as u32).min(self.bar_width);
-        let empty_count = self.bar_width.saturating_sub(filled_count);
-
-        let filled = paint_fg(
-            &self.style.fill_char.to_string().repeat(filled_count as usize),
-            self.style.filled_color,
-            depth,
-        );
-        let empty = paint_fg(
-            &self.style.empty_char.to_string().repeat(empty_count as usize),
-            self.style.empty_color,
-            depth,
-        );
-        let left = paint_fg(
-            &self.style.left_bracket.to_string(),
-            self.style.bracket_color,
-            depth,
-        );
-        let right = paint_fg(
-            &self.style.right_bracket.to_string(),
-            self.style.bracket_color,
-            depth,
-        );
-
-        let percentage_str = format!("{percentage:3}%");
-
-        if let Some(ref label) = self.label {
-            format!("{label} {left}{filled}{empty}{right} {percentage_str}")
-        } else {
-            format!("{left}{filled}{empty}{right} {percentage_str}")
-        }
-    }
 }
 
 /// Wraps `text` in a foreground SGR escape for `color`, degraded to `depth`.
@@ -331,8 +271,7 @@ impl TerminalRenderable for Progress {
     ///
     /// Routes through the canonical render tree via [`Self::render_via_tree`]
     /// so terminal output matches the Browser and Markdown paths for the same
-    /// component. The legacy bespoke output is retained on
-    /// [`Self::render_bespoke`] for parity testing.
+    /// component.
     fn render_optimistic(&self, term_width: Option<u32>) -> String {
         let term = Terminal::new_optimistic(term_width.unwrap_or(80));
         self.render_via_tree(&term)
@@ -341,8 +280,6 @@ impl TerminalRenderable for Progress {
     /// Renders to the supplied terminal.
     ///
     /// Routes through the canonical render tree via [`Self::render_via_tree`].
-    /// The legacy bespoke output is retained on [`Self::render_bespoke`] for
-    /// parity testing.
     fn render(&self, term: &Terminal) -> String {
         self.render_via_tree(term)
     }

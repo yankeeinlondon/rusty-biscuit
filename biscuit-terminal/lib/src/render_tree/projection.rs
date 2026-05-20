@@ -31,12 +31,58 @@
 //! assert!(result.diagnostics.is_empty());
 //! ```
 
+use std::collections::HashSet;
+use std::sync::{Mutex, OnceLock};
+
 use renderable::tree::{Diagnostic, DiagnosticKind, RenderNode, RenderStrictness, Severity};
+use tracing::{debug, warn};
 
 use crate::components::prose::Prose;
 use crate::components::renderable::RenderableTerminalContent;
 use crate::discovery::eval::strip_ansi_codes;
 use crate::terminal::Terminal;
+
+/// Set of component type names that have already produced a `Warn`-mode
+/// fallback diagnostic. The first occurrence for any given type emits
+/// `tracing::warn!`; subsequent occurrences emit `tracing::debug!` so the
+/// signal stays loud without flooding logs in long-running processes.
+fn warned_types() -> &'static Mutex<HashSet<&'static str>> {
+    static WARNED_TYPES: OnceLock<Mutex<HashSet<&'static str>>> = OnceLock::new();
+    WARNED_TYPES.get_or_init(|| Mutex::new(HashSet::new()))
+}
+
+/// Emits a fallback observability event for a component that produced `None`
+/// from `render_tree_node` under [`RenderStrictness::Warn`].
+///
+/// The first call for a given `type_name` emits `tracing::warn!`. Subsequent
+/// calls for the same type emit `tracing::debug!` so the warn signal stays
+/// useful in long-running processes without being silenced.
+fn emit_fallback_event(type_name: &'static str) {
+    let is_first = {
+        let mut guard = warned_types().lock().unwrap_or_else(|e| e.into_inner());
+        guard.insert(type_name)
+    };
+    if is_first {
+        warn!(
+            component = type_name,
+            "component does not implement render_tree_node; falling back to ANSI-stripped text"
+        );
+    } else {
+        debug!(
+            component = type_name,
+            "component does not implement render_tree_node; falling back to ANSI-stripped text"
+        );
+    }
+}
+
+/// Test-only helper to reset the warn-once cache so tests are not
+/// order-dependent on the global state.
+#[cfg(test)]
+fn reset_warned_types_for_test() {
+    if let Ok(mut guard) = warned_types().lock() {
+        guard.clear();
+    }
+}
 
 /// Context for projecting terminal content to render tree nodes.
 ///
@@ -326,13 +372,10 @@ impl RenderableTerminalContent {
                 match component.render_tree_node() {
                     Some(node) => ProjectionResult::single(node),
                     None => {
-                        // Component does not support tree rendering — apply strictness policy
-                        let type_name = format!("{:?}", component);
-                        let type_label = type_name
-                            .split_whitespace()
-                            .next()
-                            .unwrap_or("Component")
-                            .to_string();
+                        // Component does not support tree rendering — apply strictness policy.
+                        // Use the stable Rust type name rather than a Debug-derived
+                        // heuristic so diagnostic labels are derive-format-independent.
+                        let type_label = component.type_name();
 
                         match ctx.strictness {
                             RenderStrictness::Strict => {
@@ -345,7 +388,7 @@ impl RenderableTerminalContent {
                                     span: None,
                                 };
                                 ProjectionResult::with_diagnostic(
-                                    RenderNode::unsupported(&type_label),
+                                    RenderNode::unsupported(type_label),
                                     diagnostic,
                                 )
                             }
@@ -354,6 +397,8 @@ impl RenderableTerminalContent {
                                 let term = Terminal::new_optimistic(80);
                                 let rendered = component.render(&term);
                                 let stripped = strip_ansi_codes(&rendered);
+
+                                emit_fallback_event(type_label);
 
                                 let diagnostic = Diagnostic {
                                     kind: DiagnosticKind::Lossy,
@@ -578,6 +623,108 @@ mod tests {
         // Saturating sub prevents underflow
         ctx.exit();
         assert_eq!(ctx.current_depth, 0);
+    }
+
+    /// Deliberately un-overridden `TerminalRenderable` stub used only by
+    /// `warn_fallback_emits_warn_once_then_debug`. The unique nested-module
+    /// type path guarantees `type_name` collision risk with other tests
+    /// or production components is zero.
+    mod warn_once_stub {
+        use std::any::Any;
+
+        use super::super::*;
+        use crate::components::renderable::TerminalRenderable;
+        use crate::utils::layout::Layout;
+
+        #[derive(Debug, Default)]
+        pub(super) struct StubWarnOnceFallback {
+            layout: Layout,
+        }
+
+        impl TerminalRenderable for StubWarnOnceFallback {
+            fn render(&self, _term: &Terminal) -> String {
+                "warn-once stub output".to_string()
+            }
+
+            fn layout(&self) -> &Layout {
+                &self.layout
+            }
+
+            fn layout_mut(&mut self) -> &mut Layout {
+                &mut self.layout
+            }
+
+            fn as_any(&self) -> &dyn Any {
+                self
+            }
+
+            // render_tree_node intentionally NOT overridden — defaults to None.
+            // type_name intentionally NOT overridden — defaults to std::any::type_name::<Self>().
+        }
+    }
+
+    #[test]
+    #[tracing_test::traced_test]
+    fn warn_fallback_emits_warn_once_then_debug() {
+        // Clear the global warn-once state so this test does not depend on
+        // execution order relative to other tests in the suite.
+        reset_warned_types_for_test();
+
+        let stub_type_name = std::any::type_name::<warn_once_stub::StubWarnOnceFallback>();
+
+        // First projection — should hit the Warn fallback and emit `warn!`.
+        let content1 = RenderableTerminalContent::Component(Rc::new(
+            warn_once_stub::StubWarnOnceFallback::default(),
+        ));
+        let mut ctx1 = TreeProjectionContext::with_strictness(RenderStrictness::Warn);
+        let result1 = content1.to_tree_nodes(&mut ctx1);
+
+        // Projected node is the text fallback (NodeKind::Text with stub output).
+        assert_eq!(result1.nodes.len(), 1);
+        assert!(matches!(
+            &result1.nodes[0].kind,
+            NodeKind::Text { value } if value == "warn-once stub output"
+        ));
+
+        // Diagnostic includes the stable Rust type name.
+        assert_eq!(result1.diagnostics.len(), 1);
+        assert!(
+            result1.diagnostics[0].message.contains(stub_type_name),
+            "diagnostic message {:?} should contain stable type name {:?}",
+            result1.diagnostics[0].message,
+            stub_type_name,
+        );
+
+        // Second projection — should downgrade to `debug!`.
+        let content2 = RenderableTerminalContent::Component(Rc::new(
+            warn_once_stub::StubWarnOnceFallback::default(),
+        ));
+        let mut ctx2 = TreeProjectionContext::with_strictness(RenderStrictness::Warn);
+        let _result2 = content2.to_tree_nodes(&mut ctx2);
+
+        // Count WARN vs DEBUG occurrences referencing the stub's type name
+        // in the captured log buffer. We expect exactly one WARN and one DEBUG.
+        logs_assert(|lines: &[&str]| {
+            let warns = lines
+                .iter()
+                .filter(|l| l.contains("WARN") && l.contains("StubWarnOnceFallback"))
+                .count();
+            let debugs = lines
+                .iter()
+                .filter(|l| l.contains("DEBUG") && l.contains("StubWarnOnceFallback"))
+                .count();
+            if warns != 1 {
+                return Err(format!(
+                    "expected exactly 1 WARN line referencing StubWarnOnceFallback, got {warns}; lines={lines:?}"
+                ));
+            }
+            if debugs != 1 {
+                return Err(format!(
+                    "expected exactly 1 DEBUG line referencing StubWarnOnceFallback, got {debugs}; lines={lines:?}"
+                ));
+            }
+            Ok(())
+        });
     }
 
     #[test]

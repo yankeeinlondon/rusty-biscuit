@@ -18,8 +18,8 @@ use crate::{
     terminal::Terminal,
     utils::{
         color::Color,
-        layout::{Layout, LayoutTerminalExt},
-        styling::{FontWeight, Style, Stylist, UnderliningRequest},
+        layout::Layout,
+        styling::{FontWeight, UnderliningRequest},
     },
 };
 
@@ -223,17 +223,6 @@ impl TextBlock {
     /// string: the [`TerminalRenderable::render`] trait is infallible by
     /// contract, and surfacing a `[render-tree error: …]` sentinel as in-band
     /// terminal text would pollute user output.
-    ///
-    /// ## Notes
-    ///
-    /// The TextBlock spec gestured at a bespoke per-failure recovery (e.g.
-    /// falling back to the legacy bespoke path on tree-render failure), but
-    /// every migrated component in this push uses the same "log + empty
-    /// string" policy. Keeping TextBlock aligned with the other components
-    /// means failures surface uniformly through `tracing` rather than via a
-    /// bespoke recovery that only TextBlock would exercise — and the
-    /// dedicated parity tests already cover the legacy path explicitly via
-    /// [`Self::render_bespoke`].
     fn render_via_tree(&self, term: &Terminal) -> String {
         let node = self.to_render_node();
         let opts = TerminalRenderOptions::new(term, RenderStrictness::Warn);
@@ -250,46 +239,6 @@ impl TextBlock {
         }
     }
 
-    /// Renders via the pre-tree bespoke path.
-    ///
-    /// Retained for parity testing — the active [`TerminalRenderable::render`]
-    /// path now delegates to [`Self::render_via_tree`] so the user-facing
-    /// output flows through the canonical tree. Integration parity tests can
-    /// call this method directly to compare the legacy bespoke output against
-    /// the tree renderer's output.
-    ///
-    /// ## Notes
-    ///
-    /// Not part of the stable surface; will be removed once the tree renderer
-    /// is the universal default and no parity comparison is needed. The
-    /// bespoke path only applies italic and `FontWeight` — foreground color,
-    /// background color, underline, strikethrough, and blink are stored but
-    /// not rendered here. Use [`Self::render`] (which routes through
-    /// [`Self::render_via_tree`]) to activate every stored field.
-    #[doc(hidden)]
-    pub fn render_bespoke(&self, term: &Terminal) -> String {
-        let width = term.width();
-        let content = self.to_terminal(term);
-        self.layout.apply_layout(&content, width)
-    }
-
-    /// The pre-tree terminal renderer.
-    ///
-    /// Applies italic (when supported) and `FontWeight` only; all other
-    /// stored fields are inert here. Retained as the body of
-    /// [`Self::render_bespoke`].
-    fn to_terminal(&self, term: &Terminal) -> String {
-        let mut content = self.content.clone();
-        let _underline = term.underline_support;
-
-        if self.italic && term.supports_italic {
-            content = Style::Italic.wrap(content);
-        }
-
-        content = self.font_weight.term_wrap(content, term);
-
-        content
-    }
 }
 
 /// Maps the bespoke [`UnderliningRequest`] to a render-tree
@@ -317,8 +266,7 @@ impl TerminalRenderable for TextBlock {
     ///
     /// Routes through the canonical render tree via [`Self::render_via_tree`]
     /// so terminal output matches the Browser and Markdown paths for the same
-    /// component. The legacy bespoke output is retained on
-    /// [`Self::render_bespoke`] for parity testing.
+    /// component.
     fn render_optimistic(&self, term_width: Option<u32>) -> String {
         let term = Terminal::new_optimistic(term_width.unwrap_or(80));
         self.render_via_tree(&term)
@@ -327,8 +275,6 @@ impl TerminalRenderable for TextBlock {
     /// Renders to the supplied terminal.
     ///
     /// Routes through the canonical render tree via [`Self::render_via_tree`].
-    /// The legacy bespoke output is retained on [`Self::render_bespoke`] for
-    /// parity testing.
     fn render(&self, term: &Terminal) -> String {
         self.render_via_tree(term)
     }
@@ -542,14 +488,4 @@ mod tests {
         );
     }
 
-    #[test]
-    fn render_bespoke_still_available_for_parity() {
-        // The bespoke renderer is retained as a `#[doc(hidden)]` surface for
-        // parity testing — the active render path now goes through the tree.
-        let mut block = TextBlock::new("X");
-        block.using_bold_text();
-        let term = Terminal::new_optimistic(80);
-        let bespoke = block.render_bespoke(&term);
-        assert!(bespoke.contains("\x1b[1m"), "bespoke bold: {bespoke:?}");
-    }
 }

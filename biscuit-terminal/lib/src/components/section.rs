@@ -20,7 +20,7 @@ use crate::{
         render_terminal_node,
     },
     terminal::Terminal,
-    utils::layout::{Layout, LayoutTerminalExt},
+    utils::layout::Layout,
 };
 
 /// Heading level for sections, from h1 (largest) to h6 (smallest).
@@ -189,72 +189,6 @@ impl Section {
         self
     }
 
-    /// Render the section with heading styling based on level.
-    ///
-    /// This is the pre-tree bespoke renderer. The active
-    /// [`TerminalRenderable::render`] path now routes through
-    /// [`Self::render_via_tree`]; this helper is retained for parity testing
-    /// only.
-    fn render_content(&self, term: Option<&Terminal>, term_width: u32) -> String {
-        let mut result = String::new();
-
-        // The Markdown-style prefix per level.
-        let prefix = match self.level {
-            HeadingLevel::h1 => "# ",
-            HeadingLevel::h2 => "## ",
-            HeadingLevel::h3 => "### ",
-            HeadingLevel::h4 => "#### ",
-            HeadingLevel::h5 => "##### ",
-            HeadingLevel::h6 => "###### ",
-        };
-
-        // The heading is rendered by lowering the level's declared `Style`
-        // through the shared terminal style applier — the same path the tree
-        // renderer uses — rather than hand-splicing SGR escapes. A `Terminal`
-        // is required; the optimistic-width path manufactures one.
-        let owned_term;
-        let term_ref = match term {
-            Some(t) => t,
-            None => {
-                owned_term = Terminal::new_optimistic(term_width);
-                &owned_term
-            }
-        };
-        let styled_heading = crate::render_tree::style::apply_style(
-            &format!("{prefix}{}", self.title),
-            &self.level.heading_style(),
-            term_ref,
-            term_width,
-        );
-
-        // Render the heading
-        result.push_str(&styled_heading);
-        result.push('\n');
-
-        // Render content
-        for item in &self.content {
-            let content_str = match item {
-                RenderableTerminalContent::String(s) => s.clone(),
-                RenderableTerminalContent::Component(component) => {
-                    if let Some(t) = term {
-                        component.render_in_width(t, term_width)
-                    } else {
-                        component.render_optimistic(Some(term_width))
-                    }
-                }
-            };
-            result.push_str(&content_str);
-            result.push('\n');
-        }
-
-        // Remove trailing newline
-        if result.ends_with('\n') {
-            result.pop();
-        }
-
-        result
-    }
-
     /// Builds the canonical [`NodeKind::Section`] tree node for this section.
     ///
     /// This is the **single private projection helper**. Both
@@ -324,25 +258,6 @@ impl Section {
         }
     }
 
-    /// Renders via the pre-tree bespoke path.
-    ///
-    /// Retained for parity testing — the active [`TerminalRenderable::render`]
-    /// path now delegates to [`Self::render_via_tree`] so the user-facing
-    /// output flows through the canonical tree. Integration parity tests can
-    /// call this method directly to compare the legacy bespoke output against
-    /// the tree renderer's output.
-    ///
-    /// ## Notes
-    ///
-    /// Not part of the stable surface; will be removed once the tree renderer
-    /// is the universal default and no parity comparison is needed.
-    #[doc(hidden)]
-    pub fn render_bespoke(&self, term: &Terminal) -> String {
-        let width = term.width();
-        let available = self.layout.available_width(width);
-        let content = self.render_content(Some(term), available);
-        self.layout.apply_layout(&content, width)
-    }
 }
 
 impl TerminalRenderable for Section {
@@ -350,8 +265,7 @@ impl TerminalRenderable for Section {
     ///
     /// Routes through the canonical render tree via [`Self::render_via_tree`]
     /// so terminal output matches the Browser and Markdown paths for the same
-    /// component. The legacy bespoke output is retained on
-    /// [`Self::render_bespoke`] for parity testing.
+    /// component.
     fn render_optimistic(&self, term_width: Option<u32>) -> String {
         let term = Terminal::new_optimistic(term_width.unwrap_or(80));
         self.render_via_tree(&term)
@@ -360,8 +274,6 @@ impl TerminalRenderable for Section {
     /// Renders to the supplied terminal.
     ///
     /// Routes through the canonical render tree via [`Self::render_via_tree`].
-    /// The legacy bespoke output is retained on [`Self::render_bespoke`] for
-    /// parity testing.
     fn render(&self, term: &Terminal) -> String {
         self.render_via_tree(term)
     }
@@ -563,15 +475,4 @@ mod tests {
         );
     }
 
-    #[test]
-    fn render_bespoke_still_available_for_parity() {
-        // The bespoke renderer is retained as a `#[doc(hidden)]` surface for
-        // parity testing — the active render path now goes through the tree.
-        let section = Section::new(HeadingLevel::h1, "Title");
-        let term = Terminal::new_optimistic(80);
-        let bespoke = section.render_bespoke(&term);
-        // Empty section: bespoke emits the styled heading with no trailing
-        // newline.
-        assert_eq!(bespoke, "\x1b[1m# Title\x1b[0m");
-    }
 }

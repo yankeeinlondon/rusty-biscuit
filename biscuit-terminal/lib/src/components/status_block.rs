@@ -320,20 +320,21 @@ impl StatusBlock {
         }
     }
 
-    /// Renders the status block via the pre-tree bespoke path.
+    /// Renders the status block via the sanctioned bespoke escape hatch.
     ///
-    /// Retained as a `#[doc(hidden)]` surface for parity testing and for the
-    /// arbitrary [`StatusBlock::border`] compatibility fallback. The active
+    /// Retained as a `#[doc(hidden)]` surface because [`StatusBlock`] supports
+    /// an arbitrary string [`StatusBlock::border`] prefix that the render
+    /// tree's standard [`Border`] enum cannot express. The active
     /// [`TerminalRenderable::render`] path routes through
-    /// [`Self::render_via_tree`] when the component carries the default
-    /// border; integration tests can call this method directly to compare the
-    /// legacy bespoke output against the tree renderer's output.
+    /// [`Self::render_via_tree`] for the default border and falls back to
+    /// this method for arbitrary prefixes.
     ///
     /// ## Notes
     ///
-    /// Not part of the stable surface; the tree path is the canonical
-    /// behavior. This entry point exists only while the migration retains
-    /// the bespoke renderer as a compatibility fallback.
+    /// `#[doc(hidden)]` because this is an internal escape hatch, not part
+    /// of the public surface; `pub` so integration parity tests can reach
+    /// it. Removing this without first adding an equivalent
+    /// arbitrary-border capability to the render tree is a regression.
     #[doc(hidden)]
     pub fn render_bespoke(&self, term: &Terminal) -> String {
         let mut parts = Vec::new();
@@ -400,6 +401,17 @@ impl TerminalRenderable for StatusBlock {
 
     fn as_any(&self) -> &dyn Any {
         self
+    }
+
+    /// Exposes the tree projection through the canonical
+    /// [`TerminalRenderable::render_tree_node`] hook so cross-target adapters
+    /// (and nested [`RenderableTerminalContent::Component`] projection) consume
+    /// `StatusBlock` structurally instead of degrading to ANSI-stripped text.
+    ///
+    /// Delegates to [`TreeRenderable::render_tree`] so both public entry
+    /// points share one source of truth.
+    fn render_tree_node(&self) -> Option<RenderNode> {
+        Some(<Self as TreeRenderable>::render_tree(self))
     }
 }
 

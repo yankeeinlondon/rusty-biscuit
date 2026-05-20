@@ -252,7 +252,7 @@ mod tests {
             ColorDepth::Enhanced,
             ColorDepth::TrueColor,
         ] {
-            let render: RenderColorDepth = depth.clone().into();
+            let render: RenderColorDepth = depth.into();
             let render_ref: RenderColorDepth = (&depth).into();
             assert_eq!(render, render_ref);
         }

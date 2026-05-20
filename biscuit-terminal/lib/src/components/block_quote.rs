@@ -349,6 +349,11 @@ impl BlockQuote {
     /// [`TerminalRenderable`] impl routes through the tree renderer; otherwise
     /// it falls back to the bespoke [`render_content`](Self::render_content)
     /// path that honors the custom prefix verbatim.
+    //
+    // Arbitrary prefixes set via `BlockQuote::with_border` stay on the
+    // internal bespoke escape hatch; there is no public `render_bespoke`
+    // hook on `BlockQuote` — the only way to reach that path is through
+    // `TerminalRenderable::render` when this predicate returns `false`.
     fn has_default_border(&self) -> bool {
         self.border == DEFAULT_BORDER
     }
@@ -429,6 +434,17 @@ impl TerminalRenderable for BlockQuote {
 
     fn is_block_level(&self) -> bool {
         true
+    }
+
+    /// Exposes the tree projection through the canonical
+    /// [`TerminalRenderable::render_tree_node`] hook so cross-target adapters
+    /// (and nested [`RenderableTerminalContent::Component`] projection) consume
+    /// `BlockQuote` structurally instead of degrading to ANSI-stripped text.
+    ///
+    /// Delegates to [`TreeRenderable::render_tree`] so both public entry
+    /// points share one source of truth.
+    fn render_tree_node(&self) -> Option<RenderNode> {
+        Some(<Self as TreeRenderable>::render_tree(self))
     }
 }
 
