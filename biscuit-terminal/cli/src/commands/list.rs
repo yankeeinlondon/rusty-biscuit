@@ -102,27 +102,21 @@ impl Run for ListArgs {
             })
             .collect();
 
-        // Route through the chosen target. OrderedList has cross-target
-        // tree-projection-backed render impls; UnorderedList currently only
-        // implements TerminalRenderable, so `--md`, `--md-plus`, and `--html`
-        // require `--ordered` until UnorderedList's IR migration lands.
+        // Route through the chosen target. Both OrderedList and
+        // UnorderedList now implement TerminalRenderable, MarkdownRenderable,
+        // and BrowserRenderable through the canonical render tree, so the
+        // cross-target switches work uniformly across both list kinds.
         if self.ordered {
             let mut list = OrderedList::from(prose_items);
             apply_layout(&mut list, &self.layout);
             self.dispatch_ordered_render(&list)?;
         } else {
-            if self.html || self.md || self.md_plus {
-                return Err(color_eyre::eyre::eyre!(
-                    "--html / --md / --md-plus currently require --ordered. \
-                     Unordered list cross-target rendering is pending its IR migration."
-                ));
-            }
             let mut list = UnorderedList::from(prose_items).with_bullet(&self.bullet);
             if self.no_hanging_indent {
                 list = list.without_hanging_indent();
             }
             apply_layout(&mut list, &self.layout);
-            self.dispatch_unordered_terminal(&list)?;
+            self.dispatch_unordered_render(&list)?;
         }
 
         if self.example {
@@ -169,9 +163,38 @@ impl ListArgs {
         self.render_terminal(list)
     }
 
-    /// Renders an unordered list to the terminal only (its cross-target
-    /// IR migration is pending).
-    fn dispatch_unordered_terminal(&self, list: &UnorderedList) -> color_eyre::Result<()> {
+    /// Dispatches an unordered-list render to the chosen target.
+    ///
+    /// [`UnorderedList`] implements [`TerminalRenderable`],
+    /// [`MarkdownRenderable`], and [`BrowserRenderable`] via the canonical
+    /// render tree, so cross-target rendering is uniform with the ordered
+    /// path.
+    ///
+    /// A custom `--bullet` is honored on the terminal target only; the
+    /// Markdown and Browser tree renderers emit standard `- ` markers and
+    /// `<ul>`/`<li>` respectively regardless of the configured bullet.
+    fn dispatch_unordered_render(&self, list: &UnorderedList) -> color_eyre::Result<()> {
+        if self.html {
+            println!(
+                "{}",
+                render_html_with_layout(&list.render_html_fragment().render(), &self.layout)
+            );
+            return Ok(());
+        }
+        if self.md {
+            println!(
+                "{}",
+                render_markdown_with_layout_frontmatter(&list.render_markdown(), &self.layout)
+            );
+            return Ok(());
+        }
+        if self.md_plus {
+            println!(
+                "{}",
+                render_markdown_with_layout_frontmatter(&list.render_markdown_plus(), &self.layout)
+            );
+            return Ok(());
+        }
         self.render_terminal(list)
     }
 
@@ -198,57 +221,37 @@ fn apply_layout<L: TerminalRenderable>(list: &mut L, layout: &LayoutArgs) {
     }
 }
 
-fn render_markdown_with_layout_frontmatter(body: &str, layout: &LayoutArgs) -> String {
-    let Some(frontmatter) = layout_style_frontmatter(layout) else {
-        return body.to_string();
-    };
-    format!("---\n{frontmatter}---\n\n{body}")
-}
-
-fn layout_style_frontmatter(layout: &LayoutArgs) -> Option<String> {
-    if layout.margin_left.is_none() && layout.margin_right.is_none() {
-        return None;
-    }
-    let mut out = String::from("style:\n  page:\n");
-    if let Some(left) = layout.margin_left {
-        out.push_str(&format!("    margin-left: {left}ch\n"));
-    }
-    if let Some(right) = layout.margin_right {
-        out.push_str(&format!("    margin-right: {right}ch\n"));
-    }
-    Some(out)
-}
-
+/// Wraps the rendered HTML fragment in a `<div>` only when the CLI was given
+/// layout properties the tree-path CSS lowering cannot express on the
+/// component's own root element.
+///
+/// The tree renderer lowers `Layout` to CSS on the `<ol>` itself (see
+/// `layout_to_css` in `renderable::tree::render::browser`). Margins (all four
+/// sides) and `max_width`-driven alignment are emitted there directly. The
+/// only LayoutArgs property without an `<ol>`-level peer is `--alignment`
+/// without a `max_width`, which would need a `text-align` declaration on a
+/// surrounding block. We wrap in that case only; otherwise we return the
+/// fragment as-is to avoid double-application of properties (e.g. doubled
+/// `margin-left`).
 fn render_html_with_layout(fragment: &str, layout: &LayoutArgs) -> String {
-    let Some(style) = layout_css_style(layout) else {
+    let Some(style) = wrapper_only_css(layout) else {
         return fragment.to_string();
     };
     format!("<div style=\"{style}\">{fragment}</div>")
 }
 
-fn layout_css_style(layout: &LayoutArgs) -> Option<String> {
+/// Returns the CSS declarations that the tree-path layout lowering cannot
+/// express on the component's own element. Today that is `text-align` from
+/// `--alignment` when no `max_width` is in play. Margins are always
+/// expressible by the tree path and therefore deliberately omitted here.
+fn wrapper_only_css(layout: &LayoutArgs) -> Option<String> {
     use biscuit_terminal::utils::layout::Alignment;
 
-    let mut declarations = Vec::new();
-    if let Some(left) = layout.margin_left {
-        declarations.push(format!("margin-left: {left}ch"));
-    }
-    if let Some(right) = layout.margin_right {
-        declarations.push(format!("margin-right: {right}ch"));
-    }
-    if let Some(top) = layout.margin_top {
-        declarations.push(format!("margin-top: {top}lh"));
-    }
-    if let Some(bottom) = layout.margin_bottom {
-        declarations.push(format!("margin-bottom: {bottom}lh"));
-    }
-    if let Some(alignment) = layout.alignment {
-        let text_align = match alignment {
-            Alignment::Left => "left",
-            Alignment::Center => "center",
-            Alignment::Right => "right",
-        };
-        declarations.push(format!("text-align: {text_align}"));
-    }
-    (!declarations.is_empty()).then(|| declarations.join("; "))
+    let alignment = layout.alignment?;
+    let text_align = match alignment {
+        Alignment::Left => "left",
+        Alignment::Center => "center",
+        Alignment::Right => "right",
+    };
+    Some(format!("text-align: {text_align}"))
 }

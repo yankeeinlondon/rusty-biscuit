@@ -148,6 +148,39 @@ pub fn print_example_command(cmd: &str) {
     println!("{}{}{}", s.dim, cmd, s.reset);
 }
 
+/// Emits a YAML frontmatter block carrying the CLI's `--margin-left` /
+/// `--margin-right` values prepended to a Markdown body.
+///
+/// Returns the body unchanged when no horizontal margins were given on the
+/// CLI. Vertical margins (`--margin-top` / `--margin-bottom`) and
+/// `--alignment` are intentionally not lowered to Markdown frontmatter —
+/// CommonMark has no portable peer for them and the bt CLI emits them as
+/// blank lines / through HTML wrappers respectively.
+pub fn render_markdown_with_layout_frontmatter(body: &str, layout: &LayoutArgs) -> String {
+    let Some(frontmatter) = layout_style_frontmatter(layout) else {
+        return body.to_string();
+    };
+    format!("---\n{frontmatter}---\n\n{body}")
+}
+
+/// Builds the YAML body of the `style:` frontmatter block for the given
+/// layout flags. Returns `None` when neither `--margin-left` nor
+/// `--margin-right` is set, which signals callers to omit the frontmatter
+/// envelope entirely.
+pub fn layout_style_frontmatter(layout: &LayoutArgs) -> Option<String> {
+    if layout.margin_left.is_none() && layout.margin_right.is_none() {
+        return None;
+    }
+    let mut out = String::from("style:\n  page:\n");
+    if let Some(left) = layout.margin_left {
+        out.push_str(&format!("    margin-left: {left}ch\n"));
+    }
+    if let Some(right) = layout.margin_right {
+        out.push_str(&format!("    margin-right: {right}ch\n"));
+    }
+    Some(out)
+}
+
 /// Strips SGR (Select Graphic Rendition) CSI sequences from `s`.
 ///
 /// This preserves non-color ANSI sequences such as OSC8 hyperlinks

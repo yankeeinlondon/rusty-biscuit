@@ -145,28 +145,6 @@ impl Run for ProseArgs {
     }
 }
 
-fn render_markdown_with_layout_frontmatter(body: &str, layout: &LayoutArgs) -> String {
-    let Some(frontmatter) = layout_style_frontmatter(layout) else {
-        return body.to_string();
-    };
-    format!("---\n{frontmatter}---\n\n{body}")
-}
-
-fn layout_style_frontmatter(layout: &LayoutArgs) -> Option<String> {
-    if layout.margin_left.is_none() && layout.margin_right.is_none() {
-        return None;
-    }
-
-    let mut out = String::from("style:\n  page:\n");
-    if let Some(left) = layout.margin_left {
-        out.push_str(&format!("    margin-left: {left}ch\n"));
-    }
-    if let Some(right) = layout.margin_right {
-        out.push_str(&format!("    margin-right: {right}ch\n"));
-    }
-    Some(out)
-}
-
 fn render_html_with_layout(fragment: &str, layout: &LayoutArgs) -> String {
     let Some(style) = layout_css_style(layout) else {
         return fragment.to_string();

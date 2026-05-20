@@ -2549,6 +2549,27 @@ fn test_list_unordered_example_unchanged() {
 }
 
 #[test]
+fn test_list_unordered_terminal_honors_custom_bullet() {
+    // The `--bullet` flag must reach the default terminal render path.
+    // Markdown / HTML paths ignore it (pinned by
+    // `test_list_unordered_md_ignores_custom_bullet` /
+    // `test_list_unordered_html_ignores_custom_bullet`); this test pins the
+    // terminal path.
+    let output = cargo_bin_cmd!("bt")
+        .args(["list", "--bullet", "→ ", "x"])
+        .output()
+        .expect("Failed to execute command");
+    assert!(output.status.success(), "bt list --bullet should succeed");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    // ANSI / OSC may surround the marker; check for the literal bullet
+    // glyph followed by the item content.
+    assert!(
+        stdout.contains("→ x"),
+        "expected `→ x` in terminal output: {stdout:?}"
+    );
+}
+
+#[test]
 fn test_list_md_html_mutual_exclusion() {
     let output = cargo_bin_cmd!("bt")
         .args(["list", "--ordered", "--md", "--html", "x"])
@@ -2567,20 +2588,174 @@ fn test_list_md_md_plus_mutual_exclusion() {
 }
 
 #[test]
-fn test_list_unordered_md_returns_error() {
-    // UnorderedList's cross-target rendering is pending its IR migration —
-    // the CLI rejects --md / --html / --md-plus without --ordered to avoid
-    // shipping an inconsistent surface.
+fn test_list_unordered_md_emits_commonmark() {
+    // After UnorderedList's IR migration, `bt list --md` (no `--ordered`)
+    // emits portable CommonMark bullet syntax through the canonical render
+    // tree, mirroring the ordered path. The CLI's custom terminal bullet
+    // (`--bullet`, default `• `) is ignored — Markdown's portable contract
+    // uses `- `.
     let output = cargo_bin_cmd!("bt")
-        .args(["list", "--md", "A", "B"])
+        .args(["list", "--md", "First", "Second", "Third"])
         .output()
         .expect("Failed to execute command");
-    assert!(!output.status.success());
-    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(output.status.success(), "bt list --md should succeed");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("- First"), "got: {stdout}");
+    assert!(stdout.contains("- Second"), "got: {stdout}");
+    assert!(stdout.contains("- Third"), "got: {stdout}");
+    assert!(!stdout.contains("•"), "custom bullet not used in MD: {stdout}");
+    assert!(!stdout.contains("<ul"), "no HTML wrapper: {stdout}");
+    assert!(!stdout.contains("\x1b["), "no ANSI: {stdout:?}");
+}
+
+#[test]
+fn test_list_unordered_md_ignores_custom_bullet() {
+    // `--bullet "→ "` only affects terminal output. The Markdown path emits
+    // standard `- ` regardless.
+    let output = cargo_bin_cmd!("bt")
+        .args(["list", "--md", "--bullet", "→ ", "Alpha", "Beta"])
+        .output()
+        .expect("Failed to execute command");
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("- Alpha"), "got: {stdout}");
+    assert!(stdout.contains("- Beta"), "got: {stdout}");
     assert!(
-        stderr.contains("require --ordered"),
-        "explanatory error: {stderr}"
+        !stdout.contains("→"),
+        "custom bullet must not leak into Markdown: {stdout}"
     );
+}
+
+#[test]
+fn test_list_unordered_md_plus_matches_md() {
+    let md = cargo_bin_cmd!("bt")
+        .args(["list", "--md", "A", "B", "C"])
+        .output()
+        .expect("Failed to execute command");
+    let md_plus = cargo_bin_cmd!("bt")
+        .args(["list", "--md-plus", "A", "B", "C"])
+        .output()
+        .expect("Failed to execute command");
+    assert!(md.status.success() && md_plus.status.success());
+    assert_eq!(
+        String::from_utf8_lossy(&md.stdout),
+        String::from_utf8_lossy(&md_plus.stdout),
+        "unordered list --md and --md-plus produce identical output",
+    );
+}
+
+#[test]
+fn test_list_unordered_html_emits_ul_li() {
+    let output = cargo_bin_cmd!("bt")
+        .args(["list", "--html", "First", "Second"])
+        .output()
+        .expect("Failed to execute command");
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("<ul"), "ul present: {stdout}");
+    assert!(stdout.contains("</ul>"), "ul closed: {stdout}");
+    assert!(stdout.contains("<li>"), "li present: {stdout}");
+    assert!(stdout.contains("First"));
+    assert!(stdout.contains("Second"));
+    // No <ol>, ever, for unordered.
+    assert!(!stdout.contains("<ol"), "no ordered tag: {stdout}");
+}
+
+#[test]
+fn test_list_unordered_html_ignores_custom_bullet() {
+    // Browsers control list-marker presentation via CSS; the terminal bullet
+    // is not rendered into the HTML fragment.
+    let output = cargo_bin_cmd!("bt")
+        .args(["list", "--html", "--bullet", "→ ", "Alpha", "Beta"])
+        .output()
+        .expect("Failed to execute command");
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("<ul"), "ul present: {stdout}");
+    assert!(stdout.contains("Alpha"));
+    assert!(
+        !stdout.contains("→"),
+        "custom bullet must not leak into HTML: {stdout}"
+    );
+}
+
+#[test]
+fn test_list_unordered_md_with_left_margin_emits_frontmatter() {
+    let output = cargo_bin_cmd!("bt")
+        .args([
+            "list",
+            "--md",
+            "--margin-left",
+            "4",
+            "First",
+            "Second",
+        ])
+        .output()
+        .expect("Failed to execute command");
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("margin-left: 4ch"), "frontmatter: {stdout}");
+    assert!(stdout.contains("- First"), "items below frontmatter: {stdout}");
+}
+
+#[test]
+fn test_list_unordered_html_with_layout_emits_margin_on_ul_only() {
+    // Same contract as the ordered path: `--margin-left N` lowers to
+    // `margin-left:Nch` on the `<ul>` itself; the CLI must not double-wrap
+    // in `<div style="…">` for tree-expressible properties.
+    let output = cargo_bin_cmd!("bt")
+        .args([
+            "list",
+            "--html",
+            "--margin-left",
+            "2",
+            "X",
+            "Y",
+        ])
+        .output()
+        .expect("Failed to execute command");
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("<ul"), "ul still emitted: {stdout}");
+    assert!(
+        stdout.contains("margin-left:2ch"),
+        "tree path applies margin to <ul>: {stdout}"
+    );
+    assert!(
+        !stdout.contains("<div style="),
+        "no wrapper div for tree-expressible properties: {stdout}"
+    );
+    let margin_left_count = stdout.matches("margin-left").count();
+    assert_eq!(
+        margin_left_count, 1,
+        "margin-left applied exactly once: {stdout}"
+    );
+}
+
+#[test]
+fn test_list_unordered_html_with_alignment_wraps_in_div() {
+    // Same rule as the ordered path: `text-align` from `--alignment` has no
+    // peer on the tree path's `<ul>` CSS (which only emits
+    // `margin-left:auto`/`margin-right:auto` with `max_width`), so the CLI
+    // wraps in `<div style="text-align: …">` to express it.
+    let output = cargo_bin_cmd!("bt")
+        .args([
+            "list",
+            "--html",
+            "--alignment",
+            "center",
+            "X",
+            "Y",
+        ])
+        .output()
+        .expect("Failed to execute command");
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("<div style=\"text-align: center\">"),
+        "wrapper div for alignment: {stdout}"
+    );
+    assert!(stdout.contains("<ul"), "ul present: {stdout}");
 }
 
 #[test]
@@ -2604,7 +2779,10 @@ fn test_list_ordered_md_with_left_margin_emits_frontmatter() {
 }
 
 #[test]
-fn test_list_ordered_html_with_layout_wraps_in_div() {
+fn test_list_ordered_html_with_layout_emits_margin_on_ol_only() {
+    // Per OrderedList-spec: LayoutArgs that the tree path's CSS lowering can
+    // express on the component's own root (margins) must NOT be additionally
+    // wrapped in a `<div style="…">` — that would double-apply them.
     let output = cargo_bin_cmd!("bt")
         .args([
             "list",
@@ -2619,7 +2797,271 @@ fn test_list_ordered_html_with_layout_wraps_in_div() {
         .expect("Failed to execute command");
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("<div style=\""), "wrapper div: {stdout}");
-    assert!(stdout.contains("margin-left: 2ch"), "css: {stdout}");
     assert!(stdout.contains("<ol"), "ol still emitted: {stdout}");
+    // The tree path emits margin-left:2ch on the <ol> itself; no wrapper div.
+    assert!(
+        stdout.contains("margin-left:2ch"),
+        "tree path applies margin to <ol>: {stdout}"
+    );
+    assert!(
+        !stdout.contains("<div style="),
+        "no wrapper div for tree-expressible properties: {stdout}"
+    );
+    let margin_left_count = stdout.matches("margin-left").count();
+    assert_eq!(
+        margin_left_count, 1,
+        "margin-left applied exactly once: {stdout}"
+    );
+}
+
+#[test]
+fn test_list_ordered_html_with_alignment_wraps_in_div() {
+    // text-align from --alignment has no peer on the tree path's <ol> CSS
+    // (which only emits margin-left:auto / margin-right:auto with max_width),
+    // so the CLI must wrap in a <div style="text-align: …"> to express it.
+    let output = cargo_bin_cmd!("bt")
+        .args([
+            "list",
+            "--ordered",
+            "--html",
+            "--alignment",
+            "center",
+            "X",
+            "Y",
+        ])
+        .output()
+        .expect("Failed to execute command");
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("<div style=\"text-align: center\">"),
+        "wrapper div for alignment: {stdout}"
+    );
+    assert!(stdout.contains("<ol"), "ol present: {stdout}");
+}
+
+// =============================================================================
+// bt progress: cross-target rendering (--html, --md, --md-plus)
+// =============================================================================
+
+#[test]
+fn test_progress_terminal_default() {
+    cargo_bin_cmd!("bt")
+        .env("NO_COLOR", "1")
+        .args(["progress", "60", "--label", "Loading"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Loading"))
+        .stdout(predicate::str::contains("60%"))
+        .stdout(predicate::str::contains("["))
+        .stdout(predicate::str::contains("]"));
+}
+
+#[test]
+fn test_progress_example_succeeds() {
+    cargo_bin_cmd!("bt")
+        .env("NO_COLOR", "1")
+        .args(["progress", "--example"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Indexing"))
+        .stdout(predicate::str::contains("Command:"))
+        .stdout(predicate::str::contains(
+            "bt progress 72 --label \"Indexing\"",
+        ));
+}
+
+#[test]
+fn test_progress_md_outputs_label_and_percentage() {
+    let output = cargo_bin_cmd!("bt")
+        .args(["progress", "75", "--label", "Loading", "--md"])
+        .output()
+        .expect("Failed to execute command");
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("Loading 75%"),
+        "portable Markdown shows label + percentage: {stdout}"
+    );
+    // Must NOT contain bar glyphs or HTML
+    assert!(!stdout.contains('█'), "no bar glyphs in Markdown: {stdout}");
+    assert!(
+        !stdout.contains("<span"),
+        "no HTML in portable Markdown: {stdout}"
+    );
+}
+
+#[test]
+fn test_progress_md_unlabeled_outputs_just_percentage() {
+    let output = cargo_bin_cmd!("bt")
+        .args(["progress", "50", "--md"])
+        .output()
+        .expect("Failed to execute command");
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(
+        stdout.trim(),
+        "50%",
+        "unlabeled progress Markdown is just the percentage"
+    );
+}
+
+#[test]
+fn test_progress_md_plus_emits_semantic_html() {
+    let output = cargo_bin_cmd!("bt")
+        .args(["progress", "40", "--label", "Sync", "--md-plus"])
+        .output()
+        .expect("Failed to execute command");
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("role=\"progressbar\""),
+        "MarkdownPlus carries semantic widget: {stdout}"
+    );
+    assert!(
+        stdout.contains("aria-valuenow=\"40\""),
+        "ARIA value reflects completion: {stdout}"
+    );
+    assert!(stdout.contains("Sync"), "label survives: {stdout}");
+    assert!(stdout.contains("40%"), "percentage survives: {stdout}");
+}
+
+#[test]
+fn test_progress_html_emits_semantic_widget() {
+    let output = cargo_bin_cmd!("bt")
+        .args(["progress", "25", "--label", "Loading", "--html"])
+        .output()
+        .expect("Failed to execute command");
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("role=\"progressbar\""),
+        "HTML fragment carries semantic widget: {stdout}"
+    );
+    assert!(
+        stdout.contains("aria-valuenow=\"25\""),
+        "ARIA value reflects completion: {stdout}"
+    );
+    assert!(
+        stdout.contains("class=\"progress\""),
+        "stable `progress` class on root: {stdout}"
+    );
+    assert!(
+        stdout.contains("progress-label") || stdout.contains("aria-label=\"Loading\""),
+        "label is exposed: {stdout}"
+    );
+}
+
+#[test]
+fn test_progress_html_unlabeled_omits_label_span() {
+    let output = cargo_bin_cmd!("bt")
+        .args(["progress", "50", "--html"])
+        .output()
+        .expect("Failed to execute command");
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("role=\"progressbar\""),
+        "HTML widget present: {stdout}"
+    );
+    assert!(
+        !stdout.contains("progress-label"),
+        "unlabeled progress emits no label span: {stdout}"
+    );
+}
+
+#[test]
+fn test_progress_md_html_mutually_exclusive() {
+    cargo_bin_cmd!("bt")
+        .args(["progress", "50", "--md", "--html"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("cannot be used with"));
+}
+
+#[test]
+fn test_progress_md_md_plus_mutually_exclusive() {
+    cargo_bin_cmd!("bt")
+        .args(["progress", "50", "--md", "--md-plus"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("cannot be used with"));
+}
+
+#[test]
+fn test_progress_html_md_plus_mutually_exclusive() {
+    cargo_bin_cmd!("bt")
+        .args(["progress", "50", "--html", "--md-plus"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("cannot be used with"));
+}
+
+#[test]
+fn test_progress_rejects_percentage_above_100() {
+    cargo_bin_cmd!("bt")
+        .args(["progress", "150"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("Percentage must be 0-100"));
+}
+
+#[test]
+fn test_progress_color_flags_parse_for_terminal() {
+    cargo_bin_cmd!("bt")
+        .env("NO_COLOR", "1")
+        .args([
+            "progress",
+            "50",
+            "--label",
+            "Loading",
+            "--fill-color",
+            "green",
+            "--empty-color",
+            "#444444",
+            "--bracket-color",
+            "cyan",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Loading"))
+        .stdout(predicate::str::contains("50%"));
+}
+
+#[test]
+fn test_progress_html_color_flags_inline_css() {
+    let output = cargo_bin_cmd!("bt")
+        .args([
+            "progress",
+            "50",
+            "--label",
+            "Loading",
+            "--html",
+            "--fill-color",
+            "green",
+            "--empty-color",
+            "red",
+        ])
+        .output()
+        .expect("Failed to execute command");
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("background-color"),
+        "fill/empty colors lowered to inline CSS background-color: {stdout}"
+    );
+}
+
+#[test]
+fn test_progress_example_with_md_renders_markdown() {
+    let output = cargo_bin_cmd!("bt")
+        .args(["progress", "--example", "--md"])
+        .output()
+        .expect("Failed to execute command");
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("Indexing 72%"),
+        "example --md still renders example values: {stdout}"
+    );
 }

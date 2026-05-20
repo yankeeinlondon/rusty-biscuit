@@ -2,19 +2,21 @@ use crate::commands::color_parse::parse_color;
 use crate::commands::shared::{detect_terminal_honoring_force_color, print_example_command};
 use crate::commands::{CliContext, Run};
 use biscuit_terminal::components::progress::Progress;
-use biscuit_terminal::components::renderable::TerminalRenderable;
-use biscuit_terminal::render_tree::{TerminalRenderOptions, render_terminal_node};
+use biscuit_terminal::components::renderable::{BrowserRenderable, TerminalRenderable};
 use clap::Args as ClapArgs;
-use renderable::tree::{RenderNode, RenderStrictness};
+use renderable::markdown::MarkdownRenderable;
 
 const PROGRESS_EXAMPLE_PERCENT: u8 = 72;
 const PROGRESS_EXAMPLE_CMD: &str =
     r#"bt progress 72 --label "Indexing" --width 28 --fill-color green --bracket-color cyan"#;
 
-/// Render a progress bar through the render tree
+/// Render a progress bar through the canonical render tree.
+///
+/// The default target is the terminal. Switch to a different render target
+/// with one of the mutually-exclusive `--html`, `--md`, or `--md-plus` flags.
 #[derive(ClapArgs, Debug, Clone)]
 pub struct ProgressArgs {
-    /// Render an example and show the command used
+    /// Render an example and show the command used.
     #[arg(long, short = 'e')]
     pub example: bool,
 
@@ -26,7 +28,7 @@ pub struct ProgressArgs {
     #[arg(long)]
     pub label: Option<String>,
 
-    /// Width of the bar portion in characters.
+    /// Width of the bar portion in characters (or CSS `ch` for browser/MarkdownPlus).
     #[arg(long)]
     pub width: Option<u32>,
 
@@ -38,9 +40,26 @@ pub struct ProgressArgs {
     #[arg(long = "empty-color")]
     pub empty_color: Option<String>,
 
-    /// Color of the bracket glyphs (named or #rrggbb).
+    /// Color of the bracket glyphs (named or #rrggbb). Retained for terminal
+    /// and hint-preserving outputs; the browser output uses it only when
+    /// rendering bracket affordances.
     #[arg(long = "bracket-color")]
     pub bracket_color: Option<String>,
+
+    /// Render to an HTML fragment instead of the terminal.
+    #[arg(long, conflicts_with_all = ["md", "md_plus"])]
+    pub html: bool,
+
+    /// Render to portable Markdown instead of the terminal.
+    ///
+    /// Portable Markdown has no progress widget, so the output is just
+    /// `"{label} {percentage}%"` (or `"{percentage}%"` when no label is set).
+    #[arg(long, conflicts_with_all = ["html", "md_plus"])]
+    pub md: bool,
+
+    /// Render to MarkdownPlus (inline HTML allowed) instead of the terminal.
+    #[arg(long = "md-plus", conflicts_with_all = ["html", "md"])]
+    pub md_plus: bool,
 }
 
 impl Run for ProgressArgs {
@@ -79,17 +98,18 @@ impl Run for ProgressArgs {
             progress = progress.with_bracket_color(parse_color(color)?);
         }
 
-        let node = progress.render_tree_node().ok_or_else(|| {
-            color_eyre::eyre::eyre!("Progress component produced no render-tree node")
-        })?;
-        let root = RenderNode::root(vec![node]);
+        // Dispatch by selected target. Mutual exclusion is enforced by clap.
+        if self.html {
+            println!("{}", progress.render_html_fragment().render());
+        } else if self.md {
+            println!("{}", progress.render_markdown());
+        } else if self.md_plus {
+            println!("{}", progress.render_markdown_plus());
+        } else {
+            let term = detect_terminal_honoring_force_color();
+            println!("{}", progress.render(&term));
+        }
 
-        let term = detect_terminal_honoring_force_color();
-        let opts = TerminalRenderOptions::new(&term, RenderStrictness::Warn);
-        let rendered = render_terminal_node(&root, &opts)
-            .map_err(|e| color_eyre::eyre::eyre!("render failed: {e}"))?;
-
-        println!("{}", rendered.output);
         if self.example {
             print_example_command(PROGRESS_EXAMPLE_CMD);
         }
