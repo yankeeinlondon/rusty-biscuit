@@ -1,5 +1,13 @@
 # Stage 3 Spec Review
 
+> Status: historical review of the first Stage 3 spec draft. The current
+> `stage3-spec.md` has absorbed these findings: the baseline table now calls
+> out `BlockQuote`, `StatusBlock`, and `FileSystem` as missing
+> `render_tree_node` overrides; `FileSystem::render` is an explicit decision;
+> retained `render_bespoke` hooks stay `#[doc(hidden)] pub` for integration
+> tests; and the Compose coverage is expressed as a fixture table rather than
+> "all twelve components as inner parts."
+
 ## Findings
 
 ### 1. The S3-1 baseline overstates the current Stage 2 completion state [`HIGH`]

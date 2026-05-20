@@ -34,7 +34,7 @@ Required behavior:
 
 **APPROVED**
 
-this feature request has been approved and WILL be included as part of the render-tree implementation BEFORE you are asked to implement this solution. Always refer to the @renderable/docs/tree-rendering.md and @renderable/docs/layout-and-style.md documents as the definitive guide.
+This feature request has been approved and WILL be included as part of the render-tree implementation BEFORE you are asked to implement this solution. Always refer to the @renderable/docs/tree-rendering.md and @renderable/docs/layout-and-style.md documents as the definitive guide.
 
 Why: FileSystem has semantic nested-list structure, but its terminal contract
 uses connector geometry (`├──`, `└──`, `│`) rather than normal unordered-list
@@ -66,7 +66,7 @@ Required behavior:
 
 **APPROVED**
 
-this feature request has been approved and WILL be included as part of the render-tree implementation BEFORE you are asked to implement this solution. Always refer to the @renderable/docs/tree-rendering.md and @renderable/docs/layout-and-style.md documents as the definitive guide.
+This feature request has been approved and WILL be included as part of the render-tree implementation BEFORE you are asked to implement this solution. Always refer to the @renderable/docs/tree-rendering.md and @renderable/docs/layout-and-style.md documents as the definitive guide.
 
 Why: the tree already carries a target-agnostic `ProgressHints` payload, and
 the terminal renderer already treats that payload as native widget semantics.
@@ -103,7 +103,7 @@ Required behavior:
 
 **APPROVED**
 
-this feature request has been approved and WILL be included as part of the render-tree implementation BEFORE you are asked to implement this solution. Always refer to the @renderable/docs/tree-rendering.md and @renderable/docs/layout-and-style.md documents as the definitive guide.
+This feature request has been approved and WILL be included as part of the render-tree implementation BEFORE you are asked to implement this solution. Always refer to the @renderable/docs/tree-rendering.md and @renderable/docs/layout-and-style.md documents as the definitive guide.
 
 Why: MarkdownPlus is the rich Markdown dialect in this codebase. Rendering
 `ProgressHints` as inline HTML in MarkdownPlus gives components one canonical
@@ -129,7 +129,7 @@ Required behavior:
 
 **APPROVED**
 
-this feature request has been approved and WILL be included as part of the render-tree implementation BEFORE you are asked to implement this solution. Always refer to the @renderable/docs/tree-rendering.md and @renderable/docs/layout-and-style.md documents as the definitive guide.
+This feature request has been approved and WILL be included as part of the render-tree implementation BEFORE you are asked to implement this solution. Always refer to the @renderable/docs/tree-rendering.md and @renderable/docs/layout-and-style.md documents as the definitive guide.
 
 Why: Table has an existing public title feature, and the current render-tree
 shape does not carry it. Adding a `NodeKind::Table` enum field would be too
@@ -158,7 +158,7 @@ Required behavior:
 
 **APPROVED**
 
-this feature request has been approved and WILL be included as part of the render-tree implementation BEFORE you are asked to implement this solution. Always refer to the @renderable/docs/tree-rendering.md and @renderable/docs/layout-and-style.md documents as the definitive guide.
+This feature request has been approved and WILL be included as part of the render-tree implementation BEFORE you are asked to implement this solution. Always refer to the @renderable/docs/tree-rendering.md and @renderable/docs/layout-and-style.md documents as the definitive guide.
 
 Why: The current Markdown tree renderer renders text raw and joins table cells
 with pipe delimiters. That corrupts GFM tables when cell content contains `|`
@@ -185,7 +185,7 @@ Required behavior:
 
 **APPROVED**
 
-this feature request has been approved and WILL be included as part of the render-tree implementation BEFORE you are asked to implement this solution. Always refer to the @renderable/docs/tree-rendering.md and @renderable/docs/layout-and-style.md documents as the definitive guide.
+This feature request has been approved and WILL be included as part of the render-tree implementation BEFORE you are asked to implement this solution. Always refer to the @renderable/docs/tree-rendering.md and @renderable/docs/layout-and-style.md documents as the definitive guide.
 
 Why: `TextBlock` is exactly the simple styled-paragraph case that `Style` was
 created to support. The terminal renderer already consumes `Style`; leaving
@@ -218,7 +218,7 @@ Required behavior:
 
 **APPROVED**
 
-this feature request has been approved and WILL be included as part of the
+This feature request has been approved and WILL be included as part of the
 render-tree implementation BEFORE you are asked to implement this solution. Always
 refer to the @renderable/docs/tree-rendering.md and
 @renderable/docs/layout-and-style.md documents as the definitive guide.
@@ -261,7 +261,7 @@ Required behavior:
 
 **APPROVED**
 
-this feature request has been approved and WILL be included as part of the render-tree implementation BEFORE you are asked to implement this solution. Always refer to the @renderable/docs/tree-rendering.md and @renderable/docs/layout-and-style.md documents as the definitive guide.
+This feature request has been approved and WILL be included as part of the render-tree implementation BEFORE you are asked to implement this solution. Always refer to the @renderable/docs/tree-rendering.md and @renderable/docs/layout-and-style.md documents as the definitive guide.
 
 Why: the browser renderer already recognizes `ColumnsHints`, but it currently
 emits only CSS-ready classes. That preserves the existence of two columns but
@@ -295,7 +295,7 @@ Required behavior:
 
 **APPROVED**
 
-this feature request has been approved and WILL be included as part of the render-tree implementation BEFORE you are asked to implement this solution. Always refer to the @renderable/docs/tree-rendering.md and @renderable/docs/layout-and-style.md documents as the definitive guide.
+This feature request has been approved and WILL be included as part of the render-tree implementation BEFORE you are asked to implement this solution. Always refer to the @renderable/docs/tree-rendering.md and @renderable/docs/layout-and-style.md documents as the definitive guide.
 
 Why: portable Markdown has no side-by-side layout, so the existing sequential
 fallback is correct for `MarkdownDialect::Markdown`. MarkdownPlus is explicitly

@@ -379,8 +379,9 @@ followed without modification:
 1. **Single private projection helper** shared by
    `TreeRenderable::render_tree` and `TerminalRenderable::render_tree_node`
 2. **`render_via_tree`** with `tracing::error!` + empty / bespoke fallback
-3. **`pub(crate)` (or retired) `render_bespoke()`** for escape hatches and
-   parity testing (post-S3-4)
+3. **`#[doc(hidden)] pub` (escape hatch) or retired `render_bespoke()`**
+   depending on whether integration parity tests still need to compare a
+   sanctioned terminal-only path (post-S3-4)
 4. **Direct `BrowserRenderable` / `MarkdownRenderable` impls** that delegate
    to the canonical tree
 5. **`bt X --md / --md-plus / --html / --example`** with `conflicts_with_all`
