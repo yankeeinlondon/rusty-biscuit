@@ -147,22 +147,29 @@ and record it in `lessons-learned.md`:
 - **(i) Flip to tree.** Replace `FileSystem::render` with a `render_via_tree`
   that calls `<Self as TreeRenderable>::render_tree` and lowers via
   `render_terminal_node`. Add a parity test file
-  (`filesystem_parity.rs`) that compares bespoke vs tree across the spec's
-  documented variants. Required if tree-path output is byte-equivalent or
-  acceptably divergent.
+  (`filesystem_parity.rs`) that compares bespoke vs tree across the
+  documented variants in [`FileSystem-spec.md`](./components/FileSystem-spec.md)
+  (connector geometry, gitignore styling, error/permission states, depth
+  limits, highlight precedence, metric annotations, dotfile italic, symlink
+  styling). Required if tree-path output is byte-equivalent or acceptably
+  divergent across those variants.
 - **(ii) Stay bespoke; document permanently.** Keep `FileSystem::render`
   on the bespoke path and document it alongside the other four sanctioned
   escape-hatch components. Required if connector geometry, OSC8 hyperlinks,
   or other features cannot be expressed through the tree even with the
   approved `ListMarkerPolicy::TreeConnectors` and other Stage 1 additions.
 - **(iii) Stay bespoke pending Stage 4.** Keep `FileSystem::render` on the
-  bespoke path and explicitly defer the flip to a future stage with a named
-  acceptance criterion. Required if the tree path needs further renderer
-  features that are not in scope for Stage 3.
+  bespoke path and explicitly defer the flip to a future stage. If chosen,
+  the parity-test run that motivated the deferral must name the specific
+  missing renderer capability (e.g. "OSC8 hyperlink lowering on `Link`
+  nodes," "per-cell color band painting") as the Stage 4 acceptance
+  criterion in `lessons-learned.md`. "Missing capability, will revisit"
+  is not a sufficient record.
 
 The decision is owned by the implementer based on actual parity-test
-results. The acceptance criteria below treat all three outcomes as
-acceptable provided the choice is recorded.
+results against the `FileSystem-spec.md` variant matrix. The acceptance
+criteria below treat all three outcomes as acceptable provided the choice
+and (for outcome iii) the missing capability are recorded.
 
 ### S3-2: Tighten the deferred parity tests
 
@@ -404,9 +411,41 @@ followed without modification:
   ProjectionMode)` with `InlineOnly` and `Structural { terminal_hint }`
   variants, and the CLI helper home at
   `biscuit-terminal/cli/src/commands/shared.rs`.
+- **Error-fallback policy** for infallible trait methods. Every Stage 2
+  flip converged on the same shape, and the checklist must codify it so
+  future migrations do not need to re-derive it:
+  - **Terminal** (`TerminalRenderable::render` / `render_optimistic`) —
+    log via `tracing::error!(component = "...", error = %error)` and
+    return either `String::new()` or, where the component carries a
+    documented terminal-only escape hatch, the bespoke fallback path.
+    Never emit `[render-tree error: ...]` as in-band text.
+  - **Markdown / MarkdownPlus** (`MarkdownRenderable::render_markdown` /
+    `render_markdown_plus`) — log via `tracing::error!(component, dialect,
+    error)` and return `String::new()`. Do **not** use
+    `unwrap_or_default()`; the silent swallow is the anti-pattern.
+  - **Browser** (`BrowserRenderable::render_html_fragment`) — log via
+    `tracing::error!(component, error)` and return an empty fragment
+    (`BrowserFragment::new().finalize()`). Do **not** return a fragment
+    containing `[render-tree error: ...]` text.
+- **Documentation-update obligations.** Every component migration must
+  also update:
+  - `renderable/docs/components.md` — the per-component row (Browser,
+    Markdown, Tree columns, IR State, bt CLI).
+  - The per-component doc under `biscuit-terminal/docs/components/<name>.md`
+    (or create one if missing).
+  - CLI help text and any `--example` output if `--md`, `--md-plus`,
+    `--html`, or `--example` behavior changes.
+  - The relevant skill under `.claude/skills/biscuit-terminal/` if the
+    public component contract changes.
 
 Reference this doc from `renderable/README.md` and from the renderable skill
 under `.claude/skills/renderable/`.
+
+**Note on Stage 3 scope.** S3-5 codifies the error-fallback and
+documentation policies as forward-looking conventions for future
+migrations. Stage 3 does **not** require auditing every Stage 2 component
+for compliance with this policy — that cleanup is tracked separately in
+the review-1 addendum's "Good After Stage 3" section.
 
 ### S3-6: Layout-matrix harness simplification
 
@@ -454,10 +493,34 @@ The matrix policy is:
    separately** from ordinary render-tree regressions, with a comment
    naming the sanctioning spec section.
 
+**Required default-case coverage.** The matrix must include a
+default-configuration row for every tree-backed component whose
+`TerminalRenderable::render` is expected to match `via_tree_direct`. Per
+review-1's gap analysis, this minimum set is:
+
+- `BlockQuote` (default `│ ` border only — `with_border(arbitrary)` excluded)
+- `Compose`
+- `OrderedList`
+- `Progress`
+- `Section`
+- `StatusBlock` (default `┃ ` border only — `border(arbitrary)` excluded)
+- `Table` (default path only — `prefer_cursor_alignment` excluded)
+- `TextBlock`
+- `Todo`
+- `TwoColumn` (non-image / default path only — image overlay excluded)
+- `UnorderedList`
+- `FileSystem` **only if S3-1c chooses outcome (i)** (flip to tree)
+
+Review 1 specifically flagged `OrderedList`, `TextBlock`, and `Todo` as
+currently absent from the matrix; S3-6 must close those gaps.
+
 **Tasks:**
 
 - Rename the harness fields and snapshot column headers in
   `biscuit-terminal/lib/tests/layout_matrix_support/mod.rs`.
+- Add `ComponentCase` entries for every component in the required-coverage
+  list above whose row is currently absent. Generate snapshots with
+  `INSTA_UPDATE=always`.
 - Audit current matrix cases for any escape-hatch usage; move or
   exclude them per the policy above.
 - Regenerate snapshots only if any drift surfaces on the default-case
@@ -487,6 +550,38 @@ Stage 3 closes them out:
 After fixes, `cargo clippy --all-targets -- -D warnings` must be clean
 across `renderable`, `biscuit-terminal`, and `biscuit-terminal-cli`.
 
+#### S3-7a — `NO_COLOR` verification for tree-rendered CLI commands
+
+Review 1 raised the concern (across `BlockQuote`, `OrderedList`, and
+`Progress`) that commands which moved to the tree path may not honor
+`NO_COLOR`. The fix, if needed, is **cross-cutting at the terminal
+detection / rendering layer** — not per-component patches.
+
+**Tasks:**
+
+1. **Verify.** Add one CLI integration test against a tree-rendered
+   command (e.g. `NO_COLOR=1 bt quote "text"` or
+   `NO_COLOR=1 bt progress 50 --fill-color green`) asserting the output
+   contains zero `\x1b[` bytes.
+2. **If the test passes:** Record the verified behavior in
+   `lessons-learned.md` and add **no** component-level patches. The
+   review-1 concern is resolved.
+3. **If the test fails:** Fix at the shared layer. Two acceptable
+   approaches:
+   - **(a)** Teach `Terminal::new()` /
+     `detect_terminal_honoring_force_color()` to downgrade
+     `ColorDepth::None` when the `NO_COLOR` environment variable is
+     set (and unset / empty `FORCE_COLOR` is not overriding it).
+   - **(b)** Teach the tree renderer's `apply_style` (or the shared
+     `TerminalRenderOptions`) to suppress SGR emission when the
+     terminal's color depth is `None`.
+   - Option (a) is preferred because it benefits every consumer of
+     `Terminal`, not just the tree renderer.
+
+Explicitly **out of scope:** per-component `NO_COLOR` patches or
+post-render ANSI-stripping in individual `bt` subcommands. Per the
+review-1 addendum, those would collapse into the shared fix.
+
 ## Suggested phasing
 
 | Phase | Items | Risk | Why phased this way |
@@ -495,7 +590,7 @@ across `renderable`, `biscuit-terminal`, and `biscuit-terminal-cli`.
 | **3b** | S3-3 | Low | Tightens the safety net once S3-1 has soaked and no overrides are missing. |
 | **3c** | S3-4, S3-6 | Low | Cleanup that benefits from S3-3 already gating new misses. |
 | **3d** | S3-5 | None | Pure documentation; lands once 3a–3c stabilize so the recipe matches reality. |
-| **3e** | S3-7 | Trivial | Independent of the structural work; can land any time. |
+| **3e** | S3-7 | Trivial → Low | Pre-existing failures and warnings are trivial; the S3-7a `NO_COLOR` verification may surface a real shared-layer fix that warrants its own review. |
 
 Phases can be implemented sequentially by an orchestrator + subagent pair
 following the Stage 2 pattern: implement → review → fix → next.
@@ -539,17 +634,26 @@ following the Stage 2 pattern: implement → review → fix → next.
 - [ ] `FileSystem` action records the S3-1c outcome and any matching
   `render_bespoke` work alongside it in `lessons-learned.md` (S3-4d).
 - [ ] `renderable/docs/migrate-component-to-ir.md` exists, covers both
-  flip-from-bespoke and born-on-the-tree variants, and is referenced from
+  flip-from-bespoke and born-on-the-tree variants, codifies the
+  error-fallback policy (terminal / Markdown / Browser), lists the
+  documentation-update obligations, and is referenced from
   `renderable/README.md` and the renderable skill (S3-5).
 - [ ] The layout-matrix harness compares `via_render` against
-  `via_tree_direct` and the snapshot headers reflect the new contract;
-  escape-hatch cases are either excluded from the matrix or routed to a
-  separate "terminal-only behavior" suite (S3-6).
+  `via_tree_direct`; default-case rows exist for every component in the
+  required-coverage list (S3-6); escape-hatch cases are either excluded
+  from the matrix or routed to a separate "terminal-only behavior" suite.
+- [ ] `OrderedList`, `TextBlock`, and `Todo` have default-case rows in the
+  layout matrix where they were previously absent (S3-6).
 - [ ] `cargo test -p renderable -p biscuit-terminal -p biscuit-terminal-cli`
   is fully green; `test_prose_empty_errors_to_stderr` is fixed or retired
   (S3-7).
 - [ ] `cargo clippy --all-targets -- -D warnings` is clean across all three
   packages (S3-7).
+- [ ] A `NO_COLOR=1` CLI integration test against at least one tree-rendered
+  command (`bt quote` or `bt progress`) asserts zero `\x1b[` bytes; if the
+  test failed at first run, the shared `Terminal` / detection-layer fix is
+  recorded in `lessons-learned.md` and no per-component patches were added
+  (S3-7a).
 - [ ] `lessons-learned.md` carries a closing "Stage 3 complete" section that
   cross-references the migration checklist as the canonical onward-path
   document.
@@ -583,6 +687,7 @@ Stage 3 does **not**:
 | S3-4b retained `render_bespoke` hooks drift from the real escape-hatch behavior over time | Low | Each retained `*_parity.rs` has a top-of-file comment naming the knob it covers; future changes that touch the knob must verify the parity test still asserts the right contract. |
 | S3-6 reveals real drift between `via_render` and `via_tree_direct` on default cases | Low | The Stage 2 parity tests would have caught this; treat any default-case drift as a regression and fix at the component level, not in the harness. |
 | S3-6 escape-hatch case is accidentally left in the default matrix and `via_tree_direct` parity fails | Medium | The migration checklist (S3-5) documents the policy; the matrix audit step in S3-6 explicitly checks for escape-hatch usage in each row. |
+| S3-7a `NO_COLOR` verification fails and the shared-layer fix touches `Terminal` construction more broadly than expected | Medium | Scope the fix to `detect_terminal_honoring_force_color` and document the new precedence (`NO_COLOR` set → `ColorDepth::None`, unless `FORCE_COLOR` overrides) in the same change. Add the precedence rule to `lessons-learned.md` so future contributors do not re-litigate it. |
 
 ## Success metric
 
