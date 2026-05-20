@@ -4,7 +4,7 @@ A uniformly styled block of text. Applies consistent styling (colors, font weigh
 
 ## IR Status
 
-`TextBlock` implements `TreeRenderable`, `TerminalRenderable`, `BrowserRenderable`, and `MarkdownRenderable`. The default `render()` path routes through the render tree (`Paragraph(Text)` with `Style` and optional `Layout`). The legacy bespoke renderer is retained as `#[doc(hidden)] pub fn render_bespoke()` for parity testing.
+`TextBlock` implements `TreeRenderable`, `TerminalRenderable`, `BrowserRenderable`, and `MarkdownRenderable`. The default `render()` path routes through the render tree (`Paragraph(Text)` with `Style` and optional `Layout`). The legacy `render_bespoke` parity hook was retired in Stage 3 Task 3c.1 — `TextBlock` has no escape-hatch knob, so the tree path is the sole renderer.
 
 After the IR flip, every stored style field is active when rendering through the tree:
 
