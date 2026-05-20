@@ -153,3 +153,14 @@ single anonymous "known drift" row. The minimum ledger key is:
 ```text
 (fixture, target, phase, diagnostic-kind-or-output-facet)
 ```
+
+### Ordering and allocation policy
+
+Diagnostics keep phase-local ordering. `PipelineResult` should store the two
+vectors it receives rather than eagerly merging or sorting them. This keeps the
+normal render path cheap and makes fixture diffs stable:
+
+1. Fold diagnostics appear in source/event order.
+2. Render diagnostics appear in renderer traversal order.
+3. A flattened view, if needed by a test or log formatter, is derived lazily at
+   the call site with explicit phase labels.

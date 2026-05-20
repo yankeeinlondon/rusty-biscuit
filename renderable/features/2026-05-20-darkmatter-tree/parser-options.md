@@ -11,7 +11,7 @@ prompt: |-
     
     Write mini-design spec to the body of this Markdown document that classifies each option as public now, tree experimental only, or deferred. 
 
-    > **Note:** this mini-design is meant to compliments the existing {{ feature }}/spec.md
+    > **Note:** this mini-design complements the existing {{ feature }}/spec.md
 last_updated: 2026-05-20
 ---
 # Darkmatter Parser Option Classification

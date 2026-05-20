@@ -92,8 +92,11 @@ policy later introduces a shared function.
   explicitly measures image behavior. This keeps ordinary terminal benches from
   depending on host graphics capability.
 - `HtmlOptions::default()` — consistent across both paths.
-- `BrowserRenderOptions::default()` / `MarkdownRenderOptions::default()` — consistent for tree renders.
-- `TerminalRenderOptions::default()` — consistent for tree terminal renders (uses the same 120-width optimistic `Terminal`).
+- `BrowserRenderOptions::default()` / `MarkdownRenderOptions::default()` —
+  consistent for tree renders.
+- `TerminalRenderOptions::new(&term, RenderStrictness::Warn)` — consistent for
+  tree terminal renders, using a 120-width optimistic `Terminal` built from the
+  pinned terminal options.
 - `source = SourceDescriptor::Virtual { name }` — no filesystem hits.
 - `sample_size(20)` — matches existing benches.
 

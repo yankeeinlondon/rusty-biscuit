@@ -49,6 +49,9 @@ This is a convenience wrapper around the existing `fold_markdown_to_document` th
 
 - Derives the `SourceDescriptor` from `md.source()` (file path when known, virtual otherwise).
 - Passes `md.content()` (frontmatter already stripped) as the input text.
+- In the next migration step, accepts or attaches Darkmatter's already
+  extracted frontmatter so `DocumentMetadata::frontmatter` is populated without
+  enabling pulldown-cmark metadata blocks.
 
 #### 2. Target renderers (experimental, `pub(crate)`)
 
@@ -60,7 +63,7 @@ This is a convenience wrapper around the existing `fold_markdown_to_document` th
 pub(crate) fn render_tree_html(
     md: &Markdown,
     options: &HtmlOptions,
-) -> MarkdownResult<String>;
+) -> PipelineRenderResult<String>;
 
 /// Renders a `Markdown` to a terminal string via the render-tree pipeline.
 ///
@@ -69,7 +72,7 @@ pub(crate) fn render_tree_html(
 pub(crate) fn render_tree_terminal(
     md: &Markdown,
     options: &TerminalOptions,
-) -> MarkdownResult<String>;
+) -> PipelineRenderResult<String>;
 
 /// Renders a `Markdown` back to a Markdown string via the render-tree pipeline.
 ///
@@ -77,8 +80,18 @@ pub(crate) fn render_tree_terminal(
 /// primarily useful for round-trip / normalization testing.
 pub(crate) fn render_tree_markdown(
     md: &Markdown,
-) -> Result<Rendered<String>, RenderError>;
+) -> PipelineRenderResult<String>;
 ```
+
+The concrete result alias comes from `diagnostic-model.md`:
+
+```rust
+pub(crate) type PipelineRenderResult<T> = Result<PipelineResult<T>, RenderError>;
+```
+
+The public legacy wrappers can later map this into `MarkdownResult<String>`;
+the experimental entry points should preserve fold and render diagnostics
+separately.
 
 #### 3. Options mapping (private helpers)
 
@@ -97,13 +110,19 @@ fn terminal_options_from_terminal_options(
 These mappings are intentionally narrow for the experimental phase:
 
 - **Code highlighting** — the tree browser renderer currently emits plain `<pre><code class="language-{lang}">` and does not run syntect. Until the `CodeRenderer` hook is wired, `render_tree_html` will not match `as_html`'s highlighted output. This is a documented parity gap, not a blocker for the internal API.
-- **Mermaid** — `BrowserRenderOptions` has no mermaid mode. The adapter maps `MermaidMode::Image` to `RawHtmlPolicy::Allow` so raw mermaid blocks pass through; `MermaidMode::Off` keeps the default escape policy.
+- **Mermaid** — `BrowserRenderOptions` has no mermaid mode. The experimental
+  adapter should preserve legacy raw-HTML safety first (`RawHtmlPolicy::Escape`
+  by default). Mermaid parity is a documented gap until a tree-level Mermaid
+  lowering or a deliberate raw-HTML policy exists.
 - **HR CSS variables** — `BrowserRenderOptions::page` does not yet support custom `:root` CSS injection. The adapter ignores `hr_css_variables` in the experimental phase; this is another documented parity gap.
 - **Terminal images** — `TerminalRenderOptions` carries a `Terminal` context but no image renderer. The adapter ignores `image_mode` and `base_path` until `render_terminal_document` gains image support.
 
 ### Why module-level and not `Markdown` methods
 
-The legacy renderers (`Markdown::as_html`, `Markdown::as_terminal`) are public, stable, and shipped. The tree pipeline is **parallel and experimental**. Keeping the entry points as module-level `pub(crate)` functions:
+The legacy renderers (`Markdown::as_html`, `Markdown::for_terminal`, and the
+module-level `for_terminal`) are public, stable, and shipped. The tree pipeline
+is **parallel and experimental**. Keeping the entry points as module-level
+`pub(crate)` functions:
 
 1. Prevents accidental public dependency on an unstable pipeline.
 2. Lets the parity tests call both legacy and tree paths without method-name collision.
@@ -134,8 +153,9 @@ The gate is **semantic parity**, not byte-identical output. The classification f
 
 These darkmatter-specific constructs are intentionally **not** folded in the experimental phase and therefore remain parity gaps:
 
-- `==mark==` / dim inline styles — `InlineStyleProcessor` destroys source offsets.
-- Horizontal rules with attribute blocks — `RuleProcessor` destroys source offsets.
+- `==mark==` / dim inline styles until the span-aware processor chain lands.
+- Horizontal rules with attribute blocks until the span-aware processor chain
+  lands.
 - `compose/` transformations (transclusion, interpolation, TOC linking) — these are string-level preprocessors and do not yet have tree-rewrite equivalents.
 
 The internal API boundary does not attempt to solve these. It exposes only the Milestone 1 fold plus the target renderers, gated by parity.

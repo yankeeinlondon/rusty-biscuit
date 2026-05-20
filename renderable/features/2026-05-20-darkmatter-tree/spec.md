@@ -118,6 +118,17 @@ obscure the architectural migration.
 
 ## Work Items
 
+The design prerequisites for this work live alongside this spec:
+
+- `parser-options.md`
+- `span-aware-processor-design.md`
+- `entry-point-shape.md`
+- `diagnostic-model.md`
+- `benchmark-harness-shape.md`
+
+Implementation should follow that order, with raw HTML policy documented before
+any public Browser/HTML cutover.
+
 ### DMTR-1: Add Explicit Tree Rendering Entry Points
 
 Add internal or experimental APIs that make the tree path easy to exercise
@@ -125,7 +136,7 @@ without changing stable behavior.
 
 Candidate APIs:
 
-```rust
+```text
 Markdown -> renderable::tree::Document
 Markdown -> Document -> Markdown
 Markdown -> Document -> MarkdownPlus
@@ -326,6 +337,28 @@ Acceptance criteria:
 - A target can remain legacy-backed while another target moves to tree-backed
   rendering.
 
+### DMTR-9: Preserve Raw HTML Safety First
+
+Current Darkmatter HTML rendering escapes raw HTML from Markdown source. The
+render tree has `NodeKind::Html`, and the Browser renderer can either escape,
+allow, or reject raw HTML through `RawHtmlPolicy`.
+
+Initial migration policy:
+
+- Browser/HTML tree rendering must default to `RawHtmlPolicy::Escape`.
+- Legacy-vs-tree parity should treat escaped raw HTML as the baseline.
+- Mermaid, embedded HTML widgets, and future richer browser features should not
+  be enabled by globally switching to `RawHtmlPolicy::Allow`.
+- Any target or feature that needs raw HTML passthrough must get a separate
+  opt-in design with tests and security notes.
+
+Acceptance criteria:
+
+- Raw HTML fixtures exist before Browser/HTML public cutover.
+- The experimental Browser/HTML tree path preserves legacy escaping by default.
+- Any accepted divergence from legacy raw HTML behavior is explicitly recorded
+  in the parity ledger.
+
 ## Component Relationship
 
 Components implementing `TerminalRenderable`, `MarkdownRenderable`, and
@@ -399,5 +432,7 @@ Performance tuning posture:
 - [ ] Benchmark commands and baseline results exist before any public cutover.
 - [ ] New tree code avoids obvious string cloning without introducing broad
   optimization work.
+- [ ] Raw HTML defaults to legacy-safe escaping on the tree-backed Browser/HTML
+  path unless a separate opt-in policy is approved.
 - [ ] Parsed Markdown and renderable components converge at `RenderNode`; the
   migration does not render ordinary Markdown by constructing component objects.
