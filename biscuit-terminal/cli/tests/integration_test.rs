@@ -101,6 +101,30 @@ fn test_respects_no_color() {
         .stdout(predicate::str::contains("\x1b[").not());
 }
 
+/// Regression test for Stage 3 / Phase 3e of the renderable IR push.
+///
+/// `bt quote` is a tree-rendered command that exercises both bold and
+/// colored output through the shared terminal-detection layer. Setting
+/// `NO_COLOR=1` (and removing any `FORCE_COLOR` override the calling
+/// shell may have set) must suppress all SGR ANSI sequences in stdout.
+///
+/// The fix lives in the shared color-detection layer
+/// (`biscuit-terminal/lib/src/discovery/detection/color.rs`) — per-command
+/// SGR stripping is explicitly out of scope. If this test ever regresses,
+/// fix `color_depth()` rather than the `quote` command.
+#[test]
+fn test_tree_rendered_quote_respects_no_color() {
+    cargo_bin_cmd!("bt")
+        .env("NO_COLOR", "1")
+        .env_remove("FORCE_COLOR")
+        .env_remove("CLICOLOR_FORCE")
+        .args(["quote", "Test text"])
+        .assert()
+        .success()
+        // No SGR sequences should appear when NO_COLOR is set.
+        .stdout(predicate::str::contains("\x1b[").not());
+}
+
 #[test]
 fn test_shows_underline_support() {
     cargo_bin_cmd!("bt")

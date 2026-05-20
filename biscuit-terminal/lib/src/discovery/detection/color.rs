@@ -31,9 +31,13 @@ pub enum ColorMode {
 /// Detect the terminal's color depth capability.
 ///
 /// Detection strategy:
-/// 1. Check `COLORTERM` environment variable for "truecolor" or "24bit"
-/// 2. Query terminfo `MaxColors` capability
-/// 3. Default to `ColorDepth::None` if detection fails
+/// 1. Honor `NO_COLOR` (any non-empty value) by returning
+///    [`ColorDepth::None`], unless `FORCE_COLOR` or `CLICOLOR_FORCE` is
+///    also set — those explicit overrides take precedence per the
+///    de-facto convention used by clap, supports-color, chalk, etc.
+/// 2. Check `COLORTERM` environment variable for "truecolor" or "24bit"
+/// 3. Query terminfo `MaxColors` capability
+/// 4. Default to `ColorDepth::None` if detection fails
 ///
 /// ## Examples
 ///
@@ -49,6 +53,27 @@ pub enum ColorMode {
 /// }
 /// ```
 pub fn color_depth() -> ColorDepth {
+    // Honor NO_COLOR (https://no-color.org): any non-empty value disables
+    // color output, unless FORCE_COLOR / CLICOLOR_FORCE explicitly opts
+    // back in.
+    let force_color = env::var_os("FORCE_COLOR")
+        .filter(|v| !v.is_empty())
+        .is_some()
+        || env::var_os("CLICOLOR_FORCE")
+            .filter(|v| !v.is_empty())
+            .is_some();
+    let no_color = env::var_os("NO_COLOR")
+        .filter(|v| !v.is_empty())
+        .is_some();
+    if no_color && !force_color {
+        tracing::debug!(
+            color_depth = ?ColorDepth::None,
+            source = "NO_COLOR",
+            "NO_COLOR environment variable set; disabling color output"
+        );
+        return ColorDepth::None;
+    }
+
     // Check COLORTERM environment variable first
     if let Ok(colorterm) = env::var("COLORTERM") {
         let colorterm_lower = colorterm.to_lowercase();
