@@ -1525,8 +1525,13 @@ fn test_quiet_short_flag() {
 
 #[test]
 fn test_prose_empty_errors_to_stderr() {
+    // Pass an explicit empty positional to bypass clap's `required_unless_present`
+    // check and exercise the runtime guard in `ProseArgs::run`. Without any
+    // positional at all, clap rejects the invocation at parse time before the
+    // guard can run.
     let output = cargo_bin_cmd!("bt")
         .arg("prose")
+        .arg("")
         .output()
         .expect("Failed to execute command");
 
