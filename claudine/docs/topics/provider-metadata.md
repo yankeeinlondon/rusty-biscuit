@@ -1,5 +1,5 @@
 ---
-categies: 
+categories: 
     - technical
     - type-safety
     - goal-alignment
