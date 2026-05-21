@@ -102,7 +102,7 @@ For all the _synchronized_ features described in the last section all you would 
     - `claudine qwen` - executes Qwen CLI in wrapped execution mode
     - `claudine goose` - executes Goose CLI in wrapped execution mode
 
-Ok so now you _what_ you're supposed to do and if you're good at "instruction following" (just like you expect your LLM to be) then that's all you need. Sadly, us humans have this annoying tendency to know _why_ they should do things. Well ok, princess ... here's **why** you should wrap your agent execution:
+Ok so now you _what_ you're supposed to do and if you're good at "instruction following" (just like you expect your LLM to be) then that's all you need. Sadly, us humans have this annoying tendency to need to know _why_ they should do things. Well ok, princess ... here's **why** you should wrap your agent execution:
 
 - **Consistent CLI interface**
     
@@ -196,6 +196,9 @@ There are a number of powerful features which Claudine unlocks with what we're c
         ```
 
         Outside of being a terrible prompt -- _what do you want from an example?_ -- what you see here is that documents can _inject_ content in at runtime. That can be static Frontmatter properties, the output of shell commands (which require approval), or leveraging the `ctx` or `env` dictionaries which provide runtime information.
+
+- **Shell Expansion**
+
 - **Transclusion**
     - not only is **transclusion** a fun word to drop into a conversation it's also a power tool that all professional note taking tools include as a way to "combine" content.
     - An example might be as follows:
@@ -213,6 +216,196 @@ There are a number of powerful features which Claudine unlocks with what we're c
         ```
 
         In this example we're using the `::file` directive to instruct Claudine that this parent markdown document will need to inject the `do-the-following.md` and `best-practices.md` content into the locations specified.
+
+## Executable Documents
+
+I know you're probably still excited about the idea of composition so we'll take a second to calm down. Calm? Great let's get started:
+
+- John Gruber -- from Daring Fireball fame -- coined the term _notational velocity_ in 2004 (which ended up being the name of one of the first Markdown apps)
+    - John's intent was to find a way to write down ideas removed from the constraints and distractions of buttons, pulldown menus, fonts, and all sorts of other cruft that acts as a distraction from the real focus
+- Markdown was a simple grammar that could be learned in a day (if not an hour) that combined 
+    - a place for _prose_ (aka, the body of the document) 
+    - and a place for _metadata_ (aka, the Frontmatter)
+- Of course today it has become the lingua franca of AI prompts, responses, and all thoughts in-between.
+- In some ways it's current mantle in the AI world aligns with the original goals that Gruber had for writing:
+    - A minimal syntax provides some structure but doesn't get in the way of the real content
+        - By comparison XML is **highly** structure but terrible ergonomically to write and inefficient character/token wise
+        - HTML may not be quite as insufferable as XML in terms of structure but it's not a language 
+
+That's the history but throughout that history a _written_ document once written was static. It simply was a document which conveyed some knowledge. With Claudine we hope to make that document come to life by making Markdown **executable**.
+
+### Lifecycle Events
+
+- while the Markdown standard allows for both Frontmatter metadata and body content, they are inert and unconnected
+    - with interpolation, transclusion, and shell expansion we've already seen how these two types of data can interact in dynamic ways
+- now let's explore the **lifecycle** of a Markdown document:
+    - Claudine defines the following lifecycle events to every Markdown document:
+        - **initialize**
+            - allows a Markdown file to immediately assess it's environment and respond to it before even the pre-flight checks have been run
+        - **start**
+            - the start event takes place after all "preflight-checks" have taken place
+            - these pre-flight checks includes activities like making sure all shell commands have been white-listed (aka, approved)
+        - **blocked**
+            - when a document has failed the preflight checks you end up at the "blocked" lifecycle
+            - you can "handle" these failures, communicate them, etc.
+        - **success**
+
+            - if a document completes successfully the this lifecycle event it triggered
+            - it gives the document an author to communicate but also allows more precise validations to take place
+                - LLMs have a tendency to be overly generous in what they deem as "success"
+                - with this lifecycle you can impose a more complete set of tests and those tests can be context specific
+
+        - **failure**
+
+            - knowing that something failed quickly is important in recovery and this lifecycle event allows you to be notified as soon as any failure condition is reached
+            - 
+
+### Lifecycle Actions
+
+An event would be no fun at all if you couldn't _do something with it_ and that's where lifecycle **actions** come in:
+
+```mermaid
+mindmap Actions
+    Communication(Communication)
+    Flow(Flow Control)
+    SideEffect(Side Effects)
+```
+
+#### Communication
+
+In this new AI world we live in the handoffs between humans and agents is massively parallel and letting the human known when their action is required is crucial to efficient workflow.
+
+Claudine will allow the host to communicate:
+
+- across multiple channels including the following **chat apps**:
+    - Slack
+    - Discord
+    - Whatsapp
+    - Signal
+    - Telegram
+- send **desktop notifications** on Windows, macOS, and Linux
+- Speak natural language on the host's audio using local and free **TTS** services
+    - will detect and use highest quality TTS solution on host
+    - allows voice, gender, volume, speed controls
+    - can help user install higher quality TTS solutions if they want a free upgrade
+    - **Note:** also supports ElevenLabs API if a user has a plan
+- and communication wouldn't be complete unless **sound effects** were an option and Claudine doesn't disappoint
+    - comes with a library of 60+ sound effects you can attach to your events
+
+As an example, should you want send a chat message, speak out loud, and send a sound effect ("no such thing as over communicating") when a Markdown document has passed all preflight checks you could:
+
+```yaml
+start:
+    message: "We are about to start the build process for {{ctx.repo}} using {{env.AGENT}} agent"
+    say: "Starting build process"
+    effect: small-group-cheer
+```
+
+#### Side Effects & Flow Control
+
+If you spend a lot of time around functional programmers you'll likely have heard them discuss "side effects" as being the lowest of the low. You should be _ashamed_ of yourself if you produce side effects. Ok, i'm sure your friends are nice but they're wrong. Side Effects are actually the only thing that matters in a non-deterministic world and almost always where the value/utility of programs/apps reside.
+
+So Claudine, wanted you to stop feeling ashamed about creating side-effects and start declaring them:
+
+```yaml
+start: 
+    stack:
+        - {}
+```
+
+- side effects are a part of the "stack" of all lifecycle events
+- this "stack" is operated as a FIFO stack (aka, items at top are executed first)
+- there are three types of side effects you can attach to a lifecycle event:
+    - **Shell Commands** - _run a shell command and change some stuff (hey, break some stuff, you go kid)_
+    - **Safe Effects Library** - _choose from a safe set of utilities that Claudine provides to you_
+    - **Flow Control** - _proxy the execution to another document, force an error, exit successful if all the aims have been completed_
+- side effects, as well as all other items on the stack, are **conditional** (or at least can be)
+- every lifecycle event pulls from the stack until:
+    - a Flow Control event is matched (aka, conditional evaluates to `true`), or
+    - the stack has been emptied
+
+> **Note:** creating side effects is valuable activity but never _emit_ a side effect ... no one likes that plus it smells bad
+
+## Orchestration
+
+Up to now we've talked Markdown documents as being the unit of execution but Claudine's got another trick up her sleeve called **sequences** and **execution-groups**.
+
+### Execution Groups
+
+Execution Groups help us to produce two desirable sequence patterns:
+
+- **Concurrency** - _run multiple things concurrently_
+- **Conditional Looping** - _loop over a serial set of steps until a condition is met_
+
+Execution Groups are defined in YAML files and take the following parameters:
+
+- To choose a **concurrent** execution group set `kind` to `concurrent`
+- To choose a **looping** execution group set `kind` to `loop`
+- an execution must be one of the two types and never both
+
+#### Concurrent Execution
+
+> **Note:** this feature is still a work in progress but will be arriving soon; just need to sort out best UX for concurrent threads; likely to result in a TUI.
+
+```yaml
+kind: "execution-group"
+type: "concurrent"
+fail_fast: false
+nodes:
+    - compose: "foobar.md"
+    - inline-compose: "research-something.md"
+    - prompt: "why are you such a nancy?"
+    - sequence: "abc.yaml"
+    - shell: "git status"
+```
+
+- In this example you see the various "node types" (e.g., prompt, compose, inline-compose, sequence, shell) which characterize the task and make up the _concurrent_ activity that this groups.
+    - **compose** - composes a Markdown document and uses it as an LLM prompt
+    - **inline-compose** - uses the Frontmatter `prompt` as an prompt for an LLM and directs it's output to the body of the same document
+    - **prompt** - a direct prompt to be passed to an LLM
+    - **sequence** - kicks off a sequence (next section)
+    - **shell** - runs a shell command
+- The `fail_fast` boolean flag determines whether:
+    - `true` - when one task fails, all tasks fail
+    - `false` - all tasks are completed successful or not
+
+    > default is `false`
+
+While this example was good at showing _breadth_ it hasn't yet shown a type of _depth_ that will be important in some cases:
+
+- all of the node types can be represented in _short-hand_ form as a single string value but if you need to pass parameters then you can do that
+
+    ```yaml
+    kind: "execution-group"
+    type: "concurrent"
+    nodes: 
+        - compose: "foobar.md"
+          yolo: true
+          agent: claude
+        - inline-compose: "research-something.md"
+          plan: "@features/do-it/plan.md"
+    ```
+
+#### Looping Groups
+
+Looping groups contain 1:M steps which are executed serially and then _loop_ until a condition is met:
+
+```mermaid
+flowchart TB;
+
+    subgraph Group
+    A(Task 1) --> B(Task 2) --> C(Task 3)
+    end
+
+    Group --> Condition
+    Condition -->|false| Group
+    Condition -->|true| Done((Done))
+```
+
+
+
+
+
 
 ### Sequences
 
@@ -336,3 +529,39 @@ claudine local hosts
 > Not yet ready but will be added soon.
 
 Providing the right levels of isolation for concurrent work in the same repo is becoming more and more important and **git**'s **worktree** feature is the primitive that most people turn to. Some of the agent's have incorporated their own worktree solution (_which you're free to use if you prefer it_) but **Claudine** provides a unified worktree solution that spans all of the providers.
+
+### Advanced Transclusion
+
+Transcluding a document (or a part of a document) from a local document is available today, but soon you'll be able to:
+
+- transclude the _summary_ of a web page or a document
+
+    ```md
+    ## SomeSite is Growing
+
+    ::summarize https://somesite.com
+    ```
+
+- transclude in the result of a _agent query_:
+
+    ```md
+    ## Why the Sky is Blue
+
+    ::prompt "why is the sky blue?"
+    ```
+
+    Specify the Agent's _explicitly_:
+
+    ```md
+    ## Why the Sky is Blue (for smart folk)
+
+    ::prompt "why is the sky blue?" --model opus-4.7
+    ```
+
+    Or instead use an _implicit_ reference to the 
+
+These more expensive operations, unlike simple document transclusions which can be brought in in less than a second, are expensive and so caching is necessary. Where are these cached results stored? 
+
+
+
+Not in some far off database but rather instead they reside in the Frontmatter of the markdown document
