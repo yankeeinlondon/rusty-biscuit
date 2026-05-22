@@ -1,8 +1,9 @@
 ---
 source: darkmatter/lib/tests/error_snapshots/condition.rs
+assertion_line: 52
 expression: out
 ---
-⨫ ConditionError: evaluation failed
+⤫ ConditionError: evaluation failed
 ┃ Condition evaluation failed for when="length(items) > 0":
 ┃ 
 ┃      9 │ line 9

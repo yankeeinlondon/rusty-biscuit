@@ -1,7 +1,8 @@
 ---
 source: darkmatter/lib/tests/error_snapshots/link.rs
+assertion_line: 13
 expression: out
 ---
-⨫ LinkError: empty href
+⤫ LinkError: empty href
 ┃ Link href cannot be empty or whitespace-only.
 Pass a non-empty URL, relative path, or anchor to Link::new.

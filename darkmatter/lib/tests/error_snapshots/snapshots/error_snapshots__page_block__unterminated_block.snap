@@ -1,8 +1,9 @@
 ---
 source: darkmatter/lib/tests/error_snapshots/page_block.rs
+assertion_line: 72
 expression: out
 ---
-⨫ PageBlockError: The file sample.md has an unterminated ::block / ::end-block
+⤫ PageBlockError: The file sample.md has an unterminated ::block / ::end-block
   block definition.
 ┃ The Frontmatter of this document was:
 ┃ 
