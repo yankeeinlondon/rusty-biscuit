@@ -19,3 +19,12 @@ scope: "{{ctx.current_package_area == 'root' ? 'package' : 'package area' }}"
 - when a package area has both a library and CLI (as many do) the naming convention is:
     - `{name}` for library
     - `{name}-cli` for the CLI
+
+## Hashing Content
+
+- all Markdown files which take a hash Frontmatter property representing the state of file should use the hashing functionality provided in **Darkmatter** (library and CLI)
+    - when using the CLI the syntax is `md hash <file>`
+    - The library and CLI both use a very fast implementation of **xxHash**
+    - The Markdown file is segmented into a hash for it's frontmatter which is distinct from the body of the page (the `-` character delimits them)
+- if you need to hash for non-markdown content, unless this is related to git or some other domain which has it's own hashing rules, then you should use the **biscuit-hash** library for hashing using xxHash
+    - this content doesn't have the same Frontmatter versus Body hashing strategy but it uses the same **xxHash** hashing algorithm
