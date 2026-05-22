@@ -89,6 +89,8 @@ serial_test = "3.0"
 git2 = "0.20"
 proptest = "1.6"
 criterion = { version = "0.5", features = ["html_reports"] }
+biscuit-test-harness = { path = "../../biscuit-test-harness" }
+tempfile = "3"
 
 [[bench]]
 name = "schema_validation"
@@ -104,4 +106,12 @@ harness = false
 
 [[bench]]
 name = "render_pipeline"
+harness = false
+
+# DMTR-6 — side-by-side legacy vs render-tree benchmarks for every public
+# render target. Drives the parity-baseline measurement gate before any public
+# cutover; see
+# `renderable/features/2026-05-20-darkmatter-tree/benchmark-harness-shape.md`.
+[[bench]]
+name = "migration_parity"
 harness = false
