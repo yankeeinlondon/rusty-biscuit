@@ -90,7 +90,7 @@ A few important current-state caveats:
     - The CLI just writes that fragment directly as the .html artifact in darkmatter/cli/src/output.rs (line 63).
     - Raw HTML inside markdown is escaped, not passed through, at output/html.rs (line 380).
     - HtmlOptions.prose_theme exists, but this renderer does not currently use it; only code highlighting is theme-driven in practice.
-    - Code highlighting resolves the mode-agnostic `ThemePair` (`code_theme`) to a concrete light/dark theme via `color_mode`. The **HTML path uses `options.color_mode` directly** (no inversion); the **terminal path inverts** the code theme for page contrast (`ColorMode::inverted()`). See [Code Highlighting](./rendering/code-highlighting.md).
+    - Code highlighting resolves the mode-agnostic `ThemePair` (`code_theme`) to a concrete light/dark theme via `color_mode`. Both the **HTML path** and the **terminal path** invert the code theme for page contrast (`ColorMode::inverted()`), so a dark page gets a light code panel on either target. See [Code Highlighting](./rendering/code-highlighting.md).
     - Mermaid is special-cased, but the HTML renderer only inserts Mermaid::render_for_html().body and later appends its own generic script block. It does not use the Mermaid renderer’s head output, even though that method produces one at mermaid/mod.rs (line 265).
 
 
