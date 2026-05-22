@@ -58,6 +58,15 @@ use crate::markdown::output::terminal::{
 pub struct DarkmatterPage {
     terminal_width: u16,
     terminal_color_mode: TerminalColorMode,
+    /// Color depth captured from the [`Terminal`] at construction, projected
+    /// onto darkmatter's [`ColorDepth`] palette via the same thresholds as
+    /// [`ColorDepth::auto_detect`]. Threaded into [`TerminalOptions`] on the
+    /// decorated render path (see [`Self::render`]) when the caller has not
+    /// set one explicitly, so a page built from `Terminal::new_optimistic`
+    /// renders with that terminal's reported depth regardless of the ambient
+    /// environment. The zero-config path deliberately leaves this unset to
+    /// preserve byte-for-byte parity with `for_terminal(default)`.
+    terminal_color_depth: ColorDepth,
     margin: PageMargin,
     padding: PagePadding,
     page_background: PageBackground,
@@ -84,6 +93,7 @@ impl DarkmatterPage {
         Self {
             terminal_width: clamp_width(terminal.width()),
             terminal_color_mode: terminal.color_mode.clone(),
+            terminal_color_depth: ColorDepth::from(terminal.color_depth),
             margin: PageMargin::ZERO,
             padding: PagePadding::ZERO,
             page_background: PageBackground::Transparent,
@@ -111,6 +121,17 @@ impl DarkmatterPage {
     /// state, including [`TerminalColorMode::Unknown`].
     pub fn terminal_color_mode(&self) -> &TerminalColorMode {
         &self.terminal_color_mode
+    }
+
+    /// Captured terminal color depth, projected onto darkmatter's
+    /// [`ColorDepth`] palette.
+    ///
+    /// The decorated render path threads this into [`TerminalOptions`] when
+    /// the caller has not invoked [`Self::with_color_depth`], so renders
+    /// produced through page layout honor the [`Terminal`] the page was
+    /// built with rather than re-detecting from the ambient environment.
+    pub fn terminal_color_depth(&self) -> ColorDepth {
+        self.terminal_color_depth
     }
 
     /// Configured page margin.
@@ -482,6 +503,20 @@ impl DarkmatterPage {
         // `for_terminal(..., TerminalOptions::default())`.
         if ctx.needs_decoration() || self.max_width.is_some() {
             options.max_width = Some(ctx.effective_width);
+        }
+        // Honor the captured terminal's color depth on the decorated layout
+        // path, mirroring the captured-width handling above: the page was
+        // constructed from a specific `Terminal`, so renders that go through
+        // its layout pipeline should follow that terminal's reported depth
+        // rather than re-detecting from the ambient environment (which would
+        // make `DarkmatterPage::new(&Terminal::new_optimistic(_))` paint
+        // different SGR in a headless env than in a truecolor terminal).
+        // The zero-config path deliberately leaves this unset so the renderer
+        // falls back to `ColorDepth::auto_detect`, preserving byte-for-byte
+        // parity with `for_terminal(&md, TerminalOptions::default())`. An
+        // explicit `with_color_depth` always wins.
+        if !self.is_default_layout() && options.color_depth.is_none() {
+            options.color_depth = Some(self.terminal_color_depth);
         }
         options.include_line_numbers = self.line_numbers;
         options.color_mode = ctx.render_color_mode;
@@ -1255,6 +1290,70 @@ mod tests {
         assert_eq!(
             page_out, direct_out,
             "zero-config render with code block must match for_terminal"
+        );
+    }
+
+    /// `DarkmatterPage::new` must capture the [`Terminal`]'s color depth so a
+    /// page built from `new_optimistic` (hardcoded `TrueColor`) reports that
+    /// depth regardless of ambient detection.
+    #[test]
+    fn new_captures_terminal_color_depth() {
+        let term = Terminal::new_optimistic(80);
+        let page = DarkmatterPage::new(&term);
+        assert_eq!(page.terminal_color_depth(), ColorDepth::TrueColor);
+    }
+
+    /// On the decorated layout path, the page must thread its captured color
+    /// depth into [`TerminalOptions`] so the render honors the [`Terminal`] it
+    /// was constructed with rather than re-detecting from the ambient
+    /// environment. Without this, a page built from `new_optimistic` in a
+    /// headless `cargo test` env would emit 256-color or no-color SGR even
+    /// though the captured terminal reports `TrueColor`.
+    ///
+    /// The truecolor background SGR sequence (`\x1b[48;2;r;g;bm`) is unique to
+    /// 24-bit output — its presence is sufficient evidence that the captured
+    /// depth was honored.
+    #[test]
+    fn decorated_render_honors_captured_color_depth() {
+        let term = Terminal::new_optimistic(80);
+        let md: Markdown = "```rust\nfn main() {}\n```\n".into();
+        let out = DarkmatterPage::new(&term)
+            .with_margin_left(2)
+            .with_margin_right(2)
+            .with_code_theme("dracula")
+            .render(&md)
+            .unwrap();
+        assert!(
+            out.contains("\x1b[48;2;"),
+            "decorated render with `new_optimistic` must emit truecolor SGR"
+        );
+    }
+
+    /// An explicit [`Self::with_color_depth`] must override the captured
+    /// terminal depth, so callers retain precise control when they want it.
+    ///
+    /// Pinning [`ColorDepth::None`] is the cleanest discriminator: the
+    /// terminal renderer detects it at the top of its pipeline and returns the
+    /// raw markdown content (no syntax highlighting, no SGR), so a passing
+    /// assertion below proves the explicit value reached the renderer rather
+    /// than being silently replaced by the captured `TrueColor`. (Verifying a
+    /// downgrade between truecolor and 256-color would also require the
+    /// highlighter to honor `color_depth`, which is a separate concern from
+    /// this gate's contract.)
+    #[test]
+    fn with_color_depth_overrides_captured_depth() {
+        let term = Terminal::new_optimistic(80);
+        let md: Markdown = "```rust\nfn main() {}\n```\n".into();
+        let out = DarkmatterPage::new(&term)
+            .with_color_depth(ColorDepth::None)
+            .with_margin_left(2)
+            .with_margin_right(2)
+            .with_code_theme("dracula")
+            .render(&md)
+            .unwrap();
+        assert!(
+            !out.contains("\x1b["),
+            "explicit `with_color_depth(None)` must suppress every SGR; got: {out:?}"
         );
     }
 

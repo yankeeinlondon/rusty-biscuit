@@ -167,6 +167,28 @@ impl ColorDepth {
     }
 }
 
+impl From<TerminalColorDepth> for ColorDepth {
+    /// Project a biscuit-terminal [`ColorDepth`](TerminalColorDepth) onto the
+    /// darkmatter renderer's coarser palette using the same thresholds as
+    /// [`ColorDepth::auto_detect`].
+    ///
+    /// Darkmatter has no 8-color variant, so biscuit's `Minimal` (8 colors)
+    /// falls below the 16-color floor and maps to [`ColorDepth::None`] — the
+    /// same projection [`auto_detect`](Self::auto_detect) makes via
+    /// [`crate::terminal::color_depth`]. Preserving that mapping is what lets
+    /// a [`crate::layout::DarkmatterPage`] built from a real
+    /// [`biscuit_terminal::terminal::Terminal`] render byte-for-byte
+    /// identically to `for_terminal(&md, TerminalOptions::default())`.
+    fn from(depth: TerminalColorDepth) -> Self {
+        match depth {
+            TerminalColorDepth::TrueColor => ColorDepth::TrueColor,
+            TerminalColorDepth::Enhanced => ColorDepth::Colors256,
+            TerminalColorDepth::Basic => ColorDepth::Colors16,
+            TerminalColorDepth::Minimal | TerminalColorDepth::None => ColorDepth::None,
+        }
+    }
+}
+
 /// Controls how italic text is rendered to the terminal.
 ///
 /// Different terminals have varying levels of support for italic text rendering.
