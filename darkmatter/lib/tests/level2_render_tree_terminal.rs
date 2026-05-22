@@ -198,6 +198,157 @@ fn drive_pane(
     Some((frame, dir))
 }
 
+/// Extracts every background-color descriptor set by the SGR sequences in
+/// `row`, normalized so two rows from the *same* capture can be compared
+/// regardless of WezTerm's true-color wire form.
+///
+/// `wezterm cli get-text --escapes` re-emits each cell's attributes, so a code
+/// line's background reaches the capture here. WezTerm uses the ITU **colon**
+/// form for true color (`48:2::r:g:b`); other terminals emit the legacy
+/// **semicolon** form (`48;2;r;g;b`). Both are handled so the highlighted line's
+/// background can be compared against a non-highlighted line's.
+fn background_colors(row: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut rest = row;
+    while let Some(start) = rest.find("\u{1b}[") {
+        let after = &rest[start + 2..];
+        let Some(mpos) = after.find('m') else {
+            break;
+        };
+        let params = &after[..mpos];
+        // Only inspect well-formed SGR parameter lists (digits / `;` / `:`).
+        if params
+            .chars()
+            .all(|c| c.is_ascii_digit() || matches!(c, ';' | ':'))
+        {
+            let fields: Vec<&str> = params.split(';').collect();
+            // Colon form: the background introducer and its components arrive
+            // as a single field such as `48:2::r:g:b` or `48:5:n`.
+            for field in &fields {
+                if field.starts_with("48:") {
+                    out.push((*field).to_string());
+                }
+            }
+            // Semicolon form: `48;2;r;g;b` / `48;5;n` — the introducer and its
+            // components are separate fields.
+            let mut i = 0;
+            while i < fields.len() {
+                if fields[i] == "48" {
+                    let span = match fields.get(i + 1).copied() {
+                        Some("2") => 5,
+                        Some("5") => 3,
+                        _ => 1,
+                    };
+                    let end = (i + span).min(fields.len());
+                    out.push(fields[i..end].join(";"));
+                    i = end;
+                    continue;
+                }
+                i += 1;
+            }
+        }
+        rest = &after[mpos + 1..];
+    }
+    out
+}
+
+/// Review-13: rich fenced code blocks are a user-observable terminal feature
+/// (info-string title, line-number gutter, highlighted lines) but were only
+/// verified at Level 1 (in-process string assertions in `entrypoints.rs` and
+/// `render_tree_parity.rs`). This Level 2 test drives the **same wired
+/// [`TerminalCodeRenderer`]** through a real WezTerm pane and asserts the
+/// title, body, line-number layout, and highlighted-line styling survive a
+/// real terminal — closing the review's remaining production blocker.
+///
+/// The fixture mirrors the `code_block_rich` parity fixture: a `rust` block
+/// with `title="Demo Snippet"`, `line-numbering=true`, and `highlight=2`.
+#[test]
+#[serial(level2_terminal)]
+fn level2_tree_rich_code_block_title_gutter_and_highlight_survive_real_terminal() {
+    let body = "```rust title=\"Demo Snippet\" line-numbering=true highlight=2\n\
+                fn parity_demo() {\n    println!(\"render tree\");\n}\n```\n";
+    let Some((frame, _dir)) = run_in_pane(body, "code_block_rich") else {
+        return;
+    };
+
+    // 1. The info-string title surfaces in the code-block header row.
+    assert!(
+        frame.plain.contains("Demo Snippet"),
+        "code-block title missing from real-terminal capture. plain:\n{}",
+        frame.plain
+    );
+
+    // 2. The code body survives syntax highlighting + the real-terminal trip.
+    for token in &["parity_demo", "render tree"] {
+        assert!(
+            frame.plain.contains(token),
+            "code body token {token:?} missing from capture. plain:\n{}",
+            frame.plain
+        );
+    }
+
+    // 3. Line-number gutter: the renderer emits a right-aligned line number
+    //    followed by ` │ `. Three source lines produce gutters `1 │`, `2 │`,
+    //    `3 │`. The `│` separator appears only in the gutter (the code body
+    //    has no pipes), so each numbered separator proves the gutter layout
+    //    survived to the pane.
+    for gutter in &["1 \u{2502}", "2 \u{2502}", "3 \u{2502}"] {
+        assert!(
+            frame.plain.contains(gutter),
+            "line-number gutter {gutter:?} missing from capture. plain:\n{}",
+            frame.plain
+        );
+    }
+
+    // 4. Syntax highlighting: foreground color SGRs must survive into the real
+    //    pane (the plain no-color fallback emits none). WezTerm re-emits true
+    //    color in the colon form; accept colon, semicolon, or 256-color.
+    assert!(
+        frame.raw.contains("\u{1b}[38;2;")
+            || frame.raw.contains("\u{1b}[38:2:")
+            || frame.raw.contains("\u{1b}[38;5;"),
+        "expected foreground syntax-highlight SGRs in code-block capture; raw:\n{}",
+        frame.raw
+    );
+
+    // 5. Highlighted-line styling: line 2 (`highlight=2`) is painted with a
+    //    background distinct from the other code lines. WezTerm re-emits each
+    //    cell's background, and `plain`/`raw` lines are index-aligned, so we can
+    //    isolate the highlighted row by its text. WezTerm *omits* a background
+    //    SGR when the cell background equals the pane default, so the
+    //    non-highlighted code lines (whose background matches the theme/pane
+    //    default) carry no explicit background sequence — but the highlighted
+    //    line, whose background is the theme default plus the highlight delta,
+    //    must carry an explicit background SGR that the non-highlighted line
+    //    lacks. Comparing two rows from the *same* capture is normalization-proof.
+    let plain_rows: Vec<&str> = frame.plain.lines().collect();
+    let raw_rows: Vec<&str> = frame.raw.lines().collect();
+    let row_index = |needle: &str| {
+        plain_rows
+            .iter()
+            .position(|p| p.contains(needle))
+            .unwrap_or_else(|| {
+                panic!("could not locate row {needle:?} in capture.\nplain:\n{}", frame.plain)
+            })
+    };
+    let plain_row = row_index("parity_demo"); // line 1 — not highlighted
+    let highlighted_row = row_index("render tree"); // line 2 — highlight=2
+
+    let plain_bgs = background_colors(raw_rows[plain_row]);
+    let highlight_bgs = background_colors(raw_rows[highlighted_row]);
+    assert!(
+        !highlight_bgs.is_empty(),
+        "highlighted line (`highlight=2`) must carry an explicit background SGR; raw row:\n{}",
+        raw_rows[highlighted_row]
+    );
+    assert_ne!(
+        plain_bgs, highlight_bgs,
+        "highlighted line (`highlight=2`) must carry a background distinct from a \
+         non-highlighted line.\nnon-highlighted raw:\n{}\nhighlighted raw:\n{}",
+        raw_rows[plain_row], raw_rows[highlighted_row]
+    );
+}
+
 #[test]
 #[serial(level2_terminal)]
 fn level2_tree_heading_text_survives_real_terminal() {
