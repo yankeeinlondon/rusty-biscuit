@@ -13,11 +13,14 @@
 //!
 //! The fixtures live in `tests/fixtures/render_tree/`.
 
-use darkmatter::markdown::render_tree::fold_markdown_to_document;
+use darkmatter::markdown::Markdown;
+use darkmatter::markdown::render_tree::{
+    fold_markdown_to_document, fold_markdown_with_frontmatter,
+};
 use renderable::tree::{
-    ColumnAlign, DiagnosticKind, Document, MarkdownDialect, MarkdownRenderOptions, NodeKind,
-    Provenance, RenderError, RenderNode, RenderStrictness, SourceDescriptor,
-    render_markdown_document,
+    ColumnAlign, DiagnosticKind, Document, FrontmatterFormat, MarkdownDialect,
+    MarkdownRenderOptions, NodeKind, Provenance, RenderError, RenderNode, RenderStrictness,
+    SourceDescriptor, render_markdown_document,
 };
 
 /// Reads a fixture from `tests/fixtures/render_tree/`.
@@ -339,35 +342,80 @@ fn render_tree_unsupported_math_or_definition_folds_to_plain_text() {
     insta::assert_snapshot!("unsupported_math_or_definition", rendered.output);
 }
 
-/// The `frontmatter.md` fixture documents another **known gap**: the
-/// Milestone 1 fold does *not* extract frontmatter. A `---`-delimited block at
-/// the top of the input is parsed by `pulldown-cmark` as ordinary Markdown — a
-/// thematic break followed by a setext/ATX heading — and
-/// [`renderable::tree::DocumentMetadata::frontmatter`] stays `None`.
+/// The body-only fold treats a `---`-delimited block at the top of the input
+/// as ordinary Markdown — `pulldown-cmark`'s metadata-block options stay
+/// off, so the leading `---` parses as a thematic break.
 ///
-/// Frontmatter folding is deferred to a later phase; this test pins the
-/// current behavior so the future change is a deliberate, visible update.
+/// To attach Darkmatter's already extracted frontmatter to the folded
+/// [`Document`], callers use [`fold_markdown_with_frontmatter`] (DMTR-4) —
+/// see [`render_tree_frontmatter_above_the_fold_attaches_metadata`].
 #[test]
-fn render_tree_frontmatter_is_not_extracted() {
+fn render_tree_frontmatter_is_not_extracted_by_body_fold() {
     let (doc, diags) = fold_fixture("frontmatter.md");
     assert!(diags.is_empty());
 
-    // Frontmatter is NOT extracted by the Milestone 1 fold.
+    // The body fold itself never parses frontmatter — that is darkmatter's
+    // job upstream. With `DocumentMetadata::default()` metadata, the field
+    // remains `None`.
     assert!(
         doc.metadata.frontmatter.is_none(),
-        "frontmatter folding is deferred; metadata.frontmatter must stay None"
+        "the body fold does not populate metadata.frontmatter on its own"
     );
 
     // The leading `---` is parsed as a thematic break, not a frontmatter fence.
     let children = roots(&doc);
     assert!(
         matches!(children[0].kind, NodeKind::ThematicBreak),
-        "the `---` fence folds to a ThematicBreak under the current behavior"
+        "the `---` fence folds to a ThematicBreak under the body-only fold"
     );
 
     let rendered = render(&doc);
     assert!(rendered.diagnostics.is_empty());
     insta::assert_snapshot!("frontmatter", rendered.output);
+}
+
+/// DMTR-4: `fold_markdown_with_frontmatter` wires Darkmatter's already
+/// extracted frontmatter into [`DocumentMetadata::frontmatter`] without
+/// re-parsing it through `pulldown-cmark`'s metadata-block options.
+#[test]
+fn render_tree_frontmatter_above_the_fold_attaches_metadata() {
+    let raw = "---\ntitle: Example Document\nauthor: Test Suite\n---\n\n\
+        The body paragraph that follows a YAML frontmatter block.\n";
+    // `Markdown::from(&str)` parses the leading YAML fence into
+    // `md.frontmatter()` and strips it from `md.content()`.
+    let md: Markdown = raw.into();
+
+    let source = SourceDescriptor::Virtual {
+        name: "frontmatter_above_the_fold".into(),
+    };
+    let (doc, diags) = fold_markdown_with_frontmatter(source, &md);
+    assert!(diags.is_empty());
+
+    let fm = doc
+        .metadata
+        .frontmatter
+        .as_ref()
+        .expect("darkmatter frontmatter must flow into DocumentMetadata");
+    assert_eq!(fm.format, FrontmatterFormat::Yaml);
+    assert!(
+        fm.raw.contains("title: Example Document"),
+        "raw frontmatter source is preserved verbatim, got {:?}",
+        fm.raw
+    );
+
+    // The body fold sees only Markdown content — the `---` fences are gone.
+    let children = roots(&doc);
+    assert!(
+        !children.is_empty(),
+        "body fold should still produce content"
+    );
+    assert!(
+        !children
+            .iter()
+            .any(|n| matches!(n.kind, NodeKind::ThematicBreak)),
+        "with frontmatter stripped upstream, the body fold no longer sees \
+         a thematic break from the fence"
+    );
 }
 
 /// Renders a tree containing an `Unsupported` node under each

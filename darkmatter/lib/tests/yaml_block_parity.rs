@@ -128,6 +128,7 @@ impl CodeRenderer for StubCodeRenderer {
         &self,
         lang: Option<&str>,
         value: &str,
+        _meta: Option<&str>,
         attrs: &NodeAttrs,
         context: TerminalCodeContext,
     ) -> Option<String> {
@@ -145,6 +146,7 @@ impl CodeRenderer for StubCodeRenderer {
         &self,
         _lang: Option<&str>,
         _value: &str,
+        _meta: Option<&str>,
         _attrs: &NodeAttrs,
     ) -> Option<renderable::browser::fragment::BrowserFragment<renderable::browser::fragment::Ready>>
     {

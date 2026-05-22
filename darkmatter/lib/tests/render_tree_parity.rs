@@ -83,12 +83,18 @@
 //! renderer change drop content, the invariant assertions here fail and name
 //! the offending token.
 
+use std::rc::Rc;
+
 use biscuit_terminal::render_tree::{TerminalRenderOptions, render_terminal_document};
 use darkmatter::markdown::Markdown;
 use darkmatter::markdown::output::{HtmlOptions, TerminalOptions, as_html, for_terminal};
-use darkmatter::markdown::render_tree::fold_markdown_to_document;
+use darkmatter::markdown::render_tree::{
+    TerminalCodeRenderer, fold_markdown_spanned_with_frontmatter, fold_markdown_to_document,
+};
 use renderable::tree::{
-    BrowserRenderOptions, Document, RawHtmlPolicy, SourceDescriptor, render_browser_document,
+    BrowserRenderOptions, Document, MarkdownDialect, MarkdownRenderOptions, NodeKind, RawHtmlPolicy,
+    RenderNode, RenderStrictness, SourceDescriptor, render_browser_document,
+    render_markdown_document,
 };
 
 // ---------------------------------------------------------------------------
@@ -143,6 +149,50 @@ const FIXTURES: &[(&str, &str)] = &[
         "raw_html",
         "A paragraph then a block:\n\n<div class=\"callout\">raw block content</div>\n\n\
          Trailing paragraph with <strong>inline html</strong> too.\n",
+    ),
+    (
+        "mark",
+        "Plain text with ==highlighted phrase== inside it.\n",
+    ),
+    (
+        "dim",
+        "Plain text with \u{2304}dimmed phrase\u{2304} inside it.\n",
+    ),
+    (
+        "hr_attributes",
+        "Lead paragraph.\n\n--- { style: waves }\n\nTrailing paragraph.\n",
+    ),
+    (
+        "hr_attributes_in_list",
+        "- --- { style: waves }\n",
+    ),
+    (
+        "code_block_rich",
+        "```rust title=\"Demo Snippet\" line-numbering=true highlight=2\n\
+         fn parity_demo() {\n    println!(\"render tree\");\n}\n```\n",
+    ),
+    (
+        "image_titled",
+        "An image ![descriptive alt](photo.png \"Hover Title\") inline.\n",
+    ),
+    (
+        "footnote",
+        "Body text with a reference.[^note]\n\n[^note]: The footnote definition body.\n",
+    ),
+    // `pulldown-cmark` superscript / subscript only fire when the delimiters
+    // flank a word boundary (`^text^` / `~text~`); mid-word forms like `x^2^`
+    // parse as plain text. The fixtures use the word-boundary form.
+    (
+        "superscript",
+        "The ^2nd^ entry wins the race.\n",
+    ),
+    (
+        "subscript",
+        "Take the ~note~ for later.\n",
+    ),
+    (
+        "mermaid_off",
+        "```mermaid\ngraph TD\n  A --> B\n```\n",
     ),
 ];
 
@@ -231,23 +281,41 @@ fn fold(name: &str, markdown: &str) -> Document {
     doc
 }
 
+/// Folds parity fixture `name` to a render-tree [`Document`] through the
+/// **span-aware** chain — the path that surfaces `==mark==`, `⌄dim⌄`, and
+/// `--- { ... }` HR-attribute constructs. Equivalent to the path the
+/// experimental `to_render_document` entry point uses.
+fn fold_spanned(name: &str, markdown: &str) -> Document {
+    let source = SourceDescriptor::Virtual { name: name.into() };
+    let md: Markdown = markdown.into();
+    let (doc, _diags) = fold_markdown_spanned_with_frontmatter(source, &md);
+    doc
+}
+
 /// Renders fixture text to HTML via the legacy `as_html` renderer.
 fn legacy_html(markdown: &str) -> String {
     let md: Markdown = markdown.into();
     as_html(&md, HtmlOptions::default()).expect("legacy as_html must succeed")
 }
 
+/// Builds [`BrowserRenderOptions`] that mirror the production HTML entry point
+/// (`render_tree_html`): the [`TerminalCodeRenderer`] hook is wired so fenced
+/// code blocks reproduce darkmatter's syntax-highlighted HTML (title block,
+/// line-number table, highlighted-line markup) instead of the render tree's
+/// plain `<pre><code>` fallback. [`RawHtmlPolicy::Allow`] keeps raw-HTML
+/// fixtures comparable to the legacy renderer (which passes raw HTML through).
+fn tree_html_options() -> BrowserRenderOptions {
+    BrowserRenderOptions {
+        raw_html: RawHtmlPolicy::Allow,
+        code_renderer: Some(Rc::new(TerminalCodeRenderer::new())),
+        ..BrowserRenderOptions::default()
+    }
+}
+
 /// Renders fixture text to HTML via the render-tree browser renderer.
-///
-/// Uses [`RawHtmlPolicy::Allow`] so raw-HTML fixtures compare against the
-/// legacy renderer (which passes raw HTML through) on equal footing.
 fn tree_html(name: &str, markdown: &str) -> String {
     let doc = fold(name, markdown);
-    let opts = BrowserRenderOptions {
-        raw_html: RawHtmlPolicy::Allow,
-        ..BrowserRenderOptions::default()
-    };
-    render_browser_document(&doc, &opts)
+    render_browser_document(&doc, &tree_html_options())
         .expect("tree browser render must succeed")
         .output
         .render()
@@ -259,10 +327,46 @@ fn legacy_terminal(markdown: &str) -> String {
     for_terminal(&md, TerminalOptions::default()).expect("legacy for_terminal must succeed")
 }
 
+/// Builds [`TerminalRenderOptions`] that mirror the production tree terminal
+/// entry point (`render_tree_terminal`): the [`TerminalCodeRenderer`] hook is
+/// wired in so fenced code blocks reproduce darkmatter's syntax-highlighted
+/// code-block path instead of the render tree's plain-fence fallback. A
+/// default-width optimistic terminal keeps the visible width repeatable.
+///
+/// Closes review-10 finding 2: the parity harness must exercise the same
+/// code path the user-observable entry point uses, not the bare
+/// `TerminalRenderOptions::default()` (which sets `code_renderer: None`).
+fn tree_terminal_options() -> TerminalRenderOptions {
+    // Start from the same detected-terminal default the original parity
+    // harness used (so hyperlink / color behavior is unchanged) and only add
+    // the code-render hook on top.
+    TerminalRenderOptions::default().with_code_renderer(Rc::new(TerminalCodeRenderer::new()))
+}
+
 /// Renders fixture text to a terminal string via the render-tree renderer.
 fn tree_terminal(name: &str, markdown: &str) -> String {
     let doc = fold(name, markdown);
-    render_terminal_document(&doc, &TerminalRenderOptions::default())
+    render_terminal_document(&doc, &tree_terminal_options())
+        .expect("tree terminal render must succeed")
+        .output
+}
+
+/// Renders fixture text to HTML via the render-tree browser renderer, using
+/// the **span-aware** fold. Uses [`RawHtmlPolicy::Allow`] so darkmatter HTML
+/// fixtures stay comparable to the legacy renderer.
+fn tree_html_spanned(name: &str, markdown: &str) -> String {
+    let doc = fold_spanned(name, markdown);
+    render_browser_document(&doc, &tree_html_options())
+        .expect("tree browser render must succeed")
+        .output
+        .render()
+}
+
+/// Renders fixture text to a terminal string via the render-tree renderer
+/// using the **span-aware** fold.
+fn tree_terminal_spanned(name: &str, markdown: &str) -> String {
+    let doc = fold_spanned(name, markdown);
+    render_terminal_document(&doc, &tree_terminal_options())
         .expect("tree terminal render must succeed")
         .output
 }
@@ -495,6 +599,28 @@ fn render_tree_parity_table() {
         &["Fruit", "Quantity", "apples", "pears", "12"],
         &[],
     );
+
+    // Structural-HTML invariant for GFM tables: both pipelines must emit a
+    // `<table>` element and at least one `<tr>` and `<td>`. Token-stripping
+    // would let pipe-table syntax pass through as paragraph text undetected;
+    // the per-tag assertions below pin that the parser-option contract
+    // (DMTR-2) is honored by both pipelines — see
+    // `renderable/features/2026-05-20-darkmatter-tree/parser-options.md`.
+    let markdown = fixture("table");
+    let legacy_html_raw = legacy_html(markdown);
+    let tree_html_raw = tree_html("table", markdown);
+    for tag in &["<table", "<tr", "<td"] {
+        assert!(
+            legacy_html_raw.contains(tag),
+            "[table/HTML] legacy renderer must emit a structural {tag} element; \
+             without `ENABLE_TABLES` the parser drops table events and only the \
+             cell text leaks through as paragraph text",
+        );
+        assert!(
+            tree_html_raw.contains(tag),
+            "[table/HTML] render-tree renderer must emit a structural {tag} element",
+        );
+    }
 }
 
 #[test]
@@ -573,4 +699,624 @@ fn render_tree_parity_all_fixtures_render() {
         let _ = legacy_terminal(markdown);
         let _ = tree_terminal(name, markdown);
     }
+}
+
+// ---------------------------------------------------------------------------
+// Darkmatter-inline parity (DMTR-3): mark / dim / HR attributes
+//
+// These fixtures exercise the span-aware fold, which is the path the
+// experimental `to_render_document` / `render_tree_html` / `render_tree_terminal`
+// entry points use. The legacy renderers (`as_html`, `for_terminal`) already
+// understand the same constructs via the non-spanned `InlineStyleProcessor`
+// and `RuleProcessor`, so visible-text parity is the right invariant here.
+//
+// Closes review-2 finding 3 in
+// `renderable/features/2026-05-20-darkmatter-tree/review-2.md`.
+// ---------------------------------------------------------------------------
+
+/// Visible-text parity for `==highlighted==`: both pipelines preserve the
+/// marked word on both HTML and terminal surfaces.
+#[test]
+fn render_tree_parity_mark_spanned() {
+    let name = "mark";
+    let markdown = fixture(name);
+    let tokens = &["Plain text", "highlighted phrase", "inside it"];
+
+    let legacy_html_raw = legacy_html(markdown);
+    let tree_html_raw = tree_html_spanned(name, markdown);
+    assert_tokens_present(
+        name,
+        "HTML",
+        &strip_html(&legacy_html_raw),
+        &strip_html(&tree_html_raw),
+        tokens,
+    );
+
+    let legacy_term = legacy_terminal(markdown);
+    let tree_term = tree_terminal_spanned(name, markdown);
+    assert_tokens_present(
+        name,
+        "terminal",
+        &strip_ansi(&legacy_term),
+        &strip_ansi(&tree_term),
+        tokens,
+    );
+}
+
+/// Visible-text parity for `⌄dimmed⌄`: both pipelines preserve the dim phrase
+/// on both HTML and terminal surfaces.
+#[test]
+fn render_tree_parity_dim_spanned() {
+    let name = "dim";
+    let markdown = fixture(name);
+    let tokens = &["Plain text", "dimmed phrase", "inside it"];
+
+    let legacy_html_raw = legacy_html(markdown);
+    let tree_html_raw = tree_html_spanned(name, markdown);
+    assert_tokens_present(
+        name,
+        "HTML",
+        &strip_html(&legacy_html_raw),
+        &strip_html(&tree_html_raw),
+        tokens,
+    );
+
+    let legacy_term = legacy_terminal(markdown);
+    let tree_term = tree_terminal_spanned(name, markdown);
+    assert_tokens_present(
+        name,
+        "terminal",
+        &strip_ansi(&legacy_term),
+        &strip_ansi(&tree_term),
+        tokens,
+    );
+}
+
+/// HR-attribute parity: both pipelines render the styled rule as
+/// non-literal markup (legacy renders `--- { style: waves }` as a styled
+/// SVG; the tree renderer emits an `<hr>` carrying the HR-attribute hints).
+/// What both pipelines must *not* do is leak the raw markdown source —
+/// `--- { style: waves }` — through as visible paragraph text. The
+/// surrounding paragraphs must also survive on both HTML and terminal
+/// surfaces. Exact HR styling (palette, glyph) is an *acceptable formatting
+/// difference* and is checked separately at Level 2.
+#[test]
+fn render_tree_parity_hr_attributes_spanned() {
+    let name = "hr_attributes";
+    let markdown = fixture(name);
+    let tokens = &["Lead paragraph", "Trailing paragraph"];
+
+    // Browser surface: the surrounding paragraphs survive, and the raw HR
+    // markdown source must not appear as visible text in either pipeline.
+    let legacy_html_raw = legacy_html(markdown);
+    let tree_html_raw = tree_html_spanned(name, markdown);
+    let legacy_html_plain = strip_html(&legacy_html_raw);
+    let tree_html_plain = strip_html(&tree_html_raw);
+    assert!(
+        !normalize(&legacy_html_plain).contains("style: waves"),
+        "[hr_attributes/HTML] legacy renderer leaked the raw HR markdown as text; \
+         raw output:\n{legacy_html_raw}",
+    );
+    assert!(
+        !normalize(&tree_html_plain).contains("style: waves"),
+        "[hr_attributes/HTML] render-tree renderer leaked the raw HR markdown as text; \
+         raw output:\n{tree_html_raw}",
+    );
+    assert_tokens_present(
+        name,
+        "HTML",
+        &legacy_html_plain,
+        &tree_html_plain,
+        tokens,
+    );
+
+    // Terminal surface: the surrounding paragraphs survive both pipelines,
+    // and again the raw HR source must not leak through as visible text.
+    let legacy_term = legacy_terminal(markdown);
+    let tree_term = tree_terminal_spanned(name, markdown);
+    let legacy_term_plain = strip_ansi(&legacy_term);
+    let tree_term_plain = strip_ansi(&tree_term);
+    assert!(
+        !normalize(&legacy_term_plain).contains("style: waves"),
+        "[hr_attributes/terminal] legacy renderer leaked the raw HR markdown as text",
+    );
+    assert!(
+        !normalize(&tree_term_plain).contains("style: waves"),
+        "[hr_attributes/terminal] render-tree renderer leaked the raw HR markdown as text",
+    );
+    assert_tokens_present(
+        name,
+        "terminal",
+        &legacy_term_plain,
+        &tree_term_plain,
+        tokens,
+    );
+}
+
+// ---------------------------------------------------------------------------
+// HR attributes inside a list item (DMTR-5, review-11 finding 3).
+//
+// The span-aware design (`span-aware-processor-design.md` §"HR Attributes:
+// List Item") requires the tree fold to match the legacy `RuleProcessor`, and
+// mandates an explicit test rather than inferring the desired shape.
+//
+// **Established behavior (ledger):** the legacy `RuleProcessor` does NOT
+// transform an HR-attribute paragraph inside a list item — a tight list item
+// emits no `Paragraph` wrapper, so the HR-rewrite (which only fires for a
+// simple buffered paragraph) never triggers. See the unit test
+// `rule_processor::tests::test_horizontal_rule_inside_list_item_is_not_transformed`.
+// The span-aware fold mirrors this: its `SpannedRuleProcessor` only rewrites
+// when `paragraph_start.is_some()`, so `- --- { style: waves }` stays
+// list-item text on the tree path too. Classified as *equivalent behavior*,
+// not a divergence.
+// ---------------------------------------------------------------------------
+
+/// `- --- { style: waves }` must NOT fold to a `ThematicBreak`; it stays a
+/// list whose item carries the literal text — matching the legacy
+/// `RuleProcessor`. Both pipelines therefore surface the raw HR source as
+/// visible list text (the opposite of the top-level `hr_attributes` fixture,
+/// where both pipelines DO transform it).
+#[test]
+fn render_tree_parity_hr_attributes_in_list_item() {
+    let name = "hr_attributes_in_list";
+    let markdown = fixture(name);
+
+    // Fold (Level 1): the span-aware fold — the production entry-point path —
+    // must leave the HR-attribute text inside the list, not promote it to a
+    // ThematicBreak.
+    let doc = fold_spanned(name, markdown);
+    assert!(
+        find_node(&doc.root, |n| matches!(n.kind, NodeKind::ThematicBreak)).is_none(),
+        "HR-attribute text inside a list item must NOT fold to a ThematicBreak \
+         (must match the legacy RuleProcessor); tree:\n{:#?}",
+        doc.root,
+    );
+    assert!(
+        find_node(&doc.root, |n| matches!(n.kind, NodeKind::List { .. })).is_some(),
+        "fixture must fold to a List node; tree:\n{:#?}",
+        doc.root,
+    );
+
+    // Render parity: because neither pipeline transforms the rule, the raw HR
+    // source survives as visible list text on both surfaces. This is the
+    // matching-legacy invariant for this fixture.
+    let legacy_html_plain = strip_html(&legacy_html(markdown));
+    let tree_html_plain = strip_html(&tree_html_spanned(name, markdown));
+    assert_tokens_present(
+        name,
+        "HTML",
+        &legacy_html_plain,
+        &tree_html_plain,
+        &["style: waves"],
+    );
+
+    let legacy_term_plain = strip_ansi(&legacy_terminal(markdown));
+    let tree_term_plain = strip_ansi(&tree_terminal_spanned(name, markdown));
+    assert_tokens_present(
+        name,
+        "terminal",
+        &legacy_term_plain,
+        &tree_term_plain,
+        &["style: waves"],
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Rich code-block parity (DMTR-5): syntax highlighting + full info-string
+// metadata parity.
+//
+// The render-tree entry points wire darkmatter's `TerminalCodeRenderer` for
+// both terminal (review-10 finding 2) and browser/HTML (review-11 finding 2),
+// and the `CodeRenderer` trait now carries the info-string `meta` (the text
+// after the language token, e.g. `title="…" line-numbering=true highlight=2`).
+// The renderer re-parses that directive via `parse_code_info`, so title, line
+// numbering, and highlighted-line behavior reach **both** pipelines exactly as
+// the legacy renderer produces them — closing the previously-accepted ledger
+// divergence. The `tree_terminal` / `tree_html` helpers use the same wiring,
+// so this test exercises the production-shaped path.
+// ---------------------------------------------------------------------------
+
+/// Code body, syntax highlighting, **and** the info-string metadata (title /
+/// line numbers / highlight) reach both pipelines on both surfaces.
+#[test]
+fn render_tree_parity_code_block_rich() {
+    let name = "code_block_rich";
+    let markdown = fixture(name);
+    let body_tokens = &["fn", "parity_demo", "println", "render tree"];
+
+    // HTML: code body survives on both surfaces.
+    let legacy_html_raw = legacy_html(markdown);
+    let tree_html_raw = tree_html(name, markdown);
+    assert_tokens_present(
+        name,
+        "HTML",
+        &strip_html(&legacy_html_raw),
+        &strip_html(&tree_html_raw),
+        body_tokens,
+    );
+
+    // HTML: the info-string title, line-number table, and highlighted-line
+    // markup now reach the tree path as well as the legacy renderer.
+    for (surface, html) in [("legacy", &legacy_html_raw), ("tree", &tree_html_raw)] {
+        assert!(
+            html.contains("Demo Snippet"),
+            "[{surface}] HTML must surface the code-block title",
+        );
+        assert!(
+            html.contains("code-table") && html.contains("ln-gutter"),
+            "[{surface}] HTML must render the line-number table",
+        );
+        assert!(
+            html.contains("highlighted"),
+            "[{surface}] HTML must mark the highlighted line",
+        );
+    }
+
+    // Terminal: code body survives on both surfaces, and both pipelines
+    // syntax-highlight (the tree side via the wired `TerminalCodeRenderer`).
+    let legacy_term = legacy_terminal(markdown);
+    let tree_term = tree_terminal(name, markdown);
+    assert_tokens_present(
+        name,
+        "terminal",
+        &strip_ansi(&legacy_term),
+        &strip_ansi(&tree_term),
+        body_tokens,
+    );
+    assert!(
+        tree_term.contains('\u{1b}'),
+        "tree terminal code block must be syntax-highlighted (ANSI escapes present); \
+         if this fails the code renderer is not wired into the tree terminal path",
+    );
+
+    // Terminal: the info-string title now surfaces in the header row on both
+    // pipelines (previously an accepted tree-path divergence).
+    for (surface, term) in [("legacy", &legacy_term), ("tree", &tree_term)] {
+        assert!(
+            strip_ansi(term).contains("Demo Snippet"),
+            "[{surface}] terminal renderer must surface the code-block title",
+        );
+    }
+
+    // The info-string metadata is preserved on the folded node and re-parsed
+    // by the renderer; this pins that the fold still carries it.
+    let doc = fold(name, markdown);
+    let code = find_node(&doc.root, |n| matches!(n.kind, NodeKind::Code { .. }))
+        .expect("fixture must fold to a Code node");
+    match &code.kind {
+        NodeKind::Code { lang, meta, .. } => {
+            assert_eq!(lang.as_deref(), Some("rust"));
+            let meta = meta.as_deref().unwrap_or_default();
+            assert!(
+                meta.contains("title=") && meta.contains("highlight="),
+                "code info-string metadata must survive on NodeKind::Code.meta; got {meta:?}",
+            );
+        }
+        other => panic!("expected Code node, got {other:?}"),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Image alt / title / width parity (DMTR-5).
+//
+// `alt` and a plain `title` reach both pipelines on the browser surface.
+//
+// **Accepted divergence (ledger):** the tree fold captures only the image
+// `url` and `title` (`Tag::Image { dest_url, title }`); it does not parse
+// darkmatter's structured-title `width` extension, so a `width` attribute is
+// emitted by the legacy renderer but not by the tree path. Recorded as an
+// accepted experimental-path divergence.
+// ---------------------------------------------------------------------------
+
+/// Image `alt`, `src`, and plain `title` reach both browser pipelines.
+#[test]
+fn render_tree_parity_image_titled() {
+    let name = "image_titled";
+    let markdown = fixture(name);
+
+    let legacy_html_raw = legacy_html(markdown);
+    let tree_html_raw = tree_html(name, markdown);
+
+    // Visible prose survives on both surfaces.
+    assert_tokens_present(
+        name,
+        "HTML",
+        &strip_html(&legacy_html_raw),
+        &strip_html(&tree_html_raw),
+        &["An image", "inline"],
+    );
+    // alt / src / title live inside attributes — checked against raw HTML.
+    assert_urls_present(
+        name,
+        "HTML",
+        &legacy_html_raw,
+        &tree_html_raw,
+        &["photo.png", "descriptive alt", "Hover Title"],
+    );
+    // Both renderers emit a `title=` attribute for the plain title.
+    assert!(
+        legacy_html_raw.contains("title=\"Hover Title\""),
+        "legacy HTML must emit the image title attribute; raw:\n{legacy_html_raw}",
+    );
+    assert!(
+        tree_html_raw.contains("title=\"Hover Title\""),
+        "tree HTML must emit the image title attribute; raw:\n{tree_html_raw}",
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Parser-option-sensitive parity (DMTR-2 / DMTR-5): footnotes, superscript,
+// subscript.
+//
+// These constructs are **intentionally widened** on the tree path:
+// `render_tree_parser_options()` enables `ENABLE_FOOTNOTES`,
+// `ENABLE_SUPERSCRIPT`, and `ENABLE_SUBSCRIPT`, while the legacy renderers
+// parse with only `ENABLE_TABLES | ENABLE_STRIKETHROUGH`. Parity here is
+// therefore a **documented divergence**, not equivalence — see
+// `parser-options.md`:
+//
+// 1. Legacy ignores or mangles the syntax (plain text, or strikethrough for
+//    a single-tilde subscript).
+// 2. The tree path folds to structural nodes
+//    (`FootnoteReference`/`FootnoteDefinition`, `Span` class `sup`/`sub`).
+// 3. The divergence is classified here rather than treated as a failure.
+// ---------------------------------------------------------------------------
+
+/// Footnotes: legacy emits the literal `[^note]` marker (footnotes disabled);
+/// the tree path folds to `FootnoteReference` / `FootnoteDefinition` and the
+/// browser renderer lowers them to anchor + definition markup.
+#[test]
+fn render_tree_parity_footnote_divergence() {
+    let name = "footnote";
+    let markdown = fixture(name);
+
+    // Tree side: structural footnote nodes exist after the fold.
+    let doc = fold(name, markdown);
+    assert!(
+        find_node(&doc.root, |n| matches!(
+            n.kind,
+            NodeKind::FootnoteReference { .. }
+        ))
+        .is_some(),
+        "tree fold must produce a FootnoteReference node (ENABLE_FOOTNOTES)",
+    );
+    assert!(
+        find_node(&doc.root, |n| matches!(
+            n.kind,
+            NodeKind::FootnoteDefinition { .. }
+        ))
+        .is_some(),
+        "tree fold must produce a FootnoteDefinition node (ENABLE_FOOTNOTES)",
+    );
+
+    // Browser surface: the tree lowers the reference to an `#fn-` anchor and
+    // the definition to a `footnote-definition` block.
+    let tree_html_raw = tree_html(name, markdown);
+    assert!(
+        tree_html_raw.contains("#fn-note"),
+        "tree HTML must link the footnote reference to its definition; raw:\n{tree_html_raw}",
+    );
+    assert!(
+        tree_html_raw.contains("footnote-definition"),
+        "tree HTML must mark the footnote definition block; raw:\n{tree_html_raw}",
+    );
+
+    // Legacy side: footnotes are disabled, so the literal marker leaks through
+    // as plain text and no footnote anchor markup is produced.
+    let legacy_html_raw = legacy_html(markdown);
+    assert!(
+        strip_html(&legacy_html_raw).contains("[^note]"),
+        "legacy renderer (footnotes disabled) must emit the literal [^note] marker; \
+         raw:\n{legacy_html_raw}",
+    );
+    assert!(
+        !legacy_html_raw.contains("#fn-note"),
+        "legacy renderer must NOT produce footnote anchor markup; raw:\n{legacy_html_raw}",
+    );
+}
+
+/// Superscript: legacy emits the literal `^2nd^` (superscript disabled); the
+/// tree path folds `^2nd^` to a `Span` class `sup`, which the browser renderer
+/// lowers to `<span class="sup">` and MarkdownPlus preserves verbatim.
+#[test]
+fn render_tree_parity_superscript_divergence() {
+    let name = "superscript";
+    let markdown = fixture(name);
+
+    // Tree side: a `sup`-class span exists after the fold.
+    let doc = fold(name, markdown);
+    assert!(
+        find_node(&doc.root, |n| span_has_class(n, "sup")).is_some(),
+        "tree fold must produce a Span with class \"sup\" (ENABLE_SUPERSCRIPT)",
+    );
+
+    // Browser surface: the class survives.
+    let tree_html_raw = tree_html(name, markdown);
+    assert!(
+        tree_html_raw.contains("class=\"sup\""),
+        "tree HTML must emit a sup-class span; raw:\n{tree_html_raw}",
+    );
+
+    // MarkdownPlus surface: the class survives as inline HTML.
+    let tree_md_plus = tree_markdown_plus(name, markdown);
+    assert!(
+        tree_md_plus.contains("class=\"sup\""),
+        "tree MarkdownPlus must preserve the sup-class span; output:\n{tree_md_plus}",
+    );
+
+    // Legacy side: superscript disabled, so the literal `^2nd^` leaks through
+    // and no `<sup>` / sup-class markup is produced.
+    let legacy_html_raw = legacy_html(markdown);
+    assert!(
+        strip_html(&legacy_html_raw).contains("^2nd^"),
+        "legacy renderer (superscript disabled) must emit the literal ^2nd^; \
+         raw:\n{legacy_html_raw}",
+    );
+    assert!(
+        !legacy_html_raw.contains("class=\"sup\"") && !legacy_html_raw.contains("<sup>"),
+        "legacy renderer must NOT produce superscript markup; raw:\n{legacy_html_raw}",
+    );
+}
+
+/// Subscript: a single-tilde `~note~` is the parser-option-sensitive case the
+/// design calls out. With `ENABLE_SUBSCRIPT` the tree path folds it to a
+/// `Span` class `sub`; the legacy renderer (subscript disabled, strikethrough
+/// enabled) treats the single-tilde pair as **strikethrough** instead. The
+/// inner `note` survives on both surfaces; the structural treatment diverges.
+#[test]
+fn render_tree_parity_subscript_divergence() {
+    let name = "subscript";
+    let markdown = fixture(name);
+
+    // Tree side: a `sub`-class span exists after the fold.
+    let doc = fold(name, markdown);
+    assert!(
+        find_node(&doc.root, |n| span_has_class(n, "sub")).is_some(),
+        "tree fold must produce a Span with class \"sub\" (ENABLE_SUBSCRIPT)",
+    );
+
+    // Browser surface: the class survives and the inner text is preserved.
+    let tree_html_raw = tree_html(name, markdown);
+    assert!(
+        tree_html_raw.contains("class=\"sub\""),
+        "tree HTML must emit a sub-class span; raw:\n{tree_html_raw}",
+    );
+    assert!(
+        strip_html(&tree_html_raw).contains("note"),
+        "tree HTML must preserve the subscript content; raw:\n{tree_html_raw}",
+    );
+
+    // Legacy side: subscript disabled. The single-tilde pair is consumed by
+    // strikethrough (`<del>`), NOT subscript — the documented delimiter
+    // divergence. The inner `note` still survives.
+    let legacy_html_raw = legacy_html(markdown);
+    assert!(
+        strip_html(&legacy_html_raw).contains("note"),
+        "legacy renderer must preserve the subscript content; raw:\n{legacy_html_raw}",
+    );
+    assert!(
+        !legacy_html_raw.contains("class=\"sub\"") && !legacy_html_raw.contains("<sub>"),
+        "legacy renderer (subscript disabled) must NOT produce subscript markup; \
+         raw:\n{legacy_html_raw}",
+    );
+}
+
+// ---------------------------------------------------------------------------
+// MarkdownPlus target parity (DMTR-5 / DMTR-8 cutover order item 2).
+//
+// MarkdownPlus is the Markdown renderer's richer dialect: span classes the
+// portable Markdown dialect would drop survive as inline HTML. These tests pin
+// that the tree MarkdownPlus path preserves darkmatter-inline structure that
+// portable Markdown cannot, so the cutover-order item-2 target has explicit
+// coverage rather than only smoke tests.
+// ---------------------------------------------------------------------------
+
+/// MarkdownPlus preserves the `mark`-class span (via the span-aware fold) as
+/// inline HTML, where portable Markdown would drop the class.
+#[test]
+fn render_tree_markdown_plus_preserves_mark_span() {
+    let name = "mark";
+    let markdown = fixture(name);
+
+    let plus = tree_markdown_plus_spanned(name, markdown);
+    assert!(
+        plus.contains("highlighted phrase"),
+        "MarkdownPlus must preserve the mark text; output:\n{plus}",
+    );
+    assert!(
+        plus.contains("class=\"mark\""),
+        "MarkdownPlus must preserve the mark-class span as inline HTML; output:\n{plus}",
+    );
+
+    // Portable Markdown drops the class but keeps the visible text.
+    let portable = tree_markdown_portable_spanned(name, markdown);
+    assert!(
+        portable.contains("highlighted phrase"),
+        "portable Markdown must keep the visible mark text; output:\n{portable}",
+    );
+    assert!(
+        !portable.contains("class=\"mark\""),
+        "portable Markdown has no span-class equivalent; output:\n{portable}",
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Mermaid mode parity (DMTR-5): the only deterministic mode.
+//
+// `MermaidMode::Off` (the default for both `TerminalOptions` and `HtmlOptions`)
+// renders a `mermaid` fenced block as an ordinary syntax-highlighted code
+// block — no diagram rendering — so the mermaid *source* survives on both
+// pipelines. This is the deterministic mode the spec asks parity to cover.
+//
+// **Accepted divergence (ledger):** `MermaidMode::Text` and
+// `MermaidMode::Image` are NOT covered here. `Image` shells out to an external
+// renderer (mermaid.ink / mmdc) and emits terminal graphics — non-deterministic
+// and environment-dependent — and the experimental tree path has no Mermaid
+// adapter at all (see `entry-point-shape.md` deferred list and
+// `baselines.md`). Those modes are deferred until the tree renderer gains a
+// Mermaid adapter.
+// ---------------------------------------------------------------------------
+
+/// In the default `MermaidMode::Off`, a `mermaid` block renders as a plain
+/// highlighted code block on both pipelines, so the diagram source survives.
+#[test]
+fn render_tree_parity_mermaid_off_mode() {
+    // `TerminalOptions::default()` / `HtmlOptions::default()` both use
+    // `MermaidMode::Off`, which the parity drivers use.
+    assert_parity(
+        "mermaid_off",
+        &["graph TD", "A", "B"],
+        &[],
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Shared helpers for the structural-node parity tests above.
+// ---------------------------------------------------------------------------
+
+/// Returns the first node in the subtree (depth-first, root included) for
+/// which `pred` holds.
+fn find_node(
+    node: &RenderNode,
+    pred: impl Fn(&RenderNode) -> bool + Copy,
+) -> Option<&RenderNode> {
+    if pred(node) {
+        return Some(node);
+    }
+    node.children()
+        .iter()
+        .find_map(|child| find_node(child, pred))
+}
+
+/// Returns `true` when `node` is a `Span` carrying `class`.
+fn span_has_class(node: &RenderNode, class: &str) -> bool {
+    matches!(node.kind, NodeKind::Span { .. }) && node.attrs.classes.iter().any(|c| c == class)
+}
+
+/// Renders fixture text to MarkdownPlus via the render-tree Markdown renderer
+/// (plain fold).
+fn tree_markdown_plus(name: &str, markdown: &str) -> String {
+    render_markdown(fold(name, markdown), MarkdownDialect::MarkdownPlus)
+}
+
+/// Renders fixture text to MarkdownPlus via the **span-aware** fold.
+fn tree_markdown_plus_spanned(name: &str, markdown: &str) -> String {
+    render_markdown(fold_spanned(name, markdown), MarkdownDialect::MarkdownPlus)
+}
+
+/// Renders fixture text to portable Markdown via the **span-aware** fold.
+fn tree_markdown_portable_spanned(name: &str, markdown: &str) -> String {
+    render_markdown(fold_spanned(name, markdown), MarkdownDialect::Markdown)
+}
+
+/// Shared Markdown render path for the dialect helpers above.
+fn render_markdown(doc: Document, dialect: MarkdownDialect) -> String {
+    let opts = MarkdownRenderOptions {
+        dialect,
+        strictness: RenderStrictness::Warn,
+        style: None,
+    };
+    render_markdown_document(&doc, &opts)
+        .expect("tree markdown render must succeed")
+        .output
 }
