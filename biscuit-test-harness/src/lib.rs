@@ -29,6 +29,7 @@ use std::time::Duration;
 pub mod apple_terminal;
 pub mod cliclick;
 pub mod kitty;
+pub mod layout_invariants;
 pub mod tmux;
 pub mod wezterm;
 
