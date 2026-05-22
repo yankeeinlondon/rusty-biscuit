@@ -43,12 +43,22 @@ fn find_chrome() -> Option<PathBuf> {
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = std::env::args().collect();
-    let input = args.get(1).expect("usage: html_to_png <input.md> <out.png> [dark|light]");
-    let out = args.get(2).expect("usage: html_to_png <input.md> <out.png> [dark|light]");
+    let input = args
+        .get(1)
+        .expect("usage: html_to_png <input.md> <out.png> [dark|light]");
+    let out = args
+        .get(2)
+        .expect("usage: html_to_png <input.md> <out.png> [dark|light]");
     let mode = args.get(3).map(String::as_str).unwrap_or("dark");
     let (page_bg, color_mode) = match mode {
-        "light" => ("#ffffff", darkmatter::markdown::highlighting::ColorMode::Light),
-        _ => ("#202020", darkmatter::markdown::highlighting::ColorMode::Dark),
+        "light" => (
+            "#ffffff",
+            darkmatter::markdown::highlighting::ColorMode::Light,
+        ),
+        _ => (
+            "#202020",
+            darkmatter::markdown::highlighting::ColorMode::Dark,
+        ),
     };
 
     let chrome = find_chrome().expect("no Chrome/Chromium found (set CHROME=/path)");
@@ -80,11 +90,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .new_page(format!("file://{}", html_path.display()))
         .await?;
     page.wait_for_navigation().await?;
-    page.save_screenshot(
-        ScreenshotParams::builder().full_page(true).build(),
-        out,
-    )
-    .await?;
+    page.save_screenshot(ScreenshotParams::builder().full_page(true).build(), out)
+        .await?;
 
     let mut browser = browser;
     browser.close().await?;

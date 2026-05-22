@@ -42,8 +42,8 @@ use darkmatter::markdown::render_tree::{
 };
 use pulldown_cmark::{Options, Parser};
 use renderable::tree::{
-    BrowserRenderOptions, MarkdownRenderOptions, RawHtmlPolicy, RenderStrictness,
-    SourceDescriptor, render_browser_document, render_markdown_document,
+    BrowserRenderOptions, MarkdownRenderOptions, RawHtmlPolicy, RenderStrictness, SourceDescriptor,
+    render_browser_document, render_markdown_document,
 };
 
 // ---------------------------------------------------------------------------
@@ -276,7 +276,10 @@ fn source_for(name: &str) -> SourceDescriptor {
 fn fold_fixture(
     name: &str,
     input: &str,
-) -> (renderable::tree::Document, Vec<renderable::tree::Diagnostic>) {
+) -> (
+    renderable::tree::Document,
+    Vec<renderable::tree::Diagnostic>,
+) {
     if uses_span_aware_fold(name) {
         let md: Markdown = input.into();
         fold_markdown_spanned_with_frontmatter(source_for(name), &md)
@@ -487,8 +490,7 @@ fn bench_fold_once_multi_target(c: &mut Criterion) {
         // Legacy: three separate render calls, each with its own parse.
         group.bench_function(format!("{name}/legacy"), |b| {
             b.iter(|| {
-                let t = for_terminal(black_box(&md), term_opts.clone())
-                    .expect("legacy terminal");
+                let t = for_terminal(black_box(&md), term_opts.clone()).expect("legacy terminal");
                 let h = as_html(black_box(&md), html_opts.clone()).expect("legacy html");
                 // No legacy Markdown round-trip — keep parity by rendering
                 // HTML twice so the legacy work is comparable in shape to
