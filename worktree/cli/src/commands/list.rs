@@ -8,7 +8,7 @@ use biscuit_terminal::components::terminal_image::{ImageWidth, parse_width_spec}
 use biscuit_terminal::discovery::detection::ImageSupport;
 use biscuit_terminal::terminal::Terminal;
 use worktree::WorktreeError;
-use worktree::worktree::{WorktreeStatus, default_branch, list_worktrees};
+use worktree::worktree::{DirtyStatus, WorktreeStatus, default_branch, list_worktrees};
 
 use super::git_graph;
 
@@ -178,7 +178,7 @@ fn format_status_line(status: &WorktreeStatus) -> String {
         format!("<dim>{name}</dim>")
     };
 
-    let mut parts = vec![name_styled];
+    let mut parts = vec![dirty_badge(status.dirty), name_styled];
 
     if !status.entry.is_main {
         let merge_indicator = if status.entry.is_current {
@@ -215,4 +215,22 @@ fn format_status_line(status: &WorktreeStatus) -> String {
     }
 
     parts.join("  ")
+}
+
+/// Render a colored badge for a worktree's working-tree dirtiness.
+///
+/// All three badges have the same visible width (` Clean ` / ` Dirty `) so the
+/// name column lines up across rows.
+fn dirty_badge(status: DirtyStatus) -> String {
+    match status {
+        DirtyStatus::Clean => {
+            "<bg-green-900><green-300><b> Clean </b></green-300></bg-green-900>".to_string()
+        }
+        DirtyStatus::DirtyNonSource => {
+            "<bg-orange-900><orange-300><b> Dirty </b></orange-300></bg-orange-900>".to_string()
+        }
+        DirtyStatus::DirtySource => {
+            "<bg-red-900><red-300><b> Dirty </b></red-300></bg-red-900>".to_string()
+        }
+    }
 }
