@@ -1,6 +1,6 @@
 ---
 name: biscuit-clipboard
-description: provides rich details on how to call and use the `biscuit-clipboard` library and CLI.
+description: Expert knowledge for the biscuit-clipboard Rust library and CLI for cross-platform clipboard access. Use when working in the biscuit-clipboard package area, reading or writing the system clipboard, adding the biscuit-clipboard dependency, or using its CLI.
 ---
 # Biscuit Clipboard
 

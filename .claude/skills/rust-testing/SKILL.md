@@ -1,6 +1,6 @@
 ---
 name: rust-testing
-description: Expert guidance for testing Rust code including unit tests, integration tests, property-based testing with proptest, mocking with mockall, benchmarking with criterion, and test runners like cargo-nextest
+description: Expert guidance for testing Rust — unit and integration tests, property-based testing with proptest, mocking with mockall, benchmarking with criterion, and runners like cargo-nextest. Use when writing or structuring Rust tests, adding property/mock/benchmark coverage, or choosing a test runner.
 hash: a7d02c40efcd27f4
 ---
 

@@ -1,5 +1,6 @@
 ---
-description: Expert knowledge for the `renderable` library which provides traits and utilities for multi-target rendering (Terminal, Markdown, Browser, AST) in the rusty-biscuit monorepo.
+name: renderable
+description: Expert knowledge for the renderable library, which provides traits and utilities for multi-target rendering (Terminal, Markdown, Browser, AST) in the rusty-biscuit monorepo. Use when working in the renderable package area, implementing multi-target rendering for a type, adding or targeting a render target (Terminal/Markdown/Browser/AST), or adding the renderable dependency.
 ---
 # `renderable` Library
 

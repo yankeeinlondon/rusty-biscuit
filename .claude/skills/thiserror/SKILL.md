@@ -1,6 +1,6 @@
 ---
 name: thiserror
-description: Expert knowledge for Rust error handling with thiserror crate - derive macros for custom error types, #[error] formatting, #[from] conversions, #[source] chaining, and comparison with anyhow/snafu
+description: Expert knowledge for Rust error handling with thiserror — derive macros for custom error types, #[error] formatting, #[from] conversions, and #[source] chaining. Use when defining library error enums, adding error conversions or chaining, or choosing between thiserror, anyhow, and snafu.
 hash: 0818e6c807d7d386
 ---
 

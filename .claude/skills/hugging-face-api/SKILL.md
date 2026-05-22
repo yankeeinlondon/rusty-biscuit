@@ -1,6 +1,6 @@
 ---
 name: hugging-face-api
-description: Expert knowledge for working with Hugging Face REST APIs - including Hub API for model search and downloads, Inference API for serverless model execution, and programmatic access using Python/Rust
+description: Expert knowledge for Hugging Face REST APIs — the Hub API (model search and downloads), the Inference API (serverless model execution), and programmatic access from Python/Rust. Use when searching or downloading models, calling hosted inference, or integrating Hugging Face into Rust or Python tooling.
 ---
 
 # Hugging Face REST API

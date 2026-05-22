@@ -1,6 +1,6 @@
 ---
 name: ollama
-description: Expert knowledge for working with Ollama - running LLMs locally, using native and OpenAI-compatible APIs, managing model storage, and creating custom models with Modelfiles
+description: Expert knowledge for Ollama — running LLMs locally, the native and OpenAI-compatible APIs, model storage, and custom models via Modelfiles. Use when running local models, calling the Ollama API, managing model storage, or authoring Modelfiles.
 ---
 
 # Ollama
