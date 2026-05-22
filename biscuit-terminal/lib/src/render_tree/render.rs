@@ -34,13 +34,13 @@
 use renderable::color::TerminalCodeContext;
 use renderable::style::Style;
 use renderable::tree::{
-    ColumnAlign, ColumnConditional, Diagnostic, Document, NodeKind, ProgressHints, RenderError,
-    RenderNode, RenderStrictness, Rendered, Severity, TableColumnHints,
+    ColumnAlign, ColumnConditional, Diagnostic, Document, HintNamespace, NodeKind, ProgressHints,
+    RenderError, RenderNode, RenderStrictness, Rendered, Severity, TableColumnHints,
 };
 use renderable::tree::{ValidationError, ValidationMode, validate};
 
 use crate::components::block_quote::BlockQuote;
-use crate::components::horizontal_rule::HorizontalRule;
+use crate::components::horizontal_rule::{HorizontalRule, RuleAlignment, RuleStyle, RuleWeight};
 use crate::components::prose::Prose;
 use crate::components::renderable::TerminalRenderable;
 use crate::components::table::cell::pad_cell;
@@ -413,16 +413,14 @@ impl Writer<'_> {
                     None => body,
                 })
             }
-            // `meta` (info-string beyond the language) is intentionally
-            // ignored: syntax highlighting and meta handling are out of
-            // scope for this phase.
-            NodeKind::Code {
-                lang,
-                meta: _,
+            NodeKind::Code { lang, meta, value } => Ok(self.render_code_node(
+                lang.as_deref(),
                 value,
-            } => Ok(self.render_code_node(lang.as_deref(), value, &node.attrs)),
+                meta.as_deref(),
+                &node.attrs,
+            )),
             NodeKind::ThematicBreak => {
-                let rule = HorizontalRule::new();
+                let rule = horizontal_rule_from_attrs(&node.attrs);
                 Ok(rule.render(&self.opts.context.terminal))
             }
             NodeKind::Table { align, children } => {
@@ -1084,14 +1082,15 @@ impl Writer<'_> {
     /// hook before falling back to the built-in plain rendering.
     ///
     /// When [`TerminalRenderOptions::code_renderer`] is set, the hook is given
-    /// the language, body, node attributes, and a [`TerminalCodeContext`]
-    /// containing the available render width, color depth, and color mode.
-    /// A `Some` result is used verbatim; a `None` result falls back to
-    /// [`Self::render_code`].
+    /// the language, body, info-string `meta`, node attributes, and a
+    /// [`TerminalCodeContext`] containing the available render width, color
+    /// depth, and color mode. A `Some` result is used verbatim; a `None`
+    /// result falls back to [`Self::render_code`].
     fn render_code_node(
         &self,
         lang: Option<&str>,
         value: &str,
+        meta: Option<&str>,
         attrs: &renderable::tree::NodeAttrs,
     ) -> String {
         if let Some(renderer) = &self.opts.code_renderer {
@@ -1100,7 +1099,9 @@ impl Writer<'_> {
                 (&self.opts.context.color_depth).into(),
                 (&self.opts.context.color_mode).into(),
             );
-            if let Some(rendered) = renderer.render_terminal_code(lang, value, attrs, context) {
+            if let Some(rendered) =
+                renderer.render_terminal_code(lang, value, meta, attrs, context)
+            {
                 return rendered;
             }
         }
@@ -1230,6 +1231,12 @@ impl Writer<'_> {
     }
 
     /// Extracts the plain-text cells of a table row.
+    ///
+    /// Each cell's inline children are first rendered to [`Prose`] markup,
+    /// then that markup is lowered to a styled terminal string via
+    /// [`Self::render_prose`]. Skipping the Prose-rendering step would leak
+    /// Prose tags (e.g. `<dim>`) and prose-escape backslashes (e.g.
+    /// `\_` for literal underscores) into the final table cell output.
     fn table_row_cells(&mut self, row: &RenderNode) -> Result<Vec<String>, RenderError> {
         let NodeKind::TableRow { children } = &row.kind else {
             // The validator rejects malformed tables before this runs.
@@ -1242,7 +1249,8 @@ impl Writer<'_> {
                 continue;
             };
             let markup = self.render_inline(children, &Style::default())?;
-            cells.push(self.apply_cell_style(cell, markup));
+            let rendered = self.render_prose(&markup);
+            cells.push(self.apply_cell_style(cell, rendered));
         }
         Ok(cells)
     }
@@ -1286,7 +1294,11 @@ impl Writer<'_> {
                 cells.push(TableCellContent::from(self.render(cell)?));
                 continue;
             };
-            let text = self.render_inline(cell_children, &Style::default())?;
+            // Lower Prose markup to a terminal string so cell content does
+            // not leak Prose tags or prose-escape backslashes. See
+            // `Self::table_row_cells` for the same reasoning.
+            let markup = self.render_inline(cell_children, &Style::default())?;
+            let text = self.render_prose(&markup);
             cells.push(reconstruct_cell(&cell.attrs, text));
         }
         Ok(cells)
@@ -1385,6 +1397,69 @@ impl Writer<'_> {
 fn wrap_column_lines(rendered: &str, width: u32) -> String {
     let lines: Vec<String> = rendered.split('\n').map(str::to_string).collect();
     wrap_lines(lines, &WordWrap::WrapProse(None, None), width).join("\n")
+}
+
+/// Builds a [`HorizontalRule`] from `darkmatter.hr.*` hints on a
+/// [`NodeKind::ThematicBreak`] node.
+///
+/// Darkmatter's span-aware fold lowers HR-attribute paragraphs (e.g.
+/// `--- { style: waves, weight: thick }`) into a [`NodeKind::ThematicBreak`]
+/// whose [`NodeAttrs::data`] carries string-valued hints under the
+/// `darkmatter.hr` namespace — see
+/// `renderable/features/2026-05-20-darkmatter-tree/span-aware-processor-design.md`.
+/// Without consuming those hints the terminal renderer would emit a plain
+/// rule for every HR regardless of authored attributes (review-4 finding 2).
+///
+/// Unknown enum values fall back to the [`HorizontalRule`] defaults so a
+/// malformed `style: dashse` still produces output rather than panicking.
+///
+/// [`NodeAttrs::data`]: renderable::tree::NodeAttrs
+fn horizontal_rule_from_attrs(attrs: &renderable::tree::NodeAttrs) -> HorizontalRule {
+    const HR_NS: HintNamespace = HintNamespace("darkmatter.hr");
+
+    let hint_str = |key: &str| -> Option<String> {
+        attrs
+            .get_hint(HR_NS, key)
+            .and_then(|v| v.as_str().map(str::to_string))
+    };
+
+    let mut rule = HorizontalRule::new();
+    if let Some(style) = hint_str("style") {
+        rule = match style.as_str() {
+            "dashes" => rule.style(RuleStyle::Dashes),
+            "dots" => rule.style(RuleStyle::Dots),
+            "waves" => rule.style(RuleStyle::Waves),
+            "line-star" => rule.style(RuleStyle::LineStar),
+            "line-circle" => rule.style(RuleStyle::LineCircle),
+            "inset-line" => rule.style(RuleStyle::InsetLine),
+            "curtain-rod" => rule.style(RuleStyle::CurtainRod),
+            _ => rule,
+        };
+    }
+    if let Some(alignment) = hint_str("alignment") {
+        rule = match alignment.as_str() {
+            "full" => rule.alignment(RuleAlignment::Full),
+            "centered" => rule.alignment(RuleAlignment::Centered),
+            "left" => rule.alignment(RuleAlignment::Left),
+            "right" => rule.alignment(RuleAlignment::Right),
+            _ => rule,
+        };
+    }
+    if let Some(weight) = hint_str("weight") {
+        rule = match weight.as_str() {
+            "thin" => rule.weight(RuleWeight::Thin),
+            "medium" => rule.weight(RuleWeight::Medium),
+            "thick" => rule.weight(RuleWeight::Thick),
+            _ => rule,
+        };
+    }
+    if let Some(width) = hint_str("width") {
+        rule = rule.width(width);
+    }
+    if let Some(color) = hint_str("color") {
+        rule = rule.color(color);
+    }
+    rule
 }
 
 fn render_progress_bar(hints: &ProgressHints, paragraph_text: &str, depth: ColorDepth) -> String {
@@ -2908,6 +2983,58 @@ mod render_tree_tests {
             out.contains("\x1b[1m"),
             "standalone styled cell must emit bold SGR: {out:?}"
         );
+    }
+
+    /// Review-4 finding 2: a `NodeKind::ThematicBreak` carrying
+    /// `darkmatter.hr.*` hints must render the corresponding styled rule,
+    /// not collapse to the default dashed rule. Without this wiring the
+    /// fold's HR-attribute storage would never reach the user's terminal.
+    ///
+    /// The test uses a text-tier terminal (`ImageSupport::None`) so the
+    /// `HorizontalRule`'s SVG-to-Kitty image tier is bypassed and the
+    /// glyph-based output is observable.
+    #[test]
+    fn render_tree_thematic_break_consumes_darkmatter_hr_hints() {
+        use crate::discovery::detection::ImageSupport;
+        use renderable::tree::HintNamespace;
+
+        let mut hr = RenderNode::thematic_break();
+        let ns = HintNamespace("darkmatter.hr");
+        hr.attrs.set_hint(ns, "style", serde_json::json!("waves"));
+
+        let term = Terminal::builder()
+            .width(40)
+            .image_support(ImageSupport::None)
+            .build();
+        let opts = TerminalRenderOptions::new(&term, RenderStrictness::Warn);
+        let out = render_terminal_node(&hr, &opts).expect("render hr").output;
+        // The waves rule emits `≋` (U+224B) in Unicode-capable terminals,
+        // `~` in ASCII fallback. Either waves marker proves the hint was
+        // honored instead of falling back to the default dashed rule.
+        assert!(
+            out.contains('\u{224B}') || out.contains('~'),
+            "expected waves rule glyph; got: {out:?}"
+        );
+        assert!(
+            !out.contains('\u{2500}'),
+            "default dashed rule glyph leaked despite waves hint: {out:?}"
+        );
+    }
+
+    /// A `NodeKind::ThematicBreak` with no hints must still render through
+    /// the default `HorizontalRule` path — the hint-consumer change cannot
+    /// regress plain rules.
+    #[test]
+    fn render_tree_thematic_break_without_hints_uses_default_rule() {
+        use crate::discovery::detection::ImageSupport;
+        let hr = RenderNode::thematic_break();
+        let term = Terminal::builder()
+            .width(40)
+            .image_support(ImageSupport::None)
+            .build();
+        let opts = TerminalRenderOptions::new(&term, RenderStrictness::Warn);
+        let out = render_terminal_node(&hr, &opts).expect("render hr").output;
+        assert!(!out.is_empty(), "default rule must produce output");
     }
 
     #[test]

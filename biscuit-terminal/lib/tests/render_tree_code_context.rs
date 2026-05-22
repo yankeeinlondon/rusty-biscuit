@@ -62,6 +62,7 @@ impl CodeRenderer for CapturingCodeRenderer {
         &self,
         _lang: Option<&str>,
         _value: &str,
+        _meta: Option<&str>,
         _attrs: &NodeAttrs,
         context: TerminalCodeContext,
     ) -> Option<String> {
@@ -76,6 +77,7 @@ impl CodeRenderer for CapturingCodeRenderer {
         &self,
         _lang: Option<&str>,
         _value: &str,
+        _meta: Option<&str>,
         _attrs: &NodeAttrs,
     ) -> Option<renderable::browser::fragment::BrowserFragment<renderable::browser::fragment::Ready>>
     {
