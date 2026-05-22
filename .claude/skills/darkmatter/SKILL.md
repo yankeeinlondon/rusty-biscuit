@@ -269,7 +269,7 @@ Located in `darkmatter/lib/src/markdown/inline/types.rs`, `darkmatter/lib/src/ma
 
 These helpers ensure Markdown code fences and `YamlBlock` use identical syntax-highlighting logic.
 
-**Code-block theme contrast (terminal only):** code blocks resolve their `ThemePair` against the **inverted** color mode (`ColorMode::inverted()`) so the panel contrasts against the page (light code on a dark terminal); prose follows the real mode. Single-variant themes (dracula/nord/monokai/vs-dark) are a deliberate no-op. **HTML does not invert.** See [Code Highlighting](../../../darkmatter/docs/rendering/code-highlighting.md) and [`terminal.md`](./terminal.md).
+**Code-block theme contrast (terminal and HTML):** code blocks resolve their `ThemePair` against the **inverted** color mode (`ColorMode::inverted()`) so the panel contrasts against the page (light code on a dark page); prose follows the real mode. Single-variant themes (dracula/nord/monokai/vs-dark) are a deliberate no-op. Inversion is applied at all code-highlighter construction sites — bespoke terminal, render-tree `CodeRenderer`, `YamlBlock` terminal **and** browser paths, and `as_html` — so terminal and HTML agree (Defect D). See [Code Highlighting](../../../darkmatter/docs/rendering/code-highlighting.md) and [`terminal.md`](./terminal.md).
 
 ### YamlBlock Component
 

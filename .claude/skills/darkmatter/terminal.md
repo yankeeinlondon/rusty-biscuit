@@ -69,8 +69,9 @@ background follow the terminal's real mode so body text stays readable.
   background math) keys off the **resolved** theme background
   (`code_block::mode_for_background`), not the requested mode — so a single-variant
   dark theme still gets light header text.
-- **Browser/HTML does not invert** (no live light/dark detection; `color_mode` is
-  caller-set). Terminal-only.
+- **HTML inverts too** (Defect D): the `color_mode` is the caller-declared page
+  mode, and the code theme resolves against its inverse just like the terminal,
+  so a Markdown code fence and a `YamlBlock` render byte-identically.
 
 ## Color Mode Detection
 
