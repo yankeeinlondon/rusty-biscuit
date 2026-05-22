@@ -262,11 +262,14 @@ Located in `darkmatter/lib/src/markdown/inline/types.rs`, `darkmatter/lib/src/ma
 
 `darkmatter/lib/src/markdown/output/code_block.rs` contains `pub(crate)` helpers used by both terminal and HTML rendering:
 
-- `render_terminal_code_block` - ANSI-highlighted code with padding, line numbers, and highlighted ranges
+- `render_terminal_code_block` - ANSI-highlighted code with padding, line numbers, and highlighted ranges (pads to the content width; never clears to the physical edge with `\x1b[K` under a layout context)
 - `render_html_code_block` - `<div class="code-block">` wrapper with optional line-number table or `<pre><code>` output
 - `find_syntax` - Language lookup by extension, name, or alias (shared `syntect` behaviour)
+- `mode_for_background` - derives a code panel's effective `ColorMode` from its resolved theme background (luminance), used for header-pill text color and highlight-line math
 
 These helpers ensure Markdown code fences and `YamlBlock` use identical syntax-highlighting logic.
+
+**Code-block theme contrast (terminal only):** code blocks resolve their `ThemePair` against the **inverted** color mode (`ColorMode::inverted()`) so the panel contrasts against the page (light code on a dark terminal); prose follows the real mode. Single-variant themes (dracula/nord/monokai/vs-dark) are a deliberate no-op. **HTML does not invert.** See [Code Highlighting](../../../darkmatter/docs/rendering/code-highlighting.md) and [`terminal.md`](./terminal.md).
 
 ### YamlBlock Component
 
