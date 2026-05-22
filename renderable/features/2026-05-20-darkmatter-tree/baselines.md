@@ -189,8 +189,17 @@ legacy comparator renders three targets too, each of which re-parses.
 - The `browser` group has the tree path within ~2× of the legacy
   renderer for prose, and at parity (≈1.0×) for the code-heavy
   `large_code_block` fixture, where both pipelines pay the same syntect
-  cost. The `mark_dim_hr` browser ratio (≈6×) is dominated by 20 HR-rule
-  SVG generations on the tree side.
+  cost. The `mark_dim_hr` browser ratio (≈6×) is dominated by the
+  span-aware fold cost (see the `fold_only` row, ≈164 µs) plus mark/dim
+  inline node construction — **not** by HR SVG generation. The tree
+  browser path lowers a `ThematicBreak` to a plain `<hr>` void tag with
+  `data-hr-*` attributes (`renderable/src/tree/render/browser.rs`,
+  `render_thematic_break`) and generates no SVG; the rich
+  CSS-variable-driven `<svg>` is produced only by the legacy HTML path.
+  The tree HR browser output is therefore cheaper but lower-fidelity than
+  legacy — that fidelity downgrade is the deferred "HR CSS variables"
+  parity gap from `entry-point-shape.md`, tracked for a cutover decision in
+  `../2026-05-21-isolated-perf/spec.md`, not a perf cost to optimize away.
 - The `large_code_block` terminal and HTML rows now include the wired
   `TerminalCodeRenderer` syntax-highlighting cost on the tree side, so they
   are the production-shaped numbers for the code-renderer cutover decision.
