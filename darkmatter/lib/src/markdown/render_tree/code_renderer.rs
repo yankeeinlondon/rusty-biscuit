@@ -99,10 +99,14 @@ impl CodeRenderer for TerminalCodeRenderer {
         let code_meta = build_code_meta(lang.unwrap_or(""), meta);
         let language = lang.unwrap_or("");
 
-        // Body: the syntax-highlighted code block. `target_width = None`
-        // matches the bespoke renderer, which lets the render-tree layout
-        // pass own width handling. `code_meta` carries any `line-numbering` /
-        // `highlight` directive so the body honors them.
+        // Body: the syntax-highlighted code block, padded to the available
+        // width. `context.width()` is already the post-margin content width
+        // (the tree renderer narrows it in `render_with_layout` before this
+        // hook runs and re-applies the left margin afterward), so padding to it
+        // — rather than clearing to the physical edge with `\x1b[K` — keeps the
+        // block within its margins and the right-aligned language pill flush
+        // with the block's right edge. `code_meta` carries any `line-numbering`
+        // / `highlight` directive so the body honors them.
         let body = render_terminal_code_block(
             value,
             language,
@@ -110,7 +114,7 @@ impl CodeRenderer for TerminalCodeRenderer {
             &options,
             &code_meta,
             color_mode,
-            None,
+            Some(context.width() as u16),
         )
         .ok()?;
 

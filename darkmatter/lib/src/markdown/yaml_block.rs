@@ -178,8 +178,15 @@ impl TerminalRenderable for YamlBlock {
         let meta = CodeBlockMeta::default();
         let terminal_width = term.width();
 
+        // Resolve the width left for the block after the layout's horizontal
+        // margins. Both the header pill (right-aligned within this width) and
+        // the body (padded to this width) use it, so the block honours the
+        // available width and a right margin pulls the block — and the pill
+        // above it — leftward off the physical edge.
+        let available = self.layout.available_width(terminal_width);
+
         // Emit the same header row Markdown's ``` yaml ``` fence emits, so
-        // YamlBlock and Markdown stay byte-identical in the body region.
+        // YamlBlock and Markdown stay parity-equivalent in the body region.
         let bg_color = highlighter
             .theme()
             .settings
@@ -190,9 +197,12 @@ impl TerminalRenderable for YamlBlock {
             "yaml",
             bg_color,
             color_mode,
-            terminal_width as u16,
+            available as u16,
         );
 
+        // Pad the body to the available width rather than clearing to the
+        // physical terminal edge (`\x1b[K`); clear-to-EOL ignores the supplied
+        // width and can never respect a right margin.
         let body = render_terminal_code_block(
             self.yaml(),
             "yaml",
@@ -200,7 +210,7 @@ impl TerminalRenderable for YamlBlock {
             &options,
             &meta,
             color_mode,
-            None,
+            Some(available as u16),
         )
         .unwrap_or_else(|_| {
             // Fallback: plain text with minimal escaping
@@ -518,8 +528,20 @@ mod tests {
         // body lines (the lines that contain the actual YAML payload). We
         // tolerate wrapper differences (extra trailing newlines, surrounding
         // blank lines) but reject structural drift in the body.
-        let block_plain = crate::testing::strip_ansi_codes(&block_output);
-        let md_plain = crate::testing::strip_ansi_codes(&md_output);
+        //
+        // Trailing whitespace is trimmed per line before comparison: `YamlBlock`
+        // pads each line to the available width, whereas the Markdown fence
+        // clears to the terminal edge with `\x1b[K` (no trailing spaces once
+        // stripped). The padding spaces are invisible formatting, not a body
+        // difference, so they are not part of the parity contract.
+        let trim_trailing = |s: &str| {
+            s.lines()
+                .map(|l| l.trim_end())
+                .collect::<Vec<_>>()
+                .join("\n")
+        };
+        let block_plain = trim_trailing(&crate::testing::strip_ansi_codes(&block_output));
+        let md_plain = trim_trailing(&crate::testing::strip_ansi_codes(&md_output));
 
         for needle in ["foo: 1", "bar: 2"] {
             assert!(
@@ -733,6 +755,55 @@ mod tests {
             assert!(
                 line.starts_with("    "),
                 "expected 4-space left margin on every non-empty line, got: {line:?}"
+            );
+        }
+    }
+
+    /// The code block must honour the available terminal width instead of
+    /// clearing to the physical terminal edge with `\x1b[K`. Every rendered
+    /// line (header, body, padding rows) must be exactly the available width,
+    /// which keeps the right-aligned language pill flush with the block's
+    /// right edge regardless of the physical terminal size.
+    #[test]
+    fn test_render_pads_to_available_width_not_clear_to_eol() {
+        let block = YamlBlock::new("foo: 1\nbar: 2").unwrap();
+        let term = Terminal::new_optimistic(40);
+        let out = TerminalRenderable::render(&block, &term);
+
+        assert!(
+            !out.contains("\x1b[K"),
+            "code block must not flood to the physical edge with clear-to-EOL: {out:?}"
+        );
+
+        let plain = crate::testing::strip_ansi_codes(&out);
+        for line in plain.lines().filter(|l| !l.is_empty()) {
+            assert_eq!(
+                line.chars().count(),
+                40,
+                "every non-empty line must pad to the available width (40): {line:?}"
+            );
+        }
+    }
+
+    /// A right margin must shrink both the code-block background and the
+    /// right-aligned language pill, moving them leftward off the right edge.
+    #[test]
+    fn test_right_margin_shrinks_block_and_pill() {
+        let mut block = YamlBlock::new("foo: 1\nbar: 2").unwrap();
+        block.layout_mut().margin.right = TargetValue::universal(Length::ch(10));
+
+        let term = Terminal::new_optimistic(40);
+        let out = TerminalRenderable::render(&block, &term);
+        let plain = crate::testing::strip_ansi_codes(&out);
+
+        // available = 40 - 10 = 30; with no left margin every non-empty line
+        // is exactly 30 columns wide, so the block (and the pill above it) end
+        // 10 cells short of the physical right edge.
+        for line in plain.lines().filter(|l| !l.is_empty()) {
+            assert_eq!(
+                line.chars().count(),
+                30,
+                "right margin must shrink the block to the available width (30): {line:?}"
             );
         }
     }

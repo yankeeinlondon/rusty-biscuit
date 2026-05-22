@@ -896,29 +896,51 @@ mod execution_tests {
                 label
             )
         };
+        let make_options = || {
+            ComposeOptions::new().with_shell(ShellExpansionOptions {
+                timeout: Duration::from_secs(5),
+                policy_root: Some(temp_dir.path().to_path_buf()),
+                approval_handler: Some(Arc::new(MockApproval)),
+                ..Default::default()
+            })
+        };
+        let mut runtime = make_runtime();
+
+        // Self-calibrating baseline: time a *single* command first. A fixed
+        // wall-clock threshold is flaky here because Python interpreter startup
+        // and process-spawn overhead (~300ms under full-suite load) is
+        // comparable to the 350ms sleep, so concurrent execution can drift up
+        // toward an absolute serial cutoff. Measuring a single command captures
+        // that overhead on *this* machine under *current* load, so the assertion
+        // adapts instead of guessing.
+        let mut baseline_fm = fm_from_json(json!({ "solo": sleep_cmd("solo") }));
+        let start = Instant::now();
+        execute_frontmatter_shell_expansion(&mut baseline_fm, &make_options(), &mut runtime, None)
+            .unwrap();
+        let single = start.elapsed();
+
+        // Two commands run concurrently should finish in roughly one command's
+        // time (~1x `single`), not two (~2x). The 1.6x cutoff sits comfortably
+        // between those, so the test stays green under load yet fails loudly if
+        // the commands serialize.
         let mut fm = fm_from_json(json!({
             "one": sleep_cmd("one"),
             "two": sleep_cmd("two")
         }));
-        let options = ComposeOptions::new().with_shell(ShellExpansionOptions {
-            timeout: Duration::from_secs(2),
-            policy_root: Some(temp_dir.path().to_path_buf()),
-            approval_handler: Some(Arc::new(MockApproval)),
-            ..Default::default()
-        });
-        let mut runtime = make_runtime();
-
         let start = Instant::now();
         let report =
-            execute_frontmatter_shell_expansion(&mut fm, &options, &mut runtime, None).unwrap();
+            execute_frontmatter_shell_expansion(&mut fm, &make_options(), &mut runtime, None)
+                .unwrap();
         let elapsed = start.elapsed();
 
         assert_eq!(report.replacements, 2);
         assert_eq!(fm.as_map().get("one"), Some(&json!("one")));
         assert_eq!(fm.as_map().get("two"), Some(&json!("two")));
         assert!(
-            elapsed < Duration::from_millis(650),
-            "expected concurrent execution under 650ms, got {elapsed:?}"
+            elapsed < single.mul_f64(1.6),
+            "expected concurrent execution (~1x the single-command time {single:?}), but \
+             two commands took {elapsed:?} — close to the serial cost (~2x), so the \
+             commands may not be running concurrently"
         );
     }
 }
