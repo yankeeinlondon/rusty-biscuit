@@ -88,3 +88,15 @@ Each of colors provides the following luminosity levels:
 color with the luminosity level.
 - you can also add in Tailwind's convention of an opacity setting with `red-500/50` where the trailing `/50` indicates the opacity setting 
     - Note: the opacity is only used when targeting HTML, it is dropped everywhere else
+
+## Code Block Theme & Contrast
+
+The `page.code` theme (`--code-theme`, `code_theme`) is a mode-agnostic
+`ThemePair`, resolved to a concrete light/dark theme at render time. In
+**terminal** output, code blocks deliberately resolve against the *inverted*
+color mode so the panel contrasts against the page (light code on a dark
+terminal, and vice versa); prose, tables, and the page background follow the
+real terminal mode. **HTML output does not invert.** Single-variant themes
+(`dracula`/`nord`/`monokai`/`vs-dark`) ignore the mode by design.
+
+See [Code Highlighting](./code-highlighting.md) for the full model.

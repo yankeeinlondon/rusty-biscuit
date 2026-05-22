@@ -219,6 +219,15 @@ md README.md --line-numbers
 md README.md --mermaid
 ```
 
+A theme name (`--theme`, `--code-theme`) is mode-agnostic — the concrete
+light/dark variant is chosen from the detected terminal color mode. In the
+**terminal**, code blocks deliberately use the *inverted* mode (a light code
+panel in a dark terminal, and vice versa) so the code contrasts against the
+page; prose follows the real terminal mode. Single-variant themes (`dracula`,
+`nord`, `monokai`, `vs-dark`) have no opposite variant, so they render the same
+in either mode (no contrast lift). HTML output (`--output html`) does not invert.
+See [Code Highlighting](../docs/rendering/code-highlighting.md).
+
 ### Verbosity
 
 ```bash
