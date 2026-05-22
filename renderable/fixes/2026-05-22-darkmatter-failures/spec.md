@@ -461,4 +461,98 @@ Discovery first, fixes second — the value of each defect decays the longer it 
 
 - Re-architecting the bespoke renderer onto the render tree (tracked separately).
 - New themes or new `PageFill` modes.
-- Browser layout beyond the code-blocks-only contrast inversion needed for parity.
+- Browser layout beyond the code-blocks-only contrast inversion (the inversion
+  itself is **now in scope and implemented** — see Stage 4, Defect D).
+
+---
+
+## Stage 4 — Scope expansion (2026-05-22 follow-up)
+
+The initial fix (commits `9c364244` / `5366b66e`) landed Defects #0–#3 with the
+seed tests and a partial invariant suite (I1, I2-as-`no-clear`, I5, I5b, I7).
+This stage completes the spec's full ambition. All work is TDD and lands green.
+
+### 4.1 Invariant predicates factored for cross-crate reuse (Additional defect E)
+
+The invariant predicates now live in
+`biscuit-test-harness/src/layout_invariants.rs` as a `pub` module, operating on
+a rendered ANSI string plus a `LayoutExpectation { width, left, right, top,
+bottom }`. `biscuit-test-harness` is `publish = false` and already a
+dev-dependency of both **darkmatter** and **biscuit-terminal**, so the same
+contract is reusable against biscuit-terminal's own renderable components.
+Each predicate returns `Result<(), String>` and carries its own unit tests
+(SGR-aware background-extent tracking via `bg_extent`).
+
+### 4.2 Full invariant set (I1–I6) with the right-aligned-pill refinement
+
+The harness now implements the complete set the Stage 2 table specified:
+
+| Predicate | Spec inv | Applies to | Notes |
+|-----------|----------|------------|-------|
+| `containment` | I1 | every shape | unchanged |
+| `no_clear_to_eol` | I2a | every shape | `\x1b[K` ban |
+| `background_rectangle` | I2b | code panels | fill ends at `width - right` |
+| `right_boundary_coherence` | I3 | code panels | all bg lines end at one column |
+| `left_offset_uniformity` | I4 | code panels | **full-bleed** lines open at `left` |
+| `vertical_rhythm` | I5 | every shape | no ≥2 interior blanks |
+| `margin_blanks` | I5b | every shape | leading/trailing == `top`/`bottom` |
+| `blank_line_idempotent` | I6 | every shape | 1 vs 5 vs 99 blanks render identically |
+
+**Refinement discovered by the sweep.** The spec's I2/I4 wording ("a line
+carrying a background opens it after exactly `left` cells") does **not** hold
+for a code block's **language pill**: the pill is right-aligned chrome whose
+(narrow) background legitimately opens mid-line and ends on the right boundary.
+Per Defect #2 ("No change to `format_header_row` is required"), the pill is
+correct as-is. So the rectangle family was scoped accordingly:
+
+- **I2b** and **I3** check the *right* edge (`width - right`), which the pill
+  satisfies — this is the real Defect #2 cross-coherence check.
+- **I4** is scoped to *full-bleed* lines (fill == content width); narrow chrome
+  is exempt.
+
+This is the spec's "the sweep is expected to surface things we have not
+inspected" working as intended — it surfaced a mis-generalization in the
+invariant wording, not a renderer bug.
+
+### 4.3 Ledger protocol for the invariant sweep (Additional defect E)
+
+`darkmatter/lib/tests/render_invariants.rs` was converted from
+panic-collect-all to the same regression/fixed ledger protocol as
+`render_comparison.rs`: a committed `KNOWN_VIOLATIONS` const, a live-vs-known
+diff that reports regressions and fixes separately, and a
+`RECORD_INVARIANTS=1` regeneration mode. The sweep runs `shapes() × scenarios()`
+(12 block shapes × 5 layouts, code-panel invariants gated on `is_code`) and
+currently lands an **empty ledger** — every applicable invariant holds in every
+cell. I6 (idempotence) and I7 (theme inversion) are dedicated tests alongside.
+
+### 4.4 Defect D — HTML code blocks now invert (promoted from deferred)
+
+HTML code blocks resolve their `ThemePair` against `color_mode.inverted()`,
+matching the terminal for cross-target parity. The `color_mode` is read as the
+caller-declared **page** mode, so a dark page emits a light code panel exactly
+as the terminal does. Applied at **both** HTML construction sites:
+
+- `markdown/output/html.rs::as_html` (drives `.code-block` / `.code-block-title`
+  CSS and the highlighted `<span>` colors), and
+- `markdown/yaml_block.rs::render_browser_html` (so a Markdown ` ```yaml ` fence
+  and a `YamlBlock` stay byte-identical — locked by
+  `test_browser_render_parity_with_markdown_yaml_fence`).
+
+Verified by `tests/html_inversion.rs` (deterministic: dark page → github-light
+`#ffffff`, light page → github-dark `#111b27`, single-variant dracula
+mode-invariant) and the re-blessed `browser_render.rs` computed-style assertion
+(`rgb(255, 255, 255)`). Nine horizontal-rule HTML snapshots were re-blessed —
+the only delta is the documented `.code-block` background inverting
+`#111b27 → #ffffff` and `.code-block-title` `#07111d → #f5f5f5`. Docs updated:
+`darkmatter/cli/README.md`, `darkmatter/docs/rendering/{code-highlighting,style}.md`,
+`darkmatter/docs/darkmatter-rendering-pipeline.md`, and the `darkmatter` skill
+(`SKILL.md`, `terminal.md`).
+
+### 4.5 Stage 4 success criteria (met)
+
+- Invariant predicates live in `biscuit-test-harness::layout_invariants` with
+  unit tests; reusable by biscuit-terminal.
+- I1–I6 implemented; the `render_invariants` sweep passes with an empty ledger.
+- Defect D implemented at both HTML sites; HTML and terminal agree; full
+  `cargo test -p darkmatter` and `-p darkmatter-cli` green; snapshots re-blessed
+  after review; docs and skill updated.
