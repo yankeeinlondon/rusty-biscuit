@@ -173,7 +173,12 @@ image rendering. They must be represented in parity ledgers before any public
 target cutover. Browser/terminal code highlighting — including info-string
 titles, line numbers, and highlighted lines — is **no longer a gap**: the
 `CodeRenderer` hook carries `meta` and is wired on both surfaces (review-11),
-so rich code blocks reach full parity with the legacy renderers.
+so rich code blocks reach full parity with the legacy renderers. Terminal
+styling/layout for rich code blocks is verified at Level 2 — a WezTerm pane
+test renders the wired `TerminalCodeRenderer` and asserts the title, body,
+line-number gutter, syntax-highlight SGRs, and a distinct highlighted-line
+background survive a real terminal (`tests/level2_render_tree_terminal.rs`,
+enforced under `just test-l2`; review-13).
 
 ### DMTR-1: Add Explicit Tree Rendering Entry Points
 
