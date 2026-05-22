@@ -171,7 +171,7 @@ fn detect_image_support_from_env() -> ImageSupport {
 fn build_status_table(statuses: &[WorktreeStatus], terminal: &Terminal) -> Table {
     let columns = vec![
         TableColumn::new("Worktree").with_alignment(Alignment::Center),
-        TableColumn::new("WT Name"),
+        TableColumn::new("Worktree Name"),
         TableColumn::new("Branch"),
         TableColumn::new("Merge").with_alignment(Alignment::Center),
         TableColumn::new("Commits").with_alignment(Alignment::Right),
@@ -209,6 +209,10 @@ fn wt_name_markup(status: &WorktreeStatus) -> String {
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_else(|| "(unknown)".to_string());
+    if status.entry.is_main {
+        let branch = status.entry.branch.as_deref().unwrap_or("HEAD");
+        return format!("<dim>{branch}::(<i>{name}</i>)</dim>");
+    }
     if status.entry.is_current {
         format!("<b>{name}</b>")
     } else {
