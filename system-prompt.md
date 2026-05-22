@@ -19,6 +19,7 @@ scope: "{{ctx.current_package_area == 'root' ? 'package' : 'package area' }}"
 - when a package area has both a library and CLI (as many do) the naming convention is:
     - `{name}` for library
     - `{name}-cli` for the CLI
+- if you are ever sending raw escape codes to the terminal you are doing something wrong! You should be using a `TerminalRenderable` components!
 
 ## Hashing Content
 
