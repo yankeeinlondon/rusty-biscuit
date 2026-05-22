@@ -13,6 +13,7 @@ style:
     ul:
         alignment: left
         left-margin: 4ch  
+        max-width: 40
 ---
 
 # Testing the `style` Property
@@ -53,6 +54,7 @@ The configuration of this page is with regard to lists is:
 
 - Ordered Lists are right justified
 - Unordered Lists are left justified (the default) but a left margin of 4ch has been applied
+- They are also limited to a max-width of 40 characters (uses a bare number not a unit based one)
 
 In order to see the ordered list:
 
