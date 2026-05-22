@@ -1,6 +1,6 @@
 ---
 name: acp
-description: Detailed information on the Agent Client Protocol (ACP), libraries to use in Rust and Typescript, background details on the underlying JSON-RPC standard. Also includes detailed strategies for interacting with claude code, codex, kimi-code, opencode, gemini-cli, and other Agentic CLI providers.
+description: Expert knowledge for the Agent Client Protocol (ACP) and its underlying JSON-RPC standard, with Rust and TypeScript libraries. Use when implementing or integrating ACP, building an ACP client or agent, or devising strategies for interacting with agentic CLI providers (Claude Code, Codex, Kimi Code, OpenCode, Gemini CLI) over ACP.
 argument-hint: "[--deploy]"
 
 prompt: |-

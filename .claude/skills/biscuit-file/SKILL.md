@@ -1,7 +1,7 @@
 ---
 name: biscuit-file
 description: >
-  Expert knowledge for the biscuit-file Rust library and CLI (`bf`) providing format conversion (TOML/YAML/JSON/JSON5), PDF extraction, file type detection, and and file reference resolution. Use when working in the `biscuit-file/` package area, using biscuit-file types (Toml, Yaml, Json5, Pdf, FileReference, PathPosition, FileType, DataFormat, FileReferenceError), adding the biscuit-file dependency, implementing file resolution, resolving file references, or  - when converting between data formats, extracting PDF content, reading markdown frontmatter, or detecting file types.
+  Expert knowledge for the biscuit-file Rust library and CLI (`bf`) providing format conversion (TOML/YAML/JSON/JSON5), PDF extraction, file type detection, and file reference resolution. Use when working in the `biscuit-file/` package area, using biscuit-file types (Toml, Yaml, Json5, Pdf, FileReference, PathPosition, FileType, DataFormat, FileReferenceError), adding the biscuit-file dependency, implementing file resolution, resolving file references, converting between data formats, extracting PDF content, reading markdown frontmatter, or detecting file types.
 ---
 
 - Read [references/format-conversion.md](references/format-conversion.md) when converting between TOML, YAML, JSON, JSON5, or PDF formats

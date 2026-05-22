@@ -1,6 +1,6 @@
 ---
 name: crossterm
-description: Cross-platform Rust terminal manipulation library for building TUIs and CLI applications with cursor control, styling, event handling, and mouse support on Windows and UNIX systems
+description: Expert knowledge for the crossterm crate — cross-platform terminal manipulation (cursor control, styling, event handling, mouse support) on Windows and UNIX. Use when building TUIs or CLI apps that need raw mode, styled output, key/mouse events, or alternate-screen handling.
 last_updated: 2025-12-26T00:00:00Z
 hash: a9ab345fd1f4d478
 ---
