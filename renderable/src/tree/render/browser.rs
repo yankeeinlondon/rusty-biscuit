@@ -23,12 +23,15 @@
 //! assert_eq!(rendered.output.render(), "<div><h2>Title</h2></div>");
 //! ```
 
+use std::rc::Rc;
+
 use crate::browser::PageOptions;
 use crate::browser::fragment::{BrowserFragment, ComposableNode, Ready};
+use crate::tree::render::CodeRenderer;
 use crate::html::HtmlPage;
-use crate::html::attribute::{ClassDefinition, DomId};
+use crate::html::attribute::{ClassDefinition, DomId, HtmlDataAttribute};
 use crate::html::tag::{BlockTag, HtmlAttribute, HtmlType, VoidTag};
-use crate::tree::attrs::NodeAttrs;
+use crate::tree::attrs::{HintNamespace, NodeAttrs};
 use crate::tree::diagnostic::{Diagnostic, Severity};
 use crate::tree::document::Document;
 use crate::tree::error::{RenderError, RenderStrictness, Rendered};
@@ -60,8 +63,9 @@ pub enum RawHtmlPolicy {
 /// Options controlling a browser render.
 ///
 /// The [`Default`] uses [`RenderStrictness::Warn`], [`RawHtmlPolicy::Escape`]
-/// (the safe choice — see [`RawHtmlPolicy`]), and no [`PageOptions`].
-#[derive(Debug, Default)]
+/// (the safe choice — see [`RawHtmlPolicy`]), no [`PageOptions`], and no
+/// [`CodeRenderer`] (fenced code blocks fall back to plain `<pre><code>`).
+#[derive(Default)]
 pub struct BrowserRenderOptions {
     /// How strictly lossy or unsupported content is treated.
     pub strictness: RenderStrictness,
@@ -69,6 +73,22 @@ pub struct BrowserRenderOptions {
     pub raw_html: RawHtmlPolicy,
     /// Optional page options applied by [`render_browser_document`].
     pub page: Option<PageOptions>,
+    /// Optional hook for bespoke code-block rendering (e.g. syntax
+    /// highlighting). When `None`, [`NodeKind::Code`] nodes render as a plain
+    /// `<pre><code>` block with a `language-<lang>` class.
+    pub code_renderer: Option<Rc<dyn CodeRenderer>>,
+}
+
+impl std::fmt::Debug for BrowserRenderOptions {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // `dyn CodeRenderer` is not `Debug`; report only whether one is set.
+        f.debug_struct("BrowserRenderOptions")
+            .field("strictness", &self.strictness)
+            .field("raw_html", &self.raw_html)
+            .field("page", &self.page)
+            .field("code_renderer", &self.code_renderer.is_some())
+            .finish()
+    }
 }
 
 /// Renders a render tree node to a typed [`BrowserFragment<Ready>`].
@@ -247,12 +267,10 @@ impl Writer<'_> {
             NodeKind::ListItem { checked, children } => {
                 self.render_list_item(node, *checked, children)
             }
-            NodeKind::Code {
-                lang,
-                meta: _,
-                value,
-            } => Ok(self.render_code_block(node, lang.as_deref(), value)),
-            NodeKind::ThematicBreak => Ok(self.void(VoidTag::Hr, &node.attrs)),
+            NodeKind::Code { lang, meta, value } => {
+                Ok(self.render_code_block(node, lang.as_deref(), meta.as_deref(), value))
+            }
+            NodeKind::ThematicBreak => Ok(self.render_thematic_break(&node.attrs)),
             NodeKind::Table { align, children } => self.render_table(node, align, children),
             NodeKind::TableRow { children } => self.block(BlockTag::Tr, &node.attrs, children),
             NodeKind::TableCell { children } => self.block(BlockTag::Td, &node.attrs, children),
@@ -321,6 +339,33 @@ impl Writer<'_> {
         let mut fragment = BrowserFragment::new().define_as_void_tag(tag);
         for attr in node_attributes(attrs, inline) {
             fragment = fragment.add_attribute(attr);
+        }
+        fragment.finalize()
+    }
+
+    /// Builds the `<hr>` for a [`NodeKind::ThematicBreak`], surfacing any
+    /// `darkmatter.hr.*` hints as `data-hr-*` HTML attributes so the styled
+    /// rule is user-observable rather than collapsing to a plain `<hr>`
+    /// (review-4 finding 2).
+    ///
+    /// Renderers that do not understand the hints simply ignore the data
+    /// attributes — the design's "renderers that do not understand the hint
+    /// should render a normal thematic break" contract still holds because a
+    /// `<hr data-hr-style="waves">` degrades to a plain rule when no CSS
+    /// targets the data attribute.
+    fn render_thematic_break(&self, attrs: &NodeAttrs) -> BrowserFragment<Ready> {
+        let mut fragment = BrowserFragment::new().define_as_void_tag(VoidTag::Hr);
+        for attr in node_attributes(attrs, is_inline_void_tag(&VoidTag::Hr)) {
+            fragment = fragment.add_attribute(attr);
+        }
+        const HR_NS: HintNamespace = HintNamespace("darkmatter.hr");
+        for key in ["style", "alignment", "weight", "width", "color"] {
+            if let Some(value) = attrs.get_hint(HR_NS, key).and_then(|v| v.as_str()) {
+                fragment = fragment.add_attribute(HtmlAttribute::Data(
+                    HtmlDataAttribute::new(format!("hr-{key}")),
+                    value.to_string(),
+                ));
+            }
         }
         fragment.finalize()
     }
@@ -555,14 +600,25 @@ impl Writer<'_> {
         Ok(fragment.finalize())
     }
 
-    /// Renders a fenced code block as `<pre><code>`; a language is carried as
-    /// a `language-<lang>` class on the `<code>` element.
+    /// Renders a fenced code block.
+    ///
+    /// When [`BrowserRenderOptions::code_renderer`] is set, the hook is given
+    /// the language, body, info-string `meta`, and node attributes; a `Some`
+    /// result is used verbatim. A `None` result (or no hook) falls back to the
+    /// built-in plain `<pre><code>` rendering, with the language carried as a
+    /// `language-<lang>` class on the `<code>` element.
     fn render_code_block(
         &self,
         node: &RenderNode,
         lang: Option<&str>,
+        meta: Option<&str>,
         value: &str,
     ) -> BrowserFragment<Ready> {
+        if let Some(renderer) = &self.opts.code_renderer
+            && let Some(fragment) = renderer.render_browser_code(lang, value, meta, &node.attrs)
+        {
+            return fragment;
+        }
         let mut code = BrowserFragment::new().define_as_block_tag(BlockTag::Code, "");
         if let Some(lang) = lang.filter(|lang| !lang.is_empty()) {
             code = code.add_attribute(HtmlAttribute::Class(ClassDefinition::new(format!(
@@ -1192,6 +1248,7 @@ mod tests {
             strictness,
             raw_html,
             page: None,
+            ..BrowserRenderOptions::default()
         }
     }
 
@@ -1309,6 +1366,27 @@ mod tests {
         assert_eq!(html(&RenderNode::thematic_break()), "<hr>");
         assert_eq!(html(&RenderNode::hard_break()), "<br>");
         assert_eq!(html(&RenderNode::soft_break()), " ");
+    }
+
+    /// Review-4 finding 2: a `<hr>` produced from darkmatter's HR-attribute
+    /// fold must surface its `darkmatter.hr.*` hints as `data-hr-*` HTML
+    /// attributes so the styled rule is user-observable in the browser. A
+    /// plain `ThematicBreak` (no hints) still degrades to a bare `<hr>`.
+    #[test]
+    fn thematic_break_surfaces_darkmatter_hr_hints_as_data_attrs() {
+        let mut hr = RenderNode::thematic_break();
+        let ns = HintNamespace("darkmatter.hr");
+        hr.attrs.set_hint(ns, "style", serde_json::json!("waves"));
+        hr.attrs.set_hint(ns, "weight", serde_json::json!("thick"));
+        let rendered = html(&hr);
+        assert!(
+            rendered.contains(r#"data-hr-style="waves""#),
+            "expected data-hr-style attribute: {rendered}",
+        );
+        assert!(
+            rendered.contains(r#"data-hr-weight="thick""#),
+            "expected data-hr-weight attribute: {rendered}",
+        );
     }
 
     #[test]
@@ -1546,6 +1624,7 @@ mod tests {
                 external_stylesheet: None,
                 external_code: None,
             }),
+            ..BrowserRenderOptions::default()
         };
         let rendered = render_browser_document(&doc, &opts).expect("render");
         let html = rendered.output.render();

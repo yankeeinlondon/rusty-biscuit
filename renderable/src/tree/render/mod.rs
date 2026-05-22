@@ -64,12 +64,18 @@ pub trait CodeRenderer {
     ///
     /// - `lang`: The language tag (e.g., `"rust"`, `"yaml"`), if any.
     /// - `value`: The raw code content.
+    /// - `meta`: The fenced code-block info string beyond the language token
+    ///   (e.g. `title="…" line-numbering=true highlight=2`), if any. A renderer
+    ///   that understands the directive may use it for titles, line numbering,
+    ///   and highlighted-line ranges; renderers that do not understand it should
+    ///   ignore it.
     /// - `attrs`: Node attributes including optional code render hints.
     /// - `context`: Terminal capability context (width, color depth, mode).
     fn render_terminal_code(
         &self,
         lang: Option<&str>,
         value: &str,
+        meta: Option<&str>,
         attrs: &NodeAttrs,
         context: TerminalCodeContext,
     ) -> Option<String>;
@@ -78,10 +84,19 @@ pub trait CodeRenderer {
     ///
     /// Returns `Some(fragment)` with styled HTML output, or `None` to fall
     /// back to plain rendering.
+    ///
+    /// ## Arguments
+    ///
+    /// - `lang`: The language tag (e.g., `"rust"`, `"yaml"`), if any.
+    /// - `value`: The raw code content.
+    /// - `meta`: The fenced code-block info string beyond the language token
+    ///   (title / line-numbering / highlight directive), if any.
+    /// - `attrs`: Node attributes including optional code render hints.
     fn render_browser_code(
         &self,
         lang: Option<&str>,
         value: &str,
+        meta: Option<&str>,
         attrs: &NodeAttrs,
     ) -> Option<BrowserFragment<Ready>>;
 }
