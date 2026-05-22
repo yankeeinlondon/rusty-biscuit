@@ -250,6 +250,13 @@ explicit on the node that paints them.
   `Padded` (the content band), or `Indented` (inset from both edges).
   `Fill::inset` adds leading unpainted columns and narrows the band.
 
+> **Code blocks are outside this `Style` primitive.** Syntax-highlighted code
+> panels are driven by darkmatter's `ThemePair` + `ColorMode`, not `Style`. As a
+> terminal-specific concern, darkmatter resolves the *code* theme against the
+> **inverted** color mode for page contrast (light code on a dark terminal); the
+> Browser path does not invert. See darkmatter's
+> [Code Highlighting](../../darkmatter/docs/rendering/code-highlighting.md).
+
 **Browser** (`renderable/src/tree/render/browser.rs`, `style_css_declarations`
 plus `wrap_style_emphasis`) lowers `Style`'s text-appearance and box-color
 layers to CSS during fragment emission:
