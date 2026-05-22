@@ -1,18 +1,55 @@
 # Darkmatter Tree Rendering Migration Plan
 
+## Status (2026-05-21)
+
+All seven success criteria are now met. See `review-1.md` for the
+finding-by-finding resolution table, and the spec's *Acceptance Criteria*
+section for the matching ✔ markers.
+
+### Review-4 Resolutions (2026-05-21)
+
+| Finding | Resolution |
+| --- | --- |
+| H1: mixed mark/dim nesting impossible | `SpannedInlineStyleProcessor` now uses a frame stack (`open_stack: Vec<OpenSpan>`) so mark and dim nest. Fold tests `span_aware_fold_nests_dim_inside_mark` and `span_aware_fold_nests_mark_inside_dim` cover both directions of the design's "Mixed Mark and Dim" fixture. |
+| H2: HR attributes folded but not rendered | Terminal renderer's `ThematicBreak` arm calls `horizontal_rule_from_attrs` to map `darkmatter.hr.*` hints onto `HorizontalRule` style/alignment/weight/width/color. Browser renderer's `render_thematic_break` surfaces the same hints as `data-hr-*` HTML attributes. Level 1 tests cover both; Level 2 test asserts the waves-rule glyph (`≋` / `~`) appears in the captured frame. |
+| H3: benchmark misses span-aware path | `migration_parity.rs` now routes each fixture through `fold_fixture(name, input)`, which selects `fold_markdown_spanned_with_frontmatter` for `mark_dim_hr` and the plain fold for all other fixtures. Baselines.md documents the routing. |
+
+### Review-5 Resolutions (2026-05-21)
+
+| Finding | Resolution |
+| --- | --- |
+| H1: terminal tree path ignores `TerminalOptions::color_depth` | Added `darkmatter_color_depth_to_terminal` mapping helper and applied it inside `terminal_options_from_terminal_options`, so the tree entry point honors `opts.color_depth`. The bench harness's `pinned_tree_terminal_options(color)` now takes the intended depth and the `migration/terminal_no_color` group includes a `debug_assert_eq!` that the tree context's `color_depth` is `TerminalColorDepth::None`. Level 1 tests `terminal_options_mapping_pins_color_depth_translation` (every variant) and `render_tree_terminal_color_depth_none_emits_no_color_sgrs` (no color SGRs in rendered bytes) pin both wiring and observable contract. Baselines.md flags the recorded no-color numbers for re-capture. |
+
+### Review-10 Resolutions (2026-05-21)
+
+| Finding | Resolution |
+| --- | --- |
+| H1: DMTR-5 marks parity complete without target coverage for footnotes/superscript/subscript, rich code blocks, image title/width, Mermaid modes, and MarkdownPlus | Added parity fixtures + tests in `render_tree_parity.rs`: `render_tree_parity_footnote_divergence`, `render_tree_parity_superscript_divergence`, `render_tree_parity_subscript_divergence` (parser-option-sensitive — each pins legacy ignoring/mangling vs the tree producing structural nodes), `render_tree_parity_code_block_rich` (syntax-highlight + body equivalence, with the info-string title/line-number/highlight metadata classified as an accepted divergence), `render_tree_parity_image_titled` (alt/src/title equivalence; structured-title `width` classified as accepted divergence), `render_tree_parity_mermaid_off_mode` (the only deterministic Mermaid mode; Text/Image modes classified as deferred), and `render_tree_markdown_plus_preserves_mark_span` (MarkdownPlus preserves span classes portable Markdown drops). `parser-options.md` acceptance criteria are now checked. |
+| H2: the tree terminal path never wires darkmatter's code renderer (`code_renderer: None`) | Wired `TerminalCodeRenderer` into `terminal_options_from_terminal_options` (the production entry point), the Level 2 harness `write_doc_to_tempfile`, the bench `pinned_tree_terminal_options`, and the parity harness's `tree_terminal_options`. Entry-point tests `terminal_options_wire_the_darkmatter_code_renderer` and `render_tree_terminal_syntax_highlights_code_blocks` pin both the wiring and the observable syntax-highlighted output. |
+
+### Accepted-Divergence Ledger (Review-10)
+
+| Fixture | Target | Facet | Classification |
+| --- | --- | --- | --- |
+| `code_block_rich` | Terminal | info-string title / line numbers / highlighted lines | **Accepted divergence** — the `CodeRenderer` hook receives `(lang, value, attrs, context)` but not the code block's info-string `meta`, so these are honored by legacy but not the tree path. Data survives on `NodeKind::Code.meta`; renderer-side threading deferred until the trait grows a `meta` parameter. |
+| `image_titled` | Browser | structured-title `width` extension | **Accepted divergence** — the tree fold captures only image `url` + `title`; darkmatter's structured-title `width` is not parsed, so legacy emits a `width` attribute the tree path omits. |
+| `footnote` / `superscript` / `subscript` | Browser / MarkdownPlus / Terminal | structural treatment | **Intentional expansion** — tree-experimental parser options widen the fold; legacy ignores/mangles the syntax by design (`parser-options.md`). Visible text survives on both. |
+| `mermaid_off` (Text / Image modes) | Terminal / Browser | diagram rendering | **Deferred** — `MermaidMode::Off` is deterministic and covered; Text/Image modes shell out to external renderers / need a tree Mermaid adapter (`entry-point-shape.md`, `baselines.md`). |
+
 ## Success Criteria
 
-- Experimental tree-backed Darkmatter entry points exist for Markdown,
+- [x] Experimental tree-backed Darkmatter entry points exist for Markdown,
   MarkdownPlus, Browser/HTML, and Terminal without changing public legacy
   methods.
-- Parser options are explicit, documented, and fixture-backed.
-- Darkmatter mark, dim, and HR-attribute processors have a span-aware fold path
-  with source ranges preserved.
-- Folded `Document`s can carry already-extracted frontmatter metadata.
-- Legacy-vs-tree parity tests classify every difference by target and phase.
-- `cargo bench -p darkmatter --bench migration_parity` exists with baseline
+- [x] Parser options are explicit, documented, and fixture-backed.
+- [x] Darkmatter mark, dim, and HR-attribute processors have a span-aware fold
+  path with source ranges preserved.
+- [x] Folded `Document`s can carry already-extracted frontmatter metadata.
+- [x] Legacy-vs-tree parity tests classify every difference by target and
+  phase.
+- [x] `cargo bench -p darkmatter --bench migration_parity` exists with baseline
   numbers before any public cutover.
-- Raw HTML stays escaped by default on the tree Browser/HTML path.
+- [x] Raw HTML stays escaped by default on the tree Browser/HTML path.
 
 ## Phase 0: Preflight and Baseline
 

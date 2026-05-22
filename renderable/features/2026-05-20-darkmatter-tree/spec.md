@@ -168,9 +168,12 @@ contract is:
   and the command `cargo bench -p darkmatter --bench migration_parity`.
 
 Known experimental adapter gaps from `entry-point-shape.md` are accepted only
-for the internal tree path: browser code highlighting, Mermaid lowering, HR CSS
-variables, and terminal image rendering. They must be represented in parity
-ledgers before any public target cutover.
+for the internal tree path: Mermaid lowering, HR CSS variables, and terminal
+image rendering. They must be represented in parity ledgers before any public
+target cutover. Browser/terminal code highlighting — including info-string
+titles, line numbers, and highlighted lines — is **no longer a gap**: the
+`CodeRenderer` hook carries `meta` and is wired on both surfaces (review-11),
+so rich code blocks reach full parity with the legacy renderers.
 
 ### DMTR-1: Add Explicit Tree Rendering Entry Points
 
@@ -468,19 +471,27 @@ Performance tuning posture:
 
 ## Acceptance Criteria
 
-- [ ] Experimental tree-backed Darkmatter render entry points exist for
+- [x] Experimental tree-backed Darkmatter render entry points exist for
   Markdown, MarkdownPlus (a `MarkdownDialect` of the Markdown renderer),
-  Browser, and Terminal.
-- [ ] Parser option policy is documented and fixture-backed.
-- [ ] Mark, dim, and HR-attribute processors have a span-aware path or are
-  explicitly recorded as the blocking parity gap.
-- [ ] Folded documents can carry extracted frontmatter metadata.
-- [ ] Legacy-vs-tree parity fixtures exist across the listed fixture
+  Browser, and Terminal. *(See `darkmatter::markdown::render_tree::entrypoints`.)*
+- [x] Parser option policy is documented and fixture-backed. *(See
+  `render_tree_parser_options` plus the strengthened
+  `render_tree_parity_table` test that pins structural `<table>` semantics.)*
+- [x] Mark, dim, and HR-attribute processors have a span-aware path or are
+  explicitly recorded as the blocking parity gap. *(See `render_tree::span`
+  and `fold_markdown_spanned_with_frontmatter`.)*
+- [x] Folded documents can carry extracted frontmatter metadata. *(See
+  `fold_markdown_with_frontmatter` and the
+  `render_tree_frontmatter_above_the_fold_attaches_metadata` test.)*
+- [x] Legacy-vs-tree parity fixtures exist across the listed fixture
   categories.
-- [ ] Benchmark commands and baseline results exist before any public cutover.
-- [ ] New tree code avoids obvious string cloning without introducing broad
+- [x] Benchmark commands and baseline results exist before any public cutover.
+  *(See `darkmatter/lib/benches/migration_parity.rs`; run with `cargo bench -p
+  darkmatter --bench migration_parity`.)*
+- [x] New tree code avoids obvious string cloning without introducing broad
   optimization work.
-- [ ] Raw HTML defaults to legacy-safe escaping on the tree-backed Browser/HTML
-  path unless a separate opt-in policy is approved.
-- [ ] Parsed Markdown and renderable components converge at `RenderNode`; the
+- [x] Raw HTML defaults to legacy-safe escaping on the tree-backed Browser/HTML
+  path unless a separate opt-in policy is approved. *(See `entrypoints::
+  browser_options_from_html_options`.)*
+- [x] Parsed Markdown and renderable components converge at `RenderNode`; the
   migration does not render ordinary Markdown by constructing component objects.

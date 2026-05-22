@@ -102,7 +102,7 @@ Add parser-option fixtures before any public tree cutover:
 
 ## Acceptance criteria
 
-- [ ] The fold's parser construction uses only flags listed as **public now** or **tree experimental** above.
-- [ ] Parity fixtures for task lists, footnotes, superscript, and subscript exist and explicitly document the legacy-vs-tree divergence.
-- [ ] The legacy `as_html` parser options are updated to include `ENABLE_TABLES` (or the pre-existing gap is documented as accepted).
-- [ ] No deferred option is enabled in either legacy or tree code paths.
+- [x] The fold's parser construction uses only flags listed as **public now** or **tree experimental** above. *(See `render_tree_parser_options()` in `darkmatter/lib/src/markdown/render_tree/fold.rs`.)*
+- [x] Parity fixtures for task lists, footnotes, superscript, and subscript exist and explicitly document the legacy-vs-tree divergence. *(See `render_tree_parity_task_list`, `render_tree_parity_footnote_divergence`, `render_tree_parity_superscript_divergence`, and `render_tree_parity_subscript_divergence` in `darkmatter/lib/tests/render_tree_parity.rs`; each pins legacy ignoring/mangling the syntax against the tree path producing structural nodes.)*
+- [x] The legacy `as_html` parser options are updated to include `ENABLE_TABLES` (or the pre-existing gap is documented as accepted). *(`as_html` enables `ENABLE_TABLES`; pinned by `render_tree_parity_table`'s structural `<table>`/`<tr>`/`<td>` assertions.)*
+- [x] No deferred option is enabled in either legacy or tree code paths. *(The fold lists each enabled flag individually; no `Options::all()` / `ENABLE_GFM` shorthand.)*

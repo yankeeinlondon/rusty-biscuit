@@ -109,7 +109,7 @@ fn terminal_options_from_terminal_options(
 
 These mappings are intentionally narrow for the experimental phase:
 
-- **Code highlighting** — the tree browser renderer currently emits plain `<pre><code class="language-{lang}">` and does not run syntect. Until the `CodeRenderer` hook is wired, `render_tree_html` will not match `as_html`'s highlighted output. This is a documented parity gap, not a blocker for the internal API.
+- **Code highlighting** — *closed (review-11 finding 2).* Both `render_tree_html` and `render_tree_terminal` wire darkmatter's `TerminalCodeRenderer` via the `CodeRenderer` hook. The hook now also receives the fenced info-string `meta` (the `CodeRenderer` trait grew a `meta` parameter), so it re-parses `title="…" line-numbering=true highlight=N` through `parse_code_info` and reproduces the legacy renderer's title block, line-number table/gutter, and highlighted-line markup on both the browser and terminal surfaces. On `ColorDepth::None` the terminal hook returns `None` so the plain (no-color) fallback runs, matching the legacy no-formatting contract (review-11 finding 1).
 - **Mermaid** — `BrowserRenderOptions` has no mermaid mode. The experimental
   adapter should preserve legacy raw-HTML safety first (`RawHtmlPolicy::Escape`
   by default). Mermaid parity is a documented gap until a tree-level Mermaid
