@@ -109,6 +109,15 @@ impl Prose {
     /// with a backslash. Use this for any user-controlled string that is
     /// interpolated into Prose content.
     ///
+    /// ## ANSI escape pass-through
+    ///
+    /// Pre-styled text containing CSI (`ESC [ … final-byte`) or OSC
+    /// (`ESC ] … BEL | ST`) escape sequences passes through unchanged: the
+    /// `[` inside a CSI sequence is part of an escape, not Prose grammar.
+    /// Escaping it would corrupt the styled bytes (an extra `\` between
+    /// `ESC` and `[` makes the terminal treat the SGR as literal text).
+    /// Outside of ANSI sequences the normal Prose escaping rules apply.
+    ///
     /// ## Examples
     ///
     /// ```rust
@@ -119,14 +128,59 @@ impl Prose {
     /// ```
     pub fn escape_text(s: &str) -> String {
         let mut result = String::with_capacity(s.len());
-        for c in s.chars() {
-            match c {
+        let bytes = s.as_bytes();
+        let mut i = 0;
+        while i < bytes.len() {
+            if bytes[i] == 0x1B && i + 1 < bytes.len() {
+                // Recognize ANSI CSI / OSC sequences and pass them through
+                // verbatim. `escape_text` is byte-oriented when stepping over
+                // ESC sequences (all bytes here are ASCII) and reverts to
+                // char-based handling once the sequence ends.
+                let next = bytes[i + 1];
+                if next == b'[' {
+                    // CSI: ESC '[' params... final-byte (0x40..=0x7E).
+                    let start = i;
+                    i += 2;
+                    while i < bytes.len() && !(0x40..=0x7E).contains(&bytes[i]) {
+                        i += 1;
+                    }
+                    if i < bytes.len() {
+                        i += 1; // include the final byte
+                    }
+                    result.push_str(&s[start..i]);
+                    continue;
+                }
+                if next == b']' {
+                    // OSC: ESC ']' params... BEL or ESC '\' (ST).
+                    let start = i;
+                    i += 2;
+                    while i < bytes.len() {
+                        if bytes[i] == 0x07 {
+                            i += 1;
+                            break;
+                        }
+                        if bytes[i] == 0x1B && i + 1 < bytes.len() && bytes[i + 1] == b'\\' {
+                            i += 2;
+                            break;
+                        }
+                        i += 1;
+                    }
+                    result.push_str(&s[start..i]);
+                    continue;
+                }
+            }
+            // Step one UTF-8 character. `s[i..]` is always a valid char
+            // boundary here because the only multi-byte handling above
+            // jumps within ASCII-only ANSI sequences.
+            let ch = s[i..].chars().next().expect("non-empty remainder");
+            match ch {
                 '<' | '>' | '{' | '*' | '_' | '[' | ']' | '(' | ')' | '\\' => {
                     result.push('\\');
-                    result.push(c);
+                    result.push(ch);
                 }
-                _ => result.push(c),
+                _ => result.push(ch),
             }
+            i += ch.len_utf8();
         }
         result
     }

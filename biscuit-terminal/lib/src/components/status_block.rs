@@ -335,6 +335,31 @@ impl StatusBlock {
     /// of the public surface; `pub` so integration parity tests can reach
     /// it. Removing this without first adding an equivalent
     /// arbitrary-border capability to the render tree is a regression.
+    /// Returns `true` when the configured header contains Prose markup that
+    /// would lose meaning if the header were flattened to plain text.
+    ///
+    /// The canonical projection in [`Self::to_render_node`] is shared with
+    /// the Browser and Markdown adapters, so it intentionally produces a
+    /// single plain-text [`renderable::tree::NodeKind::Text`] for the
+    /// header. That projection is correct for those targets but would erase
+    /// markdown-link OSC 8 hyperlinks and bracketed-tag SGR styling on the
+    /// terminal. This guard detects the cases where bespoke rendering is
+    /// the more faithful path.
+    fn header_needs_prose_rendering(&self) -> bool {
+        let Some(header) = &self.header else {
+            return false;
+        };
+        // Markdown link syntax `[text](url)` — lowered to OSC 8 by Prose.
+        if header.contains("](") && header.contains('[') {
+            return true;
+        }
+        // Bracketed Prose tags — `<bold>`, `<a href=...>`, `<red>`, etc.
+        if header.contains('<') && header.contains('>') {
+            return true;
+        }
+        false
+    }
+
     #[doc(hidden)]
     pub fn render_bespoke(&self, term: &Terminal) -> String {
         let mut parts = Vec::new();
@@ -376,13 +401,18 @@ impl TerminalRenderable for StatusBlock {
     }
 
     fn render(&self, term: &Terminal) -> String {
-        if self.has_default_border() {
+        if self.has_default_border() && !self.header_needs_prose_rendering() {
             self.render_via_tree(term)
         } else {
             // Compatibility fallback for `StatusBlock::border()` arbitrary
-            // terminal prefixes. The canonical tree cannot express target-
-            // specific prefix text; this branch preserves the historical
-            // bespoke layout for that knob only.
+            // terminal prefixes and for Prose-bearing headers (markdown
+            // links, bold/italic/color tags). The canonical
+            // [`to_render_node`] projection flattens header prose to plain
+            // text so the Browser and Markdown adapters get stable output;
+            // that flattening discards OSC 8 hyperlinks and SGR styling. The
+            // bespoke path renders the header through [`Status::from_prose`]
+            // which preserves those, so we route here when the header
+            // declares Prose content that would otherwise drop on the floor.
             self.render_bespoke(term)
         }
     }
