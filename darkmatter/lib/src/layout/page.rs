@@ -663,9 +663,8 @@ impl DarkmatterPage {
 fn normalize_body_rhythm(body: &str) -> String {
     use biscuit_terminal::prelude::strip_escape_codes;
 
-    let is_blank = |line: &str| {
-        strip_escape_codes(line).trim().is_empty() && !line.contains("\x1b[48")
-    };
+    let is_blank =
+        |line: &str| strip_escape_codes(line).trim().is_empty() && !line.contains("\x1b[48");
 
     let mut out: Vec<&str> = Vec::new();
     let mut prev_blank = false;

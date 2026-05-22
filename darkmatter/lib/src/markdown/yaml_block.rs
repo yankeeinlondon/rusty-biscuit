@@ -312,9 +312,10 @@ impl YamlBlock {
         // Route through HtmlOptions::default() for symmetry with the terminal
         // path. Reuse the resolved color mode and theme rather than re-detecting.
         let options = HtmlOptions::default();
-        // Browser code blocks do not invert (terminal-only contrast); see the
-        // note in `darkmatter::markdown::output::html::as_html`.
-        let highlighter = CodeHighlighter::new(options.code_theme, options.color_mode);
+        // Code blocks invert their theme variant for page contrast (Defect D),
+        // matching `as_html` and the terminal path, so a Markdown ` ```yaml `
+        // fence and a `YamlBlock` render byte-identically.
+        let highlighter = CodeHighlighter::new(options.code_theme, options.color_mode.inverted());
         let meta = CodeBlockMeta::default();
 
         render_html_code_block(self.yaml(), "yaml", &meta, &highlighter, &options).unwrap_or_else(

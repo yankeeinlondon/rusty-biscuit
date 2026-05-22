@@ -58,11 +58,11 @@ pub use normalize::{
     StructureIssueKind, StructureValidation, ViolationCorrection,
 };
 pub use reference::file_tree::{FileTree, FileTreeError};
-pub use render_tree::TerminalCodeRenderer;
 pub use reference::{
     ReferenceError, ReferenceGraph, ReferenceGraphOptions, ReferenceKind, ReferenceRecord,
     ReferenceSet, TransclusionRef,
 };
+pub use render_tree::TerminalCodeRenderer;
 pub use toc::{CodeBlockInfo, InternalLinkInfo, MarkdownToc, MarkdownTocNode};
 pub use types::{FrontmatterMap, MarkdownError, MarkdownResult};
 pub use yaml_block::{YamlBlock, YamlBlockError};

@@ -118,7 +118,9 @@ async fn computed_style(
             .new_page(format!("file://{}", path.display()))
             .await
             .map_err(|e| e.to_string())?;
-        page.wait_for_navigation().await.map_err(|e| e.to_string())?;
+        page.wait_for_navigation()
+            .await
+            .map_err(|e| e.to_string())?;
         let expr = format!(
             "(() => {{ const el = document.querySelector('{selector}'); \
               return el ? getComputedStyle(el).getPropertyValue('{property}') : '<no-match>'; }})()"
@@ -141,9 +143,10 @@ async fn computed_style(
 }
 
 /// The `.code-block` background darkmatter emits for a `github` + dark page must
-/// compute, in a real browser, to the github-dark panel color (`#111b27`).
-/// This proves the emitted CSS is valid and applied — not just present in the
-/// source.
+/// compute, in a real browser, to the github-*light* panel color (`#ffffff`).
+/// Code blocks invert their theme variant for page contrast (Defect D), so a
+/// dark page gets a light code panel — matching the terminal renderer. This
+/// proves the emitted CSS is valid and applied — not just present in the source.
 #[tokio::test]
 #[serial(browser)]
 async fn code_block_background_computes_in_browser() {
@@ -169,9 +172,9 @@ async fn code_block_background_computes_in_browser() {
     };
     let bg = result.expect("computed style query failed");
 
-    // github dark panel = #111b27 = rgb(17, 27, 39).
+    // Inverted for a dark page: github light panel = #ffffff = rgb(255, 255, 255).
     assert_eq!(
-        bg, "rgb(17, 27, 39)",
-        "browser-computed .code-block background-color should be the github-dark panel color",
+        bg, "rgb(255, 255, 255)",
+        "browser-computed .code-block background-color should be the inverted (github-light) panel color",
     );
 }

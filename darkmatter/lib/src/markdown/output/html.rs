@@ -141,12 +141,14 @@ pub fn as_html(md: &Markdown, options: HtmlOptions) -> MarkdownResult<String> {
 
     // Create highlighter for code blocks.
     //
-    // Note: unlike the terminal renderer, the browser path does NOT invert the
-    // code theme for page contrast. Terminal inversion keys off live light/dark
-    // *detection*; HTML `color_mode` is caller-set and the page's contrast is a
-    // CSS concern. Cross-target HTML code contrast is tracked separately (see
-    // `renderable/fixes/2026-05-22-darkmatter-failures/spec.md`, defect D).
-    let code_highlighter = CodeHighlighter::new(options.code_theme, options.color_mode);
+    // Code blocks contrast against the page: resolve the code `ThemePair`
+    // against the INVERTED color mode so a dark page gets a light code panel
+    // (and vice versa), matching the terminal renderer for cross-target parity.
+    // This is code-blocks-only — prose follows `options.color_mode`. Single-
+    // variant themes (dracula, nord, …) ignore the mode, so inversion is a
+    // deliberate no-op for them. See
+    // `renderable/fixes/2026-05-22-darkmatter-failures/spec.md`, defect D.
+    let code_highlighter = CodeHighlighter::new(options.code_theme, options.color_mode.inverted());
 
     // Emit page-level `:root` declarations for horizontal-rule CSS custom
     // properties. This is independent of `include_styles` — the override

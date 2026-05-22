@@ -172,11 +172,7 @@ impl CodeRenderer for TerminalCodeRenderer {
         // line-number table, and highlighted-line markup.
         let html =
             render_html_code_block(value, language, &code_meta, &highlighter, &options).ok()?;
-        Some(
-            BrowserFragment::new()
-                .define_as_raw_html(html)
-                .finalize(),
-        )
+        Some(BrowserFragment::new().define_as_raw_html(html).finalize())
     }
 }
 
@@ -199,7 +195,8 @@ mod tests {
     #[test]
     fn terminal_code_emits_header_and_highlighted_body() {
         let renderer = TerminalCodeRenderer::new();
-        let context = TerminalCodeContext::new(80, ColorDepth::TrueColor, RenderableColorMode::Dark);
+        let context =
+            TerminalCodeContext::new(80, ColorDepth::TrueColor, RenderableColorMode::Dark);
         let out = renderer
             .render_terminal_code(Some("yaml"), "foo: 1\nbar: 2", None, &yaml_attrs(), context)
             .expect("renders");
@@ -213,7 +210,8 @@ mod tests {
     #[test]
     fn terminal_code_omits_header_when_not_requested() {
         let renderer = TerminalCodeRenderer::new();
-        let context = TerminalCodeContext::new(80, ColorDepth::TrueColor, RenderableColorMode::Dark);
+        let context =
+            TerminalCodeContext::new(80, ColorDepth::TrueColor, RenderableColorMode::Dark);
         let out = renderer
             .render_terminal_code(Some("yaml"), "foo: 1", None, &NodeAttrs::default(), context)
             .expect("renders");
@@ -242,7 +240,8 @@ mod tests {
     #[test]
     fn terminal_code_emits_title_header_from_meta() {
         let renderer = TerminalCodeRenderer::new();
-        let context = TerminalCodeContext::new(80, ColorDepth::TrueColor, RenderableColorMode::Dark);
+        let context =
+            TerminalCodeContext::new(80, ColorDepth::TrueColor, RenderableColorMode::Dark);
         let out = renderer
             .render_terminal_code(
                 Some("rust"),

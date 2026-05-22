@@ -364,10 +364,8 @@ impl TryFrom<PageFill> for Option<renderable::layout::TargetValue<renderable::la
     /// outside `0.0..=100.0`.
     fn try_from(
         fill: PageFill,
-    ) -> Result<
-        Option<renderable::layout::TargetValue<renderable::layout::Length>>,
-        PageRenderError,
-    > {
+    ) -> Result<Option<renderable::layout::TargetValue<renderable::layout::Length>>, PageRenderError>
+    {
         use renderable::layout::TargetValue;
         match fill {
             PageFill::Full | PageFill::Pad(_) | PageFill::Indent(_) => Ok(None),
@@ -527,7 +525,10 @@ mod tests {
     #[test]
     fn width_unit_converts_to_length() {
         use renderable::layout::Length;
-        assert_eq!(Length::try_from(WidthUnit::Fixed(5)).unwrap(), Length::ch(5));
+        assert_eq!(
+            Length::try_from(WidthUnit::Fixed(5)).unwrap(),
+            Length::ch(5)
+        );
         assert_eq!(
             Length::try_from(WidthUnit::Percent(50.0)).unwrap(),
             Length::Percent(50.0)
@@ -578,7 +579,9 @@ mod tests {
 
         assert_eq!(PageFill::Full.margin_contribution().unwrap(), None);
         assert_eq!(
-            PageFill::Max(WidthUnit::Fixed(4)).margin_contribution().unwrap(),
+            PageFill::Max(WidthUnit::Fixed(4))
+                .margin_contribution()
+                .unwrap(),
             None
         );
         assert_eq!(
@@ -713,9 +716,9 @@ mod tests {
     /// for margin, padding, and max-width cases.
     #[test]
     fn darkmatter_page_layout_matches_bridge_layout() {
+        use crate::layout::DarkmatterPage;
         use biscuit_terminal::components::renderable::TerminalRenderable;
         use biscuit_terminal::terminal::Terminal;
-        use crate::layout::DarkmatterPage;
 
         let term = Terminal::new_optimistic(80);
 
@@ -736,9 +739,7 @@ mod tests {
         );
 
         // Max-width cap.
-        let page = DarkmatterPage::new(&term)
-            .with_margin(1)
-            .with_max_width(60);
+        let page = DarkmatterPage::new(&term).with_margin(1).with_max_width(60);
         assert_eq!(
             page.layout(),
             &bridge_layout(PageMargin::all(1), PagePadding::all(0), Some(60)),
@@ -759,10 +760,10 @@ mod tests {
     /// max-width facets.
     #[test]
     fn darkmatter_page_render_margin_matches_bridge_layout() {
-        use biscuit_terminal::terminal::Terminal;
-        use biscuit_terminal::utils::layout::LayoutTerminalExt;
         use crate::layout::DarkmatterPage;
         use crate::markdown::Markdown;
+        use biscuit_terminal::terminal::Terminal;
+        use biscuit_terminal::utils::layout::LayoutTerminalExt;
 
         let term = Terminal::new_optimistic(80);
         let md: Markdown = "Hello world".into();

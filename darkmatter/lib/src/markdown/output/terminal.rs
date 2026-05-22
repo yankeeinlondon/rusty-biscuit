@@ -2766,9 +2766,7 @@ impl LineWrapper {
 /// Universal `Ch` and `Zero` lengths resolve directly; `Percent` is resolved
 /// against `terminal_width`. Per-target and CSS-only values resolve to `0`.
 fn resolve_terminal_margin(
-    side: &biscuit_terminal::utils::layout::TargetValue<
-        biscuit_terminal::utils::layout::Length,
-    >,
+    side: &biscuit_terminal::utils::layout::TargetValue<biscuit_terminal::utils::layout::Length>,
     terminal_width: u32,
 ) -> u32 {
     use biscuit_terminal::utils::layout::Length;

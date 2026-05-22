@@ -81,11 +81,8 @@ mod tests {
 
     #[test]
     fn is_clean_reports_false_when_fold_has_findings() {
-        let result = PipelineResult::new(
-            "ok",
-            vec![Diagnostic::structural("ouch", None)],
-            Vec::new(),
-        );
+        let result =
+            PipelineResult::new("ok", vec![Diagnostic::structural("ouch", None)], Vec::new());
         assert!(!result.is_clean());
     }
 

@@ -377,7 +377,10 @@ where
                     // The `\\` lives inside `s` immediately before the
                     // delimiter; emit any preceding payload up to (but not
                     // including) the backslash byte.
-                    (base + delim.byte_start - 1, delim.byte_start.saturating_sub(1))
+                    (
+                        base + delim.byte_start - 1,
+                        delim.byte_start.saturating_sub(1),
+                    )
                 };
                 if pre_end > cursor {
                     self.emit_text_slice(s, cursor, pre_end, base);
@@ -833,8 +836,7 @@ mod tests {
 
     /// Drains the spanned chain over `markdown` into a flat vector.
     fn run(markdown: &str) -> Vec<SpannedInlineEvent<'static>> {
-        let parser =
-            Parser::new_ext(markdown, Options::ENABLE_STRIKETHROUGH).into_offset_iter();
+        let parser = Parser::new_ext(markdown, Options::ENABLE_STRIKETHROUGH).into_offset_iter();
         let adapter = SpanningAdapter::new(parser);
         let style = SpannedInlineStyleProcessor::new(markdown, adapter);
         // Statically owned by `into_static` is not available, so collect by
@@ -907,8 +909,7 @@ mod tests {
     /// Drains the full spanned chain (adapter + style + rule processor) over
     /// `markdown` into a flat vector. The Lifetime gymnastics mirror `run`.
     fn run_full(markdown: &str) -> Vec<SpannedInlineEvent<'static>> {
-        let parser =
-            Parser::new_ext(markdown, Options::ENABLE_STRIKETHROUGH).into_offset_iter();
+        let parser = Parser::new_ext(markdown, Options::ENABLE_STRIKETHROUGH).into_offset_iter();
         let adapter = SpanningAdapter::new(parser);
         let style = SpannedInlineStyleProcessor::new(markdown, adapter);
         let rule = SpannedRuleProcessor::new(style);
@@ -1021,7 +1022,11 @@ mod tests {
                 matches!(&e.event, InlineEvent::Standard(Event::Text(t)) if t.as_ref() == "highlighted")
             })
             .expect("inner `highlighted` Text event must exist");
-        assert_eq!(inner.range, 8..19, "inner mark text must span exactly `highlighted`");
+        assert_eq!(
+            inner.range,
+            8..19,
+            "inner mark text must span exactly `highlighted`"
+        );
     }
 
     /// `normal ⌄dimmed⌄ after` byte layout — `⌄` (U+2304) is **3 UTF-8 bytes**:
@@ -1065,7 +1070,11 @@ mod tests {
                 matches!(&e.event, InlineEvent::Standard(Event::Text(t)) if t.as_ref() == "dimmed")
             })
             .expect("inner `dimmed` Text event must exist");
-        assert_eq!(inner.range, 10..16, "inner dim text must span exactly `dimmed`");
+        assert_eq!(
+            inner.range,
+            10..16,
+            "inner dim text must span exactly `dimmed`"
+        );
     }
 
     /// Escaped `\==` must not open a mark span, and the literal `==` it
@@ -1110,9 +1119,9 @@ mod tests {
         // plus the two `=` bytes at 5..7.
         let literal = events
             .iter()
-            .find(|e| {
-                matches!(&e.event, InlineEvent::Standard(Event::Text(t)) if t.as_ref() == "==")
-            })
+            .find(
+                |e| matches!(&e.event, InlineEvent::Standard(Event::Text(t)) if t.as_ref() == "=="),
+            )
             .expect("escaped `==` must emit a literal Text(`==`) event");
         assert_eq!(
             literal.range,

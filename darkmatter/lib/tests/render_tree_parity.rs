@@ -162,10 +162,7 @@ const FIXTURES: &[(&str, &str)] = &[
         "hr_attributes",
         "Lead paragraph.\n\n--- { style: waves }\n\nTrailing paragraph.\n",
     ),
-    (
-        "hr_attributes_in_list",
-        "- --- { style: waves }\n",
-    ),
+    ("hr_attributes_in_list", "- --- { style: waves }\n"),
     (
         "code_block_rich",
         "```rust title=\"Demo Snippet\" line-numbering=true highlight=2\n\
@@ -182,18 +179,9 @@ const FIXTURES: &[(&str, &str)] = &[
     // `pulldown-cmark` superscript / subscript only fire when the delimiters
     // flank a word boundary (`^text^` / `~text~`); mid-word forms like `x^2^`
     // parse as plain text. The fixtures use the word-boundary form.
-    (
-        "superscript",
-        "The ^2nd^ entry wins the race.\n",
-    ),
-    (
-        "subscript",
-        "Take the ~note~ for later.\n",
-    ),
-    (
-        "mermaid_off",
-        "```mermaid\ngraph TD\n  A --> B\n```\n",
-    ),
+    ("superscript", "The ^2nd^ entry wins the race.\n"),
+    ("subscript", "Take the ~note~ for later.\n"),
+    ("mermaid_off", "```mermaid\ngraph TD\n  A --> B\n```\n"),
 ];
 
 // ---------------------------------------------------------------------------
@@ -844,13 +832,7 @@ fn render_tree_parity_hr_attributes_spanned() {
         "[hr_attributes/HTML] render-tree renderer leaked the raw HR markdown as text; \
          raw output:\n{tree_html_raw}",
     );
-    assert_tokens_present(
-        name,
-        "HTML",
-        &legacy_html_plain,
-        &tree_html_plain,
-        tokens,
-    );
+    assert_tokens_present(name, "HTML", &legacy_html_plain, &tree_html_plain, tokens);
 
     // Terminal surface: the surrounding paragraphs survive both pipelines,
     // and again the raw HR source must not leak through as visible text.
@@ -1305,11 +1287,7 @@ fn render_tree_markdown_plus_preserves_mark_span() {
 fn render_tree_parity_mermaid_off_mode() {
     // `TerminalOptions::default()` / `HtmlOptions::default()` both use
     // `MermaidMode::Off`, which the parity drivers use.
-    assert_parity(
-        "mermaid_off",
-        &["graph TD", "A", "B"],
-        &[],
-    );
+    assert_parity("mermaid_off", &["graph TD", "A", "B"], &[]);
 }
 
 // ---------------------------------------------------------------------------
@@ -1318,10 +1296,7 @@ fn render_tree_parity_mermaid_off_mode() {
 
 /// Returns the first node in the subtree (depth-first, root included) for
 /// which `pred` holds.
-fn find_node(
-    node: &RenderNode,
-    pred: impl Fn(&RenderNode) -> bool + Copy,
-) -> Option<&RenderNode> {
+fn find_node(node: &RenderNode, pred: impl Fn(&RenderNode) -> bool + Copy) -> Option<&RenderNode> {
     if pred(node) {
         return Some(node);
     }

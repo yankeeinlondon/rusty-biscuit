@@ -328,7 +328,10 @@ fn level2_tree_rich_code_block_title_gutter_and_highlight_survive_real_terminal(
             .iter()
             .position(|p| p.contains(needle))
             .unwrap_or_else(|| {
-                panic!("could not locate row {needle:?} in capture.\nplain:\n{}", frame.plain)
+                panic!(
+                    "could not locate row {needle:?} in capture.\nplain:\n{}",
+                    frame.plain
+                )
             })
     };
     let plain_row = row_index("parity_demo"); // line 1 — not highlighted

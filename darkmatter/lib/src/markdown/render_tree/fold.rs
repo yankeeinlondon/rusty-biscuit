@@ -323,13 +323,10 @@ pub fn fold_markdown_with_frontmatter(
     md: &crate::markdown::Markdown,
 ) -> (Document, Vec<Diagnostic>) {
     let metadata = DocumentMetadata {
-        frontmatter: md
-            .frontmatter()
-            .raw_source()
-            .map(|raw| TreeFrontmatter {
-                format: FrontmatterFormat::Yaml,
-                raw: raw.to_string(),
-            }),
+        frontmatter: md.frontmatter().raw_source().map(|raw| TreeFrontmatter {
+            format: FrontmatterFormat::Yaml,
+            raw: raw.to_string(),
+        }),
     };
     fold_markdown_to_document_with_metadata(source, md.content(), metadata)
 }
@@ -364,20 +361,16 @@ pub fn fold_markdown_spanned_with_frontmatter(
     source: SourceDescriptor,
     md: &crate::markdown::Markdown,
 ) -> (Document, Vec<Diagnostic>) {
-    use crate::markdown::inline::{InlineEvent, InlineTag};
     use super::span::{
-        SpannedEventProvenance, SpannedInlineStyleProcessor, SpannedRuleProcessor,
-        SpanningAdapter,
+        SpannedEventProvenance, SpannedInlineStyleProcessor, SpannedRuleProcessor, SpanningAdapter,
     };
+    use crate::markdown::inline::{InlineEvent, InlineTag};
 
     let metadata = DocumentMetadata {
-        frontmatter: md
-            .frontmatter()
-            .raw_source()
-            .map(|raw| TreeFrontmatter {
-                format: FrontmatterFormat::Yaml,
-                raw: raw.to_string(),
-            }),
+        frontmatter: md.frontmatter().raw_source().map(|raw| TreeFrontmatter {
+            format: FrontmatterFormat::Yaml,
+            raw: raw.to_string(),
+        }),
     };
     let (registry, source_id) = single_source_registry(source);
 
@@ -1232,10 +1225,7 @@ mod tests {
     /// Locates the first descendant `Span` whose `Style.emphasis.dim` is set.
     fn find_dim_span(node: &RenderNode) -> Option<&RenderNode> {
         if matches!(node.kind, NodeKind::Span { .. })
-            && node
-                .attrs
-                .style()
-                .is_some_and(|s| s.emphasis.dim)
+            && node.attrs.style().is_some_and(|s| s.emphasis.dim)
         {
             return Some(node);
         }
@@ -1275,8 +1265,14 @@ mod tests {
         }
         let hr = find_hr(&doc.root).expect("ThematicBreak must exist");
         let ns = renderable::tree::HintNamespace("darkmatter.hr");
-        assert_eq!(hr.attrs.get_hint(ns, "style"), Some(&serde_json::json!("waves")));
-        assert_eq!(hr.attrs.get_hint(ns, "width"), Some(&serde_json::json!("50%")));
+        assert_eq!(
+            hr.attrs.get_hint(ns, "style"),
+            Some(&serde_json::json!("waves"))
+        );
+        assert_eq!(
+            hr.attrs.get_hint(ns, "width"),
+            Some(&serde_json::json!("50%"))
+        );
         // Generated provenance: this HR was synthesized from a paragraph.
         assert_eq!(hr.span.provenance, Provenance::Generated);
         assert!(hr.span.location.is_some());
@@ -1321,7 +1317,10 @@ mod tests {
     #[test]
     fn span_aware_fold_preserves_emphasis_sibling_after_mark() {
         let (doc, diags) = fold_spanned("==marked== then *italic*");
-        assert!(diags.is_empty(), "clean fixture must fold cleanly: {diags:?}");
+        assert!(
+            diags.is_empty(),
+            "clean fixture must fold cleanly: {diags:?}"
+        );
         let para = &doc.root.children()[0];
 
         // The mark span and the emphasis must each survive as separate,
@@ -1352,7 +1351,10 @@ mod tests {
     #[test]
     fn span_aware_fold_wraps_emphasis_inside_mark() {
         let (doc, diags) = fold_spanned("==*highlighted*== rest");
-        assert!(diags.is_empty(), "clean fixture must fold cleanly: {diags:?}");
+        assert!(
+            diags.is_empty(),
+            "clean fixture must fold cleanly: {diags:?}"
+        );
         let marks = collect_spans_with_class(&doc.root, "mark");
         assert_eq!(marks.len(), 1, "expected one mark Span");
         let mark = marks[0];
@@ -1375,7 +1377,10 @@ mod tests {
     #[test]
     fn span_aware_fold_wraps_emphasis_inside_dim() {
         let (doc, diags) = fold_spanned("\u{2304}*dim and italic*\u{2304}");
-        assert!(diags.is_empty(), "clean fixture must fold cleanly: {diags:?}");
+        assert!(
+            diags.is_empty(),
+            "clean fixture must fold cleanly: {diags:?}"
+        );
         let dim = find_dim_span(&doc.root).expect("dim Span must exist");
         let first = dim
             .children()
@@ -1406,7 +1411,10 @@ mod tests {
         let mut text = String::new();
         collect_text(para.children(), &mut text);
         assert!(text.contains("=="), "literal `==` must survive: {text}");
-        assert!(text.contains("never closed"), "italic text must survive: {text}");
+        assert!(
+            text.contains("never closed"),
+            "italic text must survive: {text}"
+        );
     }
 
     /// Review-4 finding 1 / span-aware-processor-design "Mixed Mark and
@@ -1418,9 +1426,11 @@ mod tests {
     /// nesting.
     #[test]
     fn span_aware_fold_nests_dim_inside_mark() {
-        let (doc, diags) =
-            fold_spanned("==highlighted and \u{2304}dim within mark\u{2304}==");
-        assert!(diags.is_empty(), "clean fixture must fold cleanly: {diags:?}");
+        let (doc, diags) = fold_spanned("==highlighted and \u{2304}dim within mark\u{2304}==");
+        assert!(
+            diags.is_empty(),
+            "clean fixture must fold cleanly: {diags:?}"
+        );
 
         let marks = collect_spans_with_class(&doc.root, "mark");
         assert_eq!(marks.len(), 1, "expected one mark Span: {marks:?}");
@@ -1460,9 +1470,11 @@ mod tests {
     /// to the old single-slot model in the other direction.
     #[test]
     fn span_aware_fold_nests_mark_inside_dim() {
-        let (doc, diags) =
-            fold_spanned("\u{2304}dim with ==marked inside==\u{2304}");
-        assert!(diags.is_empty(), "clean fixture must fold cleanly: {diags:?}");
+        let (doc, diags) = fold_spanned("\u{2304}dim with ==marked inside==\u{2304}");
+        assert!(
+            diags.is_empty(),
+            "clean fixture must fold cleanly: {diags:?}"
+        );
 
         let dim = find_dim_span(&doc.root).expect("dim Span must exist");
         let nested_mark = dim
@@ -1510,7 +1522,10 @@ mod tests {
     fn span_aware_fold_mark_container_span_covers_full_delimited_region() {
         let input = "plain ==highlighted== after";
         let (doc, diags) = fold_spanned(input);
-        assert!(diags.is_empty(), "clean fixture must fold cleanly: {diags:?}");
+        assert!(
+            diags.is_empty(),
+            "clean fixture must fold cleanly: {diags:?}"
+        );
         let marks = collect_spans_with_class(&doc.root, "mark");
         assert_eq!(marks.len(), 1, "expected exactly one mark Span");
         let mark = marks[0];
@@ -1577,7 +1592,10 @@ mod tests {
         // is `4..7`.
         let input = "foo \\== bar";
         let (doc, diags) = fold_spanned(input);
-        assert!(diags.is_empty(), "escape fixture must fold cleanly: {diags:?}");
+        assert!(
+            diags.is_empty(),
+            "escape fixture must fold cleanly: {diags:?}"
+        );
 
         // Walk every Text descendant; the literal `==` must appear with the
         // exact `4..7` source range.

@@ -371,7 +371,10 @@ mod tests {
 
         let md: Markdown = "plain ==highlighted== after\n".into();
         let (doc, diags) = to_render_document(&md);
-        assert!(diags.is_empty(), "mark fixture must fold cleanly: {diags:?}");
+        assert!(
+            diags.is_empty(),
+            "mark fixture must fold cleanly: {diags:?}"
+        );
         assert!(
             has_mark(&doc.root),
             "to_render_document must surface a `mark` Span — entry point did not use the span-aware fold",
@@ -423,8 +426,7 @@ mod tests {
 
         let md: Markdown = "--- { style: waves }\n".into();
         let (doc, _diags) = to_render_document(&md);
-        let hr = find_hr(&doc.root)
-            .expect("HR-attribute paragraph must fold to a ThematicBreak");
+        let hr = find_hr(&doc.root).expect("HR-attribute paragraph must fold to a ThematicBreak");
         let ns = HintNamespace("darkmatter.hr");
         assert_eq!(
             hr.attrs.get_hint(ns, "style"),
@@ -519,13 +521,21 @@ mod tests {
             color_depth: Some(ColorDepth::None),
             ..TerminalOptions::default()
         };
-        let no_color_result =
-            render_tree_terminal(&md, &no_color_opts).expect("no-color render");
+        let no_color_result = render_tree_terminal(&md, &no_color_opts).expect("no-color render");
         let no_color_raw = &no_color_result.output;
         // Visible text must survive even when colors are stripped.
-        assert!(no_color_raw.contains("Heading"), "heading dropped: {no_color_raw:?}");
-        assert!(no_color_raw.contains("code"), "code text dropped: {no_color_raw:?}");
-        assert!(no_color_raw.contains("link"), "link text dropped: {no_color_raw:?}");
+        assert!(
+            no_color_raw.contains("Heading"),
+            "heading dropped: {no_color_raw:?}"
+        );
+        assert!(
+            no_color_raw.contains("code"),
+            "code text dropped: {no_color_raw:?}"
+        );
+        assert!(
+            no_color_raw.contains("link"),
+            "link text dropped: {no_color_raw:?}"
+        );
         assert!(
             !contains_color_sgr(no_color_raw),
             "ColorDepth::None must produce no ANSI color SGRs; raw output:\n{no_color_raw:?}",
@@ -671,8 +681,7 @@ mod tests {
     /// the same as block `Html` nodes under `RawHtmlPolicy::Escape`.
     #[test]
     fn render_tree_html_escapes_inline_raw_html_by_default() {
-        let md: Markdown =
-            "Inline <script>alert('xss')</script> here.\n".into();
+        let md: Markdown = "Inline <script>alert('xss')</script> here.\n".into();
         let result = render_tree_html(&md, &HtmlOptions::default()).expect("html render");
         let out = &result.output;
         assert!(
@@ -718,8 +727,7 @@ mod tests {
     /// a color SGR proves the code renderer is the one in use.
     #[test]
     fn render_tree_terminal_syntax_highlights_code_blocks() {
-        let md: Markdown =
-            "```rust\nfn demo() -> usize { 42 }\n```\n".into();
+        let md: Markdown = "```rust\nfn demo() -> usize { 42 }\n```\n".into();
         let opts = TerminalOptions {
             max_width: Some(80),
             color_depth: Some(ColorDepth::TrueColor),
@@ -727,7 +735,11 @@ mod tests {
         };
         let result = render_tree_terminal(&md, &opts).expect("terminal render");
         // The code text must survive.
-        assert!(result.output.contains("demo"), "code text dropped: {:?}", result.output);
+        assert!(
+            result.output.contains("demo"),
+            "code text dropped: {:?}",
+            result.output
+        );
         // The darkmatter highlighter emits foreground color SGRs (e.g.
         // `\x1b[38;2;…m`); the plain fallback never emits a color SGR.
         assert!(

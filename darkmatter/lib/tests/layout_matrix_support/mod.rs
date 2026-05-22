@@ -205,11 +205,10 @@ pub fn component_cases() -> Vec<ComponentCase> {
     vec![ComponentCase {
         name: "YamlBlock",
         render: Box::new(|s| {
-            let block = YamlBlock::new(
-                "name: rusty-biscuit\nversion: 0.1.0\ntags:\n  - cli\n  - terminal",
-            )
-            .expect("sample YAML is valid")
-            .with_layout(s.layout.clone());
+            let block =
+                YamlBlock::new("name: rusty-biscuit\nversion: 0.1.0\ntags:\n  - cli\n  - terminal")
+                    .expect("sample YAML is valid")
+                    .with_layout(s.layout.clone());
             let term = Terminal::new_optimistic(s.width);
             let bespoke = block.render(&term);
             let tree = block

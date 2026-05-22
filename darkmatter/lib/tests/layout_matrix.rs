@@ -53,10 +53,7 @@ fn layout_matrix_snapshots() {
         for scenario in scenarios() {
             let (bespoke, tree) = (case.render)(&scenario);
             let block = stacked_stripped(&bespoke, &tree);
-            insta::assert_snapshot!(
-                format!("{}__{}", case.name, scenario.name),
-                block
-            );
+            insta::assert_snapshot!(format!("{}__{}", case.name, scenario.name), block);
         }
     }
 }
