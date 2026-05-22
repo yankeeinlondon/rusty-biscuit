@@ -92,8 +92,8 @@ use darkmatter::markdown::render_tree::{
     TerminalCodeRenderer, fold_markdown_spanned_with_frontmatter, fold_markdown_to_document,
 };
 use renderable::tree::{
-    BrowserRenderOptions, Document, MarkdownDialect, MarkdownRenderOptions, NodeKind, RawHtmlPolicy,
-    RenderNode, RenderStrictness, SourceDescriptor, render_browser_document,
+    BrowserRenderOptions, Diagnostic, Document, MarkdownDialect, MarkdownRenderOptions, NodeKind,
+    RawHtmlPolicy, RenderNode, RenderStrictness, SourceDescriptor, render_browser_document,
     render_markdown_document,
 };
 
@@ -274,10 +274,35 @@ fn normalize(input: &str) -> String {
 // Pipeline drivers
 // ---------------------------------------------------------------------------
 
-/// Folds parity fixture `name` to a render-tree [`Document`].
+/// Asserts a fold emitted no diagnostics, naming the fixture and fold path.
+///
+/// Every fixture in this suite is an **equivalence** fixture: it must fold
+/// cleanly on both the plain and span-aware paths (the parser-option
+/// divergences fold to *structural* nodes, not diagnostics). Surfacing fold
+/// diagnostics here keeps them separately visible from render diagnostics and
+/// makes a parity failure specific enough to identify a fold-vs-renderer
+/// mismatch (DMTR-5): a fold-time `Unsupported` / `Lossy` / `Structural`
+/// diagnostic fails at the fold boundary naming the fixture, before any
+/// rendered-token comparison runs. See review-12 finding 1.
+///
+/// ## Panics
+///
+/// Panics naming the fixture, fold path, and the offending diagnostics if the
+/// fold emitted any.
+fn assert_fold_clean(fixture: &str, path: &str, diagnostics: &[Diagnostic]) {
+    assert!(
+        diagnostics.is_empty(),
+        "[{fixture}/{path}] fold emitted unexpected diagnostics (fold-vs-render \
+         mismatch): {diagnostics:#?}",
+    );
+}
+
+/// Folds parity fixture `name` to a render-tree [`Document`], asserting the
+/// fold emitted no diagnostics (see [`assert_fold_clean`]).
 fn fold(name: &str, markdown: &str) -> Document {
     let source = SourceDescriptor::Virtual { name: name.into() };
-    let (doc, _diags) = fold_markdown_to_document(source, markdown);
+    let (doc, diags) = fold_markdown_to_document(source, markdown);
+    assert_fold_clean(name, "fold", &diags);
     doc
 }
 
@@ -285,10 +310,14 @@ fn fold(name: &str, markdown: &str) -> Document {
 /// **span-aware** chain — the path that surfaces `==mark==`, `⌄dim⌄`, and
 /// `--- { ... }` HR-attribute constructs. Equivalent to the path the
 /// experimental `to_render_document` entry point uses.
+///
+/// Asserts the span-aware fold emitted no diagnostics (see
+/// [`assert_fold_clean`]).
 fn fold_spanned(name: &str, markdown: &str) -> Document {
     let source = SourceDescriptor::Virtual { name: name.into() };
     let md: Markdown = markdown.into();
-    let (doc, _diags) = fold_markdown_spanned_with_frontmatter(source, &md);
+    let (doc, diags) = fold_markdown_spanned_with_frontmatter(source, &md);
+    assert_fold_clean(name, "fold_spanned", &diags);
     doc
 }
 

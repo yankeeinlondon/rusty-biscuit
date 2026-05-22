@@ -218,18 +218,25 @@ fn darkmatter_color_depth_to_terminal(depth: ColorDepth) -> TerminalColorDepth {
 
 /// Derives a [`SourceDescriptor`] from `md.source()`.
 ///
-/// A file-backed darkmatter document maps to [`SourceDescriptor::File`] when
-/// the variant exists; otherwise the descriptor is virtual and named after
-/// the file. Virtual / URL / unknown sources all fold to a virtual
-/// descriptor.
+/// A file-backed darkmatter document maps to [`SourceDescriptor::File`] so the
+/// source kind survives into every [`SourceLocation`](renderable::tree::SourceLocation)
+/// emitted through [`to_render_document`] (the path diagnostics and
+/// source-aware tools consume). URL and unknown sources have no file backing,
+/// so they fold to a [`SourceDescriptor::Virtual`] named after the URL (or a
+/// generic `"darkmatter"` placeholder).
 fn derive_source(md: &Markdown) -> SourceDescriptor {
     use crate::markdown::compose::ComposeSource;
-    let name = match md.source() {
-        Some(ComposeSource::File(path)) => path.to_string_lossy().into_owned(),
-        Some(ComposeSource::Url(url)) => url.to_string(),
-        _ => "darkmatter".to_string(),
-    };
-    SourceDescriptor::Virtual { name }
+    match md.source() {
+        Some(ComposeSource::File(path)) => SourceDescriptor::File {
+            path: path.to_path_buf(),
+        },
+        Some(ComposeSource::Url(url)) => SourceDescriptor::Virtual {
+            name: url.to_string(),
+        },
+        _ => SourceDescriptor::Virtual {
+            name: "darkmatter".to_string(),
+        },
+    }
 }
 
 #[cfg(test)]
@@ -282,6 +289,40 @@ mod tests {
         let result = render_tree_markdown_dialect(&md, MarkdownDialect::MarkdownPlus)
             .expect("markdown-plus render");
         assert!(result.output.contains("Heading"));
+    }
+
+    /// A file-backed darkmatter document must resolve to a
+    /// [`SourceDescriptor::File`] (carrying its path), not be downgraded to a
+    /// [`SourceDescriptor::Virtual`]. URL / unknown sources stay virtual.
+    /// Pins the fix for review-12 finding 2.
+    #[test]
+    fn derive_source_preserves_file_backing() {
+        use crate::markdown::compose::ComposeSource;
+        use renderable::tree::SourceId;
+        use std::path::PathBuf;
+
+        // File-backed: must surface as `SourceDescriptor::File`.
+        let md: Markdown = Markdown::from("Body paragraph.\n")
+            .with_source(ComposeSource::File(PathBuf::from("docs/example.md")));
+        let (doc, _diags) = to_render_document(&md);
+        assert_eq!(
+            doc.sources.resolve(SourceId(0)),
+            Some(&SourceDescriptor::File {
+                path: PathBuf::from("docs/example.md"),
+            }),
+            "file-backed Markdown must register a SourceDescriptor::File",
+        );
+
+        // No source: stays virtual.
+        let md: Markdown = "Body paragraph.\n".into();
+        let (doc, _diags) = to_render_document(&md);
+        assert_eq!(
+            doc.sources.resolve(SourceId(0)),
+            Some(&SourceDescriptor::Virtual {
+                name: "darkmatter".to_string(),
+            }),
+            "sourceless Markdown must register a virtual descriptor",
+        );
     }
 
     #[test]

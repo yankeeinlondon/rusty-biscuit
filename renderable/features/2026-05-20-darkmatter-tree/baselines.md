@@ -55,10 +55,9 @@ tree context — see review-5 finding 1. A `debug_assert_eq!` in
 `TerminalColorDepth::None` so the no-color comparison cannot silently
 regress again.
 
-After this fix, the `migration/terminal_no_color` numbers below should be
-re-captured before any public terminal cutover; the previously recorded
-numbers reflect the **same** TrueColor tree work the colored group
-measured, not a real no-color tree path.
+The `migration/terminal_no_color` numbers in the tables below were
+**re-captured** after this fix, so they reflect a real `ColorDepth::None`
+tree context (not the TrueColor tree work the colored group measures).
 
 ## Code Renderer Wiring
 
@@ -69,16 +68,15 @@ Previously the helper passed `code_renderer: None`, so the benchmarked tree
 terminal path measured the render tree's plain dim-fence fallback instead of
 darkmatter's syntax-highlighted code path.
 
-The `large_code_block` tree numbers in particular must be **re-captured**
-before any public terminal cutover: the previously recorded numbers reflect
-the plain-fence fallback, not the syntax-highlighting cost the production path
-now pays.
-
 `pinned_browser_options()` likewise wires the `TerminalCodeRenderer` (review-11
 finding 2), so the tree HTML group now pays darkmatter's syntect cost — plus
 info-string title / line-number / highlight handling via the `CodeRenderer`
-`meta` parameter — instead of the plain `<pre><code>` fallback. The
-`large_code_block` HTML tree numbers must be re-captured for the same reason.
+`meta` parameter — instead of the plain `<pre><code>` fallback.
+
+The `large_code_block` rows in the tables below were **re-captured** after
+both fixes, so the tree terminal and tree HTML numbers reflect the
+syntax-highlighting cost the production path now pays — not the earlier
+plain-fence / `<pre><code>` fallback.
 
 ## Fold Selection
 
@@ -99,56 +97,72 @@ the corrected routing.
 [`fold_markdown_spanned_with_frontmatter`]: ../../../../darkmatter/lib/src/markdown/render_tree/fold.rs
 [`fold_markdown_to_document`]: ../../../../darkmatter/lib/src/markdown/render_tree/fold.rs
 
-## Recorded Baselines (2026-05-20, sample subset)
+## Recorded Baselines (2026-05-21, sample subset)
 
 Captured on the development host with
 `--warm-up-time 1 --measurement-time 3 --sample-size 10`. Times are
 Criterion's middle estimate; the harness emits low/middle/high CIs for
-every measurement in the full report.
+every measurement in the full report. The `large_code_block` rows exercise
+the wired `TerminalCodeRenderer` on both the tree terminal and tree HTML
+paths (review-10 / review-11 finding 2); the `terminal_no_color` rows use a
+real `ColorDepth::None` tree context (review-5 finding 1).
 
 ### `migration/terminal` (TrueColor)
 
-| Fixture        | Legacy        | Tree         | Tree / Legacy |
-|----------------|---------------|--------------|---------------|
-| `small_prose`  | 6.57 ms       | 15.56 µs     | ≈ 0.0024×     |
-| `mark_dim_hr`  | 6.84 ms       | 336.33 µs    | ≈ 0.049×      |
+| Fixture            | Legacy        | Tree         | Tree / Legacy |
+|--------------------|---------------|--------------|---------------|
+| `small_prose`      | 5.60 ms       | 15.60 µs     | ≈ 0.0028×     |
+| `large_code_block` | 27.80 ms      | 20.35 ms     | ≈ 0.73×       |
+| `mark_dim_hr`      | 5.93 ms       | 5.47 ms      | ≈ 0.92×       |
 
 ### `migration/terminal_no_color` (`ColorDepth::None`)
 
-| Fixture        | Legacy        | Tree         | Tree / Legacy |
-|----------------|---------------|--------------|---------------|
-| `small_prose`  | 99.11 ns      | 16.36 µs     | ≈ 165×        |
-| `mark_dim_hr`  | 3.26 µs       | 345.39 µs    | ≈ 106×        |
+| Fixture            | Legacy        | Tree         | Tree / Legacy |
+|--------------------|---------------|--------------|---------------|
+| `small_prose`      | 98.96 ns      | 15.39 µs     | ≈ 155×        |
+| `large_code_block` | 10.07 µs      | 489.47 µs    | ≈ 49×         |
+| `mark_dim_hr`      | 3.18 µs       | 5.50 ms      | ≈ 1730×       |
 
 The no-color group is the documented spec exception: legacy's
 `ColorDepth::None` early return is a fast path with no equivalent on the
 tree side. The tree path remains the chosen architecture; the regression
 is accepted as the spec calls out under "Performance Expectations" and
 will be revisited with a tree no-color fast path before public terminal
-cutover.
+cutover. The `mark_dim_hr` ratio is the most extreme because that fixture's
+20 HR-attribute rules each rasterize through the Tier-1 image path on the
+tree side even when colors are off, while legacy's no-color rule output is
+near-free; this is the same HR cost visible in the TrueColor group.
 
 ### `migration/browser`
 
-| Fixture        | Legacy        | Tree         | Tree / Legacy |
-|----------------|---------------|--------------|---------------|
-| `small_prose`  | 5.35 µs       | 11.73 µs     | ≈ 2.2×        |
-| `mark_dim_hr`  | 132.35 µs     | 180.80 µs    | ≈ 1.37×       |
+| Fixture            | Legacy        | Tree         | Tree / Legacy |
+|--------------------|---------------|--------------|---------------|
+| `small_prose`      | 5.07 µs       | 10.69 µs     | ≈ 2.1×        |
+| `large_code_block` | 17.97 ms      | 18.04 ms     | ≈ 1.00×       |
+| `mark_dim_hr`      | 125.79 µs     | 756.36 µs    | ≈ 6.0×        |
 
 ### `migration/markdown`
 
 The legacy renderer has no Markdown round-trip; only the tree path runs.
 
-| Fixture        | Tree         |
-|----------------|--------------|
-| `small_prose`  | 9.36 µs      |
-| `mark_dim_hr`  | (see full report) |
+| Fixture            | Tree         |
+|--------------------|--------------|
+| `small_prose`      | 9.29 µs      |
+| `large_code_block` | 12.16 µs     |
+| `mark_dim_hr`      | 578.34 µs    |
 
 ### `migration/fold_only`
 
-| Fixture        | Legacy        | Tree         | Tree / Legacy |
-|----------------|---------------|--------------|---------------|
-| `small_prose`  | 498.47 ns     | 1.18 µs      | ≈ 2.37×       |
-| `mark_dim_hr`  | 9.02 µs       | 17.60 µs     | ≈ 1.95×       |
+| Fixture            | Legacy        | Tree         | Tree / Legacy |
+|--------------------|---------------|--------------|---------------|
+| `small_prose`      | 493.17 ns     | 1.15 µs      | ≈ 2.34×       |
+| `large_code_block` | 5.35 µs       | 6.70 µs      | ≈ 1.25×       |
+| `mark_dim_hr`      | 9.04 µs       | 164.47 µs    | ≈ 18.2×       |
+
+The `mark_dim_hr` fold ratio reflects the span-aware processor cost: the
+fixture's 80 mark/dim paragraphs and 20 HR-attribute rules all route
+through `fold_markdown_spanned_with_frontmatter`, where the legacy fold runs
+only the plain event stream.
 
 ### `migration/fold_once_multi_target`
 
@@ -156,10 +170,11 @@ The tree pipeline's strongest case: parse + fold once, render all three
 targets (terminal + browser + markdown) from the single document. The
 legacy comparator renders three targets too, each of which re-parses.
 
-| Fixture        | Legacy        | Tree         | Tree / Legacy |
-|----------------|---------------|--------------|---------------|
-| `small_prose`  | 5.81 ms       | 33.26 µs     | ≈ 0.0057×     |
-| `mark_dim_hr`  | 6.41 ms       | 597.94 µs    | ≈ 0.093×      |
+| Fixture            | Legacy        | Tree         | Tree / Legacy |
+|--------------------|---------------|--------------|---------------|
+| `small_prose`      | 5.60 ms       | 33.65 µs     | ≈ 0.0060×     |
+| `large_code_block` | 64.00 ms      | 38.09 ms     | ≈ 0.60×       |
+| `mark_dim_hr`      | 6.36 ms       | 6.57 ms      | ≈ 1.03×       |
 
 ## How to Read the Numbers
 
@@ -172,8 +187,13 @@ legacy comparator renders three targets too, each of which re-parses.
   this gap and to adding a tree no-color fast path before the public
   terminal cutover.
 - The `browser` group has the tree path within ~2× of the legacy
-  renderer; the gap closes as the corpus gets larger because the legacy
-  pipeline's per-element string concatenation begins to dominate.
+  renderer for prose, and at parity (≈1.0×) for the code-heavy
+  `large_code_block` fixture, where both pipelines pay the same syntect
+  cost. The `mark_dim_hr` browser ratio (≈6×) is dominated by 20 HR-rule
+  SVG generations on the tree side.
+- The `large_code_block` terminal and HTML rows now include the wired
+  `TerminalCodeRenderer` syntax-highlighting cost on the tree side, so they
+  are the production-shaped numbers for the code-renderer cutover decision.
 - The `fold_only` numbers measure tree-fold cost in isolation. They are
   the lower bound for any tree-target render and are stable across runs
   to within ±2%.
