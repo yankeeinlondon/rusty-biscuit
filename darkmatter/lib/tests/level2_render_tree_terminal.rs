@@ -25,6 +25,16 @@
 //! `wezterm` binary is missing. Set `DARKMATTER_LEVEL2_REQUIRED=1` in the
 //! environment to convert that into a hard failure — CI jobs that provision
 //! WezTerm should set this so Level 2 coverage is enforced, not nominal.
+//!
+//! ## Bespoke page-path coverage
+//!
+//! Beyond the render-tree pipeline, this file also drives the **bespoke
+//! [`DarkmatterPage`] path** — the path the reported code-block defects live in
+//! (theme inversion, right-margin gap, pill/body boundary). Those tests render
+//! the real repro layout at the pane's true width and assert on the captured
+//! *cell grid* (inverted code-panel background, contiguous rectangle, shared
+//! right boundary, blank-line rhythm) — properties an in-process ANSI string
+//! cannot verify. See `run_page_in_pane` and the `level2_page_*` tests.
 
 use biscuit_terminal::render_tree::{
     TerminalRenderContext, TerminalRenderOptions, render_terminal_document,
@@ -32,7 +42,10 @@ use biscuit_terminal::render_tree::{
 use biscuit_terminal::terminal::Terminal;
 use biscuit_test_harness::wezterm::WezTermHarness;
 use biscuit_test_harness::{CapturedFrame, TerminalHarness, skip_with_reason};
+use darkmatter::layout::DarkmatterPage;
 use darkmatter::markdown::Markdown;
+use darkmatter::markdown::highlighting::{CodeHighlighter, ColorMode, ThemePair};
+use darkmatter::markdown::output::ColorDepth;
 use darkmatter::markdown::render_tree::{
     TerminalCodeRenderer, fold_markdown_spanned_with_frontmatter, fold_markdown_to_document,
 };
@@ -545,4 +558,363 @@ fn level2_tree_hr_attributes_render_styled_rule_in_real_terminal() {
     // Sanity: the plain dashed rule glyph must not dominate (the test would
     // also pass if Tea-Time Unicode font missing forces all-`~` ASCII, so
     // we only assert *positive* evidence of the waves style above).
+}
+
+// ---------------------------------------------------------------------------
+// Bespoke page-path Level 2 coverage (review-1 finding 1)
+//
+// The reported code-block rendering defects (#0 theme inversion, #1 right-margin
+// gap, #2 pill/body right-boundary mismatch) live in the **bespoke**
+// `DarkmatterPage` path under page decoration, and were only verified at Level 1
+// (in-process ANSI-string inspection). String inspection cannot tell whether the
+// emitted SGR sequences actually paint the intended *cell grid* — e.g. an
+// `\x1b[K` clear-to-edge versus background-padded spaces look different on the
+// real grid but both "contain a background". These tests drive the real repro
+// configuration (`--ml 4 --mr 4`, github theme, dark page) into a WezTerm pane
+// and assert on the captured cell grid: the inverted (light) code-panel
+// background, a single contiguous background rectangle (no gap), and a shared
+// right boundary across all panel rows.
+// ---------------------------------------------------------------------------
+
+/// The github *light* theme background (the variant a dark page inverts to for
+/// code-block contrast). The renderer emits exactly this RGB when truecolor is
+/// forced, so the capture can match it cell-for-cell.
+fn github_light_bg() -> (u8, u8, u8) {
+    let bg = CodeHighlighter::new(ThemePair::Github, ColorMode::Light)
+        .theme()
+        .settings
+        .background
+        .expect("github light theme has a background");
+    (bg.r, bg.g, bg.b)
+}
+
+/// One run of visible cells in a captured row that share a background
+/// classification (target background or not).
+struct BgRun {
+    is_target: bool,
+    width: usize,
+}
+
+/// Updates the active background color `cur` from one SGR parameter list.
+///
+/// Handles the colon true-color form (`48:2::r:g:b`, WezTerm's wire form), the
+/// legacy semicolon form (`48;2;r;g;b`), the 256-color introducer (`48;5;n`,
+/// tracked as a non-target color), and the resets (`0`, empty, `49`).
+fn update_bg(cur: &mut Option<(u8, u8, u8)>, params: &str) {
+    // Colon true-color form: a single field like `48:2::r:g:b`.
+    for field in params.split(';') {
+        if let Some(rest) = field.strip_prefix("48:2:") {
+            let comps: Vec<&str> = rest.split(':').filter(|s| !s.is_empty()).collect();
+            if comps.len() >= 3
+                && let (Ok(r), Ok(g), Ok(b)) =
+                    (comps[0].parse(), comps[1].parse(), comps[2].parse())
+            {
+                *cur = Some((r, g, b));
+            }
+        }
+    }
+    // Semicolon forms and resets.
+    let f: Vec<&str> = params.split(';').collect();
+    let mut k = 0;
+    while k < f.len() {
+        match f[k] {
+            "0" | "" | "49" => *cur = None,
+            "48" => match f.get(k + 1) {
+                Some(&"2") => {
+                    if let (Some(r), Some(g), Some(b)) = (f.get(k + 2), f.get(k + 3), f.get(k + 4))
+                        && let (Ok(r), Ok(g), Ok(b)) = (r.parse(), g.parse(), b.parse())
+                    {
+                        *cur = Some((r, g, b));
+                    }
+                    k += 5;
+                    continue;
+                }
+                Some(&"5") => {
+                    // 256-color background: not our truecolor target.
+                    *cur = Some((0, 0, 0));
+                    k += 3;
+                    continue;
+                }
+                _ => {}
+            },
+            _ => {}
+        }
+        k += 1;
+    }
+}
+
+/// Walks the SGR sequences in `row`, splitting the visible text into runs tagged
+/// by whether the active background equals `target`. Non-`m` CSI sequences are
+/// skipped without consuming visible cells. Visible width is counted as `char`s
+/// (the fixtures are ASCII, so this equals the cell width).
+fn bg_runs(row: &str, target: (u8, u8, u8)) -> Vec<BgRun> {
+    let bytes = row.as_bytes();
+    let mut runs: Vec<BgRun> = Vec::new();
+    let mut cur: Option<(u8, u8, u8)> = None;
+    let mut i = 0;
+    let mut text_start = 0;
+
+    let flush = |runs: &mut Vec<BgRun>, text: &str, is_target: bool| {
+        let width = text.chars().count();
+        if width == 0 {
+            return;
+        }
+        if let Some(last) = runs.last_mut()
+            && last.is_target == is_target
+        {
+            last.width += width;
+            return;
+        }
+        runs.push(BgRun { is_target, width });
+    };
+
+    while i < bytes.len() {
+        if bytes[i] == 0x1b && i + 1 < bytes.len() && bytes[i + 1] == b'[' {
+            flush(&mut runs, &row[text_start..i], cur == Some(target));
+            // Find the CSI final byte (0x40..=0x7e).
+            let mut j = i + 2;
+            while j < bytes.len() && !(0x40..=0x7e).contains(&bytes[j]) {
+                j += 1;
+            }
+            if j < bytes.len() {
+                if bytes[j] == b'm' {
+                    update_bg(&mut cur, &row[i + 2..j]);
+                }
+                i = j + 1;
+                text_start = i;
+            } else {
+                i = bytes.len();
+                text_start = i;
+            }
+        } else {
+            i += 1;
+        }
+    }
+    flush(&mut runs, &row[text_start..], cur == Some(target));
+    runs
+}
+
+/// `(start_col, end_col, target_run_count)` for the `target` background in
+/// `row`, where columns are 0-based visible offsets and `end_col` is exclusive.
+/// `target_run_count == 1` is a clean rectangle; `>= 2` means an interior gap.
+/// Returns `None` when the row carries no `target` background at all.
+fn target_extent(row: &str, target: (u8, u8, u8)) -> Option<(usize, usize, usize)> {
+    let runs = bg_runs(row, target);
+    let mut col = 0usize;
+    let mut start: Option<usize> = None;
+    let mut end = 0usize;
+    let mut count = 0usize;
+    let mut prev_target = false;
+    for run in &runs {
+        if run.is_target {
+            if !prev_target {
+                count += 1;
+            }
+            start.get_or_insert(col);
+            end = col + run.width;
+        }
+        prev_target = run.is_target;
+        col += run.width;
+    }
+    start.map(|s| (s, end, count))
+}
+
+/// Renders `md_src` through the **bespoke `DarkmatterPage` path** (the one the
+/// reported defects live in) at the pane's real column width, then `cat`s it
+/// into the shared WezTerm pane. Returns the captured frame and the pane width
+/// so column assertions line up with the layout margins. Skips (returns `None`)
+/// when WezTerm is unavailable.
+#[allow(clippy::too_many_arguments)]
+fn run_page_in_pane(
+    md_src: &str,
+    name: &str,
+    ml: u16,
+    mr: u16,
+    mt: u16,
+    mb: u16,
+) -> Option<(CapturedFrame, usize)> {
+    if !WezTermHarness::available() {
+        if level2_required() {
+            panic!(
+                "DARKMATTER_LEVEL2_REQUIRED=1 set but WezTerm is unavailable. \
+                 Provision WezTerm in this environment or unset the variable."
+            );
+        }
+        skip_with_reason("WezTerm CLI (set WEZTERM_UNIX_SOCKET)");
+        return None;
+    }
+
+    let mut guard = SHARED_HARNESS
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner());
+    if guard.is_none() {
+        let mut harness = WezTermHarness::new();
+        harness.spawn_shell().expect("spawn_shell failed");
+        *guard = Some(harness);
+    }
+    let harness = guard.as_mut().unwrap();
+    let cols = harness
+        .pane_size()
+        .map(|s| s.cols as usize)
+        .unwrap_or(80)
+        .max(40);
+
+    // Force truecolor + dark mode so the inverted (light) github panel background
+    // is emitted as an exact `48;2;r;g;b` the capture can match cell-for-cell.
+    let term = Terminal::new_optimistic(cols as u32);
+    let md: Markdown = md_src.into();
+    let rendered = DarkmatterPage::new(&term)
+        .with_color_mode(ColorMode::Dark)
+        .with_color_depth(ColorDepth::TrueColor)
+        .with_code_theme("github")
+        .with_margin_left(ml)
+        .with_margin_right(mr)
+        .with_margin_top(mt)
+        .with_margin_bottom(mb)
+        .render(&md)
+        .expect("DarkmatterPage render");
+
+    let dir = tempdir().unwrap();
+    let path = dir.path().join(format!("{name}.ansi"));
+    fs::write(&path, rendered).unwrap();
+
+    run_with_sentinel(harness, "clear");
+    let frame = run_with_sentinel(harness, &format!("cat {}", path.display()));
+    Some((frame, cols))
+}
+
+/// Review-1 finding 1: under the repro layout (`--ml 4 --mr 4`, github theme,
+/// dark page), the code panel must render in a real terminal as a single
+/// contiguous **inverted (light)** background rectangle spanning exactly the
+/// content columns `[left, width - right)` on every panel row — and prose must
+/// not carry that background. This verifies Defects #0/#1/#2 against the actual
+/// cell grid, not just the ANSI byte string.
+#[test]
+#[serial(level2_terminal)]
+fn level2_page_code_panel_is_contiguous_inverted_rectangle() {
+    let (ml, mr, mt, mb) = (4u16, 4u16, 1u16, 1u16);
+    let body = "# A Heading\n\nLead prose paragraph.\n\n```rust\nfn main() {\n    let x = 1;\n}\n```\n";
+    let Some((frame, cols)) = run_page_in_pane(body, "page_code_panel", ml, mr, mt, mb) else {
+        return;
+    };
+
+    let target = github_light_bg();
+    let left = ml as usize;
+    let right_edge = cols - mr as usize;
+    let content_width = right_edge - left;
+
+    let plain_rows: Vec<&str> = frame.plain.lines().collect();
+    let raw_rows: Vec<&str> = frame.raw.lines().collect();
+
+    // Every code-panel row must be a single contiguous background run (no
+    // `\x1b[K` gap, Defect #1) that ends on the content right boundary
+    // (Defect #2 — pill and body coherent). Full-bleed rows (body + padding)
+    // additionally fill from the left margin; the right-aligned language pill is
+    // narrow chrome that legitimately opens mid-line (spec Stage 4.2).
+    let mut full_bleed_rows = 0;
+    let mut pill_rows = 0;
+    for (idx, raw) in raw_rows.iter().enumerate() {
+        if let Some((start, end, count)) = target_extent(raw, target) {
+            let plain = plain_rows.get(idx).copied().unwrap_or("");
+            assert_eq!(
+                count, 1,
+                "code panel row must be one contiguous background rectangle (no \\x1b[K gap); \
+                 row {idx} plain={plain:?} raw={raw:?}"
+            );
+            assert_eq!(
+                end, right_edge,
+                "code panel background must end at the content right edge (width - right = {right_edge}); \
+                 row {idx} plain={plain:?}"
+            );
+            if end - start == content_width {
+                assert_eq!(
+                    start, left,
+                    "full-bleed code row must start at the left margin ({left}); \
+                     row {idx} plain={plain:?}"
+                );
+                full_bleed_rows += 1;
+            } else {
+                pill_rows += 1;
+            }
+        }
+    }
+    assert!(
+        full_bleed_rows >= 3,
+        "expected >= 3 full-bleed code-panel rows (body lines + top/bottom padding) filling \
+         the content rectangle; found {full_bleed_rows}. plain:\n{}",
+        frame.plain
+    );
+    assert!(
+        pill_rows >= 1,
+        "expected the right-aligned language pill row (narrow chrome ending at the right edge); \
+         found {pill_rows}. plain:\n{}",
+        frame.plain
+    );
+
+    // Contrast: the heading (prose) row must NOT carry the inverted code-panel
+    // background — prose follows the real (dark) mode, code inverts.
+    let heading_idx = plain_rows
+        .iter()
+        .position(|p| p.contains("A Heading"))
+        .unwrap_or_else(|| panic!("heading row missing from capture. plain:\n{}", frame.plain));
+    assert!(
+        target_extent(raw_rows[heading_idx], target).is_none(),
+        "prose heading row must not carry the inverted code-panel background; raw:\n{}",
+        raw_rows[heading_idx]
+    );
+}
+
+/// Review-1 finding 1 (blank-line behavior): between two code blocks the
+/// rendered pane must not contain a run of two or more consecutive *blank* rows
+/// (the Markdown vertical-rhythm invariant). A background-filled panel padding
+/// row is **not** blank; "blank" means visibly empty with no code-panel
+/// background. This checks the rhythm on the real terminal grid.
+#[test]
+#[serial(level2_terminal)]
+fn level2_page_no_double_blank_rows_between_code_blocks() {
+    let (ml, mr, mt, mb) = (4u16, 4u16, 0u16, 0u16);
+    let body = "```rust\nfn a() {}\n```\n\n\n\n```rust\nfn b() {}\n```\n";
+    let Some((frame, _cols)) = run_page_in_pane(body, "page_rhythm", ml, mr, mt, mb) else {
+        return;
+    };
+
+    let target = github_light_bg();
+    let plain_rows: Vec<&str> = frame.plain.lines().collect();
+    let raw_rows: Vec<&str> = frame.raw.lines().collect();
+
+    // Restrict the scan to the span between the first and last code-panel row so
+    // the shell prompt / sentinel framing is excluded.
+    let panel_idxs: Vec<usize> = raw_rows
+        .iter()
+        .enumerate()
+        .filter(|(_, raw)| target_extent(raw, target).is_some())
+        .map(|(i, _)| i)
+        .collect();
+    assert!(
+        panel_idxs.len() >= 2,
+        "expected two code panels in the capture. plain:\n{}",
+        frame.plain
+    );
+    let (first, last) = (panel_idxs[0], *panel_idxs.last().unwrap());
+
+    let is_blank = |idx: usize| -> bool {
+        let visibly_empty = plain_rows.get(idx).is_none_or(|p| p.trim().is_empty());
+        let no_panel_bg = target_extent(raw_rows[idx], target).is_none();
+        visibly_empty && no_panel_bg
+    };
+
+    let mut consecutive_blanks = 0;
+    for idx in first..=last {
+        if is_blank(idx) {
+            consecutive_blanks += 1;
+            assert!(
+                consecutive_blanks < 2,
+                "found a run of >= 2 consecutive blank rows between code blocks (row {idx}); \
+                 Markdown vertical-rhythm invariant violated. plain:\n{}",
+                frame.plain
+            );
+        } else {
+            consecutive_blanks = 0;
+        }
+    }
 }

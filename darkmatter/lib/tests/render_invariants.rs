@@ -43,6 +43,7 @@ use biscuit_test_harness::layout_invariants::{self as inv, LayoutExpectation};
 use darkmatter::layout::DarkmatterPage;
 use darkmatter::markdown::Markdown;
 use darkmatter::markdown::highlighting::{CodeHighlighter, ColorMode, ThemePair};
+use darkmatter::markdown::output::MermaidMode;
 
 /// One block shape, as a minimal Markdown fixture.
 struct Shape {
@@ -52,6 +53,15 @@ struct Shape {
     /// panel background, so the background-rectangle family (I2b/I3/I4) applies;
     /// other shapes paint partial-width or no background, so it does not.
     is_code: bool,
+    /// Mermaid rendering mode to apply via [`DarkmatterPage::with_mermaid_mode`].
+    /// `None` leaves the page default (`MermaidMode::Off`). `Some(Text)`
+    /// exercises the Mermaid text path, which renders the diagram source as a
+    /// syntax-highlighted code block through the same emitter as ordinary
+    /// fences — so the layout/right-boundary/color-mode invariants must hold.
+    /// `MermaidMode::Image` is *not* used in the sweep: it renders via the real
+    /// `mmdc`/terminal and prints to stdout, so it is non-deterministic; its
+    /// fallback path is covered by a dedicated gated test instead.
+    mermaid: Option<MermaidMode>,
 }
 
 fn shapes() -> Vec<Shape> {
@@ -60,61 +70,83 @@ fn shapes() -> Vec<Shape> {
             name: "heading",
             md: "# A Heading\n",
             is_code: false,
+            mermaid: None,
         },
         Shape {
             name: "prose",
             md: "Some prose paragraph text goes here.\n",
             is_code: false,
+            mermaid: None,
         },
         Shape {
             name: "prose_wrap",
             md: "This is a deliberately long paragraph of prose intended to exceed the available content width so that word wrapping is exercised against the page layout under test conditions.\n",
             is_code: false,
+            mermaid: None,
         },
         Shape {
             name: "ulist",
             md: "- item one\n- item two\n",
             is_code: false,
+            mermaid: None,
         },
         Shape {
             name: "olist",
             md: "1. item one\n2. item two\n",
             is_code: false,
+            mermaid: None,
         },
         Shape {
             name: "blockquote",
             md: "> a quoted line of text\n",
             is_code: false,
+            mermaid: None,
         },
         Shape {
             name: "table",
             md: "| A | B |\n|---|---|\n| 1 | 2 |\n",
             is_code: false,
+            mermaid: None,
         },
         Shape {
             name: "code_rust",
             md: "```rust\npub struct FooBar {\n    foo: String,\n    bar: u32,\n}\n```\n",
             is_code: true,
+            mermaid: None,
         },
         Shape {
             name: "code_ts",
             md: "```ts\ntype FooBar = {\n    foo: string;\n    bar: number;\n}\n```\n",
             is_code: true,
+            mermaid: None,
+        },
+        // Mermaid text mode: the diagram source renders as a syntax-highlighted
+        // code block through the same emitter as ordinary fences, so all the
+        // code-panel invariants (background rectangle, right-boundary coherence,
+        // no `\x1b[K` gap under decoration) must hold (review-1 finding 3).
+        Shape {
+            name: "mermaid_text",
+            md: "```mermaid\ngraph TD;\n    A-->B;\n    A-->C;\n```\n",
+            is_code: true,
+            mermaid: Some(MermaidMode::Text),
         },
         Shape {
             name: "hr",
             md: "above\n\n---\n\nbelow\n",
             is_code: false,
+            mermaid: None,
         },
         Shape {
             name: "image",
             md: "![alt text|20](nonexistent.png)\n",
             is_code: false,
+            mermaid: None,
         },
         Shape {
             name: "blocks_fixture",
             md: "# Blocks Test\n\nThis Markdown has a series of code blocks.\n\n## Rust\n\n```rust\npub struct FooBar {\n    foo: String,\n    bar: u32,\n}\n```\n\n## Typescript\n\n```ts\ntype FooBar = {\n    foo: string;\n    bar: number;\n}\n```\n",
             is_code: true,
+            mermaid: None,
         },
     ]
 }
@@ -194,12 +226,15 @@ fn scenarios() -> Vec<Scenario> {
 
 fn render(shape: &Shape, scenario: &Scenario) -> String {
     let term = Terminal::new_optimistic(scenario.width as u32);
-    let page = DarkmatterPage::new(&term)
+    let mut page = DarkmatterPage::new(&term)
         .with_margin_left(scenario.ml)
         .with_margin_right(scenario.mr)
         .with_margin_top(scenario.mt)
         .with_margin_bottom(scenario.mb)
         .with_code_theme("dracula");
+    if let Some(mode) = shape.mermaid {
+        page = page.with_mermaid_mode(mode);
+    }
     let md: Markdown = shape.md.into();
     page.render(&md)
         .unwrap_or_else(|e| format!("<render error: {e}>"))
@@ -355,16 +390,19 @@ fn blank_line_count_is_idempotent() {
                 name: shape.name,
                 md: Box::leak(format!("{}\n{tail}", shape.md).into_boxed_str()),
                 is_code: shape.is_code,
+                mermaid: shape.mermaid,
             };
             let five = Shape {
                 name: shape.name,
                 md: Box::leak(format!("{}\n\n\n\n\n{tail}", shape.md).into_boxed_str()),
                 is_code: shape.is_code,
+                mermaid: shape.mermaid,
             };
             let many = Shape {
                 name: shape.name,
                 md: Box::leak(format!("{}{}{tail}", shape.md, "\n".repeat(99)).into_boxed_str()),
                 is_code: shape.is_code,
+                mermaid: shape.mermaid,
             };
 
             let r1 = render(&one, &scenario);
@@ -454,4 +492,50 @@ fn single_variant_theme_ignores_mode() {
         theme_bg_ansi(ThemePair::Dracula, ColorMode::Dark),
         theme_bg_ansi(ThemePair::Dracula, ColorMode::Light),
     );
+}
+
+/// Review-1 finding 3 (image fallback): when `MermaidMode::Image` rendering
+/// fails, the renderer falls back to the highlighted mermaid source. That
+/// fallback is now routed through the same emitter as ordinary code fences, so
+/// it must honor page decoration identically: no `\x1b[K`, a background
+/// rectangle ending at `width - right`, and chrome/body sharing one right edge.
+///
+/// Image rendering shells out to the real `mmdc`/terminal and prints to stdout,
+/// so its success is environment-dependent and cannot be forced deterministically.
+/// This test therefore asserts the invariants **only when the fallback was
+/// actually taken** (detected by the `mermaid` language pill, which the
+/// image-success path omits); when the image renders, there is nothing to check
+/// here and the deterministic `mermaid_text` matrix shape covers the same emitter.
+#[test]
+fn mermaid_image_fallback_honors_layout_under_decoration() {
+    let term = Terminal::new_optimistic(120);
+    let md: Markdown = "```mermaid\ngraph TD;\n    A-->B;\n```\n".into();
+    let out = DarkmatterPage::new(&term)
+        .with_margin_left(4)
+        .with_margin_right(4)
+        .with_margin_top(1)
+        .with_margin_bottom(1)
+        .with_code_theme("dracula")
+        .with_mermaid_mode(MermaidMode::Image)
+        .render(&md)
+        .unwrap();
+
+    // The `mermaid` pill only appears on the fallback (highlighted-source) path;
+    // the image-success path emits a title-only header. Skip when the image
+    // rendered successfully — the text-mode matrix shape covers the same code.
+    if !out.contains("mermaid") {
+        return;
+    }
+
+    let expect = LayoutExpectation {
+        width: 120,
+        left: 4,
+        right: 4,
+        top: 1,
+        bottom: 1,
+    };
+    inv::containment(&out, &expect).expect("I1 containment");
+    inv::no_clear_to_eol(&out, &expect).expect("I2a no \\x1b[K");
+    inv::background_rectangle(&out, &expect).expect("I2b background rectangle");
+    inv::right_boundary_coherence(&out, &expect).expect("I3 right-boundary coherence");
 }
