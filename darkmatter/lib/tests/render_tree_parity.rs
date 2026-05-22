@@ -450,7 +450,9 @@ fn assert_tokens_present(
 /// output.
 ///
 /// URL tokens are checked against un-stripped output because in HTML they live
-/// inside `href`/`src` attributes that tag-stripping would discard.
+/// inside `href`/`src` attributes that tag-stripping would discard, and on the
+/// terminal surface an OSC8 hyperlink carries the URL inside the escape
+/// sequence that ANSI/OSC-stripping would discard. Pass raw output here.
 ///
 /// ## Panics
 ///
@@ -569,10 +571,18 @@ fn render_tree_parity_inline_styles() {
 /// attribute-bound tokens (`href`/`src`/`alt`) are checked by [`assert_parity`].
 ///
 /// The link `href` is additionally checked on the **terminal** surface: both
-/// terminal renderers surface it (legacy as `text [url]`, the tree renderer
-/// as `[text](url)`). The image `src` URL is *not* checked on the terminal —
-/// neither terminal renderer emits an image's `src`; both show only the alt
-/// text. That symmetric omission is an *acceptable formatting difference*.
+/// terminal renderers surface it, but *where* the URL lives depends on
+/// hyperlink support. With OSC8 enabled (a TTY-attached, capable terminal) the
+/// legacy renderer embeds the URL **inside** the OSC8 escape sequence
+/// (`ESC]8;;<url>BEL`) rather than as visible `text [url]`; the tree renderer
+/// surfaces it as `[text](url)`. Either way the URL is present in the *raw*
+/// output, so — exactly like the HTML attribute-bound tokens — it is asserted
+/// against the un-stripped terminal output. Stripping ANSI/OSC first (as the
+/// visible-text checks do) would discard the URL in OSC8 mode and make this
+/// assertion fail spuriously when run attached to a terminal. The image `src`
+/// URL is *not* checked on the terminal — neither terminal renderer emits an
+/// image's `src`; both show only the alt text. That symmetric omission is an
+/// *acceptable formatting difference*.
 #[test]
 fn render_tree_parity_links_images() {
     assert_parity(
@@ -581,9 +591,12 @@ fn render_tree_parity_links_images() {
         &["https://example.com", "image.png", "descriptive alt"],
     );
 
+    // URL parity on the terminal surface is checked against the *raw* output:
+    // in OSC8 mode the legacy renderer carries the URL inside the (otherwise
+    // stripped) hyperlink escape sequence. See `assert_urls_present`.
     let markdown = fixture("links_images");
-    let legacy_term = strip_ansi(&legacy_terminal(markdown));
-    let tree_term = strip_ansi(&tree_terminal("links_images", markdown));
+    let legacy_term = legacy_terminal(markdown);
+    let tree_term = tree_terminal("links_images", markdown);
     assert_urls_present(
         "links_images",
         "terminal",

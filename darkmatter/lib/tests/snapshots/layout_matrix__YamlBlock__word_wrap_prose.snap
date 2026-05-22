@@ -4,17 +4,18 @@ expression: block
 ---
 BESPOKE
                                                                            yaml 
- name: rusty-biscuit
- version: 0.1.0
- tags:
-   - cli
+                                                                                
+ name: rusty-biscuit                                                            
+ version: 0.1.0                                                                 
+ tags:                                                                          
+   - cli                                                                        
    - terminal
 ---
 TREE
                                                                            yaml 
-
- name: rusty-biscuit
- version: 0.1.0
- tags:
-   - cli
+                                                                                
+ name: rusty-biscuit                                                            
+ version: 0.1.0                                                                 
+ tags:                                                                          
+   - cli                                                                        
    - terminal
