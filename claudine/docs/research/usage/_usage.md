@@ -21,7 +21,14 @@ Your task is to research how a program can get this usage data for the current u
         - maybe if we ask for a JSON response we can get this information?
         - add a section to the "{{doc}}" called `## CLI Switch Opportunities` and report on everything you find out about CLI Switch opportunities to get usage data for the user's subscription with {{state.name}}
         - if there is a clear way to do this via CLI set the Frontmatter property `cli_switch` on "{{doc}}" to `true`; otherwise set to `false`
-    3. Scraping
+    3. PTY Scraping 
+        - to enable this {{state.name}} would need to have a `/status`, `/usage` command available to interactive sessions
+            - sadly these slash commands seem to never be available on non-interactive sessions
+        - research using the Rust crate 'expectrl' to scrape the information we want
+        - the goal is to produce a mini-design for how expectrl could be used to do a two pass scrape of the content:
+            - first pass would be to look for the current reporting shape that the CLI provides
+            - the second pass would only be used if the first pass failed (likely due to the reporting have changed) and it would take more of a fuzzy search approach to find the metrics on the page
+
     4. 
 
 ::block when="state.model_provider"

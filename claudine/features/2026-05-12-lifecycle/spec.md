@@ -2,7 +2,7 @@
 
 ## The Prompt Lifecycle
 
-![lifecycle](./lifecycle.svg)
+![lifecycle](./lifecycle.png)
 
 Today we have the following "lifecycle" events defined for a prompt document in Claudine:
 
@@ -13,12 +13,14 @@ Today we have the following "lifecycle" events defined for a prompt document in 
 
 2. **Blocked** - _pre-flight checks failed_
 
-    - communicate the outcome
+    - communicate regarding blocked status
+    - proxy to a different prompt instead?
 
 3. **Success** (agentic loop completed successfully)
 
     - communicate a successful outcome and/or status of a metric
-    - create a side-effect to positively effect the execution environment
+    - call a webhook? run a git commit? etc.
+    - move onto the "next step" when in sequence or loop
 
 4. **Failure** (agentic loop ran into an error)
 
