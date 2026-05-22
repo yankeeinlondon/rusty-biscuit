@@ -44,6 +44,7 @@ use darkmatter::layout::DarkmatterPage;
 use darkmatter::markdown::Markdown;
 use darkmatter::markdown::highlighting::{CodeHighlighter, ColorMode, ThemePair};
 use darkmatter::markdown::output::MermaidMode;
+use darkmatter::markdown::output::terminal::{ColorDepth, TerminalImageMode};
 
 /// One block shape, as a minimal Markdown fixture.
 struct Shape {
@@ -226,7 +227,14 @@ fn scenarios() -> Vec<Scenario> {
 
 fn render(shape: &Shape, scenario: &Scenario) -> String {
     let term = Terminal::new_optimistic(scenario.width as u32);
+    // Pin the color depth so the render path is hermetic. Left unset, the
+    // renderer falls back to `ColorDepth::auto_detect()` and reads the ambient
+    // environment — under a no-color terminal it dumps raw, undecorated
+    // markdown (bypassing wrapping and layout), which trivially breaks every
+    // layout invariant. Forcing TrueColor exercises the real decorated path in
+    // every environment.
     let mut page = DarkmatterPage::new(&term)
+        .with_color_depth(ColorDepth::TrueColor)
         .with_margin_left(scenario.ml)
         .with_margin_right(scenario.mr)
         .with_margin_top(scenario.mt)
@@ -443,7 +451,12 @@ fn theme_bg_ansi(pair: ThemePair, mode: ColorMode) -> String {
 #[test]
 fn i7_code_block_inverts_theme_against_dark_terminal() {
     let term = Terminal::new_optimistic(80);
+    // Pin TrueColor so the asserted truecolor (`48;2;r;g;b`) background SGR is
+    // emitted deterministically; otherwise the renderer auto-detects the
+    // ambient depth and a 256-color or no-color environment produces different
+    // (or no) SGR, making this assertion environment-dependent.
     let page = DarkmatterPage::new(&term)
+        .with_color_depth(ColorDepth::TrueColor)
         .with_color_mode(ColorMode::Dark)
         .with_code_theme("github")
         .with_margin_left(2)
@@ -469,6 +482,7 @@ fn i7_code_block_inverts_theme_against_dark_terminal() {
 fn i7_code_block_inverts_theme_against_light_terminal() {
     let term = Terminal::new_optimistic(80);
     let page = DarkmatterPage::new(&term)
+        .with_color_depth(ColorDepth::TrueColor)
         .with_color_mode(ColorMode::Light)
         .with_code_theme("github")
         .with_margin_left(2)
@@ -500,32 +514,37 @@ fn single_variant_theme_ignores_mode() {
 /// it must honor page decoration identically: no `\x1b[K`, a background
 /// rectangle ending at `width - right`, and chrome/body sharing one right edge.
 ///
-/// Image rendering shells out to the real `mmdc`/terminal and prints to stdout,
-/// so its success is environment-dependent and cannot be forced deterministically.
-/// This test therefore asserts the invariants **only when the fallback was
-/// actually taken** (detected by the `mermaid` language pill, which the
-/// image-success path omits); when the image renders, there is nothing to check
-/// here and the deterministic `mermaid_text` matrix shape covers the same emitter.
+/// `mmdc`/terminal image rendering shells out and prints to stdout, so its
+/// *success* is environment-dependent and cannot be forced. The *fallback*,
+/// however, can: [`TerminalImageMode::Never`] skips the image attempt entirely
+/// and routes straight to the highlighted-source path. Combined with a pinned
+/// [`ColorDepth::TrueColor`], this exercises the fallback branch in-process,
+/// deterministically, in every environment — so the layout invariants are
+/// asserted unconditionally rather than only when `mmdc` happens to fail.
 #[test]
 fn mermaid_image_fallback_honors_layout_under_decoration() {
     let term = Terminal::new_optimistic(120);
     let md: Markdown = "```mermaid\ngraph TD;\n    A-->B;\n```\n".into();
     let out = DarkmatterPage::new(&term)
+        .with_color_depth(ColorDepth::TrueColor)
         .with_margin_left(4)
         .with_margin_right(4)
         .with_margin_top(1)
         .with_margin_bottom(1)
         .with_code_theme("dracula")
         .with_mermaid_mode(MermaidMode::Image)
+        .with_image_mode(TerminalImageMode::Never)
         .render(&md)
         .unwrap();
 
-    // The `mermaid` pill only appears on the fallback (highlighted-source) path;
-    // the image-success path emits a title-only header. Skip when the image
-    // rendered successfully — the text-mode matrix shape covers the same code.
-    if !out.contains("mermaid") {
-        return;
-    }
+    // `TerminalImageMode::Never` guarantees the fallback was taken: the
+    // highlighted-source path emits the `mermaid` language pill (the
+    // image-success path omits it). Assert the fallback actually ran so a
+    // regression that bypassed it would fail loudly rather than vacuously pass.
+    assert!(
+        out.contains("mermaid"),
+        "TerminalImageMode::Never must route to the highlighted-source fallback"
+    );
 
     let expect = LayoutExpectation {
         width: 120,
@@ -538,4 +557,5 @@ fn mermaid_image_fallback_honors_layout_under_decoration() {
     inv::no_clear_to_eol(&out, &expect).expect("I2a no \\x1b[K");
     inv::background_rectangle(&out, &expect).expect("I2b background rectangle");
     inv::right_boundary_coherence(&out, &expect).expect("I3 right-boundary coherence");
+    inv::left_offset_uniformity(&out, &expect).expect("I4 left-offset uniformity");
 }

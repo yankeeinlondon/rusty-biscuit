@@ -1117,11 +1117,22 @@ pub(crate) fn write_terminal_with_layout<W: std::io::Write>(
                             // Render mermaid diagram as image using mmdc CLI
                             let diagram = crate::mermaid::Mermaid::new(&code_buffer);
 
-                            let render_succeeded = match diagram.render_for_terminal() {
-                                Ok(()) => true,
-                                Err(e) => {
-                                    tracing::warn!(error = %e, "Mermaid image rendering failed");
-                                    false
+                            // `TerminalImageMode::Never` means "always use text
+                            // fallback", so skip the mmdc attempt entirely and
+                            // route straight to the highlighted-source fallback.
+                            // This honors the image-mode contract and gives
+                            // callers a deterministic, in-process way to exercise
+                            // the fallback path regardless of `mmdc`/TTY presence.
+                            let render_succeeded = if options.image_mode == TerminalImageMode::Never
+                            {
+                                false
+                            } else {
+                                match diagram.render_for_terminal() {
+                                    Ok(()) => true,
+                                    Err(e) => {
+                                        tracing::warn!(error = %e, "Mermaid image rendering failed");
+                                        false
+                                    }
                                 }
                             };
 
