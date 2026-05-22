@@ -1,7 +1,7 @@
 ---
 name: rust-testing
 description: Expert guidance for testing Rust — unit and integration tests, property-based testing with proptest, mocking with mockall, benchmarking with criterion, and runners like cargo-nextest. Use when writing or structuring Rust tests, adding property/mock/benchmark coverage, or choosing a test runner.
-hash: a7d02c40efcd27f4
+hash: 4eb80211fedd5ae8-6699cbd30e03eef2
 ---
 
 # Rust Testing
@@ -21,6 +21,7 @@ Comprehensive testing patterns for Rust using the built-in framework, cargo-next
 - In this workspace, new and modified tests should prefer `#[rstest]` for fixtures and parameterization; do not bulk-migrate unrelated tests just for style consistency
 - Use `test_toolkit::EnvGuard` for process environment setup/teardown and serialize those tests with `#[serial_test::serial]`
 - Use `test_toolkit::trace_phase!` around meaningful setup/body/teardown boundaries when tracing would help diagnose fixture or integration-test hangs
+- For HTML/CSS render output, drive a real headless browser with `chromiumoxide` and assert on **computed styles** (`getComputedStyle`), not pixel screenshots — computed-style assertions are deterministic and cross-platform stable; reserve screenshots for opt-in visual baselines. Skip cleanly when no Chrome/Chromium is found (see [Browser Render Testing](./browser-testing.md))
 
 ## Quick Reference
 
@@ -120,6 +121,7 @@ When you need to pin a toolchain to get reliable results, include the exact comm
 - [Benchmarking](./benchmarking.md) - Criterion for performance measurement
 - [CLI Output Testing](./cli-output-testing.md) - stdout/stderr, ANSI, and shell completion checks
 - [TUI Testing](./tui-testing.md) - Ratatui `TestBackend` rendering and event-path tests
+- [Browser Render Testing](./browser-testing.md) - Headless Chrome (chromiumoxide) computed-style assertions and screenshot inspection for HTML/CSS output
 
 ### Tools
 
@@ -310,6 +312,59 @@ assert_eq!(stdout, strip_ansi(&stdout));
 
 Use `FORCE_COLOR=1` when you need styled output in non-TTY integration tests, and `--plain` when the CLI exposes an explicit no-ANSI mode that should override env-based color forcing.
 
+### Headless Browser Render Test (chromiumoxide)
+
+Assert on what a real browser *computes* from your HTML/CSS, not on source
+substrings. Wrap a render fragment into a standalone document, load it over a
+`file://` URL, and read `getComputedStyle`. See [Browser Render Testing](./browser-testing.md)
+for the `find_chrome` locator, the screenshot path, and skip-clean details.
+
+```rust
+use chromiumoxide::browser::{Browser, BrowserConfig};
+use futures_util::StreamExt;
+
+#[tokio::test]
+#[serial_test::serial(browser)]
+async fn code_block_background_computes() {
+    let Some(chrome) = find_chrome() else { return; }; // skip if no browser
+
+    // Wrap the render fragment in a full document with a page background.
+    let doc = format!(
+        "<!doctype html><html><body style=\"background:#202020\">{}</body></html>",
+        render_html_fragment(),
+    );
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("page.html");
+    std::fs::write(&path, doc).unwrap();
+
+    let config = BrowserConfig::builder()
+        .chrome_executable(chrome)
+        .arg("--no-sandbox")
+        .build()
+        .unwrap();
+    let (browser, mut handler) = Browser::launch(config).await.unwrap();
+    // The handler MUST be polled or no CDP traffic flows.
+    let pump = tokio::spawn(async move { while handler.next().await.is_some() {} });
+
+    let page = browser.new_page(format!("file://{}", path.display())).await.unwrap();
+    page.wait_for_navigation().await.unwrap();
+    let bg: String = page
+        .evaluate(
+            "getComputedStyle(document.querySelector('.code-block')).backgroundColor",
+        )
+        .await
+        .unwrap()
+        .into_value()
+        .unwrap();
+
+    let mut browser = browser;
+    browser.close().await.ok();
+    pump.abort();
+
+    assert_eq!(bg, "rgb(17, 27, 39)"); // browser-computed, not source-matched
+}
+```
+
 ### Expected Panic
 
 ```rust
@@ -332,6 +387,7 @@ fn panics_on_invalid_index() {
 | pretty_assertions | Better diff output | `pretty_assertions = "1"` |
 | insta | Snapshot testing | `insta = "1"` |
 | testcontainers | Docker-based integration tests | `testcontainers = "0.15"` |
+| chromiumoxide | Headless-browser (CDP) HTML/CSS render tests | `chromiumoxide = { version = "0.7", default-features = false, features = ["tokio-runtime"] }` |
 
 ## Resources
 
