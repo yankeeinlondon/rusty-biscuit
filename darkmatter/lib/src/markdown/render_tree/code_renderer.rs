@@ -161,9 +161,13 @@ impl CodeRenderer for TerminalCodeRenderer {
         _attrs: &NodeAttrs,
     ) -> Option<BrowserFragment<Ready>> {
         let options = HtmlOptions::default();
-        // Browser code blocks do not invert (terminal-only contrast); see the
-        // note in `darkmatter::markdown::output::html::as_html`.
-        let highlighter = CodeHighlighter::new(options.code_theme, options.color_mode);
+        // Code blocks contrast against the page: resolve the theme *variant*
+        // against the INVERTED color mode (a light code panel on a dark page,
+        // and vice versa). This matches `darkmatter::markdown::output::html::as_html`
+        // and `YamlBlock`'s browser path so render-tree HTML, legacy `as_html`,
+        // and `YamlBlock` agree (Defect D). Single-variant themes (dracula/nord/
+        // monokai/vs-dark) are a deliberate no-op.
+        let highlighter = CodeHighlighter::new(options.code_theme, options.color_mode.inverted());
         let code_meta = build_code_meta(lang.unwrap_or(""), meta);
         let language = lang.unwrap_or("");
 
@@ -265,6 +269,57 @@ mod tests {
             .render_browser_code(Some("yaml"), "foo: 1", None, &NodeAttrs::default())
             .expect("renders");
         assert!(fragment.render().contains("language-yaml"));
+    }
+
+    /// Defect D (review-1 finding 2): the render-tree browser hook must invert
+    /// the code theme for page contrast, exactly like `as_html` and `YamlBlock`.
+    /// `HtmlOptions::default()` is a `github` (paired) theme on a `Dark` page, so
+    /// the panel must resolve to github-*light* (`Dark.inverted()`), not
+    /// github-dark. The fragment carries no stylesheet, so the inversion shows up
+    /// in the `<span style="color: …">` syntax colors. We render the same
+    /// `render_html_code_block` helper with the inverted (correct) and
+    /// non-inverted (buggy) highlighters and assert the hook reproduces the
+    /// inverted one — independent of concrete hex values.
+    #[test]
+    fn browser_code_inverts_theme_for_page_contrast() {
+        let opts = HtmlOptions::default();
+        let code = "fn main() {}";
+        let meta = build_code_meta("rust", None);
+
+        let inverted = render_html_code_block(
+            code,
+            "rust",
+            &meta,
+            &CodeHighlighter::new(opts.code_theme, opts.color_mode.inverted()),
+            &opts,
+        )
+        .expect("inverted highlight");
+        let non_inverted = render_html_code_block(
+            code,
+            "rust",
+            &meta,
+            &CodeHighlighter::new(opts.code_theme, opts.color_mode),
+            &opts,
+        )
+        .expect("non-inverted highlight");
+        assert_ne!(
+            inverted, non_inverted,
+            "github is a paired theme; inverted vs non-inverted output must differ",
+        );
+
+        let html = TerminalCodeRenderer::new()
+            .render_browser_code(Some("rust"), code, None, &NodeAttrs::default())
+            .expect("renders")
+            .render();
+
+        assert!(
+            html.contains(inverted.trim()),
+            "render-tree HTML on a dark page must use the INVERTED (light) github theme; got:\n{html}",
+        );
+        assert!(
+            !html.contains(non_inverted.trim()),
+            "render-tree HTML must not use the non-inverted (dark) github theme; got:\n{html}",
+        );
     }
 
     /// A `title` / `line-numbering` / `highlight` info-string directive must
