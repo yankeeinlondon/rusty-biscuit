@@ -19,14 +19,17 @@
 //! superscript/subscript, relying on the dispositions recorded in
 //! [`inventory`].
 //!
-//! Two darkmatter inline conveniences are **intentionally deferred** to a
-//! follow-up feature: `==mark==` / dim inline styles and horizontal rules with
-//! attribute blocks. Both are produced by darkmatter's `InlineStyleProcessor` /
-//! `RuleProcessor`, iterator adapters that cannot consume the fold's
-//! offset-carrying stream and that discard source byte ranges. Folding them
-//! without losing every node's `SourceLocation` needs a separate design
-//! decision — see the [`inventory`] module docs for the full rationale.
-//! Frontmatter wiring is likewise deferred to a later phase.
+//! Frontmatter wiring is now available via
+//! [`fold_markdown_with_frontmatter`]: darkmatter's already extracted
+//! frontmatter flows through [`renderable::tree::DocumentMetadata::frontmatter`]
+//! without re-parsing through `pulldown-cmark`'s metadata-block options (DMTR-4).
+//!
+//! A span-aware processor chain for `==mark==` / dim inline styles and
+//! horizontal-rule attribute paragraphs lives in [`span`]. It produces
+//! [`span::SpannedInlineEvent`]s with byte ranges so the fold can preserve
+//! every node's [`renderable::tree::SourceLocation`] when those Darkmatter
+//! constructs appear (DMTR-3). The legacy non-spanned `InlineStyleProcessor`
+//! and `RuleProcessor` still back the public renderers and are unchanged.
 //!
 //! [`Tag`]: pulldown_cmark::Tag
 //!
@@ -48,9 +51,33 @@
 //! `pulldown-cmark` event stream and builds a [`renderable::tree::Document`].
 
 pub mod code_renderer;
+// `entrypoints` exposes `pub(crate)` adapter functions that are exercised by
+// integration tests, benches, and the parity harness — none of which live in
+// the lib crate. Silence the lib-side dead-code warnings until the public
+// cutover wires the adapter into `Markdown::as_html` / `for_terminal`.
+#[allow(dead_code)]
+pub(crate) mod entrypoints;
 pub mod fold;
 pub mod inventory;
+pub mod pipeline;
 pub mod source;
+pub mod span;
 
 pub use code_renderer::TerminalCodeRenderer;
-pub use fold::fold_markdown_to_document;
+pub use fold::{
+    fold_markdown_spanned_with_frontmatter, fold_markdown_to_document,
+    fold_markdown_to_document_with_metadata, fold_markdown_with_frontmatter,
+};
+pub use pipeline::{PipelineRenderResult, PipelineResult};
+
+// Internal experimental entry points (DMTR-1). These are `pub(crate)` so
+// parity tests and benchmarks inside `darkmatter` can drive the tree path
+// without exposing it to downstream callers. The public `Markdown::as_html`,
+// `Markdown::as_terminal`, and `for_terminal` continue to use the legacy
+// renderers until cutover; see
+// `renderable/features/2026-05-20-darkmatter-tree/entry-point-shape.md`.
+#[allow(unused_imports)]
+pub(crate) use entrypoints::{
+    render_tree_html, render_tree_markdown, render_tree_markdown_dialect, render_tree_terminal,
+    to_render_document,
+};

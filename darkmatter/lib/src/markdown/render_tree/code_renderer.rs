@@ -7,11 +7,13 @@
 //! [`YamlBlock`](crate::markdown::YamlBlock) (and Markdown code fence) renderer.
 
 use renderable::browser::fragment::{BrowserFragment, Ready};
-use renderable::color::{ColorMode as RenderableColorMode, TerminalCodeContext};
+use renderable::color::{
+    ColorDepth as RenderableColorDepth, ColorMode as RenderableColorMode, TerminalCodeContext,
+};
 use renderable::tree::{CodeRenderer, NodeAttrs};
 
 use crate::markdown::{
-    dsl::CodeBlockMeta,
+    dsl::{CodeBlockMeta, parse_code_info},
     highlighting::{CodeHighlighter, ColorMode},
     output::code_block::{render_html_code_block, render_terminal_code_block},
     output::html::HtmlOptions,
@@ -52,37 +54,69 @@ fn map_color_mode(mode: RenderableColorMode) -> ColorMode {
     }
 }
 
+/// Reconstructs a [`CodeBlockMeta`] from the language token and the fenced
+/// info-string `meta` (the text after the language).
+///
+/// This is how the render-tree path recovers darkmatter's code-block DSL
+/// (`title="…" line-numbering=true highlight=2`): the fold splits the info
+/// string into `lang` + `meta`, and this helper re-joins them so
+/// [`parse_code_info`] yields the same [`CodeBlockMeta`] the legacy renderer
+/// builds. A malformed directive (e.g. an invalid highlight range) degrades to
+/// a language-only meta rather than failing the render.
+fn build_code_meta(lang: &str, meta: Option<&str>) -> CodeBlockMeta {
+    let info = match meta {
+        Some(m) if !m.trim().is_empty() => format!("{lang} {m}"),
+        _ => lang.to_string(),
+    };
+    parse_code_info(&info).unwrap_or_else(|_| CodeBlockMeta {
+        language: lang.to_string(),
+        ..CodeBlockMeta::default()
+    })
+}
+
 impl CodeRenderer for TerminalCodeRenderer {
     fn render_terminal_code(
         &self,
         lang: Option<&str>,
         value: &str,
+        meta: Option<&str>,
         attrs: &NodeAttrs,
         context: TerminalCodeContext,
     ) -> Option<String> {
+        // No-color contract (see [`CodeRenderer`]): on `ColorDepth::None` the
+        // syntax-highlighted output would emit ANSI color SGRs, so return
+        // `None` and let the tree renderer's plain fallback run. This matches
+        // the legacy terminal renderer, which short-circuits to unformatted
+        // content when color is disabled.
+        if context.color_depth() == RenderableColorDepth::None {
+            return None;
+        }
+
         let hints = attrs.code_hints();
         let color_mode = map_color_mode(context.color_mode());
         let options = TerminalOptions::default();
         let highlighter = CodeHighlighter::new(options.code_theme, color_mode);
-        let meta = CodeBlockMeta::default();
+        let code_meta = build_code_meta(lang.unwrap_or(""), meta);
         let language = lang.unwrap_or("");
 
         // Body: the syntax-highlighted code block. `target_width = None`
         // matches the bespoke renderer, which lets the render-tree layout
-        // pass own width handling.
+        // pass own width handling. `code_meta` carries any `line-numbering` /
+        // `highlight` directive so the body honors them.
         let body = render_terminal_code_block(
             value,
             language,
             &highlighter,
             &options,
-            &meta,
+            &code_meta,
             color_mode,
             None,
         )
         .ok()?;
 
-        // Header: emitted only when the projection requested one.
-        if hints.header_row {
+        // Header: emitted when the projection requested one (e.g. `YamlBlock`)
+        // or when the info string carried a `title`.
+        if hints.header_row || code_meta.title.is_some() {
             let label = hints.language_label.as_deref().unwrap_or(language);
             let bg_color = highlighter
                 .theme()
@@ -90,7 +124,7 @@ impl CodeRenderer for TerminalCodeRenderer {
                 .background
                 .unwrap_or(syntect::highlighting::Color::BLACK);
             let header = format_header_row(
-                meta.title.as_deref(),
+                code_meta.title.as_deref(),
                 label,
                 bg_color,
                 color_mode,
@@ -106,15 +140,19 @@ impl CodeRenderer for TerminalCodeRenderer {
         &self,
         lang: Option<&str>,
         value: &str,
+        meta: Option<&str>,
         _attrs: &NodeAttrs,
     ) -> Option<BrowserFragment<Ready>> {
         let options = HtmlOptions::default();
         let highlighter = CodeHighlighter::new(options.code_theme, options.color_mode);
-        let meta = CodeBlockMeta::default();
+        let code_meta = build_code_meta(lang.unwrap_or(""), meta);
         let language = lang.unwrap_or("");
 
+        // `code_meta` carries any `title` / `line-numbering` / `highlight`
+        // directive so the HTML reproduces the legacy renderer's title block,
+        // line-number table, and highlighted-line markup.
         let html =
-            render_html_code_block(value, language, &meta, &highlighter, &options).ok()?;
+            render_html_code_block(value, language, &code_meta, &highlighter, &options).ok()?;
         Some(
             BrowserFragment::new()
                 .define_as_raw_html(html)
@@ -144,7 +182,7 @@ mod tests {
         let renderer = TerminalCodeRenderer::new();
         let context = TerminalCodeContext::new(80, ColorDepth::TrueColor, RenderableColorMode::Dark);
         let out = renderer
-            .render_terminal_code(Some("yaml"), "foo: 1\nbar: 2", &yaml_attrs(), context)
+            .render_terminal_code(Some("yaml"), "foo: 1\nbar: 2", None, &yaml_attrs(), context)
             .expect("renders");
 
         assert!(out.contains(" yaml "), "header label missing: {out:?}");
@@ -158,17 +196,85 @@ mod tests {
         let renderer = TerminalCodeRenderer::new();
         let context = TerminalCodeContext::new(80, ColorDepth::TrueColor, RenderableColorMode::Dark);
         let out = renderer
-            .render_terminal_code(Some("yaml"), "foo: 1", &NodeAttrs::default(), context)
+            .render_terminal_code(Some("yaml"), "foo: 1", None, &NodeAttrs::default(), context)
             .expect("renders");
         assert!(!out.contains(" yaml "), "header should be absent: {out:?}");
+    }
+
+    /// Finding 1 (review-11): a `ColorDepth::None` context must short-circuit
+    /// to `None` so the tree renderer's plain (no-ANSI) fallback runs instead
+    /// of the syntax-highlighted body, matching the legacy renderer's
+    /// no-formatting contract.
+    #[test]
+    fn terminal_code_returns_none_for_color_depth_none() {
+        let renderer = TerminalCodeRenderer::new();
+        let context = TerminalCodeContext::new(80, ColorDepth::None, RenderableColorMode::Dark);
+        let out =
+            renderer.render_terminal_code(Some("rust"), "fn x() {}", None, &yaml_attrs(), context);
+        assert!(
+            out.is_none(),
+            "ColorDepth::None must return None so the plain fallback runs; got {out:?}",
+        );
+    }
+
+    /// A `title="…"` info-string directive must surface as a header row on the
+    /// terminal path even without `CodeRenderHints::header_row` (the Markdown
+    /// fold does not set hints, only `meta`).
+    #[test]
+    fn terminal_code_emits_title_header_from_meta() {
+        let renderer = TerminalCodeRenderer::new();
+        let context = TerminalCodeContext::new(80, ColorDepth::TrueColor, RenderableColorMode::Dark);
+        let out = renderer
+            .render_terminal_code(
+                Some("rust"),
+                "fn demo() {}",
+                Some("title=\"Demo Snippet\""),
+                &NodeAttrs::default(),
+                context,
+            )
+            .expect("renders");
+        let plain = crate::testing::strip_ansi_codes(&out);
+        assert!(
+            plain.contains("Demo Snippet"),
+            "info-string title must reach the terminal header; got {plain:?}",
+        );
     }
 
     #[test]
     fn browser_code_emits_language_class() {
         let renderer = TerminalCodeRenderer::new();
         let fragment = renderer
-            .render_browser_code(Some("yaml"), "foo: 1", &NodeAttrs::default())
+            .render_browser_code(Some("yaml"), "foo: 1", None, &NodeAttrs::default())
             .expect("renders");
         assert!(fragment.render().contains("language-yaml"));
+    }
+
+    /// A `title` / `line-numbering` / `highlight` info-string directive must
+    /// reproduce the legacy renderer's title block, line-number table, and
+    /// highlighted-line markup on the browser path.
+    #[test]
+    fn browser_code_emits_title_and_line_numbers_from_meta() {
+        let renderer = TerminalCodeRenderer::new();
+        let fragment = renderer
+            .render_browser_code(
+                Some("rust"),
+                "fn a() {}\nfn b() {}",
+                Some("title=\"Demo Snippet\" line-numbering=true highlight=2"),
+                &NodeAttrs::default(),
+            )
+            .expect("renders");
+        let html = fragment.render();
+        assert!(
+            html.contains("code-block-title") && html.contains("Demo Snippet"),
+            "info-string title must reach HTML; got {html}",
+        );
+        assert!(
+            html.contains("code-table") && html.contains("ln-gutter"),
+            "line-numbering must produce the line-number table; got {html}",
+        );
+        assert!(
+            html.contains("highlighted"),
+            "highlight directive must mark the highlighted line; got {html}",
+        );
     }
 }

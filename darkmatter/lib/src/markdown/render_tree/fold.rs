@@ -35,12 +35,32 @@
 
 use pulldown_cmark::{CodeBlockKind, Event, HeadingLevel, Options, Parser, Tag, TagEnd};
 use renderable::tree::{
-    ColumnAlign, Diagnostic, Document, DocumentMetadata, HeadingDepth, NodeKind, Provenance,
-    RenderNode, SourceDescriptor, SourceId, SourceLocation, SourceSpan,
+    ColumnAlign, Diagnostic, Document, DocumentMetadata, Frontmatter as TreeFrontmatter,
+    FrontmatterFormat, HeadingDepth, NodeKind, Provenance, RenderNode, SourceDescriptor, SourceId,
+    SourceLocation, SourceSpan,
 };
 use std::ops::Range;
 
 use super::source::single_source_registry;
+
+/// Canonical parser-option set the render-tree fold uses.
+///
+/// Tables + strikethrough match darkmatter's terminal render path; task lists
+/// let `ListItem.checked` be populated; footnotes and super/subscript fold to
+/// real nodes (`FootnoteDefinition` / `FootnoteReference`, `Span`). Math,
+/// definition lists, and metadata blocks stay off.
+///
+/// See `renderable/features/2026-05-20-darkmatter-tree/parser-options.md` for
+/// the public-now / tree-experimental / deferred classification this matches.
+#[must_use]
+pub(crate) fn render_tree_parser_options() -> Options {
+    Options::ENABLE_TABLES
+        | Options::ENABLE_STRIKETHROUGH
+        | Options::ENABLE_TASKLISTS
+        | Options::ENABLE_FOOTNOTES
+        | Options::ENABLE_SUPERSCRIPT
+        | Options::ENABLE_SUBSCRIPT
+}
 
 /// A single in-progress container on the fold stack.
 struct Frame {
@@ -106,6 +126,17 @@ enum ContainerKind {
     /// `Tag::HtmlBlock` — the `Event::Html` lines inside it are concatenated
     /// into a single `NodeKind::Html { block: true }` node on close.
     HtmlBlock,
+    /// A darkmatter `==mark==` inline span. Pushed onto the main fold stack
+    /// by the span-aware fold when an [`InlineEvent::Start(InlineTag::Mark)`]
+    /// arrives; nested standard events (`Emphasis`, `Strong`, links, …)
+    /// accumulate inside this frame naturally before the matching
+    /// [`InlineEvent::End`] closes it.
+    Mark,
+    /// A darkmatter `⌄dim⌄` inline span. Pushed onto the main fold stack by
+    /// the span-aware fold and closed the same way as [`ContainerKind::Mark`],
+    /// gaining a [`Style`](renderable::style::Style) whose
+    /// `emphasis.dim` is set on the produced [`NodeKind::Span`].
+    Dim,
 }
 
 /// The mutable state threaded through the fold.
@@ -147,6 +178,48 @@ impl Fold {
         node.span = span;
         self.push_child(node);
     }
+
+    /// Feeds a single `(Event, Range)` pair through the fold's main dispatch.
+    ///
+    /// Extracted from the body loop so the span-aware fold (see
+    /// [`fold_markdown_spanned_with_frontmatter`]) can replay the same logic
+    /// for `InlineEvent::Standard(_)` events while routing mark/dim and HR
+    /// attribute events separately.
+    pub(super) fn feed_event(&mut self, event: Event<'_>, range: Range<usize>) {
+        match event {
+            Event::Start(tag) => self.start(tag, range),
+            Event::End(tag_end) => self.end(&tag_end, range),
+            Event::Text(text) => {
+                self.push_leaf(RenderNode::text(text.into_string()), range);
+            }
+            Event::Code(code) => {
+                self.push_leaf(RenderNode::inline_code(code.into_string()), range);
+            }
+            Event::Html(html) => {
+                self.push_leaf(RenderNode::html(html.into_string(), true), range);
+            }
+            Event::InlineHtml(html) => {
+                self.push_leaf(RenderNode::html(html.into_string(), false), range);
+            }
+            Event::SoftBreak => self.push_leaf(RenderNode::soft_break(), range),
+            Event::HardBreak => self.push_leaf(RenderNode::hard_break(), range),
+            Event::Rule => self.push_leaf(RenderNode::thematic_break(), range),
+            Event::TaskListMarker(checked) => self.task_marker(checked, range),
+            Event::FootnoteReference(name) => {
+                self.push_leaf(RenderNode::footnote_reference(name.into_string()), range);
+            }
+            // Math stays disabled by the chosen options; the fold must stay
+            // total regardless.
+            Event::InlineMath(_) | Event::DisplayMath(_) => {
+                let label = "math expression".to_string();
+                self.push_leaf(RenderNode::unsupported(label.clone()), range.clone());
+                self.diagnostics.push(Diagnostic::unsupported(
+                    label,
+                    Some(self.parsed_span(range)),
+                ));
+            }
+        }
+    }
 }
 
 /// Folds a Markdown string into a canonical [`renderable::tree::Document`].
@@ -173,18 +246,25 @@ pub fn fold_markdown_to_document(
     source: SourceDescriptor,
     input: &str,
 ) -> (Document, Vec<Diagnostic>) {
+    fold_markdown_to_document_with_metadata(source, input, DocumentMetadata::default())
+}
+
+/// Folds a Markdown string into a [`Document`] with the supplied
+/// [`DocumentMetadata`].
+///
+/// Identical to [`fold_markdown_to_document`] except that the caller provides
+/// pre-built metadata — typically darkmatter's already extracted frontmatter
+/// wired in via [`fold_markdown_with_frontmatter`]. The body fold itself never
+/// sees a frontmatter block; the input must already have it stripped.
+#[must_use]
+pub fn fold_markdown_to_document_with_metadata(
+    source: SourceDescriptor,
+    input: &str,
+    metadata: DocumentMetadata,
+) -> (Document, Vec<Diagnostic>) {
     let (registry, source_id) = single_source_registry(source);
 
-    // Tables + strikethrough match darkmatter's render path; task lists let
-    // `ListItem.checked` be populated; footnotes and super/subscript fold to
-    // real nodes (`FootnoteDefinition`/`FootnoteReference`, `Span`). Math,
-    // definition lists and metadata blocks stay off.
-    let options = Options::ENABLE_TABLES
-        | Options::ENABLE_STRIKETHROUGH
-        | Options::ENABLE_TASKLISTS
-        | Options::ENABLE_FOOTNOTES
-        | Options::ENABLE_SUPERSCRIPT
-        | Options::ENABLE_SUBSCRIPT;
+    let options = render_tree_parser_options();
 
     let mut fold = Fold {
         stack: vec![Frame {
@@ -197,39 +277,7 @@ pub fn fold_markdown_to_document(
     };
 
     for (event, range) in Parser::new_ext(input, options).into_offset_iter() {
-        match event {
-            Event::Start(tag) => fold.start(tag, range),
-            Event::End(tag_end) => fold.end(&tag_end, range),
-            Event::Text(text) => {
-                fold.push_leaf(RenderNode::text(text.into_string()), range);
-            }
-            Event::Code(code) => {
-                fold.push_leaf(RenderNode::inline_code(code.into_string()), range);
-            }
-            Event::Html(html) => {
-                fold.push_leaf(RenderNode::html(html.into_string(), true), range);
-            }
-            Event::InlineHtml(html) => {
-                fold.push_leaf(RenderNode::html(html.into_string(), false), range);
-            }
-            Event::SoftBreak => fold.push_leaf(RenderNode::soft_break(), range),
-            Event::HardBreak => fold.push_leaf(RenderNode::hard_break(), range),
-            Event::Rule => fold.push_leaf(RenderNode::thematic_break(), range),
-            Event::TaskListMarker(checked) => fold.task_marker(checked, range),
-            Event::FootnoteReference(name) => {
-                fold.push_leaf(RenderNode::footnote_reference(name.into_string()), range);
-            }
-            // Math stays disabled by the chosen options; the fold must stay
-            // total regardless.
-            Event::InlineMath(_) | Event::DisplayMath(_) => {
-                let label = "math expression".to_string();
-                fold.push_leaf(RenderNode::unsupported(label.clone()), range.clone());
-                fold.diagnostics.push(Diagnostic::unsupported(
-                    label,
-                    Some(fold.parsed_span(range)),
-                ));
-            }
-        }
+        fold.feed_event(event, range);
     }
 
     // Drain remaining frames. Only the root should remain; if the parser left
@@ -248,7 +296,219 @@ pub fn fold_markdown_to_document(
     let root_children = fold.stack.pop().map(|f| f.children).unwrap_or_default();
     let document = Document {
         sources: registry,
-        metadata: DocumentMetadata::default(),
+        metadata,
+        root: RenderNode::root(root_children),
+    };
+    (document, fold.diagnostics)
+}
+
+/// Folds a darkmatter [`Markdown`](crate::markdown::Markdown) value into a
+/// [`Document`], wiring its already extracted frontmatter into
+/// [`DocumentMetadata::frontmatter`].
+///
+/// The body fold sees only Markdown content — darkmatter extracts frontmatter
+/// before the parser runs, and pulldown-cmark's metadata-block options stay
+/// off (see `parser-options.md`). The metadata's raw source comes from
+/// [`Frontmatter::raw_source`](crate::markdown::Frontmatter::raw_source);
+/// programmatically constructed darkmatter frontmatter (no raw text) is
+/// reported as `None`. Darkmatter's frontmatter is always YAML.
+///
+/// ## Returns
+///
+/// The folded [`Document`] (with [`DocumentMetadata::frontmatter`] populated
+/// when raw frontmatter is available) and any non-fatal [`Diagnostic`]s.
+#[must_use]
+pub fn fold_markdown_with_frontmatter(
+    source: SourceDescriptor,
+    md: &crate::markdown::Markdown,
+) -> (Document, Vec<Diagnostic>) {
+    let metadata = DocumentMetadata {
+        frontmatter: md
+            .frontmatter()
+            .raw_source()
+            .map(|raw| TreeFrontmatter {
+                format: FrontmatterFormat::Yaml,
+                raw: raw.to_string(),
+            }),
+    };
+    fold_markdown_to_document_with_metadata(source, md.content(), metadata)
+}
+
+/// Folds Markdown through the span-aware processor chain (DMTR-3), preserving
+/// source byte ranges for `==mark==`, dim, and HR-attribute paragraphs.
+///
+/// Walks the chain
+/// `Parser::new_ext(...).into_offset_iter() -> SpanningAdapter ->
+/// SpannedInlineStyleProcessor -> SpannedRuleProcessor` and folds:
+///
+/// - `InlineEvent::Standard(_)` events through the existing
+///   [`Fold::feed_event`] dispatch.
+/// - `InlineEvent::Start(InlineTag::Mark)` / `End(Mark)` into
+///   [`NodeKind::Span`] containers with class `"mark"`.
+/// - `InlineEvent::Start(InlineTag::Dim)` / `End(Dim)` into
+///   [`NodeKind::Span`] containers whose `Style.emphasis.dim` is set so the
+///   browser renderer lowers it to `opacity: 0.6` and the terminal renderer
+///   emits the dim SGR (`\x1b[2m`) automatically.
+/// - `InlineEvent::HorizontalRule(attrs)` into a [`NodeKind::ThematicBreak`]
+///   with `darkmatter.hr.*` hints (and `Provenance::Generated` because the
+///   event was synthesized from a paragraph).
+///
+/// The body fold sees only Markdown content; darkmatter's already extracted
+/// frontmatter flows into [`DocumentMetadata::frontmatter`].
+///
+/// ## Returns
+///
+/// The folded [`Document`] and any non-fatal [`Diagnostic`]s.
+#[must_use]
+pub fn fold_markdown_spanned_with_frontmatter(
+    source: SourceDescriptor,
+    md: &crate::markdown::Markdown,
+) -> (Document, Vec<Diagnostic>) {
+    use crate::markdown::inline::{InlineEvent, InlineTag};
+    use super::span::{
+        SpannedEventProvenance, SpannedInlineStyleProcessor, SpannedRuleProcessor,
+        SpanningAdapter,
+    };
+
+    let metadata = DocumentMetadata {
+        frontmatter: md
+            .frontmatter()
+            .raw_source()
+            .map(|raw| TreeFrontmatter {
+                format: FrontmatterFormat::Yaml,
+                raw: raw.to_string(),
+            }),
+    };
+    let (registry, source_id) = single_source_registry(source);
+
+    let options = render_tree_parser_options();
+    let parser = Parser::new_ext(md.content(), options).into_offset_iter();
+    let chain = SpannedRuleProcessor::new(SpannedInlineStyleProcessor::new(
+        md.content(),
+        SpanningAdapter::new(parser),
+    ));
+
+    let mut fold = Fold {
+        stack: vec![Frame {
+            tag: ContainerKind::Root,
+            children: Vec::new(),
+            start: 0,
+        }],
+        source: source_id,
+        diagnostics: Vec::new(),
+    };
+
+    // Mark/dim frames live directly on `fold.stack` as `ContainerKind::Mark`
+    // / `ContainerKind::Dim` so that nested standard events (Emphasis, Strong,
+    // links, …) accumulate inside them naturally instead of being drained out
+    // by a parallel sidecar. The fold's existing `feed_event` already pushes
+    // children into whichever frame is innermost, so no extra wiring is
+    // required for the standard branch.
+    for spanned in chain {
+        match spanned.event {
+            InlineEvent::Standard(event) => {
+                fold.feed_event(event, spanned.range);
+            }
+            InlineEvent::Start(tag) => {
+                let kind = match tag {
+                    InlineTag::Mark => ContainerKind::Mark,
+                    InlineTag::Dim => ContainerKind::Dim,
+                };
+                fold.stack.push(Frame {
+                    tag: kind,
+                    children: Vec::new(),
+                    start: spanned.range.start,
+                });
+            }
+            InlineEvent::End(tag) => {
+                // The innermost frame should be the matching inline tag.
+                let matches_open = fold.stack.last().is_some_and(|f| {
+                    matches!(
+                        (&f.tag, tag),
+                        (ContainerKind::Mark, InlineTag::Mark)
+                            | (ContainerKind::Dim, InlineTag::Dim)
+                    )
+                });
+                if !matches_open {
+                    fold.diagnostics.push(Diagnostic::structural(
+                        format!("mismatched inline tag end: closing {tag:?}"),
+                        Some(fold.parsed_span(spanned.range.clone())),
+                    ));
+                    continue;
+                }
+                let frame = fold.stack.pop().expect("checked non-empty above");
+                let span = fold.parsed_span(frame.start..spanned.range.end);
+                let Frame {
+                    tag: kind,
+                    children,
+                    ..
+                } = frame;
+                let mut node = build_container(kind, children);
+                node.span = span;
+                fold.push_child(node);
+            }
+            InlineEvent::HorizontalRule(attrs) => {
+                let location_range = match spanned.provenance {
+                    SpannedEventProvenance::GeneratedFrom { source } => source,
+                    SpannedEventProvenance::Parsed => spanned.range.clone(),
+                };
+                let mut node = RenderNode::thematic_break();
+                // Provenance::Generated because the event was synthesized
+                // from a paragraph (span-aware-processor-design.md).
+                node.span = renderable::tree::SourceSpan {
+                    provenance: renderable::tree::Provenance::Generated,
+                    location: Some(renderable::tree::SourceLocation {
+                        source: fold.source,
+                        bytes: location_range,
+                    }),
+                };
+                let hr_ns = renderable::tree::HintNamespace("darkmatter.hr");
+                if let Some(style) = attrs.style {
+                    node.attrs
+                        .set_hint(hr_ns, "style", serde_json::json!(style));
+                }
+                if let Some(alignment) = attrs.alignment {
+                    node.attrs
+                        .set_hint(hr_ns, "alignment", serde_json::json!(alignment));
+                }
+                if let Some(weight) = attrs.weight {
+                    node.attrs
+                        .set_hint(hr_ns, "weight", serde_json::json!(weight));
+                }
+                if let Some(width) = attrs.width {
+                    node.attrs
+                        .set_hint(hr_ns, "width", serde_json::json!(width));
+                }
+                if let Some(color) = attrs.color {
+                    node.attrs
+                        .set_hint(hr_ns, "color", serde_json::json!(color));
+                }
+                fold.push_child(node);
+            }
+        }
+    }
+
+    // Drain remaining frames. Only the root should remain. Any unclosed
+    // mark/dim or pulldown container splices its children upward and emits a
+    // structural diagnostic — matching the legacy "unclosed reverts to
+    // literal" posture without losing the inner content.
+    while fold.stack.len() > 1 {
+        let frame = fold.stack.pop().expect("len checked");
+        let message = match &frame.tag {
+            ContainerKind::Mark => "unclosed mark span".to_string(),
+            ContainerKind::Dim => "unclosed dim span".to_string(),
+            _ => "unclosed container in event stream".to_string(),
+        };
+        fold.diagnostics.push(Diagnostic::structural(message, None));
+        if let Some(parent) = fold.stack.last_mut() {
+            parent.children.extend(frame.children);
+        }
+    }
+
+    let root_children = fold.stack.pop().map(|f| f.children).unwrap_or_default();
+    let document = Document {
+        sources: registry,
+        metadata,
         root: RenderNode::root(root_children),
     };
     (document, fold.diagnostics)
@@ -437,6 +697,24 @@ fn build_container(kind: ContainerKind, children: Vec<RenderNode>) -> RenderNode
         }
         ContainerKind::Link { url, title } => RenderNode::link(url, title, children),
         ContainerKind::Image { url, title } => RenderNode::image(url, title, image_alt(&children)),
+        ContainerKind::Mark => RenderNode::span(vec!["mark".to_string()], children),
+        ContainerKind::Dim => {
+            // The span-aware design (`span-aware-processor-design.md`) requires
+            // dim to ride in `Style.emphasis.dim`, not in semantic emphasis or
+            // a custom hint, so both the terminal renderer's inline-style SGR
+            // path (`\x1b[2m`) and the browser renderer's CSS lowering
+            // (`opacity:0.6`) consume it automatically.
+            let mut node = RenderNode::span(Vec::new(), children);
+            let style = renderable::style::Style {
+                emphasis: renderable::style::TextEmphasis {
+                    dim: true,
+                    ..Default::default()
+                },
+                ..Default::default()
+            };
+            node.attrs.set_style(&style);
+            node
+        }
         // Handled by `Fold::end`; unreachable here.
         ContainerKind::Root
         | ContainerKind::HtmlBlock
@@ -902,6 +1180,431 @@ mod tests {
             fold.diagnostics[0]
                 .message
                 .contains("task-list marker outside a list item")
+        );
+    }
+
+    // -------------------------------------------------------------------
+    // DMTR-3: span-aware fold for mark / dim / HR-attribute paragraphs.
+    // -------------------------------------------------------------------
+
+    /// Folds `input` through the span-aware path using a synthetic
+    /// [`crate::markdown::Markdown`] value.
+    fn fold_spanned(input: &str) -> (Document, Vec<Diagnostic>) {
+        let md: crate::markdown::Markdown = input.into();
+        fold_markdown_spanned_with_frontmatter(
+            SourceDescriptor::Virtual {
+                name: "spanned".into(),
+            },
+            &md,
+        )
+    }
+
+    /// Visits `node` and every descendant, collecting `Span` nodes whose
+    /// `attrs.classes` contains `class`.
+    fn collect_spans_with_class<'a>(node: &'a RenderNode, class: &str) -> Vec<&'a RenderNode> {
+        let mut out = Vec::new();
+        fn walk<'a>(node: &'a RenderNode, class: &str, out: &mut Vec<&'a RenderNode>) {
+            if matches!(node.kind, NodeKind::Span { .. })
+                && node.attrs.classes.iter().any(|c| c == class)
+            {
+                out.push(node);
+            }
+            for child in node.children() {
+                walk(child, class, out);
+            }
+        }
+        walk(node, class, &mut out);
+        out
+    }
+
+    #[test]
+    fn span_aware_fold_emits_mark_span_with_class() {
+        let (doc, diags) = fold_spanned("plain ==highlighted== after");
+        assert!(diags.is_empty(), "clean fixture must fold cleanly");
+        let marks = collect_spans_with_class(&doc.root, "mark");
+        assert_eq!(marks.len(), 1, "expected one mark Span");
+        // The mark contains the highlighted text.
+        let mut text = String::new();
+        collect_text(marks[0].children(), &mut text);
+        assert_eq!(text, "highlighted");
+    }
+
+    /// Locates the first descendant `Span` whose `Style.emphasis.dim` is set.
+    fn find_dim_span(node: &RenderNode) -> Option<&RenderNode> {
+        if matches!(node.kind, NodeKind::Span { .. })
+            && node
+                .attrs
+                .style()
+                .is_some_and(|s| s.emphasis.dim)
+        {
+            return Some(node);
+        }
+        for child in node.children() {
+            if let Some(found) = find_dim_span(child) {
+                return Some(found);
+            }
+        }
+        None
+    }
+
+    #[test]
+    fn span_aware_fold_emits_dim_span_with_style() {
+        let (doc, diags) = fold_spanned("normal \u{2304}dimmed\u{2304} after");
+        assert!(diags.is_empty());
+        let dim = find_dim_span(&doc.root).expect("dim Span must exist");
+        let mut text = String::new();
+        collect_text(dim.children(), &mut text);
+        assert_eq!(text, "dimmed");
+    }
+
+    #[test]
+    fn span_aware_fold_emits_hr_with_attribute_hints() {
+        let (doc, diags) = fold_spanned("--- { style: waves, width: \"50%\" }\n");
+        assert!(diags.is_empty());
+        // Find the ThematicBreak.
+        fn find_hr(node: &RenderNode) -> Option<&RenderNode> {
+            if matches!(node.kind, NodeKind::ThematicBreak) {
+                return Some(node);
+            }
+            for child in node.children() {
+                if let Some(found) = find_hr(child) {
+                    return Some(found);
+                }
+            }
+            None
+        }
+        let hr = find_hr(&doc.root).expect("ThematicBreak must exist");
+        let ns = renderable::tree::HintNamespace("darkmatter.hr");
+        assert_eq!(hr.attrs.get_hint(ns, "style"), Some(&serde_json::json!("waves")));
+        assert_eq!(hr.attrs.get_hint(ns, "width"), Some(&serde_json::json!("50%")));
+        // Generated provenance: this HR was synthesized from a paragraph.
+        assert_eq!(hr.span.provenance, Provenance::Generated);
+        assert!(hr.span.location.is_some());
+    }
+
+    #[test]
+    fn span_aware_fold_plain_rule_keeps_parsed_provenance() {
+        // A bare `---` arrives as `Event::Rule` and folds straight through to
+        // a parsed `ThematicBreak` — no HR attribute hints.
+        let (doc, diags) = fold_spanned("para\n\n---\n\nmore");
+        assert!(diags.is_empty());
+        fn find_hr(node: &RenderNode) -> Option<&RenderNode> {
+            if matches!(node.kind, NodeKind::ThematicBreak) {
+                return Some(node);
+            }
+            for child in node.children() {
+                if let Some(found) = find_hr(child) {
+                    return Some(found);
+                }
+            }
+            None
+        }
+        let hr = find_hr(&doc.root).expect("ThematicBreak must exist");
+        assert_eq!(hr.span.provenance, Provenance::Parsed);
+        let ns = renderable::tree::HintNamespace("darkmatter.hr");
+        assert!(
+            hr.attrs.get_hint(ns, "style").is_none(),
+            "plain rule must not carry HR hints"
+        );
+    }
+
+    /// Review-2 finding 2: the previous fold drained nested standard children
+    /// out of the active fold frame into a sidecar, breaking sibling
+    /// containers that appeared *after* a closed mark span. With the
+    /// sidecar replaced by [`ContainerKind::Mark`] / [`ContainerKind::Dim`]
+    /// frames on the main fold stack, an emphasis that follows a closed mark
+    /// must remain its own container with its own text — not become an empty
+    /// sibling of the drained text.
+    ///
+    /// Cross-text-event mark/dim spanning (review-3 finding 2) is covered by
+    /// the `span_aware_fold_wraps_emphasis_inside_*` tests below.
+    #[test]
+    fn span_aware_fold_preserves_emphasis_sibling_after_mark() {
+        let (doc, diags) = fold_spanned("==marked== then *italic*");
+        assert!(diags.is_empty(), "clean fixture must fold cleanly: {diags:?}");
+        let para = &doc.root.children()[0];
+
+        // The mark span and the emphasis must each survive as separate,
+        // populated children of the paragraph — the sidecar bug would have
+        // either swallowed the emphasis or left it empty.
+        let marks = collect_spans_with_class(&doc.root, "mark");
+        assert_eq!(marks.len(), 1, "expected one mark Span");
+        let mut marked_text = String::new();
+        collect_text(marks[0].children(), &mut marked_text);
+        assert_eq!(marked_text, "marked");
+
+        let emphasis = para
+            .children()
+            .iter()
+            .find(|n| matches!(n.kind, NodeKind::Emphasis { .. }))
+            .expect("paragraph must carry an Emphasis sibling after the mark");
+        let mut italic_text = String::new();
+        collect_text(emphasis.children(), &mut italic_text);
+        assert_eq!(italic_text, "italic");
+    }
+
+    /// Review-3 finding 2: `==*highlighted*==` must fold to a mark Span whose
+    /// child is the Emphasis container — proving the
+    /// [`SpannedInlineStyleProcessor`](super::span::SpannedInlineStyleProcessor)
+    /// tracks mark state across pulldown text events. The Emphasis arrives
+    /// between the two `==` delimiters, which pulldown-cmark emits as
+    /// separate text events.
+    #[test]
+    fn span_aware_fold_wraps_emphasis_inside_mark() {
+        let (doc, diags) = fold_spanned("==*highlighted*== rest");
+        assert!(diags.is_empty(), "clean fixture must fold cleanly: {diags:?}");
+        let marks = collect_spans_with_class(&doc.root, "mark");
+        assert_eq!(marks.len(), 1, "expected one mark Span");
+        let mark = marks[0];
+        let first = mark
+            .children()
+            .first()
+            .expect("mark span must have at least one child");
+        assert!(
+            matches!(first.kind, NodeKind::Emphasis { .. }),
+            "expected Emphasis inside mark; got {:?}",
+            first.kind,
+        );
+        let mut text = String::new();
+        collect_text(first.children(), &mut text);
+        assert_eq!(text, "highlighted");
+    }
+
+    /// Review-3 finding 2: the design's `⌄*dim and italic*⌄` fixture must
+    /// fold to a dim Span whose single child is the Emphasis container.
+    #[test]
+    fn span_aware_fold_wraps_emphasis_inside_dim() {
+        let (doc, diags) = fold_spanned("\u{2304}*dim and italic*\u{2304}");
+        assert!(diags.is_empty(), "clean fixture must fold cleanly: {diags:?}");
+        let dim = find_dim_span(&doc.root).expect("dim Span must exist");
+        let first = dim
+            .children()
+            .first()
+            .expect("dim span must have at least one child");
+        assert!(
+            matches!(first.kind, NodeKind::Emphasis { .. }),
+            "expected Emphasis inside dim; got {:?}",
+            first.kind,
+        );
+        let mut text = String::new();
+        collect_text(first.children(), &mut text);
+        assert_eq!(text, "dim and italic");
+    }
+
+    /// Review-3 finding 2: an unclosed cross-text-event mark must revert to
+    /// literal text rather than leaking an open container.
+    #[test]
+    fn span_aware_fold_unclosed_cross_event_mark_reverts() {
+        let (doc, _diags) = fold_spanned("==*never closed* and on");
+        let marks = collect_spans_with_class(&doc.root, "mark");
+        assert!(
+            marks.is_empty(),
+            "unclosed cross-event mark must not emit a Span: {marks:?}",
+        );
+        // The literal `==` and the emphasis must both still appear.
+        let para = &doc.root.children()[0];
+        let mut text = String::new();
+        collect_text(para.children(), &mut text);
+        assert!(text.contains("=="), "literal `==` must survive: {text}");
+        assert!(text.contains("never closed"), "italic text must survive: {text}");
+    }
+
+    /// Review-4 finding 1 / span-aware-processor-design "Mixed Mark and
+    /// Dim": `==highlighted and ⌄dim within mark⌄==` must fold to a mark
+    /// Span containing a nested dim Span. The earlier single-slot
+    /// implementation modeled mark and dim as mutually exclusive — a dim
+    /// delimiter inside an open mark became literal text — which made the
+    /// designed fixture impossible. The stack-based processor preserves
+    /// nesting.
+    #[test]
+    fn span_aware_fold_nests_dim_inside_mark() {
+        let (doc, diags) =
+            fold_spanned("==highlighted and \u{2304}dim within mark\u{2304}==");
+        assert!(diags.is_empty(), "clean fixture must fold cleanly: {diags:?}");
+
+        let marks = collect_spans_with_class(&doc.root, "mark");
+        assert_eq!(marks.len(), 1, "expected one mark Span: {marks:?}");
+        let mark = marks[0];
+
+        // The mark contains literal text plus a nested dim Span.
+        let dim = mark
+            .children()
+            .iter()
+            .find(|n| {
+                matches!(n.kind, NodeKind::Span { .. })
+                    && n.attrs.style().is_some_and(|s| s.emphasis.dim)
+            })
+            .expect("mark must contain a nested dim Span");
+        let mut dim_text = String::new();
+        collect_text(dim.children(), &mut dim_text);
+        assert_eq!(dim_text, "dim within mark");
+
+        // The leading text "highlighted and " must precede the dim Span
+        // inside the mark.
+        let mut leading = String::new();
+        for child in mark.children() {
+            if matches!(child.kind, NodeKind::Span { .. })
+                && child.attrs.style().is_some_and(|s| s.emphasis.dim)
+            {
+                break;
+            }
+            collect_text(std::slice::from_ref(child), &mut leading);
+        }
+        assert_eq!(leading.trim_end(), "highlighted and");
+    }
+
+    /// Review-4 finding 1 (reverse direction): nesting works in the other
+    /// direction too — a mark delimiter inside an open dim opens a nested
+    /// mark frame. This is not in the design's fixture list explicitly but
+    /// falls out of the symmetric stack policy and guards against regressing
+    /// to the old single-slot model in the other direction.
+    #[test]
+    fn span_aware_fold_nests_mark_inside_dim() {
+        let (doc, diags) =
+            fold_spanned("\u{2304}dim with ==marked inside==\u{2304}");
+        assert!(diags.is_empty(), "clean fixture must fold cleanly: {diags:?}");
+
+        let dim = find_dim_span(&doc.root).expect("dim Span must exist");
+        let nested_mark = dim
+            .children()
+            .iter()
+            .find(|n| {
+                matches!(n.kind, NodeKind::Span { .. })
+                    && n.attrs.classes.iter().any(|c| c == "mark")
+            })
+            .expect("dim must contain a nested mark Span");
+        let mut nested_text = String::new();
+        collect_text(nested_mark.children(), &mut nested_text);
+        assert_eq!(nested_text, "marked inside");
+    }
+
+    #[test]
+    fn span_aware_fold_emits_no_mark_for_escaped_delimiter() {
+        // `\==` is escaped and must not open a mark span. The legacy
+        // pre-processor rewrites `\==` upstream; the span-aware processor
+        // honors a literal backslash escape directly in its own pass.
+        let (doc, diags) = fold_spanned("foo \\== not highlighted\n");
+        assert!(diags.is_empty());
+        let marks = collect_spans_with_class(&doc.root, "mark");
+        assert!(
+            marks.is_empty(),
+            "escaped mark delimiter must not open a Span"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // Review-6 finding 2 (fold tier): pin the exact `SourceLocation.bytes`
+    // ranges from `span-aware-processor-design.md` for the container Span
+    // and the generated thematic break. The span-tier event-range tests in
+    // `super::span::tests` cover the inline event stream; these fold-tier
+    // tests cover the assembled `RenderNode.span` that downstream tools and
+    // diagnostics actually consume.
+    // -----------------------------------------------------------------------
+
+    /// `plain ==highlighted== after` must fold to a mark `Span` whose
+    /// `SourceLocation.bytes` spans the full delimited region `6..21` (the
+    /// opener at `6..8`, the inner text at `8..19`, and the closer at
+    /// `19..21`). A bug that built container spans from only the opener or
+    /// inner-text range would fail this test.
+    #[test]
+    fn span_aware_fold_mark_container_span_covers_full_delimited_region() {
+        let input = "plain ==highlighted== after";
+        let (doc, diags) = fold_spanned(input);
+        assert!(diags.is_empty(), "clean fixture must fold cleanly: {diags:?}");
+        let marks = collect_spans_with_class(&doc.root, "mark");
+        assert_eq!(marks.len(), 1, "expected exactly one mark Span");
+        let mark = marks[0];
+        let location = mark
+            .span
+            .location
+            .as_ref()
+            .expect("mark Span must carry a SourceLocation");
+        assert_eq!(
+            location.bytes,
+            6..21,
+            "mark container span must cover the opener, inner text, and closer",
+        );
+    }
+
+    /// `--- { style: waves }` must fold to a `ThematicBreak` whose
+    /// `SourceLocation.bytes` covers the **paragraph body** (`0..20`), not
+    /// the wider `End(Paragraph)` range that includes the trailing newline.
+    /// The span-aware HR processor synthesizes the event from the paragraph
+    /// body bytes (provenance `Generated`); the fold then attaches the same
+    /// `SourceLocation`. This pins the design's "HR Attributes: Basic"
+    /// fixture (`location=0..20`) at the fold layer.
+    #[test]
+    fn span_aware_fold_hr_source_location_pins_paragraph_body_bytes() {
+        let body = "--- { style: waves }";
+        let input = format!("{body}\n");
+        assert_eq!(body.len(), 20);
+        let (doc, diags) = fold_spanned(&input);
+        assert!(diags.is_empty(), "HR fixture must fold cleanly: {diags:?}");
+
+        fn find_hr(node: &RenderNode) -> Option<&RenderNode> {
+            if matches!(node.kind, NodeKind::ThematicBreak) {
+                return Some(node);
+            }
+            for child in node.children() {
+                if let Some(found) = find_hr(child) {
+                    return Some(found);
+                }
+            }
+            None
+        }
+        let hr = find_hr(&doc.root).expect("ThematicBreak must exist");
+        assert_eq!(hr.span.provenance, Provenance::Generated);
+        let location = hr
+            .span
+            .location
+            .as_ref()
+            .expect("generated HR must carry a SourceLocation");
+        assert_eq!(
+            location.bytes,
+            0..body.len(),
+            "generated HR SourceLocation must exactly cover the paragraph body bytes",
+        );
+    }
+
+    /// Fold-tier counterpart of the span-tier escaped-mark test: the
+    /// escaped `\==` literal must reach the fold as a Text node whose
+    /// `SourceLocation.bytes` includes the backslash byte. This pins
+    /// `span-aware-processor-design.md` *Mark: Escaped* at the fold layer.
+    #[test]
+    fn span_aware_fold_escaped_mark_literal_text_includes_backslash_byte() {
+        // Byte layout: `foo \== bar` (11 bytes). The `\` is at byte 4 and the
+        // `==` token is at bytes 5..7, so the design-conforming literal span
+        // is `4..7`.
+        let input = "foo \\== bar";
+        let (doc, diags) = fold_spanned(input);
+        assert!(diags.is_empty(), "escape fixture must fold cleanly: {diags:?}");
+
+        // Walk every Text descendant; the literal `==` must appear with the
+        // exact `4..7` source range.
+        fn find_text<'a>(node: &'a RenderNode, value: &str) -> Option<&'a RenderNode> {
+            if let NodeKind::Text { value: text } = &node.kind
+                && text == value
+            {
+                return Some(node);
+            }
+            for child in node.children() {
+                if let Some(found) = find_text(child, value) {
+                    return Some(found);
+                }
+            }
+            None
+        }
+        let literal = find_text(&doc.root, "==")
+            .expect("escaped mark literal must reach the fold as a Text node");
+        let location = literal
+            .span
+            .location
+            .as_ref()
+            .expect("escaped mark literal must carry a SourceLocation");
+        assert_eq!(
+            location.bytes,
+            4..7,
+            "escaped mark literal SourceLocation must include the backslash byte",
         );
     }
 }
