@@ -682,7 +682,7 @@ mod execution_tests {
     use serial_test::serial;
     use std::path::PathBuf;
     use std::sync::Arc;
-    use std::time::{Duration, Instant};
+    use std::time::Duration;
     use tempfile::TempDir;
 
     fn fm_from_json(data: serde_json::Value) -> Frontmatter {
@@ -888,59 +888,48 @@ mod execution_tests {
             return;
         };
 
+        // Each command records a wall-clock start timestamp, then sleeps briefly.
+        // Concurrent execution => both commands start within startup jitter of
+        // each other. Serial execution => the second start is delayed by the
+        // first command's full sleep. Comparing start offsets (rather than total
+        // wall-clock time) keeps the test fast and immune to interpreter startup
+        // variance.
         let temp_dir = TempDir::new().unwrap();
-        let sleep_cmd = |label: &str| {
+        let stamp_cmd = || {
             format!(
-                "$({} -c \"import time; time.sleep(0.35); print('{}', end='')\")",
-                python.display(),
-                label
+                "$({} -c \"import time; print(time.time(), end=''); time.sleep(0.3)\")",
+                python.display()
             )
         };
-        let make_options = || {
-            ComposeOptions::new().with_shell(ShellExpansionOptions {
-                timeout: Duration::from_secs(5),
-                policy_root: Some(temp_dir.path().to_path_buf()),
-                approval_handler: Some(Arc::new(MockApproval)),
-                ..Default::default()
-            })
-        };
+        let mut fm = fm_from_json(json!({
+            "one": stamp_cmd(),
+            "two": stamp_cmd()
+        }));
+        let options = ComposeOptions::new().with_shell(ShellExpansionOptions {
+            timeout: Duration::from_secs(2),
+            policy_root: Some(temp_dir.path().to_path_buf()),
+            approval_handler: Some(Arc::new(MockApproval)),
+            ..Default::default()
+        });
         let mut runtime = make_runtime();
 
-        // Self-calibrating baseline: time a *single* command first. A fixed
-        // wall-clock threshold is flaky here because Python interpreter startup
-        // and process-spawn overhead (~300ms under full-suite load) is
-        // comparable to the 350ms sleep, so concurrent execution can drift up
-        // toward an absolute serial cutoff. Measuring a single command captures
-        // that overhead on *this* machine under *current* load, so the assertion
-        // adapts instead of guessing.
-        let mut baseline_fm = fm_from_json(json!({ "solo": sleep_cmd("solo") }));
-        let start = Instant::now();
-        execute_frontmatter_shell_expansion(&mut baseline_fm, &make_options(), &mut runtime, None)
-            .unwrap();
-        let single = start.elapsed();
-
-        // Two commands run concurrently should finish in roughly one command's
-        // time (~1x `single`), not two (~2x). The 1.6x cutoff sits comfortably
-        // between those, so the test stays green under load yet fails loudly if
-        // the commands serialize.
-        let mut fm = fm_from_json(json!({
-            "one": sleep_cmd("one"),
-            "two": sleep_cmd("two")
-        }));
-        let start = Instant::now();
         let report =
-            execute_frontmatter_shell_expansion(&mut fm, &make_options(), &mut runtime, None)
-                .unwrap();
-        let elapsed = start.elapsed();
+            execute_frontmatter_shell_expansion(&mut fm, &options, &mut runtime, None).unwrap();
 
         assert_eq!(report.replacements, 2);
-        assert_eq!(fm.as_map().get("one"), Some(&json!("one")));
-        assert_eq!(fm.as_map().get("two"), Some(&json!("two")));
+        let start_time = |key: &str| -> f64 {
+            fm.as_map()
+                .get(key)
+                .and_then(|value| value.as_str())
+                .unwrap_or_default()
+                .parse()
+                .unwrap_or_else(|_| panic!("expected numeric start timestamp for `{key}`"))
+        };
+        let start_skew = (start_time("one") - start_time("two")).abs();
         assert!(
-            elapsed < single.mul_f64(1.6),
-            "expected concurrent execution (~1x the single-command time {single:?}), but \
-             two commands took {elapsed:?} — close to the serial cost (~2x), so the \
-             commands may not be running concurrently"
+            start_skew < 0.2,
+            "expected commands to start concurrently (skew < 0.2s), got {start_skew}s \
+             — commands appear to have run serially"
         );
     }
 }

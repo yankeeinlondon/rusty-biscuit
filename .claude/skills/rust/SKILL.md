@@ -1,6 +1,6 @@
 ---
 name: rust
-description: Expert knowledge for Rust systems programming covering ownership, borrowing, type safety, error handling, async patterns, performance optimization, and the 2024 edition improvements for building safe, concurrent, and high-performance applications
+description: Expert knowledge for Rust systems programming — ownership, borrowing, type safety, error handling, async patterns, performance optimization, and 2024-edition improvements. Use when writing or reviewing idiomatic Rust, resolving borrow-checker or lifetime issues, structuring error handling, or optimizing performance.
 last_updated: 2025-12-20T00:00:00Z
 hash: 987826de0dddb854
 ---

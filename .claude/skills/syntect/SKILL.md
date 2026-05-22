@@ -1,6 +1,6 @@
 ---
 name: syntect
-description: Expert knowledge for syntax highlighting in Rust using Syntect, a high-performance library that uses Sublime Text syntax definitions and TextMate themes for terminal ANSI output and HTML generation, including TypeScript support and modern themes
+description: Expert knowledge for syntax highlighting in Rust with syntect — Sublime Text syntax definitions and TextMate themes producing ANSI-terminal and HTML output, including TypeScript support and modern themes. Use when highlighting code for terminal or HTML output, loading custom syntaxes or themes, or troubleshooting highlighting performance.
 last_updated: 2025-12-24T00:00:00Z
 hash: 285587f8ac19de6c
 ---

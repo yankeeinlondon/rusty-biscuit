@@ -179,11 +179,12 @@ impl TerminalRenderable for YamlBlock {
         let terminal_width = term.width();
 
         // Resolve the width left for the block after the layout's horizontal
-        // margins. Both the header pill (right-aligned within this width) and
-        // the body (padded to this width) use it, so the block honours the
-        // available width and a right margin pulls the block — and the pill
-        // above it — leftward off the physical edge.
-        let available = self.layout.available_width(terminal_width);
+        // margins and any `max_width` cap. Both the header pill (right-aligned
+        // within this width) and the body (padded to this width) use it, so the
+        // block honours the available width — a right margin or a `max_width`
+        // cap pulls the block, and the pill above it, leftward off the physical
+        // edge, matching the render-tree path.
+        let available = self.layout.content_width(terminal_width);
 
         // Emit the same header row Markdown's ``` yaml ``` fence emits, so
         // YamlBlock and Markdown stay parity-equivalent in the body region.
@@ -804,6 +805,28 @@ mod tests {
                 line.chars().count(),
                 30,
                 "right margin must shrink the block to the available width (30): {line:?}"
+            );
+        }
+    }
+
+    /// A `max_width` cap must bound the block (and its pill) to the capped
+    /// width, matching the render-tree path which applies the cap in
+    /// `render_with_layout`.
+    #[test]
+    fn test_max_width_caps_block() {
+        let mut block = YamlBlock::new("foo: 1\nbar: 2").unwrap();
+        block.layout_mut().max_width = Some(TargetValue::universal(Length::Percent(50.0)));
+
+        let term = Terminal::new_optimistic(80);
+        let out = TerminalRenderable::render(&block, &term);
+        let plain = crate::testing::strip_ansi_codes(&out);
+
+        // 50% of 80 = 40; every non-empty line is exactly 40 columns wide.
+        for line in plain.lines().filter(|l| !l.is_empty()) {
+            assert_eq!(
+                line.chars().count(),
+                40,
+                "max_width 50% must cap the block to 40 columns: {line:?}"
             );
         }
     }

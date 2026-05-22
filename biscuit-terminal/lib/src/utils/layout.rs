@@ -88,6 +88,16 @@ pub trait LayoutTerminalExt {
     /// Width available for content after subtracting the left and right
     /// margins, resolved against `terminal_width` in whole terminal cells.
     fn available_width(&self, terminal_width: u32) -> u32;
+
+    /// Width available for content after subtracting the horizontal margins
+    /// **and** applying any `max_width` cap, resolved against `terminal_width`
+    /// in whole terminal cells and clamped to at least 1.
+    ///
+    /// This mirrors the width the render-tree renderer hands a block (margins
+    /// reduce the width, then `max_width` caps it — see `render_with_layout`),
+    /// so bespoke components that pad to a known width stay in parity with the
+    /// tree path.
+    fn content_width(&self, terminal_width: u32) -> u32;
 }
 
 impl LayoutTerminalExt for Layout {
@@ -95,6 +105,17 @@ impl LayoutTerminalExt for Layout {
         let left = resolve_cells(&self.margin.left, terminal_width);
         let right = resolve_cells(&self.margin.right, terminal_width);
         terminal_width.saturating_sub(left).saturating_sub(right)
+    }
+
+    fn content_width(&self, terminal_width: u32) -> u32 {
+        let mut width = self.available_width(terminal_width);
+        if let Some(max_width) = &self.max_width {
+            let cap = resolve_cells(max_width, terminal_width);
+            if cap > 0 {
+                width = width.min(cap);
+            }
+        }
+        width.max(1)
     }
 
     fn apply_block_layout(&self, content: &str, terminal_width: u32) -> String {

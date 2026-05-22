@@ -91,58 +91,32 @@ struct DriftKey {
 /// and `width_120` scenarios — which exercise no node layout — agree across
 /// every facet and carry no ledger entries.
 ///
-/// Every remaining entry is `BespokeBehind`: the divergences are confined to
-/// the layout scenarios (margins, alignment, word-wrap), and in each one the
-/// render-tree output is *more* correct. The bespoke renderer applies layout
-/// by calling `Layout::apply_layout` on an already-built, full-width
-/// `{header}\n{body}` string, which (a) builds the header at the full terminal
-/// width and then prefixes the margin, overflowing the line; (b) ragged-centers
-/// individual code lines instead of shifting the block as a unit; and (c) loses
-/// the code block's intrinsic top/bottom padding rows and the vertical-margin
-/// blank lines. The render tree instead renders the code body within the
-/// margin-reduced width and applies block-level alignment and vertical margins
-/// around it. No entry is `TreeBehind`.
+/// The bespoke renderer now resolves the layout's available width
+/// (`Layout::available_width`) and builds both the header pill and the code
+/// body within it (padding the body to that width rather than clearing to the
+/// physical edge with `\x1b[K`), so the horizontal-layout scenarios —
+/// `align_center`, `align_right`, `left_margin_4`, `left_margin_pct_10`,
+/// `right_margin_4`, and `word_wrap_prose` — now agree with the render tree
+/// across every facet and carry no ledger entries.
+///
+/// Every remaining entry is `BespokeBehind` and confined to the *vertical*
+/// margin scenarios (`top_margin_2`, `bottom_margin_2`): the bespoke renderer
+/// applies layout by calling `Layout::apply_layout` on the built
+/// `{header}\n{body}` string, which loses the code block's intrinsic top/bottom
+/// padding rows and the vertical-margin blank lines. The render tree instead
+/// emits the vertical margins as blank lines around the block. No entry is
+/// `TreeBehind`.
 #[rustfmt::skip]
 const KNOWN_DRIFT: &[(&str, &str, Facet, Verdict)] = &[
-    ("YamlBlock", "align_center", Facet::Exact, Verdict::BespokeBehind),
-    ("YamlBlock", "align_center", Facet::Text, Verdict::BespokeBehind),
-    ("YamlBlock", "align_center", Facet::Indent, Verdict::BespokeBehind),
-    ("YamlBlock", "align_center", Facet::BlankLines, Verdict::BespokeBehind),
-    ("YamlBlock", "align_center", Facet::Styling, Verdict::BespokeBehind),
-    ("YamlBlock", "align_right", Facet::Exact, Verdict::BespokeBehind),
-    ("YamlBlock", "align_right", Facet::Text, Verdict::BespokeBehind),
-    ("YamlBlock", "align_right", Facet::Indent, Verdict::BespokeBehind),
-    ("YamlBlock", "align_right", Facet::BlankLines, Verdict::BespokeBehind),
-    ("YamlBlock", "align_right", Facet::Styling, Verdict::BespokeBehind),
     ("YamlBlock", "bottom_margin_2", Facet::Exact, Verdict::BespokeBehind),
     ("YamlBlock", "bottom_margin_2", Facet::Text, Verdict::BespokeBehind),
     ("YamlBlock", "bottom_margin_2", Facet::Indent, Verdict::BespokeBehind),
     ("YamlBlock", "bottom_margin_2", Facet::BlankLines, Verdict::BespokeBehind),
-    ("YamlBlock", "left_margin_4", Facet::Exact, Verdict::BespokeBehind),
-    ("YamlBlock", "left_margin_4", Facet::Text, Verdict::BespokeBehind),
-    ("YamlBlock", "left_margin_4", Facet::Indent, Verdict::BespokeBehind),
-    ("YamlBlock", "left_margin_4", Facet::Width, Verdict::BespokeBehind),
-    ("YamlBlock", "left_margin_4", Facet::Styling, Verdict::BespokeBehind),
-    ("YamlBlock", "left_margin_pct_10", Facet::Exact, Verdict::BespokeBehind),
-    ("YamlBlock", "left_margin_pct_10", Facet::Text, Verdict::BespokeBehind),
-    ("YamlBlock", "left_margin_pct_10", Facet::Indent, Verdict::BespokeBehind),
-    ("YamlBlock", "left_margin_pct_10", Facet::Width, Verdict::BespokeBehind),
-    ("YamlBlock", "left_margin_pct_10", Facet::Styling, Verdict::BespokeBehind),
-    ("YamlBlock", "right_margin_4", Facet::Exact, Verdict::BespokeBehind),
-    ("YamlBlock", "right_margin_4", Facet::Text, Verdict::BespokeBehind),
-    ("YamlBlock", "right_margin_4", Facet::Indent, Verdict::BespokeBehind),
-    ("YamlBlock", "right_margin_4", Facet::Width, Verdict::BespokeBehind),
-    ("YamlBlock", "right_margin_4", Facet::Styling, Verdict::BespokeBehind),
     ("YamlBlock", "top_margin_2", Facet::Exact, Verdict::BespokeBehind),
     ("YamlBlock", "top_margin_2", Facet::Text, Verdict::BespokeBehind),
     ("YamlBlock", "top_margin_2", Facet::Indent, Verdict::BespokeBehind),
     ("YamlBlock", "top_margin_2", Facet::BlankLines, Verdict::BespokeBehind),
     ("YamlBlock", "top_margin_2", Facet::Styling, Verdict::BespokeBehind),
-    ("YamlBlock", "word_wrap_prose", Facet::Exact, Verdict::BespokeBehind),
-    ("YamlBlock", "word_wrap_prose", Facet::Text, Verdict::BespokeBehind),
-    ("YamlBlock", "word_wrap_prose", Facet::Indent, Verdict::BespokeBehind),
-    ("YamlBlock", "word_wrap_prose", Facet::BlankLines, Verdict::BespokeBehind),
-    ("YamlBlock", "word_wrap_prose", Facet::Styling, Verdict::BespokeBehind),
 ];
 
 /// Returns `true` when `a` and `b` are byte-for-byte identical.

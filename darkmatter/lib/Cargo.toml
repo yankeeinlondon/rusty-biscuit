@@ -115,3 +115,7 @@ harness = false
 [[bench]]
 name = "migration_parity"
 harness = false
+
+[[bench]]
+name = "prose_highlighter"
+harness = false
