@@ -696,6 +696,7 @@ impl Commands {
                 filter,
                 repo_subcommand,
             } => Some(match repo_subcommand {
+                None if filter.is_empty() && !*latest_versions => RepoAction::Name,
                 None => RepoAction::Structure {
                     filter: filter.clone(),
                     latest_versions: *latest_versions,
@@ -985,6 +986,7 @@ impl Commands {
                     no_error: *no_error,
                     on_error: on_error.clone(),
                 },
+                Some(RepoSubcommand::Name) => RepoAction::Name,
             }),
             _ => None,
         }
@@ -1145,6 +1147,10 @@ Output modes:
 ";
 
 pub const REPO_AFTER_HELP: &str = "\
+Identity:
+  sniff repo name                     Repository name (plain text)
+  sniff repo name -v                  Name + version + language or package count
+
 Structure:
   sniff repo                          Show repository/monorepo structure
   sniff repo biscuit darkmatter       Filter to packages matching \"biscuit\" or \"darkmatter\"
@@ -2097,7 +2103,7 @@ mod tests {
                 ..
             }) = cli.command
             {
-                assert_eq!(remote, "origin");
+                assert_eq!(remote, Some("origin".to_string()));
             } else {
                 panic!("Expected repo remote");
             }
