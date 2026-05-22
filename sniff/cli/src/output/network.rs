@@ -138,7 +138,7 @@ fn build_interface_blocks(network: &sniff::NetworkInfo, verbose: u8) -> Vec<Unor
                     interface
                         .ipv4_addresses
                         .iter()
-                        .map(std::string::ToString::to_string)
+                        .map(|cidr| format_cidr(&cidr.address.to_string(), cidr.prefix_len))
                         .collect::<Vec<_>>()
                         .join(", ")
                 )));
@@ -150,7 +150,7 @@ fn build_interface_blocks(network: &sniff::NetworkInfo, verbose: u8) -> Vec<Unor
                     interface
                         .ipv6_addresses
                         .iter()
-                        .map(std::string::ToString::to_string)
+                        .map(|cidr| format_cidr(&cidr.address.to_string(), cidr.prefix_len))
                         .collect::<Vec<_>>()
                         .join(", ")
                 )));
@@ -199,7 +199,7 @@ fn summarize_active_ipv4_addresses(network: &sniff::NetworkInfo) -> Option<Strin
         interface
             .ipv4_addresses
             .iter()
-            .map(std::string::ToString::to_string)
+            .map(|cidr| format_cidr(&cidr.address.to_string(), cidr.prefix_len))
             .collect()
     })
 }
@@ -209,9 +209,16 @@ fn summarize_active_ipv6_addresses(network: &sniff::NetworkInfo) -> Option<Strin
         interface
             .ipv6_addresses
             .iter()
-            .map(std::string::ToString::to_string)
+            .map(|cidr| format_cidr(&cidr.address.to_string(), cidr.prefix_len))
             .collect()
     })
+}
+
+fn format_cidr(address: &str, prefix_len: Option<u8>) -> String {
+    match prefix_len {
+        Some(p) => format!("{address}/{p}"),
+        None => address.to_string(),
+    }
 }
 
 fn summarize_active_interface_addresses<F>(

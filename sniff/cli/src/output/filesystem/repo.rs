@@ -7,11 +7,50 @@ use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::components::renderable::{TerminalRenderable, RenderableTerminalContent};
 use biscuit_terminal::terminal::Terminal;
 use sniff::filesystem::git::BehindStatus;
-use sniff::filesystem::repo::{DependencyEntry, Package, RepoInfo};
+use sniff::filesystem::repo::{DependencyEntry, Package, RepoIdentity, RepoInfo};
 
 use super::language::render_framework_summary;
 use super::packages::select_repo_packages;
 use super::{format_number, relative_path};
+
+/// Render `sniff repo name` output.
+///
+/// At verbosity `0`, emits just the bare repo name followed by a newline so
+/// the command pipes cleanly. At verbosity `>= 1`, decorates the name with
+/// version and a language-or-monorepo-package-count suffix, styled through
+/// Prose so terminal-aware fallbacks apply.
+pub fn render_repo_name(identity: &RepoIdentity, verbose: u8) -> String {
+    if verbose == 0 {
+        return format!("{}\n", identity.name);
+    }
+
+    let mut markup = format!("**{}**", identity.name);
+    if let Some(version) = identity.version.as_deref() {
+        markup.push_str(&format!(" v{version}"));
+    }
+
+    let suffix = if identity.is_monorepo {
+        identity
+            .package_count
+            .map(|count| format!(" [<dim>{} package monorepo</dim>]", format_number(count)))
+    } else {
+        identity
+            .language
+            .as_deref()
+            .map(|lang| format!(" [{lang}]"))
+    };
+    if let Some(suffix) = suffix {
+        markup.push_str(&suffix);
+    }
+
+    let term = Terminal::default();
+    let rendered = Prose::new(&markup).render(&term);
+    if rendered.ends_with('\n') {
+        rendered
+    } else {
+        format!("{rendered}\n")
+    }
+}
 
 fn area_parent(area: &str) -> Option<String> {
     if area == "root" {

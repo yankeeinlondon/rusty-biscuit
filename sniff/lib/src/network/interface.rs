@@ -3,8 +3,9 @@ use std::net::{Ipv4Addr, Ipv6Addr};
 
 /// Represents a network interface with its associated properties.
 ///
-/// Each interface has a name, optional MAC address, IPv4 and IPv6 addresses,
-/// and various flags indicating its state.
+/// Each interface has a name, optional MAC address, IPv4 and IPv6 addresses
+/// (each paired with its CIDR prefix length), and various flags indicating
+/// its state.
 ///
 /// ## Examples
 ///
@@ -23,14 +24,64 @@ pub struct NetworkInterface {
     /// MAC address in hexadecimal format (e.g., "00:1A:2B:3C:4D:5E")
     pub mac_address: Option<String>,
 
-    /// List of IPv4 addresses assigned to this interface
-    pub ipv4_addresses: Vec<Ipv4Addr>,
+    /// List of IPv4 addresses assigned to this interface, each paired with
+    /// its CIDR prefix length when the kernel reported a netmask.
+    pub ipv4_addresses: Vec<Ipv4Cidr>,
 
-    /// List of IPv6 addresses assigned to this interface
-    pub ipv6_addresses: Vec<Ipv6Addr>,
+    /// List of IPv6 addresses assigned to this interface, each paired with
+    /// its CIDR prefix length when the kernel reported a netmask.
+    pub ipv6_addresses: Vec<Ipv6Cidr>,
 
     /// Interface state flags
     pub flags: InterfaceFlags,
+}
+
+/// An IPv4 address paired with its CIDR prefix length.
+///
+/// The `prefix_len` is derived from the kernel-supplied netmask via
+/// `netmask.to_bits().count_ones()` and is therefore exact for the
+/// (overwhelmingly common) contiguous-mask case. It is `None` when the
+/// platform did not report a netmask for this address.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct Ipv4Cidr {
+    /// The IPv4 address.
+    pub address: Ipv4Addr,
+    /// CIDR prefix length in bits (0-32), if a netmask was reported.
+    pub prefix_len: Option<u8>,
+}
+
+impl Ipv4Cidr {
+    /// Construct a new CIDR pair.
+    pub fn new(address: Ipv4Addr, prefix_len: Option<u8>) -> Self {
+        Self {
+            address,
+            prefix_len,
+        }
+    }
+}
+
+/// An IPv6 address paired with its CIDR prefix length.
+///
+/// The `prefix_len` is derived from the kernel-supplied netmask via
+/// `netmask.to_bits().count_ones()` and is therefore exact for the
+/// (overwhelmingly common) contiguous-mask case. It is `None` when the
+/// platform did not report a netmask for this address.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct Ipv6Cidr {
+    /// The IPv6 address.
+    pub address: Ipv6Addr,
+    /// CIDR prefix length in bits (0-128), if a netmask was reported.
+    pub prefix_len: Option<u8>,
+}
+
+impl Ipv6Cidr {
+    /// Construct a new CIDR pair.
+    pub fn new(address: Ipv6Addr, prefix_len: Option<u8>) -> Self {
+        Self {
+            address,
+            prefix_len,
+        }
+    }
 }
 
 impl NetworkInterface {
@@ -69,9 +120,11 @@ impl NetworkInterface {
 /// let addr = Ipv4Address {
 ///     address: "192.168.1.100".to_string(),
 ///     interface: "en0".to_string(),
+///     prefix_len: Some(24),
 /// };
 /// assert_eq!(addr.address, "192.168.1.100");
 /// assert_eq!(addr.interface, "en0");
+/// assert_eq!(addr.prefix_len, Some(24));
 /// ```
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Ipv4Address {
@@ -79,6 +132,8 @@ pub struct Ipv4Address {
     pub address: String,
     /// The interface name providing this address (e.g., "en0")
     pub interface: String,
+    /// CIDR prefix length in bits (0-32), if a netmask was reported.
+    pub prefix_len: Option<u8>,
 }
 
 /// An IPv6 address with interface attribution.
@@ -94,9 +149,11 @@ pub struct Ipv4Address {
 /// let addr = Ipv6Address {
 ///     address: "fe80::1".to_string(),
 ///     interface: "en0".to_string(),
+///     prefix_len: Some(64),
 /// };
 /// assert_eq!(addr.address, "fe80::1");
 /// assert_eq!(addr.interface, "en0");
+/// assert_eq!(addr.prefix_len, Some(64));
 /// ```
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Ipv6Address {
@@ -104,6 +161,8 @@ pub struct Ipv6Address {
     pub address: String,
     /// The interface name providing this address (e.g., "en0")
     pub interface: String,
+    /// CIDR prefix length in bits (0-128), if a netmask was reported.
+    pub prefix_len: Option<u8>,
 }
 
 /// Aggregated IP addresses across all network interfaces.
@@ -121,10 +180,12 @@ pub struct Ipv6Address {
 /// addrs.v4.push(Ipv4Address {
 ///     address: "192.168.1.100".to_string(),
 ///     interface: "en0".to_string(),
+///     prefix_len: Some(24),
 /// });
 /// addrs.v6.push(Ipv6Address {
 ///     address: "fe80::1".to_string(),
 ///     interface: "en0".to_string(),
+///     prefix_len: Some(64),
 /// });
 /// assert_eq!(addrs.v4.len(), 1);
 /// assert_eq!(addrs.v6.len(), 1);

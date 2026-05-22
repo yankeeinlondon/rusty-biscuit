@@ -59,7 +59,7 @@ pub enum RepoAction {
         package_area: Option<String>,
     },
     Remote {
-        remote: String,
+        remote: Option<String>,
     },
     Deps {
         filter: Vec<String>,
@@ -175,6 +175,7 @@ pub enum RepoAction {
         no_error: bool,
         on_error: Option<String>,
     },
+    Name,
 }
 
 // ---------------------------------------------------------------------------
@@ -295,8 +296,11 @@ pub enum RepoSubcommand {
     /// Inspect a remote repository (URL, name, or owner/repo shorthand)
     Remote {
         /// Git remote URL, remote name, or owner/repo shorthand
+        ///
+        /// When omitted inside a git repo, defaults to the origin remote URL
+        /// (or the first configured remote if origin is not set).
         #[arg(value_name = "REMOTE")]
-        remote: String,
+        remote: Option<String>,
     },
     /// Render an internal dependency diagram
     Deps {
@@ -557,4 +561,6 @@ pub enum RepoSubcommand {
         #[arg(long, value_name = "MESSAGE", allow_hyphen_values = true)]
         on_error: Option<String>,
     },
+    /// Output the repository name (plain text); use -v for version + language/monorepo info
+    Name,
 }

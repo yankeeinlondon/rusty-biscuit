@@ -106,7 +106,7 @@ pub(crate) use packages::{
     select_dirty_package_names, select_repo_packages, select_staged_package_names,
     select_unstaged_package_names,
 };
-pub use repo::{render_filesystem_section, render_repo_section};
+pub use repo::{render_filesystem_section, render_repo_name, render_repo_section};
 
 /// Format a commit datetime to a relative date string and 12hr time string.
 ///
@@ -426,19 +426,6 @@ fn build_git_status_items(
 
     let mut status_items: Vec<String> = Vec::new();
 
-    let conflicted: Vec<_> = git
-        .file_changes
-        .iter()
-        .filter(|f| f.status == FileStatus::Conflicted)
-        .collect();
-    for file in &conflicted {
-        let path = file.path.display().to_string();
-        let absolute = git.repo_root.join(&file.path).display().to_string();
-        let linked_path = format_git_status_filepath(&path, &absolute);
-        let line = format!("<red>conflicted: {linked_path}</red>");
-        status_items.push(line);
-    }
-
     // Recent commits with conventional commit parsing (oldest first, so most recent is at bottom)
     let commits: Vec<_> = git.recent.iter().take(history_count).collect();
     for (display_index, commit) in commits.iter().rev().enumerate() {
@@ -506,6 +493,20 @@ fn build_git_status_items(
         let absolute = git.repo_root.join(&file.path).display().to_string();
         let linked_path = format_git_status_filepath(&path, &absolute);
         let line = format!("<dim>untracked: {linked_path}</dim>");
+        status_items.push(line);
+    }
+
+    // Conflicted files render last so they're easy to spot at the bottom of the list.
+    let conflicted: Vec<_> = git
+        .file_changes
+        .iter()
+        .filter(|f| f.status == FileStatus::Conflicted)
+        .collect();
+    for file in &conflicted {
+        let path = file.path.display().to_string();
+        let absolute = git.repo_root.join(&file.path).display().to_string();
+        let linked_path = format_git_status_filepath(&path, &absolute);
+        let line = format!("<red>conflicted: {linked_path}</red>");
         status_items.push(line);
     }
 
@@ -1189,7 +1190,7 @@ mod tests {
         use super::*;
 
         #[test]
-        fn conflicted_files_render_before_commits_and_untracked_is_dimmed() {
+        fn conflicted_files_render_last_and_untracked_is_dimmed() {
             let git = make_git_info(vec![
                 FileChange {
                     path: PathBuf::from("src/main.rs"),
@@ -1216,16 +1217,28 @@ mod tests {
 
             let items = build_git_status_items(&git, 10, 0);
 
-            assert!(items[0].starts_with("<red>conflicted: <a href=\"/repo/conflict.txt\">"));
-            assert!(items[0].contains("<b>conflict.txt</b></a>"));
-            assert!(items.iter().any(|item| {
-                item.starts_with("<dim>untracked: <a href=\"/repo/notes.md\">")
-                    && item.contains("<b>notes.md</b></a>")
-            }));
-            assert!(items.iter().any(|item| {
-                item.starts_with("<lime>staged(")
-                    && item.contains("<a href=\"/repo/src/main.rs\">src/<b>main.rs</b></a>")
-            }));
+            let last = items.last().expect("at least one status item");
+            assert!(last.starts_with("<red>conflicted: <a href=\"/repo/conflict.txt\">"));
+            assert!(last.contains("<b>conflict.txt</b></a>"));
+
+            let staged_index = items
+                .iter()
+                .position(|item| {
+                    item.starts_with("<lime>staged(")
+                        && item.contains("<a href=\"/repo/src/main.rs\">src/<b>main.rs</b></a>")
+                })
+                .expect("staged item present");
+            let untracked_index = items
+                .iter()
+                .position(|item| {
+                    item.starts_with("<dim>untracked: <a href=\"/repo/notes.md\">")
+                        && item.contains("<b>notes.md</b></a>")
+                })
+                .expect("untracked item present");
+            let conflicted_index = items.len() - 1;
+
+            assert!(staged_index < conflicted_index);
+            assert!(untracked_index < conflicted_index);
         }
 
         #[test]

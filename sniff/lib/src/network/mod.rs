@@ -16,7 +16,9 @@ use tracing::{debug, info};
 use tracing::{instrument, warn};
 
 mod interface;
-pub use interface::{InterfaceFlags, IpAddresses, Ipv4Address, Ipv6Address, NetworkInterface};
+pub use interface::{
+    InterfaceFlags, IpAddresses, Ipv4Address, Ipv4Cidr, Ipv6Address, Ipv6Cidr, NetworkInterface,
+};
 
 #[cfg(feature = "network")]
 const DEFAULT_WAN_IP_ENDPOINTS: &[&str] = &["https://api64.ipify.org"];
@@ -263,20 +265,38 @@ fn detect_local_interfaces()
 
         match ifaddr.address {
             getifaddrs::Address::V4(v4) => {
-                if !entry.ipv4_addresses.contains(&v4.address) {
-                    entry.ipv4_addresses.push(v4.address);
+                if !entry
+                    .ipv4_addresses
+                    .iter()
+                    .any(|cidr| cidr.address == v4.address)
+                {
+                    let prefix_len = v4.netmask.map(|m| m.to_bits().count_ones() as u8);
+                    entry.ipv4_addresses.push(Ipv4Cidr {
+                        address: v4.address,
+                        prefix_len,
+                    });
                     ip_addresses.v4.push(Ipv4Address {
                         address: v4.address.to_string(),
                         interface: interface_name,
+                        prefix_len,
                     });
                 }
             }
             getifaddrs::Address::V6(v6) => {
-                if !entry.ipv6_addresses.contains(&v6.address) {
-                    entry.ipv6_addresses.push(v6.address);
+                if !entry
+                    .ipv6_addresses
+                    .iter()
+                    .any(|cidr| cidr.address == v6.address)
+                {
+                    let prefix_len = v6.netmask.map(|m| m.to_bits().count_ones() as u8);
+                    entry.ipv6_addresses.push(Ipv6Cidr {
+                        address: v6.address,
+                        prefix_len,
+                    });
                     ip_addresses.v6.push(Ipv6Address {
                         address: v6.address.to_string(),
                         interface: interface_name,
+                        prefix_len,
                     });
                 }
             }
@@ -958,7 +978,7 @@ fn interface_name_for_ipv4(
 ) -> Option<String> {
     interfaces
         .iter()
-        .find(|iface| iface.ipv4_addresses.contains(&address))
+        .find(|iface| iface.ipv4_addresses.iter().any(|c| c.address == address))
         .map(|iface| iface.name.clone())
 }
 
@@ -1292,6 +1312,92 @@ mod tests {
     }
 
     #[test]
+    fn test_ip_addresses_have_prefix_length_on_real_system() {
+        // On every supported platform `getifaddrs` reports a netmask for
+        // both IPv4 and IPv6 addresses, so once we have any non-empty
+        // result the prefix should be present and within range.
+        let info = detect_network().unwrap();
+        if info.permission_denied {
+            return;
+        }
+
+        for addr in &info.ip_addresses.v4 {
+            let prefix = addr.prefix_len.unwrap_or_else(|| {
+                panic!(
+                    "IPv4 address {} on {} should report a prefix length",
+                    addr.address, addr.interface
+                )
+            });
+            assert!(prefix <= 32, "IPv4 prefix /{prefix} out of range");
+        }
+
+        for addr in &info.ip_addresses.v6 {
+            let prefix = addr.prefix_len.unwrap_or_else(|| {
+                panic!(
+                    "IPv6 address {} on {} should report a prefix length",
+                    addr.address, addr.interface
+                )
+            });
+            assert!(prefix <= 128, "IPv6 prefix /{prefix} out of range");
+        }
+
+        // Loopback should always report the classical full-host prefixes.
+        for iface in info.interfaces.iter().filter(|i| i.flags.is_loopback) {
+            for cidr in &iface.ipv4_addresses {
+                if cidr.address.is_loopback() {
+                    assert_eq!(
+                        cidr.prefix_len,
+                        Some(8),
+                        "127.0.0.0/8 expected for loopback IPv4"
+                    );
+                }
+            }
+            for cidr in &iface.ipv6_addresses {
+                if cidr.address.is_loopback() {
+                    assert_eq!(
+                        cidr.prefix_len,
+                        Some(128),
+                        "::1/128 expected for loopback IPv6"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_ip_addresses_per_interface_prefix_matches_aggregate() {
+        let info = detect_network().unwrap();
+        if info.permission_denied {
+            return;
+        }
+
+        for iface in &info.interfaces {
+            for cidr in &iface.ipv4_addresses {
+                let aggregate = info.ip_addresses.v4.iter().find(|a| {
+                    a.interface == iface.name && a.address == cidr.address.to_string()
+                });
+                assert_eq!(
+                    aggregate.and_then(|a| a.prefix_len),
+                    cidr.prefix_len,
+                    "Per-interface IPv4 prefix should match aggregate for {}",
+                    cidr.address
+                );
+            }
+            for cidr in &iface.ipv6_addresses {
+                let aggregate = info.ip_addresses.v6.iter().find(|a| {
+                    a.interface == iface.name && a.address == cidr.address.to_string()
+                });
+                assert_eq!(
+                    aggregate.and_then(|a| a.prefix_len),
+                    cidr.prefix_len,
+                    "Per-interface IPv6 prefix should match aggregate for {}",
+                    cidr.address
+                );
+            }
+        }
+    }
+
+    #[test]
     fn test_filtered_ip_addresses_match_retained_interfaces() {
         let info = detect_network_filtered().unwrap();
         if !info.permission_denied {
@@ -1408,7 +1514,9 @@ mod tests {
         iface.flags.is_up = true;
         iface.flags.is_running = is_running;
         if has_ipv4 {
-            iface.ipv4_addresses.push("192.168.1.100".parse().unwrap());
+            iface
+                .ipv4_addresses
+                .push(Ipv4Cidr::new("192.168.1.100".parse().unwrap(), Some(24)));
         }
         iface
     }
@@ -1743,7 +1851,9 @@ garbage line";
     fn test_interface_name_for_ipv4_found() {
         let mut iface = create_test_interface("Ethernet", true, true);
         iface.ipv4_addresses.clear();
-        iface.ipv4_addresses.push("10.0.0.50".parse().unwrap());
+        iface
+            .ipv4_addresses
+            .push(Ipv4Cidr::new("10.0.0.50".parse().unwrap(), Some(24)));
 
         let result = interface_name_for_ipv4(&[iface], "10.0.0.50".parse().unwrap());
         assert_eq!(result, Some("Ethernet".to_string()));
