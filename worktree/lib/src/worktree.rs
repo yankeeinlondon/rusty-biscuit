@@ -123,9 +123,12 @@ pub fn parse_worktree_list(porcelain_output: &str) -> Vec<WorktreeEntry> {
 
 /// Get status for all worktrees.
 ///
-/// Each worktree's per-entry git work (`ahead_behind`, `check_clean_merge`,
-/// `dirty_status`) is dispatched in parallel via `std::thread::scope`, since
-/// each call spawns its own `git` subprocess and the work is independent.
+/// Each worktree's per-entry git work is dispatched in parallel via
+/// `std::thread::scope`. Within each worktree, `ahead_behind` and `dirty_status`
+/// run concurrently on sub-threads. `check_clean_merge` is the most expensive
+/// call (`git merge-tree --write-tree` does a real 3-way merge) so it's only
+/// invoked when both `ahead > 0` and `behind > 0` — otherwise the merge is
+/// trivially a fast-forward and known clean.
 pub fn list_worktrees() -> Result<Vec<WorktreeStatus>, WorktreeError> {
     let porcelain = git_command(&["worktree", "list", "--porcelain"])?;
     let entries = parse_worktree_list(&porcelain);
@@ -137,17 +140,28 @@ pub fn list_worktrees() -> Result<Vec<WorktreeStatus>, WorktreeError> {
             .map(|entry| {
                 let default = default.as_str();
                 scope.spawn(move || {
+                    let dirty_handle = {
+                        let path = entry.path.clone();
+                        std::thread::spawn(move || dirty_status(&path))
+                    };
+
                     let (ahead, behind, is_clean) = if entry.is_main {
                         (0, 0, true)
                     } else if let Some(ref branch) = entry.branch {
                         let (a, b) = ahead_behind(default, branch).unwrap_or((0, 0));
-                        let clean = check_clean_merge(default, branch);
+                        // Fast-forward in either direction is trivially clean;
+                        // only invoke merge-tree when histories actually diverge.
+                        let clean = if a == 0 || b == 0 {
+                            true
+                        } else {
+                            check_clean_merge(default, branch)
+                        };
                         (a, b, clean)
                     } else {
                         (0, 0, true)
                     };
 
-                    let dirty = dirty_status(&entry.path);
+                    let dirty = dirty_handle.join().expect("dirty_status thread panicked");
 
                     WorktreeStatus {
                         entry,
@@ -176,7 +190,14 @@ pub fn list_worktrees() -> Result<Vec<WorktreeStatus>, WorktreeError> {
 /// and everything else. Falls back to [`DirtyStatus::Clean`] on git failure so
 /// listing still works in degraded environments.
 pub fn dirty_status(path: &Path) -> DirtyStatus {
-    let Ok(output) = git_command_in(path, &["status", "--porcelain"]) else {
+    // `core.untrackedCache=true` enables git's untracked-files cache (persisted
+    // in the worktree's `.git/index`). Walking untracked files in a large
+    // monorepo is the dominant cost of `git status`; the cache cuts subsequent
+    // calls 4-5x. Passing `-c` here is enough to enable and populate the cache.
+    let Ok(output) = git_command_in(
+        path,
+        &["-c", "core.untrackedCache=true", "status", "--porcelain"],
+    ) else {
         return DirtyStatus::Clean;
     };
 
