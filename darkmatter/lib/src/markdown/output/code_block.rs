@@ -364,6 +364,28 @@ pub(crate) fn find_syntax<'a>(
         .or_else(|| syntax_set.find_syntax_by_name(alias))
 }
 
+/// Derives the effective color mode of a code panel from its resolved theme
+/// background, by perceived luminance.
+///
+/// Code blocks select their theme *variant* against the inverted terminal mode
+/// (for page contrast), but a few theme names are single-variant and do not
+/// invert. Downstream contrast decisions — the header pill's text color and the
+/// highlighted-line background math — must therefore key off the panel's
+/// **actual** background, not the requested mode, so a single-variant dark theme
+/// still gets light header text (and vice versa).
+///
+/// Returns [`ColorMode::Light`] when the background is perceptually light
+/// (Rec. 601 luma > 127), otherwise [`ColorMode::Dark`].
+#[inline]
+pub(crate) fn mode_for_background(bg: Color) -> ColorMode {
+    let luma = 0.299 * f32::from(bg.r) + 0.587 * f32::from(bg.g) + 0.114 * f32::from(bg.b);
+    if luma > 127.0 {
+        ColorMode::Light
+    } else {
+        ColorMode::Dark
+    }
+}
+
 /// Computes a highlighted background color based on the theme background and color mode.
 ///
 /// Uses warmer tones (more red/green) to create a visual highlight effect.

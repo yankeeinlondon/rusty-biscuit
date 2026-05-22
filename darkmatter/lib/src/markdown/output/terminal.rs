@@ -892,7 +892,23 @@ pub(crate) fn write_terminal_with_layout<W: std::io::Write>(
         .unwrap_or_else(|| biscuit_terminal::discovery::detection::terminal_width() as u16);
     tracing::debug!(terminal_width, "Terminal width for rendering");
 
-    let code_highlighter = CodeHighlighter::new(options.code_theme, options.color_mode);
+    // Code blocks contrast against the page: they resolve their theme *variant*
+    // against the INVERTED color mode (a light code panel in a dark terminal,
+    // and vice versa). Prose, headings, and tables keep `options.color_mode`.
+    // See `ColorMode::inverted` for the rationale and the theme-name
+    // abstraction.
+    let code_highlighter = CodeHighlighter::new(options.code_theme, options.color_mode.inverted());
+    // The panel's internal contrast (header pill text color, highlight-line
+    // background math) keys off the *resolved* theme background, not the
+    // requested mode — single-variant themes (e.g. dracula) don't invert, so
+    // their dark panel must still get light header text.
+    let code_color_mode = crate::markdown::output::code_block::mode_for_background(
+        code_highlighter
+            .theme()
+            .settings
+            .background
+            .unwrap_or(Color::BLACK),
+    );
     let hr_defaults = hr_defaults_from_frontmatter(md);
 
     // Load prose theme for ProseHighlighter
@@ -1190,7 +1206,7 @@ pub(crate) fn write_terminal_with_layout<W: std::io::Write>(
                         meta.title.as_deref(),
                         &code_language,
                         bg_color,
-                        options.color_mode,
+                        code_color_mode,
                         code_width,
                     );
                     let header = if let Some(ctx) = layout_ctx {
@@ -1201,15 +1217,19 @@ pub(crate) fn write_terminal_with_layout<W: std::io::Write>(
                     wrapper.push_with_newlines(&header);
                     wrapper.newline();
 
-                    // Highlight and render code. When a layout context actually
-                    // constrains code-block width below the terminal width, pass
-                    // the resolved width so the body pads to the same width as
-                    // the header instead of clearing to the terminal edge with
-                    // `\x1b[K`. When the layout is at defaults (zero-config or
-                    // `PageFill::Full` with no margins), `code_width` equals
-                    // `terminal_width` and we keep `None` so the output stays
-                    // byte-for-byte equivalent to the legacy path.
-                    let body_width = if code_width < terminal_width {
+                    // Highlight and render code. Whenever a layout context is
+                    // present, pass the resolved width so the body pads with
+                    // background-colored spaces to the same width as the header
+                    // pill, instead of clearing to the physical terminal edge
+                    // with `\x1b[K`. `\x1b[K` is incompatible with the page's
+                    // post-hoc row decoration (it paints to the physical edge,
+                    // ignoring the left margin prepended afterward and the right
+                    // margin entirely), which left a margin-width unstyled gap
+                    // after the code and pushed the fill past the right margin.
+                    // Only the true zero-config path (no layout context, code
+                    // spans the terminal from column 0) keeps `None`, preserving
+                    // byte-for-byte equivalence with the legacy renderer.
+                    let body_width = if layout_ctx.is_some() || code_width < terminal_width {
                         Some(code_width)
                     } else {
                         None
@@ -1220,7 +1240,7 @@ pub(crate) fn write_terminal_with_layout<W: std::io::Write>(
                         &code_highlighter,
                         &options,
                         &meta,
-                        options.color_mode,
+                        code_color_mode,
                         body_width,
                     )?;
                     let highlighted = if let Some(ctx) = layout_ctx {

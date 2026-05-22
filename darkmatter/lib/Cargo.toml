@@ -91,6 +91,8 @@ proptest = "1.6"
 criterion = { version = "0.5", features = ["html_reports"] }
 biscuit-test-harness = { path = "../../biscuit-test-harness" }
 tempfile = "3"
+chromiumoxide = { version = "0.7", default-features = false, features = ["tokio-runtime"] }
+futures-util = "0.3"
 
 [[bench]]
 name = "schema_validation"

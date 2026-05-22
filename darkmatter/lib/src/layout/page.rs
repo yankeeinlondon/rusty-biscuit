@@ -503,6 +503,13 @@ impl DarkmatterPage {
             return Ok(body);
         }
 
+        // Normalize the body's vertical rhythm before margins are applied, so
+        // leading/trailing blank rows come *only* from the configured margins
+        // (no constant document-tail offset) and no interior run of >=2 blank
+        // lines survives. Runs only on the decorated path; the zero-config path
+        // returned above keeps byte-for-byte equivalence with `for_terminal`.
+        let body = normalize_body_rhythm(&body);
+
         Ok(apply_row_decoration(&body, &ctx))
     }
 
@@ -644,6 +651,41 @@ impl DarkmatterPage {
         self.validate_fills()?;
         Ok(())
     }
+}
+
+/// Collapse runs of ≥2 blank lines to one and strip trailing blank lines from a
+/// rendered body, enforcing Markdown's vertical-rhythm invariant before page
+/// margins are applied.
+///
+/// A line counts as blank only when it carries no visible glyphs **and** no
+/// background fill — a code-block or page padding row (`\x1b[48…`) is content,
+/// not blank, and is preserved.
+fn normalize_body_rhythm(body: &str) -> String {
+    use biscuit_terminal::prelude::strip_escape_codes;
+
+    let is_blank = |line: &str| {
+        strip_escape_codes(line).trim().is_empty() && !line.contains("\x1b[48")
+    };
+
+    let mut out: Vec<&str> = Vec::new();
+    let mut prev_blank = false;
+    for line in body.lines() {
+        let blank = is_blank(line);
+        if blank && prev_blank {
+            continue; // collapse consecutive blank lines to a single one
+        }
+        out.push(line);
+        prev_blank = blank;
+    }
+    while out.last().is_some_and(|l| is_blank(l)) {
+        out.pop();
+    }
+
+    let mut normalized = out.join("\n");
+    if !normalized.is_empty() {
+        normalized.push('\n');
+    }
+    normalized
 }
 
 /// Wrap rendered markdown body with margin/padding rows and background fill.

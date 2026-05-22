@@ -93,9 +93,22 @@ impl CodeRenderer for TerminalCodeRenderer {
         }
 
         let hints = attrs.code_hints();
-        let color_mode = map_color_mode(context.color_mode());
+        // Code blocks contrast against the page: resolve the theme *variant*
+        // against the INVERTED terminal mode (see `ColorMode::inverted`).
         let options = TerminalOptions::default();
-        let highlighter = CodeHighlighter::new(options.code_theme, color_mode);
+        let highlighter = CodeHighlighter::new(
+            options.code_theme,
+            map_color_mode(context.color_mode()).inverted(),
+        );
+        // Header/body contrast keys off the resolved theme background, not the
+        // requested mode, so single-variant themes still get readable chrome.
+        let color_mode = crate::markdown::output::code_block::mode_for_background(
+            highlighter
+                .theme()
+                .settings
+                .background
+                .unwrap_or(syntect::highlighting::Color::BLACK),
+        );
         let code_meta = build_code_meta(lang.unwrap_or(""), meta);
         let language = lang.unwrap_or("");
 
@@ -148,6 +161,8 @@ impl CodeRenderer for TerminalCodeRenderer {
         _attrs: &NodeAttrs,
     ) -> Option<BrowserFragment<Ready>> {
         let options = HtmlOptions::default();
+        // Browser code blocks do not invert (terminal-only contrast); see the
+        // note in `darkmatter::markdown::output::html::as_html`.
         let highlighter = CodeHighlighter::new(options.code_theme, options.color_mode);
         let code_meta = build_code_meta(lang.unwrap_or(""), meta);
         let language = lang.unwrap_or("");

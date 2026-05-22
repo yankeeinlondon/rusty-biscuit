@@ -139,7 +139,13 @@ pub fn as_html(md: &Markdown, options: HtmlOptions) -> MarkdownResult<String> {
     let mut output = String::new();
     let hr_defaults = hr_defaults_from_frontmatter(md);
 
-    // Create highlighter for code blocks
+    // Create highlighter for code blocks.
+    //
+    // Note: unlike the terminal renderer, the browser path does NOT invert the
+    // code theme for page contrast. Terminal inversion keys off live light/dark
+    // *detection*; HTML `color_mode` is caller-set and the page's contrast is a
+    // CSS concern. Cross-target HTML code contrast is tracked separately (see
+    // `renderable/fixes/2026-05-22-darkmatter-failures/spec.md`, defect D).
     let code_highlighter = CodeHighlighter::new(options.code_theme, options.color_mode);
 
     // Emit page-level `:root` declarations for horizontal-rule CSS custom

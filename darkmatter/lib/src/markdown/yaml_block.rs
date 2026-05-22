@@ -172,9 +172,21 @@ impl TerminalRenderable for YamlBlock {
     fn render(&self, term: &Terminal) -> String {
         // Detect color mode fresh so env-var changes between renders are
         // honoured (e.g. dark/light tests that flip COLORFGBG).
-        let color_mode = detect_color_mode();
+        // A YamlBlock is a code block: it contrasts against the page by
+        // resolving its theme *variant* against the INVERTED detected mode (see
+        // `ColorMode::inverted`), keeping it byte-identical to a Markdown
+        // ```yaml``` fence.
         let options = TerminalOptions::default();
-        let highlighter = CodeHighlighter::new(options.code_theme, color_mode);
+        let highlighter = CodeHighlighter::new(options.code_theme, detect_color_mode().inverted());
+        // Header/body contrast keys off the resolved theme background so
+        // single-variant themes still get readable chrome.
+        let color_mode = crate::markdown::output::code_block::mode_for_background(
+            highlighter
+                .theme()
+                .settings
+                .background
+                .unwrap_or(syntect::highlighting::Color::BLACK),
+        );
         let meta = CodeBlockMeta::default();
         let terminal_width = term.width();
 
@@ -300,6 +312,8 @@ impl YamlBlock {
         // Route through HtmlOptions::default() for symmetry with the terminal
         // path. Reuse the resolved color mode and theme rather than re-detecting.
         let options = HtmlOptions::default();
+        // Browser code blocks do not invert (terminal-only contrast); see the
+        // note in `darkmatter::markdown::output::html::as_html`.
         let highlighter = CodeHighlighter::new(options.code_theme, options.color_mode);
         let meta = CodeBlockMeta::default();
 
@@ -720,8 +734,18 @@ mod tests {
     fn test_dark_and_light_render_differ() {
         let _no_color_guard = EnvVarGuard::capture("NO_COLOR");
         let _colorfgbg_guard = EnvVarGuard::capture("COLORFGBG");
+        // Pin a *paired* code theme so the assertion is meaningful. A code block
+        // resolves its theme against the INVERTED terminal mode for page
+        // contrast, so a paired theme yields opposite concrete variants (and
+        // thus different backgrounds) between dark and light terminals.
+        // Single-variant themes (the ambient default in some environments)
+        // legitimately render identically under both modes — keying header text
+        // off the resolved background, not the requested mode — so they cannot
+        // demonstrate this property.
+        let _code_theme_guard = EnvVarGuard::capture("CODE_THEME");
 
         unsafe { std::env::remove_var("NO_COLOR") };
+        unsafe { std::env::set_var("CODE_THEME", "github") };
 
         let block = YamlBlock::new("foo: 1\nbar: 2").unwrap();
         let term = Terminal::default();
