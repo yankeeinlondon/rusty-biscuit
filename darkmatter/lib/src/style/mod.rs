@@ -7,6 +7,7 @@ pub mod alignment;
 pub mod color;
 pub mod error;
 pub mod length;
+pub mod schema;
 pub mod warning;
 
 pub use color::StyleColor;
