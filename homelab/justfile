@@ -56,11 +56,13 @@ build *args="":
 
 # run tests for Homelab packages
 test *args="":
-    @echo ""
-    @echo -e "Testing {{BOLD}}Homelab{{RESET}} ({{ITALIC}}Library, Homey CLI, Server{{RESET}})"
-    @echo "-----------------------------------------------"
-    @echo ""
-    @cargo test -p homelab -p homelab-cli -p homelab-server -p unfolded-integration-helper -p arcam-amp-integration -p eversolo-integration -p sony-receiver-integration {{args}}
+    @just _test homelab {{ args }}
+    @just _test homelab-cli {{ args }}
+    @just _test homelab-server {{ args }}
+    @just _test unfolded-integration-helper {{ args }}
+    @just _test arcam-amp-integration {{ args }}
+    @just _test eversolo-integration {{ args }}
+    @just _test sony-receiver-integration {{ args }}
     @just test-frontend
 
 # run opt-in ignored tests against real devices
@@ -205,10 +207,7 @@ server *args="":
 
 # run tests for server only
 test-server *args="":
-    @echo ""
-    @echo "Testing {{BOLD}}Homelab Server{{RESET}}"
-    @echo ""
-    @cargo test -p homelab-server {{args}}
+    @just _test homelab-server {{ args }}
 
 
 # build frontend SPA (installs deps if needed)

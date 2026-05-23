@@ -101,8 +101,7 @@ fn from_env_internal(
         }
 
         if headers.authorization.is_none()
-            && let (Some(user_list), Some(pass_list)) =
-                (&mapping.basic_user, &mapping.basic_pass)
+            && let (Some(user_list), Some(pass_list)) = (&mapping.basic_user, &mapping.basic_pass)
         {
             let user = resolve_env_list(user_list);
             let pass = resolve_env_list(pass_list);

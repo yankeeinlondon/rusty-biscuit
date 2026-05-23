@@ -1,12 +1,12 @@
 use std::path::{Path, PathBuf};
 
 use claudine::provider::Provider;
+use claudine::provider::SystemPromptSpec;
 use claudine::provider::{
     EntrypointMode, OutputFormatSelector, PROVIDER_COUNT, PromptArgConventions, YoloSupport,
     provider_info,
 };
 use claudine::stream::StreamProtocol;
-use claudine::provider::SystemPromptSpec;
 use claudine::system_prompt::{PreparedSystemPrompt, SystemPromptMode};
 use color_eyre::eyre::{Result, bail, eyre};
 
@@ -1903,10 +1903,7 @@ mod tests {
     ) -> bool {
         match provider_info(provider).yolo {
             YoloSupport::None => {
-                !outcome.applied
-                    && outcome.warning.is_some()
-                    && args.is_empty()
-                    && env.is_empty()
+                !outcome.applied && outcome.warning.is_some() && args.is_empty() && env.is_empty()
             }
             YoloSupport::DirectFlag { native_flag } => {
                 outcome.applied && yolo_flag_present(args, native_flag)
@@ -1995,10 +1992,7 @@ mod tests {
             !baseline,
             "no flag and no env must leave yolo=false (got {baseline})",
         );
-        assert!(
-            with_flag,
-            "-y on argv must enable yolo (got {with_flag})",
-        );
+        assert!(with_flag, "-y on argv must enable yolo (got {with_flag})",);
         assert!(
             from_env,
             "CLAUDINE_YOLO=true must enable yolo on SharedComposeArgs (got {from_env})",

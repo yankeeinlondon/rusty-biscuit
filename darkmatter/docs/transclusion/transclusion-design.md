@@ -358,11 +358,11 @@ Reuse interpolation parser/evaluator infrastructure with transclusion condition 
 
 1. Add unary `!` support
 2. Add function aliases/case-insensitive names:
-   - `HasKey`/`has_key`
-   - `Contains`/`contains`
-   - `Length`/`length`
-   - `And`/`and`
-   - `Or`/`or`
+   - `has_key`/`has_key`
+   - `contains`/`contains`
+   - `length`/`length`
+   - `and`/`and`
+   - `or`/`or`
 3. Use boolean evaluation mode for `when`
 
 ### Semantics
@@ -370,8 +370,8 @@ Reuse interpolation parser/evaluator infrastructure with transclusion condition 
 1. Missing values evaluate as falsy
 2. Equality/inequality compare normalized scalar strings
 3. Numeric comparisons in `when` coerce non-numeric values to `0` (per functional spec)
-4. `And(a,b,c)` requires all truthy
-5. `Or(a,b,c)` requires any truthy
+4. `and(a,b,c)` requires all truthy
+5. `or(a,b,c)` requires any truthy
 
 `when` false behavior:
 
@@ -527,7 +527,7 @@ Performance:
    - `./`, `/`, `~`, `@`
    - unknown source failures
 3. Condition evaluator:
-   - unary, comparisons, `And`/`Or`, `HasKey`, `Contains`, `Length`
+   - unary, comparisons, `and`/`or`, `has_key`, `contains`, `length`
 4. State merge:
    - deep merge and precedence
    - `replace` option variants

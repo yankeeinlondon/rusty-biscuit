@@ -225,8 +225,8 @@ pub fn resolve_user_prompt_report_config(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::types::PromptVerbosity;
+    use super::*;
 
     // --- System prompt precedence tests ---
 
@@ -275,7 +275,9 @@ mod tests {
     #[test]
     fn env_verbose_used_when_no_cli_flags() {
         let config = resolve_system_prompt_report_config(
-            false, false, false,
+            false,
+            false,
+            false,
             Some(PromptVerbosity::Verbose),
             200,
             Some(PromptVerbosity::Quiet),
@@ -287,7 +289,9 @@ mod tests {
     #[test]
     fn env_silent_used_when_no_cli_flags() {
         let config = resolve_system_prompt_report_config(
-            false, false, false,
+            false,
+            false,
+            false,
             Some(PromptVerbosity::Silent),
             5,
             Some(PromptVerbosity::Verbose),
@@ -301,7 +305,9 @@ mod tests {
         // should trigger FullPrompt … wait, no: env comes before prompt
         // length, but frontmatter comes AFTER prompt length.
         let config = resolve_system_prompt_report_config(
-            false, false, false,
+            false,
+            false,
+            false,
             None,
             5,
             Some(PromptVerbosity::Quiet),
@@ -313,7 +319,9 @@ mod tests {
     #[test]
     fn frontmatter_used_when_no_other_hints() {
         let config = resolve_system_prompt_report_config(
-            false, false, false,
+            false,
+            false,
+            false,
             None,
             50,
             Some(PromptVerbosity::Verbose),
@@ -323,12 +331,7 @@ mod tests {
 
     #[test]
     fn default_is_summary() {
-        let config = resolve_system_prompt_report_config(
-            false, false, false,
-            None,
-            50,
-            None,
-        );
+        let config = resolve_system_prompt_report_config(false, false, false, None, 50, None);
         assert!(config.show_header);
         assert_eq!(config.format, PromptReportFormat::Summary);
     }
@@ -336,11 +339,7 @@ mod tests {
     #[test]
     fn unchanged_default_suppresses_header() {
         let config = resolve_system_prompt_report_config_with_change(
-            false, false, false,
-            None,
-            50,
-            None,
-            true, // unchanged
+            false, false, false, None, 50, None, true, // unchanged
         );
         assert!(!config.show_header);
         assert!(!config.show_summary);
@@ -349,11 +348,7 @@ mod tests {
     #[test]
     fn unchanged_overridden_by_verbose() {
         let config = resolve_system_prompt_report_config_with_change(
-            false, false, true,
-            None,
-            50,
-            None,
-            true, // unchanged but verbose flag wins
+            false, false, true, None, 50, None, true, // unchanged but verbose flag wins
         );
         assert!(config.show_header);
         assert_eq!(config.format, PromptReportFormat::FullPrompt);
@@ -362,7 +357,9 @@ mod tests {
     #[test]
     fn unchanged_overridden_by_env() {
         let config = resolve_system_prompt_report_config_with_change(
-            false, false, false,
+            false,
+            false,
+            false,
             Some(PromptVerbosity::Quiet),
             50,
             None,
@@ -374,7 +371,9 @@ mod tests {
     #[test]
     fn unchanged_overridden_by_frontmatter() {
         let config = resolve_system_prompt_report_config_with_change(
-            false, false, false,
+            false,
+            false,
+            false,
             None,
             50,
             Some(PromptVerbosity::Verbose),
@@ -385,12 +384,7 @@ mod tests {
 
     #[test]
     fn long_prompt_with_no_hints_defaults_to_summary() {
-        let config = resolve_system_prompt_report_config(
-            false, false, false,
-            None,
-            100,
-            None,
-        );
+        let config = resolve_system_prompt_report_config(false, false, false, None, 100, None);
         assert_eq!(config.format, PromptReportFormat::Summary);
     }
 

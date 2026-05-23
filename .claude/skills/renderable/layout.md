@@ -1,38 +1,101 @@
 ---
-description: Target-agnostic layout configuration in the renderable library — Layout, Alignment, Margin, RowFill, and MaxWidth.
+description: Target-agnostic layout configuration in the renderable library — Layout, TargetValue, Length, Margin, and Alignment.
 ---
 
 # Layout Module
 
-Target-agnostic layout configuration data. Terminal ANSI-width application lives in `biscuit-terminal` as the `LayoutTerminalExt` extension trait.
+`renderable::layout` is the single, target-agnostic layout primitive. It
+describes a **block-level** component's relationship to its parent — margins,
+alignment within the parent, max-width, and content wrapping. Appearance
+(background, fill) is a `Style` concern and is *not* represented here.
+
+The layout rides on render-tree nodes via `NodeAttrs::set_layout` and is
+consumed by the Browser renderer (lowered to inline CSS) and the Terminal
+renderer (margins resolved to cells, plus block alignment). The Markdown
+renderer deliberately ignores it. `max_width` is a Browser-only property —
+the Terminal renderer does not apply it.
+
+Terminal ANSI-width application lives in `biscuit-terminal` as the
+`LayoutTerminalExt` extension trait.
+
+> The legacy `LayoutHints`, the old `MaxWidth` / `RowFill` enums, and the old
+> `Margin` enum (`Margin::Chars` / `Margin::Percent` / `Margin::Offset`) have
+> been removed. There is now one `Layout` struct.
 
 ## Layout
 
-Controls margins, alignment, word-wrapping, and background color.
-
 ```rust
-use renderable::layout::{Layout, Margin, Alignment, WordWrap};
+use renderable::layout::{Layout, Margin, Alignment, Length, TargetValue, WordWrap};
 
-// Centered content with margins
 let layout = Layout {
-    left_margin: Margin::Chars(4),
-    right_margin: Margin::Chars(4),
+    margin: Margin {
+        left: TargetValue::universal(Length::ch(4)),
+        right: TargetValue::universal(Length::ch(4)),
+        ..Margin::default()
+    },
     alignment: Alignment::Center,
-    ..Default::default()
-};
-
-// Word-wrapped content at 50% width
-let wrapped = Layout {
-    left_margin: Margin::Percent(25.0),
-    right_margin: Margin::Percent(25.0),
-    word_wrap: WordWrap::WrapProse(Some(8), Some(4)),
-    ..Default::default()
+    max_width: Some(TargetValue::universal(Length::ch(80))),
+    word_wrap: WordWrap::WrapProse(Some(8), None),
 };
 ```
 
+`Layout::default()` is zero margins, `Alignment::Left`, no `max_width`, and
+`WordWrap::None` — note this is the hand-written default, *not*
+`WordWrap::default()` (which is a wrapping policy).
+
+`Layout::validate()` (and `Margin::validate()` / `TargetValue::validate()`)
+returns the first `LayoutError` from `margin` or `max_width`. Validation is
+**opt-in**: a caller constructing a `Layout` should call it, but the render
+pipeline does not — once a `Layout` is on the tree the renderers lower it
+as-is. Only *placement* (block-only) is enforced, by tree validation.
+
+## Length
+
+The universal layout unit.
+
+```rust
+use renderable::layout::Length;
+
+Length::Zero            // unit-independent zero
+Length::ch(4)           // 4 whole cells (columns horizontally, rows vertically)
+Length::percent(10.0)?  // 10% of available width (0.0..=100.0; Result)
+Length::css(sizing)     // target-native CSS length — per-target branch only
+```
+
+`Zero`, `Ch`, and `Percent` are **universal units** (valid on every target).
+`Css` is target-native and valid only inside a per-target `TargetValue`.
+
+## TargetValue&lt;T&gt;
+
+A layout value that is either universal or specified per render target.
+
+```rust
+use renderable::layout::{Length, TargetValue};
+
+TargetValue::universal(Length::ch(2))  // same value for every target
+// TargetValue::PerTarget(map)         // per-target; non-empty; native units OK
+```
+
+A target absent from a `PerTarget` map does not receive that property.
+
+## Margin
+
+A four-sided box; each side is a `TargetValue<Length>`.
+
+```rust
+use renderable::layout::{Margin, Length};
+
+Margin::default()       // all four sides Zero
+Margin::all(Length::ch(2))   // every side
+Margin::x(Length::ch(4))     // left + right
+Margin::y(Length::ch(1))     // top + bottom
+```
+
+The browser renderer lowers vertical sides (`top` / `bottom`) to `lh`.
+
 ## Alignment
 
-Horizontal alignment within available width.
+Horizontal alignment within the parent's available width.
 
 ```rust
 use renderable::layout::Alignment;
@@ -42,79 +105,34 @@ Alignment::Center
 Alignment::Right
 ```
 
-Per-line vs block alignment depends on the terminal layout method used (see biscuit-terminal).
+The tree-renderer terminal path block-aligns the component as a unit.
 
-## Margin
-
-Whitespace around content. Can be fixed, percentage-based, or composed.
+## LayoutError
 
 ```rust
-use renderable::layout::Margin;
+use renderable::layout::LayoutError;
 
-Margin::None                    // No margin
-Margin::Chars(4)               // Fixed 4 characters
-Margin::Percent(10.0)          // 10% of terminal width
-Margin::Percent(10.0).add_chars(4)  // 10% + 4 characters (deferred resolution)
+LayoutError::InvalidPercent(f32)    // percentage outside 0.0..=100.0, or non-finite
+LayoutError::NonUniversalUnit(_)    // Length::Css used in a Universal branch
+LayoutError::EmptyPerTarget         // empty PerTarget map
 ```
 
-### Composition
+## Carrying Layout on the Render Tree
+
+`Layout` is stored on a node via `NodeAttrs::set_layout` and recovered with
+`NodeAttrs::layout`.
 
 ```rust
-// Common cases are optimized:
-Margin::None.add_chars(4)           // → Margin::Chars(4)
-Margin::Chars(2).add_chars(3)       // → Margin::Chars(5)
-Margin::Percent(10.0).add_chars(4)  // → Margin::Offset(Percent(10.0), 4)
+use renderable::layout::Layout;
+use renderable::tree::NodeAttrs;
+
+let mut attrs = NodeAttrs::default();
+attrs.set_layout(&Layout::default());
+assert_eq!(attrs.layout(), Some(Layout::default()));
 ```
 
-### Resolution
-
-Margins resolve to character counts at render time:
-
-```rust
-use renderable::layout::{Layout, Margin};
-
-assert_eq!(Layout::resolve_margin(&Margin::Chars(4), 80), 4);
-assert_eq!(Layout::resolve_margin(&Margin::Percent(10.0), 100), 10);
-assert_eq!(Layout::resolve_margin(&Margin::None, 80), 0);
-
-let nested = Margin::Percent(10.0).add_chars(4).add_chars(2);
-assert_eq!(Layout::resolve_margin(&nested, 100), 16); // 10 + 4 + 2
-```
-
-## RowFill
-
-Row padding strategy for text blocks.
-
-```rust
-use renderable::layout::RowFill;
-
-RowFill::Auto   // Pad only when background color is not default (default)
-RowFill::Fill   // Always pad to max width
-RowFill::Exact  // Never add padding
-```
-
-## MaxWidth
-
-Width constraints.
-
-```rust
-use renderable::layout::MaxWidth;
-
-MaxWidth::None
-MaxWidth::Chars(80)
-MaxWidth::Percent(80.0)
-```
-
-## Available Width
-
-```rust
-use renderable::layout::{Layout, Margin};
-
-let layout = Layout {
-    left_margin: Margin::Chars(10),
-    right_margin: Margin::Chars(10),
-    ..Layout::default()
-};
-
-assert_eq!(layout.available_width(80), 60);
-```
+Tree validation enforces **block-only** layout: a layout attribute on an
+inline node is a validation error ("layout attributes are permitted only on
+block-level nodes"). Components emit their `Layout` onto their root node
+during tree projection; `TreeRenderable::tree_layout` is the optional hook
+for supplying it.

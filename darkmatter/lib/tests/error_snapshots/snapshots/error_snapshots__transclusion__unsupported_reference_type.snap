@@ -1,7 +1,8 @@
 ---
 source: darkmatter/lib/tests/error_snapshots/transclusion.rs
+assertion_line: 88
 expression: out
 ---
-⨫ TransclusionError: unsupported reference type
+⤫ TransclusionError: unsupported reference type
 ┃ The reference ftp://host/file uses an unsupported scheme or syntax.
 Supported: ./relative, @/repo, !package, vault:, %, {{ENV}}

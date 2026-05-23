@@ -55,6 +55,21 @@ test *args="":
     @just _test darkmatter {{ args }}
     @just _test darkmatter-cli {{ args }}
 
+# Run the Level-2 (real-terminal) render-tree tests, enforced.
+#
+# Sets DARKMATTER_LEVEL2_REQUIRED=1 so the suite hard-fails if WezTerm is not
+# reachable — matching the spec's expectation that terminal user-observable
+# rendering is verified in an actual terminal pane, not as in-process strings.
+# Requires WEZTERM_UNIX_SOCKET to point at a running WezTerm instance and the
+# `wezterm` CLI on PATH.
+test-l2 *args="":
+    @echo
+    @echo -e "Running {{ BOLD }}Level-2{{ RESET }} render-tree terminal tests"
+    @echo -e "{{ DIM }}- requires WezTerm: WEZTERM_UNIX_SOCKET + wezterm on PATH{{ RESET }}"
+    @echo
+    @DARKMATTER_LEVEL2_REQUIRED=1 cargo test -p darkmatter \
+        --test level2_render_tree_terminal {{ args }}
+
 # Lint both the library and CLI
 lint:
     @just _lint darkmatter

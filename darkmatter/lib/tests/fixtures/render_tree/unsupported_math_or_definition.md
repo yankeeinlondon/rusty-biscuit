@@ -1,0 +1,5 @@
+An inline math span $x^2 + y^2 = z^2$ and a definition list:
+
+Term
+: A definition body.
+: A second definition body.

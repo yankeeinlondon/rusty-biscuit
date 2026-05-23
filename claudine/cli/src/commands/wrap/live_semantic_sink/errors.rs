@@ -7,7 +7,7 @@ use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::components::status::StatusState;
 use biscuit_terminal::prelude::StatusBlock;
 use biscuit_terminal::utils::color::{Color, Tailwind};
-use biscuit_terminal::utils::layout::{Margin, WordWrap};
+use biscuit_terminal::utils::layout::{Length, Margin, TargetValue, WordWrap};
 
 impl LiveSemanticSink {
     /// Render a typed [`SemanticEvent::Error`] as a colored `BlockQuote`
@@ -40,8 +40,8 @@ impl LiveSemanticSink {
         let block = StatusBlock::new(StatusState::Error)
             .body(prose)
             .border_color(border_color)
-            .left_margin(Margin::Chars(0))
-            .right_margin(Margin::Chars(0));
+            .left_margin(TargetValue::universal(Length::ch(0)))
+            .right_margin(TargetValue::universal(Length::ch(0)));
         let rendered = block.render(&self.terminal);
         for line in rendered.lines() {
             self.emit_section_line(section, line);
@@ -93,8 +93,8 @@ impl LiveSemanticSink {
             .header(header_prose)
             .body(body)
             .border_color(border_color)
-            .left_margin(Margin::Chars(0))
-            .right_margin(Margin::Chars(0));
+            .left_margin(TargetValue::universal(Length::ch(0)))
+            .right_margin(TargetValue::universal(Length::ch(0)));
         let rendered = block.render(&self.terminal);
         for line in rendered.lines() {
             self.emit_section_line(section, line);

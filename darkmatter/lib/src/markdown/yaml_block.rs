@@ -11,6 +11,7 @@ use biscuit_terminal::components::renderable::{BrowserRenderable, TerminalRender
 use biscuit_terminal::terminal::Terminal;
 use biscuit_terminal::utils::layout::{Layout, LayoutTerminalExt};
 use renderable::browser::fragment::{BrowserFragment, Ready};
+use renderable::tree::{CodeRenderHints, RenderNode};
 use thiserror::Error;
 
 use crate::markdown::{
@@ -171,14 +172,34 @@ impl TerminalRenderable for YamlBlock {
     fn render(&self, term: &Terminal) -> String {
         // Detect color mode fresh so env-var changes between renders are
         // honoured (e.g. dark/light tests that flip COLORFGBG).
-        let color_mode = detect_color_mode();
+        // A YamlBlock is a code block: it contrasts against the page by
+        // resolving its theme *variant* against the INVERTED detected mode (see
+        // `ColorMode::inverted`), keeping it byte-identical to a Markdown
+        // ```yaml``` fence.
         let options = TerminalOptions::default();
-        let highlighter = CodeHighlighter::new(options.code_theme, color_mode);
+        let highlighter = CodeHighlighter::new(options.code_theme, detect_color_mode().inverted());
+        // Header/body contrast keys off the resolved theme background so
+        // single-variant themes still get readable chrome.
+        let color_mode = crate::markdown::output::code_block::mode_for_background(
+            highlighter
+                .theme()
+                .settings
+                .background
+                .unwrap_or(syntect::highlighting::Color::BLACK),
+        );
         let meta = CodeBlockMeta::default();
         let terminal_width = term.width();
 
+        // Resolve the width left for the block after the layout's horizontal
+        // margins and any `max_width` cap. Both the header pill (right-aligned
+        // within this width) and the body (padded to this width) use it, so the
+        // block honours the available width — a right margin or a `max_width`
+        // cap pulls the block, and the pill above it, leftward off the physical
+        // edge, matching the render-tree path.
+        let available = self.layout.content_width(terminal_width);
+
         // Emit the same header row Markdown's ``` yaml ``` fence emits, so
-        // YamlBlock and Markdown stay byte-identical in the body region.
+        // YamlBlock and Markdown stay parity-equivalent in the body region.
         let bg_color = highlighter
             .theme()
             .settings
@@ -189,9 +210,12 @@ impl TerminalRenderable for YamlBlock {
             "yaml",
             bg_color,
             color_mode,
-            terminal_width as u16,
+            available as u16,
         );
 
+        // Pad the body to the available width rather than clearing to the
+        // physical terminal edge (`\x1b[K`); clear-to-EOL ignores the supplied
+        // width and can never respect a right margin.
         let body = render_terminal_code_block(
             self.yaml(),
             "yaml",
@@ -199,7 +223,7 @@ impl TerminalRenderable for YamlBlock {
             &options,
             &meta,
             color_mode,
-            None,
+            Some(available as u16),
         )
         .unwrap_or_else(|_| {
             // Fallback: plain text with minimal escaping
@@ -237,6 +261,25 @@ impl TerminalRenderable for YamlBlock {
     fn is_block_level(&self) -> bool {
         true
     }
+
+    /// Projects this block into a [`NodeKind::Code`](renderable::tree::NodeKind::Code)
+    /// render-tree node tagged with the `yaml` language.
+    ///
+    /// The node carries [`CodeRenderHints`] requesting a header row, a `yaml`
+    /// language label, and syntax highlighting, so a tree renderer wired with
+    /// a `CodeRenderer` hook can reproduce the bespoke highlighted output.
+    fn render_tree_node(&self) -> Option<RenderNode> {
+        let mut node = RenderNode::code(Some("yaml".into()), None, self.yaml.clone());
+        node.attrs.set_code_hints(&CodeRenderHints {
+            header_row: true,
+            language_label: Some("yaml".into()),
+            highlight: true,
+        });
+        if self.layout != Layout::default() {
+            node.attrs.set_layout(&self.layout);
+        }
+        Some(node)
+    }
 }
 
 /// Emits `<pre><code class="language-yaml">…</code></pre>` inside the standard
@@ -269,7 +312,10 @@ impl YamlBlock {
         // Route through HtmlOptions::default() for symmetry with the terminal
         // path. Reuse the resolved color mode and theme rather than re-detecting.
         let options = HtmlOptions::default();
-        let highlighter = CodeHighlighter::new(options.code_theme, options.color_mode);
+        // Code blocks invert their theme variant for page contrast (Defect D),
+        // matching `as_html` and the terminal path, so a Markdown ` ```yaml `
+        // fence and a `YamlBlock` render byte-identically.
+        let highlighter = CodeHighlighter::new(options.code_theme, options.color_mode.inverted());
         let meta = CodeBlockMeta::default();
 
         render_html_code_block(self.yaml(), "yaml", &meta, &highlighter, &options).unwrap_or_else(
@@ -287,7 +333,7 @@ impl YamlBlock {
 mod tests {
     use super::*;
     use crate::markdown::highlighting::{ColorMode, detect_color_mode};
-    use biscuit_terminal::utils::layout::Margin;
+    use biscuit_terminal::utils::layout::{Length, TargetValue};
     use serial_test::serial;
     use std::io::Write;
     use tempfile::NamedTempFile;
@@ -498,8 +544,20 @@ mod tests {
         // body lines (the lines that contain the actual YAML payload). We
         // tolerate wrapper differences (extra trailing newlines, surrounding
         // blank lines) but reject structural drift in the body.
-        let block_plain = crate::testing::strip_ansi_codes(&block_output);
-        let md_plain = crate::testing::strip_ansi_codes(&md_output);
+        //
+        // Trailing whitespace is trimmed per line before comparison: `YamlBlock`
+        // pads each line to the available width, whereas the Markdown fence
+        // clears to the terminal edge with `\x1b[K` (no trailing spaces once
+        // stripped). The padding spaces are invisible formatting, not a body
+        // difference, so they are not part of the parity contract.
+        let trim_trailing = |s: &str| {
+            s.lines()
+                .map(|l| l.trim_end())
+                .collect::<Vec<_>>()
+                .join("\n")
+        };
+        let block_plain = trim_trailing(&crate::testing::strip_ansi_codes(&block_output));
+        let md_plain = trim_trailing(&crate::testing::strip_ansi_codes(&md_output));
 
         for needle in ["foo: 1", "bar: 2"] {
             assert!(
@@ -677,8 +735,18 @@ mod tests {
     fn test_dark_and_light_render_differ() {
         let _no_color_guard = EnvVarGuard::capture("NO_COLOR");
         let _colorfgbg_guard = EnvVarGuard::capture("COLORFGBG");
+        // Pin a *paired* code theme so the assertion is meaningful. A code block
+        // resolves its theme against the INVERTED terminal mode for page
+        // contrast, so a paired theme yields opposite concrete variants (and
+        // thus different backgrounds) between dark and light terminals.
+        // Single-variant themes (the ambient default in some environments)
+        // legitimately render identically under both modes — keying header text
+        // off the resolved background, not the requested mode — so they cannot
+        // demonstrate this property.
+        let _code_theme_guard = EnvVarGuard::capture("CODE_THEME");
 
         unsafe { std::env::remove_var("NO_COLOR") };
+        unsafe { std::env::set_var("CODE_THEME", "github") };
 
         let block = YamlBlock::new("foo: 1\nbar: 2").unwrap();
         let term = Terminal::default();
@@ -695,16 +763,16 @@ mod tests {
         );
     }
 
-    /// §3.2 — Layout `left_margin` must be applied to the rendered output.
+    /// §3.2 — Layout left margin must be applied to the rendered output.
     ///
-    /// Sets `Margin::Chars(4)` on the block's layout and asserts every
+    /// Sets a 4-cell left margin on the block's layout and asserts every
     /// non-empty rendered line begins with the expected indent. This is the
     /// behavioural test for Phase 1 §1.1 (rewriting `render` to honour the
     /// stored layout).
     #[test]
     fn test_left_margin_is_applied() {
         let mut block = YamlBlock::new("foo: 1\nbar: 2").unwrap();
-        block.layout_mut().left_margin = Margin::Chars(4);
+        block.layout_mut().margin.left = TargetValue::universal(Length::ch(4));
 
         let out = TerminalRenderable::render(&block, &Terminal::default());
         let plain = crate::testing::strip_ansi_codes(&out);
@@ -713,6 +781,77 @@ mod tests {
             assert!(
                 line.starts_with("    "),
                 "expected 4-space left margin on every non-empty line, got: {line:?}"
+            );
+        }
+    }
+
+    /// The code block must honour the available terminal width instead of
+    /// clearing to the physical terminal edge with `\x1b[K`. Every rendered
+    /// line (header, body, padding rows) must be exactly the available width,
+    /// which keeps the right-aligned language pill flush with the block's
+    /// right edge regardless of the physical terminal size.
+    #[test]
+    fn test_render_pads_to_available_width_not_clear_to_eol() {
+        let block = YamlBlock::new("foo: 1\nbar: 2").unwrap();
+        let term = Terminal::new_optimistic(40);
+        let out = TerminalRenderable::render(&block, &term);
+
+        assert!(
+            !out.contains("\x1b[K"),
+            "code block must not flood to the physical edge with clear-to-EOL: {out:?}"
+        );
+
+        let plain = crate::testing::strip_ansi_codes(&out);
+        for line in plain.lines().filter(|l| !l.is_empty()) {
+            assert_eq!(
+                line.chars().count(),
+                40,
+                "every non-empty line must pad to the available width (40): {line:?}"
+            );
+        }
+    }
+
+    /// A right margin must shrink both the code-block background and the
+    /// right-aligned language pill, moving them leftward off the right edge.
+    #[test]
+    fn test_right_margin_shrinks_block_and_pill() {
+        let mut block = YamlBlock::new("foo: 1\nbar: 2").unwrap();
+        block.layout_mut().margin.right = TargetValue::universal(Length::ch(10));
+
+        let term = Terminal::new_optimistic(40);
+        let out = TerminalRenderable::render(&block, &term);
+        let plain = crate::testing::strip_ansi_codes(&out);
+
+        // available = 40 - 10 = 30; with no left margin every non-empty line
+        // is exactly 30 columns wide, so the block (and the pill above it) end
+        // 10 cells short of the physical right edge.
+        for line in plain.lines().filter(|l| !l.is_empty()) {
+            assert_eq!(
+                line.chars().count(),
+                30,
+                "right margin must shrink the block to the available width (30): {line:?}"
+            );
+        }
+    }
+
+    /// A `max_width` cap must bound the block (and its pill) to the capped
+    /// width, matching the render-tree path which applies the cap in
+    /// `render_with_layout`.
+    #[test]
+    fn test_max_width_caps_block() {
+        let mut block = YamlBlock::new("foo: 1\nbar: 2").unwrap();
+        block.layout_mut().max_width = Some(TargetValue::universal(Length::Percent(50.0)));
+
+        let term = Terminal::new_optimistic(80);
+        let out = TerminalRenderable::render(&block, &term);
+        let plain = crate::testing::strip_ansi_codes(&out);
+
+        // 50% of 80 = 40; every non-empty line is exactly 40 columns wide.
+        for line in plain.lines().filter(|l| !l.is_empty()) {
+            assert_eq!(
+                line.chars().count(),
+                40,
+                "max_width 50% must cap the block to 40 columns: {line:?}"
             );
         }
     }

@@ -42,10 +42,10 @@ use serde_json::{Map, Value};
 
 use crate::stylesheet::error::StylesheetError;
 use crate::stylesheet::prop::{CssProp, CssTypedProperty};
+use crate::stylesheet::value::strip_surrounding_braces;
 use crate::stylesheet::value::{
     CssColor, CssRaw, CssSizing, CssSizingMulti, CssValue, CssValueKind, IntoCssValue,
 };
-use crate::stylesheet::value::strip_surrounding_braces;
 
 /// Internal storage unit for [`CssStyle`]: a single
 /// `property: value` pair preserved in insertion order.

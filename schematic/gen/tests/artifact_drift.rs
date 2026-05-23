@@ -219,17 +219,10 @@ fn artificial_analysis_attribution_present_in_all_artifacts() {
     let schema_path = {
         let single = root.join("schema/src/artificial_analysis.rs");
         let split = root.join("schema/src/artificial_analysis/mod.rs");
-        if single.exists() {
-            single
-        } else {
-            split
-        }
+        if single.exists() { single } else { split }
     };
     let artifacts: [(&str, PathBuf); 3] = [
-        (
-            "schema rustdoc",
-            schema_path,
-        ),
+        ("schema rustdoc", schema_path),
         (
             "OpenAPI grouped doc",
             root.join("openapi/artificial_analysis.json"),

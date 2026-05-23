@@ -1,8 +1,9 @@
 ---
 source: darkmatter/lib/tests/error_snapshots/transclusion.rs
+assertion_line: 29
 expression: out
 ---
-⨫ TransclusionError: directive parse failed
+⤫ TransclusionError: directive parse failed
 ┃ Directive parsing failed here:
 ┃ 
 ┃     2 │ line 2

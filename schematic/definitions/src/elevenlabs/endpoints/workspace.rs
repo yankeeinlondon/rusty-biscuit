@@ -115,7 +115,8 @@ pub fn all() -> Vec<Endpoint> {
         Endpoint {
             id: "UpdateApiKey".to_string(),
             method: RestMethod::Patch,
-            path: "/v1/service-accounts/{service_account_user_id}/api-keys/{api_key_id}".to_string(),
+            path: "/v1/service-accounts/{service_account_user_id}/api-keys/{api_key_id}"
+                .to_string(),
             description: "Updates an API key".to_string(),
             request: Some(ApiRequest::json_type("UpdateApiKeyBody")),
             response: ApiResponse::json_type("StatusResponse"),
@@ -126,7 +127,8 @@ pub fn all() -> Vec<Endpoint> {
         Endpoint {
             id: "DeleteApiKey".to_string(),
             method: RestMethod::Delete,
-            path: "/v1/service-accounts/{service_account_user_id}/api-keys/{api_key_id}".to_string(),
+            path: "/v1/service-accounts/{service_account_user_id}/api-keys/{api_key_id}"
+                .to_string(),
             description: "Deletes an API key".to_string(),
             request: None,
             response: ApiResponse::json_type("StatusResponse"),

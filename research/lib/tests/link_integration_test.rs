@@ -688,12 +688,14 @@ async fn test_stale_symlinks_are_removed_before_linking() {
     assert!(
         claude_skills
             .join("stale-claude-skill")
-            .symlink_metadata().is_err()
+            .symlink_metadata()
+            .is_err()
     );
     assert!(
         opencode_skills
             .join("stale-opencode-skill")
-            .symlink_metadata().is_err()
+            .symlink_metadata()
+            .is_err()
     );
 
     // Verify stale_removed contains our broken symlinks
@@ -1015,7 +1017,8 @@ async fn test_stale_doc_symlinks_also_removed() {
     assert!(
         opencode_docs
             .join("another-stale.md")
-            .symlink_metadata().is_err()
+            .symlink_metadata()
+            .is_err()
     );
 
     // Verify stale_removed contains the doc symlinks

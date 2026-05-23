@@ -97,6 +97,10 @@ fn groups() -> Vec<CommandGroup> {
                 cmd("providers", "Show provider capability matrix"),
                 cmd("logs", "Query and sync Claudine JSONL logs"),
                 cmd("completions", "Generate shell completions"),
+                cmd(
+                    "context",
+                    "Show Darkmatter runtime context, expression engine, and side effects",
+                ),
             ],
         },
     ]

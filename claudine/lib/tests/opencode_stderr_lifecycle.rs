@@ -38,8 +38,7 @@ fn replay_with_events(stdout_seen: bool) -> Vec<SemanticEvent> {
     let sink = SharedSink {
         events: Arc::clone(&events),
     };
-    let mut bridge =
-        OpenCodeLogBridge::new(sink, Arc::new(AtomicBool::new(stdout_seen)), None);
+    let mut bridge = OpenCodeLogBridge::new(sink, Arc::new(AtomicBool::new(stdout_seen)), None);
     for line in fixture().lines() {
         let _ = bridge.ingest(line);
     }

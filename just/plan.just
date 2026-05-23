@@ -26,7 +26,7 @@ plan-implement-review:
     root="$(sniff repo root)"
     dir="$(dirname "${spec}")"
     fq_path="${root}${area}/${dir}"
-    plan="plan.md"
+    plan="$(just _derive_plan_name "${spec_file}")"
     planning_agent="$(just _choose_agent 'Choose the planning Agent')"
     planning_model=""
     planning_model_param=""
@@ -71,7 +71,11 @@ plan-implement-review:
     echo
     echo -e "Detected {{ yellow }}${total_phases}{{ reset }} phases in the plan"
     echo
-    claudine compose @prompts/implement-phase.md -y plan="${dir}/${plan}" --${implementing_agent} ${implementing_model_param} total_phases="${total_phases}"
+    current=1
+    while (( current <= total_phases )); do
+        claudine compose @prompts/implement-phase.md -y plan="${dir}/${plan}" --${implementing_agent} ${implementing_model_param} phase="${current}" total_phases="${total_phases}"
+        ((current++))
+    done
     claudine compose @prompts/review-feature.md -y spec="${spec}" iteration=1 --${reviewing_agent} ${reviewing_model_param}
     echo
     echo -e "The specification file {{ blue }}${spec}{{ reset }} drove a plan, implementation, and review."
@@ -126,7 +130,11 @@ implement-review:
         exit 1
     fi
     echo -e "Starting at {{ yellow }}phase ${start_phase}{{ reset }} of {{ yellow }}${total_phases}{{ reset }}"
-    claudine compose @prompts/implement-phase.md -y plan="${dir}/plan.md" --${implementing_agent} ${implementing_model_param} phase="${start_phase}" total_phases="${total_phases}" memory="${memory}"
+    current="${start_phase}"
+    while (( current <= total_phases )); do
+        claudine compose @prompts/implement-phase.md -y plan="${plan}" --${implementing_agent} ${implementing_model_param} phase="${current}" total_phases="${total_phases}" memory="${memory}"
+        ((current++))
+    done
     claudine compose @prompts/review-feature.md -y spec="${spec}" iteration=1 --${reviewing_agent} ${reviewing_model_param}
     echo
     echo -e "The specification file {{ blue }}${spec}{{ reset }} drove implementation and review."
@@ -165,7 +173,12 @@ implement-plan filter="":
     #!/usr/bin/env bash
     set -euo pipefail
 
-    plan="$(just _choose_plan "{{ filter }}")"
+    # If the argument is an existing file path, use it directly
+    if [[ -f "{{ filter }}" ]]; then
+        plan="{{ filter }}"
+    else
+        plan="$(just _choose_plan "{{ filter }}")"
+    fi
     if [[ -z "${plan}" ]]; then
         echo -e "{{ red }}No plan file selected — aborting.{{ reset }}" >&2
         exit 1
@@ -252,7 +265,7 @@ plan spec="" design="" review="":
         # Step 2: Choose target document and delegate to appropriate planner
         case "${area}" in
             Feature)
-                doc="$(fd -g '*{spec,design}.md' features/ --exclude '_completed' | fzf --height=15 --border --border-label 'Choose a spec or design file')"
+                doc="$(fd -g '*{spec,design}*.md' features/ --exclude '_completed' | fzf --height=15 --border --border-label 'Choose a spec or design file')"
                 if [[ -z "${doc}" ]]; then
                     echo -e "{{ red }}No document selected — aborting.{{ reset }}" >&2
                     exit 1
@@ -268,7 +281,7 @@ plan spec="" design="" review="":
                 just plan-feature "${spec_file}" "${design_file}"
                 ;;
             Fix)
-                doc="$(fd -g '*{spec,design}.md' fixes/ --exclude '_completed' | fzf --height=15 --border --border-label 'Choose a spec or design file')"
+                doc="$(fd -g '*{spec,design}*.md' fixes/ --exclude '_completed' | fzf --height=15 --border --border-label 'Choose a spec or design file')"
                 if [[ -z "${doc}" ]]; then
                     echo -e "{{ red }}No document selected — aborting.{{ reset }}" >&2
                     exit 1
@@ -287,7 +300,7 @@ plan spec="" design="" review="":
                 just plan-review
                 ;;
             'Feature (unscheduled)')
-                doc="$(fd -g '*{spec,design}.md' features/_unscheduled/ --exclude '_completed' | fzf --height=15 --border --border-label 'Choose a spec or design file')"
+                doc="$(fd -g '*{spec,design}*.md' features/_unscheduled/ --exclude '_completed' | fzf --height=15 --border --border-label 'Choose a spec or design file')"
                 if [[ -z "${doc}" ]]; then
                     echo -e "{{ red }}No document selected — aborting.{{ reset }}" >&2
                     exit 1
@@ -303,7 +316,7 @@ plan spec="" design="" review="":
                 just plan-feature "${spec_file}" "${design_file}"
                 ;;
             'Fix (unscheduled)')
-                doc="$(fd -g '*{spec,design}.md' fixes/_unscheduled/ --exclude '_completed' | fzf --height=15 --border --border-label 'Choose a spec or design file')"
+                doc="$(fd -g '*{spec,design}*.md' fixes/_unscheduled/ --exclude '_completed' | fzf --height=15 --border --border-label 'Choose a spec or design file')"
                 if [[ -z "${doc}" ]]; then
                     echo -e "{{ red }}No document selected — aborting.{{ reset }}" >&2
                     exit 1
@@ -458,7 +471,8 @@ plan-feature spec="" design="":
         exit 0
     fi
     echo
-    claudine compose @prompts/plan.md -y --${agent} spec="${spec_file}" design="${design_file}" ${model} || (
+    plan="$(just _derive_plan_name "${spec_file}")"
+    claudine compose @prompts/plan.md -y --${agent} spec="${spec_file}" design="${design_file}" plan="${plan}" ${model} || (
         echo
         echo "Planning failed for {{ bold }}${dir}{{ reset }}"
         echo
@@ -467,6 +481,21 @@ plan-feature spec="" design="":
     )
     echo
     echo -e "🎉 planning is complete!"
+
+    # Offer to implement the newly created plan
+    plan_path="${dir}/${plan}"
+    if [[ -f "${plan_path}" ]]; then
+        echo
+        echo -e "A plan file was created at {{ blue }}$(just _link "${plan_path}" "$(just _abs_path "${plan_path}")"){{ reset }}"
+        if [[ "$(just _confirm "Do you want to implement this plan phase by phase now?")" == "y" ]]; then
+            echo
+            just implement-plan "${plan_path}"
+        else
+            echo
+            echo -e "Ok. You can implement it later with: {{ yellow }}just implement-plan ${plan_path}{{ reset }}"
+        fi
+    fi
+    echo
 
 # create a plan from a review
 plan-review review="":

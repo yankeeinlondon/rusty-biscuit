@@ -1,8 +1,9 @@
 ---
 source: darkmatter/lib/tests/error_snapshots/transclusion.rs
+assertion_line: 168
 expression: out
 ---
-⨫ TransclusionError: condition evaluation failed
+⤫ TransclusionError: condition evaluation failed
 ┃ Failed to evaluate when="length(items) > 0":
 ┃ 
 ┃      9 │ line 9

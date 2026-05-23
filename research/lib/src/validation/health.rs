@@ -300,7 +300,10 @@ This is the skill content.
     fn test_topic_type_from_str_valid() {
         assert_eq!("library".parse::<TopicType>().unwrap(), TopicType::Library);
         assert_eq!("tool".parse::<TopicType>().unwrap(), TopicType::Tool);
-        assert_eq!("software".parse::<TopicType>().unwrap(), TopicType::Software);
+        assert_eq!(
+            "software".parse::<TopicType>().unwrap(),
+            TopicType::Software
+        );
         assert_eq!(
             "framework".parse::<TopicType>().unwrap(),
             TopicType::Framework
@@ -309,18 +312,9 @@ This is the skill content.
 
     #[test]
     fn test_topic_type_from_str_case_insensitive() {
-        assert_eq!(
-            "LIBRARY".parse::<TopicType>().unwrap(),
-            TopicType::Library
-        );
-        assert_eq!(
-            "Library".parse::<TopicType>().unwrap(),
-            TopicType::Library
-        );
-        assert_eq!(
-            "LiBrArY".parse::<TopicType>().unwrap(),
-            TopicType::Library
-        );
+        assert_eq!("LIBRARY".parse::<TopicType>().unwrap(), TopicType::Library);
+        assert_eq!("Library".parse::<TopicType>().unwrap(), TopicType::Library);
+        assert_eq!("LiBrArY".parse::<TopicType>().unwrap(), TopicType::Library);
     }
 
     #[test]
@@ -328,7 +322,10 @@ This is the skill content.
         let result = "invalid".parse::<TopicType>();
         assert!(result.is_err());
         let err = result.unwrap_err();
-        assert!(err.contains("invalid"), "Error should mention the bad value");
+        assert!(
+            err.contains("invalid"),
+            "Error should mention the bad value"
+        );
     }
 
     #[test]
@@ -585,8 +582,7 @@ Content
 
     #[test]
     fn test_research_health_empty_vecs_omitted() {
-        let health =
-            ResearchHealth::new(TopicType::Tool, "test".to_string(), vec![], vec![], true);
+        let health = ResearchHealth::new(TopicType::Tool, "test".to_string(), vec![], vec![], true);
 
         let json = serde_json::to_string(&health).unwrap();
 

@@ -4,8 +4,8 @@ use std::rc::Rc;
 use biscuit_terminal::components::list::UnorderedList;
 use biscuit_terminal::components::pad::PadRight;
 use biscuit_terminal::components::prose::Prose;
-use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::components::renderable::RenderableTerminalContent;
+use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::terminal::Terminal;
 use sniff::filesystem::JustfileInfo;
 

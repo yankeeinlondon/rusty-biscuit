@@ -1,4 +1,7 @@
-#[derive(Debug, Clone, PartialEq)]
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum WordWrap {
     /// **WrapProse**`(StartLooking, HangingIndent)`
     ///

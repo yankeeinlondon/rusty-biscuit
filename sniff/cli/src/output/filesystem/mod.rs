@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 
 use biscuit_terminal::components::list::UnorderedList;
 use biscuit_terminal::components::prose::Prose;
-use biscuit_terminal::components::renderable::{TerminalRenderable, RenderableTerminalContent};
+use biscuit_terminal::components::renderable::{RenderableTerminalContent, TerminalRenderable};
 use biscuit_terminal::terminal::Terminal;
 use sniff::filesystem::git::{ConventionalCommit, FileAction, FileStatus, RefKind};
 use sniff::filesystem::repo::Package;
@@ -2154,8 +2154,7 @@ mod tests {
                 make_package("biscuit-terminal", "biscuit-terminal", &[]),
                 make_package("claudine", "claudine", &["dm-cli"]),
             ];
-            let focus: std::collections::HashSet<&str> =
-                ["dm-cli", "dm-lib"].into_iter().collect();
+            let focus: std::collections::HashSet<&str> = ["dm-cli", "dm-lib"].into_iter().collect();
             let result = build_deps_dot(&packages, Some(&focus)).unwrap();
 
             // Focus area is the only cluster (count `subgraph cluster_` occurrences).
@@ -2171,7 +2170,10 @@ mod tests {
             assert!(result.contains("n3 [label=\"claudine\", style=dashed];"));
 
             // Edges touching focus are emitted
-            assert!(result.contains("n0 -> n1;"), "dm-cli -> dm-lib edge missing");
+            assert!(
+                result.contains("n0 -> n1;"),
+                "dm-cli -> dm-lib edge missing"
+            );
             assert!(
                 result.contains("n1 -> n2;"),
                 "dm-lib -> biscuit-terminal edge missing"
@@ -2188,15 +2190,25 @@ mod tests {
             // the darkmatter focus. Their internal edge must NOT be drawn because
             // it doesn't touch the focus area.
             let packages = vec![
-                make_package("dm-lib", "darkmatter", &["biscuit-terminal", "biscuit-file"]),
+                make_package(
+                    "dm-lib",
+                    "darkmatter",
+                    &["biscuit-terminal", "biscuit-file"],
+                ),
                 make_package("biscuit-terminal", "biscuit-terminal", &["biscuit-file"]),
                 make_package("biscuit-file", "biscuit-file", &[]),
             ];
             let focus: std::collections::HashSet<&str> = ["dm-lib"].into_iter().collect();
             let result = build_deps_dot(&packages, Some(&focus)).unwrap();
 
-            assert!(result.contains("n0 -> n1;"), "focus -> external edge missing");
-            assert!(result.contains("n0 -> n2;"), "focus -> external edge missing");
+            assert!(
+                result.contains("n0 -> n1;"),
+                "focus -> external edge missing"
+            );
+            assert!(
+                result.contains("n0 -> n2;"),
+                "focus -> external edge missing"
+            );
             // External-only edge: biscuit-terminal (n1) -> biscuit-file (n2)
             assert!(
                 !result.contains("n1 -> n2;"),

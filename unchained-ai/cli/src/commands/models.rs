@@ -2,7 +2,7 @@ use std::rc::Rc;
 
 use biscuit_terminal::components::list::UnorderedList;
 use biscuit_terminal::components::prose::Prose;
-use biscuit_terminal::components::renderable::{TerminalRenderable, RenderableTerminalContent};
+use biscuit_terminal::components::renderable::{RenderableTerminalContent, TerminalRenderable};
 use biscuit_terminal::terminal::Terminal;
 use color_eyre::eyre::{Result, eyre};
 use serde_json::{Map, Value, json};
@@ -333,7 +333,9 @@ fn build_provider_list(models: &[ProviderModel], verbose: bool) -> UnorderedList
     let mut items: Vec<RenderableTerminalContent> = Vec::with_capacity(models.len() * 2);
 
     for model in models {
-        items.push(RenderableTerminalContent::String(model.model_id().to_string()));
+        items.push(RenderableTerminalContent::String(
+            model.model_id().to_string(),
+        ));
 
         if verbose
             && let Some(meta) = model.metadata()

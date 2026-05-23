@@ -107,6 +107,17 @@ fn run_with_sentinel(harness: &mut WezTermHarness, cmd: &str) -> CapturedFrame {
 /// Helper: write a markdown fixture, run `md` with the given flags inside the
 /// shared harness pane, and return the captured frame.
 fn run_md(file_body: &str, extra_args: &str) -> Option<(CapturedFrame, std::path::PathBuf)> {
+    run_md_env(file_body, extra_args, &[])
+}
+
+/// Like [`run_md`] but injects inline environment assignments onto the `md`
+/// invocation (e.g. `COLORFGBG` to force light/dark color-mode detection
+/// deterministically).
+fn run_md_env(
+    file_body: &str,
+    extra_args: &str,
+    env: &[(&str, &str)],
+) -> Option<(CapturedFrame, std::path::PathBuf)> {
     if !WezTermHarness::available() {
         if level2_required() {
             panic!(
@@ -139,9 +150,37 @@ fn run_md(file_body: &str, extra_args: &str) -> Option<(CapturedFrame, std::path
     run_with_sentinel(harness, "clear");
 
     let cmd = format!("md {} {}", file_path.display(), extra_args);
-    let frame = run_with_sentinel(harness, &cmd);
+    let frame = run_with_sentinel_env(harness, &cmd, env);
     // Keep tempdir alive past capture by returning its path.
     Some((frame, file_path))
+}
+
+/// Like [`run_with_sentinel`] but applies inline env assignments to `cmd`.
+fn run_with_sentinel_env(
+    harness: &mut WezTermHarness,
+    cmd: &str,
+    env: &[(&str, &str)],
+) -> CapturedFrame {
+    let id = SENTINEL_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let sentinel = format!("__DM_LVL2_DONE_{id}__");
+    let wrapped = format!("{cmd}; printf '\\n{sentinel}\\n'");
+    harness
+        .send_command_with_env(&wrapped, env)
+        .expect("send_command_with_env failed");
+    match wait_for_sentinel(harness, &sentinel) {
+        Ok(frame) => {
+            // The sentinel only guarantees `md` finished; the pane grid may
+            // still be settling (scroll, redraw). Settle and re-capture so
+            // assertions see the final stable frame, not a transitional one.
+            std::thread::sleep(Duration::from_millis(250));
+            harness.capture().unwrap_or(frame)
+        }
+        Err(last) => panic!(
+            "timed out waiting for sentinel {sentinel} after {SENTINEL_TIMEOUT:?}. \
+             last plain capture:\n{}",
+            last.plain
+        ),
+    }
 }
 
 /// Strip trailing whitespace from a line for visible-width comparisons.
@@ -249,18 +288,15 @@ fn level2_max_width_caps_visible_content_columns() {
         .iter()
         .position(|l| l.contains("Sentinel_paragraph"))
         .unwrap_or_else(|| {
-            panic!("sentinel line not found in pane capture. plain:\n{}", frame.plain)
+            panic!(
+                "sentinel line not found in pane capture. plain:\n{}",
+                frame.plain
+            )
         });
 
     // Check the sentinel line and the next two lines (wrap continuation) all
     // fit within 40 visible columns.
-    for (offset, line) in lines
-        .iter()
-        .skip(sentinel_idx)
-        .take(3)
-        .copied()
-        .enumerate()
-    {
+    for (offset, line) in lines.iter().skip(sentinel_idx).take(3).copied().enumerate() {
         let visible = rtrim(line).chars().count();
         assert!(
             visible <= 40,
@@ -470,8 +506,10 @@ fn level2_table_center_alignment_indents_more_than_left() {
     // wrapping column needs ~9 cols of content plus pipes/padding, so a
     // 2-column table needs roughly 25 cols minimum. We pick 40 so the cap
     // still leaves visible alignment surplus on the 60-col page.
-    let Some((left, _)) = run_md(body, "--align-tables left --fill-tables max=40 --max-width 60")
-    else {
+    let Some((left, _)) = run_md(
+        body,
+        "--align-tables left --fill-tables max=40 --max-width 60",
+    ) else {
         return;
     };
     let Some((center, _)) = run_md(
@@ -767,11 +805,323 @@ Some prose paragraph.\n\
     );
 
     // Every component anchor must be present in the captured pane.
-    for anchor in ["Some prose paragraph", "list item alpha", "list item beta", "A quoted observation"] {
+    for anchor in [
+        "Some prose paragraph",
+        "list item alpha",
+        "list item beta",
+        "A quoted observation",
+    ] {
         assert!(
             frame.plain.contains(anchor),
             "expected '{anchor}' in captured plain output. plain:\n{}",
             frame.plain
         );
     }
+}
+
+// ---------------------------------------------------------------------------
+// Code-block rendering (fixes from 2026-05-22-darkmatter-failures)
+//
+// These exercise the real `md` CLI in a real WezTerm pane: the renderer must
+// detect the terminal's color mode, invert the *code* theme for contrast, fill
+// the code background across the content rectangle (never to the physical
+// edge), and not leave a constant trailing-blank offset.
+// ---------------------------------------------------------------------------
+
+/// Rec. 601 luma of an sRGB triple.
+fn luma(r: u32, g: u32, b: u32) -> f32 {
+    0.299 * r as f32 + 0.587 * g as f32 + 0.114 * b as f32
+}
+
+/// Maximum truecolor-background luma found on the first captured line whose
+/// ANSI-stripped text contains `needle`. `None` when no such line or no
+/// `48;2;r;g;b` background is present.
+fn max_bg_luma_on_line(raw: &str, needle: &str) -> Option<f32> {
+    let re = regex_lite_bg();
+    // Scan from the bottom so we read the *current* render, not stale scrollback
+    // from a previous test sharing the pane.
+    for line in raw.lines().rev() {
+        let plain = biscuit_test_harness::strip_ansi(line);
+        if plain.contains(needle) {
+            let mut best: Option<f32> = None;
+            for (r, g, b) in re(line) {
+                let l = luma(r, g, b);
+                best = Some(best.map_or(l, |m: f32| m.max(l)));
+            }
+            return best;
+        }
+    }
+    None
+}
+
+/// Tiny hand-rolled scan for truecolor background SGRs, handling both the
+/// legacy `\x1b[48;2;R;G;Bm` (semicolon) and the ITU `\x1b[48:2::R:G:Bm`
+/// (colon, with empty colorspace) forms WezTerm emits in `get-text --escapes`.
+fn regex_lite_bg() -> impl Fn(&str) -> Vec<(u32, u32, u32)> {
+    |line: &str| {
+        let mut out = Vec::new();
+        // Split on the CSI introducer; each chunk starts with SGR params.
+        for chunk in line.split("\x1b[").skip(1) {
+            let Some(mend) = chunk.find('m') else { continue };
+            // Numeric params, ignoring empty fields (the colon form has an
+            // empty colorspace slot: `48:2::R:G:B`).
+            let nums: Vec<u32> = chunk[..mend]
+                .split([';', ':'])
+                .filter_map(|s| s.parse::<u32>().ok())
+                .collect();
+            // Background truecolor: leading `48 2` then R G B.
+            if nums.len() >= 5 && nums[0] == 48 && nums[1] == 2 {
+                out.push((nums[2], nums[3], nums[4]));
+            }
+        }
+        out
+    }
+}
+
+/// True when a raw (ANSI-bearing) captured line is genuinely blank: no visible
+/// glyphs AND no background fill. A code-block / page padding row paints `48`
+/// background spaces and is content, not blank — the same rule the library-side
+/// invariants use.
+fn raw_line_is_blank(line: &str) -> bool {
+    biscuit_test_harness::strip_ansi(line).trim().is_empty() && !line.contains("\x1b[48")
+}
+
+/// True when a line is *exactly* a completion sentinel (`__DM_LVL2_DONE_<n>__`)
+/// on its own — not a wrapped fragment of the echoed command line.
+fn is_sentinel_line(line: &str) -> bool {
+    let t = line.trim();
+    t.strip_prefix("__DM_LVL2_DONE_")
+        .and_then(|r| r.strip_suffix("__"))
+        .is_some_and(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()))
+}
+
+/// The rendered `md` output region: from the line containing `head_needle`
+/// (inclusive) up to the *last* real sentinel line (exclusive). Excludes the
+/// shell prompt and the echoed command (whose long temp path would otherwise
+/// pollute width/blank-line scans).
+fn rendered_region<'a>(lines: &'a [&'a str], head_needle: &str) -> (usize, usize) {
+    let head = lines.iter().position(|l| l.contains(head_needle)).unwrap_or(0);
+    let sentinel = lines
+        .iter()
+        .rposition(|l| is_sentinel_line(l))
+        .unwrap_or(lines.len());
+    (head, sentinel)
+}
+
+const CODE_DOC: &str = "\
+# Heading\n\
+\n\
+Some prose line.\n\
+\n\
+```rust\n\
+pub struct FooBar {\n\
+    foo: String,\n\
+}\n\
+```\n\
+";
+
+/// #0 — In a dark terminal the code panel must invert to a *light* theme so it
+/// contrasts against the page. Forces dark detection via `COLORFGBG` and a
+/// paired theme (`github`) that has a light variant.
+#[test]
+#[serial(level2_terminal)]
+fn level2_code_block_inverts_to_light_in_dark_terminal() {
+    let Some((frame, _)) = run_md_env(
+        CODE_DOC,
+        "--code-theme github --max-width 60",
+        &[("COLORFGBG", "15;0")], // bg index 0 => dark terminal
+    ) else {
+        return;
+    };
+
+    let code_luma = max_bg_luma_on_line(&frame.raw, "rust").unwrap_or_else(|| {
+        panic!(
+            "no truecolor background found on the code line. raw:\n{}",
+            frame.raw
+        )
+    });
+    assert!(
+        code_luma > 140.0,
+        "code panel should be LIGHT (high luma) in a dark terminal, got luma {code_luma:.0}. \
+         plain:\n{}",
+        frame.plain
+    );
+}
+
+/// #0 mirror — In a light terminal the code panel must invert to a *dark* theme.
+#[test]
+#[serial(level2_terminal)]
+fn level2_code_block_inverts_to_dark_in_light_terminal() {
+    let Some((frame, _)) = run_md_env(
+        CODE_DOC,
+        "--code-theme github --max-width 60",
+        &[("COLORFGBG", "0;15")], // bg index 15 => light terminal
+    ) else {
+        return;
+    };
+
+    let code_luma = max_bg_luma_on_line(&frame.raw, "rust").unwrap_or_else(|| {
+        panic!(
+            "no truecolor background found on the code line. raw:\n{}",
+            frame.raw
+        )
+    });
+    assert!(
+        code_luma < 120.0,
+        "code panel should be DARK (low luma) in a light terminal, got luma {code_luma:.0}. \
+         plain:\n{}",
+        frame.plain
+    );
+}
+
+/// #1/#2 — With left+right margins the code panel must stay within the content
+/// rectangle: no rendered line exceeds the content width, and the right-margin
+/// columns are blank (the old `\x1b[K` bug painted to the physical edge and
+/// left a margin-width unstyled gap).
+#[test]
+#[serial(level2_terminal)]
+fn level2_code_block_respects_right_margin() {
+    let Some((frame, _)) =
+        run_md_env(CODE_DOC, "--ml 4 --mr 4 --max-width 50", &[("COLORFGBG", "15;0")])
+    else {
+        return;
+    };
+
+    // Anchor on the code line and verify it carries a background fill.
+    assert!(
+        max_bg_luma_on_line(&frame.raw, "rust").is_some(),
+        "code line must carry a background fill. raw:\n{}",
+        frame.raw
+    );
+
+    // Content rectangle = ml(4) + max_width(50) + mr(4) = 58 columns. No
+    // rendered line may exceed it (the bug overflowed to the physical edge).
+    // Scope to the rendered region so the echoed command (long temp path) does
+    // not pollute the width scan.
+    let lines: Vec<&str> = frame.plain.lines().collect();
+    let (head, sentinel) = rendered_region(&lines, "FooBar");
+    let max_visible = lines[head..sentinel]
+        .iter()
+        .map(|l| rtrim(l).chars().count())
+        .max()
+        .unwrap_or(0);
+    assert!(
+        max_visible <= 58,
+        "no rendered line may exceed ml+max_width+mr = 58 cols, got {max_visible}. plain:\n{}",
+        frame.plain
+    );
+}
+
+/// #3 — A document ending in a code block must not accrue the old constant
+/// trailing blank-line offset (the body emitted `mb + 2` blank rows). The
+/// `printf` sentinel injects one trailing newline of its own, so the robust
+/// bound above the sentinel is `mb + 1`; the pre-fix bug would produce `mb + 3`.
+#[test]
+#[serial(level2_terminal)]
+fn level2_no_trailing_blank_offset_after_code() {
+    let Some((frame, _)) =
+        run_md_env(CODE_DOC, "--mb 1 --max-width 60", &[("COLORFGBG", "15;0")])
+    else {
+        return;
+    };
+
+    // Use raw lines so a bg-filled code padding row is not mistaken for a blank
+    // margin row.
+    let raw_lines: Vec<&str> = frame.raw.lines().collect();
+    let sentinel_idx = raw_lines
+        .iter()
+        .rposition(|l| is_sentinel_line(l))
+        .unwrap_or_else(|| panic!("sentinel line not found. raw:\n{}", frame.raw));
+
+    // Count genuinely-blank rows immediately above the sentinel. With mb=1 this
+    // must be at most 2 (1 bottom margin + 1 printf newline); the pre-fix
+    // constant +2 offset would have made it 4.
+    let trailing_blanks = raw_lines[..sentinel_idx]
+        .iter()
+        .rev()
+        .take_while(|l| raw_line_is_blank(l))
+        .count();
+    assert!(
+        trailing_blanks <= 2,
+        "trailing blank rows must not pile up (mb=1 ⇒ at most 2 with the printf \
+         newline); the old +2 offset bug produced 4. got {trailing_blanks}. plain:\n{}",
+        frame.plain
+    );
+}
+
+// Interior vertical rhythm (no run of >=2 blank rows) is verified
+// deterministically and across every shape by the library-side `I5` invariant
+// in `darkmatter/lib/tests/render_invariants.rs`. A real-terminal version is
+// omitted here because transient mid-scroll captures make it flaky without
+// adding coverage the deterministic invariant does not already provide.
+
+// =============================================================================
+//   STYLE FRONTMATTER FIXTURE (sub-spec #2 acceptance — review-2 finding #2)
+// =============================================================================
+//
+// These tests run the canonical `style-prop.md` fixture in a real WezTerm pane
+// to verify the user-visible margin layout actually reaches the terminal. The
+// pipe-captured CLI test (`cli.rs::style_fixture_cli_pipe_smoke_passes`) only
+// exercises the markdown pass-through path because `OutputFormat::Auto` falls
+// back to that path when stdout is not a TTY.
+
+/// Frontmatter + body matching `darkmatter/example-docs/rendering/style-prop.md`.
+/// Kept inline so the Level 2 helper's tempfile pattern works without rewiring
+/// to an absolute fixture path. Uses a raw string so YAML indentation survives
+/// (Rust's `\<newline>` line continuation would strip the leading whitespace).
+const STYLE_PROP_FIXTURE: &str = r#"---
+style:
+    page:
+        left-margin: 2ch
+        right-margin: 4ch
+        top-margin: 1
+        bottom-margin: 0
+---
+
+# StylePropFixtureHeading
+
+Sentinel_paragraph_for_left_margin_check.
+"#;
+
+#[test]
+#[serial(level2_terminal)]
+fn level2_style_fixture_applies_top_and_left_margins_in_real_terminal() {
+    // Acceptance: `style.page.top-margin: 1` adds a blank row above the
+    // rendered title, and `style.page.left-margin: 2ch` leaves >=2 leading
+    // columns on non-empty content rows when rendered through the real
+    // terminal pipeline. The fixture is composed inline to mirror
+    // `darkmatter/example-docs/rendering/style-prop.md` page-level frontmatter.
+    let Some((frame, _)) = run_md(STYLE_PROP_FIXTURE, "--max-width 60") else {
+        return;
+    };
+
+    let lines: Vec<&str> = frame.plain.lines().collect();
+    let marker_idx = lines
+        .iter()
+        .position(|l| l.contains("StylePropFixtureHeading"))
+        .unwrap_or_else(|| panic!("heading not found in pane capture:\n{}", frame.plain));
+
+    // Top-margin: 1 — at least one row above the heading must be blank
+    // (after rtrim of left-margin spaces).
+    assert!(
+        marker_idx >= 1,
+        "top-margin: 1 must leave at least one row above the heading, got idx {marker_idx}. plain:\n{}",
+        frame.plain
+    );
+    let above = rtrim(lines[marker_idx - 1]);
+    assert!(
+        above.is_empty(),
+        "row directly above heading should be blank (top-margin: 1), got: {above:?}. plain:\n{}",
+        frame.plain
+    );
+
+    // Left-margin: 2ch — the heading line itself starts with >=2 leading
+    // columns (the heading row carries the left-margin prefix too).
+    let head_leading = lines[marker_idx].chars().take_while(|c| *c == ' ').count();
+    assert!(
+        head_leading >= 2,
+        "expected >=2 leading columns for left-margin: 2ch on heading, got {head_leading}: {:?}. plain:\n{}",
+        lines[marker_idx],
+        frame.plain
+    );
 }

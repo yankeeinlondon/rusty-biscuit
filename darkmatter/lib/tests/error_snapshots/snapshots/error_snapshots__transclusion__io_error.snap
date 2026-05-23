@@ -1,7 +1,8 @@
 ---
 source: darkmatter/lib/tests/error_snapshots/transclusion.rs
+assertion_line: 270
 expression: out
 ---
-⨫ TransclusionError: I/O failure
+⤫ TransclusionError: I/O failure
 ┃ file gone
 Check file existence and permissions.

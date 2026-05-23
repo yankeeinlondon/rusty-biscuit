@@ -315,6 +315,10 @@ The following crates play an important role in Darkmatter providing it's current
 - `reqwest` - _for 
 - `this-error` & `tracing` - _provide error definition support and reporting_
 
+### Development Dependencies
+
+- `chromiumoxide` & `futures-util` - _drive a real headless Chrome (Chrome DevTools Protocol) for browser-render tests (`tests/browser_render.rs`) that assert on browser-computed styles of the HTML output, plus the `examples/html_to_png.rs` screenshot helper. Tests skip cleanly when no Chrome/Chromium is found._ See the `rust-testing` skill's [Browser Render Testing](../../.claude/skills/rust-testing/browser-testing.md) topic.
+
 
 
 ## Modules

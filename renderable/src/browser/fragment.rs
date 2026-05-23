@@ -302,9 +302,7 @@ impl BrowserFragment<Ready> {
 /// Recursively renders a single composable node to HTML.
 fn render_node(node: &ComposableNode) -> String {
     match node {
-        ComposableNode::TextFragment(text) => {
-            crate::browser::utils::escape_text(text).into_owned()
-        }
+        ComposableNode::TextFragment(text) => crate::browser::utils::escape_text(text).into_owned(),
         ComposableNode::RawHtml(html) => html.clone(),
         ComposableNode::Component(fragment) => fragment.render(),
         ComposableNode::VoidTag(void) => {
@@ -316,8 +314,7 @@ fn render_node(node: &ComposableNode) -> String {
         }
         ComposableNode::BlockTag(block) => {
             let name = block.tag.name();
-            let children: String =
-                block.content.children.iter().map(render_node).collect();
+            let children: String = block.content.children.iter().map(render_node).collect();
             format!(
                 "<{name}{}>{children}</{name}>",
                 render_attributes(&block.attributes, Some(&block.base_class))
@@ -332,9 +329,7 @@ fn validate_node(node: &ComposableNode) -> bool {
         ComposableNode::TextFragment(_) | ComposableNode::RawHtml(_) => true,
         ComposableNode::VoidTag(_) => true,
         ComposableNode::Component(fragment) => fragment.validate_render_content(),
-        ComposableNode::BlockTag(block) => {
-            block.content.children.iter().all(validate_node)
-        }
+        ComposableNode::BlockTag(block) => block.content.children.iter().all(validate_node),
     }
 }
 
@@ -523,7 +518,10 @@ mod tests {
             .add_metadata_keypair(MicrodataKey::Title, "Diagram")
             .finalize();
         assert_eq!(
-            fragment.metadata.get(&MicrodataKey::Title).map(String::as_str),
+            fragment
+                .metadata
+                .get(&MicrodataKey::Title)
+                .map(String::as_str),
             Some("Diagram")
         );
     }
@@ -534,7 +532,10 @@ mod tests {
             .define_as_raw_html("<b>hi</b>")
             .finalize()
             .render();
-        assert!(raw.contains("<b>hi</b>"), "RawHtml must pass through verbatim");
+        assert!(
+            raw.contains("<b>hi</b>"),
+            "RawHtml must pass through verbatim"
+        );
 
         let text = BrowserFragment::new()
             .define_as_text_fragment("<b>hi</b>")

@@ -1,8 +1,9 @@
 ---
 source: darkmatter/lib/tests/error_snapshots/transclusion.rs
+assertion_line: 52
 expression: out
 ---
-⨫ TransclusionError: The reference in doc.md could not be resolved.
+⤫ TransclusionError: The reference in doc.md could not be resolved.
 ┃ Invalid file reference //weird found in:
 ┃ 
 ┃     1 │ line 1

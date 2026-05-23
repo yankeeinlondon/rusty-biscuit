@@ -1,12 +1,14 @@
 # Renderable Components
 
-All components implement the `Renderable` trait which provides three rendering paths:
+All components implement the `TerminalRenderable` trait, which provides these rendering methods:
 
 | Method | Trailing `\n` | Terminal-aware | Use for |
 |--------|---------------|---------------|---------|
-| `render(term_width)` | No | No | Composition, embedding |
-| `fallback_render(term)` | No | Yes | Composition, embedding |
+| `render_optimistic(term_width)` | No | No | Composition, embedding |
+| `render(term)` | No | Yes | Composition, embedding |
 | **`display(term)`** | **Yes** | **Yes** | **Direct terminal output** |
+
+`render(&Terminal)` is the terminal-aware path; `render_optimistic(Option<u32>)` assumes a modern capability set without detection; `render_in_width(term, width)` overrides width only. A component may also implement `render_tree_node(&self) -> Option<RenderNode>` to project itself into the `renderable` render tree — see [Render Tree](./render-tree.md).
 
 Every component owns a `Layout` for margins, alignment, word-wrap, and row-fill. Builder methods (`left_margin()`, `right_margin()`, `alignment()`, `word_wrap()`, etc.) configure it fluently.
 
@@ -42,12 +44,12 @@ Combines multiple renderable parts into a single output.
 use biscuit_terminal::prelude::*;
 
 let mut compose = Compose::new();
-compose.add_text("Hello, ").add_prose(Prose::new("{{bold}}world{{reset}}!"));
+compose.add_text("Hello, ").add_prose(Prose::new("<b>world</b>!"));
 
 // Can also add lists, other components
 compose.add_unordered_list(UnorderedList::new(vec!["Item A", "Item B"]));
 
-let output = compose.render(Some(80));
+let output = compose.render_optimistic(Some(80));
 ```
 
 **Key methods:** `add_text()`, `add_prose()`, `add_ordered_list()`, `add_unordered_list()`, `add_component()`
@@ -61,7 +63,7 @@ use biscuit_terminal::prelude::*;
 
 let section = Section::new(HeadingLevel::h2, "My Section")
     .with_content(vec![
-        RenderableContent::String("Body text here.".to_string()),
+        RenderableTerminalContent::String("Body text here.".to_string()),
     ]);
 ```
 
@@ -81,7 +83,7 @@ let quote = BlockQuote::new("To be or not to be")
 
 **Builder methods:** `with_attribution()`, `with_text_color()`, `with_bg_color()`, `with_left_block_color()`
 
-Word wrapping is enabled by default. Content can be a string or any `RenderableContent`.
+Word wrapping is enabled by default. Content can be a string or any `RenderableTerminalContent`.
 
 ## TwoColumn
 
@@ -91,8 +93,8 @@ Side-by-side column rendering with cursor-based positioning. Handles inline imag
 use biscuit_terminal::prelude::*;
 
 let columns = TwoColumn::new(
-    RenderableContent::String("Left content".into()),
-    RenderableContent::String("Right content".into()),
+    RenderableTerminalContent::String("Left content".into()),
+    RenderableTerminalContent::String("Right content".into()),
 )
 .with_gap(4)
 .with_left_width(ColumnWidth::Percent(0.4));
@@ -157,8 +159,8 @@ list.add("Item 1").add("Item 2");
 // Nested
 let inner = OrderedList::new(vec!["Sub A", "Sub B"]);
 let outer = UnorderedList::from(vec![
-    RenderableContent::String("Top item".into()),
-    RenderableContent::Component(Arc::new(inner)),
+    RenderableTerminalContent::String("Top item".into()),
+    RenderableTerminalContent::Component(Rc::new(inner)),
 ]);
 ```
 
@@ -188,15 +190,15 @@ use biscuit_terminal::components::inline_content::InlineContent;
 
 See [Styling](./styling.md) for comprehensive Prose token reference and TextBlock builder details.
 
-## RenderableContent
+## RenderableTerminalContent
 
-The `RenderableContent` enum bridges strings and components:
+The `RenderableTerminalContent` enum bridges strings and components:
 
 ```rust
-pub enum RenderableContent {
+pub enum RenderableTerminalContent {
     String(String),
-    Component(Arc<dyn Renderable>),
+    Component(Rc<dyn TerminalRenderable>),
 }
 ```
 
-Implements `From<String>`, `From<&str>`, and `From<T: Renderable>` for ergonomic construction.
+Implements `From<String>`, `From<&str>`, and `From<T: TerminalRenderable>` for ergonomic construction.

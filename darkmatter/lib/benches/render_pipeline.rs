@@ -67,9 +67,7 @@ fn build_code_document(index: usize) -> String {
     for lang in ["rust", "python", "json"] {
         doc.push_str(&format!("```{lang}\n"));
         for line in 0..30 {
-            doc.push_str(&format!(
-                "let item_{line} = compute({index}, {line});\n"
-            ));
+            doc.push_str(&format!("let item_{line} = compute({index}, {line});\n"));
         }
         doc.push_str("```\n\n");
     }
@@ -86,8 +84,7 @@ fn render_terminal_options() -> TerminalOptions {
 
 fn bench_render_pipeline(c: &mut Criterion) {
     let sources: Vec<String> = (0..CORPUS_SIZE).map(build_document).collect();
-    let corpus: Vec<Markdown> =
-        sources.iter().map(|s| Markdown::from(s.as_str())).collect();
+    let corpus: Vec<Markdown> = sources.iter().map(|s| Markdown::from(s.as_str())).collect();
     let code_corpus: Vec<Markdown> = (0..CODE_CORPUS_SIZE)
         .map(|i| Markdown::from(build_code_document(i).as_str()))
         .collect();

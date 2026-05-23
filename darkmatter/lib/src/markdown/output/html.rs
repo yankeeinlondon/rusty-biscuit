@@ -139,8 +139,16 @@ pub fn as_html(md: &Markdown, options: HtmlOptions) -> MarkdownResult<String> {
     let mut output = String::new();
     let hr_defaults = hr_defaults_from_frontmatter(md);
 
-    // Create highlighter for code blocks
-    let code_highlighter = CodeHighlighter::new(options.code_theme, options.color_mode);
+    // Create highlighter for code blocks.
+    //
+    // Code blocks contrast against the page: resolve the code `ThemePair`
+    // against the INVERTED color mode so a dark page gets a light code panel
+    // (and vice versa), matching the terminal renderer for cross-target parity.
+    // This is code-blocks-only — prose follows `options.color_mode`. Single-
+    // variant themes (dracula, nord, …) ignore the mode, so inversion is a
+    // deliberate no-op for them. See
+    // `renderable/fixes/2026-05-22-darkmatter-failures/spec.md`, defect D.
+    let code_highlighter = CodeHighlighter::new(options.code_theme, options.color_mode.inverted());
 
     // Emit page-level `:root` declarations for horizontal-rule CSS custom
     // properties. This is independent of `include_styles` — the override
@@ -154,10 +162,17 @@ pub fn as_html(md: &Markdown, options: HtmlOptions) -> MarkdownResult<String> {
         output.push_str(&generate_styles(&code_highlighter, &options));
     }
 
-    // Parse markdown content with GFM strikethrough extension and wrap with MarkProcessor
-    // and RuleProcessor for horizontal rules with attributes
+    // Parse markdown content with GFM strikethrough + GFM tables, and wrap
+    // with MarkProcessor and RuleProcessor for horizontal rules with
+    // attributes. `ENABLE_TABLES` was missing from the legacy HTML parser
+    // (the terminal renderer already enabled it); this closed a parity gap
+    // where pipe-table syntax fell through as paragraph text in HTML.
+    // See `renderable/features/2026-05-20-darkmatter-tree/parser-options.md`.
     let preprocessed = crate::markdown::inline::preprocess_escaped_markers(md.content());
-    let parser = Parser::new_ext(&preprocessed, Options::ENABLE_STRIKETHROUGH);
+    let parser = Parser::new_ext(
+        &preprocessed,
+        Options::ENABLE_STRIKETHROUGH | Options::ENABLE_TABLES,
+    );
     let events = RuleProcessor::new(InlineStyleProcessor::new(parser));
 
     // Track state for code blocks
@@ -444,6 +459,35 @@ pub fn as_html(md: &Markdown, options: HtmlOptions) -> MarkdownResult<String> {
             InlineEvent::Standard(Event::Html(html) | Event::InlineHtml(html)) => {
                 // Raw HTML - escape it for safety
                 output.push_str(html_escape::encode_text(&html).as_ref());
+            }
+            // GFM table tag handling. `ENABLE_TABLES` is now enabled at the
+            // parser; without these arms the catch-all below would silently
+            // drop the structural events and only the cell text would land
+            // in the output.
+            //
+            // The column-alignment vector from `Tag::Table(_)` is ignored
+            // here; richer per-cell alignment can be added when needed. The
+            // important parity invariant is that a `<table>` element now
+            // wraps the cell text.
+            InlineEvent::Standard(Event::Start(Tag::Table(_))) => {
+                output.push_str("<table>\n");
+            }
+            InlineEvent::Standard(Event::End(TagEnd::Table)) => {
+                output.push_str("</table>\n");
+            }
+            InlineEvent::Standard(Event::Start(Tag::TableHead))
+            | InlineEvent::Standard(Event::Start(Tag::TableRow)) => {
+                output.push_str("<tr>");
+            }
+            InlineEvent::Standard(Event::End(TagEnd::TableHead))
+            | InlineEvent::Standard(Event::End(TagEnd::TableRow)) => {
+                output.push_str("</tr>\n");
+            }
+            InlineEvent::Standard(Event::Start(Tag::TableCell)) => {
+                output.push_str("<td>");
+            }
+            InlineEvent::Standard(Event::End(TagEnd::TableCell)) => {
+                output.push_str("</td>");
             }
             _ => {}
         }

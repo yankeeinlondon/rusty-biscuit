@@ -658,15 +658,22 @@ fn run_provider_wrapper_inner(
 
     let scoped_tmp = system_prompt::scoped_tmp_dir(&launch_workspace);
     system_prompt::maybe_gitignore_claudine_tmp(
-        launch_workspace.repo_root.as_deref().unwrap_or(&launch_workspace.launch_cwd),
+        launch_workspace
+            .repo_root
+            .as_deref()
+            .unwrap_or(&launch_workspace.launch_cwd),
     );
 
     match &effective_sp {
         claudine::system_prompt::EffectiveSystemPrompt::None
         | claudine::system_prompt::EffectiveSystemPrompt::Disabled { .. } => {}
         claudine::system_prompt::EffectiveSystemPrompt::Ready(prepared) => {
-            let application =
-                profile.apply_system_prompt(prepared, !non_interactive_requested, &cwd, &scoped_tmp)?;
+            let application = profile.apply_system_prompt(
+                prepared,
+                !non_interactive_requested,
+                &cwd,
+                &scoped_tmp,
+            )?;
             child_args.extend(application.args);
             env_overrides.extend(
                 application
@@ -1392,10 +1399,7 @@ mod tests {
             }
         }
 
-        assert_eq!(
-            observed_cwd, target_canon,
-            "chdir must take effect",
-        );
+        assert_eq!(observed_cwd, target_canon, "chdir must take effect",);
         assert_eq!(
             observed_pwd.as_deref(),
             Some(target_canon.as_os_str()),

@@ -88,14 +88,21 @@ agents := "claude\ncodex\nopencode\ngemini\nqwen\nroo\nkimi\n"
 _choose_feature feat="":
     #!/usr/bin/env bash
     set -euo pipefail
-    file="$(fd -g '*{spec,design}\.md' features/ --exclude '_completed' | {{ if feat == "" { "cat" } else { "rg " + feat } }} |  fzf --height=15 --border --border-label 'Choose a spec or design file')"
+    file="$(fd -g '*{spec,design}*\.md' features/ --exclude '_completed' | {{ if feat == "" { "cat" } else { "rg " + feat } }} |  fzf --height=15 --border --border-label 'Choose a spec or design file')"
     echo "${file}"
 
 # chooses a spec or design file to identify the fix
 _choose_fix feat="":
     #!/usr/bin/env bash
     set -euo pipefail
-    file="$(fd -g '*{spec,design}\.md' fixes/ --exclude '_completed' | {{ if feat == "" { "cat" } else { "rg " + feat } }} |  fzf --height=15 --border --border-label 'Choose a spec or design file')"
+    file="$(fd -g '*{spec,design}*\.md' fixes/ --exclude '_completed' | {{ if feat == "" { "cat" } else { "rg " + feat } }} |  fzf --height=15 --border --border-label 'Choose a spec or design file')"
+    echo "${file}"
+
+# chooses a spec or design file to identify the feature
+_choose_feature_or_fix feat="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    file="$(fd -g '*{spec,design}*\.md' --exclude '_completed' | {{ if feat == "" { "cat" } else { "rg " + feat } }} |  fzf --height=15 --border --border-label 'Choose a spec or design file')"
     echo "${file}"
 
 _choose_agent question="Choose the Agent to use":
@@ -207,6 +214,20 @@ _get_spec_doc dir:
         [[ "${spec}" == "NONE" ]] && spec=""
     fi
     echo "${spec}"
+
+# Derive a plan filename from a spec filename.
+# If the spec basename ends with `spec-N.md`, returns `plan-N.md`.
+# If it ends with `something-spec-N.md`, returns `something-plan-N.md`.
+# Otherwise returns `plan.md`.
+_derive_plan_name spec_file:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    spec_basename="$(basename "{{ spec_file }}")"
+    if [[ "${spec_basename}" =~ (.*)spec(-[0-9]+)\.md$ ]]; then
+        echo "${BASH_REMATCH[1]}plan${BASH_REMATCH[2]}.md"
+    else
+        echo "plan.md"
+    fi
 
 # Convert the passed string to kebab-case: "hello_world" or "helloWorld" → "hello-world"
 _dasherize str:

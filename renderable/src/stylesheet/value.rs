@@ -7,6 +7,8 @@
 
 use std::fmt::{self, Display};
 
+use serde::{Deserialize, Serialize};
+
 use crate::stylesheet::error::StylesheetError;
 
 /// High-level category for a CSS property's accepted value type.
@@ -82,7 +84,8 @@ impl Display for CssValueKind {
 /// assert_eq!(size.to_string(), "2rem");
 /// assert_eq!(CssUnit::Percent.as_str(), "%");
 /// ```
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum CssUnit {
     /// Pixels (`px`) — absolute length.
     Px,
@@ -175,7 +178,8 @@ impl CssUnit {
 /// let calc = CssSizing::expression("calc(100% - 16px)").unwrap();
 /// assert_eq!(calc.to_string(), "calc(100% - 16px)");
 /// ```
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum CssSizing {
     /// A finite number paired with a unit (e.g. `12px`, `1.5rem`, `50%`).
     Dimension {

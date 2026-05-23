@@ -26,8 +26,7 @@
 use serde_json::{Map, Value, json};
 
 use super::types::{
-    Constraint, PropertyAtom, PropertyDef, SchemaArm, SchemaShape, SimplifiedSchema,
-    SimplifiedType,
+    Constraint, PropertyAtom, PropertyDef, SchemaArm, SchemaShape, SimplifiedSchema, SimplifiedType,
 };
 use crate::markdown::schemas::errors::SchemaError;
 
@@ -113,10 +112,7 @@ fn union_to_root_schema(arms: &[SchemaArm]) -> Result<Map<String, Value>, Schema
 
 // ── Property-level dispatch (single vs union) ────────────────────────────
 
-fn property_def_to_schema(
-    name: &str,
-    def: &PropertyDef,
-) -> Result<(Value, bool), SchemaError> {
+fn property_def_to_schema(name: &str, def: &PropertyDef) -> Result<(Value, bool), SchemaError> {
     match def {
         PropertyDef::Single(atom) => atom_to_schema(name, atom),
         PropertyDef::Union(arms) => union_property_to_schema(name, arms),
@@ -448,10 +444,7 @@ fn reject_unsupported(
 fn invalid_constraint(property: &str, ty: &str, c: &Constraint) -> SchemaError {
     SchemaError::Convert {
         property: property.to_string(),
-        message: format!(
-            "constraint `{}` is not valid on `{ty}`",
-            c.keyword()
-        ),
+        message: format!("constraint `{}` is not valid on `{ty}`", c.keyword()),
     }
 }
 
@@ -484,9 +477,7 @@ fn normalize_json_number(value: Value) -> Value {
                 Value::Number(n)
             }
         }
-        Value::Array(items) => {
-            Value::Array(items.into_iter().map(normalize_json_number).collect())
-        }
+        Value::Array(items) => Value::Array(items.into_iter().map(normalize_json_number).collect()),
         Value::Object(map) => Value::Object(
             map.into_iter()
                 .map(|(k, v)| (k, normalize_json_number(v)))

@@ -1,7 +1,8 @@
 ---
 source: darkmatter/lib/tests/error_snapshots/reference.rs
+assertion_line: 88
 expression: out
 ---
-⨫ ReferenceError: URL parse failure
+⤫ ReferenceError: URL parse failure
 ┃ relative URL without a base
 Verify the URL scheme and format (e.g., https://example.com).

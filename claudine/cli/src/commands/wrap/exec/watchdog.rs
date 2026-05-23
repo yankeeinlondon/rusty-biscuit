@@ -593,7 +593,8 @@ pub(crate) fn evaluate_timeout_tick(
 pub(crate) struct OpenCodeBreachContext {
     pub(crate) subagent_done_count: u32,
     pub(crate) step_in_flight: bool,
-    pub(crate) recent_subagents: std::collections::VecDeque<super::subagent_watchdog::RecentSubagentInfo>,
+    pub(crate) recent_subagents:
+        std::collections::VecDeque<super::subagent_watchdog::RecentSubagentInfo>,
     pub(crate) now: Instant,
 }
 
@@ -620,10 +621,15 @@ pub(crate) fn format_step_timeout_breach_message(
 ) -> String {
     let silence_text = format_duration(silence);
     if outstanding.is_empty() && stuck_tools.is_empty() && stuck_subagents.is_empty() {
-        let mut msg = format!("no stream activity for {silence_text}; terminating due to step_timeout");
+        let mut msg =
+            format!("no stream activity for {silence_text}; terminating due to step_timeout");
         if let Some(ctx) = opencode_context {
             if ctx.subagent_done_count > 0 {
-                let plural = if ctx.subagent_done_count == 1 { "subagent" } else { "subagents" };
+                let plural = if ctx.subagent_done_count == 1 {
+                    "subagent"
+                } else {
+                    "subagents"
+                };
                 let count = ctx.subagent_done_count;
                 msg = format!("{count} {plural} observed in this step. {msg}");
             }
@@ -647,7 +653,8 @@ pub(crate) fn format_step_timeout_breach_message(
             if !ctx.recent_subagents.is_empty() {
                 msg.push_str("\n\nRecent subagents:");
                 for info in &ctx.recent_subagents {
-                    let since = format_duration(ctx.now.saturating_duration_since(info.completed_at));
+                    let since =
+                        format_duration(ctx.now.saturating_duration_since(info.completed_at));
                     let desc = info.description.as_ref().or(info.name.as_ref());
                     let label = desc.map(|s| s.as_str()).unwrap_or("(unnamed)");
                     let status = info.status.as_deref().unwrap_or("unknown");
@@ -727,7 +734,7 @@ pub(crate) fn render_watchdog_error_to_stream(
     use biscuit_terminal::components::status::StatusState;
     use biscuit_terminal::prelude::StatusBlock;
     use biscuit_terminal::utils::color::{Color, Tailwind};
-    use biscuit_terminal::utils::layout::{Margin, WordWrap};
+    use biscuit_terminal::utils::layout::{Length, Margin, TargetValue, WordWrap};
 
     let term = crate::log::terminal();
     let border_color = Color::Tailwind(Tailwind::Red700);
@@ -737,8 +744,8 @@ pub(crate) fn render_watchdog_error_to_stream(
     let block = StatusBlock::new(StatusState::Error)
         .body(prose)
         .border_color(border_color)
-        .left_margin(Margin::Chars(0))
-        .right_margin(Margin::Chars(0));
+        .left_margin(TargetValue::universal(Length::ch(0)))
+        .right_margin(TargetValue::universal(Length::ch(0)));
     let rendered = block.render(&term);
     for line in rendered.lines() {
         stream_output.emit_stderr_line(line);
@@ -1544,7 +1551,8 @@ mod tests {
             m.last_byte_at = Some(stale);
         }
 
-        let result = evaluate_timeout_tick(&config, Instant::now(), stale, &state, &metrics, &fired);
+        let result =
+            evaluate_timeout_tick(&config, Instant::now(), stale, &state, &metrics, &fired);
         assert!(
             matches!(
                 result,
@@ -1680,31 +1688,25 @@ mod tests {
     #[test]
     fn format_step_timeout_breach_message_opencode_names_subagent_count() {
         let mut recent = std::collections::VecDeque::new();
-        recent.push_back(crate::commands::wrap::exec::subagent_watchdog::RecentSubagentInfo {
-            id: "sa-1".into(),
-            name: Some("Alpha".into()),
-            description: Some("do alpha".into()),
-            completed_at: Instant::now(),
-            status: Some("success".into()),
-        });
+        recent.push_back(
+            crate::commands::wrap::exec::subagent_watchdog::RecentSubagentInfo {
+                id: "sa-1".into(),
+                name: Some("Alpha".into()),
+                description: Some("do alpha".into()),
+                completed_at: Instant::now(),
+                status: Some("success".into()),
+            },
+        );
         let ctx = OpenCodeBreachContext {
             subagent_done_count: 3,
             step_in_flight: true,
             recent_subagents: recent,
             now: Instant::now(),
         };
-        let msg = format_step_timeout_breach_message(
-            Duration::from_secs(180),
-            &[],
-            &[],
-            &[],
-            Some(ctx),
-        );
+        let msg =
+            format_step_timeout_breach_message(Duration::from_secs(180), &[], &[], &[], Some(ctx));
         assert!(msg.contains("3 subagents observed"), "got: {msg}");
-        assert!(
-            msg.contains("step boundary was still open"),
-            "got: {msg}"
-        );
+        assert!(msg.contains("step boundary was still open"), "got: {msg}");
     }
 
     #[test]
@@ -1713,13 +1715,15 @@ mod tests {
         // Simulate newest-first ring buffer: push_front so Desc-4 (newest)
         // ends up at the front of the deque.
         for i in 0..5 {
-            recent.push_front(crate::commands::wrap::exec::subagent_watchdog::RecentSubagentInfo {
-                id: format!("sa-{i}"),
-                name: Some(format!("Name-{i}")),
-                description: Some(format!("Desc-{i}")),
-                completed_at: Instant::now() - Duration::from_secs((5 - i) as u64 * 60),
-                status: Some("success".into()),
-            });
+            recent.push_front(
+                crate::commands::wrap::exec::subagent_watchdog::RecentSubagentInfo {
+                    id: format!("sa-{i}"),
+                    name: Some(format!("Name-{i}")),
+                    description: Some(format!("Desc-{i}")),
+                    completed_at: Instant::now() - Duration::from_secs((5 - i) as u64 * 60),
+                    status: Some("success".into()),
+                },
+            );
         }
         let ctx = OpenCodeBreachContext {
             subagent_done_count: 5,
@@ -1727,13 +1731,8 @@ mod tests {
             recent_subagents: recent,
             now: Instant::now(),
         };
-        let msg = format_step_timeout_breach_message(
-            Duration::from_secs(180),
-            &[],
-            &[],
-            &[],
-            Some(ctx),
-        );
+        let msg =
+            format_step_timeout_breach_message(Duration::from_secs(180), &[], &[], &[], Some(ctx));
         assert!(msg.contains("5 subagents observed"), "got: {msg}");
         assert!(msg.contains("Recent subagents:"), "got: {msg}");
         // Newest first: Desc-4 should appear before Desc-3
@@ -1750,13 +1749,8 @@ mod tests {
             recent_subagents: std::collections::VecDeque::new(),
             now: Instant::now(),
         };
-        let msg = format_step_timeout_breach_message(
-            Duration::from_secs(180),
-            &[],
-            &[],
-            &[],
-            Some(ctx),
-        );
+        let msg =
+            format_step_timeout_breach_message(Duration::from_secs(180), &[], &[], &[], Some(ctx));
         assert!(msg.contains("step_timeout"), "got: {msg}");
         assert!(
             !msg.contains("subagents observed"),
@@ -1814,9 +1808,9 @@ mod tests {
             WatchdogTickResult::Breach(ref w) => {
                 assert_eq!(w.reason, WatchdogTerminationReason::StepTimeout);
             }
-            other => panic!(
-                "expected StepTimeout breach once step_in_flight is cleared, got: {other:?}"
-            ),
+            other => {
+                panic!("expected StepTimeout breach once step_in_flight is cleared, got: {other:?}")
+            }
         }
         assert!(fired.load(Ordering::SeqCst));
     }
@@ -1855,8 +1849,14 @@ mod tests {
                 "observe_event must set step_in_flight=true on step_start"
             );
         }
-        let result =
-            evaluate_timeout_tick(&config, Instant::now(), session_start, &state, &metrics, &fired);
+        let result = evaluate_timeout_tick(
+            &config,
+            Instant::now(),
+            session_start,
+            &state,
+            &metrics,
+            &fired,
+        );
         assert_eq!(
             result,
             WatchdogTickResult::Ok,
@@ -1880,8 +1880,14 @@ mod tests {
             );
             assert_eq!(m.provider_status.as_deref(), Some("tool-calls"));
         }
-        let result =
-            evaluate_timeout_tick(&config, Instant::now(), session_start, &state, &metrics, &fired);
+        let result = evaluate_timeout_tick(
+            &config,
+            Instant::now(),
+            session_start,
+            &state,
+            &metrics,
+            &fired,
+        );
         assert!(
             matches!(result, WatchdogTickResult::Breach(ref w) if w.reason == WatchdogTerminationReason::StepTimeout),
             "step_finish must release suppression and allow step_timeout to fire; got: {result:?}"
@@ -1908,8 +1914,14 @@ mod tests {
             // protection; it must come from `step_in_flight` alone.
             assert_eq!(m.provider_status.as_deref(), Some("tool-calls"));
         }
-        let result =
-            evaluate_timeout_tick(&config, Instant::now(), session_start, &state, &metrics, &fired);
+        let result = evaluate_timeout_tick(
+            &config,
+            Instant::now(),
+            session_start,
+            &state,
+            &metrics,
+            &fired,
+        );
         assert_eq!(
             result,
             WatchdogTickResult::Ok,
@@ -1943,7 +1955,8 @@ mod tests {
             m.provider_status = Some("stop".into());
         }
 
-        let result = evaluate_timeout_tick(&config, Instant::now(), stale, &state, &metrics, &fired);
+        let result =
+            evaluate_timeout_tick(&config, Instant::now(), stale, &state, &metrics, &fired);
         match result {
             WatchdogTickResult::Breach(ref w) => {
                 assert_eq!(w.reason, WatchdogTerminationReason::StepTimeout);
@@ -1987,7 +2000,8 @@ mod tests {
             assert!(m.provider_status.is_none());
         }
 
-        let result = evaluate_timeout_tick(&config, Instant::now(), stale, &state, &metrics, &fired);
+        let result =
+            evaluate_timeout_tick(&config, Instant::now(), stale, &state, &metrics, &fired);
         match result {
             WatchdogTickResult::Breach(ref w) => {
                 assert_eq!(w.reason, WatchdogTerminationReason::StepTimeout);
@@ -2032,7 +2046,8 @@ mod tests {
             assert!(!m.step_in_flight);
         }
 
-        let result = evaluate_timeout_tick(&config, Instant::now(), stale, &state, &metrics, &fired);
+        let result =
+            evaluate_timeout_tick(&config, Instant::now(), stale, &state, &metrics, &fired);
         assert_eq!(
             result,
             WatchdogTickResult::Ok,
@@ -2087,9 +2102,9 @@ mod tests {
                     w.message
                 );
             }
-            other => panic!(
-                "expected StepTimeout breach with subagent count diagnostic; got: {other:?}"
-            ),
+            other => {
+                panic!("expected StepTimeout breach with subagent count diagnostic; got: {other:?}")
+            }
         }
         assert!(fired.load(Ordering::SeqCst));
     }

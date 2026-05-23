@@ -252,9 +252,7 @@ impl HtmlPage {
         // 1. charset — always first.
         head.push_str(r#"<meta charset="utf-8">"#);
         // 2. viewport.
-        head.push_str(
-            r#"<meta name="viewport" content="width=device-width, initial-scale=1">"#,
-        );
+        head.push_str(r#"<meta name="viewport" content="width=device-width, initial-scale=1">"#);
         // 3. title — from the Title microdata key, else first <h1>, else empty.
         // Metadata is the page/component merge so a nested component's
         // title or description is not lost.
@@ -310,9 +308,7 @@ impl HtmlPage {
             }
         }
         let body: String = self.fragments.iter().map(|f| f.render()).collect();
-        format!(
-            "<!DOCTYPE html><html><head>{head}</head><body>{body}</body></html>"
-        )
+        format!("<!DOCTYPE html><html><head>{head}</head><body>{body}</body></html>")
     }
 
     /// Renders the page-level `:root { … }` block. Starts from the
@@ -403,9 +399,7 @@ pub(crate) fn find_first_h1_text(node: &ComposableNode) -> Option<String> {
             }
             None
         }
-        ComposableNode::Component(fragment) => {
-            fragment.node().and_then(find_first_h1_text)
-        }
+        ComposableNode::Component(fragment) => fragment.node().and_then(find_first_h1_text),
         _ => None,
     }
 }

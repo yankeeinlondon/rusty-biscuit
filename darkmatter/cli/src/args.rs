@@ -1,3 +1,9 @@
+// The CLI maps `--align-*` / `--fill-*` arguments onto the deprecated
+// page-layout types (`PageAlignment`, `PageFill`, `WidthUnit`), which remain
+// the public construction path through the `DarkmatterPage` builder. The
+// migration to `renderable::layout::Layout` is tracked separately.
+#![allow(deprecated)]
+
 use clap::{Parser, Subcommand, ValueEnum};
 use clap_complete::Shell;
 use clap_complete::engine::{ArgValueCompleter, CompletionCandidate};
@@ -470,11 +476,11 @@ pub struct Cli {
     pub input: Option<PathBuf>,
 
     /// Theme for prose content (kebab-case name)
-    #[arg(long, value_parser = parse_theme_name)]
+    #[arg(long, value_parser = parse_theme_name, add = ArgValueCompleter::new(complete_theme_names))]
     pub theme: Option<ThemePair>,
 
     /// Theme for code blocks (overrides derived theme)
-    #[arg(long, value_parser = parse_theme_name)]
+    #[arg(long, value_parser = parse_theme_name, add = ArgValueCompleter::new(complete_theme_names))]
     pub code_theme: Option<ThemePair>,
 
     /// List available themes
@@ -629,6 +635,10 @@ pub struct Cli {
     #[arg(long, value_name = "FILL", value_parser = parse_page_fill)]
     pub fill_code_blocks: Option<PageFill>,
 
+    /// Promote schema-validation warnings (unknown / deprecated keys) to errors.
+    #[arg(long)]
+    pub strict_style: bool,
+
     /// Increase verbosity for styled user-facing output (-v summary, -vv detailed)
     #[arg(
         short = 'v',
@@ -768,6 +778,27 @@ fn complete_indent_values(current: &OsStr) -> Vec<CompletionCandidate> {
         .collect();
     candidates.sort_by(|a, b| a.get_value().cmp(b.get_value()));
     candidates
+}
+
+/// Completes theme names for `--theme` / `--code-theme`.
+///
+/// Enumerates every available [`ThemePair`](darkmatter::markdown::highlighting::ThemePair)
+/// by its kebab-case name (the same set `--list-themes` prints), attaching each
+/// theme's description as completion help. Without this completer the dynamic
+/// completion engine has no value source for the theme flags, so `--theme <tab>`
+/// offers nothing.
+fn complete_theme_names(current: &OsStr) -> Vec<CompletionCandidate> {
+    use darkmatter::markdown::highlighting::ColorMode;
+
+    let current_str = current.to_string_lossy();
+    darkmatter::markdown::highlighting::ThemePair::all()
+        .iter()
+        .filter(|pair| pair.kebab_name().starts_with(current_str.as_ref()))
+        .map(|pair| {
+            CompletionCandidate::new(pair.kebab_name())
+                .help(Some(pair.description(ColorMode::Dark).into()))
+        })
+        .collect()
 }
 
 /// Parses and validates list indentation width.
@@ -927,6 +958,26 @@ mod tests {
 
         let values = completion_values(complete_indent_values(OsStr::new("4")));
         assert_eq!(values, vec!["4"]);
+    }
+
+    #[test]
+    fn test_complete_theme_names() {
+        // Empty prefix enumerates every theme `--list-themes` knows about.
+        let values = completion_values(complete_theme_names(OsStr::new("")));
+        let expected: Vec<String> = darkmatter::markdown::highlighting::ThemePair::all()
+            .iter()
+            .map(|pair| pair.kebab_name().to_string())
+            .collect();
+        assert_eq!(values, expected);
+        assert!(values.contains(&"dracula".to_string()));
+        assert!(values.contains(&"nord".to_string()));
+
+        // A prefix narrows the candidates by kebab name.
+        let values = completion_values(complete_theme_names(OsStr::new("gru")));
+        assert_eq!(values, vec!["gruvbox"]);
+
+        // A non-matching prefix yields nothing.
+        assert!(completion_values(complete_theme_names(OsStr::new("zzz"))).is_empty());
     }
 
     #[test]

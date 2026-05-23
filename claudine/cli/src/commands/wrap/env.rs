@@ -917,12 +917,8 @@ mod tests {
         let launch_cwd = PathBuf::from("/tmp/scratch");
         let source_repo = PathBuf::from("/repo-b");
 
-        let ctx = launch_workspace_context_from_repo_info(
-            &launch_cwd,
-            None,
-            None,
-            Some(&source_repo),
-        );
+        let ctx =
+            launch_workspace_context_from_repo_info(&launch_cwd, None, None, Some(&source_repo));
 
         assert_eq!(ctx.repo_root.as_deref(), Some(source_repo.as_path()));
         assert_eq!(ctx.child_cwd, launch_cwd);

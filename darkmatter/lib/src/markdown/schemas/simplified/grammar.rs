@@ -105,7 +105,11 @@ impl<'a> Lexer<'a> {
                 return Err(GrammarBug {
                     message: format!(
                         "unterminated {} string",
-                        if quote == b'\'' { "single-quoted" } else { "double-quoted" }
+                        if quote == b'\'' {
+                            "single-quoted"
+                        } else {
+                            "double-quoted"
+                        }
                     ),
                     span: start..self.pos,
                 });
@@ -146,9 +150,7 @@ impl<'a> Lexer<'a> {
     fn read_word(&mut self) -> (String, Range<usize>) {
         let start = self.pos;
         while let Some(b) = self.peek_byte() {
-            if matches!(b, b',' | b';' | b'(' | b')' | b'\'' | b'"')
-                || b.is_ascii_whitespace()
-            {
+            if matches!(b, b',' | b';' | b'(' | b')' | b'\'' | b'"') || b.is_ascii_whitespace() {
                 break;
             }
             if b == b'-' && self.bytes.get(self.pos + 1).copied() == Some(b'>') {
@@ -330,14 +332,11 @@ impl<'a> Parser<'a> {
             }
             b'\'' | b'"' => {
                 if matches!(mode, LexMode::ArgList) {
-                    let (s, span) = self
-                        .lex
-                        .read_quoted(b)
-                        .map_err(|e| SchemaError::Grammar {
-                            property: self.property.to_string(),
-                            message: e.message,
-                            span: e.span,
-                        })?;
+                    let (s, span) = self.lex.read_quoted(b).map_err(|e| SchemaError::Grammar {
+                        property: self.property.to_string(),
+                        message: e.message,
+                        span: e.span,
+                    })?;
                     return Ok(Token {
                         tok: Tok::Quoted(s),
                         span,
@@ -393,10 +392,7 @@ impl<'a> Parser<'a> {
             Tok::Arrow => {
                 let rest = self.src[self.lex.pos..].trim().to_string();
                 if rest.is_empty() {
-                    return self.err(
-                        "`->` must be followed by a description",
-                        next.span,
-                    );
+                    return self.err("`->` must be followed by a description", next.span);
                 }
                 self.lex.pos = self.src.len();
                 Ok(PropertyAtom {
@@ -483,7 +479,11 @@ impl<'a> Parser<'a> {
             Ok(tok)
         } else {
             self.err(
-                format!("expected `{}`, found `{:?}`", describe_tok(&expected), tok.tok),
+                format!(
+                    "expected `{}`, found `{:?}`",
+                    describe_tok(&expected),
+                    tok.tok
+                ),
                 tok.span,
             )
         }
@@ -533,7 +533,10 @@ impl<'a> Parser<'a> {
                 Some(other) => {
                     let span = self.lex.pos..self.lex.pos + 1;
                     return self.err(
-                        format!("expected `;` or `)` between constraints, found `{}`", other as char),
+                        format!(
+                            "expected `;` or `)` between constraints, found `{}`",
+                            other as char
+                        ),
                         span,
                     );
                 }
@@ -718,10 +721,7 @@ impl<'a> Parser<'a> {
             ("integer", false) => Constraint::Integer,
             ("unique", false) => Constraint::Unique,
             ("required", true) => {
-                return self.err(
-                    "`required` does not take arguments",
-                    kw_span,
-                );
+                return self.err("`required` does not take arguments", kw_span);
             }
             ("default", true) => {
                 self.lex.pos += 1; // consume (
@@ -802,10 +802,7 @@ impl<'a> Parser<'a> {
                 let args = self.parse_arglist()?;
                 self.expect(Tok::RParen)?;
                 if args.is_empty() {
-                    return self.err(
-                        "`match` requires at least one glob",
-                        kw_span,
-                    );
+                    return self.err("`match` requires at least one glob", kw_span);
                 }
                 let globs = args.into_iter().map(|a| a.lex).collect();
                 Constraint::Match(globs)
@@ -815,10 +812,7 @@ impl<'a> Parser<'a> {
                 let args = self.parse_arglist()?;
                 self.expect(Tok::RParen)?;
                 if args.is_empty() {
-                    return self.err(
-                        "`scheme` requires at least one scheme",
-                        kw_span,
-                    );
+                    return self.err("`scheme` requires at least one scheme", kw_span);
                 }
                 let schemes = args
                     .into_iter()
@@ -828,10 +822,7 @@ impl<'a> Parser<'a> {
             }
             (other, has_args_) => {
                 let suffix = if has_args_ { "(...)" } else { "" };
-                return self.err(
-                    format!("unknown constraint `{other}{suffix}`"),
-                    kw_span,
-                );
+                return self.err(format!("unknown constraint `{other}{suffix}`"), kw_span);
             }
         };
 
@@ -869,10 +860,7 @@ impl<'a> Parser<'a> {
                     span: tok.span,
                 },
                 other => {
-                    return self.err(
-                        format!("expected argument, found `{:?}`", other),
-                        tok.span,
-                    );
+                    return self.err(format!("expected argument, found `{:?}`", other), tok.span);
                 }
             };
             args.push(arg);
@@ -886,7 +874,10 @@ impl<'a> Parser<'a> {
                 Some(other) => {
                     let span = self.lex.pos..self.lex.pos + 1;
                     return self.err(
-                        format!("expected `,` or `)` in argument list, found `{}`", other as char),
+                        format!(
+                            "expected `,` or `)` in argument list, found `{}`",
+                            other as char
+                        ),
                         span,
                     );
                 }
@@ -1054,20 +1045,29 @@ mod tests {
     #[test]
     fn parses_pattern_with_quoted_regex() {
         let atom = parse(r#"string(pattern("^[a-z]+$"))"#);
-        assert_eq!(atom.constraints, vec![Constraint::Pattern("^[a-z]+$".into())]);
+        assert_eq!(
+            atom.constraints,
+            vec![Constraint::Pattern("^[a-z]+$".into())]
+        );
     }
 
     #[test]
     fn parses_pattern_with_bare_regex() {
         let atom = parse("string(pattern(^[a-z]+$))");
-        assert_eq!(atom.constraints, vec![Constraint::Pattern("^[a-z]+$".into())]);
+        assert_eq!(
+            atom.constraints,
+            vec![Constraint::Pattern("^[a-z]+$".into())]
+        );
     }
 
     #[test]
     fn parses_array_with_item_and_array_constraints() {
         let atom = parse("string(pattern(^[a-z]+$))[](min(1); max(5); unique)");
         assert!(atom.is_array);
-        assert_eq!(atom.constraints, vec![Constraint::Pattern("^[a-z]+$".into())]);
+        assert_eq!(
+            atom.constraints,
+            vec![Constraint::Pattern("^[a-z]+$".into())]
+        );
         assert_eq!(
             atom.array_constraints,
             vec![
@@ -1104,7 +1104,9 @@ mod tests {
         let atom = parse("string(default(hello))");
         assert_eq!(
             atom.constraints,
-            vec![Constraint::Default(serde_json::Value::String("hello".into()))]
+            vec![Constraint::Default(serde_json::Value::String(
+                "hello".into()
+            ))]
         );
     }
 
@@ -1122,7 +1124,9 @@ mod tests {
         let atom = parse(r#"string(default("hi there"))"#);
         assert_eq!(
             atom.constraints,
-            vec![Constraint::Default(serde_json::Value::String("hi there".into()))]
+            vec![Constraint::Default(serde_json::Value::String(
+                "hi there".into()
+            ))]
         );
     }
 
@@ -1154,11 +1158,7 @@ mod tests {
         assert_eq!(
             atom.constraints,
             vec![
-                Constraint::Members(vec![
-                    "draft".into(),
-                    "published".into(),
-                    "archived".into()
-                ]),
+                Constraint::Members(vec!["draft".into(), "published".into(), "archived".into()]),
                 Constraint::Default(serde_json::Value::String("draft".into())),
                 Constraint::Required,
             ]

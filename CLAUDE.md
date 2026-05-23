@@ -56,3 +56,8 @@ Update alongside code changes:
     Touch only what you must. Don't "improve" adjacent code, comments, or formatting. Don't refactor what isn't broken. Match existing style.
 - **Rule 4** — Goal-Driven Execution.
     Define success criteria. Loop until verified. Don't tell Claude what steps to follow, tell it what success looks like and let it iterate.
+
+## Hashing
+
+- any hashing requirements should prefer using the crypto, non-crypto, and password hashing that **biscuit-hash** provides
+- in the case of hashing Markdown documents, the **Darkmatter** hasher should be used (as it uses a Markdown aware approach)

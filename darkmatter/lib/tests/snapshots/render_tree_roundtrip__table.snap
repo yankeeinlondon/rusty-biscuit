@@ -1,0 +1,8 @@
+---
+source: darkmatter/lib/tests/render_tree_roundtrip.rs
+expression: rendered.output
+---
+| Name | Count |
+| :-- | --: |
+| apples | 3 |
+| pears | 12 |

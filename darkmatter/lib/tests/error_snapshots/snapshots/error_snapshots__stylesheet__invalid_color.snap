@@ -1,7 +1,8 @@
 ---
 source: darkmatter/lib/tests/error_snapshots/stylesheet.rs
+assertion_line: 109
 expression: out
 ---
-⨫ StylesheetError: invalid color value
+⤫ StylesheetError: invalid color value
 ┃ Value: notacolor
 Accepted color tokens: #rgb, #rrggbb, rgb(r,g,b), rgba(r,g,b,a), a named color, or one of transparent / currentColor.

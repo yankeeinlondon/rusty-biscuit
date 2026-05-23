@@ -227,9 +227,7 @@ fn generates_new_for_path_param_and_body() {
     let code = format_generated_code(&tokens).expect("Failed to format code");
 
     assert!(
-        code.contains(
-            "pub fn new(thread_id: impl Into<String>, body: CreateMessageBody) -> Self"
-        ),
+        code.contains("pub fn new(thread_id: impl Into<String>, body: CreateMessageBody) -> Self"),
         "Expected new() with path param and body, got:\n{}",
         code
     );
@@ -929,9 +927,7 @@ fn query_params_with_path_params() {
     assert!(code.contains("pub page: Option<i64>"));
 
     // new() should include path params
-    assert!(
-        code.contains("pub fn new(owner: impl Into<String>, repo: impl Into<String>) -> Self")
-    );
+    assert!(code.contains("pub fn new(owner: impl Into<String>, repo: impl Into<String>) -> Self"));
 }
 
 #[test]

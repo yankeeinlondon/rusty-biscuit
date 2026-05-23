@@ -83,6 +83,27 @@ fn redact_temp_home(input: &str) -> String {
     format!("{}HOME=<redacted>{}", &input[..start], &after[end..])
 }
 
+/// Replace every occurrence of the tempdir root (and its canonicalized form)
+/// with `<workspace>` so snapshots are stable across machines and runs.
+///
+/// macOS canonicalizes `/var/folders/...` → `/private/var/folders/...`, so
+/// the canonical (longer) form must be replaced first to avoid leaving a
+/// stray `/private` prefix.
+fn redact_workspace_paths(workspace: &Path, input: &str) -> String {
+    let mut out = input.to_string();
+    if let Ok(canon) = workspace.canonicalize() {
+        let canon = canon.display().to_string();
+        if !canon.is_empty() {
+            out = out.replace(&canon, "<workspace>");
+        }
+    }
+    let raw = workspace.display().to_string();
+    if !raw.is_empty() {
+        out = out.replace(&raw, "<workspace>");
+    }
+    out
+}
+
 fn today_log_path(home: &Path) -> std::path::PathBuf {
     home.join(".claudine")
         .join("logs")
@@ -391,11 +412,21 @@ exit 0
 #[test]
 fn wrapper_reports_removed_sensitive_env_names() {
     let workspace = tempdir().unwrap();
+    let cwd_dir = workspace.path().join("cwd");
     let path_dir = workspace.path().join("bin");
     let fake_home = workspace.path().join("home");
+    fs::create_dir_all(&cwd_dir).unwrap();
     fs::create_dir_all(&path_dir).unwrap();
     seed_minimal_config(&fake_home);
     fs::create_dir_all(fake_home.join(".codex")).unwrap();
+
+    // Seed a deterministic system-prompt.md next to the launch CWD so the
+    // pre-flight token count is stable across repo state and machines.
+    fs::write(
+        cwd_dir.join("system-prompt.md"),
+        "You are a test fixture system prompt.\n",
+    )
+    .unwrap();
 
     write_executable(
         &path_dir.join("codex"),
@@ -413,12 +444,17 @@ exit 0
         .env("TERM_WIDTH", "80")
         .env("OPENAI_API_KEY", "keep")
         .env("INTERNAL_TOKEN", "remove")
+        .current_dir(&cwd_dir)
         .args(["codex", "--include", "OPENAI_API_KEY", "--", "--version"])
         .assert()
         .success();
 
     let stderr = String::from_utf8_lossy(&assert.get_output().stderr);
-    insta::assert_snapshot!(redact_temp_home(&redact_session_id(&strip_ansi(&stderr))));
+    let redacted = redact_workspace_paths(
+        workspace.path(),
+        &redact_temp_home(&redact_session_id(&strip_ansi(&stderr))),
+    );
+    insta::assert_snapshot!(redacted);
 }
 
 #[cfg(unix)]

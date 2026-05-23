@@ -1,7 +1,8 @@
 ---
 source: darkmatter/lib/tests/error_snapshots/reference.rs
+assertion_line: 79
 expression: out
 ---
-⨫ ReferenceError: I/O failure
+⤫ ReferenceError: I/O failure
 ┃ file gone
 Check file existence and permissions.

@@ -7,12 +7,12 @@ spec: ""
 design: ""
 plan: "plan.md"
 start:
-    message: "🖊️ creating a plan for `{{area}}/{{dir}}`"
+    message: "🖊️ creating a plan for the `{{spec}}` specification"
 success:
     stderr: "The **{{area}}/{{dir}}/{{plan}}** _plan_ has been created"
-    message: "✅  the **{{area}}/{{dir}}/{{plan}}** _plan_ was created _at_ {{ctx.time}}"
+    message: "✅  the _plan_ for the spec `{{spec}}` was created _at_ {{ctx.time}}"
 failure:
-    message: "❌️  the **{{area}}/{{dir}}/{{plan}}** _plan_ has failed to complete!"
+    message: "❌️  the _plan_ for the spec `{{spec}}` failed to complete!"
 ---
 
 You are a planning agent. Convert the following documents into a high confidence execution plan:

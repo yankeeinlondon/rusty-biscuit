@@ -62,7 +62,8 @@ fn load_inputs(dir: &Path) -> Vec<Markdown> {
     entries
         .into_iter()
         .map(|p| {
-            let content = fs::read_to_string(&p).unwrap_or_else(|e| panic!("read {}: {e}", p.display()));
+            let content =
+                fs::read_to_string(&p).unwrap_or_else(|e| panic!("read {}: {e}", p.display()));
             content.as_str().into()
         })
         .collect()

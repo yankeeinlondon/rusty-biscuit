@@ -1,9 +1,3 @@
-<<<<<<< HEAD
----
-
----
-||||||| a8e59b48
-=======
 ---
 area: "{{ctx.current_package_area}}"
 ---

@@ -191,10 +191,7 @@ pub fn detect_repo_packages(repo_root: &Path) -> Vec<(String, PathBuf)> {
 /// knows the target area (e.g. from `--package-area sniff`).
 ///
 /// Returns `(package_name, repo_relative_path)` pairs.
-pub fn detect_packages_in_dirs(
-    repo_root: &Path,
-    dirs: &[PathBuf],
-) -> Vec<(String, PathBuf)> {
+pub fn detect_packages_in_dirs(repo_root: &Path, dirs: &[PathBuf]) -> Vec<(String, PathBuf)> {
     let mut packages = Vec::new();
     for dir in dirs {
         if !dir.is_dir() {
@@ -220,25 +217,24 @@ pub fn detect_packages_in_dirs(
                 None => continue,
             };
             let name = if path.file_name().is_some_and(|n| n == "Cargo.toml") {
-                fs::read_to_string(path)
-                    .ok()
-                    .and_then(|c| {
-                        biscuit_file::toml_crate::from_str::<biscuit_file::toml_crate::Value>(&c)
-                            .ok()
-                            .and_then(|v| {
-                                v.get("package")
-                                    .and_then(|p| p.get("name"))
-                                    .and_then(|n| n.as_str().map(|s| s.to_string()))
-                            })
-                    })
+                fs::read_to_string(path).ok().and_then(|c| {
+                    biscuit_file::toml_crate::from_str::<biscuit_file::toml_crate::Value>(&c)
+                        .ok()
+                        .and_then(|v| {
+                            v.get("package")
+                                .and_then(|p| p.get("name"))
+                                .and_then(|n| n.as_str().map(|s| s.to_string()))
+                        })
+                })
             } else {
-                fs::read_to_string(path)
-                    .ok()
-                    .and_then(|c| {
-                        serde_json::from_str::<serde_json::Value>(&c)
-                            .ok()
-                            .and_then(|v| v.get("name").and_then(|n| n.as_str().map(|s| s.to_string())))
-                    })
+                fs::read_to_string(path).ok().and_then(|c| {
+                    serde_json::from_str::<serde_json::Value>(&c)
+                        .ok()
+                        .and_then(|v| {
+                            v.get("name")
+                                .and_then(|n| n.as_str().map(|s| s.to_string()))
+                        })
+                })
             };
             if let Some(name) = name {
                 packages.push((name, rel));
@@ -384,9 +380,7 @@ where
 
     let mut docs: Vec<MarkdownMeta> = paths
         .into_par_iter()
-        .filter_map(|path| {
-            parse_markdown_meta_with_mode(&path, repo_root, packages, mode)
-        })
+        .filter_map(|path| parse_markdown_meta_with_mode(&path, repo_root, packages, mode))
         .collect();
 
     docs.sort_by(|a, b| a.relative.cmp(&b.relative));
@@ -568,9 +562,7 @@ where
 
     let mut docs: Vec<MarkdownMeta> = all_paths
         .into_par_iter()
-        .filter_map(|path| {
-            parse_markdown_meta_with_mode(&path, repo_root, packages, mode)
-        })
+        .filter_map(|path| parse_markdown_meta_with_mode(&path, repo_root, packages, mode))
         .collect();
 
     docs.sort_by(|a, b| a.relative.cmp(&b.relative));
@@ -590,9 +582,7 @@ pub fn parse_markdown_files(
 ) -> Vec<MarkdownMeta> {
     let mut docs: Vec<MarkdownMeta> = paths
         .into_par_iter()
-        .filter_map(|path| {
-            parse_markdown_meta_with_mode(path, repo_root, packages, mode)
-        })
+        .filter_map(|path| parse_markdown_meta_with_mode(path, repo_root, packages, mode))
         .collect();
     docs.sort_by(|a, b| a.relative.cmp(&b.relative));
     docs
@@ -1663,7 +1653,10 @@ mod tests {
 
             let packages: Vec<(String, PathBuf)> = vec![];
             let docs = collect_markdown_files_filtered(
-                root, &packages, DocParseMode::FrontmatterOnly, |_| true,
+                root,
+                &packages,
+                DocParseMode::FrontmatterOnly,
+                |_| true,
             );
             assert_eq!(docs.len(), 1);
             assert_eq!(docs[0].prompt.as_deref(), Some("Do stuff"));
@@ -1683,7 +1676,10 @@ mod tests {
 
             let packages: Vec<(String, PathBuf)> = vec![];
             let docs = collect_markdown_files_filtered(
-                root, &packages, DocParseMode::FrontmatterOnly, |_| true,
+                root,
+                &packages,
+                DocParseMode::FrontmatterOnly,
+                |_| true,
             );
             assert_eq!(docs.len(), 1);
             assert!(docs[0].content_hash.is_empty());
@@ -1719,7 +1715,10 @@ mod tests {
 
             let packages: Vec<(String, PathBuf)> = vec![];
             let docs = collect_markdown_files_filtered(
-                root, &packages, DocParseMode::FrontmatterOnly, |_| true,
+                root,
+                &packages,
+                DocParseMode::FrontmatterOnly,
+                |_| true,
             );
             assert_eq!(docs.len(), 1);
             assert!(docs[0].title.is_empty());

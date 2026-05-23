@@ -533,10 +533,7 @@ impl MermaidDiagram {
             &self.layout,
             term.width(),
         );
-        let cell_pixel_width = term
-            .cell_size()
-            .map(|cs| cs.width.max(1))
-            .unwrap_or(8u32);
+        let cell_pixel_width = term.cell_size().map(|cs| cs.width.max(1)).unwrap_or(8u32);
         let target_width_px = (dims.image_width.max(1)) * cell_pixel_width;
 
         let (png_path, cache_hit) = self

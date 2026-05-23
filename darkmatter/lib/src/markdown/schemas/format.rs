@@ -98,9 +98,7 @@ pub fn match_keyword_factory<'a>(
 
     for (idx, item) in arr.iter().enumerate() {
         let raw = item.as_str().ok_or_else(|| {
-            ValidationError::schema(format!(
-                "x-darkmatter-match[{idx}] must be a string"
-            ))
+            ValidationError::schema(format!("x-darkmatter-match[{idx}] must be a string"))
         })?;
         let (target, has_pos) = if let Some(stripped) = raw.strip_prefix('!') {
             (stripped, false)
@@ -122,9 +120,7 @@ pub fn match_keyword_factory<'a>(
 
     let positive = if has_positive {
         Some(positive.build().map_err(|err| {
-            ValidationError::schema(format!(
-                "could not build positive glob set: {err}"
-            ))
+            ValidationError::schema(format!("could not build positive glob set: {err}"))
         })?)
     } else {
         None
@@ -220,9 +216,7 @@ pub fn url_scheme_keyword_factory<'a>(
     let mut schemes = Vec::with_capacity(arr.len());
     for (idx, item) in arr.iter().enumerate() {
         let raw = item.as_str().ok_or_else(|| {
-            ValidationError::schema(format!(
-                "x-darkmatter-url-scheme[{idx}] must be a string"
-            ))
+            ValidationError::schema(format!("x-darkmatter-url-scheme[{idx}] must be a string"))
         })?;
         schemes.push(raw.to_ascii_lowercase());
     }
@@ -327,8 +321,7 @@ mod tests {
 
     fn make_match_keyword(globs: Value) -> Box<dyn Keyword> {
         let parent = Map::new();
-        match_keyword_factory(&parent, &globs, Location::default())
-            .expect("factory should accept")
+        match_keyword_factory(&parent, &globs, Location::default()).expect("factory should accept")
     }
 
     #[test]
@@ -374,8 +367,9 @@ mod tests {
     #[test]
     fn url_scheme_keyword_accepts_match() {
         let parent = Map::new();
-        let kw = url_scheme_keyword_factory(&parent, &json!(["https", "http"]), Location::default())
-            .unwrap();
+        let kw =
+            url_scheme_keyword_factory(&parent, &json!(["https", "http"]), Location::default())
+                .unwrap();
         assert!(kw.is_valid(&Value::String("https://example.com".into())));
         assert!(kw.is_valid(&Value::String("HTTP://example.com".into())));
         assert!(!kw.is_valid(&Value::String("ftp://example.com".into())));
@@ -384,8 +378,8 @@ mod tests {
     #[test]
     fn url_scheme_keyword_rejects_non_url() {
         let parent = Map::new();
-        let kw = url_scheme_keyword_factory(&parent, &json!(["https"]), Location::default())
-            .unwrap();
+        let kw =
+            url_scheme_keyword_factory(&parent, &json!(["https"]), Location::default()).unwrap();
         assert!(!kw.is_valid(&Value::String("not a url".into())));
     }
 

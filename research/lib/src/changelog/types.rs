@@ -491,10 +491,22 @@ mod tests {
 
     #[test]
     fn test_confidence_level_from_str() {
-        assert_eq!("high".parse::<ConfidenceLevel>().unwrap(), ConfidenceLevel::High);
-        assert_eq!("HIGH".parse::<ConfidenceLevel>().unwrap(), ConfidenceLevel::High);
-        assert_eq!("Medium".parse::<ConfidenceLevel>().unwrap(), ConfidenceLevel::Medium);
-        assert_eq!("low".parse::<ConfidenceLevel>().unwrap(), ConfidenceLevel::Low);
+        assert_eq!(
+            "high".parse::<ConfidenceLevel>().unwrap(),
+            ConfidenceLevel::High
+        );
+        assert_eq!(
+            "HIGH".parse::<ConfidenceLevel>().unwrap(),
+            ConfidenceLevel::High
+        );
+        assert_eq!(
+            "Medium".parse::<ConfidenceLevel>().unwrap(),
+            ConfidenceLevel::Medium
+        );
+        assert_eq!(
+            "low".parse::<ConfidenceLevel>().unwrap(),
+            ConfidenceLevel::Low
+        );
         assert!("invalid".parse::<ConfidenceLevel>().is_err());
     }
 

@@ -529,13 +529,7 @@ mod tests {
         for i in 0..3 {
             let id = format!("sa-{i}");
             state.subagent_started(id.clone(), None, t0);
-            state.subagent_stopped(
-                &id,
-                None,
-                None,
-                None,
-                t0 + Duration::from_secs(i as u64),
-            );
+            state.subagent_stopped(&id, None, None, None, t0 + Duration::from_secs(i as u64));
         }
         let ids: Vec<_> = state
             .recent_subagents

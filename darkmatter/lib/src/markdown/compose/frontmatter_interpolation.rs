@@ -698,10 +698,7 @@ mod tests {
             }));
             // With defer disabled, the literal `$(pwd)` flows through.
             let report = interpolate_frontmatter(&mut fm, &test_context(), false, false).unwrap();
-            assert_eq!(
-                fm.as_map().get("combined"),
-                Some(&json!("cwd is $(pwd)"))
-            );
+            assert_eq!(fm.as_map().get("combined"), Some(&json!("cwd is $(pwd)")));
             assert_eq!(report.replacements, 1);
         }
     }

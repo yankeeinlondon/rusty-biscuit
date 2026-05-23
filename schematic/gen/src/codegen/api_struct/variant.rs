@@ -9,9 +9,7 @@ use quote::quote;
 /// - `variant()` - Creates a variant builder
 /// - `variant_with()` - Convenience method for common variant configurations
 /// - `variant_with_headers()` - Convenience method for header-based variants
-pub(super) fn generate_variant_methods(
-    builder_name: &Ident,
-) -> TokenStream {
+pub(super) fn generate_variant_methods(builder_name: &Ident) -> TokenStream {
     quote! {
         /// Creates a variant builder for customizing this API client.
         ///
@@ -109,10 +107,7 @@ pub(super) fn generate_variant_methods(
 ///
 /// The builder allows creating customized variants of the API client with
 /// different base URLs, authentication, headers, and response hooks.
-pub(super) fn generate_variant_builder(
-    struct_name: &Ident,
-    builder_name: &Ident,
-) -> TokenStream {
+pub(super) fn generate_variant_builder(struct_name: &Ident, builder_name: &Ident) -> TokenStream {
     quote! {
         /// Builder for creating customized variants of the API client.
         ///

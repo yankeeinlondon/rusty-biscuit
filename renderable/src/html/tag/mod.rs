@@ -1,12 +1,12 @@
 use url::Url;
 
 use crate::browser::fragment::ComposableNode;
-use crate::stylesheet::CssStyle;
 use crate::html::attribute::{
     ClassDefinition, DomId, HtmlDataAttribute,
     aria::{AriaAttribute, AriaRole},
     rel::RelAttribute,
 };
+use crate::stylesheet::CssStyle;
 
 /// Placeholder type for HTML attribute values.
 pub type Value = String;
@@ -113,6 +113,7 @@ pub enum BlockTag {
     Iframe,
     Ins,
     Kbd,
+    Li,
     Main,
     Map,
     Mark,
@@ -423,7 +424,9 @@ pub struct InnerHtml {
 
 impl InnerHtml {
     pub(crate) fn new() -> Self {
-        Self { children: Vec::new() }
+        Self {
+            children: Vec::new(),
+        }
     }
 }
 
@@ -556,6 +559,7 @@ impl BlockTag {
             BlockTag::Iframe => "iframe",
             BlockTag::Ins => "ins",
             BlockTag::Kbd => "kbd",
+            BlockTag::Li => "li",
             BlockTag::Main => "main",
             BlockTag::Map => "map",
             BlockTag::Mark => "mark",

@@ -206,8 +206,11 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                     .collect()
             } else if has_pkg_filter {
                 let pkgs = sniff::filesystem::docs::detect_repo_packages(&repo_root);
-                let lowered: Vec<String> =
-                    docs_filter.package.iter().map(|p| p.to_lowercase()).collect();
+                let lowered: Vec<String> = docs_filter
+                    .package
+                    .iter()
+                    .map(|p| p.to_lowercase())
+                    .collect();
                 pkgs.iter()
                     .filter(|(name, _)| lowered.iter().any(|p| name.eq_ignore_ascii_case(p)))
                     .map(|(_, rel)| repo_root.join(rel))
@@ -282,10 +285,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                     .collect();
 
                 let packages = if has_area_filter && !has_pkg_filter {
-                    sniff::filesystem::docs::detect_packages_in_dirs(
-                        &repo_root,
-                        &target_dirs,
-                    )
+                    sniff::filesystem::docs::detect_packages_in_dirs(&repo_root, &target_dirs)
                 } else {
                     pkg_handle.join().unwrap_or_default()
                 };
@@ -301,10 +301,8 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                     );
                 }
             } else if has_area_filter && !has_pkg_filter {
-                let packages = sniff::filesystem::docs::detect_packages_in_dirs(
-                    &repo_root,
-                    &target_dirs,
-                );
+                let packages =
+                    sniff::filesystem::docs::detect_packages_in_dirs(&repo_root, &target_dirs);
                 let mode = if needs_full_parse {
                     sniff::filesystem::docs::DocParseMode::Full
                 } else {
@@ -330,14 +328,9 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                     |_| true,
                 );
                 let packages = pkg_handle.join().unwrap_or_default();
-                sniff::filesystem::docs::assign_packages(
-                    &mut all_docs,
-                    &packages,
-                    &repo_root,
-                );
+                sniff::filesystem::docs::assign_packages(&mut all_docs, &packages, &repo_root);
             } else if has_pkg_filter || needs_full_parse {
-                let packages =
-                    sniff::filesystem::docs::detect_repo_packages(&repo_root);
+                let packages = sniff::filesystem::docs::detect_repo_packages(&repo_root);
                 let mode = if needs_full_parse {
                     sniff::filesystem::docs::DocParseMode::Full
                 } else {
@@ -490,15 +483,17 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                             .unwrap_or_else(|| std::path::Path::new("."));
                         let repo = git2::Repository::discover(dir)
                             .map_err(|_| "No git repository found — provide a REMOTE argument or run from inside a git repo".to_string())?;
-                        resolve_origin_or_first_remote(&repo)
-                            .ok_or("No git remotes found for this repository — provide a REMOTE argument")?
+                        resolve_origin_or_first_remote(&repo).ok_or(
+                            "No git remotes found for this repository — provide a REMOTE argument",
+                        )?
                     }
                 };
                 if remote.contains("://") || remote.starts_with("git@") {
                     return handle_remote_url(&remote, cli.json, cli.plain, cli.verbose, &perf)
                         .await;
                 } else if is_owner_repo_shorthand(&remote) {
-                    return handle_shorthand(&remote, cli.json, cli.plain, cli.verbose, &perf).await;
+                    return handle_shorthand(&remote, cli.json, cli.plain, cli.verbose, &perf)
+                        .await;
                 } else {
                     let url =
                         resolve_remote_name(&remote, base_dir.as_deref()).ok_or_else(|| {
@@ -730,7 +725,8 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                         return Ok(());
                     }
                     if cli.verbose > 0 {
-                        if let Some(info) = sniff::filesystem::git::get_current_worktree_info(dir)? {
+                        if let Some(info) = sniff::filesystem::git::get_current_worktree_info(dir)?
+                        {
                             println!("{} [{}]", info.0, info.1);
                         } else {
                             println!("{name}");
@@ -1620,8 +1616,7 @@ pub(super) fn resolve_package_and_area(
                     .and_then(|pkgs| pkgs.iter().find(|p| p.name.to_lowercase() == lower_name))
                     .map(|p| p.package_area.clone())
                     .unwrap_or_else(|| pkg_path.trim_end_matches('/').to_string());
-                let requested =
-                    area_path_label(packages, area).unwrap_or_else(|| area.to_string());
+                let requested = area_path_label(packages, area).unwrap_or_else(|| area.to_string());
                 return Err(format!(
                     "Package '{name}' is in area '{real_area}', not '{requested}'"
                 )

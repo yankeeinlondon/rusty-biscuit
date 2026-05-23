@@ -29,7 +29,10 @@ pub fn escape_text(input: &str) -> Cow<'_, str> {
 /// Escapes the four characters relevant inside a double-quoted attribute
 /// value: `&`, `<`, `"`, `'`. `>` is intentionally left alone.
 pub fn escape_attribute(input: &str) -> Cow<'_, str> {
-    if input.bytes().any(|b| matches!(b, b'&' | b'<' | b'"' | b'\'')) {
+    if input
+        .bytes()
+        .any(|b| matches!(b, b'&' | b'<' | b'"' | b'\''))
+    {
         let mut out = String::with_capacity(input.len() + 8);
         for ch in input.chars() {
             match ch {
@@ -165,8 +168,10 @@ mod tests {
 
     #[test]
     fn escape_attribute_handles_quotes_but_not_gt() {
-        assert_eq!(escape_attribute(r#"he said "hi" > 'bye'"#),
-            "he said &quot;hi&quot; > &#39;bye&#39;");
+        assert_eq!(
+            escape_attribute(r#"he said "hi" > 'bye'"#),
+            "he said &quot;hi&quot; > &#39;bye&#39;"
+        );
     }
 
     #[test]

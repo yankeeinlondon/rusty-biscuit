@@ -92,8 +92,8 @@ list:
   - 1
   - 2
 ---
-Value is string: {{ IsString(value) ? "yes" : "no" }}
-List is array: {{ IsArray(list) ? "yes" : "no" }}"#;
+Value is string: {{ is_string(value) ? "yes" : "no" }}
+List is array: {{ is_array(list) ? "yes" : "no" }}"#;
     let md: Markdown = content.into();
     let (composed, _) = md.compose().unwrap();
     assert!(composed.content().contains("Value is string: yes"));
@@ -109,10 +109,10 @@ empty_arr: []
 full_arr:
   - 1
 ---
-Empty string: {{ IsEmpty(empty_str) ? "empty" : "not" }}
-Full string: {{ IsEmpty(full_str) ? "empty" : "not" }}
-Empty array: {{ IsEmpty(empty_arr) ? "empty" : "not" }}
-Full array: {{ IsEmpty(full_arr) ? "empty" : "not" }}"#;
+Empty string: {{ is_empty(empty_str) ? "empty" : "not" }}
+Full string: {{ is_empty(full_str) ? "empty" : "not" }}
+Empty array: {{ is_empty(empty_arr) ? "empty" : "not" }}
+Full array: {{ is_empty(full_arr) ? "empty" : "not" }}"#;
     let md: Markdown = content.into();
     let (composed, _) = md.compose().unwrap();
     assert!(composed.content().contains("Empty string: empty"));
@@ -129,14 +129,14 @@ fn regression_string_mutations_in_interpolation() {
 title: "hello world"
 kebab: "helloWorld"
 ---
-Upper: {{ Upper(title) }}
-Lower: {{ Lower("HELLO") }}
-Capitalize: {{ Capitalize(title) }}
-Kebab: {{ KebabCase(kebab) }}
-Camel: {{ CamelCase("hello-world") }}
-Pascal: {{ PascalCase("hello_world") }}
-Snake: {{ SnakeCase("helloWorld") }}
-Title: {{ TitleCase("hello world") }}"#;
+Upper: {{ upper(title) }}
+Lower: {{ lower("HELLO") }}
+Capitalize: {{ capitalize(title) }}
+Kebab: {{ kebab_case(kebab) }}
+Camel: {{ camel_case("hello-world") }}
+Pascal: {{ pascal_case("hello_world") }}
+Snake: {{ snake_case("helloWorld") }}
+Title: {{ title_case("hello world") }}"#;
     let md: Markdown = content.into();
     let (composed, _) = md.compose().unwrap();
     assert!(composed.content().contains("Upper: HELLO WORLD"));
@@ -155,8 +155,8 @@ fn regression_string_predicates_in_conditions() {
 filename: "report.pdf"
 prefix: "rep"
 ---
-{{ StartsWith(filename, prefix) ? "Matching prefix" : "No match" }}
-{{ EndsWith(filename, ".pdf") ? "Is PDF" : "Not PDF" }}"#;
+{{ starts_with(filename, prefix) ? "Matching prefix" : "No match" }}
+{{ ends_with(filename, ".pdf") ? "Is PDF" : "Not PDF" }}"#;
     let md: Markdown = content.into();
     let (composed, _) = md.compose().unwrap();
     assert!(composed.content().contains("Matching prefix"));
@@ -213,9 +213,9 @@ fn regression_date_validators_in_ternary() {
 date_str: "2026-05-09"
 invalid: "not-a-date"
 ---
-Valid date: {{ IsDate(date_str) ? "yes" : "no" }}
-Invalid date: {{ IsDate(invalid) ? "yes" : "no" }}
-DateTime: {{ IsDateTime("2026-05-09T10:30:00Z") ? "yes" : "no" }}"#;
+Valid date: {{ is_date(date_str) ? "yes" : "no" }}
+Invalid date: {{ is_date(invalid) ? "yes" : "no" }}
+DateTime: {{ is_datetime("2026-05-09T10:30:00Z") ? "yes" : "no" }}"#;
     let md: Markdown = content.into();
     let (composed, _) = md.compose().unwrap();
     assert!(composed.content().contains("Valid date: yes"));
@@ -231,12 +231,12 @@ datetime_str: "2024-06-15T12:30:00Z"
 bad_str: "not-a-date"
 num: 123
 ---
-IsDate: {{ IsDate(date_str) ? "yes" : "no" }}
-IsDateUtc: {{ IsDateUtc(date_str) ? "yes" : "no" }}
-IsDateTime: {{ IsDateTime(datetime_str) ? "yes" : "no" }}
-IsDateTimeUtc: {{ IsDateTimeUtc(datetime_str) ? "yes" : "no" }}
-IsDateBad: {{ IsDate(bad_str) ? "yes" : "no" }}
-IsDateNum: {{ IsDate(num) ? "yes" : "no" }}"#;
+IsDate: {{ is_date(date_str) ? "yes" : "no" }}
+IsDateUtc: {{ is_date_utc(date_str) ? "yes" : "no" }}
+IsDateTime: {{ is_datetime(datetime_str) ? "yes" : "no" }}
+IsDateTimeUtc: {{ is_datetime_utc(datetime_str) ? "yes" : "no" }}
+IsDateBad: {{ is_date(bad_str) ? "yes" : "no" }}
+IsDateNum: {{ is_date(num) ? "yes" : "no" }}"#;
     let md: Markdown = content.into();
     let (composed, _) = md.compose().unwrap();
     assert!(composed.content().contains("IsDate: yes"));
@@ -252,16 +252,16 @@ fn regression_relative_date_validators_in_interpolation() {
     let content = r#"---
 distant: "1900-01-01"
 ---
-IsToday: {{ IsToday(distant) ? "yes" : "no" }}
-IsTodayUtc: {{ IsTodayUtc(distant) ? "yes" : "no" }}
-IsYesterday: {{ IsYesterday(distant) ? "yes" : "no" }}
-IsYesterdayUtc: {{ IsYesterdayUtc(distant) ? "yes" : "no" }}
-IsTomorrow: {{ IsTomorrow(distant) ? "yes" : "no" }}
-IsTomorrowUtc: {{ IsTomorrowUtc(distant) ? "yes" : "no" }}
-IsThisMonth: {{ IsThisMonth(distant) ? "yes" : "no" }}
-IsThisMonthUtc: {{ IsThisMonthUtc(distant) ? "yes" : "no" }}
-IsThisYear: {{ IsThisYear(distant) ? "yes" : "no" }}
-IsThisYearUtc: {{ IsThisYearUtc(distant) ? "yes" : "no" }}"#;
+IsToday: {{ is_today(distant) ? "yes" : "no" }}
+IsTodayUtc: {{ is_today_utc(distant) ? "yes" : "no" }}
+IsYesterday: {{ is_yesterday(distant) ? "yes" : "no" }}
+IsYesterdayUtc: {{ is_yesterday_utc(distant) ? "yes" : "no" }}
+IsTomorrow: {{ is_tomorrow(distant) ? "yes" : "no" }}
+IsTomorrowUtc: {{ is_tomorrow_utc(distant) ? "yes" : "no" }}
+IsThisMonth: {{ is_this_month(distant) ? "yes" : "no" }}
+IsThisMonthUtc: {{ is_this_month_utc(distant) ? "yes" : "no" }}
+IsThisYear: {{ is_this_year(distant) ? "yes" : "no" }}
+IsThisYearUtc: {{ is_this_year_utc(distant) ? "yes" : "no" }}"#;
     let md: Markdown = content.into();
     let (composed, _) = md.compose().unwrap();
     assert!(composed.content().contains("IsToday: no"));
@@ -286,23 +286,23 @@ fn regression_date_helpers_in_condition_mode() {
     });
 
     // Strict validators - true cases
-    assert!(evaluate_condition_against("IsDate(date_str)", &data, Path::new(".")).unwrap());
-    assert!(evaluate_condition_against("IsDateUtc(date_str)", &data, Path::new(".")).unwrap());
-    assert!(evaluate_condition_against("IsDateTime(datetime_str)", &data, Path::new(".")).unwrap());
+    assert!(evaluate_condition_against("is_date(date_str)", &data, Path::new(".")).unwrap());
+    assert!(evaluate_condition_against("is_date_utc(date_str)", &data, Path::new(".")).unwrap());
+    assert!(evaluate_condition_against("is_datetime(datetime_str)", &data, Path::new(".")).unwrap());
     assert!(
-        evaluate_condition_against("IsDateTimeUtc(datetime_str)", &data, Path::new(".")).unwrap()
+        evaluate_condition_against("is_datetime_utc(datetime_str)", &data, Path::new(".")).unwrap()
     );
 
     // Strict validators - false cases
-    assert!(!evaluate_condition_against("IsDate(bad_str)", &data, Path::new(".")).unwrap());
-    assert!(!evaluate_condition_against("IsDateTime(bad_str)", &data, Path::new(".")).unwrap());
+    assert!(!evaluate_condition_against("is_date(bad_str)", &data, Path::new(".")).unwrap());
+    assert!(!evaluate_condition_against("is_datetime(bad_str)", &data, Path::new(".")).unwrap());
 
     // Relative validators - false cases with distant date
-    assert!(!evaluate_condition_against("IsToday(distant)", &data, Path::new(".")).unwrap());
-    assert!(!evaluate_condition_against("IsTodayUtc(distant)", &data, Path::new(".")).unwrap());
-    assert!(!evaluate_condition_against("IsYesterday(distant)", &data, Path::new(".")).unwrap());
-    assert!(!evaluate_condition_against("IsThisMonth(distant)", &data, Path::new(".")).unwrap());
-    assert!(!evaluate_condition_against("IsThisYear(distant)", &data, Path::new(".")).unwrap());
+    assert!(!evaluate_condition_against("is_today(distant)", &data, Path::new(".")).unwrap());
+    assert!(!evaluate_condition_against("is_today_utc(distant)", &data, Path::new(".")).unwrap());
+    assert!(!evaluate_condition_against("is_yesterday(distant)", &data, Path::new(".")).unwrap());
+    assert!(!evaluate_condition_against("is_this_month(distant)", &data, Path::new(".")).unwrap());
+    assert!(!evaluate_condition_against("is_this_year(distant)", &data, Path::new(".")).unwrap());
 }
 
 #[test]
@@ -310,7 +310,7 @@ fn regression_page_block_with_date_helper() {
     let content = r#"---
 date_str: "2024-06-15"
 ---
-::block when="IsDate(date_str)"
+::block when="is_date(date_str)"
 Valid date detected
 ::end-block"#;
     let md: Markdown = content.into();
@@ -320,7 +320,7 @@ Valid date detected
     let content_bad = r#"---
 bad_str: "not-a-date"
 ---
-::block when="IsDate(bad_str)"
+::block when="is_date(bad_str)"
 Valid date detected
 ::end-block"#;
     let md_bad: Markdown = content_bad.into();
@@ -408,8 +408,8 @@ config:
 ---
 First admin: {{ users[0].name + " (" + length(users[0].tags) + " tags)" }}
 Adult check: {{ users[0].age >= config["min_age"] ? "adult" : "minor" }}
-Empty tags: {{ IsEmpty(users[-1].tags) ? users[-1].name + " has no tags" : "has tags" }}
-Formatted: {{ config.prefix + Lower(users[0].name) }}"#;
+Empty tags: {{ is_empty(users[-1].tags) ? users[-1].name + " has no tags" : "has tags" }}
+Formatted: {{ config.prefix + lower(users[0].name) }}"#;
     let md: Markdown = content.into();
     let (composed, _) = md.compose().unwrap();
     assert!(
@@ -464,7 +464,7 @@ settings:
     - "auth"
     - "billing"
 ---
-::block when="IsArray(settings.features) && length(settings.features) > 0"
+::block when="is_array(settings.features) && length(settings.features) > 0"
 Features enabled
 ::end-block"#;
     let md: Markdown = content.into();
@@ -491,7 +491,7 @@ fn regression_shortcut_api_with_arithmetic_and_access() {
     assert!(result);
 
     let result2 = evaluate_condition_against(
-        "IsArray(items) && !IsEmpty(items) && length(items) * 2 > count",
+        "is_array(items) && !is_empty(items) && length(items) * 2 > count",
         &data,
         Path::new("."),
     )
@@ -543,7 +543,7 @@ title: null
 ---
 Name: {{ name || "unnamed" }}
 Title: {{ title || "untitled" }}
-Display: {{ IsEmpty(name) ? "No name provided" : Upper(name) }}"#;
+Display: {{ is_empty(name) ? "No name provided" : upper(name) }}"#;
     let md: Markdown = content.into();
     let (composed, _) = md.compose().unwrap();
     assert!(composed.content().contains("Name: unnamed"));

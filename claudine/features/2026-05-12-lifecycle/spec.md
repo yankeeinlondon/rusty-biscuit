@@ -4,211 +4,347 @@
 
 ![lifecycle](./lifecycle.png)
 
-Today we have the following "lifecycle" events defined for a prompt document in Claudine:
+A Claudine prompt document moves through a fixed set of lifecycle events. Today four of them exist as `LifecycleSignal` variants in `composition/lifecycle.rs` (`start`, `success`, `blocked`, `failure`), but they only support a handful of communication properties. This feature formalizes the full event set, introduces a unified per-event configuration model, and folds two pre-existing composition concerns (`loop`, `next`) into that model.
 
-1. **Start** - _pre-flight checks have passed_
+### Event Inventory
 
-    - the best time to communicate about _this_ prompt file starting (no opportunity to proxy or skip to another prompt)
-    - you can also stop this prompt from completing by raising an error if certain preconditions aren't available for a successful run
+| Event | New? | Fires when |
+|---|---|---|
+| `initialize` | **new** | Prompt file has been identified, before any pre-flight checks have run |
+| `start` | existing | Pre-flight checks have all passed; about to invoke the agent |
+| `blocked` | existing | Pre-flight checks failed; agent will not be invoked |
+| `success` | existing | Agentic loop completed without error |
+| `failure` | existing | Agentic loop returned an error |
+| `loop` | **repurposed** | An iteration of a looping prompt boundary (see [Loop](#loop)) |
+| `next` | **new** | Composition completed successfully and a handoff is configured |
 
-2. **Blocked** - _pre-flight checks failed_
+### Event Purpose
 
-    - communicate regarding blocked status
-    - proxy to a different prompt instead?
+- **`initialize`** — quick communication, environment prep, or opt-out before the prompt commits to running. Cheap, runs even when pre-flight will fail.
+- **`start`** — best moment to announce *this* prompt is running. Pre-flight has passed; the agent will be invoked next.
+- **`blocked`** — communicate why the prompt was rejected; optionally proxy to a different prompt.
+- **`success`** — communicate completion, capture metrics, fire webhooks, advance a sequence.
+- **`failure`** — communicate failure, recover with `Retry` / `Resume` / `Requeue` / `Proxy`, or simply exit.
+- **`loop`** — per-iteration boundary inside a looping prompt; layers lifecycle-event behavior on top of the existing iteration controls.
+- **`next`** — handoff to another document on successful completion.
 
-3. **Success** (agentic loop completed successfully)
+## Configuration Model
 
-    - communicate a successful outcome and/or status of a metric
-    - call a webhook? run a git commit? etc.
-    - move onto the "next step" when in sequence or loop
-
-4. **Failure** (agentic loop ran into an error)
-
-    - communicate a failed outcome
-    - handle the failure by taking action:
-        - retry
-        - resume
-        - proxy
-
-These are a good starting point but we'll add two new events and modify our terminology a bit to incorporate one more:
-
-- **Initialize (new)** - _when the prompt file is first identified and before the pre-flight checks are run; good for:_
-    - Quick upfront communication to the user
-    - Allows _proxying_ a request to a different prompt for processing
-    - Allows the prompt to be _skipped_ which is the same as **stop** except that it's only stopping the execution of _this_ prompt 
-    - A useful time to "prep" the environment for this prompt by creating some "side-effects" which will be used at **start**
-- **Loop (repurposed)** - _today we see the `loop` frontmatter as responsible for defining a prompt loop; that won't change but it's worthwhile considering it as part of the Lifecycle just like the other events_
-- **Next (new)** - _a new instruction we'll add in this feature (see below) as well as being considered a lifecycle event_
-
-## Commonality Among Lifecycle Events
-
-While there are differences between the different lifecycle events, the ambition is to find as large of a _common_ API surface as possible.
-
-> a larger _common_ interface makes the learning curve less steep as each lifecycle event is configured and behaves very similarly
-
-Today the lifecycle events are an opportunity to _communicate_ about the
-
-## Actions
-
-### Lifecycle Actions
-
-Any given lifecycle event will have some subset of the following actions _available_ to them but the first lifecyle event which matches it's preconditions finalizes the lifecycle action.
-
-- `Proxy`
-- `Skip`
-- `Stop`*
-- `Error`*
-- `Handle`**
-
-> - those actions with a `*` are available on ALL lifecycle events
-> - those actions with a `**` are available to all failure based events (`blocked` and `failure`)
-
-### Other Actions
-
-The lifecycle actions above have a **`1:M`** cardinality with each lifecycle event but all other actions operate on a **`0:M`** basis:
-
-#### Communication (existing)
-
-The communication mechanisms we have today will be used at every lifecycle event (they already exist in current lifecycle events):
-
-- `effect` - play a sound effect from playa sounds effect's library to get user's attention
-- `say`, `speak` - use the host's TTS solutions to _speak_ a message to the user
-- `message` - send a message to a messaging application (Discord, Slack, etc.)
-- `desktop` - send a message to the OS's desktop notification system
-- `stderr` - communicate a message to the console's STDERR stream
-- `stdout` - communicate a message to the console's STDOUT stream
-
-#### Side Effects (new)
-
-Side effects are often spoken about in very unkind terms by functional programming snobs but in fact the world wouldn't be worth living without side effects. I mean, unless you're a huge fan of the **status quo**. In this feature we're offering side effects
-at every lifecycle event.
-
-Side effects are broken up into two categories:
-
-1. **Bespoke** shell commands
-    - will need to go through the normal white-listing approval process during preflight checks to be usable
-2. **built-ins**
-    - designed to be safe, do not need approval to be used
-    - provides nice reporting out of the box
-
-
-##### **built-in Commands**
-
-- `ensureFile(file)`
-- `ensureFile(file, handle: ignore | fail)`
-    - tries to resolve the passed in file path using the normal `FileReference` rules
-    - if file reference found then, then this is a no-op
-    - if file wasn't found then the file is created as an empty file:
-        - if the file reference is "multi-pathed" (like magic paths, or an implicit relative file) we will resolve to the most _localized_ variant
-        - for example, the path `@prompts/foobar.md` could resolve to a file off
-- `ensureDir(path)`
-- `removeDocumentation(file | glob)`
-    - allows the removal of documentation files (.md, .txt, .doc, .docx, .xls, .ppt, etc.) but only within:
-        - the current repo
-        - the `~/.claudine`, and agent user scoped directories (e.g., `~/.claude`, `~/.codex`, `~/.config/opencode`, `~/.qwen`, etc.)
-- `removeData(file | glob)`
-    - allows the removal of data files (.json, .toml, .yaml, .csv, .tsv, .xml)
-- `removeImage(file | glob)`
-- `set_frontmatter(...)`
-    - two signatures:
-        - `set_frontmatter(file, JSON)`
-        - `set_frontmatter(file, prop, value)`
-- `append_jsonl(file, content)`
-- `append(file, content)`
-- `post(url, payload)`
-
-
-## Configuring a Lifecycle Event
-
-Today lifecycle events just let us communicate. For instance:
+Every lifecycle event is configured under a frontmatter key matching its name and shares the same configuration shape.
 
 ```yaml
-say: "hi"
-stderr: "I said hello"
+start:
+    # Legacy communication properties (backward compatible)
+    say: "Starting build for {{ctx.repo}}"
+    notify: "Build starting"
+    effect: small-group-cheer
+
+    # The stack: ordered list of conditional actions
+    stack:
+        - when: "env.AGENT == 'claude'"
+          action: say
+          message: "Using Claude provider"
+        - "shell(git status --short)"
 ```
 
-To preserve backward compatibility as well provide a simple, clean interface for _just communicating_ this same API surface is available with the introduction of this feature. 
+### Top-Level Communication Properties
 
-However, as a part of this feature, we will be introducing a property called `stack` to each lifecycle event. The `stack` property is an array/vector/list of `LifecycleStackItem`:
+Each event accepts the following shorthand properties at its top level. They are unconditional and execute **before** the stack, in the order written.
+
+| Property | Purpose |
+|---|---|
+| `say`, `speak` | TTS via host's speech provider |
+| `effect` | Sound effect from the embedded library |
+| `message` | Send via configured messenger route (Slack, Discord, WhatsApp, Signal, Telegram) |
+| `notify` | OS desktop notification (replaces the deprecated `desktop:` alias) |
+| `stderr` | Plain string to STDERR |
+| `stdout` | Plain string to STDOUT |
+
+All values support [Darkmatter interpolation](@darkmatter/docs/topics/darkmatter-expressions.md).
+
+### The Stack
+
+`stack:` is an **ordered list, processed top to bottom.** Each element is a `LifecycleStackItem`:
 
 ```rust
 pub struct LifecycleStackItem {
-    when: {expression},
-    action: {action}
+    pub when: Option<Expression>,  // omitted == always true
+    pub action: ActionRef,
 }
 ```
 
-- the _conditional expressions_ use the same [expression syntax](@darkmatter/docs/topics/expression-syntax.md) which shared by **Darkmatter** and **Claudine**.
-- _actions_ can be expressed as a string (shorthand) or a dictionary (long form)
-- _actions_ can also be expressed as a block a singular "action" or an array of actions
+- `when:` is a [Darkmatter conditional expression](@darkmatter/docs/topics/darkmatter-expressions.md). When omitted, the item always executes.
+- `action:` is exactly one action (see [Actions](#actions)). If you want multiple effects, write multiple stack items.
 
-### Action Definitions
+### Stack Processing
 
-#### Built-in Commands
+```text
+For each stack item, top to bottom:
+  evaluate `when` →
+    false: skip (no-op)
+    true:  execute action
+      • communication, side effect, expression call, shell → continue to next item
+      • lifecycle action (Stop/Skip/Error/Proxy/Retry/Resume/Requeue) → stop processing this event
 
-The **built-in** commands defined above can be configured in a very formulaic way:
-
-```yaml
-- start:
-    stack:
-        - "ensureFile(@foo/bar/baz.md)"
-        - action: ensureFile
-          file: "@foo/bar/baz.md"
+If the stack runs to completion without a lifecycle action matching, the event ends normally.
 ```
 
-> In the above example we see stack items but both items do exactly the same thing; one uses the short form and the latter the long form.
+## Actions
 
-#### Bespoke Shell Commands
+An action is one of five categories. Most accept a **short form** (string) and a **long form** (mapping with `action:` key plus parameters).
 
-To execute a **bespoke shell command** the syntax is:
+### Lifecycle Actions
 
-- The short form is: `shell(cmd)`
-- The long form is:
-    ```yaml
-    action: shell
-    command: {cmd}
-    ```
+These actions change what happens next. The first one whose `when:` matches **terminates stack processing** for the current event.
 
-    the "long form" provides the following additional (but optional) props:
-    - `on_error` - provide the STDOUT output for the command whenever an error code is returned
-        - if you want to suppress STDERR output on errors just append ` &2> /dev/null` to the end of your command
-    - `no_error` - a boolean flag which will suppress any error return value when set to `true` without changing the STDOUT/STDERR streams
+| Action | Where valid | Effect |
+|---|---|---|
+| `Stop` | every event | End this event's stack cleanly. Composition continues. |
+| `Skip` | `initialize` only | Mark the prompt as skipped without running it. Pre-flight does not run. Emits an `INFO` log line indicating the skip. In a sequence, advances to the next step. |
+| `Error` | every event | Mark this event as failed with a reason. At `start`/`initialize` this prevents agent invocation; at `success` it converts the outcome to failure; at `blocked`/`failure` it short-circuits further recovery attempts. |
+| `Proxy` | `initialize`, `blocked`, `failure` | Hand off execution to another prompt document. The proxied document enters at its own `initialize` event — a fresh prompt run, including pre-flight. The target document's own opt-out logic (`Skip`/`Proxy`/`Error` at `initialize`) is respected. |
+| `Retry` | `blocked`, `failure` | Re-run the agentic loop from the last invocation. Parameters: `max_attempts` (default `1`), `backoff` (`fixed` \| `exponential`, default `fixed`), `delay` (duration, default `0s`). |
+| `Resume` | `failure` only | Resume the agent session with its context intact and a follow-up message. Parameters: `message` (the follow-up prompt, required), `max_attempts` (default `1`). |
+| `Requeue` | `blocked`, `failure` | Push this prompt onto the deferred-execution queue (via `rendezvous`). Parameters: `delay` (duration, required), `reason` (string, optional). |
 
-#### Communication in the Stack
+Short forms:
 
-While you are offered a chance to communicate with the basic `say`, `effect` based props, these props are not conditional. Therefore, it's possible to stack as many communications as you like on the stack.
+- `"stop"`, `"skip"`
+- `"proxy(@prompts/foo.md)"`
+- `"error(\"reason\")"`
+- `"retry"`, `"retry(3)"` (count shorthand)
+- `"resume(\"please set the production_ready frontmatter\")"`
+- `"requeue(5m)"`
 
-- The short form looks like: `say(hi)` or `effect(space-alarm)`
-- The long form is depends a little bit by the communication method but primarily is:
-    - `say`, `speak`, `message`, and `desktop` all require a **message** parameter:
+### Communication Actions
 
-        ```yaml
-        success:
-            stack:
-                - action: say
-                  message: "hi"
-        ```
-    - in contrast `effect` requires a **effect** parameter
+The same channels as the top-level properties, but each is a discrete stack item (so it can be guarded by `when:`).
 
-        ```yaml
-        success:
-            stack:
-                - action: effect
-                  effect: applause
-        ```
+| Action | Short form | Long form parameter |
+|---|---|---|
+| `say` / `speak` | `say("hi")` | `message:` |
+| `effect` | `effect(applause)` | `sound:` |
+| `message` | `message("done")` | `message:` (optionally `route:` to pin to a specific channel) |
+| `notify` | `notify("done")` | `message:` |
+| `stderr` | `stderr("warn")` | `message:` |
+| `stdout` | `stdout("ok")` | `message:` |
 
-> The pattern is that the _short form_ allows you pass the required parameters positionally whereas the _long form_ provides named parameters (required parameters are required but each communication style exposes other optional config params)
+```yaml
+success:
+    stack:
+        - when: "env.AGENT == 'claude'"
+          action: say
+          message: "Claude finished"
+        - action: effect
+          sound: applause
+```
 
-## Processing Lifecycle Stack
+### Side-Effect Actions
 
-Each lifecycle event starts by _communicating_ through the same means that is done today (e.g., leveraging the existing `say`, `effect`, etc. properties on the lifecycle event). Immediately following that though, the lifecycle `stack` is processed.
+Mutating operations (file creation, frontmatter updates, HTTP POSTs, etc.) are provided by the Darkmatter side-effects system introduced in [`more-context-variables`](@darkmatter/features/_unscheduled/more-context-variables/spec.md). The lifecycle stack invokes them by name:
 
-- `stack` is treated as a FIFO stack (aka, items at the top are executed before items at the bottom)
-- items in the stack are taken off one at a time until
-    - a stack item who's `when` condition matches _and_ who's action is a Lifecycle Action
-    - if condition above is never met then execution stops when the stack has been exhausted
-- each item off the stack is first evaluated for a match to the `when` condition
-    - if there is NOT a match then this stack item becomes a **no-op**
-    - if there **is** a match then this action is executed
-        - if the matched action is a Lifecycle Action then this lifecycle's event process is over
-        - the Lifecycle action will dictate what action will happen next
+```yaml
+start:
+    stack:
+        - "ensure_file(@prompts/state.md)"
+        - action: set_frontmatter
+          file: "@spec.md"
+          prop: "status"
+          value: "in-progress"
+```
+
+This spec deliberately does **not** define the side-effect catalog. See the Darkmatter spec for the authoritative list and call shapes. **Dependency:** the Darkmatter side-effects work must ship before this lifecycle feature ships.
+
+### Expression-Function Actions
+
+Read-only [Darkmatter expression functions](@darkmatter/docs/topics/darkmatter-expressions.md) may also be invoked as stack actions, primarily for logging their result or feeding it into a subsequent `set_frontmatter` step. They are mostly useful inside `when:` clauses; standalone use is supported but rare.
+
+### Shell Actions
+
+Bespoke shell commands invoked from the stack.
+
+```yaml
+- "shell(git status --short)"
+- action: shell
+  command: "git push origin HEAD"
+  on_error: "Push failed; check network"
+  no_error: false
+```
+
+| Long-form parameter | Purpose |
+|---|---|
+| `command` | The shell command string (required) |
+| `on_error` | Message to emit when the command exits non-zero |
+| `no_error` | Boolean; when `true`, suppress error exit codes without altering STDOUT/STDERR |
+
+**Pre-flight requirement:** every shell command in every reachable stack must pass Claudine's command whitelist during pre-flight, exactly like body-level shell expansions today.
+
+## Per-Event Details
+
+### `initialize`
+
+Runs as soon as the prompt file is identified. Pre-flight checks have **not** run. Use for:
+
+- Cheap upfront communication ("starting pre-flight…")
+- Opting out via `Skip` (e.g., feature-flag a prompt off)
+- Proxying to a different prompt via `Proxy` (e.g., route based on env)
+- Preparing the environment via side effects so pre-flight checks will succeed
+
+**`initialize` is a timing slot, not a validation phase.** It cannot "fail itself" — pre-flight (owned by `start`) remains the single validation surface. The only way `initialize` alters flow is by a stack item evaluating a lifecycle action (`Skip`, `Proxy`, `Error`, `Stop`). An `Error` raised here routes through the normal `failure` event path, same as anywhere else.
+
+### `start`
+
+Pre-flight has passed; the agent is about to be invoked. Last chance to communicate before non-determinism takes over.
+
+### `blocked`
+
+A pre-flight check failed. The agent will not be invoked. Common patterns: communicate the failure, `Proxy` to a fallback prompt, `Retry` after a side-effect fixes the offending condition, or `Requeue` for later execution.
+
+### `success`
+
+Agentic loop completed cleanly. Common patterns: announce outcome, commit a side effect (e.g., `append_jsonl` to a log), or chain via `next`.
+
+### `failure`
+
+Agentic loop errored. Common patterns: announce failure, recover via `Retry` / `Resume` / `Requeue` / `Proxy`, or simply communicate and exit.
+
+### `loop`
+
+The `loop` event is **both** an iteration-control configuration **and** a lifecycle event. The two concern groups share one frontmatter block.
+
+#### Iteration Controls (already implemented)
+
+These keys govern *how* the prompt iterates:
+
+| Key | Type | Purpose | Default |
+|---|---|---|---|
+| `while` | expression | Continue while truthy. Mutually exclusive with `until`. | — |
+| `until` | expression | Continue until truthy. Mutually exclusive with `while`. | — |
+| `action` / `actions` | string or list | Per-iteration frontmatter mutations | — |
+| `max` | positive integer | Hard iteration cap | `100` |
+| `fail_fast` | boolean | Abort the loop on first iteration error | `true` |
+| `on_rate_limit` | enum: `pause` \| `abort` \| `continue` | Behavior on provider rate-limit | `pause` |
+
+Per-iteration `action` operations (existing DSL):
+
+- `increment(prop)`, `decrement(prop)` — numeric mutation
+- `set(prop, value)` — assign
+- `append(prop, value)`, `prepend(prop, value)` — array mutation
+- `merge(prop, value)` — shallow object merge
+
+Both DSL string form (`"increment(phase)"`) and structured form (`{op: "increment", prop: "phase"}`) are accepted.
+
+Ambient variables exposed inside each iteration:
+
+- `_loop_count` (1-based iteration number)
+- `_loop_is_first`, `_loop_is_last` (booleans; `_loop_is_last` is speculative)
+- `_loop_last_output`, `_loop_last_exit_code` (from previous iteration)
+
+#### Lifecycle Concerns
+
+In addition to iteration controls, the `loop` block accepts the standard lifecycle-event properties (`say`, `notify`, `effect`, `message`, `stderr`, `stdout`, `stack`).
+
+**Firing model:** the lifecycle concerns fire **once per iteration**, immediately before the iteration's prompt is sent to the agent. Use the ambient variables `_loop_is_first` and `_loop_is_last` in `when:` clauses to express entry-only, exit-only, or per-iteration behavior. The iteration controls (`while`/`until`/`action`/`max`/`fail_fast`/`on_rate_limit`) are processed by the existing loop engine and are **not** lifecycle events themselves — they govern *whether* and *how* the next iteration runs, while the lifecycle concerns govern *what to say and do at* each iteration boundary.
+
+The composition's outer `start` / `success` / `failure` events still fire once per overall run (before the loop begins / after it ends), distinct from `loop` event firings.
+
+```yaml
+phase: 1
+total_phases: 6
+loop:
+    # Iteration controls — processed by the loop engine
+    until: "phase > total_phases"
+    action: "increment(phase)"
+    max: 10
+    fail_fast: true
+    on_rate_limit: pause
+
+    # Lifecycle concerns — fire once per iteration
+    say: "Phase {{phase}} of {{total_phases}}"
+    stack:
+        - when: "_loop_is_first"
+          action: notify
+          message: "Build loop started"
+        - when: "_loop_is_last"
+          action: effect
+          sound: applause
+```
+
+### `next`
+
+Opt-in: present means a handoff is configured. Mutually exclusive `suggest` vs `push` keys determine interactivity.
+
+```yaml
+# Interactive: prompt the user before handing off
+next:
+    suggest:
+        compose: "the-next-thing.md"
+
+# Non-interactive: run immediately on success
+next:
+    push:
+        compose: "the-next-thing.md"
+```
+
+The handoff target accepts any of the **execution-group node kinds**:
+
+| Kind | Shape |
+|---|---|
+| `compose` | `compose: "<file>"` — run another prompt through the composition pipeline |
+| `inline-compose` | `inline-compose: "<file>"` — run an inline-compose prompt |
+| `sequence` | `sequence: "<file>"` — run a sequence |
+| `shell` | `shell: "<command>"` — run a shell command |
+| `prompt` | `prompt: "<text>"` — send a direct prompt to the current agent |
+
+Additional optional parameters mirror the execution-group node form (e.g., `yolo:`, `agent:`, `model:`).
+
+Standard lifecycle-event properties (`say`, `notify`, `effect`, `message`, `stack`) are also accepted on the `next` event.
+
+## Action Error Propagation
+
+When a side-effect, expression-function, or shell action errors during stack processing, what happens depends on which event is processing the stack.
+
+| Event | Default behavior on errored action |
+|---|---|
+| `initialize` | Stop the stack, log the error, transition to `failure` event |
+| `start` | Stop the stack, log the error, transition to `failure` event |
+| `blocked` | Stop the stack, log the error, transition to `failure` event |
+| `loop` (per-iteration) | Stop the stack, log the error, transition to `failure` event |
+| `success` | Stop the stack, log the error, **composition outcome unchanged** |
+| `failure` | Stop the stack, log the error, **composition outcome unchanged** |
+| `next` | Stop the stack, log the error, **composition outcome unchanged** |
+
+The split is intentional: setup-phase errors should propagate so the agent isn't invoked with a broken environment, but terminal-phase errors (a flaky webhook in `success.stack`) must never invert the composition's actual outcome.
+
+**Per-action escape hatch:** any action accepts a `no_error: true` parameter to suppress error propagation. When set, errors are logged but the stack continues to the next item, and the composition outcome is unchanged regardless of which event is processing the stack.
+
+```yaml
+start:
+    stack:
+        - action: shell
+          command: "git fetch --all"
+          no_error: true       # never block agent invocation on fetch failure
+        - "ensure_file(@out/log.md)"
+```
+
+This extends the existing `no_error` flag (previously defined only for `shell`) to all action categories.
+
+## Backward Compatibility
+
+Existing prompts using only top-level communication properties continue to work unchanged:
+
+```yaml
+start:
+    say: "hi"
+success:
+    effect: applause
+failure:
+    message: "Something broke"
+```
+
+Adding `stack:` is purely additive. The top-level properties fire first, then the stack is processed.
+
+## Dependencies
+
+- **Darkmatter side-effects spec** ([`more-context-variables`](@darkmatter/features/_unscheduled/more-context-variables/spec.md)) — must be finalized and implemented before this feature lands. Side effects are the substrate for non-lifecycle, non-shell, non-communication actions.
+- **Darkmatter expression engine** ([`expressions`](@darkmatter/docs/topics/darkmatter-expressions.md)) — already implemented; used for `when:` conditions and interpolation in messages.
