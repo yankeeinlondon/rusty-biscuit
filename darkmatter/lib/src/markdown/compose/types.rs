@@ -1206,8 +1206,8 @@ impl ComposeContext {
     pub fn env(&self) -> &HashMap<String, String> {
         &self.inner.env
     }
-    /// Access the values map (crate-internal).
-    pub(crate) fn values(&self) -> &serde_json::Map<String, serde_json::Value> {
+    /// Access the values map.
+    pub fn values(&self) -> &serde_json::Map<String, serde_json::Value> {
         &self.inner.values
     }
 }
