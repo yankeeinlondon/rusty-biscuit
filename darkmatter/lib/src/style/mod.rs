@@ -3,6 +3,11 @@
 //! See `renderable/features/_unscheduled/style-property/spec.md` for the
 //! design. Sub-spec #1: schema + parser only; no rendering changes.
 
+pub mod error;
+pub mod warning;
+
+pub use error::StyleParseError;
+
 #[cfg(test)]
 mod tests {
     /// Smoke test: the module is reachable and compiles.
