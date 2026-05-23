@@ -71,7 +71,11 @@ plan-implement-review:
     echo
     echo -e "Detected {{ yellow }}${total_phases}{{ reset }} phases in the plan"
     echo
-    claudine compose @prompts/implement-phase.md -y plan="${dir}/${plan}" --${implementing_agent} ${implementing_model_param} total_phases="${total_phases}"
+    current=1
+    while (( current <= total_phases )); do
+        claudine compose @prompts/implement-phase.md -y plan="${dir}/${plan}" --${implementing_agent} ${implementing_model_param} phase="${current}" total_phases="${total_phases}"
+        ((current++))
+    done
     claudine compose @prompts/review-feature.md -y spec="${spec}" iteration=1 --${reviewing_agent} ${reviewing_model_param}
     echo
     echo -e "The specification file {{ blue }}${spec}{{ reset }} drove a plan, implementation, and review."
@@ -126,7 +130,11 @@ implement-review:
         exit 1
     fi
     echo -e "Starting at {{ yellow }}phase ${start_phase}{{ reset }} of {{ yellow }}${total_phases}{{ reset }}"
-    claudine compose @prompts/implement-phase.md -y plan="${plan}" --${implementing_agent} ${implementing_model_param} phase="${start_phase}" total_phases="${total_phases}" memory="${memory}"
+    current="${start_phase}"
+    while (( current <= total_phases )); do
+        claudine compose @prompts/implement-phase.md -y plan="${plan}" --${implementing_agent} ${implementing_model_param} phase="${current}" total_phases="${total_phases}" memory="${memory}"
+        ((current++))
+    done
     claudine compose @prompts/review-feature.md -y spec="${spec}" iteration=1 --${reviewing_agent} ${reviewing_model_param}
     echo
     echo -e "The specification file {{ blue }}${spec}{{ reset }} drove implementation and review."
