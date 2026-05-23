@@ -20,7 +20,7 @@ use crate::style::warning::{StyleWarning, StyleWarningKind};
 /// `sub_spec` is `<=` this constant are considered wired and stay silent.
 ///
 /// Advance this constant whenever a future sub-spec wires its keys.
-pub const ACTIVE_STYLE_WIRING_SUB_SPEC: u8 = 2;
+pub const ACTIVE_STYLE_WIRING_SUB_SPEC: u8 = 3;
 
 /// Parse a `serde_json::Value` representing the value at the `style:` key.
 ///
@@ -484,9 +484,9 @@ mod tests {
 
     #[test]
     fn future_phase_key_still_emits_known_but_inactive() {
-        // `table.alignment` is wired in sub-spec #3 — currently inactive.
+        // `table.color` is wired in sub-spec #5 — currently inactive.
         let (_, w) = from_json_value(&json!({
-            "table": {"alignment": "right"}
+            "table": {"color": "red-500"}
         }))
         .unwrap();
         let inactive: Vec<_> = w
@@ -494,18 +494,87 @@ mod tests {
             .filter(|w| matches!(w.kind, StyleWarningKind::KnownButInactive { .. }))
             .collect();
         assert_eq!(inactive.len(), 1);
-        assert_eq!(inactive[0].path, "style.table.alignment");
+        assert_eq!(inactive[0].path, "style.table.color");
         assert!(matches!(
             inactive[0].kind,
-            StyleWarningKind::KnownButInactive { sub_spec: 3 }
+            StyleWarningKind::KnownButInactive { sub_spec: 5 }
         ));
     }
 
     #[test]
-    fn nested_alias_emits_two_deprecated_and_one_known_but_inactive() {
+    fn sub_spec_3_keys_no_longer_emit_known_but_inactive() {
+        // Phase 4 of sub-spec #3: table/images/block-quote width, max-width,
+        // and alignment are now wired. They must not emit KnownButInactive.
+        let cases = [
+            json!({"table": {"width": "40ch"}}),
+            json!({"table": {"max-width": "50%"}}),
+            json!({"table": {"alignment": "right"}}),
+            json!({"images": {"width": "40ch"}}),
+            json!({"images": {"max-width": "50%"}}),
+            json!({"images": {"alignment": "center"}}),
+            json!({"block-quote": {"width": "40ch"}}),
+            json!({"block-quote": {"max-width": "50%"}}),
+            json!({"block-quote": {"alignment": "left"}}),
+        ];
+        for v in &cases {
+            let (_, w) = from_json_value(v).unwrap();
+            let inactive: Vec<_> = w
+                .iter()
+                .filter(|w| matches!(w.kind, StyleWarningKind::KnownButInactive { .. }))
+                .collect();
+            assert!(
+                inactive.is_empty(),
+                "sub-spec #3 key in {:?} should not emit KnownButInactive; got: {:?}",
+                v,
+                inactive,
+            );
+        }
+    }
+
+    #[test]
+    fn sub_spec_3_color_keys_still_emit_known_but_inactive() {
+        // Color keys for the same buckets remain inactive (sub-spec #5).
+        let cases = [
+            ("style.table.color", json!({"table": {"color": "red-500"}})),
+            (
+                "style.table.bg-color",
+                json!({"table": {"bg-color": "blue-200"}}),
+            ),
+            ("style.images.color", json!({"images": {"color": "red-500"}})),
+            (
+                "style.images.bg-color",
+                json!({"images": {"bg-color": "blue-200"}}),
+            ),
+            (
+                "style.block-quote.color",
+                json!({"block-quote": {"color": "red-500"}}),
+            ),
+            (
+                "style.block-quote.bg-color",
+                json!({"block-quote": {"bg-color": "blue-200"}}),
+            ),
+        ];
+        for (path, v) in &cases {
+            let (_, w) = from_json_value(v).unwrap();
+            let inactive: Vec<_> = w
+                .iter()
+                .filter(|w| matches!(w.kind, StyleWarningKind::KnownButInactive { .. }))
+                .collect();
+            assert_eq!(inactive.len(), 1, "expected 1 inactive for {}", path);
+            assert_eq!(inactive[0].path, *path);
+            assert!(matches!(
+                inactive[0].kind,
+                StyleWarningKind::KnownButInactive { sub_spec: 5 }
+            ));
+        }
+    }
+
+    #[test]
+    fn nested_alias_emits_two_deprecated_warnings() {
         // Spec test #8 + Finding 1 regression: `block_quote.max_width` must
-        // emit exactly two `Deprecated` warnings plus a single
-        // `KnownButInactive` at the canonical path.
+        // emit exactly two `Deprecated` warnings (one per snake-cased
+        // segment). After sub-spec #3 phase 4 it no longer emits
+        // `KnownButInactive` because `block-quote.max-width` is now wired.
         let (_, w) = from_json_value(&json!({
             "block_quote": {"max_width": "50%"}
         }))
@@ -519,8 +588,11 @@ mod tests {
             .filter(|w| matches!(w.kind, StyleWarningKind::KnownButInactive { .. }))
             .collect();
         assert_eq!(deprecated.len(), 2, "got: {:?}", deprecated);
-        assert_eq!(inactive.len(), 1);
-        assert_eq!(inactive[0].path, "style.block-quote.max-width");
+        assert!(
+            inactive.is_empty(),
+            "block-quote.max-width is wired in sub-spec #3; got: {:?}",
+            inactive
+        );
     }
 
     #[test]
@@ -539,9 +611,10 @@ mod tests {
             .iter()
             .filter(|w| matches!(w.kind, StyleWarningKind::KnownButInactive { .. }))
             .collect();
-        // Sub-spec #2 wires the 4 page leaves; the remaining 2 table + 1 ol
-        // + 3 ul = 6 are still future-phase.
-        assert_eq!(inactive.len(), 6, "got {:?}", inactive);
+        // Sub-specs #2 and #3 wire the page leaves and the table
+        // alignment/max-width leaves. Only the 1 ol + 3 ul = 4 sub-spec #4
+        // leaves remain future-phase.
+        assert_eq!(inactive.len(), 4, "got {:?}", inactive);
     }
 
     #[test]

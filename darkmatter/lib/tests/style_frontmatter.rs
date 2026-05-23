@@ -130,8 +130,8 @@ fn fixture_applies_expected_page_margins() {
 #[test]
 fn fixture_no_known_but_inactive_for_page_keys() {
     // After sub-spec #2 lands, page-level keys must NOT emit
-    // `KnownButInactive`. Table / ul / ol keys still emit them (they are
-    // wired in sub-specs #3+).
+    // `KnownButInactive`. UL / OL keys still emit them (they are wired in
+    // sub-spec #4).
     let raw = fs::read_to_string(fixture_path()).expect("read fixture");
     let md = Markdown::try_from_content(&raw).expect("parse markdown");
     let (_style, warnings) = from_frontmatter(md.frontmatter()).expect("parse style");
