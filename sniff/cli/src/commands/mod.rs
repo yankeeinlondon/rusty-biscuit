@@ -480,15 +480,17 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                             .unwrap_or_else(|| std::path::Path::new("."));
                         let repo = git2::Repository::discover(dir)
                             .map_err(|_| "No git repository found — provide a REMOTE argument or run from inside a git repo".to_string())?;
-                        resolve_origin_or_first_remote(&repo)
-                            .ok_or("No git remotes found for this repository — provide a REMOTE argument")?
+                        resolve_origin_or_first_remote(&repo).ok_or(
+                            "No git remotes found for this repository — provide a REMOTE argument",
+                        )?
                     }
                 };
                 if remote.contains("://") || remote.starts_with("git@") {
                     return handle_remote_url(&remote, cli.json, cli.plain, cli.verbose, &perf)
                         .await;
                 } else if is_owner_repo_shorthand(&remote) {
-                    return handle_shorthand(&remote, cli.json, cli.plain, cli.verbose, &perf).await;
+                    return handle_shorthand(&remote, cli.json, cli.plain, cli.verbose, &perf)
+                        .await;
                 } else {
                     let url =
                         resolve_remote_name(&remote, base_dir.as_deref()).ok_or_else(|| {
