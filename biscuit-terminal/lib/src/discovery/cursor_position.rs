@@ -41,12 +41,21 @@ pub fn cursor_position_with_timeout(timeout: Duration) -> Option<CursorPosition>
 }
 
 /// Internal DSR query implementation.
+///
+/// Opens `/dev/tty` directly for the query I/O so the request bytes reach
+/// the controlling terminal even when stdout is redirected to a pipe
+/// (e.g. when invoked under `output="$(some-tool ...)"`). Writing to
+/// `std::io::stdout()` in that situation would land the query in the
+/// captured stream, the terminal would never see it, and any wrapper
+/// re-emitting the captured bytes later would trigger a delayed response
+/// that lands as garbage on the next shell prompt.
 #[cfg(unix)]
 fn query_cursor_position(timeout: Duration) -> Result<CursorPosition, String> {
     use super::raw_mode::{RawModeGuard, TERMINAL_QUERY_MUTEX};
     use crate::discovery::detection::is_tty;
     use crate::discovery::os_detection::is_ci;
     use std::io::{Read, Write};
+    use std::os::unix::io::AsRawFd;
 
     if !is_tty() {
         tracing::trace!("DSR cursor position query skipped: not a TTY");
@@ -57,27 +66,35 @@ fn query_cursor_position(timeout: Duration) -> Result<CursorPosition, String> {
         return Err("CI environment".into());
     }
 
+    let mut tty = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open("/dev/tty")
+        .map_err(|e| {
+            tracing::trace!("DSR cursor position query: open /dev/tty failed: {}", e);
+            format!("open /dev/tty: {e}")
+        })?;
+    let fd = tty.as_raw_fd();
+
     // Serialize terminal access to prevent race conditions
     let _lock = TERMINAL_QUERY_MUTEX
         .lock()
         .map_err(|_| "terminal query mutex poisoned".to_string())?;
 
-    // Enter raw mode (RAII guard restores on drop)
-    let _guard = RawModeGuard::stdin()?;
+    // Enter raw mode on the /dev/tty fd (RAII guard restores on drop)
+    let _guard = RawModeGuard::new(fd)?;
 
     // Send DSR: ESC[6n
-    let mut stdout = std::io::stdout();
-    stdout.write_all(b"\x1b[6n").map_err(|e| e.to_string())?;
-    stdout.flush().map_err(|e| e.to_string())?;
+    tty.write_all(b"\x1b[6n").map_err(|e| e.to_string())?;
+    tty.flush().map_err(|e| e.to_string())?;
 
     // Read response: ESC[{row};{col}R
     let mut buffer = [0u8; 32];
     let mut response = Vec::new();
     let start = std::time::Instant::now();
-    let mut stdin = std::io::stdin();
 
     while start.elapsed() < timeout {
-        match stdin.read(&mut buffer) {
+        match tty.read(&mut buffer) {
             Ok(0) => std::thread::sleep(Duration::from_millis(5)),
             Ok(n) => {
                 response.extend_from_slice(&buffer[..n]);

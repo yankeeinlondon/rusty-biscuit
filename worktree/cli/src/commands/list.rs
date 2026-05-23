@@ -4,11 +4,13 @@ use biscuit_terminal::components::list::UnorderedList;
 use biscuit_terminal::components::mermaid::MermaidDiagram;
 use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::components::renderable::TerminalRenderable as _;
+use biscuit_terminal::components::table::table::{Table, TableCellContent, TableColumn};
 use biscuit_terminal::components::terminal_image::{ImageWidth, parse_width_spec};
 use biscuit_terminal::discovery::detection::ImageSupport;
 use biscuit_terminal::terminal::Terminal;
+use biscuit_terminal::utils::layout::Alignment;
 use worktree::WorktreeError;
-use worktree::worktree::{WorktreeStatus, default_branch, list_worktrees};
+use worktree::worktree::{DirtyStatus, WorktreeStatus, default_branch, list_worktrees};
 
 use super::git_graph;
 
@@ -18,12 +20,8 @@ pub fn run(width_spec: Option<&str>, verbose: bool) -> Result<(), WorktreeError>
     let statuses = list_worktrees()?;
     let terminal = Terminal::default();
 
-    let mut list = UnorderedList::empty();
-    for status in &statuses {
-        list.add(Prose::new(format_status_line(status)));
-    }
-
-    eprintln!("\n{}", list.render(&terminal));
+    let table = build_status_table(&statuses, &terminal);
+    eprintln!("\n{}", table.render(&terminal));
 
     // Generate graph instructions first so we can size the width based on commit count
     if let Some(instructions) = graph_instructions(&statuses) {
@@ -169,50 +167,116 @@ fn detect_image_support_from_env() -> ImageSupport {
     }
 }
 
-fn format_status_line(status: &WorktreeStatus) -> String {
-    let name = status.entry.branch.as_deref().unwrap_or("(detached)");
+/// Build the worktree-status table with one row per worktree.
+fn build_status_table(statuses: &[WorktreeStatus], terminal: &Terminal) -> Table {
+    let columns = vec![
+        TableColumn::new("Worktree").with_alignment(Alignment::Center),
+        TableColumn::new("Worktree Name"),
+        TableColumn::new("Branch"),
+        TableColumn::new("Merge").with_alignment(Alignment::Center),
+        TableColumn::new("Commits").with_alignment(Alignment::Right),
+    ];
 
-    let name_styled = if status.entry.is_current {
+    let mut table = Table::new()
+        .with_columns(columns)
+        .prefer_cursor_alignment();
+
+    for status in statuses {
+        table.add_row(status_row(status, terminal));
+    }
+
+    table
+}
+
+fn status_row(status: &WorktreeStatus, terminal: &Terminal) -> Vec<TableCellContent> {
+    vec![
+        prose_cell(&dirty_badge(status.dirty), terminal),
+        prose_cell(&wt_name_markup(status), terminal),
+        prose_cell(&branch_markup(status), terminal),
+        prose_cell(&merge_markup(status), terminal),
+        prose_cell(&commits_markup(status), terminal),
+    ]
+}
+
+fn prose_cell(markup: &str, terminal: &Terminal) -> TableCellContent {
+    Prose::new(markup.to_string()).render(terminal).into()
+}
+
+fn wt_name_markup(status: &WorktreeStatus) -> String {
+    let name = status
+        .entry
+        .path
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "(unknown)".to_string());
+    if status.entry.is_main {
+        let branch = status.entry.branch.as_deref().unwrap_or("HEAD");
+        return format!("<dim>{branch}::(<i>{name}</i>)</dim>");
+    }
+    if status.entry.is_current {
         format!("<b>{name}</b>")
     } else {
         format!("<dim>{name}</dim>")
-    };
+    }
+}
 
-    let mut parts = vec![name_styled];
+fn branch_markup(status: &WorktreeStatus) -> String {
+    let branch = status.entry.branch.as_deref().unwrap_or("(detached)");
+    if status.entry.is_current {
+        format!("<b>{branch}</b>")
+    } else {
+        format!("<dim>{branch}</dim>")
+    }
+}
 
-    if !status.entry.is_main {
-        let merge_indicator = if status.entry.is_current {
-            if status.is_clean {
-                "<green>clean</green>".to_string()
-            } else {
-                "<red>conflict</red>".to_string()
-            }
-        } else if status.is_clean {
-            "<dim>clean</dim>".to_string()
+fn merge_markup(status: &WorktreeStatus) -> String {
+    if status.entry.is_main {
+        return String::new();
+    }
+    match (status.entry.is_current, status.is_clean) {
+        (true, true) => "<green>clean</green>".to_string(),
+        (true, false) => "<red>conflict</red>".to_string(),
+        (false, true) => "<dim>clean</dim>".to_string(),
+        (false, false) => "<dim>conflict</dim>".to_string(),
+    }
+}
+
+fn commits_markup(status: &WorktreeStatus) -> String {
+    if status.entry.is_main || (status.ahead == 0 && status.behind == 0) {
+        return String::new();
+    }
+    let mut parts = Vec::new();
+    if status.ahead > 0 {
+        parts.push(if status.entry.is_current {
+            format!("<green>+{}</green>", status.ahead)
         } else {
-            "<dim>conflict</dim>".to_string()
-        };
-        parts.push(merge_indicator);
+            format!("<dim>+{}</dim>", status.ahead)
+        });
+    }
+    if status.behind > 0 {
+        parts.push(if status.entry.is_current {
+            format!("<yellow>-{}</yellow>", status.behind)
+        } else {
+            format!("<dim>-{}</dim>", status.behind)
+        });
+    }
+    parts.join(" ")
+}
 
-        if status.ahead > 0 || status.behind > 0 {
-            let mut counts = Vec::new();
-            if status.ahead > 0 {
-                counts.push(if status.entry.is_current {
-                    format!("<green>+{}</green>", status.ahead)
-                } else {
-                    format!("<dim>+{}</dim>", status.ahead)
-                });
-            }
-            if status.behind > 0 {
-                counts.push(if status.entry.is_current {
-                    format!("<yellow>-{}</yellow>", status.behind)
-                } else {
-                    format!("<dim>-{}</dim>", status.behind)
-                });
-            }
-            parts.push(counts.join(" "));
+/// Render a colored badge for a worktree's working-tree dirtiness.
+///
+/// All three badges have the same visible width (` Clean ` / ` Dirty `) so the
+/// name column lines up across rows.
+fn dirty_badge(status: DirtyStatus) -> String {
+    match status {
+        DirtyStatus::Clean => {
+            "<bg-green-900><green-300><b> Clean </b></green-300></bg-green-900>".to_string()
+        }
+        DirtyStatus::DirtyNonSource => {
+            "<bg-yellow-900><yellow-300><b> Dirty </b></yellow-300></bg-yellow-900>".to_string()
+        }
+        DirtyStatus::DirtySource => {
+            "<bg-red-900><red-300><b> Dirty </b></red-300></bg-red-900>".to_string()
         }
     }
-
-    parts.join("  ")
 }

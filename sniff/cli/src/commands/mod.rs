@@ -21,7 +21,7 @@ mod repo;
 
 use remote::{
     commit_url_from_repo, handle_pr_command, handle_remote_url, handle_shorthand,
-    resolve_remote_name,
+    resolve_origin_or_first_remote, resolve_remote_name,
 };
 use repo::{
     RepoPackageAreasArgs, RepoPackagesArgs, handle_file_list_command, handle_repo_package_areas,
@@ -472,14 +472,28 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
     if let Some(ref action) = repo_action {
         match action {
             crate::args::RepoAction::Remote { remote } => {
+                let remote = match remote {
+                    Some(r) => r.clone(),
+                    None => {
+                        let dir = base_dir
+                            .as_deref()
+                            .unwrap_or_else(|| std::path::Path::new("."));
+                        let repo = git2::Repository::discover(dir)
+                            .map_err(|_| "No git repository found — provide a REMOTE argument or run from inside a git repo".to_string())?;
+                        resolve_origin_or_first_remote(&repo).ok_or(
+                            "No git remotes found for this repository — provide a REMOTE argument",
+                        )?
+                    }
+                };
                 if remote.contains("://") || remote.starts_with("git@") {
-                    return handle_remote_url(remote, cli.json, cli.plain, cli.verbose, &perf)
+                    return handle_remote_url(&remote, cli.json, cli.plain, cli.verbose, &perf)
                         .await;
-                } else if is_owner_repo_shorthand(remote) {
-                    return handle_shorthand(remote, cli.json, cli.plain, cli.verbose, &perf).await;
+                } else if is_owner_repo_shorthand(&remote) {
+                    return handle_shorthand(&remote, cli.json, cli.plain, cli.verbose, &perf)
+                        .await;
                 } else {
                     let url =
-                        resolve_remote_name(remote, base_dir.as_deref()).ok_or_else(|| {
+                        resolve_remote_name(&remote, base_dir.as_deref()).ok_or_else(|| {
                             format!(
                                 "Could not find remote '{}' in the current repository",
                                 remote
@@ -680,6 +694,21 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                     std::process::exit(0);
                 }
                 std::process::exit(1);
+            }
+            crate::args::RepoAction::Name => {
+                let dir = base_dir
+                    .as_deref()
+                    .unwrap_or_else(|| std::path::Path::new("."));
+                let identity = sniff::filesystem::repo::detect_repo_identity(dir)?;
+                if cli.json {
+                    let json = serde_json::to_value(&identity)?;
+                    output::print_json_value(json, perf.build_report().as_ref());
+                    return Ok(());
+                }
+                let rendered = output::render_repo_name(&identity, cli.verbose);
+                output::emit_text(&rendered, cli.plain);
+                perf.emit_stderr(None);
+                return Ok(());
             }
             crate::args::RepoAction::Worktree { no_error, on_error } => {
                 let dir = base_dir
