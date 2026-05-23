@@ -69,6 +69,40 @@ where
     }
 }
 
+/// Serde deserializer for `Option<u16>` row counts.
+///
+/// Explicitly rejects strings so `top-margin: "2ch"` produces a clear error
+/// rather than serde's default "invalid type" message.
+pub fn deserialize_optional_row_count<'de, D>(de: D) -> Result<Option<u16>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let value: Option<serde_json::Value> = Option::deserialize(de)?;
+    match value {
+        None | Some(serde_json::Value::Null) => Ok(None),
+        Some(serde_json::Value::Number(n)) => n
+            .as_u64()
+            .and_then(|v| u16::try_from(v).ok())
+            .map(Some)
+            .ok_or_else(|| de::Error::custom("row count out of range for u16")),
+        Some(other) => Err(de::Error::custom(format!(
+            "row count must be a non-negative integer (got {})",
+            type_name_of(&other)
+        ))),
+    }
+}
+
+fn type_name_of(v: &serde_json::Value) -> &'static str {
+    match v {
+        serde_json::Value::Null => "null",
+        serde_json::Value::Bool(_) => "bool",
+        serde_json::Value::Number(_) => "number",
+        serde_json::Value::String(_) => "string",
+        serde_json::Value::Array(_) => "array",
+        serde_json::Value::Object(_) => "object",
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -145,5 +179,43 @@ mod tests {
         assert_eq!(w.v, None);
         let err = serde_json::from_str::<Wrap>(r#"{"v": "2px"}"#).unwrap_err();
         assert!(err.to_string().contains("unsupported unit"));
+    }
+
+    #[test]
+    fn row_count_accepts_integers() {
+        #[derive(serde::Deserialize, Debug)]
+        struct Wrap {
+            #[serde(deserialize_with = "deserialize_optional_row_count")]
+            v: Option<u16>,
+        }
+        let w: Wrap = serde_json::from_str(r#"{"v": 0}"#).unwrap();
+        assert_eq!(w.v, Some(0));
+        let w: Wrap = serde_json::from_str(r#"{"v": 1}"#).unwrap();
+        assert_eq!(w.v, Some(1));
+        let w: Wrap = serde_json::from_str(r#"{"v": 42}"#).unwrap();
+        assert_eq!(w.v, Some(42));
+    }
+
+    #[test]
+    fn row_count_rejects_strings() {
+        #[derive(serde::Deserialize, Debug)]
+        struct Wrap {
+            #[serde(deserialize_with = "deserialize_optional_row_count")]
+            v: Option<u16>,
+        }
+        let err = serde_json::from_str::<Wrap>(r#"{"v": "2ch"}"#).unwrap_err();
+        assert!(err.to_string().contains("must be a non-negative integer"));
+        assert!(err.to_string().contains("string"));
+    }
+
+    #[test]
+    fn row_count_null_is_none() {
+        #[derive(serde::Deserialize, Debug)]
+        struct Wrap {
+            #[serde(default, deserialize_with = "deserialize_optional_row_count")]
+            v: Option<u16>,
+        }
+        let w: Wrap = serde_json::from_str(r#"{"v": null}"#).unwrap();
+        assert_eq!(w.v, None);
     }
 }
