@@ -1,7 +1,7 @@
 ---
 phases: 3
 created: 2026-05-23
-start_phase: 1
+start_phase: 3
 source_files_during_phase_1:
   - darkmatter/lib/src/style/apply.rs
   - darkmatter/lib/src/style/mod.rs
