@@ -80,14 +80,30 @@ pub fn visible_width(line: &str) -> usize {
 
 /// A line is "blank" when it has no visible glyphs after ANSI stripping **and**
 /// carries no background fill. A background-filled padding row is content.
+///
+/// The background check delegates to [`bg_extent`] so every SGR form the parser
+/// recognizes — semicolon and colon extended (`48;…` / `48:…`), basic 8-color
+/// (`40`-`47`), and aixterm bright (`100`-`107`) — is treated as content here
+/// as well. A naive substring scan for `\x1b[48` would miss the basic and
+/// bright forms and misclassify a background-filled padding row as blank.
 pub fn is_blank(line: &str) -> bool {
-    strip_ansi(line).trim().is_empty() && !line.contains("\x1b[48")
+    strip_ansi(line).trim().is_empty() && bg_extent(line).is_none()
 }
 
 /// Advances `bg_active` over one SGR parameter list (the text between `\x1b[`
-/// and the final `m`). Handles extended `38;5/2` (foreground) and `48;5/2`
-/// (background) forms so their numeric arguments are not misread as further
-/// SGR codes.
+/// and the final `m`).
+///
+/// Recognized background activations:
+///
+/// - Semicolon-form extended (`48;5;n`, `48;2;r;g;b`) — skip sub-arguments so
+///   their numeric values are not misread as further SGR codes.
+/// - Colon-form extended (`48:5:n`, `48:2::r:g:b`) — emitted by terminals such
+///   as WezTerm; the entire sub-parameter list lives inside one
+///   semicolon-separated token, so its `48:` prefix is sufficient.
+/// - Basic 8-color (`40`-`47`) and aixterm bright (`100`-`107`).
+///
+/// The semicolon-form `38` (foreground) sub-arguments are skipped for the same
+/// reason; the colon-form `38:…` is self-contained and ignored without state.
 fn update_bg(params: &str, bg_active: &mut bool) {
     let codes: Vec<&str> = if params.is_empty() {
         vec!["0"]
@@ -96,11 +112,12 @@ fn update_bg(params: &str, bg_active: &mut bool) {
     };
     let mut k = 0;
     while k < codes.len() {
-        match codes[k] {
+        let code = codes[k];
+        match code {
             // Full / default-background reset both clear the active background.
             "0" | "49" => *bg_active = false,
             "48" => {
-                // Extended background: 48;5;n or 48;2;r;g;b. Skip its args.
+                // Semicolon-form extended background: 48;5;n or 48;2;r;g;b.
                 match codes.get(k + 1).copied() {
                     Some("5") => k += 2,
                     Some("2") => k += 4,
@@ -109,14 +126,26 @@ fn update_bg(params: &str, bg_active: &mut bool) {
                 *bg_active = true;
             }
             "38" => {
-                // Extended foreground: skip its args so r;g;b aren't misread.
+                // Semicolon-form extended foreground: skip args so r;g;b aren't
+                // misread as further SGR codes.
                 match codes.get(k + 1).copied() {
                     Some("5") => k += 2,
                     Some("2") => k += 4,
                     _ => {}
                 }
             }
-            _ => {}
+            other if other.starts_with("48:") => *bg_active = true,
+            other => {
+                // Basic 8-color background (`40`-`47`) and aixterm bright
+                // background (`100`-`107`) each activate a background fill.
+                // Colon-form `38:…` (foreground) parses here too and is
+                // intentionally ignored without state.
+                if let Ok(n) = other.parse::<u16>() {
+                    if (40..=47).contains(&n) || (100..=107).contains(&n) {
+                        *bg_active = true;
+                    }
+                }
+            }
         }
         k += 1;
     }
@@ -514,6 +543,49 @@ mod tests {
         // Background spans "e" + combining acute = one cell total.
         let line = format!("  \x1b[48;2;0;0;0me\u{0301}\x1b[0m  ");
         assert_eq!(bg_extent(&line), Some((2, 1)));
+    }
+
+    #[test]
+    fn bg_extent_recognizes_colon_truecolor() {
+        // WezTerm and other emulators may re-emit truecolor as a single
+        // sub-parameter token: `48:2::r:g:b` (note the empty colorspace slot).
+        let line = format!("  \x1b[48:2::0:0:0m{}\x1b[0m  ", " ".repeat(6));
+        assert_eq!(bg_extent(&line), Some((2, 6)));
+    }
+
+    #[test]
+    fn bg_extent_recognizes_colon_indexed_background() {
+        // Colon-form 256-color background: `48:5:n`.
+        let line = format!("  \x1b[48:5:236m{}\x1b[0m  ", " ".repeat(6));
+        assert_eq!(bg_extent(&line), Some((2, 6)));
+    }
+
+    #[test]
+    fn bg_extent_recognizes_basic_background() {
+        // Basic 8-color background SGR (`40`-`47`).
+        let line = format!("  \x1b[44m{}\x1b[0m  ", " ".repeat(6));
+        assert_eq!(bg_extent(&line), Some((2, 6)));
+    }
+
+    #[test]
+    fn bg_extent_recognizes_bright_basic_background() {
+        // aixterm bright background SGR (`100`-`107`).
+        let line = format!("  \x1b[104m{}\x1b[0m  ", " ".repeat(6));
+        assert_eq!(bg_extent(&line), Some((2, 6)));
+    }
+
+    #[test]
+    fn is_blank_rejects_basic_background_padding() {
+        // A padding row filled with basic background is content, not blank.
+        let pad = format!("  \x1b[44m{}\x1b[0m  ", " ".repeat(6));
+        assert!(!is_blank(&pad));
+    }
+
+    #[test]
+    fn is_blank_rejects_colon_form_background_padding() {
+        // A padding row filled with colon-form truecolor is content, not blank.
+        let pad = format!("  \x1b[48:2::0:0:0m{}\x1b[0m  ", " ".repeat(6));
+        assert!(!is_blank(&pad));
     }
 
     #[test]
