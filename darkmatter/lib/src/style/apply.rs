@@ -24,8 +24,8 @@
 use renderable::layout::{Alignment, Length};
 use thiserror::Error;
 
-use crate::layout::{DarkmatterPage, PageAlignment, PageComponent};
-use crate::style::schema::StyleFrontmatter;
+use crate::layout::{DarkmatterPage, PageAlignment, PageComponent, PageFill, WidthUnit};
+use crate::style::schema::{CommonStyle, StyleFrontmatter};
 
 /// Field-level CLI overrides for page-level style.
 ///
@@ -60,6 +60,26 @@ pub struct PageStyleOverrides {
     pub align_code_blocks: bool,
 }
 
+/// Field-level CLI overrides for the three non-list component buckets wired by
+/// sub-spec #3 (`style.table.*`, `style.images.*`, `style.block-quote.*`).
+///
+/// Each `true` value means the corresponding frontmatter field must be ignored
+/// because a CLI flag already claimed it. Constructed by `darkmatter-cli` from
+/// the parsed CLI args using the same global-then-component-specific
+/// precedence as [`PageStyleOverrides`]: global `--alignment` sets every
+/// `*_alignment` field, global `--fill` sets every `*_fill` field, and
+/// component-specific flags (e.g. `--align-tables`, `--fill-images`) set only
+/// their own field.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ComponentStyleOverrides {
+    pub tables_alignment: bool,
+    pub tables_fill: bool,
+    pub images_alignment: bool,
+    pub images_fill: bool,
+    pub block_quotes_alignment: bool,
+    pub block_quotes_fill: bool,
+}
+
 impl PageStyleOverrides {
     /// Returns `true` when `component` has been claimed by a component-specific
     /// CLI alignment flag and must therefore be skipped by a
@@ -91,6 +111,57 @@ pub enum StyleApplyError {
     /// `max_width = 0` as invalid.
     #[error("`style.page.max-width` resolved to 0 cells (must be > 0)")]
     InvalidMaxWidth,
+
+    /// A component bucket (`table`, `images`, or `block-quote`) set both
+    /// `width` and `max-width`. `DarkmatterPage` exposes a single
+    /// [`PageFill`] slot per component so the two cannot coexist; future
+    /// layout-storage migrations can revisit combined semantics.
+    ///
+    /// [`PageFill`]: crate::layout::PageFill
+    #[error(
+        "`style.{bucket}.width` and `style.{bucket}.max-width` are mutually exclusive"
+    )]
+    ComponentWidthConflict { bucket: &'static str },
+
+    /// A [`Length::Css(_)`] value appeared in a component-level fill field
+    /// (`style.{bucket}.{field}`). Component fills accept only `ch`, `%`, and
+    /// bare cells; CSS lengths cannot be represented by [`WidthUnit`].
+    #[error(
+        "`style.{bucket}.{field}` uses CSS length which is not supported for component fill"
+    )]
+    ComponentInvalidCssLength {
+        bucket: &'static str,
+        field: &'static str,
+    },
+}
+
+/// Lower a [`Length`] onto a [`WidthUnit`] for component fill application.
+///
+/// `bucket` and `field` name the source key (in canonical kebab-case) so a
+/// rejected [`Length::Css(_)`] surfaces a precise diagnostic.
+///
+/// ## Returns
+///
+/// - [`Length::Zero`] → `WidthUnit::Fixed(0)`
+/// - [`Length::Ch(n)`] → `WidthUnit::Fixed(u16)` (saturating cast)
+/// - [`Length::Percent(p)`] → `WidthUnit::Percent(p)` (the parser already
+///   guarantees `0.0..=100.0`; downstream `WidthUnit::resolve` validates again)
+///
+/// ## Errors
+///
+/// - [`StyleApplyError::ComponentInvalidCssLength`] when `length` is
+///   [`Length::Css(_)`].
+pub(crate) fn lower_length_to_fill(
+    length: &Length,
+    bucket: &'static str,
+    field: &'static str,
+) -> Result<WidthUnit, StyleApplyError> {
+    match length {
+        Length::Zero => Ok(WidthUnit::Fixed(0)),
+        Length::Ch(n) => Ok(WidthUnit::Fixed(u16::try_from(*n).unwrap_or(u16::MAX))),
+        Length::Percent(p) => Ok(WidthUnit::Percent(*p)),
+        Length::Css(_) => Err(StyleApplyError::ComponentInvalidCssLength { bucket, field }),
+    }
 }
 
 /// Apply parsed page-level style onto a [`DarkmatterPage`] builder.
@@ -201,6 +272,111 @@ pub fn apply_page_style(
                 page = page.use_alignment(component, mapped);
             }
         }
+    }
+
+    Ok(page)
+}
+
+/// Apply parsed component-level style (`style.table.*`, `style.images.*`,
+/// `style.block-quote.*`) onto a [`DarkmatterPage`] builder.
+///
+/// `overrides` carries the field-level CLI claims constructed by
+/// `darkmatter-cli`; for any field where the corresponding bool is `true`,
+/// the matching frontmatter value is skipped so the CLI flag stays in effect.
+///
+/// Should be called **after** [`apply_page_style`] so that component-specific
+/// frontmatter alignment can override a `style.page.alignment` broadcast
+/// (page broadcast is applied first as the default; component frontmatter
+/// then overrides it for any component not claimed by a CLI flag).
+///
+/// ## Errors
+///
+/// - [`StyleApplyError::ComponentWidthConflict`] when both `width` and
+///   `max-width` appear inside the same component bucket.
+/// - [`StyleApplyError::ComponentInvalidCssLength`] when `width` or
+///   `max-width` is a [`Length::Css(_)`] value.
+pub fn apply_component_style(
+    page: DarkmatterPage,
+    style: &StyleFrontmatter,
+    overrides: ComponentStyleOverrides,
+) -> Result<DarkmatterPage, StyleApplyError> {
+    let mut page = page;
+
+    if let Some(table) = style.table.as_ref() {
+        page = apply_common_style(
+            page,
+            "table",
+            PageComponent::Tables,
+            &table.common,
+            overrides.tables_alignment,
+            overrides.tables_fill,
+        )?;
+    }
+
+    if let Some(images) = style.images.as_ref() {
+        page = apply_common_style(
+            page,
+            "images",
+            PageComponent::Images,
+            &images.common,
+            overrides.images_alignment,
+            overrides.images_fill,
+        )?;
+    }
+
+    if let Some(block_quote) = style.block_quote.as_ref() {
+        page = apply_common_style(
+            page,
+            "block-quote",
+            PageComponent::BlockQuotes,
+            &block_quote.common,
+            overrides.block_quotes_alignment,
+            overrides.block_quotes_fill,
+        )?;
+    }
+
+    Ok(page)
+}
+
+/// Apply one bucket's [`CommonStyle`] onto `page`.
+///
+/// `bucket` is the canonical kebab-case label (`"table"`, `"images"`,
+/// `"block-quote"`) used in diagnostic messages. `component` is the matching
+/// [`PageComponent`] for alignment/fill storage.
+///
+/// `alignment_claimed` and `fill_claimed` are the bucket's two CLI claim
+/// bits from [`ComponentStyleOverrides`].
+fn apply_common_style(
+    page: DarkmatterPage,
+    bucket: &'static str,
+    component: PageComponent,
+    style: &CommonStyle,
+    alignment_claimed: bool,
+    fill_claimed: bool,
+) -> Result<DarkmatterPage, StyleApplyError> {
+    let mut page = page;
+
+    if !fill_claimed {
+        match (style.width.as_ref(), style.max_width.as_ref()) {
+            (Some(_), Some(_)) => {
+                return Err(StyleApplyError::ComponentWidthConflict { bucket });
+            }
+            (Some(width), None) => {
+                let unit = lower_length_to_fill(width, bucket, "width")?;
+                page = page.with_fill(component, PageFill::Explicit(unit));
+            }
+            (None, Some(max_width)) => {
+                let unit = lower_length_to_fill(max_width, bucket, "max-width")?;
+                page = page.with_fill(component, PageFill::Max(unit));
+            }
+            (None, None) => {}
+        }
+    }
+
+    if !alignment_claimed
+        && let Some(alignment) = style.alignment
+    {
+        page = page.use_alignment(component, map_alignment(alignment));
     }
 
     Ok(page)
@@ -496,6 +672,74 @@ mod tests {
     }
 
     #[test]
+    fn lower_length_to_fill_zero_maps_to_fixed_zero() {
+        let unit = lower_length_to_fill(&Length::Zero, "table", "width").unwrap();
+        assert_eq!(unit, WidthUnit::Fixed(0));
+    }
+
+    #[test]
+    fn lower_length_to_fill_ch_maps_to_fixed() {
+        let unit = lower_length_to_fill(&Length::Ch(30), "table", "width").unwrap();
+        assert_eq!(unit, WidthUnit::Fixed(30));
+    }
+
+    #[test]
+    fn lower_length_to_fill_ch_saturates_when_oversized() {
+        // u32::MAX is larger than u16::MAX, so the saturating cast must clamp
+        // to u16::MAX rather than wrap.
+        let unit = lower_length_to_fill(&Length::Ch(u32::MAX), "images", "max-width").unwrap();
+        assert_eq!(unit, WidthUnit::Fixed(u16::MAX));
+    }
+
+    #[test]
+    fn lower_length_to_fill_ch_at_u16_boundary() {
+        let unit = lower_length_to_fill(&Length::Ch(u32::from(u16::MAX)), "table", "width")
+            .unwrap();
+        assert_eq!(unit, WidthUnit::Fixed(u16::MAX));
+    }
+
+    #[test]
+    fn lower_length_to_fill_percent_maps_to_percent() {
+        let unit = lower_length_to_fill(&Length::Percent(50.0), "table", "max-width").unwrap();
+        assert_eq!(unit, WidthUnit::Percent(50.0));
+    }
+
+    #[test]
+    fn lower_length_to_fill_percent_preserves_fractional() {
+        let unit = lower_length_to_fill(&Length::Percent(33.5), "images", "width").unwrap();
+        assert_eq!(unit, WidthUnit::Percent(33.5));
+    }
+
+    #[test]
+    fn lower_length_to_fill_css_returns_component_error() {
+        use renderable::stylesheet::CssSizing;
+        let err =
+            lower_length_to_fill(&Length::Css(CssSizing::px(10.0)), "block-quote", "max-width")
+                .unwrap_err();
+        assert_eq!(
+            err,
+            StyleApplyError::ComponentInvalidCssLength {
+                bucket: "block-quote",
+                field: "max-width",
+            }
+        );
+    }
+
+    #[test]
+    fn lower_length_to_fill_css_uses_kebab_case_bucket_in_error() {
+        use renderable::stylesheet::CssSizing;
+        // The bucket label propagates verbatim, so callers must pass the
+        // canonical kebab-case spelling (`block-quote`, not `block_quote`).
+        let err = lower_length_to_fill(&Length::Css(CssSizing::px(1.0)), "block-quote", "width")
+            .unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.contains("`style.block-quote.width`"),
+            "expected kebab-case bucket in message, got: {msg}"
+        );
+    }
+
+    #[test]
     fn padding_lowers_horizontal_and_vertical() {
         let style = style_with_page(PageStyle {
             left_padding: Some(Length::Ch(3)),
@@ -510,5 +754,327 @@ mod tests {
         assert_eq!(out.padding().right, 3);
         assert_eq!(out.padding().top, 1);
         assert_eq!(out.padding().bottom, 1);
+    }
+
+    // ----- apply_component_style -----
+
+    use crate::style::schema::{BlockQuoteStyle, CommonStyle, ImageStyle, TableStyle};
+
+    fn style_with_table(common: CommonStyle) -> StyleFrontmatter {
+        StyleFrontmatter {
+            table: Some(TableStyle { common }),
+            ..StyleFrontmatter::default()
+        }
+    }
+
+    fn style_with_images(common: CommonStyle) -> StyleFrontmatter {
+        StyleFrontmatter {
+            images: Some(ImageStyle {
+                common,
+                local_style: None,
+            }),
+            ..StyleFrontmatter::default()
+        }
+    }
+
+    fn style_with_block_quote(common: CommonStyle) -> StyleFrontmatter {
+        StyleFrontmatter {
+            block_quote: Some(BlockQuoteStyle { common }),
+            ..StyleFrontmatter::default()
+        }
+    }
+
+    #[test]
+    fn component_style_empty_returns_page_unchanged() {
+        let p = page(80);
+        let style = StyleFrontmatter::default();
+        let out =
+            apply_component_style(p.clone(), &style, ComponentStyleOverrides::default()).unwrap();
+        for component in PageComponent::ALL {
+            assert_eq!(out.alignment_for(component), p.alignment_for(component));
+            assert_eq!(out.fill_for(component), p.fill_for(component));
+        }
+    }
+
+    #[test]
+    fn table_alignment_applied() {
+        let style = style_with_table(CommonStyle {
+            alignment: Some(Alignment::Right),
+            ..CommonStyle::default()
+        });
+        let out =
+            apply_component_style(page(80), &style, ComponentStyleOverrides::default()).unwrap();
+        assert_eq!(out.alignment_for(PageComponent::Tables), PageAlignment::Right);
+    }
+
+    #[test]
+    fn table_max_width_applied() {
+        let style = style_with_table(CommonStyle {
+            max_width: Some(Length::Percent(50.0)),
+            ..CommonStyle::default()
+        });
+        let out =
+            apply_component_style(page(80), &style, ComponentStyleOverrides::default()).unwrap();
+        assert_eq!(
+            out.fill_for(PageComponent::Tables),
+            PageFill::Max(WidthUnit::Percent(50.0))
+        );
+    }
+
+    #[test]
+    fn table_width_applied() {
+        let style = style_with_table(CommonStyle {
+            width: Some(Length::Ch(40)),
+            ..CommonStyle::default()
+        });
+        let out =
+            apply_component_style(page(80), &style, ComponentStyleOverrides::default()).unwrap();
+        assert_eq!(
+            out.fill_for(PageComponent::Tables),
+            PageFill::Explicit(WidthUnit::Fixed(40))
+        );
+    }
+
+    #[test]
+    fn image_alignment_and_fill_applied() {
+        let style = style_with_images(CommonStyle {
+            alignment: Some(Alignment::Center),
+            max_width: Some(Length::Ch(60)),
+            ..CommonStyle::default()
+        });
+        let out =
+            apply_component_style(page(80), &style, ComponentStyleOverrides::default()).unwrap();
+        assert_eq!(
+            out.alignment_for(PageComponent::Images),
+            PageAlignment::Center
+        );
+        assert_eq!(
+            out.fill_for(PageComponent::Images),
+            PageFill::Max(WidthUnit::Fixed(60))
+        );
+    }
+
+    #[test]
+    fn block_quote_max_width_applied() {
+        let style = style_with_block_quote(CommonStyle {
+            max_width: Some(Length::Percent(75.0)),
+            ..CommonStyle::default()
+        });
+        let out =
+            apply_component_style(page(80), &style, ComponentStyleOverrides::default()).unwrap();
+        assert_eq!(
+            out.fill_for(PageComponent::BlockQuotes),
+            PageFill::Max(WidthUnit::Percent(75.0))
+        );
+    }
+
+    #[test]
+    fn width_and_max_width_together_rejected() {
+        let style = style_with_table(CommonStyle {
+            width: Some(Length::Ch(40)),
+            max_width: Some(Length::Percent(50.0)),
+            ..CommonStyle::default()
+        });
+        let err =
+            apply_component_style(page(80), &style, ComponentStyleOverrides::default()).unwrap_err();
+        assert_eq!(
+            err,
+            StyleApplyError::ComponentWidthConflict { bucket: "table" }
+        );
+    }
+
+    #[test]
+    fn block_quote_width_conflict_uses_kebab_case_bucket() {
+        let style = style_with_block_quote(CommonStyle {
+            width: Some(Length::Ch(40)),
+            max_width: Some(Length::Ch(60)),
+            ..CommonStyle::default()
+        });
+        let err =
+            apply_component_style(page(80), &style, ComponentStyleOverrides::default()).unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.contains("`style.block-quote.width`"),
+            "expected kebab-case bucket in message, got: {msg}"
+        );
+    }
+
+    #[test]
+    fn css_length_in_component_fill_rejected() {
+        use renderable::stylesheet::CssSizing;
+        let style = style_with_images(CommonStyle {
+            max_width: Some(Length::Css(CssSizing::px(120.0))),
+            ..CommonStyle::default()
+        });
+        let err =
+            apply_component_style(page(80), &style, ComponentStyleOverrides::default()).unwrap_err();
+        assert_eq!(
+            err,
+            StyleApplyError::ComponentInvalidCssLength {
+                bucket: "images",
+                field: "max-width",
+            }
+        );
+    }
+
+    #[test]
+    fn cli_alignment_override_suppresses_frontmatter() {
+        let style = style_with_table(CommonStyle {
+            alignment: Some(Alignment::Right),
+            ..CommonStyle::default()
+        });
+        let overrides = ComponentStyleOverrides {
+            tables_alignment: true,
+            ..ComponentStyleOverrides::default()
+        };
+        // Simulate CLI having already applied `--align-tables left` earlier.
+        let starting = page(80).use_alignment(PageComponent::Tables, PageAlignment::Left);
+        let out = apply_component_style(starting, &style, overrides).unwrap();
+        assert_eq!(
+            out.alignment_for(PageComponent::Tables),
+            PageAlignment::Left,
+            "CLI alignment claim should suppress frontmatter alignment",
+        );
+    }
+
+    #[test]
+    fn cli_fill_override_suppresses_frontmatter() {
+        let style = style_with_images(CommonStyle {
+            max_width: Some(Length::Percent(50.0)),
+            ..CommonStyle::default()
+        });
+        let overrides = ComponentStyleOverrides {
+            images_fill: true,
+            ..ComponentStyleOverrides::default()
+        };
+        // Simulate CLI having already applied a fill earlier.
+        let starting =
+            page(80).with_fill(PageComponent::Images, PageFill::Max(WidthUnit::Fixed(30)));
+        let out = apply_component_style(starting, &style, overrides).unwrap();
+        assert_eq!(
+            out.fill_for(PageComponent::Images),
+            PageFill::Max(WidthUnit::Fixed(30)),
+            "CLI fill claim should suppress frontmatter width / max-width",
+        );
+    }
+
+    #[test]
+    fn component_alignment_overrides_page_broadcast() {
+        // Simulate the integration order: `apply_page_style` ran first and
+        // broadcast `center` to every component, then `apply_component_style`
+        // sees `style.table.alignment: right` with no CLI claim and must
+        // override the broadcast for tables only.
+        let page_style = PageStyle {
+            alignment: Some(Alignment::Center),
+            ..PageStyle::default()
+        };
+        let mut style = style_with_table(CommonStyle {
+            alignment: Some(Alignment::Right),
+            ..CommonStyle::default()
+        });
+        style.page = Some(page_style);
+
+        let p = apply_page_style(page(80), &style, PageStyleOverrides::default()).unwrap();
+        let out = apply_component_style(p, &style, ComponentStyleOverrides::default()).unwrap();
+
+        assert_eq!(
+            out.alignment_for(PageComponent::Tables),
+            PageAlignment::Right,
+            "component frontmatter should override page broadcast",
+        );
+        for component in [
+            PageComponent::Images,
+            PageComponent::Lists,
+            PageComponent::BlockQuotes,
+            PageComponent::CodeBlocks,
+        ] {
+            assert_eq!(
+                out.alignment_for(component),
+                PageAlignment::Center,
+                "untouched components keep page broadcast: {component:?}",
+            );
+        }
+    }
+
+    #[test]
+    fn page_broadcast_wins_when_cli_claimed_component_alignment() {
+        // If the CLI claimed `--align-tables`, `apply_page_style` already
+        // skipped the broadcast for tables; `apply_component_style` must also
+        // honor the claim and skip the frontmatter alignment, leaving the
+        // pre-existing CLI value intact.
+        let page_style = PageStyle {
+            alignment: Some(Alignment::Center),
+            ..PageStyle::default()
+        };
+        let mut style = style_with_table(CommonStyle {
+            alignment: Some(Alignment::Right),
+            ..CommonStyle::default()
+        });
+        style.page = Some(page_style);
+        let page_overrides = PageStyleOverrides {
+            align_tables: true,
+            ..PageStyleOverrides::default()
+        };
+        let component_overrides = ComponentStyleOverrides {
+            tables_alignment: true,
+            ..ComponentStyleOverrides::default()
+        };
+
+        let starting = page(80).use_alignment(PageComponent::Tables, PageAlignment::Left);
+        let p = apply_page_style(starting, &style, page_overrides).unwrap();
+        let out = apply_component_style(p, &style, component_overrides).unwrap();
+
+        assert_eq!(
+            out.alignment_for(PageComponent::Tables),
+            PageAlignment::Left,
+            "CLI alignment must survive both broadcast and component frontmatter",
+        );
+    }
+
+    #[test]
+    fn all_three_buckets_applied_independently() {
+        let mut style = style_with_table(CommonStyle {
+            alignment: Some(Alignment::Right),
+            max_width: Some(Length::Percent(50.0)),
+            ..CommonStyle::default()
+        });
+        style.images = Some(ImageStyle {
+            common: CommonStyle {
+                alignment: Some(Alignment::Center),
+                width: Some(Length::Ch(40)),
+                ..CommonStyle::default()
+            },
+            local_style: None,
+        });
+        style.block_quote = Some(BlockQuoteStyle {
+            common: CommonStyle {
+                max_width: Some(Length::Ch(60)),
+                ..CommonStyle::default()
+            },
+        });
+
+        let out =
+            apply_component_style(page(80), &style, ComponentStyleOverrides::default()).unwrap();
+
+        assert_eq!(
+            out.alignment_for(PageComponent::Tables),
+            PageAlignment::Right
+        );
+        assert_eq!(
+            out.fill_for(PageComponent::Tables),
+            PageFill::Max(WidthUnit::Percent(50.0))
+        );
+        assert_eq!(
+            out.alignment_for(PageComponent::Images),
+            PageAlignment::Center
+        );
+        assert_eq!(
+            out.fill_for(PageComponent::Images),
+            PageFill::Explicit(WidthUnit::Fixed(40))
+        );
+        assert_eq!(
+            out.fill_for(PageComponent::BlockQuotes),
+            PageFill::Max(WidthUnit::Fixed(60))
+        );
     }
 }
