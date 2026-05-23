@@ -1,7 +1,7 @@
 ---
 name: rust-testing
 description: Expert guidance for testing Rust — unit and integration tests, property-based testing with proptest, mocking with mockall, benchmarking with criterion, and runners like cargo-nextest. Use when writing or structuring Rust tests, adding property/mock/benchmark coverage, or choosing a test runner.
-hash: 4eb80211fedd5ae8-6699cbd30e03eef2
+hash: ccc3b799a5c1d6af-9720a912f567666e
 ---
 
 # Rust Testing
@@ -77,6 +77,29 @@ just lint                       # Package-area lint verification when an area ju
 ```
 
 In this workspace, the root `.config/nextest.toml` keeps package-scoped nextest as the preferred runner. The default profile treats tests as slow after 5 seconds and terminates after 3 slow periods; the CI profile treats tests as slow after 10 seconds, terminates after 2 slow periods, and writes JUnit output to `test-results.xml`.
+
+## Package-Area Test Recipe
+
+When adding or updating a package area's `justfile`, delegate `test` to the shared `_test` recipe from [`just/devops.just`](../../../just/devops.just) instead of calling `cargo test` directly. This is the convention used by `claudine`, `darkmatter`, `biscuit-terminal`, `biscuit-tui`, `model-citizen`, `schematic`, and most other areas — areas still calling raw `cargo test` (e.g. `biscuit-file`, `sniff`, `homelab`, `queue`, `biscuit-visualized`) should be migrated when touched.
+
+```just
+# justfile
+import "../just/devops.just"
+
+# Test both library and CLI
+test *args="":
+    @just _test my-area {{ args }}
+    @just _test my-area-cli {{ args }}
+```
+
+The shared `_test pkg *args` recipe:
+
+1. **Auto-detects `cargo nextest`** — runs `cargo nextest run -p {pkg}` if available, falls back to `cargo test -p {pkg}` otherwise. Developers without nextest installed are not broken.
+2. **Always package-scoped** with `-p {pkg}` — never builds the full workspace, matching the workspace-wide rule to use targeted builds.
+3. **Logs per-run timing** to `test-{pkg}-timing.jsonl` with commit hash, duration, pass/fail, and any args passed. Useful for spotting slow drift over commits.
+4. **Emits styled pass/fail messaging** — clear visual outcome plus exit code propagation.
+
+Authors of new package areas should follow this pattern from day one. Authors of existing areas using `cargo test` directly should migrate to `@just _test` when they touch the recipe for any other reason. Do not add new package-area justfiles that bypass the shared recipe — duplicated test recipes drift, and the JSONL timing log becomes inconsistent across areas.
 
 ## Toolchain Troubleshooting
 

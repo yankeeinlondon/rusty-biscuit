@@ -1,7 +1,7 @@
 ---
 name: claudine
 description: Use when working in the claudine/ package area or with the Claudine library/CLI — normalizing agentic-CLI lifecycle events and hooks, wrapping providers (Claude Code, Codex, Gemini, Goose, Kimi, OpenCode, Qwen, Roo), composing Markdown prompts (compose/inline-compose/sequence), managing the MCP catalog, linking skills/commands/agents across providers, or researching agentic CLI platform behavior.
-last_updated: 2026-05-21
+last_updated: 2026-05-23
 ---
 
 ## Overview
@@ -94,6 +94,7 @@ The `claudine` binary provides interactive setup, hook inspection, event handlin
 | `claudine providers` | Provider capability matrix (skill/slash/agent/hooks) |
 | `claudine logs [today\|week\|month\|sessions\|tools\|errors\|repos\|trends\|sync]` | Reporting and sync for Claudine JSONL logs |
 | `claudine completions <shell>` | Generate shell completions |
+| `claudine context [--values\|--expressions\|--side-effects]` | Show Darkmatter runtime context, expression engine, and side effects |
 | `claudine` *(no subcommand)* | Render rich grouped help |
 
 **Wrapper & composition notes:**
