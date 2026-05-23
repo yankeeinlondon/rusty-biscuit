@@ -85,7 +85,7 @@ display when the AGENT environment variable is set
 display when the AGENT environment variable is equal to `claude`
 ::end-block
 
-::block when="And(draft, user.role == 'admin')"
+::block when="and(draft, user.role == 'admin')"
 display only when both conditions are true
 ::end-block
 ```

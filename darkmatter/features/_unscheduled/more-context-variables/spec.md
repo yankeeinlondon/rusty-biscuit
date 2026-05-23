@@ -5,15 +5,13 @@ interpolation through the `ctx` frontmatter property.
 
 - read [context variables](@darkmatter/docs/topics/context-variables.md) for context on what we provide today
 
-In this feature we will add to this set of available context variables _and_ add some "context functions" to compliement
-them. In both cases it's critical that we keep an eye on performance. The current set of context variables uses a
-performant and lazily loaded approach to sourcing the context information that works well but as we add more information
-we should always take the time to consider the most performant way of achieving the functional goal and then make
-sure our benchmark testing is able to detect regressions.
+In this feature we will add to this set of available context variables _and_ add some "context functions" to compliment them. In both cases it's critical that we keep an eye on performance. The current set of context variables uses a performant and lazily loaded approach to sourcing the context information that works well but as we add more information we should always take the time to consider the most performant way of achieving the functional goal and then make sure our benchmark testing is able to detect regressions.
 
 ## New Context Variables
 
 ### Git / Repo
+
+The following context variables are only available in a monorepo:
 
 - `current_packages` - _lists all packages in a monorepo which reside under the current directory_
     - format of the output should mimic:
@@ -26,14 +24,28 @@ sure our benchmark testing is able to detect regressions.
 
         aka, a Markdown unordered list which shows the relative path (from repo root) to the package area
 
-- `depends_on` - \_provides the dependency relationships between
+- `depends_on` - _provides a list of packages in the monorepo that the current {scope} depends on_
+    - where `scope` is 
+        - the current **package area** when the package area is NOT "root", otherwise
+        - the current **package** when user started session inside a package defined in the package
+        - lists all packages in the monorepo and each top-level item has a nested unordered list of dependencies listed
+        - style:
+            - UnorderedList -> `'{package}' depends on:`
+                - UnorderedList -> `{dep-package}`
+            - if no dependencies then: `'{package}' has no dependencies on other packages in this monorepo`
 - `used_by` 
+    - provides the same scoping rules of `depends_on` but instead nesting dependencies we list "dependent" packages which rely on the scoped area.
+    - top level list are the packages in the scoped area
+        - `'{package}' is used by:`
+        - or `'{package}' is not used by other packages in this monorepo`
+    - nested level is the dependent packages
+
 
 ## Context Functions
 
 In this feature we're going to take context variables one step further to **context functions**.
 
-- a context function provides _context_ to the prompt about the surrounding envirnment just like **context variables** do but it's super power is that it can take _parameters_
+- a context function provides _context_ to the prompt about the surrounding environment just like **context variables** do but it's super power is that it can take _parameters_
 - a context function consists of lowercase alpha and `_` characters and the leads to the parameter section: `(p1, p2, p3, ...)`
 
 ### File System
@@ -73,6 +85,8 @@ In this feature we're going to take context variables one step further to **cont
 
 
 
+
+
 > NOTE: for all filepath parameters, there should be a small "normalization" step which ensure that filepaths like `foo//bar` are converted to `foo/bar` and references like `file://foo/bar` have the `file://` prefix removed.
 
 
@@ -93,3 +107,8 @@ In this feature we're going to take context variables one step further to **cont
         - `12 July 2021` 
     - `Do MMM DD YYYY` / `long`:
         - `Mon, July 12<dim>th</dim>, 2021`
+
+
+## Side Effects
+
+The following expressions will allow mutations to external state
