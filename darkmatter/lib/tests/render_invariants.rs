@@ -24,6 +24,12 @@
 //! - I6  BlankLineIdempotence — 1 vs N source blank lines render identically.
 //! - I7  ColorModeContract   — code resolves its theme against the inverted mode.
 //!
+//! `render` is itself a first-class invariant id: any `DarkmatterPage::render`
+//! error in the matrix sweep is recorded as `(shape, scenario, "render")` and
+//! short-circuits the per-shape layout predicates for that cell. This prevents
+//! a regression from valid output to a render error from satisfying I1/I2a
+//! /I5/I5b vacuously as the literal text `"<render error: ...>"`.
+//!
 //! ## Ledger protocol
 //!
 //! The sweep records *every* violation across `shapes() x scenarios()` as a
@@ -225,7 +231,7 @@ fn scenarios() -> Vec<Scenario> {
     ]
 }
 
-fn render(shape: &Shape, scenario: &Scenario) -> String {
+fn render(shape: &Shape, scenario: &Scenario) -> Result<String, String> {
     let term = Terminal::new_optimistic(scenario.width as u32);
     // `DarkmatterPage::new` captures `term.color_depth` (TrueColor under
     // `new_optimistic`) and threads it onto the decorated path, so this matrix
@@ -242,8 +248,7 @@ fn render(shape: &Shape, scenario: &Scenario) -> String {
         page = page.with_mermaid_mode(mode);
     }
     let md: Markdown = shape.md.into();
-    page.render(&md)
-        .unwrap_or_else(|e| format!("<render error: {e}>"))
+    page.render(&md).map_err(|e| format!("{e}"))
 }
 
 /// One applicable invariant: stable id, whether it only applies to full-bleed
@@ -310,7 +315,23 @@ fn layout_invariants_hold_across_matrix() {
 
     for shape in shapes() {
         for scenario in scenarios() {
-            let rendered = render(&shape, &scenario);
+            let rendered = match render(&shape, &scenario) {
+                Ok(out) => out,
+                Err(msg) => {
+                    // Record the render failure itself as a first-class
+                    // violation and skip layout predicates for this cell so
+                    // they cannot vacuously pass against a `"<render error>"`
+                    // string.
+                    let key = ViolationKey {
+                        shape: shape.name,
+                        scenario: scenario.name,
+                        invariant: "render",
+                    };
+                    messages.insert(key.clone(), format!("render error: {msg}"));
+                    live.insert(key);
+                    continue;
+                }
+            };
             let exp = scenario.expectation();
             for (id, code_only, check) in checks() {
                 if code_only && !shape.is_code {
@@ -411,9 +432,36 @@ fn blank_line_count_is_idempotent() {
                 mermaid: shape.mermaid,
             };
 
-            let r1 = render(&one, &scenario);
-            let r5 = render(&five, &scenario);
-            let r99 = render(&many, &scenario);
+            let r1 = match render(&one, &scenario) {
+                Ok(out) => out,
+                Err(e) => {
+                    violations.push(format!(
+                        "[{} / {}] render error (1 blank): {e}",
+                        shape.name, scenario.name,
+                    ));
+                    continue;
+                }
+            };
+            let r5 = match render(&five, &scenario) {
+                Ok(out) => out,
+                Err(e) => {
+                    violations.push(format!(
+                        "[{} / {}] render error (5 blanks): {e}",
+                        shape.name, scenario.name,
+                    ));
+                    continue;
+                }
+            };
+            let r99 = match render(&many, &scenario) {
+                Ok(out) => out,
+                Err(e) => {
+                    violations.push(format!(
+                        "[{} / {}] render error (99 blanks): {e}",
+                        shape.name, scenario.name,
+                    ));
+                    continue;
+                }
+            };
 
             if let Err(e) = inv::blank_line_idempotent(&r1, &r5) {
                 violations.push(format!("[{} / {}] 1 vs 5: {e}", shape.name, scenario.name));
