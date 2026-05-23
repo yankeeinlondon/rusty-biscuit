@@ -7,8 +7,8 @@ use darkmatter::markdown::output::MermaidMode;
 use darkmatter::markdown::output::terminal::TerminalImageMode;
 use darkmatter::markdown::{Markdown, MarkdownDelta, MarkdownToc, MarkdownTocNode};
 use darkmatter::style::{
-    PageStyleOverrides, StyleWarning, StyleWarningKind, apply_page_style, from_frontmatter,
-    into_strict,
+    ComponentStyleOverrides, PageStyleOverrides, StyleWarning, StyleWarningKind,
+    apply_component_style, apply_page_style, from_frontmatter, into_strict,
 };
 use std::io::{self, Write};
 use std::path::PathBuf;
@@ -218,6 +218,29 @@ pub fn page_style_overrides_from_cli(cli: &Cli) -> PageStyleOverrides {
     }
 }
 
+/// Build a [`ComponentStyleOverrides`] reflecting which component-bucket
+/// frontmatter fields the CLI has already claimed.
+///
+/// Mirrors the global/component-specific precedence in
+/// [`apply_cli_layout_flags`]: the global `--alignment` flag claims every
+/// `*_alignment` field, the global `--fill` flag claims every `*_fill` field,
+/// and the component-specific flags (`--align-tables`, `--align-images`,
+/// `--align-block-quotes`, `--fill-tables`, `--fill-images`,
+/// `--fill-block-quotes`) each claim only their own field.
+pub fn component_style_overrides_from_cli(cli: &Cli) -> ComponentStyleOverrides {
+    let alignment_all = cli.alignment.is_some();
+    let fill_all = cli.fill.is_some();
+
+    ComponentStyleOverrides {
+        tables_alignment: alignment_all || cli.align_tables.is_some(),
+        tables_fill: fill_all || cli.fill_tables.is_some(),
+        images_alignment: alignment_all || cli.align_images.is_some(),
+        images_fill: fill_all || cli.fill_images.is_some(),
+        block_quotes_alignment: alignment_all || cli.align_block_quotes.is_some(),
+        block_quotes_fill: fill_all || cli.fill_block_quotes.is_some(),
+    }
+}
+
 /// Parse the `style:` frontmatter (if any), promote schema warnings to errors
 /// when `--strict-style` is set, log remaining warnings, and apply the
 /// page-level subset to `page` using the CLI's override summary.
@@ -246,8 +269,12 @@ pub fn apply_style_frontmatter(
 
     log_style_warnings(&warnings);
 
-    let overrides = page_style_overrides_from_cli(cli);
-    apply_page_style(page, &style, overrides)
+    let page_overrides = page_style_overrides_from_cli(cli);
+    let page = apply_page_style(page, &style, page_overrides)
+        .map_err(|e| eyre!("Failed to apply `style:` frontmatter: {e}"))?;
+
+    let component_overrides = component_style_overrides_from_cli(cli);
+    apply_component_style(page, &style, component_overrides)
         .map_err(|e| eyre!("Failed to apply `style:` frontmatter: {e}"))
 }
 
