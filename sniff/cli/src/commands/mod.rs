@@ -57,7 +57,10 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
         unsafe { std::env::set_var("NO_COLOR", "1") };
     }
 
-    let cli = Cli::parse();
+    let cli = match Cli::try_parse() {
+        Ok(cli) => cli,
+        Err(err) => exit_with_parse_error(err),
+    };
 
     crate::init_tracing(cli.debug);
 
@@ -1373,6 +1376,29 @@ fn wants_completions_help_with_args(args: &[String]) -> bool {
 
 fn print_completions_help() {
     println!("{}", COMPLETIONS_HELP);
+}
+
+/// Print a clap parse error and exit.
+///
+/// For `sniff repo <unknown>` errors, append the categorized list of valid
+/// repo subcommands so users do not have to re-run with `--help`.
+fn exit_with_parse_error(err: clap::Error) -> ! {
+    use clap::error::ErrorKind;
+
+    let kind = err.kind();
+    let argv: Vec<String> = std::env::args().skip(1).collect();
+    let under_repo = argv.iter().any(|a| a == "repo");
+    let is_unknown_sub = matches!(
+        kind,
+        ErrorKind::InvalidSubcommand | ErrorKind::UnknownArgument
+    );
+
+    if under_repo && is_unknown_sub {
+        let _ = err.print();
+        eprintln!("\n{}", crate::args::REPO_AFTER_HELP);
+        std::process::exit(2);
+    }
+    err.exit();
 }
 
 /// Enriches all dependencies in a SniffResult with latest versions from package registries.

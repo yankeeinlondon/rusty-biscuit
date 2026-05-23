@@ -229,10 +229,13 @@ pub(crate) fn repo_package_area_candidates() -> Vec<clap_complete::engine::Compl
     after_help = REPO_AFTER_HELP,
 )]
 pub enum RepoSubcommand {
-    /// Show repository structure (default when no subcommand given)
+    /// Show repository structure
     Structure {
         /// Filter packages by name (or @area); prefix with ! to exclude
         filter: Vec<String>,
+        /// Query package registries for latest dependency versions and report available updates
+        #[arg(long)]
+        latest_versions: bool,
         /// Scope to a specific package
         #[arg(short, long, value_name = "PKG", add = clap_complete::engine::ArgValueCandidates::new(repo_package_candidates))]
         package: Option<String>,
