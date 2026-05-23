@@ -3453,3 +3453,223 @@ fn style_cli_margin_overrides_frontmatter() {
         "frontmatter right-margin (4ch) must still apply when not claimed"
     );
 }
+
+// =============================================================================
+//          COMPONENT STYLE FRONTMATTER (Sub-Spec #3) END-TO-END
+// =============================================================================
+//
+// These tests verify that `style.table.*`, `style.images.*`, and
+// `style.block-quote.*` frontmatter reaches the page builder, and that
+// component-specific CLI flags (`--align-tables`, `--fill-tables`, ...) plus
+// the global `--alignment` / `--fill` claim the matching frontmatter fields
+// via `ComponentStyleOverrides`.
+
+/// Drive the full CLI integration: parse args, apply CLI layout flags, then
+/// apply the `style:` frontmatter (page + component). Returns the resolved
+/// page for assertions.
+fn apply_style_for(raw: &str, args: &[&str]) -> DarkmatterPage {
+    use darkmatter::markdown::Markdown;
+    use darkmatter_cli::output::apply_style_frontmatter;
+    let cli = parse_cli(args);
+    let md = Markdown::try_from_content(raw).unwrap();
+    let term = Terminal::new_optimistic(80);
+    let page = apply_cli_layout_flags(DarkmatterPage::new(&term), &cli);
+    apply_style_frontmatter(page, &md, &cli).expect("style apply")
+}
+
+#[test]
+fn component_overrides_global_alignment_claims_every_bucket() {
+    use darkmatter::style::ComponentStyleOverrides;
+    use darkmatter_cli::output::component_style_overrides_from_cli;
+
+    let cli = parse_cli(&["doc.md", "--alignment", "center"]);
+    let o = component_style_overrides_from_cli(&cli);
+    assert_eq!(
+        o,
+        ComponentStyleOverrides {
+            tables_alignment: true,
+            images_alignment: true,
+            block_quotes_alignment: true,
+            tables_fill: false,
+            images_fill: false,
+            block_quotes_fill: false,
+        }
+    );
+}
+
+#[test]
+fn component_overrides_global_fill_claims_every_bucket() {
+    use darkmatter::style::ComponentStyleOverrides;
+    use darkmatter_cli::output::component_style_overrides_from_cli;
+
+    let cli = parse_cli(&["doc.md", "--fill", "max=60"]);
+    let o = component_style_overrides_from_cli(&cli);
+    assert_eq!(
+        o,
+        ComponentStyleOverrides {
+            tables_fill: true,
+            images_fill: true,
+            block_quotes_fill: true,
+            tables_alignment: false,
+            images_alignment: false,
+            block_quotes_alignment: false,
+        }
+    );
+}
+
+#[test]
+fn component_overrides_component_specific_alignment_claims_one_bucket() {
+    use darkmatter_cli::output::component_style_overrides_from_cli;
+
+    let cli = parse_cli(&["doc.md", "--align-tables", "right"]);
+    let o = component_style_overrides_from_cli(&cli);
+    assert!(o.tables_alignment);
+    assert!(!o.images_alignment);
+    assert!(!o.block_quotes_alignment);
+    assert!(!o.tables_fill && !o.images_fill && !o.block_quotes_fill);
+}
+
+#[test]
+fn component_overrides_component_specific_fill_claims_one_bucket() {
+    use darkmatter_cli::output::component_style_overrides_from_cli;
+
+    let cli = parse_cli(&["doc.md", "--fill-images", "max=40"]);
+    let o = component_style_overrides_from_cli(&cli);
+    assert!(o.images_fill);
+    assert!(!o.tables_fill && !o.block_quotes_fill);
+    assert!(!o.tables_alignment && !o.images_alignment && !o.block_quotes_alignment);
+}
+
+#[test]
+fn frontmatter_table_alignment_reaches_page_when_no_cli_flag() {
+    let raw = "---\n\
+style:\n\
+\x20   table:\n\
+\x20       alignment: left\n\
+---\n\n# Doc\n";
+    let page = apply_style_for(raw, &["doc.md"]);
+    assert_eq!(
+        page.alignment_for(PageComponent::Tables),
+        PageAlignment::Left,
+        "frontmatter table.alignment must reach the page when no CLI claim",
+    );
+}
+
+#[test]
+fn cli_align_tables_overrides_frontmatter_table_alignment() {
+    // Plan ask: `--align-tables right` overriding frontmatter
+    // `style.table.alignment: left`. The CLI flag wins.
+    let raw = "---\n\
+style:\n\
+\x20   table:\n\
+\x20       alignment: left\n\
+---\n\n# Doc\n";
+    let page = apply_style_for(raw, &["doc.md", "--align-tables", "right"]);
+    assert_eq!(
+        page.alignment_for(PageComponent::Tables),
+        PageAlignment::Right,
+        "--align-tables right must override frontmatter table.alignment: left",
+    );
+}
+
+#[test]
+fn cli_global_fill_overrides_frontmatter_table_max_width() {
+    // Plan ask: `--fill max=60` overriding frontmatter
+    // `style.table.max-width: 50%` for all components.
+    let raw = "---\n\
+style:\n\
+\x20   table:\n\
+\x20       max-width: 50%\n\
+---\n\n# Doc\n";
+    let page = apply_style_for(raw, &["doc.md", "--fill", "max=60"]);
+    assert_eq!(
+        page.fill_for(PageComponent::Tables),
+        PageFill::Max(WidthUnit::Fixed(60)),
+        "--fill max=60 (global) must claim the table fill slot",
+    );
+}
+
+#[test]
+fn frontmatter_table_max_width_reaches_page_when_no_cli_flag() {
+    let raw = "---\n\
+style:\n\
+\x20   table:\n\
+\x20       max-width: 50%\n\
+---\n\n# Doc\n";
+    let page = apply_style_for(raw, &["doc.md"]);
+    assert_eq!(
+        page.fill_for(PageComponent::Tables),
+        PageFill::Max(WidthUnit::Percent(50.0)),
+        "frontmatter table.max-width must reach the page when no CLI claim",
+    );
+}
+
+#[test]
+fn frontmatter_images_alignment_and_fill_reach_page() {
+    let raw = "---\n\
+style:\n\
+\x20   images:\n\
+\x20       alignment: center\n\
+\x20       max-width: 40ch\n\
+---\n\n# Doc\n";
+    let page = apply_style_for(raw, &["doc.md"]);
+    assert_eq!(
+        page.alignment_for(PageComponent::Images),
+        PageAlignment::Center,
+    );
+    assert_eq!(
+        page.fill_for(PageComponent::Images),
+        PageFill::Max(WidthUnit::Fixed(40)),
+    );
+}
+
+#[test]
+fn frontmatter_block_quote_max_width_reaches_page() {
+    let raw = "---\n\
+style:\n\
+\x20   block-quote:\n\
+\x20       max-width: 75%\n\
+---\n\n# Doc\n";
+    let page = apply_style_for(raw, &["doc.md"]);
+    assert_eq!(
+        page.fill_for(PageComponent::BlockQuotes),
+        PageFill::Max(WidthUnit::Percent(75.0)),
+    );
+}
+
+#[test]
+fn style_fixture_renders_with_align_tables_override() {
+    // End-to-end sanity check: the canonical fixture renders successfully
+    // when the user overrides table alignment from the CLI.
+    let output = md_cmd()
+        .arg(style_prop_fixture())
+        .arg("--align-tables")
+        .arg("center")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "md --align-tables center style-prop.md must succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn style_fixture_renders_html_with_fill_override() {
+    // End-to-end sanity check: --output html runs the same component-style
+    // path as the terminal pipeline.
+    let output = md_cmd()
+        .arg(style_prop_fixture())
+        .arg("--output")
+        .arg("html")
+        .arg("--fill")
+        .arg("max=60")
+        .env("MD_DRY_RUN", "1")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "md --output html --fill max=60 must succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
