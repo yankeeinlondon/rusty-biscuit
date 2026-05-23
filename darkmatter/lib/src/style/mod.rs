@@ -4,6 +4,7 @@
 //! design. Sub-spec #1: schema + parser only; no rendering changes.
 
 pub mod error;
+pub mod length;
 pub mod warning;
 
 pub use error::StyleParseError;
