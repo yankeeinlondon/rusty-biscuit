@@ -12,6 +12,7 @@ pub mod warning;
 
 pub use color::StyleColor;
 pub use error::StyleParseError;
+pub use schema::StyleFrontmatter;
 pub use warning::{StyleSpan, StyleWarning, StyleWarningKind};
 
 #[cfg(test)]
