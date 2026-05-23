@@ -4,10 +4,12 @@
 //! design. Sub-spec #1: schema + parser only; no rendering changes.
 
 pub mod alignment;
+pub mod color;
 pub mod error;
 pub mod length;
 pub mod warning;
 
+pub use color::StyleColor;
 pub use error::StyleParseError;
 pub use warning::{StyleSpan, StyleWarning, StyleWarningKind};
 
