@@ -4,5 +4,7 @@
 //! structs live in sibling files.
 
 pub mod common;
+pub mod page;
 
 pub use common::CommonStyle;
+pub use page::{CodeStyle, PageStyle};

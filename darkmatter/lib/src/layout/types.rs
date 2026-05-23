@@ -117,7 +117,8 @@ impl PagePadding {
 ///
 /// `Subtle` and `Pronounced` resolve to concrete colors at render time using
 /// the captured terminal color mode.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum PageBackground {
     /// Default. Margin and padding are visually identical (both transparent).
     #[default]
