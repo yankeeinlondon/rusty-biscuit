@@ -3,6 +3,7 @@
 //! See `renderable/features/_unscheduled/style-property/spec.md` for the
 //! design. Sub-spec #1: schema + parser only; no rendering changes.
 
+pub mod alignment;
 pub mod error;
 pub mod length;
 pub mod warning;
