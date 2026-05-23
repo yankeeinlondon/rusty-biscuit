@@ -4,6 +4,7 @@
 - this session was started with a focus on the **{{ctx.current_package_area || env.PACKAGE_AREA}}** package area
     - you must use the '{{ctx.current_package_area || env.PACKAGE_AREA }}' agent skill
 - always prefer US English (en-US) over other variants such as UK English (en-GB) when creating symbol names or writing documentation
+- the host computer is on the {{ctx.os}} operating system; consider this when running shell commands
 
 ## Best Practices
 
@@ -15,3 +16,4 @@
 - when a package area has both a library and CLI (as many do) the naming convention is:
     - `{name}` for library
     - `{name}-cli` for the CLI
+- never run `cargo fmt` unless told explicitly to do so
