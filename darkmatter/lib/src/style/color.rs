@@ -5,8 +5,7 @@
 //! [`renderable::color::Color`]. Opacity is preserved separately because
 //! the underlying enum does not carry it.
 
-#[allow(unused_imports)]
-use renderable::color::{Color, Tailwind, WEB_COLOR_LOOKUP, WebColor};
+use renderable::color::{Color, Tailwind, WEB_COLOR_LOOKUP};
 use serde::de::{self, Deserializer};
 use serde::Deserialize;
 
@@ -385,14 +384,91 @@ fn lookup_tailwind(family: &str, level: &str) -> Option<Tailwind> {
     })
 }
 
-/// Stub: hex parsing lands in Task 8.
-fn parse_hex(_raw: &str) -> Result<StyleColor, &'static str> {
-    Err("hex parsing not yet implemented (Task 8)")
+/// Parse a CSS hex color: `#rgb`, `#rrggbb`, or `#rrggbbaa`.
+fn parse_hex(raw: &str) -> Result<StyleColor, &'static str> {
+    use renderable::color::RgbColor;
+
+    let hex = raw.trim_start_matches('#');
+    if hex.is_empty() || !hex.chars().all(|c| c.is_ascii_hexdigit()) {
+        return Err("non-hex digit");
+    }
+
+    let (r, g, b, a) = match hex.len() {
+        3 => {
+            let r = u8::from_str_radix(&hex[0..1], 16).map_err(|_| "non-hex digit")?;
+            let g = u8::from_str_radix(&hex[1..2], 16).map_err(|_| "non-hex digit")?;
+            let b = u8::from_str_radix(&hex[2..3], 16).map_err(|_| "non-hex digit")?;
+            (r * 17, g * 17, b * 17, None) // expand nibble (0xF → 0xFF)
+        }
+        6 => {
+            let r = u8::from_str_radix(&hex[0..2], 16).map_err(|_| "non-hex digit")?;
+            let g = u8::from_str_radix(&hex[2..4], 16).map_err(|_| "non-hex digit")?;
+            let b = u8::from_str_radix(&hex[4..6], 16).map_err(|_| "non-hex digit")?;
+            (r, g, b, None)
+        }
+        8 => {
+            let r = u8::from_str_radix(&hex[0..2], 16).map_err(|_| "non-hex digit")?;
+            let g = u8::from_str_radix(&hex[2..4], 16).map_err(|_| "non-hex digit")?;
+            let b = u8::from_str_radix(&hex[4..6], 16).map_err(|_| "non-hex digit")?;
+            let a_byte = u8::from_str_radix(&hex[6..8], 16).map_err(|_| "non-hex digit")?;
+            // Alpha 0..=255 → opacity 0..=100.
+            let opacity = ((a_byte as u32) * 100 / 255) as u8;
+            (r, g, b, Some(opacity))
+        }
+        _ => {
+            return Err("hex color must have 3, 6, or 8 digits after `#`");
+        }
+    };
+
+    let fallback = dominant_basic_color(r, g, b);
+    Ok(StyleColor {
+        color: Color::Rgb(RgbColor::new(r, g, b, fallback)),
+        opacity: a,
+    })
 }
 
-/// Stub: web-named parsing lands in Task 8.
-fn parse_web_named(_raw: &str) -> Option<StyleColor> {
-    None
+/// Pick a `BasicColor` fallback for hex inputs. Used only when ANSI palette
+/// is too narrow for true-color output. Simple dominant-channel heuristic.
+fn dominant_basic_color(r: u8, g: u8, b: u8) -> renderable::color::BasicColor {
+    use renderable::color::BasicColor::*;
+    match (r, g, b) {
+        (r, g, b) if r >= 200 && g >= 200 && b >= 200 => White,
+        (r, g, b) if r < 50 && g < 50 && b < 50 => Black,
+        (r, g, b) if r > 150 && g > 150 && b < 100 => Yellow,
+        (r, g, b) if r > 150 && b > 150 && g < 100 => Magenta,
+        (r, g, b) if g > 150 && b > 150 && r < 100 => Cyan,
+        (r, g, b) if r > g && r > b => Red,
+        (r, g, b) if g > r && g > b => Green,
+        (r, g, b) if b > r && b > g => Blue,
+        _ => White,
+    }
+}
+
+/// Parse a CSS web-named color (`"orange"`, `"rebeccapurple"`).
+///
+/// Performs a case-insensitive match against the 148 CSS named colors by
+/// serializing each `WebColor` variant (PascalCase) and comparing it
+/// case-insensitively to the input. CSS color names are case-insensitive
+/// and multi-word names are written as one word (`midnightblue`).
+fn parse_web_named(raw: &str) -> Option<StyleColor> {
+    let lower = raw.to_ascii_lowercase();
+    // Serde serializes WebColor variants as PascalCase (default behavior).
+    // Lower-casing both sides gives us a case-insensitive match that works
+    // for single-word names ("orange" → "Orange") and multi-word names
+    // ("midnightblue" → "MidnightBlue" → lowercased "midnightblue").
+    let web = WEB_COLOR_LOOKUP
+        .keys()
+        .find(|&&variant| {
+            serde_json::to_string(&variant)
+                .ok()
+                .map(|s| s.trim_matches('"').to_ascii_lowercase() == lower)
+                .unwrap_or(false)
+        })
+        .copied()?;
+    Some(StyleColor {
+        color: Color::Web(web),
+        opacity: None,
+    })
 }
 
 pub fn deserialize_optional_color<'de, D>(de: D) -> Result<Option<StyleColor>, D::Error>
@@ -451,5 +527,67 @@ mod tests {
     fn empty_color_rejected() {
         assert!(parse("").is_err());
         assert!(parse("   ").is_err());
+    }
+
+    #[test]
+    fn hex_short() {
+        let c = parse("#fff").unwrap();
+        match c.color {
+            Color::Rgb(rgb) => {
+                assert_eq!(rgb.red(), 255);
+                assert_eq!(rgb.green(), 255);
+                assert_eq!(rgb.blue(), 255);
+            }
+            _ => panic!("expected Color::Rgb"),
+        }
+        assert_eq!(c.opacity, None);
+    }
+
+    #[test]
+    fn hex_long() {
+        let c = parse("#ff8000").unwrap();
+        match c.color {
+            Color::Rgb(rgb) => {
+                assert_eq!(rgb.red(), 255);
+                assert_eq!(rgb.green(), 128);
+                assert_eq!(rgb.blue(), 0);
+            }
+            _ => panic!("expected Color::Rgb"),
+        }
+    }
+
+    #[test]
+    fn hex_with_alpha() {
+        let c = parse("#ff000080").unwrap();
+        match c.color {
+            Color::Rgb(rgb) => {
+                assert_eq!(rgb.red(), 255);
+                assert_eq!(rgb.green(), 0);
+                assert_eq!(rgb.blue(), 0);
+            }
+            _ => panic!("expected Color::Rgb"),
+        }
+        // 0x80 / 255 * 100 ≈ 50
+        assert_eq!(c.opacity, Some(50));
+    }
+
+    #[test]
+    fn hex_invalid_digit_rejected() {
+        let err = parse("#fg0").unwrap_err();
+        assert_eq!(err, "non-hex digit");
+    }
+
+    #[test]
+    fn hex_wrong_length_rejected() {
+        assert!(parse("#ff").is_err());
+        assert!(parse("#ffff").is_err());
+        assert!(parse("#fffffff").is_err());
+    }
+
+    #[test]
+    fn web_named_orange() {
+        let c = parse("orange").unwrap();
+        assert!(matches!(c.color, Color::Web(_)));
+        assert_eq!(c.opacity, None);
     }
 }

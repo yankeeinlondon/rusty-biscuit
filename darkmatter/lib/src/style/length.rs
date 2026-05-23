@@ -2,8 +2,8 @@
 //! `renderable::layout::Length` (horizontal) and `u16` (vertical row counts).
 
 use renderable::layout::Length;
-use serde::de::{self, Deserializer};
 use serde::Deserialize;
+use serde::de::{self, Deserializer};
 
 /// Parse a single horizontal length value.
 ///
@@ -30,10 +30,7 @@ pub fn parse_horizontal(raw: &str) -> Result<Length, &'static str> {
 
     // Percent: trailing `%`.
     if let Some(num_part) = trimmed.strip_suffix('%') {
-        let n: f32 = num_part
-            .trim()
-            .parse()
-            .map_err(|_| "malformed percent")?;
+        let n: f32 = num_part.trim().parse().map_err(|_| "malformed percent")?;
         if !(0.0..=100.0).contains(&n) || !n.is_finite() {
             return Err("percent out of range; must be in 0.0..=100.0");
         }
@@ -63,9 +60,7 @@ where
     let raw: Option<String> = Option::deserialize(de)?;
     match raw {
         None => Ok(None),
-        Some(s) => parse_horizontal(&s)
-            .map(Some)
-            .map_err(de::Error::custom),
+        Some(s) => parse_horizontal(&s).map(Some).map_err(de::Error::custom),
     }
 }
 
@@ -201,6 +196,7 @@ mod tests {
         #[derive(serde::Deserialize, Debug)]
         struct Wrap {
             #[serde(deserialize_with = "deserialize_optional_row_count")]
+            #[allow(dead_code)]
             v: Option<u16>,
         }
         let err = serde_json::from_str::<Wrap>(r#"{"v": "2ch"}"#).unwrap_err();
