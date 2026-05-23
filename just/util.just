@@ -102,7 +102,7 @@ _choose_fix feat="":
 _choose_feature_or_fix feat="":
     #!/usr/bin/env bash
     set -euo pipefail
-    file="$(fd -g '*{spec,design}\.md' --exclude '_completed' | {{ if feat == "" { "cat" } else { "rg " + feat } }} |  fzf --height=15 --border --border-label 'Choose a spec or design file')"
+    file="$(fd -g '*{spec,design}*\.md' --exclude '_completed' | {{ if feat == "" { "cat" } else { "rg " + feat } }} |  fzf --height=15 --border --border-label 'Choose a spec or design file')"
     echo "${file}"
 
 _choose_agent question="Choose the Agent to use":
