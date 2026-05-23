@@ -13,7 +13,7 @@ pub struct UlStyle {
     pub common: CommonStyle,
     /// Indent applied to ul content. Wired in sub-spec #4 as
     /// `PageFill::Indent` on `PageComponent::Ul`.
-    #[serde(deserialize_with = "deserialize_optional_length")]
+    #[serde(deserialize_with = "deserialize_optional_length", alias = "left_margin")]
     pub left_margin: Option<Length>,
 }
 
@@ -65,5 +65,11 @@ mod tests {
     fn li_is_common_only() {
         let li: LiStyle = serde_json::from_str("{}").unwrap();
         assert_eq!(li, LiStyle::default());
+    }
+
+    #[test]
+    fn snake_case_left_margin_alias_accepted() {
+        let ul: UlStyle = serde_json::from_str(r#"{"left_margin": "4ch"}"#).unwrap();
+        assert_eq!(ul.left_margin, Some(Length::Ch(4)));
     }
 }

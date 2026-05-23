@@ -15,23 +15,23 @@ use crate::style::length::{
 #[serde(rename_all = "kebab-case", default)]
 pub struct PageStyle {
     // Margins.
-    #[serde(deserialize_with = "deserialize_optional_length")]
+    #[serde(deserialize_with = "deserialize_optional_length", alias = "left_margin")]
     pub left_margin: Option<Length>,
-    #[serde(deserialize_with = "deserialize_optional_length")]
+    #[serde(deserialize_with = "deserialize_optional_length", alias = "right_margin")]
     pub right_margin: Option<Length>,
-    #[serde(deserialize_with = "deserialize_optional_row_count")]
+    #[serde(deserialize_with = "deserialize_optional_row_count", alias = "top_margin")]
     pub top_margin: Option<u16>,
-    #[serde(deserialize_with = "deserialize_optional_row_count")]
+    #[serde(deserialize_with = "deserialize_optional_row_count", alias = "bottom_margin")]
     pub bottom_margin: Option<u16>,
 
     // Padding.
-    #[serde(deserialize_with = "deserialize_optional_length")]
+    #[serde(deserialize_with = "deserialize_optional_length", alias = "left_padding")]
     pub left_padding: Option<Length>,
-    #[serde(deserialize_with = "deserialize_optional_length")]
+    #[serde(deserialize_with = "deserialize_optional_length", alias = "right_padding")]
     pub right_padding: Option<Length>,
-    #[serde(deserialize_with = "deserialize_optional_row_count")]
+    #[serde(deserialize_with = "deserialize_optional_row_count", alias = "top_padding")]
     pub top_padding: Option<u16>,
-    #[serde(deserialize_with = "deserialize_optional_row_count")]
+    #[serde(deserialize_with = "deserialize_optional_row_count", alias = "bottom_padding")]
     pub bottom_padding: Option<u16>,
 
     // Page knobs.

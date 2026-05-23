@@ -8,12 +8,14 @@ pub mod color;
 pub mod descriptor;
 pub mod error;
 pub mod length;
+pub mod parse;
 pub mod schema;
 pub mod walker;
 pub mod warning;
 
 pub use color::StyleColor;
 pub use error::StyleParseError;
+pub use parse::from_json_value;
 pub use schema::StyleFrontmatter;
 pub use warning::{StyleSpan, StyleWarning, StyleWarningKind};
 
