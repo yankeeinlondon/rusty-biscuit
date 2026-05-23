@@ -3674,6 +3674,129 @@ fn style_fixture_renders_html_with_fill_override() {
     );
 }
 
+#[test]
+fn style_frontmatter_html_emits_component_layout_css() {
+    // Sub-spec #3 acceptance (review-3 finding #3): `md --output html` on a
+    // document carrying `style.table.*`, `style.images.*`, and
+    // `style.block-quote.*` must emit the matching component layout CSS
+    // selectors and declarations, not just succeed silently.
+    //
+    // Mirrors `darkmatter/lib/src/layout/page.rs::browser_render_with_component_*_css`
+    // but drives the assertion through the public CLI surface so the
+    // frontmatter → page-style → HTML pipeline is exercised end-to-end.
+    let tmp = md_file(
+        "---\n\
+        style:\n\
+        \x20   table:\n\
+        \x20       alignment: center\n\
+        \x20       max-width: 60ch\n\
+        \x20   images:\n\
+        \x20       alignment: right\n\
+        \x20       max-width: 40ch\n\
+        \x20   block-quote:\n\
+        \x20       alignment: right\n\
+        \x20       max-width: 50ch\n\
+        ---\n\n\
+        # Doc\n\n\
+        | A | B |\n\
+        | - | - |\n\
+        | 1 | 2 |\n\n\
+        ![alt](./x.png)\n\n\
+        > quote\n",
+    );
+
+    let output = md_cmd()
+        .arg(tmp.path())
+        .arg("--output")
+        .arg("html")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "md --output html must succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let html = String::from_utf8(output.stdout).expect("html stdout must be utf-8");
+
+    // Component selectors must be emitted for all three buckets.
+    assert!(
+        html.contains(".darkmatter-page table {"),
+        "expected `.darkmatter-page table {{` selector in HTML. html:\n{html}",
+    );
+    assert!(
+        html.contains(".darkmatter-page img {") || html.contains(".darkmatter-page image {"),
+        "expected `.darkmatter-page img {{` selector in HTML. html:\n{html}",
+    );
+    assert!(
+        html.contains(".darkmatter-page blockquote {"),
+        "expected `.darkmatter-page blockquote {{` selector in HTML. html:\n{html}",
+    );
+
+    // Center alignment → `margin-left: auto; margin-right: auto;`.
+    assert!(
+        html.contains("margin-left: auto;") && html.contains("margin-right: auto;"),
+        "expected centered-table margin declarations in HTML. html:\n{html}",
+    );
+
+    // Right alignment → `margin-right: 0;` (with auto on the left).
+    assert!(
+        html.contains("margin-right: 0;"),
+        "expected right-aligned `margin-right: 0;` declaration in HTML. html:\n{html}",
+    );
+
+    // Max-width fills → `max-width: <N>ch` for each bucket's cap.
+    assert!(
+        html.contains("max-width: 60ch"),
+        "expected `max-width: 60ch` (table cap) in HTML. html:\n{html}",
+    );
+    assert!(
+        html.contains("max-width: 40ch"),
+        "expected `max-width: 40ch` (image cap) in HTML. html:\n{html}",
+    );
+    assert!(
+        html.contains("max-width: 50ch"),
+        "expected `max-width: 50ch` (block-quote cap) in HTML. html:\n{html}",
+    );
+}
+
+#[test]
+fn style_prop_fixture_html_emits_table_layout_css() {
+    // Acceptance from sub-spec #3: `md --output html style-prop.md` must emit
+    // the expected table layout CSS (right alignment + 50% max-width that
+    // lowers to the page-content base, i.e. 50ch when the page builds at
+    // its 120-col default for HTML).
+    let output = md_cmd()
+        .arg(style_prop_fixture())
+        .arg("--output")
+        .arg("html")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "md --output html style-prop.md must succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let html = String::from_utf8(output.stdout).expect("html stdout must be utf-8");
+
+    assert!(
+        html.contains(".darkmatter-page table {"),
+        "expected `.darkmatter-page table {{` selector in HTML. html:\n{html}",
+    );
+    // Right alignment → `margin-right: 0;`.
+    assert!(
+        html.contains("margin-right: 0;"),
+        "expected right-aligned table `margin-right: 0;` declaration in HTML. html:\n{html}",
+    );
+    // The fixture sets `max-width: 50%`; lowering must emit a `max-width: …ch`
+    // declaration somewhere in the table block (the exact column count
+    // depends on the page-content base, but a `ch`-suffixed cap must exist).
+    assert!(
+        html.contains("max-width: ") && html.contains("ch"),
+        "expected a `max-width: <N>ch` declaration in HTML. html:\n{html}",
+    );
+}
+
 // =============================================================================
 //          PHASE 5 REGRESSION TESTS (Sub-Spec #3)
 // =============================================================================

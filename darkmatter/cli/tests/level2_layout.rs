@@ -23,8 +23,8 @@ use biscuit_test_harness::wezterm::WezTermHarness;
 use biscuit_test_harness::{CapturedFrame, TerminalHarness, skip_with_reason};
 use serial_test::serial;
 use std::fs;
-use std::sync::Mutex;
 use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::{Mutex, Once};
 use std::time::{Duration, Instant};
 use tempfile::tempdir;
 
@@ -44,10 +44,45 @@ fn level2_required() -> bool {
 /// time and can safely share a single pane.
 ///
 /// Between invocations the pane is reset with `clear` so each test sees a
-/// clean visible region. The pane is intentionally not torn down at end of
-/// process — it lives in WezTerm's background workspace and is reclaimed
-/// when WezTerm exits.
+/// clean visible region. At process exit, [`ensure_atexit_cleanup`]
+/// registers a `libc::atexit` handler that takes the harness out of the
+/// mutex and drops it — `WezTermHarness::drop` calls `wezterm cli kill-pane`
+/// so the pane is reclaimed instead of leaking into the
+/// `biscuit-bg` workspace. Rust never runs `Drop` on `static` values, so
+/// the atexit hook is what prevents pty exhaustion across many test runs.
 static SHARED_HARNESS: Mutex<Option<WezTermHarness>> = Mutex::new(None);
+
+/// Ensures the shared WezTerm pane is killed at process exit, even though
+/// Rust does not run `Drop` on `static` values.
+///
+/// Called from [`run_md_env`] the first time the shared harness is spawned.
+/// The registered handler is idempotent — running it again after the harness
+/// has been taken is a no-op.
+fn ensure_atexit_cleanup() {
+    static REGISTER_ATEXIT: Once = Once::new();
+    REGISTER_ATEXIT.call_once(|| {
+        extern "C" fn cleanup_shared_harness() {
+            // atexit handlers must not unwind. The lock may be poisoned by
+            // a panicking test; recover and proceed so the pane is still
+            // killed. `WezTermHarness::drop` shells out to `wezterm cli
+            // kill-pane`, which is itself best-effort.
+            let _ = std::panic::catch_unwind(|| {
+                let mut guard = SHARED_HARNESS
+                    .lock()
+                    .unwrap_or_else(|poison| poison.into_inner());
+                // `take` moves the harness out so its `Drop` runs here at
+                // process exit instead of being skipped for the static.
+                drop(guard.take());
+            });
+        }
+        // SAFETY: `cleanup_shared_harness` is `extern "C" fn()` with no
+        // captures, matching `libc::atexit`'s required signature. Registration
+        // itself is thread-safe; macOS allows up to 32 atexit handlers.
+        unsafe {
+            libc::atexit(cleanup_shared_harness);
+        }
+    });
+}
 
 /// Monotonic counter for sentinel uniqueness across tests in this binary.
 static SENTINEL_COUNTER: AtomicU32 = AtomicU32::new(0);
@@ -142,6 +177,12 @@ fn run_md_env(
         let mut harness = WezTermHarness::new();
         harness.spawn_shell().expect("spawn_shell failed");
         *guard = Some(harness);
+        // Register the process-exit cleanup the first time we actually own a
+        // pane. Registering before spawn would leave a no-op handler in place
+        // for runs where every test skips (WezTerm absent), which is harmless
+        // but wasteful — registering here keeps the hook paired with the
+        // resource it cleans up.
+        ensure_atexit_cleanup();
     }
     let harness = guard.as_mut().unwrap();
 
@@ -1122,6 +1163,220 @@ fn level2_style_fixture_applies_top_and_left_margins_in_real_terminal() {
         head_leading >= 2,
         "expected >=2 leading columns for left-margin: 2ch on heading, got {head_leading}: {:?}. plain:\n{}",
         lines[marker_idx],
+        frame.plain
+    );
+}
+
+// =============================================================================
+//   COMPONENT STYLE FRONTMATTER (sub-spec #3 acceptance — review-3 finding #2)
+// =============================================================================
+//
+// These tests exercise the new `style.table.*`, `style.images.*`, and
+// `style.block-quote.*` frontmatter path through the real `md` CLI in a real
+// WezTerm pane. The Level 1 tests in `cli.rs` cover the resolved
+// `DarkmatterPage` state and a single in-process render; these confirm the
+// visible terminal layout for the same buckets actually reaches the user.
+
+#[test]
+#[serial(level2_terminal)]
+fn level2_style_frontmatter_table_max_width_caps_visible_row() {
+    // `style.table.max-width: 50%` at --max-width 80 must cap rendered table
+    // rows at 40 visible columns. Anchored on a unique cell value so we never
+    // accidentally match the shell command echo.
+    let body = r#"---
+style:
+    table:
+        max-width: 50%
+---
+
+| ColA | ColB | ColC |
+| ---- | ---- | ---- |
+| sentinel_fm_alpha | beta | gamma |
+"#;
+
+    let Some((frame, _)) = run_md(body, "--max-width 80") else {
+        return;
+    };
+
+    let row = frame
+        .plain
+        .lines()
+        .find(|l| l.contains("sentinel_fm_alpha"))
+        .unwrap_or_else(|| {
+            panic!(
+                "expected table row containing 'sentinel_fm_alpha' in:\n{}",
+                frame.plain
+            )
+        });
+    let visible = rtrim(row).chars().count();
+    assert!(
+        visible <= 40,
+        "frontmatter style.table.max-width: 50% must cap row to 40 cols (50% of 80), got {visible}: {row:?}"
+    );
+    assert!(
+        visible < 80,
+        "frontmatter style.table.max-width: 50% must constrain below page width, got {visible}"
+    );
+}
+
+#[test]
+#[serial(level2_terminal)]
+fn level2_style_frontmatter_table_right_alignment_pushes_row_to_right_edge() {
+    // `style.table.alignment: right` plus `style.table.max-width: 40%` must
+    // push the rendered table to the right edge of the page so its leading
+    // indent exceeds what a left-aligned table at the same fill would have.
+    let right = r#"---
+style:
+    table:
+        alignment: right
+        max-width: 40%
+---
+
+| A | B |
+| - | - |
+| sentinelR | xx |
+"#;
+    let left = r#"---
+style:
+    table:
+        alignment: left
+        max-width: 40%
+---
+
+| A | B |
+| - | - |
+| sentinelR | xx |
+"#;
+
+    let Some((right_frame, _)) = run_md(right, "--max-width 60") else {
+        return;
+    };
+    let Some((left_frame, _)) = run_md(left, "--max-width 60") else {
+        return;
+    };
+
+    let row_right = right_frame
+        .plain
+        .lines()
+        .find(|l| l.contains("sentinelR"))
+        .unwrap_or_else(|| {
+            panic!(
+                "right: data row missing. plain:\n---\n{}\n---",
+                right_frame.plain
+            )
+        });
+    let row_left = left_frame
+        .plain
+        .lines()
+        .find(|l| l.contains("sentinelR"))
+        .unwrap_or_else(|| {
+            panic!(
+                "left: data row missing. plain:\n---\n{}\n---",
+                left_frame.plain
+            )
+        });
+    let right_indent = row_right.chars().take_while(|c| *c == ' ').count();
+    let left_indent = row_left.chars().take_while(|c| *c == ' ').count();
+    assert!(
+        right_indent > left_indent,
+        "frontmatter style.table.alignment: right must indent more than left: right={right_indent}, left={left_indent}"
+    );
+}
+
+#[test]
+#[serial(level2_terminal)]
+fn level2_style_frontmatter_images_alignment_indents_fallback_text() {
+    // `style.images.alignment` flows through to image fallback rendering for
+    // missing images, the same path Level 1 covers structurally.
+    let right = r#"---
+style:
+    images:
+        alignment: right
+        max-width: 20ch
+---
+
+![Sentinel image alt](./does-not-exist.png)
+"#;
+    let left = r#"---
+style:
+    images:
+        alignment: left
+        max-width: 20ch
+---
+
+![Sentinel image alt](./does-not-exist.png)
+"#;
+
+    let Some((right_frame, _)) = run_md(right, "--max-width 60") else {
+        return;
+    };
+    let Some((left_frame, _)) = run_md(left, "--max-width 60") else {
+        return;
+    };
+
+    let line_right = right_frame
+        .plain
+        .lines()
+        .find(|l| l.contains("Sentinel image alt"))
+        .unwrap_or_else(|| {
+            panic!(
+                "right: expected an alt-text anchor in image fallback. plain:\n{}",
+                right_frame.plain
+            )
+        });
+    let line_left = left_frame
+        .plain
+        .lines()
+        .find(|l| l.contains("Sentinel image alt"))
+        .unwrap_or_else(|| {
+            panic!(
+                "left: expected an alt-text anchor in image fallback. plain:\n{}",
+                left_frame.plain
+            )
+        });
+
+    let right_indent = line_right.chars().take_while(|c| *c == ' ').count();
+    let left_indent = line_left.chars().take_while(|c| *c == ' ').count();
+    assert!(
+        right_indent > left_indent,
+        "frontmatter style.images.alignment: right must indent more than left: right={right_indent}, left={left_indent}"
+    );
+}
+
+#[test]
+#[serial(level2_terminal)]
+fn level2_style_frontmatter_block_quote_max_width_caps_wrap_width() {
+    // `style.block-quote.max-width: 50%` at --max-width 80 must wrap quoted
+    // text under 40 visible columns. Block-quote lines are prefixed by the
+    // `▐` indicator glyph.
+    let body = r#"---
+style:
+    block-quote:
+        max-width: 50%
+---
+
+> This is a fairly long quoted paragraph that should wrap onto a second visible line once the frontmatter max-width cap forces the blockquote render width to half the page width.
+"#;
+
+    let Some((frame, _)) = run_md(body, "--max-width 80") else {
+        return;
+    };
+
+    let quote_lines: Vec<String> = frame
+        .plain
+        .lines()
+        .filter(|l| l.contains('▐'))
+        .map(|l| rtrim(l).to_string())
+        .collect();
+    assert!(
+        quote_lines.len() >= 2,
+        "blockquote should wrap onto multiple lines under style.block-quote.max-width: 50%. plain:\n{}",
+        frame.plain
+    );
+    let max_len = quote_lines.iter().map(|l| l.chars().count()).max().unwrap();
+    assert!(
+        max_len <= 40,
+        "blockquote lines should be capped to 40 cols (50% of 80), got max={max_len}. plain:\n{}",
         frame.plain
     );
 }
