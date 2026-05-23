@@ -356,21 +356,22 @@ fn apply_common_style(
 ) -> Result<DarkmatterPage, StyleApplyError> {
     let mut page = page;
 
-    if !fill_claimed {
-        match (style.width.as_ref(), style.max_width.as_ref()) {
-            (Some(_), Some(_)) => {
-                return Err(StyleApplyError::ComponentWidthConflict { bucket });
-            }
-            (Some(width), None) => {
-                let unit = lower_length_to_fill(width, bucket, "width")?;
-                page = page.with_fill(component, PageFill::Explicit(unit));
-            }
-            (None, Some(max_width)) => {
-                let unit = lower_length_to_fill(max_width, bucket, "max-width")?;
-                page = page.with_fill(component, PageFill::Max(unit));
-            }
-            (None, None) => {}
+    // Validate exclusivity of width vs max-width unconditionally — a CLI fill
+    // claim chooses which value wins for rendering, but it never makes an
+    // ambiguous frontmatter bucket valid.
+    match (style.width.as_ref(), style.max_width.as_ref()) {
+        (Some(_), Some(_)) => {
+            return Err(StyleApplyError::ComponentWidthConflict { bucket });
         }
+        (Some(width), None) if !fill_claimed => {
+            let unit = lower_length_to_fill(width, bucket, "width")?;
+            page = page.with_fill(component, PageFill::Explicit(unit));
+        }
+        (None, Some(max_width)) if !fill_claimed => {
+            let unit = lower_length_to_fill(max_width, bucket, "max-width")?;
+            page = page.with_fill(component, PageFill::Max(unit));
+        }
+        _ => {}
     }
 
     if !alignment_claimed
@@ -934,6 +935,48 @@ mod tests {
             out.alignment_for(PageComponent::Tables),
             PageAlignment::Left,
             "CLI alignment claim should suppress frontmatter alignment",
+        );
+    }
+
+    #[test]
+    fn cli_fill_override_does_not_mask_frontmatter_width_conflict() {
+        // Regression: a document with both `width` and `max-width` in the same
+        // component bucket is always invalid, even when the user passes a CLI
+        // fill flag that would otherwise claim the bucket. The CLI overrides
+        // the rendered value but does not paper over ambiguous frontmatter.
+        let style = style_with_table(CommonStyle {
+            width: Some(Length::Ch(40)),
+            max_width: Some(Length::Percent(50.0)),
+            ..CommonStyle::default()
+        });
+        let overrides = ComponentStyleOverrides {
+            tables_fill: true,
+            ..ComponentStyleOverrides::default()
+        };
+        let err = apply_component_style(page(80), &style, overrides).unwrap_err();
+        assert_eq!(
+            err,
+            StyleApplyError::ComponentWidthConflict { bucket: "table" }
+        );
+    }
+
+    #[test]
+    fn cli_fill_images_override_does_not_mask_frontmatter_width_conflict() {
+        // Same regression as `cli_fill_override_does_not_mask_frontmatter_width_conflict`
+        // but for the component-specific `--fill-images` claim path.
+        let style = style_with_images(CommonStyle {
+            width: Some(Length::Ch(30)),
+            max_width: Some(Length::Ch(40)),
+            ..CommonStyle::default()
+        });
+        let overrides = ComponentStyleOverrides {
+            images_fill: true,
+            ..ComponentStyleOverrides::default()
+        };
+        let err = apply_component_style(page(80), &style, overrides).unwrap_err();
+        assert_eq!(
+            err,
+            StyleApplyError::ComponentWidthConflict { bucket: "images" }
         );
     }
 
