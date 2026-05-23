@@ -5,6 +5,7 @@
 
 pub mod alignment;
 pub mod color;
+pub mod descriptor;
 pub mod error;
 pub mod length;
 pub mod schema;
