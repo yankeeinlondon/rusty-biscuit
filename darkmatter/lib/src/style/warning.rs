@@ -73,7 +73,9 @@ mod tests {
     fn deprecated_is_schema_issue() {
         let w = StyleWarning::new(
             "style.block_quote",
-            StyleWarningKind::Deprecated { replacement: "block-quote".into() },
+            StyleWarningKind::Deprecated {
+                replacement: "block-quote".into(),
+            },
         );
         assert!(w.is_schema_issue());
     }

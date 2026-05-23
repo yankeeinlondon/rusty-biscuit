@@ -793,7 +793,8 @@ fn run_page_in_pane(
 #[serial(level2_terminal)]
 fn level2_page_code_panel_is_contiguous_inverted_rectangle() {
     let (ml, mr, mt, mb) = (4u16, 4u16, 1u16, 1u16);
-    let body = "# A Heading\n\nLead prose paragraph.\n\n```rust\nfn main() {\n    let x = 1;\n}\n```\n";
+    let body =
+        "# A Heading\n\nLead prose paragraph.\n\n```rust\nfn main() {\n    let x = 1;\n}\n```\n";
     let Some((frame, cols)) = run_page_in_pane(body, "page_code_panel", ml, mr, mt, mb) else {
         return;
     };
