@@ -2,8 +2,6 @@
 $schema:
     phase: number(required)
     total_phases: number(required)
-    
-
 phase: 1
 total_phases: 0
 plan: ""
