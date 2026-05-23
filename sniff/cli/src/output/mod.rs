@@ -527,11 +527,21 @@ pub fn render_text(
                     print_package_area_has_source_code_changes(result, base_dir, verbose);
                 }
                 Some(RepoAction::GitStatus {
-                    compact, branch, ..
+                    compact,
+                    branch,
+                    worktree,
+                    ..
                 }) => {
                     if let Some(ref filesystem) = result.filesystem
                         && let Some(ref git) = filesystem.git
                     {
+                        // `--worktree` takes precedence; the worktree handler
+                        // upstream already replaced `current_branch` with the
+                        // worktree's branch, so use that for the heading.
+                        let target_worktree = worktree
+                            .as_deref()
+                            .zip(git.current_branch.as_deref());
+
                         // Annotate the Status heading only when the user
                         // explicitly named a branch different from the
                         // currently checked-out one. `--branch` with no
@@ -552,6 +562,7 @@ pub fn render_text(
                             verbose,
                             *compact,
                             target_branch,
+                            target_worktree,
                         ));
                     }
                 }

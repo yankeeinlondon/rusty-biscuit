@@ -49,6 +49,9 @@ pub enum RepoAction {
         /// with no value (use current branch), `Some(Some(name))` = explicit
         /// branch name.
         branch: Option<Option<String>>,
+        /// Worktree filter: name of a linked worktree (matches the worktree's
+        /// branch or its directory basename). Mutually exclusive with `branch`.
+        worktree: Option<String>,
     },
     Hash {
         sha: String,
@@ -257,8 +260,12 @@ pub enum RepoSubcommand {
         package_area: Option<String>,
         /// Show commits from a specific branch (defaults to current branch
         /// when the flag is given without a value)
-        #[arg(long, value_name = "BRANCH")]
+        #[arg(long, value_name = "BRANCH", conflicts_with = "worktree")]
         branch: Option<Option<String>>,
+        /// Show commits and working-tree status from a linked worktree.
+        /// Accepts the worktree's branch name or its directory basename.
+        #[arg(long, value_name = "WORKTREE")]
+        worktree: Option<String>,
     },
     /// Show details for a specific commit hash
     Hash {

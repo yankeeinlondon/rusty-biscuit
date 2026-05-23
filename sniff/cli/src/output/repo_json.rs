@@ -589,6 +589,7 @@ mod tests {
             package: None,
             package_area: None,
             branch: None,
+            worktree: None,
         }
     }
 

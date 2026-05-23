@@ -532,20 +532,30 @@ fn build_git_status_items(
 /// * `history_count` - Number of recent commits to display
 /// * `target_branch` - When `Some`, annotates the Status heading with the
 ///   branch whose commits are being shown (used by `--branch <name>`).
+/// * `target_worktree` - When `Some((name, branch))`, annotates the heading
+///   to indicate the commits and working-tree state are scoped to the named
+///   linked worktree (used by `--worktree <name>`). Takes precedence over
+///   `target_branch` when both are provided.
 pub fn render_git_section(
     git: &sniff::filesystem::git::GitInfo,
     history_count: usize,
     verbose: u8,
     compact: bool,
     target_branch: Option<&str>,
+    target_worktree: Option<(&str, &str)>,
 ) -> String {
     let mut out = String::new();
     let terminal = Terminal::default();
 
     // === Status Section ===
-    let status_title = match target_branch {
-        Some(branch) => Prose::new(format!("<b><u>Status</u></b> (branch: <i>{branch}</i>)")),
-        None => Prose::new("<b><u>Status</u></b>"),
+    let status_title = match (target_worktree, target_branch) {
+        (Some((wt, branch)), _) => Prose::new(format!(
+            "<b><u>Status</u></b> (<dim>worktree: <green>{wt}</green> <i>on</i> <green><i>{branch}</i></green> <i>branch</i></dim>)"
+        )),
+        (None, Some(branch)) => {
+            Prose::new(format!("<b><u>Status</u></b> (branch: <i>{branch}</i>)"))
+        }
+        (None, None) => Prose::new("<b><u>Status</u></b>"),
     };
     writeln!(out, "\n{}\n", status_title.render(&terminal)).unwrap();
 
@@ -1270,7 +1280,7 @@ mod tests {
                 lines_removed: 0,
             }]);
 
-            let output = render_git_section(&git, 10, 0, true, None);
+            let output = render_git_section(&git, 10, 0, true, None, None);
 
             assert!(output.contains("Status"));
             assert!(!output.contains("\x1b[1m\x1b[4mMeta"));

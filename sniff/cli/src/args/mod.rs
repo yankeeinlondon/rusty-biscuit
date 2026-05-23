@@ -724,6 +724,7 @@ impl Commands {
                     package,
                     package_area,
                     branch,
+                    worktree,
                 }) => RepoAction::GitStatus {
                     history: *history,
                     refresh_remotes: *refresh_remotes,
@@ -731,6 +732,7 @@ impl Commands {
                     package: package.clone(),
                     package_area: package_area.clone(),
                     branch: branch.clone(),
+                    worktree: worktree.clone(),
                 },
                 Some(RepoSubcommand::Hash { sha }) => RepoAction::Hash { sha: sha.clone() },
                 Some(RepoSubcommand::StagedFiles(args)) => RepoAction::StagedFiles(args.clone()),
@@ -2192,6 +2194,7 @@ mod tests {
                     package: Some("homelab".to_string()),
                     package_area: None,
                     branch: None,
+                    worktree: None,
                 }),
             };
             match cmd.to_repo_action() {

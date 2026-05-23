@@ -1091,6 +1091,66 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
+    // Worktree filter for `repo git-status --worktree <name>`. Replaces both
+    // the recent commit list and the working-tree status with those of the
+    // selected worktree. The selector matches against either the worktree's
+    // branch (the `worktrees` HashMap key) or its directory basename.
+    if let Some(crate::args::RepoAction::GitStatus {
+        worktree: Some(wt_selector),
+        ..
+    }) = &repo_action
+        && let Some(ref mut filesystem) = result.filesystem
+        && let Some(ref mut git) = filesystem.git
+    {
+        let matched = git
+            .worktrees
+            .values()
+            .find(|info| {
+                info.branch == *wt_selector
+                    || info
+                        .filepath
+                        .file_name()
+                        .and_then(|n| n.to_str())
+                        .is_some_and(|basename| basename == *wt_selector)
+            })
+            .cloned();
+
+        match matched {
+            Some(info) => {
+                if let Some(wt_repo) =
+                    sniff::filesystem::git::GitRepo::discover(&info.filepath)?
+                {
+                    git.recent = wt_repo.recent_commits(history_count);
+
+                    let file_changes = wt_repo.file_changes().unwrap_or_default();
+                    let repo_status = wt_repo.repo_status().unwrap_or_default();
+                    git.file_changes = file_changes;
+                    git.status = repo_status;
+                }
+                // Reflect the worktree's location so absolute file paths in
+                // the rendered output resolve to the worktree, and the queried
+                // branch so downstream code sees it as the current branch.
+                git.repo_root = info.filepath.clone();
+                git.current_branch = Some(info.branch.clone());
+            }
+            None => {
+                let names: Vec<String> = git
+                    .worktrees
+                    .values()
+                    .map(|info| info.branch.clone())
+                    .collect();
+                let listing = if names.is_empty() {
+                    "no linked worktrees found".to_string()
+                } else {
+                    format!("available: {}", names.join(", "))
+                };
+                return Err(
+                    format!("Worktree not found: {} ({})", wt_selector, listing).into(),
+                );
+            }
+        }
+    }
+
     // Tier 2/3 scoping: validate that `--package` and `--package-area` resolve
     // and (when both supplied) overlap. The output functions apply the actual
     // filtering; this call surfaces the intersection error before render time.
