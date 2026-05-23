@@ -24,5 +24,6 @@ Provide constructive feedback on how this spec file could be improved:
     - make sure to distinguish "intended" changes to standards versus accidental
 - suggest better wording if you think ideas are expressed unclearly
 
+Write your review to "{{dir}}/spec-review-{{basename}}":
 
-Write your review to "{{dir}}/review-{{basename}}".
+- set the `description` frontmatter on the review file to 'a review of the draft specification {{spec}}; implementation of this review's comments will allow the specification to be ready for planning and implementation.'
