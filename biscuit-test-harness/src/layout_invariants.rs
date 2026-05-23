@@ -34,7 +34,19 @@
 //! **and** which carries no background fill — a background-filled padding row
 //! (e.g. a code-block padding row) is content, not blank.
 
+use unicode_width::UnicodeWidthChar;
+
 use crate::strip_ansi;
+
+/// Display width of `ch` in terminal cells, defaulting unknown widths to `1`.
+///
+/// `UnicodeWidthChar::width` returns `None` for control characters and a small
+/// set of ambiguous-width glyphs (e.g. some emoji like `✅`); modern terminals
+/// render these as a single cell, so `1` is the safe fallback. This is the
+/// same convention used by `biscuit_terminal::utils::block_constraint`.
+fn cell_width(ch: char) -> usize {
+    UnicodeWidthChar::width(ch).unwrap_or(1)
+}
 
 /// The resolved layout a rendered output is expected to satisfy.
 ///
@@ -55,9 +67,15 @@ pub struct LayoutExpectation {
     pub bottom: usize,
 }
 
-/// Visible width of a (possibly ANSI-bearing) line, in characters.
+/// Visible width of a (possibly ANSI-bearing) line, in **terminal cells**.
+///
+/// Strips ANSI/CSI/OSC/charset-designation escapes, then sums the per-`char`
+/// display width via `unicode-width`. This matches the cell-based semantics of
+/// the spec's I1 invariant: a line of full-width CJK glyphs occupies twice as
+/// many cells as `chars().count()` would report, and a naive char count would
+/// let `I1` pass while the real terminal wrapped.
 pub fn visible_width(line: &str) -> usize {
-    strip_ansi(line).chars().count()
+    strip_ansi(line).chars().map(cell_width).sum()
 }
 
 /// A line is "blank" when it has no visible glyphs after ANSI stripping **and**
@@ -105,10 +123,13 @@ fn update_bg(params: &str, bg_active: &mut bool) {
 }
 
 /// The background extent of one line: `(leading, fill)` where `leading` is the
-/// number of visible columns before the background first becomes active and
-/// `fill` is the number of visible columns painted with an active background.
+/// number of visible **terminal cells** before the background first becomes
+/// active and `fill` is the number of cells painted with an active background.
 ///
-/// Returns `None` when no background is ever active on the line.
+/// Widths come from `unicode-width`, matching the cell-based semantics of the
+/// spec's layout invariants: a full-width CJK glyph counts as two cells, a
+/// zero-width combining mark as zero. Returns `None` when no background is ever
+/// active on the line.
 fn bg_extent(line: &str) -> Option<(usize, usize)> {
     let mut chars = line.chars().peekable();
     let mut visible = 0usize;
@@ -138,13 +159,14 @@ fn bg_extent(line: &str) -> Option<(usize, usize)> {
             }
             continue;
         }
-        if bg_active {
+        let w = cell_width(c);
+        if bg_active && w > 0 {
             if leading.is_none() {
                 leading = Some(visible);
             }
-            fill += 1;
+            fill += w;
         }
-        visible += 1;
+        visible += w;
     }
 
     leading.map(|l| (l, fill))
@@ -455,5 +477,53 @@ mod tests {
     fn blank_line_idempotent_compares_outputs() {
         assert!(blank_line_idempotent("same", "same").is_ok());
         assert!(blank_line_idempotent("a", "b").is_err());
+    }
+
+    #[test]
+    fn visible_width_counts_full_width_cjk_as_two_cells() {
+        // "日本語" — three full-width Han/Hiragana glyphs, six cells in any
+        // monospaced terminal. A naive `chars().count()` returns 3 and would
+        // let I1 vacuously pass for a CJK line that actually wrapped.
+        assert_eq!(visible_width("日本語"), 6);
+    }
+
+    #[test]
+    fn visible_width_treats_combining_marks_as_zero_width() {
+        // "e" + COMBINING ACUTE ACCENT (U+0301): one base + one zero-width
+        // mark = a single cell.
+        assert_eq!(visible_width("e\u{0301}"), 1);
+    }
+
+    #[test]
+    fn visible_width_strips_ansi_before_measuring_cells() {
+        // A styled CJK glyph still occupies two cells; the SGR escape itself
+        // contributes nothing.
+        assert_eq!(visible_width("\x1b[31m日\x1b[0m"), 2);
+    }
+
+    #[test]
+    fn bg_extent_measures_full_width_glyphs_in_cells() {
+        // 2 spaces of leading, then a backgrounded full-width glyph (2 cells),
+        // then reset and trailing whitespace. The fill must be 2, not 1.
+        let line = format!("  \x1b[48;2;0;0;0m日\x1b[0m  ");
+        assert_eq!(bg_extent(&line), Some((2, 2)));
+    }
+
+    #[test]
+    fn bg_extent_ignores_zero_width_combining_marks() {
+        // Background spans "e" + combining acute = one cell total.
+        let line = format!("  \x1b[48;2;0;0;0me\u{0301}\x1b[0m  ");
+        assert_eq!(bg_extent(&line), Some((2, 1)));
+    }
+
+    #[test]
+    fn containment_flags_cjk_overflow_chars_alone_miss() {
+        // Three full-width glyphs = 6 cells, exceeding the 5-cell terminal
+        // width. `chars().count()` would report 3 and falsely pass I1.
+        let narrow = LayoutExpectation {
+            width: 5,
+            ..EXP
+        };
+        assert!(containment("日本語", &narrow).is_err());
     }
 }
