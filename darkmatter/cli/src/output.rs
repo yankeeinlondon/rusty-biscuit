@@ -1059,7 +1059,7 @@ mod tests {
     #[tracing_test::traced_test]
     fn strict_style_still_emits_known_but_inactive_event() {
         // A schema-clean fixture whose only warnings are `KnownButInactive`
-        // (the `table` block is wired in a later sub-spec). Under
+        // (the `table.color` leaf is wired in sub-spec #5). Under
         // `--strict-style`, `into_strict` must succeed (no schema issues),
         // and the informational future-phase event must still reach
         // `log_style_warnings`. The old code replaced the warning list with
@@ -1067,7 +1067,7 @@ mod tests {
         let raw = "---\n\
 style:\n\
 \x20   table:\n\
-\x20       alignment: right\n\
+\x20       color: red-500\n\
 ---\n\n# Doc\n";
         let md = Markdown::try_from_content(raw).unwrap();
         let cli = cli_from(&["md", "doc.md", "--strict-style"]);
@@ -1085,7 +1085,7 @@ style:\n\
         let raw = "---\n\
 style:\n\
 \x20   table:\n\
-\x20       alignment: right\n\
+\x20       color: red-500\n\
 ---\n\n# Doc\n";
         let md = Markdown::try_from_content(raw).unwrap();
         let cli = cli_from(&["md", "doc.md"]);
