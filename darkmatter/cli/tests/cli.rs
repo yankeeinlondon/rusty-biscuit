@@ -3277,9 +3277,13 @@ fn style_prop_fixture() -> std::path::PathBuf {
 }
 
 #[test]
-fn style_fixture_renders_terminal_successfully() {
-    // Acceptance: `md style-prop.md` produces output (page-level margins are
-    // applied through `apply_page_style`).
+fn style_fixture_cli_pipe_smoke_passes() {
+    // Smoke check that `md style-prop.md` exits successfully and emits a
+    // non-empty stdout when stdout is a pipe (the CLI test runner captures
+    // stdout, so `OutputFormat::Auto` takes the markdown pass-through path
+    // here — this test does NOT exercise the terminal renderer). Terminal
+    // layout coverage lives in the Level 2 WezTerm pane tests
+    // (`darkmatter/cli/tests/level2_layout.rs::level2_style_fixture_*`).
     let output = md_cmd().arg(style_prop_fixture()).output().unwrap();
     assert!(
         output.status.success(),
@@ -3287,10 +3291,7 @@ fn style_fixture_renders_terminal_successfully() {
         String::from_utf8_lossy(&output.stderr)
     );
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(
-        !stdout.is_empty(),
-        "rendered output must not be empty"
-    );
+    assert!(!stdout.is_empty(), "rendered output must not be empty");
     assert!(
         stdout.contains("Testing the `style` Property")
             || stdout.contains("Testing the"),

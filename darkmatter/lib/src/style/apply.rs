@@ -24,7 +24,7 @@
 use renderable::layout::{Alignment, Length};
 use thiserror::Error;
 
-use crate::layout::{DarkmatterPage, PageAlignment};
+use crate::layout::{DarkmatterPage, PageAlignment, PageComponent};
 use crate::style::schema::StyleFrontmatter;
 
 /// Field-level CLI overrides for page-level style.
@@ -34,6 +34,12 @@ use crate::style::schema::StyleFrontmatter;
 /// `darkmatter-cli` from the parsed CLI args using the same shorthand
 /// expansion rules as `apply_cli_layout_flags` (e.g. `--margin` claims all four
 /// margin sides, `--mx` claims left + right).
+///
+/// The component-specific alignment fields
+/// (`align_images`, `align_lists`, `align_block_quotes`, `align_tables`,
+/// `align_code_blocks`) record CLI claims made by the corresponding
+/// `--align-*` flags. When set, the `style.page.alignment` broadcast skips
+/// that component so component-specific CLI alignment is preserved.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct PageStyleOverrides {
     pub margin_top: bool,
@@ -47,6 +53,26 @@ pub struct PageStyleOverrides {
     pub max_width: bool,
     pub background: bool,
     pub alignment: bool,
+    pub align_images: bool,
+    pub align_lists: bool,
+    pub align_block_quotes: bool,
+    pub align_tables: bool,
+    pub align_code_blocks: bool,
+}
+
+impl PageStyleOverrides {
+    /// Returns `true` when `component` has been claimed by a component-specific
+    /// CLI alignment flag and must therefore be skipped by a
+    /// `style.page.alignment` broadcast.
+    fn alignment_claimed_for(&self, component: PageComponent) -> bool {
+        match component {
+            PageComponent::Images => self.align_images,
+            PageComponent::Lists => self.align_lists,
+            PageComponent::BlockQuotes => self.align_block_quotes,
+            PageComponent::Tables => self.align_tables,
+            PageComponent::CodeBlocks => self.align_code_blocks,
+        }
+    }
 }
 
 /// Errors produced when lowering parsed [`StyleFrontmatter`] onto a
@@ -164,11 +190,17 @@ pub fn apply_page_style(
         page = page.with_max_width(resolved);
     }
 
-    // Alignment broadcasts to every page component.
+    // Alignment broadcasts to every page component not already claimed by a
+    // component-specific CLI flag (`--align-images`, `--align-tables`, ...).
     if !overrides.alignment
         && let Some(alignment) = page_style.alignment
     {
-        page = page.use_alignment_for_all(map_alignment(alignment));
+        let mapped = map_alignment(alignment);
+        for component in PageComponent::ALL {
+            if !overrides.alignment_claimed_for(component) {
+                page = page.use_alignment(component, mapped);
+            }
+        }
     }
 
     Ok(page)
@@ -378,6 +410,44 @@ mod tests {
         let err =
             apply_page_style(p, &style, PageStyleOverrides::default()).unwrap_err();
         assert_eq!(err, StyleApplyError::InvalidMaxWidth);
+    }
+
+    #[test]
+    fn page_alignment_broadcast_skips_components_claimed_by_cli() {
+        // Component-specific CLI alignment (`--align-tables right`) must
+        // survive a `style.page.alignment: center` broadcast — the broadcast
+        // is a default for unclaimed components, not an override.
+        use crate::layout::PageComponent;
+        let style = style_with_page(PageStyle {
+            alignment: Some(Alignment::Center),
+            ..PageStyle::default()
+        });
+        let overrides = PageStyleOverrides {
+            align_tables: true,
+            ..PageStyleOverrides::default()
+        };
+        // Simulate the CLI having applied `--align-tables right` before us.
+        let starting = page(80).use_alignment(PageComponent::Tables, PageAlignment::Right);
+        let out = apply_page_style(starting, &style, overrides).unwrap();
+        assert_eq!(
+            out.alignment_for(PageComponent::Tables),
+            PageAlignment::Right,
+            "component-specific CLI alignment must survive page broadcast",
+        );
+        // Unclaimed components still receive the page default.
+        for component in [
+            PageComponent::Images,
+            PageComponent::Lists,
+            PageComponent::BlockQuotes,
+            PageComponent::CodeBlocks,
+        ] {
+            assert_eq!(
+                out.alignment_for(component),
+                PageAlignment::Center,
+                "unclaimed component should adopt page broadcast: {:?}",
+                component,
+            );
+        }
     }
 
     #[test]

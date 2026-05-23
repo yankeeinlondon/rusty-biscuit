@@ -185,7 +185,11 @@ pub fn apply_cli_layout_flags(page: DarkmatterPage, cli: &Cli) -> DarkmatterPage
 /// Mirrors the shorthand expansion rules in [`apply_cli_layout_flags`]:
 /// `--margin` claims all four sides, `--mx` claims left/right, `--my` claims
 /// top/bottom. Padding follows the same pattern. `--max-width`, `--page-bg`,
-/// and `--alignment` each claim their corresponding page-level field.
+/// and `--alignment` each claim their corresponding page-level field. The
+/// component-specific alignment flags (`--align-images`, `--align-lists`,
+/// `--align-block-quotes`, `--align-tables`, `--align-code-blocks`) each
+/// claim their component so the `style.page.alignment` broadcast does not
+/// silently overwrite them.
 pub fn page_style_overrides_from_cli(cli: &Cli) -> PageStyleOverrides {
     let margin_all = cli.margin.is_some();
     let mx = cli.mx.is_some();
@@ -206,6 +210,11 @@ pub fn page_style_overrides_from_cli(cli: &Cli) -> PageStyleOverrides {
         max_width: cli.max_width.is_some(),
         background: cli.page_bg.is_some(),
         alignment: cli.alignment.is_some(),
+        align_images: cli.align_images.is_some(),
+        align_lists: cli.align_lists.is_some(),
+        align_block_quotes: cli.align_block_quotes.is_some(),
+        align_tables: cli.align_tables.is_some(),
+        align_code_blocks: cli.align_code_blocks.is_some(),
     }
 }
 
@@ -217,15 +226,22 @@ pub fn apply_style_frontmatter(
     md: &Markdown,
     cli: &Cli,
 ) -> Result<DarkmatterPage> {
-    let parsed = from_frontmatter(md.frontmatter())
+    let (style, all_warnings) = from_frontmatter(md.frontmatter())
         .context("Failed to parse `style:` frontmatter")?;
 
+    // `--strict-style` promotes schema issues (UnknownKey / Deprecated) to
+    // errors, but informational `KnownButInactive` warnings must still flow
+    // through `log_style_warnings` so `RUST_LOG=darkmatter=info` users see
+    // future-phase keys regardless of strict mode.
     let (style, warnings) = if cli.strict_style {
-        let style = into_strict(parsed)
+        let (schema, informational): (Vec<_>, Vec<_>) = all_warnings
+            .into_iter()
+            .partition(StyleWarning::is_schema_issue);
+        let style = into_strict((style, schema))
             .context("`style:` frontmatter rejected by --strict-style")?;
-        (style, Vec::new())
+        (style, informational)
     } else {
-        parsed
+        (style, all_warnings)
     };
 
     log_style_warnings(&warnings);
@@ -965,5 +981,91 @@ mod tests {
         let cli = cli_from(&["md", "doc.md", "--alignment", "center"]);
         let o = page_style_overrides_from_cli(&cli);
         assert!(o.alignment);
+    }
+
+    #[test]
+    fn component_specific_alignment_flags_claim_their_component() {
+        let cli = cli_from(&[
+            "md",
+            "doc.md",
+            "--align-images",
+            "left",
+            "--align-lists",
+            "right",
+            "--align-block-quotes",
+            "center",
+            "--align-tables",
+            "right",
+            "--align-code-blocks",
+            "left",
+        ]);
+        let o = page_style_overrides_from_cli(&cli);
+        assert!(o.align_images && o.align_lists && o.align_block_quotes);
+        assert!(o.align_tables && o.align_code_blocks);
+        // The global `--alignment` was not set, so the broadcast field stays clear.
+        assert!(!o.alignment);
+    }
+
+    #[test]
+    fn component_alignment_unclaimed_when_no_flags() {
+        let cli = cli_from(&["md", "doc.md"]);
+        let o = page_style_overrides_from_cli(&cli);
+        assert!(
+            !o.align_images
+                && !o.align_lists
+                && !o.align_block_quotes
+                && !o.align_tables
+                && !o.align_code_blocks,
+        );
+    }
+
+    // -----------------------------------------------------------------
+    // Strict-style preserves informational `KnownButInactive` warnings
+    // -----------------------------------------------------------------
+
+    /// Build a `DarkmatterPage` at a deterministic width for warning-log tests.
+    fn test_page() -> DarkmatterPage {
+        DarkmatterPage::new(&Terminal::new_optimistic(80))
+    }
+
+    #[test]
+    #[tracing_test::traced_test]
+    fn strict_style_still_emits_known_but_inactive_event() {
+        // A schema-clean fixture whose only warnings are `KnownButInactive`
+        // (the `table` block is wired in a later sub-spec). Under
+        // `--strict-style`, `into_strict` must succeed (no schema issues),
+        // and the informational future-phase event must still reach
+        // `log_style_warnings`. The old code replaced the warning list with
+        // `Vec::new()` in strict mode and silently swallowed it.
+        let raw = "---\n\
+style:\n\
+\x20   table:\n\
+\x20       alignment: right\n\
+---\n\n# Doc\n";
+        let md = Markdown::try_from_content(raw).unwrap();
+        let cli = cli_from(&["md", "doc.md", "--strict-style"]);
+        apply_style_frontmatter(test_page(), &md, &cli)
+            .expect("strict-style must succeed on schema-clean future-phase key");
+        assert!(
+            logs_contain("style key parsed but not yet wired"),
+            "informational KnownButInactive event must survive --strict-style"
+        );
+    }
+
+    #[test]
+    #[tracing_test::traced_test]
+    fn non_strict_style_emits_known_but_inactive_event() {
+        let raw = "---\n\
+style:\n\
+\x20   table:\n\
+\x20       alignment: right\n\
+---\n\n# Doc\n";
+        let md = Markdown::try_from_content(raw).unwrap();
+        let cli = cli_from(&["md", "doc.md"]);
+        apply_style_frontmatter(test_page(), &md, &cli).expect("apply");
+        assert!(
+            logs_contain("style key parsed but not yet wired"),
+            "informational KnownButInactive event must be logged in non-strict mode"
+        );
     }
 }
