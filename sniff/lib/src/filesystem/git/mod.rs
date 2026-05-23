@@ -8,7 +8,7 @@ pub mod worktree;
 
 pub use discovery::{
     DeltaKind, detect_git, detect_git_with_request, get_commit_by_sha, get_commit_files,
-    get_commits_for_path,
+    get_commits_for_branch, get_commits_for_path,
 };
 pub use recent_commits::{
     CommitDesc, CommitDescSet, CommitFileChange, PeriodSpecifier, get_recent_commits_by_count,
