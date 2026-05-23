@@ -5,34 +5,64 @@ use renderable::layout::Length;
 use serde::Deserialize;
 use serde::de::{self, Deserializer};
 
-/// Parse a single horizontal length value.
+/// Typed reason for a horizontal-length parse failure. Used by the pre-
+/// validator to choose between `StyleParseError::InvalidLength` and
+/// `StyleParseError::InvalidPercent`.
+#[derive(Debug, Clone, PartialEq)]
+pub enum HorizontalLengthError {
+    Empty,
+    Negative,
+    MalformedPercent,
+    MalformedCh,
+    /// Percent value was numerically parseable but outside `0.0..=100.0`.
+    /// Carries the offending value for inclusion in the public error.
+    PercentOutOfRange(f32),
+    UnsupportedUnit,
+}
+
+impl HorizontalLengthError {
+    /// Human-readable reason. Used both as a `&'static str` for serde
+    /// `Error::custom` messages and as the `reason` field on
+    /// `StyleParseError::InvalidLength`.
+    pub fn as_static_reason(&self) -> &'static str {
+        match self {
+            Self::Empty => "empty length",
+            Self::Negative => "negative length",
+            Self::MalformedPercent => "malformed percent",
+            Self::MalformedCh => "malformed ch length",
+            Self::PercentOutOfRange(_) => "percent out of range; must be in 0.0..=100.0",
+            Self::UnsupportedUnit => "unsupported unit; allowed: ch, %",
+        }
+    }
+}
+
+/// Parse a single horizontal length value, returning a typed error.
 ///
 /// ## Accepted forms
 ///
 /// - `"2ch"` / `"2 ch"` → `Length::Ch(2)`
 /// - `"40"` (bare) → `Length::Ch(40)`
 /// - `"50%"` / `"50.5%"` → `Length::Percent(50.0)` / `Length::Percent(50.5)`
-///
-/// ## Errors
-///
-/// Returns one of the reasons:
-/// `"empty length"`, `"negative length"`, `"malformed percent"`,
-/// `"malformed ch length"`, `"percent out of range; must be in 0.0..=100.0"`,
-/// or `"unsupported unit; allowed: ch, %"`.
-pub fn parse_horizontal(raw: &str) -> Result<Length, &'static str> {
+pub fn parse_horizontal_typed(raw: &str) -> Result<Length, HorizontalLengthError> {
     let trimmed = raw.trim();
     if trimmed.is_empty() {
-        return Err("empty length");
+        return Err(HorizontalLengthError::Empty);
     }
     if trimmed.starts_with('-') {
-        return Err("negative length");
+        return Err(HorizontalLengthError::Negative);
     }
 
     // Percent: trailing `%`.
     if let Some(num_part) = trimmed.strip_suffix('%') {
-        let n: f32 = num_part.trim().parse().map_err(|_| "malformed percent")?;
-        if !(0.0..=100.0).contains(&n) || !n.is_finite() {
-            return Err("percent out of range; must be in 0.0..=100.0");
+        let n: f32 = num_part
+            .trim()
+            .parse()
+            .map_err(|_| HorizontalLengthError::MalformedPercent)?;
+        if !n.is_finite() {
+            return Err(HorizontalLengthError::MalformedPercent);
+        }
+        if !(0.0..=100.0).contains(&n) {
+            return Err(HorizontalLengthError::PercentOutOfRange(n));
         }
         return Ok(Length::Percent(n));
     }
@@ -40,7 +70,10 @@ pub fn parse_horizontal(raw: &str) -> Result<Length, &'static str> {
     // `Nch` (with or without space).
     let lower = trimmed.to_ascii_lowercase();
     if let Some(num_part) = lower.strip_suffix("ch") {
-        let n: u32 = num_part.trim().parse().map_err(|_| "malformed ch length")?;
+        let n: u32 = num_part
+            .trim()
+            .parse()
+            .map_err(|_| HorizontalLengthError::MalformedCh)?;
         return Ok(Length::Ch(n));
     }
 
@@ -49,7 +82,20 @@ pub fn parse_horizontal(raw: &str) -> Result<Length, &'static str> {
         return Ok(Length::Ch(n));
     }
 
-    Err("unsupported unit; allowed: ch, %")
+    Err(HorizontalLengthError::UnsupportedUnit)
+}
+
+/// Thin wrapper over [`parse_horizontal_typed`] that returns a static reason
+/// string. Kept for backward compatibility with the serde-layer deserializers.
+///
+/// ## Errors
+///
+/// Returns one of: `"empty length"`, `"negative length"`,
+/// `"malformed percent"`, `"malformed ch length"`,
+/// `"percent out of range; must be in 0.0..=100.0"`, or
+/// `"unsupported unit; allowed: ch, %"`.
+pub fn parse_horizontal(raw: &str) -> Result<Length, &'static str> {
+    parse_horizontal_typed(raw).map_err(|e| e.as_static_reason())
 }
 
 /// Serde deserializer for `Option<Length>` reading a string or bare integer.

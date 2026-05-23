@@ -590,4 +590,91 @@ mod tests {
         assert!(matches!(c.color, Color::Web(_)));
         assert_eq!(c.opacity, None);
     }
+
+    /// Exhaustive table of every supported Tailwind `(family, level)` pair.
+    /// Used by the matrix test below; kept as a separate constant so a
+    /// missing or extra row is reviewable in isolation.
+    ///
+    /// Generated against the `Tailwind` variants the renderable crate
+    /// publishes — 22 families × 11 levels = 242 entries.
+    const TAILWIND_MATRIX: &[(&str, [Tailwind; 11])] = {
+        use Tailwind::*;
+        &[
+            ("red",     [Red50, Red100, Red200, Red300, Red400, Red500, Red600, Red700, Red800, Red900, Red950]),
+            ("orange",  [Orange50, Orange100, Orange200, Orange300, Orange400, Orange500, Orange600, Orange700, Orange800, Orange900, Orange950]),
+            ("amber",   [Amber50, Amber100, Amber200, Amber300, Amber400, Amber500, Amber600, Amber700, Amber800, Amber900, Amber950]),
+            ("yellow",  [Yellow50, Yellow100, Yellow200, Yellow300, Yellow400, Yellow500, Yellow600, Yellow700, Yellow800, Yellow900, Yellow950]),
+            ("lime",    [Lime50, Lime100, Lime200, Lime300, Lime400, Lime500, Lime600, Lime700, Lime800, Lime900, Lime950]),
+            ("green",   [Green50, Green100, Green200, Green300, Green400, Green500, Green600, Green700, Green800, Green900, Green950]),
+            ("emerald", [Emerald50, Emerald100, Emerald200, Emerald300, Emerald400, Emerald500, Emerald600, Emerald700, Emerald800, Emerald900, Emerald950]),
+            ("teal",    [Teal50, Teal100, Teal200, Teal300, Teal400, Teal500, Teal600, Teal700, Teal800, Teal900, Teal950]),
+            ("cyan",    [Cyan50, Cyan100, Cyan200, Cyan300, Cyan400, Cyan500, Cyan600, Cyan700, Cyan800, Cyan900, Cyan950]),
+            ("sky",     [Sky50, Sky100, Sky200, Sky300, Sky400, Sky500, Sky600, Sky700, Sky800, Sky900, Sky950]),
+            ("blue",    [Blue50, Blue100, Blue200, Blue300, Blue400, Blue500, Blue600, Blue700, Blue800, Blue900, Blue950]),
+            ("indigo",  [Indigo50, Indigo100, Indigo200, Indigo300, Indigo400, Indigo500, Indigo600, Indigo700, Indigo800, Indigo900, Indigo950]),
+            ("violet",  [Violet50, Violet100, Violet200, Violet300, Violet400, Violet500, Violet600, Violet700, Violet800, Violet900, Violet950]),
+            ("purple",  [Purple50, Purple100, Purple200, Purple300, Purple400, Purple500, Purple600, Purple700, Purple800, Purple900, Purple950]),
+            ("fuchsia", [Fuchsia50, Fuchsia100, Fuchsia200, Fuchsia300, Fuchsia400, Fuchsia500, Fuchsia600, Fuchsia700, Fuchsia800, Fuchsia900, Fuchsia950]),
+            ("pink",    [Pink50, Pink100, Pink200, Pink300, Pink400, Pink500, Pink600, Pink700, Pink800, Pink900, Pink950]),
+            ("rose",    [Rose50, Rose100, Rose200, Rose300, Rose400, Rose500, Rose600, Rose700, Rose800, Rose900, Rose950]),
+            ("slate",   [Slate50, Slate100, Slate200, Slate300, Slate400, Slate500, Slate600, Slate700, Slate800, Slate900, Slate950]),
+            ("gray",    [Gray50, Gray100, Gray200, Gray300, Gray400, Gray500, Gray600, Gray700, Gray800, Gray900, Gray950]),
+            ("zinc",    [Zinc50, Zinc100, Zinc200, Zinc300, Zinc400, Zinc500, Zinc600, Zinc700, Zinc800, Zinc900, Zinc950]),
+            ("neutral", [Neutral50, Neutral100, Neutral200, Neutral300, Neutral400, Neutral500, Neutral600, Neutral700, Neutral800, Neutral900, Neutral950]),
+            ("stone",   [Stone50, Stone100, Stone200, Stone300, Stone400, Stone500, Stone600, Stone700, Stone800, Stone900, Stone950]),
+        ]
+    };
+
+    const TAILWIND_LEVELS: [&str; 11] =
+        ["50", "100", "200", "300", "400", "500", "600", "700", "800", "900", "950"];
+
+    /// Spec test #2: every supported Tailwind `(family, level)` combination
+    /// parses to its matching `Tailwind` enum variant, including the four
+    /// neutral families (`slate`, `zinc`, `neutral`, `stone`).
+    #[test]
+    fn tailwind_full_matrix() {
+        assert_eq!(TAILWIND_MATRIX.len(), 22, "should cover all 22 families");
+        let mut total = 0usize;
+        for (family, variants) in TAILWIND_MATRIX {
+            assert_eq!(
+                variants.len(),
+                TAILWIND_LEVELS.len(),
+                "family {} should have 11 levels",
+                family
+            );
+            for (level, expected) in TAILWIND_LEVELS.iter().zip(variants.iter()) {
+                let input = format!("{}-{}", family, level);
+                let parsed = parse(&input).unwrap_or_else(|e| {
+                    panic!("`{}` failed to parse: {}", input, e)
+                });
+                assert_eq!(
+                    parsed.color,
+                    Color::Tailwind(*expected),
+                    "`{}` produced unexpected variant",
+                    input
+                );
+                assert_eq!(parsed.opacity, None, "`{}` should have no opacity", input);
+                total += 1;
+            }
+        }
+        assert_eq!(total, 242, "expected 22 * 11 = 242 cases");
+    }
+
+    /// Spot-check: opacity round-trips through the matrix for a sample of
+    /// families/levels. The opacity-only edge cases (0, 50, 100, 101) are
+    /// already covered by `tailwind_opacity_bounds`; this confirms the
+    /// matrix entries don't lose opacity when present.
+    #[test]
+    fn tailwind_matrix_opacity_smoke() {
+        for (family, variants) in TAILWIND_MATRIX {
+            for (level, expected) in TAILWIND_LEVELS.iter().zip(variants.iter()) {
+                let input = format!("{}-{}/50", family, level);
+                let parsed = parse(&input).unwrap_or_else(|e| {
+                    panic!("`{}` failed to parse: {}", input, e)
+                });
+                assert_eq!(parsed.color, Color::Tailwind(*expected), "`{}`", input);
+                assert_eq!(parsed.opacity, Some(50), "`{}` opacity", input);
+            }
+        }
+    }
 }

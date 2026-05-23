@@ -36,6 +36,7 @@
 //! populate it without changing the public surface.
 
 pub mod alignment;
+pub mod apply;
 pub mod color;
 pub mod descriptor;
 pub mod error;
@@ -45,6 +46,10 @@ pub mod schema;
 pub mod walker;
 pub mod warning;
 
+#[cfg(test)]
+mod coverage_tests;
+
+pub use apply::{apply_page_style, PageStyleOverrides, StyleApplyError};
 pub use color::StyleColor;
 pub use error::StyleParseError;
 pub use parse::{from_frontmatter, from_json_value, into_strict};

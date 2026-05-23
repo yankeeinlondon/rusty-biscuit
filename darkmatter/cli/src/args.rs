@@ -635,6 +635,10 @@ pub struct Cli {
     #[arg(long, value_name = "FILL", value_parser = parse_page_fill)]
     pub fill_code_blocks: Option<PageFill>,
 
+    /// Promote schema-validation warnings (unknown / deprecated keys) to errors.
+    #[arg(long)]
+    pub strict_style: bool,
+
     /// Increase verbosity for styled user-facing output (-v summary, -vv detailed)
     #[arg(
         short = 'v',
