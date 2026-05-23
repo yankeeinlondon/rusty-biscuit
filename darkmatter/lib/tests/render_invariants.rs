@@ -231,7 +231,16 @@ fn scenarios() -> Vec<Scenario> {
     ]
 }
 
-fn render(shape: &Shape, scenario: &Scenario) -> Result<String, String> {
+/// Renders raw Markdown source under `scenario`, optionally enabling Mermaid.
+///
+/// Splitting this from [`render`] lets the idempotence sweep build per-iteration
+/// fixture strings (varying only the blank-line count between blocks) without
+/// having to materialize them as `&'static str` via `Box::leak`.
+fn render_md(
+    md: &str,
+    mermaid: Option<MermaidMode>,
+    scenario: &Scenario,
+) -> Result<String, String> {
     let term = Terminal::new_optimistic(scenario.width as u32);
     // `DarkmatterPage::new` captures `term.color_depth` (TrueColor under
     // `new_optimistic`) and threads it onto the decorated path, so this matrix
@@ -244,11 +253,15 @@ fn render(shape: &Shape, scenario: &Scenario) -> Result<String, String> {
         .with_margin_top(scenario.mt)
         .with_margin_bottom(scenario.mb)
         .with_code_theme("dracula");
-    if let Some(mode) = shape.mermaid {
+    if let Some(mode) = mermaid {
         page = page.with_mermaid_mode(mode);
     }
-    let md: Markdown = shape.md.into();
+    let md: Markdown = md.into();
     page.render(&md).map_err(|e| format!("{e}"))
+}
+
+fn render(shape: &Shape, scenario: &Scenario) -> Result<String, String> {
+    render_md(shape.md, shape.mermaid, scenario)
 }
 
 /// One applicable invariant: stable id, whether it only applies to full-bleed
@@ -413,26 +426,11 @@ fn blank_line_count_is_idempotent() {
 
     for shape in shapes() {
         for scenario in scenarios() {
-            let one = Shape {
-                name: shape.name,
-                md: Box::leak(format!("{}\n{tail}", shape.md).into_boxed_str()),
-                is_code: shape.is_code,
-                mermaid: shape.mermaid,
-            };
-            let five = Shape {
-                name: shape.name,
-                md: Box::leak(format!("{}\n\n\n\n\n{tail}", shape.md).into_boxed_str()),
-                is_code: shape.is_code,
-                mermaid: shape.mermaid,
-            };
-            let many = Shape {
-                name: shape.name,
-                md: Box::leak(format!("{}{}{tail}", shape.md, "\n".repeat(99)).into_boxed_str()),
-                is_code: shape.is_code,
-                mermaid: shape.mermaid,
-            };
+            let one = format!("{}\n{tail}", shape.md);
+            let five = format!("{}\n\n\n\n\n{tail}", shape.md);
+            let many = format!("{}{}{tail}", shape.md, "\n".repeat(99));
 
-            let r1 = match render(&one, &scenario) {
+            let r1 = match render_md(&one, shape.mermaid, &scenario) {
                 Ok(out) => out,
                 Err(e) => {
                     violations.push(format!(
@@ -442,7 +440,7 @@ fn blank_line_count_is_idempotent() {
                     continue;
                 }
             };
-            let r5 = match render(&five, &scenario) {
+            let r5 = match render_md(&five, shape.mermaid, &scenario) {
                 Ok(out) => out,
                 Err(e) => {
                     violations.push(format!(
@@ -452,7 +450,7 @@ fn blank_line_count_is_idempotent() {
                     continue;
                 }
             };
-            let r99 = match render(&many, &scenario) {
+            let r99 = match render_md(&many, shape.mermaid, &scenario) {
                 Ok(out) => out,
                 Err(e) => {
                     violations.push(format!(
