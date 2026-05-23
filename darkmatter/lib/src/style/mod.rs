@@ -15,7 +15,7 @@ pub mod warning;
 
 pub use color::StyleColor;
 pub use error::StyleParseError;
-pub use parse::from_json_value;
+pub use parse::{from_frontmatter, from_json_value, into_strict};
 pub use schema::StyleFrontmatter;
 pub use warning::{StyleSpan, StyleWarning, StyleWarningKind};
 

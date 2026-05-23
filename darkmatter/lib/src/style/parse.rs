@@ -81,9 +81,49 @@ fn annotate_inner(value: &Value, path: &str, warnings: &mut Vec<StyleWarning>) {
     }
 }
 
+use crate::markdown::Frontmatter;
+
+/// Parse the `style:` value from a `Frontmatter`. Returns
+/// `(StyleFrontmatter::default(), vec![])` when no `style:` key is present.
+///
+/// ## Errors
+///
+/// Propagates any `StyleParseError` returned by `from_json_value`.
+pub fn from_frontmatter(
+    fm: &Frontmatter,
+) -> Result<(StyleFrontmatter, Vec<StyleWarning>), StyleParseError> {
+    match fm.as_map().get("style") {
+        Some(value) => from_json_value(value),
+        None => Ok((StyleFrontmatter::default(), Vec::new())),
+    }
+}
+
+/// Promote schema-validation warnings (`UnknownKey`, `Deprecated`) to errors.
+///
+/// `KnownButInactive` warnings are deliberately ignored so a strict caller
+/// does not fail on a forward-compatible document.
+///
+/// ## Errors
+///
+/// Returns `StyleParseError::Strict` when any `UnknownKey` or `Deprecated`
+/// warnings are present in the parsed result.
+pub fn into_strict(
+    parsed: (StyleFrontmatter, Vec<StyleWarning>),
+) -> Result<StyleFrontmatter, StyleParseError> {
+    let (style, warnings) = parsed;
+    let schema: Vec<StyleWarning> =
+        warnings.into_iter().filter(|w| w.is_schema_issue()).collect();
+    if schema.is_empty() {
+        Ok(style)
+    } else {
+        Err(StyleParseError::Strict { warnings: schema })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::markdown::Frontmatter;
     use renderable::layout::{Alignment, Length};
     use serde_json::json;
 
@@ -235,5 +275,63 @@ mod tests {
         assert_eq!(ul.common.alignment, Some(Alignment::Left));
         assert_eq!(ul.left_margin, Some(Length::Ch(4)));
         assert_eq!(ul.common.max_width, Some(Length::Ch(40)));
+    }
+
+    #[test]
+    fn from_frontmatter_no_style_key_yields_default() {
+        let fm = Frontmatter::new();
+        let (s, w) = from_frontmatter(&fm).unwrap();
+        assert_eq!(s, StyleFrontmatter::default());
+        assert!(w.is_empty());
+    }
+
+    #[test]
+    fn from_frontmatter_with_style_key() {
+        let mut fm = Frontmatter::new();
+        fm.insert("style", json!({"page": {"left-margin": "2ch"}})).unwrap();
+        let (s, _w) = from_frontmatter(&fm).unwrap();
+        assert!(s.page.is_some());
+    }
+
+    #[test]
+    fn into_strict_passes_clean_parse() {
+        let parsed = from_json_value(&json!({"page": {"left-margin": "2ch"}})).unwrap();
+        // Only KnownButInactive warnings; strict should succeed.
+        let s = into_strict(parsed).unwrap();
+        assert!(s.page.is_some());
+    }
+
+    #[test]
+    fn into_strict_fails_on_unknown_key() {
+        let parsed =
+            from_json_value(&json!({"page": {"lft-margin": "2ch"}})).unwrap();
+        match into_strict(parsed) {
+            Err(StyleParseError::Strict { warnings }) => {
+                assert_eq!(warnings.len(), 1);
+                assert_eq!(warnings[0].path, "style.page.lft-margin");
+            }
+            other => panic!("expected Strict error, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn into_strict_fails_on_deprecated_alias() {
+        let parsed =
+            from_json_value(&json!({"page": {"left_margin": "2ch"}})).unwrap();
+        assert!(matches!(
+            into_strict(parsed),
+            Err(StyleParseError::Strict { .. })
+        ));
+    }
+
+    #[test]
+    fn into_strict_ignores_known_but_inactive() {
+        // Document fully valid; every key emits KnownButInactive but strict
+        // must still succeed.
+        let parsed = from_json_value(&json!({
+            "table": {"alignment": "right", "max-width": "50%"}
+        }))
+        .unwrap();
+        assert!(into_strict(parsed).is_ok());
     }
 }
