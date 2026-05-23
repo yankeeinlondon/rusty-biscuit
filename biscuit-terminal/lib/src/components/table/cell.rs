@@ -161,7 +161,7 @@ pub(super) fn format_currency(currency: &Currency, value: f64) -> String {
 /// If `width_for_alignment` is provided, alignment offsets use this width instead
 /// of the actual content width. This ensures consistent alignment across rows with
 /// mixed-width content (e.g., emoji vs symbols).
-pub(super) fn pad_cell(
+pub(crate) fn pad_cell(
     content: &str,
     width: usize,
     alignment: Alignment,

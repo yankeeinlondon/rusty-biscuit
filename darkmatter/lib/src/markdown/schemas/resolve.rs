@@ -61,10 +61,7 @@ pub struct ResolvedSchema {
 /// - [`SchemaError::FrontmatterShape`] for unsupported `$schema` shapes.
 /// - [`SchemaError::Grammar`] / [`SchemaError::Convert`] propagated from the
 ///   parser and converter.
-pub fn resolve_schema(
-    value: &Value,
-    base_dir: &Path,
-) -> Result<ResolvedSchema, SchemaError> {
+pub fn resolve_schema(value: &Value, base_dir: &Path) -> Result<ResolvedSchema, SchemaError> {
     let yaml = json_to_yaml(value);
     resolve_yaml_schema(&yaml, base_dir)
 }
@@ -95,10 +92,7 @@ pub fn resolve_yaml_schema(
     }
 }
 
-fn resolve_root_union(
-    items: &[YamlValue],
-    base_dir: &Path,
-) -> Result<ResolvedSchema, SchemaError> {
+fn resolve_root_union(items: &[YamlValue], base_dir: &Path) -> Result<ResolvedSchema, SchemaError> {
     if items.is_empty() {
         return Err(SchemaError::FrontmatterShape {
             message: "$schema root union must have at least one arm".into(),
@@ -158,10 +152,7 @@ fn resolve_root_union(
     })
 }
 
-fn resolve_reference(
-    reference: &str,
-    base_dir: &Path,
-) -> Result<ResolvedSchema, SchemaError> {
+fn resolve_reference(reference: &str, base_dir: &Path) -> Result<ResolvedSchema, SchemaError> {
     let trimmed = reference.trim();
     if let Some(rest) = trimmed.strip_prefix("http://") {
         let _ = rest;
@@ -212,10 +203,7 @@ fn load_schema_from_path(path: &Path) -> Result<ResolvedSchema, SchemaError> {
     }
 }
 
-fn parse_yaml_referenced_file(
-    path: &Path,
-    bytes: &[u8],
-) -> Result<ResolvedSchema, SchemaError> {
+fn parse_yaml_referenced_file(path: &Path, bytes: &[u8]) -> Result<ResolvedSchema, SchemaError> {
     let text = std::str::from_utf8(bytes).map_err(|_| SchemaError::AmbiguousReferenced {
         path: path.to_path_buf(),
     })?;
@@ -228,8 +216,7 @@ fn parse_yaml_referenced_file(
     // or a sequence (i.e. an authored SimplifiedSchema). Otherwise treat as
     // raw JSON Schema.
     if let YamlValue::Mapping(map) = &value
-        && let Some(schema_value) =
-            map.get(YamlValue::String("$schema".into()))
+        && let Some(schema_value) = map.get(YamlValue::String("$schema".into()))
         && matches!(schema_value, YamlValue::Mapping(_) | YamlValue::Sequence(_))
     {
         let parsed = parse_yaml_schema(schema_value)?;
@@ -257,9 +244,10 @@ fn parse_yaml_referenced_file(
 }
 
 fn parse_raw_json_schema(path: &Path, bytes: &[u8]) -> Result<ResolvedSchema, SchemaError> {
-    let value: Value = serde_json::from_slice(bytes).map_err(|_| SchemaError::AmbiguousReferenced {
-        path: path.to_path_buf(),
-    })?;
+    let value: Value =
+        serde_json::from_slice(bytes).map_err(|_| SchemaError::AmbiguousReferenced {
+            path: path.to_path_buf(),
+        })?;
     if !value.is_object() {
         return Err(SchemaError::AmbiguousReferenced {
             path: path.to_path_buf(),
@@ -287,10 +275,7 @@ fn parse_raw_json_schema(path: &Path, bytes: &[u8]) -> Result<ResolvedSchema, Sc
 /// Returns [`SchemaError::Baseline`] when the baseline is not a simple
 /// object schema (rooted at `"type": "object"` with only `properties` /
 /// `required`).
-pub fn merge_baseline(
-    baseline: &Value,
-    document: Value,
-) -> Result<Value, SchemaError> {
+pub fn merge_baseline(baseline: &Value, document: Value) -> Result<Value, SchemaError> {
     let baseline_obj = baseline.as_object().ok_or_else(|| SchemaError::Baseline {
         message: "baseline must be an object schema".into(),
         source: None,
@@ -303,10 +288,7 @@ pub fn merge_baseline(
         for arm in arms {
             new_arms.push(merge_baseline(baseline, arm.clone())?);
         }
-        let mut merged = document
-            .as_object()
-            .cloned()
-            .unwrap_or_else(Map::new);
+        let mut merged = document.as_object().cloned().unwrap_or_else(Map::new);
         merged.insert("anyOf".into(), Value::Array(new_arms));
         return Ok(Value::Object(merged));
     }

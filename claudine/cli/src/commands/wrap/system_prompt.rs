@@ -23,14 +23,12 @@ pub(crate) enum SystemPromptArtifact {
 impl std::fmt::Debug for SystemPromptArtifact {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            SystemPromptArtifact::TempFile(tmp) => f
-                .debug_tuple("TempFile")
-                .field(&tmp.path())
-                .finish(),
-            SystemPromptArtifact::TempDir(tmp) => f
-                .debug_tuple("TempDir")
-                .field(&tmp.path())
-                .finish(),
+            SystemPromptArtifact::TempFile(tmp) => {
+                f.debug_tuple("TempFile").field(&tmp.path()).finish()
+            }
+            SystemPromptArtifact::TempDir(tmp) => {
+                f.debug_tuple("TempDir").field(&tmp.path()).finish()
+            }
         }
     }
 }
@@ -349,7 +347,12 @@ mod tests {
         let file = scoped_tempfile(base.path(), "test-prefix-").unwrap();
         let path = file.path();
         assert!(path.starts_with(base.path()));
-        assert!(path.file_name().unwrap().to_string_lossy().starts_with("test-prefix-"));
+        assert!(
+            path.file_name()
+                .unwrap()
+                .to_string_lossy()
+                .starts_with("test-prefix-")
+        );
         assert!(path.extension().unwrap() == "md");
         assert!(path.exists());
     }
@@ -571,7 +574,10 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(app.args, vec!["-c", "developer_instructions=\"Small prompt.\""]);
+        assert_eq!(
+            app.args,
+            vec!["-c", "developer_instructions=\"Small prompt.\""]
+        );
         assert!(app.env.is_empty());
         assert!(app.artifacts.is_empty());
     }
@@ -655,7 +661,10 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(app.args, vec!["--append-system-prompt", "Qwen append content."]);
+        assert_eq!(
+            app.args,
+            vec!["--append-system-prompt", "Qwen append content."]
+        );
         assert!(app.env.is_empty());
         assert!(app.artifacts.is_empty());
     }

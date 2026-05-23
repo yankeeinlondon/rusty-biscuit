@@ -5,10 +5,10 @@ use biscuit_terminal::{
         compose::Compose,
         list::UnorderedList,
         prose::Prose,
-        renderable::{TerminalRenderable, RenderableTerminalContent},
+        renderable::{RenderableTerminalContent, TerminalRenderable},
     },
     terminal::Terminal,
-    utils::layout::Margin,
+    utils::layout::{Length, TargetValue},
 };
 
 pub fn render_network_section(network: &sniff::NetworkInfo, verbose: u8) -> String {
@@ -163,7 +163,7 @@ fn build_interface_blocks(network: &sniff::NetworkInfo, verbose: u8) -> Vec<Unor
 
 fn indented_line(content: String) -> RenderableTerminalContent {
     Prose::new(content)
-        .with_left_margin(Margin::Chars(2))
+        .with_left_margin(TargetValue::universal(Length::ch(2)))
         .into()
 }
 

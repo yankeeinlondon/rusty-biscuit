@@ -1,8 +1,9 @@
 ---
 source: darkmatter/lib/tests/error_snapshots/transclusion.rs
+assertion_line: 243
 expression: out
 ---
-⨫ TransclusionError: invalid frontmatter assignment
+⤫ TransclusionError: invalid frontmatter assignment
 ┃ Invalid frontmatter override in directive:
 ┃ 
 ┃     4 │ line 4

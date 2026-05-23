@@ -21,8 +21,8 @@ use schematic_definitions::elevenlabs::define_elevenlabs_rest_api;
 use schematic_definitions::openai::define_openai_api;
 use schematic_definitions::registry::get_registries_for_module;
 use schematic_gen::cargo_gen::write_cargo_toml;
-use schematic_gen::infer_module_path;
 use schematic_gen::export::openapi::write_openapi_grouped;
+use schematic_gen::infer_module_path;
 use schematic_gen::output::{generate_and_write, generate_and_write_all};
 
 /// Returns true if a module exists as either a single `.rs` file or a directory

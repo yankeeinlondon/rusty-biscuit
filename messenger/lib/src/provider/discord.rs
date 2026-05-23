@@ -68,16 +68,28 @@ impl DiscordProvider {
                     }
                     rich_md.push_str(&loc);
                 }
-                let embed = EmbedBuilder::new()
-                    .description(rich_md)
-                    .build();
-                let content = if summary.is_empty() { None } else { Some(summary) };
-                DiscordPayload { content, embed: Some(embed) }
+                let embed = EmbedBuilder::new().description(rich_md).build();
+                let content = if summary.is_empty() {
+                    None
+                } else {
+                    Some(summary)
+                };
+                DiscordPayload {
+                    content,
+                    embed: Some(embed),
+                }
             }
             None => {
                 let content = message.render_body_with_location(ProviderKind::Discord);
-                let content = if content.is_empty() { None } else { Some(content) };
-                DiscordPayload { content, embed: None }
+                let content = if content.is_empty() {
+                    None
+                } else {
+                    Some(content)
+                };
+                DiscordPayload {
+                    content,
+                    embed: None,
+                }
             }
         }
     }

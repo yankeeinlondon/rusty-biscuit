@@ -10,7 +10,10 @@ use biscuit_terminal::discovery::cursor_position::cursor_position;
 use biscuit_terminal::terminal::Terminal;
 use clap::Args as ClapArgs;
 use std::path::Path;
+use std::path::PathBuf;
 use std::time::Instant;
+
+const IMAGE_EXAMPLE_BYTES: &[u8] = include_bytes!("../../tests/fixtures/tiny.png");
 
 /// Display an image in the terminal
 ///
@@ -18,9 +21,13 @@ use std::time::Instant;
 /// Supports PNG, JPG, JPEG, and GIF formats.
 #[derive(ClapArgs, Debug, Clone)]
 pub struct ImageArgs {
+    /// Render an example and show the command used
+    #[arg(long, short = 'e')]
+    pub example: bool,
+
     /// Image file path with optional width spec (e.g., "photo.jpg|75%")
-    #[arg(value_name = "FILEPATH", add = clap_complete::engine::ArgValueCompleter::new(crate::image_completer()))]
-    pub filepath: String,
+    #[arg(value_name = "FILEPATH", required_unless_present = "example", add = clap_complete::engine::ArgValueCompleter::new(crate::image_completer()))]
+    pub filepath: Option<String>,
 
     /// Display width: percentage (e.g., "50%"), characters (e.g., "80ch" or "80"), or "fill"
     ///
@@ -43,14 +50,34 @@ pub struct ImageArgs {
 impl Run for ImageArgs {
     fn run(self, _ctx: &CliContext) -> color_eyre::Result<()> {
         let width_str = self.width.as_ref().map(|w| w.to_string());
-        render_image(
-            &self.filepath,
-            width_str.as_deref(),
-            &self.layout,
-            self.meta,
-            self.debug,
-        )
+        let (filepath, example_cmd) = if self.example {
+            let example_path = write_example_image()?;
+            let path = example_path.to_string_lossy().to_string();
+            let cmd = format!(r#"bt image "{}" --width 16"#, path);
+            (path, Some(cmd))
+        } else {
+            let filepath = self.filepath.ok_or_else(|| {
+                color_eyre::eyre::eyre!("No image file provided. Usage: bt image photo.jpg")
+            })?;
+            (filepath, None)
+        };
+        let width = width_str
+            .as_deref()
+            .or_else(|| self.example.then_some("16"));
+        render_image(&filepath, width, &self.layout, self.meta, self.debug)?;
+
+        if let Some(cmd) = example_cmd {
+            print_example_command(&cmd);
+        }
+
+        Ok(())
     }
+}
+
+fn write_example_image() -> color_eyre::Result<PathBuf> {
+    let path = std::env::temp_dir().join("bt-example-tiny.png");
+    std::fs::write(&path, IMAGE_EXAMPLE_BYTES)?;
+    Ok(path)
 }
 
 /// Render an image to the terminal.

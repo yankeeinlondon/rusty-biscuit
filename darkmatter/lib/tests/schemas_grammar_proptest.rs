@@ -6,8 +6,7 @@
 //! every code path.
 
 use darkmatter::markdown::schemas::simplified::{
-    Constraint, PropertyAtom, SimplifiedType, grammar::parse_type_expr,
-    serialize_property_atom,
+    Constraint, PropertyAtom, SimplifiedType, grammar::parse_type_expr, serialize_property_atom,
 };
 use proptest::prelude::*;
 
@@ -39,35 +38,32 @@ fn bare_word() -> impl Strategy<Value = String> {
 /// Glob-like pattern that includes `[`, `]`, `*`, `!`, etc. but no
 /// whitespace, commas, semicolons, parens, or quotes.
 fn glob_pattern() -> impl Strategy<Value = String> {
-    "[a-zA-Z0-9_/.*!^$+\\-\\[\\]]{1,12}"
-        .prop_filter("non-empty", |s| !s.is_empty())
+    "[a-zA-Z0-9_/.*!^$+\\-\\[\\]]{1,12}".prop_filter("non-empty", |s| !s.is_empty())
 }
 
 fn item_constraints_for(ty: SimplifiedType) -> impl Strategy<Value = Vec<Constraint>> {
     let universal = prop_oneof![Just(Constraint::Required),];
 
     let typed: BoxedStrategy<Vec<Constraint>> = match ty {
-        SimplifiedType::Number | SimplifiedType::NumberLike => {
-            (
-                proptest::option::of(0i32..1_000_000),
-                proptest::option::of(0i32..1_000_000),
-                any::<bool>(),
-            )
-                .prop_map(|(min, max, integer)| {
-                    let mut out = vec![];
-                    if let Some(m) = min {
-                        out.push(Constraint::Min(m as f64));
-                    }
-                    if let Some(m) = max {
-                        out.push(Constraint::Max(m as f64));
-                    }
-                    if integer {
-                        out.push(Constraint::Integer);
-                    }
-                    out
-                })
-                .boxed()
-        }
+        SimplifiedType::Number | SimplifiedType::NumberLike => (
+            proptest::option::of(0i32..1_000_000),
+            proptest::option::of(0i32..1_000_000),
+            any::<bool>(),
+        )
+            .prop_map(|(min, max, integer)| {
+                let mut out = vec![];
+                if let Some(m) = min {
+                    out.push(Constraint::Min(m as f64));
+                }
+                if let Some(m) = max {
+                    out.push(Constraint::Max(m as f64));
+                }
+                if integer {
+                    out.push(Constraint::Integer);
+                }
+                out
+            })
+            .boxed(),
         SimplifiedType::String => (
             proptest::option::of(0usize..200),
             proptest::option::of(0usize..200),
@@ -93,7 +89,10 @@ fn item_constraints_for(ty: SimplifiedType) -> impl Strategy<Value = Vec<Constra
                     vec![]
                 } else {
                     vec![Constraint::Scheme(
-                        schemes.into_iter().map(|s| s.to_ascii_lowercase()).collect(),
+                        schemes
+                            .into_iter()
+                            .map(|s| s.to_ascii_lowercase())
+                            .collect(),
                     )]
                 }
             })
@@ -148,20 +147,15 @@ fn atom_strategy() -> impl Strategy<Value = PropertyAtom> {
         let array = array_constraints();
         let is_arr = any::<bool>();
         let desc = description_strategy();
-        (
-            Just(ty),
-            item,
-            array,
-            is_arr,
-            desc,
-        )
-            .prop_map(|(ty, item, array, is_array, description)| PropertyAtom {
+        (Just(ty), item, array, is_arr, desc).prop_map(
+            |(ty, item, array, is_array, description)| PropertyAtom {
                 ty,
                 is_array,
                 constraints: item,
                 array_constraints: if is_array { array } else { vec![] },
                 description: description.filter(|d| !d.is_empty()),
-            })
+            },
+        )
     })
 }
 

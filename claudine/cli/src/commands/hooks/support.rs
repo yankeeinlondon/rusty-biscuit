@@ -3,7 +3,7 @@ use color_eyre::eyre::Result;
 use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::components::table::table::{Table, TableCellContent, TableColumn};
-use biscuit_terminal::utils::layout::{Alignment, Margin};
+use biscuit_terminal::utils::layout::{Alignment, Length, Margin};
 use claudine::events::event_support_matrix;
 use claudine::provider::EventSupportLevel;
 
@@ -32,7 +32,7 @@ pub(super) fn run_support() -> Result<()> {
     }
 
     let mut table = Table::new().with_columns(columns).prefer_cursor_alignment();
-    table.layout_mut().left_margin = Margin::Chars(1);
+    table.layout_mut().margin = Margin::x(Length::ch(1));
 
     for matrix_row in matrix {
         let mut row: Vec<TableCellContent> = vec![matrix_row.event.as_pascal_case().into()];
@@ -56,9 +56,10 @@ pub(super) fn run_support() -> Result<()> {
     log::data(&format!("\n{}", rendered));
 
     log::data("");
-    let legend = Prose::new(
-        "{{dim}}Legend: {{reset}}✅{{dim}} = hook support (config file), {{reset}}⛔️{{dim}} = non-hook (wrapper/proxy required), {{reset}}{{NO_SUPPORT}}{{dim}} = not supported{{reset}}",
-    );
+    let legend = Prose::new(format!(
+        "<dim>Legend: </dim>✅<dim> = hook support (config file), </dim>⛔️<dim> = non-hook (wrapper/proxy required), </dim>{}<dim> = not supported</dim>",
+        NO_SUPPORT
+    ));
     log::data(&format!(" {}\n", legend.render(&term)));
 
     Ok(())

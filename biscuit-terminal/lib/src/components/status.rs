@@ -49,7 +49,12 @@ const NERD_TIMELINE_SUBAGENT: &str = "\u{f0012}";
 const FB_NOT_STARTED: &str = "\u{25fb}"; // ◻
 const FB_ACTIVE: &str = "\u{25fd}"; // ◽
 const FB_SUCCESS: &str = "\u{2713}"; // ✓
-const FB_FAILURE: &str = "\u{2a2b}"; // ⤫
+// U+292B (RISING DIAGONAL CROSSING FALLING DIAGONAL — `⤫`). The previous
+// constant pointed at U+2A2B (`⨫`, "slanted equal to or less-than"), which
+// shipped only because the inline comment looked identical to the intended
+// glyph. `StatusBlock::severity_icon` already uses `\u{292b}`; sharing the
+// value here keeps the bespoke and tree-rendering paths visually consistent.
+const FB_FAILURE: &str = "\u{292b}"; // ⤫
 const FB_WARNING: &str = "\u{26a0}"; // ⚠
 const FB_INFO: &str = "\u{2139}"; // ℹ
 const FB_TOOL_USE: &str = "\u{1f527}"; // 🔧

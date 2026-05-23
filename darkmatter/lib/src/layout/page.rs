@@ -2,6 +2,13 @@
 //! padding, page background, max-width, alignment, and per-component fill
 //! settings for darkmatter rendering.
 
+// `DarkmatterPage` is built from the deprecated page-layout types
+// (`PageMargin`, `PagePadding`, `PageAlignment`, `PageFill`); the builder is
+// the CLI's only construction path, so this module legitimately references
+// them. Page margins are mapped onto `renderable::layout::Layout` via the
+// `From`/`TryFrom` bridges in `super::types`.
+#![allow(deprecated)]
+
 use std::any::Any;
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -51,6 +58,15 @@ use crate::markdown::output::terminal::{
 pub struct DarkmatterPage {
     terminal_width: u16,
     terminal_color_mode: TerminalColorMode,
+    /// Color depth captured from the [`Terminal`] at construction, projected
+    /// onto darkmatter's [`ColorDepth`] palette via the same thresholds as
+    /// [`ColorDepth::auto_detect`]. Threaded into [`TerminalOptions`] on the
+    /// decorated render path (see [`Self::render`]) when the caller has not
+    /// set one explicitly, so a page built from `Terminal::new_optimistic`
+    /// renders with that terminal's reported depth regardless of the ambient
+    /// environment. The zero-config path deliberately leaves this unset to
+    /// preserve byte-for-byte parity with `for_terminal(default)`.
+    terminal_color_depth: ColorDepth,
     margin: PageMargin,
     padding: PagePadding,
     page_background: PageBackground,
@@ -77,6 +93,7 @@ impl DarkmatterPage {
         Self {
             terminal_width: clamp_width(terminal.width()),
             terminal_color_mode: terminal.color_mode.clone(),
+            terminal_color_depth: ColorDepth::from(terminal.color_depth),
             margin: PageMargin::ZERO,
             padding: PagePadding::ZERO,
             page_background: PageBackground::Transparent,
@@ -104,6 +121,17 @@ impl DarkmatterPage {
     /// state, including [`TerminalColorMode::Unknown`].
     pub fn terminal_color_mode(&self) -> &TerminalColorMode {
         &self.terminal_color_mode
+    }
+
+    /// Captured terminal color depth, projected onto darkmatter's
+    /// [`ColorDepth`] palette.
+    ///
+    /// The decorated render path threads this into [`TerminalOptions`] when
+    /// the caller has not invoked [`Self::with_color_depth`], so renders
+    /// produced through page layout honor the [`Terminal`] the page was
+    /// built with rather than re-detecting from the ambient environment.
+    pub fn terminal_color_depth(&self) -> ColorDepth {
+        self.terminal_color_depth
     }
 
     /// Configured page margin.
@@ -159,11 +187,46 @@ impl DarkmatterPage {
         self
     }
 
+    // ---------- Layout synchronization ----------
+
+    /// Rebuild the [`renderable::layout::Layout`] mirror from current page
+    /// state.
+    ///
+    /// Page margin **and** padding are both transparent/filled space outside
+    /// the content rectangle; the new [`Layout`] primitive has no separate
+    /// padding concept, so the two are summed into the layout margin. The
+    /// max-width cap is mapped to a universal `Ch` length. This keeps the
+    /// [`TerminalRenderable::layout`] accessor consistent with the builder
+    /// state without disturbing the bespoke row-decoration pipeline.
+    fn rebuild_layout(&mut self) {
+        use renderable::layout::{Length, Margin as RMargin, TargetValue};
+
+        let margin: RMargin = self.margin.into();
+        let padding: RMargin = self.padding.into();
+        let sum = |a: &TargetValue<Length>, b: &TargetValue<Length>| {
+            let cells = |tv: &TargetValue<Length>| match tv {
+                TargetValue::Universal(Length::Ch(n)) => *n,
+                _ => 0,
+            };
+            TargetValue::universal(Length::ch(cells(a) + cells(b)))
+        };
+        self.layout.margin = RMargin {
+            top: sum(&margin.top, &padding.top),
+            right: sum(&margin.right, &padding.right),
+            bottom: sum(&margin.bottom, &padding.bottom),
+            left: sum(&margin.left, &padding.left),
+        };
+        self.layout.max_width = self
+            .max_width
+            .map(|mw| TargetValue::universal(Length::ch(u32::from(mw))));
+    }
+
     // ---------- Margin builders ----------
 
     /// Set all four sides of the margin to `n` cells.
     pub fn with_margin(mut self, n: u16) -> Self {
         self.margin = PageMargin::all(n);
+        self.rebuild_layout();
         self
     }
 
@@ -171,6 +234,7 @@ impl DarkmatterPage {
     pub fn with_margin_x(mut self, n: u16) -> Self {
         self.margin.left = n;
         self.margin.right = n;
+        self.rebuild_layout();
         self
     }
 
@@ -178,30 +242,35 @@ impl DarkmatterPage {
     pub fn with_margin_y(mut self, n: u16) -> Self {
         self.margin.top = n;
         self.margin.bottom = n;
+        self.rebuild_layout();
         self
     }
 
     /// Set the top margin to `n` rows.
     pub fn with_margin_top(mut self, n: u16) -> Self {
         self.margin.top = n;
+        self.rebuild_layout();
         self
     }
 
     /// Set the bottom margin to `n` rows.
     pub fn with_margin_bottom(mut self, n: u16) -> Self {
         self.margin.bottom = n;
+        self.rebuild_layout();
         self
     }
 
     /// Set the left margin to `n` columns.
     pub fn with_margin_left(mut self, n: u16) -> Self {
         self.margin.left = n;
+        self.rebuild_layout();
         self
     }
 
     /// Set the right margin to `n` columns.
     pub fn with_margin_right(mut self, n: u16) -> Self {
         self.margin.right = n;
+        self.rebuild_layout();
         self
     }
 
@@ -210,6 +279,7 @@ impl DarkmatterPage {
     /// Set all four sides of the padding to `n` cells.
     pub fn with_padding(mut self, n: u16) -> Self {
         self.padding = PagePadding::all(n);
+        self.rebuild_layout();
         self
     }
 
@@ -217,6 +287,7 @@ impl DarkmatterPage {
     pub fn with_padding_x(mut self, n: u16) -> Self {
         self.padding.left = n;
         self.padding.right = n;
+        self.rebuild_layout();
         self
     }
 
@@ -224,30 +295,35 @@ impl DarkmatterPage {
     pub fn with_padding_y(mut self, n: u16) -> Self {
         self.padding.top = n;
         self.padding.bottom = n;
+        self.rebuild_layout();
         self
     }
 
     /// Set the top padding to `n` rows.
     pub fn with_padding_top(mut self, n: u16) -> Self {
         self.padding.top = n;
+        self.rebuild_layout();
         self
     }
 
     /// Set the bottom padding to `n` rows.
     pub fn with_padding_bottom(mut self, n: u16) -> Self {
         self.padding.bottom = n;
+        self.rebuild_layout();
         self
     }
 
     /// Set the left padding to `n` columns.
     pub fn with_padding_left(mut self, n: u16) -> Self {
         self.padding.left = n;
+        self.rebuild_layout();
         self
     }
 
     /// Set the right padding to `n` columns.
     pub fn with_padding_right(mut self, n: u16) -> Self {
         self.padding.right = n;
+        self.rebuild_layout();
         self
     }
 
@@ -262,6 +338,7 @@ impl DarkmatterPage {
     /// Cap the content width at `max_width` columns.
     pub fn with_max_width(mut self, max_width: u16) -> Self {
         self.max_width = Some(max_width);
+        self.rebuild_layout();
         self
     }
 
@@ -427,6 +504,20 @@ impl DarkmatterPage {
         if ctx.needs_decoration() || self.max_width.is_some() {
             options.max_width = Some(ctx.effective_width);
         }
+        // Honor the captured terminal's color depth on the decorated layout
+        // path, mirroring the captured-width handling above: the page was
+        // constructed from a specific `Terminal`, so renders that go through
+        // its layout pipeline should follow that terminal's reported depth
+        // rather than re-detecting from the ambient environment (which would
+        // make `DarkmatterPage::new(&Terminal::new_optimistic(_))` paint
+        // different SGR in a headless env than in a truecolor terminal).
+        // The zero-config path deliberately leaves this unset so the renderer
+        // falls back to `ColorDepth::auto_detect`, preserving byte-for-byte
+        // parity with `for_terminal(&md, TerminalOptions::default())`. An
+        // explicit `with_color_depth` always wins.
+        if !self.is_default_layout() && options.color_depth.is_none() {
+            options.color_depth = Some(self.terminal_color_depth);
+        }
         options.include_line_numbers = self.line_numbers;
         options.color_mode = ctx.render_color_mode;
 
@@ -446,6 +537,13 @@ impl DarkmatterPage {
         if !ctx.needs_decoration() {
             return Ok(body);
         }
+
+        // Normalize the body's vertical rhythm before margins are applied, so
+        // leading/trailing blank rows come *only* from the configured margins
+        // (no constant document-tail offset) and no interior run of >=2 blank
+        // lines survives. Runs only on the decorated path; the zero-config path
+        // returned above keeps byte-for-byte equivalence with `for_terminal`.
+        let body = normalize_body_rhythm(&body);
 
         Ok(apply_row_decoration(&body, &ctx))
     }
@@ -588,6 +686,40 @@ impl DarkmatterPage {
         self.validate_fills()?;
         Ok(())
     }
+}
+
+/// Collapse runs of ≥2 blank lines to one and strip trailing blank lines from a
+/// rendered body, enforcing Markdown's vertical-rhythm invariant before page
+/// margins are applied.
+///
+/// A line counts as blank only when it carries no visible glyphs **and** no
+/// background fill — a code-block or page padding row (`\x1b[48…`) is content,
+/// not blank, and is preserved.
+fn normalize_body_rhythm(body: &str) -> String {
+    use biscuit_terminal::prelude::strip_escape_codes;
+
+    let is_blank =
+        |line: &str| strip_escape_codes(line).trim().is_empty() && !line.contains("\x1b[48");
+
+    let mut out: Vec<&str> = Vec::new();
+    let mut prev_blank = false;
+    for line in body.lines() {
+        let blank = is_blank(line);
+        if blank && prev_blank {
+            continue; // collapse consecutive blank lines to a single one
+        }
+        out.push(line);
+        prev_blank = blank;
+    }
+    while out.last().is_some_and(|l| is_blank(l)) {
+        out.pop();
+    }
+
+    let mut normalized = out.join("\n");
+    if !normalized.is_empty() {
+        normalized.push('\n');
+    }
+    normalized
 }
 
 /// Wrap rendered markdown body with margin/padding rows and background fill.
@@ -1158,6 +1290,70 @@ mod tests {
         assert_eq!(
             page_out, direct_out,
             "zero-config render with code block must match for_terminal"
+        );
+    }
+
+    /// `DarkmatterPage::new` must capture the [`Terminal`]'s color depth so a
+    /// page built from `new_optimistic` (hardcoded `TrueColor`) reports that
+    /// depth regardless of ambient detection.
+    #[test]
+    fn new_captures_terminal_color_depth() {
+        let term = Terminal::new_optimistic(80);
+        let page = DarkmatterPage::new(&term);
+        assert_eq!(page.terminal_color_depth(), ColorDepth::TrueColor);
+    }
+
+    /// On the decorated layout path, the page must thread its captured color
+    /// depth into [`TerminalOptions`] so the render honors the [`Terminal`] it
+    /// was constructed with rather than re-detecting from the ambient
+    /// environment. Without this, a page built from `new_optimistic` in a
+    /// headless `cargo test` env would emit 256-color or no-color SGR even
+    /// though the captured terminal reports `TrueColor`.
+    ///
+    /// The truecolor background SGR sequence (`\x1b[48;2;r;g;bm`) is unique to
+    /// 24-bit output — its presence is sufficient evidence that the captured
+    /// depth was honored.
+    #[test]
+    fn decorated_render_honors_captured_color_depth() {
+        let term = Terminal::new_optimistic(80);
+        let md: Markdown = "```rust\nfn main() {}\n```\n".into();
+        let out = DarkmatterPage::new(&term)
+            .with_margin_left(2)
+            .with_margin_right(2)
+            .with_code_theme("dracula")
+            .render(&md)
+            .unwrap();
+        assert!(
+            out.contains("\x1b[48;2;"),
+            "decorated render with `new_optimistic` must emit truecolor SGR"
+        );
+    }
+
+    /// An explicit [`Self::with_color_depth`] must override the captured
+    /// terminal depth, so callers retain precise control when they want it.
+    ///
+    /// Pinning [`ColorDepth::None`] is the cleanest discriminator: the
+    /// terminal renderer detects it at the top of its pipeline and returns the
+    /// raw markdown content (no syntax highlighting, no SGR), so a passing
+    /// assertion below proves the explicit value reached the renderer rather
+    /// than being silently replaced by the captured `TrueColor`. (Verifying a
+    /// downgrade between truecolor and 256-color would also require the
+    /// highlighter to honor `color_depth`, which is a separate concern from
+    /// this gate's contract.)
+    #[test]
+    fn with_color_depth_overrides_captured_depth() {
+        let term = Terminal::new_optimistic(80);
+        let md: Markdown = "```rust\nfn main() {}\n```\n".into();
+        let out = DarkmatterPage::new(&term)
+            .with_color_depth(ColorDepth::None)
+            .with_margin_left(2)
+            .with_margin_right(2)
+            .with_code_theme("dracula")
+            .render(&md)
+            .unwrap();
+        assert!(
+            !out.contains("\x1b["),
+            "explicit `with_color_depth(None)` must suppress every SGR; got: {out:?}"
         );
     }
 

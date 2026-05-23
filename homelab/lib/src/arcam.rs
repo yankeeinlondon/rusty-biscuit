@@ -387,11 +387,10 @@ async fn get_system_status(addr: &str) -> Result<ArcamSystemStatus, ArcamError> 
                         // Mute (0x0E): 0x00 = muted, 0x01 = unmuted
                         0x0E => status.muted = resp.data.first().copied() == Some(0x00),
                         // Software Version (0x04): 2 bytes major.minor
-                        0x04
-                            if resp.data.len() >= 2 => {
-                                status.software_version =
-                                    Some(format!("{}.{}", resp.data[0], resp.data[1]));
-                            }
+                        0x04 if resp.data.len() >= 2 => {
+                            status.software_version =
+                                Some(format!("{}.{}", resp.data[0], resp.data[1]));
+                        }
                         // Friendly Name (0x53): ASCII string
                         0x53 => {
                             let name = String::from_utf8_lossy(&resp.data).trim().to_string();
@@ -400,19 +399,17 @@ async fn get_system_status(addr: &str) -> Result<ArcamSystemStatus, ArcamError> 
                             }
                         }
                         // IP Address (0x54): 4 bytes
-                        0x54
-                            if resp.data.len() >= 4 => {
-                                status.ip_address = Some(format!(
-                                    "{}.{}.{}.{}",
-                                    resp.data[0], resp.data[1], resp.data[2], resp.data[3]
-                                ));
-                            }
+                        0x54 if resp.data.len() >= 4 => {
+                            status.ip_address = Some(format!(
+                                "{}.{}.{}.{}",
+                                resp.data[0], resp.data[1], resp.data[2], resp.data[3]
+                            ));
+                        }
                         // Timeout Counter (0x55): 2 bytes big-endian
-                        0x55
-                            if resp.data.len() >= 2 => {
-                                status.timeout_counter =
-                                    Some(u16::from_be_bytes([resp.data[0], resp.data[1]]));
-                            }
+                        0x55 if resp.data.len() >= 2 => {
+                            status.timeout_counter =
+                                Some(u16::from_be_bytes([resp.data[0], resp.data[1]]));
+                        }
                         // Auto Shutdown (0x58): 1 byte
                         0x58 => status.auto_shutdown = resp.data.first().copied(),
                         // Input Detect (0x5A): 0x00 = no signal, 0x01 = signal present

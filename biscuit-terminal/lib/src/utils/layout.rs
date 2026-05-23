@@ -1,18 +1,34 @@
 //! Terminal layout application.
 //!
 //! The layout *data* types ([`Layout`], [`Alignment`], [`Margin`],
-//! [`RowFill`], [`MaxWidth`]) live in [`renderable::layout`] and [`WordWrap`]
-//! in [`renderable::wrap_policy`]; they are re-exported here for backwards
-//! compatibility. Terminal-specific ANSI-width application lives in this
-//! crate as the [`LayoutTerminalExt`] extension trait.
+//! [`Length`], [`TargetValue`]) live in [`renderable::layout`] and
+//! [`WordWrap`] in [`renderable::wrap_policy`]; they are re-exported here for
+//! backwards compatibility. Terminal-specific ANSI-width application lives in
+//! this crate as the [`LayoutTerminalExt`] extension trait.
 
 use crate::{
+    render_tree::render::resolve_cells,
     terminal::Terminal,
     utils::block_constraint::{split_lines, visible_width, wrap_lines},
 };
 
-pub use renderable::layout::{Alignment, Layout, Margin, MaxWidth, RowFill};
+pub use renderable::layout::{Alignment, Layout, Length, Margin, TargetValue};
 pub use renderable::wrap_policy::WordWrap;
+
+/// Adds `cells` whole terminal cells to a `TargetValue<Length>` margin value.
+///
+/// Only universal [`Length::Ch`] (and [`Length::Zero`]) margins can absorb a
+/// cell offset; per-target or non-cell margins are returned unchanged.
+pub(crate) fn add_cells(margin: &TargetValue<Length>, cells: u32) -> TargetValue<Length> {
+    if cells == 0 {
+        return margin.clone();
+    }
+    match margin {
+        TargetValue::Universal(Length::Zero) => TargetValue::universal(Length::ch(cells)),
+        TargetValue::Universal(Length::Ch(n)) => TargetValue::universal(Length::ch(n + cells)),
+        other => other.clone(),
+    }
+}
 
 /// A `RenderableWrapper` is a utility which operates at a
 /// lower level than a `TerminalRenderable` **component** and takes in
@@ -68,12 +84,43 @@ pub trait LayoutTerminalExt {
     /// typically relies on horizontal spatial relationships that wrapping
     /// would destroy.
     fn apply_block_layout(&self, content: &str, terminal_width: u32) -> String;
+
+    /// Width available for content after subtracting the left and right
+    /// margins, resolved against `terminal_width` in whole terminal cells.
+    fn available_width(&self, terminal_width: u32) -> u32;
+
+    /// Width available for content after subtracting the horizontal margins
+    /// **and** applying any `max_width` cap, resolved against `terminal_width`
+    /// in whole terminal cells and clamped to at least 1.
+    ///
+    /// This mirrors the width the render-tree renderer hands a block (margins
+    /// reduce the width, then `max_width` caps it — see `render_with_layout`),
+    /// so bespoke components that pad to a known width stay in parity with the
+    /// tree path.
+    fn content_width(&self, terminal_width: u32) -> u32;
 }
 
 impl LayoutTerminalExt for Layout {
+    fn available_width(&self, terminal_width: u32) -> u32 {
+        let left = resolve_cells(&self.margin.left, terminal_width);
+        let right = resolve_cells(&self.margin.right, terminal_width);
+        terminal_width.saturating_sub(left).saturating_sub(right)
+    }
+
+    fn content_width(&self, terminal_width: u32) -> u32 {
+        let mut width = self.available_width(terminal_width);
+        if let Some(max_width) = &self.max_width {
+            let cap = resolve_cells(max_width, terminal_width);
+            if cap > 0 {
+                width = width.min(cap);
+            }
+        }
+        width.max(1)
+    }
+
     fn apply_block_layout(&self, content: &str, terminal_width: u32) -> String {
-        let left = Layout::resolve_margin(&self.left_margin, terminal_width);
-        let right = Layout::resolve_margin(&self.right_margin, terminal_width);
+        let left = resolve_cells(&self.margin.left, terminal_width);
+        let right = resolve_cells(&self.margin.right, terminal_width);
 
         let available_width = terminal_width.saturating_sub(left).saturating_sub(right);
         if available_width == 0 {
@@ -100,24 +147,11 @@ impl LayoutTerminalExt for Layout {
         let left_padding = " ".repeat(left as usize);
         let block_padding_str = " ".repeat(pre_align as usize);
 
-        let should_fill = match &self.row_fill_strategy {
-            RowFill::Fill => true,
-            RowFill::Auto => self.page_bg_color.is_some(),
-            RowFill::Exact => false,
-        };
-
         let mut result = String::new();
         for line in &lines {
             result.push_str(&left_padding);
             result.push_str(&block_padding_str);
             result.push_str(line);
-
-            if should_fill {
-                let line_width = visible_width(line);
-                let trailing = max_line_width.saturating_sub(line_width);
-                result.push_str(&" ".repeat(trailing as usize));
-            }
-
             result.push('\n');
         }
 
@@ -129,8 +163,8 @@ impl LayoutTerminalExt for Layout {
     }
 
     fn apply_layout(&self, content: &str, terminal_width: u32) -> String {
-        let left = Layout::resolve_margin(&self.left_margin, terminal_width);
-        let right = Layout::resolve_margin(&self.right_margin, terminal_width);
+        let left = resolve_cells(&self.margin.left, terminal_width);
+        let right = resolve_cells(&self.margin.right, terminal_width);
 
         // Calculate available width for content
         let available_width = terminal_width.saturating_sub(left).saturating_sub(right);
@@ -166,36 +200,20 @@ impl LayoutTerminalExt for Layout {
         let left_padding = " ".repeat(left as usize);
         let mut result = String::new();
 
-        // Determine if we should fill rows
-        let should_fill = match &self.row_fill_strategy {
-            RowFill::Fill => true,
-            RowFill::Auto => self.page_bg_color.is_some(),
-            RowFill::Exact => false,
-        };
-
         for line in wrapped_lines {
             let line_width = visible_width(&line);
             let padding_needed = available_width.saturating_sub(line_width);
 
             // Apply alignment
-            let (pre_align, post_align) = match self.alignment {
-                Alignment::Left => (0, padding_needed),
-                Alignment::Right => (padding_needed, 0),
-                Alignment::Center => {
-                    let left_pad = padding_needed / 2;
-                    let right_pad = padding_needed - left_pad;
-                    (left_pad, right_pad)
-                }
+            let pre_align = match self.alignment {
+                Alignment::Left => 0,
+                Alignment::Right => padding_needed,
+                Alignment::Center => padding_needed / 2,
             };
 
             result.push_str(&left_padding);
             result.push_str(&" ".repeat(pre_align as usize));
             result.push_str(&line);
-
-            if should_fill {
-                result.push_str(&" ".repeat(post_align as usize));
-            }
-
             result.push('\n');
         }
 
@@ -216,11 +234,21 @@ mod tests {
     #[test]
     fn test_layout_left_margin() {
         let layout = Layout {
-            left_margin: Margin::Chars(4),
+            margin: Margin::x(Length::ch(4)),
             ..Layout::default()
         };
         let result = layout.apply_layout("Hello", 80);
         assert!(result.starts_with("    Hello"));
+    }
+
+    #[test]
+    fn apply_layout_indents_by_left_margin_cells() {
+        let layout = Layout {
+            margin: Margin::x(Length::ch(3)),
+            ..Layout::default()
+        };
+        let out = layout.apply_layout("hi", 40);
+        assert!(out.starts_with("   hi"));
     }
 
     #[test]
@@ -240,7 +268,7 @@ mod tests {
         // compensation) should preserve the trailing newline without adding
         // left-margin padding to the empty trailing line.
         let layout = Layout {
-            left_margin: Margin::Chars(4),
+            margin: Margin::x(Length::ch(4)),
             ..Layout::default()
         };
         let result = layout.apply_layout("hello\n", 80);
@@ -260,7 +288,7 @@ mod tests {
     fn test_layout_no_trailing_newline_unchanged() {
         // Content without trailing newline should not gain one
         let layout = Layout {
-            left_margin: Margin::Chars(4),
+            margin: Margin::x(Length::ch(4)),
             ..Layout::default()
         };
         let result = layout.apply_layout("hello", 80);
@@ -346,8 +374,7 @@ mod tests {
     #[test]
     fn test_apply_block_layout_respects_margins() {
         let layout = Layout {
-            left_margin: Margin::Chars(2),
-            right_margin: Margin::Chars(2),
+            margin: Margin::x(Length::ch(2)),
             alignment: Alignment::Center,
             ..Layout::default()
         };
@@ -365,18 +392,15 @@ mod tests {
         fn prop_layout_never_panics(
             text in ".*",
             terminal_width in 1..=500u32,
-            margin_left in 0..=100u32,
-            margin_right in 0..=100u32,
+            margin in 0..=100u32,
             indentation in 0..=100u32
         ) {
             let layout = Layout {
-                left_margin: Margin::Chars(margin_left),
-                right_margin: Margin::Chars(margin_right),
+                margin: Margin::x(Length::ch(margin)),
                 word_wrap: WordWrap::WrapProse(Some(indentation), None),
                 ..Default::default()
             };
             let _ = layout.apply_layout(&text, terminal_width);
-            let _ = layout.available_width(terminal_width);
         }
     }
 }

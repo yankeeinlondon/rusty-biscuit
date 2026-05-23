@@ -163,7 +163,10 @@ impl SchemaRegistry {
             if let Some(defs) = obj.get("$defs").and_then(|v| v.as_object()) {
                 for (def_name, def_schema) in defs {
                     if !result.contains_key(def_name) {
-                        result.insert(def_name.clone(), conversion::convert_json_schema_to_openapi(def_schema));
+                        result.insert(
+                            def_name.clone(),
+                            conversion::convert_json_schema_to_openapi(def_schema),
+                        );
                         // Recurse into the def itself
                         Self::extract_defs_recursive(def_schema, result);
                     }

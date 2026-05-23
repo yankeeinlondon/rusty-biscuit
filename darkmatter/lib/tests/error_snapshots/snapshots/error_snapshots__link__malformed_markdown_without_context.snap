@@ -1,8 +1,9 @@
 ---
 source: darkmatter/lib/tests/error_snapshots/link.rs
+assertion_line: 65
 expression: out
 ---
-⨫ LinkError: malformed markdown link
+⤫ LinkError: malformed markdown link
 ┃ Message: missing closing bracket
 ┃ 
 ┃ Link parsing failed here:

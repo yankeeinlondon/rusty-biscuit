@@ -4,7 +4,7 @@ use oauth2::{AuthorizationCode, CsrfToken, PkceCodeChallenge, PkceCodeVerifier, 
 use schematic_define::PkceRequirement;
 
 use crate::error::OAuthError;
-use crate::manager::{OAuth2Manager, build_http_client, extract_tokens};
+use crate::manager::{build_http_client, extract_tokens, OAuth2Manager};
 use crate::types::{AuthorizationSession, StoredTokens};
 
 impl OAuth2Manager {

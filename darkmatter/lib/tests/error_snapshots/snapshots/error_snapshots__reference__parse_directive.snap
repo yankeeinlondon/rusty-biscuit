@@ -1,8 +1,9 @@
 ---
 source: darkmatter/lib/tests/error_snapshots/reference.rs
+assertion_line: 33
 expression: out
 ---
-⨫ ReferenceError: directive parse failed
+⤫ ReferenceError: directive parse failed
 ┃ Directive parsing failed in docs/root.md:
 ┃ 
 ┃     4 │ line 4

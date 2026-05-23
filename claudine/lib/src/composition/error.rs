@@ -438,22 +438,19 @@ impl BlockError for CompositionError {
                 let title = exit_reason
                     .clone()
                     .unwrap_or_else(|| "iteration failed".to_string());
-                let body = format!(
-                    "Iteration {iteration} exited with code {exit_code}.\n\n{reason}"
-                );
+                let body =
+                    format!("Iteration {iteration} exited with code {exit_code}.\n\n{reason}");
                 StatusBlock::new(StatusState::Error)
                     .error_header(ErrorHeader::new("CompositionError", &title))
                     .body(body)
             }
-            CompositionError::LoopRateLimited { .. } => {
-                StatusBlock::new(StatusState::Error)
-                    .error_header(ErrorHeader::new("CompositionError", "rate limited"))
-                    .body(self.to_string())
-                    .hint(
-                        "Re-run after the listed reset time, or use \
+            CompositionError::LoopRateLimited { .. } => StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new("CompositionError", "rate limited"))
+                .body(self.to_string())
+                .hint(
+                    "Re-run after the listed reset time, or use \
                          `--on-rate-limit pause` to wait automatically.",
-                    )
-            }
+                ),
             _ => {
                 let msg = self.to_string();
                 StatusBlock::new(StatusState::Error)
@@ -522,10 +519,7 @@ mod tests {
         let rendered = err.to_string();
         assert!(rendered.contains("k2p6"), "got: {rendered}");
         assert!(rendered.contains("resets at"), "got: {rendered}");
-        assert!(
-            rendered.contains("Usage limit reached"),
-            "got: {rendered}"
-        );
+        assert!(rendered.contains("Usage limit reached"), "got: {rendered}");
     }
 
     #[test]
@@ -543,7 +537,10 @@ mod tests {
             rendered.starts_with("loop halted at iteration 3 of plan.md"),
             "got: {rendered}"
         );
-        assert!(rendered.contains("provider rate limited"), "got: {rendered}");
+        assert!(
+            rendered.contains("provider rate limited"),
+            "got: {rendered}"
+        );
         // No reset clause when reset_at is absent
         assert!(!rendered.contains("resets at"), "got: {rendered}");
     }
@@ -571,6 +568,9 @@ mod tests {
         // variants above.
         let err = CompositionError::LoopInvalid("`loop.max` must be greater than zero".to_string());
         let rendered = err.to_string();
-        assert!(rendered.starts_with("invalid loop definition:"), "got: {rendered}");
+        assert!(
+            rendered.starts_with("invalid loop definition:"),
+            "got: {rendered}"
+        );
     }
 }

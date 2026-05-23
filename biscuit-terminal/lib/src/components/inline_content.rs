@@ -1,7 +1,7 @@
 use std::any::Any;
 
 use crate::components::prose::Prose;
-use crate::components::renderable::{TerminalRenderable, RenderableTerminalContent};
+use crate::components::renderable::{RenderableTerminalContent, TerminalRenderable};
 use crate::components::text_block::TextBlock;
 use crate::terminal::Terminal;
 use crate::utils::layout::Layout;
@@ -234,7 +234,8 @@ impl InlineContent {
 
     /// Appends plain text content.
     pub fn add_text<T: Into<String>>(&mut self, content: T) -> &mut Self {
-        self.parts.push(RenderableTerminalContent::String(content.into()));
+        self.parts
+            .push(RenderableTerminalContent::String(content.into()));
         self
     }
 
@@ -315,7 +316,7 @@ impl TerminalRenderable for InlineContent {
 mod tests {
     use super::*;
     use crate::components::compose::Compose;
-    use crate::utils::layout::{Alignment, Margin, RowFill};
+    use crate::utils::layout::{Alignment, Length, TargetValue};
     use crate::utils::wrap_policy::WordWrap;
 
     // =====================================================================
@@ -393,7 +394,10 @@ mod tests {
 
     #[test]
     fn test_from_vec_renderable_content() {
-        let items = vec![RenderableTerminalContent::from("x"), RenderableTerminalContent::from("y")];
+        let items = vec![
+            RenderableTerminalContent::from("x"),
+            RenderableTerminalContent::from("y"),
+        ];
         let inline = InlineContent::from(items);
         assert_eq!(inline.len(), 2);
         assert_eq!(inline.render_optimistic(Some(80)), "xy");
@@ -784,7 +788,10 @@ mod tests {
         assert_eq!(InlineContent::from(String::from("x")).len(), 1);
         assert_eq!(InlineContent::from(Prose::new("x")).len(), 1);
         assert_eq!(InlineContent::from(TextBlock::new("x")).len(), 1);
-        assert_eq!(InlineContent::from(RenderableTerminalContent::from("x")).len(), 1);
+        assert_eq!(
+            InlineContent::from(RenderableTerminalContent::from("x")).len(),
+            1
+        );
     }
 
     // =====================================================================
@@ -889,38 +896,32 @@ mod tests {
 
     #[test]
     fn test_left_margin_builder() {
-        let inline = InlineContent::from("test").left_margin(Margin::Chars(4));
-        assert_eq!(inline.layout().left_margin, Margin::Chars(4));
+        let inline = InlineContent::from("test").left_margin(TargetValue::universal(Length::ch(4)));
+        assert_eq!(inline.layout().margin.left, TargetValue::universal(Length::ch(4)));
     }
 
     #[test]
     fn test_right_margin_builder() {
-        let inline = InlineContent::from("test").right_margin(Margin::Chars(4));
-        assert_eq!(inline.layout().right_margin, Margin::Chars(4));
+        let inline = InlineContent::from("test").right_margin(TargetValue::universal(Length::ch(4)));
+        assert_eq!(inline.layout().margin.right, TargetValue::universal(Length::ch(4)));
     }
 
     #[test]
     fn test_top_margin_builder() {
-        let inline = InlineContent::from("test").top_margin(Margin::Chars(2));
-        assert_eq!(inline.layout().top_margin, Margin::Chars(2));
+        let inline = InlineContent::from("test").top_margin(TargetValue::universal(Length::ch(2)));
+        assert_eq!(inline.layout().margin.top, TargetValue::universal(Length::ch(2)));
     }
 
     #[test]
     fn test_bottom_margin_builder() {
-        let inline = InlineContent::from("test").bottom_margin(Margin::Chars(2));
-        assert_eq!(inline.layout().bottom_margin, Margin::Chars(2));
+        let inline = InlineContent::from("test").bottom_margin(TargetValue::universal(Length::ch(2)));
+        assert_eq!(inline.layout().margin.bottom, TargetValue::universal(Length::ch(2)));
     }
 
     #[test]
     fn test_alignment_builder() {
         let inline = InlineContent::from("test").alignment(Alignment::Right);
         assert_eq!(inline.layout().alignment, Alignment::Right);
-    }
-
-    #[test]
-    fn test_row_fill_strategy_builder() {
-        let inline = InlineContent::from("test").row_fill_strategy(RowFill::Fill);
-        assert_eq!(inline.layout().row_fill_strategy, RowFill::Fill);
     }
 
     #[test]
@@ -932,11 +933,11 @@ mod tests {
     #[test]
     fn test_chained_layout_builders() {
         let inline = InlineContent::from("test")
-            .left_margin(Margin::Chars(2))
-            .right_margin(Margin::Chars(2))
+            .left_margin(TargetValue::universal(Length::ch(2)))
+            .right_margin(TargetValue::universal(Length::ch(2)))
             .alignment(Alignment::Center);
-        assert_eq!(inline.layout().left_margin, Margin::Chars(2));
-        assert_eq!(inline.layout().right_margin, Margin::Chars(2));
+        assert_eq!(inline.layout().margin.left, TargetValue::universal(Length::ch(2)));
+        assert_eq!(inline.layout().margin.right, TargetValue::universal(Length::ch(2)));
         assert_eq!(inline.layout().alignment, Alignment::Center);
     }
 
@@ -944,9 +945,9 @@ mod tests {
     fn test_layout_builders_chain_with_content_builders() {
         let inline = InlineContent::default()
             .with("hello")
-            .left_margin(Margin::Chars(4))
+            .left_margin(TargetValue::universal(Length::ch(4)))
             .with(" world");
-        assert_eq!(inline.layout().left_margin, Margin::Chars(4));
+        assert_eq!(inline.layout().margin.left, TargetValue::universal(Length::ch(4)));
         assert_eq!(inline.len(), 2);
     }
 
@@ -1090,7 +1091,7 @@ mod tests {
     fn test_prose_bold_renders_inline() {
         let inline = InlineContent::default()
             .with("normal ")
-            .with(Prose::new("{{bold}}bold{{reset}}"))
+            .with(Prose::new("<bold>bold</bold>"))
             .with(" normal");
         let output = inline.render_optimistic(Some(80));
         // Bold wraps with escape codes: \x1b[1m ... \x1b[22m
@@ -1113,9 +1114,9 @@ mod tests {
     #[test]
     fn test_multiple_styled_prose_inline() {
         let inline = InlineContent::default()
-            .with(Prose::new("{{bold}}key{{reset}}"))
+            .with(Prose::new("<bold>key</bold>"))
             .with(": ")
-            .with(Prose::new("{{dim}}value{{reset}}"));
+            .with(Prose::new("<dim>value</dim>"));
         let output = inline.render_optimistic(Some(80));
         assert!(output.contains("key"));
         assert!(output.contains(": "));

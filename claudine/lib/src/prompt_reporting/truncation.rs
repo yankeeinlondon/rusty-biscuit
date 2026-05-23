@@ -182,7 +182,10 @@ mod tests {
         let text = "Line 1\nLine 2\n\nLine 4\nLine 5\nLine 6\nLine 7";
         let result = truncate_front_back(text, 3, 2);
         // front_end should be 2 (skipping the blank line at index 2)
-        assert!(result.contains("Line 1\nLine 2\n\n---\n\nLine 6\nLine 7"), "{result:?}");
+        assert!(
+            result.contains("Line 1\nLine 2\n\n---\n\nLine 6\nLine 7"),
+            "{result:?}"
+        );
     }
 
     #[test]
@@ -190,7 +193,10 @@ mod tests {
         let text = "Line 1\nLine 2\nLine 3\nLine 4\n\nLine 6\nLine 7";
         let result = truncate_front_back(text, 2, 3);
         // back_start should skip the blank at index 4, landing at 5
-        assert!(result.contains("Line 1\nLine 2\n\n---\n\nLine 6\nLine 7"), "{result:?}");
+        assert!(
+            result.contains("Line 1\nLine 2\n\n---\n\nLine 6\nLine 7"),
+            "{result:?}"
+        );
     }
 
     #[test]

@@ -4,9 +4,9 @@ use openapiv3::{Operation, PathItem, Paths, ReferenceOr};
 use super::super::OpenApiError;
 use super::super::extensions::SchematicOpExtension;
 use super::super::options::ExportOptions;
+use super::components::SchemaRegistryLike;
 use super::request_body::map_request_body;
 use super::responses::map_responses;
-use super::components::SchemaRegistryLike;
 use crate::types::{Endpoint, RestMethod};
 
 /// Maps all endpoints to OpenAPI paths.

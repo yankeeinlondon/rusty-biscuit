@@ -36,10 +36,7 @@ pub use types::*;
 use crate::registry::SchemaRegistry;
 #[cfg(test)]
 use schematic_define::ApiResponse;
-use schematic_define::{
-    ApiKeyEnv, AuthStrategy, Endpoint, EnvList, EnvMapping,
-    RestApi, Schema,
-};
+use schematic_define::{ApiKeyEnv, AuthStrategy, Endpoint, EnvList, EnvMapping, RestApi, Schema};
 
 /// Creates a schema registry containing all ElevenLabs response types.
 ///

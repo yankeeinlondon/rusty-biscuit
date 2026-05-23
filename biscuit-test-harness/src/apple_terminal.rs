@@ -182,10 +182,11 @@ impl AppleTerminalHarness {
                             .stderr(Stdio::null());
                         if let Ok(out) = run_with_timeout(&mut check_cmd, Duration::from_secs(2))
                             && out.status.success()
-                                && let Ok(s) = std::str::from_utf8(&out.stdout)
-                                    && s.trim() == "0" {
-                                        break;
-                                    }
+                            && let Ok(s) = std::str::from_utf8(&out.stdout)
+                            && s.trim() == "0"
+                        {
+                            break;
+                        }
                     }
                 }
             }

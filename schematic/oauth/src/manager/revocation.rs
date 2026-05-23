@@ -3,7 +3,7 @@
 use oauth2::AccessToken;
 
 use crate::error::OAuthError;
-use crate::manager::{OAuth2Manager, build_http_client};
+use crate::manager::{build_http_client, OAuth2Manager};
 
 impl OAuth2Manager {
     /// Revokes the current token if a revocation URL is configured.

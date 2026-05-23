@@ -1,7 +1,10 @@
 use crate::{
-    components::renderable::{TerminalRenderable, RenderableTerminalContent},
+    components::renderable::{RenderableTerminalContent, TerminalRenderable},
     terminal::Terminal,
-    utils::{block_constraint::visible_width, layout::{Layout, LayoutTerminalExt}},
+    utils::{
+        block_constraint::visible_width,
+        layout::{Layout, LayoutTerminalExt},
+    },
 };
 
 /// Pads content on the left with spaces to guarantee a minimum width.

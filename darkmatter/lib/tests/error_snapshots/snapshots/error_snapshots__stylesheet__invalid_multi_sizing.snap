@@ -1,7 +1,8 @@
 ---
 source: darkmatter/lib/tests/error_snapshots/stylesheet.rs
+assertion_line: 90
 expression: out
 ---
-⨫ StylesheetError: invalid multi-sizing value
+⤫ StylesheetError: invalid multi-sizing value
 ┃ Value: 1px 2px 3px 4px 5px
 Use 1 to 4 sizing tokens separated by spaces, e.g. 8px 16px or 4px 8px 12px 16px.

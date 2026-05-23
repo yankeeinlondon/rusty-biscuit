@@ -19,6 +19,7 @@ pub mod layout;
 pub mod markdown;
 pub mod mermaid;
 pub mod render;
+pub mod style;
 pub mod terminal;
 
 pub mod testing;

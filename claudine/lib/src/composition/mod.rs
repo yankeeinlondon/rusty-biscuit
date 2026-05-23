@@ -9,8 +9,8 @@
 pub mod closure;
 mod error;
 mod guardrails;
-pub mod lifecycle;
 pub mod launch_workspace;
+pub mod lifecycle;
 pub mod loop_actions;
 pub mod loop_config;
 pub mod loop_engine;
@@ -24,6 +24,7 @@ mod types;
 
 pub use darkmatter::markdown::compose::shell_expansion::{ShellCommandOrigin, ShellExpansionError};
 pub use error::{CompositionError, LOOP_RATE_LIMITED_EXIT_CODE, SequenceSelectionFailure};
+pub use launch_workspace::{LaunchWorkspaceContext, PackageContext};
 #[allow(deprecated)]
 pub use lifecycle::{
     DefaultLifecycleEmitter, LifecycleConfig, LifecycleEmitter, LifecycleNotification,
@@ -49,7 +50,6 @@ pub use select::{
     resolve_target_non_tty_with_catalog, resolve_target_non_tty_with_hints, select_provider,
 };
 pub use sequence::{build_step_overlay, resolve_sequence_plan};
-pub use launch_workspace::{LaunchWorkspaceContext, PackageContext};
 pub use types::{
     AgentHint, AmbientVariable, CompositionClosurePlan, CompositionExecutionRequest,
     CompositionMode, EffectiveSelectionHints, InlineClosurePlan, InstalledProviderSnapshot,

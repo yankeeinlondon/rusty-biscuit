@@ -42,6 +42,12 @@ darkmatter_lib/
 | `biscuit-hash` | Content hashing (xxHash) for TOC, delta, and mermaid caching |
 | `serde` | Frontmatter serialization |
 
+### Dev-dependencies
+
+| Crate | Purpose |
+|-------|---------|
+| `chromiumoxide` + `futures-util` | Headless-Chrome browser-render tests (`tests/browser_render.rs`) + `examples/html_to_png.rs` screenshot helper; skip cleanly without a browser |
+
 ## Public Modules (`lib.rs`)
 
 | Module | Description |

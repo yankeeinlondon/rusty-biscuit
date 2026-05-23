@@ -169,5 +169,3 @@ pub use websocket::{
     HeartbeatHints, MessageDirection, MessageSchema, ParamType, RequestIdType, WebSocketApi,
     WebSocketEndpoint, WebSocketEndpointHints, WebSocketRuntimeHints,
 };
-
-

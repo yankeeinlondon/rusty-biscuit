@@ -221,7 +221,12 @@ fn run() -> Result<()> {
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()?;
-    runtime.block_on(async_main(argv, perf_bootstrap, arg_parse_start, process_start))
+    runtime.block_on(async_main(
+        argv,
+        perf_bootstrap,
+        arg_parse_start,
+        process_start,
+    ))
 }
 
 async fn async_main(

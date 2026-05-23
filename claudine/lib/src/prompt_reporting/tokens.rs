@@ -67,10 +67,7 @@ pub fn estimate_tokens_dense(text: &str) -> u64 {
 ///
 /// Concatenates the primary composed markdown with the appendix (if any)
 /// and runs [`estimate_tokens`] over the combined text.
-pub fn estimate_system_prompt_tokens(
-    composed_markdown: &str,
-    appendix: Option<&str>,
-) -> u64 {
+pub fn estimate_system_prompt_tokens(composed_markdown: &str, appendix: Option<&str>) -> u64 {
     let combined = match appendix {
         Some(a) => format!("{}\n\n{}", composed_markdown.trim_end(), a.trim()),
         None => composed_markdown.to_string(),
@@ -107,7 +104,8 @@ mod tests {
         let primary = "Base prompt content.";
         let appendix = "Non-interactive safety instructions.";
         let tokens = estimate_system_prompt_tokens(primary, Some(appendix));
-        let expected = estimate_tokens("Base prompt content.\n\nNon-interactive safety instructions.");
+        let expected =
+            estimate_tokens("Base prompt content.\n\nNon-interactive safety instructions.");
         assert_eq!(tokens, expected);
     }
 

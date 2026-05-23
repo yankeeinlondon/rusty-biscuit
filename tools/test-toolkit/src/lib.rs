@@ -231,13 +231,13 @@ fn previous_value(key: &OsStr) -> PreviousEnvValue {
 
 #[cfg(test)]
 mod tests {
-    use super::{init_test_tracing, EnvGuard};
+    use super::{EnvGuard, init_test_tracing};
     use std::env;
     use std::sync::{Arc, Mutex};
     use tracing::Subscriber;
+    use tracing_subscriber::Registry;
     use tracing_subscriber::layer::{Context, Layer};
     use tracing_subscriber::prelude::*;
-    use tracing_subscriber::Registry;
 
     const RESTORE_KEY: &str = "TEST_TOOLKIT_ENV_GUARD_RESTORE";
     const REMOVE_KEY: &str = "TEST_TOOLKIT_ENV_GUARD_REMOVE";
@@ -423,7 +423,10 @@ mod tests {
                 _id: &tracing::span::Id,
                 _ctx: Context<'_, S>,
             ) {
-                self.0.lock().unwrap().push(attrs.metadata().name().to_string());
+                self.0
+                    .lock()
+                    .unwrap()
+                    .push(attrs.metadata().name().to_string());
             }
         }
 

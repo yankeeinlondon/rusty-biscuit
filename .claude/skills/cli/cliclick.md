@@ -25,6 +25,8 @@ session_learnings: |-
 ---
 ## cliclick Overview
 
+> In the rusty-biscuit monorepo, `cliclick` is wrapped for Level-3 tests by the shared `biscuit-test-harness` crate (`src/cliclick.rs`). See `biscuit-test-harness/README.md` for how Level-3 keyboard injection fits with the Level-1/2 harnesses and the `RUN_LEVEL3` / `--test-threads=1` / `SpawnVisibility::Foreground` requirements.
+
 `cliclick` is not a Rust crate on crates.io. `cargo search cliclick` and the crates.io API currently return no Rust package named `cliclick`. The project commonly meant by this name is [BlueM/cliclick](https://github.com/BlueM/cliclick), a macOS command-line tool written in Objective-C for emitting host-level mouse and keyboard events. Homebrew currently packages version `5.1`; the upstream GitHub latest release is also [`5.1`](https://github.com/BlueM/cliclick/releases/tag/5.1).
 
 Because it is an external executable rather than a Rust crate, it has no Cargo feature flags. In Rust projects, use it by spawning the `cliclick` binary from tests or helper scripts.

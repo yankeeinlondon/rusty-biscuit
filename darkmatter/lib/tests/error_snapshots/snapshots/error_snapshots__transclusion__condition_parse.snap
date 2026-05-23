@@ -1,8 +1,9 @@
 ---
 source: darkmatter/lib/tests/error_snapshots/transclusion.rs
+assertion_line: 190
 expression: out
 ---
-⨫ TransclusionError: condition parse failed
+⤫ TransclusionError: condition parse failed
 ┃ Failed to parse when="a &&& b":
 ┃ 
 ┃     3 │ line 3

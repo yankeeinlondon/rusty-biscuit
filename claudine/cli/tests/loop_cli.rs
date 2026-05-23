@@ -695,7 +695,8 @@ exit 0
 
     let exit_code = assert.get_output().status.code().unwrap_or(-1);
     assert_eq!(
-        exit_code, 75,
+        exit_code,
+        75,
         "rate-limit abort must exit with EX_TEMPFAIL (75); got {exit_code}, stderr: {}",
         String::from_utf8_lossy(&assert.get_output().stderr)
     );
@@ -865,7 +866,8 @@ exit 0
 
     let exit_code = assert.get_output().status.code().unwrap_or(-1);
     assert_eq!(
-        exit_code, 75,
+        exit_code,
+        75,
         "no reset_at must still abort cleanly with EX_TEMPFAIL (75); got {exit_code}, stderr: {}",
         String::from_utf8_lossy(&assert.get_output().stderr)
     );

@@ -230,12 +230,8 @@ pub(crate) fn select_dirty_package_area_names(
     let dirty_set: std::collections::HashSet<&str> =
         dirty_names.iter().map(|n| n.as_str()).collect();
 
-    let filtered = super::packages::select_repo_packages(
-        packages,
-        repo_filter,
-        package,
-        package_area,
-    );
+    let filtered =
+        super::packages::select_repo_packages(packages, repo_filter, package, package_area);
     let mut areas: Vec<String> = filtered
         .iter()
         .filter(|p| dirty_set.contains(p.name.as_str()))
@@ -258,8 +254,7 @@ pub fn render_dirty_package_areas(
 
     match repo {
         Some(repo) if repo.is_monorepo => {
-            select_dirty_package_area_names(result, repo_filter, package, package_area)
-                .join(", ")
+            select_dirty_package_area_names(result, repo_filter, package, package_area).join(", ")
         }
         _ => String::from(
             "- the \"--dirty-package-areas\" switch is only intended to be used in a monorepo",
@@ -287,12 +282,8 @@ pub(crate) fn select_staged_package_area_names(
     let staged_set: std::collections::HashSet<&str> =
         staged_names.iter().map(|n| n.as_str()).collect();
 
-    let filtered = super::packages::select_repo_packages(
-        packages,
-        repo_filter,
-        package,
-        package_area,
-    );
+    let filtered =
+        super::packages::select_repo_packages(packages, repo_filter, package, package_area);
     let mut areas: Vec<String> = filtered
         .iter()
         .filter(|p| staged_set.contains(p.name.as_str()))
@@ -315,8 +306,7 @@ pub fn render_staged_package_areas(
 
     match repo {
         Some(repo) if repo.is_monorepo => {
-            select_staged_package_area_names(result, repo_filter, package, package_area)
-                .join(", ")
+            select_staged_package_area_names(result, repo_filter, package, package_area).join(", ")
         }
         _ => String::from(
             "- the \"staged-package-areas\" subcommand is only intended to be used in a monorepo",
@@ -344,12 +334,8 @@ pub(crate) fn select_unstaged_package_area_names(
     let unstaged_set: std::collections::HashSet<&str> =
         unstaged_names.iter().map(|n| n.as_str()).collect();
 
-    let filtered = super::packages::select_repo_packages(
-        packages,
-        repo_filter,
-        package,
-        package_area,
-    );
+    let filtered =
+        super::packages::select_repo_packages(packages, repo_filter, package, package_area);
     let mut areas: Vec<String> = filtered
         .iter()
         .filter(|p| unstaged_set.contains(p.name.as_str()))

@@ -7,7 +7,7 @@ use biscuit_terminal::components::block_quote::BlockQuote;
 use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::terminal::Terminal;
 use biscuit_terminal::utils::color::{Color, Tailwind};
-use biscuit_terminal::utils::layout::Margin;
+use biscuit_terminal::utils::layout::{Length, Margin};
 use biscuit_terminal::utils::wrap_policy::WordWrap;
 
 /// The full-block vertical border (U+2588) used by the user-prompt
@@ -86,8 +86,8 @@ pub(crate) fn prompt_body_width(term: &Terminal) -> u32 {
 /// assert!(!output.contains("\n\n\n"));
 /// ```
 pub fn render_markdown_for_terminal(text: &str, _term: &Terminal, max_width: u32) -> String {
-    use darkmatter::markdown::output::terminal::{for_terminal, TerminalOptions};
     use darkmatter::markdown::Markdown;
+    use darkmatter::markdown::output::terminal::{TerminalOptions, for_terminal};
 
     if text.trim().is_empty() {
         return String::new();
@@ -197,7 +197,7 @@ fn style_system_prompt_blockquote(mut quote: BlockQuote) -> BlockQuote {
     quote = quote
         .with_left_block_color(Color::Tailwind(Tailwind::Orange500))
         .with_border(SYSTEM_PROMPT_BORDER);
-    quote.layout_mut().left_margin = Margin::Chars(PROMPT_LEFT_MARGIN);
+    quote.layout_mut().margin = Margin::x(Length::ch(PROMPT_LEFT_MARGIN));
     // Content is already wrapped at `prompt_body_width(term)` by darkmatter,
     // so re-wrapping inside the BlockQuote would just chop trailing ANSI off
     // already-fit lines. `WordWrap::None` preserves the rendered geometry.
@@ -229,7 +229,7 @@ pub fn create_user_prompt_blockquote(content: &str, term: &Terminal) -> BlockQuo
     let mut quote = BlockQuote::from(rendered)
         .with_left_block_color(Color::Tailwind(Tailwind::Green500))
         .with_border(PROMPT_BORDER);
-    quote.layout_mut().left_margin = Margin::Chars(PROMPT_LEFT_MARGIN);
+    quote.layout_mut().margin = Margin::x(Length::ch(PROMPT_LEFT_MARGIN));
     // See note in `style_system_prompt_blockquote`.
     quote.layout_mut().word_wrap = WordWrap::None;
     quote
@@ -403,5 +403,4 @@ mod tests {
         assert!(stripped.contains("bold"));
         assert!(stripped.contains("italic"));
     }
-
 }

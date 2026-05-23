@@ -8,9 +8,9 @@ mod constructors;
 mod fields;
 mod helpers;
 mod request_method;
-mod variant;
 #[cfg(test)]
 mod tests;
+mod variant;
 
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};

@@ -76,7 +76,10 @@ fn validate_table() {
                 report.problems
             );
         }
-        if let Some(at_least) = expected.get("problem_count_at_least").and_then(Value::as_u64) {
+        if let Some(at_least) = expected
+            .get("problem_count_at_least")
+            .and_then(Value::as_u64)
+        {
             assert!(
                 (report.problems.len() as u64) >= at_least,
                 "[{case_name}] expected at least {at_least} problems, got {:?}",

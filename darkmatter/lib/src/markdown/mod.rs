@@ -42,6 +42,7 @@ mod inline_html;
 pub mod normalize;
 pub mod output;
 pub mod reference;
+pub mod render_tree;
 pub mod schemas;
 pub mod toc;
 mod types;
@@ -61,6 +62,7 @@ pub use reference::{
     ReferenceError, ReferenceGraph, ReferenceGraphOptions, ReferenceKind, ReferenceRecord,
     ReferenceSet, TransclusionRef,
 };
+pub use render_tree::TerminalCodeRenderer;
 pub use toc::{CodeBlockInfo, InternalLinkInfo, MarkdownToc, MarkdownTocNode};
 pub use types::{FrontmatterMap, MarkdownError, MarkdownResult};
 pub use yaml_block::{YamlBlock, YamlBlockError};

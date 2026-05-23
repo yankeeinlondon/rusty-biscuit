@@ -17,8 +17,7 @@ pub mod types;
 pub use convert::{DRAFT_2020_12, to_json_schema};
 pub use serialize::serialize_property_atom;
 pub use types::{
-    Constraint, PropertyAtom, PropertyDef, SchemaArm, SchemaShape, SimplifiedSchema,
-    SimplifiedType,
+    Constraint, PropertyAtom, PropertyDef, SchemaArm, SchemaShape, SimplifiedSchema, SimplifiedType,
 };
 
 use indexmap::IndexMap;
@@ -149,10 +148,9 @@ fn parse_property_def(name: &str, value: &YamlValue) -> Result<PropertyDef, Sche
         }
         YamlValue::Mapping(_) => Err(SchemaError::Grammar {
             property: name.to_string(),
-            message:
-                "mapping property values are reserved for future nested object schemas; \
+            message: "mapping property values are reserved for future nested object schemas; \
                  use a string type expression"
-                    .into(),
+                .into(),
             span: 0..0,
         }),
         other => Err(SchemaError::Grammar {
@@ -298,7 +296,10 @@ mod tests {
     fn rejects_property_value_mapping() {
         let v = yaml("foo:\n  bar: baz");
         let err = parse_yaml_schema(&v).unwrap_err();
-        let SchemaError::Grammar { property, message, .. } = err else {
+        let SchemaError::Grammar {
+            property, message, ..
+        } = err
+        else {
             panic!("expected Grammar error, got {err:?}")
         };
         assert_eq!(property, "foo");

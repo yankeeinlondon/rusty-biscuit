@@ -602,13 +602,13 @@ fn run_compose_inner(
         silent: shared.silent,
         env_overrides,
         shared_approval_cache: Some(shared_approval_cache),
-                sequence: false,
-                installed_snapshot: Some(prep_context.installed_snapshot.clone()),
-                prep_launch_workspace: Some(prep_context.launch_workspace.clone()),
-                prep_launch_context: Some(prep_context.launch_context.clone()),
-                prep_env_context: Some(prep_context.env_context.clone()),
-                prep_launch_detection_error: prep_context.launch_detection_error.clone(),
-            };
+        sequence: false,
+        installed_snapshot: Some(prep_context.installed_snapshot.clone()),
+        prep_launch_workspace: Some(prep_context.launch_workspace.clone()),
+        prep_launch_context: Some(prep_context.launch_context.clone()),
+        prep_env_context: Some(prep_context.env_context.clone()),
+        prep_launch_detection_error: prep_context.launch_detection_error.clone(),
+    };
 
     if let Some(ref mut timings) = startup_timings {
         timings.prep_phase = compose_entry.elapsed();

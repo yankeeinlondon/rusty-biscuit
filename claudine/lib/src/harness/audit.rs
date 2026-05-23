@@ -81,12 +81,12 @@ pub fn collect_auditable_commands(
             std::path::PathBuf::from("<harness-audit>"),
             text.to_string(),
         );
-        let directives =
-            darkmatter::markdown::compose::shell_expansion::parse_directives(text, ctx).map_err(
-                |e| HarnessError::ShellAuditParseError {
-                    detail: e.to_string(),
-                },
-            )?;
+        let directives = darkmatter::markdown::compose::shell_expansion::parse_directives(
+            text, ctx,
+        )
+        .map_err(|e| HarnessError::ShellAuditParseError {
+            detail: e.to_string(),
+        })?;
         for directive in directives {
             commands.push(AuditedCommand {
                 source: AuditedCommandSource::ComposeSourceLine {

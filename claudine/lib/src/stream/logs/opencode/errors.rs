@@ -1231,7 +1231,10 @@ mod tests {
             } => {
                 assert_eq!(permission, "task");
                 assert_eq!(pattern, "general");
-                assert_eq!(action, r#"{"permission":"*","action":"allow","pattern":"*"}"#);
+                assert_eq!(
+                    action,
+                    r#"{"permission":"*","action":"allow","pattern":"*"}"#
+                );
             }
             other => panic!("expected PermissionEvaluated, got {other:?}"),
         }

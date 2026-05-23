@@ -1189,7 +1189,10 @@ mod tests {
 
         assert_eq!(result.iteration_count, 1);
         assert!(
-            matches!(result.error, Some(CompositionError::LoopRateLimited { reset_at: None, .. })),
+            matches!(
+                result.error,
+                Some(CompositionError::LoopRateLimited { reset_at: None, .. })
+            ),
             "got: {:?}",
             result.error
         );
@@ -1247,8 +1250,7 @@ mod tests {
             object(json!({"counter": 0})),
             LoopExecutionOptions::default(),
             |_ctx| {
-                Ok(LoopIterationOutput::success("ok")
-                    .with_rate_limit(Some(throttled(None, None))))
+                Ok(LoopIterationOutput::success("ok").with_rate_limit(Some(throttled(None, None))))
             },
         )
         .unwrap();

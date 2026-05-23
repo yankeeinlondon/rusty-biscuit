@@ -119,8 +119,7 @@ fn style_declaration_line(terminal: &Terminal, line: &str) -> String {
         .and_then(|prop| prop.expected_kind())
         .unwrap_or(CssValueKind::Raw);
 
-    let styled_name =
-        prose_style_text(terminal, "<bold><rgb 97,175,239>{text}</rgb></bold>", name);
+    let styled_name = prose_style_text(terminal, "<bold><rgb 97,175,239>{text}</rgb></bold>", name);
     let styled_colon = Prose::new("<rgb 160,160,160>:</rgb>").render(terminal);
     let value_template = match kind {
         CssValueKind::Sizing | CssValueKind::SizingMulti => "<rgb 86,182,194>{text}</rgb>",
