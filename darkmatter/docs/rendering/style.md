@@ -127,6 +127,8 @@ Use it in CI to catch typos and snake-case aliases.
 `style.{bucket}.width` and `style.{bucket}.max-width` are mutually exclusive
 ```
 
+The exclusivity check runs **unconditionally** — a CLI fill flag (e.g. `--fill`, `--fill-tables`) chooses which value wins at render time, but it never makes an ambiguous frontmatter bucket valid. A document that sets both `width` and `max-width` in the same bucket always fails with `ComponentWidthConflict { bucket }` before rendering, with or without a CLI fill override.
+
 Bucket names in diagnostics use canonical kebab-case (`style.block-quote.*`, not `style.block_quote.*`). Snake-case aliases still parse but emit a `Deprecated` warning.
 
 ### Example
