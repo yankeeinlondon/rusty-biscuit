@@ -3320,9 +3320,9 @@ fn style_fixture_renders_html_successfully() {
 
 #[test]
 fn style_fixture_strict_style_passes_on_schema_clean_doc() {
-    // The fixture only generates `KnownButInactive` warnings (the table /
-    // ol / ul keys are wired in later sub-specs). `--strict-style` must NOT
-    // fail on `KnownButInactive`.
+    // The fixture only generates `KnownButInactive` warnings (the ul / ol
+    // keys are wired in later sub-specs). `--strict-style` must NOT fail on
+    // `KnownButInactive`.
     let output = md_cmd()
         .arg(style_prop_fixture())
         .arg("--strict-style")
@@ -3671,5 +3671,179 @@ fn style_fixture_renders_html_with_fill_override() {
         output.status.success(),
         "md --output html --fill max=60 must succeed: {}",
         String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+// =============================================================================
+//          PHASE 5 REGRESSION TESTS (Sub-Spec #3)
+// =============================================================================
+//
+// These tests cover the Phase 5 acceptance criteria:
+//
+//   1. `apply_cli_layout_flags` behavior is unchanged for documents without a
+//      `style:` frontmatter (no silent state drift from the new
+//      `apply_component_style` integration).
+//   2. The canonical `style-prop.md` fixture resolves to the structural
+//      page state the spec promises (table right-aligned, capped at 50%).
+//   3. Component fill from `style.block-quote.max-width` flows into the
+//      page builder and matches the structural shape used by the terminal
+//      blockquote renderer.
+
+#[test]
+fn no_style_frontmatter_leaves_cli_layout_state_intact() {
+    // Phase 5 acceptance: documents without a `style:` block must observe the
+    // same resolved page state with vs. without `apply_style_frontmatter`.
+    // Guards against silent state drift from the component-style integration.
+    use darkmatter::markdown::Markdown;
+    use darkmatter_cli::output::apply_style_frontmatter;
+
+    let raw = "# No Style Doc\n\nBody.\n";
+    let md = Markdown::try_from_content(raw).unwrap();
+    let cli = parse_cli(&[
+        "doc.md",
+        "-m",
+        "3",
+        "--max-width",
+        "70",
+        "--alignment",
+        "center",
+        "--fill",
+        "max=50",
+    ]);
+
+    let term = Terminal::new_optimistic(120);
+    let cli_only = apply_cli_layout_flags(DarkmatterPage::new(&term), &cli);
+    let after_style =
+        apply_style_frontmatter(cli_only.clone(), &md, &cli).expect("style apply");
+
+    assert_eq!(
+        after_style.margin(),
+        cli_only.margin(),
+        "no `style:` frontmatter must leave CLI-resolved margins untouched",
+    );
+    assert_eq!(
+        after_style.padding(),
+        cli_only.padding(),
+        "no `style:` frontmatter must leave CLI-resolved padding untouched",
+    );
+    assert_eq!(
+        after_style.max_width(),
+        cli_only.max_width(),
+        "no `style:` frontmatter must leave CLI-resolved max-width untouched",
+    );
+    for component in PageComponent::ALL {
+        assert_eq!(
+            after_style.alignment_for(component),
+            cli_only.alignment_for(component),
+            "no `style:` frontmatter must leave CLI-resolved alignment untouched: {component:?}",
+        );
+        assert_eq!(
+            after_style.fill_for(component),
+            cli_only.fill_for(component),
+            "no `style:` frontmatter must leave CLI-resolved fill untouched: {component:?}",
+        );
+    }
+}
+
+#[test]
+fn style_prop_fixture_resolves_to_expected_table_layout() {
+    // Phase 5 acceptance: the canonical `style-prop.md` fixture must produce
+    // a page where the table is right-aligned and capped at 50% max-width via
+    // the new component-style apply path.
+    let raw = std::fs::read_to_string(style_prop_fixture()).unwrap();
+    let page = apply_style_for(&raw, &["doc.md"]);
+
+    assert_eq!(
+        page.alignment_for(PageComponent::Tables),
+        PageAlignment::Right,
+        "fixture must resolve to a right-aligned table",
+    );
+    assert_eq!(
+        page.fill_for(PageComponent::Tables),
+        PageFill::Max(WidthUnit::Percent(50.0)),
+        "fixture must cap the table at 50% max-width",
+    );
+}
+
+#[test]
+fn style_prop_fixture_resolves_to_expected_page_margins() {
+    // Phase 5 acceptance: page-level margins from the fixture survive the
+    // full CLI -> page-style -> component-style pipeline.
+    let raw = std::fs::read_to_string(style_prop_fixture()).unwrap();
+    let page = apply_style_for(&raw, &["doc.md"]);
+
+    let m = page.margin();
+    assert_eq!(m.left, 2, "fixture left-margin: 2ch must reach the page");
+    assert_eq!(m.right, 4, "fixture right-margin: 4ch must reach the page");
+    assert_eq!(m.top, 1, "fixture top-margin: 1 must reach the page");
+    assert_eq!(m.bottom, 0, "fixture bottom-margin: 0 must reach the page");
+}
+
+#[test]
+fn block_quote_max_width_caps_terminal_render_wrap_width() {
+    // Phase 5 acceptance: `style.block-quote.max-width` reaches the page and
+    // caps visible wrap width when the terminal renders a top-level
+    // blockquote. We use a 100-col terminal so 50% resolves cleanly, then
+    // assert that no rendered (ANSI-stripped) blockquote line exceeds the
+    // resolved fill width.
+    use darkmatter::layout::{DarkmatterPage, PageComponent};
+    use darkmatter::markdown::Markdown;
+    use darkmatter::testing::strip_ansi_codes;
+    use darkmatter_cli::output::apply_style_frontmatter;
+
+    let raw = "---\n\
+style:\n\
+\x20   block-quote:\n\
+\x20       max-width: 50%\n\
+---\n\n\
+> This is a long quoted paragraph intended to wrap onto multiple visible \
+rows once the blockquote fill caps the render width well below the page width. \
+Add filler text to guarantee the wrap point is reached even when the \
+terminal is reasonably wide.\n";
+
+    let cli = parse_cli(&["doc.md"]);
+    let md = Markdown::try_from_content(raw).unwrap();
+    let term = Terminal::new_optimistic(100);
+    let page = DarkmatterPage::new(&term);
+    let page = apply_cli_layout_flags(page, &cli);
+    let page = apply_style_frontmatter(page, &md, &cli).expect("style apply");
+
+    // Structural guard: the apply pipeline put the fill where the renderer
+    // will look for it.
+    assert_eq!(
+        page.fill_for(PageComponent::BlockQuotes),
+        PageFill::Max(WidthUnit::Percent(50.0)),
+        "block-quote.max-width must reach the page fill slot",
+    );
+
+    let rendered = page.render(&md).expect("render to terminal");
+    let plain = strip_ansi_codes(&rendered);
+
+    // The blockquote should wrap onto at least two visible lines.
+    let quote_lines: Vec<String> = plain
+        .lines()
+        .filter(|l| {
+            let trimmed = l.trim_start();
+            // Common blockquote indicators across themes (`│`, `▌`, `▐`).
+            trimmed.starts_with('│')
+                || trimmed.starts_with('▌')
+                || trimmed.starts_with('▐')
+        })
+        .map(|l| l.trim_end().to_string())
+        .collect();
+
+    assert!(
+        quote_lines.len() >= 2,
+        "blockquote should wrap onto >=2 visible lines under max-width: 50%. plain:\n{plain}",
+    );
+
+    // The renderer chooses 50% of the available content width; with a 100-col
+    // terminal and no other margins/padding that's at most 50 cells of *text*
+    // beyond the indicator + leading space. Allow generous slack for indent +
+    // alignment padding by upper-bounding total visible width at 60.
+    let max_len = quote_lines.iter().map(|l| l.chars().count()).max().unwrap();
+    assert!(
+        max_len <= 60,
+        "blockquote visible width should be capped under max-width: 50% on a 100-col terminal, got max={max_len}. plain:\n{plain}",
     );
 }

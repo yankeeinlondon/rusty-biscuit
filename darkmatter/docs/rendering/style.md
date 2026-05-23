@@ -22,13 +22,13 @@ When performing a composition argument the caller can send in a style object to 
 |----------|-----------------------------------|-----------------|
 | #1       | Parser + schema + warnings        | Live            |
 | #2       | `style.page.*` → `DarkmatterPage` | **Live**        |
-| #3       | `style.table.*` / `style.ul.*` / `style.ol.*` / `style.li.*` | Pending |
-| #4       | `style.images.*` / `style.block-quote.*` | Pending  |
+| #3       | `style.table.*` / `style.images.*` / `style.block-quote.*` (`width`, `max-width`, `alignment`) | **Live** |
+| #4       | `style.ul.*` / `style.ol.*` / `style.li.*` / `style.hyperlinks.*` | Pending |
 | #5       | `color` / `bg-color` application  | Pending         |
 | #6       | `style.hr.*` migration            | Pending         |
 | #7       | Final bespoke knobs               | Pending         |
 
-The library exposes `ACTIVE_STYLE_WIRING_SUB_SPEC` so `KnownButInactive` warnings only fire for keys whose wiring sub-spec has not yet landed.
+The library exposes `ACTIVE_STYLE_WIRING_SUB_SPEC` (currently `3`) so `KnownButInactive` warnings only fire for keys whose wiring sub-spec has not yet landed. The color and background-color knobs on every bucket — `style.table.color`, `style.table.bg-color`, `style.images.color`, `style.images.bg-color`, `style.block-quote.color`, `style.block-quote.bg-color` — remain inactive and continue to emit `KnownButInactive { sub_spec: 5 }`.
 
 ## Page-Level Style (Sub-Spec #2)
 
@@ -108,6 +108,80 @@ Use it in CI to catch typos and snake-case aliases.
 
 - `InvalidCssLength { field }` — `Length::Css(_)` was supplied to a page-level length field.
 - `InvalidMaxWidth` — `style.page.max-width` resolved to `0` cells (e.g. `50%` of a `0`-cell content width after margins consumed everything).
+
+## Component-Level Style (Sub-Spec #3)
+
+`style.table.*`, `style.images.*`, and `style.block-quote.*` lower onto the same `DarkmatterPage` builder used by page-level style, via `apply_component_style`. Three knobs are live on each of the three buckets:
+
+- `width` — fixed width as `Nch`, `N%`, or `0`. Lowers to `PageFill::Explicit(WidthUnit)`.
+- `max-width` — upper bound as `Nch`, `N%`, or `0`. Lowers to `PageFill::Max(WidthUnit)`.
+- `alignment` — `left` \| `center` \| `right`. Sets the component's `PageAlignment` directly.
+
+`Length::Css(_)` (e.g. `10px`) is **not** valid in component fill fields; `apply_component_style` returns `StyleApplyError::ComponentInvalidCssLength { bucket, field }`.
+
+### Width vs. Max-Width Exclusivity
+
+`width` and `max-width` are mutually exclusive **within the same bucket** because `DarkmatterPage` exposes a single `PageFill` slot per component. Setting both raises:
+
+```text
+`style.{bucket}.width` and `style.{bucket}.max-width` are mutually exclusive
+```
+
+Bucket names in diagnostics use canonical kebab-case (`style.block-quote.*`, not `style.block_quote.*`). Snake-case aliases still parse but emit a `Deprecated` warning.
+
+### Example
+
+```yaml
+---
+style:
+    table:
+        max-width: 50%
+        alignment: right
+    images:
+        width: 40ch
+        alignment: center
+    block-quote:
+        max-width: 60ch
+---
+```
+
+### Precedence: CLI Flags, Page Broadcast, Component Frontmatter
+
+The integration order in `darkmatter-cli` is:
+
+1. `DarkmatterPage::new(&terminal)`
+2. `apply_cli_layout_flags(page, &cli)` — global and component-specific CLI flags
+3. `darkmatter::style::apply_page_style(page, &style, page_overrides)` — page-level frontmatter, including any `style.page.alignment` broadcast
+4. `darkmatter::style::apply_component_style(page, &style, component_overrides)` — `style.{table|images|block-quote}.*` frontmatter
+
+`ComponentStyleOverrides` records which fields the CLI already claimed:
+
+| CLI Flag                | Claims                                                     |
+|-------------------------|------------------------------------------------------------|
+| `--align-tables`        | `tables_alignment`                                         |
+| `--align-images`        | `images_alignment`                                         |
+| `--align-block-quotes`  | `block_quotes_alignment`                                   |
+| `--fill-tables`         | `tables_fill`                                              |
+| `--fill-images`         | `images_fill`                                              |
+| `--fill-block-quotes`   | `block_quotes_fill`                                        |
+| `--alignment` (global)  | every `*_alignment` field                                  |
+| `--fill` (global)       | every `*_fill` field                                       |
+
+Precedence resolution at each component:
+
+- **CLI flag wins over everything.** A CLI claim suppresses both the matching component frontmatter and the page-level alignment broadcast.
+- **Component frontmatter wins over the page broadcast.** When no CLI flag has claimed a component, `style.{bucket}.alignment` overrides `style.page.alignment` for that component only; untouched components keep the broadcast.
+
+### Errors
+
+`apply_component_style` returns `StyleApplyError`:
+
+- `ComponentWidthConflict { bucket }` — `width` and `max-width` set together inside the same bucket.
+- `ComponentInvalidCssLength { bucket, field }` — `width` or `max-width` is a `Length::Css(_)` value.
+
+### Inactive Keys
+
+The remaining `style.{table|images|block-quote}.*` keys (`color`, `bg-color`, plus `images.local_style`) parse cleanly but emit `KnownButInactive { sub_spec: 5 }` until color application lands.
 
 ## Style Mutation
 
