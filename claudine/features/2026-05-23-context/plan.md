@@ -2,6 +2,31 @@
 phases: 4
 created: 2026-05-23
 start_phase: 1
+source_files_during_phase_1:
+  - claudine/cli/src/args.rs
+  - claudine/cli/src/commands/mod.rs
+  - claudine/cli/src/commands/context.rs
+  - claudine/cli/src/main.rs
+  - claudine/cli/src/telemetry.rs
+docs_updated_during_phase_1: []
+docs_created_during_phase_1: []
+skills_files_updated_during_phase_1:
+  - .claude/skills/claudine/SKILL.md
+source_files_during_phase_2:
+  - claudine/cli/src/commands/context.rs
+  - darkmatter/lib/src/markdown/compose/types.rs
+  - claudine/cli/tests/snapshots/wrap_commands__help_lists_wrapper_subcommands.snap
+docs_updated_during_phase_2: []
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2: []
+source_files_during_phase_3:
+  - claudine/cli/src/commands/context.rs
+docs_updated_during_phase_3: []
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3: []
+packages:
+  - claudine-cli
+  - darkmatter
 ---
 
 # Execution Plan: Context Subcommand
