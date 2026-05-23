@@ -24,7 +24,7 @@ A Claudine prompt document moves through a fixed set of lifecycle events. Today 
 - **`start`** — best moment to announce *this* prompt is running. Pre-flight has passed; the agent will be invoked next.
 - **`blocked`** — communicate why the prompt was rejected; optionally proxy to a different prompt.
 - **`success`** — communicate completion, capture metrics, fire webhooks, advance a sequence.
-- **`failure`** — communicate failure, recover with `Handle`, optionally proxy.
+- **`failure`** — communicate failure, recover with `Retry` / `Resume` / `Requeue` / `Proxy`, or simply exit.
 - **`loop`** — per-iteration boundary inside a looping prompt; layers lifecycle-event behavior on top of the existing iteration controls.
 - **`next`** — handoff to another document on successful completion.
 
@@ -84,7 +84,7 @@ For each stack item, top to bottom:
     false: skip (no-op)
     true:  execute action
       • communication, side effect, expression call, shell → continue to next item
-      • lifecycle action (Stop/Skip/Error/Proxy/Handle) → stop processing this event
+      • lifecycle action (Stop/Skip/Error/Proxy/Retry/Resume/Requeue) → stop processing this event
 
 If the stack runs to completion without a lifecycle action matching, the event ends normally.
 ```
@@ -101,11 +101,20 @@ These actions change what happens next. The first one whose `when:` matches **te
 |---|---|---|
 | `Stop` | every event | End this event's stack cleanly. Composition continues. |
 | `Skip` | `initialize` only | Mark the prompt as skipped without running it. Pre-flight does not run. Emits an `INFO` log line indicating the skip. In a sequence, advances to the next step. |
-| `Error` | every event | Mark this event as failed with a reason. At `start`/`initialize` this prevents agent invocation; at `success` it converts the outcome to failure. |
-| `Proxy` | `initialize`, `blocked`, `failure` | Hand off execution to another prompt document. (Re-entry semantics: see [Open Design Gaps](#open-design-gaps)). |
-| `Handle` | `blocked`, `failure` | Recover via a sub-action (`retry`, `resume`, `proxy`, `requeue`). (Sub-action shape: see [Open Design Gaps](#open-design-gaps)). |
+| `Error` | every event | Mark this event as failed with a reason. At `start`/`initialize` this prevents agent invocation; at `success` it converts the outcome to failure; at `blocked`/`failure` it short-circuits further recovery attempts. |
+| `Proxy` | `initialize`, `blocked`, `failure` | Hand off execution to another prompt document. The proxied document enters at its own `initialize` event — a fresh prompt run, including pre-flight. The target document's own opt-out logic (`Skip`/`Proxy`/`Error` at `initialize`) is respected. |
+| `Retry` | `blocked`, `failure` | Re-run the agentic loop from the last invocation. Parameters: `max_attempts` (default `1`), `backoff` (`fixed` \| `exponential`, default `fixed`), `delay` (duration, default `0s`). |
+| `Resume` | `failure` only | Resume the agent session with its context intact and a follow-up message. Parameters: `message` (the follow-up prompt, required), `max_attempts` (default `1`). |
+| `Requeue` | `blocked`, `failure` | Push this prompt onto the deferred-execution queue (via `rendezvous`). Parameters: `delay` (duration, required), `reason` (string, optional). |
 
-Short forms: `"stop"`, `"skip"`, `"proxy(@prompts/foo.md)"`, `"error(\"reason\")"`.
+Short forms:
+
+- `"stop"`, `"skip"`
+- `"proxy(@prompts/foo.md)"`
+- `"error(\"reason\")"`
+- `"retry"`, `"retry(3)"` (count shorthand)
+- `"resume(\"please set the production_ready frontmatter\")"`
+- `"requeue(5m)"`
 
 ### Communication Actions
 
@@ -181,13 +190,15 @@ Runs as soon as the prompt file is identified. Pre-flight checks have **not** ru
 - Proxying to a different prompt via `Proxy` (e.g., route based on env)
 - Preparing the environment via side effects so pre-flight checks will succeed
 
+**`initialize` is a timing slot, not a validation phase.** It cannot "fail itself" — pre-flight (owned by `start`) remains the single validation surface. The only way `initialize` alters flow is by a stack item evaluating a lifecycle action (`Skip`, `Proxy`, `Error`, `Stop`). An `Error` raised here routes through the normal `failure` event path, same as anywhere else.
+
 ### `start`
 
 Pre-flight has passed; the agent is about to be invoked. Last chance to communicate before non-determinism takes over.
 
 ### `blocked`
 
-A pre-flight check failed. The agent will not be invoked. Common patterns: communicate the failure, `Proxy` to a fallback prompt, or `Handle` (e.g., re-trigger pre-flight after fixing the offending condition).
+A pre-flight check failed. The agent will not be invoked. Common patterns: communicate the failure, `Proxy` to a fallback prompt, `Retry` after a side-effect fixes the offending condition, or `Requeue` for later execution.
 
 ### `success`
 
@@ -195,7 +206,7 @@ Agentic loop completed cleanly. Common patterns: announce outcome, commit a side
 
 ### `failure`
 
-Agentic loop errored. Common patterns: announce failure, `Handle` with retry/resume/proxy/requeue, or simply communicate and exit.
+Agentic loop errored. Common patterns: announce failure, recover via `Retry` / `Resume` / `Requeue` / `Proxy`, or simply communicate and exit.
 
 ### `loop`
 
@@ -231,24 +242,32 @@ Ambient variables exposed inside each iteration:
 
 #### Lifecycle Concerns
 
-In addition to iteration controls, the `loop` block accepts the standard lifecycle-event properties (`say`, `notify`, `effect`, `message`, `stderr`, `stdout`, `stack`). **When these fire within the loop cycle is a design gap (D2 below).**
+In addition to iteration controls, the `loop` block accepts the standard lifecycle-event properties (`say`, `notify`, `effect`, `message`, `stderr`, `stdout`, `stack`).
+
+**Firing model:** the lifecycle concerns fire **once per iteration**, immediately before the iteration's prompt is sent to the agent. Use the ambient variables `_loop_is_first` and `_loop_is_last` in `when:` clauses to express entry-only, exit-only, or per-iteration behavior. The iteration controls (`while`/`until`/`action`/`max`/`fail_fast`/`on_rate_limit`) are processed by the existing loop engine and are **not** lifecycle events themselves — they govern *whether* and *how* the next iteration runs, while the lifecycle concerns govern *what to say and do at* each iteration boundary.
+
+The composition's outer `start` / `success` / `failure` events still fire once per overall run (before the loop begins / after it ends), distinct from `loop` event firings.
 
 ```yaml
 phase: 1
 total_phases: 6
 loop:
+    # Iteration controls — processed by the loop engine
     until: "phase > total_phases"
     action: "increment(phase)"
     max: 10
     fail_fast: true
     on_rate_limit: pause
 
-    # Lifecycle concerns:
-    say: "Loop iteration {{_loop_count}}"
+    # Lifecycle concerns — fire once per iteration
+    say: "Phase {{phase}} of {{total_phases}}"
     stack:
         - when: "_loop_is_first"
           action: notify
-          message: "Loop started"
+          message: "Build loop started"
+        - when: "_loop_is_last"
+          action: effect
+          sound: applause
 ```
 
 ### `next`
@@ -256,20 +275,59 @@ loop:
 Opt-in: present means a handoff is configured. Mutually exclusive `suggest` vs `push` keys determine interactivity.
 
 ```yaml
-# Interactive: prompt the user
+# Interactive: prompt the user before handing off
 next:
     suggest:
         compose: "the-next-thing.md"
 
-# Non-interactive: run immediately
+# Non-interactive: run immediately on success
 next:
     push:
         compose: "the-next-thing.md"
 ```
 
-The handoff target supports the same node kinds as execution groups: `compose`, `inline-compose`, `sequence`, `shell`, `prompt`. (Exact allowed kinds: see [Open Design Gaps](#open-design-gaps).)
+The handoff target accepts any of the **execution-group node kinds**:
+
+| Kind | Shape |
+|---|---|
+| `compose` | `compose: "<file>"` — run another prompt through the composition pipeline |
+| `inline-compose` | `inline-compose: "<file>"` — run an inline-compose prompt |
+| `sequence` | `sequence: "<file>"` — run a sequence |
+| `shell` | `shell: "<command>"` — run a shell command |
+| `prompt` | `prompt: "<text>"` — send a direct prompt to the current agent |
+
+Additional optional parameters mirror the execution-group node form (e.g., `yolo:`, `agent:`, `model:`).
 
 Standard lifecycle-event properties (`say`, `notify`, `effect`, `message`, `stack`) are also accepted on the `next` event.
+
+## Action Error Propagation
+
+When a side-effect, expression-function, or shell action errors during stack processing, what happens depends on which event is processing the stack.
+
+| Event | Default behavior on errored action |
+|---|---|
+| `initialize` | Stop the stack, log the error, transition to `failure` event |
+| `start` | Stop the stack, log the error, transition to `failure` event |
+| `blocked` | Stop the stack, log the error, transition to `failure` event |
+| `loop` (per-iteration) | Stop the stack, log the error, transition to `failure` event |
+| `success` | Stop the stack, log the error, **composition outcome unchanged** |
+| `failure` | Stop the stack, log the error, **composition outcome unchanged** |
+| `next` | Stop the stack, log the error, **composition outcome unchanged** |
+
+The split is intentional: setup-phase errors should propagate so the agent isn't invoked with a broken environment, but terminal-phase errors (a flaky webhook in `success.stack`) must never invert the composition's actual outcome.
+
+**Per-action escape hatch:** any action accepts a `no_error: true` parameter to suppress error propagation. When set, errors are logged but the stack continues to the next item, and the composition outcome is unchanged regardless of which event is processing the stack.
+
+```yaml
+start:
+    stack:
+        - action: shell
+          command: "git fetch --all"
+          no_error: true       # never block agent invocation on fetch failure
+        - "ensure_file(@out/log.md)"
+```
+
+This extends the existing `no_error` flag (previously defined only for `shell`) to all action categories.
 
 ## Backward Compatibility
 
@@ -285,17 +343,6 @@ failure:
 ```
 
 Adding `stack:` is purely additive. The top-level properties fire first, then the stack is processed.
-
-## Open Design Gaps
-
-These are tracked separately and will be resolved in the design-gap pass following this spec:
-
-1. **D1.** What concretely differentiates `initialize` from `start` beyond timing? What preconditions can fail `initialize`?
-2. **D2.** How do lifecycle concerns and iteration controls interleave in `loop`? Does `loop.stack` fire per-iteration, or only on loop entry/exit?
-3. **D3.** Full shape of the `Handle` action — what does each sub-action (`retry`, `resume`, `proxy`, `requeve`) look like?
-4. **D4.** Error propagation when a side-effect or shell action fails inside a stack — does it transition to the `failure` event, or merely stop the stack with an error?
-5. **D5.** Exact allowed node kinds and shape for `next.suggest` and `next.push`.
-6. **D6.** `Proxy` re-entry semantics — does the proxied document re-enter at `initialize` or `start`?
 
 ## Dependencies
 
