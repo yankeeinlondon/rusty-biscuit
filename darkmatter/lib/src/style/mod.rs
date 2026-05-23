@@ -7,6 +7,7 @@ pub mod error;
 pub mod warning;
 
 pub use error::StyleParseError;
+pub use warning::{StyleSpan, StyleWarning, StyleWarningKind};
 
 #[cfg(test)]
 mod tests {
