@@ -54,7 +54,7 @@ GithubDark`). The bottom four pairs are **single-variant by design** — they ig
 the mode and resolve to one theme. Do not confuse the user-facing name with a
 concrete light/dark theme.
 
-### Code blocks invert for page contrast (terminal only)
+### Code blocks invert for page contrast (terminal and HTML)
 
 Code blocks resolve their theme *variant* against the **inverted** terminal mode
 (`ColorMode::inverted`): a *light* code panel in a dark terminal, and vice versa.
