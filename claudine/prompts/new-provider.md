@@ -79,6 +79,16 @@ We will research online to get all the metadata we need to complete the informat
             {{ ctx.schema({{base}}/acp/{{file}}.md)}}) }}
             ```
 
+    - Logging: `claudine compose @claudine/docs/research/agent-logging/_agent-logging.md sequence="" state.name="{{provider}}" state.website="{{website}} state.repo="{{repo}}" state.file="{{file}}"`
+
+        - When this command completes it will have written the file to '{{base}}/usage/{{file}}.md'
+        - It will have a full report in the basics of **{{provider}}** in the body of the Markdown
+        - But more importantly the Frontmatter of the document will provide the following information:
+
+            ```json
+            {{ ctx.schema({{base}}/acp/{{file}}.md)}}) }}
+            ```
+
     - Usage Metrics: `claudine compose @claudine/docs/research/usage/_usage.md sequence="" state.name="{{provider}}" state.website="{{website}} state.repo="{{repo}}" state.file="{{file}}"`
 
         - When this command completes it will have written the file to '{{base}}/usage/{{file}}.md'
