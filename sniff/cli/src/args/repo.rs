@@ -45,6 +45,10 @@ pub enum RepoAction {
         compact: bool,
         package: Option<String>,
         package_area: Option<String>,
+        /// Branch filter: `None` = flag absent, `Some(None)` = flag present
+        /// with no value (use current branch), `Some(Some(name))` = explicit
+        /// branch name.
+        branch: Option<Option<String>>,
     },
     Hash {
         sha: String,
@@ -249,8 +253,12 @@ pub enum RepoSubcommand {
         #[arg(short, long, value_name = "PKG", add = clap_complete::engine::ArgValueCandidates::new(repo_package_candidates))]
         package: Option<String>,
         /// Scope to a specific package area
-        #[arg(long, value_name = "AREA", add = clap_complete::engine::ArgValueCandidates::new(repo_package_area_candidates))]
+        #[arg(short = 'a', long, value_name = "AREA", add = clap_complete::engine::ArgValueCandidates::new(repo_package_area_candidates))]
         package_area: Option<String>,
+        /// Show commits from a specific branch (defaults to current branch
+        /// when the flag is given without a value)
+        #[arg(long, value_name = "BRANCH")]
+        branch: Option<Option<String>>,
     },
     /// Show details for a specific commit hash
     Hash {

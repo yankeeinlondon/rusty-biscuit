@@ -1048,6 +1048,49 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
+    // Branch filter for `repo git-status --branch [<name>]`. When the flag is
+    // given without a value, the current branch is used (which is a no-op vs
+    // the default HEAD walk). When a different branch is given, replace the
+    // recent commit list with one walked from that branch's tip.
+    if let Some(crate::args::RepoAction::GitStatus {
+        branch: Some(branch_opt),
+        ..
+    }) = &repo_action
+        && let Some(ref mut filesystem) = result.filesystem
+        && let Some(ref mut git) = filesystem.git
+    {
+        let explicit = branch_opt.as_deref().filter(|s| !s.is_empty());
+        let target_branch = explicit
+            .map(str::to_string)
+            .or_else(|| git.current_branch.clone());
+
+        if let Some(branch_name) = target_branch
+            && git.current_branch.as_deref() != Some(branch_name.as_str())
+        {
+            let dir = base_dir
+                .as_deref()
+                .unwrap_or_else(|| std::path::Path::new("."));
+            if let Ok(repo) = git2::Repository::discover(dir) {
+                git.recent = sniff::filesystem::get_commits_for_branch(
+                    &repo,
+                    &branch_name,
+                    history_count,
+                );
+            }
+
+            // Working-tree state belongs to the currently checked-out branch,
+            // not the one being inspected — clear it so the output doesn't
+            // imply those files are dirty on the target branch.
+            git.file_changes.clear();
+            git.status.dirty.clear();
+            git.status.untracked.clear();
+            git.status.staged_count = 0;
+            git.status.unstaged_count = 0;
+            git.status.untracked_count = 0;
+            git.status.is_dirty = false;
+        }
+    }
+
     // Tier 2/3 scoping: validate that `--package` and `--package-area` resolve
     // and (when both supplied) overlap. The output functions apply the actual
     // filtering; this call surfaces the intersection error before render time.
