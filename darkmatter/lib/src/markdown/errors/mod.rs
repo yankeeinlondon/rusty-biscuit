@@ -255,7 +255,7 @@ mod tests {
         assert!(out.contains("a &&& b"));
         assert!(out.contains("^"));
         assert!(out.contains("&&"));
-        assert!(out.contains("HasKey"));
+        assert!(out.contains("has_key"));
     }
 
     #[test]

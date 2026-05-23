@@ -37,7 +37,7 @@
 //!
 //! - **Functions**: Helper utilities for value transformation. The library
 //!   includes `length`, `number`, `round`, plus type predicates
-//!   (`IsString`, `IsArray`, …), math helpers (`min`, `max`, `abs`),
+//!   (`is_string`, `is_array`, …), math helpers (`min`, `max`, `abs`),
 //!   collection helpers (`first`, `last`), string predicates and case
 //!   mutations, and date validators.
 //!
@@ -1779,7 +1779,7 @@ mod tests {
         fn has_key_function() {
             let state = create_test_state(json!({"user": {"name": "Alice"}}));
             let evaluator = Evaluator::new(&state);
-            let expr = parse(r#"HasKey(user, "name")"#).unwrap();
+            let expr = parse(r#"has_key(user, "name")"#).unwrap();
 
             match evaluator.eval(&expr) {
                 EvalResult::Value(v) => assert_eq!(v, "true"),
@@ -1792,8 +1792,8 @@ mod tests {
             let state = create_test_state(json!({"a": true, "b": false}));
             let evaluator = Evaluator::new(&state);
 
-            let and_expr = parse("And(a, b)").unwrap();
-            let or_expr = parse("Or(a, b)").unwrap();
+            let and_expr = parse("and(a, b)").unwrap();
+            let or_expr = parse("or(a, b)").unwrap();
 
             match evaluator.eval(&and_expr) {
                 EvalResult::Value(v) => assert_eq!(v, "false"),
@@ -1879,11 +1879,11 @@ mod tests {
             let state = create_test_state(json!({
                 "tags": ["one"], "title": "doc", "count": 3
             }));
-            assert_eq!(render(&state, "IsArray(tags)"), "true");
-            assert_eq!(render(&state, "IsString(title)"), "true");
-            assert_eq!(render(&state, "IsNumber(count)"), "true");
-            assert_eq!(render(&state, "IsEmpty(missing)"), "true");
-            assert_eq!(render(&state, "IsEmpty(tags)"), "false");
+            assert_eq!(render(&state, "is_array(tags)"), "true");
+            assert_eq!(render(&state, "is_string(title)"), "true");
+            assert_eq!(render(&state, "is_number(count)"), "true");
+            assert_eq!(render(&state, "is_empty(missing)"), "true");
+            assert_eq!(render(&state, "is_empty(tags)"), "false");
         }
 
         #[test]
@@ -1899,14 +1899,14 @@ mod tests {
         #[test]
         fn string_predicates_and_mutations() {
             let state = create_test_state(json!({ "title": "Hello World" }));
-            assert_eq!(render(&state, r#"StartsWith(title, "Hello")"#), "true");
-            assert_eq!(render(&state, r#"EndsWith(title, "World")"#), "true");
-            assert_eq!(render(&state, "Lower(title)"), "hello world");
-            assert_eq!(render(&state, "Upper(title)"), "HELLO WORLD");
-            assert_eq!(render(&state, "KebabCase(title)"), "hello-world");
-            assert_eq!(render(&state, "SnakeCase(title)"), "hello_world");
-            assert_eq!(render(&state, "CamelCase(title)"), "helloWorld");
-            assert_eq!(render(&state, "PascalCase(title)"), "HelloWorld");
+            assert_eq!(render(&state, r#"starts_with(title, "Hello")"#), "true");
+            assert_eq!(render(&state, r#"ends_with(title, "World")"#), "true");
+            assert_eq!(render(&state, "lower(title)"), "hello world");
+            assert_eq!(render(&state, "upper(title)"), "HELLO WORLD");
+            assert_eq!(render(&state, "kebab_case(title)"), "hello-world");
+            assert_eq!(render(&state, "snake_case(title)"), "hello_world");
+            assert_eq!(render(&state, "camel_case(title)"), "helloWorld");
+            assert_eq!(render(&state, "pascal_case(title)"), "HelloWorld");
         }
 
         #[test]
@@ -1916,17 +1916,17 @@ mod tests {
                 "bad_date": "06-15-2024",
                 "good_dt": "2024-06-15T12:30:00Z"
             }));
-            assert_eq!(render(&state, "IsDate(good_date)"), "true");
-            assert_eq!(render(&state, "IsDate(bad_date)"), "false");
-            assert_eq!(render(&state, "IsDateTime(good_dt)"), "true");
-            assert_eq!(render(&state, "IsDate(missing)"), "false");
+            assert_eq!(render(&state, "is_date(good_date)"), "true");
+            assert_eq!(render(&state, "is_date(bad_date)"), "false");
+            assert_eq!(render(&state, "is_date_time(good_dt)"), "true");
+            assert_eq!(render(&state, "is_date(missing)"), "false");
         }
 
         #[test]
         fn null_propagation_through_helpers() {
             let state = create_test_state(json!({}));
             assert_eq!(render(&state, "min(missing, 5)"), "");
-            assert_eq!(render(&state, "Lower(missing)"), "");
+            assert_eq!(render(&state, "lower(missing)"), "");
             assert_eq!(render(&state, "first(missing)"), "");
         }
 
