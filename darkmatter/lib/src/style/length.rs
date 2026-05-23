@@ -52,15 +52,33 @@ pub fn parse_horizontal(raw: &str) -> Result<Length, &'static str> {
     Err("unsupported unit; allowed: ch, %")
 }
 
-/// Serde deserializer for `Option<Length>` reading a string.
+/// Serde deserializer for `Option<Length>` reading a string or bare integer.
+///
+/// Accepts:
+/// - A YAML/JSON string such as `"2ch"`, `"50%"`, or `"40"`.
+/// - A bare JSON/YAML integer such as `40` — treated as `ch`.
+/// - `null` / absent — yields `None`.
 pub fn deserialize_optional_length<'de, D>(de: D) -> Result<Option<Length>, D::Error>
 where
     D: Deserializer<'de>,
 {
-    let raw: Option<String> = Option::deserialize(de)?;
-    match raw {
-        None => Ok(None),
-        Some(s) => parse_horizontal(&s).map(Some).map_err(de::Error::custom),
+    let value: Option<serde_json::Value> = Option::deserialize(de)?;
+    match value {
+        None | Some(serde_json::Value::Null) => Ok(None),
+        Some(serde_json::Value::String(s)) => {
+            parse_horizontal(&s).map(Some).map_err(de::Error::custom)
+        }
+        Some(serde_json::Value::Number(n)) => {
+            if let Some(u) = n.as_u64() {
+                Ok(Some(Length::Ch(u as u32)))
+            } else {
+                Err(de::Error::custom("length must be a non-negative integer or a string like \"2ch\", \"50%\""))
+            }
+        }
+        Some(other) => Err(de::Error::custom(format!(
+            "length must be a string or non-negative integer (got {})",
+            type_name_of(&other)
+        ))),
     }
 }
 
@@ -174,6 +192,9 @@ mod tests {
         assert_eq!(w.v, None);
         let err = serde_json::from_str::<Wrap>(r#"{"v": "2px"}"#).unwrap_err();
         assert!(err.to_string().contains("unsupported unit"));
+        // Bare integer is accepted and treated as ch.
+        let w: Wrap = serde_json::from_str(r#"{"v": 40}"#).unwrap();
+        assert_eq!(w.v, Some(Length::Ch(40)));
     }
 
     #[test]
