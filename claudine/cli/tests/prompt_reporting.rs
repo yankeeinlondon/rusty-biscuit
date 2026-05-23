@@ -27,8 +27,12 @@ exit 0
     (workspace, path_dir, md_file)
 }
 
-fn make_workspace_with_goose_and_system_prompt()
--> (tempfile::TempDir, std::path::PathBuf, std::path::PathBuf, std::path::PathBuf) {
+fn make_workspace_with_goose_and_system_prompt() -> (
+    tempfile::TempDir,
+    std::path::PathBuf,
+    std::path::PathBuf,
+    std::path::PathBuf,
+) {
     let (workspace, path_dir, md_file) = make_workspace_with_goose();
     let sp_file = workspace.path().join("system-prompt.md");
     fs::write(
@@ -39,8 +43,12 @@ fn make_workspace_with_goose_and_system_prompt()
     (workspace, path_dir, md_file, sp_file)
 }
 
-fn make_workspace_with_goose_and_verbose_system_prompt()
--> (tempfile::TempDir, std::path::PathBuf, std::path::PathBuf, std::path::PathBuf) {
+fn make_workspace_with_goose_and_verbose_system_prompt() -> (
+    tempfile::TempDir,
+    std::path::PathBuf,
+    std::path::PathBuf,
+    std::path::PathBuf,
+) {
     let (workspace, path_dir, md_file) = make_workspace_with_goose();
     let sp_file = workspace.path().join("system-prompt.md");
     fs::write(
@@ -318,9 +326,9 @@ fn compose_system_prompt_summary_shows_token_count() {
     let plain = strip_ansi(&stderr);
 
     // Token count should be present and look like a number followed by "tokens"
-    let tokens_found = plain.split_whitespace().any(|w| {
-        w.parse::<u64>().is_ok() && plain.contains(&format!("{w} tokens"))
-    });
+    let tokens_found = plain
+        .split_whitespace()
+        .any(|w| w.parse::<u64>().is_ok() && plain.contains(&format!("{w} tokens")));
     assert!(
         tokens_found,
         "system prompt summary should contain a numeric token count; stderr:\n{plain}"
@@ -466,12 +474,18 @@ exit 0
         "40-line user prompt should still show header; stderr:\n{plain}"
     );
     // Front+middle+last should all appear (no truncation at 40 lines).
-    assert!(plain.contains("Line1"), "should show front of 40-line prompt");
+    assert!(
+        plain.contains("Line1"),
+        "should show front of 40-line prompt"
+    );
     assert!(
         plain.contains("Line20"),
         "should show middle of 40-line prompt (no truncation at 40)"
     );
-    assert!(plain.contains("Line40"), "should show last line of 40-line prompt");
+    assert!(
+        plain.contains("Line40"),
+        "should show last line of 40-line prompt"
+    );
 }
 
 #[cfg(unix)]

@@ -2,7 +2,7 @@ use renderable::browser::fragment::{BrowserFragment, Ready};
 
 use crate::components::renderable::BrowserRenderable;
 use crate::utils::color::{BasicColor, RgbColor};
-use crate::utils::layout::Margin;
+use crate::utils::layout::{Length, TargetValue};
 
 use super::HorizontalRule;
 use super::style::{RuleStyle, RuleWeight};
@@ -134,8 +134,8 @@ impl HorizontalRule {
 
         let width_attr = self.width.as_deref().unwrap_or("100%");
         let color_attr = self.color.as_deref().unwrap_or("currentColor");
-        let margin_top = self.layout.top_margin.to_css_value("0");
-        let margin_bottom = self.layout.bottom_margin.to_css_value("0");
+        let margin_top = self.layout.margin.top.to_css_value("0");
+        let margin_bottom = self.layout.margin.bottom.to_css_value("0");
 
         // Every `stroke`, `fill`, and `stroke-width` expression goes through
         // these `var(--hr-xxx, FALLBACK)` forms so page-level CSS that sets
@@ -233,38 +233,20 @@ impl BrowserRenderable for HorizontalRule {
     }
 }
 
-// Helper trait extension for Margin to convert to CSS values
+// Helper trait extension for a `TargetValue<Length>` margin to convert to a
+// CSS value, resolved for the [`RenderTarget::Browser`] target.
 pub(super) trait MarginToCss {
     fn to_css_value(&self, default: &str) -> String;
 }
 
-impl MarginToCss for Margin {
-    fn to_css_value(&self, _default: &str) -> String {
-        match self {
-            Margin::Chars(chars) => format!("{}ch", chars),
-            Margin::Percent(pct) => format!("{}%", pct),
-            Margin::None => "0".to_string(),
-            Margin::Offset(base, chars) => {
-                // `Margin::Offset(base, chars)` combines a heterogeneous base
-                // (percent / chars / none) with an additional character
-                // offset. Raw `{base} + {chars}ch` is not legal CSS —
-                // browsers reject it. Wrap the combination in `calc(...)`
-                // so the emitted `style="margin: calc(2% + 3ch) …"` stays
-                // valid. Two fast paths collapse degenerate cases:
-                //   - `chars == 0` returns the base verbatim (no
-                //     `calc(5% + 0ch)` noise)
-                //   - a `None` base (`base_value == "0"`) collapses to the
-                //     plain `{chars}ch` form
-                let base_value = base.to_css_value("0");
-                if *chars == 0 {
-                    return base_value;
-                }
-                if base_value == "0" {
-                    format!("{}ch", chars)
-                } else {
-                    format!("calc({} + {}ch)", base_value, chars)
-                }
-            }
+impl MarginToCss for TargetValue<Length> {
+    fn to_css_value(&self, default: &str) -> String {
+        use renderable::target::RenderTarget;
+        match self.resolve(RenderTarget::Browser) {
+            Some(Length::Zero) | None => default.to_string(),
+            Some(Length::Ch(n)) => format!("{}ch", n),
+            Some(Length::Percent(pct)) => format!("{}%", pct),
+            Some(Length::Css(sizing)) => sizing.to_string(),
         }
     }
 }

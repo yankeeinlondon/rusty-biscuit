@@ -120,11 +120,7 @@ fn load_api(schema: Option<&Path>) -> Result<DarkmatterSchemas, SchemaError> {
 
 /// Validates a single file, capturing parse/schema failures separately so the
 /// caller can map them to the spec's exit codes.
-fn validate_one(
-    api: &DarkmatterSchemas,
-    file: &Path,
-    assignments: &[Assignment],
-) -> FileOutcome {
+fn validate_one(api: &DarkmatterSchemas, file: &Path, assignments: &[Assignment]) -> FileOutcome {
     let mut md = match Markdown::try_from(file) {
         Ok(md) => md,
         Err(err) => return FileOutcome::ParseError(err.to_string()),
@@ -215,9 +211,8 @@ fn emit_pretty(file: &Path, outcome: &FileOutcome, quiet: bool, terminal: &Termi
             } else {
                 "has a schema definition and is valid."
             };
-            let line = format!(
-                "- <green>✔</green> _<dim>the document</dim>_ {link} _<dim>{tail}</dim>_"
-            );
+            let line =
+                format!("- <green>✔</green> _<dim>the document</dim>_ {link} _<dim>{tail}</dim>_");
             println!("{}", Prose::new(line).render(terminal));
         }
         FileOutcome::Validated {
@@ -284,10 +279,7 @@ fn emit_problem_bullet(problem: &ValidationProblem, terminal: &Terminal) {
     };
 
     let message = trim_redundant_property_prefix(&problem.message, problem.property.as_deref());
-    let bullet = format!(
-        "    - {prefix}{}{location_suffix}",
-        escape_prose(message)
-    );
+    let bullet = format!("    - {prefix}{}{location_suffix}", escape_prose(message));
     println!("{}", Prose::new(bullet).render(terminal));
 }
 

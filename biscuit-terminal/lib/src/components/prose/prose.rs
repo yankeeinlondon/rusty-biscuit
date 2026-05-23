@@ -2,35 +2,22 @@
 
 use crate::{
     terminal::Terminal,
-    utils::layout::{Layout, Margin},
+    utils::layout::{Layout, Length, TargetValue},
     utils::wrap_policy::WordWrap,
 };
 
-use super::markdown::preprocess_markdown;
-use super::styles::StyleState;
-use super::tokens::parse_tokens_inner;
+use super::ir::ProseDocument;
 
 /// Styled text with token and block tag support for rich terminal output.
 ///
 /// This struct wraps text content that gets parsed for styling tokens and
 /// rendered with ANSI escape codes.
 ///
-/// ## Token Types
+/// ## Input Grammars
 ///
-/// ### Atomic Tokens (`{{token}}`)
-/// Single-use tokens that apply styling and require manual `{{reset}}`:
-///
-/// ```rust
-/// use biscuit_terminal::components::prose::Prose;
-/// use biscuit_terminal::components::renderable::TerminalRenderable;
-///
-/// let prose = Prose::new("{{bold}}Important:{{reset}} This is bold text");
-/// let rendered = prose.render_optimistic(None);
-/// // Contains ANSI bold escape codes
-/// ```
-///
-/// Supported tokens: `{{bold}}`, `{{dim}}`, `{{italic}}`, `{{underline}}`,
-/// `{{red}}`, `{{bg-blue}}`, `{{reset}}`, etc.
+/// `Prose` accepts **bracketed tags** and a **Markdown subset**. The
+/// atomic-token grammar (`{{token}}`) has been removed — `{{…}}` now renders
+/// as ordinary literal text.
 ///
 /// ### Block Tags (`<tag>content</tag>`)
 /// Self-closing tags that auto-reset:
@@ -104,14 +91,14 @@ impl Prose {
     }
 
     /// Set the left margin.
-    pub fn with_left_margin(mut self, margin: Margin) -> Self {
-        self.layout.left_margin = margin;
+    pub fn with_left_margin(mut self, margin: TargetValue<Length>) -> Self {
+        self.layout.margin.left = margin;
         self
     }
 
     /// Set the right margin.
-    pub fn with_right_margin(mut self, margin: Margin) -> Self {
-        self.layout.right_margin = margin;
+    pub fn with_right_margin(mut self, margin: TargetValue<Length>) -> Self {
+        self.layout.margin.right = margin;
         self
     }
 
@@ -121,6 +108,15 @@ impl Prose {
     /// (`<`, `>`, `{`, `*`, `_`, `[`, `]`, `(`, `)`, `\`) by prefixing them
     /// with a backslash. Use this for any user-controlled string that is
     /// interpolated into Prose content.
+    ///
+    /// ## ANSI escape pass-through
+    ///
+    /// Pre-styled text containing CSI (`ESC [ … final-byte`) or OSC
+    /// (`ESC ] … BEL | ST`) escape sequences passes through unchanged: the
+    /// `[` inside a CSI sequence is part of an escape, not Prose grammar.
+    /// Escaping it would corrupt the styled bytes (an extra `\` between
+    /// `ESC` and `[` makes the terminal treat the SGR as literal text).
+    /// Outside of ANSI sequences the normal Prose escaping rules apply.
     ///
     /// ## Examples
     ///
@@ -132,29 +128,75 @@ impl Prose {
     /// ```
     pub fn escape_text(s: &str) -> String {
         let mut result = String::with_capacity(s.len());
-        for c in s.chars() {
-            match c {
+        let bytes = s.as_bytes();
+        let mut i = 0;
+        while i < bytes.len() {
+            if bytes[i] == 0x1B && i + 1 < bytes.len() {
+                // Recognize ANSI CSI / OSC sequences and pass them through
+                // verbatim. `escape_text` is byte-oriented when stepping over
+                // ESC sequences (all bytes here are ASCII) and reverts to
+                // char-based handling once the sequence ends.
+                let next = bytes[i + 1];
+                if next == b'[' {
+                    // CSI: ESC '[' params... final-byte (0x40..=0x7E).
+                    let start = i;
+                    i += 2;
+                    while i < bytes.len() && !(0x40..=0x7E).contains(&bytes[i]) {
+                        i += 1;
+                    }
+                    if i < bytes.len() {
+                        i += 1; // include the final byte
+                    }
+                    result.push_str(&s[start..i]);
+                    continue;
+                }
+                if next == b']' {
+                    // OSC: ESC ']' params... BEL or ESC '\' (ST).
+                    let start = i;
+                    i += 2;
+                    while i < bytes.len() {
+                        if bytes[i] == 0x07 {
+                            i += 1;
+                            break;
+                        }
+                        if bytes[i] == 0x1B && i + 1 < bytes.len() && bytes[i + 1] == b'\\' {
+                            i += 2;
+                            break;
+                        }
+                        i += 1;
+                    }
+                    result.push_str(&s[start..i]);
+                    continue;
+                }
+            }
+            // Step one UTF-8 character. `s[i..]` is always a valid char
+            // boundary here because the only multi-byte handling above
+            // jumps within ASCII-only ANSI sequences.
+            let ch = s[i..].chars().next().expect("non-empty remainder");
+            match ch {
                 '<' | '>' | '{' | '*' | '_' | '[' | ']' | '(' | ')' | '\\' => {
                     result.push('\\');
-                    result.push(c);
+                    result.push(ch);
                 }
-                _ => result.push(c),
+                _ => result.push(ch),
             }
+            i += ch.len_utf8();
         }
         result
     }
 
     /// Build a safely-quoted attribute value for Prose block tags.
     ///
-    /// Escapes only the characters that would break tag-level parsing
-    /// (`<`, `>`, `\`) and wraps the result in single or double quotes,
-    /// choosing the quote character that does not appear in the value so
-    /// the attribute parser never mis-identifies the end of the value.
+    /// Backslash-escapes the characters that would break tag-level parsing
+    /// (`<`, `>`, `\`), wraps the result in single or double quotes —
+    /// preferring the quote character that does not already appear in the
+    /// value — and escapes any occurrence of the chosen wrapping quote.
+    /// The Prose tag parser resolves these escapes inside attribute values,
+    /// so a value containing both quote types still round-trips exactly.
     ///
     /// Markdown-emphasis characters (`_`, `*`, `[`, `]`, `(`, `)`, `{`)
     /// are passed through verbatim: the markdown pre-processor treats tag
-    /// declarations opaquely, and the attribute parser does not unescape
-    /// backslash sequences, so escaping them here would leak literal
+    /// declarations opaquely, and escaping them here would leak literal
     /// backslashes into href URLs and other consumers.
     ///
     /// ## Examples
@@ -185,27 +227,33 @@ impl Prose {
                 _ => escaped.push(c),
             }
         }
-        if escaped.contains('"') && !escaped.contains('\'') {
-            format!("'{}'", escaped)
+        // Wrap in the quote character least likely to collide; escape any
+        // occurrence of the chosen quote so a value carrying both quote
+        // types still parses back to its exact bytes.
+        let quote = if escaped.contains('"') && !escaped.contains('\'') {
+            '\''
         } else {
-            format!("\"{}\"", escaped)
-        }
+            '"'
+        };
+        let body = escaped.replace(quote, &format!("\\{quote}"));
+        format!("{quote}{body}{quote}")
     }
 
-    /// Parse and render the content, replacing tokens with ANSI escape codes.
+    /// Parse the raw content into the target-neutral [`ProseDocument`] IR.
     ///
-    /// Pre-processes the raw content for the supported Markdown subset
-    /// (`**bold**`, `_italics_`, `[desc](ref)`) before delegating to the
-    /// existing block-tag parser. Only this outermost call emits the
-    /// final `\x1b[0m` reset.
+    /// Pre-processes the supported Markdown subset (`**bold**`, `_italics_`,
+    /// `[desc](ref)`) and parses bracketed tags. Former atomic-token syntax
+    /// (`{{…}}`) is treated as ordinary literal text.
+    pub(super) fn document(&self) -> ProseDocument {
+        ProseDocument::parse(&self.content)
+    }
+
+    /// Parse and render the content to terminal ANSI/OSC8 output.
+    ///
+    /// Builds the [`ProseDocument`] IR and renders it through the terminal
+    /// emitter. Only the outermost emit produces the final `\x1b[0m` reset.
     pub(super) fn parse_tokens(&self, term: Option<&Terminal>) -> String {
-        let preprocessed = preprocess_markdown(&self.content);
-        let mut state = StyleState::default();
-        let mut result = parse_tokens_inner(&preprocessed, term, &mut state);
-        if state.used_styles {
-            result.push_str("\x1b[0m");
-        }
-        result
+        super::terminal::render(&self.document(), term)
     }
 }
 

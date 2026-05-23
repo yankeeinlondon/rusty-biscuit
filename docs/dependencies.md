@@ -1057,6 +1057,18 @@ This is a Rust workspace with the following modules:
 
     _Tags: testing, cli, integration-tests_
 
+- [chromiumoxide](https://github.com/mattsse/chromiumoxide) _v0.7_ [📄](https://docs.rs/chromiumoxide)
+
+    _Headless-browser automation over the Chrome DevTools Protocol. Used by `darkmatter/lib` browser-render tests to assert on browser-computed styles of HTML/CSS output and to screenshot renders. Skips cleanly when no Chrome/Chromium is present._
+
+    _Tags: testing, browser, html, css_
+
+- [futures-util](https://github.com/rust-lang/futures-rs) _v0.3_ [📄](https://docs.rs/futures-util)
+
+    _Async stream/future combinators. Used in `darkmatter/lib` browser-render tests to pump the `chromiumoxide` CDP handler stream._
+
+    _Tags: testing, async, browser_
+
 - [insta](https://github.com/mitsuhiko/insta) _v1.41_ [📄](https://insta.rs)
 
     _Snapshot testing library with VS Code integration and beautiful diffs._

@@ -1,7 +1,8 @@
 ---
 source: darkmatter/lib/tests/error_snapshots/stylesheet.rs
+assertion_line: 72
 expression: out
 ---
-⨫ StylesheetError: invalid sizing value
+⤫ StylesheetError: invalid sizing value
 ┃ Value: abc
 Accepted sizing tokens: 0, 42px, 1.5rem, 50%, auto, min-content, or a calc(...) expression.

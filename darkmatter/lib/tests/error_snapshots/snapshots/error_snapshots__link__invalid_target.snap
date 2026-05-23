@@ -1,7 +1,8 @@
 ---
 source: darkmatter/lib/tests/error_snapshots/link.rs
+assertion_line: 105
 expression: out
 ---
-⨫ LinkError: invalid target
+⤫ LinkError: invalid target
 ┃ Target: _parent_
 Valid targets: _self, _blank, _parent, _top, or a named context.

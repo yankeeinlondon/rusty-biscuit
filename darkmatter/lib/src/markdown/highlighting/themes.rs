@@ -35,6 +35,40 @@ pub enum ColorMode {
     Dark,
 }
 
+impl ColorMode {
+    /// Returns the opposite color mode.
+    ///
+    /// Used to give **code blocks** a theme that contrasts against the page:
+    /// in a dark terminal the code panel resolves its [`ThemePair`] against
+    /// `Light` (and vice versa), which lifts and separates the code block from
+    /// surrounding prose. Only code blocks invert — prose, headings, tables,
+    /// and the page background follow the terminal's real mode so body text
+    /// stays readable.
+    ///
+    /// Note that the user-facing theme *name* ([`ThemePair`]) is abstracted
+    /// from light/dark; [`ThemePair::resolve`] maps the abstract name **plus** a
+    /// mode to a concrete light or dark theme. Inverting the mode here therefore
+    /// selects the opposite concrete variant of the *same* theme name. A few
+    /// pairs (`dracula`, `nord`, `monokai`, `vs-dark`) are single-variant by
+    /// design and resolve identically under both modes; for those, inversion is
+    /// a deliberate no-op, not a bug.
+    ///
+    /// ## Examples
+    ///
+    /// ```
+    /// use darkmatter::markdown::highlighting::ColorMode;
+    ///
+    /// assert_eq!(ColorMode::Dark.inverted(), ColorMode::Light);
+    /// assert_eq!(ColorMode::Light.inverted(), ColorMode::Dark);
+    /// ```
+    pub const fn inverted(self) -> Self {
+        match self {
+            ColorMode::Light => ColorMode::Dark,
+            ColorMode::Dark => ColorMode::Light,
+        }
+    }
+}
+
 /// Primary API surface - theme pairs that adapt to light/dark modes.
 ///
 /// Each variant represents a paired light/dark theme combination.

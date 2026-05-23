@@ -29,8 +29,9 @@ use image::{DynamicImage, ImageFormat, ImageReader};
 
 use crate::{
     components::renderable::TerminalRenderable,
+    render_tree::render::resolve_cells,
     terminal::Terminal,
-    utils::layout::{Alignment, Layout, Margin},
+    utils::layout::{Alignment, Layout, Length, TargetValue},
 };
 
 mod cursor;
@@ -288,13 +289,13 @@ impl TerminalRenderable for TerminalImage {
 /// ```rust,no_run
 /// use biscuit_terminal::components::terminal_image::{TerminalImage, ImageWidth};
 /// use biscuit_terminal::components::renderable::TerminalRenderable;
-/// use biscuit_terminal::utils::layout::Margin;
+/// use biscuit_terminal::utils::layout::{Length, TargetValue};
 /// use std::path::Path;
 ///
 /// let image = TerminalImage::new(Path::new("test.png")).unwrap()
 ///     .with_width(ImageWidth::Percent(0.8))
-///     .left_margin(Margin::Chars(10))
-///     .right_margin(Margin::Chars(10));
+///     .left_margin(TargetValue::universal(Length::ch(10)))
+///     .right_margin(TargetValue::universal(Length::ch(10)));
 ///
 /// // Resolve dimensions for a 80-character wide terminal
 /// let dims = image.resolve_dimensions(80);
@@ -309,13 +310,12 @@ impl TerminalRenderable for TerminalImage {
 /// ```rust,no_run
 /// use biscuit_terminal::components::terminal_image::TerminalImage;
 /// use biscuit_terminal::components::renderable::TerminalRenderable;
-/// use biscuit_terminal::utils::layout::{Alignment, Layout, Margin};
+/// use biscuit_terminal::utils::layout::{Alignment, Layout, Length, Margin, TargetValue};
 /// use std::path::Path;
 ///
 /// let image = TerminalImage::new(Path::new("diagram.svg")).unwrap()
 ///     .with_layout(Layout {
-///         left_margin: Margin::Percent(10.0),
-///         right_margin: Margin::Percent(10.0),
+///         margin: Margin::x(Length::percent(10.0).unwrap()),
 ///         alignment: Alignment::Center,
 ///         ..Layout::default()
 ///     });
@@ -370,8 +370,8 @@ impl TerminalImage {
     ) -> ResolvedDimensions {
         let term_width = term_width.max(1);
 
-        let resolved_left = Layout::resolve_margin(&layout.left_margin, term_width);
-        let resolved_right = Layout::resolve_margin(&layout.right_margin, term_width);
+        let resolved_left = resolve_cells(&layout.margin.left, term_width);
+        let resolved_right = resolve_cells(&layout.margin.right, term_width);
 
         let available_width = term_width
             .saturating_sub(resolved_left + resolved_right)
@@ -586,8 +586,8 @@ impl TerminalImage {
 
     /// Set the margins for this image.
     pub fn with_margins(mut self, left: u32, right: u32) -> Self {
-        self.layout.left_margin = Margin::Chars(left);
-        self.layout.right_margin = Margin::Chars(right);
+        self.layout.margin.left = TargetValue::universal(Length::ch(left));
+        self.layout.margin.right = TargetValue::universal(Length::ch(right));
         self
     }
 

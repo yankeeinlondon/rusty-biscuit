@@ -27,12 +27,10 @@ pub use system_prompt::{
     render_system_prompt_body, render_system_prompt_header, render_system_prompt_summary,
     report_system_prompt, report_system_prompt_empty, report_system_prompt_with_base,
 };
-pub use user_prompt::{
-    render_user_prompt_body, render_user_prompt_header, report_user_prompt,
-};
 pub use tokens::{estimate_system_prompt_tokens, estimate_tokens, estimate_tokens_dense};
 pub use truncation::{strip_leading_whitespace, truncate_front_back};
 pub use types::{
     PromptReportFormat, PromptVerbosity, SystemPromptReportConfig, TruncationMode,
     UserPromptReportConfig,
 };
+pub use user_prompt::{render_user_prompt_body, render_user_prompt_header, report_user_prompt};

@@ -42,7 +42,7 @@ pub mod write;
 pub mod ws_modules;
 
 pub use assemble::{
-    SplitApiParts, SPLIT_THRESHOLD_LINES, assemble_api_code, assemble_api_module,
+    SPLIT_THRESHOLD_LINES, SplitApiParts, assemble_api_code, assemble_api_module,
     assemble_api_module_with_options, assemble_combined_api_module, assemble_lib_rs,
     assemble_lib_rs_with_options, assemble_prelude, assemble_prelude_with_options,
     assemble_shared_module, assemble_split_api_module, assemble_split_combined_api_module,
@@ -204,14 +204,8 @@ pub fn generate_and_write_all(
                     client_rs,
                 } => {
                     println!("=== {}/mod.rs ===\n{}\n", module_path, mod_rs);
-                    println!(
-                        "=== {}/requests.rs ===\n{}\n",
-                        module_path, requests_rs
-                    );
-                    println!(
-                        "=== {}/responses.rs ===\n{}\n",
-                        module_path, responses_rs
-                    );
+                    println!("=== {}/requests.rs ===\n{}\n", module_path, requests_rs);
+                    println!("=== {}/responses.rs ===\n{}\n", module_path, responses_rs);
                     println!("=== {}/client.rs ===\n{}\n", module_path, client_rs);
                 }
             }
@@ -1118,16 +1112,12 @@ mod tests {
             panic!(
                 "Generated as single file ({} lines, threshold is {}). \
                  Increase endpoint count in make_large_api().",
-                line_count,
-                SPLIT_THRESHOLD_LINES
+                line_count, SPLIT_THRESHOLD_LINES
             );
         }
 
         assert!(dir.is_dir(), "large should be a directory");
-        assert!(
-            dir.join("mod.rs").exists(),
-            "large/mod.rs should exist"
-        );
+        assert!(dir.join("mod.rs").exists(), "large/mod.rs should exist");
         assert!(
             dir.join("requests.rs").exists(),
             "large/requests.rs should exist"

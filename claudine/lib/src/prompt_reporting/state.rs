@@ -53,11 +53,7 @@ pub fn write_hash(scope: &Path, hash: &str) -> io::Result<()> {
 /// Returns `true` when the prompt is byte-for-byte identical to the last
 /// observed value at this scope. Returns `false` on first run, on change,
 /// or when reading/writing state fails.
-pub fn check_and_record(
-    scope: &Path,
-    composed_markdown: &str,
-    appendix: Option<&str>,
-) -> bool {
+pub fn check_and_record(scope: &Path, composed_markdown: &str, appendix: Option<&str>) -> bool {
     let new_hash = compute_prompt_hash(composed_markdown, appendix);
     let unchanged = read_last_hash(scope)
         .map(|prev| prev == new_hash)

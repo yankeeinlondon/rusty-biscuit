@@ -2,7 +2,7 @@
 
 use std::fs;
 
-use schematic_define::{ApiResponse, AuthStrategy, Endpoint, RestMethod, RestApi};
+use schematic_define::{ApiResponse, AuthStrategy, Endpoint, RestApi, RestMethod};
 
 use crate::export::auth::{ApiKeyLocation, ExportAuth};
 use crate::export::body::{ExportBody, FormField, FormFieldExportKind, map_body};

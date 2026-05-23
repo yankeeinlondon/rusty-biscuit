@@ -1712,16 +1712,8 @@ fn main() {
 
     // Write palette_defaults method
     writeln!(writer).unwrap();
-    writeln!(
-        writer,
-        "    /// Every concrete Tailwind palette color as a"
-    )
-    .unwrap();
-    writeln!(
-        writer,
-        "    /// `(custom-property-name, hex-value)` pair."
-    )
-    .unwrap();
+    writeln!(writer, "    /// Every concrete Tailwind palette color as a").unwrap();
+    writeln!(writer, "    /// `(custom-property-name, hex-value)` pair.").unwrap();
     writeln!(writer, "    ///").unwrap();
     writeln!(
         writer,

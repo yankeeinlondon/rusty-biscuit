@@ -61,12 +61,12 @@ pub enum GraphRenderError {
 ///     GraphExpression, GraphInputSyntax, GraphOrientation,
 /// };
 /// use biscuit_terminal::components::renderable::TerminalRenderable;
-/// use biscuit_terminal::utils::layout::Margin;
+/// use biscuit_terminal::utils::layout::{Length, TargetValue};
 ///
 /// let graph = GraphExpression::for_terminal("a -> b -> c", GraphInputSyntax::Auto)?
 ///     .with_orientation(GraphOrientation::LeftToRight)
 ///     .with_title("My Graph")
-///     .left_margin(Margin::Chars(4));
+///     .left_margin(TargetValue::universal(Length::ch(4)));
 ///
 /// # Ok::<(), biscuit_terminal::components::graph_expression::GraphRenderError>(())
 /// ```
@@ -307,12 +307,8 @@ impl GraphExpression {
         // The resulting `target_width_px` is fed to the rasterizer so the PNG
         // is rendered once at exactly the display resolution — no oversampling,
         // no downscaling, text rasterised fresh at the terminal's pixel density.
-        let dims =
-            TerminalImage::resolve_dimensions_for(&self.width, &self.layout, term.width());
-        let cell_pixel_width = term
-            .cell_size()
-            .map(|cs| cs.width.max(1))
-            .unwrap_or(8u32);
+        let dims = TerminalImage::resolve_dimensions_for(&self.width, &self.layout, term.width());
+        let cell_pixel_width = term.cell_size().map(|cs| cs.width.max(1)).unwrap_or(8u32);
         let target_width_px = (dims.image_width.max(1)) * cell_pixel_width;
 
         let (png_path, cache_hit) = self.render_to_cached_png_at_width(target_width_px)?;
@@ -573,11 +569,8 @@ mod tests {
 
     #[test]
     fn browser_render_dot_input_emits_svg() {
-        let graph = GraphExpression::parse(
-            "digraph G { A -> B; B -> C; }",
-            GraphInputSyntax::Dot,
-        )
-        .unwrap();
+        let graph =
+            GraphExpression::parse("digraph G { A -> B; B -> C; }", GraphInputSyntax::Dot).unwrap();
         let html = graph.render_browser_svg();
         assert!(html.contains("<svg"));
         assert!(html.contains("</svg>"));

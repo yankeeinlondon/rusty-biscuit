@@ -3,7 +3,7 @@ use color_eyre::eyre::Result;
 use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::components::table::table::{Table, TableColumn};
-use biscuit_terminal::utils::layout::Margin;
+use biscuit_terminal::utils::layout::{Length, Margin};
 use claudine::dispatch::template::{TemplateVariable, VariableCategory};
 use claudine::events::{EventMeta, detect_environment};
 
@@ -18,11 +18,11 @@ use super::bold;
 pub(super) fn run_variables() -> Result<()> {
     let term = crate::log::terminal();
 
-    let header = Prose::new("{{bold}}Template Variables{{reset}}");
+    let header = Prose::new("<bold>Template Variables</bold>");
     log::data(&format!("\n {}", header.render(&term)));
     log::data("");
     let intro = Prose::new(
-        "{{dim}}Use these in speak messages and report templates: {{reset}}{{cyan}}\"Tool {{tool_name}} failed: {{error}}\"{{reset}}",
+        "<dim>Use these in speak messages and report templates: </dim><cyan>\"Tool {{tool_name}} failed: {{error}}\"</cyan>",
     );
     log::data(&format!(" {}", intro.render(&term)));
     log::data("");
@@ -33,15 +33,15 @@ pub(super) fn run_variables() -> Result<()> {
         TableColumn::new(bold("Available For")),
     ];
     let mut table = Table::new().with_columns(columns);
-    table.layout_mut().left_margin = Margin::Chars(1);
+    table.layout_mut().margin = Margin::x(Length::ch(1));
 
     for var in TemplateVariable::event_variables() {
         table.add_row(vec![
-            Prose::new(format!("{{{{cyan}}}}{}{{{{reset}}}}", var.placeholder()))
+            Prose::new(format!("<cyan>{}</cyan>", var.placeholder()))
                 .render(&term)
                 .into(),
             var.description().into(),
-            Prose::new(format!("{{{{dim}}}}{}{{{{reset}}}}", var.availability()))
+            Prose::new(format!("<dim>{}</dim>", var.availability()))
                 .render(&term)
                 .into(),
         ]);
@@ -52,7 +52,7 @@ pub(super) fn run_variables() -> Result<()> {
 
     log::data("");
     let ctx_header =
-        Prose::new("{{bold}}Context Variables{{reset}} {{dim}}(auto-detected at runtime){{reset}}");
+        Prose::new("<bold>Context Variables</bold> <dim>(auto-detected at runtime)</dim>");
     log::data(&format!(" {}", ctx_header.render(&term)));
 
     let cwd = std::env::current_dir().unwrap_or_default();
@@ -65,7 +65,7 @@ pub(super) fn run_variables() -> Result<()> {
         TableColumn::new(bold("Current Value")),
     ];
     let mut ctx_table = Table::new().with_columns(ctx_columns);
-    ctx_table.layout_mut().left_margin = Margin::Chars(1);
+    ctx_table.layout_mut().margin = Margin::x(Length::ch(1));
 
     let mut current_category: Option<VariableCategory> = None;
 
@@ -75,7 +75,7 @@ pub(super) fn run_variables() -> Result<()> {
         if current_category != Some(cat) {
             current_category = Some(cat);
             ctx_table.add_row(vec![
-                Prose::new(format!("{{{{dim}}}}# {}{{{{reset}}}}", cat.label()))
+                Prose::new(format!("<dim># {}</dim>", cat.label()))
                     .render(&term)
                     .into(),
                 "".into(),
@@ -85,18 +85,22 @@ pub(super) fn run_variables() -> Result<()> {
 
         let current_value = var.resolve(&dummy_meta);
         let value_display = if current_value.is_empty() {
-            Prose::new("{{dim}}-{{reset}}").render(&term)
+            Prose::new("<dim>-</dim>").render(&term)
         } else {
             let truncated = if current_value.len() > 40 {
                 format!("{}…", &current_value[..39])
             } else {
                 current_value.to_string()
             };
-            Prose::new(format!("{{{{green}}}}{}{{{{reset}}}}", truncated)).render(&term)
+            Prose::new(format!(
+                "<green>{}</green>",
+                Prose::escape_text(&truncated)
+            ))
+            .render(&term)
         };
 
         ctx_table.add_row(vec![
-            Prose::new(format!("{{{{cyan}}}}{}{{{{reset}}}}", var.placeholder()))
+            Prose::new(format!("<cyan>{}</cyan>", var.placeholder()))
                 .render(&term)
                 .into(),
             var.description().into(),
@@ -108,14 +112,14 @@ pub(super) fn run_variables() -> Result<()> {
     log::data(&ctx_rendered);
 
     log::data("");
-    let example_header = Prose::new("{{bold}}Example{{reset}}");
+    let example_header = Prose::new("<bold>Example</bold>");
     log::data(&format!(" {}", example_header.render(&term)));
     log::data("");
     let example = Prose::new(
-        r#"{{dim}}  {
+        r#"<dim>  {
     "type": "speak",
     "message": "Tool {{tool_name}} failed on {{git.branch}}: {{error}}"
-  }{{reset}}"#,
+  }</dim>"#,
     );
     log::data(&example.render(&term));
     log::data("");

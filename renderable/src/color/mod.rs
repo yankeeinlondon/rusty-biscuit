@@ -1,10 +1,22 @@
-//! Target-agnostic color data types.
+//! Target-agnostic color data types and capability descriptors.
 //!
 //! This module is the single source of truth for color *data* shared across
-//! render targets. Terminal-specific ANSI emission (the `TermColor` trait and
-//! its impls) lives in `biscuit-terminal`.
+//! render targets. It contains two categories:
+//!
+//! - **Color values**: Types representing specific colors (`Color`, `HdrColor`,
+//!   `BasicColor`, `Tailwind`, etc.).
+//! - **Capability descriptors**: Types describing what a terminal can display
+//!   (`ColorDepth`, `ColorMode`, `TerminalCodeContext`). These are used by
+//!   [`CodeRenderer`] and tree renderers to make rendering decisions without
+//!   ambient detection.
+//!
+//! Terminal-specific ANSI emission (the `TermColor` trait and its impls) lives
+//! in `biscuit-terminal`.
+//!
+//! [`CodeRenderer`]: crate::tree::CodeRenderer
 
 pub mod basic;
+pub mod capability;
 pub mod color_enum;
 pub mod hdr;
 pub mod octet;
@@ -13,6 +25,7 @@ pub mod tailwind;
 pub mod web;
 
 pub use basic::{BasicColor, FgBg, basic_color_to_rgb};
+pub use capability::{ColorDepth, ColorMode, TerminalCodeContext};
 pub use color_enum::Color;
 pub use hdr::HdrColor;
 pub use octet::{Octet, OctetError};

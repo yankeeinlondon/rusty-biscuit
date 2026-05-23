@@ -47,18 +47,52 @@ fn is_intra_word(prev: Option<char>, next: Option<char>) -> bool {
     is_word_neighbour(prev) && is_word_neighbour(next)
 }
 
-const CODE_BLOCK_PLACEHOLDER_MARK: char = '\u{0002}';
+/// Sentinel character marking a lifted fenced code block. It is a C0
+/// control character that never appears in real Prose input, so the
+/// `\u{0002}CODE<n>\u{0002}` placeholder cannot collide with user code —
+/// see [`super::tokens::parse_nodes`], which consumes it directly.
+pub(super) const CODE_BLOCK_PLACEHOLDER_MARK: char = '\u{0002}';
+
+/// A fenced code block lifted out of the input during pre-processing.
+///
+/// The body is opaque: no Prose markup is ever parsed from it. The token
+/// parser turns the matching placeholder straight into a
+/// [`ProseNode::CodeBlock`](super::ir::ProseNode::CodeBlock).
+#[derive(Debug, Clone)]
+pub(super) struct FencedCode {
+    /// Language hint from the opening fence (may be empty).
+    pub lang: String,
+    /// Verbatim code-block body.
+    pub body: String,
+}
+
+/// Result of [`preprocess_markdown`]: the converted text — still carrying
+/// opaque `\u{0002}CODE<n>\u{0002}` placeholders for fenced code blocks —
+/// plus the lifted code blocks indexed by placeholder number.
+///
+/// Code blocks are deliberately *not* restored into the string grammar:
+/// re-injecting a body that itself contained a closing tag would let the
+/// tag scanner terminate the block early. The token parser instead
+/// resolves each placeholder against `code_blocks` directly.
+pub(super) struct Preprocessed {
+    /// Pre-processed text with code-block placeholders intact.
+    pub text: String,
+    /// Lifted fenced code blocks, indexed by placeholder number.
+    pub code_blocks: Vec<FencedCode>,
+}
 
 /// Phase 0: lift fenced code blocks (` ```lang\n...\n``` `) into opaque
 /// placeholders so that inner backticks, asterisks, and underscores are
 /// never interpreted as Markdown.
 ///
-/// Returns the text with placeholders and a vector of (language, body)
-/// tuples for later restoration.
-fn convert_fenced_code_blocks(input: &str) -> (String, Vec<(String, String)>) {
+/// Returns the text with placeholders and the lifted code blocks. The
+/// placeholders survive every later phase untouched (the sentinel is a
+/// non-word, non-escapable character) and are resolved by the token
+/// parser, never re-expanded back into string markup.
+fn convert_fenced_code_blocks(input: &str) -> (String, Vec<FencedCode>) {
     let lines: Vec<&str> = input.lines().collect();
     let mut output_lines: Vec<String> = Vec::new();
-    let mut code_blocks: Vec<(String, String)> = Vec::new();
+    let mut code_blocks: Vec<FencedCode> = Vec::new();
     let mut i = 0;
 
     while i < lines.len() {
@@ -85,7 +119,10 @@ fn convert_fenced_code_blocks(input: &str) -> (String, Vec<(String, String)>) {
                 m = CODE_BLOCK_PLACEHOLDER_MARK,
                 n = code_blocks.len()
             );
-            code_blocks.push((lang, body_lines.join("\n")));
+            code_blocks.push(FencedCode {
+                lang,
+                body: body_lines.join("\n"),
+            });
             output_lines.push(placeholder);
         } else {
             output_lines.push(line.to_string());
@@ -96,47 +133,23 @@ fn convert_fenced_code_blocks(input: &str) -> (String, Vec<(String, String)>) {
     (output_lines.join("\n"), code_blocks)
 }
 
-/// Restore each `\u{0002}CODE<n>\u{0002}` placeholder with a
-/// `<code-block lang="...">...</code-block>` tag that the token parser
-/// recognises and renders as a dim, indented code block.
-fn restore_code_blocks(input: &str, blocks: &[(String, String)]) -> String {
-    if blocks.is_empty() {
-        return input.to_string();
-    }
-    let mut output = input.to_string();
-    for (i, (lang, body)) in blocks.iter().enumerate() {
-        let placeholder = format!("{m}CODE{i}{m}", m = CODE_BLOCK_PLACEHOLDER_MARK);
-        let tag = format!(
-            "<code-block lang=\"{}\">{}</code-block>",
-            html_escape(lang),
-            body
-        );
-        output = output.replace(&placeholder, &tag);
-    }
-    output
-}
-
-/// Minimal HTML escape for code-block language attributes.
-fn html_escape(s: &str) -> String {
-    s.replace('&', "&amp;")
-        .replace('"', "&quot;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
-}
-
 /// Apply the full Markdown pre-processing pipeline.
 ///
-/// Order: fenced code blocks → links → bold → italics. The output is fed
-/// verbatim into the existing block-tag parser. Backslash escapes for `*`,
-/// `_`, `[`, `]`, `(`, `)` are preserved end-to-end so the downstream parser
-/// converts them to literal characters via Phase 1's escape handling.
-pub(super) fn preprocess_markdown(input: &str) -> String {
+/// Order: fenced code blocks → links → bold → italics. The text output is
+/// fed into the block-tag parser; the lifted code blocks are handed to it
+/// alongside so it can resolve placeholders without ever re-parsing a
+/// code body as markup. Backslash escapes for `*`, `_`, `[`, `]`, `(`,
+/// `)` are preserved end-to-end so the downstream parser converts them to
+/// literal characters via Phase 1's escape handling.
+pub(super) fn preprocess_markdown(input: &str) -> Preprocessed {
     let (with_code, code_blocks) = convert_fenced_code_blocks(input);
     let (with_links, hrefs) = convert_links(&with_code);
     let with_bold = convert_bold(&with_links);
     let with_italics = convert_italics(&with_bold);
-    let restored = restore_hrefs(&with_italics, &hrefs);
-    restore_code_blocks(&restored, &code_blocks)
+    Preprocessed {
+        text: restore_hrefs(&with_italics, &hrefs),
+        code_blocks,
+    }
 }
 
 /// Characters that participate in backslash escape sequences during
@@ -539,10 +552,17 @@ fn restore_hrefs(input: &str, hrefs: &[String]) -> String {
 mod tests {
     use super::*;
 
+    /// Run the pre-processor and return only the converted text. Tests
+    /// that care about lifted fenced code blocks inspect `code_blocks`
+    /// via [`preprocess_markdown`] directly instead.
+    fn pp(input: &str) -> String {
+        preprocess_markdown(input).text
+    }
+
     #[test]
     fn link_basic_conversion() {
         assert_eq!(
-            preprocess_markdown("[click here](https://example.com)"),
+            pp("[click here](https://example.com)"),
             "<a href=\"https://example.com\">click here</a>",
         );
     }
@@ -550,7 +570,7 @@ mod tests {
     #[test]
     fn link_url_with_underscores_preserved() {
         assert_eq!(
-            preprocess_markdown("[link](https://example.com/path_with_underscores)"),
+            pp("[link](https://example.com/path_with_underscores)"),
             "<a href=\"https://example.com/path_with_underscores\">link</a>",
         );
     }
@@ -558,7 +578,7 @@ mod tests {
     #[test]
     fn link_url_with_asterisks_preserved() {
         assert_eq!(
-            preprocess_markdown("[link](https://example.com/a*b*c)"),
+            pp("[link](https://example.com/a*b*c)"),
             "<a href=\"https://example.com/a*b*c\">link</a>",
         );
     }
@@ -566,7 +586,7 @@ mod tests {
     #[test]
     fn link_url_with_double_asterisks_preserved() {
         assert_eq!(
-            preprocess_markdown("[link](https://example.com/a**b)"),
+            pp("[link](https://example.com/a**b)"),
             "<a href=\"https://example.com/a**b\">link</a>",
         );
     }
@@ -576,7 +596,7 @@ mod tests {
         // Both `\[` and `\]` escapes survive pre-processing; downstream
         // tokens.rs converts them to literal `[` and `]`.
         assert_eq!(
-            preprocess_markdown(r"\[not a link\](url)"),
+            pp(r"\[not a link\](url)"),
             r"\[not a link\](url)"
         );
     }
@@ -586,7 +606,7 @@ mod tests {
         // `[desc\]](url)` -> description preserves `\]` as escape, link
         // closes at the unescaped `]`.
         assert_eq!(
-            preprocess_markdown(r"[desc\]](url)"),
+            pp(r"[desc\]](url)"),
             "<a href=\"url\">desc\\]</a>",
         );
     }
@@ -595,30 +615,30 @@ mod tests {
     fn link_with_escaped_paren_in_url() {
         // `\)` inside the href should be folded to a literal `)`.
         assert_eq!(
-            preprocess_markdown(r"[link](http://e.com/p\)q)"),
+            pp(r"[link](http://e.com/p\)q)"),
             "<a href=\"http://e.com/p)q\">link</a>",
         );
     }
 
     #[test]
     fn malformed_link_no_paren_left_alone() {
-        assert_eq!(preprocess_markdown("[desc] no paren"), "[desc] no paren");
+        assert_eq!(pp("[desc] no paren"), "[desc] no paren");
     }
 
     #[test]
     fn malformed_link_unclosed_paren_left_alone() {
-        assert_eq!(preprocess_markdown("[desc](no close"), "[desc](no close");
+        assert_eq!(pp("[desc](no close"), "[desc](no close");
     }
 
     #[test]
     fn bold_basic_conversion() {
-        assert_eq!(preprocess_markdown("**bold text**"), "<b>bold text</b>");
+        assert_eq!(pp("**bold text**"), "<b>bold text</b>");
     }
 
     #[test]
     fn bold_escaped_asterisks_left_literal() {
         assert_eq!(
-            preprocess_markdown(r"\*\*not bold\*\*"),
+            pp(r"\*\*not bold\*\*"),
             r"\*\*not bold\*\*",
         );
     }
@@ -626,23 +646,23 @@ mod tests {
     #[test]
     fn bold_underscore_double_form_unsupported() {
         // Per spec, `__bold__` is NOT bold — left as-is.
-        assert_eq!(preprocess_markdown("__bold__"), "__bold__");
+        assert_eq!(pp("__bold__"), "__bold__");
     }
 
     #[test]
     fn italics_basic_conversion() {
-        assert_eq!(preprocess_markdown("_italic text_"), "<i>italic text</i>");
+        assert_eq!(pp("_italic text_"), "<i>italic text</i>");
     }
 
     #[test]
     fn italics_escaped_underscores_left_literal() {
-        assert_eq!(preprocess_markdown(r"\_not italic\_"), r"\_not italic\_");
+        assert_eq!(pp(r"\_not italic\_"), r"\_not italic\_");
     }
 
     #[test]
     fn italics_asterisk_form_unsupported() {
         // Per spec, `*italics*` is NOT italic — left as-is.
-        assert_eq!(preprocess_markdown("*italics*"), "*italics*");
+        assert_eq!(pp("*italics*"), "*italics*");
     }
 
     #[test]
@@ -650,7 +670,7 @@ mod tests {
         // Bold phase wraps `**...**`; italics phase then converts the
         // inner `_..._`.
         assert_eq!(
-            preprocess_markdown("**bold _and italics_**"),
+            pp("**bold _and italics_**"),
             "<b>bold <i>and italics</i></b>",
         );
     }
@@ -658,7 +678,7 @@ mod tests {
     #[test]
     fn nested_bold_italics() {
         assert_eq!(
-            preprocess_markdown("**_bold italics_**"),
+            pp("**_bold italics_**"),
             "<b><i>bold italics</i></b>",
         );
     }
@@ -668,7 +688,7 @@ mod tests {
         // The URL contains underscores at positions that would normally
         // trigger italics; the placeholder shields them.
         assert_eq!(
-            preprocess_markdown("[link](https://e.com/_path_)"),
+            pp("[link](https://e.com/_path_)"),
             "<a href=\"https://e.com/_path_\">link</a>",
         );
     }
@@ -676,7 +696,7 @@ mod tests {
     #[test]
     fn mixed_markdown_combination() {
         assert_eq!(
-            preprocess_markdown("**bold** and _italics_ and [link](url)"),
+            pp("**bold** and _italics_ and [link](url)"),
             "<b>bold</b> and <i>italics</i> and <a href=\"url\">link</a>",
         );
     }
@@ -684,20 +704,20 @@ mod tests {
     #[test]
     fn bold_inside_link_description() {
         assert_eq!(
-            preprocess_markdown("[**bold link**](url)"),
+            pp("[**bold link**](url)"),
             "<a href=\"url\"><b>bold link</b></a>",
         );
     }
 
     #[test]
     fn empty_input_returns_empty() {
-        assert_eq!(preprocess_markdown(""), "");
+        assert_eq!(pp(""), "");
     }
 
     #[test]
     fn plain_text_passes_through_unchanged() {
         assert_eq!(
-            preprocess_markdown("just some plain prose"),
+            pp("just some plain prose"),
             "just some plain prose",
         );
     }
@@ -705,53 +725,53 @@ mod tests {
     #[test]
     fn empty_link_description_still_converts() {
         assert_eq!(
-            preprocess_markdown("[](https://example.com)"),
+            pp("[](https://example.com)"),
             "<a href=\"https://example.com\"></a>",
         );
     }
 
     #[test]
     fn empty_link_url_still_converts() {
-        assert_eq!(preprocess_markdown("[desc]()"), "<a href=\"\">desc</a>");
+        assert_eq!(pp("[desc]()"), "<a href=\"\">desc</a>");
     }
 
     #[test]
     fn adjacent_bold_runs() {
-        assert_eq!(preprocess_markdown("**a****b**"), "<b>a</b><b>b</b>",);
+        assert_eq!(pp("**a****b**"), "<b>a</b><b>b</b>",);
     }
 
     #[test]
     fn adjacent_italics_runs() {
         // `__` is opaque (doubled markers are not italics openers/closers),
         // so the outer single underscores wrap the entire `a__b` slice.
-        assert_eq!(preprocess_markdown("_a__b_"), "<i>a__b</i>");
+        assert_eq!(pp("_a__b_"), "<i>a__b</i>");
     }
 
     #[test]
     fn separate_italics_runs_with_text_between() {
-        assert_eq!(preprocess_markdown("_a_ and _b_"), "<i>a</i> and <i>b</i>",);
+        assert_eq!(pp("_a_ and _b_"), "<i>a</i> and <i>b</i>",);
     }
 
     #[test]
     fn unclosed_bold_left_alone() {
-        assert_eq!(preprocess_markdown("**unfinished"), "**unfinished");
+        assert_eq!(pp("**unfinished"), "**unfinished");
     }
 
     #[test]
     fn unclosed_italics_left_alone() {
-        assert_eq!(preprocess_markdown("_unfinished"), "_unfinished");
+        assert_eq!(pp("_unfinished"), "_unfinished");
     }
 
     #[test]
     fn empty_bold_run_left_alone() {
         // `****` is not a valid empty bold (would yield `<b></b>` which
         // is meaningless). The scanner refuses zero-width runs.
-        assert_eq!(preprocess_markdown("****"), "****");
+        assert_eq!(pp("****"), "****");
     }
 
     #[test]
     fn empty_italics_run_left_alone() {
-        assert_eq!(preprocess_markdown("__"), "__");
+        assert_eq!(pp("__"), "__");
     }
 
     #[test]
@@ -759,8 +779,8 @@ mod tests {
         // Phase 1 of prose-plus added `\*` `\_` `\[` `\]` `\(` `\)` to
         // the escape set; legacy escapes (`\<`, `\>`, `\{`, `\\`) must
         // still pass through pre-processing untouched.
-        assert_eq!(preprocess_markdown(r"\<env\>"), r"\<env\>");
-        assert_eq!(preprocess_markdown(r"\\path"), r"\\path");
+        assert_eq!(pp(r"\<env\>"), r"\<env\>");
+        assert_eq!(pp(r"\\path"), r"\\path");
     }
 
     // -- Flanking rules --------------------------------------------------------
@@ -776,12 +796,12 @@ mod tests {
         // pass through pre-processing unchanged. Every `_` here has a
         // word character on both sides and therefore cannot open or close.
         assert_eq!(
-            preprocess_markdown("OPENCODE_CONFIG_CONTENT"),
+            pp("OPENCODE_CONFIG_CONTENT"),
             "OPENCODE_CONFIG_CONTENT",
         );
-        assert_eq!(preprocess_markdown("foo_bar"), "foo_bar");
+        assert_eq!(pp("foo_bar"), "foo_bar");
         assert_eq!(
-            preprocess_markdown("CLAUDINE_SESSION_ID"),
+            pp("CLAUDINE_SESSION_ID"),
             "CLAUDINE_SESSION_ID",
         );
     }
@@ -791,14 +811,14 @@ mod tests {
         // `_foo_bar_`: outer `_`s are at word boundaries (start/end), the
         // middle `_` is intra-word. Result: a single italic span over the
         // full `foo_bar` slice.
-        assert_eq!(preprocess_markdown("_foo_bar_"), "<i>foo_bar</i>");
+        assert_eq!(pp("_foo_bar_"), "<i>foo_bar</i>");
     }
 
     #[test]
     fn bold_intra_word_double_asterisks_are_literal() {
         // Same rule for `**` doubled markers: word-on-both-sides means
         // literal text.
-        assert_eq!(preprocess_markdown("foo**bar**baz"), "foo**bar**baz");
+        assert_eq!(pp("foo**bar**baz"), "foo**bar**baz");
     }
 
     #[test]
@@ -807,7 +827,7 @@ mod tests {
         // pairs are intra-word and therefore literal. The outer pair
         // wraps the whole inner slice as bold.
         assert_eq!(
-            preprocess_markdown("**foo**bar**baz**"),
+            pp("**foo**bar**baz**"),
             "<b>foo**bar**baz</b>",
         );
     }
@@ -816,8 +836,8 @@ mod tests {
     fn italics_punctuation_neighbour_is_a_boundary() {
         // Non-alphanumeric neighbours (parens, brackets, period, slash,
         // colon) form boundaries — emphasis still triggers around them.
-        assert_eq!(preprocess_markdown("(_text_)"), "(<i>text</i>)");
-        assert_eq!(preprocess_markdown("hit _Esc_."), "hit <i>Esc</i>.");
+        assert_eq!(pp("(_text_)"), "(<i>text</i>)");
+        assert_eq!(pp("hit _Esc_."), "hit <i>Esc</i>.");
     }
 
     #[test]
@@ -826,7 +846,7 @@ mod tests {
         // tag declarations themselves are copied verbatim. The outer
         // `_` flanks against space and `<`, both non-word.
         assert_eq!(
-            preprocess_markdown("<dim>one _two_</dim>"),
+            pp("<dim>one _two_</dim>"),
             "<dim>one <i>two</i></dim>",
         );
     }
@@ -836,7 +856,7 @@ mod tests {
         // Opener `_` at start has a word boundary; the inner `_` between
         // letters is intra-word and must not close. With no further `_`
         // available, the opener is left as a literal.
-        assert_eq!(preprocess_markdown("_foo_bar"), "_foo_bar");
+        assert_eq!(pp("_foo_bar"), "_foo_bar");
     }
 
     #[test]
@@ -845,7 +865,7 @@ mod tests {
         // wraps a dynamic value containing intra-word underscores. The
         // value must render unmodified.
         assert_eq!(
-            preprocess_markdown("<dim>=OPENCODE_CONFIG_CONTENT</dim>"),
+            pp("<dim>=OPENCODE_CONFIG_CONTENT</dim>"),
             "<dim>=OPENCODE_CONFIG_CONTENT</dim>",
         );
     }
@@ -854,30 +874,46 @@ mod tests {
 
     #[test]
     fn fenced_code_block_basic() {
-        let input = "```yaml\nkey: value\n```";
-        let out = preprocess_markdown(input);
-        assert!(out.contains("<code-block lang=\"yaml\">"));
-        assert!(out.contains("key: value"));
-        assert!(out.contains("</code-block>"));
+        // The fence is lifted out as an opaque code block; the converted
+        // text keeps only the sentinel placeholder, never a `<code-block>`
+        // tag re-injected into the string grammar.
+        let pre = preprocess_markdown("```yaml\nkey: value\n```");
+        assert_eq!(pre.code_blocks.len(), 1);
+        assert_eq!(pre.code_blocks[0].lang, "yaml");
+        assert_eq!(pre.code_blocks[0].body, "key: value");
+        assert!(pre.text.contains(CODE_BLOCK_PLACEHOLDER_MARK));
+        assert!(!pre.text.contains("<code-block"));
     }
 
     #[test]
     fn fenced_code_block_no_lang() {
-        let input = "```\nplain text\n```";
-        let out = preprocess_markdown(input);
-        assert!(out.contains("<code-block lang=\"\">"));
-        assert!(out.contains("plain text"));
+        let pre = preprocess_markdown("```\nplain text\n```");
+        assert_eq!(pre.code_blocks.len(), 1);
+        assert_eq!(pre.code_blocks[0].lang, "");
+        assert_eq!(pre.code_blocks[0].body, "plain text");
     }
 
     #[test]
     fn fenced_code_block_preserves_inner_markdown() {
         // Asterisks and underscores inside code blocks must NOT be
-        // interpreted as emphasis.
-        let input = "```\n**not bold**\n_not italic_\n```";
-        let out = preprocess_markdown(input);
-        assert!(!out.contains("<b>"));
-        assert!(!out.contains("<i>"));
-        assert!(out.contains("**not bold**"));
-        assert!(out.contains("_not italic_"));
+        // interpreted as emphasis — the body is lifted out verbatim and
+        // never touched by the bold/italics phases.
+        let pre = preprocess_markdown("```\n**not bold**\n_not italic_\n```");
+        assert!(!pre.text.contains("<b>"));
+        assert!(!pre.text.contains("<i>"));
+        assert_eq!(pre.code_blocks.len(), 1);
+        assert_eq!(pre.code_blocks[0].body, "**not bold**\n_not italic_");
+    }
+
+    #[test]
+    fn fenced_code_block_with_closing_tag_in_body_is_opaque() {
+        // Regression: a code body containing the parser's own synthetic
+        // closing tag must stay verbatim in `code_blocks` and never leak
+        // into the converted text as markup.
+        let pre = preprocess_markdown("```\n</code-block><red>x</red>\n```");
+        assert_eq!(pre.code_blocks.len(), 1);
+        assert_eq!(pre.code_blocks[0].body, "</code-block><red>x</red>");
+        assert!(!pre.text.contains("<red>"));
+        assert!(!pre.text.contains("</code-block>"));
     }
 }

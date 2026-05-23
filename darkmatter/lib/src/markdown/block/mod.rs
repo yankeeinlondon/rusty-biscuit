@@ -7,4 +7,4 @@ mod hr_builder;
 mod rule_processor;
 
 pub(crate) use hr_builder::{build_rule_with_defaults, hr_defaults_from_frontmatter};
-pub use rule_processor::RuleProcessor;
+pub use rule_processor::{RuleProcessor, try_parse_hr_attrs};

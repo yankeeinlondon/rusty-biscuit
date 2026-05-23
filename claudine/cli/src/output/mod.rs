@@ -10,7 +10,7 @@ pub(crate) use switches::{style_cli_switches, truncate_args};
 
 use biscuit_terminal::components::list::UnorderedList;
 use biscuit_terminal::components::prose::Prose;
-use biscuit_terminal::components::renderable::{TerminalRenderable, RenderableTerminalContent};
+use biscuit_terminal::components::renderable::{RenderableTerminalContent, TerminalRenderable};
 use biscuit_terminal::components::status::{Status, StatusState, StatusTheme};
 use biscuit_terminal::discovery::eval::strip_ansi_codes;
 use biscuit_terminal::terminal::Terminal;
@@ -159,16 +159,9 @@ pub(crate) fn log_compose_prompt(
     quiet: bool,
     term: &Terminal,
 ) {
-    use claudine::prompt_reporting::{
-        resolve_user_prompt_report_config, report_user_prompt,
-    };
+    use claudine::prompt_reporting::{report_user_prompt, resolve_user_prompt_report_config};
 
-    let config = resolve_user_prompt_report_config(
-        silent,
-        quiet,
-        verbose,
-        prompt.lines().count(),
-    );
+    let config = resolve_user_prompt_report_config(silent, quiet, verbose, prompt.lines().count());
 
     if let Some(output) = report_user_prompt(prompt, config, term) {
         log::message(&output);
@@ -195,9 +188,9 @@ pub(crate) fn log_system_prompt_with_scope(
     term: &Terminal,
 ) {
     use claudine::prompt_reporting::{
-        parse_frontmatter_verbosity, report_system_prompt_empty,
+        PromptVerbosity, parse_frontmatter_verbosity, report_system_prompt_empty,
         report_system_prompt_with_base, resolve_system_prompt_report_config_with_change,
-        state::check_and_record, PromptVerbosity,
+        state::check_and_record,
     };
 
     if silent {

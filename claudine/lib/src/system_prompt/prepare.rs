@@ -224,9 +224,7 @@ pub fn resolve_and_prepare_for_session(
     // it once.
     let primary = crate::system_prompt::resolve::resolve_system_prompt_source(args, context)?;
     let appendix_candidates = if non_interactive {
-        Some(crate::system_prompt::resolve::resolve_non_interactive_candidates(
-            context,
-        )?)
+        Some(crate::system_prompt::resolve::resolve_non_interactive_candidates(context)?)
     } else {
         None
     };
@@ -241,7 +239,9 @@ pub fn resolve_and_prepare_for_session(
     );
 
     let effective = match primary {
-        Some((source, raw_text)) => prepare_system_prompt_with_ctx(source, &raw_text, Some(&shared_ctx))?,
+        Some((source, raw_text)) => {
+            prepare_system_prompt_with_ctx(source, &raw_text, Some(&shared_ctx))?
+        }
         None => EffectiveSystemPrompt::None,
     };
 

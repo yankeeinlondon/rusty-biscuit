@@ -1,6 +1,10 @@
 //! [`TerminalRenderable`] implementation for [`Prose`].
 
-use crate::{components::renderable::TerminalRenderable, terminal::Terminal, utils::layout::{Layout, LayoutTerminalExt}};
+use crate::{
+    components::renderable::TerminalRenderable,
+    terminal::Terminal,
+    utils::layout::{Layout, LayoutTerminalExt},
+};
 
 use super::prose::Prose;
 

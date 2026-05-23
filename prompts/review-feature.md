@@ -12,7 +12,7 @@ parameters:
         desc: "the iteration count of the review"
 dir: "$(dirname '{{spec || design}}')"
 iteration: 1
-area: "{{ctx.current_package_area}}"
+area: "{{ctx.current_package_area =='root' ? ctx.current_package : ctx.current_package_area}}"
 start:
     message: "👓 starting the feature review of `{{dir}}` -- _in the **{{ctx.current_package_area}}** package area_ -- at {{ctx.now}}"
 success:

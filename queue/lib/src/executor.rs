@@ -771,9 +771,9 @@ mod tests {
                     status: TaskStatus::Completed,
                     ..
                 } = event
-                {
-                    completed_count += 1;
-                }
+            {
+                completed_count += 1;
+            }
         }
 
         assert_eq!(completed_count, 2, "Both tasks should complete");

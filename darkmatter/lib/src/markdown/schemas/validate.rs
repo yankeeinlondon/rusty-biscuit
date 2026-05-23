@@ -146,7 +146,11 @@ impl ValidatorCache {
 
     /// Returns the current number of cached validators. Mainly a testing aid.
     pub fn len(&self) -> usize {
-        self.inner.lock().expect("validator cache lock poisoned").entries.len()
+        self.inner
+            .lock()
+            .expect("validator cache lock poisoned")
+            .entries
+            .len()
     }
 
     /// Reports whether the cache is empty.
@@ -163,14 +167,18 @@ fn build_validator(schema: &Value) -> Result<Validator, SchemaError> {
         .with_pattern_options(PatternOptions::regex());
     let opts = format::register_darkmatter_formats(opts)
         .should_validate_formats(true)
-        .with_keyword(format::DARKMATTER_MATCH_KEYWORD, format::match_keyword_factory)
+        .with_keyword(
+            format::DARKMATTER_MATCH_KEYWORD,
+            format::match_keyword_factory,
+        )
         .with_keyword(
             format::DARKMATTER_URL_SCHEME_KEYWORD,
             format::url_scheme_keyword_factory,
         );
-    opts.build(schema).map_err(|err| SchemaError::BuildValidator {
-        message: err.to_string(),
-    })
+    opts.build(schema)
+        .map_err(|err| SchemaError::BuildValidator {
+            message: err.to_string(),
+        })
 }
 
 /// Maps `jsonschema::ValidationError` into the public `ValidationProblem`
@@ -233,9 +241,7 @@ fn build_problem(
     let path = err.instance_path().as_str().to_string();
     let key = identify_key(&path, err.kind());
     let property = match err.kind() {
-        ValidationErrorKind::Required { property } => {
-            property.as_str().map(str::to_string)
-        }
+        ValidationErrorKind::Required { property } => property.as_str().map(str::to_string),
         _ => None,
     };
     let (line, column) = key
@@ -546,8 +552,7 @@ mod tests {
         let v0 = Arc::new(build_validator(&arm0).unwrap());
         let v1 = Arc::new(build_validator(&arm1).unwrap());
         let instance = json!({"c": "x"});
-        let problems =
-            collect_root_union_problems(&[v0, v1], &instance, &PositionMap::new());
+        let problems = collect_root_union_problems(&[v0, v1], &instance, &PositionMap::new());
         assert!(problems.is_empty(), "expected match: {problems:?}");
     }
 
@@ -566,8 +571,7 @@ mod tests {
         let v0 = Arc::new(build_validator(&arm0).unwrap());
         let v1 = Arc::new(build_validator(&arm1).unwrap());
         let instance = json!({});
-        let problems =
-            collect_root_union_problems(&[v0, v1], &instance, &PositionMap::new());
+        let problems = collect_root_union_problems(&[v0, v1], &instance, &PositionMap::new());
         assert!(!problems.is_empty());
         assert!(problems.iter().all(|p| p.arm_index == Some(0)));
     }

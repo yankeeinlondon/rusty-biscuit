@@ -124,7 +124,7 @@ Conflicting combinations (e.g. `--json --no-output`) should produce a clear erro
 | Property | `proptest` | Fuzz custom parsers for edge cases |
 | Runner | `cargo-nextest` | Fast execution with retries for flaky TTY/timeout tests |
 
-**Test rigor matters as much as test count.** A user-observable requirement of the form "when the user holds modifier X, behaviour Y happens" cannot be covered by Level 1 tests alone — the terminal's encoder is never exercised. See [`cli-best-practices.md` §Test Rigor](cli-best-practices.md) for the Level 1 / 2 / 3 vocabulary, the canonical harness pattern (`cli/tests/common/real_terminal/` in `biscuit-tui` is the reference implementation), and the rule for when to require which level.
+**Test rigor matters as much as test count.** A user-observable requirement of the form "when the user holds modifier X, behaviour Y happens" cannot be covered by Level 1 tests alone — the terminal's encoder is never exercised. See [`cli-best-practices.md` §Test Rigor](cli-best-practices.md) for the Level 1 / 2 / 3 vocabulary and the rule for when to require which level. In the rusty-biscuit monorepo, the Level 2/3 harness implementations live in the shared `biscuit-test-harness` crate — its `biscuit-test-harness/README.md` documents the harness variants, when to use each, and the environment each requires.
 
 ## Detailed References
 

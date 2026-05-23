@@ -162,6 +162,14 @@ impl Run for Command {
             Command::PadRight(args) => args.run(ctx),
             Command::Columns(args) => args.run(ctx),
             Command::Dir(args) => args.run(ctx),
+            Command::Block(args) => args.run(ctx),
+            Command::Progress(args) => args.run(ctx),
+            Command::Table(args) => args.run(ctx),
+            Command::Compose(args) => args.run(ctx),
+            Command::Section(args) => args.run(ctx),
+            Command::StatusBlock(args) => args.run(ctx),
+            Command::TextBlock(args) => args.run(ctx),
+            Command::Todo(args) => args.run(ctx),
         }
     }
 }

@@ -269,7 +269,7 @@ impl From<&Terminal> for Terminal {
             underline_support: value.underline_support,
             osc_link_support: value.osc_link_support,
             is_tty: value.is_tty,
-            color_depth: value.color_depth.clone(),
+            color_depth: value.color_depth,
             color_mode: value.color_mode.clone(),
             os: value.os,
             distro: value.distro.clone(),
@@ -518,7 +518,7 @@ impl Terminal {
     /// use biscuit_terminal::terminal::Terminal;
     ///
     /// Terminal::render("Hello, world!");
-    /// Terminal::render("Formatted {{bold}}text{{reset}}");
+    /// Terminal::render("Formatted <bold>text</bold>");
     /// ```
     pub fn render<T: Into<String>>(content: T) {
         use crate::utils::layout::{Layout, LayoutTerminalExt};

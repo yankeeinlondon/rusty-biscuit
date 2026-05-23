@@ -556,7 +556,10 @@ async fn webhook_markdown_body_does_not_include_embeds() {
 
     let received = server.received_requests().await.unwrap();
     let body: serde_json::Value = serde_json::from_slice(&received[0].body).unwrap();
-    assert_eq!(body.get("content").and_then(|v| v.as_str()), Some("**bold**"));
+    assert_eq!(
+        body.get("content").and_then(|v| v.as_str()),
+        Some("**bold**")
+    );
     assert!(
         body.get("embeds").is_none(),
         "legacy Markdown body must not produce an embeds field"

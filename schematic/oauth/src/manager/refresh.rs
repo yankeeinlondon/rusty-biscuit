@@ -3,7 +3,7 @@
 use oauth2::RefreshToken;
 
 use crate::error::OAuthError;
-use crate::manager::{OAuth2Manager, build_http_client, extract_tokens};
+use crate::manager::{build_http_client, extract_tokens, OAuth2Manager};
 use crate::types::StoredTokens;
 
 impl OAuth2Manager {
@@ -13,8 +13,7 @@ impl OAuth2Manager {
     ///
     /// - `OAuthError::AuthenticationRequired` if no token is stored.
     /// - `OAuthError::TokenRefresh` if refresh fails.
-    pub async fn get_valid_token(&self,
-    ) -> Result<String, OAuthError> {
+    pub async fn get_valid_token(&self) -> Result<String, OAuthError> {
         let store = self.store.read().await;
         let tokens = store.load()?;
         drop(store);
@@ -27,10 +26,7 @@ impl OAuth2Manager {
     }
 
     /// Refreshes the token using the stored refresh token.
-    pub(super) async fn refresh_token(
-        &self,
-        tokens: &StoredTokens,
-    ) -> Result<String, OAuthError> {
+    pub(super) async fn refresh_token(&self, tokens: &StoredTokens) -> Result<String, OAuthError> {
         let refresh_token = tokens
             .refresh_token
             .as_ref()

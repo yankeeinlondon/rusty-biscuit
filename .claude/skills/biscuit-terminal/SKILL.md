@@ -1,6 +1,6 @@
 ---
 name: biscuit-terminal
-description: Expert knowledge for the biscuit-terminal Rust library - the authority for terminal capability detection (13+ emulators) and rich terminal rendering. Provides inline image rendering (Kitty/iTerm2 protocols), terminal-facing Mermaid and graph adapters backed by biscuit-visualized, OS/font detection, escape code analysis, color system (BasicColor, WebColor, Tailwind), and composable rendering components. The `Prose` component supports three input grammars — atomic tokens (`{{bold}}`), block tags (`<bold>...</bold>`), and a Markdown subset (`**bold**`, `_italics_`, `[desc](url)`) with intra-word flanking rules so identifiers like `OPENCODE_CONFIG_CONTENT` pass through unmangled. Use when building CLI apps with terminal-aware features, rendering images or diagrams inline, detecting color/underline/italics/dim support, or querying terminal environment. Darkmatter depends on this for terminal Mermaid rendering.
+description: Expert knowledge for the biscuit-terminal Rust library - the authority for terminal capability detection (13+ emulators) and rich terminal rendering. Provides inline image rendering (Kitty/iTerm2 protocols), terminal-facing Mermaid and graph adapters backed by biscuit-visualized, OS/font detection, escape code analysis, color system (BasicColor, WebColor, Tailwind), and composable rendering components. The `Prose` component renders Terminal, Browser, Markdown, and MarkdownPlus from a shared `ProseDocument` IR, using bracketed tags (`<bold>...</bold>`) and a Markdown subset (`**bold**`, `_italics_`, `[desc](url)`) with intra-word flanking rules so identifiers like `OPENCODE_CONFIG_CONTENT` pass through unmangled. Use when building CLI apps with terminal-aware features, rendering images or diagrams inline, detecting color/underline/italics/dim support, or querying terminal environment. Darkmatter depends on this for terminal Mermaid rendering.
 ---
 
 # biscuit-terminal
@@ -13,6 +13,7 @@ Terminal detection and rich rendering library for Rust. The authority for termin
 2. **Graceful fallback**: Use `fallback_render()` and explicit app-level text fallback where needed
 3. **Static vs dynamic**: `Terminal` struct fields for static properties, methods for dynamic
 4. **Input validation + policy**: `TerminalImage::new()` validates local paths; apply app-level policies with `TerminalImageOptions`
+5. **IR for cross-target components**: Components that render beyond the terminal should project through `renderable::tree` with a shared `TreeRenderable::render_tree` / `TerminalRenderable::render_tree_node` helper, so nested components remain structural instead of degrading to ANSI-stripped text
 
 ## Quick Start
 
@@ -38,13 +39,14 @@ if term.supports_italic { println!("\x1b[3mItalic\x1b[0m"); }
 |-------|-------------|
 | [Terminal Struct](./terminal-struct.md) | Main struct, static vs dynamic properties, enums |
 | [Components](./components.md) | All renderable components: BlockQuote, Compose, FileSystem, GraphExpression, HorizontalRule, InlineContent, MermaidDiagram, OrderedList, UnorderedList, PadLeft, PadRight, Progress, Prose, Section, Status, StatusBlock, Table, TerminalImage, TextBlock, Todo, TwoColumn |
+| [Render Tree](./render-tree.md) | Terminal renderer for the `renderable` render tree: `render_terminal_node`, `TreeComponent`, `BrowserTreeComponent`, projection layer, `render_tree_node`, native rendering, `CodeRenderer` hook |
 | [Image Rendering](./image-rendering.md) | Kitty/iTerm2 protocols, width parsing, cursor behavior, policy controls |
 | [Mermaid Diagrams](./mermaid-diagrams.md) | Terminal-facing `MermaidDiagram` adapter backed by biscuit-visualized |
 | [Color System](./color-system.md) | BasicColor, RgbColor, WebColor, Tailwind, HdrColor with TermColor trait |
 | [Detection Functions](./discovery.md) | App, color, underline, italics, dim, multiplex detection |
 | [OS & Environment](./os-environment.md) | OS, distro, CI, fonts, locale |
 | [Escape Codes](./escape-codes.md) | Strip, analyze, visual width calculation |
-| [Styling](./styling.md) | Terminal-aware styling, Prose component (atomic tokens, block tags, Markdown subset with flanking rules), TextBlock |
+| [Styling](./styling.md) | Terminal-aware styling, Prose component (bracketed tags, Markdown subset with flanking rules), TextBlock |
 | [bt Command](./cli.md) | CLI tool: 17 commands for inspection, diagrams, text, and filesystem |
 
 ## Common Patterns
@@ -137,7 +139,7 @@ overrides.insert("hr-weight".to_string(), "12".to_string());
 let svg_override = rule.render_to_browser_with_inline_variables(&overrides);
 ```
 
-The `HorizontalRule` component implements both `Renderable` (terminal output) and `BrowserRenderable` (HTML/SVG output).
+The `HorizontalRule` component implements both `TerminalRenderable` (terminal output) and `BrowserRenderable` (HTML/SVG output).
 
 **Supported attributes:**
 
@@ -182,7 +184,7 @@ and override knobs.
 
 \* Requires `terminal.integrated.enableImages` and GPU acceleration enabled in VS Code settings.
 
-## bt CLI Commands (17 commands)
+## bt CLI Commands (20 commands)
 
 ```bash
 # Terminal inspection
@@ -190,11 +192,16 @@ bt                              # Pretty-printed capabilities
 bt --json                       # JSON output for scripting
 
 # Styled text and layout
-bt prose "Hello {{bold}}world{{reset}}!"
+bt prose "Hello <b>world</b>!"
 bt prose "<red>Error</red>: message"
 bt quote --attribution "Shakespeare" "To be or not to be"
 bt list "First item" "Second item" "Third item"
 bt columns --gap 6 --left 40% "Title" "Description"
+
+# Render-tree Style components (fg/bg/emphasis/fill/border, slot colors)
+bt block "Styled block" --fg red --border all --fill subtle --fill-band indented
+bt progress 60 --label Loading --fill-color green --bracket-color cyan
+bt table --columns "Name,Score" --row "Ann,90" --row "Bob,75" --striped
 
 # Filesystem
 bt dir src --depth 2 --filter ".rs"
@@ -215,7 +222,8 @@ bt graph-expression "a -- b -- c"          # Dash syntax (undirected)
 bt graph-expression --syntax dot "digraph { A -> B; }"  # DOT syntax
 ```
 
-Diagram options: `--example`, `--width`, `--inverse`, `--title`, `--json`, `--meta`
+All `bt <subcommand>` commands support `--example` / `-e`, which renders a representative example and prints the command that produced it.
+Diagram options: `--width`, `--inverse`, `--title`, `--json`, `--meta`
 Bar/line chart extras: `--horizontal`, `--show-data-label`, `--aspect-ratio`
 Graph extras: `--syntax` (auto, expression, dot), `--orientation` (left-to-right, top-to-bottom)
 Graph note: mixed `->` and `--` expression syntax is rejected; use separate graphs instead.
@@ -236,8 +244,14 @@ biscuit_terminal/
 │   ├── mode_2027.rs      # Grapheme cluster support
 │   ├── cursor_position.rs # Cursor position queries
 │   └── eval.rs           # Escape analysis
+├── render_tree/          # Terminal renderer for the renderable render tree
+│   ├── render.rs         # render_terminal_node — native heading/list/table rendering
+│   ├── component.rs      # TreeComponent<T> adapter (TreeRenderable → TerminalRenderable)
+│   ├── browser_adapter.rs # BrowserTreeComponent<T> adapter
+│   ├── projection.rs     # RenderableTerminalContent::to_tree_nodes, TreeProjectionContext
+│   └── options.rs        # TerminalRenderOptions, TerminalRenderContext
 ├── components/           # Rendering
-│   ├── renderable.rs     # Renderable trait + RenderableContent
+│   ├── renderable.rs     # TerminalRenderable trait (+ render_tree_node) + RenderableTerminalContent
 │   ├── compose.rs        # Compose (combine multiple renderables)
 │   ├── section.rs        # Section with heading levels (h1-h6)
 │   ├── block_quote.rs    # BlockQuote with attribution
@@ -292,10 +306,14 @@ biscuit-terminal follows the Level 1 / 2 / 3 testing vocabulary from the
   validate escape-sequence output, glyph widths, scroll behaviour, and
   image protocol bytes against the actual terminal's display path.
 - **Level 3** — Not applicable (biscuit-terminal has no interactive input).
+  OS keyboard injection is documented in `biscuit-test-harness/README.md`.
 
 ### biscuit-test-harness (shared crate)
 
-The `biscuit-test-harness` workspace member provides:
+The `biscuit-test-harness` workspace member provides the following. Its
+`biscuit-test-harness/README.md` is the full reference — harness variants,
+when to use each, the `SpawnVisibility` background/foreground choice, and
+the environment each harness requires.
 
 - `TerminalHarness` trait — `spawn`, `send_text`, `capture`, `settle`.
 - `WezTermHarness`, `KittyHarness`, `TmuxHarness`, `AppleTerminalHarness`

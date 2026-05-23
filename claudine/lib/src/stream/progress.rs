@@ -748,7 +748,10 @@ mod tests {
                 now,
             );
             assert_eq!(state.provider_status.as_deref(), Some("tool-calls"));
-            assert!(!state.step_in_flight, "step_finish must set step_in_flight = false");
+            assert!(
+                !state.step_in_flight,
+                "step_finish must set step_in_flight = false"
+            );
         }
 
         #[test]
@@ -763,7 +766,10 @@ mod tests {
                 now,
             );
             assert_eq!(state.provider_status, None);
-            assert!(state.step_in_flight, "step_start must set step_in_flight = true");
+            assert!(
+                state.step_in_flight,
+                "step_start must set step_in_flight = true"
+            );
         }
 
         #[test]
@@ -778,7 +784,10 @@ mod tests {
                 now,
             );
             assert_eq!(state.provider_status.as_deref(), Some("finish"));
-            assert!(!state.step_in_flight, "step_finish must clear step_in_flight even without reason");
+            assert!(
+                !state.step_in_flight,
+                "step_finish must clear step_in_flight even without reason"
+            );
         }
     }
 }

@@ -14,6 +14,3 @@ pub enum PageFeature {
     MermaidDiagram,
     DarkMode,
 }
-
-/// Alias for backward compatibility.
-pub type CodeFeature = PageFeature;

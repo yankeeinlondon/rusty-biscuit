@@ -8,8 +8,8 @@ use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::terminal::Terminal;
 
 use super::{
-    create_user_prompt_blockquote, strip_leading_whitespace, truncate_front_back,
-    PromptReportFormat, TruncationMode, UserPromptReportConfig,
+    PromptReportFormat, TruncationMode, UserPromptReportConfig, create_user_prompt_blockquote,
+    strip_leading_whitespace, truncate_front_back,
 };
 
 /// Render the user-prompt header line.
@@ -237,12 +237,18 @@ mod tests {
         let plain = strip_ansi_codes(&body);
         assert!(plain.contains("Hello"));
         assert!(plain.contains("World"));
-        assert!(!plain.contains("  Hello"), "leading whitespace should be stripped");
+        assert!(
+            !plain.contains("  Hello"),
+            "leading whitespace should be stripped"
+        );
     }
 
     #[test]
     fn partial_format_truncates_long_text() {
-        let text: String = (1..=50).map(|i| format!("Line {i}")).collect::<Vec<_>>().join("\n");
+        let text: String = (1..=50)
+            .map(|i| format!("Line {i}"))
+            .collect::<Vec<_>>()
+            .join("\n");
         let term = test_terminal();
         let body = render_user_prompt_body(
             &text,
@@ -256,7 +262,10 @@ mod tests {
         // check for " 50" (with leading space or newline) instead.
         assert!(plain.contains(" 50"), "should contain the last line number");
         // Verify truncation happened by checking that not all lines are present
-        assert!(!plain.contains("Line 25"), "middle lines should be truncated");
+        assert!(
+            !plain.contains("Line 25"),
+            "middle lines should be truncated"
+        );
     }
 
     #[test]
@@ -280,7 +289,10 @@ mod tests {
     #[test]
     fn partial_format_uses_20_10_for_long_text() {
         // Create text with more than 30 lines to trigger truncation with 20/10
-        let text: String = (1..=50).map(|i| format!("Line {i}")).collect::<Vec<_>>().join("\n");
+        let text: String = (1..=50)
+            .map(|i| format!("Line {i}"))
+            .collect::<Vec<_>>()
+            .join("\n");
         let term = test_terminal();
         let body = render_user_prompt_body(
             &text,
@@ -299,15 +311,18 @@ mod tests {
             .collect::<Vec<_>>()
             .join("\n");
         assert!(body_content.contains("Line 1"));
-        let contains_line_20 = body_content.contains("Line 20")
-            || body_content.lines().any(|l| l.starts_with("20"));
+        let contains_line_20 =
+            body_content.contains("Line 20") || body_content.lines().any(|l| l.starts_with("20"));
         assert!(contains_line_20, "should contain Line 20: {plain:?}");
-        let contains_line_50 = body_content.contains("Line 50")
-            || body_content.lines().any(|l| l.starts_with("50"));
+        let contains_line_50 =
+            body_content.contains("Line 50") || body_content.lines().any(|l| l.starts_with("50"));
         assert!(contains_line_50, "should contain Line 50: {plain:?}");
-        let contains_line_30 = body_content.contains("Line 30")
-            || body_content.lines().any(|l| l.starts_with("30"));
-        assert!(!contains_line_30, "middle lines should be truncated: {plain:?}");
+        let contains_line_30 =
+            body_content.contains("Line 30") || body_content.lines().any(|l| l.starts_with("30"));
+        assert!(
+            !contains_line_30,
+            "middle lines should be truncated: {plain:?}"
+        );
     }
 
     // --- Top-level reporter tests ---
@@ -362,7 +377,10 @@ mod tests {
 
     #[test]
     fn partial_format_renders_truncated_body() {
-        let text: String = (1..=50).map(|i| format!("Line {i}")).collect::<Vec<_>>().join("\n");
+        let text: String = (1..=50)
+            .map(|i| format!("Line {i}"))
+            .collect::<Vec<_>>()
+            .join("\n");
         let term = test_terminal();
         let config = UserPromptReportConfig {
             show_header: true,
@@ -379,7 +397,10 @@ mod tests {
         // Because of line wrapping, "Line 50" may be split across lines
         assert!(plain.contains(" 50"), "should contain the last line number");
         // Verify truncation happened by checking middle lines are omitted
-        assert!(!plain.contains("Line 25"), "middle lines should be truncated");
+        assert!(
+            !plain.contains("Line 25"),
+            "middle lines should be truncated"
+        );
     }
 
     #[test]
@@ -465,6 +486,9 @@ mod tests {
         assert!(plain.contains("Line 1"));
         assert!(plain.contains("Line 2"));
         assert!(plain.contains("Line 3"));
-        assert!(!plain.contains("    Line"), "leading whitespace should be stripped");
+        assert!(
+            !plain.contains("    Line"),
+            "leading whitespace should be stripped"
+        );
     }
 }

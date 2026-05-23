@@ -67,7 +67,10 @@ fn bench_system_prompt_resolution_cold_and_warm() {
 
     match cold {
         EffectiveSystemPrompt::Ready(p) => {
-            eprintln!("composed length (cold): {} chars", p.composed_markdown.len())
+            eprintln!(
+                "composed length (cold): {} chars",
+                p.composed_markdown.len()
+            )
         }
         other => panic!("expected Ready, got {:?}", other),
     }
@@ -120,7 +123,11 @@ fn bench_resolve_and_prepare_step_by_step() {
         let t2 = Instant::now();
         let candidates = resolve::resolve_non_interactive_candidates(&ctx).unwrap();
         let t_candidates = t2.elapsed();
-        eprintln!("run #{run} resolve_non_interactive_candidates: {:?} ({} candidates)", t_candidates, candidates.len());
+        eprintln!(
+            "run #{run} resolve_non_interactive_candidates: {:?} ({} candidates)",
+            t_candidates,
+            candidates.len()
+        );
 
         // Compose first candidate (mirrors prepare_non_interactive_appendix
         // returning early on first non-empty).
@@ -146,7 +153,10 @@ fn bench_resolve_and_prepare_step_by_step() {
     for run in 1..=3 {
         let t = Instant::now();
         let _ = resolve_and_prepare_for_session(&args, &ctx, true).unwrap();
-        eprintln!("run #{run} resolve_and_prepare_for_session: {:?}", t.elapsed());
+        eprintln!(
+            "run #{run} resolve_and_prepare_for_session: {:?}",
+            t.elapsed()
+        );
     }
 }
 
@@ -207,6 +217,9 @@ fn bench_raw_darkmatter_compose_passes() {
         let opts = ComposeOptions::new();
         let t = Instant::now();
         let (_composed, _report) = md.compose_with(opts).unwrap();
-        eprintln!("system-prompt.md compose-without-source run #{run}: {:?}", t.elapsed());
+        eprintln!(
+            "system-prompt.md compose-without-source run #{run}: {:?}",
+            t.elapsed()
+        );
     }
 }

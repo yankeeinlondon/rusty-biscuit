@@ -46,10 +46,7 @@ pub fn detect_schema(sources: &[&Markdown], opts: DetectOptions) -> SimplifiedSc
         return SimplifiedSchema::Single(SchemaShape::default());
     }
 
-    let shapes: Vec<SchemaShape> = sources
-        .iter()
-        .map(|md| detect_from_document(md))
-        .collect();
+    let shapes: Vec<SchemaShape> = sources.iter().map(|md| detect_from_document(md)).collect();
 
     if shapes.len() == 1 {
         return SimplifiedSchema::Single(shapes.into_iter().next().unwrap());
@@ -389,12 +386,14 @@ fn unify_types(a: SimplifiedType, b: SimplifiedType) -> Option<SimplifiedType> {
 fn strip_required(def: PropertyDef) -> PropertyDef {
     match def {
         PropertyDef::Single(mut atom) => {
-            atom.constraints.retain(|c| !matches!(c, Constraint::Required));
+            atom.constraints
+                .retain(|c| !matches!(c, Constraint::Required));
             PropertyDef::Single(atom)
         }
         PropertyDef::Union(mut arms) => {
             for atom in &mut arms {
-                atom.constraints.retain(|c| !matches!(c, Constraint::Required));
+                atom.constraints
+                    .retain(|c| !matches!(c, Constraint::Required));
             }
             PropertyDef::Union(arms)
         }
@@ -483,9 +482,9 @@ fn write_shape_list_item(out: &mut String, shape: &SchemaShape, indent_levels: u
 
 fn property_def_to_yaml_scalar(def: &PropertyDef) -> String {
     match def {
-        PropertyDef::Single(atom) => quote_if_needed(&super::simplified::serialize_property_atom(
-            atom,
-        )),
+        PropertyDef::Single(atom) => {
+            quote_if_needed(&super::simplified::serialize_property_atom(atom))
+        }
         PropertyDef::Union(arms) => {
             // Inline flow sequence keeps the YAML compact and easy to read.
             let pieces: Vec<String> = arms
@@ -538,9 +537,7 @@ mod tests {
 
     #[test]
     fn detects_simple_scalars() {
-        let md = md_with_frontmatter(
-            "title: Hello\nactive: true\ncount: 42\nrating: 3.14\n",
-        );
+        let md = md_with_frontmatter("title: Hello\nactive: true\ncount: 42\nrating: 3.14\n");
         let schema = detect_schema(&[&md], DetectOptions::default());
         let SimplifiedSchema::Single(shape) = schema else {
             panic!("expected Single");
@@ -597,9 +594,7 @@ mod tests {
 
     #[test]
     fn detects_url_and_email() {
-        let md = md_with_frontmatter(
-            "homepage: https://example.com\nauthor: alice@example.com\n",
-        );
+        let md = md_with_frontmatter("homepage: https://example.com\nauthor: alice@example.com\n");
         let schema = detect_schema(&[&md], DetectOptions::default());
         let SimplifiedSchema::Single(shape) = schema else {
             panic!();

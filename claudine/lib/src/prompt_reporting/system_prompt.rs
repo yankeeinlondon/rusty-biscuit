@@ -9,15 +9,12 @@ use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::terminal::Terminal;
 
-use crate::system_prompt::{
-    EffectiveSystemPrompt, SystemPromptMode, SystemPromptSource,
-};
+use crate::system_prompt::{EffectiveSystemPrompt, SystemPromptMode, SystemPromptSource};
 
 use super::formatting::prompt_body_width;
 use super::{
-    estimate_system_prompt_tokens, render_markdown_for_terminal,
-    system_prompt_blockquote_styled, truncate_front_back, PromptReportFormat,
-    SystemPromptReportConfig, TruncationMode,
+    PromptReportFormat, SystemPromptReportConfig, TruncationMode, estimate_system_prompt_tokens,
+    render_markdown_for_terminal, system_prompt_blockquote_styled, truncate_front_back,
 };
 
 /// Nerd Font codepoint used as the in-repo hyperlink label when the terminal
@@ -144,16 +141,13 @@ pub fn render_system_prompt_summary(
         SystemPromptSource::StandardDiscovered { path, .. }
         | SystemPromptSource::ExplicitFile { path, .. }
         | SystemPromptSource::NonInteractiveFile { path, .. } => {
-            let absolute: PathBuf =
-                path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+            let absolute: PathBuf = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
             let label = resolve_display_label(&absolute, base_path, term);
             let href = format!("file://{}", absolute.display());
             // Prose handles the OSC8 emission + plain-text fallback for us;
             // `<blue-400>` styles the visible label so a reader sees it as a
             // link even when OSC8 is unsupported.
-            format!(
-                "the content was _composed_ from <blue-400>[{label}]({href})</blue-400>"
-            )
+            format!("the content was _composed_ from <blue-400>[{label}]({href})</blue-400>")
         }
         SystemPromptSource::BuiltInNonInteractive => {
             "the content was _composed_ from the <dim>built-in</dim> non-interactive prompt"
@@ -312,7 +306,10 @@ pub fn report_system_prompt_with_base(
     if config.show_summary {
         let tokens = estimate_system_prompt_tokens(
             &prepared.composed_markdown,
-            prepared.non_interactive_appendix.as_ref().map(|a| a.composed_markdown.as_str()),
+            prepared
+                .non_interactive_appendix
+                .as_ref()
+                .map(|a| a.composed_markdown.as_str()),
         );
         body_parts.push(render_system_prompt_summary(
             &prepared.source,
@@ -386,8 +383,8 @@ pub fn report_system_prompt_empty(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use biscuit_terminal::terminal::Terminal;
     use crate::system_prompt::PreparedSystemPrompt;
+    use biscuit_terminal::terminal::Terminal;
     use std::path::PathBuf;
 
     fn test_terminal() -> Terminal {
@@ -477,13 +474,8 @@ mod tests {
             path: PathBuf::from("/tmp/prompt.md"),
             scope: crate::system_prompt::StandardPromptScope::Repo,
         };
-        let summary = render_system_prompt_summary(
-            &source,
-            SystemPromptMode::Append,
-            50,
-            None,
-            &term,
-        );
+        let summary =
+            render_system_prompt_summary(&source, SystemPromptMode::Append, 50, None, &term);
         assert!(summary.contains("prompt.md"));
     }
 
@@ -533,13 +525,8 @@ mod tests {
             scope: crate::system_prompt::StandardPromptScope::Repo,
         };
         let base = sp.parent().unwrap().canonicalize().unwrap();
-        let summary = render_system_prompt_summary(
-            &source,
-            SystemPromptMode::Append,
-            10,
-            Some(&base),
-            &term,
-        );
+        let summary =
+            render_system_prompt_summary(&source, SystemPromptMode::Append, 10, Some(&base), &term);
         let plain = strip_ansi_codes(&summary);
         assert!(
             plain.contains("./system-prompt.md"),
@@ -632,13 +619,8 @@ mod tests {
             path: sp.clone(),
             scope: crate::system_prompt::StandardPromptScope::Repo,
         };
-        let summary = render_system_prompt_summary(
-            &source,
-            SystemPromptMode::Append,
-            10,
-            Some(&base),
-            &term,
-        );
+        let summary =
+            render_system_prompt_summary(&source, SystemPromptMode::Append, 10, Some(&base), &term);
         // Tailwind Blue 400 in 24-bit color emits ESC[38;2;81;162;255m.
         assert!(
             summary.contains("38;2;81;162;255"),
@@ -657,13 +639,8 @@ mod tests {
             path: sp.clone(),
             scope: crate::system_prompt::StandardPromptScope::Repo,
         };
-        let summary = render_system_prompt_summary(
-            &source,
-            SystemPromptMode::Append,
-            10,
-            Some(&base),
-            &term,
-        );
+        let summary =
+            render_system_prompt_summary(&source, SystemPromptMode::Append, 10, Some(&base), &term);
         // OSC8 opener: ESC ]8;;
         assert!(summary.contains("\x1b]8;;file://"));
         // The absolute path must appear inside the OSC8 href.
@@ -700,7 +677,10 @@ mod tests {
 
     #[test]
     fn partial_format_truncates_long_text() {
-        let text: String = (1..=50).map(|i| format!("Line {i}")).collect::<Vec<_>>().join("\n");
+        let text: String = (1..=50)
+            .map(|i| format!("Line {i}"))
+            .collect::<Vec<_>>()
+            .join("\n");
         let term = test_terminal();
         let body = render_system_prompt_body(
             &text,
@@ -716,12 +696,18 @@ mod tests {
         let contains_last_line_number = plain
             .lines()
             .any(|l| l.trim_start().starts_with("50") || l.contains(" 50"));
-        assert!(contains_last_line_number, "should contain the last line number: {plain:?}");
+        assert!(
+            contains_last_line_number,
+            "should contain the last line number: {plain:?}"
+        );
         // Verify truncation happened by checking that not all lines are present.
         // "Line 25" may be wrapped as "Line \n25"; check both forms.
-        let contains_line_25 = plain.contains("Line 25")
-            || plain.lines().any(|l| l.trim_start().starts_with("25"));
-        assert!(!contains_line_25, "middle lines should be truncated: {plain:?}");
+        let contains_line_25 =
+            plain.contains("Line 25") || plain.lines().any(|l| l.trim_start().starts_with("25"));
+        assert!(
+            !contains_line_25,
+            "middle lines should be truncated: {plain:?}"
+        );
     }
 
     #[test]
@@ -754,11 +740,7 @@ mod tests {
             format: PromptReportFormat::Summary,
             truncation: TruncationMode::FrontBack,
         };
-        let result = report_system_prompt(
-            &EffectiveSystemPrompt::Ready(prepared),
-            config,
-            &term,
-        );
+        let result = report_system_prompt(&EffectiveSystemPrompt::Ready(prepared), config, &term);
         assert!(result.is_none());
     }
 
@@ -772,11 +754,7 @@ mod tests {
             format: PromptReportFormat::Summary,
             truncation: TruncationMode::FrontBack,
         };
-        let result = report_system_prompt(
-            &EffectiveSystemPrompt::Ready(prepared),
-            config,
-            &term,
-        );
+        let result = report_system_prompt(&EffectiveSystemPrompt::Ready(prepared), config, &term);
         let output = result.expect("should produce output");
         assert!(output.contains("📔"));
         assert!(output.contains("System Prompt"));
@@ -794,11 +772,7 @@ mod tests {
             format: PromptReportFormat::FullPrompt,
             truncation: TruncationMode::FrontBack,
         };
-        let result = report_system_prompt(
-            &EffectiveSystemPrompt::Ready(prepared),
-            config,
-            &term,
-        );
+        let result = report_system_prompt(&EffectiveSystemPrompt::Ready(prepared), config, &term);
         let output = result.expect("should produce output");
         let plain = strip_ansi_codes(&output);
         assert!(plain.contains("📔"));
@@ -808,7 +782,10 @@ mod tests {
 
     #[test]
     fn partial_format_renders_truncated_body() {
-        let text: String = (1..=50).map(|i| format!("Line {i}")).collect::<Vec<_>>().join("\n");
+        let text: String = (1..=50)
+            .map(|i| format!("Line {i}"))
+            .collect::<Vec<_>>()
+            .join("\n");
         let term = test_terminal();
         let prepared = test_prepared(SystemPromptMode::Append, &text);
         let config = SystemPromptReportConfig {
@@ -817,11 +794,7 @@ mod tests {
             format: PromptReportFormat::PartialPrompt,
             truncation: TruncationMode::FrontBack,
         };
-        let result = report_system_prompt(
-            &EffectiveSystemPrompt::Ready(prepared),
-            config,
-            &term,
-        );
+        let result = report_system_prompt(&EffectiveSystemPrompt::Ready(prepared), config, &term);
         let output = result.expect("should produce output");
         let plain = strip_ansi_codes(&output);
         assert!(plain.contains("📔"));
@@ -829,7 +802,10 @@ mod tests {
         // Because of line wrapping, "Line 50" may be split across lines
         assert!(plain.contains(" 50"), "should contain the last line number");
         // Verify truncation happened by checking middle lines are omitted
-        assert!(!plain.contains("Line 25"), "middle lines should be truncated");
+        assert!(
+            !plain.contains("Line 25"),
+            "middle lines should be truncated"
+        );
     }
 
     #[test]
@@ -855,11 +831,8 @@ mod tests {
             format: PromptReportFormat::Summary,
             truncation: TruncationMode::FrontBack,
         };
-        let result = report_system_prompt(
-            &EffectiveSystemPrompt::Disabled { source },
-            config,
-            &term,
-        );
+        let result =
+            report_system_prompt(&EffectiveSystemPrompt::Disabled { source }, config, &term);
         assert!(result.is_none());
     }
 
@@ -890,11 +863,8 @@ mod tests {
             format: PromptReportFormat::FullPrompt,
             truncation: TruncationMode::FrontBack,
         };
-        let result = report_system_prompt_empty(
-            &EffectiveSystemPrompt::Disabled { source },
-            config,
-            &term,
-        );
+        let result =
+            report_system_prompt_empty(&EffectiveSystemPrompt::Disabled { source }, config, &term);
         let output = result.expect("should produce output in full mode");
         let plain = strip_ansi_codes(&output);
         assert!(plain.contains("📔"));
@@ -916,11 +886,7 @@ mod tests {
             format: PromptReportFormat::Summary,
             truncation: TruncationMode::FrontBack,
         };
-        let result = report_system_prompt(
-            &EffectiveSystemPrompt::Ready(prepared),
-            config,
-            &term,
-        );
+        let result = report_system_prompt(&EffectiveSystemPrompt::Ready(prepared), config, &term);
         let output = result.expect("should produce output");
         let plain = strip_ansi_codes(&output);
         let mut lines = plain.lines();
@@ -954,11 +920,7 @@ mod tests {
             format: PromptReportFormat::Summary,
             truncation: TruncationMode::FrontBack,
         };
-        let result = report_system_prompt(
-            &EffectiveSystemPrompt::Ready(prepared),
-            config,
-            &term,
-        );
+        let result = report_system_prompt(&EffectiveSystemPrompt::Ready(prepared), config, &term);
         let output = result.expect("should produce output");
         assert!(output.contains("replaced"));
     }

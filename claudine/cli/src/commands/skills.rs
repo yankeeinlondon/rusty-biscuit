@@ -9,7 +9,7 @@ use biscuit_terminal::components::list::UnorderedList;
 use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::terminal::Terminal;
-use biscuit_terminal::utils::layout::{Layout, Margin, WordWrap};
+use biscuit_terminal::utils::layout::{Layout, Length, Margin, WordWrap};
 use claudine::badges;
 use claudine::linking::{
     ExceptionType, LinkableResource, ProviderSkillPaths, SkillDirectoryDiagnostic, SkillException,
@@ -150,7 +150,7 @@ fn render_detail(term: &Terminal, skill: &SkillInfo) {
         && let Ok(mut fs) = FileSystem::new_with_formatting(dir_str)
     {
         let layout = Layout {
-            left_margin: Margin::Chars(2),
+            margin: Margin::x(Length::ch(2)),
             ..Layout::default()
         };
         fs = fs.show_tokens().with_file_links().layout(layout);
@@ -302,7 +302,7 @@ fn render_exceptions(
                                 && let Ok(mut fs) = FileSystem::new_with_formatting(dir_str)
                             {
                                 let layout = Layout {
-                                    left_margin: Margin::Chars(4),
+                                    margin: Margin::x(Length::ch(4)),
                                     ..Layout::default()
                                 };
                                 fs = fs.show_tokens().with_file_links().layout(layout);

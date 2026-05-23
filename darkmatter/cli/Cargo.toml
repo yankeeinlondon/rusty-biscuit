@@ -44,3 +44,4 @@ predicates = "3"
 tempfile = "3"
 biscuit-test-harness = { path = "../../biscuit-test-harness" }
 serial_test = "3"
+tracing-test = "0.2"

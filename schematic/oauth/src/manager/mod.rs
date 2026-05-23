@@ -174,7 +174,9 @@ where
 mod tests {
     use super::*;
     use crate::store::MemoryTokenStore;
-    use schematic_define::{OAuth2ClientAuthMethod, OAuth2Config, OAuth2GrantType, PkceRequirement};
+    use schematic_define::{
+        OAuth2ClientAuthMethod, OAuth2Config, OAuth2GrantType, PkceRequirement,
+    };
 
     pub(super) fn auth_code_config() -> OAuth2RuntimeConfig {
         OAuth2RuntimeConfig {

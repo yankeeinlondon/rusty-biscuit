@@ -22,7 +22,6 @@ pub struct MetaTag {
     name: Option<String>,
 }
 
-
 impl MetaTag {
     pub fn new() -> MetaTag {
         MetaTag::default()
@@ -35,7 +34,11 @@ impl MetaTag {
     }
 
     /// Set the `name` attribute and its `content` value.
-    pub fn set_named(&mut self, name: impl Into<String>, content: impl Into<String>) -> &mut MetaTag {
+    pub fn set_named(
+        &mut self,
+        name: impl Into<String>,
+        content: impl Into<String>,
+    ) -> &mut MetaTag {
         self.name = Some(name.into());
         self.content = Some(content.into());
         self

@@ -258,12 +258,25 @@ impl super::Provider for DiscordWebhookProvider {
                     }
                     rich_md.push_str(&loc);
                 }
-                let content = if summary.is_empty() { None } else { Some(summary) };
-                (content, Some(vec![EmbedBody { description: rich_md }]))
+                let content = if summary.is_empty() {
+                    None
+                } else {
+                    Some(summary)
+                };
+                (
+                    content,
+                    Some(vec![EmbedBody {
+                        description: rich_md,
+                    }]),
+                )
             }
             None => {
                 let content = message.render_body_with_location(ProviderKind::DiscordWebhook);
-                let content = if content.is_empty() { None } else { Some(content) };
+                let content = if content.is_empty() {
+                    None
+                } else {
+                    Some(content)
+                };
                 (content, None)
             }
         };

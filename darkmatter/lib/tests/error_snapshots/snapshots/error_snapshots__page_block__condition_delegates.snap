@@ -1,8 +1,9 @@
 ---
 source: darkmatter/lib/tests/error_snapshots/page_block.rs
+assertion_line: 127
 expression: out
 ---
-⨫ ConditionError: parse failed
+⤫ ConditionError: parse failed
 ┃ Condition parsing failed for when="a &&& b":
 ┃ 
 ┃     3 │ line 3

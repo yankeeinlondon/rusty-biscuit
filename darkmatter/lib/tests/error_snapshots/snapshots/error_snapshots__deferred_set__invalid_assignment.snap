@@ -1,8 +1,9 @@
 ---
 source: darkmatter/lib/tests/error_snapshots/deferred_set.rs
+assertion_line: 26
 expression: out
 ---
-⨫ DeferredSetError: invalid set assignment
+⤫ DeferredSetError: invalid set assignment
 ┃ Line: 8
 ┃ Value: "not json"
 ┃ Reason: expected JSON5 object

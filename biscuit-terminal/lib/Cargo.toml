@@ -71,3 +71,7 @@ tracing-test = "0.2"
 [[bench]]
 name = "rendering"
 harness = false
+
+[[bench]]
+name = "render_tree"
+harness = false

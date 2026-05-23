@@ -531,11 +531,7 @@ fn render_section(body: &mut String, section: &Section) {
         let total_value = fmt_duration(total);
         let sep_width = label_width + value_width;
         let sep = "═".repeat(sep_width);
-        body.push_str(&format!(
-            "{:indent$}{sep}\n",
-            "",
-            indent = 2,
-        ));
+        body.push_str(&format!("{:indent$}{sep}\n", "", indent = 2,));
         body.push_str(&format!(
             "{:indent$}{:<label_width$}{:>value_width$}\n",
             "",
@@ -597,8 +593,8 @@ pub(crate) fn render_perf_report(report: &CommandPerfReport) -> String {
 
     // Agent Execution section
     if let Some(agent) = &report.agent {
-        let mut exec =
-            Section::new("Agent Execution").with_total(TotalKind::Fixed(agent.total_elapsed), "TOTAL:");
+        let mut exec = Section::new("Agent Execution")
+            .with_total(TotalKind::Fixed(agent.total_elapsed), "TOTAL:");
         exec.push_value("launches:", agent.launches.to_string());
         if let Some(latency) = agent.first_response_latency {
             exec.push_diagnostic("first response:", latency);
@@ -802,10 +798,7 @@ mod tests {
             rendered.contains("target resolution:"),
             "missing target resolution: {rendered}"
         );
-        assert!(
-            rendered.contains("TOTAL:"),
-            "missing TOTAL: {rendered}"
-        );
+        assert!(rendered.contains("TOTAL:"), "missing TOTAL: {rendered}");
         assert!(
             rendered.contains("Composition Report"),
             "missing Composition Report: {rendered}"

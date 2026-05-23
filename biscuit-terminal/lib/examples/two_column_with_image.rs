@@ -22,7 +22,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Right-hand column with a short description.
     let description = Prose::new(concat!(
-        "{{bold}}biscuit-terminal{{reset}}\n\n",
+        "<bold>biscuit-terminal</bold>\n\n",
         "Terminal-aware rendering with capability detection, inline images, \n",
         "Mermaid diagrams, and graceful fallbacks when features are missing."
     ))

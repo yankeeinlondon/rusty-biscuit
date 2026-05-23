@@ -1129,28 +1129,36 @@ fn gemini_system_prompt_uses_env_var_file() {
     assert!(
         matches!(
             info.system_prompt.append.interactive,
-            super::SystemPromptDelivery::EnvVarFile { env_var: "GEMINI_SYSTEM_MD" }
+            super::SystemPromptDelivery::EnvVarFile {
+                env_var: "GEMINI_SYSTEM_MD"
+            }
         ),
         "Gemini append interactive must be EnvVarFile(GEMINI_SYSTEM_MD)"
     );
     assert!(
         matches!(
             info.system_prompt.append.non_interactive,
-            super::SystemPromptDelivery::EnvVarFile { env_var: "GEMINI_SYSTEM_MD" }
+            super::SystemPromptDelivery::EnvVarFile {
+                env_var: "GEMINI_SYSTEM_MD"
+            }
         ),
         "Gemini append non-interactive must be EnvVarFile(GEMINI_SYSTEM_MD)"
     );
     assert!(
         matches!(
             info.system_prompt.replace.interactive,
-            super::SystemPromptDelivery::EnvVarFile { env_var: "GEMINI_SYSTEM_MD" }
+            super::SystemPromptDelivery::EnvVarFile {
+                env_var: "GEMINI_SYSTEM_MD"
+            }
         ),
         "Gemini replace interactive must be EnvVarFile(GEMINI_SYSTEM_MD)"
     );
     assert!(
         matches!(
             info.system_prompt.replace.non_interactive,
-            super::SystemPromptDelivery::EnvVarFile { env_var: "GEMINI_SYSTEM_MD" }
+            super::SystemPromptDelivery::EnvVarFile {
+                env_var: "GEMINI_SYSTEM_MD"
+            }
         ),
         "Gemini replace non-interactive must be EnvVarFile(GEMINI_SYSTEM_MD)"
     );
@@ -1162,28 +1170,36 @@ fn qwen_system_prompt_uses_inline_flags() {
     assert!(
         matches!(
             info.system_prompt.append.interactive,
-            super::SystemPromptDelivery::InlineFlag { flag: "--append-system-prompt" }
+            super::SystemPromptDelivery::InlineFlag {
+                flag: "--append-system-prompt"
+            }
         ),
         "Qwen append interactive must be InlineFlag(--append-system-prompt)"
     );
     assert!(
         matches!(
             info.system_prompt.append.non_interactive,
-            super::SystemPromptDelivery::InlineFlag { flag: "--append-system-prompt" }
+            super::SystemPromptDelivery::InlineFlag {
+                flag: "--append-system-prompt"
+            }
         ),
         "Qwen append non-interactive must be InlineFlag(--append-system-prompt)"
     );
     assert!(
         matches!(
             info.system_prompt.replace.interactive,
-            super::SystemPromptDelivery::InlineFlag { flag: "--system-prompt" }
+            super::SystemPromptDelivery::InlineFlag {
+                flag: "--system-prompt"
+            }
         ),
         "Qwen replace interactive must be InlineFlag(--system-prompt)"
     );
     assert!(
         matches!(
             info.system_prompt.replace.non_interactive,
-            super::SystemPromptDelivery::InlineFlag { flag: "--system-prompt" }
+            super::SystemPromptDelivery::InlineFlag {
+                flag: "--system-prompt"
+            }
         ),
         "Qwen replace non-interactive must be InlineFlag(--system-prompt)"
     );

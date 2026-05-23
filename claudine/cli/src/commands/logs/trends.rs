@@ -1,6 +1,6 @@
 use biscuit_terminal::components::list::UnorderedList;
 use biscuit_terminal::components::prose::Prose;
-use biscuit_terminal::components::renderable::{TerminalRenderable, RenderableTerminalContent};
+use biscuit_terminal::components::renderable::{RenderableTerminalContent, TerminalRenderable};
 use biscuit_terminal::components::table::table::TableColumn;
 use biscuit_terminal::components::table::types::ColumnType;
 use biscuit_terminal::utils::layout::{Alignment, WordWrap};
@@ -110,9 +110,9 @@ pub(super) fn render_trends_report(report: &TrendsReport, error_hint: Option<&st
         .iter()
         .any(|point| point.tool_errors + point.turn_errors > 0)
     {
-        definitions.push(RenderableTerminalContent::from(Prose::new(error_hint_markup(
-            error_hint.unwrap_or("week"),
-        ))));
+        definitions.push(RenderableTerminalContent::from(Prose::new(
+            error_hint_markup(error_hint.unwrap_or("week")),
+        )));
     }
     let definitions = UnorderedList::from(definitions).with_bullet("  ");
     log::data(&definitions.render(&term));

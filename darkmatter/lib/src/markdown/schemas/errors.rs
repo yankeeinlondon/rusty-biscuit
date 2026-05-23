@@ -437,9 +437,6 @@ mod tests {
             out.contains("frontmatter shape unsupported"),
             "missing summary: {out}",
         );
-        assert!(
-            out.contains("expected mapping"),
-            "missing detail: {out}",
-        );
+        assert!(out.contains("expected mapping"), "missing detail: {out}",);
     }
 }

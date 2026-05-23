@@ -42,13 +42,9 @@ fn bench_prose_highlighter_new(c: &mut Criterion) {
 
     for (label, name) in THEMES {
         let theme = theme_set.get(*name).clone();
-        group.bench_with_input(
-            BenchmarkId::from_parameter(label),
-            &theme,
-            |b, theme| {
-                b.iter(|| black_box(ProseHighlighter::new(black_box(theme))));
-            },
-        );
+        group.bench_with_input(BenchmarkId::from_parameter(label), &theme, |b, theme| {
+            b.iter(|| black_box(ProseHighlighter::new(black_box(theme))));
+        });
     }
 
     group.finish();

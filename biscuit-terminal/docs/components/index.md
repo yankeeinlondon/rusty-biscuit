@@ -17,7 +17,7 @@ All components implement the [`Renderable`](../../lib/src/components/renderable.
 | [PadLeft](./pad_left.md) | Right-align content by padding with spaces on the left |
 | [PadRight](./pad_right.md) | Left-align content by padding with spaces on the right |
 | [Progress](./progress.md) | Horizontal progress bar with configurable width, characters, and colors |
-| [Prose](./prose.md) | Styled text with inline tokens (`{{bold}}`, `<red>...</red>`, etc.) |
+| [Prose](./prose.md) | Styled text with bracketed tags (`<b>...</b>`, `<red>...</red>`) and a Markdown subset |
 | [Section](./section.md) | Heading (h1-h6) with optional content body |
 | [Status](./status.md) | Status items with icons (success, failure, warning, info, active, not-started) |
 | [Table](./table.md) | Box-drawing table with auto-sized columns and rich formatting |

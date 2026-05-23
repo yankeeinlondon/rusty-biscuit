@@ -6,16 +6,15 @@
 //! `cargo insta`.
 
 use darkmatter::markdown::schemas::{
-    simplified::{grammar::parse_type_expr, to_json_schema},
     PropertyAtom, PropertyDef, SchemaShape, SimplifiedSchema, parse_yaml_schema,
+    simplified::{grammar::parse_type_expr, to_json_schema},
 };
 use insta::assert_snapshot;
 
 /// Convert a YAML document string into a pretty-printed JSON Schema string
 /// suitable for snapshot diffing.
 fn convert_yaml(yaml: &str) -> String {
-    let parsed: serde_yaml_ng::Value =
-        serde_yaml_ng::from_str(yaml).expect("yaml parse");
+    let parsed: serde_yaml_ng::Value = serde_yaml_ng::from_str(yaml).expect("yaml parse");
     let schema = parse_yaml_schema(&parsed).expect("schema parse");
     let value = to_json_schema(&schema).expect("convert");
     serde_json::to_string_pretty(&value).expect("serialize")
@@ -173,9 +172,7 @@ status: "enum(draft, published, archived; default(draft); required)"
 
 #[test]
 fn snapshot_atom_with_description() {
-    assert_snapshot!(convert_atom(
-        "string(required) -> The author's full name"
-    ));
+    assert_snapshot!(convert_atom("string(required) -> The author's full name"));
 }
 
 #[test]

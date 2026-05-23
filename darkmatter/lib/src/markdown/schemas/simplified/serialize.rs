@@ -158,10 +158,9 @@ fn write_arg(out: &mut String, value: &str) {
 
 fn needs_quoting(value: &str) -> bool {
     value.is_empty()
-        || value.chars().any(|c| {
-            c.is_whitespace()
-                || matches!(c, ',' | ';' | '(' | ')' | '\'' | '"')
-        })
+        || value
+            .chars()
+            .any(|c| c.is_whitespace() || matches!(c, ',' | ';' | '(' | ')' | '\'' | '"'))
 }
 
 fn format_number(n: f64) -> String {

@@ -481,11 +481,7 @@ fn schema_validate_assignment_failing_value_still_exits_1() {
 #[test]
 fn schema_validate_invalid_assignment_yaml_returns_usage_error() {
     let tmp = TempDir::new().unwrap();
-    let doc = write_file(
-        &tmp,
-        "post.md",
-        "---\n$schema:\n  title: 'string'\n---\n",
-    );
+    let doc = write_file(&tmp, "post.md", "---\n$schema:\n  title: 'string'\n---\n");
 
     md_cmd()
         .args(["schema", "validate"])

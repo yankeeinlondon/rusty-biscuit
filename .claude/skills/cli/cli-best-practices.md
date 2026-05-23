@@ -156,6 +156,8 @@ Use `expectrl` to spawn the binary in a pseudo-terminal for testing TTY-dependen
 
 **Test count is not test rigor.** A feature may have hundreds of unit and integration tests and still ship with a glaring user-visible bug if none of those tests exercise the right layer. Classify every user-observable requirement against these three levels:
 
+> In the rusty-biscuit monorepo the Level 2/3 harnesses (`WezTermHarness`, `KittyHarness`, `TmuxHarness`, `AppleTerminalHarness`, and the `cliclick` Level-3 helper) are implemented once in the shared `biscuit-test-harness` crate. Its `biscuit-test-harness/README.md` documents each harness variant, when to use which, the `SpawnVisibility` background/foreground choice, and the environment each requires — read it before writing or reviewing Level 2/3 tests.
+
 #### Level 1 — In-Process / PTY
 
 Unit tests, plus tests that spawn the binary in a pseudo-TTY (`expectrl`) and feed manufactured input bytes. Verifies internal state transitions, byte-level parsing, and rendering logic.
