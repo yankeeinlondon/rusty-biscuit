@@ -588,6 +588,7 @@ mod tests {
             compact: false,
             package: None,
             package_area: None,
+            branch: None,
         }
     }
 

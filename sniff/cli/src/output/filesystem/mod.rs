@@ -226,11 +226,11 @@ fn parse_git_url(
 
 /// Build the commit URL base from the preferred remote (usually "origin").
 ///
-/// Returns `(browse_url, provider)` if a browsable remote is found, or `None`
-/// if no remote has a resolvable browse URL.
+/// Returns `(browse_url, provider, remote_name)` if a browsable remote is
+/// found, or `None` if no remote has a resolvable browse URL.
 fn build_commit_url_base(
     git: &sniff::filesystem::git::GitInfo,
-) -> Option<(String, sniff::filesystem::git::GitHostingProvider)> {
+) -> Option<(String, sniff::filesystem::git::GitHostingProvider, String)> {
     // Prefer "origin", fall back to the first remote with a URL
     let remote = git
         .remotes
@@ -239,7 +239,7 @@ fn build_commit_url_base(
         .or_else(|| git.remotes.first())?;
     let url = remote.url.as_ref()?;
     let (_, browse_url) = parse_git_url(url, &remote.provider);
-    browse_url.map(|base| (base, remote.provider))
+    browse_url.map(|base| (base, remote.provider, remote.name.clone()))
 }
 
 /// Split a path into directory and filename components.
@@ -295,7 +295,7 @@ fn format_commit_line(
     let short_sha = &commit.sha[0..7];
     let sha_display = match commit_url {
         Some(url) => format!("<a href=\"{url}\"><b>{short_sha}</b></a>"),
-        None => format!("<b>{short_sha}</b>"),
+        None => format!("<dim><i>{short_sha}</i></dim>"),
     };
     let date_prefix = if use_on { "<i>on</i> " } else { "" };
     let refs_part = format_ref_decorations(&commit.refs);
@@ -414,26 +414,39 @@ fn build_git_status_items(
 ) -> Vec<String> {
     // Build commit URL base from the preferred remote (usually "origin").
     let commit_url_base = build_commit_url_base(git);
-
-    // Determine how many of the most recent commits are unpushed.
-    // Use the "origin" tracking ahead count; if unavailable, assume all are pushed.
-    let unpushed_count = git
-        .tracking
-        .iter()
-        .find(|t| t.remote == "origin")
-        .map(|t| t.ahead)
-        .unwrap_or(0);
+    let url_remote_prefix = commit_url_base
+        .as_ref()
+        .map(|(_, _, name)| format!("{name}/"));
 
     let mut status_items: Vec<String> = Vec::new();
 
-    // Recent commits with conventional commit parsing (oldest first, so most recent is at bottom)
+    // Recent commits with conventional commit parsing (oldest first, so most recent is at bottom).
+    // `git.recent` is newest-first. A commit is considered pushed once we encounter
+    // (walking newest→oldest) a commit with a remote-tracking ref decoration for the
+    // URL-providing remote; that commit and all older ones are pushed. This is robust
+    // to `--branch <other>` queries where `git.tracking` reflects the checked-out
+    // branch, not the queried one.
     let commits: Vec<_> = git.recent.iter().take(history_count).collect();
+    let unpushed_count = url_remote_prefix
+        .as_deref()
+        .map(|prefix| {
+            commits
+                .iter()
+                .take_while(|c| {
+                    !c.refs
+                        .iter()
+                        .any(|r| r.kind == RefKind::RemoteBranch && r.name.starts_with(prefix))
+                })
+                .count()
+        })
+        .unwrap_or(0);
+
     for (display_index, commit) in commits.iter().rev().enumerate() {
         // display_index 0 = oldest displayed commit, last = most recent.
         // The most recent `unpushed_count` commits (at the end) are unpushed.
         let is_pushed = display_index < commits.len().saturating_sub(unpushed_count);
         let commit_url = if is_pushed {
-            commit_url_base.as_ref().map(|(base, provider)| {
+            commit_url_base.as_ref().map(|(base, provider, _)| {
                 format!("{}/{}/{}", base, provider.commit_path_segment(), commit.sha)
             })
         } else {
@@ -517,17 +530,23 @@ fn build_git_status_items(
 ///
 /// * `git` - Git repository information
 /// * `history_count` - Number of recent commits to display
+/// * `target_branch` - When `Some`, annotates the Status heading with the
+///   branch whose commits are being shown (used by `--branch <name>`).
 pub fn render_git_section(
     git: &sniff::filesystem::git::GitInfo,
     history_count: usize,
     verbose: u8,
     compact: bool,
+    target_branch: Option<&str>,
 ) -> String {
     let mut out = String::new();
     let terminal = Terminal::default();
 
     // === Status Section ===
-    let status_title = Prose::new("<b><u>Status</u></b>");
+    let status_title = match target_branch {
+        Some(branch) => Prose::new(format!("<b><u>Status</u></b> (branch: <i>{branch}</i>)")),
+        None => Prose::new("<b><u>Status</u></b>"),
+    };
     writeln!(out, "\n{}\n", status_title.render(&terminal)).unwrap();
 
     let status_items = build_git_status_items(git, history_count, verbose);
@@ -1251,7 +1270,7 @@ mod tests {
                 lines_removed: 0,
             }]);
 
-            let output = render_git_section(&git, 10, 0, true);
+            let output = render_git_section(&git, 10, 0, true, None);
 
             assert!(output.contains("Status"));
             assert!(!output.contains("\x1b[1m\x1b[4mMeta"));
