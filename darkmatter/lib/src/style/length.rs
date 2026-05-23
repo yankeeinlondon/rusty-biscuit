@@ -68,13 +68,16 @@ where
         Some(serde_json::Value::String(s)) => {
             parse_horizontal(&s).map(Some).map_err(de::Error::custom)
         }
-        Some(serde_json::Value::Number(n)) => {
-            if let Some(u) = n.as_u64() {
-                Ok(Some(Length::Ch(u as u32)))
-            } else {
-                Err(de::Error::custom("length must be a non-negative integer or a string like \"2ch\", \"50%\""))
-            }
-        }
+        Some(serde_json::Value::Number(n)) => n
+            .as_u64()
+            .and_then(|u| u32::try_from(u).ok())
+            .map(|u| Some(Length::Ch(u)))
+            .ok_or_else(|| {
+                de::Error::custom(
+                    "length must be a non-negative integer in 0..=4294967295 \
+                     or a string like \"2ch\", \"50%\"",
+                )
+            }),
         Some(other) => Err(de::Error::custom(format!(
             "length must be a string or non-negative integer (got {})",
             type_name_of(&other)
@@ -234,5 +237,19 @@ mod tests {
         }
         let w: Wrap = serde_json::from_str(r#"{"v": null}"#).unwrap();
         assert_eq!(w.v, None);
+    }
+
+    #[test]
+    fn length_rejects_u32_overflow_integer() {
+        #[derive(serde::Deserialize, Debug)]
+        struct Wrap {
+            #[serde(deserialize_with = "deserialize_optional_length")]
+            #[allow(dead_code)]
+            v: Option<Length>,
+        }
+        // 5_000_000_000 > u32::MAX (4_294_967_295); must error.
+        let err =
+            serde_json::from_str::<Wrap>(r#"{"v": 5000000000}"#).unwrap_err();
+        assert!(err.to_string().contains("0..=4294967295"));
     }
 }

@@ -8,8 +8,8 @@ use super::warning::StyleWarning;
 ///
 /// ## Notes
 ///
-/// `Strict` is produced by `into_strict` (added in a later sub-spec phase) when
-/// an otherwise successful parse carries `UnknownKey` or `Deprecated` warnings.
+/// `Strict` is produced by [`into_strict`](super::into_strict) when an
+/// otherwise successful parse carries `UnknownKey` or `Deprecated` warnings.
 #[derive(Debug, Error)]
 pub enum StyleParseError {
     /// A YAML node had the wrong shape at the given path.
