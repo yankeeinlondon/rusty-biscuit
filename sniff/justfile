@@ -45,13 +45,8 @@ build *args="":
 
 # test library and CLI
 test *args="":
-    @echo -e "Testing {{ BOLD }}Library{{ RESET }} code"
-    @echo ""
-    @cargo test -p sniff -- {{ args }}
-    @echo ""
-    @echo -e "Testing {{ BOLD }}CLI{{ RESET }} code"
-    @echo ""
-    @cargo test -p sniff-cli -- {{ args }}
+    @just _test sniff {{ args }}
+    @just _test sniff-cli {{ args }}
 
 # lint with clippy
 lint *args="":
