@@ -77,6 +77,7 @@ pub fn render_terminal_output(
 /// Precedence: margin shorthand → axis → side-specific.
 /// Same for padding. Alignment: global → component-specific.
 /// Fill: global → component-specific.
+#[allow(deprecated)]
 pub fn apply_cli_layout_flags(page: DarkmatterPage, cli: &Cli) -> DarkmatterPage {
     let mut page = page;
 

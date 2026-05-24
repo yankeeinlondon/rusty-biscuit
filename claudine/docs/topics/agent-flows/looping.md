@@ -303,10 +303,10 @@ Implementation notes:
 CLI shorthand setters and `--set` JSON are applied to the **initial frontmatter** that the loop's first iteration sees. So:
 
 ```bash
-claudine compose implement-phase.md total_phases=6 plan=fixes/2026-05-08-watchdog/plan.md --claude
+claudine compose loop_example.md iteration=1 --claude
 ```
 
-…is equivalent to authoring the document with `total_phases: 6` and `plan: fixes/...` in the frontmatter. Subsequent iterations carry those values through unless an action explicitly overwrites them.
+…is equivalent to authoring the document with `iteration: 1` in the frontmatter. Subsequent iterations carry that value through unless an action explicitly overwrites it.
 
 ## Common errors
 

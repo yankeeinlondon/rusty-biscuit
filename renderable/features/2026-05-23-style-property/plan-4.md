@@ -2,6 +2,19 @@
 phases: 6
 created: 2026-05-23
 start_phase: 1
+source_files_during_phase_1:
+  - darkmatter/lib/src/layout/types.rs
+  - darkmatter/lib/src/layout/page.rs
+  - darkmatter/lib/src/layout/context.rs
+  - darkmatter/lib/src/markdown/output/terminal.rs
+  - darkmatter/lib/src/style/apply.rs
+  - darkmatter/cli/src/output.rs
+docs_updated_during_phase_1: []
+docs_created_during_phase_1: []
+skills_files_updated_during_phase_1: []
+packages:
+  - darkmatter
+  - darkmatter-cli
 ---
 
 # Execution Plan: Sub-Spec #4 — `ul` / `ol` / `li` Split + Wiring

@@ -87,12 +87,30 @@ impl PageStyleOverrides {
     fn alignment_claimed_for(&self, component: PageComponent) -> bool {
         match component {
             PageComponent::Images => self.align_images,
-            PageComponent::Lists => self.align_lists,
+            PageComponent::Ul | PageComponent::Ol | PageComponent::Li | PageComponent::Lists => {
+                self.align_lists
+            }
             PageComponent::BlockQuotes => self.align_block_quotes,
             PageComponent::Tables => self.align_tables,
             PageComponent::CodeBlocks => self.align_code_blocks,
         }
     }
+}
+
+/// Field-level CLI overrides for list component style (`style.ul.*`,
+/// `style.ol.*`, `style.li.*`).
+///
+/// Each `true` value means the corresponding frontmatter field must be ignored
+/// because a CLI flag already claimed it.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ListStyleOverrides {
+    pub ul_alignment: bool,
+    pub ul_fill: bool,
+    pub ul_left_margin: bool,
+    pub ol_alignment: bool,
+    pub ol_fill: bool,
+    pub li_alignment: bool,
+    pub li_fill: bool,
 }
 
 /// Errors produced when lowering parsed [`StyleFrontmatter`] onto a
@@ -133,6 +151,20 @@ pub enum StyleApplyError {
         bucket: &'static str,
         field: &'static str,
     },
+
+    /// A list bucket (`ul`, `ol`, or `li`) set both `width` and `max-width`.
+    /// `DarkmatterPage` exposes a single [`PageFill`] slot per component so
+    /// the two cannot coexist.
+    #[error(
+        "`style.{bucket}.width` and `style.{bucket}.max-width` are mutually exclusive"
+    )]
+    WidthMaxWidthConflict { bucket: &'static str },
+
+    /// `with_list_left_margin` was called with a component other than
+    /// [`PageComponent::Ul`]. Only unordered lists support the left-margin
+    /// channel in this sub-spec.
+    #[error("list left margin only accepts `PageComponent::Ul`")]
+    InvalidListLeftMarginComponent,
 }
 
 /// Lower a [`Length`] onto a [`WidthUnit`] for component fill application.
@@ -152,6 +184,31 @@ pub enum StyleApplyError {
 /// - [`StyleApplyError::ComponentInvalidCssLength`] when `length` is
 ///   [`Length::Css(_)`].
 pub(crate) fn lower_length_to_fill(
+    length: &Length,
+    bucket: &'static str,
+    field: &'static str,
+) -> Result<WidthUnit, StyleApplyError> {
+    match length {
+        Length::Zero => Ok(WidthUnit::Fixed(0)),
+        Length::Ch(n) => Ok(WidthUnit::Fixed(u16::try_from(*n).unwrap_or(u16::MAX))),
+        Length::Percent(p) => Ok(WidthUnit::Percent(*p)),
+        Length::Css(_) => Err(StyleApplyError::ComponentInvalidCssLength { bucket, field }),
+    }
+}
+
+/// Lower a [`Length`] onto a [`WidthUnit`] for list left-margin application.
+///
+/// ## Returns
+///
+/// - [`Length::Zero`] → `WidthUnit::Fixed(0)`
+/// - [`Length::Ch(n)`] → `WidthUnit::Fixed(u16)` (saturating cast)
+/// - [`Length::Percent(p)`] → `WidthUnit::Percent(p)`
+///
+/// ## Errors
+///
+/// - [`StyleApplyError::ComponentInvalidCssLength`] when `length` is
+///   [`Length::Css(_)`].
+pub(crate) fn lower_length_to_width_unit(
     length: &Length,
     bucket: &'static str,
     field: &'static str,
@@ -271,6 +328,10 @@ pub fn apply_page_style(
             if !overrides.alignment_claimed_for(component) {
                 page = page.use_alignment(component, mapped);
             }
+        }
+        #[allow(deprecated)]
+        if !overrides.align_lists {
+            page = page.use_alignment(PageComponent::Lists, mapped);
         }
     }
 

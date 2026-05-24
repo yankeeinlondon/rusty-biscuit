@@ -55,6 +55,8 @@ pub(crate) struct LayoutContext {
     #[allow(dead_code)]
     /// Per-component fills.
     pub fills: std::collections::HashMap<PageComponent, PageFill>,
+    /// Per-component list left margins.
+    pub list_left_margins: std::collections::HashMap<PageComponent, WidthUnit>,
 }
 
 /// Concrete RGB background color resolved from [`PageBackground`] and the
@@ -127,6 +129,7 @@ impl LayoutContext {
         options_color_mode: ColorMode,
         alignments: std::collections::HashMap<PageComponent, PageAlignment>,
         fills: std::collections::HashMap<PageComponent, PageFill>,
+        list_left_margins: std::collections::HashMap<PageComponent, WidthUnit>,
     ) -> Result<Self, PageRenderError> {
         let margin_x = margin.horizontal();
         let padding_x = padding.horizontal();
@@ -150,7 +153,8 @@ impl LayoutContext {
             || page_background != PageBackground::Transparent
             || max_width.is_some()
             || !alignments.is_empty()
-            || !fills.is_empty();
+            || !fills.is_empty()
+            || !list_left_margins.is_empty();
 
         // Per spec, page background resolution uses the *terminal's* detected
         // color mode (so `Subtle` picks a dark-vs-light surface based on the
@@ -198,6 +202,7 @@ impl LayoutContext {
             render_color_mode,
             alignments,
             fills,
+            list_left_margins,
         })
     }
 
@@ -208,17 +213,49 @@ impl LayoutContext {
 
     /// Whether any per-component alignment or fill is configured.
     pub fn has_component_styles(&self) -> bool {
-        !self.alignments.is_empty() || !self.fills.is_empty()
+        !self.alignments.is_empty() || !self.fills.is_empty() || !self.list_left_margins.is_empty()
+    }
+
+    /// Get the list left margin for a component, if any.
+    #[allow(dead_code)]
+    pub fn list_left_margin(&self, component: PageComponent) -> Option<WidthUnit> {
+        self.list_left_margins.get(&component).copied()
     }
 
     /// Get the alignment for a component, defaulting to [`PageAlignment::Left`].
+    ///
+    /// For the concrete list variants (`Ul`, `Ol`, `Li`), falls back to the
+    /// deprecated [`PageComponent::Lists`] entry when no explicit entry exists.
     pub fn component_alignment(&self, component: PageComponent) -> PageAlignment {
-        self.alignments.get(&component).copied().unwrap_or_default()
+        self.alignments
+            .get(&component)
+            .copied()
+            .or_else(|| {
+                if PageComponent::LISTS.contains(&component) {
+                    self.alignments.get(&PageComponent::Lists).copied()
+                } else {
+                    None
+                }
+            })
+            .unwrap_or_default()
     }
 
     /// Get the fill for a component, defaulting to [`PageFill::Full`].
+    ///
+    /// For the concrete list variants (`Ul`, `Ol`, `Li`), falls back to the
+    /// deprecated [`PageComponent::Lists`] entry when no explicit entry exists.
     pub fn component_fill(&self, component: PageComponent) -> PageFill {
-        self.fills.get(&component).copied().unwrap_or_default()
+        self.fills
+            .get(&component)
+            .copied()
+            .or_else(|| {
+                if PageComponent::LISTS.contains(&component) {
+                    self.fills.get(&PageComponent::Lists).copied()
+                } else {
+                    None
+                }
+            })
+            .unwrap_or_default()
     }
 
     /// Resolve the target render width for a component based on its fill setting.
@@ -346,6 +383,7 @@ mod tests {
             render_color_mode: ColorMode::Dark,
             alignments: HashMap::new(),
             fills: HashMap::new(),
+            list_left_margins: HashMap::new(),
         }
     }
 

@@ -14,6 +14,8 @@ are identical everywhere.
 > predicates, and date helpers, so this topic is the authoritative reference
 > under its new name.
 
+All functions provided here DO NOT mutate state, they only _report_ on state. If you are looking for ways to mutate state then you should go to the [side effects](./side-effects.md) documentation. Of course you _can_ use these functions to assign the value of a frontmatter property on the local document you are in but never more than that.
+
 ## Core Expression Engine
 
 The parser, AST, and evaluator live in the [`expression`](../../lib/src/markdown/compose/expression/mod.rs) module and are public API:
@@ -147,7 +149,7 @@ Consequences:
 - `{{ a && b }}` is rejected at parse time
 - `when="a && b"` is logical AND
 
-The function-call forms `And(...)` and `Or(...)` are valid in both modes.
+The function-call forms `and(...)` and `or(...)` are valid in both modes.
 
 ## Comparison Operators
 
@@ -182,8 +184,8 @@ For `>`, `>=`, `<`, and `<=`, both sides are coerced to numbers.
 - `null`, arrays, objects, and non-numeric strings become `0`
 
 ```md
-::file ./large.md when="Length(items) > 3"
-::file ./small.md when="Length(items) <= 3"
+::file ./large.md when="length(items) > 3"
+::file ./small.md when="length(items) <= 3"
 ```
 
 ## Arithmetic Operators
@@ -224,19 +226,19 @@ Arithmetic errors fail composition:
 
 ## Functions
 
-Function names are **case-insensitive**: `HasKey`, `has_key`, and `haskey` all
+Function names are **case-insensitive**: `has_key`, `HasKey`, and `haskey` all
 resolve to the same function.
 
 ### Logical Helpers
 
-- `And(a, b, c, ...)` — all arguments truthy; left-to-right short-circuit
-- `Or(a, b, c, ...)` — any argument truthy; left-to-right short-circuit
-- `HasKey(object, key)` — `true` when the first argument is an object containing `key`
-- `Contains(collection, value)` — substring/array/object/scalar containment
+- `and(a, b, c, ...)` — all arguments truthy; left-to-right short-circuit
+- `or(a, b, c, ...)` — any argument truthy; left-to-right short-circuit
+- `has_key(object, key)` — `true` when the first argument is an object containing `key`
+- `contains(collection, value)` — substring/array/object/scalar containment
 
 ### Length and Numbers
 
-- `Length(value)` — string char count, array length, object key count, number's character count, `0` for `null`/booleans
+- `length(value)` — string char count, array length, object key count, number's character count, `0` for `null`/booleans
 - `number(value, default?)` — parses as number; falls back to `default` (or `0`)
 - `round(value, default?)` — rounds the parsed number to an integer
 
@@ -252,8 +254,8 @@ null-safety applies — see [Function Contracts](#function-contracts)).
 
 ### Type Predicates
 
-- `IsString(x)`, `IsNumber(x)`, `IsArray(x)`, `IsNull(x)`, `IsObject(x)`
-- `IsEmpty(x)` — `true` for `null`, `""`, `[]`, `{}`; `false` for numbers (including `0`), booleans, and non-empty containers
+- `is_string(x)`, `is_number(x)`, `is_array(x)`, `is_null(x)`, `is_object(x)`
+- `is_empty(x)` — `true` for `null`, `""`, `[]`, `{}`; `false` for numbers (including `0`), booleans, and non-empty containers
 
 ### Collection Helpers
 
@@ -262,27 +264,27 @@ null-safety applies — see [Function Contracts](#function-contracts)).
 
 ### String Predicates
 
-- `StartsWith(x, find)` — case-sensitive prefix test
-- `EndsWith(x, find)` — case-sensitive suffix test
+- `starts_with(x, find)` — case-sensitive prefix test
+- `ends_with(x, find)` — case-sensitive suffix test
 
 ### String Mutations
 
-- `Lower(x)`, `Upper(x)`, `Capitalize(x)`
-- `KebabCase(x)`, `SnakeCase(x)`, `CamelCase(x)`, `PascalCase(x)`, `TitleCase(x)`
+- `lower(x)`, `upper(x)`, `capitalize(x)`
+- `kebab_case(x)`, `snake_case(x)`, `camel_case(x)`, `pascal_case(x)`, `title_case(x)`
 
 ### Date Validators
 
 Strict format validators (strings only, exact format required):
 
-- `IsDate(x)` — `YYYY-MM-DD`
-- `IsDateUtc(x)` — same format
-- `IsDateTime(x)` — ISO 8601 datetime
-- `IsDateTimeUtc(x)` — same format
+- `is_date(x)` — `YYYY-MM-DD`
+- `is_date_utc(x)` — same format
+- `is_datetime(x)` — ISO 8601 datetime
+- `is_datetime_utc(x)` — same format
 
 Relative validators (accept date *and* datetime strings):
 
-- Local: `IsToday(x)`, `IsYesterday(x)`, `IsTomorrow(x)`, `IsThisMonth(x)`, `IsThisYear(x)`
-- UTC:   `IsTodayUtc(x)`, `IsYesterdayUtc(x)`, `IsTomorrowUtc(x)`, `IsThisMonthUtc(x)`, `IsThisYearUtc(x)`
+- Local: `is_today(x)`, `is_yesterday(x)`, `is_tomorrow(x)`, `is_this_month(x)`, `is_this_year(x)`
+- UTC:   `is_today_utc(x)`, `is_yesterday_utc(x)`, `is_tomorrow_utc(x)`, `is_this_month_utc(x)`, `is_this_year_utc(x)`
 
 All return `false` for non-string inputs and unparseable strings.
 
@@ -298,10 +300,10 @@ This applies to:
 
 - math: `min`, `max`, `abs`
 - collections: `first`, `last`
-- string predicates: `StartsWith`, `EndsWith`
-- string mutations: `Lower`, `Upper`, `Capitalize`, `KebabCase`, `CamelCase`, `PascalCase`, `SnakeCase`, `TitleCase`
+- string predicates: `starts_with`, `ends_with`
+- string mutations: `lower`, `upper`, `capitalize`, `kebab_case`, `camel_case`, `pascal_case`, `snake_case`, `title_case`
 
-`IsString`/`IsNumber`/`IsArray`/`IsNull`/`IsObject`/`IsEmpty` are inspecting
+`is_string`/`is_number`/`is_array`/`is_null`/`is_object`/`is_empty` are inspecting
 predicates and never error or null-propagate; they always return a boolean.
 
 ## Null Propagation Summary
@@ -327,13 +329,13 @@ predicates and never error or null-propagate; they always return a boolean.
 
 ### Date Validator Input Contracts
 
-**Strict format validators** (`IsDate`, `IsDateTime`, and UTC variants):
+**Strict format validators** (`is_date`, `is_datetime`, and UTC variants):
 
 - accept **strings only**
 - return `false` for non-string inputs, including `null`
 - return `false` for strings that do not match the expected exact format
 
-**Relative validators** (`IsToday`, `IsYesterday`, `IsTomorrow`, `IsThisMonth`, `IsThisYear` plus UTC variants):
+**Relative validators** (`is_today`, `is_yesterday`, `is_tomorrow`, `is_this_month`, `is_this_year` plus UTC variants):
 
 - accept both **date** and **datetime** strings
 - when given a datetime string, extract the date portion for comparison
@@ -454,11 +456,11 @@ Admin-only details
 ### Type Predicates
 
 ```md
-::block when="IsArray(tags) && Length(tags) > 0"
+::block when="is_array(tags) && length(tags) > 0"
 Has tags
 ::end-block
 
-::block when="IsEmpty(tags)"
+::block when="is_empty(tags)"
 No tags
 ::end-block
 ```
@@ -466,19 +468,19 @@ No tags
 ### String Mutations Inside Interpolation
 
 ```md
-{{ KebabCase(title) }}      → "my-document"
-{{ Upper(env.AGENT) }}      → "CLAUDE"
-{{ StartsWith(slug, "x-") ? "experimental" : "stable" }}
+{{ kebab_case(title) }}      → "my-document"
+{{ upper(env.AGENT) }}      → "CLAUDE"
+{{ starts_with(slug, "x-") ? "experimental" : "stable" }}
 ```
 
 ### Date Gates
 
 ```md
-::block when="IsToday(published)"
+::block when="is_today(published)"
 Published today!
 ::end-block
 
-::block when="IsThisMonth(published)"
+::block when="is_this_month(published)"
 Recent
 ::end-block
 ```
@@ -507,6 +509,7 @@ Unsupported or easy-to-misread forms:
 
 ## See Also
 
+- [Side Effects](./side-effects.md)
 - [Page Blocks](../inline/page-blocks.md)
 - [Block Transclusion](../transclusion/block-transclusion.md)
 - [Context Variables](./context-variables.md)

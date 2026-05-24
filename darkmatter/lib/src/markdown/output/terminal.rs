@@ -1363,6 +1363,7 @@ pub(crate) fn write_terminal_with_layout<W: std::io::Write>(
                 if list_stack.is_empty()
                     && let Some(ctx) = layout_ctx
                 {
+                    #[allow(deprecated)]
                     let component = PageComponent::Lists;
                     let component_width = ctx
                         .resolve_component_width(component)

@@ -8,6 +8,7 @@ scope: "{{ctx.current_package_area == 'root' ? 'package' : 'package area' }}"
 - this session was started with a focus on the **{{area}}** {{scope}}
     - you must use the '{{ area }}' agent skill
 - always prefer US English (en-US) over other English variants when creating symbol names or writing documentation
+- the host computer is on the {{ctx.os}} operating system; consider this when running shell commands
 
 ## Best Practices
 
@@ -19,6 +20,7 @@ scope: "{{ctx.current_package_area == 'root' ? 'package' : 'package area' }}"
 - when a package area has both a library and CLI (as many do) the naming convention is:
     - `{name}` for library
     - `{name}-cli` for the CLI
+- never run `cargo fmt` unless told explicitly to do so
 - if you are ever sending raw escape codes to the terminal you are doing something wrong! You should be using a `TerminalRenderable` components!
 
 ## Hashing Content

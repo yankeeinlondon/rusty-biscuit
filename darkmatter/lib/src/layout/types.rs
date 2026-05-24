@@ -143,19 +143,31 @@ pub enum PageComponent {
     Tables,
     /// Code blocks.
     CodeBlocks,
+    /// Unordered lists.
+    Ul,
+    /// Ordered lists.
+    Ol,
+    /// List items.
+    Li,
     /// Lists (ordered and unordered).
+    #[deprecated(note = "use PageComponent::{Ul, Ol, Li}")]
     Lists,
 }
 
 impl PageComponent {
     /// All page-component variants in canonical order.
-    pub const ALL: [PageComponent; 5] = [
+    pub const ALL: [PageComponent; 7] = [
         PageComponent::Images,
         PageComponent::BlockQuotes,
         PageComponent::Tables,
         PageComponent::CodeBlocks,
-        PageComponent::Lists,
+        PageComponent::Ul,
+        PageComponent::Ol,
+        PageComponent::Li,
     ];
+
+    /// The three concrete list component variants.
+    pub const LISTS: [PageComponent; 3] = [Self::Ul, Self::Ol, Self::Li];
 }
 
 /// Horizontal alignment for a [`PageComponent`].
@@ -488,7 +500,15 @@ mod tests {
 
     #[test]
     fn page_component_all_covers_every_variant() {
-        assert_eq!(PageComponent::ALL.len(), 5);
+        assert_eq!(PageComponent::ALL.len(), 7);
+    }
+
+    #[test]
+    fn page_component_lists_contains_exactly_three_concrete_variants() {
+        assert_eq!(PageComponent::LISTS.len(), 3);
+        assert!(PageComponent::LISTS.contains(&PageComponent::Ul));
+        assert!(PageComponent::LISTS.contains(&PageComponent::Ol));
+        assert!(PageComponent::LISTS.contains(&PageComponent::Li));
     }
 
     // ---------- Deprecation-bridge conversions ----------

@@ -2,11 +2,11 @@
 $schema:
     phase: number(required)
     total_phases: number(required)
+    plan: file(required)
 phase: 1
 total_phases: 0
-plan: ""
 dir: "$(dirname '{{plan}}')"
-area: "{{ctx.current_package_area == 'root' ? ctx.current_package : ctx.current_package_area}}"
+area: "{{ctx.current_package_area == 'root' ? ctx.current_package || '' : ctx.current_package_area}}"
 pass_icon: "{{ _loop_is_last ? '✅' : '🧑‍💻' }}"
 start:
     message: "🎬  starting the implementation of phase **#{{phase}}** of `{{ctx.current_package_area}}/{{plan}}`"
@@ -18,17 +18,6 @@ blocked:
 failure:
     say: "Phase {{phase}} of a plan in the {{area}} package area, ran into problems!"
     message: "❌️  phase {{phase}} (_of {{total_phases}}_) failed in the plan `{{area}}/{{plan}}`"
-loop:
-    until: "phase > total_phases"
-    action: increment(phase)
-next:
-    when: suggest
-    compose: "@prompts/review-feature.md"
-    with_frontmatter:
-        iteration: 1
-        dir: "{{dir}}"
-        spec: "() => find_file({{dir}}/review*.md)"
-        design: "() => find_file({{dir}}/tech-design*.md)"
 ---
 ::block when="total_phases"
 # Implement Phase {{phase}} of {{total_phases}}

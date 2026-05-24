@@ -74,6 +74,7 @@ pub struct DarkmatterPage {
     line_numbers: bool,
     alignments: HashMap<PageComponent, PageAlignment>,
     fills: HashMap<PageComponent, PageFill>,
+    list_left_margins: HashMap<PageComponent, WidthUnit>,
     options: TerminalOptions,
     /// Stored markdown for [`TerminalRenderable`] support.
     markdown: Option<Markdown>,
@@ -101,6 +102,7 @@ impl DarkmatterPage {
             line_numbers: false,
             alignments: HashMap::new(),
             fills: HashMap::new(),
+            list_left_margins: HashMap::new(),
             options: TerminalOptions::default(),
             markdown: None,
             layout: Layout::default(),
@@ -161,19 +163,44 @@ impl DarkmatterPage {
 
     /// Resolve alignment for the given component, defaulting to
     /// [`PageAlignment::Left`].
+    ///
+    /// For the concrete list variants (`Ul`, `Ol`, `Li`), falls back to the
+    /// deprecated [`PageComponent::Lists`] entry when no explicit entry exists.
     pub fn alignment_for(&self, component: PageComponent) -> PageAlignment {
         self.alignments
             .get(&component)
             .copied()
+            .or_else(|| {
+                if PageComponent::LISTS.contains(&component) {
+                    self.alignments.get(&PageComponent::Lists).copied()
+                } else {
+                    None
+                }
+            })
             .unwrap_or(PageAlignment::Left)
     }
 
     /// Resolve fill for the given component, defaulting to [`PageFill::Full`].
+    ///
+    /// For the concrete list variants (`Ul`, `Ol`, `Li`), falls back to the
+    /// deprecated [`PageComponent::Lists`] entry when no explicit entry exists.
     pub fn fill_for(&self, component: PageComponent) -> PageFill {
         self.fills
             .get(&component)
             .copied()
+            .or_else(|| {
+                if PageComponent::LISTS.contains(&component) {
+                    self.fills.get(&PageComponent::Lists).copied()
+                } else {
+                    None
+                }
+            })
             .unwrap_or(PageFill::Full)
+    }
+
+    /// Resolve list left margin for the given component.
+    pub fn list_left_margin_for(&self, component: PageComponent) -> Option<WidthUnit> {
+        self.list_left_margins.get(&component).copied()
     }
 
     /// Read-only view of the underlying [`TerminalOptions`].
@@ -367,6 +394,8 @@ impl DarkmatterPage {
         for component in PageComponent::ALL {
             self.alignments.insert(component, alignment);
         }
+        #[allow(deprecated)]
+        self.alignments.insert(PageComponent::Lists, alignment);
         self
     }
 
@@ -381,6 +410,26 @@ impl DarkmatterPage {
         for component in PageComponent::ALL {
             self.fills.insert(component, fill);
         }
+        #[allow(deprecated)]
+        self.fills.insert(PageComponent::Lists, fill);
+        self
+    }
+
+    /// Set the list left margin for a single [`PageComponent`].
+    ///
+    /// # Panics
+    ///
+    /// Panics when `component` is not [`PageComponent::Ul`].
+    /// Set the list left margin for a single [`PageComponent`].
+    ///
+    /// # Panics
+    ///
+    /// Panics when `component` is not [`PageComponent::Ul`].
+    pub fn with_list_left_margin(mut self, component: PageComponent, margin: WidthUnit) -> Self {
+        if component != PageComponent::Ul {
+            panic!("with_list_left_margin only accepts PageComponent::Ul");
+        }
+        self.list_left_margins.insert(component, margin);
         self
     }
 
@@ -494,6 +543,7 @@ impl DarkmatterPage {
             self.options.color_mode,
             self.alignments.clone(),
             self.fills.clone(),
+            self.list_left_margins.clone(),
         )?;
 
         // Build derived TerminalOptions.
@@ -582,6 +632,7 @@ impl DarkmatterPage {
             self.options.color_mode,
             self.alignments.clone(),
             self.fills.clone(),
+            self.list_left_margins.clone(),
         )?;
 
         // Build HtmlOptions from TerminalOptions.
@@ -622,6 +673,7 @@ impl DarkmatterPage {
             && !self.line_numbers
             && self.alignments.is_empty()
             && self.fills.is_empty()
+            && self.list_left_margins.is_empty()
     }
 
     /// Validate horizontal space requirements against the captured terminal
@@ -1008,6 +1060,10 @@ fn component_selectors(component: PageComponent) -> &'static str {
         PageComponent::BlockQuotes => "blockquote",
         PageComponent::Tables => "table",
         PageComponent::CodeBlocks => ".code-block, pre",
+        PageComponent::Ul => "ul",
+        PageComponent::Ol => "ol",
+        PageComponent::Li => "li",
+        #[allow(deprecated)]
         PageComponent::Lists => "ul, ol",
     }
 }
@@ -1126,6 +1182,49 @@ mod tests {
             page.fill_for(PageComponent::Tables),
             PageFill::Pad(WidthUnit::Fixed(2))
         );
+    }
+
+    #[test]
+    #[allow(deprecated)]
+    fn alignment_for_ul_falls_back_to_lists() {
+        let page = page().use_alignment(PageComponent::Lists, PageAlignment::Right);
+        assert_eq!(page.alignment_for(PageComponent::Ul), PageAlignment::Right);
+        assert_eq!(page.alignment_for(PageComponent::Ol), PageAlignment::Right);
+        assert_eq!(page.alignment_for(PageComponent::Li), PageAlignment::Right);
+    }
+
+    #[test]
+    #[allow(deprecated)]
+    fn fill_for_ol_falls_back_to_lists() {
+        let page = page().with_fill(PageComponent::Lists, PageFill::Max(WidthUnit::Fixed(40)));
+        assert_eq!(
+            page.fill_for(PageComponent::Ol),
+            PageFill::Max(WidthUnit::Fixed(40))
+        );
+        assert_eq!(
+            page.fill_for(PageComponent::Ul),
+            PageFill::Max(WidthUnit::Fixed(40))
+        );
+        assert_eq!(
+            page.fill_for(PageComponent::Li),
+            PageFill::Max(WidthUnit::Fixed(40))
+        );
+    }
+
+    #[test]
+    fn list_left_margin_accessor() {
+        let page = page().with_list_left_margin(PageComponent::Ul, WidthUnit::Fixed(4));
+        assert_eq!(
+            page.list_left_margin_for(PageComponent::Ul),
+            Some(WidthUnit::Fixed(4))
+        );
+        assert_eq!(page.list_left_margin_for(PageComponent::Ol), None);
+    }
+
+    #[test]
+    #[should_panic(expected = "with_list_left_margin only accepts PageComponent list variants")]
+    fn list_left_margin_rejects_non_list_component() {
+        let _ = page().with_list_left_margin(PageComponent::Images, WidthUnit::Fixed(4));
     }
 
     #[test]

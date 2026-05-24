@@ -1028,8 +1028,13 @@ fn provider_field_matches_registry_key() {
 
 /// The OnceLock-backed registry array must have exactly one slot per
 /// [`Provider`] variant.
+///
+/// Nextest runs each test in its own process, so the `OnceLock` starts
+/// uninitialized — we must trigger lazy initialization via
+/// [`provider_info`] before reading `REGISTRY.get()`.
 #[test]
 fn registry_array_length_matches_variant_count() {
+    let _ = provider_info(PROVIDERS_DISPLAY_ORDER[0]);
     let registry = super::registry::REGISTRY
         .get()
         .expect("registry initialized");
