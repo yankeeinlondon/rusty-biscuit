@@ -121,10 +121,10 @@ fn parse_context_variables_content(content: &str) -> Vec<ContextSection> {
 
         // Table row — only collect from Variable tables
         if trimmed.starts_with('|') && in_table {
-            if current_table_header.as_deref() == Some("Variable") {
-                if let Some(var) = parse_table_row(trimmed) {
-                    pending_variables.push(var);
-                }
+            if current_table_header.as_deref() == Some("Variable")
+                && let Some(var) = parse_table_row(trimmed)
+            {
+                pending_variables.push(var);
             }
             continue;
         }
@@ -276,8 +276,10 @@ fn type_to_display_text(type_name: &str, key: &str, description: &str) -> String
             };
 
             // Apply variant to String or String[]
-            if variant.is_some() && (display_token == "String" || display_token == "String[]") {
-                format!("String({})", variant.unwrap())
+            if let Some(variant) = variant
+                && (display_token == "String" || display_token == "String[]")
+            {
+                format!("String({variant})")
             } else {
                 display_token
             }
