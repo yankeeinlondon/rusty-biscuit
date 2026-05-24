@@ -66,8 +66,7 @@ test *args="":
 #
 # By default, missing harnesses (WezTerm / tmux) cause the suite to skip
 # cleanly. Set `BISCUIT_TEST_LEVEL_REQUIRED=2` in the environment to convert
-# missing harnesses into hard failures (CI use). The legacy
-# `DARKMATTER_LEVEL2_REQUIRED=1` is still honored as a compatibility shim.
+# missing harnesses into hard failures (CI use).
 test-l2 *args="":
     @echo
     @echo -e "Running {{ BOLD }}Level-2{{ RESET }} render-tree terminal tests"
@@ -105,9 +104,9 @@ doctest *args="":
     @just _doctest {{ LIBRARY }} {{ args }}
     @just _doctest {{ CLI }} {{ args }}
 
-# not applicable: darkmatter has no cargo-fuzz targets yet (Phase 5 scope)
-fuzz:
-    @echo "fuzz: not applicable for darkmatter (planned Phase 5)"
+# Fuzz target for darkmatter markdown parser.
+fuzz *args="":
+    @just _fuzz lib markdown_parser {{ args }}
 
 # Canonical PR-gate runner: sanity → lint → doctest → test → test-l2 → test-browser.
 all:

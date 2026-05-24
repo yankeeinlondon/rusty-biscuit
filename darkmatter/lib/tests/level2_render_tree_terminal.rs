@@ -21,8 +21,8 @@
 //!    actually emitted into a real terminal.
 //! 4. Captures the rendered frame and asserts on visible structure.
 //!
-//! Tests skip silently when `WEZTERM_UNIX_SOCKET` is not set or the
-//! `wezterm` binary is missing. Set `DARKMATTER_LEVEL2_REQUIRED=1` in the
+//! Tests skip cleanly when `WEZTERM_UNIX_SOCKET` is not set or the
+//! `wezterm` binary is missing. Set `BISCUIT_TEST_LEVEL_REQUIRED=2` in the
 //! environment to convert that into a hard failure — CI jobs that provision
 //! WezTerm should set this so Level 2 coverage is enforced, not nominal.
 //!
@@ -59,22 +59,8 @@ use std::time::{Duration, Instant};
 use tempfile::tempdir;
 use test_toolkit::{Level, LevelDecision, evaluate_level};
 
-/// Compatibility shim: honour the deprecated `DARKMATTER_LEVEL2_REQUIRED`
-/// variable as an alias for `BISCUIT_TEST_LEVEL_REQUIRED=2`. The new helper
-/// is preferred; the alias keeps existing CI scripts working until they
-/// migrate.
+/// Gating decision for Level-2 WezTerm tests.
 fn wezterm_decision() -> LevelDecision {
-    let legacy_required = matches!(
-        std::env::var("DARKMATTER_LEVEL2_REQUIRED").as_deref(),
-        Ok("1") | Ok("true") | Ok("TRUE")
-    );
-    if legacy_required && std::env::var("BISCUIT_TEST_LEVEL_REQUIRED").is_err() {
-        // SAFETY: test binaries serialize env access through `serial_test`.
-        // Setting the unified variable on first call upgrades the alias.
-        unsafe {
-            std::env::set_var("BISCUIT_TEST_LEVEL_REQUIRED", "2");
-        }
-    }
     evaluate_level(Level::L2, WezTermHarness::available(), "WezTerm")
 }
 

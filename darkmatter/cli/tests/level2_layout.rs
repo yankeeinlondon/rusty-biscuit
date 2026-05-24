@@ -14,7 +14,7 @@
 //!
 //! ## CI enforcement
 //!
-//! Set `DARKMATTER_LEVEL2_REQUIRED=1` in the environment to convert a missing
+//! Set `BISCUIT_TEST_LEVEL_REQUIRED=2` in the environment to convert a missing
 //! WezTerm into a hard failure rather than a silent skip. CI jobs that
 //! provision WezTerm should always set this so Level 2 coverage is
 //! actually enforced, not just nominally present.
@@ -29,19 +29,8 @@ use std::time::{Duration, Instant};
 use tempfile::tempdir;
 use test_toolkit::{Level, LevelDecision, evaluate_level};
 
-/// Compatibility shim: honour the deprecated `DARKMATTER_LEVEL2_REQUIRED`
-/// variable as an alias for `BISCUIT_TEST_LEVEL_REQUIRED=2`.
+/// Gating decision for Level-2 WezTerm tests.
 fn wezterm_decision() -> LevelDecision {
-    let legacy_required = matches!(
-        std::env::var("DARKMATTER_LEVEL2_REQUIRED").as_deref(),
-        Ok("1") | Ok("true") | Ok("TRUE")
-    );
-    if legacy_required && std::env::var("BISCUIT_TEST_LEVEL_REQUIRED").is_err() {
-        // SAFETY: test binaries serialize env access through `serial_test`.
-        unsafe {
-            std::env::set_var("BISCUIT_TEST_LEVEL_REQUIRED", "2");
-        }
-    }
     evaluate_level(Level::L2, WezTermHarness::available(), "WezTerm")
 }
 
