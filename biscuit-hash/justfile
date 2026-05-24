@@ -66,9 +66,9 @@ lint:
     @just _lint biscuit-hash
     @just _lint biscuit-hash-cli
 
-# Criterion benches (planned in Phase 4; documented no-op until then).
-bench:
-    @echo "bench: not applicable for biscuit-hash yet (planned Phase 4)"
+# Criterion benches for biscuit-hash hashing algorithms.
+bench *args="":
+    @just _bench biscuit-hash {{ args }}
 
 # Per-package LCOV coverage for the library and CLI.
 coverage *args="":
