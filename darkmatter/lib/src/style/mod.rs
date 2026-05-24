@@ -50,8 +50,8 @@ pub mod warning;
 mod coverage_tests;
 
 pub use apply::{
-    apply_component_style, apply_page_style, ComponentStyleOverrides, PageStyleOverrides,
-    StyleApplyError,
+    apply_component_style, apply_list_style, apply_page_style, ComponentStyleOverrides,
+    ListStyleOverrides, PageStyleOverrides, StyleApplyError,
 };
 pub use color::StyleColor;
 pub use error::StyleParseError;

@@ -55,6 +55,9 @@ pub struct PageStyleOverrides {
     pub alignment: bool,
     pub align_images: bool,
     pub align_lists: bool,
+    pub align_ul: bool,
+    pub align_ol: bool,
+    pub align_li: bool,
     pub align_block_quotes: bool,
     pub align_tables: bool,
     pub align_code_blocks: bool,
@@ -87,9 +90,10 @@ impl PageStyleOverrides {
     fn alignment_claimed_for(&self, component: PageComponent) -> bool {
         match component {
             PageComponent::Images => self.align_images,
-            PageComponent::Ul | PageComponent::Ol | PageComponent::Li | PageComponent::Lists => {
-                self.align_lists
-            }
+            PageComponent::Ul => self.align_ul || self.align_lists,
+            PageComponent::Ol => self.align_ol || self.align_lists,
+            PageComponent::Li => self.align_li || self.align_lists,
+            PageComponent::Lists => self.align_lists,
             PageComponent::BlockQuotes => self.align_block_quotes,
             PageComponent::Tables => self.align_tables,
             PageComponent::CodeBlocks => self.align_code_blocks,
@@ -394,6 +398,111 @@ pub fn apply_component_style(
             overrides.block_quotes_alignment,
             overrides.block_quotes_fill,
         )?;
+    }
+
+    Ok(page)
+}
+
+/// Apply parsed list-level style (`style.ul.*`, `style.ol.*`, `style.li.*`)
+/// onto a [`DarkmatterPage`] builder.
+///
+/// `overrides` carries the field-level CLI claims constructed by
+/// `darkmatter-cli`; for any field where the corresponding bool is `true`,
+/// the matching frontmatter value is skipped so the CLI flag stays in effect.
+///
+/// Should be called **after** [`apply_page_style`] and [`apply_component_style`]
+/// so that list-specific frontmatter can override broader broadcasts.
+///
+/// ## Errors
+///
+/// - [`StyleApplyError::WidthMaxWidthConflict`] when both `width` and
+///   `max-width` appear inside the same list bucket.
+/// - [`StyleApplyError::ComponentInvalidCssLength`] when `width`, `max-width`,
+///   or `left-margin` is a [`Length::Css(_)`] value.
+pub fn apply_list_style(
+    page: DarkmatterPage,
+    style: &StyleFrontmatter,
+    overrides: ListStyleOverrides,
+) -> Result<DarkmatterPage, StyleApplyError> {
+    let mut page = page;
+
+    if let Some(ul) = style.ul.as_ref() {
+        page = apply_list_bucket(
+            page,
+            "ul",
+            PageComponent::Ul,
+            &ul.common,
+            overrides.ul_alignment,
+            overrides.ul_fill,
+        )?;
+
+        if !overrides.ul_left_margin
+            && let Some(left_margin) = ul.left_margin.as_ref()
+        {
+            let unit = lower_length_to_width_unit(left_margin, "ul", "left-margin")?;
+            page = page.with_list_left_margin(PageComponent::Ul, unit);
+        }
+    }
+
+    if let Some(ol) = style.ol.as_ref() {
+        page = apply_list_bucket(
+            page,
+            "ol",
+            PageComponent::Ol,
+            &ol.common,
+            overrides.ol_alignment,
+            overrides.ol_fill,
+        )?;
+    }
+
+    if let Some(li) = style.li.as_ref() {
+        page = apply_list_bucket(
+            page,
+            "li",
+            PageComponent::Li,
+            &li.common,
+            overrides.li_alignment,
+            overrides.li_fill,
+        )?;
+    }
+
+    Ok(page)
+}
+
+/// Apply one list bucket's [`CommonStyle`] onto `page`.
+///
+/// `bucket` is the canonical kebab-case label (`"ul"`, `"ol"`, `"li"`).
+/// `component` is the matching [`PageComponent`] for alignment/fill storage.
+fn apply_list_bucket(
+    page: DarkmatterPage,
+    bucket: &'static str,
+    component: PageComponent,
+    style: &CommonStyle,
+    alignment_claimed: bool,
+    fill_claimed: bool,
+) -> Result<DarkmatterPage, StyleApplyError> {
+    let mut page = page;
+
+    // Validate exclusivity of width vs max-width unconditionally.
+    match (style.width.as_ref(), style.max_width.as_ref()) {
+        (Some(_), Some(_)) => {
+            return Err(StyleApplyError::WidthMaxWidthConflict { bucket });
+        }
+        (Some(width), None) if !fill_claimed => {
+            let unit = lower_length_to_fill(width, bucket, "width")?;
+            page = page.with_fill(component, PageFill::Explicit(unit));
+        }
+        (None, Some(max_width)) if !fill_claimed => {
+            let unit = lower_length_to_fill(max_width, bucket, "max-width")?;
+            page = page.with_fill(component, PageFill::Max(unit));
+        }
+        _ => {}
+    }
+
+    if !alignment_claimed
+        && let Some(alignment) = style.alignment
+    {
+        page = page.use_alignment(component, map_alignment(alignment));
     }
 
     Ok(page)
@@ -1180,5 +1289,159 @@ mod tests {
             out.fill_for(PageComponent::BlockQuotes),
             PageFill::Max(WidthUnit::Fixed(60))
         );
+    }
+
+    // ----- apply_list_style -----
+
+    use crate::style::schema::{LiStyle, OlStyle, UlStyle};
+
+    fn style_with_ul(common: CommonStyle, left_margin: Option<Length>) -> StyleFrontmatter {
+        StyleFrontmatter {
+            ul: Some(UlStyle { common, left_margin }),
+            ..StyleFrontmatter::default()
+        }
+    }
+
+    fn style_with_ol(common: CommonStyle) -> StyleFrontmatter {
+        StyleFrontmatter {
+            ol: Some(OlStyle { common }),
+            ..StyleFrontmatter::default()
+        }
+    }
+
+    fn style_with_li(common: CommonStyle) -> StyleFrontmatter {
+        StyleFrontmatter {
+            li: Some(LiStyle { common }),
+            ..StyleFrontmatter::default()
+        }
+    }
+
+    #[test]
+    fn ul_left_margin_applied() {
+        let style = style_with_ul(
+            CommonStyle::default(),
+            Some(Length::Ch(4)),
+        );
+        let out = apply_list_style(page(80), &style, ListStyleOverrides::default()).unwrap();
+        assert_eq!(
+            out.list_left_margin_for(PageComponent::Ul),
+            Some(WidthUnit::Fixed(4))
+        );
+    }
+
+    #[test]
+    fn ol_alignment_applied() {
+        let style = style_with_ol(CommonStyle {
+            alignment: Some(Alignment::Right),
+            ..CommonStyle::default()
+        });
+        let out = apply_list_style(page(80), &style, ListStyleOverrides::default()).unwrap();
+        assert_eq!(
+            out.alignment_for(PageComponent::Ol),
+            PageAlignment::Right
+        );
+    }
+
+    #[test]
+    fn li_width_applied() {
+        let style = style_with_li(CommonStyle {
+            width: Some(Length::Ch(30)),
+            ..CommonStyle::default()
+        });
+        let out = apply_list_style(page(80), &style, ListStyleOverrides::default()).unwrap();
+        assert_eq!(
+            out.fill_for(PageComponent::Li),
+            PageFill::Explicit(WidthUnit::Fixed(30))
+        );
+    }
+
+    #[test]
+    fn ul_width_max_width_conflict() {
+        let style = style_with_ul(
+            CommonStyle {
+                width: Some(Length::Ch(40)),
+                max_width: Some(Length::Ch(60)),
+                ..CommonStyle::default()
+            },
+            None,
+        );
+        let err = apply_list_style(page(80), &style, ListStyleOverrides::default()).unwrap_err();
+        assert_eq!(
+            err,
+            StyleApplyError::WidthMaxWidthConflict { bucket: "ul" }
+        );
+    }
+
+    #[test]
+    fn ol_width_max_width_conflict() {
+        let style = style_with_ol(CommonStyle {
+            width: Some(Length::Ch(40)),
+            max_width: Some(Length::Ch(60)),
+            ..CommonStyle::default()
+        });
+        let err = apply_list_style(page(80), &style, ListStyleOverrides::default()).unwrap_err();
+        assert_eq!(
+            err,
+            StyleApplyError::WidthMaxWidthConflict { bucket: "ol" }
+        );
+    }
+
+    #[test]
+    fn li_width_max_width_conflict() {
+        let style = style_with_li(CommonStyle {
+            width: Some(Length::Ch(40)),
+            max_width: Some(Length::Ch(60)),
+            ..CommonStyle::default()
+        });
+        let err = apply_list_style(page(80), &style, ListStyleOverrides::default()).unwrap_err();
+        assert_eq!(
+            err,
+            StyleApplyError::WidthMaxWidthConflict { bucket: "li" }
+        );
+    }
+
+    #[test]
+    fn ul_left_margin_css_rejected() {
+        use renderable::stylesheet::CssSizing;
+        let style = style_with_ul(
+            CommonStyle::default(),
+            Some(Length::Css(CssSizing::px(10.0))),
+        );
+        let err = apply_list_style(page(80), &style, ListStyleOverrides::default()).unwrap_err();
+        assert_eq!(
+            err,
+            StyleApplyError::ComponentInvalidCssLength {
+                bucket: "ul",
+                field: "left-margin",
+            }
+        );
+    }
+
+    #[test]
+    fn overrides_suppress_frontmatter() {
+        let style = style_with_ul(
+            CommonStyle {
+                alignment: Some(Alignment::Right),
+                width: Some(Length::Ch(40)),
+                ..CommonStyle::default()
+            },
+            Some(Length::Ch(4)),
+        );
+        let overrides = ListStyleOverrides {
+            ul_alignment: true,
+            ul_fill: true,
+            ul_left_margin: true,
+            ..ListStyleOverrides::default()
+        };
+        let starting = page(80)
+            .use_alignment(PageComponent::Ul, PageAlignment::Left)
+            .with_fill(PageComponent::Ul, PageFill::Max(WidthUnit::Fixed(30)));
+        let out = apply_list_style(starting, &style, overrides).unwrap();
+        assert_eq!(out.alignment_for(PageComponent::Ul), PageAlignment::Left);
+        assert_eq!(
+            out.fill_for(PageComponent::Ul),
+            PageFill::Max(WidthUnit::Fixed(30))
+        );
+        assert_eq!(out.list_left_margin_for(PageComponent::Ul), None);
     }
 }

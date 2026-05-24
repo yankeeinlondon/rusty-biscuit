@@ -1222,9 +1222,21 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "with_list_left_margin only accepts PageComponent list variants")]
-    fn list_left_margin_rejects_non_list_component() {
+    #[should_panic(expected = "with_list_left_margin only accepts PageComponent::Ul")]
+    fn list_left_margin_rejects_non_ul_component() {
         let _ = page().with_list_left_margin(PageComponent::Images, WidthUnit::Fixed(4));
+    }
+
+    #[test]
+    #[should_panic(expected = "with_list_left_margin only accepts PageComponent::Ul")]
+    fn list_left_margin_rejects_ol_component() {
+        let _ = page().with_list_left_margin(PageComponent::Ol, WidthUnit::Fixed(4));
+    }
+
+    #[test]
+    #[should_panic(expected = "with_list_left_margin only accepts PageComponent::Ul")]
+    fn list_left_margin_rejects_li_component() {
+        let _ = page().with_list_left_margin(PageComponent::Li, WidthUnit::Fixed(4));
     }
 
     #[test]
