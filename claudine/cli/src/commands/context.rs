@@ -362,7 +362,9 @@ fn render_default_report(sections: &[ContextSection]) {
 
         let columns = vec![
             TableColumn::new("Property").with_min_width(property_width),
-            TableColumn::new("Type").with_alignment(Alignment::Center),
+            TableColumn::new("Type")
+                .with_alignment(Alignment::Center)
+                .drop_when_space_is_limited::<String>(None),
             TableColumn::new("Description"),
         ];
         let mut table = Table::new().with_columns(columns);
@@ -406,7 +408,9 @@ fn render_values_report(sections: &[ContextSection]) {
 
         let columns = vec![
             TableColumn::new("Property").with_min_width(property_width),
-            TableColumn::new("Type").with_alignment(Alignment::Center),
+            TableColumn::new("Type")
+                .with_alignment(Alignment::Center)
+                .drop_when_space_is_limited::<String>(None),
             TableColumn::new("Value"),
         ];
         let mut table = Table::new().with_columns(columns);
@@ -507,6 +511,11 @@ fn parse_expressions_content(content: &str) -> Vec<ExprSection> {
 
     let mut in_table = false;
     let mut table_lines: Vec<String> = Vec::new();
+    // The Markdown table header row appears BEFORE the `|---` separator. We
+    // stash a candidate header line here so the separator can promote it
+    // into the first entry of `table_lines`; otherwise `build_expr_table`
+    // mistakes the first data row for the headers.
+    let mut pending_table_header: Option<String> = None;
     let mut in_code_block = false;
     let mut code_block_lines: Vec<String> = Vec::new();
     let mut in_ordered_list = false;
@@ -519,11 +528,15 @@ fn parse_expressions_content(content: &str) -> Vec<ExprSection> {
 
         // Headings
         if let Some(h2) = trimmed.strip_prefix("## ") {
+            // A non-`|---` line after a pending header means the candidate
+            // was not actually a table; drop it.
+            pending_table_header = None;
             flush_expr_current(&mut sections, &mut current_heading, &mut current_blocks);
             current_heading = Some((h2.trim().to_string(), 2));
             continue;
         }
         if let Some(h3) = trimmed.strip_prefix("### ") {
+            pending_table_header = None;
             flush_expr_current(&mut sections, &mut current_heading, &mut current_blocks);
             current_heading = Some((h3.trim().to_string(), 3));
             continue;
@@ -531,6 +544,7 @@ fn parse_expressions_content(content: &str) -> Vec<ExprSection> {
 
         // Code blocks
         if trimmed.starts_with("```") {
+            pending_table_header = None;
             if in_code_block {
                 in_code_block = false;
                 current_blocks.push(ExprBlock::CodeBlock(code_block_lines.join("\n")));
@@ -561,11 +575,22 @@ fn parse_expressions_content(content: &str) -> Vec<ExprSection> {
                 &mut in_ordered_list,
                 &mut in_unordered_list,
             );
+            // Promote the pending header line into the table so
+            // `build_expr_table` sees `lines[0]` as the actual headers.
+            if let Some(header) = pending_table_header.take() {
+                table_lines.push(header);
+            }
             in_table = true;
             continue;
         }
         if in_table && trimmed.starts_with('|') {
             table_lines.push(trimmed.to_string());
+            continue;
+        }
+        if !in_table && trimmed.starts_with('|') {
+            // Candidate table header — keep it aside until we see the
+            // `|---` separator on the next line.
+            pending_table_header = Some(trimmed.to_string());
             continue;
         }
         if in_table && !trimmed.starts_with('|') {
@@ -575,6 +600,9 @@ fn parse_expressions_content(content: &str) -> Vec<ExprSection> {
             table_lines.clear();
             in_table = false;
         }
+        // If we had a pending header line but the next line is not a
+        // separator, it was not a table after all.
+        pending_table_header = None;
 
         // List items
         if trimmed.starts_with("- ") || trimmed.starts_with("* ") {
@@ -1204,6 +1232,76 @@ mod tests {
 
         let math = sections.iter().find(|s| s.heading == "Math");
         assert!(math.is_some(), "should find Math subsection");
+    }
+
+    /// Regression: review-2 finding noted that the table header row was lost
+    /// because the parser only began collecting after the `|---` separator.
+    /// `build_expr_table` then treated the first data row as headers. This
+    /// asserts the actual documented headers survive parsing and the first
+    /// data row remains a body row.
+    #[test]
+    fn expressions_table_keeps_header_row_and_first_data_row() {
+        let sections = parse_expressions_content(TEST_EXPR_MD);
+
+        let truthiness = sections
+            .iter()
+            .find(|s| s.heading == "Truthiness")
+            .expect("Truthiness section must be present");
+
+        let table = truthiness
+            .blocks
+            .iter()
+            .find_map(|b| match b {
+                ExprBlock::Table { headers, rows } => Some((headers, rows)),
+                _ => None,
+            })
+            .expect("Truthiness section must include a Table block");
+
+        let (headers, rows) = table;
+        assert_eq!(
+            headers,
+            &vec!["Value".to_string(), "Falsy".to_string()],
+            "headers must come from the row above `|---`, not the first data row",
+        );
+        assert_eq!(rows.len(), 2, "both data rows must survive");
+        assert_eq!(
+            rows[0],
+            vec!["`null`".to_string(), "yes".to_string()],
+            "first data row must be preserved as a body row",
+        );
+        assert_eq!(rows[1], vec!["`false`".to_string(), "no".to_string()]);
+    }
+
+    /// Regression: the real `darkmatter-expressions.md` Truthiness table
+    /// previously parsed with `null`/`yes` as headers. Make sure the
+    /// production document parses with the documented `Value`/`Falsy`
+    /// headers.
+    #[test]
+    fn real_expressions_truthiness_table_has_correct_headers() {
+        let sections = parse_expressions_doc();
+        let truthiness = sections
+            .iter()
+            .find(|s| s.heading == "Truthiness")
+            .expect("Truthiness section must exist in real document");
+
+        let (headers, rows) = truthiness
+            .blocks
+            .iter()
+            .find_map(|b| match b {
+                ExprBlock::Table { headers, rows } => Some((headers, rows)),
+                _ => None,
+            })
+            .expect("Truthiness section in real doc must have a Table");
+
+        assert!(
+            headers.iter().any(|h| h.eq_ignore_ascii_case("Value")),
+            "Truthiness headers must include `Value`, got {headers:?}",
+        );
+        assert!(
+            headers.iter().any(|h| h.eq_ignore_ascii_case("Falsy")),
+            "Truthiness headers must include `Falsy`, got {headers:?}",
+        );
+        assert!(!rows.is_empty(), "Truthiness table must have rows");
     }
 
     #[test]
