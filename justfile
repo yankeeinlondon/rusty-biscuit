@@ -15,12 +15,13 @@ import "./just/spec.just"
 
 # List of areas in this monorepo
 
-areas := "biscuit-hash biscuit-location biscuit-speaks biscuit-terminal schematic biscuit-file unchained-ai playa so-you-say tree-hugger darkmatter sniff model-citizen claudine research queue homelab"
+areas := "biscuit-hash biscuit-location biscuit-speaks biscuit-terminal schematic biscuit-file unchained-ai playa tree-hugger darkmatter sniff model-citizen claudine research queue homelab"
 BOLD := '\033[1m'
 DIM := '\033[2m'
 ITALIC := '\033[3m'
 RESET := '\033[0m'
 RED := '\033[31m'
+GREEN := '\033[32m'
 
 default:
     #!/usr/bin/env bash
@@ -43,6 +44,9 @@ modules:
 test *args="":
     #!/usr/bin/env bash
     set -euo pipefail
+    failed_areas=()
+    passed_areas=()
+
     if [[ -z "{{ args }}" ]]; then
         echo ""
         echo "Running tests for all areas..."
@@ -53,7 +57,12 @@ test *args="":
                 if (cd "./$area" && just --summary 2>/dev/null) | grep -qw "test"; then
                     echo
                     echo "Testing $area..."
-                    (cd "./$area" && just test) || echo "Warning: tests failed in $area"
+                    if (cd "./$area" && just test); then
+                        passed_areas+=("$area")
+                    else
+                        failed_areas+=("$area")
+                        just _message "Tests failed in $area"
+                    fi
                 else
                     echo "- no test command for the area **$area**" >&2
                 fi
@@ -72,16 +81,38 @@ test *args="":
                 if (cd "./$area" && just --summary 2>/dev/null) | grep -qw "test"; then
                     echo
                     echo "Testing $area..."
-                    (cd "./$area" && just test) || exit 1
+                    if (cd "./$area" && just test); then
+                        passed_areas+=("$area")
+                    else
+                        failed_areas+=("$area")
+                        just _message "Tests failed in $area"
+                    fi
                 else
                     echo "Error: area '$area' has no test recipe" >&2
-                    exit 1
+                    failed_areas+=("$area (no test recipe)")
                 fi
             else
                 echo "Error: area '$area' not found or has no justfile" >&2
-                exit 1
+                failed_areas+=("$area (not found / no justfile)")
             fi
         done
+    fi
+
+    echo ""
+    echo "================================================"
+    echo "Test Summary"
+    echo "================================================"
+    echo -e "{{ GREEN }}Passed{{ RESET }} (${#passed_areas[@]}): ${passed_areas[*]:-(none)}"
+    if [[ ${#failed_areas[@]} -gt 0 ]]; then
+        echo -e "{{ RED }}Failed{{ RESET }} (${#failed_areas[@]}): ${failed_areas[*]}"
+    else
+        echo -e "{{ RED }}Failed{{ RESET }} (${#failed_areas[@]}): (none)"
+    fi
+    echo "================================================"
+    echo ""
+
+    if [[ ${#failed_areas[@]} -gt 0 ]]; then
+        exit 1
     fi
 
 # detect which monorepo areas have changed files compared to the upstream branch
@@ -261,6 +292,26 @@ lint:
           fi
       done
 
+# run sanity checks (all areas, or specific areas: just sanity claudine darkmatter)
+sanity *args="":
+    @just _orchestrate sanity {{ args }}
+
+# run benchmarks (all areas, or specific areas: just bench claudine darkmatter)
+bench *args="":
+    @just _orchestrate bench {{ args }}
+
+# run coverage (all areas, or specific areas: just coverage claudine darkmatter)
+coverage *args="":
+    @just _orchestrate coverage {{ args }}
+
+# run fuzz targets (all areas, or specific areas: just fuzz claudine darkmatter)
+fuzz *args="":
+    @just _orchestrate fuzz {{ args }}
+
+# run all canonical tiers (all areas, or specific areas: just all claudine darkmatter)
+all *args="":
+    @just _orchestrate all {{ args }}
+
 # commits all the staged changes using model from MODEL or COMMIT_MODEL in OpenCode
 commit:
     @echo ""
@@ -344,6 +395,81 @@ _ensure-build-deps:
 # sync a just recipe from one justfile to all others that have it
 sync-recipe recipe source:
     @./scripts/sync-recipe.sh "{{ recipe }}" "{{ source }}"
+
+# Internal helper: run a named recipe across all curated areas (or specific areas).
+_orchestrate recipe *args="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    failed_areas=()
+    passed_areas=()
+
+    if [[ -z "{{ args }}" ]]; then
+        echo ""
+        echo "Running {{ recipe }} for all areas..."
+        echo "------------------------------------------------"
+        echo ""
+        for area in {{ areas }}; do
+            if [ -f "$area/justfile" ]; then
+                if (cd "./$area" && just --summary 2>/dev/null) | grep -qw "{{ recipe }}"; then
+                    echo
+                    echo "{{ recipe }} $area..."
+                    if (cd "./$area" && just {{ recipe }}); then
+                        passed_areas+=("$area")
+                    else
+                        failed_areas+=("$area")
+                        just _message "{{ recipe }} failed in $area"
+                    fi
+                else
+                    echo "- no {{ recipe }} command for the area **$area**" >&2
+                fi
+            else
+                echo "- no justfile for the area **$area**" >&2
+            fi
+        done
+    else
+        IFS=', ' read -ra areas <<< "{{ args }}"
+        echo ""
+        echo "Running {{ recipe }} for: ${areas[*]}"
+        echo "------------------------------------------------"
+        echo ""
+        for area in "${areas[@]}"; do
+            if [ -d "$area" ] && [ -f "$area/justfile" ]; then
+                if (cd "./$area" && just --summary 2>/dev/null) | grep -qw "{{ recipe }}"; then
+                    echo
+                    echo "{{ recipe }} $area..."
+                    if (cd "./$area" && just {{ recipe }}); then
+                        passed_areas+=("$area")
+                    else
+                        failed_areas+=("$area")
+                        just _message "{{ recipe }} failed in $area"
+                    fi
+                else
+                    echo "Error: area '$area' has no {{ recipe }} recipe" >&2
+                    failed_areas+=("$area (no {{ recipe }} recipe)")
+                fi
+            else
+                echo "Error: area '$area' not found or has no justfile" >&2
+                failed_areas+=("$area (not found / no justfile)")
+            fi
+        done
+    fi
+
+    echo ""
+    echo "================================================"
+    echo "{{ recipe }} summary"
+    echo "================================================"
+    echo -e "{{ GREEN }}Passed{{ RESET }} (${#passed_areas[@]}): ${passed_areas[*]:-(none)}"
+    if [[ ${#failed_areas[@]} -gt 0 ]]; then
+        echo -e "{{ RED }}Failed{{ RESET }} (${#failed_areas[@]}): ${failed_areas[*]}"
+    else
+        echo -e "{{ RED }}Failed{{ RESET }} (${#failed_areas[@]}): (none)"
+    fi
+    echo "================================================"
+    echo ""
+
+    if [[ ${#failed_areas[@]} -gt 0 ]]; then
+        exit 1
+    fi
 
 audio-reset:
     sudo killall coreaudiod
