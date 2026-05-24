@@ -2,6 +2,14 @@
 phases: 5
 created: 2026-05-23
 start_phase: 1
+source_files_during_phase_1:
+  - sniff/lib/src/filesystem/git/worktree.rs
+  - sniff/lib/src/filesystem/git/mod.rs
+docs_updated_during_phase_1: []
+docs_created_during_phase_1: []
+skills_files_updated_during_phase_1: []
+packages:
+  - sniff
 ---
 
 ## Phase 1 - Library Data Model and Discovery
