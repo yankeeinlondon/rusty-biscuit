@@ -25,6 +25,11 @@ The following context variables are only available in a monorepo:
     - when in a "package" folder then return `{package} package`
     - when in the root folder of a monorepo return an empty string
 
+- `area_root`
+    - returns repo root if not a monorepo
+    - returns the fully qualified absolute path to the root of the `area`
+    - no trailing `/` character
+
 - `current_packages` - _lists all packages in a monorepo which reside under the current directory_
     - format of the output should mimic:
 
@@ -52,9 +57,15 @@ The following context variables are only available in a monorepo:
         - or `'{package}' is not used by other packages in this monorepo`
     - nested level is the dependent packages
 
+### Date and Time -> Time Only
+
+- `time_utc` - same as `time` except the time is in UTC and we append ` (UTC)` to the end of the string
+- `time_military_utc` - same as `time_military` but the time is in UTC and we append ` (UTC)` to the end of the string
+
 ## Small Changes to Existing Context Variables
 
 - `repo_root` is returning the correct directory but it's terminating with a `/` character which problematic. Do not add the closing `/`. This same change was already made to `sniff repo root` CLI so these will be consistent.
+
 
 
 ## Context Expression Functions
@@ -68,6 +79,7 @@ In this feature we are going to add to the available functions offered. Before w
     - the expression engine will check for PascalCase too and use it as a fallback
     - this is a convenience and we don't want to overly promote this externally
 - all functions are involved in _retrieving_ information and are NOT allowed to mutate any external state (e.g., external to the document they are defined on)
+- 
 
 
 ### File System
@@ -108,11 +120,7 @@ In this feature we are going to add to the available functions offered. Before w
     - can validate the schema of a Markdown or YAML document
     - if the `$schema` property is not set then this will always return **true**
     - otherwise the schema will be used to validate the frontmatter and returns the boolean outcome
-    - review the [schema documentation]() for more on Darkmatter schemas
-
-
-
-
+    - review the [schema documentation](@darkmatter/docs/topics/schema-definition.md) implemented in Darkmatter and exposed in Claudine for more on schema support
 
 > NOTE: for all filepath parameters, there should be a small "normalization" step which ensure that filepaths like `foo//bar` are converted to `foo/bar` and references like `file://foo/bar` have the `file://` prefix removed.
 
@@ -120,22 +128,24 @@ In this feature we are going to add to the available functions offered. Before w
 ### Date/Time Functions
 
 - `date(iso, format)` - allows you to reformat a valid ISO Date or ISO DateTime into a formatted date:
-    - `MMM DD` / `short`:
-        - `July 12<dim>th</dim>`
-    - `MMM DD yyyy` / `short-optional`:
-        - `July 12<dim>th</dim>` (for dates in current year)
+    - `MMMM Do` / `short`:
+        - `July 12th`
+    - `MMMM Do [YYYY]` / `short-optional`:
+        - `July 12th` (for dates in current year)
         - `July 12th 1999` (for dates in a different year)
-    - `MMM DD YYYY`
+        - note: `[YYYY]` is a Darkmatter-specific extension meaning "include year only when it differs from the current year"
+    - `MMMM Do YYYY`:
         - `July 12th 2026`
-    - `DD MMM yyyy`:
+    - `D MMMM [YYYY]`:
         - `12 July` (for dates in current year)
         - `12 July 1999` (for dates in a different year)
-    - `DD MMM YYYY`:
-        - `12 July 2021` 
-    - `Do MMM DD YYYY` / `long`:
-        - `Mon, July 12<dim>th</dim>, 2021`
+        - note: same `[YYYY]` optional-year extension as above
+    - `D MMMM YYYY`:
+        - `12 July 2021`
+    - `ddd, MMMM Do, YYYY` / `long`:
+        - `Mon, July 12th, 2021`
 
 
 ## Side Effects
 
-The following expressions will allow mutations to external state
+Side Effects, unlike the Expression Engine utility functions, **do** mutate state within the local filesystem but they are setup to provide relative safe operations and will only mutate files that are within the
