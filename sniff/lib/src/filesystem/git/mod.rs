@@ -22,4 +22,6 @@ pub use types::{
     RefDecoration, RefKind, RemoteInfo, RemoteTrackingStatus, RepoStatus, UntrackedFile,
     WorktreeInfo,
 };
-pub use worktree::{get_current_worktree_info, get_current_worktree_name};
+pub use worktree::{
+    WorktreeEntry, get_current_worktree_info, get_current_worktree_name, list_worktrees,
+};
