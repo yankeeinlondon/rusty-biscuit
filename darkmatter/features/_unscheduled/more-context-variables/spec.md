@@ -13,6 +13,18 @@ In this feature we will add to this set of available context variables _and_ add
 
 The following context variables are only available in a monorepo:
 
+- `area`
+    - returns an empty string when not a monorepo
+    - when in a monorepo and in a "package area" but NOT in a "package" folder then we return the "package area"
+    - when in a "package" folder then return the package name
+    - when in the root folder of a monorepo return an empty string
+
+- `area_description`
+    - returns an empty string when not in a monorepo
+    - when in a monorepo and in a "package area" but NOT in a "package" folder then we return `{package-area} package area`
+    - when in a "package" folder then return `{package} package`
+    - when in the root folder of a monorepo return an empty string
+
 - `current_packages` - _lists all packages in a monorepo which reside under the current directory_
     - format of the output should mimic:
 
@@ -40,18 +52,28 @@ The following context variables are only available in a monorepo:
         - or `'{package}' is not used by other packages in this monorepo`
     - nested level is the dependent packages
 
+## Small Changes to Existing Context Variables
 
-## Context Functions
+- `repo_root` is returning the correct directory but it's terminating with a `/` character which problematic. Do not add the closing `/`. This same change was already made to `sniff repo root` CLI so these will be consistent.
 
-In this feature we're going to take context variables one step further to **context functions**.
 
-- a context function provides _context_ to the prompt about the surrounding environment just like **context variables** do but it's super power is that it can take _parameters_
-- a context function consists of lowercase alpha and `_` characters and the leads to the parameter section: `(p1, p2, p3, ...)`
+## Context Expression Functions
+
+We currently already have a decent set of _operators_ and _utility functions_ which are part of what we're calling the Expression Engine. This is documented in @darkmatter/docs/topics/darkmatter-expressions.md
+
+In this feature we are going to add to the available functions offered. Before we go through the additions let's remind ourselves of some key constraints we have with Expression Functions:
+
+- expected function naming should follow the "snake_case" naming convention
+    - all documentation MUST use snake_case, however
+    - the expression engine will check for PascalCase too and use it as a fallback
+    - this is a convenience and we don't want to overly promote this externally
+- all functions are involved in _retrieving_ information and are NOT allowed to mutate any external state (e.g., external to the document they are defined on)
+
 
 ### File System
 
-- `absolute(filepath)` - take a string file path and using the `FileReference` rules resolves it to a fully qualified file path
-- `relative(filepath)` - takes a string file reference and using the `FileReference` rules, and returns a relative path:
+- `absolute(file) -> file | Error::InvalidFilePath` - take a string file path and using the `FileReference` rules resolves it to a fully qualified file path
+- `relative(file) -> file | Error::InvalidFilePath` - takes a string file reference and using the `FileReference` rules, and returns a relative path:
     - if in a repo:
         - relative to the repo's root when filepath is contained within the repo
     - if not a repo:
@@ -60,24 +82,29 @@ In this feature we're going to take context variables one step further to **cont
         - `~` if it's off of the user's home directory
         - ENV variables which are a valid filepath can also be used as an alias
     - NOTE: this relative path logic should already exist in Darkmatter as part of the composition pipeline, see if that can be reused.
-- `file_exists(filepath)`
+- `file_exists(file) -> bool`
     - validates that the passed in filepath exists in the file system
-- `frontmatter(filepath, prop)` 
-    - returns the value of the specified Frontmatter property
+    - if the file passed in is an invalid file path it returns `false`
+- `frontmatter(file) -> object | Error::InvalidFilePath`
+- `frontmatter(file, prop) -> any | Error::InvalidFilePath`
+    - two signatures:
+        - when no property is provided then the full frontmatter key/value object is returned
+        - when a property is provided then the value of that particular property is returned
     - if the filepath is invalid then an error is raised 
-    - to protect against this type of error you can: `{{ ctx.file_exists(filepath) ? ctx.frontmatter(filepath, prop) : "oops" }}`
-    - if the `prop` is not defined then we return null
-- `markdown_body_empty(filepath)`
+    - to protect against this type of error you can: `{{ file_exists(filepath) ? frontmatter(filepath, prop) : "oops" }}`
+    - if the `prop` is provided but the referenced property does not exist in frontmatter we return null
+- `markdown_body_empty(filepath) -> bool | Error::InvalidFilePath`
     - checks if the Markdown file referenced is "empty" where "empty" means that the body has no characters other than potentially whitespace
     - the Markdown document _can_ have frontmatter and still be considered "empty" as the only criteria is based exclusively on the body content of the document
-- `markdown_title(filepath)`
+- `markdown_title(filepath) -> string | null | Error::InvalidFilePath`
     - results in an error if invalid filepath
     - if valid filepath then 
         - it returns the `title` Frontmatter of the document if it exists
         - if `title` is not present it will look for H1 Heading(s)
             - if single H1 Heading is found then the text for that heading is returned as the title
             - if more than one H1 Heading, the first is returned as a title and a warning message is sent to STDERR 
-- `validate_schema(filepath)`
+- `validate_schema(filepath) -> bool | Error::InvalidFilePath`
+- `validate_schema(filepath, obj) -> bool | Error::InvalidFilePath`
     - can validate the schema of a Markdown or YAML document
     - if the `$schema` property is not set then this will always return **true**
     - otherwise the schema will be used to validate the frontmatter and returns the boolean outcome
