@@ -79,8 +79,14 @@ mod tests {
 
     #[test]
     fn percent_rejects_out_of_range() {
-        assert_eq!(Length::percent(150.0), Err(LayoutError::InvalidPercent(150.0)));
-        assert_eq!(Length::percent(-1.0), Err(LayoutError::InvalidPercent(-1.0)));
+        assert_eq!(
+            Length::percent(150.0),
+            Err(LayoutError::InvalidPercent(150.0))
+        );
+        assert_eq!(
+            Length::percent(-1.0),
+            Err(LayoutError::InvalidPercent(-1.0))
+        );
         assert!(matches!(
             Length::percent(f32::NAN),
             Err(LayoutError::InvalidPercent(_))

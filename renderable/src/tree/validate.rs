@@ -378,10 +378,9 @@ fn check_node(
         }
 
         if let Err(err) = layout.validate() {
-            report.findings.push(error(
-                format!("invalid layout: {err}"),
-                span,
-            ));
+            report
+                .findings
+                .push(error(format!("invalid layout: {err}"), span));
         }
     }
 }
@@ -442,7 +441,9 @@ fn check_hints(node: &RenderNode, span: &Option<SourceSpan>, report: &mut Valida
         .attrs
         .get_hint(HintNamespace::WIDGET_COLUMNS, "left_width_kind")
     {
-        let width = node.attrs.get_hint(HintNamespace::WIDGET_COLUMNS, "left_width");
+        let width = node
+            .attrs
+            .get_hint(HintNamespace::WIDGET_COLUMNS, "left_width");
         match kind.as_str() {
             Some("fixed") => {
                 if let Some(width) = width
@@ -693,8 +694,10 @@ mod tests {
             "layout on an inline Text node must be a warning, not an error"
         );
         assert!(
-            report.findings.iter().any(|f| f.severity == Severity::Warning
-                && f.message.contains("block-level")),
+            report
+                .findings
+                .iter()
+                .any(|f| f.severity == Severity::Warning && f.message.contains("block-level")),
             "should contain a warning about block-level"
         );
         assert!(ensure_valid(&root).is_ok());
@@ -797,7 +800,8 @@ mod tests {
     fn list_marker_policy_on_non_list_is_an_error() {
         use crate::tree::ListMarkerPolicy;
         let mut para = RenderNode::paragraph(vec![RenderNode::text("x")]);
-        para.attrs.set_list_marker_policy(ListMarkerPolicy::TreeConnectors);
+        para.attrs
+            .set_list_marker_policy(ListMarkerPolicy::TreeConnectors);
         let root = RenderNode::root(vec![para]);
         let report = validate(&root, ValidationMode::Full);
         assert!(report.has_errors());
@@ -913,8 +917,11 @@ mod tests {
     fn invalid_task_state_token_is_an_error() {
         use crate::tree::HintNamespace;
         let mut item = RenderNode::list_item(Some(false), vec![]);
-        item.attrs
-            .set_hint(HintNamespace::WIDGET_TASK, "state", serde_json::json!("bogus"));
+        item.attrs.set_hint(
+            HintNamespace::WIDGET_TASK,
+            "state",
+            serde_json::json!("bogus"),
+        );
         let root = RenderNode::root(vec![RenderNode::list(false, None, vec![item])]);
         let report = validate(&root, ValidationMode::Full);
         assert!(
@@ -988,7 +995,8 @@ mod tests {
             state: TaskState::Blocked,
         });
         let mut list = RenderNode::list(false, None, vec![item]);
-        list.attrs.set_list_marker_policy(ListMarkerPolicy::TreeConnectors);
+        list.attrs
+            .set_list_marker_policy(ListMarkerPolicy::TreeConnectors);
         let mut root = RenderNode::root(vec![list]);
         root.attrs.set_sequence_join(SequenceJoin::None);
         assert!(ensure_valid(&root).is_ok());
@@ -996,8 +1004,8 @@ mod tests {
 
     #[test]
     fn empty_per_target_map_rejected_by_tree_validation() {
-        use std::collections::BTreeMap;
         use crate::layout::{Layout, TargetValue};
+        use std::collections::BTreeMap;
 
         let mut para = RenderNode::paragraph(vec![RenderNode::text("hi")]);
         para.attrs.set_layout(&Layout {

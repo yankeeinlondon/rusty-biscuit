@@ -2,13 +2,11 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::layout::{Length, TargetValue};
 use crate::layout::length::LayoutError;
+use crate::layout::{Length, TargetValue};
 
 /// Horizontal alignment of a block within its parent's available width.
-#[derive(
-    Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize,
-)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 #[cfg_attr(feature = "clap", derive(clap::ValueEnum))]
 pub enum Alignment {
