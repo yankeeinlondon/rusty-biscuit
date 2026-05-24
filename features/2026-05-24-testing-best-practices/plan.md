@@ -2,8 +2,73 @@
 phases: 6
 created: 2026-05-24
 start_phase: 1
+source_files_during_phase_4:
+  - biscuit-file/lib/benches/parsers.rs
+  - biscuit-file/lib/Cargo.toml
+  - biscuit-file/justfile
+  - biscuit-hash/lib/benches/hashing.rs
+  - biscuit-hash/lib/Cargo.toml
+  - biscuit-hash/justfile
+  - tree-hugger/lib/benches/tree_file.rs
+  - tree-hugger/lib/Cargo.toml
+  - tree-hugger/justfile
+  - renderable/benches/render.rs
+  - renderable/Cargo.toml
+  - renderable/justfile
+  - .github/workflows/bench-nightly.yml
+  - schematic/justfile
+  - schematic/define/Cargo.toml
+  - schematic/definitions/Cargo.toml
+  - schematic/gen/Cargo.toml
+  - schematic/oauth/Cargo.toml
+  - schematic/schema/Cargo.toml
+  - biscuit-location/lib/Cargo.toml
+  - biscuit-speaks/lib/Cargo.toml
+  - homelab/lib/Cargo.toml
+  - model-citizen/lib/Cargo.toml
+  - playa/lib/Cargo.toml
+  - queue/lib/Cargo.toml
+  - research/lib/Cargo.toml
+  - unchained-ai/lib/Cargo.toml
+  - biscuit-test-harness/Cargo.toml
+  - biscuit-browser-harness/Cargo.toml
+  - tools/test-toolkit/Cargo.toml
+docs_updated_during_phase_4: []
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4: []
+packages:
+  - biscuit-file
+  - biscuit-hash
+  - tree-hugger
+  - renderable
+  - darkmatter
+  - schematic
+source_files_during_phase_5:
+  - biscuit-file/lib/fuzz/Cargo.toml
+  - biscuit-file/lib/fuzz/rust-toolchain.toml
+  - biscuit-file/lib/fuzz/fuzz_targets/pdf_extract.rs
+  - biscuit-file/lib/fuzz/fuzz_targets/toml_roundtrip.rs
+  - biscuit-file/lib/fuzz/fuzz_targets/yaml_roundtrip.rs
+  - biscuit-file/lib/fuzz/fuzz_targets/json5_roundtrip.rs
+  - biscuit-file/lib/fuzz/corpus-seed/pdf/minimal.pdf
+  - biscuit-file/lib/fuzz/corpus-seed/toml/basic.toml
+  - biscuit-file/lib/fuzz/corpus-seed/yaml/basic.yaml
+  - biscuit-file/lib/fuzz/corpus-seed/json5/basic.json5
+  - biscuit-file/justfile
+  - darkmatter/lib/fuzz/Cargo.toml
+  - darkmatter/lib/fuzz/rust-toolchain.toml
+  - darkmatter/lib/fuzz/fuzz_targets/markdown_parser.rs
+  - darkmatter/lib/fuzz/corpus-seed/markdown/basic.md
+  - darkmatter/justfile
+docs_updated_during_phase_5: []
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5: []
+packages:
+  - biscuit-file
+  - darkmatter
 source_files_during_phase_3:
   - justfile
+  - just/devops.just
   - biscuit-hash/justfile
   - biscuit-location/justfile
   - biscuit-speaks/justfile
@@ -82,6 +147,33 @@ packages:
   - darkmatter-cli
   - biscuit-terminal-cli
   - tui-chrome-cli
+source_files_during_phase_6:
+  - .claude/skills/rust-testing/SKILL.md
+  - docs/testing-strategy.md
+  - prompts/snippets/test-rigor.md
+  - CLAUDE.md
+  - .github/workflows/sanity.yml
+  - .github/workflows/test.yml
+  - .github/workflows/fuzz-nightly.yml
+  - .github/workflows/coverage.yml
+  - docs/dependencies.md
+  - darkmatter/lib/tests/level2_render_tree_terminal.rs
+  - darkmatter/cli/tests/level2_layout.rs
+  - darkmatter/justfile
+docs_updated_during_phase_6:
+  - docs/testing-strategy.md
+  - docs/dependencies.md
+  - CLAUDE.md
+  - prompts/snippets/test-rigor.md
+docs_created_during_phase_6:
+  - .github/workflows/sanity.yml
+  - .github/workflows/test.yml
+  - .github/workflows/fuzz-nightly.yml
+  - .github/workflows/coverage.yml
+skills_files_updated_during_phase_6:
+  - .claude/skills/rust-testing/SKILL.md
+packages:
+  - darkmatter
 ---
 
 # Execution Plan: Testing Best Practices

@@ -44,6 +44,8 @@ This is a Rust workspace with the following modules:
 - `unchained-ai/gen/Cargo.toml` - Provider model enum generator (`gen-models`)
 - `unchained-ai/cli/Cargo.toml` - Future AI CLI (`unchained`)
 - `tools/test-toolkit/Cargo.toml` - Shared test lifecycle helpers
+- `biscuit-test-harness/Cargo.toml` - Real-terminal test harness (WezTerm, Kitty, tmux, Apple Terminal)
+- `biscuit-browser-harness/Cargo.toml` - Headless browser test harness (Chrome/Chromium)
 
 ## Workspace Packages
 
@@ -280,6 +282,18 @@ This is a Rust workspace with the following modules:
     _Shared test lifecycle helpers, including tracing phase spans and environment-variable guards._
 
     _Tags: workspace, library, testing_
+
+- [biscuit-test-harness](./biscuit-test-harness) _v0.1.0_
+
+    _Real-terminal test harness with backends for WezTerm, Kitty, tmux, and Apple Terminal. Provides `SharedHarness`, `TerminalHarness` trait, and capture utilities._
+
+    _Tags: workspace, library, testing, terminal_
+
+- [biscuit-browser-harness](./biscuit-browser-harness) _v0.1.0_
+
+    _Headless browser test harness wrapping `chromiumoxide`. Provides `BrowserHarness` trait, `ChromeHarness` implementation, and skip-clean contract for CI._
+
+    _Tags: workspace, library, testing, browser_
 
 ## Production Dependencies
 

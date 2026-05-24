@@ -141,9 +141,8 @@ or any PR-blocking gate.
 | `RUN_LEVEL3=1` | Explicit opt-in for OS-keyboard-injection tests. |
 
 Per-package legacy variables such as `DARKMATTER_LEVEL2_REQUIRED` are
-deprecated in favor of the unified `BISCUIT_*` contract. They are still
-accepted while the migration completes (Phase 6 sweep) and are wrapped by the
-new `test-toolkit` helper.
+deprecated and removed as of Phase 6. Use the unified `BISCUIT_*` contract
+exclusively.
 
 ## Why this matters
 
@@ -153,6 +152,58 @@ new `test-toolkit` helper.
   recipe names being present.
 - Drift between packages is detectable: `just _check_canonical` either passes
   or names the missing recipes.
+
+## Fuzz Playbook
+
+Fuzz targets live in `<crate>/fuzz/` and use `cargo-fuzz` (nightly Rust only).
+Each target directory contains:
+
+- `Cargo.toml` — fuzz-suite manifest depending on the parent crate.
+- `rust-toolchain.toml` — pins `channel = "nightly"`.
+- `fuzz_targets/<name>.rs` — one binary per target.
+- `corpus-seed/` — small, hand-curated seed inputs committed to the repo.
+- `crashes/<target>/` — minimized crash inputs committed as regression fixtures.
+
+### Running fuzz targets locally
+
+```bash
+cd biscuit-file/lib/fuzz
+cargo +nightly fuzz run pdf_extract -- -runs=1000
+cargo +nightly fuzz run toml_roundtrip -- -runs=1000
+
+cd darkmatter/lib/fuzz
+cargo +nightly fuzz run markdown_parser -- -runs=1000
+```
+
+### When to add a new fuzz target
+
+A parser/decoder is a good fuzz candidate if **all** are true:
+
+1. It accepts data from outside the process boundary.
+2. A crash, hang, or OOM in it is a real defect.
+3. It has a stable surface area.
+
+Top candidates in priority order: `biscuit-file` parsers, `darkmatter` markdown,
+`claudine` hook JSON, `tree-hugger` queries, `schematic` schema definitions.
+
+### CI integration
+
+Fuzz runs nightly via `.github/workflows/fuzz-nightly.yml`. It is **never**
+part of `sanity`, `test`, or PR-blocking gates because it requires nightly
+Rust and long wall-clock times.
+
+## Decision Log
+
+| Decision | Rationale |
+|----------|-----------|
+| Runtime `require_level!` macro instead of proc-macro attribute | Avoids compile-time overhead and a new proc-macro crate. Skip-vs-fail behaviour is explicit in the test body. |
+| `sanity` excludes doctests | Doctest compile cost would blow the ≤15 s per-package budget. |
+| `just all` order: sanity → lint → doctest → test → test-l2 → test-browser | Fast-fail order: cheapest signals surface first. |
+| test-l3, test-real, fuzz, bench excluded from `all` | They require explicit opt-in (devices, OS keyboard focus, nightly toolchain, quiet CPU). |
+| Coverage is report-only | Gates create perverse incentives and false alarms on legitimate refactors. |
+| Fuzz corpus stored in-repo (seed only) | Avoids Git LFS dependency. Only minimized crash inputs are committed back. |
+| tmux as default L2 backend | Most portable: headless, runs on any CI runner without GUI. |
+| `[package.metadata.benchmarks] required = false` convention | Grep-able opt-out for pure data crates. Enforced by reviewer discretion only. |
 
 See also:
 
