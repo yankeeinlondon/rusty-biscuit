@@ -134,6 +134,29 @@ fn yaml_value_as_string(value: &serde_yaml_ng::Value) -> Option<String> {
 ///
 /// // The paragraph will be converted to a HorizontalRule event
 /// ```
+/// Scan markdown content for inline horizontal-rule deprecation warnings.
+///
+/// Runs the full inline event pipeline (pulldown-cmark → [`InlineStyleProcessor`]
+/// → [`RuleProcessor`]) and returns any deprecation warnings emitted for legacy
+/// inline `style` attributes (`--- { style: waves }`).
+///
+/// This is a preflight helper for `--strict-style`: callers can check the
+/// returned warnings before rendering and promote them to errors when strict
+/// mode is enabled.
+pub fn scan_inline_hr_warnings(content: &str) -> Vec<StyleWarning> {
+    let preprocessed = crate::markdown::inline::preprocess_escaped_markers(content);
+    let parser = pulldown_cmark::Parser::new_ext(
+        &preprocessed,
+        pulldown_cmark::Options::ENABLE_TABLES | pulldown_cmark::Options::ENABLE_STRIKETHROUGH,
+    );
+    let mut processor = RuleProcessor::new(crate::markdown::inline::InlineStyleProcessor::new(
+        parser,
+    ));
+    // Consume all events to populate warnings.
+    for _ in &mut processor {}
+    processor.warnings.into_iter().collect()
+}
+
 pub struct RuleProcessor<'a, I>
 where
     I: Iterator<Item = InlineEvent<'a>>,
@@ -773,6 +796,41 @@ mod tests {
         // Legacy key is still present, so deprecation warning fires even when
         // canonical wins.
         assert_eq!(processor.warnings().len(), 1);
+    }
+
+    // ----- scan_inline_hr_warnings preflight -----
+
+    #[test]
+    fn scan_inline_hr_warnings_empty_for_clean_doc() {
+        let warnings = scan_inline_hr_warnings("# Hello\n\n---\n\nSome text.");
+        assert!(warnings.is_empty());
+    }
+
+    #[test]
+    fn scan_inline_hr_warnings_detects_legacy_style() {
+        let warnings = scan_inline_hr_warnings("--- { style: waves }");
+        assert_eq!(warnings.len(), 1);
+        assert_eq!(warnings[0].path, "hr.inline.style");
+        assert!(
+            matches!(
+                &warnings[0].kind,
+                StyleWarningKind::Deprecated { replacement } if replacement == "hr.inline.kind"
+            )
+        );
+    }
+
+    #[test]
+    fn scan_inline_hr_warnings_detects_multiple_legacy_rules() {
+        let warnings = scan_inline_hr_warnings(
+            "--- { style: waves }\n\nSome text.\n\n--- { style: dots }\n",
+        );
+        assert_eq!(warnings.len(), 2);
+    }
+
+    #[test]
+    fn scan_inline_hr_warnings_empty_for_canonical_kind() {
+        let warnings = scan_inline_hr_warnings("--- { kind: waves }");
+        assert!(warnings.is_empty());
     }
 
     // Phase 5 B1: validation — unknown enum values are captured verbatim so the

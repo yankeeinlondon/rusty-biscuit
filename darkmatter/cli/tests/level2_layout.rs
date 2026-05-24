@@ -1794,16 +1794,35 @@ style:\n  ul:\n    color: red-500\n---\n\
         return;
     };
 
-    // Tailwind Red-500 lowers to `\x1b[38;2;251;44;54m` (see
-    // `darkmatter::style::lower_to_sgr`). At least two occurrences are
-    // expected: one per body anchor.
-    let red_sgr = "\x1b[38;2;251;44;54m";
-    let occurrences = frame.raw.matches(red_sgr).count();
+    // Tailwind Red-500 lowers to truecolor (251, 44, 54). WezTerm's
+    // `get-text --escapes` re-emits cell attributes and collapses
+    // contiguous same-attribute cells into a single SGR span, so counting
+    // opens is unreliable. Instead, verify both items live inside the same
+    // red span: a red SGR (semicolon or ITU colon form) precedes the first
+    // item, and no foreground reset (`\x1b[39m` or `\x1b[0m`) appears
+    // between the two item bodies.
+    let red_semi = "\x1b[38;2;251;44;54m";
+    let red_colon = "\x1b[38:2::251:44:54m";
+    let red_open_at = frame
+        .raw
+        .find(red_semi)
+        .or_else(|| frame.raw.find(red_colon));
+    let alpha_at = frame.raw.find("listbodyalpha");
+    let beta_at = frame.raw.find("listbodybeta");
+    let (Some(red_at), Some(alpha_at), Some(beta_at)) = (red_open_at, alpha_at, beta_at) else {
+        panic!("missing red SGR and/or item bodies. raw={:?}", frame.raw);
+    };
     assert!(
-        occurrences >= 2,
-        "ul.color must wrap each item body (>=2 red SGR). got {} occurrences. raw len {}",
-        occurrences,
-        frame.raw.len()
+        red_at < alpha_at && alpha_at < beta_at,
+        "red SGR must open before the first item body. raw={:?}",
+        frame.raw
+    );
+    let between = &frame.raw[alpha_at..beta_at];
+    assert!(
+        !between.contains("\x1b[39m") && !between.contains("\x1b[0m"),
+        "no foreground reset may appear between item bodies — both must \
+         inherit ul.color. between={between:?}, raw={:?}",
+        frame.raw
     );
     // Layout must also still show the bodies in the plain view.
     assert!(
@@ -1827,11 +1846,14 @@ style:\n  hyperlinks:\n    color: red-500\n  table:\n    color: blue-500\n---\n\
         return;
     };
 
-    let red_sgr = "\x1b[38;2;251;44;54m";
+    // WezTerm re-emits truecolor SGR as either semicolon or ITU colon form.
+    let red_semi = "\x1b[38;2;251;44;54m";
+    let red_colon = "\x1b[38:2::251:44:54m";
     assert!(
-        frame.raw.contains(red_sgr),
-        "hyperlink color must appear inside table cell. raw stream:\n{}",
-        frame.raw
+        frame.raw.contains(red_semi) || frame.raw.contains(red_colon),
+        "hyperlink color must appear inside table cell. raw={:?}, plain={:?}",
+        frame.raw,
+        frame.plain,
     );
     // The OSC8 wrapping must remain so the link is clickable.
     assert!(
