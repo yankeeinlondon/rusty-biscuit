@@ -24,7 +24,6 @@ use std::time::Duration;
 use biscuit_clipboard::ClipboardBackend;
 use biscuit_clipboard::backend::SystemClipboard;
 use biscuit_clipboard::config::{CLIP_RUNTIME_DIR_ENV, read_port_file_in};
-use reqwest;
 
 const HEALTH_TIMEOUT_MS: u64 = 5000;
 const HISTORY_POLL_TIMEOUT_MS: u64 = 2000;
@@ -112,14 +111,13 @@ async fn wait_for_history_entry(port: u16, expected_preview: &str) -> Option<ser
     let deadline = tokio::time::Instant::now() + Duration::from_millis(HISTORY_POLL_TIMEOUT_MS);
 
     while tokio::time::Instant::now() < deadline {
-        if let Ok(resp) = client.get(&url).send().await {
-            if let Ok(json) = resp.json::<serde_json::Value>().await {
-                if let Some(entries) = json.get("entries").and_then(|v| v.as_array()) {
-                    for entry in entries {
-                        if entry.get("preview").and_then(|p| p.as_str()) == Some(expected_preview) {
-                            return Some(entry.clone());
-                        }
-                    }
+        if let Ok(resp) = client.get(&url).send().await
+            && let Ok(json) = resp.json::<serde_json::Value>().await
+            && let Some(entries) = json.get("entries").and_then(|v| v.as_array())
+        {
+            for entry in entries {
+                if entry.get("preview").and_then(|p| p.as_str()) == Some(expected_preview) {
+                    return Some(entry.clone());
                 }
             }
         }

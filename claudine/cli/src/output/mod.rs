@@ -8,10 +8,9 @@ pub(crate) use api_errors::try_format_api_error;
 pub(crate) use assistant::{render_assistant_markdown, render_assistant_markdown_with_options};
 pub(crate) use switches::{style_cli_switches, truncate_args};
 
-use biscuit_terminal::components::block_quote::BlockQuote;
 use biscuit_terminal::components::list::UnorderedList;
 use biscuit_terminal::components::prose::Prose;
-use biscuit_terminal::components::renderable::{Renderable, RenderableContent};
+use biscuit_terminal::components::renderable::{RenderableTerminalContent, TerminalRenderable};
 use biscuit_terminal::components::status::{Status, StatusState, StatusTheme};
 use biscuit_terminal::discovery::eval::strip_ansi_codes;
 use biscuit_terminal::terminal::Terminal;
@@ -35,6 +34,7 @@ pub(crate) enum ComposeDisplay {
     InlineCompose,
 }
 
+#[allow(dead_code)]
 fn trim_trailing_blank_rendered_lines(rendered: &str) -> String {
     let mut lines: Vec<&str> = rendered.lines().collect();
     while let Some(last) = lines.last() {
@@ -152,68 +152,23 @@ pub(crate) fn log_wrapper_header(
 ///
 /// In verbose mode the entire prompt is shown. Otherwise the first 10 lines
 /// are rendered with a truncation notice.
-pub(crate) fn log_compose_prompt(prompt: &str, verbose: bool, term: &Terminal) {
-    use biscuit_terminal::utils::color::{Color, Tailwind};
-    use darkmatter::markdown::Markdown;
-    use darkmatter::markdown::output::terminal::{TerminalOptions, for_terminal};
+pub(crate) fn log_compose_prompt(
+    prompt: &str,
+    verbose: bool,
+    silent: bool,
+    quiet: bool,
+    term: &Terminal,
+) {
+    use claudine::prompt_reporting::{report_user_prompt, resolve_user_prompt_report_config};
 
-    log::message(&Prose::new("<bold>Agent Prompt:</bold>").render(term));
+    let config = resolve_user_prompt_report_config(silent, quiet, verbose, prompt.lines().count());
 
-    let display_text = if verbose {
-        prompt.to_string()
-    } else {
-        let lines: Vec<&str> = prompt.lines().collect();
-        lines
-            .iter()
-            .take(10)
-            .copied()
-            .collect::<Vec<_>>()
-            .join("\n")
-    };
-
-    // Render prompt as Markdown through Darkmatter, constraining width to
-    // account for the block quote border ("▌ " = 2 visible cols) and
-    // margins (2 cols each side).
-    let left_margin: u16 = 2;
-    let right_margin: u16 = 2;
-    let border_width: u16 = 2;
-    let content_width = (term.width() as u16)
-        .saturating_sub(border_width)
-        .saturating_sub(left_margin)
-        .saturating_sub(right_margin);
-    let mut opts = TerminalOptions::default();
-    opts.max_width = Some(content_width);
-    let rendered = match for_terminal(&Markdown::new(display_text.trim()), opts) {
-        Ok(r) => r,
-        Err(_) => display_text.clone(),
-    };
-
-    // Wrap in a BlockQuote with green border, left margin, and no additional
-    // word wrapping (Darkmatter already wrapped to the correct width).
-    let mut block = BlockQuote::new(
-        RenderableContent::from(trim_trailing_blank_rendered_lines(&rendered)),
-        None::<&str>,
-    )
-    .with_left_block_color(Color::Tailwind(Tailwind::Green700))
-    .with_border("▌ ");
-    block.layout_mut().left_margin =
-        biscuit_terminal::utils::layout::Margin::Chars(left_margin as u32);
-    block.layout_mut().right_margin =
-        biscuit_terminal::utils::layout::Margin::Chars(right_margin as u32);
-    log::message(&block.render(term));
-
-    if !verbose && prompt.lines().count() > 10 {
-        log::message(""); // blank line between block quote and bullet
-        log::message(
-            &Prose::new(
-                "- <dim>remaining prompt truncated for brevity, use <blue>--verbose</blue> to show entire prompt</dim>",
-            )
-            .with_word_wrap(WordWrap::WrapProse(None, Some(2)))
-            .render(term),
-        );
+    if let Some(output) = report_user_prompt(prompt, config, term) {
+        log::message(&output);
     }
 }
 
+#[allow(dead_code)]
 pub(crate) fn log_system_prompt(
     effective_sp: &claudine::system_prompt::EffectiveSystemPrompt,
     verbose: bool,
@@ -221,81 +176,70 @@ pub(crate) fn log_system_prompt(
     quiet: bool,
     term: &Terminal,
 ) {
-    use biscuit_terminal::utils::color::{Color, Tailwind};
-    use darkmatter::markdown::Markdown;
-    use darkmatter::markdown::output::terminal::{TerminalOptions, for_terminal};
+    log_system_prompt_with_scope(effective_sp, verbose, silent, quiet, None, term)
+}
+
+pub(crate) fn log_system_prompt_with_scope(
+    effective_sp: &claudine::system_prompt::EffectiveSystemPrompt,
+    verbose: bool,
+    silent: bool,
+    quiet: bool,
+    scope: Option<&Path>,
+    term: &Terminal,
+) {
+    use claudine::prompt_reporting::{
+        PromptVerbosity, parse_frontmatter_verbosity, report_system_prompt_empty,
+        report_system_prompt_with_base, resolve_system_prompt_report_config_with_change,
+        state::check_and_record,
+    };
 
     if silent {
         return;
     }
 
-    match effective_sp {
-        claudine::system_prompt::EffectiveSystemPrompt::None => {
-            if verbose && !quiet {
-                let mut block = BlockQuote::new(
-                    RenderableContent::from("the system prompt has not been modified".to_string()),
-                    None::<&str>,
-                )
-                .with_left_block_color(Color::Tailwind(Tailwind::Orange700))
-                .with_border("▌ ");
-                block.layout_mut().left_margin = biscuit_terminal::utils::layout::Margin::Chars(2);
-                block.layout_mut().right_margin = biscuit_terminal::utils::layout::Margin::Chars(2);
-                log::message(&block.render(term));
-            }
-        }
-        claudine::system_prompt::EffectiveSystemPrompt::Disabled { source: _ } => {
-            if verbose && !quiet {
-                let mut block = BlockQuote::new(
-                    RenderableContent::from("the system prompt has been disabled".to_string()),
-                    None::<&str>,
-                )
-                .with_left_block_color(Color::Tailwind(Tailwind::Orange700))
-                .with_border("▌ ");
-                block.layout_mut().left_margin = biscuit_terminal::utils::layout::Margin::Chars(2);
-                block.layout_mut().right_margin = biscuit_terminal::utils::layout::Margin::Chars(2);
-                log::message(&block.render(term));
-            }
-        }
+    let env_verbosity = std::env::var("CLAUDINE_SYSTEM_PROMPT")
+        .ok()
+        .as_deref()
+        .and_then(PromptVerbosity::parse);
+
+    let (line_count, frontmatter_verbosity, unchanged) = match effective_sp {
         claudine::system_prompt::EffectiveSystemPrompt::Ready(prepared) => {
-            let variant_label = match prepared.mode {
-                claudine::system_prompt::SystemPromptMode::Append => "appended",
-                claudine::system_prompt::SystemPromptMode::Replace => "replaced",
-            };
-            log::message(
-                &Prose::new(format!(
-                    "<bold>System Prompt(<dim><i>{variant_label}</i></dim>):</bold>"
-                ))
-                .render(term),
-            );
-
-            let full_text = &prepared.composed_markdown;
-
-            let left_margin: u16 = 2;
-            let right_margin: u16 = 2;
-            let border_width: u16 = 2;
-            let content_width = (term.width() as u16)
-                .saturating_sub(border_width)
-                .saturating_sub(left_margin)
-                .saturating_sub(right_margin);
-            let mut opts = TerminalOptions::default();
-            opts.max_width = Some(content_width);
-            let rendered = match for_terminal(&Markdown::new(full_text.trim()), opts) {
-                Ok(r) => r,
-                Err(_) => full_text.clone(),
-            };
-
-            let mut block = BlockQuote::new(
-                RenderableContent::from(trim_trailing_blank_rendered_lines(&rendered)),
-                None::<&str>,
+            let frontmatter = parse_frontmatter_verbosity(&prepared.raw_text);
+            let unchanged = scope
+                .map(|s| {
+                    check_and_record(
+                        s,
+                        &prepared.composed_markdown,
+                        prepared
+                            .non_interactive_appendix
+                            .as_ref()
+                            .map(|a| a.composed_markdown.as_str()),
+                    )
+                })
+                .unwrap_or(false);
+            (
+                prepared.composed_markdown.lines().count(),
+                frontmatter,
+                unchanged,
             )
-            .with_left_block_color(Color::Tailwind(Tailwind::Orange700))
-            .with_border("▌ ");
-            block.layout_mut().left_margin =
-                biscuit_terminal::utils::layout::Margin::Chars(left_margin as u32);
-            block.layout_mut().right_margin =
-                biscuit_terminal::utils::layout::Margin::Chars(right_margin as u32);
-            log::message(&block.render(term));
         }
+        _ => (0, None, false),
+    };
+
+    let config = resolve_system_prompt_report_config_with_change(
+        silent,
+        quiet,
+        verbose,
+        env_verbosity,
+        line_count,
+        frontmatter_verbosity,
+        unchanged,
+    );
+
+    if let Some(output) = report_system_prompt_with_base(effective_sp, config, scope, term) {
+        log::message(&output);
+    } else if let Some(output) = report_system_prompt_empty(effective_sp, config, term) {
+        log::message(&output);
     }
 }
 
@@ -313,28 +257,28 @@ pub(crate) fn log_wrapper_env_details(
     {
         log::message(&Prose::new("<bold>Environment Variables:</bold>").render(term));
 
-        let mut items: Vec<RenderableContent> = Vec::new();
+        let mut items: Vec<RenderableTerminalContent> = Vec::new();
         for removed in &env_plan.removed {
-            items.push(RenderableContent::from(Prose::new(format!(
+            items.push(RenderableTerminalContent::from(Prose::new(format!(
                 "<red><strikethrough>{removed}</strikethrough></red>"
             ))));
         }
 
         for included in &env_plan.included {
-            items.push(RenderableContent::from(Prose::new(format!(
+            items.push(RenderableTerminalContent::from(Prose::new(format!(
                 "<orange>{included}</orange>"
             ))));
         }
 
         for (key, value) in &env_plan.added {
-            items.push(RenderableContent::from(Prose::new(format!(
+            items.push(RenderableTerminalContent::from(Prose::new(format!(
                 "<green>{key}</green><dim>={}</dim>",
                 summarize_value(key, value)
             ))));
         }
 
         if items.is_empty() {
-            items.push(RenderableContent::from(Prose::new(
+            items.push(RenderableTerminalContent::from(Prose::new(
                 "<dim>no environment changes</dim>",
             )));
         }
@@ -392,24 +336,24 @@ pub(crate) fn log_dry_run(
 
     // Environment changes
     log::message(&Prose::new("<bold>Environment Changes:</bold>").render(term));
-    let mut items: Vec<RenderableContent> = Vec::new();
+    let mut items: Vec<RenderableTerminalContent> = Vec::new();
     for removed in &env_plan.removed {
-        items.push(RenderableContent::from(Prose::new(format!(
+        items.push(RenderableTerminalContent::from(Prose::new(format!(
             "<red><strikethrough>{removed}</strikethrough></red>"
         ))));
     }
     for included in &env_plan.included {
-        items.push(RenderableContent::from(Prose::new(format!(
+        items.push(RenderableTerminalContent::from(Prose::new(format!(
             "<orange>{included}</orange>"
         ))));
     }
     for (key, value) in &env_plan.added {
-        items.push(RenderableContent::from(Prose::new(format!(
+        items.push(RenderableTerminalContent::from(Prose::new(format!(
             "<green>{key}</green><dim>={value}</dim>"
         ))));
     }
     if items.is_empty() {
-        items.push(RenderableContent::from(Prose::new(
+        items.push(RenderableTerminalContent::from(Prose::new(
             "<dim>no environment changes</dim>",
         )));
     }
@@ -422,9 +366,9 @@ pub(crate) fn log_dry_run(
 
     if let Some(lines) = sp_lines {
         log::message(&Prose::new("<bold>System prompt:</bold>").render(term));
-        let items: Vec<RenderableContent> = lines
+        let items: Vec<RenderableTerminalContent> = lines
             .iter()
-            .map(|l| RenderableContent::from(Prose::new(format!("<dim>{l}</dim>"))))
+            .map(|l| RenderableTerminalContent::from(Prose::new(format!("<dim>{l}</dim>"))))
             .collect();
         let rendered = UnorderedList::from(items).with_bullet("• ").render(term);
         log::message(&rendered);
@@ -492,69 +436,69 @@ pub(crate) fn removed_env_info_message(removed_env: &[String], term: &Terminal) 
 fn log_mcp_runtime(term: &Terminal, mcp_runtime: &McpRuntimeInfo) {
     log::message(&Prose::new("<bold>MCP:</bold>").render(term));
 
-    let mut items: Vec<RenderableContent> = Vec::new();
+    let mut items: Vec<RenderableTerminalContent> = Vec::new();
     if mcp_runtime.servers.is_empty() {
-        items.push(RenderableContent::from(Prose::new(
+        items.push(RenderableTerminalContent::from(Prose::new(
             "<dim>no active MCP servers</dim>",
         )));
     } else {
-        items.push(RenderableContent::from(Prose::new(format!(
+        items.push(RenderableTerminalContent::from(Prose::new(format!(
             "<green>servers</green><dim>={}</dim>",
             mcp_runtime.servers.join(", ")
         ))));
     }
 
     if !mcp_runtime.default_servers.is_empty() {
-        items.push(RenderableContent::from(Prose::new(format!(
+        items.push(RenderableTerminalContent::from(Prose::new(format!(
             "<green>defaults</green><dim>={}</dim>",
             mcp_runtime.default_servers.join(", ")
         ))));
     }
     if !mcp_runtime.explicit_servers.is_empty() {
-        items.push(RenderableContent::from(Prose::new(format!(
+        items.push(RenderableTerminalContent::from(Prose::new(format!(
             "<green>use</green><dim>={}</dim>",
             mcp_runtime.explicit_servers.join(", ")
         ))));
     }
     if !mcp_runtime.tag_servers.is_empty() {
-        items.push(RenderableContent::from(Prose::new(format!(
+        items.push(RenderableTerminalContent::from(Prose::new(format!(
             "<green>tag_servers</green><dim>={}</dim>",
             mcp_runtime.tag_servers.join(", ")
         ))));
     }
 
     if !mcp_runtime.resolved_tags.is_empty() {
-        items.push(RenderableContent::from(Prose::new(format!(
+        items.push(RenderableTerminalContent::from(Prose::new(format!(
             "<green>tags</green><dim>={}</dim>",
             mcp_runtime.resolved_tags.join(", ")
         ))));
     }
     if !mcp_runtime.missing_tags.is_empty() {
-        items.push(RenderableContent::from(Prose::new(format!(
+        items.push(RenderableTerminalContent::from(Prose::new(format!(
             "<orange>missing_tags</orange><dim>={}</dim>",
             mcp_runtime.missing_tags.join(", ")
         ))));
     }
     if !mcp_runtime.ambiguous_tags.is_empty() {
-        items.push(RenderableContent::from(Prose::new(format!(
+        items.push(RenderableTerminalContent::from(Prose::new(format!(
             "<orange>ambiguous_tags</orange><dim>={}</dim>",
             mcp_runtime.ambiguous_tags.join(", ")
         ))));
     }
     if let Some(cleaned_prompt) = &mcp_runtime.cleaned_prompt {
-        items.push(RenderableContent::from(Prose::new(format!(
+        items.push(RenderableTerminalContent::from(Prose::new(format!(
             "<green>cleaned_prompt</green><dim>={}</dim>",
             shell_escape(cleaned_prompt)
         ))));
     }
     if !mcp_runtime.env_vars_set.is_empty() {
-        items.push(RenderableContent::from(Prose::new(format!(
+        items.push(RenderableTerminalContent::from(Prose::new(format!(
             "<green>env</green><dim>={}</dim>",
             mcp_runtime.env_vars_set.join(", ")
         ))));
     }
     if !mcp_runtime.extra_args.is_empty() {
-        items.push(RenderableContent::from(Prose::new(format!(
+        items.push(RenderableTerminalContent::from(Prose::new(format!(
             "<green>extra_args</green><dim>={}</dim>",
             mcp_runtime
                 .extra_args
@@ -565,7 +509,7 @@ fn log_mcp_runtime(term: &Terminal, mcp_runtime: &McpRuntimeInfo) {
         ))));
     }
     if !mcp_runtime.temp_files.is_empty() {
-        items.push(RenderableContent::from(Prose::new(format!(
+        items.push(RenderableTerminalContent::from(Prose::new(format!(
             "<green>files</green><dim>={}</dim>",
             mcp_runtime
                 .temp_files
@@ -634,6 +578,40 @@ pub(crate) fn format_user_interrupt_status() -> String {
         .state(StatusState::Failure)
         .theme(StatusTheme::Circular)
         .render(&crate::log::terminal())
+}
+
+/// Process-scoped flag set by the loop's `SIGINT` handler when the user
+/// presses Ctrl+C. Rendering surfaces consult this to relabel any
+/// post-interrupt agent error as a user-action block instead of a red
+/// `Agent Error`.
+static USER_INTERRUPTED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Mark that a user interrupt was observed in this process.
+///
+/// Also raises the lib-side flag in [`claudine::interrupt`] so blocking
+/// post-execute work (lifecycle messenger sends, TTS playback, sound
+/// effects) short-circuits on the first Ctrl+C instead of after several.
+pub(crate) fn mark_user_interrupted() {
+    USER_INTERRUPTED.store(true, std::sync::atomic::Ordering::SeqCst);
+    claudine::interrupt::mark_interrupted();
+}
+
+/// Returns `true` once a Ctrl+C has been observed in this process.
+pub(crate) fn user_interrupt_observed() -> bool {
+    USER_INTERRUPTED.load(std::sync::atomic::Ordering::SeqCst)
+}
+
+/// Reset the user-interrupt flag. Used only by tests that need a clean
+/// observable state across assertions.
+///
+/// Clears both the CLI-local flag set by [`mark_user_interrupted`] **and**
+/// the lib-side flag in [`claudine::interrupt`] so subsequent in-process
+/// tests that observe lifecycle side effects through `claudine::interrupt`
+/// see a clean slate.
+#[cfg(test)]
+pub(crate) fn clear_user_interrupt_for_tests() {
+    USER_INTERRUPTED.store(false, std::sync::atomic::Ordering::SeqCst);
+    claudine::interrupt::clear_for_tests();
 }
 
 /// Format an INFO-only line announcing the working directory used to launch the agent.

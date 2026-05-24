@@ -1,7 +1,26 @@
 [profile.default]
 # Retry failed tests up to 3 times to mitigate flakiness in PTY tests or timing issues
 retries = 3
+# Mark tests slower than 5s as slow; terminate after 6×5s = 30s. Many integration
+# tests spawn the claudine binary plus git/composition/system-prompt resolution
+# and finish in 5–10s isolated but get squeezed past 15s under heavy parallel
+# load. 30s catches real hangs without killing healthy-but-contended tests.
+slow-timeout = { period = "5s", terminate-after = 6 }
+
+# Tests that intentionally wait on a real clock (e.g. rate-limit pause policies)
+# need an even longer leash than the default termination window.
+[[profile.default.overrides]]
+filter = 'test(=compose_loop_rate_limit_pause_waits_then_continues)'
+slow-timeout = { period = "30s", terminate-after = 3 }
 
 [profile.ci]
 # Same behavior for CI environment
 retries = 3
+# Stricter slow-test marker for CI, same generous termination ceiling.
+slow-timeout = { period = "10s", terminate-after = 3 }
+# JUnit XML for CI dashboards.
+junit = { path = "test-results.xml" }
+
+[[profile.ci.overrides]]
+filter = 'test(=compose_loop_rate_limit_pause_waits_then_continues)'
+slow-timeout = { period = "30s", terminate-after = 3 }

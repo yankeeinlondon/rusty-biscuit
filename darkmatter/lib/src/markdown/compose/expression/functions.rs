@@ -66,32 +66,32 @@ fn require_array<'a>(name: &str, value: &'a Value) -> Result<&'a Vec<Value>, Str
 
 /// Type predicates from the spec.
 pub fn is_string(args: &[Value]) -> Result<Value, String> {
-    require_args("IsString", args, 1)?;
+    require_args("is_string", args, 1)?;
     Ok(Value::Bool(matches!(args[0], Value::String(_))))
 }
 
 pub fn is_number(args: &[Value]) -> Result<Value, String> {
-    require_args("IsNumber", args, 1)?;
+    require_args("is_number", args, 1)?;
     Ok(Value::Bool(matches!(args[0], Value::Number(_))))
 }
 
 pub fn is_array(args: &[Value]) -> Result<Value, String> {
-    require_args("IsArray", args, 1)?;
+    require_args("is_array", args, 1)?;
     Ok(Value::Bool(matches!(args[0], Value::Array(_))))
 }
 
 pub fn is_null(args: &[Value]) -> Result<Value, String> {
-    require_args("IsNull", args, 1)?;
+    require_args("is_null", args, 1)?;
     Ok(Value::Bool(matches!(args[0], Value::Null)))
 }
 
 pub fn is_object(args: &[Value]) -> Result<Value, String> {
-    require_args("IsObject", args, 1)?;
+    require_args("is_object", args, 1)?;
     Ok(Value::Bool(matches!(args[0], Value::Object(_))))
 }
 
 pub fn is_empty_fn(args: &[Value]) -> Result<Value, String> {
-    require_args("IsEmpty", args, 1)?;
+    require_args("is_empty", args, 1)?;
     Ok(Value::Bool(is_empty(&args[0])))
 }
 
@@ -147,25 +147,25 @@ pub fn last_fn(args: &[Value]) -> Result<Value, String> {
     Ok(items.last().cloned().unwrap_or(Value::Null))
 }
 
-/// `StartsWith(x, find)` — case-sensitive prefix test.
+/// `starts_with(x, find)` — case-sensitive prefix test.
 pub fn starts_with(args: &[Value]) -> Result<Value, String> {
-    require_args("StartsWith", args, 2)?;
+    require_args("starts_with", args, 2)?;
     if any_null(args) {
         return Ok(Value::Null);
     }
-    let haystack = require_string("StartsWith", &args[0])?;
-    let needle = require_string("StartsWith", &args[1])?;
+    let haystack = require_string("starts_with", &args[0])?;
+    let needle = require_string("starts_with", &args[1])?;
     Ok(Value::Bool(haystack.starts_with(needle)))
 }
 
-/// `EndsWith(x, find)` — case-sensitive suffix test.
+/// `ends_with(x, find)` — case-sensitive suffix test.
 pub fn ends_with(args: &[Value]) -> Result<Value, String> {
-    require_args("EndsWith", args, 2)?;
+    require_args("ends_with", args, 2)?;
     if any_null(args) {
         return Ok(Value::Null);
     }
-    let haystack = require_string("EndsWith", &args[0])?;
-    let needle = require_string("EndsWith", &args[1])?;
+    let haystack = require_string("ends_with", &args[0])?;
+    let needle = require_string("ends_with", &args[1])?;
     Ok(Value::Bool(haystack.ends_with(needle)))
 }
 
@@ -182,15 +182,15 @@ where
 }
 
 pub fn lower(args: &[Value]) -> Result<Value, String> {
-    string_mutation("Lower", args, |s| s.to_lowercase())
+    string_mutation("lower", args, |s| s.to_lowercase())
 }
 
 pub fn upper(args: &[Value]) -> Result<Value, String> {
-    string_mutation("Upper", args, |s| s.to_uppercase())
+    string_mutation("upper", args, |s| s.to_uppercase())
 }
 
 pub fn capitalize(args: &[Value]) -> Result<Value, String> {
-    string_mutation("Capitalize", args, |s| {
+    string_mutation("capitalize", args, |s| {
         let mut chars = s.chars();
         match chars.next() {
             Some(first) => first.to_uppercase().chain(chars).collect(),
@@ -245,15 +245,15 @@ fn split_words(input: &str) -> Vec<String> {
 }
 
 pub fn kebab_case(args: &[Value]) -> Result<Value, String> {
-    string_mutation("KebabCase", args, |s| split_words(s).join("-"))
+    string_mutation("kebab_case", args, |s| split_words(s).join("-"))
 }
 
 pub fn snake_case(args: &[Value]) -> Result<Value, String> {
-    string_mutation("SnakeCase", args, |s| split_words(s).join("_"))
+    string_mutation("snake_case", args, |s| split_words(s).join("_"))
 }
 
 pub fn camel_case(args: &[Value]) -> Result<Value, String> {
-    string_mutation("CamelCase", args, |s| {
+    string_mutation("camel_case", args, |s| {
         let words = split_words(s);
         let mut iter = words.into_iter();
         let mut out = String::new();
@@ -272,7 +272,7 @@ pub fn camel_case(args: &[Value]) -> Result<Value, String> {
 }
 
 pub fn pascal_case(args: &[Value]) -> Result<Value, String> {
-    string_mutation("PascalCase", args, |s| {
+    string_mutation("pascal_case", args, |s| {
         let mut out = String::new();
         for word in split_words(s) {
             let mut chars = word.chars();
@@ -286,7 +286,7 @@ pub fn pascal_case(args: &[Value]) -> Result<Value, String> {
 }
 
 pub fn title_case(args: &[Value]) -> Result<Value, String> {
-    string_mutation("TitleCase", args, |s| {
+    string_mutation("title_case", args, |s| {
         let mut parts: Vec<String> = Vec::new();
         for word in split_words(s) {
             let mut chars = word.chars();
@@ -352,30 +352,30 @@ fn parse_iso_datetime_to_date(s: &str, assume_utc: bool) -> Option<NaiveDate> {
         .map(|naive| naive.date())
 }
 
-/// `IsDate(x)` — strict `YYYY-MM-DD` validator. Strings only.
+/// `is_date(x)` — strict `YYYY-MM-DD` validator. Strings only.
 pub fn is_date(args: &[Value]) -> Result<Value, String> {
-    require_args("IsDate", args, 1)?;
+    require_args("is_date", args, 1)?;
     let ok = matches!(&args[0], Value::String(s) if parse_iso_date(s).is_some());
     Ok(Value::Bool(ok))
 }
 
-/// `IsDateUtc(x)` — same as `IsDate` (the format itself is timezone-agnostic).
+/// `is_date_utc(x)` — same as `is_date` (the format itself is timezone-agnostic).
 pub fn is_date_utc(args: &[Value]) -> Result<Value, String> {
-    require_args("IsDateUtc", args, 1)?;
+    require_args("is_date_utc", args, 1)?;
     let ok = matches!(&args[0], Value::String(s) if parse_iso_date(s).is_some());
     Ok(Value::Bool(ok))
 }
 
-/// `IsDateTime(x)` — strict ISO datetime validator. Strings only.
+/// `is_date_time(x)` — strict ISO datetime validator. Strings only.
 pub fn is_datetime(args: &[Value]) -> Result<Value, String> {
-    require_args("IsDateTime", args, 1)?;
+    require_args("is_date_time", args, 1)?;
     let ok = matches!(&args[0], Value::String(s) if parse_iso_datetime(s));
     Ok(Value::Bool(ok))
 }
 
-/// `IsDateTimeUtc(x)` — same parse contract as `IsDateTime`.
+/// `is_date_time_utc(x)` — same parse contract as `is_date_time`.
 pub fn is_datetime_utc(args: &[Value]) -> Result<Value, String> {
-    require_args("IsDateTimeUtc", args, 1)?;
+    require_args("is_date_time_utc", args, 1)?;
     let ok = matches!(&args[0], Value::String(s) if parse_iso_datetime(s));
     Ok(Value::Bool(ok))
 }
@@ -438,17 +438,17 @@ fn today_utc() -> NaiveDate {
 }
 
 pub fn is_today(args: &[Value]) -> Result<Value, String> {
-    require_args("IsToday", args, 1)?;
+    require_args("is_today", args, 1)?;
     Ok(Value::Bool(is_today_with(&args[0], today_local(), false)))
 }
 
 pub fn is_today_utc(args: &[Value]) -> Result<Value, String> {
-    require_args("IsTodayUtc", args, 1)?;
+    require_args("is_today_utc", args, 1)?;
     Ok(Value::Bool(is_today_with(&args[0], today_utc(), true)))
 }
 
 pub fn is_yesterday(args: &[Value]) -> Result<Value, String> {
-    require_args("IsYesterday", args, 1)?;
+    require_args("is_yesterday", args, 1)?;
     Ok(Value::Bool(is_yesterday_with(
         &args[0],
         today_local(),
@@ -457,12 +457,12 @@ pub fn is_yesterday(args: &[Value]) -> Result<Value, String> {
 }
 
 pub fn is_yesterday_utc(args: &[Value]) -> Result<Value, String> {
-    require_args("IsYesterdayUtc", args, 1)?;
+    require_args("is_yesterday_utc", args, 1)?;
     Ok(Value::Bool(is_yesterday_with(&args[0], today_utc(), true)))
 }
 
 pub fn is_tomorrow(args: &[Value]) -> Result<Value, String> {
-    require_args("IsTomorrow", args, 1)?;
+    require_args("is_tomorrow", args, 1)?;
     Ok(Value::Bool(is_tomorrow_with(
         &args[0],
         today_local(),
@@ -471,12 +471,12 @@ pub fn is_tomorrow(args: &[Value]) -> Result<Value, String> {
 }
 
 pub fn is_tomorrow_utc(args: &[Value]) -> Result<Value, String> {
-    require_args("IsTomorrowUtc", args, 1)?;
+    require_args("is_tomorrow_utc", args, 1)?;
     Ok(Value::Bool(is_tomorrow_with(&args[0], today_utc(), true)))
 }
 
 pub fn is_this_month(args: &[Value]) -> Result<Value, String> {
-    require_args("IsThisMonth", args, 1)?;
+    require_args("is_this_month", args, 1)?;
     Ok(Value::Bool(is_this_month_with(
         &args[0],
         today_local(),
@@ -485,12 +485,12 @@ pub fn is_this_month(args: &[Value]) -> Result<Value, String> {
 }
 
 pub fn is_this_month_utc(args: &[Value]) -> Result<Value, String> {
-    require_args("IsThisMonthUtc", args, 1)?;
+    require_args("is_this_month_utc", args, 1)?;
     Ok(Value::Bool(is_this_month_with(&args[0], today_utc(), true)))
 }
 
 pub fn is_this_year(args: &[Value]) -> Result<Value, String> {
-    require_args("IsThisYear", args, 1)?;
+    require_args("is_this_year", args, 1)?;
     Ok(Value::Bool(is_this_year_with(
         &args[0],
         today_local(),
@@ -499,7 +499,7 @@ pub fn is_this_year(args: &[Value]) -> Result<Value, String> {
 }
 
 pub fn is_this_year_utc(args: &[Value]) -> Result<Value, String> {
-    require_args("IsThisYearUtc", args, 1)?;
+    require_args("is_this_year_utc", args, 1)?;
     Ok(Value::Bool(is_this_year_with(&args[0], today_utc(), true)))
 }
 
@@ -539,8 +539,8 @@ pub fn dispatch(name: &str, args: &[Value]) -> Option<Result<Value, String>> {
         // Strict date validators
         "isdate" | "is_date" => is_date,
         "isdateutc" | "is_date_utc" => is_date_utc,
-        "isdatetime" | "is_datetime" => is_datetime,
-        "isdatetimeutc" | "is_datetime_utc" => is_datetime_utc,
+        "isdatetime" | "is_datetime" | "is_date_time" => is_datetime,
+        "isdatetimeutc" | "is_datetime_utc" | "is_date_time_utc" => is_datetime_utc,
         // Relative date validators
         "istoday" | "is_today" => is_today,
         "istodayutc" | "is_today_utc" => is_today_utc,

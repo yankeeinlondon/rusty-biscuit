@@ -49,7 +49,8 @@ _install path pkg_name binary="" *args="":
 # commits all the staged changes with OpenCode (model is MODEL or COMMIT_MODEL)
 [arg("agent", long="agent")]
 [arg("model", long="model")]
-commit agent="opencode" model="" *args="":
+[arg("yolo", long="yolo")]
+commit yolo="true" agent="opencode" model="":
     #!/usr/bin/env bash
     set -euo pipefail
     model=""
@@ -57,8 +58,14 @@ commit agent="opencode" model="" *args="":
         model="--model {{ model }}"
     else
         if [[ "{{ agent }}" == "opencode" ]]; then
-            model="--model minimax/MiniMax-M2.7-highspeed"
+            if [[ -z "{{ model }}" ]]; then
+                model="--model minimax/MiniMax-M2.7-highspeed"
+            fi
         fi
+    fi
+    yolo=""
+    if [[ "{{ yolo }}" == "true" ]]; then
+        yolo="-y"
     fi
     echo ""
     echo -e "Committing staged changes in the {{ bold }}Rusty Biscuit{{ reset }} monorepo to git"
@@ -70,7 +77,7 @@ commit agent="opencode" model="" *args="":
     echo ""
     echo -e "{{ bold }}{{ blue }}Staged Files:{{ reset }}"
     sniff repo staged-files || ( echo "No Staged Files! Nothing to do ..." )
-    claudine compose --{{ agent }} "@prompts/commit.md" --op "commit" --quiet -y ${model} {{ args }}
+    claudine compose --{{ agent }} "@prompts/commit.md" --op "commit" --quiet ${yolo} ${model}
     just _speak "git commits completed in the $(sniff repo package-area) package area of rusty biscuit"
     sniff repo git-status --compact 2>/dev/null || exit 0
     echo
@@ -200,7 +207,7 @@ status subject="":
         echo -e "{{ bold }}{{ blue }}{{ underline }}Features{{ reset }}"
         echo
         if [[ -d features ]]; then
-            eza features -lDga -I '_*' || echo -e "  {{ italic }}no features found{{ reset }}"
+            eza features -lhga --git --hyperlink --group -I '_*' || echo -e "  {{ italic }}no features found{{ reset }}"
         else
             echo -e "  {{ italic }}no features directory{{ reset }}"
         fi
@@ -208,7 +215,7 @@ status subject="":
         echo -e "{{ bold }}Unscheduled{{ reset }}"
         echo
         if [[ -d features/_unscheduled ]]; then
-            eza features/_unscheduled -lDga -s name || echo -e "  {{ italic }}no unscheduled features{{ reset }}"
+            eza features/_unscheduled -lhga --git --hyperlink --group -s name || echo -e "  {{ italic }}no unscheduled features{{ reset }}"
         else
             echo -e "  {{ italic }}no unscheduled directory{{ reset }}"
         fi
@@ -292,16 +299,15 @@ status subject="":
 _structure dir:
     @eza -lDTL 4 --icons=always --hyperlink {{ dir }}
 
-# brings up nvim to edit *.just files
-edit:
-    @nvim ../just
-
-# brings up nvim to edit .claudine files
-claudine:
-    @nvim ../.claudine
-
-prompts:
-    @nvim ../prompts
-
-skills:
-    @nvim ../skills
+# produce documentation for a package (without dependencies included)
+_doc package open="false":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo
+    echo -e "Creating documentation for {{ bold }}{{ package }}{{ reset }}."
+    echo
+    cargo doc -p {{ package }} --no-deps
+    echo
+    if [[ "{{ open }}" == "true" ]]; then
+        open "../target/doc/{{ package }}/index.html"
+    fi

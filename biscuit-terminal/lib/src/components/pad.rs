@@ -1,7 +1,10 @@
 use crate::{
-    components::renderable::{Renderable, RenderableContent},
+    components::renderable::{RenderableTerminalContent, TerminalRenderable},
     terminal::Terminal,
-    utils::{block_constraint::visible_width, layout::Layout},
+    utils::{
+        block_constraint::visible_width,
+        layout::{Layout, LayoutTerminalExt},
+    },
 };
 
 /// Pads content on the left with spaces to guarantee a minimum width.
@@ -29,7 +32,7 @@ use crate::{
 /// ```
 #[derive(Debug, Clone)]
 pub struct PadLeft {
-    content: RenderableContent,
+    content: RenderableTerminalContent,
     min_width: u32,
     truncate: bool,
     layout: Layout,
@@ -37,7 +40,7 @@ pub struct PadLeft {
 
 impl PadLeft {
     /// Create a new `PadLeft` that pads content to at least `min_width` characters.
-    pub fn new<T: Into<RenderableContent>>(content: T, min_width: u32) -> Self {
+    pub fn new<T: Into<RenderableTerminalContent>>(content: T, min_width: u32) -> Self {
         Self {
             content: content.into(),
             min_width,
@@ -72,11 +75,11 @@ impl PadLeft {
     }
 }
 
-impl Renderable for PadLeft {
+impl TerminalRenderable for PadLeft {
     fn render_optimistic(&self, term_width: Option<u32>) -> String {
         let rendered = match &self.content {
-            RenderableContent::String(s) => s.clone(),
-            RenderableContent::Component(c) => c.render_optimistic(term_width),
+            RenderableTerminalContent::String(s) => s.clone(),
+            RenderableTerminalContent::Component(c) => c.render_optimistic(term_width),
         };
         let padded = self.pad_content(&rendered);
         let width = term_width.unwrap_or(80);
@@ -85,8 +88,8 @@ impl Renderable for PadLeft {
 
     fn render(&self, term: &Terminal) -> String {
         let rendered = match &self.content {
-            RenderableContent::String(s) => s.clone(),
-            RenderableContent::Component(c) => c.render(term),
+            RenderableTerminalContent::String(s) => s.clone(),
+            RenderableTerminalContent::Component(c) => c.render(term),
         };
         let padded = self.pad_content(&rendered);
         self.layout.apply_layout(&padded, term.width())
@@ -130,7 +133,7 @@ impl Renderable for PadLeft {
 /// ```
 #[derive(Debug, Clone)]
 pub struct PadRight {
-    content: RenderableContent,
+    content: RenderableTerminalContent,
     min_width: u32,
     truncate: bool,
     layout: Layout,
@@ -138,7 +141,7 @@ pub struct PadRight {
 
 impl PadRight {
     /// Create a new `PadRight` that pads content to at least `min_width` characters.
-    pub fn new<T: Into<RenderableContent>>(content: T, min_width: u32) -> Self {
+    pub fn new<T: Into<RenderableTerminalContent>>(content: T, min_width: u32) -> Self {
         Self {
             content: content.into(),
             min_width,
@@ -173,11 +176,11 @@ impl PadRight {
     }
 }
 
-impl Renderable for PadRight {
+impl TerminalRenderable for PadRight {
     fn render_optimistic(&self, term_width: Option<u32>) -> String {
         let rendered = match &self.content {
-            RenderableContent::String(s) => s.clone(),
-            RenderableContent::Component(c) => c.render_optimistic(term_width),
+            RenderableTerminalContent::String(s) => s.clone(),
+            RenderableTerminalContent::Component(c) => c.render_optimistic(term_width),
         };
         let padded = self.pad_content(&rendered);
         let width = term_width.unwrap_or(80);
@@ -186,8 +189,8 @@ impl Renderable for PadRight {
 
     fn render(&self, term: &Terminal) -> String {
         let rendered = match &self.content {
-            RenderableContent::String(s) => s.clone(),
-            RenderableContent::Component(c) => c.render(term),
+            RenderableTerminalContent::String(s) => s.clone(),
+            RenderableTerminalContent::Component(c) => c.render(term),
         };
         let padded = self.pad_content(&rendered);
         self.layout.apply_layout(&padded, term.width())

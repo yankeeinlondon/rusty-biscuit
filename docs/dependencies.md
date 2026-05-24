@@ -43,6 +43,7 @@ This is a Rust workspace with the following modules:
 - `unchained-ai/lib/Cargo.toml` - LLM pipeline primitives and provider integrations
 - `unchained-ai/gen/Cargo.toml` - Provider model enum generator (`gen-models`)
 - `unchained-ai/cli/Cargo.toml` - Future AI CLI (`unchained`)
+- `tools/test-toolkit/Cargo.toml` - Shared test lifecycle helpers
 
 ## Workspace Packages
 
@@ -274,6 +275,12 @@ This is a Rust workspace with the following modules:
 
     _Tags: workspace, cli, messaging, notifications_
 
+- [test-toolkit](./tools/test-toolkit) _v0.1.0_
+
+    _Shared test lifecycle helpers, including tracing phase spans and environment-variable guards._
+
+    _Tags: workspace, library, testing_
+
 ## Production Dependencies
 
 ### AI & LLM
@@ -365,6 +372,12 @@ This is a Rust workspace with the following modules:
     _Library for building interactive CLI prompts with text, select, multiselect, date, editor, and password prompts._
 
     _Tags: cli, interactive, prompts_
+
+- [heck](https://github.com/withoutboats/heck) _v0.5_ [📄](https://docs.rs/heck)
+
+    _Case conversion helpers used by the `question` CLI naming-convention flags._
+
+    _Tags: cli, strings, case-conversion_
 
 - [owo-colors](https://github.com/owo-colors/owo-colors) _v4.2_ [📄](https://docs.rs/owo-colors)
 
@@ -1044,6 +1057,18 @@ This is a Rust workspace with the following modules:
 
     _Tags: testing, cli, integration-tests_
 
+- [chromiumoxide](https://github.com/mattsse/chromiumoxide) _v0.7_ [📄](https://docs.rs/chromiumoxide)
+
+    _Headless-browser automation over the Chrome DevTools Protocol. Used by `darkmatter/lib` browser-render tests to assert on browser-computed styles of HTML/CSS output and to screenshot renders. Skips cleanly when no Chrome/Chromium is present._
+
+    _Tags: testing, browser, html, css_
+
+- [futures-util](https://github.com/rust-lang/futures-rs) _v0.3_ [📄](https://docs.rs/futures-util)
+
+    _Async stream/future combinators. Used in `darkmatter/lib` browser-render tests to pump the `chromiumoxide` CDP handler stream._
+
+    _Tags: testing, async, browser_
+
 - [insta](https://github.com/mitsuhiko/insta) _v1.41_ [📄](https://insta.rs)
 
     _Snapshot testing library with VS Code integration and beautiful diffs._
@@ -1067,6 +1092,12 @@ This is a Rust workspace with the following modules:
     _Property-based testing framework generating arbitrary inputs and shrinking failing cases._
 
     _Tags: testing, property-testing, fuzzing_
+
+- [rstest](https://github.com/la10736/rstest) _v0.25_
+
+    _Fixture-based and parameterized testing framework used for new and modified Claudine tests._
+
+    _Tags: testing, fixtures, parameterized-tests_
 
 - [serial_test](https://github.com/palfrey/serial_test) _v3.2_
 

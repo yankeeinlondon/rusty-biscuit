@@ -1,9 +1,15 @@
 use crate::args::Cli;
-use color_eyre::eyre::{Context, Result};
+use biscuit_terminal::terminal::Terminal;
+use color_eyre::eyre::{Context, Result, eyre};
+use darkmatter::layout::{DarkmatterPage, PageComponent};
 use darkmatter::markdown::highlighting::{ColorMode, ThemePair};
+use darkmatter::markdown::output::MermaidMode;
 use darkmatter::markdown::output::terminal::TerminalImageMode;
-use darkmatter::markdown::output::{HtmlOptions, MermaidMode, TerminalOptions, write_terminal};
 use darkmatter::markdown::{Markdown, MarkdownDelta, MarkdownToc, MarkdownTocNode};
+use darkmatter::style::{
+    PageStyleOverrides, StyleWarning, StyleWarningKind, apply_page_style, from_frontmatter,
+    into_strict,
+};
 use std::io::{self, Write};
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -23,33 +29,254 @@ pub fn render_terminal_output(
     code_theme: ThemePair,
     color_mode: ColorMode,
 ) -> Result<()> {
-    let mut options = TerminalOptions::default();
-    options.prose_theme = prose_theme;
-    options.code_theme = code_theme;
-    options.color_mode = color_mode;
-    options.include_line_numbers = cli.line_numbers;
-    options.color_depth = None; // Auto-detect
-    options.image_mode = terminal_image_mode_from_env();
-    options.mermaid_mode = if cli.mermaid {
-        MermaidMode::Image
-    } else {
-        MermaidMode::Off
-    };
+    let term = Terminal::new();
+    let mut page = DarkmatterPage::new(&term)
+        .with_prose_theme(prose_theme.kebab_name())
+        .with_code_theme(code_theme.kebab_name())
+        .with_color_mode(color_mode)
+        .with_image_mode(terminal_image_mode_from_env())
+        .with_mermaid_mode(if cli.mermaid {
+            MermaidMode::Image
+        } else {
+            MermaidMode::Off
+        });
 
-    // Derive base_path from input file for relative image resolution
     if let Some(path) = input_path
         && path.to_str() != Some("-")
     {
-        options.base_path = path.parent().map(|p| p.to_path_buf());
+        page = page.with_base_path(path.parent().map(|p| p.to_path_buf()).unwrap_or_default());
     }
 
-    // Use write_terminal with stdout for proper image rendering
-    // (viuer requires direct stdout access for graphics protocols)
+    // Apply layout flags from CLI.
+    page = apply_cli_layout_flags(page, cli);
+
+    // Apply page-level frontmatter style after CLI flags so CLI wins on
+    // overlapping fields via PageStyleOverrides.
+    page = apply_style_frontmatter(page, md, cli)?;
+
+    // Handle line numbers: CLI flag overrides default.
+    if let Some(on) = cli.line_numbers {
+        page = page.with_line_numbers(on);
+    }
+
+    let output = page
+        .render(md)
+        .context("Failed to render markdown for terminal")?;
+
     let stdout = io::stdout();
     let mut handle = stdout.lock();
-    write_terminal(&mut handle, md, options).context("Failed to render markdown for terminal")?;
+    handle
+        .write_all(output.as_bytes())
+        .context("Failed to write terminal output")?;
 
     Ok(())
+}
+
+/// Apply CLI layout flags to a [`DarkmatterPage`].
+///
+/// Precedence: margin shorthand → axis → side-specific.
+/// Same for padding. Alignment: global → component-specific.
+/// Fill: global → component-specific.
+pub fn apply_cli_layout_flags(page: DarkmatterPage, cli: &Cli) -> DarkmatterPage {
+    let mut page = page;
+
+    // Margin precedence: all > axis > side
+    if let Some(n) = cli.margin {
+        page = page.with_margin(n);
+    }
+    if let Some(n) = cli.mx {
+        page = page.with_margin_x(n);
+    }
+    if let Some(n) = cli.my {
+        page = page.with_margin_y(n);
+    }
+    if let Some(n) = cli.mt {
+        page = page.with_margin_top(n);
+    }
+    if let Some(n) = cli.mb {
+        page = page.with_margin_bottom(n);
+    }
+    if let Some(n) = cli.ml {
+        page = page.with_margin_left(n);
+    }
+    if let Some(n) = cli.mr {
+        page = page.with_margin_right(n);
+    }
+
+    // Padding precedence: all > axis > side
+    if let Some(n) = cli.padding {
+        page = page.with_padding(n);
+    }
+    if let Some(n) = cli.px {
+        page = page.with_padding_x(n);
+    }
+    if let Some(n) = cli.py {
+        page = page.with_padding_y(n);
+    }
+    if let Some(n) = cli.pt {
+        page = page.with_padding_top(n);
+    }
+    if let Some(n) = cli.pb {
+        page = page.with_padding_bottom(n);
+    }
+    if let Some(n) = cli.pl {
+        page = page.with_padding_left(n);
+    }
+    if let Some(n) = cli.pr {
+        page = page.with_padding_right(n);
+    }
+
+    // Page background
+    if let Some(bg) = cli.page_bg {
+        page = page.with_page_background(bg.into());
+    }
+
+    // Max width
+    if let Some(n) = cli.max_width {
+        page = page.with_max_width(n);
+    }
+
+    // Alignment precedence: global > component-specific
+    if let Some(align) = cli.alignment {
+        page = page.use_alignment_for_all(align.into());
+    }
+    if let Some(align) = cli.align_images {
+        page = page.use_alignment(PageComponent::Images, align.into());
+    }
+    if let Some(align) = cli.align_lists {
+        page = page.use_alignment(PageComponent::Lists, align.into());
+    }
+    if let Some(align) = cli.align_block_quotes {
+        page = page.use_alignment(PageComponent::BlockQuotes, align.into());
+    }
+    if let Some(align) = cli.align_tables {
+        page = page.use_alignment(PageComponent::Tables, align.into());
+    }
+    if let Some(align) = cli.align_code_blocks {
+        page = page.use_alignment(PageComponent::CodeBlocks, align.into());
+    }
+
+    // Fill precedence: global > component-specific
+    if let Some(fill) = cli.fill {
+        page = page.with_fill_for_all(fill);
+    }
+    if let Some(fill) = cli.fill_images {
+        page = page.with_fill(PageComponent::Images, fill);
+    }
+    if let Some(fill) = cli.fill_lists {
+        page = page.with_fill(PageComponent::Lists, fill);
+    }
+    if let Some(fill) = cli.fill_block_quotes {
+        page = page.with_fill(PageComponent::BlockQuotes, fill);
+    }
+    if let Some(fill) = cli.fill_tables {
+        page = page.with_fill(PageComponent::Tables, fill);
+    }
+    if let Some(fill) = cli.fill_code_blocks {
+        page = page.with_fill(PageComponent::CodeBlocks, fill);
+    }
+
+    page
+}
+
+/// Build a [`PageStyleOverrides`] reflecting which `style.page.*` fields the
+/// CLI has already claimed.
+///
+/// Mirrors the shorthand expansion rules in [`apply_cli_layout_flags`]:
+/// `--margin` claims all four sides, `--mx` claims left/right, `--my` claims
+/// top/bottom. Padding follows the same pattern. `--max-width`, `--page-bg`,
+/// and `--alignment` each claim their corresponding page-level field. The
+/// component-specific alignment flags (`--align-images`, `--align-lists`,
+/// `--align-block-quotes`, `--align-tables`, `--align-code-blocks`) each
+/// claim their component so the `style.page.alignment` broadcast does not
+/// silently overwrite them.
+pub fn page_style_overrides_from_cli(cli: &Cli) -> PageStyleOverrides {
+    let margin_all = cli.margin.is_some();
+    let mx = cli.mx.is_some();
+    let my = cli.my.is_some();
+    let padding_all = cli.padding.is_some();
+    let px = cli.px.is_some();
+    let py = cli.py.is_some();
+
+    PageStyleOverrides {
+        margin_top: margin_all || my || cli.mt.is_some(),
+        margin_right: margin_all || mx || cli.mr.is_some(),
+        margin_bottom: margin_all || my || cli.mb.is_some(),
+        margin_left: margin_all || mx || cli.ml.is_some(),
+        padding_top: padding_all || py || cli.pt.is_some(),
+        padding_right: padding_all || px || cli.pr.is_some(),
+        padding_bottom: padding_all || py || cli.pb.is_some(),
+        padding_left: padding_all || px || cli.pl.is_some(),
+        max_width: cli.max_width.is_some(),
+        background: cli.page_bg.is_some(),
+        alignment: cli.alignment.is_some(),
+        align_images: cli.align_images.is_some(),
+        align_lists: cli.align_lists.is_some(),
+        align_block_quotes: cli.align_block_quotes.is_some(),
+        align_tables: cli.align_tables.is_some(),
+        align_code_blocks: cli.align_code_blocks.is_some(),
+    }
+}
+
+/// Parse the `style:` frontmatter (if any), promote schema warnings to errors
+/// when `--strict-style` is set, log remaining warnings, and apply the
+/// page-level subset to `page` using the CLI's override summary.
+pub fn apply_style_frontmatter(
+    page: DarkmatterPage,
+    md: &Markdown,
+    cli: &Cli,
+) -> Result<DarkmatterPage> {
+    let (style, all_warnings) =
+        from_frontmatter(md.frontmatter()).context("Failed to parse `style:` frontmatter")?;
+
+    // `--strict-style` promotes schema issues (UnknownKey / Deprecated) to
+    // errors, but informational `KnownButInactive` warnings must still flow
+    // through `log_style_warnings` so `RUST_LOG=darkmatter=info` users see
+    // future-phase keys regardless of strict mode.
+    let (style, warnings) = if cli.strict_style {
+        let (schema, informational): (Vec<_>, Vec<_>) = all_warnings
+            .into_iter()
+            .partition(StyleWarning::is_schema_issue);
+        let style = into_strict((style, schema))
+            .context("`style:` frontmatter rejected by --strict-style")?;
+        (style, informational)
+    } else {
+        (style, all_warnings)
+    };
+
+    log_style_warnings(&warnings);
+
+    let overrides = page_style_overrides_from_cli(cli);
+    apply_page_style(page, &style, overrides)
+        .map_err(|e| eyre!("Failed to apply `style:` frontmatter: {e}"))
+}
+
+/// Log non-fatal style warnings via `tracing`.
+///
+/// `KnownButInactive` is informational; `UnknownKey` and `Deprecated` are
+/// warnings (but only when not promoted to errors by `--strict-style`).
+fn log_style_warnings(warnings: &[StyleWarning]) {
+    for w in warnings {
+        match &w.kind {
+            StyleWarningKind::UnknownKey => {
+                tracing::warn!(path = %w.path, "unknown style key");
+            }
+            StyleWarningKind::Deprecated { replacement } => {
+                tracing::warn!(
+                    path = %w.path,
+                    replacement = %replacement,
+                    "deprecated style key",
+                );
+            }
+            StyleWarningKind::KnownButInactive { sub_spec } => {
+                tracing::info!(
+                    path = %w.path,
+                    sub_spec = sub_spec,
+                    "style key parsed but not yet wired",
+                );
+            }
+        }
+    }
 }
 
 pub fn markdown_artifact(md: &Markdown) -> OutputArtifact {
@@ -65,14 +292,23 @@ pub fn html_artifact(
     prose_theme: ThemePair,
     code_theme: ThemePair,
     color_mode: ColorMode,
+    cli: &Cli,
 ) -> Result<OutputArtifact> {
-    let mut options = HtmlOptions::default();
-    options.prose_theme = prose_theme;
-    options.code_theme = code_theme;
-    options.color_mode = color_mode;
-    options.mermaid_mode = MermaidMode::Image;
+    let term = Terminal::new_optimistic(120);
+    let mut page = apply_cli_layout_flags(
+        DarkmatterPage::new(&term)
+            .with_prose_theme(prose_theme.kebab_name())
+            .with_code_theme(code_theme.kebab_name())
+            .with_color_mode(color_mode),
+        cli,
+    );
 
-    let content = md.as_html(options).context("Failed to convert to HTML")?;
+    page = apply_style_frontmatter(page, md, cli)?;
+
+    let content = page
+        .render_to_browser(md)
+        .context("Failed to convert to HTML")?;
+
     Ok(OutputArtifact {
         content,
         extension: "html",
@@ -632,7 +868,8 @@ pub fn print_delta(delta: &MarkdownDelta, verbose: bool, original: &Markdown, up
 
 #[cfg(test)]
 mod tests {
-    use super::parse_bool_env;
+    use super::*;
+    use clap::Parser;
 
     #[test]
     fn parse_bool_env_supports_truthy_values() {
@@ -653,5 +890,182 @@ mod tests {
         for value in ["", "maybe", "2", "enable", "disable"] {
             assert_eq!(parse_bool_env(value), None, "value: {value}");
         }
+    }
+
+    fn cli_from(args: &[&str]) -> Cli {
+        Cli::try_parse_from(args).expect("CLI should parse")
+    }
+
+    #[test]
+    fn strict_style_flag_defaults_false() {
+        let cli = cli_from(&["md", "doc.md"]);
+        assert!(!cli.strict_style);
+    }
+
+    #[test]
+    fn strict_style_flag_parses() {
+        let cli = cli_from(&["md", "doc.md", "--strict-style"]);
+        assert!(cli.strict_style);
+    }
+
+    #[test]
+    fn overrides_default_empty_when_no_layout_flags() {
+        let cli = cli_from(&["md", "doc.md"]);
+        let o = page_style_overrides_from_cli(&cli);
+        assert_eq!(o, PageStyleOverrides::default());
+    }
+
+    #[test]
+    fn margin_shorthand_claims_all_four_sides() {
+        let cli = cli_from(&["md", "doc.md", "--margin", "4"]);
+        let o = page_style_overrides_from_cli(&cli);
+        assert!(o.margin_top && o.margin_right && o.margin_bottom && o.margin_left);
+        assert!(!o.padding_top && !o.padding_left);
+    }
+
+    #[test]
+    fn mx_claims_left_and_right_only() {
+        let cli = cli_from(&["md", "doc.md", "--mx", "2"]);
+        let o = page_style_overrides_from_cli(&cli);
+        assert!(o.margin_left && o.margin_right);
+        assert!(!o.margin_top && !o.margin_bottom);
+    }
+
+    #[test]
+    fn my_claims_top_and_bottom_only() {
+        let cli = cli_from(&["md", "doc.md", "--my", "1"]);
+        let o = page_style_overrides_from_cli(&cli);
+        assert!(o.margin_top && o.margin_bottom);
+        assert!(!o.margin_left && !o.margin_right);
+    }
+
+    #[test]
+    fn ml_claims_only_left_margin() {
+        let cli = cli_from(&["md", "doc.md", "--ml", "2"]);
+        let o = page_style_overrides_from_cli(&cli);
+        assert!(o.margin_left);
+        assert!(!o.margin_right && !o.margin_top && !o.margin_bottom);
+    }
+
+    #[test]
+    fn padding_shorthand_claims_all_four_sides() {
+        let cli = cli_from(&["md", "doc.md", "--padding", "2"]);
+        let o = page_style_overrides_from_cli(&cli);
+        assert!(o.padding_top && o.padding_right && o.padding_bottom && o.padding_left);
+    }
+
+    #[test]
+    fn px_claims_left_and_right_padding() {
+        let cli = cli_from(&["md", "doc.md", "--px", "1"]);
+        let o = page_style_overrides_from_cli(&cli);
+        assert!(o.padding_left && o.padding_right);
+        assert!(!o.padding_top && !o.padding_bottom);
+    }
+
+    #[test]
+    fn max_width_flag_claims_max_width() {
+        let cli = cli_from(&["md", "doc.md", "--max-width", "80"]);
+        let o = page_style_overrides_from_cli(&cli);
+        assert!(o.max_width);
+    }
+
+    #[test]
+    fn page_bg_flag_claims_background() {
+        let cli = cli_from(&["md", "doc.md", "--page-bg", "subtle"]);
+        let o = page_style_overrides_from_cli(&cli);
+        assert!(o.background);
+    }
+
+    #[test]
+    fn alignment_flag_claims_alignment() {
+        let cli = cli_from(&["md", "doc.md", "--alignment", "center"]);
+        let o = page_style_overrides_from_cli(&cli);
+        assert!(o.alignment);
+    }
+
+    #[test]
+    fn component_specific_alignment_flags_claim_their_component() {
+        let cli = cli_from(&[
+            "md",
+            "doc.md",
+            "--align-images",
+            "left",
+            "--align-lists",
+            "right",
+            "--align-block-quotes",
+            "center",
+            "--align-tables",
+            "right",
+            "--align-code-blocks",
+            "left",
+        ]);
+        let o = page_style_overrides_from_cli(&cli);
+        assert!(o.align_images && o.align_lists && o.align_block_quotes);
+        assert!(o.align_tables && o.align_code_blocks);
+        // The global `--alignment` was not set, so the broadcast field stays clear.
+        assert!(!o.alignment);
+    }
+
+    #[test]
+    fn component_alignment_unclaimed_when_no_flags() {
+        let cli = cli_from(&["md", "doc.md"]);
+        let o = page_style_overrides_from_cli(&cli);
+        assert!(
+            !o.align_images
+                && !o.align_lists
+                && !o.align_block_quotes
+                && !o.align_tables
+                && !o.align_code_blocks,
+        );
+    }
+
+    // -----------------------------------------------------------------
+    // Strict-style preserves informational `KnownButInactive` warnings
+    // -----------------------------------------------------------------
+
+    /// Build a `DarkmatterPage` at a deterministic width for warning-log tests.
+    fn test_page() -> DarkmatterPage {
+        DarkmatterPage::new(&Terminal::new_optimistic(80))
+    }
+
+    #[test]
+    #[tracing_test::traced_test]
+    fn strict_style_still_emits_known_but_inactive_event() {
+        // A schema-clean fixture whose only warnings are `KnownButInactive`
+        // (the `table` block is wired in a later sub-spec). Under
+        // `--strict-style`, `into_strict` must succeed (no schema issues),
+        // and the informational future-phase event must still reach
+        // `log_style_warnings`. The old code replaced the warning list with
+        // `Vec::new()` in strict mode and silently swallowed it.
+        let raw = "---\n\
+style:\n\
+\x20   table:\n\
+\x20       alignment: right\n\
+---\n\n# Doc\n";
+        let md = Markdown::try_from_content(raw).unwrap();
+        let cli = cli_from(&["md", "doc.md", "--strict-style"]);
+        apply_style_frontmatter(test_page(), &md, &cli)
+            .expect("strict-style must succeed on schema-clean future-phase key");
+        assert!(
+            logs_contain("style key parsed but not yet wired"),
+            "informational KnownButInactive event must survive --strict-style"
+        );
+    }
+
+    #[test]
+    #[tracing_test::traced_test]
+    fn non_strict_style_emits_known_but_inactive_event() {
+        let raw = "---\n\
+style:\n\
+\x20   table:\n\
+\x20       alignment: right\n\
+---\n\n# Doc\n";
+        let md = Markdown::try_from_content(raw).unwrap();
+        let cli = cli_from(&["md", "doc.md"]);
+        apply_style_frontmatter(test_page(), &md, &cli).expect("apply");
+        assert!(
+            logs_contain("style key parsed but not yet wired"),
+            "informational KnownButInactive event must be logged in non-strict mode"
+        );
     }
 }

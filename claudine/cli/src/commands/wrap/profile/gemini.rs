@@ -20,7 +20,7 @@ impl WrapperProfile for GeminiWrapper {
         &self,
         args: &mut Vec<String>,
         _env_overrides: &mut Vec<(String, String)>,
-    ) -> Result<Option<String>> {
+    ) -> Result<super::YoloOutcome> {
         // Gemini accepts both `--approval-mode yolo` and
         // `--approval-mode=yolo`, while the typed catalog only records the
         // native setting. Keep this override to preserve conflict checks for
@@ -35,12 +35,12 @@ impl WrapperProfile for GeminiWrapper {
             {
                 bail!("--yolo conflicts with existing '{flag} {existing}' for gemini");
             }
-            return Ok(None);
+            return Ok(super::YoloOutcome::applied());
         }
 
         args.push(flag.to_string());
         args.push(value.to_string());
-        Ok(None)
+        Ok(super::YoloOutcome::applied())
     }
 
     fn reject_direct_yolo(&self, args: &[String]) -> Result<()> {
@@ -117,37 +117,19 @@ impl WrapperProfile for GeminiWrapper {
     fn apply_system_prompt(
         &self,
         prompt: &PreparedSystemPrompt,
-        _interactive: bool,
+        interactive: bool,
         _cwd: &Path,
+        scoped_tmp: &Path,
     ) -> Result<crate::commands::wrap::system_prompt::SystemPromptApplication> {
-        use crate::commands::wrap::system_prompt::{SystemPromptApplication, SystemPromptArtifact};
-
-        let mut app = SystemPromptApplication::empty();
-        match prompt.mode {
-            SystemPromptMode::Append => {
-                let (tmp_home, _overlay_path) =
-                    crate::commands::wrap::system_prompt::create_ephemeral_overlay_home(
-                        ".gemini",
-                        "GEMINI.md",
-                        &prompt.composed_markdown,
-                    )?;
-                app.env.push((
-                    std::ffi::OsString::from("HOME"),
-                    tmp_home.path().as_os_str().to_owned(),
-                ));
-                app.artifacts.push(SystemPromptArtifact::TempDir(tmp_home));
-            }
-            SystemPromptMode::Replace => {
-                let mut tmp = tempfile::NamedTempFile::new()?;
-                tmp.write_all(prompt.composed_markdown.as_bytes())?;
-                app.env.push((
-                    std::ffi::OsString::from("GEMINI_SYSTEM_MD"),
-                    std::ffi::OsString::from(tmp.path().display().to_string()),
-                ));
-                app.artifacts.push(SystemPromptArtifact::TempFile(tmp));
-            }
-        }
-        Ok(app)
+        let real_provider_dir = dirs::home_dir().map(|h| h.join(".gemini"));
+        crate::commands::wrap::system_prompt::apply_system_prompt_via_spec(
+            self.system_prompt_spec(),
+            prompt.mode,
+            interactive,
+            &prompt.composed_markdown,
+            real_provider_dir.as_deref(),
+            scoped_tmp,
+        )
     }
 
     fn prompt_delivery(

@@ -167,6 +167,13 @@ For the non-AST variants, there are a set of "features" which we try to employ a
 
 For each of these rendering features there are detailed documents which will describe the functionality as well as clarify the support across the different output targets.
 
+- **Page Layout:**
+
+    - The `DarkmatterPage` primitive provides page-level layout control for terminal and browser output
+    - Margins, padding, page background, max-width, line numbers, and per-component alignment/fill are all configurable via a builder API
+    - Defaults preserve the existing `for_terminal` behavior; with no builder calls the output is byte-for-byte equivalent
+    - For details read the [`darkmatter::layout`](https://docs.rs/darkmatter/latest/darkmatter/layout/index.html) API docs
+
 - **Table Rendering:**
 
     - Being able to render tables, have control over alignment, column width, and other layout features are always going to be nice-to-haves but in Markdown they have no means to be defined (note: the CommonMark spec doesn't have any direct support for tables, that only comes with GFM support)
@@ -307,6 +314,10 @@ The following crates play an important role in Darkmatter providing it's current
 - `tokio` - _for IO bound async including all remote requests_
 - `reqwest` - _for 
 - `this-error` & `tracing` - _provide error definition support and reporting_
+
+### Development Dependencies
+
+- `chromiumoxide` & `futures-util` - _drive a real headless Chrome (Chrome DevTools Protocol) for browser-render tests (`tests/browser_render.rs`) that assert on browser-computed styles of the HTML output, plus the `examples/html_to_png.rs` screenshot helper. Tests skip cleanly when no Chrome/Chromium is found._ See the `rust-testing` skill's [Browser Render Testing](../../.claude/skills/rust-testing/browser-testing.md) topic.
 
 
 

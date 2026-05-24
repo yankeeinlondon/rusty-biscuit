@@ -1,5 +1,5 @@
-set dotenv-load := true
-set positional-arguments := true
+set dotenv-load
+set positional-arguments
 
 # set allow-duplicate-recipes
 
@@ -57,6 +57,9 @@ install *args="":
 test *args="":
     @just _test biscuit-terminal {{ args }}
     @just _test biscuit-terminal-cli {{ args }}
+    @echo
+    @echo "👀 {{ BOLD }}Note:{{ RESET }} running {{ BLUE }}just test{{ RESET }} runs level 1 and 2 test but not level 3"
+    @echo
 
 # Run only Level-2 real-terminal tests
 test-l2 *args="":
@@ -75,7 +78,28 @@ outdated:
 check:
     @cargo check -p {{ LIBRARY }} -p {{ CLI }}
 
-# Run the latest debug build of the Claudine CLI
+# ---------- benchmarking + profiling ----------
+
+# run the full Criterion bench suite for biscuit-terminal
+bench *args="":
+    @echo -e "Running Criterion benches for {{ BOLD }}{{ PACKAGE }}{{ RESET }}"
+    @cargo bench -p {{ LIBRARY }} -- {{ args }}
+
+# run only the rendering benches (escape codes, prose, word-wrap, layout, components)
+bench-rendering *args="":
+    @cargo bench -p {{ LIBRARY }} --bench rendering -- {{ args }}
+
+# capture a saved baseline for trend tracking (usage: `just bench-baseline main`)
+bench-baseline name:
+    @echo -e "Saving Criterion baseline {{ BOLD }}{{ name }}{{ RESET }}"
+    @cargo bench -p {{ LIBRARY }} -- --save-baseline {{ name }}
+
+# compare current bench timings against a saved baseline
+bench-compare name:
+    @echo -e "Comparing against Criterion baseline {{ BOLD }}{{ name }}{{ RESET }}"
+    @cargo bench -p {{ LIBRARY }} -- --baseline {{ name }}
+
+# Run the latest debug build of the CLI
 cli *args="":
     @cargo run -p {{ CLI }} {{ args }}
 
@@ -87,8 +111,16 @@ deps:
 readme:
     _readme_files claudine
 
-# No-op recipe: reference color vars so linters won't report them as unused.
+# produce documentation for biscuit-terminal (without dependencies)
+doc open="false":
+    @just _doc biscuit-terminal "{{ open }}"
+    @just _doc biscuit-terminal-cli "{{ open }}"
 
+parity:
+    cargo run -p biscuit-terminal --example render_tree_parity
+    cargo run -p darkmatter --example render_tree_parity
+
+# No-op recipe: reference color vars so linters won't report them as unused.
 # Run `just _colors` if you want to exercise this (it does nothing).
 _colors:
     @: {{ BOLD }} {{ ITALIC }} {{ RESET }} {{ BLACK }} {{ RED }} {{ GREEN }} {{ YELLOW }} {{ BLUE }} {{ MAGENTA }} {{ CYAN }} {{ WHITE }} {{ DIM }} >/dev/null || true

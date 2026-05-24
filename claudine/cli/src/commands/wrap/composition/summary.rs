@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use biscuit_terminal::prelude::Renderable;
+use biscuit_terminal::prelude::TerminalRenderable;
 use claudine::events::EnvironmentContext;
 use claudine::provider::Provider;
 use claudine::stream::stderr::Verbosity;

@@ -76,10 +76,17 @@ pub fn collect_auditable_commands(
 
     // 5. Source page ::shell directives
     if let Some(text) = source_text {
-        let directives = darkmatter::markdown::compose::shell_expansion::parse_directives(text)
-            .map_err(|e| HarnessError::ShellAuditParseError {
-                detail: e.to_string(),
-            })?;
+        let ctx = biscuit_terminal::errors::SourceContext::new(
+            std::path::PathBuf::from("<harness-audit>"),
+            std::path::PathBuf::from("<harness-audit>"),
+            text.to_string(),
+        );
+        let directives = darkmatter::markdown::compose::shell_expansion::parse_directives(
+            text, ctx,
+        )
+        .map_err(|e| HarnessError::ShellAuditParseError {
+            detail: e.to_string(),
+        })?;
         for directive in directives {
             commands.push(AuditedCommand {
                 source: AuditedCommandSource::ComposeSourceLine {

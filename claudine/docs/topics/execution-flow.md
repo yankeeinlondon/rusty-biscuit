@@ -236,14 +236,14 @@ Constructs a `CompositionExecutionRequest` with `mode: ChainedDocument`, the pre
 1. Detects installed providers via `InstalledAiClients::new()`
 2. Builds installed provider snapshot, filtering excluded providers
 3. Loads selection config (favorite provider, model overrides) from Claudine config
-4. Builds model catalog via `ModelCatalogService` and calls `refresh_blocking()`
+4. Builds model catalog via `ModelCatalogService` (no upfront refresh; refresh is provider-scoped and deferred until after a provider is selected)
 5. Resolves execution target:
 
     - **If `resolved_target` is pre-set** (from sequence): uses it directly
     - **TTY mode**: explicit `--provider` flag wins unconditionally; otherwise shows interactive picker via `tui-chrome::ChooseOne`
     - **Non-TTY mode**: `resolve_target_non_tty_with_catalog()` applies strict chain: explicit flag → frontmatter `agent` (single or first-installed-from-list) → config favorite → hard error
 
-6. Resolves model: CLI `--model` → provider-specific env vars → generic `MODEL` → frontmatter `model` (validated against catalog) → provider default
+6. Resolves model: CLI `--model` → provider-specific env vars → generic `MODEL` → frontmatter `model` (validated against catalog) → provider default. When the frontmatter `model` hint is the only source, the selected provider's catalog is refreshed via `refresh_provider_blocking(provider)` before validation; CLI/env model wins skip the refresh entirely.
 
 **Affected by:**
 
@@ -355,7 +355,12 @@ If `--dry-run`: prints what would be executed and exits with code 0.
 
 ##### 6j. Preflight Checks
 
-1. Switches process CWD to child working directory
+1. Switches process CWD to child working directory via `switch_process_cwd` (in `claudine/cli/src/commands/wrap/mod.rs`). This is **intentional and not restored** for two reasons:
+    - Agents should always start at the repo root for permission-grant scope and consistent context — many provider sandboxes treat CWD as the trust boundary.
+    - The original launch CWD is preserved separately on `LaunchContext`/`LaunchWorkspaceContext` so downstream stages (system-prompt discovery, package-area detection) still know where the user actually invoked Claudine from.
+
+    **Implication for loops, sequences, and `ctx.*`:** because the CWD mutation persists for the parent claudine process across iterations and across sequence steps, any code that re-derives state from `std::env::current_dir()` between iterations (notably `ComposeContext::capture()` for `ctx.current_package_area` and friends) will see the post-switch CWD on iteration 2+ / step 2+. The intended fix is a Claudine-owned launch-CWD scratchpad captured once at process startup and used as the base directory for every `ComposeContext::capture_for_dir(...)` call — not re-reading the process CWD, and not anchoring to the source file's parent (which would change the user-facing meaning of `ctx.current_package_area`).
+
 2. Detects harness from effective frontmatter via `has_harness_properties()`
 3. Builds lifecycle context and creates `LifecycleRunGuard`
 4. **If harness enabled**: parses harness plan, prepends inline writability pre-check (if inline), resolves shell approvals for harness commands

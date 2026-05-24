@@ -12,6 +12,10 @@ categories = ["text-processing", "visualization"]
 [lib]
 name = "darkmatter"
 path = "src/lib.rs"
+# The crate has no `#[bench]` functions; disabling bench harness here keeps
+# `cargo bench` from running the unit-test harness (and printing a large
+# "N ignored" block) before the Criterion `[[bench]]` targets.
+bench = false
 
 [dependencies]
 # Tracing
@@ -53,6 +57,9 @@ two-face = "0.5"
 # CSS parsing
 cssparser = "0.37"
 
+# Type-safe CSS stylesheet declarations (shared, render-target agnostic)
+renderable = { path = "../../renderable" }
+
 # Markdown parsing and rendering
 pulldown-cmark = "0.13"
 pulldown-cmark-to-cmark = "22"
@@ -70,9 +77,47 @@ biscuit-hash = { path = "../../biscuit-hash/lib" }
 sniff = { path = "../../sniff/lib" }
 serde_yaml_ng = "0.10"
 
+# JSON Schema validation
+jsonschema = { version = "0.42", default-features = false }
+sha2 = "0.10"
+
 [dev-dependencies]
 tokio = { version = "1.48", features = ["full", "test-util"] }
 tracing-test = "0.2"
 insta = "1.41"
 serial_test = "3.0"
 git2 = "0.20"
+proptest = "1.6"
+criterion = { version = "0.5", features = ["html_reports"] }
+biscuit-test-harness = { path = "../../biscuit-test-harness" }
+tempfile = "3"
+chromiumoxide = { version = "0.7", default-features = false, features = ["tokio-runtime"] }
+futures-util = "0.3"
+
+[[bench]]
+name = "schema_validation"
+harness = false
+
+[[bench]]
+name = "render_tree"
+harness = false
+
+[[bench]]
+name = "compose_pipeline"
+harness = false
+
+[[bench]]
+name = "render_pipeline"
+harness = false
+
+# DMTR-6 — side-by-side legacy vs render-tree benchmarks for every public
+# render target. Drives the parity-baseline measurement gate before any public
+# cutover; see
+# `renderable/features/2026-05-20-darkmatter-tree/benchmark-harness-shape.md`.
+[[bench]]
+name = "migration_parity"
+harness = false
+
+[[bench]]
+name = "prose_highlighter"
+harness = false

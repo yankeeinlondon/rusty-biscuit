@@ -1,0 +1,6 @@
+---
+source: darkmatter/lib/tests/render_tree_roundtrip.rs
+expression: rendered.output
+---
+This paragraph mixes _emphasis_, **strong**, and ~~strikethrough~~ inline
+styles, plus a nested _emphasis with **strong** inside_ it.

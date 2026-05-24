@@ -48,32 +48,32 @@ pub fn apply_image_layout(
     term_image: &mut biscuit_terminal::components::terminal_image::TerminalImage,
     layout: &LayoutArgs,
 ) {
-    use biscuit_terminal::components::renderable::Renderable;
-    use biscuit_terminal::utils::layout::Margin;
+    use biscuit_terminal::components::renderable::TerminalRenderable;
+    use biscuit_terminal::utils::layout::{Length, TargetValue};
 
     if let Some(ml) = layout.margin_left {
-        term_image.layout_mut().left_margin = Margin::Chars(ml);
+        term_image.layout_mut().margin.left = TargetValue::universal(Length::ch(ml));
     }
     if let Some(mr) = layout.margin_right {
-        term_image.layout_mut().right_margin = Margin::Chars(mr);
+        term_image.layout_mut().margin.right = TargetValue::universal(Length::ch(mr));
     }
     if let Some(align) = layout.alignment {
         term_image.layout_mut().alignment = align;
     }
 }
 
-/// Apply optional margin and alignment overrides to any `Renderable` component.
+/// Apply optional margin and alignment overrides to any `TerminalRenderable` component.
 pub fn apply_renderable_layout(
-    component: &mut impl biscuit_terminal::components::renderable::Renderable,
+    component: &mut impl biscuit_terminal::components::renderable::TerminalRenderable,
     layout: &LayoutArgs,
 ) {
-    use biscuit_terminal::utils::layout::Margin;
+    use biscuit_terminal::utils::layout::{Length, TargetValue};
 
     if let Some(ml) = layout.margin_left {
-        component.layout_mut().left_margin = Margin::Chars(ml);
+        component.layout_mut().margin.left = TargetValue::universal(Length::ch(ml));
     }
     if let Some(mr) = layout.margin_right {
-        component.layout_mut().right_margin = Margin::Chars(mr);
+        component.layout_mut().margin.right = TargetValue::universal(Length::ch(mr));
     }
     if let Some(align) = layout.alignment {
         component.layout_mut().alignment = align;
@@ -146,6 +146,39 @@ pub fn print_example_command(cmd: &str) {
     println!();
     println!("{}Command:{}", s.bold, s.reset);
     println!("{}{}{}", s.dim, cmd, s.reset);
+}
+
+/// Emits a YAML frontmatter block carrying the CLI's `--margin-left` /
+/// `--margin-right` values prepended to a Markdown body.
+///
+/// Returns the body unchanged when no horizontal margins were given on the
+/// CLI. Vertical margins (`--margin-top` / `--margin-bottom`) and
+/// `--alignment` are intentionally not lowered to Markdown frontmatter —
+/// CommonMark has no portable peer for them and the bt CLI emits them as
+/// blank lines / through HTML wrappers respectively.
+pub fn render_markdown_with_layout_frontmatter(body: &str, layout: &LayoutArgs) -> String {
+    let Some(frontmatter) = layout_style_frontmatter(layout) else {
+        return body.to_string();
+    };
+    format!("---\n{frontmatter}---\n\n{body}")
+}
+
+/// Builds the YAML body of the `style:` frontmatter block for the given
+/// layout flags. Returns `None` when neither `--margin-left` nor
+/// `--margin-right` is set, which signals callers to omit the frontmatter
+/// envelope entirely.
+pub fn layout_style_frontmatter(layout: &LayoutArgs) -> Option<String> {
+    if layout.margin_left.is_none() && layout.margin_right.is_none() {
+        return None;
+    }
+    let mut out = String::from("style:\n  page:\n");
+    if let Some(left) = layout.margin_left {
+        out.push_str(&format!("    margin-left: {left}ch\n"));
+    }
+    if let Some(right) = layout.margin_right {
+        out.push_str(&format!("    margin-right: {right}ch\n"));
+    }
+    Some(out)
 }
 
 /// Strips SGR (Select Graphic Rendition) CSI sequences from `s`.

@@ -169,12 +169,13 @@ Cell alignment follows each column's effective alignment (for example: text defa
 | `render(term_width)` | Optimistic path -- assumes full terminal capabilities. Falls back to 80 columns when `term_width` is `None`. |
 | `render(term)` | Conservative path -- receives a `Terminal` reference for capability-aware decisions. Uses `term.width()` for sizing. |
 
-Both paths call `render_content()` to produce raw table text, then pass it through `Layout::apply_layout()` which applies:
+Both paths call `render_content()` to produce raw table text, then pass it through `Layout::apply_block_layout()` which applies:
 
 - Left/right margin resolution (chars, percent, or nested offset)
-- Word wrapping (if configured)
-- Text alignment (left, center, right)
+- Block-level alignment (left, center, right) — all rows shift by the same offset so column borders remain vertically aligned
 - Row-fill padding (for opaque backgrounds)
+
+> Tables intentionally use block alignment rather than per-line alignment so the box-drawing borders form straight vertical lines under center/right alignment. Word wrap is not applied at this stage; column widths are negotiated inside `render_content`.
 
 ### Block-Level Behavior
 

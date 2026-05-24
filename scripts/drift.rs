@@ -13,7 +13,7 @@ use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, bail, Context, Result};
 use biscuit_terminal::prelude::{
-    OrderedList, Prose, Renderable, RenderableContent, Table, TableColumn, Terminal, UnorderedList,
+    OrderedList, Prose, TerminalRenderable, RenderableTerminalContent, Table, TableColumn, Terminal, UnorderedList,
 };
 use cargo_metadata::{Metadata, MetadataCommand, PackageId};
 use serde_json::Value;
@@ -163,7 +163,7 @@ impl Ui {
         let items = docs
             .iter()
             .map(|(display, uri)| {
-                RenderableContent::from(Prose::new(format!("<a href=\"{uri}\">{display}</a>")))
+                RenderableTerminalContent::from(Prose::new(format!("<a href=\"{uri}\">{display}</a>")))
             })
             .collect::<Vec<_>>();
         let list = UnorderedList::from(items).with_bullet("- ");
@@ -1606,8 +1606,8 @@ fn render_markdown_list_block(lines: &[String], term: &Terminal) -> Option<Strin
         let line = &parsed[idx];
         let (component, next_idx) = build_list_component(&parsed, idx, line.indent, line.kind)?;
         match component {
-            RenderableContent::String(text) => output.push_str(&text),
-            RenderableContent::Component(component) => {
+            RenderableTerminalContent::String(text) => output.push_str(&text),
+            RenderableTerminalContent::Component(component) => {
                 output.push_str(&component.fallback_render(term))
             }
         }
@@ -1625,8 +1625,8 @@ fn build_list_component(
     mut idx: usize,
     indent: usize,
     kind: ListKind,
-) -> Option<(RenderableContent, usize)> {
-    let mut items: Vec<RenderableContent> = Vec::new();
+) -> Option<(RenderableTerminalContent, usize)> {
+    let mut items: Vec<RenderableTerminalContent> = Vec::new();
 
     while idx < lines.len() {
         let line = &lines[idx];
@@ -1650,9 +1650,9 @@ fn build_list_component(
     }
 
     let component = match kind {
-        ListKind::Ordered => RenderableContent::from(OrderedList::from(items)),
+        ListKind::Ordered => RenderableTerminalContent::from(OrderedList::from(items)),
         ListKind::Unordered => {
-            RenderableContent::from(UnorderedList::from(items).with_bullet("- "))
+            RenderableTerminalContent::from(UnorderedList::from(items).with_bullet("- "))
         }
     };
 

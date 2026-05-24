@@ -218,6 +218,7 @@ fn iana_to_abbreviation(iana: &str, is_dst: bool) -> Option<String> {
 /// ## Returns
 ///
 /// The timezone name (e.g., "America/Los_Angeles") if found, `None` otherwise.
+#[allow(dead_code)]
 pub(crate) fn extract_timezone_from_path(path: &str) -> Option<String> {
     // Common patterns for timezone paths
     let markers = ["zoneinfo/", "timezone/zoneinfo/"];

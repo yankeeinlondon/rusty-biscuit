@@ -499,7 +499,7 @@ fn render_audio_device_list(devices: &[sniff::hardware::AudioDeviceInfo], verbos
             compose::Compose,
             list::UnorderedList,
             prose::Prose,
-            renderable::Renderable,
+            renderable::TerminalRenderable,
             status::{Status, StatusState, StatusTheme},
         },
         terminal::Terminal,

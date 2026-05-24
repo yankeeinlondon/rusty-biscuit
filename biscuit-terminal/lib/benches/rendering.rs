@@ -6,9 +6,9 @@ use biscuit_terminal::components::block_quote::BlockQuote;
 use biscuit_terminal::components::list::UnorderedList;
 use biscuit_terminal::components::pad::{PadLeft, PadRight};
 use biscuit_terminal::components::prose::Prose;
-use biscuit_terminal::components::renderable::{Renderable, RenderableContent};
+use biscuit_terminal::components::renderable::{RenderableTerminalContent, TerminalRenderable};
 use biscuit_terminal::utils::escape_codes;
-use biscuit_terminal::utils::layout::{Layout, WordWrap};
+use biscuit_terminal::utils::layout::{Layout, LayoutTerminalExt, WordWrap};
 use biscuit_terminal::utils::word_wrap::word_wrap;
 use std::rc::Rc;
 
@@ -43,11 +43,9 @@ fn bench_strip_escape_codes(c: &mut Criterion) {
 
 fn bench_prose_render(c: &mut Criterion) {
     let simple = "Hello world, this is a simple prose string.";
-    let tokens = "Hello {{bold}}world{{reset}}! This is {{red}}important{{reset}} text with {{italic}}emphasis{{reset}}.";
+    let tokens = "Hello <bold>world</bold>! This is <red>important</red> text with <italic>emphasis</italic>.";
     let long_tokens = (0..20)
-        .map(|i| {
-            format!("Item {{bold}}{i}{{reset}}: description of item {i} with {{red}}color{{reset}}")
-        })
+        .map(|i| format!("Item <bold>{i}</bold>: description of item {i} with <red>color</red>"))
         .collect::<Vec<_>>()
         .join(". ");
 
@@ -80,7 +78,7 @@ fn bench_prose_render(c: &mut Criterion) {
 fn bench_word_wrap(c: &mut Criterion) {
     let short = "A short line that fits.";
     let paragraph = "This is a longer paragraph that will definitely need to be wrapped because it exceeds eighty columns when rendered in a typical terminal window and contains multiple clauses separated by conjunctions.";
-    let multiline = "First line of content here.\nSecond line with more text that may wrap.\nThird line is short.\nFourth line has {{bold}}tokens{{reset}} interspersed throughout the content for styling.";
+    let multiline = "First line of content here.\nSecond line with more text that may wrap.\nThird line is short.\nFourth line has <bold>tokens</bold> interspersed throughout the content for styling.";
 
     let mut group = c.benchmark_group("word_wrap");
     group.bench_function("short_no_wrap", |b| {
@@ -110,8 +108,9 @@ fn bench_layout_apply(c: &mut Criterion) {
     });
     group.bench_function("with_margins", |b| {
         let layout = Layout {
-            left_margin: biscuit_terminal::utils::layout::Margin::Chars(4),
-            right_margin: biscuit_terminal::utils::layout::Margin::Chars(4),
+            margin: biscuit_terminal::utils::layout::Margin::x(
+                biscuit_terminal::utils::layout::Length::ch(4),
+            ),
             ..Default::default()
         };
         b.iter(|| layout.apply_layout(black_box(content), 80))
@@ -137,7 +136,7 @@ fn bench_component_render(c: &mut Criterion) {
         b.iter(|| {
             let prose = Prose::new("To be or not to be, that is the question.");
             let quote = BlockQuote::new(
-                RenderableContent::Component(Rc::new(prose)),
+                RenderableTerminalContent::Component(Rc::new(prose)),
                 Some("Shakespeare"),
             );
             quote.render_optimistic(Some(80))
@@ -146,9 +145,9 @@ fn bench_component_render(c: &mut Criterion) {
 
     group.bench_function("unordered_list_5", |b| {
         b.iter(|| {
-            let items: Vec<RenderableContent> = (1..=5)
+            let items: Vec<RenderableTerminalContent> = (1..=5)
                 .map(|i| {
-                    RenderableContent::Component(Rc::new(Prose::new(format!(
+                    RenderableTerminalContent::Component(Rc::new(Prose::new(format!(
                         "Item number {i} with some descriptive text"
                     ))))
                 })

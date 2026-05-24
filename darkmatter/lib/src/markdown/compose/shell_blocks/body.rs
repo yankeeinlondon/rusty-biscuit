@@ -58,22 +58,30 @@ pub(crate) fn split_logical_commands(
             let start_byte = current_start_byte.unwrap();
             let end_byte = line_start + line.len();
 
-            let shell_tokens = crate::markdown::compose::shell_expansion::tokenize::tokenize(&raw)
-                .map_err(|e| ShellBlockError::Parse {
-                    line: start_line,
-                    message: format!("Command tokenization failed: {e}"),
-                    excerpt: SourceExcerpt::from_text(body, start_line, body_start_line, 2),
-                    source_file: None,
-                })?;
-
-            let pipeline =
-                crate::markdown::compose::shell_expansion::tokenize::parse_pipeline(&shell_tokens)
+            let synthetic_ctx = biscuit_terminal::errors::SourceContext::new(
+                std::path::PathBuf::from("<shell-block>"),
+                std::path::PathBuf::from("<shell-block>"),
+                raw.clone(),
+            );
+            let shell_tokens =
+                crate::markdown::compose::shell_expansion::tokenize::tokenize(&raw, &synthetic_ctx)
                     .map_err(|e| ShellBlockError::Parse {
                         line: start_line,
-                        message: format!("Command parsing failed: {e}"),
+                        message: format!("Command tokenization failed: {e}"),
                         excerpt: SourceExcerpt::from_text(body, start_line, body_start_line, 2),
                         source_file: None,
                     })?;
+
+            let pipeline = crate::markdown::compose::shell_expansion::tokenize::parse_pipeline(
+                &shell_tokens,
+                &synthetic_ctx,
+            )
+            .map_err(|e| ShellBlockError::Parse {
+                line: start_line,
+                message: format!("Command parsing failed: {e}"),
+                excerpt: SourceExcerpt::from_text(body, start_line, body_start_line, 2),
+                source_file: None,
+            })?;
 
             if pipeline.actions.is_empty() {
                 return Err(ShellBlockError::Parse {

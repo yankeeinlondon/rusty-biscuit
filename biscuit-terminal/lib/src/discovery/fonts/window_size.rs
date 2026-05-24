@@ -1,6 +1,7 @@
 //! Window pixel size and cell size queries via CSI 14 t.
 
 use super::types::{CellSize, WindowSizePixels};
+#[cfg(unix)]
 use crate::discovery::detection::is_tty;
 
 /// Get the terminal window size in pixels.

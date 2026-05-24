@@ -14,6 +14,7 @@ use super::types::{
     ChainOperator, CommandAction, PipelineAction, RedirectionConfig, ShellCommandOrigin,
     ShellExpansionError, ShellPipeline, StderrTarget, StdoutTarget,
 };
+use biscuit_terminal::errors::SourceContext;
 
 /// A single token produced by the shell tokenizer.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -60,19 +61,23 @@ pub enum ShellToken {
 /// ## Examples
 ///
 /// ```
+/// use biscuit_terminal::errors::SourceContext;
 /// use darkmatter::markdown::compose::shell_expansion::tokenize::tokenize;
+/// use std::path::PathBuf;
 ///
-/// let tokens = tokenize("echo hello world").unwrap();
+/// let ctx = SourceContext::new(PathBuf::from("/t"), PathBuf::from("t"), "");
+/// let tokens = tokenize("echo hello world", &ctx).unwrap();
 /// assert!(tokens.len() == 3);
 ///
-/// let tokens = tokenize(r#"echo "hello world""#).unwrap();
+/// let tokens = tokenize(r#"echo "hello world""#, &ctx).unwrap();
 /// assert!(tokens.len() == 2);
 /// ```
-pub fn tokenize(input: &str) -> Result<Vec<ShellToken>, ShellExpansionError> {
+pub fn tokenize(input: &str, ctx: &SourceContext) -> Result<Vec<ShellToken>, ShellExpansionError> {
     let trimmed = input.trim();
 
     if trimmed.is_empty() {
         return Err(ShellExpansionError::ParseDirective {
+            ctx: Box::new(ctx.clone()),
             origin: ShellCommandOrigin::Body { line: 0 },
             message: "Empty command".to_string(),
         });
@@ -101,6 +106,7 @@ pub fn tokenize(input: &str) -> Result<Vec<ShellToken>, ShellExpansionError> {
                 }
                 if !found_close {
                     return Err(ShellExpansionError::ParseDirective {
+                        ctx: Box::new(ctx.clone()),
                         origin: ShellCommandOrigin::Body { line: 0 },
                         message: "Unterminated single quote".to_string(),
                     });
@@ -121,6 +127,7 @@ pub fn tokenize(input: &str) -> Result<Vec<ShellToken>, ShellExpansionError> {
                             }
                         } else {
                             return Err(ShellExpansionError::ParseDirective {
+                                ctx: Box::new(ctx.clone()),
                                 origin: ShellCommandOrigin::Body { line: 0 },
                                 message: "Unterminated escape sequence in double quote".to_string(),
                             });
@@ -134,6 +141,7 @@ pub fn tokenize(input: &str) -> Result<Vec<ShellToken>, ShellExpansionError> {
                 }
                 if !found_close {
                     return Err(ShellExpansionError::ParseDirective {
+                        ctx: Box::new(ctx.clone()),
                         origin: ShellCommandOrigin::Body { line: 0 },
                         message: "Unterminated double quote".to_string(),
                     });
@@ -151,6 +159,7 @@ pub fn tokenize(input: &str) -> Result<Vec<ShellToken>, ShellExpansionError> {
                     }
                 } else {
                     return Err(ShellExpansionError::ParseDirective {
+                        ctx: Box::new(ctx.clone()),
                         origin: ShellCommandOrigin::Body { line: 0 },
                         message: "Trailing backslash".to_string(),
                     });
@@ -178,6 +187,7 @@ pub fn tokenize(input: &str) -> Result<Vec<ShellToken>, ShellExpansionError> {
                     tokens.push(ShellToken::Or);
                 } else {
                     return Err(ShellExpansionError::ParseDirective {
+                        ctx: Box::new(ctx.clone()),
                         origin: ShellCommandOrigin::Body { line: 0 },
                         message: "Shell pipes are not allowed".to_string(),
                     });
@@ -186,6 +196,7 @@ pub fn tokenize(input: &str) -> Result<Vec<ShellToken>, ShellExpansionError> {
 
             ';' => {
                 return Err(ShellExpansionError::ParseDirective {
+                    ctx: Box::new(ctx.clone()),
                     origin: ShellCommandOrigin::Body { line: 0 },
                     message: "Command chaining (;) is not allowed".to_string(),
                 });
@@ -193,6 +204,7 @@ pub fn tokenize(input: &str) -> Result<Vec<ShellToken>, ShellExpansionError> {
 
             '<' => {
                 return Err(ShellExpansionError::ParseDirective {
+                    ctx: Box::new(ctx.clone()),
                     origin: ShellCommandOrigin::Body { line: 0 },
                     message: "Input redirection (<) is not allowed".to_string(),
                 });
@@ -201,6 +213,7 @@ pub fn tokenize(input: &str) -> Result<Vec<ShellToken>, ShellExpansionError> {
             '>' => {
                 if chars.peek() == Some(&'>') {
                     return Err(ShellExpansionError::ParseDirective {
+                        ctx: Box::new(ctx.clone()),
                         origin: ShellCommandOrigin::Body { line: 0 },
                         message: "Append redirection (>>) is not allowed".to_string(),
                     });
@@ -218,6 +231,7 @@ pub fn tokenize(input: &str) -> Result<Vec<ShellToken>, ShellExpansionError> {
                         tokens.push(ShellToken::RedirectStdoutToStderr);
                     } else {
                         return Err(ShellExpansionError::ParseDirective {
+                            ctx: Box::new(ctx.clone()),
                             origin: ShellCommandOrigin::Body { line: 0 },
                             message: "Only >&2 redirection is supported after >&".to_string(),
                         });
@@ -230,6 +244,7 @@ pub fn tokenize(input: &str) -> Result<Vec<ShellToken>, ShellExpansionError> {
                         tokens.push(ShellToken::RedirectStdoutNull);
                     } else {
                         return Err(ShellExpansionError::ParseDirective {
+                            ctx: Box::new(ctx.clone()),
                             origin: ShellCommandOrigin::Body { line: 0 },
                             message: format!(
                                 "Output redirection to arbitrary files is not allowed (>{target})"
@@ -246,6 +261,7 @@ pub fn tokenize(input: &str) -> Result<Vec<ShellToken>, ShellExpansionError> {
             '$' => {
                 if chars.peek() == Some(&'(') {
                     return Err(ShellExpansionError::ParseDirective {
+                        ctx: Box::new(ctx.clone()),
                         origin: ShellCommandOrigin::Body { line: 0 },
                         message: "Command substitution $() is not allowed".to_string(),
                     });
@@ -265,6 +281,7 @@ pub fn tokenize(input: &str) -> Result<Vec<ShellToken>, ShellExpansionError> {
                             tokens.push(ShellToken::RedirectStderrToStdout);
                         } else {
                             return Err(ShellExpansionError::ParseDirective {
+                                ctx: Box::new(ctx.clone()),
                                 origin: ShellCommandOrigin::Body { line: 0 },
                                 message: "Only 2>&1 redirection is supported".to_string(),
                             });
@@ -276,6 +293,7 @@ pub fn tokenize(input: &str) -> Result<Vec<ShellToken>, ShellExpansionError> {
                             tokens.push(ShellToken::RedirectStderrNull);
                         } else {
                             return Err(ShellExpansionError::ParseDirective {
+                                ctx: Box::new(ctx.clone()),
                                 origin: ShellCommandOrigin::Body { line: 0 },
                                 message: format!(
                                     "Stderr redirection to arbitrary files is not allowed (2>{target})"
@@ -297,6 +315,7 @@ pub fn tokenize(input: &str) -> Result<Vec<ShellToken>, ShellExpansionError> {
 
     if tokens.is_empty() {
         return Err(ShellExpansionError::ParseDirective {
+            ctx: Box::new(ctx.clone()),
             origin: ShellCommandOrigin::Body { line: 0 },
             message: "Empty command".to_string(),
         });
@@ -348,8 +367,11 @@ fn read_bare_word(chars: &mut std::iter::Peekable<std::str::Chars>) -> String {
 
 /// Tokenizes input and returns only Word tokens as strings.
 /// Used by callers that don't need operator/redirection tokens.
-pub fn tokenize_simple(input: &str) -> Result<Vec<String>, ShellExpansionError> {
-    let tokens = tokenize(input)?;
+pub fn tokenize_simple(
+    input: &str,
+    ctx: &SourceContext,
+) -> Result<Vec<String>, ShellExpansionError> {
+    let tokens = tokenize(input, ctx)?;
     Ok(tokens
         .into_iter()
         .filter_map(|t| match t {
@@ -374,7 +396,10 @@ pub fn tokenize_simple(input: &str) -> Result<Vec<String>, ShellExpansionError> 
 ///   already-nulled stderr).
 /// - `cmd >&2 2> /dev/null` → only stderr suppressed; stdout keeps its
 ///   reference to the original (captured) stderr.
-pub fn parse_pipeline(tokens: &[ShellToken]) -> Result<ShellPipeline, ShellExpansionError> {
+pub fn parse_pipeline(
+    tokens: &[ShellToken],
+    ctx: &SourceContext,
+) -> Result<ShellPipeline, ShellExpansionError> {
     let mut actions = Vec::new();
     let mut current_words = Vec::new();
     let mut redirection = RedirectionConfig::default();
@@ -384,12 +409,12 @@ pub fn parse_pipeline(tokens: &[ShellToken]) -> Result<ShellPipeline, ShellExpan
         match token {
             ShellToken::Word(w) => current_words.push(w.clone()),
             ShellToken::And => {
-                let action = build_action(&mut current_words, &mut redirection, operator)?;
+                let action = build_action(&mut current_words, &mut redirection, operator, ctx)?;
                 actions.push(action);
                 operator = ChainOperator::And;
             }
             ShellToken::Or => {
-                let action = build_action(&mut current_words, &mut redirection, operator)?;
+                let action = build_action(&mut current_words, &mut redirection, operator, ctx)?;
                 actions.push(action);
                 operator = ChainOperator::Or;
             }
@@ -435,7 +460,7 @@ pub fn parse_pipeline(tokens: &[ShellToken]) -> Result<ShellPipeline, ShellExpan
     }
 
     if !current_words.is_empty() || redirection != RedirectionConfig::default() {
-        let action = build_action(&mut current_words, &mut redirection, operator)?;
+        let action = build_action(&mut current_words, &mut redirection, operator, ctx)?;
         actions.push(action);
     } else if operator != ChainOperator::None {
         let op_str = match operator {
@@ -444,6 +469,7 @@ pub fn parse_pipeline(tokens: &[ShellToken]) -> Result<ShellPipeline, ShellExpan
             ChainOperator::None => unreachable!(),
         };
         return Err(ShellExpansionError::ParseDirective {
+            ctx: Box::new(ctx.clone()),
             origin: ShellCommandOrigin::Body { line: 0 },
             message: format!("Missing command after chain operator '{op_str}'"),
         });
@@ -451,6 +477,7 @@ pub fn parse_pipeline(tokens: &[ShellToken]) -> Result<ShellPipeline, ShellExpan
 
     if actions.is_empty() {
         return Err(ShellExpansionError::ParseDirective {
+            ctx: Box::new(ctx.clone()),
             origin: ShellCommandOrigin::Body { line: 0 },
             message: "Empty command".to_string(),
         });
@@ -463,9 +490,11 @@ fn build_action(
     words: &mut Vec<String>,
     redirection: &mut RedirectionConfig,
     operator: ChainOperator,
+    ctx: &SourceContext,
 ) -> Result<PipelineAction, ShellExpansionError> {
     if words.is_empty() {
         return Err(ShellExpansionError::ParseDirective {
+            ctx: Box::new(ctx.clone()),
             origin: ShellCommandOrigin::Body { line: 0 },
             message: "Missing command before chain operator".to_string(),
         });
@@ -486,6 +515,27 @@ fn build_action(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn test_ctx() -> SourceContext {
+        SourceContext::new(
+            std::path::PathBuf::from("/test"),
+            std::path::PathBuf::from("test"),
+            String::new(),
+        )
+    }
+
+    fn tokenize(input: &str) -> Result<Vec<ShellToken>, ShellExpansionError> {
+        super::tokenize(input, &test_ctx())
+    }
+
+    fn parse_pipeline(tokens: &[ShellToken]) -> Result<ShellPipeline, ShellExpansionError> {
+        super::parse_pipeline(tokens, &test_ctx())
+    }
+
+    #[allow(dead_code)]
+    fn tokenize_simple(input: &str) -> Result<Vec<String>, ShellExpansionError> {
+        super::tokenize_simple(input, &test_ctx())
+    }
 
     fn words(tokens: &[ShellToken]) -> Vec<String> {
         tokens

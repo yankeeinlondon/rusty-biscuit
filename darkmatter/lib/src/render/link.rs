@@ -10,11 +10,12 @@ use std::fmt;
 use std::hash::{Hash, Hasher};
 
 use biscuit_terminal::components::prose::Prose;
-use biscuit_terminal::components::renderable::Renderable;
+use biscuit_terminal::components::renderable::TerminalRenderable;
+use biscuit_terminal::errors::SourceContext;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::render::stylesheet::{Stylesheet, StylesheetError};
+use crate::render::stylesheet::{CssStyle, StylesheetBlockError, StylesheetError};
 
 /// BEL character used by OSC 8 hyperlinks.
 const BEL: &str = "\x07";
@@ -45,8 +46,9 @@ pub enum LinkError {
     /// Markdown input failed to parse.
     #[error("malformed markdown link: {message}")]
     MalformedMarkdown {
+        ctx: Box<SourceContext>,
         message: String,
-        input: Option<String>,
+        /// Byte offset in `ctx.content` where the error occurred.
         caret: Option<usize>,
     },
 
@@ -56,7 +58,7 @@ pub enum LinkError {
 
     /// Invalid typed style declaration.
     #[error("invalid CSS style: {0}")]
-    InvalidStyle(#[from] StylesheetError),
+    InvalidStyle(StylesheetBlockError),
 
     /// Invalid target value.
     #[error("invalid link target `{value}`")]
@@ -64,6 +66,14 @@ pub enum LinkError {
         /// Received target value.
         value: String,
     },
+}
+
+/// Wraps a stylesheet parse failure so `?` propagates a [`StylesheetError`]
+/// straight into [`LinkError::InvalidStyle`].
+impl From<StylesheetError> for LinkError {
+    fn from(error: StylesheetError) -> Self {
+        Self::InvalidStyle(StylesheetBlockError(error))
+    }
 }
 
 impl biscuit_terminal::errors::BlockError for LinkError {
@@ -96,15 +106,29 @@ impl biscuit_terminal::errors::BlockError for LinkError {
                 ),
 
             Self::MalformedMarkdown {
+                ctx,
                 message,
-                input,
                 caret,
-            } => StatusBlock::new(StatusState::Error)
-                .error_header(ErrorHeader::new("LinkError", "malformed markdown link"))
-                .body(render_markdown_parse_body(message, input.as_deref(), *caret))
-                .hint(
-                    "Use the pattern <cyan>[display](url \"optional title\")</cyan> with balanced brackets and parentheses.",
-                ),
+            } => {
+                let mut body = vec![Prose::new(format!("<dim>Message:</dim> {message}"))];
+                body.push(Prose::new("Link parsing failed here:"));
+
+                // Link fragments usually start at line 1 of their own string.
+                body.push(ctx.excerpt_prose(1, 0, "md"));
+
+                if let Some(pos) = caret {
+                    body.push(Prose::new(format!(
+                        "{} <red><b>^</b></red> (offset {})",
+                        " ".repeat(*pos),
+                        pos
+                    )));
+                }
+
+                StatusBlock::new(StatusState::Error)
+                    .error_header(ErrorHeader::new("LinkError", "malformed markdown link"))
+                    .body(body)
+                    .hint("Use the pattern <cyan>[display](url \"optional title\")</cyan> with balanced brackets.")
+            }
 
             Self::MissingHref => StatusBlock::new(StatusState::Error)
                 .error_header(ErrorHeader::new("LinkError", "missing href"))
@@ -117,7 +141,10 @@ impl biscuit_terminal::errors::BlockError for LinkError {
 
             Self::InvalidTarget { value } => StatusBlock::new(StatusState::Error)
                 .error_header(ErrorHeader::new("LinkError", "invalid target"))
-                .body(format!("<dim>Target:</dim> <cyan>{value}</cyan>"))
+                .body(format!(
+                    "<dim>Target:</dim> <cyan>{}</cyan>",
+                    value.replace('_', "\\_"),
+                ))
                 .hint(
                     "Valid targets: <cyan>\\_self</cyan>, <cyan>\\_blank</cyan>, <cyan>\\_parent</cyan>, <cyan>\\_top</cyan>, or a named context.",
                 ),
@@ -136,8 +163,12 @@ impl LinkError {
     /// Creates a markdown-parse error without source-context details.
     pub fn malformed_markdown(message: impl Into<String>) -> Self {
         Self::MalformedMarkdown {
+            ctx: Box::new(SourceContext::new(
+                std::path::PathBuf::from("unknown"),
+                std::path::PathBuf::from("unknown"),
+                "",
+            )),
             message: message.into(),
-            input: None,
             caret: None,
         }
     }
@@ -147,9 +178,14 @@ impl LinkError {
         input: impl Into<String>,
         caret: usize,
     ) -> Self {
+        let input_str = input.into();
         Self::MalformedMarkdown {
+            ctx: Box::new(SourceContext::new(
+                std::path::PathBuf::from("unknown"),
+                std::path::PathBuf::from("unknown"),
+                input_str,
+            )),
             message: message.into(),
-            input: Some(input.into()),
             caret: Some(caret),
         }
     }
@@ -251,7 +287,7 @@ pub struct Link {
     display: String,
     link_to: String,
     class: Option<String>,
-    style: Option<Stylesheet>,
+    style: Option<CssStyle>,
     target: Option<LinkTarget>,
     title: Option<String>,
     prompt: Option<String>,
@@ -326,14 +362,14 @@ impl Link {
     }
 
     /// Sets typed inline stylesheet.
-    pub fn with_style(mut self, style: Stylesheet) -> Self {
+    pub fn with_style(mut self, style: CssStyle) -> Self {
         self.style = if style.is_empty() { None } else { Some(style) };
         self
     }
 
     /// Sets inline stylesheet from CSS text.
     pub fn with_style_css(mut self, style: impl Into<String>) -> Result<Self, LinkError> {
-        let parsed = Stylesheet::try_from(style.into().as_str())?;
+        let parsed = CssStyle::try_from(style.into().as_str())?;
         self.style = if parsed.is_empty() {
             None
         } else {
@@ -409,7 +445,7 @@ impl Link {
     }
 
     /// Returns typed style if set.
-    pub fn style(&self) -> Option<&Stylesheet> {
+    pub fn style(&self) -> Option<&CssStyle> {
         self.style.as_ref()
     }
 
@@ -674,7 +710,7 @@ impl Link {
         self.prompt = metadata.prompt.and_then(normalize_optional);
 
         if let Some(style) = metadata.style.and_then(normalize_optional)
-            && let Ok(parsed) = Stylesheet::try_from(style.as_str())
+            && let Ok(parsed) = CssStyle::try_from(style.as_str())
             && !parsed.is_empty()
         {
             self.style = Some(parsed);
@@ -889,7 +925,7 @@ fn parse_html_link(input: &str) -> Result<Link, LinkError> {
     }
 
     if let Some(style) = attrs.get("style")
-        && let Ok(parsed) = Stylesheet::try_from(style.as_str())
+        && let Ok(parsed) = CssStyle::try_from(style.as_str())
         && !parsed.is_empty()
     {
         link.style = Some(parsed);
@@ -1156,29 +1192,6 @@ fn find_closing_paren(input: &str, start: usize) -> Result<usize, LinkError> {
     ))
 }
 
-fn render_markdown_parse_body(message: &str, input: Option<&str>, caret: Option<usize>) -> String {
-    let mut body = format!("<dim>Message:</dim> {message}");
-
-    if let Some(input) = input {
-        body.push_str(&format!("\n<dim>Input:</dim>\n  <cyan>{input}</cyan>"));
-        if let Some(caret) = caret {
-            body.push('\n');
-            body.push_str(&caret_marker(input, caret));
-        }
-    }
-
-    body
-}
-
-fn caret_marker(input: &str, byte_offset: usize) -> String {
-    let clamped = byte_offset.min(input.len());
-    let column = input
-        .char_indices()
-        .take_while(|(idx, _)| *idx < clamped)
-        .count();
-    format!("  {}^", " ".repeat(column))
-}
-
 fn extract_url(content: &str) -> (String, &str) {
     let content = content.trim();
     let bytes = content.as_bytes();
@@ -1325,7 +1338,7 @@ fn apply_structured_prop(link: &mut Link, key: &str, value: String) {
         "class" => link.class = normalize_optional(value),
         "style" => {
             if let Some(style) = normalize_optional(value)
-                && let Ok(parsed) = Stylesheet::try_from(style.as_str())
+                && let Ok(parsed) = CssStyle::try_from(style.as_str())
                 && !parsed.is_empty()
             {
                 link.style = Some(parsed);
@@ -1436,7 +1449,7 @@ fn parse_css_style(style: &str) -> BTreeMap<String, String> {
     result
 }
 
-fn style_inline_css(style: Option<&Stylesheet>) -> Option<String> {
+fn style_inline_css(style: Option<&CssStyle>) -> Option<String> {
     let style = style?;
     if style.is_empty() {
         return None;
@@ -1697,7 +1710,7 @@ mod tests {
 
     #[test]
     fn typed_style_is_rendered_to_html() {
-        let style = Stylesheet::new().add(CssSizingProp::TopMargin, CssSizing::px(8.0));
+        let style = CssStyle::new().add(CssSizingProp::TopMargin, CssSizing::px(8.0));
         let link = Link::new("Click", "https://example.com")
             .expect("link should build")
             .with_style(style);
@@ -1776,7 +1789,7 @@ mod tests {
     fn markdown_default_is_lossless_and_roundtrips_extended_metadata() {
         let _env = ScopedEnv::remove(LINK_METADATA_ENV);
 
-        let style = Stylesheet::new().add(CssSizingProp::TopMargin, CssSizing::px(10.0));
+        let style = CssStyle::new().add(CssSizingProp::TopMargin, CssSizing::px(10.0));
         let original = Link::new("Example", "https://example.com")
             .expect("link should build")
             .with_class("chip")

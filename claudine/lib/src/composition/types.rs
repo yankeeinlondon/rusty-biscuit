@@ -10,6 +10,7 @@ use darkmatter::markdown::Markdown;
 use darkmatter::markdown::compose::ComposePerfReport;
 use serde::{Deserialize, Serialize};
 
+use super::launch_workspace::LaunchWorkspaceContext;
 use super::lifecycle::LifecycleConfig;
 use crate::harness::shell::CachedApprovalDecision;
 use crate::provider::Provider;
@@ -52,6 +53,54 @@ pub struct LoopConfig {
     pub max_iterations: Option<usize>,
     /// Optional per-document failure behavior.
     pub fail_fast: Option<bool>,
+    /// Optional per-document policy for what to do when a completed iteration
+    /// reports a provider rate-limit signal. `None` falls back to
+    /// [`OnRateLimit::Pause`].
+    pub on_rate_limit: Option<OnRateLimit>,
+}
+
+/// Policy for how the loop engine reacts to a rate-limit signal observed on
+/// a completed iteration.
+///
+/// The signal is read from [`crate::stream::summary::RateLimitInfo`] when
+/// `is_throttled == Some(true)`. The policy is resolved from
+/// `LoopExecutionOptions.on_rate_limit` (CLI) > `LoopConfig.on_rate_limit`
+/// (frontmatter) > [`OnRateLimit::Pause`] (default).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum OnRateLimit {
+    /// Sleep until `reset_at` + a small safety margin, then proceed to the
+    /// next iteration. If `reset_at` is missing or already past, behave as
+    /// [`OnRateLimit::Abort`] (no unbounded sleep).
+    #[default]
+    Pause,
+    /// Halt the loop with a structured [`super::error::CompositionError::LoopRateLimited`].
+    Abort,
+    /// Proceed to the next iteration without pausing. Reserved for soft
+    /// per-request limits that won't recur; not recommended.
+    Continue,
+}
+
+impl OnRateLimit {
+    /// Parse from the frontmatter string form.
+    pub fn parse(value: &str) -> Result<Self, String> {
+        match value {
+            "pause" => Ok(Self::Pause),
+            "abort" => Ok(Self::Abort),
+            "continue" => Ok(Self::Continue),
+            other => Err(format!(
+                "must be one of `pause`, `abort`, `continue`, got `{other}`"
+            )),
+        }
+    }
+
+    /// Return the canonical string form (matches the frontmatter accepted form).
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Pause => "pause",
+            Self::Abort => "abort",
+            Self::Continue => "continue",
+        }
+    }
 }
 
 /// A loop condition. `while` continues while truthy; `until` continues until truthy.
@@ -117,12 +166,16 @@ pub enum AmbientVariable {
 
 impl AmbientVariable {
     /// Reserved ambient variable names.
+    ///
+    /// All loop ambient variables are namespaced under the `_loop_` prefix
+    /// to avoid shadowing user-defined frontmatter properties named
+    /// `iteration`, `is_first`, `last_output`, etc.
     pub const NAMES: &[&str] = &[
-        "iteration",
-        "is_first",
-        "is_last",
-        "last_output",
-        "last_exit_code",
+        "_loop_count",
+        "_loop_is_first",
+        "_loop_is_last",
+        "_loop_last_output",
+        "_loop_last_exit_code",
     ];
 
     /// Returns true when `name` is a reserved ambient variable.
@@ -133,11 +186,11 @@ impl AmbientVariable {
     /// Return the frontmatter/template key for this ambient variable.
     pub const fn as_str(self) -> &'static str {
         match self {
-            Self::Iteration => "iteration",
-            Self::IsFirst => "is_first",
-            Self::IsLast => "is_last",
-            Self::LastOutput => "last_output",
-            Self::LastExitCode => "last_exit_code",
+            Self::Iteration => "_loop_count",
+            Self::IsFirst => "_loop_is_first",
+            Self::IsLast => "_loop_is_last",
+            Self::LastOutput => "_loop_last_output",
+            Self::LastExitCode => "_loop_last_exit_code",
         }
     }
 }
@@ -191,6 +244,15 @@ pub struct InstalledProviderSnapshot {
     pub excluded: BTreeSet<Provider>,
     /// All installed providers (including excluded ones).
     pub all_installed: Vec<Provider>,
+    /// Resolved binary paths for each installed provider.
+    pub binary_paths: BTreeMap<Provider, PathBuf>,
+}
+
+impl InstalledProviderSnapshot {
+    /// Return the resolved binary path for a provider, if known.
+    pub fn binary_path(&self, provider: Provider) -> Option<&std::path::Path> {
+        self.binary_paths.get(&provider).map(|p| p.as_path())
+    }
 }
 
 /// Why a provider was chosen.
@@ -472,6 +534,35 @@ pub struct CompositionExecutionRequest {
     /// Whether this request is part of a sequence run. When `true`, the
     /// execution header shows a `Sequence` badge.
     pub sequence: bool,
+    /// Pre-computed installed-provider snapshot, supplied by callers that
+    /// already ran host detection during prep (e.g. `CompositionPrepContext`).
+    /// When `Some`, the executor skips the `InstalledAiClients::new()` scan
+    /// and uses this snapshot for both provider selection and binary path
+    /// resolution.
+    pub installed_snapshot: Option<InstalledProviderSnapshot>,
+    /// Pre-computed launch-CWD `LaunchWorkspaceContext`, supplied by callers
+    /// that already ran a shared `sniff::detect_with_plan` scan during prep
+    /// (e.g. `CompositionPrepContext`). When `Some`, the executor reuses it
+    /// instead of calling `resolve_launch_workspace_context` again for both
+    /// the header env plan and the child env build.
+    pub prep_launch_workspace: Option<LaunchWorkspaceContext>,
+    /// Pre-computed launch-CWD `LaunchContext`, supplied by callers that
+    /// already ran a shared `sniff::detect_with_plan` scan during prep
+    /// (e.g. `CompositionPrepContext`). When `Some`, the executor reuses
+    /// it instead of calling `LaunchContext::from_cwd` again.
+    pub prep_launch_context: Option<crate::system_prompt::LaunchContext>,
+    /// Pre-computed launch-CWD `EnvironmentContext` derived from the
+    /// same shared sniff scan. When `Some` and the effective env-detect
+    /// root matches the launch CWD, the executor reuses it instead of
+    /// calling `detect_environment_fast` again.
+    pub prep_env_context: Option<crate::events::EnvironmentContext>,
+    /// Captured error message from the shared prep-time sniff scan, if
+    /// it failed. The shared scan defaults to an empty
+    /// [`crate::system_prompt::LaunchContext`] on failure to keep
+    /// best-effort callers happy, so the executor reads this field to
+    /// preserve the legacy hard-fail contract for `--repo`. `None` (or
+    /// no prep context at all) means no failure happened during prep.
+    pub prep_launch_detection_error: Option<String>,
 }
 
 /// Describes where the sequence definition was found.

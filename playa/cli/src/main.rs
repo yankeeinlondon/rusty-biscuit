@@ -13,7 +13,7 @@ use strum::IntoEnumIterator;
 use biscuit_terminal::components::compose::Compose;
 use biscuit_terminal::components::list::UnorderedList;
 use biscuit_terminal::components::prose::Prose;
-use biscuit_terminal::components::renderable::{Renderable, RenderableContent};
+use biscuit_terminal::components::renderable::{RenderableTerminalContent, TerminalRenderable};
 use biscuit_terminal::terminal::Terminal;
 use playa::{AudioFileFormat, AudioPlayer, Codec, PLAYER_LOOKUP, Playa, SoundEffect, all_players};
 use sniff::hardware::{AudioDeviceInfo, AudioDeviceKind, AudioDirection};
@@ -737,7 +737,7 @@ fn list_sound_effects(filter: Option<&str>) {
         top_list.add(header);
 
         // Build the inner list of effects
-        let effect_items: Vec<RenderableContent> = cat_effects
+        let effect_items: Vec<RenderableTerminalContent> = cat_effects
             .iter()
             .map(|effect| {
                 let styled = Prose::new(format!(
@@ -746,7 +746,7 @@ fn list_sound_effects(filter: Option<&str>) {
                     effect.description(),
                     format_duration(effect.duration_ms())
                 ));
-                RenderableContent::Component(Rc::new(styled))
+                RenderableTerminalContent::Component(Rc::new(styled))
             })
             .collect();
 

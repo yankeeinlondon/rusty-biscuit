@@ -1,6 +1,6 @@
 ---
 name: resvg
-description: Expert knowledge for rendering static SVG files to raster formats using the resvg Rust crate, a high-performance pure-Rust library from the Linebender ecosystem that ensures cross-platform consistency and memory safety for SVG-to-PNG conversion, icon generation, thumbnails, and server-side rendering
+description: Expert knowledge for rendering static SVG to raster formats with the resvg Rust crate (a pure-Rust Linebender library offering cross-platform consistency and memory safety). Use when rasterizing SVGs, converting SVG to PNG, generating icons or thumbnails, or doing server-side SVG rendering.
 last_updated: 2025-12-26T00:00:00Z
 hash: 3fb03d866a5b8238
 ---

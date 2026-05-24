@@ -491,7 +491,7 @@ fn evaluate_function<L: EvaluationLookup>(
         }
         "haskey" | "has_key" => {
             if args.len() < 2 {
-                return Err("HasKey() requires 2 arguments".to_string());
+                return Err("has_key() requires 2 arguments".to_string());
             }
             let object = evaluate(&args[0], lookup)?;
             let key = scalar_string(&evaluate(&args[1], lookup)?);
@@ -503,7 +503,7 @@ fn evaluate_function<L: EvaluationLookup>(
         }
         "contains" => {
             if args.len() < 2 {
-                return Err("Contains() requires 2 arguments".to_string());
+                return Err("contains() requires 2 arguments".to_string());
             }
             let haystack = evaluate(&args[0], lookup)?;
             let needle = evaluate(&args[1], lookup)?;
@@ -521,7 +521,7 @@ fn evaluate_function<L: EvaluationLookup>(
         }
         "length" => {
             if args.is_empty() {
-                return Err("Length() requires 1 argument".to_string());
+                return Err("length() requires 1 argument".to_string());
             }
             let value = evaluate(&args[0], lookup)?;
             let len = match value {
@@ -607,7 +607,7 @@ mod tests {
         #[test]
         fn interpolation_fallback_versus_condition_or() {
             // Interpolation: a || "default" -> Fallback
-            // Condition: a || "default" -> Or(a, "default")
+            // Condition: a || "default" -> or(a, "default")
             // Both should return the truthy value
             let state = lookup(json!({"a": "present"}));
             let fallback_expr = Expr::Fallback {
@@ -615,7 +615,7 @@ mod tests {
                 fallback: Box::new(Expr::StringLiteral("default".to_string())),
             };
             let or_expr = Expr::FunctionCall {
-                name: "Or".to_string(),
+                name: "or".to_string(),
                 args: vec![
                     Expr::Variable("a".to_string()),
                     Expr::StringLiteral("default".to_string()),
@@ -641,7 +641,7 @@ mod tests {
         fn condition_or_short_circuits_on_true() {
             let state = lookup(json!({"truthy_flag": true}));
             let expr = Expr::FunctionCall {
-                name: "Or".to_string(),
+                name: "or".to_string(),
                 args: vec![
                     Expr::Variable("truthy_flag".to_string()),
                     Expr::FunctionCall {
@@ -658,7 +658,7 @@ mod tests {
         fn condition_and_short_circuits_on_false() {
             let state = lookup(json!({}));
             let expr = Expr::FunctionCall {
-                name: "And".to_string(),
+                name: "and".to_string(),
                 args: vec![
                     Expr::Variable("false_flag".to_string()),
                     Expr::FunctionCall {
@@ -713,7 +713,7 @@ mod tests {
 
             // haskey
             let expr = Expr::FunctionCall {
-                name: "HasKey".to_string(),
+                name: "has_key".to_string(),
                 args: vec![
                     Expr::Variable("user".to_string()),
                     Expr::StringLiteral("name".to_string()),
@@ -1408,40 +1408,40 @@ mod tests {
 
         #[test]
         fn isdate_accepts_valid_iso_date() {
-            assert_eq!(eval_expr(r#"IsDate("2024-06-15")"#).unwrap(), json!(true));
+            assert_eq!(eval_expr(r#"is_date("2024-06-15")"#).unwrap(), json!(true));
         }
 
         #[test]
         fn isdate_rejects_invalid_and_non_strings() {
-            assert_eq!(eval_expr(r#"IsDate("not-a-date")"#).unwrap(), json!(false));
-            assert_eq!(eval_expr(r#"IsDate("2024/06/15")"#).unwrap(), json!(false));
-            assert_eq!(eval_expr("IsDate(123)").unwrap(), json!(false));
-            assert_eq!(eval_expr("IsDate(null)").unwrap(), json!(false));
-            assert_eq!(eval_expr("IsDate(true)").unwrap(), json!(false));
+            assert_eq!(eval_expr(r#"is_date("not-a-date")"#).unwrap(), json!(false));
+            assert_eq!(eval_expr(r#"is_date("2024/06/15")"#).unwrap(), json!(false));
+            assert_eq!(eval_expr("is_date(123)").unwrap(), json!(false));
+            assert_eq!(eval_expr("is_date(null)").unwrap(), json!(false));
+            assert_eq!(eval_expr("is_date(true)").unwrap(), json!(false));
         }
 
         #[test]
         fn isdateutc_same_contract_as_isdate() {
             assert_eq!(
-                eval_expr(r#"IsDateUtc("2024-06-15")"#).unwrap(),
+                eval_expr(r#"is_date_utc("2024-06-15")"#).unwrap(),
                 json!(true)
             );
-            assert_eq!(eval_expr(r#"IsDateUtc("bad")"#).unwrap(), json!(false));
-            assert_eq!(eval_expr("IsDateUtc(123)").unwrap(), json!(false));
+            assert_eq!(eval_expr(r#"is_date_utc("bad")"#).unwrap(), json!(false));
+            assert_eq!(eval_expr("is_date_utc(123)").unwrap(), json!(false));
         }
 
         #[test]
         fn isdatetime_accepts_iso_datetimes() {
             assert_eq!(
-                eval_expr(r#"IsDateTime("2024-06-15T12:30:00")"#).unwrap(),
+                eval_expr(r#"is_datetime("2024-06-15T12:30:00")"#).unwrap(),
                 json!(true)
             );
             assert_eq!(
-                eval_expr(r#"IsDateTime("2024-06-15T12:30:00Z")"#).unwrap(),
+                eval_expr(r#"is_datetime("2024-06-15T12:30:00Z")"#).unwrap(),
                 json!(true)
             );
             assert_eq!(
-                eval_expr(r#"IsDateTime("2024-06-15T12:30:00+02:00")"#).unwrap(),
+                eval_expr(r#"is_datetime("2024-06-15T12:30:00+02:00")"#).unwrap(),
                 json!(true)
             );
         }
@@ -1449,21 +1449,21 @@ mod tests {
         #[test]
         fn isdatetime_rejects_plain_dates_and_non_strings() {
             assert_eq!(
-                eval_expr(r#"IsDateTime("2024-06-15")"#).unwrap(),
+                eval_expr(r#"is_datetime("2024-06-15")"#).unwrap(),
                 json!(false)
             );
-            assert_eq!(eval_expr("IsDateTime(123)").unwrap(), json!(false));
-            assert_eq!(eval_expr("IsDateTime(null)").unwrap(), json!(false));
+            assert_eq!(eval_expr("is_datetime(123)").unwrap(), json!(false));
+            assert_eq!(eval_expr("is_datetime(null)").unwrap(), json!(false));
         }
 
         #[test]
         fn isdatetimeutc_same_contract_as_isdatetime() {
             assert_eq!(
-                eval_expr(r#"IsDateTimeUtc("2024-06-15T12:30:00Z")"#).unwrap(),
+                eval_expr(r#"is_datetime_utc("2024-06-15T12:30:00Z")"#).unwrap(),
                 json!(true)
             );
             assert_eq!(
-                eval_expr(r#"IsDateTimeUtc("2024-06-15")"#).unwrap(),
+                eval_expr(r#"is_datetime_utc("2024-06-15")"#).unwrap(),
                 json!(false)
             );
         }
@@ -1473,21 +1473,27 @@ mod tests {
         #[test]
         fn istoday_returns_false_for_distant_dates() {
             // Using a date far in the past so it is never "today"
-            assert_eq!(eval_expr(r#"IsToday("1900-01-01")"#).unwrap(), json!(false));
-            assert_eq!(eval_expr(r#"IsToday("2100-12-31")"#).unwrap(), json!(false));
+            assert_eq!(
+                eval_expr(r#"is_today("1900-01-01")"#).unwrap(),
+                json!(false)
+            );
+            assert_eq!(
+                eval_expr(r#"is_today("2100-12-31")"#).unwrap(),
+                json!(false)
+            );
         }
 
         #[test]
         fn istoday_rejects_non_strings_and_null() {
-            assert_eq!(eval_expr("IsToday(123)").unwrap(), json!(false));
-            assert_eq!(eval_expr("IsToday(null)").unwrap(), json!(false));
-            assert_eq!(eval_expr("IsToday(true)").unwrap(), json!(false));
+            assert_eq!(eval_expr("is_today(123)").unwrap(), json!(false));
+            assert_eq!(eval_expr("is_today(null)").unwrap(), json!(false));
+            assert_eq!(eval_expr("is_today(true)").unwrap(), json!(false));
         }
 
         #[test]
         fn istodayutc_returns_false_for_distant_dates() {
             assert_eq!(
-                eval_expr(r#"IsTodayUtc("1900-01-01")"#).unwrap(),
+                eval_expr(r#"is_today_utc("1900-01-01")"#).unwrap(),
                 json!(false)
             );
         }
@@ -1495,7 +1501,7 @@ mod tests {
         #[test]
         fn isyesterday_returns_false_for_distant_dates() {
             assert_eq!(
-                eval_expr(r#"IsYesterday("1900-01-01")"#).unwrap(),
+                eval_expr(r#"is_yesterday("1900-01-01")"#).unwrap(),
                 json!(false)
             );
         }
@@ -1503,7 +1509,7 @@ mod tests {
         #[test]
         fn isyesterdayutc_returns_false_for_distant_dates() {
             assert_eq!(
-                eval_expr(r#"IsYesterdayUtc("1900-01-01")"#).unwrap(),
+                eval_expr(r#"is_yesterday_utc("1900-01-01")"#).unwrap(),
                 json!(false)
             );
         }
@@ -1511,7 +1517,7 @@ mod tests {
         #[test]
         fn istomorrow_returns_false_for_distant_dates() {
             assert_eq!(
-                eval_expr(r#"IsTomorrow("1900-01-01")"#).unwrap(),
+                eval_expr(r#"is_tomorrow("1900-01-01")"#).unwrap(),
                 json!(false)
             );
         }
@@ -1519,7 +1525,7 @@ mod tests {
         #[test]
         fn istomorrowutc_returns_false_for_distant_dates() {
             assert_eq!(
-                eval_expr(r#"IsTomorrowUtc("1900-01-01")"#).unwrap(),
+                eval_expr(r#"is_tomorrow_utc("1900-01-01")"#).unwrap(),
                 json!(false)
             );
         }
@@ -1527,11 +1533,11 @@ mod tests {
         #[test]
         fn isthismonth_returns_false_for_distant_dates() {
             assert_eq!(
-                eval_expr(r#"IsThisMonth("1900-01-01")"#).unwrap(),
+                eval_expr(r#"is_this_month("1900-01-01")"#).unwrap(),
                 json!(false)
             );
             assert_eq!(
-                eval_expr(r#"IsThisMonth("2100-12-31")"#).unwrap(),
+                eval_expr(r#"is_this_month("2100-12-31")"#).unwrap(),
                 json!(false)
             );
         }
@@ -1539,7 +1545,7 @@ mod tests {
         #[test]
         fn isthismonthutc_returns_false_for_distant_dates() {
             assert_eq!(
-                eval_expr(r#"IsThisMonthUtc("1900-01-01")"#).unwrap(),
+                eval_expr(r#"is_this_month_utc("1900-01-01")"#).unwrap(),
                 json!(false)
             );
         }
@@ -1547,11 +1553,11 @@ mod tests {
         #[test]
         fn isthisyear_returns_false_for_distant_dates() {
             assert_eq!(
-                eval_expr(r#"IsThisYear("1900-01-01")"#).unwrap(),
+                eval_expr(r#"is_this_year("1900-01-01")"#).unwrap(),
                 json!(false)
             );
             assert_eq!(
-                eval_expr(r#"IsThisYear("2100-12-31")"#).unwrap(),
+                eval_expr(r#"is_this_year("2100-12-31")"#).unwrap(),
                 json!(false)
             );
         }
@@ -1559,7 +1565,7 @@ mod tests {
         #[test]
         fn isthisyearutc_returns_false_for_distant_dates() {
             assert_eq!(
-                eval_expr(r#"IsThisYearUtc("1900-01-01")"#).unwrap(),
+                eval_expr(r#"is_this_year_utc("1900-01-01")"#).unwrap(),
                 json!(false)
             );
         }
@@ -1567,9 +1573,9 @@ mod tests {
         #[test]
         fn relative_validators_accept_datetime_strings_and_return_bool() {
             // Verify datetime strings parse without error and return boolean
-            let result = eval_expr(r#"IsToday("1900-01-01T00:00:00")"#).unwrap();
+            let result = eval_expr(r#"is_today("1900-01-01T00:00:00")"#).unwrap();
             assert!(result.is_boolean());
-            let result = eval_expr(r#"IsTodayUtc("1900-01-01T00:00:00Z")"#).unwrap();
+            let result = eval_expr(r#"is_today_utc("1900-01-01T00:00:00Z")"#).unwrap();
             assert!(result.is_boolean());
         }
 
@@ -1577,20 +1583,20 @@ mod tests {
         fn all_date_helper_names_are_dispatchable() {
             // Smoke test: every required helper name parses and evaluates
             let helpers = [
-                r#"IsDate("2024-06-15")"#,
-                r#"IsDateUtc("2024-06-15")"#,
-                r#"IsDateTime("2024-06-15T12:00:00")"#,
-                r#"IsDateTimeUtc("2024-06-15T12:00:00Z")"#,
-                r#"IsToday("1900-01-01")"#,
-                r#"IsTodayUtc("1900-01-01")"#,
-                r#"IsYesterday("1900-01-01")"#,
-                r#"IsYesterdayUtc("1900-01-01")"#,
-                r#"IsTomorrow("1900-01-01")"#,
-                r#"IsTomorrowUtc("1900-01-01")"#,
-                r#"IsThisMonth("1900-01-01")"#,
-                r#"IsThisMonthUtc("1900-01-01")"#,
-                r#"IsThisYear("1900-01-01")"#,
-                r#"IsThisYearUtc("1900-01-01")"#,
+                r#"is_date("2024-06-15")"#,
+                r#"is_date_utc("2024-06-15")"#,
+                r#"is_datetime("2024-06-15T12:00:00")"#,
+                r#"is_datetime_utc("2024-06-15T12:00:00Z")"#,
+                r#"is_today("1900-01-01")"#,
+                r#"is_today_utc("1900-01-01")"#,
+                r#"is_yesterday("1900-01-01")"#,
+                r#"is_yesterday_utc("1900-01-01")"#,
+                r#"is_tomorrow("1900-01-01")"#,
+                r#"is_tomorrow_utc("1900-01-01")"#,
+                r#"is_this_month("1900-01-01")"#,
+                r#"is_this_month_utc("1900-01-01")"#,
+                r#"is_this_year("1900-01-01")"#,
+                r#"is_this_year_utc("1900-01-01")"#,
             ];
             for expr_str in &helpers {
                 let result = eval_expr(expr_str);
@@ -1613,19 +1619,19 @@ mod tests {
                 "distant": "1900-01-01"
             });
             assert_eq!(
-                eval_expr_with_data("IsDate(date_str)", data.clone()).unwrap(),
+                eval_expr_with_data("is_date(date_str)", data.clone()).unwrap(),
                 json!(true)
             );
             assert_eq!(
-                eval_expr_with_data("IsDate(bad_str)", data.clone()).unwrap(),
+                eval_expr_with_data("is_date(bad_str)", data.clone()).unwrap(),
                 json!(false)
             );
             assert_eq!(
-                eval_expr_with_data("IsToday(distant)", data.clone()).unwrap(),
+                eval_expr_with_data("is_today(distant)", data.clone()).unwrap(),
                 json!(false)
             );
             assert_eq!(
-                eval_expr_with_data("IsThisYear(distant)", data.clone()).unwrap(),
+                eval_expr_with_data("is_this_year(distant)", data.clone()).unwrap(),
                 json!(false)
             );
         }

@@ -3262,6 +3262,105 @@ fn test_repo_packages_json_output() {
     );
 }
 
+#[test]
+fn test_repo_packages_no_error_empty_filter() {
+    let (_dir, path) = create_cli_monorepo();
+    // Filter that matches nothing — without --no-error should exit 1
+    cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "repo",
+            "packages",
+            "nonexistent",
+            "--plain",
+        ])
+        .assert()
+        .failure();
+}
+
+#[test]
+fn test_repo_packages_no_error_allows_empty_filter() {
+    let (_dir, path) = create_cli_monorepo();
+    // Filter that matches nothing — with --no-error should exit 0
+    cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "repo",
+            "packages",
+            "nonexistent",
+            "--no-error",
+            "--plain",
+        ])
+        .assert()
+        .success();
+}
+
+#[test]
+fn test_repo_packages_on_error_message() {
+    let (_dir, path) = create_cli_monorepo();
+    let assert = cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "repo",
+            "packages",
+            "nonexistent",
+            "--on-error",
+            "nothing here",
+            "--plain",
+        ])
+        .assert()
+        .failure();
+    let stderr = String::from_utf8_lossy(&assert.get_output().stderr);
+    assert!(
+        stderr.contains("nothing here"),
+        "stderr should contain custom error message, got: {stderr}"
+    );
+}
+
+#[test]
+fn test_repo_packages_no_error_json_empty_filter() {
+    let (_dir, path) = create_cli_monorepo();
+    let assert = cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "repo",
+            "packages",
+            "nonexistent",
+            "--json",
+        ])
+        .assert()
+        .failure();
+    let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
+    let json: Value = serde_json::from_str(&stdout).expect("output should be valid JSON");
+    let names = json.as_array().expect("top-level JSON must be an array");
+    assert!(names.is_empty());
+}
+
+#[test]
+fn test_repo_packages_no_error_json_with_flag() {
+    let (_dir, path) = create_cli_monorepo();
+    let assert = cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "repo",
+            "packages",
+            "nonexistent",
+            "--no-error",
+            "--json",
+        ])
+        .assert()
+        .success();
+    let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
+    let json: Value = serde_json::from_str(&stdout).expect("output should be valid JSON");
+    let names = json.as_array().expect("top-level JSON must be an array");
+    assert!(names.is_empty());
+}
+
 // ============================================================================
 // repo package-areas Subcommand Tests
 // ============================================================================
@@ -3529,6 +3628,103 @@ fn test_repo_package_areas_json_perf_stdout_is_valid_json() {
         stderr.contains("Performance") || stderr.contains("Total"),
         "stderr should contain performance timing text, got:\n{stderr}"
     );
+}
+
+#[test]
+fn test_repo_package_areas_no_error_empty_filter() {
+    let (_dir, path) = create_cli_monorepo();
+    cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "repo",
+            "package-areas",
+            "nonexistent",
+            "--plain",
+        ])
+        .assert()
+        .failure();
+}
+
+#[test]
+fn test_repo_package_areas_no_error_allows_empty_filter() {
+    let (_dir, path) = create_cli_monorepo();
+    cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "repo",
+            "package-areas",
+            "nonexistent",
+            "--no-error",
+            "--plain",
+        ])
+        .assert()
+        .success();
+}
+
+#[test]
+fn test_repo_package_areas_on_error_message() {
+    let (_dir, path) = create_cli_monorepo();
+    let assert = cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "repo",
+            "package-areas",
+            "nonexistent",
+            "--on-error",
+            "no areas",
+            "--plain",
+        ])
+        .assert()
+        .failure();
+    let stderr = String::from_utf8_lossy(&assert.get_output().stderr);
+    assert!(
+        stderr.contains("no areas"),
+        "stderr should contain custom error message, got: {stderr}"
+    );
+}
+
+#[test]
+fn test_repo_package_areas_no_error_json_empty_filter() {
+    let (_dir, path) = create_cli_monorepo();
+    let assert = cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "repo",
+            "package-areas",
+            "nonexistent",
+            "--json",
+        ])
+        .assert()
+        .failure();
+    let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
+    let json: Value = serde_json::from_str(&stdout).expect("output should be valid JSON");
+    let names = json.as_array().expect("top-level JSON must be an array");
+    assert!(names.is_empty());
+}
+
+#[test]
+fn test_repo_package_areas_no_error_json_with_flag() {
+    let (_dir, path) = create_cli_monorepo();
+    let assert = cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "repo",
+            "package-areas",
+            "nonexistent",
+            "--no-error",
+            "--json",
+        ])
+        .assert()
+        .success();
+    let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
+    let json: Value = serde_json::from_str(&stdout).expect("output should be valid JSON");
+    let names = json.as_array().expect("top-level JSON must be an array");
+    assert!(names.is_empty());
 }
 
 #[test]
@@ -4648,10 +4844,631 @@ fn test_repo_worktree_json_failure_no_error() {
 }
 
 #[test]
+fn test_repo_worktree_verbose_includes_path() {
+    let (_dir, _repo_path, worktree_path) = create_test_repo_with_worktree();
+
+    let assert = cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            worktree_path.to_str().unwrap(),
+            "repo",
+            "worktree",
+            "-v",
+        ])
+        .assert()
+        .success()
+        .code(0);
+
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+    let trimmed = stdout.trim();
+    assert!(trimmed.starts_with("my-worktree ["));
+    assert!(trimmed.ends_with("]"));
+    assert!(trimmed.contains(worktree_path.to_str().unwrap()));
+}
+
+#[test]
 fn test_repo_worktree_help_mentions_subcommand() {
     cargo_bin_cmd!("sniff")
         .args(["repo", "--help"])
         .assert()
         .success()
         .stdout(predicate::str::contains("worktree"));
+}
+
+// ============================================================================
+// Phase 3 — `repo worktrees` CLI integration tests
+// ============================================================================
+
+#[test]
+fn test_repo_worktrees_default_output() {
+    let (_dir, repo_path, worktree_path) = create_test_repo_with_worktree();
+
+    let assert = cargo_bin_cmd!("sniff")
+        .args(["--base", repo_path.to_str().unwrap(), "repo", "worktrees"])
+        .assert()
+        .success();
+
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+    let lines: Vec<&str> = stdout.trim().lines().collect();
+    assert_eq!(
+        lines.len(),
+        2,
+        "expected main + 1 linked worktree: {stdout}"
+    );
+    assert!(
+        lines.iter().any(|l| l.contains("my-worktree")),
+        "should list linked worktree: {stdout}"
+    );
+}
+
+#[test]
+fn test_repo_worktrees_list_output() {
+    let (_dir, repo_path, _worktree_path) = create_test_repo_with_worktree();
+
+    let assert = cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            repo_path.to_str().unwrap(),
+            "repo",
+            "worktrees",
+            "--list",
+        ])
+        .assert()
+        .success();
+
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+    for line in stdout.trim().lines() {
+        assert!(
+            line.starts_with("- "),
+            "list output should start with '- ': {line}"
+        );
+    }
+}
+
+#[test]
+fn test_repo_worktrees_csv_output() {
+    let (_dir, repo_path, _worktree_path) = create_test_repo_with_worktree();
+
+    let assert = cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            repo_path.to_str().unwrap(),
+            "repo",
+            "worktrees",
+            "--csv",
+        ])
+        .assert()
+        .success();
+
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+    let trimmed = stdout.trim();
+    assert!(
+        trimmed.contains("my-worktree"),
+        "csv should contain worktree name: {stdout}"
+    );
+    assert!(
+        !trimmed.contains('\n'),
+        "csv should be single line: {stdout}"
+    );
+}
+
+#[test]
+fn test_repo_worktrees_verbose_output() {
+    let (_dir, repo_path, worktree_path) = create_test_repo_with_worktree();
+
+    let assert = cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            repo_path.to_str().unwrap(),
+            "repo",
+            "worktrees",
+            "-v",
+        ])
+        .assert()
+        .success();
+
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+    assert!(
+        stdout.contains("my-worktree"),
+        "verbose should list worktree name: {stdout}"
+    );
+    assert!(
+        stdout.contains("located at"),
+        "verbose should include path: {stdout}"
+    );
+    assert!(
+        stdout.contains(worktree_path.to_str().unwrap()),
+        "verbose should contain worktree path: {stdout}"
+    );
+}
+
+#[test]
+fn test_repo_worktrees_json_output() {
+    let (_dir, repo_path, _worktree_path) = create_test_repo_with_worktree();
+
+    let assert = cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            repo_path.to_str().unwrap(),
+            "repo",
+            "worktrees",
+            "--json",
+        ])
+        .assert()
+        .success();
+
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+    let value: Value = serde_json::from_str(stdout.trim())
+        .unwrap_or_else(|e| panic!("stdout was not JSON: {e}\n---\n{stdout}\n---"));
+    let arr = value["worktrees"]
+        .as_array()
+        .expect("worktrees must be array");
+    assert_eq!(arr.len(), 2, "expected main + 1 linked worktree");
+    assert!(
+        arr.iter().any(|w| w["name"] == "my-worktree"),
+        "should include linked worktree: {value}"
+    );
+}
+
+#[test]
+fn test_repo_worktrees_plain_verbose_no_escape_codes() {
+    let (_dir, repo_path, _worktree_path) = create_test_repo_with_worktree();
+
+    let assert = cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            repo_path.to_str().unwrap(),
+            "repo",
+            "worktrees",
+            "-v",
+            "--plain",
+        ])
+        .assert()
+        .success();
+
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+    assert!(
+        !stdout.contains('\x1b'),
+        "plain output must not contain escape codes: {stdout:?}"
+    );
+    assert!(
+        stdout.contains("located at"),
+        "plain verbose should still show words: {stdout}"
+    );
+}
+
+#[test]
+fn test_repo_worktrees_current_marker_from_main_worktree() {
+    let (_dir, repo_path, _worktree_path) = create_test_repo_with_worktree();
+
+    let assert = cargo_bin_cmd!("sniff")
+        .current_dir(&repo_path)
+        .args(["repo", "worktrees"])
+        .assert()
+        .success();
+
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+    let lines: Vec<&str> = stdout.trim().lines().collect();
+    let current_line = lines
+        .iter()
+        .find(|l| l.starts_with("* "))
+        .expect("should have a current marker line");
+    assert!(
+        current_line.contains(repo_path.file_name().unwrap().to_str().unwrap()),
+        "current marker should be on main worktree: {stdout}"
+    );
+}
+
+#[test]
+fn test_repo_worktrees_current_marker_from_linked_worktree() {
+    let (_dir, _repo_path, worktree_path) = create_test_repo_with_worktree();
+
+    let assert = cargo_bin_cmd!("sniff")
+        .current_dir(&worktree_path)
+        .args(["repo", "worktrees"])
+        .assert()
+        .success();
+
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+    let lines: Vec<&str> = stdout.trim().lines().collect();
+    let current_line = lines
+        .iter()
+        .find(|l| l.starts_with("* "))
+        .expect("should have a current marker line");
+    assert!(
+        current_line.contains("my-worktree"),
+        "current marker should be on linked worktree: {stdout}"
+    );
+}
+
+#[test]
+fn test_repo_worktrees_detached_head() {
+    let (dir, repo_path) = create_test_repo();
+    let repo = git2::Repository::open(&repo_path).unwrap();
+
+    let worktree_path = repo_path.join("detached-wt");
+    let _wt = repo.worktree("detached-wt", &worktree_path, None).unwrap();
+
+    // Detach HEAD in the linked worktree.
+    let wt_repo = git2::Repository::open(&worktree_path).unwrap();
+    let head_commit = wt_repo.head().unwrap().peel_to_commit().unwrap();
+    wt_repo.set_head_detached(head_commit.id()).unwrap();
+
+    let assert = cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            repo_path.to_str().unwrap(),
+            "repo",
+            "worktrees",
+            "-v",
+        ])
+        .assert()
+        .success();
+
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+    assert!(
+        stdout.contains("detached HEAD"),
+        "verbose should show detached HEAD fallback: {stdout}"
+    );
+}
+
+// ============================================================================
+// Phase 5 — `--package` / `--package-area` flag matrix
+//
+// These tests pin the consistency contract for the new flag pair across the
+// `repo` subcommand surface:
+//
+// 1. `--package` returns exactly one package.
+// 2. `--package-area homelab` matches both `homelab` and `homelab/server`
+//    (case-insensitive prefix semantics).
+// 3. `--package` AND `--package-area` overlapping → success.
+// 4. `--package` AND `--package-area` non-overlapping → hard error citing
+//    the package's real area.
+// 5. Unknown `--package` → error names valid package list.
+// 6. Unknown `--package-area` → error names valid area list.
+// 7. Positional `filter` plus `--package` → AND of both.
+// 8. `-p` short flag works on `FileListArgs`-based commands.
+// 9. `git-status -p <area-name>` no longer falls back to area matching —
+//    must hard-error.
+// ============================================================================
+
+/// Build a monorepo with three areas where two share a common prefix
+/// (`homelab` and `homelab/server`) and one is wholly distinct (`sniff`).
+///
+/// Layout:
+///
+/// - `homelab/lib`        → area `homelab`,        name `homelab-lib`
+/// - `homelab/server/srv` → area `homelab/server`, name `homelab-srv`
+/// - `sniff/cli`          → area `sniff`,          name `sniff-cli`
+fn create_cli_monorepo_with_nested_areas() -> (tempfile::TempDir, PathBuf) {
+    let dir = tempfile::tempdir().unwrap();
+    let repo = git2::Repository::init(dir.path()).unwrap();
+
+    let mut config = repo.config().unwrap();
+    config.set_str("user.email", "test@test.com").unwrap();
+    config.set_str("user.name", "Test").unwrap();
+
+    std::fs::write(
+        dir.path().join("Cargo.toml"),
+        r#"[workspace]
+members = ["homelab/lib", "homelab/server/srv", "sniff/cli"]
+"#,
+    )
+    .unwrap();
+
+    let members = [
+        ("homelab/lib", "homelab-lib"),
+        ("homelab/server/srv", "homelab-srv"),
+        ("sniff/cli", "sniff-cli"),
+    ];
+    for (rel, name) in &members {
+        let pkg = dir.path().join(rel);
+        std::fs::create_dir_all(pkg.join("src")).unwrap();
+        std::fs::write(
+            pkg.join("Cargo.toml"),
+            format!(
+                r#"[package]
+name = "{name}"
+version = "0.1.0"
+edition = "2024"
+"#
+            ),
+        )
+        .unwrap();
+        std::fs::write(pkg.join("src/lib.rs"), "pub fn entry() {}").unwrap();
+    }
+
+    let mut index = repo.index().unwrap();
+    index
+        .add_all(["*"].iter(), git2::IndexAddOption::DEFAULT, None)
+        .unwrap();
+    index.write().unwrap();
+    let sig = repo.signature().unwrap();
+    let tree_id = index.write_tree().unwrap();
+    let tree = repo.find_tree(tree_id).unwrap();
+    repo.commit(
+        Some("HEAD"),
+        &sig,
+        &sig,
+        "initial nested-area monorepo",
+        &tree,
+        &[],
+    )
+    .unwrap();
+
+    let path = dir.path().to_path_buf();
+    (dir, path)
+}
+
+/// Spec §6.1 — `--package` returns exactly one package.
+#[test]
+fn test_repo_package_flag_returns_single_package() {
+    let (_dir, path) = create_cli_monorepo_with_nested_areas();
+
+    let assert = cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "repo",
+            "packages",
+            "--package",
+            "sniff-cli",
+            "--list",
+            "--plain",
+        ])
+        .assert()
+        .success();
+
+    let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
+    assert_eq!(stdout.trim(), "sniff-cli");
+}
+
+/// Spec §6.2 — `--package-area homelab` matches both `homelab` and
+/// `homelab/server` packages via prefix semantics.
+#[test]
+fn test_repo_package_area_flag_uses_prefix_semantics() {
+    let (_dir, path) = create_cli_monorepo_with_nested_areas();
+
+    let assert = cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "repo",
+            "packages",
+            "--package-area",
+            "homelab",
+            "--list",
+            "--plain",
+        ])
+        .assert()
+        .success();
+
+    let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
+    let mut names: Vec<&str> = stdout.trim().lines().collect();
+    names.sort();
+    assert_eq!(names, vec!["homelab-lib", "homelab-srv"]);
+}
+
+/// Spec §6.3 — `--package` AND `--package-area` overlap → intersection,
+/// returns the package itself.
+#[test]
+fn test_repo_package_and_area_flags_overlap_succeeds() {
+    let (_dir, path) = create_cli_monorepo_with_nested_areas();
+
+    let assert = cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "repo",
+            "packages",
+            "--package",
+            "homelab-srv",
+            "--package-area",
+            "homelab",
+            "--list",
+            "--plain",
+        ])
+        .assert()
+        .success();
+
+    let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
+    assert_eq!(stdout.trim(), "homelab-srv");
+}
+
+/// Spec §6.4 — `--package` AND `--package-area` non-overlapping → hard error
+/// naming the package's real area and the requested area.
+#[test]
+fn test_repo_package_and_area_flags_non_overlap_errors() {
+    let (_dir, path) = create_cli_monorepo_with_nested_areas();
+
+    let assert = cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "repo",
+            "packages",
+            "--package",
+            "sniff-cli",
+            "--package-area",
+            "homelab",
+        ])
+        .assert()
+        .failure();
+
+    let stderr = String::from_utf8_lossy(&assert.get_output().stderr);
+    assert!(
+        stderr.contains("sniff-cli"),
+        "intersection error must name the package, got:\n{stderr}"
+    );
+    assert!(
+        stderr.contains("sniff"),
+        "intersection error must name the package's real area, got:\n{stderr}"
+    );
+    assert!(
+        stderr.contains("homelab"),
+        "intersection error must name the requested area, got:\n{stderr}"
+    );
+}
+
+/// Spec §6.5 — Unknown `--package` → error lists valid package names.
+#[test]
+fn test_repo_unknown_package_errors_with_valid_list() {
+    let (_dir, path) = create_cli_monorepo_with_nested_areas();
+
+    let assert = cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "repo",
+            "packages",
+            "--package",
+            "no-such-pkg",
+        ])
+        .assert()
+        .failure();
+
+    let stderr = String::from_utf8_lossy(&assert.get_output().stderr);
+    assert!(
+        stderr.contains("no-such-pkg"),
+        "error must name the unknown package, got:\n{stderr}"
+    );
+    assert!(
+        stderr.contains("Valid package names"),
+        "error must mention valid package names, got:\n{stderr}"
+    );
+    assert!(
+        stderr.contains("sniff-cli") && stderr.contains("homelab-lib"),
+        "error must list the actual valid package names, got:\n{stderr}"
+    );
+}
+
+/// Spec §6.6 — Unknown `--package-area` → error lists valid package areas.
+#[test]
+fn test_repo_unknown_package_area_errors_with_valid_list() {
+    let (_dir, path) = create_cli_monorepo_with_nested_areas();
+
+    let assert = cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "repo",
+            "packages",
+            "--package-area",
+            "no-such-area",
+        ])
+        .assert()
+        .failure();
+
+    let stderr = String::from_utf8_lossy(&assert.get_output().stderr);
+    assert!(
+        stderr.contains("no-such-area"),
+        "error must name the unknown area, got:\n{stderr}"
+    );
+    assert!(
+        stderr.contains("Valid package areas"),
+        "error must mention valid package areas, got:\n{stderr}"
+    );
+    assert!(
+        stderr.contains("sniff") && stderr.contains("homelab"),
+        "error must list the actual valid areas, got:\n{stderr}"
+    );
+}
+
+/// Spec §6.7 — Positional `filter` plus `--package` are AND-combined.
+///
+/// `homelab-lib` and `homelab-srv` are both in areas starting with `homelab`,
+/// so the positional `@homelab` filter selects both. The `--package` flag
+/// then narrows to the single named package.
+#[test]
+fn test_repo_positional_filter_and_package_flag_combine() {
+    let (_dir, path) = create_cli_monorepo_with_nested_areas();
+
+    let assert = cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "repo",
+            "packages",
+            "@homelab",
+            "--package",
+            "homelab-lib",
+            "--list",
+            "--plain",
+        ])
+        .assert()
+        .success();
+
+    let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
+    assert_eq!(stdout.trim(), "homelab-lib");
+}
+
+/// Spec §6.8 — `-p` short flag works on a `FileListArgs`-based command.
+///
+/// Stage and modify a file under `sniff/cli` so `dirty-files` has something
+/// to report, then verify `-p sniff-cli` scopes the result to that package.
+#[test]
+fn test_repo_dirty_files_short_p_flag_scopes_to_package() {
+    let (_dir, path) = create_cli_monorepo_with_nested_areas();
+
+    // Mark the sniff-cli source file dirty (untracked modification of an
+    // already-tracked file).
+    std::fs::write(
+        path.join("sniff/cli/src/lib.rs"),
+        "pub fn entry() { let _x = 1; }",
+    )
+    .unwrap();
+
+    let assert = cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "repo",
+            "dirty-files",
+            "-p",
+            "sniff-cli",
+            "--list",
+            "--plain",
+        ])
+        .assert()
+        .success();
+
+    let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
+    assert!(
+        stdout.contains("sniff/cli"),
+        "scoped dirty-files must include the sniff/cli path, got:\n{stdout}"
+    );
+    assert!(
+        !stdout.contains("homelab/"),
+        "scoped dirty-files must not include unrelated areas, got:\n{stdout}"
+    );
+}
+
+/// Spec §6.9 — Regression guard: `git-status -p <area-name>` (a real area
+/// that is **not** a package name) must hard-error rather than fall back to
+/// area matching.
+#[test]
+fn test_repo_git_status_package_with_area_name_errors() {
+    let (_dir, path) = create_cli_monorepo_with_nested_areas();
+
+    let assert = cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "repo",
+            "git-status",
+            "-p",
+            "homelab",
+        ])
+        .assert()
+        .failure();
+
+    let stderr = String::from_utf8_lossy(&assert.get_output().stderr);
+    assert!(
+        stderr.contains("homelab"),
+        "error must name the rejected input, got:\n{stderr}"
+    );
+    assert!(
+        stderr.contains("Valid package names"),
+        "error must list valid package names (not areas), got:\n{stderr}"
+    );
 }

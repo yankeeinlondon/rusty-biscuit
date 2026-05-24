@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 
 use biscuit_terminal::components::list::UnorderedList;
 use biscuit_terminal::components::prose::Prose;
-use biscuit_terminal::components::renderable::Renderable;
+use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::terminal::Terminal;
 use sniff::filesystem::{FileAssociationBreakdown, FileAssociationStats};
 
@@ -51,7 +51,7 @@ pub fn render_files_section(
     filter: &FilesFilter,
 ) -> String {
     use biscuit_terminal::components::table::{Table, TableCellContent, TableColumn};
-    use biscuit_terminal::utils::layout::{Alignment, Margin};
+    use biscuit_terminal::utils::layout::{Alignment, Length, TargetValue};
 
     let mut out = String::new();
     let filtered = filter_file_breakdown(files, filter);
@@ -63,9 +63,9 @@ pub fn render_files_section(
             TableColumn::new("Count").with_alignment(Alignment::Right),
         ])
         .prefer_cursor_alignment();
-    table.layout_mut().left_margin = Margin::Chars(1);
-    table.layout_mut().top_margin = Margin::Chars(1);
-    table.layout_mut().bottom_margin = Margin::Chars(1);
+    table.layout_mut().margin.left = TargetValue::universal(Length::ch(1));
+    table.layout_mut().margin.top = TargetValue::universal(Length::ch(1));
+    table.layout_mut().margin.bottom = TargetValue::universal(Length::ch(1));
 
     for stats in &filtered.by_association {
         table.add_row(vec![

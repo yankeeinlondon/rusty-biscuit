@@ -9,18 +9,19 @@
 use std::collections::HashMap;
 use std::io::IsTerminal;
 use std::path::Path;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 use biscuit_terminal::components::status::{Status, StatusState};
-use biscuit_terminal::prelude::Renderable;
+use biscuit_terminal::prelude::TerminalRenderable;
 use biscuit_terminal::terminal::Terminal;
 use claudine::composition::lifecycle::{
     DefaultLifecycleEmitter, LifecycleRunGuard, LifecycleRuntimeContext, LifecycleSignal,
 };
 use claudine::composition::{
     CompositionClosurePlan, CompositionError, CompositionExecutionRequest, CompositionMode,
-    InlineClosurePlan, ResolvedExecutionTarget, SelectionReason, build_installed_snapshot,
-    build_picker_plan, resolve_target_non_tty_with_catalog,
+    InlineClosurePlan, ModelResolutionReason, ResolvedExecutionTarget, SelectionReason,
+    build_installed_snapshot, build_picker_plan, resolve_target_non_tty_with_catalog,
 };
 use claudine::config::claudine_config::ProviderModelOverride;
 use claudine::provider::{PROVIDERS_DISPLAY_ORDER, Provider};
@@ -38,19 +39,92 @@ use super::{
     StructuredSummaryDetails, WrapperHarnessPermissionProbe,
     build_harness_shell_options_with_cache, emit_stream_summary_with_context, format_summary_prose,
     format_verbose_summary_details_prose, materialized_harness_prompt_from_prepared,
-    resolve_binary_path, run_harness_loop, structured_verbosity, switch_process_cwd, wrap_terminal,
+    resolve_binary_path_direct, run_harness_loop, structured_verbosity, switch_process_cwd,
+    wrap_terminal,
 };
 use crate::log;
 
 pub(crate) mod inline_guards;
 pub(crate) mod legacy_goose;
+pub(crate) mod prep_context;
 pub(crate) mod structured;
 pub(crate) mod summary;
 
 // Re-export the public API so existing callers don't break.
 pub(crate) use inline_guards::{cleanup_inline_output, split_frontmatter_and_body};
+pub(crate) use prep_context::CompositionPrepContext;
 pub(crate) use structured::run_structured_composition;
 pub(crate) use summary::{emit_composition_summary, emit_minimal_composition_summary};
+
+/// W0 instrumentation counter: increments every time
+/// [`select_launch_workspace`] falls back to the legacy
+/// `env::resolve_launch_workspace_context` call.
+///
+/// The fallback path performs a fresh `detect_git` + `detect_repo`
+/// filesystem scan, which is exactly the redundancy W0 was designed to
+/// remove. The counter is process-global so a regression test can
+/// observe it across whatever spawn / fixture machinery the test uses
+/// without having to thread an injectable counter through the entire
+/// composition request type. Tests reset it via
+/// [`reset_launch_workspace_fallbacks_for_tests`].
+static LAUNCH_WORKSPACE_FALLBACK_COUNT: AtomicUsize = AtomicUsize::new(0);
+
+/// Choose the launch workspace context for the executor.
+///
+/// Returns the precomputed `prep` value when present (the W0 hot path).
+/// Falls back to the legacy `env::resolve_launch_workspace_context` walk
+/// only for library callers that don't thread a `CompositionPrepContext`
+/// (none in the production CLI).
+///
+/// The fallback branch increments [`LAUNCH_WORKSPACE_FALLBACK_COUNT`] so
+/// regression tests can prove the production hot path stays on the
+/// no-walk branch even after future refactors.
+pub(crate) fn select_launch_workspace(
+    prep: Option<&env::LaunchWorkspaceContext>,
+    launch_cwd: &Path,
+    source_repo_root: Option<&Path>,
+) -> env::LaunchWorkspaceContext {
+    if let Some(p) = prep {
+        return p.clone();
+    }
+    LAUNCH_WORKSPACE_FALLBACK_COUNT.fetch_add(1, Ordering::SeqCst);
+    env::resolve_launch_workspace_context(launch_cwd, source_repo_root)
+}
+
+/// Test-only: snapshot of the fallback counter.
+#[cfg(test)]
+pub(crate) fn launch_workspace_fallback_count_for_tests() -> usize {
+    LAUNCH_WORKSPACE_FALLBACK_COUNT.load(Ordering::SeqCst)
+}
+
+/// Test-only: reset the fallback counter so an isolated test can
+/// observe a clean baseline.
+#[cfg(test)]
+pub(crate) fn reset_launch_workspace_fallbacks_for_tests() {
+    LAUNCH_WORKSPACE_FALLBACK_COUNT.store(0, Ordering::SeqCst);
+}
+
+/// Enforce the `--repo` legacy hard-fail contract when prep-time
+/// launch-context detection failed.
+///
+/// `CompositionPrepContext` runs a single shared `sniff::detect_with_plan`
+/// scan and falls back to a default `LaunchContext` on failure so best-
+/// effort consumers can keep going. `--repo` is not a best-effort
+/// consumer: it requires real repo detection. When the prep scan failed
+/// **and** `--repo` is set, surface the captured sniff error as a hard
+/// run abort, matching the behavior of the legacy non-prep path that
+/// called `LaunchContext::from_cwd` directly.
+fn enforce_repo_launch_detection(
+    repo: bool,
+    prep_launch_detection_error: Option<&str>,
+) -> Result<()> {
+    if repo && let Some(error) = prep_launch_detection_error {
+        return Err(eyre!(
+            "--repo requires startup repo detection, but launch-context detection failed: {error}"
+        ));
+    }
+    Ok(())
+}
 
 /// Result of executing a single composition step through the wrapper pipeline.
 pub(crate) struct SingleCompositionOutcome {
@@ -60,6 +134,58 @@ pub(crate) struct SingleCompositionOutcome {
     pub provider: Provider,
     /// Execution perf metadata, when `--perf` was enabled.
     pub agent_perf: Option<crate::perf::AgentExecutionPerf>,
+    /// Iteration-level summary signals lifted from the structured stream
+    /// for consumption by the `compose --loop` orchestrator.
+    ///
+    /// Populated for the non-harness structured-stream path (the only
+    /// path that can carry a rate-limit trailer or a watchdog
+    /// `error_kind`). `None` for the dry-run, harness, and legacy paths
+    /// where these signals aren't available at this layer.
+    pub iteration_signals: Option<IterationSummarySignals>,
+}
+
+/// Iteration-level signals lifted from the per-iteration
+/// [`claudine::stream::summary::StreamExecutionSummary`] so the
+/// `compose --loop` orchestrator can drive rate-limit-aware iteration and
+/// build [`claudine::composition::CompositionError::LoopIterationFailed`]
+/// with an honest cause.
+#[derive(Debug, Default, Clone)]
+pub(crate) struct IterationSummarySignals {
+    /// Rate-limit trailer observed during the iteration. May be present on
+    /// both successful and failed iterations.
+    pub rate_limit: Option<claudine::stream::summary::RateLimitInfo>,
+    /// Structured `error_kind` (e.g. `step_timeout`, `wall_clock_timeout`,
+    /// `usage_limit_reached`). Mirrors the JSONL session_end row's
+    /// `extra.exit_reason`.
+    pub exit_reason: Option<String>,
+    /// Human-readable failure detail from the iteration's summary, when
+    /// present (e.g. "no stream activity for 30m; terminating due to
+    /// step_timeout").
+    pub error_message: Option<String>,
+    /// Resolved provider identifier (e.g. `"k2p6"`) from the iteration's
+    /// summary, when known. Carried into [`CompositionError::LoopRateLimited`]
+    /// for honest attribution.
+    pub provider_id: Option<String>,
+    /// Resolved model identifier (e.g. `"kimi-for-coding"`) from the
+    /// iteration's summary, when known.
+    pub model_id: Option<String>,
+}
+
+impl IterationSummarySignals {
+    /// Extract the loop-relevant fields from a fully-built
+    /// [`claudine::stream::summary::StreamExecutionSummary`].
+    pub fn from_summary(summary: &claudine::stream::summary::StreamExecutionSummary) -> Self {
+        Self {
+            rate_limit: summary.rate_limit.clone(),
+            exit_reason: summary.error_kind.clone(),
+            error_message: summary.error_message.clone(),
+            // Use the Provider enum's display form (e.g. "opencode"). The
+            // finer-grained AI-SDK provider (e.g. "k2p6") typically lives
+            // inside `rate_limit.message`.
+            provider_id: Some(summary.provider.to_string()),
+            model_id: summary.model.clone(),
+        }
+    }
 }
 
 /// Result of running a structured composition stream.
@@ -223,7 +349,7 @@ pub(crate) fn resolve_timeouts(
     super::subagent_watchdog::TimeoutConfig::resolve(timeout, step_timeout)
 }
 
-fn resolve_prompt_display_path(
+pub(crate) fn resolve_prompt_display_path(
     path: &std::path::Path,
     repo_root: Option<&std::path::Path>,
 ) -> String {
@@ -301,34 +427,38 @@ fn composition_dispatch_context(
 /// from raw frontmatter (no compose), so an `agent: "{{...}}"` template
 /// is treated as absent and falls back to the picker / favorite.
 pub(crate) fn eagerly_resolve_target(
+    ctx: &CompositionPrepContext,
     hints: &claudine::composition::EffectiveSelectionHints,
     explicit_provider: Option<Provider>,
-    excluded: &std::collections::BTreeSet<Provider>,
     cli_model: Option<&str>,
-    source_repo_root: Option<&Path>,
 ) -> Result<ResolvedExecutionTarget> {
-    let cwd = std::env::current_dir()?;
-    let clients = InstalledAiClients::new();
-    let installed: Vec<Provider> = PROVIDERS_DISPLAY_ORDER
-        .into_iter()
-        .filter(|p| clients.path(p.sniff_ai_cli()).is_some())
-        .collect();
-    let snapshot = build_installed_snapshot(&installed, excluded);
-
-    let selection_config = load_selection_config(source_repo_root.unwrap_or(&cwd));
-    let catalog = match &selection_config {
+    // Phase 2 (2026-05-09-slow-prep): the installed-provider snapshot and
+    // selection config are pre-built on the shared `CompositionPrepContext`
+    // so this function no longer rediscovers the source repo root, reloads
+    // the claudine config, or re-runs host detection.
+    let snapshot = &ctx.installed_snapshot;
+    let selection_config = ctx.selection_config.as_ref();
+    let catalog = match selection_config {
         Some(cfg) => claudine::model_catalog::ModelCatalogService::with_overrides(
             cfg.model_overrides.clone(),
         ),
         None => claudine::model_catalog::ModelCatalogService::new(),
     };
-    catalog.refresh_blocking();
-    let favorite = selection_config.as_ref().and_then(|c| c.favorite);
+    // Phase 1 (2026-05-09-slow-prep): no global `refresh_blocking()` here.
+    // Catalog refresh is deferred until *after* a provider is selected and
+    // is scoped to that provider only. Provider selection itself never
+    // touches the catalog.
+    let favorite = selection_config.and_then(|c| c.favorite);
 
     let is_tty = std::io::stdin().is_terminal() && std::io::stdout().is_terminal();
 
     if is_tty {
         if let Some(provider) = explicit_provider {
+            // Probe model resolution without catalog to determine whether
+            // an env var override makes refresh unnecessary.
+            let (_, probe_reason) =
+                claudine::composition::resolve_model_with_hints(provider, hints, cli_model, None);
+            refresh_for_model_validation(&catalog, provider, hints, Some(&probe_reason));
             let (model, model_reason) = claudine::composition::resolve_model_with_hints(
                 provider,
                 hints,
@@ -342,10 +472,15 @@ pub(crate) fn eagerly_resolve_target(
                 model_reason,
             });
         }
-        let plan = claudine::composition::build_picker_plan_with_hints(hints, &snapshot, favorite)
+        let plan = claudine::composition::build_picker_plan_with_hints(hints, snapshot, favorite)
             .map_err(|e| eyre!("{e}"))?;
         let provider = super::selection_ui::prompt_one_shot_provider(plan)
             .map_err(|e| eyre!("provider selection cancelled: {e}"))?;
+        // Probe model resolution without catalog to determine whether
+        // an env var override makes refresh unnecessary.
+        let (_, probe_reason) =
+            claudine::composition::resolve_model_with_hints(provider, hints, cli_model, None);
+        refresh_for_model_validation(&catalog, provider, hints, Some(&probe_reason));
         let (model, model_reason) = claudine::composition::resolve_model_with_hints(
             provider,
             hints,
@@ -359,10 +494,29 @@ pub(crate) fn eagerly_resolve_target(
             model_reason,
         })
     } else {
+        // Non-TTY: provider resolution doesn't touch the catalog, so we
+        // perform a first pass with `None` to learn the provider, refresh
+        // only that provider's catalog (when needed), and re-resolve so
+        // model validation observes the freshly fetched data.
+        let provider_only = claudine::composition::resolve_target_non_tty_with_hints(
+            explicit_provider,
+            hints,
+            snapshot,
+            favorite,
+            cli_model,
+            None,
+        )
+        .map_err(|e| eyre!("{e}"))?;
+        refresh_for_model_validation(
+            &catalog,
+            provider_only.provider,
+            hints,
+            Some(&provider_only.model_reason),
+        );
         claudine::composition::resolve_target_non_tty_with_hints(
             explicit_provider,
             hints,
-            &snapshot,
+            snapshot,
             favorite,
             cli_model,
             Some(&catalog),
@@ -371,21 +525,67 @@ pub(crate) fn eagerly_resolve_target(
     }
 }
 
-/// Inject `AGENT` into both the parent process env and the supplied
-/// `env_overrides` map so composition templates and downstream
-/// system-prompt rendering see the chosen provider's slug.
+/// Refresh a single provider's catalog only when frontmatter `model`
+/// hints will actually be validated against it.
+///
+/// CLI `--model`, provider-specific environment variables, and the generic
+/// `MODEL` env var all win over the frontmatter `model` hint, so when one
+/// of those is supplied the catalog is never consulted and refresh would
+/// be wasted work. Static-source providers (Claude, Codex) refresh in O(1)
+/// with no subprocess, but we still skip when no validation will occur.
+pub(crate) fn refresh_for_model_validation(
+    catalog: &claudine::model_catalog::ModelCatalogService,
+    provider: Provider,
+    hints: &claudine::composition::EffectiveSelectionHints,
+    resolved_model_reason: Option<&ModelResolutionReason>,
+) {
+    if hints.model.is_none() {
+        return;
+    }
+    if matches!(
+        resolved_model_reason,
+        Some(
+            ModelResolutionReason::ExplicitCli
+                | ModelResolutionReason::ProviderEnv(_)
+                | ModelResolutionReason::GenericEnv
+        )
+    ) {
+        return;
+    }
+    let _span =
+        tracing::info_span!("compose_prep.model_catalog", provider = %provider.as_slug()).entered();
+    // W3: prefer non-blocking refresh so the current run never waits on a
+    // dynamic-source subprocess (`opencode models`) when a cache already
+    // exists. The async path falls back to blocking on true cold-cache.
+    catalog.refresh_provider_async(provider);
+}
+
+/// Same gating as [`refresh_for_model_validation`] but reads the
+/// `model` hint from a fully prepared composition.
+fn refresh_for_prepared_model_validation(
+    catalog: &claudine::model_catalog::ModelCatalogService,
+    provider: Provider,
+    prepared: &claudine::composition::PreparedComposition,
+    resolved_model_reason: Option<&ModelResolutionReason>,
+) {
+    refresh_for_model_validation(
+        catalog,
+        provider,
+        &prepared.selection_hints,
+        resolved_model_reason,
+    );
+}
+
+/// Inject `AGENT` into the supplied `env_overrides` map so composition
+/// templates and downstream system-prompt rendering see the chosen provider's
+/// slug. The wrapper no longer mutates the parent process env for AGENT;
+/// child processes receive it through `build_child_env_with_launch` and
+/// composition contexts receive it through `env_overrides`.
 pub(crate) fn install_agent_env_for_composition(
     target: &ResolvedExecutionTarget,
     env_overrides: &mut std::collections::BTreeMap<String, String>,
 ) {
     let slug = target.provider.as_slug().to_string();
-    // SAFETY: composition entry runs on the main task before any worker
-    // threads or hooks have spawned. Setting AGENT here is the only
-    // mutation of the parent process env at this point, satisfying
-    // Rust 2024's `set_var` safety contract.
-    unsafe {
-        std::env::set_var("AGENT", &slug);
-    }
     env_overrides.insert("AGENT".to_string(), slug);
 }
 
@@ -429,6 +629,19 @@ pub(crate) fn execute_composition_request_inner(
     } else {
         None
     };
+    let mut last_checkpoint = total_start;
+    /// Helper to record a named sub-stage timing and reset the checkpoint.
+    fn record_substage(
+        collector: &mut Option<crate::perf::CommandPerfCollector>,
+        checkpoint: &mut std::time::Instant,
+        name: &'static str,
+    ) {
+        if let Some(c) = collector {
+            let elapsed = checkpoint.elapsed();
+            c.mark_substage(name, elapsed);
+            *checkpoint = std::time::Instant::now();
+        }
+    }
 
     let _span = tracing::info_span!("composition_prepare").entered();
 
@@ -440,38 +653,68 @@ pub(crate) fn execute_composition_request_inner(
     let show_checks = !silent;
 
     let source_repo_root = request.prepared.source_repo_root.as_deref();
-    let launch_workspace = env::resolve_launch_workspace_context(&launch_cwd, source_repo_root);
+    let launch_workspace = select_launch_workspace(
+        request.prep_launch_workspace.as_ref(),
+        &launch_cwd,
+        source_repo_root,
+    );
 
     // -- Provider detection and selection ---------------------------------
 
-    let clients = InstalledAiClients::new();
-    let installed: Vec<Provider> = PROVIDERS_DISPLAY_ORDER
-        .into_iter()
-        .filter(|p| clients.path(p.sniff_ai_cli()).is_some())
-        .collect();
-
-    let snapshot = build_installed_snapshot(&installed, &request.excluded);
-
-    let selection_config = load_selection_config(source_repo_root.unwrap_or(&launch_cwd));
-    let catalog = match &selection_config {
-        Some(cfg) => claudine::model_catalog::ModelCatalogService::with_overrides(
-            cfg.model_overrides.clone(),
-        ),
-        None => claudine::model_catalog::ModelCatalogService::new(),
-    };
-    catalog.refresh_blocking();
-    let favorite = selection_config.as_ref().and_then(|c| c.favorite);
-
     // If a target was already resolved upstream (sequence review, non-TTY
-    // preflight, etc.), use it directly.
+    // preflight, eager resolution via `CompositionPrepContext`), reuse it
+    // and skip the entire provider/config/catalog discovery phase. This
+    // removes a duplicate `InstalledAiClients::new()` PATH scan and a
+    // redundant `load_selection_config()` (which itself runs `detect_git`
+    // off the launch CWD) on the hot path.
     let target = if let Some(ref t) = request.resolved_target {
         t.clone()
     } else {
+        let snapshot = match request.installed_snapshot {
+            Some(ref s) => s.clone(),
+            None => {
+                let clients = InstalledAiClients::new();
+                let installed: Vec<Provider> = PROVIDERS_DISPLAY_ORDER
+                    .into_iter()
+                    .filter(|p| clients.path(p.sniff_ai_cli()).is_some())
+                    .collect();
+                build_installed_snapshot(&installed, &request.excluded, &clients)
+            }
+        };
+
+        let selection_config = load_selection_config(source_repo_root.unwrap_or(&launch_cwd));
+        let catalog = match &selection_config {
+            Some(cfg) => claudine::model_catalog::ModelCatalogService::with_overrides(
+                cfg.model_overrides.clone(),
+            ),
+            None => claudine::model_catalog::ModelCatalogService::new(),
+        };
+        // Phase 1 (2026-05-09-slow-prep): refresh is provider-scoped and
+        // only runs after we know which provider was selected. The
+        // unconditional global `refresh_blocking()` previously emitted
+        // from this point was the dominant prep-time cost in the trace
+        // and has been removed.
+        let favorite = selection_config.as_ref().and_then(|c| c.favorite);
+
         let is_tty = std::io::stdin().is_terminal() && std::io::stdout().is_terminal();
 
         if is_tty {
             // TTY mode: explicit flag wins unconditionally; otherwise show picker.
             if let Some(provider) = request.explicit_provider {
+                // Probe model resolution without catalog to determine whether
+                // an env var override makes refresh unnecessary.
+                let (_, probe_reason) = claudine::composition::resolve_model_with_catalog(
+                    provider,
+                    &request.prepared,
+                    request.model.as_deref(),
+                    None,
+                );
+                refresh_for_prepared_model_validation(
+                    &catalog,
+                    provider,
+                    &request.prepared,
+                    Some(&probe_reason),
+                );
                 let (model, model_reason) = claudine::composition::resolve_model_with_catalog(
                     provider,
                     &request.prepared,
@@ -489,6 +732,20 @@ pub(crate) fn execute_composition_request_inner(
                     .map_err(|e| eyre!("{e}"))?;
                 let provider = super::selection_ui::prompt_one_shot_provider(plan)
                     .map_err(|e| eyre!("provider selection cancelled: {e}"))?;
+                // Probe model resolution without catalog to determine whether
+                // an env var override makes refresh unnecessary.
+                let (_, probe_reason) = claudine::composition::resolve_model_with_catalog(
+                    provider,
+                    &request.prepared,
+                    request.model.as_deref(),
+                    None,
+                );
+                refresh_for_prepared_model_validation(
+                    &catalog,
+                    provider,
+                    &request.prepared,
+                    Some(&probe_reason),
+                );
                 let (model, model_reason) = claudine::composition::resolve_model_with_catalog(
                     provider,
                     &request.prepared,
@@ -504,7 +761,25 @@ pub(crate) fn execute_composition_request_inner(
                 }
             }
         } else {
-            // Non-TTY mode: strict chain resolution, never prompt.
+            // Non-TTY: provider resolution doesn't touch the catalog. First
+            // pass with no catalog to determine the provider, then refresh
+            // only that provider, then re-resolve with the catalog so
+            // model validation observes the freshly fetched data.
+            let provider_only = resolve_target_non_tty_with_catalog(
+                request.explicit_provider,
+                &request.prepared,
+                &snapshot,
+                favorite,
+                request.model.as_deref(),
+                None,
+            )
+            .map_err(|e| eyre!("{e}"))?;
+            refresh_for_prepared_model_validation(
+                &catalog,
+                provider_only.provider,
+                &request.prepared,
+                Some(&provider_only.model_reason),
+            );
             resolve_target_non_tty_with_catalog(
                 request.explicit_provider,
                 &request.prepared,
@@ -532,12 +807,17 @@ pub(crate) fn execute_composition_request_inner(
         _ => SelectionReason::InteractiveChoice,
     };
     let is_inline = matches!(request.prepared.closure, CompositionClosurePlan::Inline(_));
+    record_substage(
+        &mut perf_collector,
+        &mut last_checkpoint,
+        "target resolution",
+    );
 
     // -- Profile, binary, arguments, environment --------------------------
 
     let profile = profile::profile_for_provider(provider)
         .ok_or_else(|| eyre!("'{}' cannot be wrapped", provider))?;
-    let binary_path = resolve_binary_path(profile, &clients)?;
+    let binary_path = resolve_binary_path_direct(profile, request.installed_snapshot.as_ref())?;
 
     // -- Inline + interactive check ---------------------------------------
 
@@ -583,23 +863,24 @@ pub(crate) fn execute_composition_request_inner(
         );
     }
 
+    record_substage(&mut perf_collector, &mut last_checkpoint, "header env plan");
+
     let needs_mcp_shadow_home = (request.mcp || !request.mcp_use.is_empty())
         && matches!(provider, Provider::Codex | Provider::Gemini);
     let needs_repo_shadow_home = request.repo;
     let raw_agent_params: Vec<String> = std::env::args().skip(1).collect();
     let yolo_enabled = request.yolo;
-    let mut env_plan = env::build_child_env(
+    let mut env_plan = env::build_child_env_with_launch(
         profile,
         provider,
         &request.include,
         yolo_enabled,
         request.session_interactive,
         &raw_agent_params,
-        &launch_cwd,
         &[],
         needs_repo_shadow_home,
         needs_mcp_shadow_home || needs_repo_shadow_home,
-        source_repo_root,
+        launch_workspace.clone(),
     )?;
 
     // -- Operation env override -----------------------------------------------
@@ -617,6 +898,8 @@ pub(crate) fn execute_composition_request_inner(
             .env
             .insert(key.clone().into(), value.clone().into());
     }
+
+    record_substage(&mut perf_collector, &mut last_checkpoint, "child env build");
 
     let mut effective_prompt = request.prepared.prompt.clone();
     let mut mcp_extra_args = Vec::new();
@@ -725,19 +1008,33 @@ pub(crate) fn execute_composition_request_inner(
                 provider.as_slug()
             ));
         }
+        record_substage(&mut perf_collector, &mut last_checkpoint, "mcp composition");
+    } else {
+        if let Some(ref mut collector) = perf_collector {
+            collector.mark_substage("mcp composition", std::time::Duration::ZERO);
+        }
     }
 
     let mut child_args = Vec::new();
 
     // -- Yolo ----------------------------------------------------------------
 
+    // `effective_yolo` is the single source of truth for whether the
+    // provider's native bypass actually took effect on this launch.
+    // Reporter / badge surfaces should read this — never `request.yolo`
+    // (intent) on its own, since interactive OpenCode silently suppresses
+    // the flag.
+    let mut effective_yolo = false;
     if request.yolo {
         let mut env_overrides = Vec::new();
-        if let Some(warn) = profile.apply_yolo_for_mode(
+        let outcome = profile.apply_yolo_for_mode(
             &mut child_args,
             &mut env_overrides,
             !effective_non_interactive,
-        )? && !silent
+        )?;
+        effective_yolo = outcome.applied;
+        if let Some(warn) = outcome.warning
+            && !silent
             && !quiet
         {
             log::warn(&warn);
@@ -745,8 +1042,29 @@ pub(crate) fn execute_composition_request_inner(
         for (key, value) in env_overrides {
             env_plan.env.insert(key.into(), value.into());
         }
-        // Note: yolo support already consumed at env_plan build time
     }
+    // Override the YOLO env var in the child process with the
+    // post-apply truth so the dispatch reporter (which stamps event
+    // metadata from this var) reflects what actually landed, not what
+    // was intended. `build_child_env_with_launch` set this from
+    // `request.yolo` before we knew the outcome — replace it now.
+    env_plan.env.insert(
+        "YOLO".into(),
+        if effective_yolo { "true" } else { "false" }.into(),
+    );
+    // One-shot debug trace of the final argv that goes to the provider
+    // so operators can verify the catalog flag actually landed without
+    // running an external `ps`. Gated by `tracing` (RUST_LOG); never
+    // unconditional output.
+    tracing::debug!(
+        target: "claudine::wrap::yolo",
+        provider = %profile.provider(),
+        request_yolo = request.yolo,
+        effective_yolo,
+        non_interactive = effective_non_interactive,
+        child_args = ?child_args,
+        "yolo applied to provider argv",
+    );
 
     profile.apply_entrypoint(&mut child_args, effective_non_interactive);
 
@@ -820,32 +1138,55 @@ pub(crate) fn execute_composition_request_inner(
         }
     }
 
-    let launch_context = match claudine::system_prompt::LaunchContext::from_cwd(&launch_cwd) {
-        Ok(context) => context,
-        Err(error) => {
-            if request.repo {
-                return Err(eyre!(
-                    "--repo requires startup repo detection, but launch-context detection failed: {error}"
-                ));
-            }
-            if !silent && !quiet {
-                log::warn(&format!(
-                    "launch-context detection failed; continuing without repo/package context: {error}"
-                ));
-            }
-            claudine::system_prompt::LaunchContext {
-                cwd: launch_cwd.clone(),
-                repo_root: None,
-                package_area_root: None,
-                package_root: None,
+    record_substage(&mut perf_collector, &mut last_checkpoint, "argv assembly");
+
+    enforce_repo_launch_detection(request.repo, request.prep_launch_detection_error.as_deref())?;
+    let mut launch_context = if let Some(prep) = request.prep_launch_context.as_ref() {
+        // Phase fix (2026-05-09-slow-prep): reuse the launch_context computed
+        // by the shared sniff scan in `CompositionPrepContext` instead of
+        // re-running `sniff::detect_with_plan` here.
+        prep.clone()
+    } else {
+        match claudine::system_prompt::LaunchContext::from_cwd(&launch_cwd) {
+            Ok(context) => context,
+            Err(error) => {
+                if request.repo {
+                    return Err(eyre!(
+                        "--repo requires startup repo detection, but launch-context detection failed: {error}"
+                    ));
+                }
+                if !silent && !quiet {
+                    log::warn(&format!(
+                        "launch-context detection failed; continuing without repo/package context: {error}"
+                    ));
+                }
+                claudine::system_prompt::LaunchContext {
+                    cwd: launch_cwd.clone(),
+                    repo_root: None,
+                    package_area_root: None,
+                    package_root: None,
+                    agent: None,
+                }
             }
         }
     };
+    // Plumb the provider slug into the launch context so system-prompt
+    // templates that reference {{env.AGENT}} resolve correctly without
+    // mutating the parent process env.
+    launch_context.agent = Some(target.provider.as_slug().to_string());
     let effective_sp = claudine::system_prompt::resolve_and_prepare_for_session(
         &request.system_prompt_args,
         &launch_context,
         effective_non_interactive,
     )?;
+
+    let scoped_tmp = super::system_prompt::scoped_tmp_dir(&launch_workspace);
+    super::system_prompt::maybe_gitignore_claudine_tmp(
+        launch_workspace
+            .repo_root
+            .as_deref()
+            .unwrap_or(&launch_workspace.launch_cwd),
+    );
 
     let mut sp_artifacts: Vec<super::system_prompt::SystemPromptArtifact> = Vec::new();
 
@@ -853,8 +1194,12 @@ pub(crate) fn execute_composition_request_inner(
         claudine::system_prompt::EffectiveSystemPrompt::None
         | claudine::system_prompt::EffectiveSystemPrompt::Disabled { .. } => {}
         claudine::system_prompt::EffectiveSystemPrompt::Ready(prepared) => {
-            let application =
-                profile.apply_system_prompt(prepared, !effective_non_interactive, &launch_cwd)?;
+            let application = profile.apply_system_prompt(
+                prepared,
+                !effective_non_interactive,
+                &launch_cwd,
+                &scoped_tmp,
+            )?;
             child_args.extend(application.args);
             for (k, v) in application.env {
                 if k == "HOME" && env_plan.env.contains_key(std::ffi::OsStr::new("HOME")) {
@@ -883,6 +1228,8 @@ pub(crate) fn execute_composition_request_inner(
     {
         log::warn(&warn);
     }
+
+    record_substage(&mut perf_collector, &mut last_checkpoint, "system prompt");
 
     // Timeout validation
     if request.timeout.is_some() && request.session_interactive {
@@ -953,6 +1300,12 @@ pub(crate) fn execute_composition_request_inner(
 
     let sp_display_lines = super::system_prompt::describe_effective(&effective_sp);
 
+    record_substage(
+        &mut perf_collector,
+        &mut last_checkpoint,
+        "stream + prompt delivery",
+    );
+
     if let Some(collector) = perf_collector.as_mut() {
         collector.mark_env_setup_complete();
     }
@@ -977,6 +1330,8 @@ pub(crate) fn execute_composition_request_inner(
             exit_code: 0,
             provider,
             agent_perf: None,
+            // Dry-run never produces a per-iteration summary.
+            iteration_signals: None,
         };
         // `--perf` is an explicit opt-in and overrides `--silent`/`--quiet`.
         // The perf report is always emitted to stderr when requested.
@@ -996,7 +1351,7 @@ pub(crate) fn execute_composition_request_inner(
 
     if !silent && !quiet {
         use biscuit_terminal::components::status::{Status, StatusState, StatusTheme};
-        use biscuit_terminal::prelude::Renderable as _;
+        use biscuit_terminal::prelude::TerminalRenderable as _;
 
         let status = Status::from_prose("Starting pre-flight checks".to_string())
             .state(StatusState::Info)
@@ -1138,15 +1493,74 @@ pub(crate) fn execute_composition_request_inner(
     // Detect the environment from the source repo root when available so
     // that git/repo metadata reflects the composition source, not the
     // caller's CWD (which may be in a different repo entirely).
+    //
+    // Phase 4 (2026-05-09-slow-prep): `detect_environment_fast` is still on
+    // the critical path after Phases 1–2, but its direct cost is minimal
+    // (~8 ms for git summary + repo structure). The `compose_prep.environment`
+    // span added in Phase 3 makes this cost visible in traces. Making the
+    // context truly lazy would require invasive changes to LiveSemanticSink,
+    // DispatchRuntimeContext, and the wire-session path because the context is
+    // consumed synchronously before the child spawns. Per the spec, when lazy
+    // creation is too invasive we instrument and defer deeper work.
     let env_detect_root = effective_repo_root.unwrap_or(&launch_cwd);
-    let env_context = claudine::events::detect_environment_fast(env_detect_root);
+    let env_context = {
+        let _span = tracing::info_span!("compose_prep.environment").entered();
+        // Phase fix (2026-05-09-slow-prep): reuse the cached
+        // `EnvironmentContext` when the prep-time sniff already covers the
+        // requested env_detect_root. The cached scan was rooted at the
+        // launch CWD, but sniff walks up to find the enclosing git/repo
+        // root, so the resulting env_context is equivalent to one rooted
+        // at `env_detect_root` whenever:
+        //   1. env_detect_root == launch_cwd (trivial), OR
+        //   2. launch_cwd is a subdirectory of env_detect_root AND the
+        //      cached env_context's git repo_root or repo root matches
+        //      env_detect_root (the common monorepo-subdir case).
+        // When neither holds (e.g. `--repo` pins a different root or the
+        // source lives in an unrelated repo), fall back to a fresh scan.
+        let cached_matches = request.prep_env_context.as_ref().is_some_and(|prep| {
+            if env_detect_root == launch_cwd.as_path() {
+                return true;
+            }
+            if !launch_cwd.starts_with(env_detect_root) {
+                return false;
+            }
+            let git_root_match = prep
+                .git
+                .as_ref()
+                .map(|g| g.repo_root.as_path() == env_detect_root)
+                .unwrap_or(false);
+            let repo_root_match = prep
+                .repo
+                .as_ref()
+                .map(|r| r.root.as_path() == env_detect_root)
+                .unwrap_or(false);
+            git_root_match || repo_root_match
+        });
+        if cached_matches {
+            request
+                .prep_env_context
+                .as_ref()
+                .expect("cached_matches implies Some")
+                .clone()
+        } else {
+            claudine::events::detect_environment_fast(env_detect_root)
+        }
+    };
 
     if !silent {
         if !quiet && (request.session_interactive || detail_requested) {
             crate::output::log_wrapper_env_details(&env_plan, None, &term, verbose);
         }
 
-        crate::output::log_system_prompt(&effective_sp, detail_requested, silent, quiet, &term);
+        let scope_for_report = effective_repo_root.unwrap_or(&launch_cwd);
+        crate::output::log_system_prompt_with_scope(
+            &effective_sp,
+            detail_requested,
+            silent,
+            quiet,
+            Some(scope_for_report),
+            &term,
+        );
 
         if matches!(
             effective_sp,
@@ -1157,7 +1571,13 @@ pub(crate) fn execute_composition_request_inner(
         }
 
         if effective_non_interactive {
-            crate::output::log_compose_prompt(&request.prepared.prompt, detail_requested, &term);
+            crate::output::log_compose_prompt(
+                &request.prepared.prompt,
+                detail_requested,
+                silent,
+                quiet,
+                &term,
+            );
         }
 
         if !quiet {
@@ -1238,6 +1658,13 @@ pub(crate) fn execute_composition_request_inner(
                 .as_ref()
                 .and_then(|c| c.agent_perf())
                 .or(harness_perf),
+            // The harness loop manages its own per-step summaries
+            // internally; surfacing them through this outer struct is a
+            // future enhancement. For now `compose --loop` against a
+            // harness-enabled provider falls back to the legacy
+            // behavior (no rate-limit-aware pause and no `exit_reason`
+            // pickup at the loop boundary).
+            iteration_signals: None,
         };
         // `--perf` is an explicit opt-in and overrides `--silent`/`--quiet`.
         // The perf report is always emitted to stderr when requested.
@@ -1281,10 +1708,12 @@ pub(crate) fn execute_composition_request_inner(
             None,
             request.step_timeout.clone(),
             None,
-        );
+        )
+        .with_provider(provider);
 
         let mut child_spawned = false;
         let mut agent_perf: Option<crate::perf::AgentExecutionPerf> = None;
+        let mut iteration_signals: Option<IterationSummarySignals> = None;
         let exit_result = execute_without_harness(
             mode,
             provider,
@@ -1307,6 +1736,7 @@ pub(crate) fn execute_composition_request_inner(
             &mut child_spawned,
             prompt_timing,
             &mut agent_perf,
+            &mut iteration_signals,
             timeout_config,
         );
 
@@ -1334,6 +1764,7 @@ pub(crate) fn execute_composition_request_inner(
                 .as_ref()
                 .and_then(|c| c.agent_perf())
                 .or(agent_perf),
+            iteration_signals,
         };
         // `--perf` is an explicit opt-in and overrides `--silent`/`--quiet`.
         // The perf report is always emitted to stderr when requested.
@@ -1385,6 +1816,7 @@ fn execute_without_harness(
     child_spawned: &mut bool,
     prompt_timing: Option<claudine::stream::prompt_timing::PromptTimingContext>,
     agent_perf_out: &mut Option<crate::perf::AgentExecutionPerf>,
+    iteration_signals_out: &mut Option<IterationSummarySignals>,
     timeout_config: super::subagent_watchdog::TimeoutConfig,
 ) -> Result<i32> {
     let is_inline = matches!(mode, CompositionExecutionMode::Inline { .. });
@@ -1432,6 +1864,14 @@ fn execute_without_harness(
     };
 
     let _span = tracing::info_span!("composition_postprocess").entered();
+
+    // Lift loop-relevant signals from the per-iteration summary before
+    // the summary is consumed by the renderer below. The `compose --loop`
+    // orchestrator reads these to apply the rate-limit policy and to
+    // build an honest `LoopIterationFailed` error.
+    if let Some(result) = deferred_summary.as_ref() {
+        *iteration_signals_out = Some(IterationSummarySignals::from_summary(&result.summary));
+    }
 
     match mode {
         CompositionExecutionMode::Direct => {
@@ -1496,8 +1936,17 @@ pub(crate) fn load_selection_config(cwd: &Path) -> Option<SelectionConfig> {
         .ok()
         .flatten()
         .map(|info| info.repo_root);
-    let config =
-        claudine::dispatch::loader::load_claudine_config(None, repo_root.as_deref()).ok()?;
+    load_selection_config_for_repo(repo_root.as_deref())
+}
+
+/// Load selection config against a pre-detected repo root.
+///
+/// Skips the internal `sniff::filesystem::git::detect_git` call that
+/// [`load_selection_config`] performs, so callers that already discovered
+/// the source repo root (typically via [`CompositionPrepContext`]) avoid a
+/// redundant filesystem walk on the compose hot path.
+pub(crate) fn load_selection_config_for_repo(repo_root: Option<&Path>) -> Option<SelectionConfig> {
+    let config = claudine::dispatch::loader::load_claudine_config(None, repo_root).ok()?;
     Some(SelectionConfig {
         favorite: config.preferred_agent,
         model_overrides: config.models,
@@ -1507,6 +1956,90 @@ pub(crate) fn load_selection_config(cwd: &Path) -> Option<SelectionConfig> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// W0 regression: when the executor is given a precomputed
+    /// `prep_launch_workspace`, [`select_launch_workspace`] must
+    /// short-circuit before reaching the legacy
+    /// `env::resolve_launch_workspace_context` walk. The fallback
+    /// counter is process-global so we reset it under `serial_test` to
+    /// observe a clean baseline.
+    #[test]
+    #[serial_test::serial]
+    fn select_launch_workspace_uses_prep_without_calling_fallback() {
+        use std::path::PathBuf;
+        reset_launch_workspace_fallbacks_for_tests();
+
+        let prep = env::LaunchWorkspaceContext {
+            launch_cwd: PathBuf::from("/tmp/launch"),
+            repo_root: Some(PathBuf::from("/tmp/launch")),
+            child_cwd: PathBuf::from("/tmp/launch"),
+            package_context: None,
+            warnings: Vec::new(),
+        };
+
+        let result = select_launch_workspace(Some(&prep), Path::new("/tmp/launch"), None);
+        assert_eq!(result.launch_cwd, prep.launch_cwd);
+        assert_eq!(
+            launch_workspace_fallback_count_for_tests(),
+            0,
+            "providing prep_launch_workspace must not call the fallback walker"
+        );
+    }
+
+    /// W0 contract: the fallback path is still reachable for legacy
+    /// callers that don't thread a `CompositionPrepContext` (e.g. a
+    /// hand-built library invocation). Calling without `prep` must
+    /// increment the counter exactly once so a future refactor that
+    /// adds a hidden second walk would fail this assertion.
+    #[test]
+    #[serial_test::serial]
+    fn select_launch_workspace_falls_back_once_when_prep_missing() {
+        reset_launch_workspace_fallbacks_for_tests();
+        let cwd = std::env::current_dir().unwrap();
+
+        let _ = select_launch_workspace(None, &cwd, None);
+
+        assert_eq!(
+            launch_workspace_fallback_count_for_tests(),
+            1,
+            "missing prep_launch_workspace must call the fallback walker exactly once"
+        );
+    }
+
+    #[test]
+    fn enforce_repo_launch_detection_passes_when_no_error() {
+        // Successful prep-time sniff scan: the executor should proceed
+        // regardless of whether `--repo` is set.
+        assert!(enforce_repo_launch_detection(false, None).is_ok());
+        assert!(enforce_repo_launch_detection(true, None).is_ok());
+    }
+
+    #[test]
+    fn enforce_repo_launch_detection_passes_when_repo_off() {
+        // Sniff failed during prep but `--repo` is not set, so the
+        // best-effort default is acceptable and the executor proceeds.
+        assert!(
+            enforce_repo_launch_detection(false, Some("filesystem probe failed: io error")).is_ok()
+        );
+    }
+
+    #[test]
+    fn enforce_repo_launch_detection_fails_when_repo_and_sniff_failed() {
+        // The legacy contract: `--repo` requires startup repo detection,
+        // so a captured prep-time sniff failure must abort the run with
+        // a hard error that surfaces the original sniff message.
+        let result = enforce_repo_launch_detection(true, Some("filesystem probe failed: io error"));
+        let err = result.expect_err("--repo + prep sniff failure must error");
+        let message = err.to_string();
+        assert!(
+            message.contains("--repo requires startup repo detection"),
+            "expected --repo guard message, got: {message}"
+        );
+        assert!(
+            message.contains("filesystem probe failed: io error"),
+            "expected captured sniff error in message, got: {message}"
+        );
+    }
 
     #[test]
     #[serial_test::serial]
@@ -1796,5 +2329,111 @@ mod tests {
         let cfg = resolve_timeouts(Some("60".into()), None, Some("45".into()), None);
         assert_eq!(cfg.timeout, Some(std::time::Duration::from_secs(3600)));
         assert_eq!(cfg.step_timeout, Some(std::time::Duration::from_secs(300)));
+    }
+
+    // -- Dynamic refresh gating tests (Phase 2) ---------------------------
+
+    fn make_hints_with_model(model: &str) -> claudine::composition::EffectiveSelectionHints {
+        use claudine::composition::ModelHint;
+        claudine::composition::EffectiveSelectionHints {
+            agent: None,
+            model: Some(ModelHint::Single(model.into())),
+        }
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn opencode_model_env_skips_refresh_for_frontmatter_model() {
+        let _g = EnvGuard::set("OPENCODE_MODEL", "fast");
+        let _g2 = EnvGuard::clear("MODEL");
+
+        let tmp = tempfile::tempdir().unwrap();
+        let catalog =
+            claudine::model_catalog::ModelCatalogService::with_cache_dir(tmp.path().to_path_buf());
+        let hints = make_hints_with_model("slow");
+
+        // Probe resolution without catalog tells us the model comes from env
+        let (_, probe_reason) =
+            claudine::composition::resolve_model_with_hints(Provider::OpenCode, &hints, None, None);
+        assert!(matches!(
+            probe_reason,
+            ModelResolutionReason::ProviderEnv("OPENCODE_MODEL")
+        ));
+
+        refresh_for_model_validation(&catalog, Provider::OpenCode, &hints, Some(&probe_reason));
+
+        // No opencode models subprocess should have been attempted
+        assert_eq!(catalog.opencode_fetch_attempts(), 0);
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn generic_model_env_skips_refresh_for_frontmatter_model() {
+        let _g = EnvGuard::set("MODEL", "fast");
+        let _g2 = EnvGuard::clear("OPENCODE_MODEL");
+
+        let tmp = tempfile::tempdir().unwrap();
+        let catalog =
+            claudine::model_catalog::ModelCatalogService::with_cache_dir(tmp.path().to_path_buf());
+        let hints = make_hints_with_model("slow");
+
+        let (_, probe_reason) =
+            claudine::composition::resolve_model_with_hints(Provider::OpenCode, &hints, None, None);
+        assert!(matches!(probe_reason, ModelResolutionReason::GenericEnv));
+
+        refresh_for_model_validation(&catalog, Provider::OpenCode, &hints, Some(&probe_reason));
+
+        assert_eq!(catalog.opencode_fetch_attempts(), 0);
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn provider_specific_model_env_skips_refresh_for_frontmatter_model() {
+        let _g = EnvGuard::set("CLAUDE_MODEL", "claude-3-7-sonnet-20250219");
+        let _g2 = EnvGuard::clear("MODEL");
+
+        let tmp = tempfile::tempdir().unwrap();
+        let catalog =
+            claudine::model_catalog::ModelCatalogService::with_cache_dir(tmp.path().to_path_buf());
+        let hints = make_hints_with_model("slow");
+
+        let (_, probe_reason) =
+            claudine::composition::resolve_model_with_hints(Provider::Claude, &hints, None, None);
+        assert!(matches!(
+            probe_reason,
+            ModelResolutionReason::ProviderEnv("CLAUDE_MODEL")
+        ));
+
+        refresh_for_model_validation(&catalog, Provider::Claude, &hints, Some(&probe_reason));
+
+        // Claude is a static provider; refresh writes to cache. With env
+        // override the refresh should be skipped, so no cache file.
+        let cache_file = tmp.path().join("claude.json");
+        assert!(!cache_file.exists(), "refresh should have been skipped");
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn frontmatter_model_without_env_override_refreshes_dynamic_provider() {
+        let _g1 = EnvGuard::clear("OPENCODE_MODEL");
+        let _g2 = EnvGuard::clear("MODEL");
+
+        let tmp = tempfile::tempdir().unwrap();
+        let catalog =
+            claudine::model_catalog::ModelCatalogService::with_cache_dir(tmp.path().to_path_buf());
+        let hints = make_hints_with_model("slow");
+
+        let (_, probe_reason) =
+            claudine::composition::resolve_model_with_hints(Provider::OpenCode, &hints, None, None);
+        assert!(matches!(
+            probe_reason,
+            ModelResolutionReason::FrontmatterSingle | ModelResolutionReason::ProviderDefault
+        ));
+
+        refresh_for_model_validation(&catalog, Provider::OpenCode, &hints, Some(&probe_reason));
+
+        // Refresh should have been attempted (will fail gracefully since
+        // opencode is not on PATH, but the attempt counter increments).
+        assert_eq!(catalog.opencode_fetch_attempts(), 1);
     }
 }

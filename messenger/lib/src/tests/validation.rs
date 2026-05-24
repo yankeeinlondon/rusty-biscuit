@@ -2,8 +2,10 @@ use crate::receipt::MessageRef;
 use crate::{
     Attachment, AttachmentSource, CapabilitySet, CompatibilityMode, Dispatch, Message,
     MessengerError, ProviderKind, Target, normalize_dispatch, validate_dispatch, validate_message,
-    validate_message_for_provider,
 };
+
+#[cfg(any(feature = "desktop", feature = "apns", feature = "fcm"))]
+use crate::validate_message_for_provider;
 
 #[test]
 fn empty_message_is_invalid() {
@@ -204,6 +206,26 @@ fn matched_reply_to_target_ok() {
 fn strict_mode_rejects_unsupported_markdown() {
     let dispatch = Dispatch::to(Target::discord_channel("123")).strict();
     let msg = Message::markdown("**bold**");
+    let caps = CapabilitySet {
+        supports_markdown_rendering: false,
+        ..CapabilitySet::none()
+    };
+
+    let err = validate_dispatch(&dispatch, &msg, &caps, ProviderKind::Discord).unwrap_err();
+    assert!(matches!(
+        err,
+        MessengerError::UnsupportedFeature {
+            feature: "markdown rendering",
+            ..
+        }
+    ));
+}
+
+#[cfg(feature = "discord")]
+#[test]
+fn strict_mode_rejects_unsupported_summarized() {
+    let dispatch = Dispatch::to(Target::discord_channel("123")).strict();
+    let msg = Message::summarized("s", "**m**");
     let caps = CapabilitySet {
         supports_markdown_rendering: false,
         ..CapabilitySet::none()

@@ -149,6 +149,55 @@ fn panics_with_message() {
 }
 ```
 
+## Testing Concurrency Without Flaky Timing
+
+Tests that verify work runs *concurrently* are tempting to write as "measure total
+wall-clock time, assert it is below some threshold." This is flaky: the threshold
+has to sit between the concurrent time and the serial time, and process/thread
+startup variance easily pushes a concurrent run past a tight ceiling.
+
+**Measure relative timing, not absolute wall-clock.** Have each unit of work record
+a start timestamp, then compare the *offset between starts*:
+
+- Concurrent execution → all units start within startup jitter of each other.
+- Serial execution → each start is delayed by the previous unit's full duration.
+
+```rust
+#[test]
+fn tasks_run_concurrently() {
+    // Each task records when it started, then sleeps briefly.
+    let started = run_tasks(|task_id| {
+        let start = Instant::now();
+        std::thread::sleep(Duration::from_millis(300));
+        (task_id, start)
+    });
+
+    // Concurrent => starts cluster together; serial => starts are ~300ms apart.
+    let first = started.iter().map(|(_, t)| *t).min().unwrap();
+    let last = started.iter().map(|(_, t)| *t).max().unwrap();
+    let skew = last.duration_since(first);
+    assert!(
+        skew < Duration::from_millis(200),
+        "expected concurrent starts (skew < 200ms), got {skew:?} — tasks ran serially"
+    );
+}
+```
+
+Why this is robust:
+
+- The signal is the *start offset*, which is unaffected by how long each unit runs
+  or how slow the machine is — only by scheduling order.
+- Only one short sleep contributes to total runtime, so the test stays fast.
+- The pass/fail gap is large (jitter of a few ms vs. a full task duration), so no
+  fragile threshold tuning is needed.
+
+For work that crosses process boundaries, emit a comparable wall-clock timestamp
+(e.g. epoch seconds) from each process and compare those instead of `Instant`.
+
+Note: this strategy detects *concurrency*, not *speed*. Absolute performance
+assertions (`assert!(elapsed < 1ms)`) belong in [benchmarks](./benchmarking.md),
+not unit tests — they fail unpredictably on loaded CI runners.
+
 ## Ignoring Tests
 
 ```rust

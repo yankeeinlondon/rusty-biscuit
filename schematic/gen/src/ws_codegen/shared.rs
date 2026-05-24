@@ -402,6 +402,128 @@ fn generate_codec_traits() -> TokenStream {
     }
 }
 
+/// Generates the common host auth helper functions shared by ApiKey and BearerToken strategies.
+///
+/// Produces: `configured_auth_tokens`, `auth_is_required`, `authentication_success_response`,
+/// `auth_error_response`. Callers add their own `validate_upgrade_request` with strategy-specific
+/// token extraction logic.
+pub fn generate_host_common_auth_helpers(env_names: &[String]) -> TokenStream {
+    quote! {
+        fn configured_auth_tokens() -> Vec<String> {
+            vec![#(#env_names.to_string()),*]
+                .into_iter()
+                .filter_map(|env| std::env::var(env).ok())
+                .filter(|value| !value.trim().is_empty())
+                .collect()
+        }
+
+        fn auth_is_required() -> bool {
+            !Self::configured_auth_tokens().is_empty()
+        }
+
+        fn authentication_success_response() -> serde_json::Value {
+            serde_json::json!({
+                "kind": "resp",
+                "req_id": 0,
+                "msg": "authentication",
+                "code": 200,
+                "msg_data": {}
+            })
+        }
+
+        fn auth_error_response(
+            status: tokio_tungstenite::tungstenite::http::StatusCode,
+            message: &str,
+        ) -> tokio_tungstenite::tungstenite::handshake::server::ErrorResponse {
+            tokio_tungstenite::tungstenite::http::Response::builder()
+                .status(status)
+                .body(Some(message.to_string()))
+                .unwrap_or_else(|_| {
+                    tokio_tungstenite::tungstenite::http::Response::new(Some("Unauthorized".to_string()))
+                })
+        }
+    }
+}
+
+/// Generates `validate_upgrade_request` for header-based auth that compares the raw header value.
+pub fn generate_host_validate_raw_header(header_name: &str, invalid_msg: &str) -> TokenStream {
+    quote! {
+        fn validate_upgrade_request(
+            request: &tokio_tungstenite::tungstenite::handshake::server::Request,
+            response: tokio_tungstenite::tungstenite::handshake::server::Response,
+        ) -> Result<
+            tokio_tungstenite::tungstenite::handshake::server::Response,
+            tokio_tungstenite::tungstenite::handshake::server::ErrorResponse,
+        > {
+            let expected_values = Self::configured_auth_tokens();
+
+            if expected_values.is_empty() {
+                return Ok(response);
+            }
+
+            let Some(received) = request
+                .headers()
+                .get(#header_name)
+                .and_then(|value| value.to_str().ok())
+            else {
+                return Err(Self::auth_error_response(
+                    tokio_tungstenite::tungstenite::http::StatusCode::UNAUTHORIZED,
+                    "Missing authentication header",
+                ));
+            };
+
+            if expected_values.iter().any(|expected| expected == received) {
+                Ok(response)
+            } else {
+                Err(Self::auth_error_response(
+                    tokio_tungstenite::tungstenite::http::StatusCode::UNAUTHORIZED,
+                    #invalid_msg,
+                ))
+            }
+        }
+    }
+}
+
+/// Generates `validate_upgrade_request` for Bearer token auth that strips the "Bearer " prefix.
+pub fn generate_host_validate_bearer_header(header_name: &str) -> TokenStream {
+    quote! {
+        fn validate_upgrade_request(
+            request: &tokio_tungstenite::tungstenite::handshake::server::Request,
+            response: tokio_tungstenite::tungstenite::handshake::server::Response,
+        ) -> Result<
+            tokio_tungstenite::tungstenite::handshake::server::Response,
+            tokio_tungstenite::tungstenite::handshake::server::ErrorResponse,
+        > {
+            let expected_values = Self::configured_auth_tokens();
+
+            if expected_values.is_empty() {
+                return Ok(response);
+            }
+
+            let Some(received) = request
+                .headers()
+                .get(#header_name)
+                .and_then(|value| value.to_str().ok())
+            else {
+                return Err(Self::auth_error_response(
+                    tokio_tungstenite::tungstenite::http::StatusCode::UNAUTHORIZED,
+                    "Missing authentication header",
+                ));
+            };
+
+            let token = received.strip_prefix("Bearer ").unwrap_or(received);
+            if expected_values.iter().any(|expected| expected == token) {
+                Ok(response)
+            } else {
+                Err(Self::auth_error_response(
+                    tokio_tungstenite::tungstenite::http::StatusCode::UNAUTHORIZED,
+                    "Invalid bearer token",
+                ));
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -430,5 +552,35 @@ mod tests {
             "Generated ws_shared must parse: {:?}",
             file.err()
         );
+    }
+
+    #[test]
+    fn host_common_auth_helpers_produces_tokens() {
+        let env_names = vec!["API_KEY".to_string()];
+        let tokens = generate_host_common_auth_helpers(&env_names);
+        let code = tokens.to_string();
+        assert!(code.contains("configured_auth_tokens"));
+        assert!(code.contains("auth_is_required"));
+        assert!(code.contains("authentication_success_response"));
+        assert!(code.contains("auth_error_response"));
+        assert!(code.contains("API_KEY"));
+    }
+
+    #[test]
+    fn host_validate_raw_header_produces_tokens() {
+        let tokens = generate_host_validate_raw_header("X-API-Key", "Invalid API key");
+        let code = tokens.to_string();
+        assert!(code.contains("validate_upgrade_request"));
+        assert!(code.contains("X-API-Key"));
+        assert!(code.contains("Invalid API key"));
+    }
+
+    #[test]
+    fn host_validate_bearer_header_produces_tokens() {
+        let tokens = generate_host_validate_bearer_header("Authorization");
+        let code = tokens.to_string();
+        assert!(code.contains("validate_upgrade_request"));
+        assert!(code.contains("Authorization"));
+        assert!(code.contains("Bearer"));
     }
 }

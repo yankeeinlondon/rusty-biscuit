@@ -1,0 +1,1042 @@
+use std::path::PathBuf;
+
+use biscuit_terminal::components::prose::Prose;
+use biscuit_terminal::components::renderable::TerminalRenderable;
+use biscuit_terminal::components::table::table::{Table, TableCellContent, TableColumn};
+use clap::Args;
+use color_eyre::eyre::Result;
+use darkmatter::markdown::compose::ComposeContext;
+
+use crate::log;
+
+/// Arguments for the `claudine context` subcommand.
+#[derive(Debug, Args)]
+pub struct ContextArgs {
+    /// Show live values for each context variable.
+    #[arg(long)]
+    pub values: bool,
+
+    /// Show the expression engine's operations and functions.
+    #[arg(long)]
+    pub expressions: bool,
+
+    /// Show the available safe side effects that Claudine provides.
+    #[arg(long)]
+    pub side_effects: bool,
+}
+
+/// A single context variable extracted from the documentation.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ContextVariable {
+    /// The property name (e.g., `today`).
+    pub property: String,
+    /// The type name (e.g., `String`).
+    pub type_name: String,
+    /// The description.
+    pub description: String,
+}
+
+/// A section of context variables, grouped by heading and optional subsection.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ContextSection {
+    /// The H3 section heading.
+    pub heading: String,
+    /// The H4 subsection heading, if any.
+    pub subsection: Option<String>,
+    /// The variables in this section/subsection.
+    pub variables: Vec<ContextVariable>,
+}
+
+/// Path to the context-variables documentation file.
+fn context_variables_path() -> PathBuf {
+    // Resolve relative to the repo root by walking up from CWD.
+    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    let mut dir = cwd.as_path();
+    loop {
+        let candidate = dir.join("darkmatter/docs/topics/context-variables.md");
+        if candidate.exists() {
+            return candidate;
+        }
+        if let Some(parent) = dir.parent() {
+            dir = parent;
+        } else {
+            // Fallback: assume running from repo root.
+            return PathBuf::from("darkmatter/docs/topics/context-variables.md");
+        }
+    }
+}
+
+/// Parse the context-variables.md file into sections.
+pub fn parse_context_variables() -> Vec<ContextSection> {
+    let path = context_variables_path();
+    let content = std::fs::read_to_string(&path).unwrap_or_default();
+    parse_context_variables_content(&content)
+}
+
+/// Parse context variables from markdown content.
+fn parse_context_variables_content(content: &str) -> Vec<ContextSection> {
+    let mut sections: Vec<ContextSection> = Vec::new();
+    let mut current_section: Option<String> = None;
+    let mut current_subsection: Option<String> = None;
+    let mut in_table = false;
+    let mut pending_variables: Vec<ContextVariable> = Vec::new();
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+
+        // H3 heading
+        if let Some(heading) = trimmed.strip_prefix("### ") {
+            // Flush any pending variables from previous section/subsection
+            flush_pending(
+                &mut sections,
+                &current_section,
+                &mut current_subsection,
+                &mut pending_variables,
+            );
+            current_section = Some(heading.trim().to_string());
+            current_subsection = None;
+            in_table = false;
+            continue;
+        }
+
+        // H4 heading
+        if let Some(subheading) = trimmed.strip_prefix("#### ") {
+            flush_pending(
+                &mut sections,
+                &current_section,
+                &mut current_subsection,
+                &mut pending_variables,
+            );
+            current_subsection = Some(subheading.trim().to_string());
+            in_table = false;
+            continue;
+        }
+
+        // Table separator line
+        if trimmed.starts_with("|---") {
+            in_table = true;
+            continue;
+        }
+
+        // Table row
+        if trimmed.starts_with('|') && in_table {
+            if let Some(var) = parse_table_row(trimmed) {
+                pending_variables.push(var);
+            }
+            continue;
+        }
+
+        // Blank line or non-table line ends table mode
+        if trimmed.is_empty() {
+            in_table = false;
+        }
+    }
+
+    // Flush final pending variables
+    flush_pending(
+        &mut sections,
+        &current_section,
+        &mut current_subsection,
+        &mut pending_variables,
+    );
+
+    sections
+}
+
+/// Flush pending variables into a section.
+fn flush_pending(
+    sections: &mut Vec<ContextSection>,
+    current_section: &Option<String>,
+    current_subsection: &mut Option<String>,
+    pending_variables: &mut Vec<ContextVariable>,
+) {
+    if pending_variables.is_empty() {
+        return;
+    }
+
+    if let Some(heading) = current_section.clone() {
+        sections.push(ContextSection {
+            heading,
+            subsection: current_subsection.take(),
+            variables: std::mem::take(pending_variables),
+        });
+    }
+}
+
+/// Parse a single table row into a ContextVariable.
+fn parse_table_row(line: &str) -> Option<ContextVariable> {
+    let cells = split_table_cells(line);
+
+    // Skip the first empty cell if line starts with |
+    let cells: Vec<&str> = if line.trim_start().starts_with('|')
+        && cells.first().map(|s| s.trim().is_empty()).unwrap_or(false)
+    {
+        cells.iter().skip(1).map(|s| s.as_str()).collect()
+    } else {
+        cells.iter().map(|s| s.as_str()).collect()
+    };
+
+    // We need at least 3 cells: property, type, description
+    if cells.len() < 3 {
+        return None;
+    }
+
+    let property = cells[0].trim().replace("\\|", "|");
+    let type_name = cells[1].trim().replace("\\|", "|");
+    let description = cells[2].trim().replace("\\|", "|");
+
+    // Skip header rows (when property is "Variable" or empty)
+    if property.is_empty() || property == "Variable" {
+        return None;
+    }
+
+    Some(ContextVariable {
+        property,
+        type_name,
+        description,
+    })
+}
+
+/// Split a markdown table row into cells, respecting backtick-quoted pipes.
+fn split_table_cells(line: &str) -> Vec<String> {
+    let mut cells = Vec::new();
+    let mut current = String::new();
+    let mut in_backticks = false;
+    let chars: Vec<char> = line.chars().collect();
+    let mut i = 0;
+
+    while i < chars.len() {
+        let ch = chars[i];
+
+        if ch == '`' {
+            in_backticks = !in_backticks;
+            current.push(ch);
+            i += 1;
+            continue;
+        }
+
+        if ch == '|' && !in_backticks {
+            cells.push(current.clone());
+            current.clear();
+            i += 1;
+            continue;
+        }
+
+        current.push(ch);
+        i += 1;
+    }
+
+    cells.push(current);
+    cells
+}
+
+/// Strip backticks from a property name for value lookup.
+fn strip_backticks(s: &str) -> String {
+    s.trim_matches('`').to_string()
+}
+
+/// Render the default context report (Property, Type, Description).
+fn render_default_report(sections: &[ContextSection]) {
+    let term = log::terminal();
+
+    for section in sections {
+        if let Some(ref subsection) = section.subsection {
+            let heading = Prose::new(format!(
+                "<blue><b>{}</b></blue> — <b>{subsection}</b>",
+                section.heading
+            ));
+            log::data(&heading.render(&term));
+        } else {
+            let heading = Prose::new(format!("<blue><b>{}</b></blue>", section.heading));
+            log::data(&heading.render(&term));
+        }
+
+        let columns = vec![
+            TableColumn::new("Property"),
+            TableColumn::new("Type"),
+            TableColumn::new("Description"),
+        ];
+        let mut table = Table::new().with_columns(columns);
+        table.layout_mut().margin = biscuit_terminal::utils::layout::Margin::x(
+            biscuit_terminal::utils::layout::Length::ch(1),
+        );
+
+        for var in &section.variables {
+            let row: Vec<TableCellContent> = vec![
+                var.property.clone().into(),
+                var.type_name.clone().into(),
+                var.description.clone().into(),
+            ];
+            table.add_row(row);
+        }
+
+        log::data(&table.render(&term));
+        log::data("");
+    }
+}
+
+/// Render the values report (Property, Type, Value).
+fn render_values_report(sections: &[ContextSection]) {
+    let term = log::terminal();
+    let ctx = ComposeContext::capture();
+    let values = ctx.values();
+
+    for section in sections {
+        if let Some(ref subsection) = section.subsection {
+            let heading = Prose::new(format!(
+                "<blue><b>{}</b></blue> — <b>{subsection}</b>",
+                section.heading
+            ));
+            log::data(&heading.render(&term));
+        } else {
+            let heading = Prose::new(format!("<blue><b>{}</b></blue>", section.heading));
+            log::data(&heading.render(&term));
+        }
+
+        let columns = vec![
+            TableColumn::new("Property"),
+            TableColumn::new("Type"),
+            TableColumn::new("Value"),
+        ];
+        let mut table = Table::new().with_columns(columns);
+        table.layout_mut().margin = biscuit_terminal::utils::layout::Margin::x(
+            biscuit_terminal::utils::layout::Length::ch(1),
+        );
+
+        for var in &section.variables {
+            let key = strip_backticks(&var.property);
+            let value_str = match values.get(&key) {
+                Some(v) if v.is_null() => "<dim>null</dim>".to_string(),
+                Some(v) => match v {
+                    serde_json::Value::String(s) => s.clone(),
+                    serde_json::Value::Bool(b) => b.to_string(),
+                    serde_json::Value::Number(n) => n.to_string(),
+                    serde_json::Value::Array(arr) => {
+                        let items: Vec<String> = arr.iter().map(|v| v.to_string()).collect();
+                        items.join(", ")
+                    }
+                    serde_json::Value::Object(_) => v.to_string(),
+                    serde_json::Value::Null => "<dim>null</dim>".to_string(),
+                },
+                None => "<dim>null</dim>".to_string(),
+            };
+
+            let row: Vec<TableCellContent> = vec![
+                var.property.clone().into(),
+                var.type_name.clone().into(),
+                value_str.into(),
+            ];
+            table.add_row(row);
+        }
+
+        log::data(&table.render(&term));
+        log::data("");
+    }
+}
+
+/// Render the side effects report (placeholder).
+fn render_side_effects_report() {
+    log::data("not implemented yet");
+}
+
+/// Render the footer messages to stderr.
+fn render_footer() {
+    let term = log::terminal();
+
+    let msg1 = Prose::new(
+        "<dim><i>use <blue>--expressions</blue> to see the expression engine's operations and functions</i></dim>",
+    );
+    log::message(&msg1.render(&term));
+
+    let msg2 = Prose::new(
+        "<dim><i>use <blue>--side-effects</blue> to see the available safe side effects that <b>Claudine</b> provides without need for being white listed.</i></dim>",
+    );
+    log::message(&msg2.render(&term));
+}
+
+// --- Expression doc parsing ---
+
+fn expressions_path() -> PathBuf {
+    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    let mut dir = cwd.as_path();
+    loop {
+        let candidate = dir.join("darkmatter/docs/topics/darkmatter-expressions.md");
+        if candidate.exists() {
+            return candidate;
+        }
+        if let Some(parent) = dir.parent() {
+            dir = parent;
+        } else {
+            return PathBuf::from("darkmatter/docs/topics/darkmatter-expressions.md");
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct ExprSection {
+    heading: String,
+    level: u8,
+    blocks: Vec<ExprBlock>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+enum ExprBlock {
+    Paragraph(String),
+    Table {
+        headers: Vec<String>,
+        rows: Vec<Vec<String>>,
+    },
+    OrderedList(Vec<String>),
+    UnorderedList(Vec<String>),
+    CodeBlock(String),
+}
+
+fn parse_expressions_doc() -> Vec<ExprSection> {
+    let path = expressions_path();
+    let content = std::fs::read_to_string(&path).unwrap_or_default();
+    parse_expressions_content(&content)
+}
+
+fn parse_expressions_content(content: &str) -> Vec<ExprSection> {
+    let mut sections: Vec<ExprSection> = Vec::new();
+    let mut current_heading: Option<(String, u8)> = None;
+    let mut current_blocks: Vec<ExprBlock> = Vec::new();
+
+    let mut in_table = false;
+    let mut table_lines: Vec<String> = Vec::new();
+    let mut in_code_block = false;
+    let mut code_block_lines: Vec<String> = Vec::new();
+    let mut in_ordered_list = false;
+    let mut in_unordered_list = false;
+    let mut list_items: Vec<String> = Vec::new();
+    let mut paragraph = String::new();
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+
+        // Headings
+        if let Some(h2) = trimmed.strip_prefix("## ") {
+            flush_expr_current(&mut sections, &mut current_heading, &mut current_blocks);
+            current_heading = Some((h2.trim().to_string(), 2));
+            continue;
+        }
+        if let Some(h3) = trimmed.strip_prefix("### ") {
+            flush_expr_current(&mut sections, &mut current_heading, &mut current_blocks);
+            current_heading = Some((h3.trim().to_string(), 3));
+            continue;
+        }
+
+        // Code blocks
+        if trimmed.starts_with("```") {
+            if in_code_block {
+                in_code_block = false;
+                current_blocks.push(ExprBlock::CodeBlock(code_block_lines.join("\n")));
+                code_block_lines.clear();
+            } else {
+                flush_expr_paragraph(&mut current_blocks, &mut paragraph);
+                flush_expr_list(
+                    &mut current_blocks,
+                    &mut list_items,
+                    &mut in_ordered_list,
+                    &mut in_unordered_list,
+                );
+                in_code_block = true;
+            }
+            continue;
+        }
+        if in_code_block {
+            code_block_lines.push(line.to_string());
+            continue;
+        }
+
+        // Tables
+        if trimmed.starts_with("|---") {
+            flush_expr_paragraph(&mut current_blocks, &mut paragraph);
+            flush_expr_list(
+                &mut current_blocks,
+                &mut list_items,
+                &mut in_ordered_list,
+                &mut in_unordered_list,
+            );
+            in_table = true;
+            continue;
+        }
+        if in_table && trimmed.starts_with('|') {
+            table_lines.push(trimmed.to_string());
+            continue;
+        }
+        if in_table && !trimmed.starts_with('|') {
+            if let Some((headers, rows)) = build_expr_table(&table_lines) {
+                current_blocks.push(ExprBlock::Table { headers, rows });
+            }
+            table_lines.clear();
+            in_table = false;
+        }
+
+        // List items
+        if trimmed.starts_with("- ") || trimmed.starts_with("* ") {
+            flush_expr_paragraph(&mut current_blocks, &mut paragraph);
+            if in_ordered_list {
+                flush_expr_list(
+                    &mut current_blocks,
+                    &mut list_items,
+                    &mut in_ordered_list,
+                    &mut in_unordered_list,
+                );
+            }
+            in_unordered_list = true;
+            list_items.push(trimmed[2..].to_string());
+            continue;
+        }
+        if let Some((num, rest)) = trimmed.split_once(". ")
+            && num.parse::<u32>().is_ok()
+            && !trimmed.starts_with('|')
+            && !in_table
+        {
+            flush_expr_paragraph(&mut current_blocks, &mut paragraph);
+            if in_unordered_list {
+                flush_expr_list(
+                    &mut current_blocks,
+                    &mut list_items,
+                    &mut in_ordered_list,
+                    &mut in_unordered_list,
+                );
+            }
+            in_ordered_list = true;
+            list_items.push(rest.to_string());
+            continue;
+        }
+        // Continuation of list item
+        if (in_ordered_list || in_unordered_list)
+            && !trimmed.is_empty()
+            && !trimmed.starts_with('#')
+            && !trimmed.starts_with('|')
+            && !trimmed.starts_with("```")
+            && !trimmed.starts_with("- ")
+            && !trimmed.starts_with("* ")
+        {
+            if let Some(last) = list_items.last_mut() {
+                if !last.ends_with(' ') {
+                    last.push(' ');
+                }
+                last.push_str(trimmed);
+            }
+            continue;
+        }
+
+        // Blank line
+        if trimmed.is_empty() {
+            flush_expr_paragraph(&mut current_blocks, &mut paragraph);
+            flush_expr_list(
+                &mut current_blocks,
+                &mut list_items,
+                &mut in_ordered_list,
+                &mut in_unordered_list,
+            );
+            if in_table {
+                if let Some((headers, rows)) = build_expr_table(&table_lines) {
+                    current_blocks.push(ExprBlock::Table { headers, rows });
+                }
+                table_lines.clear();
+                in_table = false;
+            }
+            continue;
+        }
+
+        // Paragraph text
+        if !paragraph.is_empty() {
+            paragraph.push(' ');
+        }
+        paragraph.push_str(trimmed);
+    }
+
+    // Flush remaining
+    flush_expr_paragraph(&mut current_blocks, &mut paragraph);
+    flush_expr_list(
+        &mut current_blocks,
+        &mut list_items,
+        &mut in_ordered_list,
+        &mut in_unordered_list,
+    );
+    if in_table
+        && !table_lines.is_empty()
+        && let Some((headers, rows)) = build_expr_table(&table_lines)
+    {
+        current_blocks.push(ExprBlock::Table { headers, rows });
+    }
+    flush_expr_current(&mut sections, &mut current_heading, &mut current_blocks);
+
+    sections
+}
+
+fn flush_expr_paragraph(blocks: &mut Vec<ExprBlock>, paragraph: &mut String) {
+    if !paragraph.is_empty() {
+        blocks.push(ExprBlock::Paragraph(std::mem::take(paragraph)));
+    }
+}
+
+fn flush_expr_list(
+    blocks: &mut Vec<ExprBlock>,
+    items: &mut Vec<String>,
+    ordered: &mut bool,
+    unordered: &mut bool,
+) {
+    if !items.is_empty() {
+        if *ordered {
+            blocks.push(ExprBlock::OrderedList(std::mem::take(items)));
+        } else {
+            blocks.push(ExprBlock::UnorderedList(std::mem::take(items)));
+        }
+    }
+    *ordered = false;
+    *unordered = false;
+}
+
+fn flush_expr_current(
+    sections: &mut Vec<ExprSection>,
+    heading: &mut Option<(String, u8)>,
+    blocks: &mut Vec<ExprBlock>,
+) {
+    if let Some((h, level)) = heading.take() {
+        sections.push(ExprSection {
+            heading: h,
+            level,
+            blocks: std::mem::take(blocks),
+        });
+    }
+}
+
+fn build_expr_table(lines: &[String]) -> Option<(Vec<String>, Vec<Vec<String>>)> {
+    if lines.is_empty() {
+        return None;
+    }
+    let headers: Vec<String> = split_table_cells(&lines[0])
+        .into_iter()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect();
+    if headers.is_empty() {
+        return None;
+    }
+    let mut rows = Vec::new();
+    for line in lines.iter().skip(1) {
+        let cells: Vec<String> = split_table_cells(line)
+            .into_iter()
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect();
+        if !cells.is_empty() {
+            rows.push(cells);
+        }
+    }
+    Some((headers, rows))
+}
+
+// --- Expression report rendering ---
+
+fn render_expressions_report() {
+    let term = log::terminal();
+    let sections = parse_expressions_doc();
+
+    // Title
+    let title = Prose::new("<blue><b>Darkmatter Expression Engine</b></blue>");
+    log::data(&title.render(&term));
+    log::data("");
+
+    // Brief description
+    let desc = Prose::new(
+        "Expressions evaluate in <b>interpolation</b> <dim>{{ ... }}</dim> and <b>conditions</b> <dim>when=\"...\"</dim> surfaces.",
+    );
+    log::data(&desc.render(&term));
+    log::data("");
+
+    // Operator Precedence
+    render_precedence_table(&term, &sections);
+
+    // Truthiness
+    render_truthiness_table(&term, &sections);
+
+    // Unary operators (brief)
+    render_unary_operators(&term, &sections);
+
+    // Functions
+    render_functions(&term, &sections);
+
+    render_footer();
+}
+
+fn render_precedence_table(term: &biscuit_terminal::terminal::Terminal, sections: &[ExprSection]) {
+    let Some(section) = sections.iter().find(|s| s.heading == "Operator Precedence") else {
+        return;
+    };
+
+    let heading = Prose::new("<blue><b>Operator Precedence</b></blue>");
+    log::data(&heading.render(term));
+    log::data("");
+
+    let mut items: Vec<(String, String)> = Vec::new();
+    for block in &section.blocks {
+        if let ExprBlock::OrderedList(list) = block {
+            for item in list {
+                let text = item.trim();
+                // Extract bold text: **Name** — description
+                if let Some(start) = text.find("**") {
+                    let after_start = &text[start + 2..];
+                    if let Some(end) = after_start.find("**") {
+                        let op_name = &after_start[..end];
+                        let rest = after_start[end + 2..].trim();
+                        let desc = rest
+                            .strip_prefix("—")
+                            .or_else(|| rest.strip_prefix("-"))
+                            .unwrap_or(rest)
+                            .trim();
+                        items.push((op_name.to_string(), desc.to_string()));
+                    }
+                }
+            }
+        }
+    }
+
+    if items.is_empty() {
+        return;
+    }
+
+    let columns = vec![
+        TableColumn::new("Precedence"),
+        TableColumn::new("Operators"),
+    ];
+    let mut table = Table::new().with_columns(columns);
+    table.layout_mut().margin =
+        biscuit_terminal::utils::layout::Margin::x(biscuit_terminal::utils::layout::Length::ch(1));
+
+    for (i, (name, desc)) in items.iter().enumerate() {
+        let row: Vec<TableCellContent> = vec![
+            format!("{}", i + 1).into(),
+            format!("{name} — {desc}").into(),
+        ];
+        table.add_row(row);
+    }
+
+    log::data(&table.render(term));
+    log::data("");
+}
+
+fn render_truthiness_table(term: &biscuit_terminal::terminal::Terminal, sections: &[ExprSection]) {
+    let Some(section) = sections.iter().find(|s| s.heading == "Truthiness") else {
+        return;
+    };
+
+    let heading = Prose::new("<blue><b>Truthiness</b></blue>");
+    log::data(&heading.render(term));
+    log::data("");
+
+    for block in &section.blocks {
+        if let ExprBlock::Table { headers, rows } = block {
+            let columns: Vec<TableColumn> = headers
+                .iter()
+                .map(|h| TableColumn::new(h.as_str()))
+                .collect();
+            let mut table = Table::new().with_columns(columns);
+            table.layout_mut().margin = biscuit_terminal::utils::layout::Margin::x(
+                biscuit_terminal::utils::layout::Length::ch(1),
+            );
+
+            for row in rows {
+                let cells: Vec<TableCellContent> = row.iter().map(|c| c.clone().into()).collect();
+                table.add_row(cells);
+            }
+
+            log::data(&table.render(term));
+            log::data("");
+        }
+    }
+}
+
+fn render_unary_operators(term: &biscuit_terminal::terminal::Terminal, sections: &[ExprSection]) {
+    let Some(section) = sections.iter().find(|s| s.heading == "Unary Operators") else {
+        return;
+    };
+
+    let heading = Prose::new("<blue><b>Unary Operators</b></blue>");
+    log::data(&heading.render(term));
+    log::data("");
+
+    let columns = vec![
+        TableColumn::new("Operator"),
+        TableColumn::new("Description"),
+    ];
+    let mut table = Table::new().with_columns(columns);
+    table.layout_mut().margin =
+        biscuit_terminal::utils::layout::Margin::x(biscuit_terminal::utils::layout::Length::ch(1));
+
+    for block in &section.blocks {
+        if let ExprBlock::UnorderedList(list) = block {
+            for item in list {
+                if let Some((sig, desc)) = parse_function_item(item) {
+                    let row: Vec<TableCellContent> = vec![format!("`{sig}`").into(), desc.into()];
+                    table.add_row(row);
+                }
+            }
+        }
+    }
+
+    log::data(&table.render(term));
+    log::data("");
+}
+
+fn render_functions(term: &biscuit_terminal::terminal::Terminal, sections: &[ExprSection]) {
+    let Some(func_idx) = sections.iter().position(|s| s.heading == "Functions") else {
+        return;
+    };
+
+    let heading = Prose::new("<blue><b>Functions</b></blue>");
+    log::data(&heading.render(term));
+    log::data("");
+
+    let mut i = func_idx + 1;
+    while i < sections.len() && sections[i].level == 3 {
+        let subsection = &sections[i];
+
+        let sub_heading = Prose::new(format!("<b>{}</b>", subsection.heading));
+        log::data(&sub_heading.render(term));
+
+        let columns = vec![
+            TableColumn::new("Function"),
+            TableColumn::new("Description"),
+        ];
+        let mut table = Table::new().with_columns(columns);
+        table.layout_mut().margin = biscuit_terminal::utils::layout::Margin::x(
+            biscuit_terminal::utils::layout::Length::ch(1),
+        );
+
+        for block in &subsection.blocks {
+            if let ExprBlock::UnorderedList(list) = block {
+                for item in list {
+                    if let Some((sig, desc)) = parse_function_item(item) {
+                        let row: Vec<TableCellContent> =
+                            vec![format!("`{sig}`").into(), desc.into()];
+                        table.add_row(row);
+                    } else if !item.trim().is_empty() {
+                        let row: Vec<TableCellContent> = vec![item.trim().into(), "".into()];
+                        table.add_row(row);
+                    }
+                }
+            }
+        }
+
+        log::data(&table.render(term));
+        log::data("");
+
+        i += 1;
+    }
+}
+
+fn parse_function_item(text: &str) -> Option<(String, String)> {
+    let text = text.trim();
+    let sep = " — ";
+    let sep_pos = text.find(sep)?;
+    let signature = text[..sep_pos].trim().trim_matches('`').to_string();
+    let description = text[sep_pos + sep.len()..].trim().to_string();
+    if signature.is_empty() {
+        return None;
+    }
+    Some((signature, description))
+}
+
+/// Show Darkmatter runtime context, expression engine, and side effects.
+pub fn run(args: ContextArgs) -> Result<()> {
+    if args.expressions {
+        render_expressions_report();
+        return Ok(());
+    }
+
+    if args.side_effects {
+        render_side_effects_report();
+        render_footer();
+        return Ok(());
+    }
+
+    let sections = parse_context_variables();
+
+    if args.values {
+        render_values_report(&sections);
+    } else {
+        render_default_report(&sections);
+    }
+
+    render_footer();
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const TEST_MD: &str = r#"
+# Context Variables
+
+## Overcoming Conflicts
+
+### Section A
+
+#### Sub A1
+
+| Variable | Type | Description |
+|----------|------|-------------|
+| `var1` | `String` | First variable |
+| `var2` | `Number` | Second variable |
+
+#### Sub A2
+
+| Variable | Type | Description |
+|----------|------|-------------|
+| `var3` | `Bool` | Third variable |
+
+### Section B
+
+| Variable | Type | Description |
+|----------|------|-------------|
+| `var4` | `String | null` | Fourth variable |
+"#;
+
+    #[test]
+    fn test_parse_context_variables_content() {
+        let sections = parse_context_variables_content(TEST_MD);
+
+        assert_eq!(
+            sections.len(),
+            3,
+            "expected 3 sections/subsections with variables"
+        );
+
+        // Section A — Sub A1
+        assert_eq!(sections[0].heading, "Section A");
+        assert_eq!(sections[0].subsection, Some("Sub A1".to_string()));
+        assert_eq!(sections[0].variables.len(), 2);
+        assert_eq!(sections[0].variables[0].property, "`var1`");
+        assert_eq!(sections[0].variables[0].type_name, "`String`");
+        assert_eq!(sections[0].variables[0].description, "First variable");
+        assert_eq!(sections[0].variables[1].property, "`var2`");
+        assert_eq!(sections[0].variables[1].type_name, "`Number`");
+
+        // Section A — Sub A2
+        assert_eq!(sections[1].heading, "Section A");
+        assert_eq!(sections[1].subsection, Some("Sub A2".to_string()));
+        assert_eq!(sections[1].variables.len(), 1);
+        assert_eq!(sections[1].variables[0].property, "`var3`");
+
+        // Section B (no subsection)
+        assert_eq!(sections[2].heading, "Section B");
+        assert_eq!(sections[2].subsection, None);
+        assert_eq!(sections[2].variables.len(), 1);
+        assert_eq!(sections[2].variables[0].property, "`var4`");
+        assert_eq!(sections[2].variables[0].type_name, "`String | null`");
+        assert_eq!(sections[2].variables[0].description, "Fourth variable");
+    }
+
+    #[test]
+    fn test_parse_real_context_variables_file() {
+        let path = context_variables_path();
+        if !path.exists() {
+            // Skip if file not found (e.g., running outside repo)
+            return;
+        }
+        let sections = parse_context_variables();
+        assert!(!sections.is_empty(), "should discover at least one section");
+
+        // We expect sections like "Date and Time Information", "Filesystem and Git", etc.
+        let has_date_section = sections.iter().any(|s| s.heading.contains("Date and Time"));
+        assert!(has_date_section, "should discover Date and Time section");
+
+        let total_vars: usize = sections.iter().map(|s| s.variables.len()).sum();
+        assert!(
+            total_vars > 10,
+            "should discover many variables, got {total_vars}"
+        );
+    }
+
+    const TEST_EXPR_MD: &str = r#"
+# Darkmatter Expressions
+
+## Operator Precedence
+
+1. **Primary** — literals
+2. **Unary** — `!`, `-`
+
+## Truthiness
+
+| Value | Falsy |
+|-------|-------|
+| `null` | yes |
+| `false` | no |
+
+## Unary Operators
+
+- `!x` — boolean negation
+- `-x` — numeric negation
+
+## Functions
+
+### Logical Helpers
+
+- `and(a, b)` — all arguments truthy
+- `or(a, b)` — any argument truthy
+
+### Math
+
+- `min(a, b)` — minimum
+"#;
+
+    #[test]
+    fn test_parse_expressions_content() {
+        let sections = parse_expressions_content(TEST_EXPR_MD);
+
+        assert!(!sections.is_empty(), "should discover sections");
+
+        let precedence = sections.iter().find(|s| s.heading == "Operator Precedence");
+        assert!(
+            precedence.is_some(),
+            "should find Operator Precedence section"
+        );
+
+        let truthiness = sections.iter().find(|s| s.heading == "Truthiness");
+        assert!(truthiness.is_some(), "should find Truthiness section");
+
+        let unary = sections.iter().find(|s| s.heading == "Unary Operators");
+        assert!(unary.is_some(), "should find Unary Operators section");
+
+        let functions = sections.iter().find(|s| s.heading == "Functions");
+        assert!(functions.is_some(), "should find Functions section");
+
+        let logical = sections.iter().find(|s| s.heading == "Logical Helpers");
+        assert!(logical.is_some(), "should find Logical Helpers subsection");
+
+        let math = sections.iter().find(|s| s.heading == "Math");
+        assert!(math.is_some(), "should find Math subsection");
+    }
+
+    #[test]
+    fn test_parse_real_expressions_file() {
+        let path = expressions_path();
+        if !path.exists() {
+            return;
+        }
+        let sections = parse_expressions_doc();
+        assert!(!sections.is_empty(), "should discover at least one section");
+
+        let has_precedence = sections.iter().any(|s| s.heading == "Operator Precedence");
+        assert!(
+            has_precedence,
+            "should discover Operator Precedence section"
+        );
+
+        let has_truthiness = sections.iter().any(|s| s.heading == "Truthiness");
+        assert!(has_truthiness, "should discover Truthiness section");
+
+        let has_functions = sections.iter().any(|s| s.heading == "Functions");
+        assert!(has_functions, "should discover Functions section");
+
+        let has_function_sub = sections.iter().any(|s| s.heading == "Logical Helpers");
+        assert!(has_function_sub, "should discover a function subsection");
+    }
+}

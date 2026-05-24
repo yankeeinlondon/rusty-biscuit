@@ -1,1 +1,4 @@
 prefix echo
+exact uname
+exact pwd
+exact ls -la ../

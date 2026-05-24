@@ -55,6 +55,21 @@ test *args="":
     @just _test darkmatter {{ args }}
     @just _test darkmatter-cli {{ args }}
 
+# Run the Level-2 (real-terminal) render-tree tests, enforced.
+#
+# Sets DARKMATTER_LEVEL2_REQUIRED=1 so the suite hard-fails if WezTerm is not
+# reachable — matching the spec's expectation that terminal user-observable
+# rendering is verified in an actual terminal pane, not as in-process strings.
+# Requires WEZTERM_UNIX_SOCKET to point at a running WezTerm instance and the
+# `wezterm` CLI on PATH.
+test-l2 *args="":
+    @echo
+    @echo -e "Running {{ BOLD }}Level-2{{ RESET }} render-tree terminal tests"
+    @echo -e "{{ DIM }}- requires WezTerm: WEZTERM_UNIX_SOCKET + wezterm on PATH{{ RESET }}"
+    @echo
+    @DARKMATTER_LEVEL2_REQUIRED=1 cargo test -p darkmatter \
+        --test level2_render_tree_terminal {{ args }}
+
 # Lint both the library and CLI
 lint:
     @just _lint darkmatter
@@ -91,6 +106,35 @@ install *args="":
 # Validate the source code without doing a full build
 check:
     @cargo check -p {{ LIBRARY }} -p {{ CLI }}
+
+# ---------- benchmarking + profiling ----------
+
+# run the full Criterion bench suite for darkmatter
+bench *args="":
+    @echo -e "Running Criterion benches for {{ BOLD }}{{ LIB_NAME }}{{ RESET }}"
+    @cargo bench -p {{ LIBRARY }} --benches -- {{ args }}
+
+# run only the schema validation benches (1000-doc corpus, warm + cold cache)
+bench-schema *args="":
+    @cargo bench -p {{ LIBRARY }} --bench schema_validation -- {{ args }}
+
+# run only the compose pipeline benches (per-stage isolation)
+bench-compose *args="":
+    @cargo bench -p {{ LIBRARY }} --bench compose_pipeline -- {{ args }}
+
+# run only the render pipeline benches (parse, terminal, html, highlight)
+bench-render *args="":
+    @cargo bench -p {{ LIBRARY }} --bench render_pipeline -- {{ args }}
+
+# capture a saved baseline for trend tracking (usage: `just bench-baseline main`)
+bench-baseline name:
+    @echo -e "Saving Criterion baseline {{ BOLD }}{{ name }}{{ RESET }}"
+    @cargo bench -p {{ LIBRARY }} --benches -- --save-baseline {{ name }}
+
+# compare current bench timings against a saved baseline
+bench-compare name:
+    @echo -e "Comparing against Criterion baseline {{ BOLD }}{{ name }}{{ RESET }}"
+    @cargo bench -p {{ LIBRARY }} --benches -- --baseline {{ name }}
 
 # Run the latest debug build of the Claudine CLI
 cli *args="":

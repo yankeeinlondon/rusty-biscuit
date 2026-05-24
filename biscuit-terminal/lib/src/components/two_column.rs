@@ -1,5 +1,19 @@
+use renderable::browser::PageOptions;
+use renderable::browser::fragment::{BrowserFragment, Ready};
+use renderable::html::HtmlPage;
+use renderable::markdown::MarkdownRenderable;
+use renderable::tree::render::{
+    BrowserRenderOptions, MarkdownDialect, MarkdownRenderOptions, render_browser_node,
+    render_markdown_node,
+};
+use renderable::tree::{
+    ColumnWidthKind, ColumnsHints, NodeKind, RenderNode, RenderStrictness, TreeRenderable,
+};
+
 use crate::discovery::detection::TerminalApp;
 use crate::prelude::*;
+use crate::render_tree::projection::TreeProjectionContext;
+use crate::render_tree::{TerminalRenderOptions, render_terminal_node};
 use crate::utils::block_constraint::{split_lines, visible_width, wrap_lines};
 
 /// Determines how wide a column should be.
@@ -115,7 +129,7 @@ fn render_column_block(render: &RenderedColumn, offset: u32) -> String {
 ///
 /// ```
 /// use biscuit_terminal::components::two_column::TwoColumn;
-/// use biscuit_terminal::components::renderable::Renderable;
+/// use biscuit_terminal::components::renderable::TerminalRenderable;
 ///
 /// // Basic 50/50 split
 /// let cols = TwoColumn::new("Left content", "Right content");
@@ -141,8 +155,8 @@ fn render_column_block(render: &RenderedColumn, offset: u32) -> String {
 /// and minimum column widths.
 #[derive(Debug, Clone)]
 pub struct TwoColumn {
-    left: RenderableContent,
-    right: RenderableContent,
+    left: RenderableTerminalContent,
+    right: RenderableTerminalContent,
     left_width: ColumnWidth,
     gap: u32,
     layout: Layout,
@@ -162,7 +176,10 @@ impl Default for TwoColumn {
 
 impl TwoColumn {
     /// Create a new two-column layout with optional ratio (defaults to 50/50).
-    pub fn new<L: Into<RenderableContent>, R: Into<RenderableContent>>(left: L, right: R) -> Self {
+    pub fn new<L: Into<RenderableTerminalContent>, R: Into<RenderableTerminalContent>>(
+        left: L,
+        right: R,
+    ) -> Self {
         TwoColumn {
             left: left.into(),
             right: right.into(),
@@ -361,7 +378,7 @@ impl TwoColumn {
 
     fn render_column(
         &self,
-        content: &RenderableContent,
+        content: &RenderableTerminalContent,
         width: u32,
         term: Option<&Terminal>,
     ) -> RenderedColumn {
@@ -373,11 +390,11 @@ impl TwoColumn {
         }
 
         match content {
-            RenderableContent::String(s) => RenderedColumn {
+            RenderableTerminalContent::String(s) => RenderedColumn {
                 lines: wrap_lines(split_lines(s), &WordWrap::WrapProse(None, None), width),
                 uses_cursor_padding: false,
             },
-            RenderableContent::Component(component) => {
+            RenderableTerminalContent::Component(component) => {
                 if let Some(t) = term
                     && let Some(image) = component.as_any().downcast_ref::<TerminalImage>()
                 {
@@ -428,11 +445,151 @@ impl TwoColumn {
         }
 
         let combined = self.render_columns(available, term);
-        self.layout.apply_layout(&combined, term_width)
+        // The column boundary must stay vertical across all rows — align as
+        // a block.
+        self.layout.apply_block_layout(&combined, term_width)
+    }
+
+    /// Projects this two-column layout into the canonical render tree.
+    ///
+    /// Returns a [`NodeKind::BlockQuote`] carrier whose `attrs` hold
+    /// [`ColumnsHints`] and (optionally) [`Layout`]. The flat child list
+    /// contains the left column's block-projected children followed by the
+    /// right column's; `ColumnsHints::left_count` records the split. All three
+    /// tree renderers special-case the columns hint so the quote border never
+    /// renders.
+    ///
+    /// When either column is a [`TerminalImage`], the projection is
+    /// [`RenderNode::unsupported`] — cursor-overlay image rendering has no
+    /// render-tree representation. Callers must detect this and fall back to
+    /// the bespoke terminal path; Browser and MarkdownPlus surface the
+    /// standard unsupported behavior according to strictness.
+    fn to_render_node(&self) -> RenderNode {
+        if content_is_terminal_image(&self.left) || content_is_terminal_image(&self.right) {
+            return RenderNode::unsupported("two-column terminal image");
+        }
+
+        let left_nodes = project_column(&self.left);
+        let right_nodes = project_column(&self.right);
+
+        let left_count = left_nodes.len();
+        let mut children = left_nodes;
+        children.extend(right_nodes);
+
+        let mut container = RenderNode::block_quote(children);
+        container.attrs.set_columns_hints(&ColumnsHints {
+            gap: self.gap,
+            left_width: column_width_kind(self.left_width),
+            left_count,
+            stack_below: true,
+        });
+        if self.layout != Layout::default() {
+            container.attrs.set_layout(&self.layout);
+        }
+        container
+    }
+
+    /// Renders the two-column layout through the canonical render tree.
+    ///
+    /// Used by the [`TerminalRenderable`] impl to route Terminal output
+    /// through the same tree the Browser and Markdown paths consume. When the
+    /// projection is `Unsupported` (a column holds a [`TerminalImage`]) or
+    /// when the tree render fails, falls back to [`Self::render_bespoke`] so
+    /// the user-facing path never emits a sentinel or empty output for the
+    /// image-overlay scenario.
+    ///
+    /// Tree-render failures other than the image-overlay fallback are logged
+    /// via `tracing::error!`: the [`TerminalRenderable::render`] contract is
+    /// infallible, and falling back to the bespoke renderer preserves output
+    /// fidelity.
+    fn render_via_tree(&self, term: &Terminal) -> String {
+        let node = self.to_render_node();
+        if matches!(node.kind, NodeKind::Unsupported { .. }) {
+            return self.render_bespoke(term);
+        }
+        let opts = TerminalRenderOptions::new(term, RenderStrictness::Warn);
+        match render_terminal_node(&node, &opts) {
+            Ok(rendered) => rendered.output,
+            Err(error) => {
+                tracing::error!(
+                    component = "TwoColumn",
+                    error = %error,
+                    "render_terminal_node failed; falling back to bespoke render",
+                );
+                self.render_bespoke(term)
+            }
+        }
+    }
+
+    /// Renders the two-column layout through the canonical render tree at an
+    /// explicit terminal width.
+    ///
+    /// Parallels [`Self::render_via_tree`] for the
+    /// [`TerminalRenderable::render_optimistic`] path; the bespoke fallback
+    /// here is [`Self::render_bespoke_optimistic`].
+    fn render_via_tree_optimistic(&self, term_width: Option<u32>) -> String {
+        let node = self.to_render_node();
+        if matches!(node.kind, NodeKind::Unsupported { .. }) {
+            return self.render_bespoke_optimistic(term_width);
+        }
+        let term = Terminal::new_optimistic(term_width.unwrap_or(80));
+        let opts = TerminalRenderOptions::new(&term, RenderStrictness::Warn);
+        match render_terminal_node(&node, &opts) {
+            Ok(rendered) => rendered.output,
+            Err(error) => {
+                tracing::error!(
+                    component = "TwoColumn",
+                    error = %error,
+                    "render_terminal_node failed; falling back to bespoke optimistic render",
+                );
+                self.render_bespoke_optimistic(term_width)
+            }
+        }
+    }
+
+    /// Renders via the sanctioned bespoke escape hatch.
+    ///
+    /// Retained as a `#[doc(hidden)]` surface because [`TwoColumn`] supports
+    /// inline [`TerminalImage`] overlays via cursor positioning — a
+    /// capability the render tree cannot represent, where the tree
+    /// projection falls back to an `Unsupported` node. The active
+    /// [`TerminalRenderable::render`] path delegates to
+    /// [`Self::render_via_tree`] and routes through this method only when a
+    /// column holds a terminal image.
+    ///
+    /// ## Notes
+    ///
+    /// `#[doc(hidden)]` because this is an internal escape hatch, not part
+    /// of the public surface; `pub` so integration parity tests can reach
+    /// it. Removing this without first adding equivalent terminal-image /
+    /// cursor-overlay capability to the render tree is a regression.
+    #[doc(hidden)]
+    pub fn render_bespoke(&self, term: &Terminal) -> String {
+        let width = term.width();
+        self.render_with_width(width, Some(term))
+    }
+
+    /// Renders the sanctioned bespoke escape hatch at an explicit width.
+    ///
+    /// Companion to [`Self::render_bespoke`] for the
+    /// [`TerminalRenderable::render_optimistic`] path, retained for the same
+    /// terminal-image-overlay reason: the render tree cannot represent
+    /// cursor-positioned image overlays inside a two-column layout.
+    ///
+    /// ## Notes
+    ///
+    /// `#[doc(hidden)]` because this is an internal escape hatch, not part
+    /// of the public surface; `pub` so integration parity tests can reach
+    /// it. Removing this without first adding equivalent terminal-image /
+    /// cursor-overlay capability to the render tree is a regression.
+    #[doc(hidden)]
+    pub fn render_bespoke_optimistic(&self, term_width: Option<u32>) -> String {
+        let width = term_width.unwrap_or(80);
+        self.render_with_width(width, None)
     }
 }
 
-impl Renderable for TwoColumn {
+impl TerminalRenderable for TwoColumn {
     fn alignment(mut self, alignment: Alignment) -> Self
     where
         Self: Sized,
@@ -441,26 +598,14 @@ impl Renderable for TwoColumn {
         self
     }
 
-    fn with_parent_layout(mut self, parent: &Layout, left_offset: u32, right_offset: u32) -> Self
-    where
-        Self: Sized,
-    {
-        self.layout.left_margin = parent.left_margin.clone().add_chars(left_offset);
-        self.layout.right_margin = parent.right_margin.clone().add_chars(right_offset);
-        self
-    }
-
-    fn bottom_margin(mut self, margin: Margin) -> Self
-    where
-        Self: Sized,
-    {
-        self.layout.bottom_margin = margin;
-        self
-    }
-
+    /// Renders to the supplied terminal.
+    ///
+    /// Routes through the canonical render tree via [`Self::render_via_tree`].
+    /// The legacy bespoke output is retained on [`Self::render_bespoke`] for
+    /// parity testing and as the fallback when a column holds a
+    /// [`TerminalImage`] (cursor overlay has no render-tree representation).
     fn render(&self, term: &Terminal) -> String {
-        let width = term.width();
-        self.render_with_width(width, Some(term))
+        self.render_via_tree(term)
     }
 
     fn as_any(&self) -> &dyn std::any::Any {
@@ -471,6 +616,23 @@ impl Renderable for TwoColumn {
         true
     }
 
+    /// Projects the two-column layout to a [`NodeKind::BlockQuote`] container
+    /// carrying [`ColumnsHints`].
+    ///
+    /// Delegates to the single private projection helper
+    /// [`Self::to_render_node`], shared with [`TreeRenderable::render_tree`]
+    /// so the terminal compatibility hook and the canonical tree producer
+    /// cannot drift.
+    ///
+    /// A column whose content is a [`TerminalImage`] cannot be projected —
+    /// cursor-overlay image rendering has no render-tree representation — so
+    /// the helper returns a [`RenderNode::unsupported`] node instead.
+    ///
+    /// [`NodeKind::BlockQuote`]: renderable::tree::NodeKind::BlockQuote
+    fn render_tree_node(&self) -> Option<RenderNode> {
+        Some(self.to_render_node())
+    }
+
     fn layout(&self) -> &Layout {
         &self.layout
     }
@@ -479,50 +641,200 @@ impl Renderable for TwoColumn {
         &mut self.layout
     }
 
-    fn left_margin(mut self, margin: Margin) -> Self
-    where
-        Self: Sized,
-    {
-        self.layout.left_margin = margin;
-        self
-    }
-
+    /// Renders to a terminal string at an explicit width.
+    ///
+    /// Routes through the canonical render tree via
+    /// [`Self::render_via_tree_optimistic`] so terminal output matches the
+    /// Browser and Markdown paths for the same component.
     fn render_optimistic(&self, term_width: Option<u32>) -> String {
-        let width = term_width.unwrap_or(80);
-        self.render_with_width(width, None)
+        self.render_via_tree_optimistic(term_width)
+    }
+}
+
+impl TreeRenderable for TwoColumn {
+    /// Projects the two-column layout into the canonical render tree.
+    ///
+    /// Delegates to the single private projection helper
+    /// [`TwoColumn::to_render_node`] so this canonical entry point and the
+    /// terminal-compatibility [`TerminalRenderable::render_tree_node`] hook
+    /// share one source of truth.
+    ///
+    /// The projected tree is a [`NodeKind::BlockQuote`] carrying
+    /// [`ColumnsHints`] on its `attrs`. The flat child list holds the left
+    /// column's blocks followed by the right column's, split at
+    /// [`ColumnsHints::left_count`]. The terminal, browser, and MarkdownPlus
+    /// renderers special-case the columns hint to produce the side-by-side
+    /// layout from the same canonical tree; portable Markdown necessarily
+    /// loses side-by-side and renders the columns sequentially.
+    ///
+    /// [`NodeKind::BlockQuote`]: renderable::tree::NodeKind::BlockQuote
+    fn render_tree(&self) -> RenderNode {
+        self.to_render_node()
+    }
+}
+
+impl MarkdownRenderable for TwoColumn {
+    /// Renders the two-column layout as portable Markdown via the canonical
+    /// render tree.
+    ///
+    /// Portable Markdown has no side-by-side layout, so the columns collapse
+    /// to sequential blocks (left column, blank line, right column). Width,
+    /// gap, and column alignment are intentionally dropped because no
+    /// portable CommonMark form preserves them.
+    fn render_markdown(&self) -> String {
+        let node = <Self as TreeRenderable>::render_tree(self);
+        match render_markdown_node(&node, &MarkdownRenderOptions::default()) {
+            Ok(rendered) => rendered.output,
+            Err(error) => {
+                tracing::error!(
+                    component = "TwoColumn",
+                    dialect = "Markdown",
+                    error = %error,
+                    "render_markdown_node failed; emitting empty output",
+                );
+                String::new()
+            }
+        }
     }
 
-    fn right_margin(mut self, margin: Margin) -> Self
-    where
-        Self: Sized,
-    {
-        self.layout.right_margin = margin;
-        self
+    /// Renders the two-column layout as MarkdownPlus via the canonical render
+    /// tree.
+    ///
+    /// MarkdownPlus allows inline HTML, so the MarkdownPlus dialect of the
+    /// tree renderer emits the same CSS flex shape used by the browser
+    /// renderer (RT-TWOCOLUMN-002): an outer
+    /// `<div class="columns" style="display:flex;gap:{gap}ch">` with two
+    /// `<div class="column">` children. The left column carries the width
+    /// CSS from [`ColumnsHints::left_width`]; the right column flexes to
+    /// fill.
+    fn render_markdown_plus(&self) -> String {
+        let node = <Self as TreeRenderable>::render_tree(self);
+        let opts = MarkdownRenderOptions {
+            dialect: MarkdownDialect::MarkdownPlus,
+            ..MarkdownRenderOptions::default()
+        };
+        match render_markdown_node(&node, &opts) {
+            Ok(rendered) => rendered.output,
+            Err(error) => {
+                tracing::error!(
+                    component = "TwoColumn",
+                    dialect = "MarkdownPlus",
+                    error = %error,
+                    "render_markdown_node failed; emitting empty output",
+                );
+                String::new()
+            }
+        }
+    }
+}
+
+impl BrowserRenderable for TwoColumn {
+    /// Renders the two-column layout as an HTML fragment via the canonical
+    /// render tree.
+    ///
+    /// The browser tree renderer (RT-TWOCOLUMN-001) emits a
+    /// `<div class="columns">` flex container with inline `display:flex` and
+    /// `gap:{gap}ch` CSS, holding two `<div class="column">` children. The
+    /// left column carries the width CSS from
+    /// [`ColumnsHints::left_width`]; the right column flexes to fill. Node
+    /// [`Layout`] is merged into the container `style` without overwriting
+    /// the flex/gap declarations.
+    ///
+    /// Failures are logged via `tracing::error!` and fall back to an empty
+    /// [`BrowserFragment`]: the [`BrowserRenderable`] contract is infallible,
+    /// and surfacing a `[render-tree error: …]` sentinel as in-band HTML
+    /// would pollute the rendered page.
+    fn render_html_fragment(&self) -> BrowserFragment<Ready> {
+        let node = <Self as TreeRenderable>::render_tree(self);
+        let opts = BrowserRenderOptions::default();
+        match render_browser_node(&node, &opts) {
+            Ok(rendered) => rendered.output,
+            Err(error) => {
+                tracing::error!(
+                    component = "TwoColumn",
+                    error = %error,
+                    "render_browser_node failed; emitting empty fragment",
+                );
+                BrowserFragment::new()
+                    .define_as_text_fragment(String::new())
+                    .finalize()
+            }
+        }
     }
 
-    fn row_fill_strategy(mut self, strategy: RowFill) -> Self
-    where
-        Self: Sized,
-    {
-        self.layout.row_fill_strategy = strategy;
-        self
+    fn render_html_page(&self, page: Option<PageOptions>) -> HtmlPage {
+        let mut html_page = HtmlPage::from(self.render_html_fragment());
+        if let Some(options) = page {
+            html_page.apply_page_options(options);
+        }
+        html_page
     }
 
-    fn top_margin(mut self, margin: Margin) -> Self
-    where
-        Self: Sized,
-    {
-        self.layout.top_margin = margin;
+    fn as_any(&self) -> &dyn std::any::Any {
         self
     }
+}
 
-    fn word_wrap(mut self, wrap: WordWrap) -> Self
-    where
-        Self: Sized,
-    {
-        self.layout.word_wrap = wrap;
-        self
+/// Returns `true` when `content` is a [`TerminalImage`] component.
+fn content_is_terminal_image(content: &RenderableTerminalContent) -> bool {
+    matches!(
+        content,
+        RenderableTerminalContent::Component(component)
+            if component.as_any().downcast_ref::<TerminalImage>().is_some()
+    )
+}
+
+/// Maps a bespoke [`ColumnWidth`] to the render-tree [`ColumnWidthKind`].
+fn column_width_kind(width: ColumnWidth) -> ColumnWidthKind {
+    match width {
+        ColumnWidth::Fixed(chars) => ColumnWidthKind::Fixed(chars),
+        ColumnWidth::Percent(percent) => ColumnWidthKind::Percent(percent),
     }
+}
+
+/// Projects a column's content into block-level render-tree nodes.
+///
+/// Inline-only projected content is wrapped in a [`RenderNode::paragraph`] so
+/// the enclosing block quote carries valid block children.
+fn project_column(content: &RenderableTerminalContent) -> Vec<RenderNode> {
+    let mut ctx = TreeProjectionContext::default();
+    let nodes = content.to_tree_nodes(&mut ctx).nodes;
+
+    let mut inline_run: Vec<RenderNode> = Vec::new();
+    let mut blocks: Vec<RenderNode> = Vec::new();
+    for node in nodes {
+        if is_inline_node(&node) {
+            inline_run.push(node);
+        } else {
+            if !inline_run.is_empty() {
+                blocks.push(RenderNode::paragraph(std::mem::take(&mut inline_run)));
+            }
+            blocks.push(node);
+        }
+    }
+    if !inline_run.is_empty() {
+        blocks.push(RenderNode::paragraph(inline_run));
+    }
+    blocks
+}
+
+/// Returns `true` when `node` is an inline-level (phrasing) render-tree node.
+fn is_inline_node(node: &RenderNode) -> bool {
+    use renderable::tree::NodeKind;
+    matches!(
+        node.kind,
+        NodeKind::Text { .. }
+            | NodeKind::Emphasis { .. }
+            | NodeKind::Strong { .. }
+            | NodeKind::Delete { .. }
+            | NodeKind::Span { .. }
+            | NodeKind::InlineCode { .. }
+            | NodeKind::Link { .. }
+            | NodeKind::Image { .. }
+            | NodeKind::FootnoteReference { .. }
+            | NodeKind::SoftBreak
+            | NodeKind::HardBreak
+    )
 }
 
 #[cfg(test)]
@@ -561,5 +873,14 @@ mod tests {
     fn is_block_level_component() {
         let two = TwoColumn::new("L", "R");
         assert!(two.is_block_level());
+    }
+
+    #[test]
+    fn two_column_render_tree_node_carries_layout_when_margins_set() {
+        use crate::utils::layout::{Length, Margin};
+        let mut two = TwoColumn::new("L", "R");
+        two.layout_mut().margin = Margin::x(Length::ch(2));
+        let node = two.render_tree_node().unwrap();
+        assert!(node.attrs.layout().is_some());
     }
 }

@@ -419,7 +419,7 @@ mod tests {
 
     #[test]
     fn test_say_provider_default() {
-        let provider = SayProvider::default();
+        let provider = SayProvider;
         let _ = provider; // Just ensure it compiles
     }
 

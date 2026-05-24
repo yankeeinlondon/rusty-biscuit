@@ -37,6 +37,7 @@ use crate::completion::composition;
 use crate::completion::root_menu;
 use crate::completion::scopes::{ComposeMode, ScopeContext};
 use crate::completion::setter_value;
+use std::ffi::OsString;
 
 /// Top-level classification of the cursor position in argv.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -168,10 +169,51 @@ pub(crate) fn run_with_context(
             setter_value::run(&token, &scope_ctx)
         }
         CompletionTarget::Other => {
-            // Unrecognized slot — emit zero candidates so the shell
-            // falls back to its native file / flag completion.
-            Vec::new()
+            // Unrecognized slot — try clap's dynamic completion for
+            // administrative subcommand flags and other static-command-tree
+            // positions before giving up.
+            clap_dynamic_fallback(argv, current_index)
         }
+    }
+}
+
+/// Fall back to clap's dynamic completion for slots the custom engine does
+/// not own (administrative subcommand flags, wrapper flags, etc.).
+///
+/// Activates when:
+/// - the cursor partial is flag-shaped (`-` or `--`), or
+/// - the previous token is flag-shaped (indicating the cursor is on a flag
+///   value).
+///
+/// Empty or non-flag partials at vanilla positional slots still defer to the
+/// shell's native file completion, preserving the contract tested by
+/// `non_targeted_subcommand_emits_no_candidates`.
+///
+/// Uses the same `ignore_errors(true)` command tree that powers the legacy
+/// `CompleteEnv` path so wrapper subcommands do not short-circuit on unknown
+/// passthrough tokens.
+fn clap_dynamic_fallback(argv: &[String], current_index: usize) -> Vec<String> {
+    let partial = argv.get(current_index).map(String::as_str).unwrap_or("");
+    let prev_flag = current_index
+        .checked_sub(1)
+        .and_then(|i| argv.get(i))
+        .is_some_and(|p| p.starts_with('-'));
+    if !partial.starts_with('-') && !prev_flag {
+        return Vec::new();
+    }
+    let mut cmd = super::completion_command();
+    let args: Vec<OsString> = argv.iter().map(|s| s.into()).collect();
+    match clap_complete::engine::complete(
+        &mut cmd,
+        args,
+        current_index,
+        std::env::current_dir().ok().as_deref(),
+    ) {
+        Ok(candidates) => candidates
+            .into_iter()
+            .map(|c| c.get_value().to_string_lossy().into_owned())
+            .collect(),
+        Err(_) => Vec::new(),
     }
 }
 
@@ -768,5 +810,39 @@ mod tests {
         let got = run_with_context(&a, 2, &test_ctx(true, true, true));
         assert!(got.iter().any(|c| c == "compose"));
         assert!(got.iter().any(|c| c == "commands"));
+    }
+
+    #[test]
+    fn clap_fallback_completes_providers_flags() {
+        let a = argv(&["claudine", "providers", "--des"]);
+        let got = run_with_context(&a, 2, &test_ctx(true, true, true));
+        assert!(
+            got.iter().any(|c| c == "--describe"),
+            "expected --describe in candidates, got {got:?}"
+        );
+    }
+
+    #[test]
+    fn clap_fallback_completes_providers_format_flag() {
+        let a = argv(&["claudine", "providers", "--format"]);
+        let got = run_with_context(&a, 2, &test_ctx(true, true, true));
+        assert!(
+            got.iter().any(|c| c == "--format"),
+            "expected --format in candidates, got {got:?}"
+        );
+    }
+
+    #[test]
+    fn clap_fallback_completes_providers_format_values() {
+        let a = argv(&["claudine", "providers", "--format", ""]);
+        let got = run_with_context(&a, 3, &test_ctx(true, true, true));
+        assert!(
+            got.iter().any(|c| c == "text"),
+            "expected 'text' format value, got {got:?}"
+        );
+        assert!(
+            got.iter().any(|c| c == "json"),
+            "expected 'json' format value, got {got:?}"
+        );
     }
 }

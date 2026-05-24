@@ -16,7 +16,9 @@
 
 pub mod block_error;
 pub mod prelude;
+pub mod source_context;
 
 pub use block_error::{
     BlockError, ErrorHeader, StatusBlockExt, as_block_error, render_with_causes,
 };
+pub use source_context::SourceContext;

@@ -24,7 +24,8 @@ Only tracks modifications to already-versioned files. Untracked (new) files are 
 
 | Argument | Description |
 |----------|-------------|
-| `-p/--package <PKG>` | Scope output to files within a specific package or package area |
+| `-p/--package <PKG>` | Scope output to files within a specific package (exact match on `Package.name`) |
+| `--package-area <AREA>` | Scope output to files within a specific package area (prefix match on `Package.package_area`) |
 
 ## Exit Codes
 
@@ -33,14 +34,17 @@ Only tracks modifications to already-versioned files. Untracked (new) files are 
 | `0` | One or more unstaged files found |
 | `1` | No unstaged files in scope |
 
-## Package Scoping (`-p`)
+## Package Scoping (`-p` and `--package-area`)
 
-When `-p/--package` is provided, only unstaged files within that package's directory are returned:
+`-p/--package` scopes the listing to files within a single package's directory. `--package-area` scopes to all packages whose area starts with the supplied prefix. Passing both narrows to the intersection (and errors if the package is not inside the area).
 
 ```bash
-sniff repo unstaged-files -p homelab      # Unstaged files in homelab/ area
-sniff repo unstaged-files -p sniff-cli    # Unstaged files in sniff/cli/
+sniff repo unstaged-files -p sniff-cli                    # Unstaged files in sniff/cli/
+sniff repo unstaged-files --package-area homelab          # Unstaged files in homelab/* (homelab, homelab/server, …)
+sniff repo unstaged-files -p sniff-cli --package-area sniff   # Intersection (here: just sniff/cli/)
 ```
+
+> Breaking change vs. previous releases: passing a **package-area name** (e.g., `homelab`) to `-p/--package` is now an error. Use `--package-area homelab` instead.
 
 ## JSON Output (`--json`)
 

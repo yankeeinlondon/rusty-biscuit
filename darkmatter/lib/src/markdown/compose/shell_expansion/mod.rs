@@ -97,10 +97,12 @@ impl DirectiveExecutionResult {
 /// ## Examples
 ///
 /// ```no_run
+/// use biscuit_terminal::errors::SourceContext;
 /// use darkmatter::markdown::compose::shell_expansion::{execute_directive, types::{ErrorHandling, ShellCommandOrigin, ShellDirective, ShellExpansionRuntime, ShellPolicyPaths}};
 /// use darkmatter::markdown::compose::ComposeOptions;
 /// use std::path::PathBuf;
 ///
+/// let ctx = SourceContext::new(PathBuf::from("/t"), PathBuf::from("t"), "");
 /// let directive = ShellDirective {
 ///     raw_command: "echo hello".to_string(),
 ///     executable: "echo".to_string(),
@@ -110,6 +112,7 @@ impl DirectiveExecutionResult {
 ///     error_handling: ErrorHandling::default(),
 ///     timeout_override: None,
 ///     pipeline: None,
+///     ctx,
 /// };
 /// let options = ComposeOptions::new();
 /// let policy_paths = ShellPolicyPaths {
@@ -162,6 +165,7 @@ pub(crate) fn prepare_directive(
         for normalized in &normalized_commands {
             if !approved.contains(normalized) {
                 return Err(ShellExpansionError::NotPreApproved {
+                    ctx: Box::new(directive.ctx.clone()),
                     command: display_command.clone(),
                     origin: directive.origin.clone(),
                     source_desc: match &options.source {
@@ -185,6 +189,7 @@ pub(crate) fn prepare_directive(
     for (exe, args) in executables_with_args(&effective) {
         if let Some(reason) = check_builtin_blacklist(&exe, &args) {
             return Err(ShellExpansionError::Blacklisted {
+                ctx: Box::new(directive.ctx.clone()),
                 command: display_command.clone(),
                 reason,
                 origin: directive.origin.clone(),
@@ -197,6 +202,7 @@ pub(crate) fn prepare_directive(
         let (exe, args) = executable_and_args_at(&effective, i);
         if check_user_blacklist(&runtime_snapshot.user_blacklist, &exe, &args, normalized) {
             return Err(ShellExpansionError::Blacklisted {
+                ctx: Box::new(directive.ctx.clone()),
                 command: display_command.clone(),
                 reason: "user blacklist".to_string(),
                 origin: directive.origin.clone(),
@@ -254,6 +260,7 @@ pub(crate) fn prepare_directive(
                 shell_runtime.complete_allow_once(normalized, false);
             }
             return Err(ShellExpansionError::ApprovalRequired {
+                ctx: Box::new(directive.ctx.clone()),
                 command: display_command,
                 whitelist_path: policy_paths.whitelist.clone(),
                 blacklist_path: policy_paths.blacklist.clone(),
@@ -341,6 +348,7 @@ pub(crate) fn prepare_directive(
                     shell_runtime.complete_allow_once(normalized, false);
                 }
                 Err(ShellExpansionError::Denied {
+                    ctx: Box::new(directive.ctx.clone()),
                     command: display_command,
                     origin: directive.origin.clone(),
                 })
@@ -352,6 +360,7 @@ pub(crate) fn prepare_directive(
                     shell_runtime.persist_blacklist_exact(normalized.clone());
                 }
                 Err(ShellExpansionError::Blacklisted {
+                    ctx: Box::new(directive.ctx.clone()),
                     command: display_command,
                     reason: "user blacklisted".to_string(),
                     origin: directive.origin.clone(),
@@ -360,6 +369,7 @@ pub(crate) fn prepare_directive(
         }
     } else {
         Err(ShellExpansionError::ApprovalRequired {
+            ctx: Box::new(directive.ctx.clone()),
             command: display_command,
             whitelist_path: policy_paths.whitelist.clone(),
             blacklist_path: policy_paths.blacklist.clone(),
@@ -437,6 +447,7 @@ fn execute_and_handle_errors(
                     // Re-construct the error with enrichment appended to stderr
                     match result {
                         Err(ShellExpansionError::ExecutionFailed {
+                            ctx,
                             command,
                             code,
                             stdout,
@@ -449,6 +460,7 @@ fn execute_and_handle_errors(
                                 format!("{stderr}\n{enrichment}")
                             };
                             Err(ShellExpansionError::ExecutionFailed {
+                                ctx,
                                 command,
                                 code,
                                 stdout,
@@ -513,6 +525,7 @@ fn resolve_or_passthrough(directive: &ShellDirective) -> (ShellDirective, Option
                 error_handling: directive.error_handling.clone(),
                 timeout_override: directive.timeout_override,
                 pipeline: Some(new_pipeline),
+                ctx: directive.ctx.clone(),
             };
             return (effective, alias_name);
         }
@@ -550,6 +563,7 @@ fn resolve_or_passthrough(directive: &ShellDirective) -> (ShellDirective, Option
             error_handling: directive.error_handling.clone(),
             timeout_override: directive.timeout_override,
             pipeline: new_pipeline,
+            ctx: directive.ctx.clone(),
         };
 
         return (effective, Some(resolved.alias_name));

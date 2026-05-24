@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::path::Path;
 
 use biscuit_terminal::components::prose::Prose;
-use biscuit_terminal::components::renderable::Renderable;
+use biscuit_terminal::components::renderable::TerminalRenderable;
 use claudine::mcp::catalog::McpCatalogStore;
 use claudine::mcp::defaults::{load_user_defaults, save_repo_defaults, save_user_defaults};
 use claudine::mcp::import::{ImportReport, McpImporter};

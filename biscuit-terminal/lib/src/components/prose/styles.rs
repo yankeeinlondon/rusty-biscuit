@@ -1,122 +1,18 @@
-//! Color tables, SGR escape resolution, and per-tag style action policy.
+//! Color name lookups, href resolution, and per-layer SGR state.
 //!
-//! Bridges raw tag/token names to ANSI escape sequences while honoring
-//! capability-aware degradation (e.g. `<double-underline>` on terminals
-//! that only advertise straight underline).
+//! Resolves bracketed-tag color names to [`renderable::color`] values and
+//! tracks the active SGR escape for each independent style layer so the
+//! terminal emitter can restore a *parent* span's value when a child span
+//! closes (instead of issuing a nuclear `\x1b[0m`).
 
-use std::borrow::Cow;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use crate::{
     terminal::Terminal,
-    utils::color::{Tailwind, WEB_COLOR_LOOKUP, WebColor},
+    utils::color::{Tailwind, WebColor},
 };
 
-/// Action returned by [`block_tag_to_escape`] describing how a block tag
-/// should be emitted into the rendered prose stream.
-///
-/// Replaces the older `(open, close)` tuple where empty strings doubled
-/// as a "suppress this tag" sentinel. The named variant lets the parser
-/// branch on intent rather than re-checking string emptiness.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) enum BlockTagAction {
-    /// Wrap the inner content with `open` before and `close` after.
-    Wrap {
-        open: Cow<'static, str>,
-        close: Cow<'static, str>,
-    },
-    /// Emit only the inner content with no surrounding escapes.
-    ///
-    /// Used when the requested style is unsupported on the current
-    /// terminal (e.g. `<double-underline>` with no underline support)
-    /// or when the tag carries no useful payload (e.g. `<a href="">`).
-    Suppress,
-}
-
-/// Static lookup table for atomic tokens.
-///
-/// Using a static array with `eq_ignore_ascii_case` avoids per-token allocations
-/// from `to_lowercase()`.
-static ATOMIC_TOKEN_TABLE: &[(&str, &str)] = &[
-    // Text styles
-    ("bold", "\x1b[1m"),
-    ("dim", "\x1b[2m"),
-    ("italic", "\x1b[3m"),
-    ("underline", "\x1b[4m"),
-    ("double-underline", "\x1b[4:2m"),
-    ("curly-underline", "\x1b[4:3m"),
-    ("dotted-underline", "\x1b[4:4m"),
-    ("dashed-underline", "\x1b[4:5m"),
-    ("blink", "\x1b[5m"),
-    ("reverse", "\x1b[7m"),
-    ("hidden", "\x1b[8m"),
-    ("strikethrough", "\x1b[9m"),
-    // Reset codes
-    ("reset", "\x1b[0m"),
-    ("reset-fg", "\x1b[39m"),
-    ("reset-bg", "\x1b[49m"),
-    // Resets foreground color and all text decorations but preserves background.
-    // Equivalent to: normal-font-weight + not-italic + not-underline + not-blink
-    //                + not-inverse + not-hidden + not-strikethrough + reset-fg
-    ("reset-style", "\x1b[22;23;24;25;27;28;29;39m"),
-    // Style-specific reset tokens (kebab-case standard)
-    ("normal-font-weight", "\x1b[22m"), // Resets bold and dim
-    ("not-italic", "\x1b[23m"),
-    ("not-underline", "\x1b[24m"),
-    ("not-blink", "\x1b[25m"),
-    ("not-inverse", "\x1b[27m"),
-    ("not-hidden", "\x1b[28m"),
-    ("not-strikethrough", "\x1b[29m"),
-    // Basic foreground colors
-    ("black", "\x1b[30m"),
-    ("red", "\x1b[31m"),
-    ("green", "\x1b[32m"),
-    ("yellow", "\x1b[33m"),
-    ("blue", "\x1b[34m"),
-    ("magenta", "\x1b[35m"),
-    ("cyan", "\x1b[36m"),
-    ("white", "\x1b[37m"),
-    // Bright foreground colors
-    ("bright-black", "\x1b[90m"),
-    ("bright-red", "\x1b[91m"),
-    ("bright-green", "\x1b[92m"),
-    ("bright-yellow", "\x1b[93m"),
-    ("bright-blue", "\x1b[94m"),
-    ("bright-magenta", "\x1b[95m"),
-    ("bright-cyan", "\x1b[96m"),
-    ("bright-white", "\x1b[97m"),
-    // Basic background colors
-    ("bg-black", "\x1b[40m"),
-    ("bg-red", "\x1b[41m"),
-    ("bg-green", "\x1b[42m"),
-    ("bg-yellow", "\x1b[43m"),
-    ("bg-blue", "\x1b[44m"),
-    ("bg-magenta", "\x1b[45m"),
-    ("bg-cyan", "\x1b[46m"),
-    ("bg-white", "\x1b[47m"),
-    // Bright background colors
-    ("bg-bright-black", "\x1b[100m"),
-    ("bg-bright-red", "\x1b[101m"),
-    ("bg-bright-green", "\x1b[102m"),
-    ("bg-bright-yellow", "\x1b[103m"),
-    ("bg-bright-blue", "\x1b[104m"),
-    ("bg-bright-magenta", "\x1b[105m"),
-    ("bg-bright-cyan", "\x1b[106m"),
-    ("bg-bright-white", "\x1b[107m"),
-];
-
-/// Convert an atomic token name to its ANSI escape code.
-///
-/// Uses `eq_ignore_ascii_case` for case-insensitive matching without allocation.
-pub(super) fn atomic_token_to_escape(token: &str) -> Option<&'static str> {
-    ATOMIC_TOKEN_TABLE
-        .iter()
-        .find(|(name, _)| name.eq_ignore_ascii_case(token))
-        .map(|(_, escape)| *escape)
-}
-
-// TODO(apple-terminal-followup): generalize to `degraded_underline_open(term, UnderlineKind)` when the curly/dotted/dashed work at the `block_tag_to_escape` TODO (see `prose.rs` ~L375-381) lands.
 /// Resolves the opening SGR escape for a `<double-underline>` request
 /// against the terminal's actual underline-support profile.
 ///
@@ -128,240 +24,20 @@ pub(super) fn atomic_token_to_escape(token: &str) -> Option<&'static str> {
 /// - `Some("\x1b[4m")` when only [`UnderlineSupport::straight`] is
 ///   advertised — the canonical Apple Terminal path.
 /// - `None` when neither variant is supported, signalling the caller to
-///   suppress the underline entirely (no SGR at all, including no
-///   `\x1b[0m` reset — `state.used_styles` must remain unchanged).
+///   suppress the underline entirely (no SGR at all).
 ///
 /// ## Notes
 ///
-/// The closing SGR for any non-`None` return is always `"\x1b[24m"` and
-/// is intentionally not returned by this helper.
+/// The closing SGR for any non-`None` return is always `"\x1b[24m"`.
 ///
 /// [`UnderlineSupport::double`]: crate::discovery::detection::UnderlineSupport::double
 /// [`UnderlineSupport::straight`]: crate::discovery::detection::UnderlineSupport::straight
-fn degraded_double_underline_open(term: Option<&Terminal>) -> Option<&'static str> {
+pub(super) fn degraded_double_underline_open(term: Option<&Terminal>) -> Option<&'static str> {
     match term {
         None => Some("\x1b[4:2m"),
         Some(t) if t.underline_support.double => Some("\x1b[4:2m"),
         Some(t) if t.underline_support.straight => Some("\x1b[4m"),
         Some(_) => None,
-    }
-}
-
-/// Capability-aware variant of [`atomic_token_to_escape`].
-///
-/// Returns the same escape as `atomic_token_to_escape` for every token
-/// **except** `double-underline`, which is routed through the same
-/// degradation policy as the `<double-underline>` block tag:
-///
-/// - No terminal context (`term == None`) — optimistic `\x1b[4:2m`.
-/// - Terminal advertises `underline_support.double` — `\x1b[4:2m`.
-/// - Terminal advertises only `underline_support.straight` —
-///   degrade to `\x1b[4m`.
-/// - Neither supported — `None` (the parser drops the token entirely).
-///
-/// Wraps `ATOMIC_TOKEN_TABLE` so the static lookup stays the source of
-/// truth for the non-degrading tokens.
-pub(super) fn atomic_token_to_escape_with_term(
-    token: &str,
-    term: Option<&Terminal>,
-) -> Option<Cow<'static, str>> {
-    if token.eq_ignore_ascii_case("double-underline") {
-        return degraded_double_underline_open(term).map(Cow::Borrowed);
-    }
-
-    atomic_token_to_escape(token).map(Cow::Borrowed)
-}
-
-/// Convert a block tag to its opening and closing ANSI escape codes.
-///
-/// TODO: `Prose` tag styling and `utils::styling::Style`/`Stylist` should
-/// eventually converge so capability-aware degradation lives in one place
-/// instead of being duplicated between the prose parser and the styling
-/// helpers.
-// TODO(apple-terminal-followup): make `curly-underline`, `dotted-underline`,
-// and `dashed-underline` capability-aware in the same way `double-underline`
-// is. `UnderlineSupport` already exposes `curly`, `dotted`, and `dashed`
-// booleans; the atomic and block tag handlers should consult them and fall
-// back to single underline (or plain text) when unsupported. Scoped out of
-// the 2026-05-02 Apple Terminal feature — see
-// features/2026-05-02-apple-terminal/spec.md.
-pub(super) fn block_tag_to_escape(
-    tag_name: &str,
-    attrs: &[(String, String)],
-    term: Option<&Terminal>,
-) -> Option<BlockTagAction> {
-    /// Helper: build a `Wrap` action with two static-string escapes.
-    fn wrap_static(open: &'static str, close: &'static str) -> BlockTagAction {
-        BlockTagAction::Wrap {
-            open: Cow::Borrowed(open),
-            close: Cow::Borrowed(close),
-        }
-    }
-
-    match tag_name {
-        // Text styles (full names + short aliases)
-        "bold" | "b" => Some(wrap_static("\x1b[1m", "\x1b[22m")),
-        "dim" => Some(wrap_static("\x1b[2m", "\x1b[22m")),
-        "italic" | "i" => Some(wrap_static("\x1b[3m", "\x1b[23m")),
-        "underline" | "u" => Some(wrap_static("\x1b[4m", "\x1b[24m")),
-        "double-underline" | "uu" => {
-            // Capability-aware degradation:
-            //   - No terminal context: optimistic `\x1b[4:2m` (legacy behavior).
-            //   - Double underline supported: `\x1b[4:2m`.
-            //   - Only straight underline supported: degrade to `\x1b[4m`.
-            //   - Neither supported: suppress the underline entirely.
-            match degraded_double_underline_open(term) {
-                Some(open) => Some(wrap_static(open, "\x1b[24m")),
-                None => Some(BlockTagAction::Suppress),
-            }
-        }
-        "curly-underline" => Some(wrap_static("\x1b[4:3m", "\x1b[24m")),
-        "dotted-underline" => Some(wrap_static("\x1b[4:4m", "\x1b[24m")),
-        "dashed-underline" => Some(wrap_static("\x1b[4:5m", "\x1b[24m")),
-        "blink" => Some(wrap_static("\x1b[5m", "\x1b[25m")),
-        "inverse" | "reverse" => Some(wrap_static("\x1b[7m", "\x1b[27m")),
-        "hidden" => Some(wrap_static("\x1b[8m", "\x1b[28m")),
-        "strikethrough" | "~" => Some(wrap_static("\x1b[9m", "\x1b[29m")),
-
-        // OSC8 hyperlinks
-        "a" => {
-            let href = attrs
-                .iter()
-                .find(|(k, _)| k == "href")
-                .map(|(_, v)| v.as_str())
-                .unwrap_or("");
-
-            // Resolve the href (handles relative paths)
-            let resolved_href = resolve_href(href);
-
-            // Check if terminal supports OSC8 (default true when no context).
-            let supports_osc8 = term.map(|t| t.osc_link_support).unwrap_or(true);
-            if resolved_href.is_empty() {
-                // No href: just show the content with no link wrapping.
-                Some(BlockTagAction::Suppress)
-            } else if supports_osc8 {
-                Some(BlockTagAction::Wrap {
-                    open: Cow::Owned(format!("\x1b]8;;{}\x1b\\", resolved_href)),
-                    close: Cow::Borrowed("\x1b]8;;\x1b\\"),
-                })
-            } else {
-                // Markdown fallback: `[description](resolved_href)`.
-                //
-                // The opening bracket is a static `Cow::Borrowed` to
-                // avoid a per-tag `String` allocation; only the close
-                // string folds the resolved href into `](url)` because
-                // the structural emit pattern is `open + inner + close`.
-                Some(BlockTagAction::Wrap {
-                    open: Cow::Borrowed("["),
-                    close: Cow::Owned(format!("]({})", resolved_href)),
-                })
-            }
-        }
-
-        // RGB colors
-        "rgb" => {
-            // Parse RGB from attrs like "rgb 125,67,45"
-            // The RGB value appears as an attr with the value in the key and empty value,
-            // e.g., attrs = [("125,67,45", "")]
-            let rgb_str = attrs
-                .iter()
-                .find(|(_, v)| v.is_empty())
-                .map(|(k, _)| k.as_str())
-                .unwrap_or("");
-
-            parse_rgb(rgb_str).map(|(r, g, b)| BlockTagAction::Wrap {
-                open: Cow::Owned(format!("\x1b[38;2;{};{};{}m", r, g, b)),
-                close: Cow::Borrowed("\x1b[39m"),
-            })
-        }
-
-        // Background RGB colors
-        "bg-rgb" => {
-            let rgb_str = attrs
-                .iter()
-                .find(|(_, v)| v.is_empty())
-                .map(|(k, _)| k.as_str())
-                .unwrap_or("");
-
-            parse_rgb(rgb_str).map(|(r, g, b)| BlockTagAction::Wrap {
-                open: Cow::Owned(format!("\x1b[48;2;{};{};{}m", r, g, b)),
-                close: Cow::Borrowed("\x1b[49m"),
-            })
-        }
-
-        // Basic foreground colors
-        "black" => Some(wrap_static("\x1b[30m", "\x1b[39m")),
-        "red" => Some(wrap_static("\x1b[31m", "\x1b[39m")),
-        "green" => Some(wrap_static("\x1b[32m", "\x1b[39m")),
-        "yellow" => Some(wrap_static("\x1b[33m", "\x1b[39m")),
-        "blue" => Some(wrap_static("\x1b[34m", "\x1b[39m")),
-        "magenta" => Some(wrap_static("\x1b[35m", "\x1b[39m")),
-        "cyan" => Some(wrap_static("\x1b[36m", "\x1b[39m")),
-        "white" => Some(wrap_static("\x1b[37m", "\x1b[39m")),
-
-        // Bright foreground colors
-        "bright-black" => Some(wrap_static("\x1b[90m", "\x1b[39m")),
-        "bright-red" => Some(wrap_static("\x1b[91m", "\x1b[39m")),
-        "bright-green" => Some(wrap_static("\x1b[92m", "\x1b[39m")),
-        "bright-yellow" => Some(wrap_static("\x1b[93m", "\x1b[39m")),
-        "bright-blue" => Some(wrap_static("\x1b[94m", "\x1b[39m")),
-        "bright-magenta" => Some(wrap_static("\x1b[95m", "\x1b[39m")),
-        "bright-cyan" => Some(wrap_static("\x1b[96m", "\x1b[39m")),
-        "bright-white" => Some(wrap_static("\x1b[97m", "\x1b[39m")),
-
-        // Clipboard - actual clipboard handling would be done externally;
-        // emit only the inner content with no surrounding escapes.
-        "clipboard" => Some(BlockTagAction::Suppress),
-
-        // Try web colors, then Tailwind colors (foreground and background)
-        _ => {
-            // Check for bg- prefix for background colors
-            if let Some(color_name) = tag_name.strip_prefix("bg-") {
-                // Try web color lookup for background
-                if let Some(rgb) = lookup_web_color(color_name) {
-                    return Some(BlockTagAction::Wrap {
-                        open: Cow::Owned(format!(
-                            "\x1b[48;2;{};{};{}m",
-                            rgb.red(),
-                            rgb.green(),
-                            rgb.blue()
-                        )),
-                        close: Cow::Borrowed("\x1b[49m"),
-                    });
-                }
-
-                // Try Tailwind color lookup for background
-                if let Some(hdr) = lookup_tailwind_color(color_name) {
-                    return Some(BlockTagAction::Wrap {
-                        open: Cow::Owned(format!("\x1b[48;2;{};{};{}m", hdr.0, hdr.1, hdr.2)),
-                        close: Cow::Borrowed("\x1b[49m"),
-                    });
-                }
-            }
-
-            // Try web color lookup (kebab-case like "alice-blue")
-            if let Some(rgb) = lookup_web_color(tag_name) {
-                return Some(BlockTagAction::Wrap {
-                    open: Cow::Owned(format!(
-                        "\x1b[38;2;{};{};{}m",
-                        rgb.red(),
-                        rgb.green(),
-                        rgb.blue()
-                    )),
-                    close: Cow::Borrowed("\x1b[39m"),
-                });
-            }
-
-            // Try Tailwind color lookup (kebab-case like "purple-500")
-            if let Some(hdr) = lookup_tailwind_color(tag_name) {
-                return Some(BlockTagAction::Wrap {
-                    open: Cow::Owned(format!("\x1b[38;2;{};{};{}m", hdr.0, hdr.1, hdr.2)),
-                    close: Cow::Borrowed("\x1b[39m"),
-                });
-            }
-
-            None
-        }
     }
 }
 
@@ -372,7 +48,7 @@ pub(super) fn block_tag_to_escape(
 /// - Space-separated: "125 67 45"
 /// - Hex with #: "#8B0000"
 /// - Hex without #: "8B0000"
-fn parse_rgb(s: &str) -> Option<(u8, u8, u8)> {
+pub(super) fn parse_rgb(s: &str) -> Option<(u8, u8, u8)> {
     let s = s.trim();
 
     // Try hex format first (#RRGGBB or RRGGBB)
@@ -484,31 +160,21 @@ pub(super) fn resolve_href(href: &str) -> String {
 }
 
 /// Find the base directory for resolving relative paths without ./ prefix.
-///
-/// Returns the first valid base from:
-/// 1. Package root (for monorepos: directory containing Cargo.toml closest to CWD)
-/// 2. Git repository root
 fn find_git_relative_base() -> Option<PathBuf> {
     let cwd = std::env::current_dir().ok()?;
-
-    // First, try to find git repo root
     let git_root = find_git_root(&cwd)?;
 
-    // Check if this is a monorepo by looking for Cargo.toml between CWD and git root
-    if let Some(package_root) = find_package_root(&cwd, &git_root) {
-        // Verify this isn't the repo root itself (which would be the workspace Cargo.toml)
-        if package_root != git_root {
-            return Some(package_root);
-        }
+    if let Some(package_root) = find_package_root(&cwd, &git_root)
+        && package_root != git_root
+    {
+        return Some(package_root);
     }
 
-    // Not a monorepo or no package found, use git root
     Some(git_root)
 }
 
 /// Find the git repository root starting from the given path.
 fn find_git_root(start: &Path) -> Option<PathBuf> {
-    // Try using git command for accuracy
     let output = Command::new("git")
         .args(["rev-parse", "--show-toplevel"])
         .current_dir(start)
@@ -520,7 +186,6 @@ fn find_git_root(start: &Path) -> Option<PathBuf> {
         return Some(PathBuf::from(path_str.trim()));
     }
 
-    // Fallback: walk up looking for .git directory
     let mut current = start.to_path_buf();
     loop {
         if current.join(".git").exists() {
@@ -538,17 +203,13 @@ fn find_package_root(start: &Path, git_root: &Path) -> Option<PathBuf> {
 
     loop {
         let cargo_toml = current.join("Cargo.toml");
-        if cargo_toml.exists() {
-            // Check if this is a package Cargo.toml (not just a workspace)
-            // A simple heuristic: if it contains [package], it's a package
-            if let Ok(contents) = std::fs::read_to_string(&cargo_toml)
-                && contents.contains("[package]")
-            {
-                return Some(current);
-            }
+        if cargo_toml.exists()
+            && let Ok(contents) = std::fs::read_to_string(&cargo_toml)
+            && contents.contains("[package]")
+        {
+            return Some(current);
         }
 
-        // Stop if we've reached or passed the git root
         if current == git_root || !current.starts_with(git_root) {
             break;
         }
@@ -561,9 +222,18 @@ fn find_package_root(start: &Path, git_root: &Path) -> Option<PathBuf> {
     None
 }
 
-/// Compare two strings case-insensitively, skipping hyphens in `input`.
+/// Render a [`Color`](renderable::color::Color) as a CSS color string.
 ///
-/// This allows matching "alice-blue" against "aliceblue" without allocation.
+/// Shared by the Browser and MarkdownPlus emitters. Colors that have no RGB
+/// representation degrade to `inherit`.
+pub(super) fn css_color(color: &renderable::color::Color) -> String {
+    match color.to_rgb() {
+        Some((r, g, b)) => format!("rgb({}, {}, {})", r, g, b),
+        None => "inherit".to_string(),
+    }
+}
+
+/// Compare two strings case-insensitively, skipping hyphens in `input`.
 fn eq_ignore_case_and_hyphens(input: &str, target: &str) -> bool {
     let mut input_chars = input.chars().filter(|c| *c != '-');
     let mut target_chars = target.chars();
@@ -581,170 +251,164 @@ fn eq_ignore_case_and_hyphens(input: &str, target: &str) -> bool {
     }
 }
 
-/// Look up a web color by kebab-case name (e.g., "alice-blue").
-///
-/// Returns the RgbColor if found.
-/// Uses case-insensitive matching without allocation.
-fn lookup_web_color(name: &str) -> Option<crate::utils::color::RgbColor> {
-    // Static lookup table for web colors - avoids allocation from to_lowercase().replace()
-    static WEB_COLOR_TABLE: &[(&str, WebColor)] = &[
-        ("aliceblue", WebColor::AliceBlue),
-        ("antiquewhite", WebColor::AntiqueWhite),
-        ("aqua", WebColor::Aqua),
-        ("aquamarine", WebColor::Aquamarine),
-        ("azure", WebColor::Azure),
-        ("beige", WebColor::Beige),
-        ("bisque", WebColor::Bisque),
-        ("blanchedalmond", WebColor::BlanchedAlmond),
-        ("blueviolet", WebColor::BlueViolet),
-        ("brown", WebColor::Brown),
-        ("burlywood", WebColor::BurlyWood),
-        ("cadetblue", WebColor::CadetBlue),
-        ("chartreuse", WebColor::Chartreuse),
-        ("chocolate", WebColor::Chocolate),
-        ("coral", WebColor::Coral),
-        ("cornflowerblue", WebColor::CornflowerBlue),
-        ("cornsilk", WebColor::Cornsilk),
-        ("crimson", WebColor::Crimson),
-        ("darkblue", WebColor::DarkBlue),
-        ("darkcyan", WebColor::DarkCyan),
-        ("darkgoldenrod", WebColor::DarkGoldenrod),
-        ("darkgray", WebColor::DarkGray),
-        ("darkgrey", WebColor::DarkGray),
-        ("darkgreen", WebColor::DarkGreen),
-        ("darkkhaki", WebColor::DarkKhaki),
-        ("darkmagenta", WebColor::DarkMagenta),
-        ("darkolivegreen", WebColor::DarkOliveGreen),
-        ("darkorange", WebColor::DarkOrange),
-        ("darkorchid", WebColor::DarkOrchid),
-        ("darkred", WebColor::DarkRed),
-        ("darksalmon", WebColor::DarkSalmon),
-        ("darkseagreen", WebColor::DarkSeaGreen),
-        ("darkslateblue", WebColor::DarkSlateBlue),
-        ("darkslategray", WebColor::DarkSlateGray),
-        ("darkslategrey", WebColor::DarkSlateGray),
-        ("darkturquoise", WebColor::DarkTurquoise),
-        ("darkviolet", WebColor::DarkViolet),
-        ("deeppink", WebColor::DeepPink),
-        ("deepskyblue", WebColor::DeepSkyBlue),
-        ("dimgray", WebColor::DimGray),
-        ("dimgrey", WebColor::DimGray),
-        ("dodgerblue", WebColor::DodgerBlue),
-        ("firebrick", WebColor::FireBrick),
-        ("floralwhite", WebColor::FloralWhite),
-        ("forestgreen", WebColor::ForestGreen),
-        ("fuchsia", WebColor::Fuchsia),
-        ("gainsboro", WebColor::Gainsboro),
-        ("ghostwhite", WebColor::GhostWhite),
-        ("gold", WebColor::Gold),
-        ("goldenrod", WebColor::Goldenrod),
-        ("gray", WebColor::Gray),
-        ("grey", WebColor::Gray),
-        ("greenyellow", WebColor::GreenYellow),
-        ("honeydew", WebColor::HoneyDew),
-        ("hotpink", WebColor::HotPink),
-        ("indianred", WebColor::IndianRed),
-        ("indigo", WebColor::Indigo),
-        ("ivory", WebColor::Ivory),
-        ("khaki", WebColor::Khaki),
-        ("lavender", WebColor::Lavender),
-        ("lavenderblush", WebColor::LavenderBlush),
-        ("lawngreen", WebColor::LawnGreen),
-        ("lemonchiffon", WebColor::LemonChiffon),
-        ("lightblue", WebColor::LightBlue),
-        ("lightcoral", WebColor::LightCoral),
-        ("lightcyan", WebColor::LightCyan),
-        ("lightgoldenrodyellow", WebColor::LightGoldenrodYellow),
-        ("lightgray", WebColor::LightGray),
-        ("lightgrey", WebColor::LightGray),
-        ("lightgreen", WebColor::LightGreen),
-        ("lightpink", WebColor::LightPink),
-        ("lightsalmon", WebColor::LightSalmon),
-        ("lightseagreen", WebColor::LightSeaGreen),
-        ("lightskyblue", WebColor::LightSkyBlue),
-        ("lightslategray", WebColor::LightSlateGray),
-        ("lightslategrey", WebColor::LightSlateGray),
-        ("lightsteelblue", WebColor::LightSteelBlue),
-        ("lightyellow", WebColor::LightYellow),
-        ("lime", WebColor::Lime),
-        ("limegreen", WebColor::LimeGreen),
-        ("linen", WebColor::Linen),
-        ("maroon", WebColor::Maroon),
-        ("mediumaquamarine", WebColor::MediumAquamarine),
-        ("mediumblue", WebColor::MediumBlue),
-        ("mediumorchid", WebColor::MediumOrchid),
-        ("mediumpurple", WebColor::MediumPurple),
-        ("mediumseagreen", WebColor::MediumSeaGreen),
-        ("mediumslateblue", WebColor::MediumSlateBlue),
-        ("mediumspringgreen", WebColor::MediumSpringGreen),
-        ("mediumturquoise", WebColor::MediumTurquoise),
-        ("mediumvioletred", WebColor::MediumVioletRed),
-        ("midnightblue", WebColor::MidnightBlue),
-        ("mintcream", WebColor::MintCream),
-        ("mistyrose", WebColor::MistyRose),
-        ("moccasin", WebColor::Moccasin),
-        ("navajowhite", WebColor::NavajoWhite),
-        ("navy", WebColor::Navy),
-        ("oldlace", WebColor::OldLace),
-        ("olive", WebColor::Olive),
-        ("olivedrab", WebColor::OliveDrab),
-        ("orange", WebColor::Orange),
-        ("orangered", WebColor::OrangeRed),
-        ("orchid", WebColor::Orchid),
-        ("palegoldenrod", WebColor::PaleGoldenrod),
-        ("palegreen", WebColor::PaleGreen),
-        ("paleturquoise", WebColor::PaleTurquoise),
-        ("palevioletred", WebColor::PaleVioletRed),
-        ("papayawhip", WebColor::PapayaWhip),
-        ("peachpuff", WebColor::PeachPuff),
-        ("peru", WebColor::Peru),
-        ("pink", WebColor::Pink),
-        ("plum", WebColor::Plum),
-        ("powderblue", WebColor::PowderBlue),
-        ("purple", WebColor::Purple),
-        ("rebeccapurple", WebColor::RebeccaPurple),
-        ("rosybrown", WebColor::RosyBrown),
-        ("royalblue", WebColor::RoyalBlue),
-        ("saddlebrown", WebColor::SaddleBrown),
-        ("salmon", WebColor::Salmon),
-        ("sandybrown", WebColor::SandyBrown),
-        ("seagreen", WebColor::SeaGreen),
-        ("seashell", WebColor::SeaShell),
-        ("sienna", WebColor::Sienna),
-        ("silver", WebColor::Silver),
-        ("skyblue", WebColor::SkyBlue),
-        ("slateblue", WebColor::SlateBlue),
-        ("slategray", WebColor::SlateGray),
-        ("slategrey", WebColor::SlateGray),
-        ("snow", WebColor::Snow),
-        ("springgreen", WebColor::SpringGreen),
-        ("steelblue", WebColor::SteelBlue),
-        ("tan", WebColor::Tan),
-        ("teal", WebColor::Teal),
-        ("thistle", WebColor::Thistle),
-        ("tomato", WebColor::Tomato),
-        ("turquoise", WebColor::Turquoise),
-        ("violet", WebColor::Violet),
-        ("wheat", WebColor::Wheat),
-        ("whitesmoke", WebColor::WhiteSmoke),
-        ("yellowgreen", WebColor::YellowGreen),
-    ];
+/// Static lookup table mapping kebab-case web color names to [`WebColor`].
+static WEB_COLOR_TABLE: &[(&str, WebColor)] = &[
+    ("aliceblue", WebColor::AliceBlue),
+    ("antiquewhite", WebColor::AntiqueWhite),
+    ("aqua", WebColor::Aqua),
+    ("aquamarine", WebColor::Aquamarine),
+    ("azure", WebColor::Azure),
+    ("beige", WebColor::Beige),
+    ("bisque", WebColor::Bisque),
+    ("blanchedalmond", WebColor::BlanchedAlmond),
+    ("blueviolet", WebColor::BlueViolet),
+    ("brown", WebColor::Brown),
+    ("burlywood", WebColor::BurlyWood),
+    ("cadetblue", WebColor::CadetBlue),
+    ("chartreuse", WebColor::Chartreuse),
+    ("chocolate", WebColor::Chocolate),
+    ("coral", WebColor::Coral),
+    ("cornflowerblue", WebColor::CornflowerBlue),
+    ("cornsilk", WebColor::Cornsilk),
+    ("crimson", WebColor::Crimson),
+    ("darkblue", WebColor::DarkBlue),
+    ("darkcyan", WebColor::DarkCyan),
+    ("darkgoldenrod", WebColor::DarkGoldenrod),
+    ("darkgray", WebColor::DarkGray),
+    ("darkgrey", WebColor::DarkGray),
+    ("darkgreen", WebColor::DarkGreen),
+    ("darkkhaki", WebColor::DarkKhaki),
+    ("darkmagenta", WebColor::DarkMagenta),
+    ("darkolivegreen", WebColor::DarkOliveGreen),
+    ("darkorange", WebColor::DarkOrange),
+    ("darkorchid", WebColor::DarkOrchid),
+    ("darkred", WebColor::DarkRed),
+    ("darksalmon", WebColor::DarkSalmon),
+    ("darkseagreen", WebColor::DarkSeaGreen),
+    ("darkslateblue", WebColor::DarkSlateBlue),
+    ("darkslategray", WebColor::DarkSlateGray),
+    ("darkslategrey", WebColor::DarkSlateGray),
+    ("darkturquoise", WebColor::DarkTurquoise),
+    ("darkviolet", WebColor::DarkViolet),
+    ("deeppink", WebColor::DeepPink),
+    ("deepskyblue", WebColor::DeepSkyBlue),
+    ("dimgray", WebColor::DimGray),
+    ("dimgrey", WebColor::DimGray),
+    ("dodgerblue", WebColor::DodgerBlue),
+    ("firebrick", WebColor::FireBrick),
+    ("floralwhite", WebColor::FloralWhite),
+    ("forestgreen", WebColor::ForestGreen),
+    ("fuchsia", WebColor::Fuchsia),
+    ("gainsboro", WebColor::Gainsboro),
+    ("ghostwhite", WebColor::GhostWhite),
+    ("gold", WebColor::Gold),
+    ("goldenrod", WebColor::Goldenrod),
+    ("gray", WebColor::Gray),
+    ("grey", WebColor::Gray),
+    ("greenyellow", WebColor::GreenYellow),
+    ("honeydew", WebColor::HoneyDew),
+    ("hotpink", WebColor::HotPink),
+    ("indianred", WebColor::IndianRed),
+    ("indigo", WebColor::Indigo),
+    ("ivory", WebColor::Ivory),
+    ("khaki", WebColor::Khaki),
+    ("lavender", WebColor::Lavender),
+    ("lavenderblush", WebColor::LavenderBlush),
+    ("lawngreen", WebColor::LawnGreen),
+    ("lemonchiffon", WebColor::LemonChiffon),
+    ("lightblue", WebColor::LightBlue),
+    ("lightcoral", WebColor::LightCoral),
+    ("lightcyan", WebColor::LightCyan),
+    ("lightgoldenrodyellow", WebColor::LightGoldenrodYellow),
+    ("lightgray", WebColor::LightGray),
+    ("lightgrey", WebColor::LightGray),
+    ("lightgreen", WebColor::LightGreen),
+    ("lightpink", WebColor::LightPink),
+    ("lightsalmon", WebColor::LightSalmon),
+    ("lightseagreen", WebColor::LightSeaGreen),
+    ("lightskyblue", WebColor::LightSkyBlue),
+    ("lightslategray", WebColor::LightSlateGray),
+    ("lightslategrey", WebColor::LightSlateGray),
+    ("lightsteelblue", WebColor::LightSteelBlue),
+    ("lightyellow", WebColor::LightYellow),
+    ("lime", WebColor::Lime),
+    ("limegreen", WebColor::LimeGreen),
+    ("linen", WebColor::Linen),
+    ("maroon", WebColor::Maroon),
+    ("mediumaquamarine", WebColor::MediumAquamarine),
+    ("mediumblue", WebColor::MediumBlue),
+    ("mediumorchid", WebColor::MediumOrchid),
+    ("mediumpurple", WebColor::MediumPurple),
+    ("mediumseagreen", WebColor::MediumSeaGreen),
+    ("mediumslateblue", WebColor::MediumSlateBlue),
+    ("mediumspringgreen", WebColor::MediumSpringGreen),
+    ("mediumturquoise", WebColor::MediumTurquoise),
+    ("mediumvioletred", WebColor::MediumVioletRed),
+    ("midnightblue", WebColor::MidnightBlue),
+    ("mintcream", WebColor::MintCream),
+    ("mistyrose", WebColor::MistyRose),
+    ("moccasin", WebColor::Moccasin),
+    ("navajowhite", WebColor::NavajoWhite),
+    ("navy", WebColor::Navy),
+    ("oldlace", WebColor::OldLace),
+    ("olive", WebColor::Olive),
+    ("olivedrab", WebColor::OliveDrab),
+    ("orange", WebColor::Orange),
+    ("orangered", WebColor::OrangeRed),
+    ("orchid", WebColor::Orchid),
+    ("palegoldenrod", WebColor::PaleGoldenrod),
+    ("palegreen", WebColor::PaleGreen),
+    ("paleturquoise", WebColor::PaleTurquoise),
+    ("palevioletred", WebColor::PaleVioletRed),
+    ("papayawhip", WebColor::PapayaWhip),
+    ("peachpuff", WebColor::PeachPuff),
+    ("peru", WebColor::Peru),
+    ("pink", WebColor::Pink),
+    ("plum", WebColor::Plum),
+    ("powderblue", WebColor::PowderBlue),
+    ("purple", WebColor::Purple),
+    ("rebeccapurple", WebColor::RebeccaPurple),
+    ("rosybrown", WebColor::RosyBrown),
+    ("royalblue", WebColor::RoyalBlue),
+    ("saddlebrown", WebColor::SaddleBrown),
+    ("salmon", WebColor::Salmon),
+    ("sandybrown", WebColor::SandyBrown),
+    ("seagreen", WebColor::SeaGreen),
+    ("seashell", WebColor::SeaShell),
+    ("sienna", WebColor::Sienna),
+    ("silver", WebColor::Silver),
+    ("skyblue", WebColor::SkyBlue),
+    ("slateblue", WebColor::SlateBlue),
+    ("slategray", WebColor::SlateGray),
+    ("slategrey", WebColor::SlateGray),
+    ("snow", WebColor::Snow),
+    ("springgreen", WebColor::SpringGreen),
+    ("steelblue", WebColor::SteelBlue),
+    ("tan", WebColor::Tan),
+    ("teal", WebColor::Teal),
+    ("thistle", WebColor::Thistle),
+    ("tomato", WebColor::Tomato),
+    ("turquoise", WebColor::Turquoise),
+    ("violet", WebColor::Violet),
+    ("wheat", WebColor::Wheat),
+    ("whitesmoke", WebColor::WhiteSmoke),
+    ("yellowgreen", WebColor::YellowGreen),
+];
 
-    // Use case-insensitive hyphen-ignoring lookup
+/// Look up a [`WebColor`] by kebab-case name (e.g. `"alice-blue"`).
+///
+/// Uses case-insensitive, hyphen-ignoring matching without allocation.
+pub(super) fn web_color_by_name(name: &str) -> Option<WebColor> {
     WEB_COLOR_TABLE
         .iter()
         .find(|(pattern, _)| eq_ignore_case_and_hyphens(name, pattern))
-        .and_then(|(_, wc)| WEB_COLOR_LOOKUP.get(wc).copied())
+        .map(|(_, wc)| *wc)
 }
 
-/// Static lookup table for Tailwind colors.
-///
-/// Using a static array with `eq_ignore_ascii_case` avoids per-lookup allocations.
+/// Static lookup table mapping kebab-case Tailwind names to [`Tailwind`].
 static TAILWIND_COLOR_TABLE: &[(&str, Tailwind)] = &[
-    // Black/White
     ("black", Tailwind::Black),
     ("white", Tailwind::White),
-    // Red
     ("red-50", Tailwind::Red50),
     ("red-100", Tailwind::Red100),
     ("red-200", Tailwind::Red200),
@@ -756,7 +420,6 @@ static TAILWIND_COLOR_TABLE: &[(&str, Tailwind)] = &[
     ("red-800", Tailwind::Red800),
     ("red-900", Tailwind::Red900),
     ("red-950", Tailwind::Red950),
-    // Orange
     ("orange-50", Tailwind::Orange50),
     ("orange-100", Tailwind::Orange100),
     ("orange-200", Tailwind::Orange200),
@@ -768,7 +431,6 @@ static TAILWIND_COLOR_TABLE: &[(&str, Tailwind)] = &[
     ("orange-800", Tailwind::Orange800),
     ("orange-900", Tailwind::Orange900),
     ("orange-950", Tailwind::Orange950),
-    // Amber
     ("amber-50", Tailwind::Amber50),
     ("amber-100", Tailwind::Amber100),
     ("amber-200", Tailwind::Amber200),
@@ -780,7 +442,6 @@ static TAILWIND_COLOR_TABLE: &[(&str, Tailwind)] = &[
     ("amber-800", Tailwind::Amber800),
     ("amber-900", Tailwind::Amber900),
     ("amber-950", Tailwind::Amber950),
-    // Yellow
     ("yellow-50", Tailwind::Yellow50),
     ("yellow-100", Tailwind::Yellow100),
     ("yellow-200", Tailwind::Yellow200),
@@ -792,7 +453,6 @@ static TAILWIND_COLOR_TABLE: &[(&str, Tailwind)] = &[
     ("yellow-800", Tailwind::Yellow800),
     ("yellow-900", Tailwind::Yellow900),
     ("yellow-950", Tailwind::Yellow950),
-    // Lime
     ("lime-50", Tailwind::Lime50),
     ("lime-100", Tailwind::Lime100),
     ("lime-200", Tailwind::Lime200),
@@ -804,7 +464,6 @@ static TAILWIND_COLOR_TABLE: &[(&str, Tailwind)] = &[
     ("lime-800", Tailwind::Lime800),
     ("lime-900", Tailwind::Lime900),
     ("lime-950", Tailwind::Lime950),
-    // Green
     ("green-50", Tailwind::Green50),
     ("green-100", Tailwind::Green100),
     ("green-200", Tailwind::Green200),
@@ -816,7 +475,6 @@ static TAILWIND_COLOR_TABLE: &[(&str, Tailwind)] = &[
     ("green-800", Tailwind::Green800),
     ("green-900", Tailwind::Green900),
     ("green-950", Tailwind::Green950),
-    // Emerald
     ("emerald-50", Tailwind::Emerald50),
     ("emerald-100", Tailwind::Emerald100),
     ("emerald-200", Tailwind::Emerald200),
@@ -828,7 +486,6 @@ static TAILWIND_COLOR_TABLE: &[(&str, Tailwind)] = &[
     ("emerald-800", Tailwind::Emerald800),
     ("emerald-900", Tailwind::Emerald900),
     ("emerald-950", Tailwind::Emerald950),
-    // Teal
     ("teal-50", Tailwind::Teal50),
     ("teal-100", Tailwind::Teal100),
     ("teal-200", Tailwind::Teal200),
@@ -840,7 +497,6 @@ static TAILWIND_COLOR_TABLE: &[(&str, Tailwind)] = &[
     ("teal-800", Tailwind::Teal800),
     ("teal-900", Tailwind::Teal900),
     ("teal-950", Tailwind::Teal950),
-    // Cyan
     ("cyan-50", Tailwind::Cyan50),
     ("cyan-100", Tailwind::Cyan100),
     ("cyan-200", Tailwind::Cyan200),
@@ -852,7 +508,6 @@ static TAILWIND_COLOR_TABLE: &[(&str, Tailwind)] = &[
     ("cyan-800", Tailwind::Cyan800),
     ("cyan-900", Tailwind::Cyan900),
     ("cyan-950", Tailwind::Cyan950),
-    // Sky
     ("sky-50", Tailwind::Sky50),
     ("sky-100", Tailwind::Sky100),
     ("sky-200", Tailwind::Sky200),
@@ -864,7 +519,6 @@ static TAILWIND_COLOR_TABLE: &[(&str, Tailwind)] = &[
     ("sky-800", Tailwind::Sky800),
     ("sky-900", Tailwind::Sky900),
     ("sky-950", Tailwind::Sky950),
-    // Blue
     ("blue-50", Tailwind::Blue50),
     ("blue-100", Tailwind::Blue100),
     ("blue-200", Tailwind::Blue200),
@@ -876,7 +530,6 @@ static TAILWIND_COLOR_TABLE: &[(&str, Tailwind)] = &[
     ("blue-800", Tailwind::Blue800),
     ("blue-900", Tailwind::Blue900),
     ("blue-950", Tailwind::Blue950),
-    // Indigo
     ("indigo-50", Tailwind::Indigo50),
     ("indigo-100", Tailwind::Indigo100),
     ("indigo-200", Tailwind::Indigo200),
@@ -888,7 +541,6 @@ static TAILWIND_COLOR_TABLE: &[(&str, Tailwind)] = &[
     ("indigo-800", Tailwind::Indigo800),
     ("indigo-900", Tailwind::Indigo900),
     ("indigo-950", Tailwind::Indigo950),
-    // Violet
     ("violet-50", Tailwind::Violet50),
     ("violet-100", Tailwind::Violet100),
     ("violet-200", Tailwind::Violet200),
@@ -900,7 +552,6 @@ static TAILWIND_COLOR_TABLE: &[(&str, Tailwind)] = &[
     ("violet-800", Tailwind::Violet800),
     ("violet-900", Tailwind::Violet900),
     ("violet-950", Tailwind::Violet950),
-    // Purple
     ("purple-50", Tailwind::Purple50),
     ("purple-100", Tailwind::Purple100),
     ("purple-200", Tailwind::Purple200),
@@ -912,7 +563,6 @@ static TAILWIND_COLOR_TABLE: &[(&str, Tailwind)] = &[
     ("purple-800", Tailwind::Purple800),
     ("purple-900", Tailwind::Purple900),
     ("purple-950", Tailwind::Purple950),
-    // Fuchsia
     ("fuchsia-50", Tailwind::Fuchsia50),
     ("fuchsia-100", Tailwind::Fuchsia100),
     ("fuchsia-200", Tailwind::Fuchsia200),
@@ -924,7 +574,6 @@ static TAILWIND_COLOR_TABLE: &[(&str, Tailwind)] = &[
     ("fuchsia-800", Tailwind::Fuchsia800),
     ("fuchsia-900", Tailwind::Fuchsia900),
     ("fuchsia-950", Tailwind::Fuchsia950),
-    // Pink
     ("pink-50", Tailwind::Pink50),
     ("pink-100", Tailwind::Pink100),
     ("pink-200", Tailwind::Pink200),
@@ -936,7 +585,6 @@ static TAILWIND_COLOR_TABLE: &[(&str, Tailwind)] = &[
     ("pink-800", Tailwind::Pink800),
     ("pink-900", Tailwind::Pink900),
     ("pink-950", Tailwind::Pink950),
-    // Rose
     ("rose-50", Tailwind::Rose50),
     ("rose-100", Tailwind::Rose100),
     ("rose-200", Tailwind::Rose200),
@@ -948,7 +596,6 @@ static TAILWIND_COLOR_TABLE: &[(&str, Tailwind)] = &[
     ("rose-800", Tailwind::Rose800),
     ("rose-900", Tailwind::Rose900),
     ("rose-950", Tailwind::Rose950),
-    // Slate
     ("slate-50", Tailwind::Slate50),
     ("slate-100", Tailwind::Slate100),
     ("slate-200", Tailwind::Slate200),
@@ -960,7 +607,6 @@ static TAILWIND_COLOR_TABLE: &[(&str, Tailwind)] = &[
     ("slate-800", Tailwind::Slate800),
     ("slate-900", Tailwind::Slate900),
     ("slate-950", Tailwind::Slate950),
-    // Gray
     ("gray-50", Tailwind::Gray50),
     ("gray-100", Tailwind::Gray100),
     ("gray-200", Tailwind::Gray200),
@@ -972,7 +618,6 @@ static TAILWIND_COLOR_TABLE: &[(&str, Tailwind)] = &[
     ("gray-800", Tailwind::Gray800),
     ("gray-900", Tailwind::Gray900),
     ("gray-950", Tailwind::Gray950),
-    // Zinc
     ("zinc-50", Tailwind::Zinc50),
     ("zinc-100", Tailwind::Zinc100),
     ("zinc-200", Tailwind::Zinc200),
@@ -984,7 +629,6 @@ static TAILWIND_COLOR_TABLE: &[(&str, Tailwind)] = &[
     ("zinc-800", Tailwind::Zinc800),
     ("zinc-900", Tailwind::Zinc900),
     ("zinc-950", Tailwind::Zinc950),
-    // Neutral
     ("neutral-50", Tailwind::Neutral50),
     ("neutral-100", Tailwind::Neutral100),
     ("neutral-200", Tailwind::Neutral200),
@@ -996,7 +640,6 @@ static TAILWIND_COLOR_TABLE: &[(&str, Tailwind)] = &[
     ("neutral-800", Tailwind::Neutral800),
     ("neutral-900", Tailwind::Neutral900),
     ("neutral-950", Tailwind::Neutral950),
-    // Stone
     ("stone-50", Tailwind::Stone50),
     ("stone-100", Tailwind::Stone100),
     ("stone-200", Tailwind::Stone200),
@@ -1010,12 +653,10 @@ static TAILWIND_COLOR_TABLE: &[(&str, Tailwind)] = &[
     ("stone-950", Tailwind::Stone950),
 ];
 
-/// Look up a Tailwind color by kebab-case name (e.g., "purple-500").
+/// Look up a [`Tailwind`] color by kebab-case name (e.g. `"purple-500"`).
 ///
-/// Returns the RGB tuple if found.
 /// Uses case-insensitive matching without allocation.
-fn lookup_tailwind_color(name: &str) -> Option<(u8, u8, u8)> {
-    // Special values that should return None
+pub(super) fn tailwind_by_name(name: &str) -> Option<Tailwind> {
     if name.eq_ignore_ascii_case("inherit")
         || name.eq_ignore_ascii_case("current")
         || name.eq_ignore_ascii_case("transparent")
@@ -1026,14 +667,13 @@ fn lookup_tailwind_color(name: &str) -> Option<(u8, u8, u8)> {
     TAILWIND_COLOR_TABLE
         .iter()
         .find(|(pattern, _)| pattern.eq_ignore_ascii_case(name))
-        .and_then(|(_, tw)| tw.to_hdr_color())
-        .map(|hdr| (hdr.red(), hdr.green(), hdr.blue()))
+        .map(|(_, tw)| *tw)
 }
 
 /// Independent style layers tracked by [`StyleState`].
 ///
-/// Each variant maps to a single SGR attribute group. Block tags push/pop
-/// per-layer so that closing a tag restores the *parent's* value instead of
+/// Each variant maps to a single SGR attribute group. Nested spans push/pop
+/// per-layer so that closing a span restores the *parent's* value instead of
 /// issuing a nuclear `\x1b[0m` reset.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum StyleLayer {
@@ -1049,6 +689,18 @@ pub(super) enum StyleLayer {
 }
 
 impl StyleLayer {
+    /// Map a shared [`EmphasisLayer`] onto its terminal [`StyleLayer`].
+    pub(super) fn from_emphasis(layer: renderable::style::EmphasisLayer) -> Self {
+        use renderable::style::EmphasisLayer;
+        match layer {
+            EmphasisLayer::Weight => Self::FontWeight,
+            EmphasisLayer::Italic => Self::Italic,
+            EmphasisLayer::Underline => Self::Underline,
+            EmphasisLayer::Strikethrough => Self::Strikethrough,
+            EmphasisLayer::Blink => Self::Blink,
+        }
+    }
+
     /// The SGR code that clears this layer back to the terminal default.
     fn default_reset(self) -> &'static str {
         match self {
@@ -1067,8 +719,8 @@ impl StyleLayer {
 
 /// Tracks the current SGR escape code for each [`StyleLayer`].
 ///
-/// Block tags call [`set`](StyleState::set) on open and
-/// [`restore`](StyleState::restore) on close, so nested tags of the same
+/// Spans call [`set`](StyleState::set) on open and
+/// [`restore`](StyleState::restore) on close, so nested spans of the same
 /// layer correctly restore the parent's value.
 #[derive(Debug, Default)]
 pub(super) struct StyleState {
@@ -1115,7 +767,7 @@ impl StyleState {
         *self.slot_mut(layer) = prev;
     }
 
-    /// The escape code to emit when closing a block tag on `layer`.
+    /// The escape code to emit when closing a span on `layer`.
     ///
     /// Returns the parent's code if one exists, otherwise the layer's
     /// default reset.
@@ -1123,30 +775,28 @@ impl StyleState {
         self.get(layer).unwrap_or(layer.default_reset())
     }
 
-    /// Clear all layers (used by `{{reset}}`).
-    pub(super) fn clear_all(&mut self) {
-        self.font_weight = None;
-        self.foreground = None;
-        self.background = None;
-        self.italic = None;
-        self.underline = None;
-        self.strikethrough = None;
-        self.blink = None;
-        self.inverse = None;
-        self.hidden = None;
-    }
-
-    /// Clear all layers except background (used by `{{reset-style}}`).
-    pub(super) fn clear_all_except_background(&mut self) {
-        self.font_weight = None;
-        self.foreground = None;
-        // background intentionally preserved
-        self.italic = None;
-        self.underline = None;
-        self.strikethrough = None;
-        self.blink = None;
-        self.inverse = None;
-        self.hidden = None;
+    /// Re-emit the opening escape for every currently-active layer.
+    ///
+    /// Used after a hard `\x1b[0m` reset — such as the one closing a
+    /// fenced code block — to restore an enclosing span's styling so
+    /// following sibling text is not left unstyled.
+    pub(super) fn reapply_active_layers(&self, out: &mut String) {
+        for code in [
+            &self.font_weight,
+            &self.foreground,
+            &self.background,
+            &self.italic,
+            &self.underline,
+            &self.strikethrough,
+            &self.blink,
+            &self.inverse,
+            &self.hidden,
+        ]
+        .into_iter()
+        .flatten()
+        {
+            out.push_str(code);
+        }
     }
 
     fn slot_mut(&mut self, layer: StyleLayer) -> &mut Option<String> {
@@ -1161,83 +811,5 @@ impl StyleState {
             StyleLayer::Inverse => &mut self.inverse,
             StyleLayer::Hidden => &mut self.hidden,
         }
-    }
-}
-
-/// Map a block tag name to its style layer.
-///
-/// Returns `None` for structural tags (`a`, `clipboard`) that don't
-/// correspond to an SGR attribute.
-pub(super) fn block_tag_layer(tag_name: &str) -> Option<StyleLayer> {
-    match tag_name {
-        "bold" | "b" | "dim" => Some(StyleLayer::FontWeight),
-        "italic" | "i" => Some(StyleLayer::Italic),
-        "underline" | "u" | "double-underline" | "uu" | "curly-underline" | "dotted-underline"
-        | "dashed-underline" => Some(StyleLayer::Underline),
-        "blink" => Some(StyleLayer::Blink),
-        "inverse" | "reverse" => Some(StyleLayer::Inverse),
-        "hidden" => Some(StyleLayer::Hidden),
-        "strikethrough" | "~" => Some(StyleLayer::Strikethrough),
-        // Structural tags — no SGR layer
-        "a" | "clipboard" => None,
-        // Named foreground colors + rgb
-        "rgb" | "black" | "red" | "green" | "yellow" | "blue" | "magenta" | "cyan" | "white"
-        | "bright-black" | "bright-red" | "bright-green" | "bright-yellow" | "bright-blue"
-        | "bright-magenta" | "bright-cyan" | "bright-white" => Some(StyleLayer::Foreground),
-        // Background rgb
-        "bg-rgb" => Some(StyleLayer::Background),
-        // Catch-all for web/tailwind colors
-        _ => {
-            if tag_name.starts_with("bg-") {
-                Some(StyleLayer::Background)
-            } else {
-                // Safe default for web/tailwind foreground colors.
-                // If block_tag_to_escape returns None the layer is never used.
-                Some(StyleLayer::Foreground)
-            }
-        }
-    }
-}
-
-/// Classify an atomic token for layer tracking.
-///
-/// Returns `Some((layer, true))` for set-tokens (e.g. `bold`, `red`),
-/// `Some((layer, false))` for clear-tokens (e.g. `normal-font-weight`),
-/// and `None` for `reset`/`reset-style` (handled by the caller) or
-/// unknown tokens.
-///
-/// Expects a **lowercased** token string.
-pub(super) fn atomic_token_layer(token: &str) -> Option<(StyleLayer, bool)> {
-    match token {
-        // --- setters ---
-        "bold" | "dim" => Some((StyleLayer::FontWeight, true)),
-        "italic" => Some((StyleLayer::Italic, true)),
-        "underline" | "double-underline" | "curly-underline" | "dotted-underline"
-        | "dashed-underline" => Some((StyleLayer::Underline, true)),
-        "blink" => Some((StyleLayer::Blink, true)),
-        "reverse" => Some((StyleLayer::Inverse, true)),
-        "hidden" => Some((StyleLayer::Hidden, true)),
-        "strikethrough" => Some((StyleLayer::Strikethrough, true)),
-        // Foreground colors
-        "black" | "red" | "green" | "yellow" | "blue" | "magenta" | "cyan" | "white"
-        | "bright-black" | "bright-red" | "bright-green" | "bright-yellow" | "bright-blue"
-        | "bright-magenta" | "bright-cyan" | "bright-white" => Some((StyleLayer::Foreground, true)),
-        // Background colors
-        "bg-black" | "bg-red" | "bg-green" | "bg-yellow" | "bg-blue" | "bg-magenta" | "bg-cyan"
-        | "bg-white" | "bg-bright-black" | "bg-bright-red" | "bg-bright-green"
-        | "bg-bright-yellow" | "bg-bright-blue" | "bg-bright-magenta" | "bg-bright-cyan"
-        | "bg-bright-white" => Some((StyleLayer::Background, true)),
-        // --- clearers ---
-        "normal-font-weight" => Some((StyleLayer::FontWeight, false)),
-        "not-italic" => Some((StyleLayer::Italic, false)),
-        "not-underline" => Some((StyleLayer::Underline, false)),
-        "not-blink" => Some((StyleLayer::Blink, false)),
-        "not-inverse" => Some((StyleLayer::Inverse, false)),
-        "not-hidden" => Some((StyleLayer::Hidden, false)),
-        "not-strikethrough" => Some((StyleLayer::Strikethrough, false)),
-        "reset-fg" => Some((StyleLayer::Foreground, false)),
-        "reset-bg" => Some((StyleLayer::Background, false)),
-        // reset / reset-style → caller handles via clear_all / clear_all_except_background
-        _ => None,
     }
 }

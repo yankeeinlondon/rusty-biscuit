@@ -17,6 +17,7 @@ impl WrapperProfile for GooseWrapper {
         prompt: &PreparedSystemPrompt,
         _interactive: bool,
         _cwd: &Path,
+        _scoped_tmp: &Path,
     ) -> Result<crate::commands::wrap::system_prompt::SystemPromptApplication> {
         use crate::commands::wrap::system_prompt::SystemPromptApplication;
 

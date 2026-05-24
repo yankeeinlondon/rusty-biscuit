@@ -134,12 +134,11 @@ sniff/lib/src/
 # sniff/lib/Cargo.toml additions
 [dependencies]
 schematic-schema = { path = "../../schematic/schema", optional = true }
-schematic-define = { path = "../../schematic/define", optional = true }
 
 [features]
 default = []
 network = ["dep:reqwest", "dep:tokio", "dep:futures", "reqwest/rustls-tls"]
-remote = ["network", "dep:schematic-schema", "dep:schematic-define"]
+remote = ["network", "dep:schematic-schema"]
 ```
 
 The `remote` feature gate keeps the new functionality opt-in and avoids pulling in schematic dependencies for consumers who only need local detection. The `remote` feature implies `network` since all remote operations require HTTP.

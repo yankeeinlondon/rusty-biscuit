@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 
 use biscuit_terminal::components::list::UnorderedList;
 use biscuit_terminal::components::prose::Prose;
-use biscuit_terminal::components::renderable::{Renderable, RenderableContent};
+use biscuit_terminal::components::renderable::{RenderableTerminalContent, TerminalRenderable};
 use biscuit_terminal::terminal::Terminal;
 use sniff::filesystem::git::{ConventionalCommit, FileAction, FileStatus, RefKind};
 use sniff::filesystem::repo::Package;
@@ -82,7 +82,7 @@ mod path_format;
 mod repo;
 
 // Re-exports from submodules
-pub use deps::{render_repo_deps_text, render_repo_deps_visual};
+pub use deps::{render_repo_deps_svg, render_repo_deps_text, render_repo_deps_visual};
 pub use docs::render_docs_output;
 pub(crate) use files::filter_file_breakdown;
 pub use files::{PathListFormat, render_files_section, render_path_list};
@@ -103,9 +103,10 @@ pub use packages::{
     render_unstaged_packages,
 };
 pub(crate) use packages::{
-    select_dirty_package_names, select_staged_package_names, select_unstaged_package_names,
+    select_dirty_package_names, select_repo_packages, select_staged_package_names,
+    select_unstaged_package_names,
 };
-pub use repo::{render_filesystem_section, render_repo_section};
+pub use repo::{render_filesystem_section, render_repo_name, render_repo_section};
 
 /// Format a commit datetime to a relative date string and 12hr time string.
 ///
@@ -225,11 +226,11 @@ fn parse_git_url(
 
 /// Build the commit URL base from the preferred remote (usually "origin").
 ///
-/// Returns `(browse_url, provider)` if a browsable remote is found, or `None`
-/// if no remote has a resolvable browse URL.
+/// Returns `(browse_url, provider, remote_name)` if a browsable remote is
+/// found, or `None` if no remote has a resolvable browse URL.
 fn build_commit_url_base(
     git: &sniff::filesystem::git::GitInfo,
-) -> Option<(String, sniff::filesystem::git::GitHostingProvider)> {
+) -> Option<(String, sniff::filesystem::git::GitHostingProvider, String)> {
     // Prefer "origin", fall back to the first remote with a URL
     let remote = git
         .remotes
@@ -238,7 +239,7 @@ fn build_commit_url_base(
         .or_else(|| git.remotes.first())?;
     let url = remote.url.as_ref()?;
     let (_, browse_url) = parse_git_url(url, &remote.provider);
-    browse_url.map(|base| (base, remote.provider))
+    browse_url.map(|base| (base, remote.provider, remote.name.clone()))
 }
 
 /// Split a path into directory and filename components.
@@ -294,7 +295,7 @@ fn format_commit_line(
     let short_sha = &commit.sha[0..7];
     let sha_display = match commit_url {
         Some(url) => format!("<a href=\"{url}\"><b>{short_sha}</b></a>"),
-        None => format!("<b>{short_sha}</b>"),
+        None => format!("<dim><i>{short_sha}</i></dim>"),
     };
     let date_prefix = if use_on { "<i>on</i> " } else { "" };
     let refs_part = format_ref_decorations(&commit.refs);
@@ -413,39 +414,39 @@ fn build_git_status_items(
 ) -> Vec<String> {
     // Build commit URL base from the preferred remote (usually "origin").
     let commit_url_base = build_commit_url_base(git);
-
-    // Determine how many of the most recent commits are unpushed.
-    // Use the "origin" tracking ahead count; if unavailable, assume all are pushed.
-    let unpushed_count = git
-        .tracking
-        .iter()
-        .find(|t| t.remote == "origin")
-        .map(|t| t.ahead)
-        .unwrap_or(0);
+    let url_remote_prefix = commit_url_base
+        .as_ref()
+        .map(|(_, _, name)| format!("{name}/"));
 
     let mut status_items: Vec<String> = Vec::new();
 
-    let conflicted: Vec<_> = git
-        .file_changes
-        .iter()
-        .filter(|f| f.status == FileStatus::Conflicted)
-        .collect();
-    for file in &conflicted {
-        let path = file.path.display().to_string();
-        let absolute = git.repo_root.join(&file.path).display().to_string();
-        let linked_path = format_git_status_filepath(&path, &absolute);
-        let line = format!("<red>conflicted: {linked_path}</red>");
-        status_items.push(line);
-    }
-
-    // Recent commits with conventional commit parsing (oldest first, so most recent is at bottom)
+    // Recent commits with conventional commit parsing (oldest first, so most recent is at bottom).
+    // `git.recent` is newest-first. A commit is considered pushed once we encounter
+    // (walking newest→oldest) a commit with a remote-tracking ref decoration for the
+    // URL-providing remote; that commit and all older ones are pushed. This is robust
+    // to `--branch <other>` queries where `git.tracking` reflects the checked-out
+    // branch, not the queried one.
     let commits: Vec<_> = git.recent.iter().take(history_count).collect();
+    let unpushed_count = url_remote_prefix
+        .as_deref()
+        .map(|prefix| {
+            commits
+                .iter()
+                .take_while(|c| {
+                    !c.refs
+                        .iter()
+                        .any(|r| r.kind == RefKind::RemoteBranch && r.name.starts_with(prefix))
+                })
+                .count()
+        })
+        .unwrap_or(0);
+
     for (display_index, commit) in commits.iter().rev().enumerate() {
         // display_index 0 = oldest displayed commit, last = most recent.
         // The most recent `unpushed_count` commits (at the end) are unpushed.
         let is_pushed = display_index < commits.len().saturating_sub(unpushed_count);
         let commit_url = if is_pushed {
-            commit_url_base.as_ref().map(|(base, provider)| {
+            commit_url_base.as_ref().map(|(base, provider, _)| {
                 format!("{}/{}/{}", base, provider.commit_path_segment(), commit.sha)
             })
         } else {
@@ -508,6 +509,20 @@ fn build_git_status_items(
         status_items.push(line);
     }
 
+    // Conflicted files render last so they're easy to spot at the bottom of the list.
+    let conflicted: Vec<_> = git
+        .file_changes
+        .iter()
+        .filter(|f| f.status == FileStatus::Conflicted)
+        .collect();
+    for file in &conflicted {
+        let path = file.path.display().to_string();
+        let absolute = git.repo_root.join(&file.path).display().to_string();
+        let linked_path = format_git_status_filepath(&path, &absolute);
+        let line = format!("<red>conflicted: {linked_path}</red>");
+        status_items.push(line);
+    }
+
     status_items
 }
 
@@ -515,17 +530,33 @@ fn build_git_status_items(
 ///
 /// * `git` - Git repository information
 /// * `history_count` - Number of recent commits to display
+/// * `target_branch` - When `Some`, annotates the Status heading with the
+///   branch whose commits are being shown (used by `--branch <name>`).
+/// * `target_worktree` - When `Some((name, branch))`, annotates the heading
+///   to indicate the commits and working-tree state are scoped to the named
+///   linked worktree (used by `--worktree <name>`). Takes precedence over
+///   `target_branch` when both are provided.
 pub fn render_git_section(
     git: &sniff::filesystem::git::GitInfo,
     history_count: usize,
     verbose: u8,
     compact: bool,
+    target_branch: Option<&str>,
+    target_worktree: Option<(&str, &str)>,
 ) -> String {
     let mut out = String::new();
     let terminal = Terminal::default();
 
     // === Status Section ===
-    let status_title = Prose::new("<b><u>Status</u></b>");
+    let status_title = match (target_worktree, target_branch) {
+        (Some((wt, branch)), _) => Prose::new(format!(
+            "<b><u>Status</u></b> (<dim>worktree: <green>{wt}</green> <i>on</i> <green><i>{branch}</i></green> <i>branch</i></dim>)"
+        )),
+        (None, Some(branch)) => {
+            Prose::new(format!("<b><u>Status</u></b> (branch: <i>{branch}</i>)"))
+        }
+        (None, None) => Prose::new("<b><u>Status</u></b>"),
+    };
     writeln!(out, "\n{}\n", status_title.render(&terminal)).unwrap();
 
     let status_items = build_git_status_items(git, history_count, verbose);
@@ -621,7 +652,7 @@ pub fn render_git_section(
 
     // --- Local ---
     if let Some(ref current) = git.current_branch {
-        let local_header: RenderableContent = Prose::new("<b>Local:</b>").into();
+        let local_header: RenderableTerminalContent = Prose::new("<b>Local:</b>").into();
         if verbose > 0 {
             // Verbose: nested list with current branch + other branches
             let mut local_list = UnorderedList::empty();
@@ -653,7 +684,7 @@ pub fn render_git_section(
                 )));
             }
 
-            let branches_header: RenderableContent = Prose::new("<b>Branches:</b>").into();
+            let branches_header: RenderableTerminalContent = Prose::new("<b>Branches:</b>").into();
             let mut local_wrapper = UnorderedList::empty();
             local_wrapper.add(branches_header);
             local_wrapper.add(local_list);
@@ -695,7 +726,7 @@ pub fn render_git_section(
 
     // --- Remotes ---
     if !git.tracking.is_empty() || !git.remotes.is_empty() {
-        let remotes_header: RenderableContent = Prose::new("<b>Remotes:</b>").into();
+        let remotes_header: RenderableTerminalContent = Prose::new("<b>Remotes:</b>").into();
         let mut remotes_list = UnorderedList::empty();
 
         for remote in &git.remotes {
@@ -769,7 +800,7 @@ pub fn render_git_section(
 
     // --- Config ---
     if git.config.user_name.is_some() {
-        let config_header: RenderableContent = Prose::new("<b>Config:</b>").into();
+        let config_header: RenderableTerminalContent = Prose::new("<b>Config:</b>").into();
         let mut config_list = UnorderedList::empty();
 
         if let Some(ref name) = git.config.user_name {
@@ -787,7 +818,7 @@ pub fn render_git_section(
 
         // Crypto subsection (verbose only)
         if verbose > 0 {
-            let crypto_header: RenderableContent = Prose::new("<b>Crypto</b>").into();
+            let crypto_header: RenderableTerminalContent = Prose::new("<b>Crypto</b>").into();
             let mut crypto_list = UnorderedList::empty();
 
             let agent = git
@@ -1091,7 +1122,7 @@ fn resolve_dir(base_dir: Option<&Path>) -> PathBuf {
 
 #[cfg(test)]
 mod tests {
-    use super::deps::build_deps_mermaid;
+    use super::deps::build_deps_dot;
     use super::repo::build_area_hierarchy;
     use super::*;
     use chrono::Utc;
@@ -1188,7 +1219,7 @@ mod tests {
         use super::*;
 
         #[test]
-        fn conflicted_files_render_before_commits_and_untracked_is_dimmed() {
+        fn conflicted_files_render_last_and_untracked_is_dimmed() {
             let git = make_git_info(vec![
                 FileChange {
                     path: PathBuf::from("src/main.rs"),
@@ -1215,16 +1246,28 @@ mod tests {
 
             let items = build_git_status_items(&git, 10, 0);
 
-            assert!(items[0].starts_with("<red>conflicted: <a href=\"/repo/conflict.txt\">"));
-            assert!(items[0].contains("<b>conflict.txt</b></a>"));
-            assert!(items.iter().any(|item| {
-                item.starts_with("<dim>untracked: <a href=\"/repo/notes.md\">")
-                    && item.contains("<b>notes.md</b></a>")
-            }));
-            assert!(items.iter().any(|item| {
-                item.starts_with("<lime>staged(")
-                    && item.contains("<a href=\"/repo/src/main.rs\">src/<b>main.rs</b></a>")
-            }));
+            let last = items.last().expect("at least one status item");
+            assert!(last.starts_with("<red>conflicted: <a href=\"/repo/conflict.txt\">"));
+            assert!(last.contains("<b>conflict.txt</b></a>"));
+
+            let staged_index = items
+                .iter()
+                .position(|item| {
+                    item.starts_with("<lime>staged(")
+                        && item.contains("<a href=\"/repo/src/main.rs\">src/<b>main.rs</b></a>")
+                })
+                .expect("staged item present");
+            let untracked_index = items
+                .iter()
+                .position(|item| {
+                    item.starts_with("<dim>untracked: <a href=\"/repo/notes.md\">")
+                        && item.contains("<b>notes.md</b></a>")
+                })
+                .expect("untracked item present");
+            let conflicted_index = items.len() - 1;
+
+            assert!(staged_index < conflicted_index);
+            assert!(untracked_index < conflicted_index);
         }
 
         #[test]
@@ -1237,7 +1280,7 @@ mod tests {
                 lines_removed: 0,
             }]);
 
-            let output = render_git_section(&git, 10, 0, true);
+            let output = render_git_section(&git, 10, 0, true, None, None);
 
             assert!(output.contains("Status"));
             assert!(!output.contains("\x1b[1m\x1b[4mMeta"));
@@ -1533,7 +1576,7 @@ mod tests {
             git.status.dirty = vec![make_dirty_file("alpha/src/main.rs")];
             let result = build_result(repo, git);
 
-            let names = select_dirty_package_names(&result, &[]);
+            let names = select_dirty_package_names(&result, &[], None, None);
             assert!(
                 names.is_empty(),
                 "expected empty for non-monorepo, got {names:?}"
@@ -1556,7 +1599,7 @@ mod tests {
             git.status.dirty = vec![make_dirty_file("area-a/alpha/src/main.rs")];
             let result = build_result(repo, git);
 
-            let names = select_dirty_package_names(&result, &[]);
+            let names = select_dirty_package_names(&result, &[], None, None);
             assert_eq!(names, vec!["alpha".to_string()]);
         }
 
@@ -1574,7 +1617,7 @@ mod tests {
             git.status.dirty = vec![make_dirty_file("area-a/alpha/src/main.rs")];
             let result = build_result(repo, git);
 
-            let areas = select_dirty_package_area_names(&result, &[]);
+            let areas = select_dirty_package_area_names(&result, &[], None, None);
             assert_eq!(areas, vec!["area-a".to_string()]);
         }
 
@@ -1595,7 +1638,7 @@ mod tests {
             ];
             let result = build_result(repo, git);
 
-            let names = select_dirty_package_names(&result, &["@area-a".to_string()]);
+            let names = select_dirty_package_names(&result, &["@area-a".to_string()], None, None);
             assert_eq!(names, vec!["alpha".to_string()]);
         }
 
@@ -1614,10 +1657,10 @@ mod tests {
             }]);
             let result = build_result(repo, git);
 
-            let names = select_staged_package_names(&result, &[]);
+            let names = select_staged_package_names(&result, &[], None, None);
             assert_eq!(names, vec!["alpha".to_string()]);
 
-            let areas = select_staged_package_area_names(&result, &[]);
+            let areas = select_staged_package_area_names(&result, &[], None, None);
             assert_eq!(areas, vec!["area-a".to_string()]);
         }
 
@@ -1636,10 +1679,10 @@ mod tests {
             }]);
             let result = build_result(repo, git);
 
-            let names = select_unstaged_package_names(&result, &[]);
+            let names = select_unstaged_package_names(&result, &[], None, None);
             assert_eq!(names, vec!["alpha".to_string()]);
 
-            let areas = select_unstaged_package_area_names(&result, &[]);
+            let areas = select_unstaged_package_area_names(&result, &[], None, None);
             assert_eq!(areas, vec!["area-a".to_string()]);
         }
 
@@ -1657,10 +1700,10 @@ mod tests {
             }]);
             let result = build_result(repo, git);
 
-            assert!(select_staged_package_names(&result, &[]).is_empty());
-            assert!(select_unstaged_package_names(&result, &[]).is_empty());
-            assert!(select_staged_package_area_names(&result, &[]).is_empty());
-            assert!(select_unstaged_package_area_names(&result, &[]).is_empty());
+            assert!(select_staged_package_names(&result, &[], None, None).is_empty());
+            assert!(select_unstaged_package_names(&result, &[], None, None).is_empty());
+            assert!(select_staged_package_area_names(&result, &[], None, None).is_empty());
+            assert!(select_unstaged_package_area_names(&result, &[], None, None).is_empty());
         }
     }
 
@@ -2052,7 +2095,7 @@ mod tests {
         }
     }
 
-    mod deps_mermaid {
+    mod deps_dot {
         use super::*;
 
         #[test]
@@ -2061,19 +2104,20 @@ mod tests {
                 make_package("alpha", "area-a", &[]),
                 make_package("beta", "area-b", &[]),
             ];
-            assert!(build_deps_mermaid(&packages).is_none());
+            assert!(build_deps_dot(&packages, None).is_none());
         }
 
         #[test]
-        fn generates_flowchart_with_edges() {
+        fn generates_digraph_with_edges() {
             let packages = vec![
                 make_package("cli", "sniff", &["lib"]),
                 make_package("lib", "sniff", &[]),
             ];
-            let result = build_deps_mermaid(&packages).unwrap();
-            assert!(result.starts_with("flowchart TD"));
-            assert!(result.contains("subgraph sniff"));
-            assert!(result.contains("n0 --> n1"));
+            let result = build_deps_dot(&packages, None).unwrap();
+            assert!(result.starts_with("digraph G {"));
+            assert!(result.contains("subgraph cluster_"));
+            assert!(result.contains("label=\"sniff\""));
+            assert!(result.contains("n0 -> n1;"));
         }
 
         #[test]
@@ -2084,9 +2128,9 @@ mod tests {
                 make_package("sniff-cli", "sniff", &["sniff-lib"]),
                 make_package("sniff-lib", "sniff", &[]),
             ];
-            let result = build_deps_mermaid(&packages).unwrap();
-            assert!(result.contains("subgraph biscuit-speaks"));
-            assert!(result.contains("subgraph sniff"));
+            let result = build_deps_dot(&packages, None).unwrap();
+            assert!(result.contains("label=\"biscuit-speaks\""));
+            assert!(result.contains("label=\"sniff\""));
         }
 
         #[test]
@@ -2095,8 +2139,81 @@ mod tests {
                 make_package("app", "apps", &["core"]),
                 make_package("core", "libs", &[]),
             ];
-            let result = build_deps_mermaid(&packages).unwrap();
-            assert!(result.contains("n0 --> n1"));
+            let result = build_deps_dot(&packages, None).unwrap();
+            assert!(result.contains("n0 -> n1;"));
+        }
+
+        #[test]
+        fn focus_groups_focus_subgraph_and_floats_external_nodes() {
+            // dm-cli depends on dm-lib (both in darkmatter area);
+            // dm-lib depends on biscuit-terminal (external);
+            // claudine (external) depends on dm-cli.
+            let packages = vec![
+                make_package("dm-cli", "darkmatter", &["dm-lib"]),
+                make_package("dm-lib", "darkmatter", &["biscuit-terminal"]),
+                make_package("biscuit-terminal", "biscuit-terminal", &[]),
+                make_package("claudine", "claudine", &["dm-cli"]),
+            ];
+            let focus: std::collections::HashSet<&str> = ["dm-cli", "dm-lib"].into_iter().collect();
+            let result = build_deps_dot(&packages, Some(&focus)).unwrap();
+
+            // Focus area is the only cluster (count `subgraph cluster_` occurrences).
+            assert_eq!(
+                result.matches("subgraph cluster_").count(),
+                1,
+                "expected exactly one cluster wrapping the focus area"
+            );
+            assert!(result.contains("label=\"darkmatter\""));
+
+            // External packages still appear as bare nodes, drawn dashed
+            assert!(result.contains("n2 [label=\"biscuit-terminal\", style=dashed];"));
+            assert!(result.contains("n3 [label=\"claudine\", style=dashed];"));
+
+            // Edges touching focus are emitted
+            assert!(
+                result.contains("n0 -> n1;"),
+                "dm-cli -> dm-lib edge missing"
+            );
+            assert!(
+                result.contains("n1 -> n2;"),
+                "dm-lib -> biscuit-terminal edge missing"
+            );
+            assert!(
+                result.contains("n3 -> n0;"),
+                "claudine -> dm-cli edge missing"
+            );
+        }
+
+        #[test]
+        fn focus_omits_edges_between_external_only() {
+            // Both biscuit-terminal and biscuit-file are 1-hop external context for
+            // the darkmatter focus. Their internal edge must NOT be drawn because
+            // it doesn't touch the focus area.
+            let packages = vec![
+                make_package(
+                    "dm-lib",
+                    "darkmatter",
+                    &["biscuit-terminal", "biscuit-file"],
+                ),
+                make_package("biscuit-terminal", "biscuit-terminal", &["biscuit-file"]),
+                make_package("biscuit-file", "biscuit-file", &[]),
+            ];
+            let focus: std::collections::HashSet<&str> = ["dm-lib"].into_iter().collect();
+            let result = build_deps_dot(&packages, Some(&focus)).unwrap();
+
+            assert!(
+                result.contains("n0 -> n1;"),
+                "focus -> external edge missing"
+            );
+            assert!(
+                result.contains("n0 -> n2;"),
+                "focus -> external edge missing"
+            );
+            // External-only edge: biscuit-terminal (n1) -> biscuit-file (n2)
+            assert!(
+                !result.contains("n1 -> n2;"),
+                "external-only edge should not be drawn"
+            );
         }
     }
 }

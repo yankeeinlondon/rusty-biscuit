@@ -1,0 +1,348 @@
+# Tree Rendering
+
+This document describes the render-tree architecture introduced into the
+`renderable`, `darkmatter`, and `biscuit-terminal` crates, how it relates to
+the rendering paths that already exist, what is and is not covered by tests,
+and a roadmap for adopting it.
+
+It is a status-and-direction document. It is deliberately honest about what has
+been *proven* versus what has only been *wired up*.
+
+## 1. The tree-rendering architecture
+
+The render tree is a **canonical, owned, target-agnostic representation** of a
+document. Content sources produce it; render targets consume it. The slogan is
+*parse once, build one tree, walk it per target*.
+
+### Core model — `renderable::tree`
+
+`renderable` owns the model so that every other crate can depend on it without
+a dependency cycle.
+
+- `RenderNode { kind: NodeKind, span: SourceSpan, attrs: NodeAttrs }` — the node
+  envelope. `span` carries provenance (and an optional byte range); `attrs`
+  carries identity (`id`), semantic `classes`, namespaced extension `data`, and
+  an optional block-level `Layout` (margins, alignment, max-width, wrapping —
+  see `layout-and-style.md`).
+- `NodeKind` — a 25-variant payload enum covering document structure: `Root`,
+  `Heading`, `Paragraph`, `BlockQuote`, `List`, `ListItem`, `Code`,
+  `ThematicBreak`, `Table`, `TableRow`, `TableCell`, `FootnoteDefinition`,
+  `Text`, `Emphasis`, `Strong`, `Delete`, `Span`, `InlineCode`, `Link`, `Image`,
+  `FootnoteReference`, `SoftBreak`, `HardBreak`, `Html`, and `Unsupported`.
+- `Document { sources: SourceRegistry, metadata: DocumentMetadata, root }` — the
+  full document wrapper, with a source registry and frontmatter slot.
+- `HeadingDepth`, `ColumnAlign` — constrained newtypes.
+
+The whole public surface is `serde`-serializable to its own documented JSON
+format (not MDAST-compatible).
+
+### Producers
+
+A tree has two kinds of producer, and the design treats them symmetrically:
+
+1. **The fold** (in `darkmatter`) — turns a parsed document into a `Document`.
+2. **`TreeRenderable` components** — a component implements
+   `TreeRenderable { fn render_tree(&self) -> RenderNode }` to project itself
+   into a document-structural subtree.
+
+### Consumers — the renderers
+
+Three renderers walk a `RenderNode` / `Document` with an **exhaustive `match`**
+over `NodeKind` (no default-recursing visitor — adding a variant must break
+every renderer until it makes a deliberate decision):
+
+| Target   | Entry points                                          | Crate             |
+|----------|-------------------------------------------------------|-------------------|
+| Markdown | `render_markdown_node` / `render_markdown_document`   | `renderable`      |
+| Browser  | `render_browser_node` / `render_browser_document`     | `renderable`      |
+| Terminal | `render_terminal_node` / `render_terminal_document`   | `biscuit-terminal`|
+
+The Terminal renderer lives in `biscuit-terminal` because a meaningful terminal
+renderer needs `Terminal`, `Layout`, color depth, and OSC8 — types `renderable`
+cannot depend on. `renderable` gains **no** `pulldown-cmark` or
+`biscuit-terminal` dependency; the dependency direction
+(`darkmatter` → `biscuit-terminal` → `renderable`) is preserved.
+
+### Shared rendering contract
+
+Every renderer follows the same shape:
+
+- It **validates first** (`validate` / `ensure_valid`). A structural `Error`
+  fails the render regardless of strictness; warnings become diagnostics.
+- It honors a `RenderStrictness` mode — `Strict` (any loss is an error),
+  `Warn` (best-effort output plus diagnostics), `Lossy` (documented degrade).
+- It returns `Result<Rendered<T>, RenderError>`, where `Rendered<T>` bundles the
+  output with any non-fatal `Diagnostic`s.
+
+`Unsupported` is a real, visible node — never a silent drop.
+
+### The component adapter
+
+`biscuit-terminal` provides `TreeComponent<T: TreeRenderable>`, which wraps a
+`TreeRenderable` and supplies an (infallible) `TerminalRenderable` impl by
+calling `render_tree()` then `render_terminal_node`. It is the bridge that lets
+a tree-producing component render to the terminal. It currently bridges **only**
+the terminal target.
+
+## 2. The existing darkmatter rendering path
+
+This path is **unchanged** by the render-tree work and is still the public,
+shipping behavior.
+
+- `Markdown::as_html(HtmlOptions)` and `for_terminal(&Markdown, TerminalOptions)`
+  are hand-written **`pulldown-cmark` event → string** serializers. Each walks
+  the event stream itself and emits the target string directly.
+- The source text is parsed independently for each pipeline. A third path,
+  `as_ast` (built on the alpha `markdown` crate, producing MDAST), exists but is
+  a dead end — a tree is produced and handed back, but nothing renders from it.
+- The parser is built with `markdown_parse_options()`
+  (`ENABLE_TABLES | ENABLE_STRIKETHROUGH`) and wrapped by darkmatter's
+  `InlineStyleProcessor` (custom `==mark==` / dim inline styles) and
+  `RuleProcessor` (horizontal rules with attributes).
+- `compose/` transformations (transclusion, interpolation, TOC linking) are
+  implemented as string preprocessing and stream-mutating iterator adapters.
+
+The new fold (`fold_markdown_to_document`) is an **additional, parallel,
+experimental** path. It does not touch `as_html` / `for_terminal` / `compose`,
+and nothing public routes through it yet.
+
+## 3. The structural-component rendering path
+
+Twelve structural components in `biscuit-terminal` — `BlockQuote`, `Compose`,
+`FileSystem`, `OrderedList`, `UnorderedList`, `Progress`, `Section`,
+`StatusBlock`, `Table`, `TextBlock`, `Todo`, and `TwoColumn` — now implement
+`TreeRenderable`, `MarkdownRenderable`, and `BrowserRenderable`. The default
+`TerminalRenderable::render` path on each of them (with one caveat below)
+projects to a `RenderNode` and lowers through `render_terminal_node`. The
+Markdown and Browser targets render exclusively through the tree.
+
+The shared shape per component is:
+
+- A private projection helper (`to_render_node()` or equivalent) builds the
+  canonical subtree.
+- `TreeRenderable::render_tree` calls that helper.
+- `TerminalRenderable::render` calls the helper, lowers via the tree
+  renderer, and falls back to a `render_bespoke` companion only for the
+  compatibility escape hatches the component still owns (e.g. a custom
+  `BlockQuote` border prefix, `Table::prefer_cursor_alignment`, the
+  `TwoColumn` image overlay).
+- `TerminalRenderable::render_tree_node` is overridden to return the same
+  projection, so when the component appears *inside* another component's
+  tree the projector emits the structural subtree rather than falling
+  back to "render to ANSI, strip, wrap in `Text`".
+
+**Caveat — `FileSystem` keeps its bespoke terminal path (Stage 4
+deferral).** Its Browser and Markdown targets route through the tree, and
+its `render_tree_node` override is in place so cross-target adapters
+consume it structurally. However `FileSystem::render` still calls the
+bespoke directory-tree renderer because the connector geometry (`├──`,
+`└──`, `│`) plus per-entry `Style` lowering through
+`render_tree_connector_list` is not yet at parity. Per Stage 3 §S3-1c
+the resolution chose outcome (iii) — defer to Stage 4 — and the named
+follow-on criteria live in
+[`stage1-and-2/lessons-learned.md`](../features/2026-05-19-pushing-toward-ir/stage1-and-2/lessons-learned.md)
+("Stage 4 acceptance criterion" under the FileSystem decision).
+
+**Stage 3 closed the structural-projection gap.** After Stage 3 every
+one of the twelve components — including `BlockQuote`, `StatusBlock`, and
+`FileSystem` — implements `TerminalRenderable::render_tree_node` and
+returns the same node as `TreeRenderable::render_tree`. Containers that
+hold a non-`Prose` child component (`BlockQuote`, `Compose`,
+`OrderedList`, `UnorderedList`) now project that child structurally
+through `project_renderable_content(.., ProjectionMode::Structural)`
+instead of falling back to ANSI-stripped text. The `RenderStrictness::Warn`
+fallback in `RenderableTerminalContent::to_tree_nodes` and in the
+terminal-hint short-circuit of `project_renderable_content` emit a
+`tracing::warn!` (then `tracing::debug!`) keyed on
+`TerminalRenderable::type_name` so a future component that forgets the
+override is observable in logs and CI.
+
+Stage 1 also landed eleven render-tree-functionality additions consumed
+by the Stage 2 component impls — `SequenceJoin::None` (Compose),
+`ListMarkerPolicy` (FileSystem), Browser and MarkdownPlus `ProgressHints`,
+`set_table_title` and Markdown-safe cell escaping (Table), Browser `Style`
+lowering for color, emphasis, underline, dim, and blink (TextBlock and
+all subsequent consumers), `TaskState` / `TaskHints` (Todo), and
+`ColumnsHints` lowering to Browser CSS and MarkdownPlus HTML (TwoColumn).
+See
+[`approved-render-tree-functionality.md`](../features/2026-05-19-pushing-toward-ir/approved-render-tree-functionality.md)
+for the full RT-* ledger.
+
+Inherently visual components (`TerminalImage`, `GraphExpression`) and
+simple non-block helpers (`PadLeft`, `PadRight`, `InlineContent`,
+`HorizontalRule`, `Status`) remain bespoke by design — they are out of
+scope for the tree. `Prose` is in a category of its own: it owns a
+component-local `ProseDocument` IR and does not project to a `RenderNode`.
+
+## 4. Testing coverage — and the gaps
+
+The render tree supports two distinct flows, and they are **not** equally
+tested.
+
+### Flow A — parsed document → tree → render (well covered)
+
+This is the darkmatter use case, and it is exercised end-to-end against real
+input:
+
+- **Event inventory** — compile-time exhaustive-match tests pin every
+  `pulldown-cmark` 0.13 `Event` / `Tag` / `TagEnd` variant to a disposition; a
+  parser enum change breaks the build.
+- **Fold unit tests** — folding of every Milestone 1 construct plus footnotes,
+  HTML-block grouping, and superscript/subscript.
+- **Golden round trips** (`render_tree_roundtrip.rs`) — 11 real Markdown
+  fixtures folded, structurally asserted, rendered back through the Markdown
+  renderer, and snapshotted; plus a serialized `Document` JSON-surface snapshot.
+- **Parity gates** (`render_tree_parity.rs`) — the new pipeline
+  (`fold → render_browser/terminal_document`) is run against real input **and
+  compared, on semantic invariants, to the legacy `as_html` / `for_terminal`
+  output**. This is the strongest evidence the new renderers are faithful.
+- **Benchmarks** — fold + render stress benchmarks in both `darkmatter` and
+  `biscuit-terminal`.
+
+Flow A is genuinely proven at the test level, not theoretical.
+
+### Flow B — component → tree → render (twelve components, parity-gated)
+
+This is the `TreeRenderable` use case. After Stage 2 of the IR push,
+twelve `biscuit-terminal` components are adopted and each has a parity gate.
+See
+[`renderable/features/2026-05-19-pushing-toward-ir/lessons-learned.md`](../features/2026-05-19-pushing-toward-ir/lessons-learned.md)
+for the per-component ledger.
+
+- `BlockQuote`, `Compose`, `FileSystem`, `OrderedList`, `UnorderedList`,
+  `Progress`, `Section`, `StatusBlock`, `Table`, `TextBlock`, `Todo`, and
+  `TwoColumn` each implement `TreeRenderable` (plus `MarkdownRenderable` and
+  `BrowserRenderable`). For all of them except `FileSystem`, the default
+  `TerminalRenderable::render` is the **tree** path; the bespoke renderer
+  is retained as a `render_bespoke` companion for parity comparison and
+  for the compatibility escape hatches the component still owns.
+- `TreeComponent` is unit-tested with synthetic stub types.
+- **Per-component parity gates** live in
+  `biscuit-terminal/lib/tests/`: `ordered_list_parity.rs`,
+  `unordered_list_parity.rs`, `list_parity.rs`, `progress_parity.rs`,
+  `section_parity.rs`, `status_block_parity.rs`, `table_parity.rs`,
+  `text_block_parity.rs`, `todo_parity.rs`, `two_column_parity.rs`. The
+  `BlockQuote` parity gate is in `render_tree_component_parity.rs`.
+  `Compose` and `FileSystem` carry their parity / projection tests
+  in-module rather than in a dedicated parity file.
+- Each parity test renders the component *both* ways — the bespoke
+  `render_bespoke` versus the tree path through `render_terminal_node` —
+  and asserts semantic invariants (token presence after ANSI stripping,
+  structural `NodeKind` for nested cases). Accepted divergences (e.g.
+  border treatment, attribution placement, flattened nested non-`Prose`
+  styling) are documented in the test bodies.
+
+Flow B is **parity-gated across the twelve adopted components**, with the
+discipline encoded as a separate test per component. The pattern that
+worked once on `BlockQuote` has now been applied to every component
+flipped to the tree.
+
+### Known gaps
+
+- **`FileSystem`'s terminal path is still bespoke.** Browser and Markdown
+  flow through the tree; `FileSystem::render` does not. The Stage 3 spec
+  (`stage3-spec.md` §S3-1c) decides between flipping, documenting as a
+  permanent escape hatch, or deferring.
+- **Three components are missing the `render_tree_node` override.**
+  `BlockQuote`, `StatusBlock`, and `FileSystem` implement
+  `TreeRenderable::render_tree` but their compat hook
+  (`TerminalRenderable::render_tree_node`) returns `None`. Their own
+  `.render` works correctly; the gap manifests only when one of them is
+  nested inside another component's tree, where the container falls back
+  to render-then-strip instead of pulling the structural subtree.
+  Stage 3 §S3-1a adds these overrides.
+- **Nested non-`Prose` block components flatten to text.** When a
+  container holds a nested component whose `render_tree_node` returns
+  `None`, the projector under `RenderStrictness::Warn` renders it to
+  ANSI, strips colors, and wraps the result in a `Text` node — so a
+  `BlockQuote` inside a `TwoColumn`, for example, appears as `Paragraph`
+  containing `Text("│ quoted")` instead of `NodeKind::BlockQuote`.
+  Stage 3 §S3-2 tightens the container parity tests once §S3-1 closes
+  the override gap.
+- **`as_html` and `for_terminal` still run legacy code.** The darkmatter
+  side of Flow A is parity-tested but not yet repointed at the tree.
+- **Lossy projection fidelity is characterized, not eliminated.** Text
+  extraction from a `Prose` component remains lossy (styling flattened);
+  the parity tests assert content survives and document styling loss
+  as accepted.
+- **Deferred fold coverage.** Custom darkmatter inline styles (`==mark==`, dim)
+  and horizontal-rule attributes are not folded yet, because darkmatter's
+  `InlineStyleProcessor` / `RuleProcessor` discard source offsets; reconciling
+  that with span-carrying nodes is an open design decision.
+
+## 5. Roadmap for integration
+
+This is a direction sketch, not a detailed plan. Each step should land as its
+own feature with its own parity gate.
+
+### Done in Stage 1–2 — component adoption (`biscuit-terminal`)
+
+1. **Component-side parity discipline established.** `BlockQuote`'s
+   `render_tree_component_parity.rs` set the pattern: render both ways,
+   assert semantic equivalence, document accepted divergences. Every
+   subsequent adoption added its own parity test file (or in-module
+   parity tests for `Compose` and `FileSystem`) before the component
+   was flipped.
+2. **Browser and Markdown adapters wired.** Both targets render the
+   twelve adopted components through `render_browser_node` /
+   `render_markdown_node`. The `BrowserRenderable` impls call the
+   shared projection and lower via the tree; the same applies to
+   `MarkdownRenderable`.
+3. **Twelve structural components flipped:** `BlockQuote`, `Compose`,
+   `FileSystem`, `OrderedList`, `UnorderedList`, `Progress`, `Section`,
+   `StatusBlock`, `Table`, `TextBlock`, `Todo`, `TwoColumn`. For all
+   except `FileSystem`, `TerminalRenderable::render` runs the tree
+   path by default and `render_bespoke` is retained for parity and
+   for the documented escape hatches.
+4. **Inherently visual components left bespoke** by design:
+   `TerminalImage`, `GraphExpression`. The simple non-block helpers
+   (`PadLeft`, `PadRight`, `InlineContent`, `HorizontalRule`, `Status`)
+   are likewise out of scope for the tree.
+5. **Stage 1 RT-\* additions landed.** Eleven render-tree-functionality
+   features (`SequenceJoin::None`, `ListMarkerPolicy`, `ProgressHints`
+   in Browser and MarkdownPlus, table title and Markdown-safe cell
+   escaping, Browser `Style` lowering, `TaskState` / `TaskHints`,
+   Browser CSS and MarkdownPlus HTML lowering for `ColumnsHints`)
+   gave Stage 2 the renderer vocabulary it needed.
+
+### Stage 3 — structural-projection completion
+
+See [`stage3-spec.md`](../features/2026-05-19-pushing-toward-ir/stage3-spec.md)
+for the full plan. The work items:
+
+- Add the missing `render_tree_node` overrides on `BlockQuote`,
+  `StatusBlock`, and `FileSystem`.
+- Decide `FileSystem`'s terminal `render` path (flip, document, or defer).
+- Tighten every container's nested-component parity test from "text
+  survives" to "structural `NodeKind` survives" once the overrides
+  land.
+- Strengthen the `to_tree_nodes` warn-once fallback policy and add a
+  stable `type_name()` hook to `TerminalRenderable` so missing overrides
+  are observable in CI.
+
+### darkmatter migration
+
+6. **Resolve the deferred fold work** — decide how the offset-destroying
+   `InlineStyleProcessor` / `RuleProcessor` reconcile with span-carrying nodes,
+   then fold `==mark==`, dim, and HR-with-attributes.
+7. **Expand the parity fixtures** until the tree pipeline reaches accepted
+   parity with `as_html` / `for_terminal` across the real darkmatter corpus
+   (the Phase 11 harness already surfaces mismatches — e.g. legacy
+   `for_terminal` silently drops raw block HTML).
+8. **Migrate the public render paths** behind the parity gate: re-point
+   `as_html` at `fold → render_browser_document` and `for_terminal` at
+   `fold → render_terminal_document`. Watch the existing render/compose
+   benchmarks — the owned tree is a heavier cost profile than the streaming
+   serializers.
+9. **Re-home `compose/`** transformations (transclusion, interpolation, TOC
+   linking) as composable tree-rewrite passes; the node model already reserves
+   the hooks (`SourceSpan` provenance, `NodeAttrs`, `DocumentMetadata`).
+10. **Retire or adapt `as_ast`** — either drop the dead MDAST path or implement
+    a dedicated `Document → MDAST JSON` adapter if external consumers need it.
+
+### Guiding principle
+
+Every migration step — component or darkmatter — should be gated by a parity
+test against the renderer it replaces, the same discipline Phase 11 applied to
+the darkmatter pipeline. The tree is adopted *because a parity gate proved it
+faithful*, never on the assumption that it is.

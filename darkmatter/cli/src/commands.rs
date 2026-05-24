@@ -1,5 +1,6 @@
 use crate::args::{
-    Cli, Command as CliCommand, GraphFormat, OutputFormat, ValidateOutputFormat, ValidateTarget,
+    Cli, Command as CliCommand, GraphFormat, OutputFormat, SchemaTarget, ValidateOutputFormat,
+    ValidateTarget,
 };
 use crate::output::{
     OutputArtifact, emit_or_show_artifact, html_artifact, json_artifact, markdown_artifact,
@@ -17,6 +18,8 @@ use rayon::prelude::*;
 use std::io::{self, IsTerminal, Read};
 use std::path::PathBuf;
 use tracing::{debug, info, instrument};
+
+pub mod schema;
 
 /// Resolved theme configuration for terminal rendering.
 struct ResolvedTheme {
@@ -311,6 +314,23 @@ pub fn run_subcommand(command: CliCommand, cli: &Cli) -> Result<()> {
         } => {
             run_graph(&input, follow, validate, json)?;
         }
+        CliCommand::Schema { target } => match target {
+            SchemaTarget::Validate {
+                inputs,
+                schema,
+                format,
+                quiet,
+            } => {
+                schema::run_validate(&inputs, schema.as_deref(), format, quiet)?;
+            }
+            SchemaTarget::Detect {
+                files,
+                format,
+                merge,
+            } => {
+                schema::run_detect(&files, format, merge)?;
+            }
+        },
     }
 
     Ok(())
@@ -409,7 +429,7 @@ pub fn run_render(
             emit_or_show_artifact(markdown_artifact(&md), show)?;
         }
         OutputFormat::Html => {
-            let artifact = html_artifact(&md, theme.prose, theme.code, theme.color_mode)?;
+            let artifact = html_artifact(&md, theme.prose, theme.code, theme.color_mode, cli)?;
             emit_or_show_artifact(artifact, show)?;
         }
         OutputFormat::Json => {
@@ -635,65 +655,70 @@ pub fn run_compose(
         use darkmatter::markdown::compose::ShellExpansionError;
 
         match e {
-            ShellExpansion(ShellExpansionError::ExecutionFailed {
-                command,
-                code,
-                stderr,
-                origin,
-                ..
-            }) => {
-                let detail = stderr.trim();
-                if detail.is_empty() {
-                    eyre!("Shell command failed (exit {code}) at {origin}: '{command}'")
-                } else {
+            ShellExpansion(inner) => match *inner {
+                ShellExpansionError::ExecutionFailed {
+                    command,
+                    code,
+                    stderr,
+                    origin,
+                    ..
+                } => {
+                    let detail = stderr.trim();
+                    if detail.is_empty() {
+                        eyre!("Shell command failed (exit {code}) at {origin}: '{command}'")
+                    } else {
+                        eyre!(
+                            "Shell command failed (exit {code}) at {origin}: '{command}'\n{detail}"
+                        )
+                    }
+                }
+                ShellExpansionError::CommandNotFound { command, origin, .. } => {
                     eyre!(
-                        "Shell command failed (exit {code}) at {origin}: '{command}'\n{detail}"
+                        "Command not found: '{command}' ({origin})\n\
+                         Ensure '{command}' is installed and available on your PATH."
                     )
                 }
-            }
-            ShellExpansion(ShellExpansionError::CommandNotFound { command, origin }) => {
-                eyre!(
-                    "Command not found: '{command}' ({origin})\n\
-                     Ensure '{command}' is installed and available on your PATH."
-                )
-            }
-            ShellExpansion(ShellExpansionError::Timeout {
-                command,
-                timeout,
-                origin,
-            }) => {
-                eyre!("Shell command timed out after {timeout:?} at {origin}: '{command}'")
-            }
-            ShellExpansion(ShellExpansionError::Blacklisted {
-                command,
-                reason,
-                origin,
-            }) => {
-                eyre!("Blocked command at {origin}: '{command}'\nReason: {reason}")
-            }
-            ShellExpansion(ShellExpansionError::Denied { command, origin }) => {
-                eyre!("Command denied at {origin}: '{command}'")
-            }
-            ShellExpansion(ShellExpansionError::ApprovalRequired {
-                command,
-                whitelist_path,
-                origin: _,
-                ..
-            }) => {
-                let executable = command.split_whitespace().next().unwrap_or(&command);
-                // Backslash-escape underscores so Prose (used by `main` to
-                // render error chains) does not mistake `_..._` patterns in
-                // paths or command names for italic markdown.
-                let escape_prose = |s: &str| s.replace('_', "\\_");
-                let path = whitelist_path.display().to_string();
-                eyre!(
-                    "Approval required for '{}'.\nTo allow in non-interactive mode, add one of these to {}:\n  exact {}\n  prefix {}",
-                    escape_prose(&command),
-                    escape_prose(&path),
-                    escape_prose(&command),
-                    escape_prose(executable),
-                )
-            }
+                ShellExpansionError::Timeout {
+                    command,
+                    timeout,
+                    origin,
+                    ..
+                } => {
+                    eyre!("Shell command timed out after {timeout:?} at {origin}: '{command}'")
+                }
+                ShellExpansionError::Blacklisted {
+                    command,
+                    reason,
+                    origin,
+                    ..
+                } => {
+                    eyre!("Blocked command at {origin}: '{command}'\nReason: {reason}")
+                }
+                ShellExpansionError::Denied { command, origin, .. } => {
+                    eyre!("Command denied at {origin}: '{command}'")
+                }
+                ShellExpansionError::ApprovalRequired {
+                    command,
+                    whitelist_path,
+                    origin: _,
+                    ..
+                } => {
+                    let executable = command.split_whitespace().next().unwrap_or(&command);
+                    // Backslash-escape underscores so Prose (used by `main` to
+                    // render error chains) does not mistake `_..._` patterns in
+                    // paths or command names for italic markdown.
+                    let escape_prose = |s: &str| s.replace('_', "\\_");
+                    let path = whitelist_path.display().to_string();
+                    eyre!(
+                        "Approval required for '{}'.\nTo allow in non-interactive mode, add one of these to {}:\n  exact {}\n  prefix {}",
+                        escape_prose(&command),
+                        escape_prose(&path),
+                        escape_prose(&command),
+                        escape_prose(executable),
+                    )
+                }
+                other => eyre!("{other}"),
+            },
             other => other.into(),
         }
     })?;
@@ -701,7 +726,7 @@ pub fn run_compose(
 
     // Verbose compose summary
     if cli.verbose > 0 {
-        use biscuit_terminal::components::renderable::Renderable;
+        use biscuit_terminal::components::renderable::TerminalRenderable;
         use biscuit_terminal::prelude::{Status, StatusState};
         use biscuit_terminal::terminal::Terminal;
         let terminal = Terminal::default();
@@ -718,7 +743,7 @@ pub fn run_compose(
     if cli.verbose > 1
         && let Some(perf_report) = &report.perf
     {
-        use biscuit_terminal::components::renderable::Renderable;
+        use biscuit_terminal::components::renderable::TerminalRenderable;
         use biscuit_terminal::prelude::Status;
         use biscuit_terminal::terminal::Terminal;
         let terminal = Terminal::default();
@@ -755,7 +780,8 @@ pub fn run_compose(
             }
         }
         OutputFormat::Html => {
-            let artifact = html_artifact(&composed, theme.prose, theme.code, theme.color_mode)?;
+            let artifact =
+                html_artifact(&composed, theme.prose, theme.code, theme.color_mode, cli)?;
             emit_or_show_artifact(artifact, show)?;
         }
         OutputFormat::Json => {
@@ -766,7 +792,7 @@ pub fn run_compose(
 
     // Emit compose warnings to stderr
     if !report.warnings.is_empty() {
-        use biscuit_terminal::components::renderable::Renderable;
+        use biscuit_terminal::components::renderable::TerminalRenderable;
         use biscuit_terminal::prelude::{Status, StatusState};
         use biscuit_terminal::terminal::Terminal;
         let term = Terminal::default();
@@ -968,7 +994,7 @@ pub fn run_rm(input: &PathBuf, props: &[String], json: bool, cli: &Cli) -> Resul
         println!("{}", serde_json::to_string_pretty(&output)?);
     } else if cli.verbose > 0 {
         use biscuit_terminal::components::prose::Prose;
-        use biscuit_terminal::components::renderable::Renderable;
+        use biscuit_terminal::components::renderable::TerminalRenderable;
         use biscuit_terminal::terminal::Terminal;
         let props_label = if removed.len() == 1 {
             format!("<b>{}</b> property", removed[0])
@@ -1453,7 +1479,7 @@ fn format_validation_issues(
 ) -> String {
     use biscuit_terminal::components::list::UnorderedList;
     use biscuit_terminal::components::prose::Prose;
-    use biscuit_terminal::components::renderable::Renderable as _;
+    use biscuit_terminal::components::renderable::TerminalRenderable as _;
     use darkmatter::markdown::compose::ComposeSource;
     use darkmatter::markdown::reference::types::ReferenceKind;
     use darkmatter::markdown::reference::validate::ReferenceSeverity;
@@ -1800,7 +1826,7 @@ fn validation_report_to_json(
 
 #[instrument(skip_all)]
 fn run_graph(input: &PathBuf, follow: bool, validate: bool, json: bool) -> Result<()> {
-    use biscuit_terminal::components::renderable::Renderable;
+    use biscuit_terminal::components::renderable::TerminalRenderable;
     use biscuit_terminal::terminal::Terminal;
     use darkmatter::markdown::reference::file_tree::FileTree;
 
@@ -1838,7 +1864,7 @@ fn run_graph(input: &PathBuf, follow: bool, validate: bool, json: bool) -> Resul
     // Validation summary footer
     if validate && let Some(report) = tree.validation_report() {
         use biscuit_terminal::components::prose::Prose;
-        use biscuit_terminal::components::renderable::Renderable as _;
+        use biscuit_terminal::components::renderable::TerminalRenderable as _;
 
         let formatted = format_validation_issues(report, &term);
         if !formatted.is_empty() {
@@ -1917,7 +1943,7 @@ fn format_compose_perf_report(
 ) -> String {
     use biscuit_terminal::components::block_quote::BlockQuote;
     use biscuit_terminal::components::prose::Prose;
-    use biscuit_terminal::components::renderable::Renderable as _;
+    use biscuit_terminal::components::renderable::TerminalRenderable as _;
     use biscuit_terminal::components::two_column::TwoColumn;
     use biscuit_terminal::utils::color::{Color, Tailwind};
 

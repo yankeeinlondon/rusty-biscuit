@@ -27,10 +27,15 @@
 //! // Output contains ANSI escape codes for terminal display
 //! ```
 
+// `PageAlignment`/`PageFill` are deprecated in favor of
+// `renderable::layout::Layout`; the page-level component-layout pipeline in
+// this module still consumes them while that migration completes.
+#[allow(deprecated)]
+use crate::layout::{LayoutContext, PageAlignment, PageComponent, PageFill};
 use crate::markdown::{
     Markdown, MarkdownError,
     block::{RuleProcessor, build_rule_with_defaults, hr_defaults_from_frontmatter},
-    dsl::parse_code_info,
+    dsl::{CodeBlockMeta, parse_code_info},
     highlighting::{
         CodeHighlighter, ColorMode, ThemePair, prose::ProseHighlighter, scope_cache::ScopeCache,
     },
@@ -40,7 +45,7 @@ use crate::markdown::{
 use biscuit_terminal::components::horizontal_rule::HorizontalRule;
 use biscuit_terminal::components::image_options::TerminalImageOptions;
 use biscuit_terminal::components::prose::Prose;
-use biscuit_terminal::components::renderable::Renderable;
+use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::components::table::cell::TableCellContent;
 use biscuit_terminal::components::table::column::TableColumn;
 use biscuit_terminal::components::table::table::Table as TerminalTable;
@@ -158,6 +163,28 @@ impl ColorDepth {
             Self::Colors16
         } else {
             Self::None
+        }
+    }
+}
+
+impl From<TerminalColorDepth> for ColorDepth {
+    /// Project a biscuit-terminal [`ColorDepth`](TerminalColorDepth) onto the
+    /// darkmatter renderer's coarser palette using the same thresholds as
+    /// [`ColorDepth::auto_detect`].
+    ///
+    /// Darkmatter has no 8-color variant, so biscuit's `Minimal` (8 colors)
+    /// falls below the 16-color floor and maps to [`ColorDepth::None`] — the
+    /// same projection [`auto_detect`](Self::auto_detect) makes via
+    /// [`crate::terminal::color_depth`]. Preserving that mapping is what lets
+    /// a [`crate::layout::DarkmatterPage`] built from a real
+    /// [`biscuit_terminal::terminal::Terminal`] render byte-for-byte
+    /// identically to `for_terminal(&md, TerminalOptions::default())`.
+    fn from(depth: TerminalColorDepth) -> Self {
+        match depth {
+            TerminalColorDepth::TrueColor => ColorDepth::TrueColor,
+            TerminalColorDepth::Enhanced => ColorDepth::Colors256,
+            TerminalColorDepth::Basic => ColorDepth::Colors16,
+            TerminalColorDepth::Minimal | TerminalColorDepth::None => ColorDepth::None,
         }
     }
 }
@@ -650,7 +677,7 @@ impl ImageRenderer {
             return format!("▉ IMAGE[{}]\n", alt_text);
         }
 
-        // Render via Renderable fallback (protocol-aware string output)
+        // Render via TerminalRenderable fallback (protocol-aware string output)
         let render_terminal = self.render_terminal();
         let output = term_image.render(&render_terminal);
         if output.is_empty() {
@@ -796,7 +823,7 @@ fn convert_alignment(align: &pulldown_cmark::Alignment) -> Alignment {
 ///
 /// This function renders markdown content with syntax-highlighted code blocks
 /// using ANSI escape sequences for terminal display. Inline images are rendered
-/// via biscuit-terminal's protocol-aware `Renderable` trait (Kitty/iTerm2).
+/// via biscuit-terminal's protocol-aware `TerminalRenderable` trait (Kitty/iTerm2).
 ///
 /// ## Examples
 ///
@@ -812,8 +839,18 @@ fn convert_alignment(align: &pulldown_cmark::Alignment) -> Alignment {
 ///
 /// Returns an error if theme loading fails or syntax highlighting encounters issues.
 pub fn for_terminal(md: &Markdown, options: TerminalOptions) -> Result<String, MarkdownError> {
+    for_terminal_with_layout(md, options, None)
+}
+
+/// Internal entry point that accepts an optional [`LayoutContext`] for
+/// page-level component alignment and fill.
+pub(crate) fn for_terminal_with_layout(
+    md: &Markdown,
+    options: TerminalOptions,
+    layout_ctx: Option<&LayoutContext>,
+) -> Result<String, MarkdownError> {
     let mut output = Vec::new();
-    write_terminal(&mut output, md, options)?;
+    write_terminal_with_layout(&mut output, md, options, layout_ctx)?;
     Ok(String::from_utf8_lossy(&output).into_owned())
 }
 
@@ -843,6 +880,17 @@ pub fn write_terminal<W: std::io::Write>(
     md: &Markdown,
     options: TerminalOptions,
 ) -> Result<(), MarkdownError> {
+    write_terminal_with_layout(writer, md, options, None)
+}
+
+/// Internal entry point that accepts an optional [`LayoutContext`] for
+/// page-level component alignment and fill.
+pub(crate) fn write_terminal_with_layout<W: std::io::Write>(
+    writer: &mut W,
+    md: &Markdown,
+    options: TerminalOptions,
+    layout_ctx: Option<&LayoutContext>,
+) -> Result<(), MarkdownError> {
     let color_depth = options.color_depth.unwrap_or_else(ColorDepth::auto_detect);
 
     // Early return if no color support
@@ -866,7 +914,23 @@ pub fn write_terminal<W: std::io::Write>(
         .unwrap_or_else(|| biscuit_terminal::discovery::detection::terminal_width() as u16);
     tracing::debug!(terminal_width, "Terminal width for rendering");
 
-    let code_highlighter = CodeHighlighter::new(options.code_theme, options.color_mode);
+    // Code blocks contrast against the page: they resolve their theme *variant*
+    // against the INVERTED color mode (a light code panel in a dark terminal,
+    // and vice versa). Prose, headings, and tables keep `options.color_mode`.
+    // See `ColorMode::inverted` for the rationale and the theme-name
+    // abstraction.
+    let code_highlighter = CodeHighlighter::new(options.code_theme, options.color_mode.inverted());
+    // The panel's internal contrast (header pill text color, highlight-line
+    // background math) keys off the *resolved* theme background, not the
+    // requested mode — single-variant themes (e.g. dracula) don't invert, so
+    // their dark panel must still get light header text.
+    let code_color_mode = crate::markdown::output::code_block::mode_for_background(
+        code_highlighter
+            .theme()
+            .settings
+            .background
+            .unwrap_or(Color::BLACK),
+    );
     let hr_defaults = hr_defaults_from_frontmatter(md);
 
     // Load prose theme for ProseHighlighter
@@ -1047,31 +1111,23 @@ pub fn write_terminal<W: std::io::Write>(
 
                     match options.mermaid_mode {
                         MermaidMode::Text => {
-                            // Ensure header starts on a fresh line (not appended to previous content)
-                            if wrapper.current_col() > 0 {
-                                wrapper.newline();
-                            }
-                            // Text mode: show header with title and "mermaid" label (it's a code block)
-                            let header = format_header_row(
-                                meta.title.as_deref(),
-                                "mermaid",
-                                bg_color,
-                                options.color_mode,
-                                terminal_width,
-                            );
-                            wrapper.push_with_newlines(&header);
-                            wrapper.newline();
-                            // Render with syntax highlighting (same as regular code blocks)
-                            let highlighted = highlight_code(
+                            // Text mode renders the mermaid source as a regular
+                            // code block, so route it through the shared emitter —
+                            // same width resolution, code-panel color mode, and
+                            // page-layout handling as ordinary fences (no `\x1b[K`
+                            // right-margin gap under decoration; pill and body
+                            // share the right boundary).
+                            emit_highlighted_code_block(
+                                &mut wrapper,
                                 &code_buffer,
                                 "mermaid",
+                                &meta,
                                 &code_highlighter,
                                 &options,
-                                &meta,
-                                options.color_mode,
+                                code_color_mode,
+                                terminal_width,
+                                layout_ctx,
                             )?;
-                            wrapper.push_with_newlines(&highlighted);
-                            wrapper.push_with_newlines("\n\n");
                         }
                         MermaidMode::Image => {
                             // Flush output before viuer prints to stdout
@@ -1083,11 +1139,22 @@ pub fn write_terminal<W: std::io::Write>(
                             // Render mermaid diagram as image using mmdc CLI
                             let diagram = crate::mermaid::Mermaid::new(&code_buffer);
 
-                            let render_succeeded = match diagram.render_for_terminal() {
-                                Ok(()) => true,
-                                Err(e) => {
-                                    tracing::warn!(error = %e, "Mermaid image rendering failed");
-                                    false
+                            // `TerminalImageMode::Never` means "always use text
+                            // fallback", so skip the mmdc attempt entirely and
+                            // route straight to the highlighted-source fallback.
+                            // This honors the image-mode contract and gives
+                            // callers a deterministic, in-process way to exercise
+                            // the fallback path regardless of `mmdc`/TTY presence.
+                            let render_succeeded = if options.image_mode == TerminalImageMode::Never
+                            {
+                                false
+                            } else {
+                                match diagram.render_for_terminal() {
+                                    Ok(()) => true,
+                                    Err(e) => {
+                                        tracing::warn!(error = %e, "Mermaid image rendering failed");
+                                        false
+                                    }
                                 }
                             };
 
@@ -1107,73 +1174,46 @@ pub fn write_terminal<W: std::io::Write>(
                                 // viuer already prints a newline, just add one more for spacing
                                 wrapper.push_with_newlines("\n");
                             } else {
-                                // Rendering failed - show fallback with syntax highlighting
-                                // Ensure header starts on a fresh line
-                                if wrapper.current_col() > 0 {
-                                    wrapper.newline();
-                                }
-                                // Emit header row with title and "mermaid" label
-                                let header = format_header_row(
-                                    meta.title.as_deref(),
-                                    "mermaid",
-                                    bg_color,
-                                    options.color_mode,
-                                    terminal_width,
-                                );
-                                wrapper.push_with_newlines(&header);
-                                wrapper.newline();
-                                // Render with syntax highlighting (same as regular code blocks)
-                                let highlighted = highlight_code(
+                                // Rendering failed — fall back to the mermaid
+                                // source as a regular code block via the shared
+                                // emitter, so the fallback honors page decoration
+                                // identically to ordinary fences (same width,
+                                // code-panel color mode, and right-margin
+                                // boundary).
+                                emit_highlighted_code_block(
+                                    &mut wrapper,
                                     &code_buffer,
                                     "mermaid",
+                                    &meta,
                                     &code_highlighter,
                                     &options,
-                                    &meta,
-                                    options.color_mode,
+                                    code_color_mode,
+                                    terminal_width,
+                                    layout_ctx,
                                 )?;
-                                wrapper.push_with_newlines(&highlighted);
-                                wrapper.push_with_newlines("\n\n");
                             }
                         }
                         MermaidMode::Off => unreachable!(),
                     }
                 } else {
-                    // Render code block with highlighting (normal path)
+                    // Render code block with highlighting (normal path) via the
+                    // shared emitter — see `emit_highlighted_code_block`. The
+                    // emitter resolves the component width, pads the body to it
+                    // (never `\x1b[K` under a layout context), and applies page
+                    // layout so prose fences, mermaid text, and the mermaid
+                    // image-fallback all behave identically.
                     let meta = parse_code_info(&code_info_string).unwrap_or_default();
-
-                    // Get background color from theme for header row
-                    let theme = code_highlighter.theme();
-                    let bg_color = theme.settings.background.unwrap_or(Color::BLACK);
-
-                    // Ensure header starts on a fresh line (not appended to previous content)
-                    if wrapper.current_col() > 0 {
-                        wrapper.newline();
-                    }
-
-                    // Add header row with title and language (right-aligned)
-                    let header = format_header_row(
-                        meta.title.as_deref(),
-                        &code_language,
-                        bg_color,
-                        options.color_mode,
-                        terminal_width,
-                    );
-                    wrapper.push_with_newlines(&header);
-                    wrapper.newline();
-
-                    // Highlight and render code
-                    let highlighted = highlight_code(
+                    emit_highlighted_code_block(
+                        &mut wrapper,
                         &code_buffer,
                         &code_language,
+                        &meta,
                         &code_highlighter,
                         &options,
-                        &meta,
-                        options.color_mode,
+                        code_color_mode,
+                        terminal_width,
+                        layout_ctx,
                     )?;
-                    wrapper.push_with_newlines(&highlighted);
-                    // highlight_code ends with a bottom padding row, add newline after it
-                    // then add blank line for separation from following content
-                    wrapper.push_with_newlines("\n\n");
                 }
             }
             InlineEvent::Standard(Event::Text(text)) if in_code_block => {
@@ -1319,10 +1359,17 @@ pub fn write_terminal<W: std::io::Write>(
                     }
                 }
 
-                // For top-level lists inside a blockquote, add a blank line before the list
-                // if there is prior content, to match paragraph spacing behavior.
-                if list_stack.is_empty() && blockquote_depth > 0 && blockquote_has_content {
-                    wrapper.emit_newline_with_prefix();
+                // Apply page-level layout for top-level lists.
+                if list_stack.is_empty()
+                    && let Some(ctx) = layout_ctx
+                {
+                    let component = PageComponent::Lists;
+                    let component_width = ctx
+                        .resolve_component_width(component)
+                        .unwrap_or(terminal_width);
+                    wrapper.push_component_width(component_width as usize);
+                    let pad = ctx.alignment_padding(component, component_width);
+                    wrapper.alignment_offset = pad as usize;
                 }
 
                 list_stack.push(start_num);
@@ -1331,6 +1378,8 @@ pub fn write_terminal<W: std::io::Write>(
                 list_stack.pop();
                 // Add blank line after top-level list ends
                 if list_stack.is_empty() {
+                    wrapper.pop_component_width();
+                    wrapper.alignment_offset = 0;
                     wrapper.newline();
                 }
             }
@@ -1494,12 +1543,20 @@ pub fn write_terminal<W: std::io::Write>(
             }
             InlineEvent::Standard(Event::End(TagEnd::Table)) => {
                 in_table = false;
-                // Render the buffered table with proper formatting
-                wrapper.push_with_newlines(&render_table(
-                    &table_rows,
-                    &table_alignments,
+                // Resolve component width when a layout context is present.
+                let table_width = resolve_component_render_width(
+                    PageComponent::Tables,
                     terminal_width,
-                ));
+                    layout_ctx,
+                );
+                // Render the buffered table with proper formatting
+                let table_output = render_table(&table_rows, &table_alignments, table_width);
+                let table_output = if let Some(ctx) = layout_ctx {
+                    apply_component_layout(&table_output, PageComponent::Tables, ctx)
+                } else {
+                    table_output
+                };
+                wrapper.push_with_newlines(&table_output);
                 // Add blank line after table for spacing from following content
                 wrapper.push_with_newlines("\n\n");
                 table_rows.clear();
@@ -1557,6 +1614,11 @@ pub fn write_terminal<W: std::io::Write>(
                         // fallback text on failure
                         let result =
                             renderer.render_image(&current_image_path, &parsed_alt, parsed_width);
+                        let result = if let Some(ctx) = layout_ctx {
+                            apply_component_layout(&result, PageComponent::Images, ctx)
+                        } else {
+                            result
+                        };
                         if !result.is_empty() {
                             // Print rendered output (or fallback text on failure)
                             write!(writer, "{}", result).ok();
@@ -1564,15 +1626,20 @@ pub fn write_terminal<W: std::io::Write>(
                         writer.flush().ok();
                         just_rendered_image = true;
                     } else {
-                        wrapper.push_with_newlines(&renderer.render_image(
-                            &current_image_path,
-                            &parsed_alt,
-                            parsed_width,
-                        ));
+                        let mut result =
+                            renderer.render_image(&current_image_path, &parsed_alt, parsed_width);
+                        if let Some(ctx) = layout_ctx {
+                            result = apply_component_layout(&result, PageComponent::Images, ctx);
+                        }
+                        wrapper.push_with_newlines(&result);
                         just_rendered_image = true;
                     }
                 } else {
-                    wrapper.push_with_newlines(&format!("▉ IMAGE[{}]\n", parsed_alt));
+                    let mut result = format!("▉ IMAGE[{}]\n", parsed_alt);
+                    if let Some(ctx) = layout_ctx {
+                        result = apply_component_layout(&result, PageComponent::Images, ctx);
+                    }
+                    wrapper.push_with_newlines(&result);
                     just_rendered_image = true;
                 }
                 in_image = false;
@@ -1588,6 +1655,16 @@ pub fn write_terminal<W: std::io::Write>(
                         } else {
                             wrapper.push_with_newlines("\n\n");
                         }
+                    }
+                    // Apply page-level layout for top-level blockquotes.
+                    if let Some(ctx) = layout_ctx {
+                        let component = PageComponent::BlockQuotes;
+                        let component_width = ctx
+                            .resolve_component_width(component)
+                            .unwrap_or(terminal_width);
+                        wrapper.push_component_width(component_width as usize);
+                        let pad = ctx.alignment_padding(component, component_width);
+                        wrapper.alignment_offset = pad as usize;
                     }
                 } else {
                     // Nested blockquote - end current line with outer prefix, add blank line
@@ -1607,6 +1684,9 @@ pub fn write_terminal<W: std::io::Write>(
                 scope_stack.pop();
                 // Update wrapper's blockquote state
                 if blockquote_depth == 0 {
+                    // Pop any layout overrides applied at blockquote entry.
+                    wrapper.pop_component_width();
+                    wrapper.alignment_offset = 0;
                     blockquote_has_content = false; // Reset only when fully exiting blockquotes
                     wrapper.clear_blockquote();
                     // Add blank line after blockquote (like headings and paragraphs)
@@ -2192,6 +2272,14 @@ struct LineWrapper {
     supports_hyperlinks: bool,
     /// Stack of indentation widths for wrapped continuation lines (e.g. for nested list items)
     indent_stack: Vec<usize>,
+    /// Left padding (in columns) to apply at the start of each line for
+    /// component alignment (e.g. centering a blockquote).
+    alignment_offset: usize,
+    /// Stack of *previous* max-width values saved when a component-specific
+    /// width override is pushed (e.g. a blockquote or list narrowing the
+    /// wrap width). The active wrap width is always `self.max_width`; this
+    /// stack only exists so `pop_component_width` can restore the prior value.
+    previous_widths: Vec<usize>,
 }
 
 impl LineWrapper {
@@ -2205,7 +2293,31 @@ impl LineWrapper {
             blockquote_bg: None,
             supports_hyperlinks,
             indent_stack: Vec::new(),
+            alignment_offset: 0,
+            previous_widths: Vec::new(),
         }
+    }
+
+    /// Push a component-specific max-width override.
+    fn push_component_width(&mut self, width: usize) {
+        self.previous_widths.push(self.max_width);
+        self.max_width = width;
+    }
+
+    /// Pop the most recent component-specific max-width override.
+    fn pop_component_width(&mut self) {
+        if let Some(w) = self.previous_widths.pop() {
+            self.max_width = w;
+        }
+    }
+
+    /// Current effective max width, accounting for any component overrides.
+    ///
+    /// `self.max_width` is always the active wrap width — component overrides
+    /// assign to it directly via [`Self::push_component_width`]. The
+    /// `previous_widths` stack only stores values to restore on pop.
+    fn effective_max_width(&self) -> usize {
+        self.max_width
     }
 
     /// Pushes a new indentation width onto the stack.
@@ -2235,6 +2347,13 @@ impl LineWrapper {
     fn ensure_prefix(&mut self) {
         if self.current_col == 0 {
             let mut current_pos = 0;
+
+            // Emit alignment offset for page-component alignment (e.g. centered blockquotes).
+            if self.alignment_offset > 0 {
+                let spaces = " ".repeat(self.alignment_offset);
+                self.output.push_str(&spaces);
+                current_pos += self.alignment_offset;
+            }
 
             if self.blockquote_depth > 0
                 && let Some(bg) = self.blockquote_bg
@@ -2294,17 +2413,18 @@ impl LineWrapper {
     ///
     /// Called before newlines in blockquotes to ensure uniform background width.
     fn pad_to_width(&mut self) {
+        let max = self.effective_max_width();
         if let Some(bg) = self.blockquote_bg
-            && self.current_col < self.max_width
+            && self.current_col < max
             && self.current_col > 0
         {
-            let padding = self.max_width - self.current_col;
+            let padding = max - self.current_col;
             let spaces = " ".repeat(padding);
             self.output.push_str(&format!(
                 "\x1b[48;2;{};{};{}m{}\x1b[0m",
                 bg.r, bg.g, bg.b, spaces
             ));
-            self.current_col = self.max_width;
+            self.current_col = max;
         }
     }
 
@@ -2368,7 +2488,7 @@ impl LineWrapper {
                     if self.current_col > 0 {
                         // Check if space would overflow the line
                         // If at max width, skip the space (next word will wrap anyway)
-                        if self.current_col >= self.max_width {
+                        if self.current_col >= self.effective_max_width() {
                             // At or past max width - don't emit space, let next word trigger wrap
                             continue;
                         }
@@ -2427,8 +2547,9 @@ impl LineWrapper {
         self.ensure_prefix();
 
         // Check if word fits on current line
+        let max = self.effective_max_width();
         if self.current_col > (self.blockquote_depth * 4 + self.current_indent())
-            && self.current_col + word_width > self.max_width
+            && self.current_col + word_width > max
         {
             // Need to wrap - emit newline (with blockquote prefix if applicable)
             self.emit_newline_with_prefix();
@@ -2547,8 +2668,9 @@ impl LineWrapper {
         self.ensure_prefix();
 
         // Check if code fits on current line
+        let max = self.effective_max_width();
         if self.current_col > (self.blockquote_depth * 4 + self.current_indent())
-            && self.current_col + code_width > self.max_width
+            && self.current_col + code_width > max
         {
             // Wrap before inline code (with blockquote prefix if applicable)
             self.emit_newline_with_prefix();
@@ -2600,23 +2722,42 @@ impl LineWrapper {
     }
 }
 
+/// Resolve a [`Layout`](biscuit_terminal::utils::layout::Layout) margin side
+/// to a whole-cell count for the terminal target.
+///
+/// Universal `Ch` and `Zero` lengths resolve directly; `Percent` is resolved
+/// against `terminal_width`. Per-target and CSS-only values resolve to `0`.
+fn resolve_terminal_margin(
+    side: &biscuit_terminal::utils::layout::TargetValue<biscuit_terminal::utils::layout::Length>,
+    terminal_width: u32,
+) -> u32 {
+    use biscuit_terminal::utils::layout::Length;
+    use renderable::target::RenderTarget;
+    match side.resolve(RenderTarget::Terminal) {
+        Some(Length::Zero) | None => 0,
+        Some(Length::Ch(n)) => *n,
+        Some(Length::Percent(p)) => ((terminal_width as f32) * p / 100.0).round() as u32,
+        Some(Length::Css(_)) => 0,
+    }
+}
+
 /// Emits a rendered [`HorizontalRule`] into `wrapper`, honoring the rule's
 /// [`Layout`](biscuit_terminal::utils::layout::Layout) margins (B3) and using
 /// the outer [`Terminal`] context (B2).
 ///
-/// The rule's `top_margin` and `bottom_margin` are resolved to character
-/// counts via [`Layout::resolve_margin`](biscuit_terminal::utils::layout::Layout::resolve_margin)
-/// and emitted as blank lines. A default-layout rule (`Margin::None`) produces
-/// a single trailing blank line to match the surrounding markdown rhythm —
-/// replacing the previous hardcoded double `\n\n` spacing.
+/// The rule's top and bottom margins are resolved to character counts via
+/// [`resolve_terminal_margin`] and emitted as blank lines. A default-layout
+/// rule (zero bottom margin) produces a single trailing blank line to match
+/// the surrounding markdown rhythm — replacing the previous hardcoded double
+/// `\n\n` spacing.
 fn write_horizontal_rule(
     wrapper: &mut LineWrapper,
     rule: &HorizontalRule,
     term: &Terminal,
     terminal_width: u16,
 ) {
-    use biscuit_terminal::components::renderable::Renderable;
-    use biscuit_terminal::utils::layout::{Layout, Margin};
+    use biscuit_terminal::components::renderable::TerminalRenderable;
+    use biscuit_terminal::utils::layout::{Length, TargetValue};
 
     // If we're mid-line, break to column 0 before emitting margins.
     if wrapper.current_col() > 0 {
@@ -2624,7 +2765,7 @@ fn write_horizontal_rule(
     }
 
     let layout = rule.layout();
-    let top = Layout::resolve_margin(&layout.top_margin, terminal_width as u32);
+    let top = resolve_terminal_margin(&layout.margin.top, terminal_width as u32);
     for _ in 0..top {
         wrapper.newline();
     }
@@ -2635,17 +2776,176 @@ fn write_horizontal_rule(
     wrapper.push_with_newlines(&rule.render(term));
     wrapper.push_with_newlines("\n");
 
-    let bottom = Layout::resolve_margin(&layout.bottom_margin, terminal_width as u32);
-    if matches!(layout.bottom_margin, Margin::None) {
+    let bottom_is_default = layout.margin.bottom == TargetValue::universal(Length::Zero);
+    let bottom = resolve_terminal_margin(&layout.margin.bottom, terminal_width as u32);
+    if bottom_is_default {
         // Default behavior: one blank line after the rule so subsequent
         // blocks visually separate without forcing authors to set an
         // explicit margin. Callers that want tighter or looser spacing can
-        // configure `layout.bottom_margin` on the rule.
+        // configure `layout.margin.bottom` on the rule.
         wrapper.push_with_newlines("\n");
     } else {
         for _ in 0..bottom {
             wrapper.newline();
         }
+    }
+}
+
+/// Emit a syntax-highlighted code block (header pill + padded body) into
+/// `wrapper`, applying the same component width resolution, code-panel color
+/// mode, and page layout (margins/alignment) as the ordinary fenced-code path.
+///
+/// Shared by the normal Markdown code fence and the Mermaid text /
+/// image-fallback paths so all three honor page decoration identically: the
+/// body pads with background-colored spaces to the resolved content width
+/// (never `\x1b[K` under a layout context, which is incompatible with the
+/// page's post-hoc row decoration), the language pill and body share the same
+/// right boundary, and the highlight-line background math keys off the
+/// resolved `code_color_mode` rather than the page mode. Only the true
+/// zero-config path (no layout context, code spans the terminal from column 0)
+/// keeps `None`, preserving byte-for-byte equivalence with the legacy renderer.
+#[allow(clippy::too_many_arguments)]
+fn emit_highlighted_code_block(
+    wrapper: &mut LineWrapper,
+    code: &str,
+    language: &str,
+    meta: &CodeBlockMeta,
+    highlighter: &CodeHighlighter,
+    options: &TerminalOptions,
+    code_color_mode: ColorMode,
+    terminal_width: u16,
+    layout_ctx: Option<&LayoutContext>,
+) -> Result<(), MarkdownError> {
+    let bg_color = highlighter
+        .theme()
+        .settings
+        .background
+        .unwrap_or(Color::BLACK);
+
+    // Ensure the header starts on a fresh line (not appended to previous content).
+    if wrapper.current_col() > 0 {
+        wrapper.newline();
+    }
+
+    // Resolve component width when a layout context is present.
+    let code_width =
+        resolve_component_render_width(PageComponent::CodeBlocks, terminal_width, layout_ctx);
+
+    // Header row with title and language (right-aligned pill).
+    let header = format_header_row(
+        meta.title.as_deref(),
+        language,
+        bg_color,
+        code_color_mode,
+        code_width,
+    );
+    let header = if let Some(ctx) = layout_ctx {
+        apply_component_layout(&header, PageComponent::CodeBlocks, ctx)
+    } else {
+        header
+    };
+    wrapper.push_with_newlines(&header);
+    wrapper.newline();
+
+    // Body. Pad to the resolved width whenever a layout context is present (or
+    // the component is narrower than the terminal); otherwise let the body clear
+    // to the physical edge with `\x1b[K` on the genuine zero-config path.
+    let body_width = if layout_ctx.is_some() || code_width < terminal_width {
+        Some(code_width)
+    } else {
+        None
+    };
+    let highlighted = highlight_code(
+        code,
+        language,
+        highlighter,
+        options,
+        meta,
+        code_color_mode,
+        body_width,
+    )?;
+    let highlighted = if let Some(ctx) = layout_ctx {
+        apply_component_layout(&highlighted, PageComponent::CodeBlocks, ctx)
+    } else {
+        highlighted
+    };
+    wrapper.push_with_newlines(&highlighted);
+    // `highlight_code` ends with a bottom padding row; the first newline
+    // terminates it, the second separates the block from following content.
+    wrapper.push_with_newlines("\n\n");
+    Ok(())
+}
+
+/// Apply page-level alignment and fill to a rendered component string.
+///
+/// When `layout_ctx` is present and carries non-default alignment or fill for
+/// `component`, the rendered text is padded on the left so it positions
+/// correctly inside the page content rectangle.
+///
+/// For [`PageFill::Pad`] and [`PageFill::Indent`] the left-side padding comes
+/// from [`LayoutContext::component_side_padding`] — symmetric for `Pad`,
+/// one-sided for `Indent` (based on alignment). This applies for every
+/// alignment including `Left`, which is the default.
+///
+/// For [`PageFill::Full`], [`PageFill::Max`] and [`PageFill::Explicit`] the
+/// component renders at the resolved width and is then aligned within the
+/// effective page width via [`LayoutContext::alignment_padding`].
+#[allow(deprecated)]
+fn apply_component_layout(
+    text: &str,
+    component: PageComponent,
+    layout_ctx: &LayoutContext,
+) -> String {
+    let fill = layout_ctx.component_fill(component);
+    let alignment = layout_ctx.component_alignment(component);
+
+    let left_pad = match fill {
+        PageFill::Pad(_) | PageFill::Indent(_) => layout_ctx
+            .component_side_padding(component)
+            .map(|(l, _)| l)
+            .unwrap_or(0),
+        PageFill::Full | PageFill::Max(_) | PageFill::Explicit(_) => {
+            if alignment == PageAlignment::Left {
+                0
+            } else {
+                let max_visible_width = text
+                    .lines()
+                    .map(biscuit_terminal::utils::block_constraint::visible_width)
+                    .max()
+                    .unwrap_or(0) as u16;
+                layout_ctx.alignment_padding(component, max_visible_width)
+            }
+        }
+    };
+
+    if left_pad == 0 {
+        return text.to_string();
+    }
+
+    let spaces = " ".repeat(left_pad as usize);
+    text.lines()
+        .map(|line| format!("{}{}", spaces, line))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// Resolve the width to pass to a component renderer (code block, table, etc.)
+/// given an optional [`LayoutContext`].
+///
+/// Returns the smaller of `terminal_width` and the component's resolved fill
+/// width when a layout context is present and the component has a non-default
+/// fill. Otherwise returns `terminal_width` unchanged.
+fn resolve_component_render_width(
+    component: PageComponent,
+    terminal_width: u16,
+    layout_ctx: Option<&LayoutContext>,
+) -> u16 {
+    let Some(ctx) = layout_ctx else {
+        return terminal_width;
+    };
+    match ctx.resolve_component_width(component) {
+        Ok(w) => terminal_width.min(w),
+        Err(_) => terminal_width,
     }
 }
 
@@ -3265,7 +3565,15 @@ fn main() {}
         let meta = crate::markdown::dsl::CodeBlockMeta::default();
 
         let code = "fn main() {}";
-        let result = highlight_code(code, "rust", &highlighter, &options, &meta, ColorMode::Dark);
+        let result = highlight_code(
+            code,
+            "rust",
+            &highlighter,
+            &options,
+            &meta,
+            ColorMode::Dark,
+            None,
+        );
 
         assert!(result.is_ok());
         let output = result.unwrap();
@@ -3281,7 +3589,15 @@ fn main() {}
         let meta = crate::markdown::dsl::CodeBlockMeta::default();
 
         let code = "fn main() {}";
-        let result = highlight_code(code, "rust", &highlighter, &options, &meta, ColorMode::Dark);
+        let result = highlight_code(
+            code,
+            "rust",
+            &highlighter,
+            &options,
+            &meta,
+            ColorMode::Dark,
+            None,
+        );
 
         assert!(result.is_ok());
         let output = result.unwrap();
@@ -3311,7 +3627,15 @@ fn main() {}
         let meta = crate::markdown::dsl::CodeBlockMeta::default();
 
         let code = "fn main() {}";
-        let result = highlight_code(code, "rust", &highlighter, &options, &meta, ColorMode::Dark);
+        let result = highlight_code(
+            code,
+            "rust",
+            &highlighter,
+            &options,
+            &meta,
+            ColorMode::Dark,
+            None,
+        );
 
         assert!(result.is_ok());
         let output = result.unwrap();
@@ -3336,7 +3660,15 @@ fn main() {}
         let meta = crate::markdown::dsl::CodeBlockMeta::default();
 
         let code = "test";
-        let result = highlight_code(code, "rust", &highlighter, &options, &meta, ColorMode::Dark);
+        let result = highlight_code(
+            code,
+            "rust",
+            &highlighter,
+            &options,
+            &meta,
+            ColorMode::Dark,
+            None,
+        );
 
         assert!(result.is_ok());
         let output = result.unwrap();
@@ -3369,7 +3701,15 @@ fn main() {}
         meta.highlight.add_line(2);
 
         let code = "line 1\nline 2\nline 3";
-        let result = highlight_code(code, "rust", &highlighter, &options, &meta, ColorMode::Dark);
+        let result = highlight_code(
+            code,
+            "rust",
+            &highlighter,
+            &options,
+            &meta,
+            ColorMode::Dark,
+            None,
+        );
 
         assert!(result.is_ok());
         let output = result.unwrap();
@@ -3404,7 +3744,15 @@ fn main() {}
         meta.highlight.add_range(2, 4).unwrap();
 
         let code = "line 1\nline 2\nline 3\nline 4\nline 5";
-        let result = highlight_code(code, "rust", &highlighter, &options, &meta, ColorMode::Dark);
+        let result = highlight_code(
+            code,
+            "rust",
+            &highlighter,
+            &options,
+            &meta,
+            ColorMode::Dark,
+            None,
+        );
 
         assert!(result.is_ok());
         let output = result.unwrap();
@@ -3435,7 +3783,15 @@ fn main() {}
         meta.highlight.add_range(4, 6).unwrap();
 
         let code = "line 1\nline 2\nline 3\nline 4\nline 5\nline 6";
-        let result = highlight_code(code, "rust", &highlighter, &options, &meta, ColorMode::Dark);
+        let result = highlight_code(
+            code,
+            "rust",
+            &highlighter,
+            &options,
+            &meta,
+            ColorMode::Dark,
+            None,
+        );
 
         assert!(result.is_ok());
         let output = result.unwrap();
@@ -3471,7 +3827,15 @@ fn main() {}
         meta.highlight.add_line(2);
 
         let code = "line 1\nline 2\nline 3";
-        let result = highlight_code(code, "rust", &highlighter, &options, &meta, ColorMode::Dark);
+        let result = highlight_code(
+            code,
+            "rust",
+            &highlighter,
+            &options,
+            &meta,
+            ColorMode::Dark,
+            None,
+        );
 
         assert!(result.is_ok());
         let output = result.unwrap();
@@ -3508,7 +3872,15 @@ fn main() {}
 
         let code =
             "line 1\nline 2\nline 3\nline 4\nline 5\nline 6\nline 7\nline 8\nline 9\nline 10";
-        let result = highlight_code(code, "rust", &highlighter, &options, &meta, ColorMode::Dark);
+        let result = highlight_code(
+            code,
+            "rust",
+            &highlighter,
+            &options,
+            &meta,
+            ColorMode::Dark,
+            None,
+        );
 
         assert!(result.is_ok());
         let output = result.unwrap();
@@ -3541,7 +3913,15 @@ fn main() {}
         let meta = crate::markdown::dsl::CodeBlockMeta::default();
 
         let code = "let x = 1;";
-        let result = highlight_code(code, "rust", &highlighter, &options, &meta, ColorMode::Dark);
+        let result = highlight_code(
+            code,
+            "rust",
+            &highlighter,
+            &options,
+            &meta,
+            ColorMode::Dark,
+            None,
+        );
 
         assert!(result.is_ok());
         let output = result.unwrap();
@@ -3591,7 +3971,15 @@ fn main() {}
         meta.highlight.add_line(0); // Line 0 should be ignored (1-indexed)
 
         let code = "line 1\nline 2\nline 3";
-        let result = highlight_code(code, "rust", &highlighter, &options, &meta, ColorMode::Dark);
+        let result = highlight_code(
+            code,
+            "rust",
+            &highlighter,
+            &options,
+            &meta,
+            ColorMode::Dark,
+            None,
+        );
 
         assert!(result.is_ok());
         let output = result.unwrap();
@@ -3628,7 +4016,15 @@ fn main() {}
         meta.highlight.add_line(100); // Line 100 on 5-line code should be ignored
 
         let code = "line 1\nline 2\nline 3\nline 4\nline 5";
-        let result = highlight_code(code, "rust", &highlighter, &options, &meta, ColorMode::Dark);
+        let result = highlight_code(
+            code,
+            "rust",
+            &highlighter,
+            &options,
+            &meta,
+            ColorMode::Dark,
+            None,
+        );
 
         assert!(result.is_ok());
         let output = result.unwrap();
@@ -8488,14 +8884,15 @@ flowchart LR
         let plain = strip_ansi_codes(&output);
         assert!(!plain.contains("Paragraph one- Item 1"));
 
-        // Split into trimmed lines to ignore the padding
+        // List directly follows paragraph inside a blockquote without an
+        // intervening blank styled line.
         let lines: Vec<&str> = plain.lines().map(|l| l.trim_end()).collect();
         let p_idx = lines
             .iter()
             .position(|l| l.contains("Paragraph one"))
             .unwrap();
-        assert_eq!(lines[p_idx + 1], "▐");
-        assert_eq!(lines[p_idx + 2], "▐   - Item 1");
+        assert_eq!(lines[p_idx + 1], "▐   - Item 1");
+        assert_eq!(lines[p_idx + 2], "▐   - Item 2");
     }
 
     #[test]

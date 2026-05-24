@@ -1,8 +1,9 @@
 ---
 lessons_learned: "@.claudine/memory/commits.md"
-timeout: 10m
-step_timeout: 7m
+timeout: 15m
+step_timeout: 8m
 show_system_prompt: false
+operation: commit
 ---
 # Commit Staged Files
 
@@ -26,7 +27,14 @@ The valid operations we use include: fix, docs, chore, feat, refactor, style, pe
 
 This monorepo has the following packages:
 
-::shell sniff repo packages
+::shell sniff repo packages 
+
+::block when="ctx.current_package_area"
+However you've started this session in the "{{ctx.current_package_area}}" package area so the most relevant packages to focus on are:
+
+::shell sniff repo packages --package-area '{{ctx.current_package_area}}'
+
+::end-block
 
 Of these packages, the following ones appear to have changes _staged_ for commit:
 
@@ -55,7 +63,7 @@ The lessons learned are found in {{lessons_learned}}
 
 The following files have been staged for commit:
 
-::shell sniff repo staged-files -v --plain
+::shell sniff repo staged-files -v --plain --on-error 'no staged files; nothing to do!'
 
 ## Task
 
@@ -96,6 +104,7 @@ Your task is to:
    - the subagent SHOULD NOT push commits to any remote!
    - the subagent SHOULD be reminded that they are running in a non-interactive session so there is no way to get feedback from the user and attempts should be made to achieve the goals without asking for additional context
 6. once all the subagents have completed their tasks, you will run `sniff repo` to provide the user a summary of the state of the repo
+   - **DO NOT `cd` anywhere before running this command.** The wrapper has already placed you in the correct git worktree's root. Prefixing with `cd /Users/.../rusty-biscuit` (or any other path) will move you to the worktrees-*parent* directory (the one that holds all linked worktrees of this repo), which is OUTSIDE the worktree, triggers OpenCode's `external_directory: ask` permission, and produces noise in the trace. Run plainly: `sniff repo` — `sniff` is already worktree-aware and resolves the correct git root from cwd.
 7. then you will review the "lessons learned" that the subagents provided to you and determine if these are both:
    1. important and worthy of saving to the lessons learned memory file, and
    2. not already represented in the lessons-learned file

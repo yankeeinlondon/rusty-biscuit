@@ -4,6 +4,7 @@
 //! It ensures that required fields are present and non-empty, and provides detailed error
 //! messages for various failure scenarios.
 
+use crate::changelog::types::ConfidenceLevel;
 use biscuit_file::YamlParseError;
 use biscuit_file::serde_yaml_ng;
 use serde::{Deserialize, Serialize};
@@ -79,7 +80,7 @@ pub struct ChangelogFrontmatter {
     pub latest_version: String,
 
     /// Confidence level: high, medium, or low
-    pub confidence: String,
+    pub confidence: ConfidenceLevel,
 
     /// List of data sources used
     pub sources: Vec<String>,
@@ -600,21 +601,6 @@ pub fn parse_and_validate_changelog_frontmatter(
         });
     }
 
-    if frontmatter.confidence.is_empty() {
-        return Err(FrontmatterError::EmptyField {
-            field: "confidence".to_string(),
-        });
-    }
-
-    // Validate confidence value
-    let confidence_lower = frontmatter.confidence.trim().to_lowercase();
-    if !["high", "medium", "low"].contains(&confidence_lower.as_str()) {
-        return Err(FrontmatterError::InvalidYaml(format!(
-            "confidence must be 'high', 'medium', or 'low', got '{}'",
-            frontmatter.confidence
-        )));
-    }
-
     // Validate sources is non-empty
     if frontmatter.sources.is_empty() {
         return Err(FrontmatterError::EmptyField {
@@ -641,7 +627,6 @@ pub fn parse_and_validate_changelog_frontmatter(
     frontmatter.created_at = frontmatter.created_at.trim().to_string();
     frontmatter.updated_at = frontmatter.updated_at.trim().to_string();
     frontmatter.latest_version = frontmatter.latest_version.trim().to_string();
-    frontmatter.confidence = frontmatter.confidence.trim().to_string();
 
     Ok((frontmatter, body))
 }
@@ -1003,6 +988,8 @@ no closing delimiter"#;
     // Changelog frontmatter tests
     #[test]
     fn test_valid_changelog_frontmatter_all_fields() {
+        use crate::changelog::types::ConfidenceLevel;
+
         let content = r#"---
 created_at: 2024-12-30
 updated_at: 2024-12-30
@@ -1025,7 +1012,7 @@ Version timeline content here.
         assert_eq!(frontmatter.created_at, "2024-12-30");
         assert_eq!(frontmatter.updated_at, "2024-12-30");
         assert_eq!(frontmatter.latest_version, "2.5.3");
-        assert_eq!(frontmatter.confidence, "high");
+        assert_eq!(frontmatter.confidence, ConfidenceLevel::High);
         assert_eq!(frontmatter.sources.len(), 3);
         assert!(frontmatter.sources.contains(&"github_releases".to_string()));
         assert!(body.contains("# Version History"));
@@ -1033,6 +1020,8 @@ Version timeline content here.
 
     #[test]
     fn test_valid_changelog_frontmatter_minimal() {
+        use crate::changelog::types::ConfidenceLevel;
+
         let content = r#"---
 created_at: 2024-12-30
 updated_at: 2024-12-30
@@ -1051,7 +1040,7 @@ Body content here.
         assert_eq!(frontmatter.created_at, "2024-12-30");
         assert_eq!(frontmatter.updated_at, "2024-12-30");
         assert_eq!(frontmatter.latest_version, "1.0.0");
-        assert_eq!(frontmatter.confidence, "low");
+        assert_eq!(frontmatter.confidence, ConfidenceLevel::Low);
         assert_eq!(frontmatter.sources, vec!["llm_knowledge"]);
         assert_eq!(body.trim(), "Body content here.");
     }
@@ -1302,12 +1291,13 @@ Body
 
         let result = parse_and_validate_changelog_frontmatter(content);
         assert!(result.is_err());
-        assert_eq!(
-            result.unwrap_err(),
-            FrontmatterError::EmptyField {
-                field: "confidence".to_string()
+
+        match result.unwrap_err() {
+            FrontmatterError::InvalidYaml(_) => {
+                // serde can't deserialize "" into ConfidenceLevel enum
             }
-        );
+            other => panic!("Expected InvalidYaml for empty confidence, got {:?}", other),
+        }
     }
 
     #[test]
@@ -1349,8 +1339,8 @@ Body
         assert!(result.is_err());
 
         match result.unwrap_err() {
-            FrontmatterError::InvalidYaml(msg) => {
-                assert!(msg.contains("confidence must be"));
+            FrontmatterError::InvalidYaml(_) => {
+                // serde can't deserialize "invalid" into ConfidenceLevel enum
             }
             other => panic!(
                 "Expected InvalidYaml for invalid confidence, got {:?}",
@@ -1360,12 +1350,14 @@ Body
     }
 
     #[test]
-    fn test_changelog_confidence_case_insensitive() {
+    fn test_changelog_confidence_lowercase_required() {
+        use crate::changelog::types::ConfidenceLevel;
+
         let content = r#"---
 created_at: 2024-12-30
 updated_at: 2024-12-30
 latest_version: "1.0.0"
-confidence: HIGH
+confidence: high
 sources:
   - github_releases
 ---
@@ -1376,7 +1368,7 @@ Body
         assert!(result.is_ok());
 
         let (frontmatter, _) = result.unwrap();
-        assert_eq!(frontmatter.confidence, "HIGH");
+        assert_eq!(frontmatter.confidence, ConfidenceLevel::High);
     }
 
     #[test]
@@ -1435,7 +1427,7 @@ Body
 created_at: " 2024-12-30 "
 updated_at: " 2024-12-30 "
 latest_version: " 1.0.0 "
-confidence: " high "
+confidence: high
 sources:
   - github_releases
 ---
@@ -1449,7 +1441,6 @@ Body
         assert_eq!(frontmatter.created_at, "2024-12-30");
         assert_eq!(frontmatter.updated_at, "2024-12-30");
         assert_eq!(frontmatter.latest_version, "1.0.0");
-        assert_eq!(frontmatter.confidence, "high");
     }
 
     #[test]

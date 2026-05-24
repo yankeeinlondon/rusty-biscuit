@@ -1,6 +1,6 @@
 ---
 name: rust-tray-icon
-description: Expert knowledge for building system tray applications in Rust using tray-icon, winit, and egui - includes platform-specific setup, native menus, auto-launch, and GUI integration
+description: Expert knowledge for building Rust system-tray apps with tray-icon, winit, and egui — platform-specific setup, native menus, auto-launch, and GUI integration. Use when adding a tray or menu-bar icon, wiring tray menus, configuring auto-launch, or integrating a tray with a winit/egui app.
 ---
 
 # Rust System Tray Applications

@@ -198,6 +198,7 @@ fn graph_diagram_render_produces_file() {
     let request = RenderRequest {
         format: OutputFormat::Svg,
         scale: 1,
+        target_width: None,
         transparent_background: false,
     };
 
@@ -218,6 +219,7 @@ fn graph_diagram_render_cache_hit_on_second_call() {
     let request = RenderRequest {
         format: OutputFormat::Svg,
         scale: 1,
+        target_width: None,
         transparent_background: false,
     };
 
@@ -294,6 +296,7 @@ fn graph_render_cache_separates_scale() {
         .render(&RenderRequest {
             format: OutputFormat::Png,
             scale: 1,
+            target_width: None,
             transparent_background: false,
         })
         .unwrap();
@@ -301,6 +304,7 @@ fn graph_render_cache_separates_scale() {
         .render(&RenderRequest {
             format: OutputFormat::Png,
             scale: 3,
+            target_width: None,
             transparent_background: false,
         })
         .unwrap();
@@ -319,6 +323,7 @@ fn graph_render_cache_separates_transparency() {
         .render(&RenderRequest {
             format: OutputFormat::Svg,
             scale: 1,
+            target_width: None,
             transparent_background: false,
         })
         .unwrap();
@@ -326,6 +331,7 @@ fn graph_render_cache_separates_transparency() {
         .render(&RenderRequest {
             format: OutputFormat::Svg,
             scale: 1,
+            target_width: None,
             transparent_background: true,
         })
         .unwrap();
@@ -350,6 +356,7 @@ fn graph_render_opaque_background_uses_theme_surface_color() {
         .render(&RenderRequest {
             format: OutputFormat::Svg,
             scale: 1,
+            target_width: None,
             transparent_background: false,
         })
         .unwrap();
@@ -359,6 +366,7 @@ fn graph_render_opaque_background_uses_theme_surface_color() {
         .render(&RenderRequest {
             format: OutputFormat::Svg,
             scale: 1,
+            target_width: None,
             transparent_background: false,
         })
         .unwrap();

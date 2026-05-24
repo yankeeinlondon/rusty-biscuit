@@ -1,0 +1,8 @@
+---
+source: darkmatter/lib/tests/error_snapshots/image_ref.rs
+assertion_line: 13
+expression: out
+---
+⤫ ImageRefError: empty source
+┃ Image source URL cannot be empty or whitespace-only.
+Pass a non-empty URL or path to ImageRef::new.

@@ -32,6 +32,29 @@ let mut stdout = std::io::stdout();
 write_terminal(&mut stdout, &md, TerminalOptions::default())?;
 ```
 
+### Page-Level Layout (DarkmatterPage)
+
+`DarkmatterPage` is a page-level layout primitive that owns margin, padding, page background, max-width, line numbers, and per-component alignment/fill settings. It captures terminal capabilities at construction and delegates to the existing terminal renderer, threading a `LayoutContext` through the render pipeline so per-component alignment and fill are applied to images, block quotes, tables, code blocks, and lists.
+
+```rust
+use biscuit_terminal::terminal::Terminal;
+use darkmatter::layout::{DarkmatterPage, PageBackground};
+use darkmatter::markdown::Markdown;
+
+let term = Terminal::new_optimistic(120);
+let md: Markdown = "# Hello\n\nWorld".into();
+let output = DarkmatterPage::new(&term)
+    .with_margin(2)
+    .with_padding(1)
+    .with_page_background(PageBackground::Subtle)
+    .with_max_width(100)
+    .render(&md)?;
+```
+
+`DarkmatterPage` implements `biscuit_terminal::components::renderable::TerminalRenderable` for composition with the biscuit-terminal component ecosystem. With no builder calls, `render` is byte-for-byte equivalent to `for_terminal(&md, TerminalOptions::default())`.
+
+> **Layout migration.** The page-layout value types — `PageMargin`, `PagePadding`, `PageFill`, `PageAlignment` — are now `#[deprecated]` in favor of `renderable::layout` (the consolidated `Layout` primitive). They remain `pub` (the CLI builds them from flags) and carry conversion bridges (`From<PageMargin>` → `renderable::layout::Margin`, `From<PageAlignment>` → `Alignment`, `TryFrom<PageFill>`/`TryFrom<WidthUnit>` for width caps). `DarkmatterPage` keeps its builder API unchanged but now maps page settings onto a `renderable::layout::Layout` internally. See `renderable/docs/layout-and-style.md`.
+
 ## Compose Pipeline
 
 Three-phase pipeline for document preparation leveraging the [pulldown-cmark](./pulldown-cmark.md) crate:
@@ -164,6 +187,7 @@ This shortcut resolves:
 - [Terminal Output](./terminal.md) - ANSI rendering, themes, options
 - [Frontmatter](./frontmatter.md) - YAML parsing, merge strategies
 - [Document Comparison](./comparison.md) - Structural diff, change classification
+- [Error Conventions](./errors.md) - `BlockError` body contract, `SourceContext`, snapshot tests
 - [Module Structure](./structure.md) - Package organization and dependencies
 
 ## CLI
@@ -184,9 +208,27 @@ md graph doc.md --follow         # Recurse into transclusions
 md graph doc.md --validate       # Inline validation overlays
 ```
 
+### Layout Flags
+
+Page-level layout is controlled via CLI flags that construct a `DarkmatterPage` internally:
+
+```bash
+md doc.md -m 2 --padding 1 --page-bg subtle --max-width 100
+md doc.md --alignment center --fill pad=4
+md doc.md --align-code-blocks left --fill-code-blocks max=60
+```
+
+- **Margin**: `-m` / `--margin`, `--mx`, `--my`, `--mt`, `--mb`, `--ml`, `--mr`
+- **Padding**: `--padding`, `--px`, `--py`, `--pt`, `--pb`, `--pl`, `--pr`
+- **Page**: `--page-bg` (alias `--page-background`), `--max-width`, `--line-numbers`, `--no-line-numbers`
+- **Alignment**: `--alignment`, `--align-images`, `--align-lists`, `--align-block-quotes`, `--align-tables`, `--align-code-blocks`
+- **Fill**: `--fill`, `--fill-images`, `--fill-lists`, `--fill-block-quotes`, `--fill-tables`, `--fill-code-blocks`
+
+Fill grammar: `full`, `pad=<n|n%>`, `indent=<n|n%>`, `max=<n|n%>`, `explicit=<n|n%>`. Precedence follows the same rules as the builder API (shorthand → axis → side for margin/padding; global → component-specific for alignment and fill).
+
 ### FileTree Component
 
-`FileTree` is a `Renderable` component that visualizes a Markdown file's dependency surface:
+`FileTree` is a `TerminalRenderable` component that visualizes a Markdown file's dependency surface:
 - References (hyperlinks, images, CSS/script imports) above the file line
 - Transclusions below the file line with section-aware captions
 - Optional recursive expansion via `.follow_transclusions()`
@@ -196,7 +238,7 @@ Located in `darkmatter/lib/src/markdown/reference/file_tree/`.
 
 ### Horizontal Rules
 
-Darkmatter styles CommonMark `---` / `___` / `***` horizontal rules from page-level `hr` frontmatter defaults, with optional per-rule attribute-block overrides (YAML flow-mapping syntax), and dispatches rendering to biscuit-terminal's `HorizontalRule` (`Renderable` + `BrowserRenderable`).
+Darkmatter styles CommonMark `---` / `___` / `***` horizontal rules from page-level `hr` frontmatter defaults, with optional per-rule attribute-block overrides (YAML flow-mapping syntax), and dispatches rendering to biscuit-terminal's `HorizontalRule` (`TerminalRenderable` + `BrowserRenderable`).
 
 - **Markdown syntax**: `--- { style: waves, width: "50%" }`
 - **Supported attributes** (all optional):
@@ -220,11 +262,14 @@ Located in `darkmatter/lib/src/markdown/inline/types.rs`, `darkmatter/lib/src/ma
 
 `darkmatter/lib/src/markdown/output/code_block.rs` contains `pub(crate)` helpers used by both terminal and HTML rendering:
 
-- `render_terminal_code_block` - ANSI-highlighted code with padding, line numbers, and highlighted ranges
+- `render_terminal_code_block` - ANSI-highlighted code with padding, line numbers, and highlighted ranges (pads to the content width; never clears to the physical edge with `\x1b[K` under a layout context)
 - `render_html_code_block` - `<div class="code-block">` wrapper with optional line-number table or `<pre><code>` output
 - `find_syntax` - Language lookup by extension, name, or alias (shared `syntect` behaviour)
+- `mode_for_background` - derives a code panel's effective `ColorMode` from its resolved theme background (luminance), used for header-pill text color and highlight-line math
 
 These helpers ensure Markdown code fences and `YamlBlock` use identical syntax-highlighting logic.
+
+**Code-block theme contrast (terminal and HTML):** code blocks resolve their `ThemePair` against the **inverted** color mode (`ColorMode::inverted()`) so the panel contrasts against the page (light code on a dark page); prose follows the real mode. Single-variant themes (dracula/nord/monokai/vs-dark) are a deliberate no-op. Inversion is applied at all code-highlighter construction sites — bespoke terminal, render-tree `CodeRenderer`, `YamlBlock` terminal **and** browser paths, and `as_html` — so terminal and HTML agree (Defect D). See [Code Highlighting](../../../darkmatter/docs/rendering/code-highlighting.md) and [`terminal.md`](./terminal.md).
 
 ### YamlBlock Component
 
@@ -236,10 +281,30 @@ These helpers ensure Markdown code fences and `YamlBlock` use identical syntax-h
     - `YamlBlock::from_markdown_content(md)` — extracts only the frontmatter; yields `{}` if none
     - `YamlBlock::from_markdown_file(path)` — from a Markdown file on disk
 - **Validation:** all constructors parse YAML through `serde_yaml_ng::from_str` and fail fast; the parsed `Value` is not retained
-- **Rendering:** implements `Renderable` and `BrowserRenderable` from `biscuit-terminal`, delegating to the shared code-block helpers with `language = "yaml"`
-- **No tree view or custom YAML renderer** — produces a standard highlighted code block
+- **Rendering:** implements `TerminalRenderable` and `BrowserRenderable` from `biscuit-terminal`, delegating to the shared code-block helpers with `language = "yaml"`
+- **Tree projection:** implements `render_tree_node()` — projects to a `NodeKind::Code` node (lang `"yaml"`) carrying `CodeRenderHints { header_row, language_label, highlight }`, and a `Layout` (via `set_layout`) when its `layout` field is non-default, so it renders through the `renderable` tree pipeline as well as the bespoke path
+- Produces a standard highlighted code block — no bespoke YAML tree view
 
 Located in `darkmatter/lib/src/markdown/yaml_block.rs`.
+
+## Render Tree Integration
+
+The shared render-tree architecture lives in `renderable::tree` (the model)
+and `biscuit_terminal::render_tree` (the terminal renderer). Darkmatter's
+current involvement:
+
+- `YamlBlock` projects to the tree via `render_tree_node()` (above).
+- `darkmatter::markdown::render_tree::fold_markdown_to_document` folds a
+  `pulldown-cmark` event stream into a `Document` — **experimental and
+  internal**; it does not change the public `as_html` / `for_terminal`
+  renderers.
+- A full migration of darkmatter onto the tree renderer (including a darkmatter
+  `CodeRenderer` hook for syntax highlighting) is upcoming. Its first precursor
+  — widening `CodeRenderer` to carry terminal color depth / color mode — is
+  specified in `renderable/features/2026-05-16-color-decisions/`.
+
+See the `renderable` skill (*Tree Module*) and the `biscuit-terminal` skill
+(*Render Tree*) for the architecture.
 
 
 

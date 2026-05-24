@@ -1,0 +1,15 @@
+---
+source: darkmatter/lib/tests/schemas_convert_snapshots.rs
+expression: "convert_atom(\"string(not-empty)\")"
+---
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "properties": {
+    "field": {
+      "pattern": "\\S",
+      "type": "string"
+    }
+  },
+  "type": "object"
+}

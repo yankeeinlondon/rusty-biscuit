@@ -1,6 +1,6 @@
 ---
 name: monorepos
-description: Expert knowledge for building and managing monorepos across JavaScript, TypeScript, Rust, Go, and JVM ecosystems using workspace standards (npm, pnpm, Yarn, Cargo, Go workspaces, Gradle, Maven), task orchestration tools (Nx, Turborepo, Bazel, Pants, Rush, Lerna, moon), versioning strategies (Changesets), and battle-tested production stacks for different team sizes and requirements
+description: Expert knowledge for building and managing monorepos across JavaScript, TypeScript, Rust, Go, and JVM — workspace standards (npm, pnpm, Yarn, Cargo, Go workspaces, Gradle, Maven), task-orchestration tools (Nx, Turborepo, Bazel, Pants, Rush, Lerna, moon), and versioning (Changesets). Use when structuring a monorepo, choosing task-orchestration tooling, or setting up workspace versioning and release flows.
 last_updated: 2026-01-03T00:00:00Z
 hash: 9dd032e824d98586
 ---

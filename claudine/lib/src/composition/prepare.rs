@@ -19,7 +19,7 @@ fn map_compose_error(source_path: &std::path::Path, err: MarkdownError) -> Compo
     match err {
         MarkdownError::ShellExpansion(shell_err) => CompositionError::ShellExpansionFailed {
             source_path: source_path.to_path_buf(),
-            error: Box::new(shell_err),
+            error: shell_err,
         },
         other => CompositionError::ComposeFailed(other),
     }
@@ -36,6 +36,16 @@ pub struct PrepareOptions {
     pub env_overrides: BTreeMap<String, String>,
     /// Enable Darkmatter composition performance collection.
     pub perf_enabled: bool,
+    /// Pre-computed source repo root.
+    ///
+    /// When `Some`, [`prepare_direct`] and [`prepare_inline`] use this value
+    /// instead of walking up from the source path. CLI callers populate this
+    /// from a shared `CompositionPrepContext` so the same repo-root value is
+    /// reused across eager target resolution, shell preflight, and
+    /// composition preparation. When `None`, the fallback walk
+    /// (`find_git_root_from_path`) preserves the original behavior for
+    /// library-only callers and tests.
+    pub source_repo_root: Option<PathBuf>,
 }
 
 /// Walk up from a file path to find the nearest `.git` directory.
@@ -102,7 +112,9 @@ pub fn prepare_direct(
     };
     let lifecycle = parse_lifecycle_config(&effective_frontmatter, &source.resolved_path)?;
 
-    let source_repo_root = find_git_root_from_path(&source.resolved_path);
+    let source_repo_root = options
+        .source_repo_root
+        .or_else(|| find_git_root_from_path(&source.resolved_path));
 
     Ok(PreparedComposition {
         mode: CompositionMode::ChainedDocument,
@@ -180,7 +192,9 @@ pub fn prepare_inline(
 
     let mut prompt = composed.content().to_string();
 
-    let source_repo_root = find_git_root_from_path(&source.resolved_path);
+    let source_repo_root = options
+        .source_repo_root
+        .or_else(|| find_git_root_from_path(&source.resolved_path));
 
     // Append guardrails with the new inline contract
     let guardrails = load_or_create_guardrails(source_repo_root.as_deref());

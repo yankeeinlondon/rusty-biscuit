@@ -14,6 +14,6 @@ pub use image_ref::{
 pub use link::{Link, LinkError, LinkParseError, LinkTarget, LinkType};
 pub use stylesheet::{
     CssColor, CssColorProp, CssCustomProp, CssIntegerProp, CssProp, CssRaw, CssSizing,
-    CssSizingMulti, CssSizingMultiProp, CssSizingProp, CssUnit, CssValue, CssValueKind, Stylesheet,
-    StylesheetError,
+    CssSizingMulti, CssSizingMultiProp, CssSizingProp, CssStyle, CssUnit, CssValue, CssValueKind,
+    StylesheetBlockError, StylesheetError, TerminalCss,
 };

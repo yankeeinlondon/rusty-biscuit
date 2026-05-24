@@ -116,10 +116,13 @@ pub fn resolve_working_directory(
 /// ## Examples
 ///
 /// ```no_run
+/// use biscuit_terminal::errors::SourceContext;
 /// use darkmatter::markdown::compose::shell_expansion::executor::execute_command;
 /// use darkmatter::markdown::compose::shell_expansion::types::{ErrorHandling, ShellCommandOrigin, ShellDirective, ShellExpansionOptions};
 /// use darkmatter::markdown::compose::ComposeSource;
+/// use std::path::PathBuf;
 ///
+/// let ctx = SourceContext::new(PathBuf::from("/t"), PathBuf::from("t"), "");
 /// let directive = ShellDirective {
 ///     raw_command: "echo hello".to_string(),
 ///     executable: "echo".to_string(),
@@ -129,6 +132,7 @@ pub fn resolve_working_directory(
 ///     error_handling: ErrorHandling::default(),
 ///     timeout_override: None,
 ///     pipeline: None,
+///     ctx,
 /// };
 /// let options = ShellExpansionOptions::default();
 /// let source = ComposeSource::Unknown;
@@ -171,12 +175,14 @@ pub(crate) fn execute_command_detailed(
             shell_opts,
             &directive.raw_command,
             &directive.origin,
+            &directive.ctx,
         );
     }
 
     // Standard single-command path (no redirections)
     let resolved_path =
         which::which(&directive.executable).map_err(|_| ShellExpansionError::CommandNotFound {
+            ctx: Box::new(directive.ctx.clone()),
             command: directive.executable.clone(),
             origin: directive.origin.clone(),
         })?;
@@ -200,6 +206,7 @@ pub(crate) fn execute_command_detailed(
     let mut child = cmd
         .spawn()
         .map_err(|e| ShellExpansionError::ExecutionFailed {
+            ctx: Box::new(directive.ctx.clone()),
             command: directive.raw_command.clone(),
             code: -1,
             stdout: String::new(),
@@ -236,8 +243,8 @@ pub(crate) fn execute_command_detailed(
         match child.try_wait() {
             Ok(Some(status)) => {
                 // Process completed
-                let stdout_bytes = join_output_thread_raw(stdout_thread, "stdout")?;
-                let stderr_bytes = join_output_thread_raw(stderr_thread, "stderr")?;
+                let stdout_bytes = join_output_thread_raw(stdout_thread, "stdout", &directive.ctx)?;
+                let stderr_bytes = join_output_thread_raw(stderr_thread, "stderr", &directive.ctx)?;
                 let stdout_str = String::from_utf8_lossy(&stdout_bytes).to_string();
                 let stderr_str = String::from_utf8_lossy(&stderr_bytes).to_string();
 
@@ -267,6 +274,7 @@ pub(crate) fn execute_command_detailed(
                     }
 
                     return Err(ShellExpansionError::ExecutionFailed {
+                        ctx: Box::new(directive.ctx.clone()),
                         command: directive.raw_command.clone(),
                         code: status.code().unwrap_or(-1),
                         stdout,
@@ -285,6 +293,7 @@ pub(crate) fn execute_command_detailed(
                     match shell_opts.timeout_behavior {
                         ShellTimeoutBehavior::Error => {
                             return Err(ShellExpansionError::Timeout {
+                                ctx: Box::new(directive.ctx.clone()),
                                 command: directive.raw_command.clone(),
                                 timeout,
                                 origin: directive.origin.clone(),
@@ -299,6 +308,7 @@ pub(crate) fn execute_command_detailed(
             }
             Err(e) => {
                 return Err(ShellExpansionError::ExecutionFailed {
+                    ctx: Box::new(directive.ctx.clone()),
                     command: directive.raw_command.clone(),
                     code: -1,
                     stdout: String::new(),
@@ -363,6 +373,7 @@ fn execute_pipeline_detailed(
             shell_opts,
             &directive.raw_command,
             &directive.origin,
+            &directive.ctx,
         );
 
         match result {
@@ -427,6 +438,7 @@ fn execute_pipeline_detailed(
 
                     if !any_or_handler {
                         return Err(ShellExpansionError::ExecutionFailed {
+                            ctx: Box::new(directive.ctx.clone()),
                             command: directive.raw_command.clone(),
                             code,
                             stdout: combined_stdout,
@@ -438,6 +450,7 @@ fn execute_pipeline_detailed(
             }
             Err(ShellExpansionError::Timeout { .. }) => {
                 return Err(ShellExpansionError::Timeout {
+                    ctx: Box::new(directive.ctx.clone()),
                     command: directive.raw_command.clone(),
                     timeout,
                     origin: directive.origin.clone(),
@@ -464,9 +477,11 @@ fn execute_single_action(
     shell_opts: &ShellExpansionOptions,
     raw_command: &str,
     origin: &super::types::ShellCommandOrigin,
+    ctx: &biscuit_terminal::errors::SourceContext,
 ) -> Result<CommandExecution, ShellExpansionError> {
     let resolved_path =
         which::which(&action.executable).map_err(|_| ShellExpansionError::CommandNotFound {
+            ctx: Box::new(ctx.clone()),
             command: action.executable.clone(),
             origin: origin.clone(),
         })?;
@@ -482,6 +497,7 @@ fn execute_single_action(
 
     let capture = configure_streams(&mut cmd, &action.redirection).map_err(|e| {
         ShellExpansionError::ExecutionFailed {
+            ctx: Box::new(ctx.clone()),
             command: raw_command.to_string(),
             code: -1,
             stdout: String::new(),
@@ -493,6 +509,7 @@ fn execute_single_action(
     let mut child = cmd
         .spawn()
         .map_err(|e| ShellExpansionError::ExecutionFailed {
+            ctx: Box::new(ctx.clone()),
             command: raw_command.to_string(),
             code: -1,
             stdout: String::new(),
@@ -559,7 +576,7 @@ fn execute_single_action(
             Ok(Some(status)) => {
                 let (mut final_stdout, mut final_stderr) = match read_strategy {
                     ReadStrategy::Merged { thread, target } => {
-                        let bytes = join_output_thread_raw(thread, "merged")?;
+                        let bytes = join_output_thread_raw(thread, "merged", ctx)?;
                         let merged = String::from_utf8_lossy(&bytes).to_string();
                         match target {
                             MergeTarget::Stdout => (merged, String::new()),
@@ -567,8 +584,8 @@ fn execute_single_action(
                         }
                     }
                     ReadStrategy::Separate { stdout, stderr } => {
-                        let stdout_bytes = join_output_thread_raw(stdout, "stdout")?;
-                        let stderr_bytes = join_output_thread_raw(stderr, "stderr")?;
+                        let stdout_bytes = join_output_thread_raw(stdout, "stdout", ctx)?;
+                        let stderr_bytes = join_output_thread_raw(stderr, "stderr", ctx)?;
                         (
                             String::from_utf8_lossy(&stdout_bytes).to_string(),
                             String::from_utf8_lossy(&stderr_bytes).to_string(),
@@ -585,6 +602,7 @@ fn execute_single_action(
                     return Ok(CommandExecution::from_streams(final_stdout, final_stderr));
                 } else {
                     return Err(ShellExpansionError::ExecutionFailed {
+                        ctx: Box::new(ctx.clone()),
                         command: raw_command.to_string(),
                         code: status.code().unwrap_or(-1),
                         stdout: final_stdout,
@@ -600,6 +618,7 @@ fn execute_single_action(
                     match shell_opts.timeout_behavior {
                         ShellTimeoutBehavior::Error => {
                             return Err(ShellExpansionError::Timeout {
+                                ctx: Box::new(ctx.clone()),
                                 command: raw_command.to_string(),
                                 timeout,
                                 origin: origin.clone(),
@@ -614,6 +633,7 @@ fn execute_single_action(
             }
             Err(e) => {
                 return Err(ShellExpansionError::ExecutionFailed {
+                    ctx: Box::new(ctx.clone()),
                     command: raw_command.to_string(),
                     code: -1,
                     stdout: String::new(),
@@ -711,10 +731,12 @@ fn configure_streams(
 fn join_output_thread_raw(
     handle: JoinHandle<Vec<u8>>,
     stream_name: &str,
+    ctx: &biscuit_terminal::errors::SourceContext,
 ) -> Result<Vec<u8>, ShellExpansionError> {
     handle
         .join()
         .map_err(|_| ShellExpansionError::ExecutionFailed {
+            ctx: Box::new(ctx.clone()),
             command: String::new(),
             code: -1,
             stdout: String::new(),
@@ -731,6 +753,14 @@ mod tests {
     use std::time::Duration;
     use tempfile::TempDir;
 
+    fn test_ctx() -> biscuit_terminal::errors::SourceContext {
+        biscuit_terminal::errors::SourceContext::new(
+            std::path::PathBuf::from("/test"),
+            std::path::PathBuf::from("test"),
+            String::new(),
+        )
+    }
+
     /// Helper to build a ShellDirective with default error handling.
     fn directive(raw: &str, exe: &str, args: &[&str], line: usize) -> ShellDirective {
         ShellDirective {
@@ -742,6 +772,7 @@ mod tests {
             error_handling: ErrorHandling::default(),
             timeout_override: None,
             pipeline: None,
+            ctx: test_ctx(),
         }
     }
 
@@ -790,7 +821,9 @@ mod tests {
         let result = execute_command(&d, &options, &source);
         assert!(result.is_err());
         match result.unwrap_err() {
-            ShellExpansionError::CommandNotFound { command, origin } => {
+            ShellExpansionError::CommandNotFound {
+                command, origin, ..
+            } => {
                 assert_eq!(command, "nonexistent_command_xyz");
                 assert_eq!(origin, ShellCommandOrigin::Body { line: 1 });
             }
@@ -889,6 +922,7 @@ mod tests {
             error_handling: ErrorHandling::default(),
             timeout_override: None,
             pipeline: None,
+            ctx: test_ctx(),
         };
         let options = ShellExpansionOptions::default();
         let source = ComposeSource::Unknown;
@@ -905,7 +939,7 @@ mod tests {
             panic!("boom");
         });
 
-        let err = join_output_thread_raw(handle, "stdout").unwrap_err();
+        let err = join_output_thread_raw(handle, "stdout", &test_ctx()).unwrap_err();
         match err {
             ShellExpansionError::ExecutionFailed { code, stderr, .. } => {
                 assert_eq!(code, -1);
@@ -947,6 +981,7 @@ mod tests {
             error_handling: ErrorHandling::default(),
             timeout_override: None,
             pipeline: None,
+            ctx: test_ctx(),
         };
         let options = ShellExpansionOptions::default();
         let source = ComposeSource::Unknown;
@@ -974,6 +1009,7 @@ mod tests {
             error_handling: ErrorHandling::default(),
             timeout_override: None,
             pipeline: None,
+            ctx: test_ctx(),
         };
         let options = ShellExpansionOptions::default();
         let source = ComposeSource::Unknown;
@@ -1018,6 +1054,7 @@ mod tests {
             error_handling: ErrorHandling::default(),
             timeout_override: None,
             pipeline: None,
+            ctx: test_ctx(),
         };
         let options = ShellExpansionOptions::default(); // strip_ansi: true by default
         let source = ComposeSource::Unknown;
@@ -1037,6 +1074,7 @@ mod tests {
             error_handling: ErrorHandling::default(),
             timeout_override: None,
             pipeline: None,
+            ctx: test_ctx(),
         };
         let options = ShellExpansionOptions {
             strip_ansi: false,
@@ -1059,6 +1097,7 @@ mod tests {
             error_handling: ErrorHandling::default(),
             timeout_override: None,
             pipeline: None,
+            ctx: test_ctx(),
         };
         let options = ShellExpansionOptions::default(); // strip_ansi: true by default
         let source = ComposeSource::Unknown;
@@ -1078,6 +1117,7 @@ mod tests {
             error_handling: ErrorHandling::default(),
             timeout_override: Some(Duration::from_millis(100)),
             pipeline: None,
+            ctx: test_ctx(),
         };
         let options = ShellExpansionOptions {
             timeout: Duration::from_secs(60), // Global timeout is 60s
@@ -1106,6 +1146,7 @@ mod tests {
             error_handling: ErrorHandling::default(),
             timeout_override: Some(Duration::from_millis(100)),
             pipeline: None,
+            ctx: test_ctx(),
         };
         let options = ShellExpansionOptions {
             timeout: Duration::from_secs(60),

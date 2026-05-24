@@ -12,9 +12,8 @@
 
 use async_trait::async_trait;
 use base64::{Engine, engine::general_purpose::STANDARD as BASE64};
-use schematic_define::{AuthStrategy, UpdateStrategy};
 use schematic_schema::gitlab::*;
-use schematic_schema::shared::SchematicError;
+use schematic_schema::shared::{AuthStrategy, SchematicError, UpdateStrategy};
 
 use super::{
     provider::RemoteRepoProvider,

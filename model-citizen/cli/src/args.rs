@@ -193,7 +193,7 @@ mod tests {
 
     #[test]
     fn parse_list_command() {
-        let cli = Cli::parse_from(&["model", "list", "--runner", "ollama"]);
+        let cli = Cli::parse_from(["model", "list", "--runner", "ollama"]);
         match cli.command {
             Commands::List { runner, .. } => assert_eq!(runner.as_deref(), Some("ollama")),
             _ => panic!("Expected List command"),
@@ -202,7 +202,7 @@ mod tests {
 
     #[test]
     fn parse_run_command() {
-        let cli = Cli::parse_from(&["model", "run", "llama-2-7b", "--runner", "llamacpp"]);
+        let cli = Cli::parse_from(["model", "run", "llama-2-7b", "--runner", "llamacpp"]);
         match cli.command {
             Commands::Run { model, runner, .. } => {
                 assert_eq!(model.as_deref(), Some("llama-2-7b"));
@@ -214,7 +214,7 @@ mod tests {
 
     #[test]
     fn parse_json_flag() {
-        let cli = Cli::parse_from(&["model", "--json", "list"]);
+        let cli = Cli::parse_from(["model", "--json", "list"]);
         assert!(cli.json);
     }
 }

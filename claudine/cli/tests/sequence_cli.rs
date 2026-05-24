@@ -995,9 +995,13 @@ if [ "$count" = "1" ]; then
   exit 0
 fi
 
-# Step 2: emit start event so last_event_at is populated, then stall so
-# the step-silence deadline fires.
+# Step 2: emit start + finish so both `last_event_at` and
+# `provider_status` are populated, then stall so the step-silence
+# deadline fires. The OpenCode `provider_status` grace requires at
+# least one observed `step_finish` boundary before allowing
+# `step_timeout` to fire.
 printf '%s\n' '{"type":"step_start","sessionID":"ses_step2"}'
+printf '%s\n' '{"type":"step_finish","sessionID":"ses_step2","part":{"reason":"tool-calls","tokens":{"input":1,"output":1,"total":2}}}'
 sleep 30
 exit 0
 "#,

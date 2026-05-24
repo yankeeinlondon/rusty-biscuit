@@ -1,0 +1,61 @@
+use schematic_define::{ApiRequest, ApiResponse, Endpoint, RestMethod};
+
+pub fn all() -> Vec<Endpoint> {
+    vec![
+        Endpoint {
+            id: "GetHistory".to_string(),
+            method: RestMethod::Get,
+            path: "/v1/history".to_string(),
+            description: "Gets generated items history".to_string(),
+            request: None,
+            response: ApiResponse::json_type("GetHistoryResponse"),
+            headers: vec![],
+            params: None,
+            oauth_scopes: None,
+        },
+        Endpoint {
+            id: "GetHistoryItem".to_string(),
+            method: RestMethod::Get,
+            path: "/v1/history/{history_item_id}".to_string(),
+            description: "Gets a specific history item".to_string(),
+            request: None,
+            response: ApiResponse::json_type("SpeechHistoryItemResponseModel"),
+            headers: vec![],
+            params: None,
+            oauth_scopes: None,
+        },
+        Endpoint {
+            id: "DeleteHistoryItem".to_string(),
+            method: RestMethod::Delete,
+            path: "/v1/history/{history_item_id}".to_string(),
+            description: "Deletes a history item".to_string(),
+            request: None,
+            response: ApiResponse::json_type("StatusResponse"),
+            headers: vec![],
+            params: None,
+            oauth_scopes: None,
+        },
+        Endpoint {
+            id: "GetHistoryItemAudio".to_string(),
+            method: RestMethod::Get,
+            path: "/v1/history/{history_item_id}/audio".to_string(),
+            description: "Gets audio for a history item".to_string(),
+            request: None,
+            response: ApiResponse::Binary,
+            headers: vec![],
+            params: None,
+            oauth_scopes: None,
+        },
+        Endpoint {
+            id: "DownloadHistoryItems".to_string(),
+            method: RestMethod::Post,
+            path: "/v1/history/download".to_string(),
+            description: "Downloads multiple history items as ZIP".to_string(),
+            request: Some(ApiRequest::json_type("DownloadHistoryBody")),
+            response: ApiResponse::Binary,
+            headers: vec![],
+            params: None,
+            oauth_scopes: None,
+        },
+    ]
+}

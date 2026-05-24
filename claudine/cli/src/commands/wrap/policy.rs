@@ -311,7 +311,7 @@ fn emit_stream_summary_inner(
     if primary_markup.is_some() || secondary_markup.is_some() {
         use super::section::Section;
         use biscuit_terminal::components::prose::Prose;
-        use biscuit_terminal::components::renderable::Renderable;
+        use biscuit_terminal::components::renderable::TerminalRenderable;
 
         let term = crate::log::terminal();
         if let Some(section_stream) = section_stream {

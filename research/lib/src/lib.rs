@@ -44,6 +44,32 @@ use unchained_ai::rigging::tools::{BravePlan, BraveSearchTool, ScreenScrapeTool}
 
 use crate::validation::{parse_and_validate_frontmatter, repair_skill_frontmatter};
 
+/// Standard preamble for research agent tasks with web search tools.
+const AGENT_PREAMBLE: &str = "You are a research assistant with web search and scraping tools. Use 1-3 targeted searches to gather key information, then synthesize your findings into a comprehensive response. Do not make excessive tool calls - gather what you need efficiently and write your final answer.";
+
+/// Preamble for changelog-specific research agent tasks.
+const AGENT_PREAMBLE_CHANGELOG: &str = "You are a research assistant with web search and scraping tools. Search for recent releases, changelogs, and version history. Use 1-3 targeted searches, then synthesize your findings. Do not make excessive tool calls - write your final answer after gathering sufficient information.";
+
+/// Preamble for synthesis tasks that work with pre-gathered data.
+const AGENT_PREAMBLE_SYNTHESIS: &str = "You are a research assistant with web search and scraping tools. You have been provided with pre-gathered version data from structured sources. Synthesize this data into a readable changelog, enriching with context where helpful. Use tools only if you need additional information beyond the provided data.";
+
+/// Preamble for question-answering research tasks.
+const AGENT_PREAMBLE_QUESTION: &str = "You are a research assistant with web search and scraping tools. Use 1-3 targeted searches to find relevant information, then provide a comprehensive answer. Do not make excessive tool calls - synthesize your findings efficiently.";
+
+/// Extracts text content from a sequence of assistant content blocks.
+///
+/// Filters for `AssistantContent::Text` variants and joins their text content.
+fn extract_text_content(content: impl IntoIterator<Item = AssistantContent>) -> String {
+    content
+        .into_iter()
+        .filter_map(|c| match c {
+            AssistantContent::Text(text) => Some(text.text),
+            _ => None,
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 /// A PromptHook that emits tracing events for agent interactions.
 ///
 /// This hook is used to trace all tool calls made by agents during research tasks,
@@ -102,11 +128,13 @@ where
         _internal_call_id: &str,
         args: &str,
     ) -> ToolCallHookAction {
+        // Never log raw tool args - they may contain sensitive data like API keys
+        // Only log the count of arguments, not the content
         info!(
             parent: &self.span,
             tool.name = %tool_name,
             tool.call_id = ?tool_call_id,
-            tool.args = %args,
+            tool.args_len = args.len(),
             "Invoking tool"
         );
         ToolCallHookAction::cont()
@@ -120,17 +148,17 @@ where
         _args: &str,
         result: &str,
     ) -> HookAction {
-        // Truncate result for logging (tool results can be large)
-        let result_preview: String = result.chars().take(200).collect();
-        let truncated = result.len() > 200;
+        // Never log raw tool results - they may contain sensitive data
+        // Only log the length and whether it was truncated
+        let result_len = result.len();
+        let truncated = result_len > 500;
 
         info!(
             parent: &self.span,
             tool.name = %tool_name,
             tool.call_id = ?tool_call_id,
-            tool.result_preview = %result_preview,
+            tool.result_len = result_len,
             tool.result_truncated = truncated,
-            tool.result_len = result.len(),
             "Tool returned result"
         );
         HookAction::cont()
@@ -181,7 +209,7 @@ pub struct MissingPrompt {
 ///
 /// Returns a list of prompts that don't have corresponding output files.
 #[deprecated(
-    note = "Use research_health() from validation::health module. Note: research_health() requires ResearchType and builds paths internally using RESEARCH_DIR environment variable or current directory."
+    note = "Use research_health() from validation::health module. Note: research_health() requires TopicType and builds paths internally using RESEARCH_DIR environment variable or current directory."
 )]
 pub async fn check_missing_standard_prompts(output_dir: &std::path::Path) -> Vec<MissingPrompt> {
     let mut missing = Vec::new();
@@ -226,7 +254,7 @@ const EXPECTED_OUTPUTS: &[(&str, &str)] = &[
 ///
 /// Returns a list of outputs that don't exist.
 #[deprecated(
-    note = "Use research_health() from validation::health module. Note: research_health() requires ResearchType and builds paths internally using RESEARCH_DIR environment variable or current directory."
+    note = "Use research_health() from validation::health module. Note: research_health() requires TopicType and builds paths internally using RESEARCH_DIR environment variable or current directory."
 )]
 pub async fn check_missing_outputs(output_dir: &std::path::Path) -> Vec<MissingOutput> {
     let mut missing = Vec::new();
@@ -242,12 +270,14 @@ pub async fn check_missing_outputs(output_dir: &std::path::Path) -> Vec<MissingO
 }
 
 /// Information about a library found in a package manager
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LibraryInfo {
     pub package_manager: String,
     pub language: String,
     pub url: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub repository: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
 }
 
@@ -310,26 +340,8 @@ fn default_schema_version() -> u32 {
     1
 }
 
-/// Library info stored in metadata (serializable version)
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct LibraryInfoMetadata {
-    pub package_manager: String,
-    pub language: String,
-    pub url: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub repository: Option<String>,
-}
-
-impl From<&LibraryInfo> for LibraryInfoMetadata {
-    fn from(info: &LibraryInfo) -> Self {
-        Self {
-            package_manager: info.package_manager.clone(),
-            language: info.language.clone(),
-            url: info.url.clone(),
-            repository: info.repository.clone(),
-        }
-    }
-}
+/// Type alias for backward compatibility with code that used `LibraryInfoMetadata`.
+pub type LibraryInfoMetadata = LibraryInfo;
 
 impl ResearchMetadata {
     /// Create new metadata for library research
@@ -405,7 +417,12 @@ impl ResearchMetadata {
             v1.when_to_use = Some(when_to_use);
             v1.updated_at = Utc::now();
             needs_save = true;
-            tracing::info!("✓ Extracted when_to_use from SKILL.md frontmatter");
+            tracing::info!(
+                field = "when_to_use",
+                source = "SKILL.md frontmatter",
+                status = "extracted",
+                "Metadata field extracted"
+            );
         }
 
         // Save if we made any changes
@@ -444,7 +461,12 @@ impl ResearchMetadata {
                 if let Err(e) = fs::write(&skill_path, &repaired).await {
                     tracing::warn!("Failed to save repaired SKILL.md: {}", e);
                 } else {
-                    tracing::info!("✓ Repaired and saved SKILL.md frontmatter");
+                    tracing::info!(
+                        field = "frontmatter",
+                        source = "SKILL.md",
+                        status = "repaired",
+                        "SKILL.md frontmatter repaired and saved"
+                    );
                 }
                 Some(frontmatter.description)
             }
@@ -1009,6 +1031,74 @@ fn parse_brief_response(response: &str) -> (Option<String>, Option<String>) {
     (brief, summary)
 }
 
+#[cfg(test)]
+mod brief_tests {
+    use super::parse_brief_response;
+
+    #[test]
+    fn test_parse_brief_response_both_markers() {
+        let response = "BRIEF: A short description\nSUMMARY: A longer summary paragraph";
+        let (brief, summary) = parse_brief_response(response);
+        assert_eq!(brief, Some("A short description".to_string()));
+        assert_eq!(summary, Some("A longer summary paragraph".to_string()));
+    }
+
+    #[test]
+    fn test_parse_brief_response_multiline_summary() {
+        let response = "BRIEF: Short desc\nSUMMARY: First line\nSecond line\nThird line";
+        let (brief, summary) = parse_brief_response(response);
+        assert_eq!(brief, Some("Short desc".to_string()));
+        assert!(summary.unwrap().contains("Second line"));
+    }
+
+    #[test]
+    fn test_parse_brief_response_missing_brief() {
+        let response = "SUMMARY: Just a summary";
+        let (brief, summary) = parse_brief_response(response);
+        assert_eq!(brief, None);
+        assert_eq!(summary, Some("Just a summary".to_string()));
+    }
+
+    #[test]
+    fn test_parse_brief_response_missing_summary() {
+        let response = "BRIEF: Just a brief";
+        let (brief, summary) = parse_brief_response(response);
+        assert_eq!(brief, Some("Just a brief".to_string()));
+        assert_eq!(summary, None);
+    }
+
+    #[test]
+    fn test_parse_brief_response_no_markers() {
+        let response = "Just some random text without markers";
+        let (brief, summary) = parse_brief_response(response);
+        assert_eq!(brief, None);
+        assert_eq!(summary, None);
+    }
+
+    #[test]
+    fn test_parse_brief_response_empty_input() {
+        let (brief, summary) = parse_brief_response("");
+        assert_eq!(brief, None);
+        assert_eq!(summary, None);
+    }
+
+    #[test]
+    fn test_parse_brief_response_extra_whitespace() {
+        let response = "BRIEF:   padded brief  \nSUMMARY:   padded summary  ";
+        let (brief, summary) = parse_brief_response(response);
+        assert_eq!(brief, Some("padded brief".to_string()));
+        assert!(summary.unwrap().starts_with("padded summary"));
+    }
+
+    #[test]
+    fn test_parse_brief_response_preamble_before_markers() {
+        let response = "Here is the result:\n\nBRIEF: The brief\nSUMMARY: The summary";
+        let (brief, summary) = parse_brief_response(response);
+        assert_eq!(brief, Some("The brief".to_string()));
+        assert_eq!(summary, Some("The summary".to_string()));
+    }
+}
+
 /// Library context for building prompts
 struct LibraryContext<'a> {
     package_manager: &'a str,
@@ -1018,16 +1108,6 @@ struct LibraryContext<'a> {
 
 impl<'a> From<&'a LibraryInfo> for LibraryContext<'a> {
     fn from(info: &'a LibraryInfo) -> Self {
-        Self {
-            package_manager: &info.package_manager,
-            language: &info.language,
-            url: &info.url,
-        }
-    }
-}
-
-impl<'a> From<&'a LibraryInfoMetadata> for LibraryContext<'a> {
-    fn from(info: &'a LibraryInfoMetadata) -> Self {
         Self {
             package_manager: &info.package_manager,
             language: &info.language,
@@ -1145,7 +1225,7 @@ fn build_changelog_prompt(
     library_info: Option<&LibraryInfo>,
     version_history: Option<&changelog::types::VersionHistory>,
 ) -> String {
-    use changelog::types::{ChangelogSource, ConfidenceLevel};
+    use changelog::types::ChangelogSource;
 
     let ctx = library_info.map(LibraryContext::from);
     let mut prompt = build_prompt_with_context(template, topic, ctx.as_ref());
@@ -1157,11 +1237,7 @@ fn build_changelog_prompt(
     // Inject version history data if available
     if let Some(history) = version_history {
         let version_data = format_version_history_for_prompt(history);
-        let confidence_str = match history.confidence {
-            ConfidenceLevel::High => "High",
-            ConfidenceLevel::Medium => "Medium",
-            ConfidenceLevel::Low => "Low",
-        };
+        let confidence_str = history.confidence.to_string();
 
         let sources_str = history
             .sources_used
@@ -1177,7 +1253,7 @@ fn build_changelog_prompt(
 
         prompt = prompt
             .replace("{{version_data}}", &version_data)
-            .replace("{{confidence_level}}", confidence_str)
+            .replace("{{confidence_level}}", &confidence_str)
             .replace("{{sources_used}}", &sources_str);
     } else {
         // No structured data available - LLM-only fallback
@@ -1196,6 +1272,17 @@ struct PromptTaskResult {
 }
 
 /// Run a prompt task and save result, printing progress as it completes
+#[instrument(
+    name = "prompt_task",
+    skip(output_dir, model, counter, cancelled),
+    fields(
+        task = %name,
+        filename = %filename,
+        output_dir = %output_dir.display(),
+        total_tasks = total,
+        prompt_len = prompt.len(),
+    )
+)]
 #[allow(clippy::too_many_arguments)]
 async fn run_prompt_task<M>(
     name: &'static str,
@@ -1231,15 +1318,7 @@ where
 
     let metrics = match result {
         Ok(response) => {
-            let content: String = response
-                .choice
-                .into_iter()
-                .filter_map(|c| match c {
-                    AssistantContent::Text(text) => Some(text.text),
-                    _ => None,
-                })
-                .collect::<Vec<_>>()
-                .join("\n");
+            let content = extract_text_content(response.choice);
 
             let usage = &response.usage;
             let metrics = PromptMetrics {
@@ -1294,6 +1373,23 @@ where
             None
         }
     };
+
+    // Record timing and outcome in the current span
+    let span = Span::current();
+    span.record("duration_ms", start_time.elapsed().as_millis() as u64);
+    span.record(
+        "outcome",
+        if metrics.is_some() {
+            "success"
+        } else {
+            "failed"
+        },
+    );
+    if let Some(ref m) = metrics {
+        span.record("input_tokens", m.input_tokens);
+        span.record("output_tokens", m.output_tokens);
+        span.record("total_tokens", m.total_tokens);
+    }
 
     PromptTaskResult { metrics }
 }
@@ -1490,19 +1586,7 @@ where
 
                 match synthesis_result {
                     Ok(response) => {
-                        // Extract text from the response
-                        let content: String = response
-                            .choice
-                            .iter()
-                            .filter_map(|c| {
-                                if let AssistantContent::Text(text) = c {
-                                    Some(text.text.clone())
-                                } else {
-                                    None
-                                }
-                            })
-                            .collect::<Vec<_>>()
-                            .join("\n");
+                        let content = extract_text_content(response.choice.iter().cloned());
 
                         let metrics = PromptMetrics {
                             input_tokens: 0,
@@ -1596,6 +1680,17 @@ pub fn default_output_dir(topic: &str) -> PathBuf {
 }
 
 /// Run a dynamic question task and save result
+#[instrument(
+    name = "question_task",
+    skip(output_dir, model, counter, cancelled, package_manager, language, url),
+    fields(
+        task = %format!("question_{}", question_num),
+        filename = %format!("question_{}.md", question_num),
+        output_dir = %output_dir.display(),
+        total_tasks = total,
+        question_len = question.len(),
+    )
+)]
 #[allow(clippy::too_many_arguments)]
 async fn run_question_task<M>(
     question_num: usize,
@@ -1643,15 +1738,7 @@ where
 
     let metrics = match result {
         Ok(response) => {
-            let content: String = response
-                .choice
-                .into_iter()
-                .filter_map(|c| match c {
-                    AssistantContent::Text(text) => Some(text.text),
-                    _ => None,
-                })
-                .collect::<Vec<_>>()
-                .join("\n");
+            let content = extract_text_content(response.choice);
 
             let usage = &response.usage;
             let metrics = PromptMetrics {
@@ -1697,6 +1784,23 @@ where
         }
     };
 
+    // Record timing and outcome in the current span
+    let span = Span::current();
+    span.record("duration_ms", start_time.elapsed().as_millis() as u64);
+    span.record(
+        "outcome",
+        if metrics.is_some() {
+            "success"
+        } else {
+            "failed"
+        },
+    );
+    if let Some(ref m) = metrics {
+        span.record("input_tokens", m.input_tokens);
+        span.record("output_tokens", m.output_tokens);
+        span.record("total_tokens", m.total_tokens);
+    }
+
     PromptTaskResult { metrics }
 }
 
@@ -1707,6 +1811,16 @@ where
 /// 2. Builds changelog prompt with injected version data
 /// 3. Calls LLM agent with tools
 /// 4. Writes the result to changelog.md
+#[instrument(
+    name = "changelog_agent_task",
+    skip(output_dir, agent, client, counter, cancelled, library_info),
+    fields(
+        task = %name,
+        filename = %filename,
+        output_dir = %output_dir.display(),
+        total_tasks = total,
+    )
+)]
 #[allow(clippy::too_many_arguments)]
 async fn run_changelog_agent_task<M>(
     name: &'static str,
@@ -1838,6 +1952,18 @@ where
         }
     };
 
+    // Record timing and outcome in the current span
+    let span = Span::current();
+    span.record("duration_ms", start_time.elapsed().as_millis() as u64);
+    span.record(
+        "outcome",
+        if metrics.is_some() {
+            "success"
+        } else {
+            "failed"
+        },
+    );
+
     PromptTaskResult { metrics }
 }
 
@@ -1848,6 +1974,16 @@ where
 /// 2. Builds changelog prompt with injected version data
 /// 3. Calls LLM completion model
 /// 4. Writes the result to changelog.md
+#[instrument(
+    name = "changelog_completion_task",
+    skip(output_dir, model, client, counter, cancelled, library_info),
+    fields(
+        task = %name,
+        filename = %filename,
+        output_dir = %output_dir.display(),
+        total_tasks = total,
+    )
+)]
 #[allow(clippy::too_many_arguments)]
 async fn run_changelog_completion_task<M>(
     name: &'static str,
@@ -1931,14 +2067,7 @@ where
 
     let metrics = match result {
         Ok(response) => {
-            let content: String = response
-                .choice
-                .into_iter()
-                .filter_map(|c| match c {
-                    AssistantContent::Text(text) => Some(text.text),
-                    _ => None,
-                })
-                .collect();
+            let content = extract_text_content(response.choice);
 
             let metrics = PromptMetrics {
                 input_tokens: response.usage.input_tokens,
@@ -1981,6 +2110,23 @@ where
             None
         }
     };
+
+    // Record timing and outcome in the current span
+    let span = Span::current();
+    span.record("duration_ms", start_time.elapsed().as_millis() as u64);
+    span.record(
+        "outcome",
+        if metrics.is_some() {
+            "success"
+        } else {
+            "failed"
+        },
+    );
+    if let Some(ref m) = metrics {
+        span.record("input_tokens", m.input_tokens);
+        span.record("output_tokens", m.output_tokens);
+        span.record("total_tokens", m.total_tokens);
+    }
 
     PromptTaskResult { metrics }
 }
@@ -2079,18 +2225,33 @@ async fn generate_skill_files(
         if let Ok(skill_content) = fs::read_to_string(&skill_md_path).await {
             match parse_and_validate_frontmatter(&skill_content) {
                 Ok((frontmatter, _body)) => {
-                    tracing::info!("✓ SKILL.md frontmatter is valid");
+                    tracing::info!(
+                        field = "frontmatter",
+                        source = "SKILL.md",
+                        status = "valid",
+                        "SKILL.md frontmatter validated"
+                    );
 
                     // Update metadata with when_to_use
                     metadata.when_to_use = Some(frontmatter.description.clone());
                     metadata.updated_at = Utc::now();
 
-                    tracing::info!("✓ Extracted when_to_use from frontmatter");
+                    tracing::info!(
+                        field = "when_to_use",
+                        source = "SKILL.md frontmatter",
+                        status = "extracted",
+                        "Metadata when_to_use extracted from frontmatter"
+                    );
                 }
                 Err(e) => {
-                    tracing::error!("✗ SKILL.md frontmatter validation failed: {}", e);
-                    tracing::error!("  File: {}", skill_md_path.display());
-                    tracing::error!("  Please manually fix the frontmatter in SKILL.md");
+                    tracing::error!(
+                        field = "frontmatter",
+                        source = "SKILL.md",
+                        status = "validation_failed",
+                        error = %e,
+                        file = %skill_md_path.display(),
+                        "SKILL.md frontmatter validation failed"
+                    );
 
                     eprintln!("\n⚠️  Warning: SKILL.md frontmatter is invalid");
                     eprintln!("   {}", e);
@@ -2257,7 +2418,7 @@ async fn run_incremental_research(
                     if let Some(ref z) = zai {
                         let agent = z
                             .agent(zai::GLM_4_7)
-                            .preamble("You are a research assistant with web search and scraping tools. Use 1-3 targeted searches to gather key information, then synthesize your findings into a comprehensive response. Do not make excessive tool calls - gather what you need efficiently and write your final answer.")
+                            .preamble(AGENT_PREAMBLE)
                             .tool(search_tool.clone())
                             .tool(scrape_tool.clone())
                             .build();
@@ -2275,7 +2436,7 @@ async fn run_incremental_research(
                     } else {
                         let agent = gemini
                             .agent("gemini-3-flash-preview")
-                            .preamble("You are a research assistant with web search and scraping tools. Use 1-3 targeted searches to gather key information, then synthesize your findings into a comprehensive response. Do not make excessive tool calls - gather what you need efficiently and write your final answer.")
+                            .preamble(AGENT_PREAMBLE)
                             .tool(search_tool.clone())
                             .tool(scrape_tool.clone())
                             .build();
@@ -2295,7 +2456,7 @@ async fn run_incremental_research(
                 "changelog" => {
                     let agent = openai
                         .agent("gpt-5.2")
-                        .preamble("You are a research assistant with web search and scraping tools. Search for recent releases, changelogs, and version history. Use 1-3 targeted searches, then synthesize your findings. Do not make excessive tool calls - write your final answer after gathering sufficient information.")
+                        .preamble(AGENT_PREAMBLE_CHANGELOG)
                         .tool(search_tool.clone())
                         .tool(scrape_tool.clone())
                         .build();
@@ -2314,7 +2475,7 @@ async fn run_incremental_research(
                 _ => {
                     let agent = gemini
                         .agent("gemini-3-flash-preview")
-                        .preamble("You are a research assistant with web search and scraping tools. Use 1-3 targeted searches to gather key information, then synthesize your findings into a comprehensive response. Do not make excessive tool calls - gather what you need efficiently and write your final answer.")
+                        .preamble(AGENT_PREAMBLE)
                         .tool(search_tool.clone())
                         .tool(scrape_tool.clone())
                         .build();
@@ -2337,7 +2498,7 @@ async fn run_incremental_research(
         for (num, question) in questions.iter() {
             let question_agent = gemini
                 .agent("gemini-3-flash-preview")
-                .preamble("You are a research assistant with web search and scraping tools. Use 1-3 targeted searches to find relevant information, then provide a comprehensive answer. Do not make excessive tool calls - synthesize your findings efficiently.")
+                .preamble(AGENT_PREAMBLE_QUESTION)
                 .tool(search_tool.clone())
                 .tool(scrape_tool.clone())
                 .build();
@@ -2604,7 +2765,11 @@ async fn run_incremental_research(
         if let Err(e) = existing_metadata.save(&output_dir).await {
             tracing::error!("Failed to save metadata: {}", e);
         } else {
-            tracing::info!("✓ Updated metadata.when_to_use");
+            tracing::info!(
+                field = "when_to_use",
+                status = "updated",
+                "Metadata when_to_use updated"
+            );
         }
     }
 
@@ -2636,15 +2801,7 @@ async fn run_incremental_research(
 
         match brief_model.completion_request(&brief_prompt).send().await {
             Ok(response) => {
-                let content: String = response
-                    .choice
-                    .into_iter()
-                    .filter_map(|c| match c {
-                        AssistantContent::Text(text) => Some(text.text),
-                        _ => None,
-                    })
-                    .collect::<Vec<_>>()
-                    .join("\n");
+                let content = extract_text_content(response.choice);
 
                 let (brief, summary) = parse_brief_response(&content);
 
@@ -3166,14 +3323,30 @@ async fn regenerate_skill_from_existing_research(
     if let Ok(skill_content) = fs::read_to_string(&skill_path).await {
         match parse_and_validate_frontmatter(&skill_content) {
             Ok((frontmatter, _body)) => {
-                tracing::info!("✓ SKILL.md frontmatter is valid");
+                tracing::info!(
+                    field = "frontmatter",
+                    source = "SKILL.md",
+                    status = "valid",
+                    "SKILL.md frontmatter validated"
+                );
                 // Update metadata with when_to_use from frontmatter
                 metadata.when_to_use = Some(frontmatter.description.clone());
                 metadata.save(output_dir).await?;
-                tracing::info!("✓ Extracted when_to_use from frontmatter");
+                tracing::info!(
+                    field = "when_to_use",
+                    source = "SKILL.md frontmatter",
+                    status = "extracted",
+                    "Metadata when_to_use extracted from frontmatter"
+                );
             }
             Err(e) => {
-                tracing::error!("✗ SKILL.md frontmatter validation failed: {}", e);
+                tracing::error!(
+                    field = "frontmatter",
+                    source = "SKILL.md",
+                    status = "validation_failed",
+                    error = %e,
+                    "SKILL.md frontmatter validation failed during regeneration"
+                );
                 return Err(ResearchError::SkillRegenerationFailed(format!(
                     "Generated SKILL.md has invalid frontmatter: {}",
                     e
@@ -3378,8 +3551,8 @@ pub async fn research(
 
         // Check for missing standard prompts
         // NOTE: Using deprecated function because research() accepts custom output_dir
-        // and doesn't have ResearchType context. This function should be kept until
-        // research() is refactored to require ResearchType parameter or can infer it.
+        // and doesn't have TopicType context. This function should be kept until
+        // research() is refactored to require TopicType parameter or can infer it.
         #[allow(deprecated)]
         let missing_prompts = check_missing_standard_prompts(&output_dir).await;
         if !missing_prompts.is_empty() {
@@ -3568,7 +3741,7 @@ pub async fn research(
         if let Some(ref z) = zai {
             let overview_agent = z
                 .agent(zai::GLM_4_7)
-                .preamble("You are a research assistant with web search and scraping tools. Use 1-3 targeted searches to gather key information, then synthesize your findings into a comprehensive response. Do not make excessive tool calls - gather what you need efficiently and write your final answer.")
+                .preamble(AGENT_PREAMBLE)
                 .tool(search_tool.clone())
                 .tool(scrape_tool.clone())
                 .build();
@@ -3586,7 +3759,7 @@ pub async fn research(
         } else {
             let overview_agent = gemini
                 .agent("gemini-3-flash-preview")
-                .preamble("You are a research assistant with web search and scraping tools. Use 1-3 targeted searches to gather key information, then synthesize your findings into a comprehensive response. Do not make excessive tool calls - gather what you need efficiently and write your final answer.")
+                .preamble(AGENT_PREAMBLE)
                 .tool(search_tool.clone())
                 .tool(scrape_tool.clone())
                 .build();
@@ -3606,7 +3779,7 @@ pub async fn research(
         // Similar libraries agent (using Gemini)
         let similar_agent = gemini
             .agent("gemini-3-flash-preview")
-            .preamble("You are a research assistant with web search and scraping tools. Use 1-3 targeted searches to gather key information, then synthesize your findings into a comprehensive response. Do not make excessive tool calls - gather what you need efficiently and write your final answer.")
+            .preamble(AGENT_PREAMBLE)
             .tool(search_tool.clone())
             .tool(scrape_tool.clone())
             .build();
@@ -3625,7 +3798,7 @@ pub async fn research(
         // Integration partners agent (using Gemini)
         let integration_agent = gemini
             .agent("gemini-3-flash-preview")
-            .preamble("You are a research assistant with web search and scraping tools. Use 1-3 targeted searches to gather key information, then synthesize your findings into a comprehensive response. Do not make excessive tool calls - gather what you need efficiently and write your final answer.")
+            .preamble(AGENT_PREAMBLE)
             .tool(search_tool.clone())
             .tool(scrape_tool.clone())
             .build();
@@ -3644,7 +3817,7 @@ pub async fn research(
         // Use cases agent (using Gemini)
         let use_cases_agent = gemini
             .agent("gemini-3-flash-preview")
-            .preamble("You are a research assistant with web search and scraping tools. Use 1-3 targeted searches to gather key information, then synthesize your findings into a comprehensive response. Do not make excessive tool calls - gather what you need efficiently and write your final answer.")
+            .preamble(AGENT_PREAMBLE)
             .tool(search_tool.clone())
             .tool(scrape_tool.clone())
             .build();
@@ -3663,7 +3836,7 @@ pub async fn research(
         // Changelog agent (using OpenAI GPT) with version history aggregation
         let changelog_agent = openai
             .agent("gpt-5.2")
-            .preamble("You are a research assistant with web search and scraping tools. You have been provided with pre-gathered version data from structured sources. Synthesize this data into a readable changelog, enriching with context where helpful. Use tools only if you need additional information beyond the provided data.")
+            .preamble(AGENT_PREAMBLE_SYNTHESIS)
             .tool(search_tool.clone())
             .tool(scrape_tool.clone())
             .build();
@@ -3685,7 +3858,7 @@ pub async fn research(
         for (i, question) in questions.iter().enumerate() {
             let question_agent = gemini
                 .agent("gemini-3-flash-preview")
-                .preamble("You are a research assistant with web search and scraping tools. Use 1-3 targeted searches to find relevant information, then provide a comprehensive answer. Do not make excessive tool calls - synthesize your findings efficiently.")
+                .preamble(AGENT_PREAMBLE_QUESTION)
                 .tool(search_tool.clone())
                 .tool(scrape_tool.clone())
                 .build();
@@ -4002,15 +4175,7 @@ pub async fn research(
 
         match brief_model.completion_request(&brief_prompt).send().await {
             Ok(response) => {
-                let content: String = response
-                    .choice
-                    .into_iter()
-                    .filter_map(|c| match c {
-                        AssistantContent::Text(text) => Some(text.text),
-                        _ => None,
-                    })
-                    .collect::<Vec<_>>()
-                    .join("\n");
+                let content = extract_text_content(response.choice);
 
                 let (brief, summary) = parse_brief_response(&content);
 
@@ -4082,7 +4247,11 @@ pub async fn research(
     if let Err(e) = metadata.save(&output_dir).await {
         eprintln!("Warning: Failed to write metadata.json: {}", e);
     } else if metadata.when_to_use.is_some() {
-        tracing::info!("✓ Updated metadata.when_to_use");
+        tracing::info!(
+            field = "when_to_use",
+            status = "updated",
+            "Metadata when_to_use updated"
+        );
     }
 
     // Exit the phase 2 span
@@ -4686,29 +4855,22 @@ mod tests {
     }
 
     // ===========================================
-    // Tests for LibraryInfoMetadata conversion
+    // Tests for LibraryInfo serialization
     // ===========================================
 
     #[test]
-    fn test_library_info_metadata_from() {
+    fn test_library_info_serialization_skips_none() {
         let lib_info = LibraryInfo {
             package_manager: "npm".to_string(),
             language: "TypeScript".to_string(),
             url: "https://npmjs.com/package/test".to_string(),
-            repository: Some("https://github.com/test/test".to_string()),
-            description: Some("Test description".to_string()),
+            repository: None,
+            description: None,
         };
 
-        let metadata: LibraryInfoMetadata = (&lib_info).into();
-
-        assert_eq!(metadata.package_manager, "npm");
-        assert_eq!(metadata.language, "TypeScript");
-        assert_eq!(metadata.url, "https://npmjs.com/package/test");
-        assert_eq!(
-            metadata.repository,
-            Some("https://github.com/test/test".to_string())
-        );
-        // Note: description is not included in metadata
+        let json = serde_json::to_string(&lib_info).unwrap();
+        assert!(!json.contains("repository"));
+        assert!(!json.contains("description"));
     }
 
     // ===========================================

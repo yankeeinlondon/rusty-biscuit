@@ -55,11 +55,8 @@ build *args="":
 
 # run tests for biscuit-file packages
 test *args="":
-    @echo ""
-    @echo "Testing {{ BOLD }}biscuit-file{{ RESET }} Packages"
-    @echo "--------------------------"
-    @echo ""
-    @cargo test -p biscuit-file -p biscuit-file-cli {{ args }}
+    @just _test biscuit-file {{ args }}
+    @just _test biscuit-file-cli {{ args }}
 
 # run clippy on biscuit-file packages
 lint:

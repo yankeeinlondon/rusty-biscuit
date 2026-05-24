@@ -1,0 +1,9 @@
+---
+source: darkmatter/lib/tests/render_tree_roundtrip.rs
+expression: rendered.output
+---
+- first unordered item
+- second unordered item
+
+1. first ordered item
+2. second ordered item

@@ -243,8 +243,8 @@ pub enum LinkError {
     Filter(#[from] FilterError),
 
     /// Failed to determine the user's home directory
-    #[error("Failed to determine home directory")]
-    HomeDirectory,
+    #[error("Failed to determine home directory: {0}")]
+    HomeDirectory(String),
 
     /// Generic I/O error
     #[error("I/O error: {0}")]

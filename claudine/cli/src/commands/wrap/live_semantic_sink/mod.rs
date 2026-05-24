@@ -675,9 +675,31 @@ impl SemanticEventSink for LiveSemanticSink {
                     SemanticEvent::SubagentStart { id, name, .. } => {
                         state.subagent_started(id.clone().unwrap_or_default(), name.clone(), now);
                     }
-                    SemanticEvent::SubagentStop { id, .. } => {
+                    SemanticEvent::SubagentStop {
+                        id,
+                        name,
+                        status,
+                        extra,
+                        ..
+                    } => {
                         if let Some(id) = id {
-                            state.subagent_stopped(id, now);
+                            let description = extra
+                                .get("description")
+                                .and_then(|v| v.as_str())
+                                .map(String::from)
+                                .or_else(|| {
+                                    extra
+                                        .get("subagent_type")
+                                        .and_then(|v| v.as_str())
+                                        .map(String::from)
+                                });
+                            state.subagent_stopped(
+                                id,
+                                name.clone(),
+                                description,
+                                status.clone(),
+                                now,
+                            );
                         }
                     }
                     _ => {

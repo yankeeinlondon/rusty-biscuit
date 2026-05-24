@@ -47,7 +47,9 @@ We will now provide a grouped overview of all the information stored in Darkmatt
 
 > **Note:** all date and time related information is reported using _local_ time but there will be a `_utc` variant that provides the same utility only using UTC time to resolve.
 
-### Date
+### Date and Time Information
+
+#### Date Only
 
 | Variable                | Type     | Description                                 |
 |-------------------------|----------|---------------------------------------------|
@@ -66,7 +68,7 @@ We will now provide a grouped overview of all the information stored in Darkmatt
 | `end_of_week_mon`       | `String` | End of week (Sunday), `YYYY-MM-DD`          |
 | `end_of_week_mon_utc`   | `String` | End of week (Sunday), UTC                   |
 
-### Date and Time
+#### Date and Time
 
 | Variable  | Type     | Description                                                |
 |-----------|----------|------------------------------------------------------------|
@@ -74,7 +76,7 @@ We will now provide a grouped overview of all the information stored in Darkmatt
 | `now_utc` | `String` | ISO Datetime string for UTC (`YYYY-MM-DDThh:mm:ssZ`)       |
 | `utc`     | `String` | **Alias** for `now_utc` (backward compatibility)           |
 
-### Time
+#### Time Only
 
 | Variable          | Type     | Description                                     |
 |-------------------|----------|-------------------------------------------------|
@@ -84,7 +86,7 @@ We will now provide a grouped overview of all the information stored in Darkmatt
 | `timezone_offset` | `String` | UTC offset (e.g., `-0700`)                      |
 | `timezone_iana`   | `String` | UTC offset (e.g., `America/Los_Angeles`)                      |
 
-### Calendar
+#### Calendar
 
 | Variable                | Type     | Description                                         |
 |-------------------------|----------|-----------------------------------------------------|
@@ -103,7 +105,7 @@ We will now provide a grouped overview of all the information stored in Darkmatt
 | `month_name_abbr`       | `String` | Abbreviated month name (e.g., Jan)                  |
 | `season`                | `String` | Meteorological season: Spring, Summer, Fall, Winter |
 
-### Timestamps
+#### Timestamps
 
 | Variable       | Type     | Description                     |
 |----------------|----------|---------------------------------|

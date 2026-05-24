@@ -486,6 +486,8 @@ Custom system prompt files support variable substitution:
 - `${AvailableTools}` -- enabled tool names
 - `${toolName_ToolName}` -- specific tool names
 
+**Claudine integration:** Claudine uses `GEMINI_SYSTEM_MD` as the official non-HOME mechanism for system prompt delivery. Both append and replace modes write a scoped temp file and set this env var. Append mode pre-composes the user's real `~/.gemini/GEMINI.md` with the overlay, so the persistent provider state directory remains fully visible to the child. There is no native append flag for `GEMINI_SYSTEM_MD`; the built-in default system prompt is silently dropped when Claudine appends.
+
 To export the default system prompt for reference:
 
 ```bash

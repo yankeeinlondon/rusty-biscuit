@@ -35,7 +35,7 @@ pub(crate) fn run_legacy_branch(
     term: &Terminal,
 ) -> Result<(i32, String, Option<super::CompositionStreamResult>)> {
     if timeout_config.any_enabled() {
-        use biscuit_terminal::components::renderable::Renderable;
+        use biscuit_terminal::components::renderable::TerminalRenderable;
         use biscuit_terminal::components::status::{Status, StatusState};
         let rendered = Status::new(
             "timeouts are only enforced in structured-stream mode; \

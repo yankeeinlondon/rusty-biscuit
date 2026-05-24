@@ -41,7 +41,7 @@ pub fn choose_one_from_csv(
     prompt: impl Into<String>,
     csv: &str,
 ) -> ChoiceInput<String> {
-    ChoiceInput::new(id, prompt).with_options(options_from_csv(csv))
+    ChoiceInput::new(id, prompt).with_options(choice_options_from_csv(csv))
 }
 
 /// Builds a multi-select input from a comma-separated string.
@@ -55,7 +55,7 @@ pub fn choose_many_from_csv(
 ) -> ChoiceInput<String> {
     ChoiceInput::new(id, prompt)
         .with_selection_mode(SelectionMode::Multiple)
-        .with_options(options_from_csv(csv))
+        .with_options(choice_options_from_csv(csv))
 }
 
 /// Builds a single-select input from a markdown bullet/numbered list.
@@ -69,7 +69,7 @@ pub fn choose_one_from_markdown_list(
     prompt: impl Into<String>,
     markdown: &str,
 ) -> ChoiceInput<String> {
-    ChoiceInput::new(id, prompt).with_options(options_from_markdown_list(markdown))
+    ChoiceInput::new(id, prompt).with_options(choice_options_from_markdown_list(markdown))
 }
 
 /// Builds a multi-select input from a markdown bullet/numbered list.
@@ -80,7 +80,7 @@ pub fn choose_many_from_markdown_list(
 ) -> ChoiceInput<String> {
     ChoiceInput::new(id, prompt)
         .with_selection_mode(SelectionMode::Multiple)
-        .with_options(options_from_markdown_list(markdown))
+        .with_options(choice_options_from_markdown_list(markdown))
 }
 
 /// Builds a single-select input from a YAML or JSON mapping.
@@ -100,7 +100,7 @@ pub fn choose_one_from_dictionary(
     prompt: impl Into<String>,
     yaml_or_json: &str,
 ) -> Result<ChoiceInput<String>, ChoiceBuilderError> {
-    Ok(ChoiceInput::new(id, prompt).with_options(options_from_dictionary(yaml_or_json)?))
+    Ok(ChoiceInput::new(id, prompt).with_options(choice_options_from_dictionary(yaml_or_json)?))
 }
 
 /// Builds a multi-select input from a YAML or JSON mapping.
@@ -114,10 +114,14 @@ pub fn choose_many_from_dictionary(
 ) -> Result<ChoiceInput<String>, ChoiceBuilderError> {
     Ok(ChoiceInput::new(id, prompt)
         .with_selection_mode(SelectionMode::Multiple)
-        .with_options(options_from_dictionary(yaml_or_json)?))
+        .with_options(choice_options_from_dictionary(yaml_or_json)?))
 }
 
-fn options_from_csv(csv: &str) -> Vec<ChoiceOption<String>> {
+/// Parses comma-separated text into choice options.
+///
+/// This is the canonical CSV parser used by both the library builders
+/// and the `question` CLI source resolver.
+pub fn choice_options_from_csv(csv: &str) -> Vec<ChoiceOption<String>> {
     csv.split(',')
         .map(str::trim)
         .filter(|entry| !entry.is_empty())
@@ -125,7 +129,12 @@ fn options_from_csv(csv: &str) -> Vec<ChoiceOption<String>> {
         .collect()
 }
 
-fn options_from_markdown_list(markdown: &str) -> Vec<ChoiceOption<String>> {
+/// Parses markdown bullet or numbered list items into choice options.
+///
+/// Non-list lines are ignored. This is the canonical markdown-list
+/// parser used by both the library builders and the `question` CLI
+/// `--options-from-file` compatibility path.
+pub fn choice_options_from_markdown_list(markdown: &str) -> Vec<ChoiceOption<String>> {
     markdown
         .lines()
         .filter_map(parse_markdown_list_line)
@@ -175,7 +184,14 @@ fn strip_numbered_prefix(line: &str) -> Option<&str> {
     Some(rest)
 }
 
-fn options_from_dictionary(input: &str) -> Result<Vec<ChoiceOption<String>>, ChoiceBuilderError> {
+/// Parses a YAML or JSON mapping into choice options.
+///
+/// Keys become labels and values become submitted values. This is the
+/// canonical dictionary parser used by both the library builders and
+/// the `question` CLI `--options-from-dictionary` compatibility path.
+pub fn choice_options_from_dictionary(
+    input: &str,
+) -> Result<Vec<ChoiceOption<String>>, ChoiceBuilderError> {
     let value: serde_yaml_ng::Value =
         serde_yaml_ng::from_str(input).map_err(|e| ChoiceBuilderError::Parse(e.to_string()))?;
     let mapping = match value {

@@ -61,10 +61,7 @@ build *args="":
 
 # test library and CLI
 test *args="":
-    @echo -e "Testing {{BOLD}}biscuit-visualized Library{{RESET}} code"
-    @echo ""
-    @cargo test -p biscuit-visualized -- {{args}}
-    @echo ""
+    @just _test biscuit-visualized {{ args }}
 
 # lint with clippy
 lint *args="":

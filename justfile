@@ -1,5 +1,5 @@
-set dotenv-load := true
-set positional-arguments := true
+set dotenv-load
+set positional-arguments
 
 # set allow-duplicate-recipes
 
@@ -38,6 +38,74 @@ default:
 
 modules:
     @cargo modules structure
+
+# run tests (all areas, or specific areas: just test claudine darkmatter)
+test *args="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [[ -z "{{ args }}" ]]; then
+        echo ""
+        echo "Running tests for all areas..."
+        echo "------------------------------------------------"
+        echo ""
+        for area in {{ areas }}; do
+            if [ -f "$area/justfile" ]; then
+                if (cd "./$area" && just --summary 2>/dev/null) | grep -qw "test"; then
+                    echo
+                    echo "Testing $area..."
+                    (cd "./$area" && just test) || echo "Warning: tests failed in $area"
+                else
+                    echo "- no test command for the area **$area**" >&2
+                fi
+            else
+                echo "- no justfile for the area **$area**" >&2
+            fi
+        done
+    else
+        IFS=', ' read -ra areas <<< "{{ args }}"
+        echo ""
+        echo "Running tests for: ${areas[*]}"
+        echo "------------------------------------------------"
+        echo ""
+        for area in "${areas[@]}"; do
+            if [ -d "$area" ] && [ -f "$area/justfile" ]; then
+                if (cd "./$area" && just --summary 2>/dev/null) | grep -qw "test"; then
+                    echo
+                    echo "Testing $area..."
+                    (cd "./$area" && just test) || exit 1
+                else
+                    echo "Error: area '$area' has no test recipe" >&2
+                    exit 1
+                fi
+            else
+                echo "Error: area '$area' not found or has no justfile" >&2
+                exit 1
+            fi
+        done
+    fi
+
+# detect which monorepo areas have changed files compared to the upstream branch
+changed-areas:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    upstream=$(git rev-parse --abbrev-ref --symbolic-full-name @{u} 2>/dev/null || true)
+    if [[ -z "${upstream:-}" ]]; then
+        # No upstream branch; return empty so caller can fall back
+        exit 0
+    fi
+    changed=$(git diff --name-only "$upstream..HEAD" | cut -d/ -f1 | sort -u)
+    matched=""
+    for area in {{ areas }}; do
+        if echo "$changed" | grep -qx "$area"; then
+            matched="$matched $area"
+        fi
+    done
+    # Trim leading space
+    echo "${matched# }"
+
+# pre-push hook entry point (default areas: claudine darkmatter)
+pre-push *areas="claudine darkmatter":
+    @just test {{ areas }}
 
 # run doctests (all workspace crates, or specific areas: just doctest claudine playa)
 doctest *args="":

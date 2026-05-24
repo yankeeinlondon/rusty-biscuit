@@ -2,9 +2,11 @@ use std::collections::BTreeMap;
 
 use secrecy::{ExposeSecret, SecretString};
 use twilight_http::Client;
+use twilight_model::channel::message::Embed;
 use twilight_model::http::attachment::Attachment as DiscordAttachment;
 use twilight_model::id::Id;
 use twilight_model::id::marker::{ChannelMarker, MessageMarker};
+use twilight_util::builder::embed::EmbedBuilder;
 
 use crate::capabilities::CapabilitySet;
 use crate::dispatch::Dispatch;
@@ -36,11 +38,60 @@ pub struct DiscordProvider {
     client: Client,
 }
 
+/// Result of preparing the Discord request body shape for a message.
+///
+/// `embed` is `Some` only for `Summarized` bodies; otherwise the rendered
+/// content is sent in the top-level `content` field as today.
+#[derive(Debug)]
+struct DiscordPayload {
+    content: Option<String>,
+    embed: Option<Embed>,
+}
+
 impl DiscordProvider {
     pub fn new(config: DiscordConfig) -> Self {
         install_default_crypto_provider();
         let client = Client::new(config.bot_token.expose_secret().to_string());
         Self { client }
+    }
+
+    fn build_payload(message: &PreparedMessage) -> DiscordPayload {
+        let summary = message.render_summary();
+        let rich = message.render_rich(ProviderKind::Discord);
+        let location_line = message.location().map(|l| l.format_text_line());
+
+        match rich {
+            Some(mut rich_md) => {
+                if let Some(loc) = location_line {
+                    if !rich_md.is_empty() {
+                        rich_md.push('\n');
+                    }
+                    rich_md.push_str(&loc);
+                }
+                let embed = EmbedBuilder::new().description(rich_md).build();
+                let content = if summary.is_empty() {
+                    None
+                } else {
+                    Some(summary)
+                };
+                DiscordPayload {
+                    content,
+                    embed: Some(embed),
+                }
+            }
+            None => {
+                let content = message.render_body_with_location(ProviderKind::Discord);
+                let content = if content.is_empty() {
+                    None
+                } else {
+                    Some(content)
+                };
+                DiscordPayload {
+                    content,
+                    embed: None,
+                }
+            }
+        }
     }
 
     fn build_attachment(
@@ -128,8 +179,8 @@ impl super::Provider for DiscordProvider {
         };
         tracing::Span::current().record("channel", tracing::field::display(channel_id));
 
-        // Render the message body (with location text fallback)
-        let content = message.render_body_with_location(ProviderKind::Discord);
+        // Build the message body shape (content + optional embed)
+        let payload = Self::build_payload(message);
         let attachments = Self::build_attachments(message)?;
         let attachment_kinds: Vec<_> = message
             .attachments()
@@ -138,7 +189,8 @@ impl super::Provider for DiscordProvider {
             .collect();
         tracing::debug!(
             has_reply = dispatch.reply_to.is_some(),
-            content_len = content.len(),
+            content_len = payload.content.as_deref().map(str::len).unwrap_or(0),
+            has_embed = payload.embed.is_some(),
             attachment_count = attachments.len(),
             "sending Discord message"
         );
@@ -147,8 +199,13 @@ impl super::Provider for DiscordProvider {
         // Build the message request
         let mut req = self.client.create_message(channel_id);
 
-        if !content.is_empty() {
-            req = req.content(&content);
+        if let Some(ref content) = payload.content {
+            req = req.content(content);
+        }
+        let embeds_storage;
+        if let Some(embed) = payload.embed {
+            embeds_storage = [embed];
+            req = req.embeds(&embeds_storage);
         }
         if !attachments.is_empty() {
             req = req.attachments(&attachments);
@@ -307,5 +364,68 @@ mod tests {
             crate::MessengerError::InvalidMessage(message)
             if message.contains("provider file ID")
         ));
+    }
+
+    use crate::Message;
+    use crate::PreparedMessage;
+
+    #[test]
+    fn build_payload_plain_body_uses_content_only() {
+        let msg = Message::text("hello");
+        let prepared = PreparedMessage::new(&msg);
+        let p = DiscordProvider::build_payload(&prepared);
+        assert_eq!(p.content.as_deref(), Some("hello"));
+        assert!(p.embed.is_none());
+    }
+
+    #[test]
+    fn build_payload_markdown_body_uses_content_only() {
+        let msg = Message::markdown("**bold**");
+        let prepared = PreparedMessage::new(&msg);
+        let p = DiscordProvider::build_payload(&prepared);
+        assert_eq!(p.content.as_deref(), Some("**bold**"));
+        assert!(p.embed.is_none());
+    }
+
+    #[test]
+    fn build_payload_summarized_body_splits_into_content_and_embed() {
+        let msg = Message::summarized("plain banner", "**rich** body");
+        let prepared = PreparedMessage::new(&msg);
+        let p = DiscordProvider::build_payload(&prepared);
+        assert_eq!(p.content.as_deref(), Some("plain banner"));
+        let embed = p.embed.expect("expected embed for Summarized body");
+        let desc = embed.description.expect("embed should have description");
+        assert!(desc.contains("**rich**"));
+        assert!(desc.contains("body"));
+    }
+
+    #[test]
+    fn build_payload_summarized_with_empty_summary_omits_content() {
+        let msg = Message::summarized("", "**rich**");
+        let prepared = PreparedMessage::new(&msg);
+        let p = DiscordProvider::build_payload(&prepared);
+        assert!(p.content.is_none());
+        assert!(p.embed.is_some());
+    }
+
+    #[test]
+    fn build_payload_summarized_appends_location_to_embed_description() {
+        let msg = Message::summarized("s", "body").with_location(34.05, -118.24);
+        let prepared = PreparedMessage::new(&msg);
+        let p = DiscordProvider::build_payload(&prepared);
+        let desc = p.embed.unwrap().description.unwrap();
+        assert!(desc.contains("body"));
+        assert!(desc.contains("📍"));
+        assert!(desc.contains("34.0500"));
+    }
+
+    #[test]
+    fn build_payload_legacy_appends_location_to_content() {
+        let msg = Message::markdown("**body**").with_location(34.05, -118.24);
+        let prepared = PreparedMessage::new(&msg);
+        let p = DiscordProvider::build_payload(&prepared);
+        let content = p.content.unwrap();
+        assert!(content.contains("**body**"));
+        assert!(content.contains("📍"));
     }
 }

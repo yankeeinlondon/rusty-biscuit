@@ -1,0 +1,14 @@
+---
+source: darkmatter/lib/tests/error_snapshots/link.rs
+assertion_line: 50
+expression: out
+---
+⤫ LinkError: malformed markdown link
+┃ Message: expected ( after display text
+┃ 
+┃ Link parsing failed here:
+┃ 
+┃   > 1 │ [label] target
+┃ 
+┃          ^ (offset 8)
+Use the pattern display with balanced brackets.

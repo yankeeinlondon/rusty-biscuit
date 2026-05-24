@@ -3,7 +3,7 @@ mod commands;
 
 use args::{Cli, Commands};
 use biscuit_terminal::components::prose::Prose;
-use biscuit_terminal::components::renderable::Renderable as _;
+use biscuit_terminal::components::renderable::TerminalRenderable as _;
 use biscuit_terminal::terminal::Terminal;
 use clap::{CommandFactory, Parser};
 use clap_complete::CompleteEnv;

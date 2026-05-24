@@ -184,7 +184,15 @@ pub(crate) fn run_structured_branch(
     // it live. Compose routes through the section stream so the trailer
     // summary sees a consistent section state; inline writes directly
     // because the body will be captured into the target file.
-    if !result.had_streamed_assistant && !result.summary.assistant_text.trim().is_empty() {
+    //
+    // Suppress on user interrupt: Codex's `agent_message` items already
+    // rendered live as `▌ ` thinking blocks, and the `--output-last-message`
+    // file ends up holding the same prose. Dumping it again after the
+    // "User interrupted…" notice is a duplicate of what just scrolled by.
+    if !result.had_streamed_assistant
+        && !result.summary.assistant_text.trim().is_empty()
+        && !crate::output::user_interrupt_observed()
+    {
         if !is_inline {
             result.section_stream.enter_final_stdout();
         }

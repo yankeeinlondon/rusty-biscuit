@@ -1,6 +1,6 @@
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
-use schematic_define::{ApiResponse, RestApi};
+use schematic_define::RestApi;
 
 /// Converts a CamelCase identifier to snake_case.
 pub(crate) fn to_snake_case(s: &str) -> String {

@@ -13,9 +13,10 @@
 
 use super::EffectiveState;
 use super::expression::{CtxLookup, EvaluationLookup, evaluate, is_truthy, parse_condition};
+use biscuit_terminal::errors::SourceContext;
 use serde_json::Value;
 use std::ops::Range;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use tracing::{debug, trace};
 
 /// Errors from condition parsing or evaluation.
@@ -24,6 +25,7 @@ pub enum ConditionError {
     /// Failed to parse a condition expression.
     #[error("Failed to parse condition '{expr}' at line {line}: {message}")]
     Parse {
+        ctx: Box<SourceContext>,
         expr: String,
         line: usize,
         message: String,
@@ -37,6 +39,7 @@ pub enum ConditionError {
     /// Failed to evaluate a condition expression.
     #[error("Failed to evaluate condition '{expr}' at line {line}: {message}")]
     Eval {
+        ctx: Box<SourceContext>,
         expr: String,
         line: usize,
         message: String,
@@ -48,32 +51,60 @@ impl biscuit_terminal::errors::BlockError for ConditionError {
         &self,
         _term: &biscuit_terminal::terminal::Terminal,
     ) -> biscuit_terminal::components::status_block::StatusBlock {
+        use biscuit_terminal::components::prose::Prose;
         use biscuit_terminal::components::status::StatusState;
         use biscuit_terminal::components::status_block::StatusBlock;
         use biscuit_terminal::errors::{ErrorHeader, StatusBlockExt};
 
-        let operator_hint = "Operators: <cyan>&&  ||  !  ==  !=  >  >=  <  <=  +  -  *  /  %  []  .</cyan> | Helpers: <cyan>HasKey, Contains, Length, number, round, min, max, abs, first, last, IsString, IsNumber, IsArray, IsNull, IsObject, IsEmpty, StartsWith, EndsWith, Lower, Upper, Capitalize, KebabCase, SnakeCase, CamelCase, PascalCase, TitleCase, IsDate, IsDateTime, IsToday, IsYesterday, IsTomorrow, IsThisMonth, IsThisYear</cyan>";
+        let operator_hint = "Operators: <cyan>&&  ||  !  ==  !=  >  >=  <  <=  +  -  *  /  %  []  .</cyan> | Helpers: <cyan>has_key, contains, length, number, round, min, max, abs, first, last, is_string, is_number, is_array, is_null, is_object, is_empty, starts_with, ends_with, lower, upper, capitalize, kebab_case, snake_case, camel_case, pascal_case, title_case, is_date, is_date_time, is_today, is_yesterday, is_tomorrow, is_this_month, is_this_year</cyan>";
 
         match self {
             ConditionError::Parse {
+                ctx,
                 expr,
                 line,
                 message,
                 span,
-            } => StatusBlock::new(StatusState::Error)
-                .error_header(ErrorHeader::new("ConditionError", "parse failed"))
-                .body(format!(
-                    "<dim>Expression:</dim>\n  <cyan>{expr}</cyan>\n{}\n<dim>Line:</dim> {line}\n<dim>Message:</dim> {message}",
-                    caret_marker(expr, span.start)
-                ))
-                .hint(operator_hint),
+            } => {
+                let body = vec![
+                    Prose::new(format!(
+                        "Condition parsing failed for <cyan>when=\"{}\"</cyan>:",
+                        expr
+                    )),
+                    ctx.excerpt_prose(*line, 1, "md"),
+                    Prose::new(format!(
+                        "{} <red><b>^</b></red> (near position {})",
+                        " ".repeat(span.start),
+                        span.start
+                    )),
+                    Prose::new(format!("<dim>Message:</dim> {message}")),
+                ];
 
-            ConditionError::Eval { expr, line, message } => StatusBlock::new(StatusState::Error)
-                .error_header(ErrorHeader::new("ConditionError", "evaluation failed"))
-                .body(format!(
-                    "<dim>Expression:</dim> <cyan>{expr}</cyan>\n<dim>Line:</dim> {line}\n<dim>Message:</dim> {message}"
-                ))
-                .hint("Confirm every variable referenced is present in the effective state."),
+                StatusBlock::new(StatusState::Error)
+                    .error_header(ErrorHeader::new("ConditionError", "parse failed"))
+                    .body(body)
+                    .hint(operator_hint)
+            }
+
+            ConditionError::Eval {
+                ctx,
+                expr,
+                line,
+                message,
+            } => {
+                let body = vec![
+                    Prose::new(format!(
+                        "Condition evaluation failed for <cyan>when=\"{}\"</cyan>:",
+                        expr
+                    )),
+                    ctx.excerpt_prose(*line, 1, "md"),
+                ];
+
+                StatusBlock::new(StatusState::Error)
+                    .error_header(ErrorHeader::new("ConditionError", "evaluation failed"))
+                    .body(body)
+                    .hint(format!("Error: {message}"))
+            }
         }
     }
 }
@@ -84,24 +115,6 @@ impl biscuit_terminal::errors::BlockError for ConditionError {
 /// pipeline. It parses the expression in condition mode (where `||` is logical
 /// OR and `&&` is logical AND) and evaluates it against the provided state.
 ///
-/// ## Examples
-///
-/// ```
-/// use darkmatter::markdown::compose::{conditions::evaluate_condition, EffectiveStateBuilder, ComposeContext};
-/// use serde_json::json;
-/// use std::collections::HashMap;
-/// use std::path::Path;
-///
-/// let state = EffectiveStateBuilder::new()
-///     .with_frontmatter([("draft".to_string(), json!(true))].into())
-///     .with_context(ComposeContext::capture_for_dir(Path::new(".")))
-///     .build()
-///     .unwrap();
-///
-/// assert!(evaluate_condition("draft", &state, 1).unwrap());
-/// assert!(!evaluate_condition("!draft", &state, 1).unwrap());
-/// ```
-///
 /// ## Returns
 ///
 /// - `Ok(true)` when the expression evaluates to a truthy value
@@ -111,15 +124,17 @@ impl biscuit_terminal::errors::BlockError for ConditionError {
 ///
 /// Returns [`ConditionError::Parse`] when the expression cannot be parsed,
 /// or [`ConditionError::Eval`] when evaluation fails (e.g. unknown function).
-/// Both variants include the source expression and line number.
+/// Both variants include the source expression, line number, and source context.
 pub fn evaluate_condition(
     expr: &str,
     state: &EffectiveState,
     line: usize,
+    ctx: SourceContext,
 ) -> Result<bool, ConditionError> {
     trace!(expr = %expr, line, "conditions: evaluating");
 
     let parsed = parse_condition(expr).map_err(|e| ConditionError::Parse {
+        ctx: Box::new(ctx.clone()),
         expr: expr.to_string(),
         line,
         message: e.message.clone(),
@@ -127,6 +142,7 @@ pub fn evaluate_condition(
     })?;
 
     let value = evaluate(&parsed, state).map_err(|message| ConditionError::Eval {
+        ctx: Box::new(ctx),
         expr: expr.to_string(),
         line,
         message,
@@ -152,6 +168,7 @@ fn parse_error_span(expr: &str, position: usize) -> Range<usize> {
     }
 }
 
+#[allow(dead_code)]
 fn caret_marker(input: &str, byte_offset: usize) -> String {
     let clamped = byte_offset.min(input.len());
     let column = input
@@ -216,7 +233,16 @@ pub fn evaluate_condition_against(
 ) -> Result<bool, ConditionError> {
     trace!(expr = %expr, "conditions: evaluating against plain data");
 
+    // Shortcut API uses a synthetic source context since it's typically
+    // evaluating in-memory or transient expressions.
+    let ctx = SourceContext::new(
+        work_dir.join("<transient>"),
+        PathBuf::from("<transient>"),
+        expr.to_string(),
+    );
+
     let parsed = parse_condition(expr).map_err(|e| ConditionError::Parse {
+        ctx: Box::new(ctx.clone()),
         expr: expr.to_string(),
         line: 1,
         message: e.message.clone(),
@@ -225,6 +251,7 @@ pub fn evaluate_condition_against(
 
     let lookup = ShortcutLookup::new(data, work_dir);
     let value = evaluate(&parsed, &lookup).map_err(|message| ConditionError::Eval {
+        ctx: Box::new(ctx),
         expr: expr.to_string(),
         line: 1,
         message,
@@ -321,67 +348,76 @@ mod tests {
             .unwrap()
     }
 
+    fn dummy_ctx() -> SourceContext {
+        SourceContext::new(PathBuf::from("/test.md"), PathBuf::from("test.md"), "")
+    }
+
+    /// Test shim that supplies a dummy `SourceContext` so call sites stay terse.
+    fn eval_cond(expr: &str, state: &EffectiveState, line: usize) -> Result<bool, ConditionError> {
+        super::evaluate_condition(expr, state, line, dummy_ctx())
+    }
+
     #[test]
     fn evaluates_unary_not() {
         let state = test_state(json!({}));
-        assert!(evaluate_condition("!missing", &state, 1).unwrap());
+        assert!(evaluate_condition("!missing", &state, 1, dummy_ctx()).unwrap());
     }
 
     #[test]
     fn evaluates_has_key() {
         let state = test_state(json!({ "user": {"name": "Alice"} }));
-        assert!(evaluate_condition(r#"HasKey(user, "name")"#, &state, 1).unwrap());
+        assert!(evaluate_condition(r#"has_key(user, "name")"#, &state, 1, dummy_ctx()).unwrap());
     }
 
     #[test]
     fn evaluates_and_or() {
         let state = test_state(json!({ "a": true, "b": false }));
-        assert!(!evaluate_condition("And(a, b)", &state, 1).unwrap());
-        assert!(evaluate_condition("Or(a, b)", &state, 1).unwrap());
+        assert!(!evaluate_condition("and(a, b)", &state, 1, dummy_ctx()).unwrap());
+        assert!(evaluate_condition("or(a, b)", &state, 1, dummy_ctx()).unwrap());
     }
 
     #[test]
     fn numeric_comparison_coerces_non_numeric_to_zero() {
         let state = test_state(json!({ "name": "Alice" }));
-        assert!(evaluate_condition("name >= 0", &state, 1).unwrap());
+        assert!(evaluate_condition("name >= 0", &state, 1, dummy_ctx()).unwrap());
     }
 
     #[test]
     fn null_equal_null_is_false() {
         let state = test_state(json!({}));
-        assert!(!evaluate_condition("missing_a == missing_b", &state, 1).unwrap());
+        assert!(!evaluate_condition("missing_a == missing_b", &state, 1, dummy_ctx()).unwrap());
     }
 
     #[test]
     fn null_not_equal_null_is_false() {
         let state = test_state(json!({}));
-        assert!(!evaluate_condition("missing_a != missing_b", &state, 1).unwrap());
+        assert!(!evaluate_condition("missing_a != missing_b", &state, 1, dummy_ctx()).unwrap());
     }
 
     #[test]
     fn defined_equal_null_is_false() {
         let state = test_state(json!({ "color": "red" }));
-        assert!(!evaluate_condition("color == missing", &state, 1).unwrap());
+        assert!(!evaluate_condition("color == missing", &state, 1, dummy_ctx()).unwrap());
     }
 
     #[test]
     fn defined_not_equal_null_is_true() {
         let state = test_state(json!({ "color": "red" }));
-        assert!(evaluate_condition("color != missing", &state, 1).unwrap());
+        assert!(evaluate_condition("color != missing", &state, 1, dummy_ctx()).unwrap());
     }
 
     #[test]
     fn equality_with_string_literal() {
         let state = test_state(json!({ "color": "red" }));
-        assert!(evaluate_condition(r#"color == "red""#, &state, 1).unwrap());
-        assert!(!evaluate_condition(r#"color == "blue""#, &state, 1).unwrap());
+        assert!(evaluate_condition(r#"color == "red""#, &state, 1, dummy_ctx()).unwrap());
+        assert!(!evaluate_condition(r#"color == "blue""#, &state, 1, dummy_ctx()).unwrap());
     }
 
     #[test]
     fn equality_with_single_quoted_string() {
         let state = test_state(json!({ "color": "red" }));
-        assert!(evaluate_condition("color == 'red'", &state, 1).unwrap());
-        assert!(!evaluate_condition("color == 'blue'", &state, 1).unwrap());
+        assert!(evaluate_condition("color == 'red'", &state, 1, dummy_ctx()).unwrap());
+        assert!(!evaluate_condition("color == 'blue'", &state, 1, dummy_ctx()).unwrap());
     }
 
     #[test]
@@ -396,14 +432,14 @@ mod tests {
             .build()
             .unwrap();
 
-        assert!(evaluate_condition("env.AGENT == 'claude'", &state, 1).unwrap());
-        assert!(!evaluate_condition("env.AGENT == 'opencode'", &state, 1).unwrap());
+        assert!(evaluate_condition("env.AGENT == 'claude'", &state, 1, dummy_ctx()).unwrap());
+        assert!(!evaluate_condition("env.AGENT == 'opencode'", &state, 1, dummy_ctx()).unwrap());
     }
 
     #[test]
     fn unset_env_equality_with_string_literal_is_false() {
         let state = test_state(json!({}));
-        assert!(!evaluate_condition("env.AGENT == 'claude'", &state, 1).unwrap());
+        assert!(!evaluate_condition("env.AGENT == 'claude'", &state, 1, dummy_ctx()).unwrap());
     }
 
     #[test]
@@ -417,18 +453,18 @@ mod tests {
             .build()
             .unwrap();
 
-        assert!(evaluate_condition("env.AGENT == 'claude'", &state, 1).unwrap());
-        assert!(!evaluate_condition("env.AGENT == 'opencode'", &state, 1).unwrap());
-        assert!(!evaluate_condition("!env.AGENT", &state, 1).unwrap());
+        assert!(evaluate_condition("env.AGENT == 'claude'", &state, 1, dummy_ctx()).unwrap());
+        assert!(!evaluate_condition("env.AGENT == 'opencode'", &state, 1, dummy_ctx()).unwrap());
+        assert!(!evaluate_condition("!env.AGENT", &state, 1, dummy_ctx()).unwrap());
     }
 
     #[test]
     fn mutual_exclusion_pattern_unset() {
         let state = test_state(json!({}));
 
-        assert!(!evaluate_condition("env.AGENT == 'claude'", &state, 1).unwrap());
-        assert!(!evaluate_condition("env.AGENT == 'opencode'", &state, 1).unwrap());
-        assert!(evaluate_condition("!env.AGENT", &state, 1).unwrap());
+        assert!(!evaluate_condition("env.AGENT == 'claude'", &state, 1, dummy_ctx()).unwrap());
+        assert!(!evaluate_condition("env.AGENT == 'opencode'", &state, 1, dummy_ctx()).unwrap());
+        assert!(evaluate_condition("!env.AGENT", &state, 1, dummy_ctx()).unwrap());
     }
 
     // ── Infix `&&` / `||` coverage ────────────────────────────────────────
@@ -436,60 +472,62 @@ mod tests {
     #[test]
     fn infix_and_both_true() {
         let state = test_state(json!({ "a": true, "b": true }));
-        assert!(evaluate_condition("a && b", &state, 1).unwrap());
+        assert!(evaluate_condition("a && b", &state, 1, dummy_ctx()).unwrap());
     }
 
     #[test]
     fn infix_and_one_false() {
         let state = test_state(json!({ "a": true, "b": false }));
-        assert!(!evaluate_condition("a && b", &state, 1).unwrap());
+        assert!(!evaluate_condition("a && b", &state, 1, dummy_ctx()).unwrap());
     }
 
     #[test]
     fn infix_or_both_false() {
         let state = test_state(json!({ "a": false, "b": false }));
-        assert!(!evaluate_condition("a || b", &state, 1).unwrap());
+        assert!(!evaluate_condition("a || b", &state, 1, dummy_ctx()).unwrap());
     }
 
     #[test]
     fn infix_or_one_true() {
         let state = test_state(json!({ "a": false, "b": true }));
-        assert!(evaluate_condition("a || b", &state, 1).unwrap());
+        assert!(evaluate_condition("a || b", &state, 1, dummy_ctx()).unwrap());
     }
 
     #[test]
     fn infix_and_binds_tighter_than_or() {
         // (false && true) || true => true
         let state = test_state(json!({ "a": false, "b": true, "c": true }));
-        assert!(evaluate_condition("a && b || c", &state, 1).unwrap());
+        assert!(evaluate_condition("a && b || c", &state, 1, dummy_ctx()).unwrap());
 
         // false || (true && false) => false
         let state = test_state(json!({ "a": false, "b": true, "c": false }));
-        assert!(!evaluate_condition("a || b && c", &state, 1).unwrap());
+        assert!(!evaluate_condition("a || b && c", &state, 1, dummy_ctx()).unwrap());
     }
 
     #[test]
     fn infix_parenthesized_or_then_and() {
         // (a || b) && c
         let state = test_state(json!({ "a": false, "b": true, "c": true }));
-        assert!(evaluate_condition("(a || b) && c", &state, 1).unwrap());
+        assert!(evaluate_condition("(a || b) && c", &state, 1, dummy_ctx()).unwrap());
 
         let state = test_state(json!({ "a": false, "b": true, "c": false }));
-        assert!(!evaluate_condition("(a || b) && c", &state, 1).unwrap());
+        assert!(!evaluate_condition("(a || b) && c", &state, 1, dummy_ctx()).unwrap());
     }
 
     #[test]
     fn infix_or_with_literal() {
         // a || (missing || "default") — Or short-circuits on `a`.
         let state = test_state(json!({ "a": true }));
-        assert!(evaluate_condition(r#"a || (missing || "default")"#, &state, 1).unwrap());
+        assert!(
+            evaluate_condition(r#"a || (missing || "default")"#, &state, 1, dummy_ctx()).unwrap()
+        );
     }
 
     #[test]
     fn legacy_and_or_function_still_works() {
         let state = test_state(json!({ "a": true, "b": false }));
-        assert!(!evaluate_condition("And(a, b)", &state, 1).unwrap());
-        assert!(evaluate_condition("Or(a, b)", &state, 1).unwrap());
+        assert!(!evaluate_condition("and(a, b)", &state, 1, dummy_ctx()).unwrap());
+        assert!(evaluate_condition("or(a, b)", &state, 1, dummy_ctx()).unwrap());
     }
 
     #[test]
@@ -497,25 +535,29 @@ mod tests {
         // UnknownFn would raise `Unknown function` — but short-circuit on
         // leading `false` means the rhs is never evaluated.
         let state = test_state(json!({}));
-        assert!(!evaluate_condition("false_flag && UnknownFn(x)", &state, 1).unwrap());
+        assert!(!evaluate_condition("false_flag && UnknownFn(x)", &state, 1, dummy_ctx()).unwrap());
     }
 
     #[test]
     fn infix_or_short_circuits_on_true() {
         let state = test_state(json!({ "truthy_flag": true }));
-        assert!(evaluate_condition("truthy_flag || UnknownFn(x)", &state, 1).unwrap());
+        assert!(evaluate_condition("truthy_flag || UnknownFn(x)", &state, 1, dummy_ctx()).unwrap());
     }
 
     #[test]
     fn function_and_short_circuits_on_false() {
         let state = test_state(json!({}));
-        assert!(!evaluate_condition("And(false_flag, UnknownFn(x))", &state, 1).unwrap());
+        assert!(
+            !evaluate_condition("and(false_flag, UnknownFn(x))", &state, 1, dummy_ctx()).unwrap()
+        );
     }
 
     #[test]
     fn function_or_short_circuits_on_true() {
         let state = test_state(json!({ "truthy_flag": true }));
-        assert!(evaluate_condition("Or(truthy_flag, UnknownFn(x))", &state, 1).unwrap());
+        assert!(
+            evaluate_condition("or(truthy_flag, UnknownFn(x))", &state, 1, dummy_ctx()).unwrap()
+        );
     }
 
     #[test]
@@ -523,7 +565,7 @@ mod tests {
         // When short-circuit doesn't kick in, unknown functions must surface
         // as an evaluation error.
         let state = test_state(json!({ "truthy_flag": true }));
-        let result = evaluate_condition("truthy_flag && UnknownFn(x)", &state, 1);
+        let result = evaluate_condition("truthy_flag && UnknownFn(x)", &state, 1, dummy_ctx());
         assert!(result.is_err());
         assert!(matches!(result.unwrap_err(), ConditionError::Eval { .. }));
     }
@@ -531,9 +573,15 @@ mod tests {
     #[test]
     fn infix_with_comparison_operands() {
         let state = test_state(json!({ "count": 5, "name": "alice" }));
-        assert!(evaluate_condition(r#"count > 0 && name == "alice""#, &state, 1).unwrap());
-        assert!(!evaluate_condition(r#"count > 0 && name == "bob""#, &state, 1).unwrap());
-        assert!(evaluate_condition(r#"count > 10 || name == "alice""#, &state, 1).unwrap());
+        assert!(
+            evaluate_condition(r#"count > 0 && name == "alice""#, &state, 1, dummy_ctx()).unwrap()
+        );
+        assert!(
+            !evaluate_condition(r#"count > 0 && name == "bob""#, &state, 1, dummy_ctx()).unwrap()
+        );
+        assert!(
+            evaluate_condition(r#"count > 10 || name == "alice""#, &state, 1, dummy_ctx()).unwrap()
+        );
     }
 
     // ── Shortcut API: evaluate_condition_against ──────────────────────
@@ -582,7 +630,7 @@ mod tests {
                 .unwrap()
         );
         assert!(
-            evaluate_condition_against("HasKey(user, 'name')", &data, std::path::Path::new("."))
+            evaluate_condition_against("has_key(user, 'name')", &data, std::path::Path::new("."))
                 .unwrap()
         );
     }
@@ -614,9 +662,9 @@ mod tests {
     fn shortcut_and_or_functions() {
         let data = json!({ "a": true, "b": false });
         assert!(
-            !evaluate_condition_against("And(a, b)", &data, std::path::Path::new(".")).unwrap()
+            !evaluate_condition_against("and(a, b)", &data, std::path::Path::new(".")).unwrap()
         );
-        assert!(evaluate_condition_against("Or(a, b)", &data, std::path::Path::new(".")).unwrap());
+        assert!(evaluate_condition_against("or(a, b)", &data, std::path::Path::new(".")).unwrap());
     }
 
     #[test]
@@ -859,33 +907,33 @@ mod tests {
         #[test]
         fn less_than_or_equal_in_when_clause() {
             let state = test_state(json!({ "count": 3 }));
-            assert!(evaluate_condition("count <= 5", &state, 1).unwrap());
-            assert!(evaluate_condition("count <= 3", &state, 1).unwrap());
-            assert!(!evaluate_condition("count <= 2", &state, 1).unwrap());
+            assert!(eval_cond("count <= 5", &state, 1).unwrap());
+            assert!(eval_cond("count <= 3", &state, 1).unwrap());
+            assert!(!eval_cond("count <= 2", &state, 1).unwrap());
         }
 
         #[test]
         fn arithmetic_in_when_clause() {
             let state = test_state(json!({ "count": 10 }));
-            assert!(evaluate_condition("count + 5 == 15", &state, 1).unwrap());
-            assert!(evaluate_condition("count - 5 == 5", &state, 1).unwrap());
-            assert!(evaluate_condition("count * 2 > 15", &state, 1).unwrap());
-            assert!(evaluate_condition("count % 3 == 1", &state, 1).unwrap());
+            assert!(eval_cond("count + 5 == 15", &state, 1).unwrap());
+            assert!(eval_cond("count - 5 == 5", &state, 1).unwrap());
+            assert!(eval_cond("count * 2 > 15", &state, 1).unwrap());
+            assert!(eval_cond("count % 3 == 1", &state, 1).unwrap());
         }
 
         #[test]
         fn bracket_index_in_when_clause() {
             let state = test_state(json!({ "items": ["a", "b", "c"] }));
-            assert!(evaluate_condition("items[0] == 'a'", &state, 1).unwrap());
-            assert!(evaluate_condition("items[-1] == 'c'", &state, 1).unwrap());
+            assert!(eval_cond("items[0] == 'a'", &state, 1).unwrap());
+            assert!(eval_cond("items[-1] == 'c'", &state, 1).unwrap());
             // Out-of-range -> null -> string compare against literal is false
-            assert!(!evaluate_condition("items[99] == 'a'", &state, 1).unwrap());
+            assert!(!eval_cond("items[99] == 'a'", &state, 1).unwrap());
         }
 
         #[test]
         fn bracket_object_key_in_when_clause() {
             let state = test_state(json!({ "config": { "theme": "dark" } }));
-            assert!(evaluate_condition(r#"config["theme"] == 'dark'"#, &state, 1).unwrap());
+            assert!(eval_cond(r#"config["theme"] == 'dark'"#, &state, 1).unwrap());
         }
 
         #[test]
@@ -893,42 +941,42 @@ mod tests {
             let state = test_state(json!({
                 "tags": ["one", "two"], "title": "doc", "missing_field": null
             }));
-            assert!(evaluate_condition("IsArray(tags)", &state, 1).unwrap());
-            assert!(evaluate_condition("IsString(title)", &state, 1).unwrap());
-            assert!(evaluate_condition("IsNull(missing_field)", &state, 1).unwrap());
-            assert!(evaluate_condition("IsEmpty(missing)", &state, 1).unwrap());
-            assert!(!evaluate_condition("IsEmpty(tags)", &state, 1).unwrap());
+            assert!(eval_cond("is_array(tags)", &state, 1).unwrap());
+            assert!(eval_cond("is_string(title)", &state, 1).unwrap());
+            assert!(eval_cond("is_null(missing_field)", &state, 1).unwrap());
+            assert!(eval_cond("is_empty(missing)", &state, 1).unwrap());
+            assert!(!eval_cond("is_empty(tags)", &state, 1).unwrap());
         }
 
         #[test]
         fn math_helpers_in_when_clause() {
             let state = test_state(json!({ "a": 7, "b": 3 }));
-            assert!(evaluate_condition("min(a, b) == 3", &state, 1).unwrap());
-            assert!(evaluate_condition("max(a, b) == 7", &state, 1).unwrap());
-            assert!(evaluate_condition("abs(-4) == 4", &state, 1).unwrap());
+            assert!(eval_cond("min(a, b) == 3", &state, 1).unwrap());
+            assert!(eval_cond("max(a, b) == 7", &state, 1).unwrap());
+            assert!(eval_cond("abs(-4) == 4", &state, 1).unwrap());
         }
 
         #[test]
         fn collection_helpers_in_when_clause() {
             let state = test_state(json!({ "items": [10, 20, 30] }));
-            assert!(evaluate_condition("first(items) == 10", &state, 1).unwrap());
-            assert!(evaluate_condition("last(items) == 30", &state, 1).unwrap());
+            assert!(eval_cond("first(items) == 10", &state, 1).unwrap());
+            assert!(eval_cond("last(items) == 30", &state, 1).unwrap());
         }
 
         #[test]
         fn string_predicates_in_when_clause() {
             let state = test_state(json!({ "title": "Hello World" }));
-            assert!(evaluate_condition(r#"StartsWith(title, "Hello")"#, &state, 1).unwrap());
-            assert!(evaluate_condition(r#"EndsWith(title, "World")"#, &state, 1).unwrap());
-            assert!(!evaluate_condition(r#"StartsWith(title, "world")"#, &state, 1).unwrap());
+            assert!(eval_cond(r#"starts_with(title, "Hello")"#, &state, 1).unwrap());
+            assert!(eval_cond(r#"ends_with(title, "World")"#, &state, 1).unwrap());
+            assert!(!eval_cond(r#"starts_with(title, "world")"#, &state, 1).unwrap());
         }
 
         #[test]
         fn string_mutations_in_when_clause() {
             let state = test_state(json!({ "title": "Hello World" }));
-            assert!(evaluate_condition("Lower(title) == 'hello world'", &state, 1).unwrap());
-            assert!(evaluate_condition("KebabCase(title) == 'hello-world'", &state, 1).unwrap());
-            assert!(evaluate_condition("Upper(title) == 'HELLO WORLD'", &state, 1).unwrap());
+            assert!(eval_cond("lower(title) == 'hello world'", &state, 1).unwrap());
+            assert!(eval_cond("kebab_case(title) == 'hello-world'", &state, 1).unwrap());
+            assert!(eval_cond("upper(title) == 'HELLO WORLD'", &state, 1).unwrap());
         }
 
         #[test]
@@ -938,10 +986,10 @@ mod tests {
                 "bad_date": "06-15-2024",
                 "dt": "2024-06-15T12:30:00Z"
             }));
-            assert!(evaluate_condition("IsDate(good_date)", &state, 1).unwrap());
-            assert!(!evaluate_condition("IsDate(bad_date)", &state, 1).unwrap());
-            assert!(evaluate_condition("IsDateTime(dt)", &state, 1).unwrap());
-            assert!(!evaluate_condition("IsDate(missing)", &state, 1).unwrap());
+            assert!(eval_cond("is_date(good_date)", &state, 1).unwrap());
+            assert!(!eval_cond("is_date(bad_date)", &state, 1).unwrap());
+            assert!(eval_cond("is_date_time(dt)", &state, 1).unwrap());
+            assert!(!eval_cond("is_date(missing)", &state, 1).unwrap());
         }
 
         #[test]
@@ -974,7 +1022,7 @@ mod tests {
             let data = json!({ "items": [1, 2, 3], "title": "Important Notes" });
             assert!(
                 evaluate_condition_against(
-                    "IsArray(items) && Length(items) >= 2",
+                    "is_array(items) && length(items) >= 2",
                     &data,
                     std::path::Path::new(".")
                 )
@@ -982,7 +1030,7 @@ mod tests {
             );
             assert!(
                 evaluate_condition_against(
-                    r#"StartsWith(Lower(title), "important")"#,
+                    r#"starts_with(lower(title), "important")"#,
                     &data,
                     std::path::Path::new(".")
                 )
@@ -999,6 +1047,7 @@ mod tests {
             use biscuit_terminal::terminal::Terminal;
 
             let err = ConditionError::Parse {
+                ctx: Box::new(dummy_ctx()),
                 expr: "&& invalid".to_string(),
                 line: 1,
                 message: "Unexpected token".to_string(),
@@ -1015,10 +1064,10 @@ mod tests {
                 "[]",
                 "min, max, abs",
                 "first, last",
-                "IsString",
-                "StartsWith",
-                "KebabCase",
-                "IsDate",
+                "is_string",
+                "starts_with",
+                "kebab_case",
+                "is_date",
             ] {
                 assert!(
                     rendered.contains(needle),

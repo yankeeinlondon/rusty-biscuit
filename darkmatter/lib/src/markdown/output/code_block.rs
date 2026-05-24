@@ -31,6 +31,11 @@ use syntect::util::LinesWithEndings;
 /// * `options` - Terminal rendering options (includes global line numbering flag)
 /// * `meta` - Code block DSL metadata (title, highlight ranges, line numbering override)
 /// * `color_mode` - Dark or light mode for computing highlight background colors
+/// * `target_width` - Optional component render width. When `Some`, each line
+///   pads to exactly `target_width` visible columns using the line background
+///   color instead of clearing to the terminal edge with `\x1b[K`. This is
+///   what `PageFill::Max`, `Explicit`, `Pad`, and `Indent` need so the code
+///   block body honours its resolved width.
 ///
 /// ## Returns
 ///
@@ -45,6 +50,7 @@ pub(crate) fn render_terminal_code_block(
     options: &TerminalOptions,
     meta: &CodeBlockMeta,
     color_mode: ColorMode,
+    target_width: Option<u16>,
 ) -> Result<String, MarkdownError> {
     let syntax = find_syntax(language, highlighter.syntax_set())
         .unwrap_or_else(|| highlighter.syntax_set().find_syntax_plain_text());
@@ -66,7 +72,7 @@ pub(crate) fn render_terminal_code_block(
     };
 
     // Add top padding row
-    output.push_str(&emit_padding_row(bg_color));
+    output.push_str(&emit_padding_row(bg_color, target_width));
 
     // Create highlighter for this code block
     let mut hl = HighlightLines::new(syntax, theme);
@@ -88,6 +94,10 @@ pub(crate) fn render_terminal_code_block(
             line_bg.r, line_bg.g, line_bg.b
         ));
 
+        // Visible width used by gutter + content so we can pad correctly when
+        // `target_width` is set.
+        let mut visible_used: usize = 0;
+
         // Add line number gutter if enabled (with background already set)
         if line_number_width > 0 {
             // Gray foreground for line numbers, background already set above
@@ -96,9 +106,12 @@ pub(crate) fn render_terminal_code_block(
                 line_number,
                 width = line_number_width
             ));
+            // gutter visible width = number digits + " │ " (3 chars: space, │, space)
+            visible_used += line_number_width + 3;
         } else {
             // Add left padding (1 character) when no line numbers
             output.push(' ');
+            visible_used += 1;
         }
 
         // Highlight the line and get styled ranges
@@ -118,22 +131,51 @@ pub(crate) fn render_terminal_code_block(
                     style.foreground.b,
                     text_without_newline
                 ));
+                visible_used +=
+                    biscuit_terminal::utils::block_constraint::visible_width(text_without_newline)
+                        as usize;
             }
         }
 
-        // Clear to end of line with background color, then reset
-        // \x1b[K clears from cursor to end of line using current background
-        output.push_str("\x1b[K\x1b[0m");
+        // Either pad to exact width with spaces (when constrained) or clear to
+        // end of line. Background is still set, so the trailing spaces inherit
+        // the line background color.
+        match target_width {
+            Some(w) => {
+                let pad = (w as usize).saturating_sub(visible_used);
+                if pad > 0 {
+                    output.push_str(&" ".repeat(pad));
+                }
+                output.push_str("\x1b[0m");
+            }
+            None => {
+                // \x1b[K clears from cursor to end of line using current background
+                output.push_str("\x1b[K\x1b[0m");
+            }
+        }
 
         // Add newline after each line (including last line, so bottom padding is on its own line)
         output.push('\n');
     }
 
     // Add bottom padding row (without trailing newline to avoid double spacing)
-    output.push_str(&format!(
-        "\x1b[48;2;{};{};{}m\x1b[K\x1b[0m",
-        bg_color.r, bg_color.g, bg_color.b
-    ));
+    match target_width {
+        Some(w) => {
+            output.push_str(&format!(
+                "\x1b[48;2;{};{};{}m{}\x1b[0m",
+                bg_color.r,
+                bg_color.g,
+                bg_color.b,
+                " ".repeat(w as usize)
+            ));
+        }
+        None => {
+            output.push_str(&format!(
+                "\x1b[48;2;{};{};{}m\x1b[K\x1b[0m",
+                bg_color.r, bg_color.g, bg_color.b
+            ));
+        }
+    }
 
     Ok(output)
 }
@@ -322,6 +364,28 @@ pub(crate) fn find_syntax<'a>(
         .or_else(|| syntax_set.find_syntax_by_name(alias))
 }
 
+/// Derives the effective color mode of a code panel from its resolved theme
+/// background, by perceived luminance.
+///
+/// Code blocks select their theme *variant* against the inverted terminal mode
+/// (for page contrast), but a few theme names are single-variant and do not
+/// invert. Downstream contrast decisions — the header pill's text color and the
+/// highlighted-line background math — must therefore key off the panel's
+/// **actual** background, not the requested mode, so a single-variant dark theme
+/// still gets light header text (and vice versa).
+///
+/// Returns [`ColorMode::Light`] when the background is perceptually light
+/// (Rec. 601 luma > 127), otherwise [`ColorMode::Dark`].
+#[inline]
+pub(crate) fn mode_for_background(bg: Color) -> ColorMode {
+    let luma = 0.299 * f32::from(bg.r) + 0.587 * f32::from(bg.g) + 0.114 * f32::from(bg.b);
+    if luma > 127.0 {
+        ColorMode::Light
+    } else {
+        ColorMode::Dark
+    }
+}
+
 /// Computes a highlighted background color based on the theme background and color mode.
 ///
 /// Uses warmer tones (more red/green) to create a visual highlight effect.
@@ -335,15 +399,25 @@ pub(crate) fn compute_highlight_bg(theme_bg: Color, color_mode: ColorMode) -> Co
 ///
 /// The padding row consists of:
 /// - Setting the background color
-/// - Clearing to end of line (\x1b[K)
+/// - Either painting exactly `target_width` spaces, or clearing to end of line
+///   (`\x1b[K`) when no width constraint applies
 /// - Resetting all attributes (\x1b[0m)
 /// - Adding a newline
 #[inline]
-pub(crate) fn emit_padding_row(bg_color: Color) -> String {
-    format!(
-        "\x1b[48;2;{};{};{}m\x1b[K\x1b[0m\n",
-        bg_color.r, bg_color.g, bg_color.b
-    )
+pub(crate) fn emit_padding_row(bg_color: Color, target_width: Option<u16>) -> String {
+    match target_width {
+        Some(w) => format!(
+            "\x1b[48;2;{};{};{}m{}\x1b[0m\n",
+            bg_color.r,
+            bg_color.g,
+            bg_color.b,
+            " ".repeat(w as usize)
+        ),
+        None => format!(
+            "\x1b[48;2;{};{};{}m\x1b[K\x1b[0m\n",
+            bg_color.r, bg_color.g, bg_color.b
+        ),
+    }
 }
 
 #[cfg(test)]
@@ -389,6 +463,7 @@ mod tests {
             &options,
             &meta,
             ColorMode::Dark,
+            None,
         );
 
         assert!(result.is_ok());
@@ -415,6 +490,7 @@ mod tests {
             &options,
             &meta,
             ColorMode::Dark,
+            None,
         );
 
         assert!(result.is_ok());
@@ -443,6 +519,7 @@ mod tests {
             &options,
             &meta,
             ColorMode::Light,
+            None,
         );
 
         assert!(result.is_ok());
@@ -467,6 +544,7 @@ mod tests {
             &options,
             &meta,
             ColorMode::Dark,
+            None,
         );
 
         assert!(result.is_ok());
@@ -552,10 +630,62 @@ mod tests {
             b: 70,
             a: 255,
         };
-        let row = emit_padding_row(bg);
+        let row = emit_padding_row(bg, None);
         assert!(row.contains("\x1b[48;2;50;60;70m"));
         assert!(row.contains("\x1b[K"));
         assert!(row.contains("\x1b[0m"));
         assert!(row.ends_with('\n'));
+    }
+
+    #[test]
+    fn test_emit_padding_row_with_target_width() {
+        let bg = Color {
+            r: 50,
+            g: 60,
+            b: 70,
+            a: 255,
+        };
+        let row = emit_padding_row(bg, Some(20));
+        assert!(row.contains("\x1b[48;2;50;60;70m"));
+        // Should not use clear-to-EOL when constrained.
+        assert!(!row.contains("\x1b[K"));
+        // Should contain exactly 20 spaces.
+        assert!(row.contains(&" ".repeat(20)));
+        assert!(row.contains("\x1b[0m"));
+        assert!(row.ends_with('\n'));
+    }
+
+    #[test]
+    fn test_render_terminal_code_block_with_target_width_pads_spaces() {
+        let highlighter = CodeHighlighter::new(
+            crate::markdown::highlighting::ThemePair::Github,
+            ColorMode::Dark,
+        );
+        let options = test_options();
+        let meta = CodeBlockMeta::default();
+
+        let code = "ok";
+        let result = render_terminal_code_block(
+            code,
+            "rust",
+            &highlighter,
+            &options,
+            &meta,
+            ColorMode::Dark,
+            Some(20),
+        )
+        .unwrap();
+
+        // Constrained output should not rely on \x1b[K (clear-to-EOL).
+        assert!(!result.contains("\x1b[K"));
+        let plain = strip_ansi_codes(&result);
+        // Each non-empty line should be exactly 20 visible columns wide.
+        for line in plain.lines().filter(|l| !l.is_empty()) {
+            assert_eq!(
+                line.chars().count(),
+                20,
+                "expected exactly 20 visible chars on line: {line:?}"
+            );
+        }
     }
 }

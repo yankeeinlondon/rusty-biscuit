@@ -302,6 +302,18 @@ impl OpenCodeError {
 /// OpenCode emits tool fields in both locations depending on whether the
 /// event is in the legacy flat format or the new structured format.
 #[derive(Debug, Default, Deserialize)]
+pub struct OpenCodeToolMetadata {
+    #[serde(default, rename = "sessionId")]
+    pub session_id: Option<String>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+pub struct OpenCodeToolTime {
+    #[serde(default)]
+    pub start: Option<u64>,
+}
+
+#[derive(Debug, Default, Deserialize)]
 pub struct OpenCodeToolFields {
     #[serde(default)]
     pub id: Option<String>,
@@ -339,6 +351,10 @@ pub struct OpenCodeToolFields {
     pub status: Option<String>,
     #[serde(default)]
     pub error: Option<Value>,
+    #[serde(default)]
+    pub metadata: Option<OpenCodeToolMetadata>,
+    #[serde(default)]
+    pub time: Option<OpenCodeToolTime>,
 }
 
 impl OpenCodeToolFields {
@@ -409,6 +425,20 @@ pub struct ResolvedOpenCodeTool {
     pub output: Option<Value>,
     pub status: Option<String>,
     pub error: Option<Value>,
+    pub metadata: Option<OpenCodeToolMetadata>,
+    pub time: Option<OpenCodeToolTime>,
+}
+
+impl ResolvedOpenCodeTool {
+    /// Returns the subagent session id from `metadata.sessionId` when present.
+    pub fn task_subagent_id(&self) -> Option<&str> {
+        self.metadata.as_ref().and_then(|m| m.session_id.as_deref())
+    }
+
+    /// Returns the task start time epoch in milliseconds from `time.start` when present.
+    pub fn task_started_at_epoch_ms(&self) -> Option<u64> {
+        self.time.as_ref().and_then(|t| t.start)
+    }
 }
 
 impl OpenCodeTool {
@@ -421,6 +451,8 @@ impl OpenCodeTool {
             output: top.take_output(),
             status: top.status.take(),
             error: top.error.take(),
+            metadata: top.metadata.take(),
+            time: top.time.take(),
         };
         if let Some(OpenCodeToolPart {
             fields: mut part,
@@ -445,6 +477,12 @@ impl OpenCodeTool {
             if resolved.error.is_none() {
                 resolved.error = part.error.take();
             }
+            if resolved.metadata.is_none() {
+                resolved.metadata = part.metadata.take();
+            }
+            if resolved.time.is_none() {
+                resolved.time = part.time.take();
+            }
             if let Some(mut state) = state {
                 if resolved.id.is_none() {
                     resolved.id = state.resolved_tool_id().map(ToOwned::to_owned);
@@ -463,6 +501,12 @@ impl OpenCodeTool {
                 }
                 if resolved.error.is_none() {
                     resolved.error = state.error.take();
+                }
+                if resolved.metadata.is_none() {
+                    resolved.metadata = state.metadata.take();
+                }
+                if resolved.time.is_none() {
+                    resolved.time = state.time.take();
                 }
             }
         }
@@ -731,5 +775,79 @@ mod tests {
             panic!("expected Reasoning");
         };
         assert_eq!(reasoning.resolved_text(), Some("nested prose".into()));
+    }
+
+    #[test]
+    fn opencode_tool_task_subagent_id_from_metadata() {
+        let event = parse(
+            r#"{"type":"tool_use","part":{"id":"t1","tool":"task","state":{"metadata":{"sessionId":"sa_123"}}}}"#,
+        );
+        let OpenCodeEvent::ToolUse(tool) = event else {
+            panic!("expected ToolUse");
+        };
+        let resolved = tool.resolve();
+        assert_eq!(resolved.task_subagent_id(), Some("sa_123"));
+    }
+
+    #[test]
+    fn opencode_tool_task_subagent_id_missing() {
+        let event = parse(r#"{"type":"tool_use","part":{"id":"t1","tool":"task"}}"#);
+        let OpenCodeEvent::ToolUse(tool) = event else {
+            panic!("expected ToolUse");
+        };
+        let resolved = tool.resolve();
+        assert_eq!(resolved.task_subagent_id(), None);
+    }
+
+    #[test]
+    fn opencode_tool_task_started_at_epoch_ms() {
+        let event = parse(
+            r#"{"type":"tool_use","part":{"id":"t1","tool":"task","state":{"time":{"start":1715432100000}}}}"#,
+        );
+        let OpenCodeEvent::ToolUse(tool) = event else {
+            panic!("expected ToolUse");
+        };
+        let resolved = tool.resolve();
+        assert_eq!(resolved.task_started_at_epoch_ms(), Some(1715432100000));
+    }
+
+    #[test]
+    fn opencode_tool_task_started_at_epoch_ms_missing() {
+        let event = parse(r#"{"type":"tool_use","part":{"id":"t1","tool":"task"}}"#);
+        let OpenCodeEvent::ToolUse(tool) = event else {
+            panic!("expected ToolUse");
+        };
+        let resolved = tool.resolve();
+        assert_eq!(resolved.task_started_at_epoch_ms(), None);
+    }
+
+    #[test]
+    fn opencode_tool_task_accessors_from_part_fields() {
+        // Top-level fields should be used when present
+        let event = parse(
+            r#"{"type":"tool_use","metadata":{"sessionId":"top_id"},"time":{"start":1000},"part":{"tool":"task","state":{"metadata":{"sessionId":"state_id"},"time":{"start":2000}}}}"#,
+        );
+        let OpenCodeEvent::ToolUse(tool) = event else {
+            panic!("expected ToolUse");
+        };
+        let resolved = tool.resolve();
+        // Top-level metadata/sessionId should win
+        assert_eq!(resolved.task_subagent_id(), Some("top_id"));
+        // Top-level time/start should win
+        assert_eq!(resolved.task_started_at_epoch_ms(), Some(1000));
+    }
+
+    #[test]
+    fn opencode_tool_task_accessors_from_part_fields_fallback() {
+        // When top-level is absent, part.state should be used
+        let event = parse(
+            r#"{"type":"tool_use","part":{"tool":"task","state":{"metadata":{"sessionId":"state_id"},"time":{"start":2000}}}}"#,
+        );
+        let OpenCodeEvent::ToolUse(tool) = event else {
+            panic!("expected ToolUse");
+        };
+        let resolved = tool.resolve();
+        assert_eq!(resolved.task_subagent_id(), Some("state_id"));
+        assert_eq!(resolved.task_started_at_epoch_ms(), Some(2000));
     }
 }

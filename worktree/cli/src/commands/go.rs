@@ -1,7 +1,7 @@
 use std::io::IsTerminal as _;
 
 use biscuit_terminal::components::prose::Prose;
-use biscuit_terminal::components::renderable::Renderable as _;
+use biscuit_terminal::components::renderable::TerminalRenderable as _;
 use biscuit_terminal::terminal::Terminal;
 use worktree::WorktreeError;
 use worktree::git::repo_info;
@@ -26,7 +26,7 @@ pub fn run(name: &str) -> Result<(), WorktreeError> {
     // Already in the target worktree — nothing to do.
     if entry.is_current {
         let kind = if entry.is_main {
-            format!("<blue-500>base</blue-500> <i>checkout</i>")
+            "<blue-500>base</blue-500> <i>checkout</i>".to_string()
         } else {
             let worktree_name = entry.branch.as_deref().unwrap_or(name);
             format!("<blue-500>{worktree_name}</blue-500> <i>worktree</i>")

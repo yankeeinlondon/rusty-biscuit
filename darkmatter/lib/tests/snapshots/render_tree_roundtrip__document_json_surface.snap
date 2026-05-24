@@ -1,0 +1,357 @@
+---
+source: darkmatter/lib/tests/render_tree_roundtrip.rs
+expression: json
+---
+{
+  "sources": {
+    "descriptors": [
+      {
+        "file": {
+          "path": "docs/sample.md"
+        }
+      }
+    ]
+  },
+  "metadata": {
+    "frontmatter": null
+  },
+  "root": {
+    "kind": {
+      "root": {
+        "children": [
+          {
+            "kind": {
+              "heading": {
+                "depth": 1,
+                "children": [
+                  {
+                    "kind": {
+                      "text": {
+                        "value": "Sample Heading"
+                      }
+                    },
+                    "span": {
+                      "provenance": "parsed",
+                      "location": {
+                        "source": 0,
+                        "bytes": {
+                          "start": 2,
+                          "end": 16
+                        }
+                      }
+                    },
+                    "attrs": {
+                      "id": null,
+                      "classes": [],
+                      "data": {}
+                    }
+                  }
+                ]
+              }
+            },
+            "span": {
+              "provenance": "parsed",
+              "location": {
+                "source": 0,
+                "bytes": {
+                  "start": 0,
+                  "end": 17
+                }
+              }
+            },
+            "attrs": {
+              "id": "sample-heading",
+              "classes": [],
+              "data": {}
+            }
+          },
+          {
+            "kind": {
+              "paragraph": {
+                "children": [
+                  {
+                    "kind": {
+                      "text": {
+                        "value": "A paragraph with "
+                      }
+                    },
+                    "span": {
+                      "provenance": "parsed",
+                      "location": {
+                        "source": 0,
+                        "bytes": {
+                          "start": 18,
+                          "end": 35
+                        }
+                      }
+                    },
+                    "attrs": {
+                      "id": null,
+                      "classes": [],
+                      "data": {}
+                    }
+                  },
+                  {
+                    "kind": {
+                      "strong": {
+                        "children": [
+                          {
+                            "kind": {
+                              "text": {
+                                "value": "strong"
+                              }
+                            },
+                            "span": {
+                              "provenance": "parsed",
+                              "location": {
+                                "source": 0,
+                                "bytes": {
+                                  "start": 37,
+                                  "end": 43
+                                }
+                              }
+                            },
+                            "attrs": {
+                              "id": null,
+                              "classes": [],
+                              "data": {}
+                            }
+                          }
+                        ]
+                      }
+                    },
+                    "span": {
+                      "provenance": "parsed",
+                      "location": {
+                        "source": 0,
+                        "bytes": {
+                          "start": 35,
+                          "end": 45
+                        }
+                      }
+                    },
+                    "attrs": {
+                      "id": null,
+                      "classes": [],
+                      "data": {}
+                    }
+                  },
+                  {
+                    "kind": {
+                      "text": {
+                        "value": " text and a "
+                      }
+                    },
+                    "span": {
+                      "provenance": "parsed",
+                      "location": {
+                        "source": 0,
+                        "bytes": {
+                          "start": 45,
+                          "end": 57
+                        }
+                      }
+                    },
+                    "attrs": {
+                      "id": null,
+                      "classes": [],
+                      "data": {}
+                    }
+                  },
+                  {
+                    "kind": {
+                      "link": {
+                        "url": "https://example.com",
+                        "title": null,
+                        "children": [
+                          {
+                            "kind": {
+                              "text": {
+                                "value": "link"
+                              }
+                            },
+                            "span": {
+                              "provenance": "parsed",
+                              "location": {
+                                "source": 0,
+                                "bytes": {
+                                  "start": 58,
+                                  "end": 62
+                                }
+                              }
+                            },
+                            "attrs": {
+                              "id": null,
+                              "classes": [],
+                              "data": {}
+                            }
+                          }
+                        ]
+                      }
+                    },
+                    "span": {
+                      "provenance": "parsed",
+                      "location": {
+                        "source": 0,
+                        "bytes": {
+                          "start": 57,
+                          "end": 84
+                        }
+                      }
+                    },
+                    "attrs": {
+                      "id": null,
+                      "classes": [],
+                      "data": {}
+                    }
+                  },
+                  {
+                    "kind": {
+                      "text": {
+                        "value": "."
+                      }
+                    },
+                    "span": {
+                      "provenance": "parsed",
+                      "location": {
+                        "source": 0,
+                        "bytes": {
+                          "start": 84,
+                          "end": 85
+                        }
+                      }
+                    },
+                    "attrs": {
+                      "id": null,
+                      "classes": [],
+                      "data": {}
+                    }
+                  }
+                ]
+              }
+            },
+            "span": {
+              "provenance": "parsed",
+              "location": {
+                "source": 0,
+                "bytes": {
+                  "start": 18,
+                  "end": 86
+                }
+              }
+            },
+            "attrs": {
+              "id": null,
+              "classes": [],
+              "data": {}
+            }
+          },
+          {
+            "kind": {
+              "list": {
+                "ordered": false,
+                "start": null,
+                "children": [
+                  {
+                    "kind": {
+                      "listItem": {
+                        "checked": true,
+                        "children": [
+                          {
+                            "kind": {
+                              "text": {
+                                "value": "a task"
+                              }
+                            },
+                            "span": {
+                              "provenance": "parsed",
+                              "location": {
+                                "source": 0,
+                                "bytes": {
+                                  "start": 93,
+                                  "end": 99
+                                }
+                              }
+                            },
+                            "attrs": {
+                              "id": null,
+                              "classes": [],
+                              "data": {}
+                            }
+                          }
+                        ]
+                      }
+                    },
+                    "span": {
+                      "provenance": "parsed",
+                      "location": {
+                        "source": 0,
+                        "bytes": {
+                          "start": 87,
+                          "end": 101
+                        }
+                      }
+                    },
+                    "attrs": {
+                      "id": null,
+                      "classes": [],
+                      "data": {}
+                    }
+                  }
+                ]
+              }
+            },
+            "span": {
+              "provenance": "parsed",
+              "location": {
+                "source": 0,
+                "bytes": {
+                  "start": 87,
+                  "end": 101
+                }
+              }
+            },
+            "attrs": {
+              "id": null,
+              "classes": [],
+              "data": {}
+            }
+          },
+          {
+            "kind": {
+              "code": {
+                "lang": "rust",
+                "meta": null,
+                "value": "let answer = 42;\n"
+              }
+            },
+            "span": {
+              "provenance": "parsed",
+              "location": {
+                "source": 0,
+                "bytes": {
+                  "start": 101,
+                  "end": 129
+                }
+              }
+            },
+            "attrs": {
+              "id": null,
+              "classes": [],
+              "data": {}
+            }
+          }
+        ]
+      }
+    },
+    "span": {
+      "provenance": "synthetic",
+      "location": null
+    },
+    "attrs": {
+      "id": null,
+      "classes": [],
+      "data": {}
+    }
+  }
+}
