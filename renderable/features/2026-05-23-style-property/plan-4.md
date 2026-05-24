@@ -22,13 +22,14 @@ skills_files_updated_during_phase_2: []
 packages_during_phase_2:
   - darkmatter
 source_files_during_phase_3:
-  - darkmatter/lib/src/style/apply.rs
   - darkmatter/cli/src/args.rs
   - darkmatter/cli/src/output.rs
   - darkmatter/cli/tests/cli.rs
 docs_updated_during_phase_3: []
 docs_created_during_phase_3: []
 skills_files_updated_during_phase_3: []
+packages_during_phase_3:
+  - darkmatter-cli
 source_files_during_phase_4:
   - darkmatter/lib/src/markdown/output/terminal.rs
   - darkmatter/lib/src/layout/page.rs

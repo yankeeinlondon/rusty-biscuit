@@ -3181,11 +3181,14 @@ fn layout_resolved_fill_global_then_component_specific() {
         PageFill::Max(WidthUnit::Fixed(30)),
         "code-block-specific fill must override global"
     );
-    assert_eq!(
-        page.fill_for(PageComponent::Lists),
-        PageFill::Max(WidthUnit::Fixed(40)),
-        "lists must still see the global fill"
-    );
+    for component in [PageComponent::Ul, PageComponent::Ol, PageComponent::Li] {
+        assert_eq!(
+            page.fill_for(component),
+            PageFill::Max(WidthUnit::Fixed(40)),
+            "{:?} must still see the global fill",
+            component
+        );
+    }
     assert_eq!(
         page.fill_for(PageComponent::Tables),
         PageFill::Max(WidthUnit::Fixed(40)),
@@ -3207,15 +3210,74 @@ fn layout_resolved_alignment_global_then_component_specific() {
         PageAlignment::Left,
         "code-block-specific alignment must override global"
     );
-    assert_eq!(
-        page.alignment_for(PageComponent::Lists),
-        PageAlignment::Center,
-        "lists must still see the global alignment"
-    );
+    for component in [PageComponent::Ul, PageComponent::Ol, PageComponent::Li] {
+        assert_eq!(
+            page.alignment_for(component),
+            PageAlignment::Center,
+            "{:?} must still see the global alignment",
+            component
+        );
+    }
     assert_eq!(
         page.alignment_for(PageComponent::BlockQuotes),
         PageAlignment::Center,
         "blockquotes must still see the global alignment"
+    );
+}
+
+#[test]
+fn layout_resolved_align_lists_broadcast_then_granular_override() {
+    // `--align-lists right --align-ul left`: broadcast sets all three list
+    // components to Right, then the granular flag overrides only Ul.
+    let page = resolved_page(&[
+        "fixture.md",
+        "--align-lists",
+        "right",
+        "--align-ul",
+        "left",
+    ]);
+    assert_eq!(
+        page.alignment_for(PageComponent::Ul),
+        PageAlignment::Left,
+        "granular --align-ul must override broadcast"
+    );
+    assert_eq!(
+        page.alignment_for(PageComponent::Ol),
+        PageAlignment::Right,
+        "Ol must still see the broadcast"
+    );
+    assert_eq!(
+        page.alignment_for(PageComponent::Li),
+        PageAlignment::Right,
+        "Li must still see the broadcast"
+    );
+}
+
+#[test]
+fn layout_resolved_fill_lists_broadcast_then_granular_override() {
+    // `--fill-lists max=40 --fill-ol max=30`: broadcast sets all three list
+    // components to Max(40), then the granular flag overrides only Ol.
+    let page = resolved_page(&[
+        "fixture.md",
+        "--fill-lists",
+        "max=40",
+        "--fill-ol",
+        "max=30",
+    ]);
+    assert_eq!(
+        page.fill_for(PageComponent::Ul),
+        PageFill::Max(WidthUnit::Fixed(40)),
+        "Ul must still see the broadcast"
+    );
+    assert_eq!(
+        page.fill_for(PageComponent::Ol),
+        PageFill::Max(WidthUnit::Fixed(30)),
+        "granular --fill-ol must override broadcast"
+    );
+    assert_eq!(
+        page.fill_for(PageComponent::Li),
+        PageFill::Max(WidthUnit::Fixed(40)),
+        "Li must still see the broadcast"
     );
 }
 

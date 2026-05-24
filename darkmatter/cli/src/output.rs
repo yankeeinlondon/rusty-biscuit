@@ -7,8 +7,9 @@ use darkmatter::markdown::output::MermaidMode;
 use darkmatter::markdown::output::terminal::TerminalImageMode;
 use darkmatter::markdown::{Markdown, MarkdownDelta, MarkdownToc, MarkdownTocNode};
 use darkmatter::style::{
-    ComponentStyleOverrides, PageStyleOverrides, StyleWarning, StyleWarningKind,
-    apply_component_style, apply_page_style, from_frontmatter, into_strict,
+    ComponentStyleOverrides, ListStyleOverrides, PageStyleOverrides, StyleWarning,
+    StyleWarningKind, apply_component_style, apply_list_style, apply_page_style,
+    from_frontmatter, into_strict,
 };
 use std::io::{self, Write};
 use std::path::PathBuf;
@@ -145,7 +146,22 @@ pub fn apply_cli_layout_flags(page: DarkmatterPage, cli: &Cli) -> DarkmatterPage
         page = page.use_alignment(PageComponent::Images, align.into());
     }
     if let Some(align) = cli.align_lists {
-        page = page.use_alignment(PageComponent::Lists, align.into());
+        for component in PageComponent::LISTS {
+            page = page.use_alignment(component, align.into());
+        }
+        #[allow(deprecated)]
+        {
+            page = page.use_alignment(PageComponent::Lists, align.into());
+        }
+    }
+    if let Some(align) = cli.align_ul {
+        page = page.use_alignment(PageComponent::Ul, align.into());
+    }
+    if let Some(align) = cli.align_ol {
+        page = page.use_alignment(PageComponent::Ol, align.into());
+    }
+    if let Some(align) = cli.align_li {
+        page = page.use_alignment(PageComponent::Li, align.into());
     }
     if let Some(align) = cli.align_block_quotes {
         page = page.use_alignment(PageComponent::BlockQuotes, align.into());
@@ -165,7 +181,22 @@ pub fn apply_cli_layout_flags(page: DarkmatterPage, cli: &Cli) -> DarkmatterPage
         page = page.with_fill(PageComponent::Images, fill);
     }
     if let Some(fill) = cli.fill_lists {
-        page = page.with_fill(PageComponent::Lists, fill);
+        for component in PageComponent::LISTS {
+            page = page.with_fill(component, fill);
+        }
+        #[allow(deprecated)]
+        {
+            page = page.with_fill(PageComponent::Lists, fill);
+        }
+    }
+    if let Some(fill) = cli.fill_ul {
+        page = page.with_fill(PageComponent::Ul, fill);
+    }
+    if let Some(fill) = cli.fill_ol {
+        page = page.with_fill(PageComponent::Ol, fill);
+    }
+    if let Some(fill) = cli.fill_li {
+        page = page.with_fill(PageComponent::Li, fill);
     }
     if let Some(fill) = cli.fill_block_quotes {
         page = page.with_fill(PageComponent::BlockQuotes, fill);
@@ -213,9 +244,38 @@ pub fn page_style_overrides_from_cli(cli: &Cli) -> PageStyleOverrides {
         alignment: cli.alignment.is_some(),
         align_images: cli.align_images.is_some(),
         align_lists: cli.align_lists.is_some(),
+        align_ul: cli.align_ul.is_some(),
+        align_ol: cli.align_ol.is_some(),
+        align_li: cli.align_li.is_some(),
         align_block_quotes: cli.align_block_quotes.is_some(),
         align_tables: cli.align_tables.is_some(),
         align_code_blocks: cli.align_code_blocks.is_some(),
+    }
+}
+
+/// Build a [`ListStyleOverrides`] reflecting which list-bucket frontmatter
+/// fields the CLI has already claimed.
+///
+/// Mirrors the global/component-specific precedence in
+/// [`apply_cli_layout_flags`]: the global `--alignment` flag claims every
+/// `*_alignment` field, the global `--fill` flag claims every `*_fill` field,
+/// the broadcast `--align-lists` / `--fill-lists` flags claim all three list
+/// components, and the granular flags (`--align-ul`, `--fill-ol`, etc.) each
+/// claim only their own field.
+pub fn list_style_overrides_from_cli(cli: &Cli) -> ListStyleOverrides {
+    let alignment_all = cli.alignment.is_some();
+    let fill_all = cli.fill.is_some();
+    let align_lists_broadcast = cli.align_lists.is_some();
+    let fill_lists_broadcast = cli.fill_lists.is_some();
+
+    ListStyleOverrides {
+        ul_alignment: alignment_all || align_lists_broadcast || cli.align_ul.is_some(),
+        ul_fill: fill_all || fill_lists_broadcast || cli.fill_ul.is_some(),
+        ul_left_margin: false,
+        ol_alignment: alignment_all || align_lists_broadcast || cli.align_ol.is_some(),
+        ol_fill: fill_all || fill_lists_broadcast || cli.fill_ol.is_some(),
+        li_alignment: alignment_all || align_lists_broadcast || cli.align_li.is_some(),
+        li_fill: fill_all || fill_lists_broadcast || cli.fill_li.is_some(),
     }
 }
 
@@ -275,7 +335,11 @@ pub fn apply_style_frontmatter(
         .map_err(|e| eyre!("Failed to apply `style:` frontmatter: {e}"))?;
 
     let component_overrides = component_style_overrides_from_cli(cli);
-    apply_component_style(page, &style, component_overrides)
+    let page = apply_component_style(page, &style, component_overrides)
+        .map_err(|e| eyre!("Failed to apply `style:` frontmatter: {e}"))?;
+
+    let list_overrides = list_style_overrides_from_cli(cli);
+    apply_list_style(page, &style, list_overrides)
         .map_err(|e| eyre!("Failed to apply `style:` frontmatter: {e}"))
 }
 
@@ -1035,12 +1099,32 @@ mod tests {
     }
 
     #[test]
+    fn granular_list_alignment_flags_claim_their_component() {
+        let cli = cli_from(&[
+            "md",
+            "doc.md",
+            "--align-ul",
+            "left",
+            "--align-ol",
+            "center",
+            "--align-li",
+            "right",
+        ]);
+        let o = page_style_overrides_from_cli(&cli);
+        assert!(o.align_ul && o.align_ol && o.align_li);
+        assert!(!o.align_lists);
+    }
+
+    #[test]
     fn component_alignment_unclaimed_when_no_flags() {
         let cli = cli_from(&["md", "doc.md"]);
         let o = page_style_overrides_from_cli(&cli);
         assert!(
             !o.align_images
                 && !o.align_lists
+                && !o.align_ul
+                && !o.align_ol
+                && !o.align_li
                 && !o.align_block_quotes
                 && !o.align_tables
                 && !o.align_code_blocks,

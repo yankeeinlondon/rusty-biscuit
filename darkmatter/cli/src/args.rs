@@ -599,6 +599,18 @@ pub struct Cli {
     #[arg(long, value_enum, value_name = "ALIGN")]
     pub align_lists: Option<PageAlignmentArg>,
 
+    /// Unordered list alignment
+    #[arg(long, value_enum, value_name = "ALIGN")]
+    pub align_ul: Option<PageAlignmentArg>,
+
+    /// Ordered list alignment
+    #[arg(long, value_enum, value_name = "ALIGN")]
+    pub align_ol: Option<PageAlignmentArg>,
+
+    /// List item alignment
+    #[arg(long, value_enum, value_name = "ALIGN")]
+    pub align_li: Option<PageAlignmentArg>,
+
     /// Block quote alignment
     #[arg(long, value_enum, value_name = "ALIGN")]
     pub align_block_quotes: Option<PageAlignmentArg>,
@@ -622,6 +634,18 @@ pub struct Cli {
     /// List fill
     #[arg(long, value_name = "FILL", value_parser = parse_page_fill)]
     pub fill_lists: Option<PageFill>,
+
+    /// Unordered list fill
+    #[arg(long, value_name = "FILL", value_parser = parse_page_fill)]
+    pub fill_ul: Option<PageFill>,
+
+    /// Ordered list fill
+    #[arg(long, value_name = "FILL", value_parser = parse_page_fill)]
+    pub fill_ol: Option<PageFill>,
+
+    /// List item fill
+    #[arg(long, value_name = "FILL", value_parser = parse_page_fill)]
+    pub fill_li: Option<PageFill>,
 
     /// Block quote fill
     #[arg(long, value_name = "FILL", value_parser = parse_page_fill)]
