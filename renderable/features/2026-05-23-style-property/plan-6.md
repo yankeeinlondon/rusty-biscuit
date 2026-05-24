@@ -2,6 +2,37 @@
 phases: 5
 created: 2026-05-23
 start_phase: 1
+source_files_during_phase_1:
+  - darkmatter/lib/src/style/schema/hr.rs
+  - darkmatter/lib/src/layout/types.rs
+  - darkmatter/lib/src/style/apply.rs
+  - darkmatter/lib/src/layout/page.rs
+  - darkmatter/lib/src/style/descriptor.rs
+  - darkmatter/lib/src/style/coverage_tests.rs
+  - darkmatter/lib/src/style/parse.rs
+source_files_during_phase_2:
+  - darkmatter/lib/src/markdown/inline/types.rs
+  - darkmatter/lib/src/markdown/block/rule_processor.rs
+  - darkmatter/lib/src/markdown/block/hr_builder.rs
+  - darkmatter/lib/src/style/parse.rs
+  - darkmatter/lib/src/markdown/render_tree/fold.rs
+  - darkmatter/lib/src/markdown/render_tree/entrypoints.rs
+docs_updated_during_phase_1: []
+docs_created_during_phase_1: []
+skills_files_updated_during_phase_1: []
+source_files_during_phase_3:
+  - darkmatter/lib/src/style/apply.rs
+  - darkmatter/lib/src/style/mod.rs
+  - darkmatter/lib/src/style/parse.rs
+  - darkmatter/lib/src/style/descriptor.rs
+  - darkmatter/lib/src/style/coverage_tests.rs
+  - darkmatter/lib/src/layout/page.rs
+docs_updated_during_phase_3: []
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3:
+  - .claude/skills/darkmatter/SKILL.md
+packages:
+  - darkmatter
 ---
 
 # Execution Plan - Sub-Spec #6: HR Migration

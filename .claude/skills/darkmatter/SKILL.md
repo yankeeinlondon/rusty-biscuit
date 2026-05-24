@@ -47,9 +47,15 @@ Implemented:
 - `md --strict-style`, which fails on unknown/deprecated schema keys but not
   on valid future-phase keys
 
+Implemented:
+
+- sub-spec #6 HR migration: top-level `hr:` merges into `style.hr.*` with
+  `Deprecated` warnings; inline `{ style: ... }` is parsed as a deprecated alias
+  for `{ kind: ... }`; `apply_hr_style` wires `style.hr.*` onto `DarkmatterPage`;
+  `ACTIVE_STYLE_WIRING_SUB_SPEC` advanced to `6`
+
 Still planned:
 
-- sub-spec #6 HR migration from top-level `hr:` to `style.hr.*`
 - sub-spec #7 bespoke knobs: `page.stylesheet`, `page.meta`,
   `page.code.theme`, hyperlink/image local-style behavior
 
@@ -109,5 +115,5 @@ the `biscuit-terminal` skill for terminal tree rendering.
   for terminal and browser syntax highlighting.
 - Code-block themes resolve against the inverted page color mode for contrast;
   ordinary prose follows the real mode.
-- Horizontal rules still use the legacy top-level `hr:` defaults and inline
-  `{ style: ... }` attributes until style-property sub-spec #6 lands.
+- Horizontal rules: canonical styling is `style.hr.*` with `apply_hr_style`;
+  top-level `hr:` and inline `{ style: ... }` remain deprecated aliases.
