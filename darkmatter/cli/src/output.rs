@@ -1157,15 +1157,15 @@ mod tests {
     #[tracing_test::traced_test]
     fn strict_style_still_emits_known_but_inactive_event() {
         // A schema-clean fixture whose only warnings are `KnownButInactive`
-        // (the `hr.color` leaf is wired in sub-spec #6). Under
+        // (the `page.stylesheet` leaf is planned for sub-spec #7). Under
         // `--strict-style`, `into_strict` must succeed (no schema issues),
         // and the informational future-phase event must still reach
         // `log_style_warnings`. The old code replaced the warning list with
         // `Vec::new()` in strict mode and silently swallowed it.
         let raw = "---\n\
 style:\n\
-\x20   hr:\n\
-\x20       color: red-500\n\
+\x20   page:\n\
+\x20       stylesheet: main.css\n\
 ---\n\n# Doc\n";
         let md = Markdown::try_from_content(raw).unwrap();
         let cli = cli_from(&["md", "doc.md", "--strict-style"]);
@@ -1182,8 +1182,8 @@ style:\n\
     fn non_strict_style_emits_known_but_inactive_event() {
         let raw = "---\n\
 style:\n\
-\x20   hr:\n\
-\x20       color: red-500\n\
+\x20   page:\n\
+\x20       stylesheet: main.css\n\
 ---\n\n# Doc\n";
         let md = Markdown::try_from_content(raw).unwrap();
         let cli = cli_from(&["md", "doc.md"]);
