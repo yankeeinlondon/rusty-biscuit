@@ -1728,3 +1728,115 @@ fn level2_cli_align_ul_granular_indents_only_ul_in_real_terminal() {
         lead(&center_ol)
     );
 }
+
+// ---------------------------------------------------------------------------
+// Review-5 follow-ups: sub-spec #5 color behavior in a real terminal
+// ---------------------------------------------------------------------------
+
+/// `style.page.color` plus the absence of a color-capable terminal must
+/// still render layout (heading, list, table) — the renderer no longer
+/// falls back to raw Markdown source when the captured terminal cannot
+/// interpret SGR.
+///
+/// The harness reports `xterm-256color`, so `ColorDepth::auto_detect`
+/// resolves to a color-capable depth; we exercise the no-color
+/// safety net by forcing `TERM=dumb`, which downgrades depth to
+/// `ColorDepth::None`. The visible text must still appear.
+#[test]
+#[serial(level2_terminal)]
+fn level2_color_depth_none_preserves_visible_layout() {
+    let body = "---\n\
+style:\n  page:\n    color: red-500\n---\n\
+# UniqueNoColorHeading\n\n\
+- BulletItem\n\n\
+| Hdr |\n|---|\n| Cell |\n";
+
+    let Some((frame, _)) = run_md_env(body, "--max-width 40", &[("TERM", "dumb")]) else {
+        return;
+    };
+
+    // All structural anchors must survive ColorDepth::None.
+    assert!(
+        frame.plain.contains("UniqueNoColorHeading"),
+        "heading text must render under ColorDepth::None. plain:\n{}",
+        frame.plain
+    );
+    assert!(
+        frame.plain.contains("BulletItem"),
+        "list body must render under ColorDepth::None. plain:\n{}",
+        frame.plain
+    );
+    assert!(
+        frame.plain.contains("Hdr") && frame.plain.contains("Cell"),
+        "table cells must render under ColorDepth::None. plain:\n{}",
+        frame.plain
+    );
+}
+
+/// Visible terminal capture for the fixed list inheritance: `style.ul.color`
+/// must surface on list item bodies even when `style.li.color` is unset.
+/// We anchor on the SGR byte sequence in the raw stream because the
+/// `plain` view strips ANSI codes.
+#[test]
+#[serial(level2_terminal)]
+fn level2_ul_color_inherits_into_li_body() {
+    let body = "---\n\
+style:\n  ul:\n    color: red-500\n---\n\
+- listbodyalpha\n- listbodybeta\n";
+
+    let Some((frame, _)) = run_md(body, "--max-width 40") else {
+        return;
+    };
+
+    // Tailwind Red-500 lowers to `\x1b[38;2;251;44;54m` (see
+    // `darkmatter::style::lower_to_sgr`). At least two occurrences are
+    // expected: one per body anchor.
+    let red_sgr = "\x1b[38;2;251;44;54m";
+    let occurrences = frame.raw.matches(red_sgr).count();
+    assert!(
+        occurrences >= 2,
+        "ul.color must wrap each item body (>=2 red SGR). got {} occurrences. raw len {}",
+        occurrences,
+        frame.raw.len()
+    );
+    // Layout must also still show the bodies in the plain view.
+    assert!(
+        frame.plain.contains("listbodyalpha") && frame.plain.contains("listbodybeta"),
+        "list bodies missing in plain capture:\n{}",
+        frame.plain
+    );
+}
+
+/// Visible terminal capture for hyperlink color routing inside table cells:
+/// `style.hyperlinks.color` must wrap the link's label even when the link
+/// lives inside a `<table>` cell, and the OSC8 sequence must be intact.
+#[test]
+#[serial(level2_terminal)]
+fn level2_hyperlink_color_applies_inside_table() {
+    let body = "---\n\
+style:\n  hyperlinks:\n    color: red-500\n  table:\n    color: blue-500\n---\n\
+| col |\n|---|\n| [clickanchor](https://example.com) |\n";
+
+    let Some((frame, _)) = run_md(body, "--max-width 60") else {
+        return;
+    };
+
+    let red_sgr = "\x1b[38;2;251;44;54m";
+    assert!(
+        frame.raw.contains(red_sgr),
+        "hyperlink color must appear inside table cell. raw stream:\n{}",
+        frame.raw
+    );
+    // The OSC8 wrapping must remain so the link is clickable.
+    assert!(
+        frame.raw.contains("\x1b]8;;https://example.com"),
+        "OSC8 link must be preserved in table cell. raw stream:\n{}",
+        frame.raw
+    );
+    // Visible label must remain in the plain capture.
+    assert!(
+        frame.plain.contains("clickanchor"),
+        "link label must render in plain capture:\n{}",
+        frame.plain
+    );
+}
