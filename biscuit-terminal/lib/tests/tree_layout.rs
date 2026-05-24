@@ -17,7 +17,10 @@ fn terminal_renderer_applies_left_margin_in_cells() {
     let rendered = render_terminal_node(&root, &opts).unwrap();
     let first = rendered.output.lines().next().unwrap_or_default();
     let lead = first.len() - first.trim_start().len();
-    assert!(lead >= 4, "expected >=4 leading cells, got {lead}: {first:?}");
+    assert!(
+        lead >= 4,
+        "expected >=4 leading cells, got {lead}: {first:?}"
+    );
 }
 
 #[test]

@@ -2394,7 +2394,10 @@ fn test_compose_md_plus_with_text_succeeds() {
         String::from_utf8_lossy(&output.stderr)
     );
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("x"), "expected `x` in MarkdownPlus output; got: {stdout:?}");
+    assert!(
+        stdout.contains("x"),
+        "expected `x` in MarkdownPlus output; got: {stdout:?}"
+    );
 }
 
 #[test]
@@ -2432,8 +2435,14 @@ fn test_compose_md_with_list_emits_dash_marker() {
         String::from_utf8_lossy(&output.stderr)
     );
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("- one"), "expected `- one` in Markdown output; got: {stdout:?}");
-    assert!(stdout.contains("- two"), "expected `- two` in Markdown output; got: {stdout:?}");
+    assert!(
+        stdout.contains("- one"),
+        "expected `- one` in Markdown output; got: {stdout:?}"
+    );
+    assert!(
+        stdout.contains("- two"),
+        "expected `- two` in Markdown output; got: {stdout:?}"
+    );
 }
 
 #[test]
@@ -2449,16 +2458,28 @@ fn test_compose_md_with_table_emits_gfm_table() {
     );
     let stdout = String::from_utf8_lossy(&output.stdout);
     // GFM table: header row uses `|`, separator row uses `|---|`.
-    assert!(stdout.contains("| A"), "expected `| A` header cell; got: {stdout:?}");
-    assert!(stdout.contains("| B"), "expected `| B` header cell; got: {stdout:?}");
+    assert!(
+        stdout.contains("| A"),
+        "expected `| A` header cell; got: {stdout:?}"
+    );
+    assert!(
+        stdout.contains("| B"),
+        "expected `| B` header cell; got: {stdout:?}"
+    );
     // GFM separator row uses `:--` / `---` patterns; accept either since the
     // renderer encodes column alignment via the leading colon.
     assert!(
         stdout.contains(":--") || stdout.contains("---"),
         "expected GFM separator row; got: {stdout:?}"
     );
-    assert!(stdout.contains("| x"), "expected `| x` cell; got: {stdout:?}");
-    assert!(stdout.contains("| y"), "expected `| y` cell; got: {stdout:?}");
+    assert!(
+        stdout.contains("| x"),
+        "expected `| x` cell; got: {stdout:?}"
+    );
+    assert!(
+        stdout.contains("| y"),
+        "expected `| y` cell; got: {stdout:?}"
+    );
 }
 
 #[test]
@@ -2635,7 +2656,10 @@ fn test_list_unordered_md_emits_commonmark() {
     assert!(stdout.contains("- First"), "got: {stdout}");
     assert!(stdout.contains("- Second"), "got: {stdout}");
     assert!(stdout.contains("- Third"), "got: {stdout}");
-    assert!(!stdout.contains("•"), "custom bullet not used in MD: {stdout}");
+    assert!(
+        !stdout.contains("•"),
+        "custom bullet not used in MD: {stdout}"
+    );
     assert!(!stdout.contains("<ul"), "no HTML wrapper: {stdout}");
     assert!(!stdout.contains("\x1b["), "no ANSI: {stdout:?}");
 }
@@ -2714,20 +2738,16 @@ fn test_list_unordered_html_ignores_custom_bullet() {
 #[test]
 fn test_list_unordered_md_with_left_margin_emits_frontmatter() {
     let output = cargo_bin_cmd!("bt")
-        .args([
-            "list",
-            "--md",
-            "--margin-left",
-            "4",
-            "First",
-            "Second",
-        ])
+        .args(["list", "--md", "--margin-left", "4", "First", "Second"])
         .output()
         .expect("Failed to execute command");
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("margin-left: 4ch"), "frontmatter: {stdout}");
-    assert!(stdout.contains("- First"), "items below frontmatter: {stdout}");
+    assert!(
+        stdout.contains("- First"),
+        "items below frontmatter: {stdout}"
+    );
 }
 
 #[test]
@@ -2736,14 +2756,7 @@ fn test_list_unordered_html_with_layout_emits_margin_on_ul_only() {
     // `margin-left:Nch` on the `<ul>` itself; the CLI must not double-wrap
     // in `<div style="…">` for tree-expressible properties.
     let output = cargo_bin_cmd!("bt")
-        .args([
-            "list",
-            "--html",
-            "--margin-left",
-            "2",
-            "X",
-            "Y",
-        ])
+        .args(["list", "--html", "--margin-left", "2", "X", "Y"])
         .output()
         .expect("Failed to execute command");
     assert!(output.status.success());
@@ -2771,14 +2784,7 @@ fn test_list_unordered_html_with_alignment_wraps_in_div() {
     // `margin-left:auto`/`margin-right:auto` with `max_width`), so the CLI
     // wraps in `<div style="text-align: …">` to express it.
     let output = cargo_bin_cmd!("bt")
-        .args([
-            "list",
-            "--html",
-            "--alignment",
-            "center",
-            "X",
-            "Y",
-        ])
+        .args(["list", "--html", "--alignment", "center", "X", "Y"])
         .output()
         .expect("Failed to execute command");
     assert!(output.status.success());
@@ -2807,7 +2813,10 @@ fn test_list_ordered_md_with_left_margin_emits_frontmatter() {
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("margin-left: 4ch"), "frontmatter: {stdout}");
-    assert!(stdout.contains("1. First"), "items below frontmatter: {stdout}");
+    assert!(
+        stdout.contains("1. First"),
+        "items below frontmatter: {stdout}"
+    );
 }
 
 #[test]
@@ -3346,10 +3355,7 @@ fn test_section_help_exposes_md_md_plus_html_and_example_flags() {
         stdout.contains("--example"),
         "help exposes --example: {stdout}"
     );
-    assert!(
-        stdout.contains("--level"),
-        "help exposes --level: {stdout}"
-    );
+    assert!(stdout.contains("--level"), "help exposes --level: {stdout}");
     assert!(
         stdout.contains("--content"),
         "help exposes --content: {stdout}"
@@ -3376,7 +3382,10 @@ fn test_status_block_example_succeeds_and_prints_command() {
         .args(["status-block", "--example"])
         .output()
         .expect("Failed to execute command");
-    assert!(output.status.success(), "bt status-block --example should succeed");
+    assert!(
+        output.status.success(),
+        "bt status-block --example should succeed"
+    );
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
         stdout.contains("Command:"),
@@ -3515,10 +3524,7 @@ fn test_status_block_help_exposes_target_and_layout_flags() {
         stdout.contains("--header"),
         "help exposes --header: {stdout}"
     );
-    assert!(
-        stdout.contains("--hint"),
-        "help exposes --hint: {stdout}"
-    );
+    assert!(stdout.contains("--hint"), "help exposes --hint: {stdout}");
     assert!(
         stdout.contains("--border-color"),
         "help exposes --border-color: {stdout}"
@@ -3613,21 +3619,26 @@ fn test_table_md_emits_gfm_pipe_table() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("| Name"), "header pipe row: {stdout}");
     assert!(stdout.contains("| Score"), "header pipe row: {stdout}");
-    assert!(
-        stdout.contains("--"),
-        "GFM delimiter row present: {stdout}"
-    );
+    assert!(stdout.contains("--"), "GFM delimiter row present: {stdout}");
     assert!(stdout.contains("Ann"), "first row data: {stdout}");
     assert!(stdout.contains("Bob"), "second row data: {stdout}");
     // No terminal box characters in the Markdown output.
-    assert!(!stdout.contains('┌'), "no box drawing in Markdown: {stdout}");
+    assert!(
+        !stdout.contains('┌'),
+        "no box drawing in Markdown: {stdout}"
+    );
 }
 
 #[test]
 fn test_table_md_plus_matches_md_for_pure_gfm_table() {
     let md_output = cargo_bin_cmd!("bt")
         .args([
-            "table", "--md", "--columns", "Name,Score", "--row", "Ann,90",
+            "table",
+            "--md",
+            "--columns",
+            "Name,Score",
+            "--row",
+            "Ann,90",
         ])
         .output()
         .expect("md run");
@@ -3770,9 +3781,7 @@ fn test_table_md_cell_pipe_is_escaped() {
 #[test]
 fn test_table_md_html_mutual_exclusion() {
     cargo_bin_cmd!("bt")
-        .args([
-            "table", "--md", "--html", "--columns", "A", "--row", "x",
-        ])
+        .args(["table", "--md", "--html", "--columns", "A", "--row", "x"])
         .assert()
         .failure();
 }
@@ -3780,15 +3789,7 @@ fn test_table_md_html_mutual_exclusion() {
 #[test]
 fn test_table_md_md_plus_mutual_exclusion() {
     cargo_bin_cmd!("bt")
-        .args([
-            "table",
-            "--md",
-            "--md-plus",
-            "--columns",
-            "A",
-            "--row",
-            "x",
-        ])
+        .args(["table", "--md", "--md-plus", "--columns", "A", "--row", "x"])
         .assert()
         .failure();
 }
@@ -3827,10 +3828,7 @@ fn test_table_help_exposes_cross_target_and_example_flags() {
         stdout.contains("--example"),
         "help exposes --example: {stdout}"
     );
-    assert!(
-        stdout.contains("--title"),
-        "help exposes --title: {stdout}"
-    );
+    assert!(stdout.contains("--title"), "help exposes --title: {stdout}");
 }
 
 #[test]
@@ -3900,10 +3898,7 @@ fn test_text_block_md_emits_plain_text() {
         "Markdown output preserves text: {stdout:?}"
     );
     // Markdown ignores Style by contract — no SGR, no semantic wrappers.
-    assert!(
-        !stdout.contains("\x1b["),
-        "no SGR in Markdown: {stdout:?}"
-    );
+    assert!(!stdout.contains("\x1b["), "no SGR in Markdown: {stdout:?}");
     assert!(
         !stdout.contains("<strong"),
         "no HTML in portable Markdown: {stdout:?}"
@@ -4003,7 +3998,10 @@ fn test_text_block_example_succeeds_and_prints_command() {
         .args(["text-block", "--example"])
         .output()
         .expect("Failed to execute command");
-    assert!(output.status.success(), "bt text-block --example should succeed");
+    assert!(
+        output.status.success(),
+        "bt text-block --example should succeed"
+    );
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
         stdout.contains("Release candidate passed"),
@@ -4072,10 +4070,7 @@ fn test_text_block_example_dim_wins_over_implicit_bold() {
     // by `print_example_command`, which would otherwise mask the assertion.
     // Split on the bold-open + "Command:" prefix so the trailer's `\x1b[1m`
     // does not leak into the body slice.
-    let body = stdout
-        .split("\x1b[1mCommand:")
-        .next()
-        .unwrap_or(&stdout);
+    let body = stdout.split("\x1b[1mCommand:").next().unwrap_or(&stdout);
     assert!(
         body.contains("\x1b[2m"),
         "--dim emits dim SGR in the example body: {body:?}"

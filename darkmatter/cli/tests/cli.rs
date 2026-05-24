@@ -3382,8 +3382,7 @@ fn style_fixture_cli_pipe_smoke_passes() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(!stdout.is_empty(), "rendered output must not be empty");
     assert!(
-        stdout.contains("Testing the `style` Property")
-            || stdout.contains("Testing the"),
+        stdout.contains("Testing the `style` Property") || stdout.contains("Testing the"),
         "rendered output should contain the page title"
     );
 }
@@ -3516,9 +3515,7 @@ fn style_cli_margin_overrides_frontmatter() {
         // Mirror the cli's parse → apply_cli → apply_style_frontmatter
         // pipeline as in the public API.
         use darkmatter::markdown::Markdown;
-        use darkmatter::style::{
-            PageStyleOverrides, apply_page_style, from_frontmatter,
-        };
+        use darkmatter::style::{PageStyleOverrides, apply_page_style, from_frontmatter};
         let raw = std::fs::read_to_string(style_prop_fixture()).unwrap();
         let md = Markdown::try_from_content(&raw).unwrap();
         let (style, _) = from_frontmatter(md.frontmatter()).unwrap();

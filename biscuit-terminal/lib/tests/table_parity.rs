@@ -626,10 +626,7 @@ fn render_terminal_with_title_emits_title_above_top_border() {
     let out = strip_ansi(&table.render(&term));
     let title = out.find("Roster").expect("title present");
     let border = out.find('┌').expect("top border present");
-    assert!(
-        title < border,
-        "title appears above the top border:\n{out}"
-    );
+    assert!(title < border, "title appears above the top border:\n{out}");
 }
 
 // ---------------------------------------------------------------------------

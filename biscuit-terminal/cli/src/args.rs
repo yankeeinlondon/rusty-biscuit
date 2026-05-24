@@ -42,7 +42,9 @@ pub struct LayoutArgs {
 #[command(name = "bt")]
 #[command(author, version, about = "Display terminal metadata and capabilities")]
 #[command(disable_help_subcommand = true)]
-#[command(after_help = "\nSHELL COMPLETIONS:\n  Two methods are available:\n\n  DYNAMIC (recommended, includes image file filtering):\n    # Bash\n    echo 'source <(COMPLETE=bash bt)' >> ~/.bashrc\n\n    # Zsh\n    echo 'source <(COMPLETE=zsh bt)' >> ~/.zshrc\n\n    # Fish\n    echo 'COMPLETE=fish bt | source' >> ~/.config/fish/config.fish\n\n  STATIC (generates a completion script):\n    # Bash\n    bt --completions bash >> ~/.bashrc\n\n    # Zsh (ensure fpath includes the directory)\n    bt --completions zsh > ~/.zfunc/_bt\n\n    # Fish\n    bt --completions fish > ~/.config/fish/completions/bt.fish\n\n    # PowerShell\n    bt --completions powershell >> $PROFILE\n")]
+#[command(
+    after_help = "\nSHELL COMPLETIONS:\n  Two methods are available:\n\n  DYNAMIC (recommended, includes image file filtering):\n    # Bash\n    echo 'source <(COMPLETE=bash bt)' >> ~/.bashrc\n\n    # Zsh\n    echo 'source <(COMPLETE=zsh bt)' >> ~/.zshrc\n\n    # Fish\n    echo 'COMPLETE=fish bt | source' >> ~/.config/fish/config.fish\n\n  STATIC (generates a completion script):\n    # Bash\n    bt --completions bash >> ~/.bashrc\n\n    # Zsh (ensure fpath includes the directory)\n    bt --completions zsh > ~/.zfunc/_bt\n\n    # Fish\n    bt --completions fish > ~/.config/fish/completions/bt.fish\n\n    # PowerShell\n    bt --completions powershell >> $PROFILE\n"
+)]
 pub struct Args {
     /// Output in JSON format
     #[arg(long, global = true, display_order = 100)]

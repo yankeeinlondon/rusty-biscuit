@@ -368,8 +368,7 @@ impl Todo {
             _ => RenderNode::text(desc_text),
         };
 
-        let mut item =
-            RenderNode::list_item(checked, vec![RenderNode::paragraph(vec![desc_node])]);
+        let mut item = RenderNode::list_item(checked, vec![RenderNode::paragraph(vec![desc_node])]);
         item.attrs.classes = vec![self.state_class().to_string()];
         item.attrs.set_task_hints(&TaskHints {
             state: TaskState::from(self.state.clone()),
@@ -421,7 +420,6 @@ impl Todo {
             }
         }
     }
-
 }
 
 impl TerminalRenderable for Todo {

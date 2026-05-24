@@ -22,7 +22,7 @@
     clippy::collapsible_if,
     clippy::possible_missing_else,
     clippy::result_large_err,
-    clippy::single_match,
+    clippy::single_match
 )]
 pub use schematic_definitions::elevenlabs::*;
 /// Builds the ElevenLabs Text-to-Speech WebSocket API definition.
@@ -74,22 +74,21 @@ impl ElevenLabsTTSWs {
     pub fn new() -> Self {
         Self {
             base_url: "wss://api.elevenlabs.io".to_string(),
-            headers: schematic_define::Headers::default()
-                .with_env_mapping(schematic_define::EnvMapping {
+            headers: schematic_define::Headers::default().with_env_mapping(
+                schematic_define::EnvMapping {
                     bearer_token: None,
                     basic_user: None,
                     basic_pass: None,
                     api_key: Some(schematic_define::ApiKeyEnv {
-                        names: schematic_define::EnvList::new(
-                            vec![
-                                "ELEVEN_LABS_API_KEY".to_string(), "ELEVENLABS_API_KEY"
-                                .to_string()
-                            ],
-                        ),
+                        names: schematic_define::EnvList::new(vec![
+                            "ELEVEN_LABS_API_KEY".to_string(),
+                            "ELEVENLABS_API_KEY".to_string(),
+                        ]),
                         header: "xi-api-key".to_string(),
                     }),
                     ..Default::default()
-                }),
+                },
+            ),
         }
     }
     /// Create a new client with a custom base URL.
@@ -97,22 +96,21 @@ impl ElevenLabsTTSWs {
     pub fn with_base_url(base_url: impl Into<String>) -> Self {
         Self {
             base_url: base_url.into(),
-            headers: schematic_define::Headers::default()
-                .with_env_mapping(schematic_define::EnvMapping {
+            headers: schematic_define::Headers::default().with_env_mapping(
+                schematic_define::EnvMapping {
                     bearer_token: None,
                     basic_user: None,
                     basic_pass: None,
                     api_key: Some(schematic_define::ApiKeyEnv {
-                        names: schematic_define::EnvList::new(
-                            vec![
-                                "ELEVEN_LABS_API_KEY".to_string(), "ELEVENLABS_API_KEY"
-                                .to_string()
-                            ],
-                        ),
+                        names: schematic_define::EnvList::new(vec![
+                            "ELEVEN_LABS_API_KEY".to_string(),
+                            "ELEVENLABS_API_KEY".to_string(),
+                        ]),
                         header: "xi-api-key".to_string(),
                     }),
                     ..Default::default()
-                }),
+                },
+            ),
         }
     }
     /// Returns the configured base URL.
@@ -156,8 +154,7 @@ impl ElevenLabsTTSWs {
             query_pairs.push(("auto_mode".to_string(), value.to_string()));
         }
         if let Some(value) = params.apply_text_normalization.as_ref() {
-            query_pairs
-                .push(("apply_text_normalization".to_string(), value.to_string()));
+            query_pairs.push(("apply_text_normalization".to_string(), value.to_string()));
         }
         if let Some(value) = params.seed.as_ref() {
             query_pairs.push(("seed".to_string(), value.to_string()));
@@ -166,9 +163,7 @@ impl ElevenLabsTTSWs {
             query_pairs.sort_by(|a, b| a.0.cmp(&b.0));
             let query = query_pairs
                 .into_iter()
-                .map(|(k, v)| {
-                    format!("{}={}", urlencoding::encode(& k), urlencoding::encode(& v))
-                })
+                .map(|(k, v)| format!("{}={}", urlencoding::encode(&k), urlencoding::encode(&v)))
                 .collect::<Vec<_>>()
                 .join("&");
             if path.contains('?') {
@@ -179,11 +174,10 @@ impl ElevenLabsTTSWs {
             path.push_str(&query);
         }
         if path.contains('{') {
-            return Err(
-                super::ws_shared::WsError::Protocol(
-                    format!("unresolved path placeholder in '{}'", path),
-                ),
-            );
+            return Err(super::ws_shared::WsError::Protocol(format!(
+                "unresolved path placeholder in '{}'",
+                path
+            )));
         }
         let url = format!("{}{}", self.base_url, path);
         let header_pairs = self
@@ -214,9 +208,7 @@ impl ElevenLabsTTSWs {
             query_pairs.sort_by(|a, b| a.0.cmp(&b.0));
             let query = query_pairs
                 .into_iter()
-                .map(|(k, v)| {
-                    format!("{}={}", urlencoding::encode(& k), urlencoding::encode(& v))
-                })
+                .map(|(k, v)| format!("{}={}", urlencoding::encode(&k), urlencoding::encode(&v)))
                 .collect::<Vec<_>>()
                 .join("&");
             if path.contains('?') {
@@ -227,11 +219,10 @@ impl ElevenLabsTTSWs {
             path.push_str(&query);
         }
         if path.contains('{') {
-            return Err(
-                super::ws_shared::WsError::Protocol(
-                    format!("unresolved path placeholder in '{}'", path),
-                ),
-            );
+            return Err(super::ws_shared::WsError::Protocol(format!(
+                "unresolved path placeholder in '{}'",
+                path
+            )));
         }
         let url = format!("{}{}", self.base_url, path);
         let header_pairs = self
@@ -250,9 +241,7 @@ impl Default for ElevenLabsTTSWs {
 ///Client for the TextToSpeech endpoint.
 pub struct TextToSpeechClient {
     transport: super::ws_shared::WsTransportHandle,
-    event_rx: tokio::sync::mpsc::Receiver<
-        Result<serde_json::Value, super::ws_shared::WsError>,
-    >,
+    event_rx: tokio::sync::mpsc::Receiver<Result<serde_json::Value, super::ws_shared::WsError>>,
 }
 impl TextToSpeechClient {
     async fn dial(
@@ -270,8 +259,7 @@ impl TextToSpeechClient {
         for (name, value) in header_pairs {
             if let (Ok(hdr_name), Ok(hdr_value)) = (
                 name.parse::<tokio_tungstenite::tungstenite::http::header::HeaderName>(),
-                value
-                    .parse::<tokio_tungstenite::tungstenite::http::header::HeaderValue>(),
+                value.parse::<tokio_tungstenite::tungstenite::http::header::HeaderValue>(),
             ) {
                 request.headers_mut().insert(hdr_name, hdr_value);
             }
@@ -283,9 +271,9 @@ impl TextToSpeechClient {
         );
         let (ws_stream, _) = tokio::time::timeout(options.handshake_timeout, connect)
             .await
-            .map_err(|_| super::ws_shared::WsError::HandshakeTimeout(
-                options.handshake_timeout.as_secs(),
-            ))??;
+            .map_err(|_| {
+                super::ws_shared::WsError::HandshakeTimeout(options.handshake_timeout.as_secs())
+            })??;
         Ok(ws_stream)
     }
     /// Connect to the endpoint.
@@ -296,24 +284,16 @@ impl TextToSpeechClient {
     ) -> Result<Self, super::ws_shared::WsError> {
         let ws_stream = Self::dial(&url, &_options, &header_pairs).await?;
         let _receive_timeout = _options.receive_timeout;
-        let (writer_tx, mut writer_rx) = tokio::sync::mpsc::channel(
-            _options.outbound_capacity,
-        );
+        let (writer_tx, mut writer_rx) = tokio::sync::mpsc::channel(_options.outbound_capacity);
         let (event_tx, event_rx) = tokio::sync::mpsc::channel(_options.inbound_capacity);
-        let (state_tx, state_rx) = tokio::sync::watch::channel(
-            super::ws_shared::WsConnectionState::Connecting,
-        );
+        let (state_tx, state_rx) =
+            tokio::sync::watch::channel(super::ws_shared::WsConnectionState::Connecting);
         let next_id = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(1));
         let pending: std::sync::Arc<
             tokio::sync::Mutex<
-                std::collections::HashMap<
-                    u64,
-                    tokio::sync::oneshot::Sender<serde_json::Value>,
-                >,
+                std::collections::HashMap<u64, tokio::sync::oneshot::Sender<serde_json::Value>>,
             >,
-        > = std::sync::Arc::new(
-            tokio::sync::Mutex::new(std::collections::HashMap::new()),
-        );
+        > = std::sync::Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new()));
         let url_for_supervisor = url.clone();
         let header_pairs_for_supervisor = header_pairs.clone();
         let options_for_supervisor = _options.clone();
@@ -330,30 +310,24 @@ impl TextToSpeechClient {
                     stream
                 } else {
                     let Some(policy) = reconnect_policy.as_ref() else {
-                        let _ = state_tx
-                            .send(super::ws_shared::WsConnectionState::Closed);
+                        let _ = state_tx.send(super::ws_shared::WsConnectionState::Closed);
                         break;
                     };
                     if let Some(max_attempts) = policy.max_attempts
                         && reconnect_attempt >= max_attempts
                     {
-                        let _ = state_tx
-                            .send(super::ws_shared::WsConnectionState::Closed);
+                        let _ = state_tx.send(super::ws_shared::WsConnectionState::Closed);
                         break;
                     }
-                    let _ = state_tx
-                        .send(super::ws_shared::WsConnectionState::Connecting);
-                    let delay = super::ws_shared::reconnect_delay(
-                        policy,
-                        reconnect_attempt,
-                    );
+                    let _ = state_tx.send(super::ws_shared::WsConnectionState::Connecting);
+                    let delay = super::ws_shared::reconnect_delay(policy, reconnect_attempt);
                     tokio::time::sleep(delay).await;
                     match TextToSpeechClient::dial(
-                            &url_for_supervisor,
-                            &options_for_supervisor,
-                            &header_pairs_for_supervisor,
-                        )
-                        .await
+                        &url_for_supervisor,
+                        &options_for_supervisor,
+                        &header_pairs_for_supervisor,
+                    )
+                    .await
                     {
                         Ok(stream) => {
                             reconnect_attempt = reconnect_attempt.saturating_add(1);
@@ -413,13 +387,13 @@ impl TextToSpeechClient {
             next_id,
             pending,
         };
-        Ok(Self { transport, event_rx })
+        Ok(Self {
+            transport,
+            event_rx,
+        })
     }
     /// Send a fire-and-forget message.
-    pub async fn send(
-        &self,
-        message: serde_json::Value,
-    ) -> Result<(), super::ws_shared::WsError> {
+    pub async fn send(&self, message: serde_json::Value) -> Result<(), super::ws_shared::WsError> {
         self.send_typed(&message).await
     }
     /// Send a strongly-typed message payload.
@@ -435,10 +409,7 @@ impl TextToSpeechClient {
             .map_err(|_| super::ws_shared::WsError::Disconnected)
     }
     ///Send the `BOS` open lifecycle message.
-    pub async fn send_bos(
-        &self,
-        message: TtsInitMessage,
-    ) -> Result<(), super::ws_shared::WsError> {
+    pub async fn send_bos(&self, message: TtsInitMessage) -> Result<(), super::ws_shared::WsError> {
         self.send_typed(&message).await
     }
     ///Send the `EOS` close lifecycle message.
@@ -457,9 +428,8 @@ impl TextToSpeechClient {
     /// Returns a stream of inbound events.
     pub fn events(
         self,
-    ) -> tokio_stream::wrappers::ReceiverStream<
-        Result<serde_json::Value, super::ws_shared::WsError>,
-    > {
+    ) -> tokio_stream::wrappers::ReceiverStream<Result<serde_json::Value, super::ws_shared::WsError>>
+    {
         tokio_stream::wrappers::ReceiverStream::new(self.event_rx)
     }
     /// Initiate a graceful close.
@@ -478,9 +448,7 @@ impl TextToSpeechClient {
 ///Client for the MultiContextTextToSpeech endpoint.
 pub struct MultiContextTextToSpeechClient {
     transport: super::ws_shared::WsTransportHandle,
-    event_rx: tokio::sync::mpsc::Receiver<
-        Result<serde_json::Value, super::ws_shared::WsError>,
-    >,
+    event_rx: tokio::sync::mpsc::Receiver<Result<serde_json::Value, super::ws_shared::WsError>>,
 }
 impl MultiContextTextToSpeechClient {
     async fn dial(
@@ -498,8 +466,7 @@ impl MultiContextTextToSpeechClient {
         for (name, value) in header_pairs {
             if let (Ok(hdr_name), Ok(hdr_value)) = (
                 name.parse::<tokio_tungstenite::tungstenite::http::header::HeaderName>(),
-                value
-                    .parse::<tokio_tungstenite::tungstenite::http::header::HeaderValue>(),
+                value.parse::<tokio_tungstenite::tungstenite::http::header::HeaderValue>(),
             ) {
                 request.headers_mut().insert(hdr_name, hdr_value);
             }
@@ -511,9 +478,9 @@ impl MultiContextTextToSpeechClient {
         );
         let (ws_stream, _) = tokio::time::timeout(options.handshake_timeout, connect)
             .await
-            .map_err(|_| super::ws_shared::WsError::HandshakeTimeout(
-                options.handshake_timeout.as_secs(),
-            ))??;
+            .map_err(|_| {
+                super::ws_shared::WsError::HandshakeTimeout(options.handshake_timeout.as_secs())
+            })??;
         Ok(ws_stream)
     }
     /// Connect to the endpoint.
@@ -524,24 +491,16 @@ impl MultiContextTextToSpeechClient {
     ) -> Result<Self, super::ws_shared::WsError> {
         let ws_stream = Self::dial(&url, &_options, &header_pairs).await?;
         let _receive_timeout = _options.receive_timeout;
-        let (writer_tx, mut writer_rx) = tokio::sync::mpsc::channel(
-            _options.outbound_capacity,
-        );
+        let (writer_tx, mut writer_rx) = tokio::sync::mpsc::channel(_options.outbound_capacity);
         let (event_tx, event_rx) = tokio::sync::mpsc::channel(_options.inbound_capacity);
-        let (state_tx, state_rx) = tokio::sync::watch::channel(
-            super::ws_shared::WsConnectionState::Connecting,
-        );
+        let (state_tx, state_rx) =
+            tokio::sync::watch::channel(super::ws_shared::WsConnectionState::Connecting);
         let next_id = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(1));
         let pending: std::sync::Arc<
             tokio::sync::Mutex<
-                std::collections::HashMap<
-                    u64,
-                    tokio::sync::oneshot::Sender<serde_json::Value>,
-                >,
+                std::collections::HashMap<u64, tokio::sync::oneshot::Sender<serde_json::Value>>,
             >,
-        > = std::sync::Arc::new(
-            tokio::sync::Mutex::new(std::collections::HashMap::new()),
-        );
+        > = std::sync::Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new()));
         let url_for_supervisor = url.clone();
         let header_pairs_for_supervisor = header_pairs.clone();
         let options_for_supervisor = _options.clone();
@@ -558,30 +517,24 @@ impl MultiContextTextToSpeechClient {
                     stream
                 } else {
                     let Some(policy) = reconnect_policy.as_ref() else {
-                        let _ = state_tx
-                            .send(super::ws_shared::WsConnectionState::Closed);
+                        let _ = state_tx.send(super::ws_shared::WsConnectionState::Closed);
                         break;
                     };
                     if let Some(max_attempts) = policy.max_attempts
                         && reconnect_attempt >= max_attempts
                     {
-                        let _ = state_tx
-                            .send(super::ws_shared::WsConnectionState::Closed);
+                        let _ = state_tx.send(super::ws_shared::WsConnectionState::Closed);
                         break;
                     }
-                    let _ = state_tx
-                        .send(super::ws_shared::WsConnectionState::Connecting);
-                    let delay = super::ws_shared::reconnect_delay(
-                        policy,
-                        reconnect_attempt,
-                    );
+                    let _ = state_tx.send(super::ws_shared::WsConnectionState::Connecting);
+                    let delay = super::ws_shared::reconnect_delay(policy, reconnect_attempt);
                     tokio::time::sleep(delay).await;
                     match MultiContextTextToSpeechClient::dial(
-                            &url_for_supervisor,
-                            &options_for_supervisor,
-                            &header_pairs_for_supervisor,
-                        )
-                        .await
+                        &url_for_supervisor,
+                        &options_for_supervisor,
+                        &header_pairs_for_supervisor,
+                    )
+                    .await
                     {
                         Ok(stream) => {
                             reconnect_attempt = reconnect_attempt.saturating_add(1);
@@ -641,13 +594,13 @@ impl MultiContextTextToSpeechClient {
             next_id,
             pending,
         };
-        Ok(Self { transport, event_rx })
+        Ok(Self {
+            transport,
+            event_rx,
+        })
     }
     /// Send a fire-and-forget message.
-    pub async fn send(
-        &self,
-        message: serde_json::Value,
-    ) -> Result<(), super::ws_shared::WsError> {
+    pub async fn send(&self, message: serde_json::Value) -> Result<(), super::ws_shared::WsError> {
         self.send_typed(&message).await
     }
     /// Send a strongly-typed message payload.
@@ -685,9 +638,8 @@ impl MultiContextTextToSpeechClient {
     /// Returns a stream of inbound events.
     pub fn events(
         self,
-    ) -> tokio_stream::wrappers::ReceiverStream<
-        Result<serde_json::Value, super::ws_shared::WsError>,
-    > {
+    ) -> tokio_stream::wrappers::ReceiverStream<Result<serde_json::Value, super::ws_shared::WsError>>
+    {
         tokio_stream::wrappers::ReceiverStream::new(self.event_rx)
     }
     /// Initiate a graceful close.

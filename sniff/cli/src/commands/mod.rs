@@ -1,3 +1,4 @@
+use biscuit_terminal::components::renderable::TerminalRenderable;
 use clap::{CommandFactory, Parser};
 use clap_complete::{CompleteEnv, Shell};
 use sniff::filesystem::blast_radius::{ChangeScope, ChangedPathKind, find_blast_radius_documents};
@@ -15,6 +16,7 @@ use crate::args::{
 };
 use crate::output::{self, OutputFilter, PathListFormat};
 use crate::perf::{CliPerf, handle_no_results};
+use std::fmt::Write as FmtWrite;
 
 mod remote;
 mod repo;
@@ -57,7 +59,10 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
         unsafe { std::env::set_var("NO_COLOR", "1") };
     }
 
-    let cli = Cli::parse();
+    let cli = match Cli::try_parse() {
+        Ok(cli) => cli,
+        Err(err) => exit_with_parse_error(err),
+    };
 
     crate::init_tracing(cli.debug);
 
@@ -742,6 +747,72 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 }
                 return handle_no_results(*no_error, on_error, cli.plain, &perf);
             }
+            crate::args::RepoAction::Worktrees { list, csv, .. } => {
+                let dir = base_dir
+                    .as_deref()
+                    .unwrap_or_else(|| std::path::Path::new("."));
+                let worktrees = sniff::filesystem::git::list_worktrees(dir)?;
+                let Some(entries) = worktrees else {
+                    return Err("Not a git repository".into());
+                };
+
+                if cli.json {
+                    let json = output::repo_json::worktrees_value(&entries);
+                    output::print_json_value(json, perf.build_report().as_ref());
+                } else if *csv {
+                    let names: Vec<String> = entries.iter().map(|e| e.name.clone()).collect();
+                    println!("{}", names.join(", "));
+                } else if cli.verbose > 0 {
+                    let home = std::env::var_os("HOME").map(std::path::PathBuf::from);
+                    let terminal = biscuit_terminal::terminal::Terminal::default();
+                    let mut lines = Vec::new();
+                    for entry in &entries {
+                        let marker = if entry.is_current { "* " } else { "  " };
+                        let branch_text = if entry.is_detached {
+                            "detached HEAD".to_string()
+                        } else {
+                            entry
+                                .branch
+                                .clone()
+                                .unwrap_or_else(|| "unknown".to_string())
+                        };
+                        let display_path = if let Some(ref home) = home {
+                            if let Ok(stripped) = entry.path.strip_prefix(home) {
+                                format!("~/{}", stripped.display())
+                            } else {
+                                entry.path.display().to_string()
+                            }
+                        } else {
+                            entry.path.display().to_string()
+                        };
+                        let absolute_path = entry.path.display().to_string();
+                        let markup = format!(
+                            "{marker}<b>{}</b> (on <green>{}</green> branch, located at <a href=\"{}\">{}</a>)",
+                            entry.name, branch_text, absolute_path, display_path
+                        );
+                        let prose = biscuit_terminal::components::prose::Prose::new(&markup);
+                        lines.push(prose.render(&terminal));
+                    }
+                    let rendered = lines.join("\n") + "\n";
+                    output::emit_text(&rendered, cli.plain);
+                } else if *list {
+                    let mut out = String::new();
+                    for entry in &entries {
+                        let marker = if entry.is_current { "* " } else { "" };
+                        writeln!(out, "- {}{}", marker, entry.name).unwrap();
+                    }
+                    output::emit_text(&out, cli.plain);
+                } else {
+                    let mut out = String::new();
+                    for entry in &entries {
+                        let marker = if entry.is_current { "* " } else { "  " };
+                        writeln!(out, "{}{}", marker, entry.name).unwrap();
+                    }
+                    output::emit_text(&out, cli.plain);
+                }
+                perf.emit_stderr(None);
+                return Ok(());
+            }
             crate::args::RepoAction::RecentCommits { .. }
             | crate::args::RepoAction::SourceCodeChanges { .. }
             | crate::args::RepoAction::DocumentationChanges { .. } => {
@@ -1044,6 +1115,102 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
+    // Branch filter for `repo git-status --branch [<name>]`. When the flag is
+    // given without a value, the current branch is used (which is a no-op vs
+    // the default HEAD walk). When a different branch is given, replace the
+    // recent commit list with one walked from that branch's tip.
+    if let Some(crate::args::RepoAction::GitStatus {
+        branch: Some(branch_opt),
+        ..
+    }) = &repo_action
+        && let Some(ref mut filesystem) = result.filesystem
+        && let Some(ref mut git) = filesystem.git
+    {
+        let explicit = branch_opt.as_deref().filter(|s| !s.is_empty());
+        let target_branch = explicit
+            .map(str::to_string)
+            .or_else(|| git.current_branch.clone());
+
+        if let Some(branch_name) = target_branch
+            && git.current_branch.as_deref() != Some(branch_name.as_str())
+        {
+            let dir = base_dir
+                .as_deref()
+                .unwrap_or_else(|| std::path::Path::new("."));
+            if let Ok(repo) = git2::Repository::discover(dir) {
+                git.recent =
+                    sniff::filesystem::get_commits_for_branch(&repo, &branch_name, history_count);
+            }
+
+            // Working-tree state belongs to the currently checked-out branch,
+            // not the one being inspected — clear it so the output doesn't
+            // imply those files are dirty on the target branch.
+            git.file_changes.clear();
+            git.status.dirty.clear();
+            git.status.untracked.clear();
+            git.status.staged_count = 0;
+            git.status.unstaged_count = 0;
+            git.status.untracked_count = 0;
+            git.status.is_dirty = false;
+        }
+    }
+
+    // Worktree filter for `repo git-status --worktree <name>`. Replaces both
+    // the recent commit list and the working-tree status with those of the
+    // selected worktree. The selector matches against either the worktree's
+    // branch (the `worktrees` HashMap key) or its directory basename.
+    if let Some(crate::args::RepoAction::GitStatus {
+        worktree: Some(wt_selector),
+        ..
+    }) = &repo_action
+        && let Some(ref mut filesystem) = result.filesystem
+        && let Some(ref mut git) = filesystem.git
+    {
+        let matched = git
+            .worktrees
+            .values()
+            .find(|info| {
+                info.branch == *wt_selector
+                    || info
+                        .filepath
+                        .file_name()
+                        .and_then(|n| n.to_str())
+                        .is_some_and(|basename| basename == *wt_selector)
+            })
+            .cloned();
+
+        match matched {
+            Some(info) => {
+                if let Some(wt_repo) = sniff::filesystem::git::GitRepo::discover(&info.filepath)? {
+                    git.recent = wt_repo.recent_commits(history_count);
+
+                    let file_changes = wt_repo.file_changes().unwrap_or_default();
+                    let repo_status = wt_repo.repo_status().unwrap_or_default();
+                    git.file_changes = file_changes;
+                    git.status = repo_status;
+                }
+                // Reflect the worktree's location so absolute file paths in
+                // the rendered output resolve to the worktree, and the queried
+                // branch so downstream code sees it as the current branch.
+                git.repo_root = info.filepath.clone();
+                git.current_branch = Some(info.branch.clone());
+            }
+            None => {
+                let names: Vec<String> = git
+                    .worktrees
+                    .values()
+                    .map(|info| info.branch.clone())
+                    .collect();
+                let listing = if names.is_empty() {
+                    "no linked worktrees found".to_string()
+                } else {
+                    format!("available: {}", names.join(", "))
+                };
+                return Err(format!("Worktree not found: {} ({})", wt_selector, listing).into());
+            }
+        }
+    }
+
     // Tier 2/3 scoping: validate that `--package` and `--package-area` resolve
     // and (when both supplied) overlap. The output functions apply the actual
     // filtering; this call surfaces the intersection error before render time.
@@ -1266,6 +1433,29 @@ fn wants_completions_help_with_args(args: &[String]) -> bool {
 
 fn print_completions_help() {
     println!("{}", COMPLETIONS_HELP);
+}
+
+/// Print a clap parse error and exit.
+///
+/// For `sniff repo <unknown>` errors, append the categorized list of valid
+/// repo subcommands so users do not have to re-run with `--help`.
+fn exit_with_parse_error(err: clap::Error) -> ! {
+    use clap::error::ErrorKind;
+
+    let kind = err.kind();
+    let argv: Vec<String> = std::env::args().skip(1).collect();
+    let under_repo = argv.iter().any(|a| a == "repo");
+    let is_unknown_sub = matches!(
+        kind,
+        ErrorKind::InvalidSubcommand | ErrorKind::UnknownArgument
+    );
+
+    if under_repo && is_unknown_sub {
+        let _ = err.print();
+        eprintln!("\n{}", crate::args::REPO_AFTER_HELP);
+        std::process::exit(2);
+    }
+    err.exit();
 }
 
 /// Enriches all dependencies in a SniffResult with latest versions from package registries.

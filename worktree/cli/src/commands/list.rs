@@ -177,9 +177,7 @@ fn build_status_table(statuses: &[WorktreeStatus], terminal: &Terminal) -> Table
         TableColumn::new("Commits").with_alignment(Alignment::Right),
     ];
 
-    let mut table = Table::new()
-        .with_columns(columns)
-        .prefer_cursor_alignment();
+    let mut table = Table::new().with_columns(columns).prefer_cursor_alignment();
 
     for status in statuses {
         table.add_row(status_row(status, terminal));

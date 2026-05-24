@@ -513,7 +513,14 @@ pub struct TableColumnHints {
     pub fixed_width: Option<u32>,
     /// Conditional visibility keyed to the renderable width.
     pub conditional: ColumnConditional,
-    /// Note appended after the table when this column is dropped.
+    /// Whether this column may be dropped when the table cannot otherwise
+    /// fit in the available width. A column may be droppable with or
+    /// without a [`Self::drop_note`]; this flag is the authoritative
+    /// "is droppable" signal and must be preserved across the render tree.
+    pub droppable: bool,
+    /// Note appended after the table when this column is dropped. A
+    /// non-empty note implies [`Self::droppable`] is `true`, but a column
+    /// can be droppable with no note (silent drop).
     pub drop_note: Option<String>,
     /// Whether all cells in this column align uniformly.
     pub uniform_alignment: bool,
@@ -1153,6 +1160,20 @@ impl NodeAttrs {
             }
         }
 
+        // `droppable` is the authoritative droppability signal — a column
+        // may be droppable without a `drop_note` (silent drop), so it must
+        // round-trip independently. Only emit the hint when true to keep
+        // default attribute sets empty.
+        if hints.droppable {
+            self.set_hint(
+                HintNamespace::TABLE,
+                &key("droppable"),
+                serde_json::Value::Bool(true),
+            );
+        } else {
+            self.remove_hint(HintNamespace::TABLE, &key("droppable"));
+        }
+
         if hints.uniform_alignment {
             self.set_hint(
                 HintNamespace::TABLE,
@@ -1200,6 +1221,15 @@ impl NodeAttrs {
             .and_then(serde_json::Value::as_str)
             .map(str::to_string);
 
+        // A column with a non-empty `drop_note` is implicitly droppable —
+        // honor that as a fallback so legacy attribute sets written before
+        // the explicit `droppable` hint existed still round-trip correctly.
+        let droppable = self
+            .get_hint(HintNamespace::TABLE, &key("droppable"))
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false)
+            || drop_note.is_some();
+
         let uniform_alignment = self
             .get_hint(HintNamespace::TABLE, &key("uniform_alignment"))
             .and_then(serde_json::Value::as_bool)
@@ -1210,6 +1240,7 @@ impl NodeAttrs {
             max_width: read_width("max_width"),
             fixed_width: read_width("fixed_width"),
             conditional,
+            droppable,
             drop_note,
             uniform_alignment,
         }
@@ -1751,9 +1782,9 @@ mod tests {
         use crate::style::{PerMode, Style, TextEmphasis};
 
         let style = Style {
-            color: Some(TargetValue::universal(PerMode::universal(
-                Color::Tailwind(Tailwind::Blue500),
-            ))),
+            color: Some(TargetValue::universal(PerMode::universal(Color::Tailwind(
+                Tailwind::Blue500,
+            )))),
             emphasis: TextEmphasis {
                 bold: true,
                 ..Default::default()
@@ -1772,7 +1803,10 @@ mod tests {
         attrs.set_hint(HintNamespace::STYLE, "style", json!("a"));
         attrs.set_hint(HintNamespace::LAYOUT, "layout", json!("b"));
         assert_eq!(attrs.data.get("renderable.style.style"), Some(&json!("a")));
-        assert_eq!(attrs.data.get("renderable.layout.layout"), Some(&json!("b")));
+        assert_eq!(
+            attrs.data.get("renderable.layout.layout"),
+            Some(&json!("b"))
+        );
     }
 
     #[test]
@@ -1847,12 +1881,16 @@ mod tests {
         assert_eq!(hints.right_bracket, ')');
         assert_eq!(
             hints.filled_color,
-            Some(crate::color::Color::BasicColor(crate::color::BasicColor::Green))
+            Some(crate::color::Color::BasicColor(
+                crate::color::BasicColor::Green
+            ))
         );
         assert_eq!(hints.empty_color, None);
         assert_eq!(
             hints.bracket_color,
-            Some(crate::color::Color::BasicColor(crate::color::BasicColor::Cyan))
+            Some(crate::color::Color::BasicColor(
+                crate::color::BasicColor::Cyan
+            ))
         );
     }
 
@@ -1870,10 +1908,13 @@ mod tests {
 
         let hints = attrs.progress_hints().expect("value present");
         assert!((hints.value - 0.25).abs() < 1e-6);
-        assert_eq!(hints, ProgressHints {
-            value: hints.value,
-            ..Default::default()
-        });
+        assert_eq!(
+            hints,
+            ProgressHints {
+                value: hints.value,
+                ..Default::default()
+            }
+        );
     }
 
     #[test]
@@ -1941,22 +1982,70 @@ mod tests {
     #[test]
     fn table_column_hints_round_trip() {
         let mut attrs = NodeAttrs::default();
-        attrs.set_table_column_hints(1, &TableColumnHints {
-            min_width: Some(4),
-            max_width: Some(40),
-            fixed_width: Some(12),
-            conditional: ColumnConditional::WidthGreaterThan(80),
-            drop_note: Some("notes hidden".into()),
-            uniform_alignment: true,
-        });
+        attrs.set_table_column_hints(
+            1,
+            &TableColumnHints {
+                min_width: Some(4),
+                max_width: Some(40),
+                fixed_width: Some(12),
+                conditional: ColumnConditional::WidthGreaterThan(80),
+                droppable: true,
+                drop_note: Some("notes hidden".into()),
+                uniform_alignment: true,
+            },
+        );
 
         let hints = attrs.table_column_hints(1);
         assert_eq!(hints.min_width, Some(4));
         assert_eq!(hints.max_width, Some(40));
         assert_eq!(hints.fixed_width, Some(12));
         assert_eq!(hints.conditional, ColumnConditional::WidthGreaterThan(80));
+        assert!(hints.droppable);
         assert_eq!(hints.drop_note.as_deref(), Some("notes hidden"));
         assert!(hints.uniform_alignment);
+    }
+
+    /// A column may be droppable without carrying a drop note — the
+    /// `droppable` flag must round-trip independently so the silent-drop
+    /// case is preserved across the render tree.
+    #[test]
+    fn table_column_hints_droppable_without_note_round_trips() {
+        let mut attrs = NodeAttrs::default();
+        attrs.set_table_column_hints(
+            0,
+            &TableColumnHints {
+                droppable: true,
+                drop_note: None,
+                ..Default::default()
+            },
+        );
+
+        let hints = attrs.table_column_hints(0);
+        assert!(
+            hints.droppable,
+            "silent-drop columns must round-trip as droppable",
+        );
+        assert!(hints.drop_note.is_none());
+    }
+
+    /// Legacy attribute sets written before the explicit `droppable` hint
+    /// existed only carried `drop_note`. Reading those must still report
+    /// the column as droppable so older serialized trees keep behaving.
+    #[test]
+    fn table_column_hints_legacy_drop_note_implies_droppable() {
+        let mut attrs = NodeAttrs::default();
+        attrs.set_hint(
+            HintNamespace::TABLE,
+            "column.0.drop_note",
+            serde_json::Value::String("legacy note".into()),
+        );
+
+        let hints = attrs.table_column_hints(0);
+        assert!(
+            hints.droppable,
+            "drop_note presence must imply droppable for backwards compat",
+        );
+        assert_eq!(hints.drop_note.as_deref(), Some("legacy note"));
     }
 
     #[test]
@@ -1970,14 +2059,20 @@ mod tests {
     #[test]
     fn table_column_hints_indexed_independently() {
         let mut attrs = NodeAttrs::default();
-        attrs.set_table_column_hints(0, &TableColumnHints {
-            min_width: Some(5),
-            ..Default::default()
-        });
-        attrs.set_table_column_hints(1, &TableColumnHints {
-            min_width: Some(9),
-            ..Default::default()
-        });
+        attrs.set_table_column_hints(
+            0,
+            &TableColumnHints {
+                min_width: Some(5),
+                ..Default::default()
+            },
+        );
+        attrs.set_table_column_hints(
+            1,
+            &TableColumnHints {
+                min_width: Some(9),
+                ..Default::default()
+            },
+        );
         assert_eq!(attrs.table_column_hints(0).min_width, Some(5));
         assert_eq!(attrs.table_column_hints(1).min_width, Some(9));
     }
@@ -2034,7 +2129,9 @@ mod tests {
         assert!(!hints.alternate_text_color);
         assert_eq!(
             hints.stripe_bg,
-            Some(crate::color::Color::BasicColor(crate::color::BasicColor::Blue))
+            Some(crate::color::Color::BasicColor(
+                crate::color::BasicColor::Blue
+            ))
         );
         assert_eq!(hints.stripe_text, None);
     }

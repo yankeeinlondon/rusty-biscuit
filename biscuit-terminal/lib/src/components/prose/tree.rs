@@ -81,11 +81,7 @@ fn style_from_prose(prose_style: &ProseStyle) -> Option<Style> {
         any = true;
     }
 
-    if any {
-        Some(style)
-    } else {
-        None
-    }
+    if any { Some(style) } else { None }
 }
 
 /// Returns `true` when `style` has no semantic inline peer in the tree.
@@ -142,10 +138,7 @@ fn project_span(style: &ProseStyle, children: Vec<RenderNode>) -> RenderNode {
     // strikethrough — no color, no underline/dim/blink), emit the
     // canonical Strong / Emphasis / Delete wrappers so Markdown and
     // Browser produce semantic output.
-    if style.fg.is_none()
-        && style.bg.is_none()
-        && pure_semantic_emphasis(&style.emphasis)
-    {
+    if style.fg.is_none() && style.bg.is_none() && pure_semantic_emphasis(&style.emphasis) {
         return wrap_semantic_emphasis(&style.emphasis, children);
     }
 
@@ -245,7 +238,9 @@ mod tests {
         let style = first(&nodes).attrs.style().expect("style attached");
         assert_eq!(
             style.color,
-            Some(universal_color(Color::BasicColor(renderable::color::BasicColor::Red)))
+            Some(universal_color(Color::BasicColor(
+                renderable::color::BasicColor::Red
+            )))
         );
     }
 
@@ -264,8 +259,7 @@ mod tests {
 
     #[test]
     fn link_projects_to_link_node() {
-        let nodes =
-            Prose::new("<a href=\"https://example.com\">go</a>").to_render_nodes();
+        let nodes = Prose::new("<a href=\"https://example.com\">go</a>").to_render_nodes();
         match &first(&nodes).kind {
             NodeKind::Link { url, .. } => assert_eq!(url, "https://example.com"),
             other => panic!("expected link node, got {other:?}"),

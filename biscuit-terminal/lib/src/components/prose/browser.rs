@@ -45,10 +45,7 @@ fn node_to_html(node: &ProseNode, out: &mut String) {
         ProseNode::CodeBlock { lang, value } => {
             out.push_str("<pre><code");
             if let Some(lang) = lang {
-                out.push_str(&format!(
-                    " class=\"language-{}\"",
-                    escape_attribute(lang)
-                ));
+                out.push_str(&format!(" class=\"language-{}\"", escape_attribute(lang)));
             }
             out.push('>');
             out.push_str(&escape_text(value));
@@ -95,10 +92,7 @@ fn span_wrappers(style: &ProseStyle) -> Vec<(String, &'static str)> {
     let mut wrappers = style.emphasis.html_wrappers();
 
     if style.hidden {
-        wrappers.push((
-            "<span style=\"visibility: hidden\">".to_string(),
-            "</span>",
-        ));
+        wrappers.push(("<span style=\"visibility: hidden\">".to_string(), "</span>"));
     }
     if style.inverse {
         wrappers.push(("<span style=\"filter: invert(1)\">".to_string(), "</span>"));
@@ -215,9 +209,7 @@ mod tests {
         // escaped `<pre><code>` body — no styled span leaks outside it.
         let h = html("```\n</code-block><red>x</red>\n```");
         assert!(
-            h.contains(
-                "<pre><code>&lt;/code-block&gt;&lt;red&gt;x&lt;/red&gt;</code></pre>"
-            ),
+            h.contains("<pre><code>&lt;/code-block&gt;&lt;red&gt;x&lt;/red&gt;</code></pre>"),
             "got: {h}"
         );
         assert!(!h.contains("<span style=\"color"), "got: {h}");

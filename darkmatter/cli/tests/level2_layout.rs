@@ -903,7 +903,9 @@ fn regex_lite_bg() -> impl Fn(&str) -> Vec<(u32, u32, u32)> {
         let mut out = Vec::new();
         // Split on the CSI introducer; each chunk starts with SGR params.
         for chunk in line.split("\x1b[").skip(1) {
-            let Some(mend) = chunk.find('m') else { continue };
+            let Some(mend) = chunk.find('m') else {
+                continue;
+            };
             // Numeric params, ignoring empty fields (the colon form has an
             // empty colorspace slot: `48:2::R:G:B`).
             let nums: Vec<u32> = chunk[..mend]
@@ -941,7 +943,10 @@ fn is_sentinel_line(line: &str) -> bool {
 /// shell prompt and the echoed command (whose long temp path would otherwise
 /// pollute width/blank-line scans).
 fn rendered_region<'a>(lines: &'a [&'a str], head_needle: &str) -> (usize, usize) {
-    let head = lines.iter().position(|l| l.contains(head_needle)).unwrap_or(0);
+    let head = lines
+        .iter()
+        .position(|l| l.contains(head_needle))
+        .unwrap_or(0);
     let sentinel = lines
         .iter()
         .rposition(|l| is_sentinel_line(l))
@@ -1022,9 +1027,11 @@ fn level2_code_block_inverts_to_dark_in_light_terminal() {
 #[test]
 #[serial(level2_terminal)]
 fn level2_code_block_respects_right_margin() {
-    let Some((frame, _)) =
-        run_md_env(CODE_DOC, "--ml 4 --mr 4 --max-width 50", &[("COLORFGBG", "15;0")])
-    else {
+    let Some((frame, _)) = run_md_env(
+        CODE_DOC,
+        "--ml 4 --mr 4 --max-width 50",
+        &[("COLORFGBG", "15;0")],
+    ) else {
         return;
     };
 
@@ -1060,8 +1067,7 @@ fn level2_code_block_respects_right_margin() {
 #[test]
 #[serial(level2_terminal)]
 fn level2_no_trailing_blank_offset_after_code() {
-    let Some((frame, _)) =
-        run_md_env(CODE_DOC, "--mb 1 --max-width 60", &[("COLORFGBG", "15;0")])
+    let Some((frame, _)) = run_md_env(CODE_DOC, "--mb 1 --max-width 60", &[("COLORFGBG", "15;0")])
     else {
         return;
     };

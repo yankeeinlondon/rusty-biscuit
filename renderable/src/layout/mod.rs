@@ -4,7 +4,7 @@ mod length;
 mod margin;
 mod target_value;
 
-pub use length::{Length, LayoutError};
+pub use length::{LayoutError, Length};
 pub use margin::{Alignment, Margin};
 pub use target_value::TargetValue;
 

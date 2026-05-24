@@ -13,7 +13,10 @@ pub struct UlStyle {
     pub common: CommonStyle,
     /// Indent applied to ul content. Wired in sub-spec #4 as
     /// `PageFill::Indent` on `PageComponent::Ul`.
-    #[serde(deserialize_with = "deserialize_optional_length", alias = "left_margin")]
+    #[serde(
+        deserialize_with = "deserialize_optional_length",
+        alias = "left_margin"
+    )]
     pub left_margin: Option<Length>,
 }
 

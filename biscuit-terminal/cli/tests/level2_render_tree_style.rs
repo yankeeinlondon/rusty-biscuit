@@ -564,9 +564,7 @@ fn assert_table_styled<H: TerminalHarness>(harness: &mut H) {
         .lines()
         .enumerate()
         .find(|(_, plain)| {
-            !plain.contains("bt table")
-                && plain.contains('│')
-                && plain.contains("Pipeline")
+            !plain.contains("bt table") && plain.contains('│') && plain.contains("Pipeline")
         })
         .and_then(|(i, _)| frame.raw.lines().nth(i).map(str::to_string))
         .unwrap_or_else(|| {
@@ -586,9 +584,7 @@ fn assert_table_styled<H: TerminalHarness>(harness: &mut H) {
         .lines()
         .enumerate()
         .find(|(_, plain)| {
-            !plain.contains("bt table")
-                && plain.contains('│')
-                && plain.contains("Quokka")
+            !plain.contains("bt table") && plain.contains('│') && plain.contains("Quokka")
         })
         .and_then(|(i, _)| frame.raw.lines().nth(i).map(str::to_string))
         .unwrap_or_else(|| {

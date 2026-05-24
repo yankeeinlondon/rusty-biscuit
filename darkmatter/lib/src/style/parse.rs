@@ -4,8 +4,7 @@ use serde_json::Value;
 
 use crate::style::color;
 use crate::style::descriptor::{
-    self, LeafType, SchemaLeaf, is_canonical_container, join_path, kebabify,
-    leaf_for_canonical,
+    self, LeafType, SchemaLeaf, is_canonical_container, join_path, kebabify, leaf_for_canonical,
 };
 use crate::style::error::StyleParseError;
 use crate::style::length::{HorizontalLengthError, parse_horizontal_typed};
@@ -112,10 +111,7 @@ fn validate_leaf(
     }
 }
 
-fn validate_horizontal_length(
-    value: &Value,
-    canonical_path: &str,
-) -> Result<(), StyleParseError> {
+fn validate_horizontal_length(value: &Value, canonical_path: &str) -> Result<(), StyleParseError> {
     match value {
         Value::Null => Ok(()),
         Value::Number(n) => {
@@ -273,8 +269,10 @@ pub fn into_strict(
     parsed: (StyleFrontmatter, Vec<StyleWarning>),
 ) -> Result<StyleFrontmatter, StyleParseError> {
     let (style, warnings) = parsed;
-    let schema: Vec<StyleWarning> =
-        warnings.into_iter().filter(|w| w.is_schema_issue()).collect();
+    let schema: Vec<StyleWarning> = warnings
+        .into_iter()
+        .filter(|w| w.is_schema_issue())
+        .collect();
     if schema.is_empty() {
         Ok(style)
     } else {
@@ -351,8 +349,7 @@ mod tests {
 
     #[test]
     fn invalid_percent_returns_typed_variant() {
-        let err =
-            from_json_value(&json!({"page": {"max-width": "150%"}})).unwrap_err();
+        let err = from_json_value(&json!({"page": {"max-width": "150%"}})).unwrap_err();
         match err {
             StyleParseError::InvalidPercent { path, value } => {
                 assert_eq!(path, "style.page.max-width");
@@ -364,8 +361,7 @@ mod tests {
 
     #[test]
     fn invalid_color_returns_typed_variant() {
-        let err =
-            from_json_value(&json!({"page": {"color": "puce"}})).unwrap_err();
+        let err = from_json_value(&json!({"page": {"color": "puce"}})).unwrap_err();
         match err {
             StyleParseError::InvalidColor { path, raw, reason } => {
                 assert_eq!(path, "style.page.color");
@@ -422,8 +418,7 @@ mod tests {
     fn typed_error_uses_canonical_path_even_when_user_wrote_alias() {
         // The user spelled `max_width` (deprecated alias); the typed error's
         // path is the canonical kebab form.
-        let err =
-            from_json_value(&json!({"page": {"max_width": "150%"}})).unwrap_err();
+        let err = from_json_value(&json!({"page": {"max_width": "150%"}})).unwrap_err();
         match err {
             StyleParseError::InvalidPercent { path, value } => {
                 assert_eq!(path, "style.page.max-width");
@@ -472,7 +467,10 @@ mod tests {
             .iter()
             .filter(|w| matches!(w.kind, StyleWarningKind::KnownButInactive { .. }))
             .collect();
-        assert!(inactive.is_empty(), "wired page leaves should not emit inactive");
+        assert!(
+            inactive.is_empty(),
+            "wired page leaves should not emit inactive"
+        );
 
         let deprecated: Vec<_> = w
             .iter()
@@ -605,7 +603,11 @@ mod tests {
         });
         let (_, w) = from_json_value(&v).unwrap();
         let schema: Vec<_> = w.iter().filter(|w| w.is_schema_issue()).collect();
-        assert!(schema.is_empty(), "should not produce schema warnings: {:?}", schema);
+        assert!(
+            schema.is_empty(),
+            "should not produce schema warnings: {:?}",
+            schema
+        );
         let inactive: Vec<_> = w
             .iter()
             .filter(|w| matches!(w.kind, StyleWarningKind::KnownButInactive { .. }))
@@ -668,7 +670,8 @@ mod tests {
     #[test]
     fn from_frontmatter_with_style_key() {
         let mut fm = Frontmatter::new();
-        fm.insert("style", json!({"page": {"left-margin": "2ch"}})).unwrap();
+        fm.insert("style", json!({"page": {"left-margin": "2ch"}}))
+            .unwrap();
         let (s, _w) = from_frontmatter(&fm).unwrap();
         assert!(s.page.is_some());
     }
@@ -682,8 +685,7 @@ mod tests {
 
     #[test]
     fn into_strict_fails_on_unknown_key() {
-        let parsed =
-            from_json_value(&json!({"page": {"lft-margin": "2ch"}})).unwrap();
+        let parsed = from_json_value(&json!({"page": {"lft-margin": "2ch"}})).unwrap();
         match into_strict(parsed) {
             Err(StyleParseError::Strict { warnings }) => {
                 assert_eq!(warnings.len(), 1);
@@ -695,8 +697,7 @@ mod tests {
 
     #[test]
     fn into_strict_fails_on_deprecated_alias() {
-        let parsed =
-            from_json_value(&json!({"page": {"left_margin": "2ch"}})).unwrap();
+        let parsed = from_json_value(&json!({"page": {"left_margin": "2ch"}})).unwrap();
         assert!(matches!(
             into_strict(parsed),
             Err(StyleParseError::Strict { .. })

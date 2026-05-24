@@ -207,7 +207,7 @@ status subject="":
         echo -e "{{ bold }}{{ blue }}{{ underline }}Features{{ reset }}"
         echo
         if [[ -d features ]]; then
-            eza features -lhga --git --hyperlink --group -I '_*' || echo -e "  {{ italic }}no features found{{ reset }}"
+            eza features -lhga --git --icons=always --hyperlink --group -I '_*' || echo -e "  {{ italic }}no features found{{ reset }}"
         else
             echo -e "  {{ italic }}no features directory{{ reset }}"
         fi
@@ -215,7 +215,7 @@ status subject="":
         echo -e "{{ bold }}Unscheduled{{ reset }}"
         echo
         if [[ -d features/_unscheduled ]]; then
-            eza features/_unscheduled -lhga --git --hyperlink --group -s name || echo -e "  {{ italic }}no unscheduled features{{ reset }}"
+            eza features/_unscheduled -lhga --git --icons=always --hyperlink --group -s name || echo -e "  {{ italic }}no unscheduled features{{ reset }}"
         else
             echo -e "  {{ italic }}no unscheduled directory{{ reset }}"
         fi
@@ -223,7 +223,7 @@ status subject="":
         echo -e "{{ bold }}{{ blue }}{{ underline }}Fixes{{ reset }}"
         echo
         if [[ -d fixes ]]; then
-            eza fixes -lDga -I '_*' || echo -e "  {{ italic }}no fixes found{{ reset }}"
+            eza fixes -lDga -I '_*' --icons=always --hyperlink || echo -e "  {{ italic }}no fixes found{{ reset }}"
         else
             echo -e "  {{ italic }}no fixes directory{{ reset }}"
         fi
@@ -233,7 +233,7 @@ status subject="":
         if [[ -d reviews ]]; then
             mapfile -t recent_reviews < <(find reviews -maxdepth 1 -mindepth 1 -type d -mtime -3 2>/dev/null | sort)
             if [[ ${#recent_reviews[@]} -gt 0 ]]; then
-                eza "${recent_reviews[@]}" -ldga --hyperlink
+                eza "${recent_reviews[@]}" -ldga --icons=always --hyperlink
             else
                 echo -e "  {{ italic }}no reviews updated in the last 3 days{{ reset }}"
             fi
@@ -263,7 +263,7 @@ status subject="":
 
     # Single scheduled match → immediate display
     if [[ ${#scheduled[@]} -eq 1 && -n "${scheduled[0]}" ]]; then
-        eza "${scheduled[0]}" -lga --hyperlink
+        eza "${scheduled[0]}" -lga ---icons=always --hyperlink
         exit 0
     fi
 
@@ -293,7 +293,7 @@ status subject="":
     fi
 
     matched="$(just util::_fzf_select "Select matching item" "${tmpfile}")"
-    eza "${matched}" -lga --hyperlink
+    eza "${matched}" -lga ---icons=always --hyperlink
 
 # show the directory structure of the given directory
 _structure dir:

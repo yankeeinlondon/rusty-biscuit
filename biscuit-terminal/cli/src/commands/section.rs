@@ -11,10 +11,8 @@ use clap::Args as ClapArgs;
 use renderable::markdown::MarkdownRenderable;
 
 const SECTION_EXAMPLE_TITLE: &str = "Deployment Guide";
-const SECTION_EXAMPLE_BODY: &[&str] = &[
-    "Follow these steps to deploy.",
-    "Verify the build passes.",
-];
+const SECTION_EXAMPLE_BODY: &[&str] =
+    &["Follow these steps to deploy.", "Verify the build passes."];
 const SECTION_EXAMPLE_CMD: &str = r#"bt section "Deployment Guide" --level 2 --content "Follow these steps to deploy." --content "Verify the build passes.""#;
 
 /// Render a Markdown-style section (heading + body) through the canonical
@@ -80,7 +78,10 @@ impl Run for SectionArgs {
         let level = heading_level_from_u8(self.level)?;
 
         let content: Vec<String> = if self.example && self.content.is_empty() {
-            SECTION_EXAMPLE_BODY.iter().map(|s| (*s).to_string()).collect()
+            SECTION_EXAMPLE_BODY
+                .iter()
+                .map(|s| (*s).to_string())
+                .collect()
         } else {
             self.content.clone()
         };

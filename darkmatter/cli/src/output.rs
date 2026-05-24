@@ -302,8 +302,8 @@ pub fn apply_style_frontmatter(
     md: &Markdown,
     cli: &Cli,
 ) -> Result<DarkmatterPage> {
-    let (style, all_warnings) = from_frontmatter(md.frontmatter())
-        .context("Failed to parse `style:` frontmatter")?;
+    let (style, all_warnings) =
+        from_frontmatter(md.frontmatter()).context("Failed to parse `style:` frontmatter")?;
 
     // `--strict-style` promotes schema issues (UnknownKey / Deprecated) to
     // errors, but informational `KnownButInactive` warnings must still flow

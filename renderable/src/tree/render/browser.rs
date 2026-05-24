@@ -27,7 +27,6 @@ use std::rc::Rc;
 
 use crate::browser::PageOptions;
 use crate::browser::fragment::{BrowserFragment, ComposableNode, Ready};
-use crate::tree::render::CodeRenderer;
 use crate::html::HtmlPage;
 use crate::html::attribute::{ClassDefinition, DomId, HtmlDataAttribute};
 use crate::html::tag::{BlockTag, HtmlAttribute, HtmlType, VoidTag};
@@ -36,6 +35,7 @@ use crate::tree::diagnostic::{Diagnostic, Severity};
 use crate::tree::document::Document;
 use crate::tree::error::{RenderError, RenderStrictness, Rendered};
 use crate::tree::node::{ColumnAlign, HeadingDepth, NodeKind, RenderNode};
+use crate::tree::render::CodeRenderer;
 use crate::tree::validate::{ValidationError, ValidationMode, validate};
 
 /// How a [`NodeKind::Html`] node is treated by the browser renderer.
@@ -1032,9 +1032,7 @@ fn node_attributes(attrs: &NodeAttrs, inline: bool) -> Vec<HtmlAttribute> {
     }
 
     let mut decls: Vec<String> = Vec::new();
-    if !inline
-        && let Some(layout) = attrs.layout()
-    {
+    if !inline && let Some(layout) = attrs.layout() {
         let css = layout_to_css(&layout);
         if !css.is_empty() {
             decls.push(css);
@@ -1075,7 +1073,9 @@ fn style_css_declarations(style: &crate::style::Style, emit_emphasis: bool) -> S
 
     let mut decls: Vec<String> = Vec::new();
 
-    let resolve_color = |tv: &crate::layout::TargetValue<crate::style::PerMode<crate::color::Color>>|
+    let resolve_color = |tv: &crate::layout::TargetValue<
+        crate::style::PerMode<crate::color::Color>,
+    >|
      -> Option<String> {
         tv.resolve(RenderTarget::Browser)
             .map(|per_mode| *per_mode.resolve(ColorMode::Dark))
@@ -1128,7 +1128,10 @@ fn style_css_declarations(style: &crate::style::Style, emit_emphasis: bool) -> S
 /// invalid HTML, so a block node lowers the same layers to CSS through
 /// [`style_css_declarations`]. The underline / dim / blink layers are always
 /// applied as CSS by [`style_css_declarations`].
-fn wrap_style_emphasis(attrs: &NodeAttrs, fragment: BrowserFragment<Ready>) -> BrowserFragment<Ready> {
+fn wrap_style_emphasis(
+    attrs: &NodeAttrs,
+    fragment: BrowserFragment<Ready>,
+) -> BrowserFragment<Ready> {
     let Some(style) = attrs.style().filter(|s| !s.is_empty()) else {
         return fragment;
     };
@@ -1754,7 +1757,10 @@ mod tests {
             .unwrap()
             .output
             .render();
-        assert!(html.contains("1lh"), "vertical Ch margin must lower to lh: {html}");
+        assert!(
+            html.contains("1lh"),
+            "vertical Ch margin must lower to lh: {html}"
+        );
     }
 
     // ── RT-PROGRESS-001: browser progress ──────────────────────────────────
@@ -1769,7 +1775,10 @@ mod tests {
     fn progress_emits_progressbar_role_and_aria() {
         let node = progress_para(
             "Loading 60%",
-            crate::tree::ProgressHints { value: 0.6, ..Default::default() },
+            crate::tree::ProgressHints {
+                value: 0.6,
+                ..Default::default()
+            },
         );
         let out = html(&node);
         assert!(out.contains(r#"role="progressbar""#), "{out}");
@@ -1783,7 +1792,10 @@ mod tests {
     fn progress_uses_stable_classes_and_clamps_value() {
         let node = progress_para(
             "150%",
-            crate::tree::ProgressHints { value: 1.5, ..Default::default() },
+            crate::tree::ProgressHints {
+                value: 1.5,
+                ..Default::default()
+            },
         );
         let out = html(&node);
         assert!(out.contains(r#"class="progress""#), "{out}");
@@ -1798,7 +1810,11 @@ mod tests {
     fn progress_track_width_uses_bar_width_in_ch() {
         let node = progress_para(
             "25%",
-            crate::tree::ProgressHints { value: 0.25, bar_width: 30, ..Default::default() },
+            crate::tree::ProgressHints {
+                value: 0.25,
+                bar_width: 30,
+                ..Default::default()
+            },
         );
         let out = html(&node);
         assert!(out.contains("width:30ch"), "{out}");
@@ -1861,7 +1877,10 @@ mod tests {
     fn progress_omits_bracket_color_attribute_when_unset() {
         let node = progress_para(
             "50%",
-            crate::tree::ProgressHints { value: 0.5, ..Default::default() },
+            crate::tree::ProgressHints {
+                value: 0.5,
+                ..Default::default()
+            },
         );
         let out = html(&node);
         assert!(
@@ -1875,7 +1894,10 @@ mod tests {
         use crate::layout::{Layout, Length, Margin};
         let mut node = progress_para(
             "40%",
-            crate::tree::ProgressHints { value: 0.4, ..Default::default() },
+            crate::tree::ProgressHints {
+                value: 0.4,
+                ..Default::default()
+            },
         );
         node.attrs.set_layout(&Layout {
             margin: Margin::x(Length::ch(3)),
@@ -1924,7 +1946,10 @@ mod tests {
     fn progress_filled_without_color_has_single_width_style() {
         let node = progress_para(
             "25%",
-            crate::tree::ProgressHints { value: 0.25, ..Default::default() },
+            crate::tree::ProgressHints {
+                value: 0.25,
+                ..Default::default()
+            },
         );
         let out = html(&node);
         let filled = progress_filled_attrs(&out);
@@ -1937,7 +1962,10 @@ mod tests {
     fn progress_label_with_special_chars_is_escaped_once() {
         let node = progress_para(
             r#"A < B & "C" 50%"#,
-            crate::tree::ProgressHints { value: 0.5, ..Default::default() },
+            crate::tree::ProgressHints {
+                value: 0.5,
+                ..Default::default()
+            },
         );
         let out = html(&node);
         assert!(
@@ -1955,7 +1983,10 @@ mod tests {
         // does not disappear.
         let node = progress_para(
             "Loading 150%",
-            crate::tree::ProgressHints { value: 1.5, ..Default::default() },
+            crate::tree::ProgressHints {
+                value: 1.5,
+                ..Default::default()
+            },
         );
         let out = html(&node);
         assert!(out.contains(r#"aria-label="Loading""#), "{out}");
@@ -1970,7 +2001,9 @@ mod tests {
         para
     }
 
-    fn universal_color(c: crate::color::Color) -> crate::layout::TargetValue<crate::style::PerMode<crate::color::Color>> {
+    fn universal_color(
+        c: crate::color::Color,
+    ) -> crate::layout::TargetValue<crate::style::PerMode<crate::color::Color>> {
         crate::layout::TargetValue::universal(crate::style::PerMode::universal(c))
     }
 
@@ -2066,7 +2099,10 @@ mod tests {
     fn style_dim_lowers_to_opacity() {
         use crate::style::{Style, TextEmphasis};
         let node = styled_para(Style {
-            emphasis: TextEmphasis { dim: true, ..Default::default() },
+            emphasis: TextEmphasis {
+                dim: true,
+                ..Default::default()
+            },
             ..Default::default()
         });
         assert!(html(&node).contains("opacity:0.6"));
@@ -2076,7 +2112,10 @@ mod tests {
     fn style_blink_lowers_to_text_decoration_blink() {
         use crate::style::{Style, TextEmphasis};
         let node = styled_para(Style {
-            emphasis: TextEmphasis { blink: true, ..Default::default() },
+            emphasis: TextEmphasis {
+                blink: true,
+                ..Default::default()
+            },
             ..Default::default()
         });
         assert!(html(&node).contains("text-decoration:blink"));
@@ -2131,7 +2170,10 @@ mod tests {
     #[test]
     fn columns_default_emits_flex_container_and_classes() {
         let node = columns_bq(
-            crate::tree::ColumnsHints { left_count: 1, ..Default::default() },
+            crate::tree::ColumnsHints {
+                left_count: 1,
+                ..Default::default()
+            },
             vec![
                 RenderNode::paragraph(vec![RenderNode::text("L")]),
                 RenderNode::paragraph(vec![RenderNode::text("R")]),
@@ -2183,7 +2225,10 @@ mod tests {
     #[test]
     fn columns_custom_gap_lowers_to_gap_ch() {
         let node = columns_bq(
-            crate::tree::ColumnsHints { gap: 8, ..Default::default() },
+            crate::tree::ColumnsHints {
+                gap: 8,
+                ..Default::default()
+            },
             vec![],
         );
         assert!(html(&node).contains("gap:8ch"));
@@ -2192,10 +2237,7 @@ mod tests {
     #[test]
     fn columns_layout_and_column_css_coexist() {
         use crate::layout::{Layout, Length, Margin};
-        let mut node = columns_bq(
-            crate::tree::ColumnsHints::default(),
-            vec![],
-        );
+        let mut node = columns_bq(crate::tree::ColumnsHints::default(), vec![]);
         node.attrs.set_layout(&Layout {
             margin: Margin::x(Length::ch(2)),
             ..Layout::default()
@@ -2208,7 +2250,10 @@ mod tests {
     #[test]
     fn columns_empty_left_and_right() {
         let node = columns_bq(
-            crate::tree::ColumnsHints { left_count: 0, ..Default::default() },
+            crate::tree::ColumnsHints {
+                left_count: 0,
+                ..Default::default()
+            },
             vec![],
         );
         let out = html(&node);
@@ -2220,7 +2265,10 @@ mod tests {
         // A columns node carrying user classes keeps them as external-CSS
         // hooks, merged after the literal `columns` class.
         let mut node = columns_bq(
-            crate::tree::ColumnsHints { left_count: 1, ..Default::default() },
+            crate::tree::ColumnsHints {
+                left_count: 1,
+                ..Default::default()
+            },
             vec![
                 RenderNode::paragraph(vec![RenderNode::text("L")]),
                 RenderNode::paragraph(vec![RenderNode::text("R")]),
@@ -2235,8 +2283,7 @@ mod tests {
 
     #[test]
     fn block_quote_without_columns_renders_normally() {
-        let bq =
-            RenderNode::block_quote(vec![RenderNode::paragraph(vec![RenderNode::text("q")])]);
+        let bq = RenderNode::block_quote(vec![RenderNode::paragraph(vec![RenderNode::text("q")])]);
         assert_eq!(html(&bq), "<blockquote><p>q</p></blockquote>");
     }
 
@@ -2246,11 +2293,9 @@ mod tests {
     fn table_title_emitted_as_caption_before_thead() {
         let mut table = RenderNode::table(
             vec![ColumnAlign::Left],
-            vec![
-                RenderNode::table_row(vec![RenderNode::table_cell(vec![RenderNode::text(
-                    "H",
-                )])]),
-            ],
+            vec![RenderNode::table_row(vec![RenderNode::table_cell(vec![
+                RenderNode::text("H"),
+            ])])],
         );
         table.attrs.set_table_title("Sales <2024>");
         let out = html(&table);
@@ -2359,9 +2404,8 @@ mod tests {
             RenderStrictness::Lossy,
         ] {
             let list = marker_policy_list(crate::tree::ListMarkerPolicy::None);
-            let rendered =
-                render_browser_node(&list, &opts(strictness, RawHtmlPolicy::Escape))
-                    .expect("None marker policy is faithful in every mode");
+            let rendered = render_browser_node(&list, &opts(strictness, RawHtmlPolicy::Escape))
+                .expect("None marker policy is faithful in every mode");
             assert!(rendered.output.render().contains("list-style:none"));
             assert!(
                 rendered.diagnostics.is_empty(),
@@ -2373,8 +2417,10 @@ mod tests {
     #[test]
     fn marker_policy_tree_connectors_rejected_under_strict() {
         let list = marker_policy_list(crate::tree::ListMarkerPolicy::TreeConnectors);
-        let result =
-            render_browser_node(&list, &opts(RenderStrictness::Strict, RawHtmlPolicy::Escape));
+        let result = render_browser_node(
+            &list,
+            &opts(RenderStrictness::Strict, RawHtmlPolicy::Escape),
+        );
         assert!(matches!(result, Err(RenderError::LossyRejected { .. })));
     }
 
@@ -2409,7 +2455,10 @@ mod tests {
             let list = RenderNode::list(false, None, vec![item]);
             let out = html(&list);
             assert!(out.contains(r#"type="checkbox""#), "{state:?}: {out}");
-            assert!(out.contains(r#"class="task-list-item""#), "{state:?}: {out}");
+            assert!(
+                out.contains(r#"class="task-list-item""#),
+                "{state:?}: {out}"
+            );
             assert!(out.contains("disabled"), "{state:?}: {out}");
             // Terminal-only task glyphs must never leak into browser output.
             for glyph in ['✔', '✗', '⏺', '☐', '⊝'] {
@@ -2431,7 +2480,8 @@ mod tests {
             RenderNode::text("inline"),
             RenderNode::paragraph(vec![RenderNode::text("para")]),
         ]);
-        root.attrs.set_sequence_join(crate::tree::SequenceJoin::None);
+        root.attrs
+            .set_sequence_join(crate::tree::SequenceJoin::None);
         let rendered =
             render_browser_node(&root, &BrowserRenderOptions::default()).expect("render");
         assert_eq!(rendered.output.render(), "<div>inline<p>para</p></div>");
@@ -2440,7 +2490,8 @@ mod tests {
     #[test]
     fn document_with_sequence_join_root_renders_through_entry_point() {
         let mut root = RenderNode::root(vec![RenderNode::paragraph(vec![RenderNode::text("x")])]);
-        root.attrs.set_sequence_join(crate::tree::SequenceJoin::None);
+        root.attrs
+            .set_sequence_join(crate::tree::SequenceJoin::None);
         let doc = Document {
             sources: SourceRegistry::default(),
             metadata: DocumentMetadata::default(),

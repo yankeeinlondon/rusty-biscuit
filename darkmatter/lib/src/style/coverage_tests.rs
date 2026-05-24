@@ -52,10 +52,7 @@ fn sample_for(kind: LeafType) -> Value {
 /// position where the alias and canonical paths differ. The walker emits
 /// one `Deprecated` warning per such position, with `path = "style.{raw}"`
 /// and `replacement = canonical`.
-fn expected_deprecated_positions(
-    alias: &str,
-    canonical: &str,
-) -> Vec<(String, String)> {
+fn expected_deprecated_positions(alias: &str, canonical: &str) -> Vec<(String, String)> {
     let alias_segs: Vec<&str> = alias.split('.').collect();
     let canon_segs: Vec<&str> = canonical.split('.').collect();
     assert_eq!(
@@ -94,10 +91,8 @@ fn every_alias_round_trips_with_expected_warnings() {
         tested += 1;
 
         let value = build_at(alias, sample_for(leaf.leaf_type));
-        let (_parsed, warnings) =
-            from_json_value(&value).unwrap_or_else(|e| {
-                panic!("alias `{}` failed to parse: {:?}", alias, e)
-            });
+        let (_parsed, warnings) = from_json_value(&value)
+            .unwrap_or_else(|e| panic!("alias `{}` failed to parse: {:?}", alias, e));
 
         let expected = expected_deprecated_positions(alias, leaf.canonical);
         let actual_deprecated: Vec<&StyleWarning> = warnings
@@ -126,8 +121,7 @@ fn every_alias_round_trips_with_expected_warnings() {
                         alias, expected_path, warnings
                     )
                 });
-            let StyleWarningKind::Deprecated { ref replacement } = found.kind
-            else {
+            let StyleWarningKind::Deprecated { ref replacement } = found.kind else {
                 unreachable!()
             };
             assert_eq!(
@@ -177,13 +171,12 @@ fn every_alias_round_trips_with_expected_warnings() {
 fn every_canonical_leaf_round_trips_without_unknown_key() {
     for leaf in SCHEMA {
         let value = build_at(leaf.canonical, sample_for(leaf.leaf_type));
-        let (_parsed, warnings) =
-            from_json_value(&value).unwrap_or_else(|e| {
-                panic!(
-                    "canonical leaf `{}` failed to parse: {:?}",
-                    leaf.canonical, e
-                )
-            });
+        let (_parsed, warnings) = from_json_value(&value).unwrap_or_else(|e| {
+            panic!(
+                "canonical leaf `{}` failed to parse: {:?}",
+                leaf.canonical, e
+            )
+        });
 
         let unknown: Vec<&StyleWarning> = warnings
             .iter()
@@ -255,10 +248,8 @@ fn descriptor_entry_count_matches_expected() {
 /// the regression intent obvious in test names.
 #[test]
 fn finding_1_paths_appear_in_alias_coverage() {
-    let paths_with_aliases: Vec<&'static str> = SCHEMA
-        .iter()
-        .filter_map(|l: &SchemaLeaf| l.alias)
-        .collect();
+    let paths_with_aliases: Vec<&'static str> =
+        SCHEMA.iter().filter_map(|l: &SchemaLeaf| l.alias).collect();
     for required in [
         "block_quote.max_width",
         "hyperlinks.local_style.max_width",

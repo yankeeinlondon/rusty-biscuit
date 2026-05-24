@@ -248,7 +248,6 @@ impl Progress {
             }
         }
     }
-
 }
 
 /// Wraps `text` in a foreground SGR escape for `color`, degraded to `depth`.
@@ -634,8 +633,14 @@ mod tests {
         let output = bar.render_optimistic(Some(80));
         // Green fg (code 32) for the filled track, cyan fg (code 36) for the
         // brackets — both lowered through the shared color path.
-        assert!(output.contains("\x1b[32m"), "filled color SGR missing: {output:?}");
-        assert!(output.contains("\x1b[36m"), "bracket color SGR missing: {output:?}");
+        assert!(
+            output.contains("\x1b[32m"),
+            "filled color SGR missing: {output:?}"
+        );
+        assert!(
+            output.contains("\x1b[36m"),
+            "bracket color SGR missing: {output:?}"
+        );
     }
 
     #[test]
@@ -676,8 +681,7 @@ mod tests {
     #[test]
     fn progress_render_tree_node_carries_slot_colors() {
         use renderable::color::BasicColor;
-        let bar = Progress::new(0.5)
-            .with_filled_color(Color::BasicColor(BasicColor::Green));
+        let bar = Progress::new(0.5).with_filled_color(Color::BasicColor(BasicColor::Green));
         let node = bar.render_tree_node().unwrap();
         let hints = node.attrs.progress_hints().expect("progress hints");
         assert_eq!(
