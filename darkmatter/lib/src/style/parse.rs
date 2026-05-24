@@ -918,6 +918,17 @@ mod tests {
     }
 
     #[test]
+    fn into_strict_fails_on_top_level_hr_alias() {
+        let mut fm = Frontmatter::new();
+        fm.insert("hr", json!({"style": "waves"})).unwrap();
+        let parsed = from_frontmatter(&fm).unwrap();
+        assert!(matches!(
+            into_strict(parsed),
+            Err(StyleParseError::Strict { .. })
+        ));
+    }
+
+    #[test]
     fn active_wiring_warnings_for_list_keys() {
         let v = json!({
             "ul": {
