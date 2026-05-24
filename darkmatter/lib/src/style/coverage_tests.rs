@@ -45,6 +45,9 @@ fn sample_for(kind: LeafType) -> Value {
         LeafType::BackgroundEnum => json!("subtle"),
         LeafType::StringValue => json!("x"),
         LeafType::OpaqueValue => json!({"k": "v"}),
+        LeafType::HrKind => json!("waves"),
+        LeafType::HrWeight => json!("medium"),
+        LeafType::HrAlignment => json!("center"),
     }
 }
 
@@ -234,8 +237,8 @@ fn descriptor_entry_count_matches_expected() {
         // ul: 6
         // hyperlinks: 5 outer + 5 local-style = 10
         // images: 5 outer + 5 local-style = 10
-        // hr: 6
-        16 + 5 + 5 + 5 + 5 + 6 + 10 + 10 + 6;
+        // hr: 7
+        16 + 5 + 5 + 5 + 5 + 6 + 10 + 10 + 7;
     assert_eq!(
         SCHEMA.len(),
         EXPECTED,

@@ -25,12 +25,17 @@ use super::types::{
 };
 use crate::markdown::Markdown;
 use crate::markdown::highlighting::{ColorMode, ThemePair};
+use crate::markdown::inline::HorizontalRuleAttrs;
 use crate::markdown::output::html::HtmlOptions;
 use crate::markdown::output::terminal::{
     ColorDepth, HyperlinkMode, ItalicMode, MermaidMode, TerminalImageMode, TerminalOptions,
 };
 use crate::style::StyleColor;
 use crate::style::color::lower_to_css;
+use crate::style::schema::hr::{HrAlignment, HrKind, HrWeight};
+use crate::markdown::block::{
+    hr_alignment_to_string, hr_kind_to_string, hr_weight_to_string,
+};
 
 /// A page-level layout primitive that owns layout state for darkmatter
 /// terminal and browser rendering.
@@ -81,6 +86,10 @@ pub struct DarkmatterPage {
     page_bg_color: Option<StyleColor>,
     component_colors: HashMap<PageComponent, StyleColor>,
     component_bg_colors: HashMap<PageComponent, StyleColor>,
+    hr_kind: Option<HrKind>,
+    hr_weight: Option<HrWeight>,
+    hr_alignment: Option<HrAlignment>,
+    hr_width: Option<String>,
     options: TerminalOptions,
     /// Stored markdown for [`TerminalRenderable`] support.
     markdown: Option<Markdown>,
@@ -113,6 +122,10 @@ impl DarkmatterPage {
             page_bg_color: None,
             component_colors: HashMap::new(),
             component_bg_colors: HashMap::new(),
+            hr_kind: None,
+            hr_weight: None,
+            hr_alignment: None,
+            hr_width: None,
             options: TerminalOptions::default(),
             markdown: None,
             layout: Layout::default(),
@@ -241,6 +254,59 @@ impl DarkmatterPage {
         self.component_bg_colors
             .get(&component)
             .or(self.page_bg_color.as_ref())
+    }
+
+    /// Configured HR kind, if any.
+    pub fn hr_kind(&self) -> Option<HrKind> {
+        self.hr_kind
+    }
+
+    /// Configured HR weight, if any.
+    pub fn hr_weight(&self) -> Option<HrWeight> {
+        self.hr_weight
+    }
+
+    /// Configured HR alignment, if any.
+    pub fn hr_alignment(&self) -> Option<HrAlignment> {
+        self.hr_alignment
+    }
+
+    /// Configured HR width string, if any.
+    pub fn hr_width(&self) -> Option<&str> {
+        self.hr_width.as_deref()
+    }
+
+    /// Build [`HorizontalRuleAttrs`] from the page's resolved HR fields.
+    ///
+    /// Returns `None` when no HR-specific settings have been configured.
+    pub fn hr_defaults(&self) -> Option<HorizontalRuleAttrs> {
+        let mut attrs = HorizontalRuleAttrs::default();
+        let mut has_any = false;
+
+        if let Some(kind) = self.hr_kind() {
+            attrs.kind = Some(hr_kind_to_string(kind).to_string());
+            has_any = true;
+        }
+        if let Some(weight) = self.hr_weight() {
+            attrs.weight = Some(hr_weight_to_string(weight).to_string());
+            has_any = true;
+        }
+        if let Some(alignment) = self.hr_alignment() {
+            attrs.alignment = Some(hr_alignment_to_string(alignment).to_string());
+            has_any = true;
+        }
+        if let Some(width) = self.hr_width() {
+            attrs.width = Some(width.to_string());
+            has_any = true;
+        }
+        if let Some(color) = self.color_for(PageComponent::Hr) {
+            if let Some(css) = lower_to_css(color) {
+                attrs.color = Some(css);
+                has_any = true;
+            }
+        }
+
+        if has_any { Some(attrs) } else { None }
     }
 
     /// Read-only view of the underlying [`TerminalOptions`].
@@ -481,6 +547,30 @@ impl DarkmatterPage {
         self
     }
 
+    /// Set the HR kind.
+    pub fn with_hr_kind(mut self, kind: HrKind) -> Self {
+        self.hr_kind = Some(kind);
+        self
+    }
+
+    /// Set the HR weight.
+    pub fn with_hr_weight(mut self, weight: HrWeight) -> Self {
+        self.hr_weight = Some(weight);
+        self
+    }
+
+    /// Set the HR alignment.
+    pub fn with_hr_alignment(mut self, alignment: HrAlignment) -> Self {
+        self.hr_alignment = Some(alignment);
+        self
+    }
+
+    /// Set the HR width string.
+    pub fn with_hr_width(mut self, width: impl Into<String>) -> Self {
+        self.hr_width = Some(width.into());
+        self
+    }
+
     /// Set the list left margin for a single [`PageComponent`].
     ///
     /// Only [`PageComponent::Ul`] is accepted; other components return a
@@ -659,6 +749,7 @@ impl DarkmatterPage {
         }
         options.include_line_numbers = self.line_numbers;
         options.color_mode = ctx.render_color_mode;
+        options.hr_defaults = self.hr_defaults();
 
         // Delegate to the existing terminal renderer. When no layout builder
         // has been called we must NOT thread a layout context — doing so leaks
@@ -737,6 +828,7 @@ impl DarkmatterPage {
             include_styles: true,
             mermaid_mode: self.options.mermaid_mode,
             hr_css_variables: std::collections::HashMap::new(),
+            hr_defaults: self.hr_defaults(),
         };
 
         let body = md
@@ -771,6 +863,10 @@ impl DarkmatterPage {
             && self.page_bg_color.is_none()
             && self.component_colors.is_empty()
             && self.component_bg_colors.is_empty()
+            && self.hr_kind.is_none()
+            && self.hr_weight.is_none()
+            && self.hr_alignment.is_none()
+            && self.hr_width.is_none()
     }
 
     /// Validate horizontal space requirements against the captured terminal
@@ -1234,6 +1330,7 @@ fn component_selectors(component: PageComponent) -> &'static str {
         PageComponent::Ul => "ul",
         PageComponent::Ol => "ol",
         PageComponent::Li => "li",
+        PageComponent::Hr => "hr",
         PageComponent::Hyperlinks => "a",
         #[allow(deprecated)]
         PageComponent::Lists => "ul, ol",

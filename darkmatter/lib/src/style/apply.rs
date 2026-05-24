@@ -21,11 +21,13 @@
 // successors. The module-level allow mirrors `layout/page.rs`.
 #![allow(deprecated)]
 
+use biscuit_terminal::components::horizontal_rule::{RuleAlignment, RuleStyle, RuleWeight};
 use renderable::layout::{Alignment, Length};
 use thiserror::Error;
 
 use crate::layout::{DarkmatterPage, PageAlignment, PageComponent, PageFill, WidthUnit};
 use crate::style::schema::{CommonStyle, StyleFrontmatter};
+use crate::style::schema::hr::{HrAlignment, HrKind, HrWeight};
 
 /// Field-level CLI overrides for page-level style.
 ///
@@ -97,6 +99,7 @@ impl PageStyleOverrides {
             PageComponent::BlockQuotes => self.align_block_quotes,
             PageComponent::Tables => self.align_tables,
             PageComponent::CodeBlocks => self.align_code_blocks,
+            PageComponent::Hr => false,
             PageComponent::Hyperlinks => false,
         }
     }
@@ -116,6 +119,18 @@ pub struct ListStyleOverrides {
     pub ol_fill: bool,
     pub li_alignment: bool,
     pub li_fill: bool,
+}
+
+/// Field-level CLI overrides for HR component style (`style.hr.*`).
+///
+/// Each `true` value means the corresponding frontmatter field must be ignored
+/// because a CLI flag already claimed it.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct HrStyleOverrides {
+    pub alignment: bool,
+    pub fill: bool,
+    pub color: bool,
+    pub bg_color: bool,
 }
 
 /// Errors produced when lowering parsed [`StyleFrontmatter`] onto a
@@ -538,6 +553,129 @@ fn apply_common_color(
         page = page.with_component_bg_color(component, bg_color);
     }
     page
+}
+
+/// Apply parsed HR style (`style.hr.*`) onto a [`DarkmatterPage`] builder.
+///
+/// `overrides` carries the field-level CLI claims; for any field where the
+/// corresponding bool is `true`, the matching frontmatter value is skipped so
+/// the CLI flag stays in effect.
+///
+/// ## Errors
+///
+/// - [`StyleApplyError::ComponentWidthConflict`] when both `width` and
+///   `max-width` appear in the `style.hr` bucket.
+/// - [`StyleApplyError::ComponentInvalidCssLength`] when `width` or
+///   `max-width` is a [`Length::Css(_)`] value.
+pub fn apply_hr_style(
+    page: DarkmatterPage,
+    style: &StyleFrontmatter,
+    overrides: HrStyleOverrides,
+) -> Result<DarkmatterPage, StyleApplyError> {
+    let Some(hr) = style.hr.as_ref() else {
+        return Ok(page);
+    };
+    let mut page = page;
+
+    // Validate exclusivity of width vs max-width unconditionally.
+    if hr.width.is_some() && hr.max_width.is_some() {
+        return Err(StyleApplyError::ComponentWidthConflict { bucket: "hr" });
+    }
+
+    if !overrides.fill {
+        if let Some(width) = hr.width.as_ref() {
+            let s = lower_length_to_hr_width(width, "hr", "width")?;
+            page = page.with_hr_width(s);
+        } else if let Some(max_width) = hr.max_width.as_ref() {
+            let s = lower_length_to_hr_width(max_width, "hr", "max-width")?;
+            page = page.with_hr_width(s);
+        }
+    }
+
+    if !overrides.alignment
+        && let Some(alignment) = hr.alignment
+    {
+        page = page.with_hr_alignment(alignment);
+    }
+
+    if let Some(kind) = hr.kind {
+        page = page.with_hr_kind(kind);
+    }
+
+    if let Some(weight) = hr.weight {
+        page = page.with_hr_weight(weight);
+    }
+
+    if !overrides.color
+        && let Some(color) = hr.color.clone()
+    {
+        page = page.with_component_color(PageComponent::Hr, color);
+    }
+
+    if !overrides.bg_color
+        && let Some(bg_color) = hr.bg_color.clone()
+    {
+        page = page.with_component_bg_color(PageComponent::Hr, bg_color);
+    }
+
+    Ok(page)
+}
+
+/// Lower a [`Length`] onto an HR width string.
+///
+/// ## Returns
+///
+/// - [`Length::Zero`] → `"0"`
+/// - [`Length::Ch(n)`] → `"{n}ch"`
+/// - [`Length::Percent(p)`] → `"{p}%"`
+///
+/// ## Errors
+///
+/// - [`StyleApplyError::ComponentInvalidCssLength`] when `length` is
+///   [`Length::Css(_)`].
+pub(crate) fn lower_length_to_hr_width(
+    length: &Length,
+    bucket: &'static str,
+    field: &'static str,
+) -> Result<String, StyleApplyError> {
+    match length {
+        Length::Zero => Ok("0".to_string()),
+        Length::Ch(n) => Ok(format!("{}ch", n)),
+        Length::Percent(p) => Ok(format!("{}%", p)),
+        Length::Css(_) => Err(StyleApplyError::ComponentInvalidCssLength { bucket, field }),
+    }
+}
+
+/// Map [`HrKind`] to [`RuleStyle`].
+pub fn map_hr_kind(kind: HrKind) -> RuleStyle {
+    match kind {
+        HrKind::Dashes => RuleStyle::Dashes,
+        HrKind::Dots => RuleStyle::Dots,
+        HrKind::Waves => RuleStyle::Waves,
+        HrKind::LineStar => RuleStyle::LineStar,
+        HrKind::LineCircle => RuleStyle::LineCircle,
+        HrKind::InsetLine => RuleStyle::InsetLine,
+        HrKind::CurtainRod => RuleStyle::CurtainRod,
+    }
+}
+
+/// Map [`HrWeight`] to [`RuleWeight`].
+pub fn map_hr_weight(weight: HrWeight) -> RuleWeight {
+    match weight {
+        HrWeight::Thin => RuleWeight::Thin,
+        HrWeight::Medium => RuleWeight::Medium,
+        HrWeight::Thick => RuleWeight::Thick,
+    }
+}
+
+/// Map [`HrAlignment`] to [`RuleAlignment`].
+pub fn map_hr_alignment(alignment: HrAlignment) -> RuleAlignment {
+    match alignment {
+        HrAlignment::Full => RuleAlignment::Full,
+        HrAlignment::Left => RuleAlignment::Left,
+        HrAlignment::Center => RuleAlignment::Centered,
+        HrAlignment::Right => RuleAlignment::Right,
+    }
 }
 
 /// Apply one list bucket's [`CommonStyle`] onto `page`.
@@ -1500,5 +1638,221 @@ mod tests {
             PageFill::Max(WidthUnit::Fixed(30))
         );
         assert_eq!(out.list_left_margin_for(PageComponent::Ul), None);
+    }
+
+    // ----- apply_hr_style -----
+
+    use crate::style::schema::hr::{HrAlignment, HrKind, HrWeight, HrStyle};
+    use biscuit_terminal::components::horizontal_rule::{RuleAlignment, RuleStyle, RuleWeight};
+
+    fn style_with_hr(hr: HrStyle) -> StyleFrontmatter {
+        StyleFrontmatter {
+            hr: Some(hr),
+            ..StyleFrontmatter::default()
+        }
+    }
+
+    #[test]
+    fn hr_style_empty_returns_page_unchanged() {
+        let p = page(80);
+        let style = StyleFrontmatter::default();
+        let out = apply_hr_style(p.clone(), &style, HrStyleOverrides::default()).unwrap();
+        assert_eq!(out.hr_kind(), None);
+        assert_eq!(out.hr_weight(), None);
+        assert_eq!(out.hr_alignment(), None);
+        assert_eq!(out.hr_width(), None);
+    }
+
+    #[test]
+    fn hr_kind_applied() {
+        let style = style_with_hr(HrStyle {
+            kind: Some(HrKind::Waves),
+            ..HrStyle::default()
+        });
+        let out = apply_hr_style(page(80), &style, HrStyleOverrides::default()).unwrap();
+        assert_eq!(out.hr_kind(), Some(HrKind::Waves));
+    }
+
+    #[test]
+    fn hr_weight_applied() {
+        let style = style_with_hr(HrStyle {
+            weight: Some(HrWeight::Thick),
+            ..HrStyle::default()
+        });
+        let out = apply_hr_style(page(80), &style, HrStyleOverrides::default()).unwrap();
+        assert_eq!(out.hr_weight(), Some(HrWeight::Thick));
+    }
+
+    #[test]
+    fn hr_alignment_applied() {
+        let style = style_with_hr(HrStyle {
+            alignment: Some(HrAlignment::Center),
+            ..HrStyle::default()
+        });
+        let out = apply_hr_style(page(80), &style, HrStyleOverrides::default()).unwrap();
+        assert_eq!(out.hr_alignment(), Some(HrAlignment::Center));
+    }
+
+    #[test]
+    fn hr_width_applied() {
+        let style = style_with_hr(HrStyle {
+            width: Some(Length::Percent(50.0)),
+            ..HrStyle::default()
+        });
+        let out = apply_hr_style(page(80), &style, HrStyleOverrides::default()).unwrap();
+        assert_eq!(out.hr_width(), Some("50%"));
+    }
+
+    #[test]
+    fn hr_max_width_applied() {
+        let style = style_with_hr(HrStyle {
+            max_width: Some(Length::Ch(40)),
+            ..HrStyle::default()
+        });
+        let out = apply_hr_style(page(80), &style, HrStyleOverrides::default()).unwrap();
+        assert_eq!(out.hr_width(), Some("40ch"));
+    }
+
+    #[test]
+    fn hr_width_and_max_width_conflict() {
+        let style = style_with_hr(HrStyle {
+            width: Some(Length::Ch(40)),
+            max_width: Some(Length::Percent(50.0)),
+            ..HrStyle::default()
+        });
+        let err = apply_hr_style(page(80), &style, HrStyleOverrides::default()).unwrap_err();
+        assert_eq!(err, StyleApplyError::ComponentWidthConflict { bucket: "hr" });
+    }
+
+    #[test]
+    fn hr_color_applied() {
+        use crate::style::color::StyleColor;
+        use renderable::color::{Color, Tailwind};
+        let color = StyleColor {
+            color: Color::Tailwind(Tailwind::Red500),
+            opacity: None,
+        };
+        let style = style_with_hr(HrStyle {
+            color: Some(color.clone()),
+            ..HrStyle::default()
+        });
+        let out = apply_hr_style(page(80), &style, HrStyleOverrides::default()).unwrap();
+        assert_eq!(
+            out.color_for(PageComponent::Hr),
+            Some(&color)
+        );
+    }
+
+    #[test]
+    fn hr_bg_color_applied() {
+        use crate::style::color::StyleColor;
+        use renderable::color::{Color, Tailwind};
+        let color = StyleColor {
+            color: Color::Tailwind(Tailwind::Blue500),
+            opacity: None,
+        };
+        let style = style_with_hr(HrStyle {
+            bg_color: Some(color.clone()),
+            ..HrStyle::default()
+        });
+        let out = apply_hr_style(page(80), &style, HrStyleOverrides::default()).unwrap();
+        assert_eq!(
+            out.bg_color_for(PageComponent::Hr),
+            Some(&color)
+        );
+    }
+
+    #[test]
+    fn hr_css_length_rejected() {
+        use renderable::stylesheet::CssSizing;
+        let style = style_with_hr(HrStyle {
+            width: Some(Length::Css(CssSizing::px(10.0))),
+            ..HrStyle::default()
+        });
+        let err = apply_hr_style(page(80), &style, HrStyleOverrides::default()).unwrap_err();
+        assert_eq!(
+            err,
+            StyleApplyError::ComponentInvalidCssLength {
+                bucket: "hr",
+                field: "width",
+            }
+        );
+    }
+
+    #[test]
+    fn hr_overrides_suppress_frontmatter() {
+        let style = style_with_hr(HrStyle {
+            alignment: Some(HrAlignment::Right),
+            width: Some(Length::Ch(40)),
+            color: Some(crate::style::color::StyleColor {
+                color: renderable::color::Color::Tailwind(renderable::color::Tailwind::Red500),
+                opacity: None,
+            }),
+            bg_color: Some(crate::style::color::StyleColor {
+                color: renderable::color::Color::Tailwind(renderable::color::Tailwind::Blue500),
+                opacity: None,
+            }),
+            ..HrStyle::default()
+        });
+        let overrides = HrStyleOverrides {
+            alignment: true,
+            fill: true,
+            color: true,
+            bg_color: true,
+        };
+        let starting = page(80)
+            .with_hr_alignment(HrAlignment::Left)
+            .with_hr_width("30ch")
+            .with_component_color(PageComponent::Hr, crate::style::color::StyleColor {
+                color: renderable::color::Color::Tailwind(renderable::color::Tailwind::Green500),
+                opacity: None,
+            })
+            .with_component_bg_color(PageComponent::Hr, crate::style::color::StyleColor {
+                color: renderable::color::Color::Tailwind(renderable::color::Tailwind::Yellow500),
+                opacity: None,
+            });
+        let out = apply_hr_style(starting, &style, overrides).unwrap();
+        assert_eq!(out.hr_alignment(), Some(HrAlignment::Left));
+        assert_eq!(out.hr_width(), Some("30ch"));
+        assert_eq!(
+            out.color_for(PageComponent::Hr),
+            Some(&crate::style::color::StyleColor {
+                color: renderable::color::Color::Tailwind(renderable::color::Tailwind::Green500),
+                opacity: None,
+            })
+        );
+        assert_eq!(
+            out.bg_color_for(PageComponent::Hr),
+            Some(&crate::style::color::StyleColor {
+                color: renderable::color::Color::Tailwind(renderable::color::Tailwind::Yellow500),
+                opacity: None,
+            })
+        );
+    }
+
+    #[test]
+    fn map_hr_kind_variants() {
+        assert_eq!(map_hr_kind(HrKind::Dashes), RuleStyle::Dashes);
+        assert_eq!(map_hr_kind(HrKind::Dots), RuleStyle::Dots);
+        assert_eq!(map_hr_kind(HrKind::Waves), RuleStyle::Waves);
+        assert_eq!(map_hr_kind(HrKind::LineStar), RuleStyle::LineStar);
+        assert_eq!(map_hr_kind(HrKind::LineCircle), RuleStyle::LineCircle);
+        assert_eq!(map_hr_kind(HrKind::InsetLine), RuleStyle::InsetLine);
+        assert_eq!(map_hr_kind(HrKind::CurtainRod), RuleStyle::CurtainRod);
+    }
+
+    #[test]
+    fn map_hr_weight_variants() {
+        assert_eq!(map_hr_weight(HrWeight::Thin), RuleWeight::Thin);
+        assert_eq!(map_hr_weight(HrWeight::Medium), RuleWeight::Medium);
+        assert_eq!(map_hr_weight(HrWeight::Thick), RuleWeight::Thick);
+    }
+
+    #[test]
+    fn map_hr_alignment_variants() {
+        assert_eq!(map_hr_alignment(HrAlignment::Full), RuleAlignment::Full);
+        assert_eq!(map_hr_alignment(HrAlignment::Left), RuleAlignment::Left);
+        assert_eq!(map_hr_alignment(HrAlignment::Center), RuleAlignment::Centered);
+        assert_eq!(map_hr_alignment(HrAlignment::Right), RuleAlignment::Right);
     }
 }

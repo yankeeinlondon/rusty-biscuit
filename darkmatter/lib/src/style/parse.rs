@@ -19,7 +19,7 @@ use crate::style::warning::{StyleWarning, StyleWarningKind};
 /// `sub_spec` is `<=` this constant are considered wired and stay silent.
 ///
 /// Advance this constant whenever a future sub-spec wires its keys.
-pub const ACTIVE_STYLE_WIRING_SUB_SPEC: u8 = 5;
+pub const ACTIVE_STYLE_WIRING_SUB_SPEC: u8 = 6;
 
 /// Parse a `serde_json::Value` representing the value at the `style:` key.
 ///
@@ -107,7 +107,10 @@ fn validate_leaf(
         LeafType::Alignment
         | LeafType::BackgroundEnum
         | LeafType::StringValue
-        | LeafType::OpaqueValue => Ok(()),
+        | LeafType::OpaqueValue
+        | LeafType::HrKind
+        | LeafType::HrWeight
+        | LeafType::HrAlignment => Ok(()),
     }
 }
 
@@ -240,9 +243,14 @@ fn annotate_inner(value: &Value, canonical_path: &str, warnings: &mut Vec<StyleW
 }
 
 use crate::markdown::Frontmatter;
+use crate::style::schema::hr::HrStyle;
 
 /// Parse the `style:` value from a `Frontmatter`. Returns
 /// `(StyleFrontmatter::default(), vec![])` when no `style:` key is present.
+///
+/// If a top-level `hr:` key exists in the frontmatter, its values are merged
+/// into `style.hr` as a deprecated alias, emitting
+/// [`StyleWarningKind::Deprecated`] for every field that is used.
 ///
 /// ## Errors
 ///
@@ -250,9 +258,130 @@ use crate::markdown::Frontmatter;
 pub fn from_frontmatter(
     fm: &Frontmatter,
 ) -> Result<(StyleFrontmatter, Vec<StyleWarning>), StyleParseError> {
-    match fm.as_map().get("style") {
-        Some(value) => from_json_value(value),
-        None => Ok((StyleFrontmatter::default(), Vec::new())),
+    let (mut style, mut warnings) = match fm.as_map().get("style") {
+        Some(value) => from_json_value(value)?,
+        None => (StyleFrontmatter::default(), Vec::new()),
+    };
+
+    if let Some(hr_value) = fm.as_map().get("hr") {
+        merge_deprecated_top_level_hr(hr_value, &mut style, &mut warnings);
+    }
+
+    Ok((style, warnings))
+}
+
+/// Merge a deprecated top-level `hr:` frontmatter block into
+/// `StyleFrontmatter::hr`, field-by-field, emitting deprecation warnings.
+///
+/// `style.hr` wins when a field is present in both; top-level `hr` only fills
+/// missing values.
+fn merge_deprecated_top_level_hr(
+    hr_value: &serde_json::Value,
+    style: &mut StyleFrontmatter,
+    warnings: &mut Vec<StyleWarning>,
+) {
+    let serde_json::Value::Object(map) = hr_value else {
+        return;
+    };
+
+    // Build a temporary JSON object that maps the legacy top-level `hr`
+    // keys onto the `HrStyle` schema (style -> kind, everything else
+    // passes through unchanged).
+    let mut mapped = serde_json::Map::new();
+    for (key, value) in map {
+        let canonical_key = match key.as_str() {
+            "style" => "kind",
+            other => other,
+        };
+        mapped.insert(canonical_key.to_string(), value.clone());
+    }
+
+    let hr_style: HrStyle = match serde_json::from_value(serde_json::Value::Object(mapped)) {
+        Ok(h) => h,
+        Err(_) => return,
+    };
+
+    // Ensure `style.hr` exists so we can fill missing fields.
+    let target = style.hr.get_or_insert_with(HrStyle::default);
+
+    // Every key present in the deprecated top-level block emits a deprecation
+    // warning. Values are merged only when `style.hr` is missing that field.
+    if hr_style.width.is_some() {
+        if target.width.is_none() {
+            target.width = hr_style.width;
+        }
+        warnings.push(StyleWarning::new(
+            "hr.width",
+            StyleWarningKind::Deprecated {
+                replacement: "style.hr.width".into(),
+            },
+        ));
+    }
+    if hr_style.max_width.is_some() {
+        if target.max_width.is_none() {
+            target.max_width = hr_style.max_width;
+        }
+        warnings.push(StyleWarning::new(
+            "hr.max-width",
+            StyleWarningKind::Deprecated {
+                replacement: "style.hr.max-width".into(),
+            },
+        ));
+    }
+    if hr_style.color.is_some() {
+        if target.color.is_none() {
+            target.color = hr_style.color;
+        }
+        warnings.push(StyleWarning::new(
+            "hr.color",
+            StyleWarningKind::Deprecated {
+                replacement: "style.hr.color".into(),
+            },
+        ));
+    }
+    if hr_style.bg_color.is_some() {
+        if target.bg_color.is_none() {
+            target.bg_color = hr_style.bg_color;
+        }
+        warnings.push(StyleWarning::new(
+            "hr.bg-color",
+            StyleWarningKind::Deprecated {
+                replacement: "style.hr.bg-color".into(),
+            },
+        ));
+    }
+    if hr_style.alignment.is_some() {
+        if target.alignment.is_none() {
+            target.alignment = hr_style.alignment;
+        }
+        warnings.push(StyleWarning::new(
+            "hr.alignment",
+            StyleWarningKind::Deprecated {
+                replacement: "style.hr.alignment".into(),
+            },
+        ));
+    }
+    if hr_style.kind.is_some() {
+        if target.kind.is_none() {
+            target.kind = hr_style.kind;
+        }
+        warnings.push(StyleWarning::new(
+            "hr.style",
+            StyleWarningKind::Deprecated {
+                replacement: "style.hr.kind".into(),
+            },
+        ));
+    }
+    if hr_style.weight.is_some() {
+        if target.weight.is_none() {
+            target.weight = hr_style.weight;
+        }
+        warnings.push(StyleWarning::new(
+            "hr.weight",
+            StyleWarningKind::Deprecated {
+                replacement: "style.hr.weight".into(),
+            },
+        ));
     }
 }
 
@@ -482,9 +611,9 @@ mod tests {
 
     #[test]
     fn future_phase_key_still_emits_known_but_inactive() {
-        // `hr.color` is wired in sub-spec #6 — still inactive.
+        // `hyperlinks.local-style.color` is wired in sub-spec #7 — still inactive.
         let (_, w) = from_json_value(&json!({
-            "hr": {"color": "red-500"}
+            "hyperlinks": {"local-style": {"color": "red-500"}}
         }))
         .unwrap();
         let inactive: Vec<_> = w
@@ -492,10 +621,10 @@ mod tests {
             .filter(|w| matches!(w.kind, StyleWarningKind::KnownButInactive { .. }))
             .collect();
         assert_eq!(inactive.len(), 1);
-        assert_eq!(inactive[0].path, "style.hr.color");
+        assert_eq!(inactive[0].path, "style.hyperlinks.local-style.color");
         assert!(matches!(
             inactive[0].kind,
-            StyleWarningKind::KnownButInactive { sub_spec: 6 }
+            StyleWarningKind::KnownButInactive { sub_spec: 7 }
         ));
     }
 
@@ -530,15 +659,37 @@ mod tests {
     }
 
     #[test]
-    fn sub_spec_6_7_keys_still_emit_known_but_inactive() {
-        // Keys wired in sub-specs #6 and #7 remain inactive.
+    fn sub_spec_6_keys_no_longer_emit_known_but_inactive() {
+        // Phase 3 of sub-spec #6: HR keys are now wired. They must not emit
+        // KnownButInactive.
         let cases = [
-            ("style.hr.color", json!({"hr": {"color": "red-500"}}), 6),
-            (
-                "style.hr.bg-color",
-                json!({"hr": {"bg-color": "blue-200"}}),
-                6,
-            ),
+            json!({"hr": {"color": "red-500"}}),
+            json!({"hr": {"bg-color": "blue-200"}}),
+            json!({"hr": {"kind": "waves"}}),
+            json!({"hr": {"weight": "thick"}}),
+            json!({"hr": {"width": "50%"}}),
+            json!({"hr": {"max-width": "20ch"}}),
+            json!({"hr": {"alignment": "center"}}),
+        ];
+        for v in &cases {
+            let (_, w) = from_json_value(v).unwrap();
+            let inactive: Vec<_> = w
+                .iter()
+                .filter(|w| matches!(w.kind, StyleWarningKind::KnownButInactive { .. }))
+                .collect();
+            assert!(
+                inactive.is_empty(),
+                "sub-spec #6 key in {:?} should not emit KnownButInactive; got: {:?}",
+                v,
+                inactive,
+            );
+        }
+    }
+
+    #[test]
+    fn sub_spec_7_keys_still_emit_known_but_inactive() {
+        // Keys wired in sub-spec #7 remain inactive.
+        let cases = [
             (
                 "style.hyperlinks.local-style.color",
                 json!({"hyperlinks": {"local-style": {"color": "red-500"}}}),
@@ -674,6 +825,59 @@ mod tests {
             .unwrap();
         let (s, _w) = from_frontmatter(&fm).unwrap();
         assert!(s.page.is_some());
+    }
+
+    #[test]
+    fn from_frontmatter_top_level_hr_merges_into_style_hr() {
+        let mut fm = Frontmatter::new();
+        fm.insert("hr", json!({"style": "waves", "color": "red-500"}))
+            .unwrap();
+        let (s, w) = from_frontmatter(&fm).unwrap();
+        let hr = s.hr.expect("hr should be populated from top-level alias");
+        assert_eq!(hr.kind, Some(crate::style::schema::hr::HrKind::Waves));
+        assert!(hr.color.is_some());
+
+        let deprecated: Vec<_> = w
+            .iter()
+            .filter(|w| matches!(w.kind, StyleWarningKind::Deprecated { .. }))
+            .collect();
+        assert_eq!(deprecated.len(), 2, "expected 2 deprecated warnings: {:?}", w);
+        assert!(deprecated.iter().any(|w| w.path == "hr.style"));
+        assert!(deprecated.iter().any(|w| w.path == "hr.color"));
+    }
+
+    #[test]
+    fn from_frontmatter_style_hr_beats_top_level_hr() {
+        let mut fm = Frontmatter::new();
+        fm.insert("style", json!({"hr": {"kind": "dots"}})).unwrap();
+        fm.insert("hr", json!({"style": "waves"})).unwrap();
+        let (s, w) = from_frontmatter(&fm).unwrap();
+        let hr = s.hr.expect("hr should exist");
+        assert_eq!(hr.kind, Some(crate::style::schema::hr::HrKind::Dots));
+
+        // Top-level `hr.style` is still deprecated even when overridden.
+        assert!(w.iter().any(|w| w.path == "hr.style"));
+    }
+
+    #[test]
+    fn from_frontmatter_top_level_hr_only_fills_missing_fields() {
+        let mut fm = Frontmatter::new();
+        fm.insert("style", json!({"hr": {"kind": "waves", "weight": "thick"}}))
+            .unwrap();
+        fm.insert("hr", json!({"style": "dots", "weight": "thin", "color": "red"}))
+            .unwrap();
+        let (s, w) = from_frontmatter(&fm).unwrap();
+        let hr = s.hr.expect("hr should exist");
+        // style.hr values win.
+        assert_eq!(hr.kind, Some(crate::style::schema::hr::HrKind::Waves));
+        assert_eq!(hr.weight, Some(crate::style::schema::hr::HrWeight::Thick));
+        // Missing in style.hr, filled from top-level.
+        assert!(hr.color.is_some());
+
+        // Every key present in the deprecated top-level block emits a warning.
+        assert!(w.iter().any(|w| w.path == "hr.color"));
+        assert!(w.iter().any(|w| w.path == "hr.style"));
+        assert!(w.iter().any(|w| w.path == "hr.weight"));
     }
 
     #[test]
