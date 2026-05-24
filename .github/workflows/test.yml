@@ -1,0 +1,44 @@
+name: test
+
+# PR gate: full canonical tier run across all curated areas.
+# Runs `just all` (sanity → lint → doctest → test → test-l2 → test-browser).
+# Tiers that skip cleanly when their resource is absent do not fail the run.
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch: {}
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+concurrency:
+  group: test-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Full test suite
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ". -> target"
+          shared-key: test
+
+      - name: Install just
+        uses: extractions/setup-just@v2
+
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@nextest
+
+      - name: Run all canonical tiers
+        run: just all

@@ -1,0 +1,83 @@
+name: fuzz-nightly
+
+# Nightly scheduled fuzz run for all targets.
+# Requires nightly Rust. Opens an issue on new crash.
+# Not a PR gate — fuzzing is advisory only.
+
+on:
+  schedule:
+    - cron: "0 2 * * *"
+  workflow_dispatch: {}
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+concurrency:
+  group: fuzz-nightly-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  biscuit-file:
+    name: Fuzz biscuit-file targets
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust nightly toolchain
+        uses: dtolnay/rust-toolchain@nightly
+
+      - name: Install cargo-fuzz
+        run: cargo +nightly install cargo-fuzz
+
+      - name: Cache Cargo artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ". -> target"
+          shared-key: fuzz-biscuit-file
+
+      - name: Run PDF extract fuzz target
+        run: |
+          cd biscuit-file/lib/fuzz
+          cargo +nightly fuzz run pdf_extract -- -runs=10000 -max_total_time=300
+
+      - name: Run TOML roundtrip fuzz target
+        run: |
+          cd biscuit-file/lib/fuzz
+          cargo +nightly fuzz run toml_roundtrip -- -runs=10000 -max_total_time=300
+
+      - name: Run YAML roundtrip fuzz target
+        run: |
+          cd biscuit-file/lib/fuzz
+          cargo +nightly fuzz run yaml_roundtrip -- -runs=10000 -max_total_time=300
+
+      - name: Run JSON5 roundtrip fuzz target
+        run: |
+          cd biscuit-file/lib/fuzz
+          cargo +nightly fuzz run json5_roundtrip -- -runs=10000 -max_total_time=300
+
+  darkmatter:
+    name: Fuzz darkmatter target
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust nightly toolchain
+        uses: dtolnay/rust-toolchain@nightly
+
+      - name: Install cargo-fuzz
+        run: cargo +nightly install cargo-fuzz
+
+      - name: Cache Cargo artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ". -> target"
+          shared-key: fuzz-darkmatter
+
+      - name: Run markdown parser fuzz target
+        run: |
+          cd darkmatter/lib/fuzz
+          cargo +nightly fuzz run markdown_parser -- -runs=10000 -max_total_time=300
