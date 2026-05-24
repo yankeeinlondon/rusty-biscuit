@@ -288,7 +288,9 @@ fn regression_date_helpers_in_condition_mode() {
     // Strict validators - true cases
     assert!(evaluate_condition_against("is_date(date_str)", &data, Path::new(".")).unwrap());
     assert!(evaluate_condition_against("is_date_utc(date_str)", &data, Path::new(".")).unwrap());
-    assert!(evaluate_condition_against("is_datetime(datetime_str)", &data, Path::new(".")).unwrap());
+    assert!(
+        evaluate_condition_against("is_datetime(datetime_str)", &data, Path::new(".")).unwrap()
+    );
     assert!(
         evaluate_condition_against("is_datetime_utc(datetime_str)", &data, Path::new(".")).unwrap()
     );

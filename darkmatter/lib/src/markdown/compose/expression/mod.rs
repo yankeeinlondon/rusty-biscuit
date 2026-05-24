@@ -1473,8 +1473,14 @@ mod tests {
         #[test]
         fn istoday_returns_false_for_distant_dates() {
             // Using a date far in the past so it is never "today"
-            assert_eq!(eval_expr(r#"is_today("1900-01-01")"#).unwrap(), json!(false));
-            assert_eq!(eval_expr(r#"is_today("2100-12-31")"#).unwrap(), json!(false));
+            assert_eq!(
+                eval_expr(r#"is_today("1900-01-01")"#).unwrap(),
+                json!(false)
+            );
+            assert_eq!(
+                eval_expr(r#"is_today("2100-12-31")"#).unwrap(),
+                json!(false)
+            );
         }
 
         #[test]

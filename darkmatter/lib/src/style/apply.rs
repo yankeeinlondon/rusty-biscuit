@@ -235,15 +235,11 @@ fn lower_max_width(length: &Length, page: &DarkmatterPage) -> Result<u16, StyleA
             let terminal_width = page.terminal_width();
             let margin = page.margin();
             let padding = page.padding();
-            let consumed = margin
-                .horizontal()
-                .saturating_add(padding.horizontal());
+            let consumed = margin.horizontal().saturating_add(padding.horizontal());
             let content = terminal_width.saturating_sub(consumed);
             Ok(resolve_percent(*p, content))
         }
-        Length::Css(_) => Err(StyleApplyError::InvalidCssLength {
-            field: "max-width",
-        }),
+        Length::Css(_) => Err(StyleApplyError::InvalidCssLength { field: "max-width" }),
     }
 }
 
@@ -297,8 +293,7 @@ mod tests {
             left_margin: Some(Length::Ch(4)),
             ..PageStyle::default()
         });
-        let out =
-            apply_page_style(page(80), &style, PageStyleOverrides::default()).unwrap();
+        let out = apply_page_style(page(80), &style, PageStyleOverrides::default()).unwrap();
         assert_eq!(out.margin().left, 4);
     }
 
@@ -308,8 +303,7 @@ mod tests {
             left_margin: Some(Length::Zero),
             ..PageStyle::default()
         });
-        let out =
-            apply_page_style(page(80), &style, PageStyleOverrides::default()).unwrap();
+        let out = apply_page_style(page(80), &style, PageStyleOverrides::default()).unwrap();
         assert_eq!(out.margin().left, 0);
     }
 
@@ -320,8 +314,7 @@ mod tests {
             left_margin: Some(Length::Percent(10.0)),
             ..PageStyle::default()
         });
-        let out =
-            apply_page_style(page(80), &style, PageStyleOverrides::default()).unwrap();
+        let out = apply_page_style(page(80), &style, PageStyleOverrides::default()).unwrap();
         assert_eq!(out.margin().left, 8);
     }
 
@@ -332,8 +325,7 @@ mod tests {
             left_margin: Some(Length::Css(CssSizing::px(10.0))),
             ..PageStyle::default()
         });
-        let err =
-            apply_page_style(page(80), &style, PageStyleOverrides::default()).unwrap_err();
+        let err = apply_page_style(page(80), &style, PageStyleOverrides::default()).unwrap_err();
         assert_eq!(
             err,
             StyleApplyError::InvalidCssLength {
@@ -378,8 +370,7 @@ mod tests {
             bottom_margin: Some(0),
             ..PageStyle::default()
         });
-        let out =
-            apply_page_style(page(80), &style, PageStyleOverrides::default()).unwrap();
+        let out = apply_page_style(page(80), &style, PageStyleOverrides::default()).unwrap();
         assert_eq!(out.margin().top, 1);
         assert_eq!(out.margin().bottom, 0);
     }
@@ -394,8 +385,7 @@ mod tests {
             max_width: Some(Length::Percent(50.0)),
             ..PageStyle::default()
         });
-        let out =
-            apply_page_style(page(100), &style, PageStyleOverrides::default()).unwrap();
+        let out = apply_page_style(page(100), &style, PageStyleOverrides::default()).unwrap();
         assert_eq!(out.max_width(), Some(40));
     }
 
@@ -407,8 +397,7 @@ mod tests {
             max_width: Some(Length::Percent(50.0)),
             ..PageStyle::default()
         });
-        let err =
-            apply_page_style(p, &style, PageStyleOverrides::default()).unwrap_err();
+        let err = apply_page_style(p, &style, PageStyleOverrides::default()).unwrap_err();
         assert_eq!(err, StyleApplyError::InvalidMaxWidth);
     }
 
@@ -457,8 +446,7 @@ mod tests {
             alignment: Some(Alignment::Center),
             ..PageStyle::default()
         });
-        let out =
-            apply_page_style(page(80), &style, PageStyleOverrides::default()).unwrap();
+        let out = apply_page_style(page(80), &style, PageStyleOverrides::default()).unwrap();
         for component in PageComponent::ALL {
             assert_eq!(
                 out.alignment_for(component),
@@ -475,8 +463,7 @@ mod tests {
             background: Some(PageBackground::Subtle),
             ..PageStyle::default()
         });
-        let out =
-            apply_page_style(page(80), &style, PageStyleOverrides::default()).unwrap();
+        let out = apply_page_style(page(80), &style, PageStyleOverrides::default()).unwrap();
         assert_eq!(out.page_background(), PageBackground::Subtle);
     }
 
@@ -504,8 +491,7 @@ mod tests {
             bottom_padding: Some(1),
             ..PageStyle::default()
         });
-        let out =
-            apply_page_style(page(80), &style, PageStyleOverrides::default()).unwrap();
+        let out = apply_page_style(page(80), &style, PageStyleOverrides::default()).unwrap();
         assert_eq!(out.padding().left, 3);
         assert_eq!(out.padding().right, 3);
         assert_eq!(out.padding().top, 1);

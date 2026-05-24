@@ -64,10 +64,7 @@ fn fixture_parses_to_expected_style_frontmatter() {
     assert!(style.block_quote.is_none());
 
     // All warnings must be KnownButInactive (the fixture is schema-clean).
-    let schema_issues: Vec<_> = warnings
-        .iter()
-        .filter(|w| w.is_schema_issue())
-        .collect();
+    let schema_issues: Vec<_> = warnings.iter().filter(|w| w.is_schema_issue()).collect();
     assert!(
         schema_issues.is_empty(),
         "fixture should be schema-clean, got: {:?}",
@@ -115,12 +112,18 @@ fn fixture_applies_expected_page_margins() {
         .expect("apply_page_style should succeed");
 
     let m = applied.margin();
-    assert_eq!(m.left, 2, "left margin should come from style.page.left-margin");
+    assert_eq!(
+        m.left, 2,
+        "left margin should come from style.page.left-margin"
+    );
     assert_eq!(
         m.right, 4,
         "right margin should come from style.page.right-margin"
     );
-    assert_eq!(m.top, 1, "top margin should come from style.page.top-margin");
+    assert_eq!(
+        m.top, 1,
+        "top margin should come from style.page.top-margin"
+    );
     assert_eq!(
         m.bottom, 0,
         "bottom margin should come from style.page.bottom-margin"
@@ -165,7 +168,10 @@ fn fixture_render_to_terminal_runs_without_error() {
         .expect("apply_page_style should succeed");
 
     let output = page.render(&md).expect("render to terminal");
-    assert!(!output.is_empty(), "rendered terminal output must not be empty");
+    assert!(
+        !output.is_empty(),
+        "rendered terminal output must not be empty"
+    );
 }
 
 #[test]
