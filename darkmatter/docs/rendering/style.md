@@ -484,7 +484,7 @@ The `color` and `bg-color` knobs on `style.table`, `style.images`, and `style.bl
 Lists,
 ```
 
-New renderer code must use `Ul`, `Ol`, or `Li`. When a concrete list variant has no value, the renderer falls back to the deprecated `Lists` entry. `PageComponent::ALL` includes only the concrete variants (`Images`, `BlockQuotes`, `Tables`, `CodeBlocks`, `Ul`, `Ol`, `Li`, `Hyperlinks`, `Hr`), not `Lists`.
+New renderer code must use `Ul`, `Ol`, or `Li`. When a concrete list variant has no value, the renderer falls back to the deprecated `Lists` entry. `PageComponent::ALL` includes only the concrete variants (`Images`, `BlockQuotes`, `Tables`, `CodeBlocks`, `Ul`, `Ol`, `Li`), not `Lists`.
 
 `PageComponent::LISTS` provides the three concrete list components in broadcast order:
 
@@ -654,16 +654,17 @@ Color and background-color knobs on list buckets (`style.ul.color`, `style.ul.bg
 
 ## Color & Background-Color (Sub-Spec #5)
 
-Sub-spec #5 activates the already-parsed `color` and `bg-color` fields for every `PageComponent` that exists after sub-spec #4, plus the newly added `PageComponent::Hyperlinks`. The design stores `StyleColor` directly on `DarkmatterPage` and lowers to target-specific representations at render time.
+Sub-spec #5 activates the already-parsed `color` and `bg-color` fields for every `PageComponent` that exists after sub-spec #4. `PageComponent::Hyperlinks` was added in this phase for color storage on `DarkmatterPage`, but its visual rendering was deferred to sub-spec #7 because links are inline content rather than page components. The design stores `StyleColor` directly on `DarkmatterPage` and lowers to target-specific representations at render time.
 
 ### PageComponent::Hyperlinks
 
-The schema already reserved `style.hyperlinks.color` and `style.hyperlinks.bg-color` as sub-spec #5 fields. This phase adds `PageComponent::Hyperlinks` to honor those two common color mutations:
+The schema already reserved `style.hyperlinks.color` and `style.hyperlinks.bg-color` as sub-spec #5 fields. This phase adds `PageComponent::Hyperlinks` to store those two common color mutations on `DarkmatterPage`; visual rendering is deferred to sub-spec #7:
 
 | Routing | Detail |
 |---|---|
-| Browser selector | `a` |
-| Terminal rendering | Wraps link label text with foreground/background SGR while preserving existing OSC8 hyperlink sequences |
+| Color storage | `DarkmatterPage` component color maps (wired sub-spec #5) |
+| Browser selector | `a` (wired sub-spec #7) |
+| Terminal rendering | Wraps link label text with foreground/background SGR while preserving existing OSC8 hyperlink sequences (wired sub-spec #7) |
 | Full layout and `local-style` | Wired in sub-spec #7 (see [Bespoke Knobs](#bespoke-knobs-sub-spec-7)) |
 
 ### Color Storage and Inheritance
@@ -1062,7 +1063,7 @@ style:
 
 ### `style.hyperlinks.*`
 
-Sub-spec #5 added `PageComponent::Hyperlinks` and wired `color` and `bg-color` for both terminal and browser output. Sub-spec #7 activates the remaining `CommonStyle` knobs — `width`, `max-width`, and `alignment` — and adds `local-style` for local-link overrides. The full `CommonStyle` surface is now live for hyperlinks:
+Sub-spec #5 added `PageComponent::Hyperlinks` for color storage on `DarkmatterPage`. Sub-spec #7 activates the full `CommonStyle` surface — including visual rendering of `color` and `bg-color` through the same `StyleColor` lowering helpers used by sub-spec #5, plus `width`, `max-width`, and `alignment` — and adds `local-style` for local-link overrides. The full `CommonStyle` surface is now live for hyperlinks:
 
 - `color` and `bg-color` lower to terminal SGR around the link display text and to inline CSS on the HTML `<a>` element.
 - Terminal: SGR wraps the display text while preserving OSC 8 hyperlink sequences. SGR reset closes before the OSC 8 end sequence so color does not leak.
