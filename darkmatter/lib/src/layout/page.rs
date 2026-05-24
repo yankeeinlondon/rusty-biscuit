@@ -299,11 +299,11 @@ impl DarkmatterPage {
             attrs.width = Some(width.to_string());
             has_any = true;
         }
-        if let Some(color) = self.color_for(PageComponent::Hr) {
-            if let Some(css) = lower_to_css(color) {
-                attrs.color = Some(css);
-                has_any = true;
-            }
+        if let Some(color) = self.color_for(PageComponent::Hr)
+            && let Some(css) = lower_to_css(color)
+        {
+            attrs.color = Some(css);
+            has_any = true;
         }
 
         if has_any { Some(attrs) } else { None }

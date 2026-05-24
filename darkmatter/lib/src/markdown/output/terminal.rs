@@ -936,7 +936,7 @@ pub(crate) fn write_terminal_with_layout<W: std::io::Write>(
     let hr_defaults: Option<&HorizontalRuleAttrs> = options
         .hr_defaults
         .as_ref()
-        .or_else(|| hr_fallback.as_ref());
+        .or(hr_fallback.as_ref());
 
     // Load prose theme for ProseHighlighter
     let prose_syntect_theme =

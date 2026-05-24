@@ -147,7 +147,7 @@ pub fn as_html(md: &Markdown, options: HtmlOptions) -> MarkdownResult<String> {
     let hr_defaults: Option<&crate::markdown::inline::HorizontalRuleAttrs> = options
         .hr_defaults
         .as_ref()
-        .or_else(|| hr_fallback.as_ref());
+        .or(hr_fallback.as_ref());
 
     // Create highlighter for code blocks.
     //
