@@ -18,6 +18,10 @@ blocked:
 failure:
     say: "Phase {{phase}} of a plan in the {{area}} package area, ran into problems!"
     message: "❌️  phase {{phase}} (_of {{total_phases}}_) failed in the plan `{{area}}/{{plan}}`"
+loop:
+    until: "phase > total_phases"
+    action: "increment(phase)"
+
 ---
 ::block when="total_phases"
 # Implement Phase {{phase}} of {{total_phases}}
