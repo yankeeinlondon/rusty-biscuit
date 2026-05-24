@@ -1,0 +1,163 @@
+---
+title: Testing Strategy
+status: living
+created: 2026-05-24
+---
+
+# Rusty Biscuit Testing Strategy
+
+This document is the human-facing reference for testing in the rusty-biscuit
+monorepo. It covers the test-level taxonomy, the canonical `just` recipe set,
+nextest filtersets, and how non-canonical or excluded areas relate to the wider
+testing initiative.
+
+For the short, agent-facing summary see `.claude/skills/rust-testing/SKILL.md`
+(authored in Phase 6 of the testing-best-practices initiative).
+
+## Test Levels
+
+| Level | Identifier | What it covers | Default behavior |
+| ----- | ---------- | -------------- | ---------------- |
+| L1    | (default)  | Fast in-process unit and integration tests. No external resources. | Always runs. |
+| L2    | `level2_`  | Real terminal / PTY / local harness tests. | Skips cleanly when harness is unavailable; hard-fails when `BISCUIT_TEST_LEVEL_REQUIRED=2`. |
+| L3    | `level3_`  | OS keyboard or mouse injection (cliclick / WezTerm window focus). | Always skipped unless `RUN_LEVEL3=1`. |
+| Browser | `browser_` | Headless browser tests via `biscuit-browser-harness`. | Skips cleanly when Chrome is absent; hard-fails when `BISCUIT_BROWSER_REQUIRED=1`. |
+| Real  | `real_`    | Tests against real devices, networks, or provider APIs. | Always `--ignored` unless explicitly opted-in via the relevant env vars. |
+| Slow  | `slow_`    | Otherwise-ordinary tests that exceed the sanity time budget. | Excluded from `sanity`, included in `test`. |
+
+The full machine-readable contract lives in `.config/nextest.toml` as
+`set:level2`, `set:level3`, `set:browser`, `set:real`, and `set:slow`.
+
+Runtime skip-vs-fail behavior is enforced via the `require_level!` macro and
+helpers in the `tools/test-toolkit` crate.
+
+## Canonical `just` Recipe Set
+
+Every curated package area in the root `justfile` `areas` variable exposes the
+same 12 recipes. Recipes that don't apply to a particular area are explicit
+no-ops with a one-line `echo` explaining why; they intentionally do not error
+so that the root orchestrators (`just test`, `just lint`, etc.) keep iterating
+across areas.
+
+| Recipe         | Purpose |
+| -------------- | ------- |
+| `sanity`       | Fast confidence (≤15s). `cargo nextest run --lib --bins -E '!set:slow'`. |
+| `test`         | Full L1 suite for this area. |
+| `test-l2`      | Real-terminal tests via `set:level2`. |
+| `test-l3`      | OS keyboard/mouse tests via `set:level3` (`RUN_LEVEL3=1`). |
+| `test-browser` | Browser tests via `set:browser`. |
+| `test-real`    | Real-resource tests via `set:real`. |
+| `lint`         | `cargo clippy -- -D warnings`. |
+| `bench`        | Criterion benchmarks. |
+| `coverage`     | Per-package LCOV via `cargo llvm-cov`. |
+| `doctest`      | `cargo test --doc`. |
+| `fuzz`         | `cargo +nightly fuzz run` targets. |
+| `all`          | `sanity → lint → doctest → test → test-l2 → test-browser`. |
+
+The shared per-package boilerplate is implemented as the `_*` private recipes
+in `just/devops.just`. Each package's own `justfile` thin-wraps these to add
+its CLI/library crates and any package-specific notes.
+
+The validator `just _check_canonical` (also in `just/devops.just`) asserts that
+the current package area exposes all 12 recipes. CI runs this against every
+curated area.
+
+## Curated Areas and Exclusions
+
+The canonical migration applies to the **curated `areas` list in the root
+`justfile`** — not every Cargo workspace member. The current list is:
+
+```
+biscuit-hash biscuit-location biscuit-speaks biscuit-terminal
+schematic biscuit-file unchained-ai playa
+tree-hugger darkmatter sniff model-citizen
+claudine research queue homelab
+```
+
+### Areas intentionally excluded from the canonical set
+
+| Workspace member | Why it is not in `areas` |
+| ---------------- | ------------------------ |
+| `biscuit-tui`    | Mature package area with its own `justfile`, but historically not part of the root orchestrator. Eligible to migrate; tracked separately. |
+| `biscuit-clipboard`, `biscuit-visualized`, `messenger`, `tabby`, `worktree`, `dmls` | Smaller utility crates or experimental areas not yet promoted into the curated list. |
+| `tools/test-toolkit`, `biscuit-test-harness`, `biscuit-browser-harness` | Test-only infrastructure crates. Their tests run as part of the consumers (darkmatter, claudine, biscuit-terminal, etc.). |
+| `schematic/schema` | Generated code; intentionally excluded from the workspace and rebuilt via `just generate` in the `schematic` area. |
+| `so-you-say` | A *binary*, not a package area — it ships from `biscuit-speaks/cli`. Lifecycle is owned by the `biscuit-speaks` area. |
+
+If a new area is added to the root `areas` list later, it **must** expose the
+canonical 12 recipes before landing, validated by `just _check_canonical`.
+
+### Multi-crate areas
+
+A handful of areas wrap more than the typical `{name}` + `{name}-cli` pair.
+Each shared `_*` recipe is invoked once per crate so coverage is uniform:
+
+- `schematic` — `schematic-define`, `schematic-definitions`, `schematic-gen`.
+- `unchained-ai` — `unchained-ai`, `unchained-ai-cli`, `unchained-ai-gen`, `model_id`.
+- `homelab` — `homelab`, `homelab-cli`, `homelab-server`, plus the
+  `*-integration` device crates (`arcam-amp`, `eversolo`, `sony-receiver`,
+  `unfolded-integration-helper`). The Vue/Vite frontend under
+  `homelab/server/frontend` is exercised via the existing `test-frontend`
+  recipe and `pnpm` scripts.
+
+## Recipe-by-recipe notes
+
+### `sanity`
+Auto-detects which of `--lib` / `--bins` the package exposes via `cargo
+metadata`, so the same `_sanity` shared recipe works for lib-only crates,
+bin-only crates, and the common lib+CLI combo without per-package wiring.
+Doctests are excluded; they run via `doctest`.
+
+### `test-l2`, `test-l3`, `test-browser`
+These select tests via stable name prefixes (`level2_`, `level3_`,
+`browser_`). The runtime `require_level!(Level::L2, harness_check)` macro from
+`test-toolkit` decides whether a selected test should skip cleanly or panic
+based on `BISCUIT_TEST_LEVEL_REQUIRED` and `BISCUIT_BROWSER_REQUIRED`.
+
+### `test-real`
+Real-resource tests are typically `#[ignore]`d and gated on per-package env
+vars (e.g. `ARCAM_REAL_HOST`, `SONY_REAL_HOST`). The recipe selects them via
+`set:real` but they remain skip-clean when the resource is absent.
+
+### `bench`
+Pure data crates or crates without measurable hot paths may opt out via
+`[package.metadata.benchmarks] required = false` in their `Cargo.toml`. Their
+`bench` recipe becomes a documented no-op. This is enforced by reviewer
+discretion only; no static checker.
+
+### `fuzz`
+Fuzz infrastructure is scoped to Phase 5 of the testing-best-practices
+initiative (`biscuit-file/fuzz`, `darkmatter/fuzz`). Until those land, the
+recipe is a no-op for every area. Fuzz is **never** part of `sanity`, `test`,
+or any PR-blocking gate.
+
+## Environment variables
+
+| Variable | Purpose |
+| -------- | ------- |
+| `BISCUIT_TEST_LEVEL=1\|2\|3` | Runtime gate; tests above this level skip cleanly. |
+| `BISCUIT_TEST_LEVEL_REQUIRED=2` | CI use; missing L2 harness panics instead of skipping. |
+| `BISCUIT_BROWSER_REQUIRED=1` | CI use; missing Chrome panics instead of skipping. |
+| `RUN_LEVEL3=1` | Explicit opt-in for OS-keyboard-injection tests. |
+
+Per-package legacy variables such as `DARKMATTER_LEVEL2_REQUIRED` are
+deprecated in favor of the unified `BISCUIT_*` contract. They are still
+accepted while the migration completes (Phase 6 sweep) and are wrapped by the
+new `test-toolkit` helper.
+
+## Why this matters
+
+- Agents can always type `just sanity`, `just test`, `just test-l2` and get the
+  same behavior regardless of which area they are in.
+- CI workflows iterate over the curated `areas` list and rely on the canonical
+  recipe names being present.
+- Drift between packages is detectable: `just _check_canonical` either passes
+  or names the missing recipes.
+
+See also:
+
+- `tools/test-toolkit/src/lib.rs` — `Level`, `require_level!`, and env contract.
+- `biscuit-test-harness/README.md` — L2 harness backends and `SharedHarness`.
+- `biscuit-browser-harness/README.md` — browser harness API.
+- `just/devops.just` — shared `_*` lifecycle recipes and `_check_canonical`.
+- `.config/nextest.toml` — filterset definitions.
