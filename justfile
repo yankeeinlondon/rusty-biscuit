@@ -15,7 +15,7 @@ import "./just/spec.just"
 
 # List of areas in this monorepo
 
-areas := "biscuit-hash biscuit-location biscuit-speaks biscuit-terminal schematic biscuit-file unchained-ai playa tree-hugger darkmatter sniff model-citizen claudine research queue homelab"
+areas := "biscuit-hash biscuit-location biscuit-speaks biscuit-terminal biscuit-tui schematic biscuit-file unchained-ai playa tree-hugger darkmatter sniff model-citizen claudine research queue homelab"
 BOLD := '\033[1m'
 DIM := '\033[2m'
 ITALIC := '\033[3m'
@@ -312,6 +312,55 @@ fuzz *args="":
 all *args="":
     @just _orchestrate all {{ args }}
 
+# validate that every curated package area defines the canonical 12-recipe set
+check-canonical *args="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    failed_areas=()
+    passed_areas=()
+
+    if [[ -z "{{ args }}" ]]; then
+        target_areas=({{ areas }})
+    else
+        IFS=', ' read -ra target_areas <<< "{{ args }}"
+    fi
+
+    echo ""
+    echo "Validating canonical recipe set for: ${target_areas[*]}"
+    echo "------------------------------------------------"
+    echo ""
+
+    for area in "${target_areas[@]}"; do
+        if [ ! -f "$area/justfile" ]; then
+            echo -e "{{ RED }}❌ $area:{{ RESET }} no justfile"
+            failed_areas+=("$area")
+            continue
+        fi
+        echo "Checking $area..."
+        if (cd "./$area" && just _check_canonical); then
+            passed_areas+=("$area")
+        else
+            failed_areas+=("$area")
+        fi
+    done
+
+    echo ""
+    echo "================================================"
+    echo "check-canonical summary"
+    echo "================================================"
+    echo -e "{{ GREEN }}Passed{{ RESET }} (${#passed_areas[@]}): ${passed_areas[*]:-(none)}"
+    if [[ ${#failed_areas[@]} -gt 0 ]]; then
+        echo -e "{{ RED }}Failed{{ RESET }} (${#failed_areas[@]}): ${failed_areas[*]}"
+    else
+        echo -e "{{ RED }}Failed{{ RESET }} (${#failed_areas[@]}): (none)"
+    fi
+    echo "================================================"
+    echo ""
+
+    if [[ ${#failed_areas[@]} -gt 0 ]]; then
+        exit 1
+    fi
+
 # commits all the staged changes using model from MODEL or COMMIT_MODEL in OpenCode
 commit:
     @echo ""
@@ -420,10 +469,12 @@ _orchestrate recipe *args="":
                         just _message "{{ recipe }} failed in $area"
                     fi
                 else
-                    echo "- no {{ recipe }} command for the area **$area**" >&2
+                    echo "Error: area '$area' has no {{ recipe }} recipe" >&2
+                    failed_areas+=("$area (no {{ recipe }} recipe)")
                 fi
             else
-                echo "- no justfile for the area **$area**" >&2
+                echo "Error: area '$area' has no justfile" >&2
+                failed_areas+=("$area (no justfile)")
             fi
         done
     else
