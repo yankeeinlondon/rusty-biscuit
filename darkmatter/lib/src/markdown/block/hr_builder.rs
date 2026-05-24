@@ -14,6 +14,7 @@
 //! becomes visible with `RUST_LOG=darkmatter=warn`.
 
 use crate::markdown::inline::HorizontalRuleAttrs;
+use crate::style::schema::hr::{HrAlignment, HrKind, HrWeight};
 use biscuit_terminal::components::horizontal_rule::{
     HorizontalRule, RuleAlignment, RuleStyle, RuleWeight,
 };
@@ -34,6 +35,38 @@ pub(crate) const ALLOWED_ALIGNMENTS: &[&str] = &["full", "centered", "left", "ri
 
 /// Allowed values for the `weight` attribute.
 pub(crate) const ALLOWED_WEIGHTS: &[&str] = &["thin", "medium", "thick"];
+
+/// Convert an [`HrKind`] to its canonical kebab-case string.
+pub(crate) fn hr_kind_to_string(kind: HrKind) -> &'static str {
+    match kind {
+        HrKind::Dashes => "dashes",
+        HrKind::Dots => "dots",
+        HrKind::Waves => "waves",
+        HrKind::LineStar => "line-star",
+        HrKind::LineCircle => "line-circle",
+        HrKind::InsetLine => "inset-line",
+        HrKind::CurtainRod => "curtain-rod",
+    }
+}
+
+/// Convert an [`HrWeight`] to its canonical lowercase string.
+pub(crate) fn hr_weight_to_string(weight: HrWeight) -> &'static str {
+    match weight {
+        HrWeight::Thin => "thin",
+        HrWeight::Medium => "medium",
+        HrWeight::Thick => "thick",
+    }
+}
+
+/// Convert an [`HrAlignment`] to its canonical lowercase string.
+pub(crate) fn hr_alignment_to_string(alignment: HrAlignment) -> &'static str {
+    match alignment {
+        HrAlignment::Full => "full",
+        HrAlignment::Left => "left",
+        HrAlignment::Center => "center",
+        HrAlignment::Right => "right",
+    }
+}
 
 /// Builds a [`HorizontalRule`] from a parsed [`HorizontalRuleAttrs`], applying
 /// each attribute through the appropriate builder method.
@@ -71,7 +104,9 @@ pub(crate) fn build_rule_with_defaults(
     let attrs = merge_attrs(defaults, attrs);
     let mut rule = HorizontalRule::new();
 
-    if let Some(raw) = attrs.style.as_deref() {
+    if let Some(raw) = attrs.kind.as_deref() {
+        rule = map_style(rule, raw);
+    } else if let Some(raw) = attrs.legacy_style.as_deref() {
         rule = map_style(rule, raw);
     }
     if let Some(raw) = attrs.alignment.as_deref() {
@@ -138,7 +173,8 @@ pub(crate) fn hr_defaults_from_frontmatter(
         };
 
         match key.as_str() {
-            "style" => attrs.style = Some(value),
+            "kind" => attrs.kind = Some(value),
+            "style" => attrs.legacy_style = Some(value),
             "alignment" => attrs.alignment = Some(value),
             "weight" => attrs.weight = Some(value),
             "width" => attrs.width = Some(value),
@@ -175,8 +211,11 @@ fn merge_attrs(
     attrs: &HorizontalRuleAttrs,
 ) -> HorizontalRuleAttrs {
     let mut merged = defaults.cloned().unwrap_or_default();
-    if attrs.style.is_some() {
-        merged.style = attrs.style.clone();
+    if attrs.kind.is_some() {
+        merged.kind = attrs.kind.clone();
+    }
+    if attrs.legacy_style.is_some() {
+        merged.legacy_style = attrs.legacy_style.clone();
     }
     if attrs.alignment.is_some() {
         merged.alignment = attrs.alignment.clone();
@@ -276,7 +315,7 @@ mod tests {
             "color": "red",
         }));
         let attrs = hr_defaults_from_frontmatter(&md).expect("expected Some attrs");
-        assert_eq!(attrs.style.as_deref(), Some("dots"));
+        assert_eq!(attrs.legacy_style.as_deref(), Some("dots"));
         assert_eq!(
             attrs.width.as_deref(),
             Some("20"),
@@ -295,7 +334,7 @@ mod tests {
         let attrs = hr_defaults_from_frontmatter(&md).expect("expected Some attrs");
         // `true` coerces to the string "true" (which is not a recognized
         // alignment value), but siblings still apply.
-        assert_eq!(attrs.style.as_deref(), Some("waves"));
+        assert_eq!(attrs.legacy_style.as_deref(), Some("waves"));
         assert_eq!(attrs.alignment.as_deref(), Some("true"));
         assert_eq!(attrs.color.as_deref(), Some("blue"));
     }
@@ -320,7 +359,7 @@ mod tests {
             "bogus": "value",
         }));
         let attrs = hr_defaults_from_frontmatter(&md).expect("expected Some attrs");
-        assert_eq!(attrs.style.as_deref(), Some("dashes"));
+        assert_eq!(attrs.legacy_style.as_deref(), Some("dashes"));
         assert!(
             logs_contain("unknown horizontal rule attribute"),
             "expected a warn log for unknown `bogus` key"
@@ -340,7 +379,8 @@ mod tests {
     #[test]
     fn build_rule_with_all_attrs_applies_them() {
         let attrs = HorizontalRuleAttrs {
-            style: Some("waves".into()),
+            kind: Some("waves".into()),
+            legacy_style: None,
             alignment: Some("centered".into()),
             weight: Some("thick".into()),
             width: Some("50%".into()),
@@ -369,7 +409,8 @@ mod tests {
         // same attrs — assert the same builder produces matching browser
         // SVG for any given attr set.
         let attrs = HorizontalRuleAttrs {
-            style: Some("dashes".into()),
+            kind: Some("dashes".into()),
+            legacy_style: None,
             alignment: None,
             weight: Some("thin".into()),
             width: Some("33%".into()),
@@ -387,7 +428,7 @@ mod tests {
     #[test]
     fn build_rule_unknown_style_falls_back_to_default() {
         let attrs = HorizontalRuleAttrs {
-            style: Some("bogus".into()),
+            kind: Some("bogus".into()),
             ..Default::default()
         };
         // Must not panic; default style (Dashes) renders successfully.
@@ -399,9 +440,12 @@ mod tests {
     #[test]
     fn build_rule_unknown_alignment_and_weight_fall_back() {
         let attrs = HorizontalRuleAttrs {
+            kind: None,
+            legacy_style: None,
             alignment: Some("diagonal".into()),
             weight: Some("ultra".into()),
-            ..Default::default()
+            width: None,
+            color: None,
         };
         let rule = build_rule(&attrs);
         let out = rule.render(&Terminal::builder().width(20).build());

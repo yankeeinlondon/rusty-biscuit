@@ -40,7 +40,7 @@ use crate::markdown::{
     highlighting::{
         CodeHighlighter, ColorMode, ThemePair, prose::ProseHighlighter, scope_cache::ScopeCache,
     },
-    inline::{InlineEvent, InlineStyleProcessor, InlineTag},
+    inline::{HorizontalRuleAttrs, InlineEvent, InlineStyleProcessor, InlineTag},
     output::code_block,
 };
 use biscuit_terminal::components::horizontal_rule::HorizontalRule;
@@ -779,6 +779,11 @@ pub struct TerminalOptions {
     /// - `Always`: Always emit OSC 8 escape codes (for pre-rendering)
     /// - `Never`: Never emit OSC 8 codes; use fallback format `text [url]`
     pub hyperlink_mode: HyperlinkMode,
+    /// Resolved HR defaults from `style.hr` frontmatter (or `DarkmatterPage`
+    /// builder calls). When present, terminal rendering uses these as the
+    /// default horizontal-rule style instead of reading the deprecated top-level
+    /// `hr:` frontmatter block.
+    pub hr_defaults: Option<crate::markdown::inline::HorizontalRuleAttrs>,
 }
 
 static DETECTED_COLOR_MODE: std::sync::OnceLock<ColorMode> = std::sync::OnceLock::new();
@@ -806,6 +811,7 @@ impl Default for TerminalOptions {
             max_width: None,
             mermaid_mode: MermaidMode::default(),
             hyperlink_mode: HyperlinkMode::default(),
+            hr_defaults: None,
         }
     }
 }
@@ -926,7 +932,11 @@ pub(crate) fn write_terminal_with_layout<W: std::io::Write>(
             .background
             .unwrap_or(Color::BLACK),
     );
-    let hr_defaults = hr_defaults_from_frontmatter(md);
+    let hr_fallback = hr_defaults_from_frontmatter(md);
+    let hr_defaults: Option<&HorizontalRuleAttrs> = options
+        .hr_defaults
+        .as_ref()
+        .or_else(|| hr_fallback.as_ref());
 
     // Load prose theme for ProseHighlighter
     let prose_syntect_theme =
@@ -1057,8 +1067,15 @@ pub(crate) fn write_terminal_with_layout<W: std::io::Write>(
             InlineEvent::HorizontalRule(attrs) => {
                 // Build the rule from attributes via the shared helper so the
                 // terminal and HTML code paths stay consistent (Phase 5).
-                let rule = build_rule_with_defaults(hr_defaults.as_ref(), &attrs);
-                write_horizontal_rule(&mut wrapper, &rule, &render_terminal, terminal_width);
+                let rule = build_rule_with_defaults(hr_defaults, &attrs);
+                write_horizontal_rule(
+                    &mut wrapper,
+                    &rule,
+                    &render_terminal,
+                    terminal_width,
+                    color_depth,
+                    layout_ctx,
+                );
             }
             // Phase 5 (B4): bare `---` / `***` / `___` lines surface as
             // pulldown-cmark `Event::Rule`. Handle them explicitly so the
@@ -1066,10 +1083,17 @@ pub(crate) fn write_terminal_with_layout<W: std::io::Write>(
             // through the catch-all arm.
             InlineEvent::Standard(Event::Rule) => {
                 let rule = build_rule_with_defaults(
-                    hr_defaults.as_ref(),
+                    hr_defaults,
                     &crate::markdown::inline::HorizontalRuleAttrs::default(),
                 );
-                write_horizontal_rule(&mut wrapper, &rule, &render_terminal, terminal_width);
+                write_horizontal_rule(
+                    &mut wrapper,
+                    &rule,
+                    &render_terminal,
+                    terminal_width,
+                    color_depth,
+                    layout_ctx,
+                );
             }
 
             // Standard pulldown-cmark events
@@ -3076,6 +3100,8 @@ fn write_horizontal_rule(
     rule: &HorizontalRule,
     term: &Terminal,
     terminal_width: u16,
+    color_depth: ColorDepth,
+    layout_ctx: Option<&crate::layout::LayoutContext>,
 ) {
     use biscuit_terminal::components::renderable::TerminalRenderable;
     use biscuit_terminal::utils::layout::{Length, TargetValue};
@@ -3094,7 +3120,16 @@ fn write_horizontal_rule(
     // `render` returns the rule content without a trailing newline; use
     // `push_with_newlines` + an explicit `\n` so wrapper column tracking
     // resets correctly.
-    wrapper.push_with_newlines(&rule.render(term));
+    let mut rendered = rule.render(term);
+    if let Some(ctx) = layout_ctx {
+        rendered = wrap_with_color(
+            &rendered,
+            ctx.component_color(PageComponent::Hr),
+            ctx.component_bg_color(PageComponent::Hr),
+            color_depth,
+        );
+    }
+    wrapper.push_with_newlines(&rendered);
     wrapper.push_with_newlines("\n");
 
     let bottom_is_default = layout.margin.bottom == TargetValue::universal(Length::Zero);
@@ -3371,6 +3406,7 @@ mod tests {
             max_width: Some(80),
             mermaid_mode: MermaidMode::Off,
             hyperlink_mode: HyperlinkMode::Always,
+            hr_defaults: None,
         }
     }
 

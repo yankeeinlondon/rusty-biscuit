@@ -99,6 +99,11 @@ pub struct HtmlOptions {
     ///
     /// [`include_styles`]: HtmlOptions::include_styles
     pub hr_css_variables: std::collections::HashMap<String, String>,
+    /// Resolved HR defaults from `style.hr` frontmatter (or `DarkmatterPage`
+    /// builder calls). When present, HTML rendering uses these as the
+    /// default horizontal-rule style instead of reading the deprecated top-level
+    /// `hr:` frontmatter block.
+    pub hr_defaults: Option<crate::markdown::inline::HorizontalRuleAttrs>,
 }
 
 impl Default for HtmlOptions {
@@ -111,6 +116,7 @@ impl Default for HtmlOptions {
             include_styles: true,
             mermaid_mode: MermaidMode::default(),
             hr_css_variables: std::collections::HashMap::new(),
+            hr_defaults: None,
         }
     }
 }
@@ -137,7 +143,11 @@ impl Default for HtmlOptions {
 /// Returns an error if theme loading fails or highlighting encounters issues.
 pub fn as_html(md: &Markdown, options: HtmlOptions) -> MarkdownResult<String> {
     let mut output = String::new();
-    let hr_defaults = hr_defaults_from_frontmatter(md);
+    let hr_fallback = hr_defaults_from_frontmatter(md);
+    let hr_defaults: Option<&crate::markdown::inline::HorizontalRuleAttrs> = options
+        .hr_defaults
+        .as_ref()
+        .or_else(|| hr_fallback.as_ref());
 
     // Create highlighter for code blocks.
     //
@@ -205,7 +215,7 @@ pub fn as_html(md: &Markdown, options: HtmlOptions) -> MarkdownResult<String> {
             InlineEvent::HorizontalRule(attrs) => {
                 // Create HorizontalRule from attributes via the shared builder
                 // so terminal and HTML renderers stay consistent (Phase 5).
-                let rule = build_rule_with_defaults(hr_defaults.as_ref(), &attrs);
+                let rule = build_rule_with_defaults(hr_defaults, &attrs);
                 output.push_str(&render_rule_browser(&rule));
                 output.push('\n');
             }
@@ -215,7 +225,7 @@ pub fn as_html(md: &Markdown, options: HtmlOptions) -> MarkdownResult<String> {
             // the catch-all arm.
             InlineEvent::Standard(Event::Rule) => {
                 let rule = build_rule_with_defaults(
-                    hr_defaults.as_ref(),
+                    hr_defaults,
                     &crate::markdown::inline::HorizontalRuleAttrs::default(),
                 );
                 output.push_str(&render_rule_browser(&rule));

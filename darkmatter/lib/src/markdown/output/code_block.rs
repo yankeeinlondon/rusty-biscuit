@@ -446,6 +446,7 @@ mod tests {
             max_width: Some(80),
             mermaid_mode: MermaidMode::Off,
             hyperlink_mode: HyperlinkMode::Always,
+            hr_defaults: None,
         }
     }
 

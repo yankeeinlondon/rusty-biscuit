@@ -407,7 +407,7 @@ mod tests {
     }
 
     /// `to_render_document` must rewrite `--- { style: waves }` into a
-    /// `ThematicBreak` carrying the `darkmatter.hr.style` hint.
+    /// `ThematicBreak` carrying the `darkmatter.hr.kind` hint.
     #[test]
     fn to_render_document_uses_span_aware_fold_for_hr_attributes() {
         use renderable::tree::{HintNamespace, NodeKind, RenderNode};
@@ -429,7 +429,7 @@ mod tests {
         let hr = find_hr(&doc.root).expect("HR-attribute paragraph must fold to a ThematicBreak");
         let ns = HintNamespace("darkmatter.hr");
         assert_eq!(
-            hr.attrs.get_hint(ns, "style"),
+            hr.attrs.get_hint(ns, "kind"),
             Some(&serde_json::json!("waves")),
             "HR-attribute hint must survive to_render_document",
         );
