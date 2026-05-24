@@ -59,9 +59,9 @@ lint:
     @just _lint tree-hugger
     @just _lint tree-hugger-cli
 
-# Criterion benches (planned in Phase 4; documented no-op until then).
-bench:
-    @echo "bench: not applicable for tree-hugger yet (planned Phase 4)"
+# Criterion benches for tree-hugger symbol extraction.
+bench *args="":
+    @just _bench tree-hugger {{ args }}
 
 # Per-package LCOV coverage.
 coverage *args="":
