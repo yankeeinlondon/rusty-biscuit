@@ -1,3 +1,19 @@
+# Stable test-tier filter expressions (Topic 1 / D15 in the testing-best-practices spec).
+#
+# Tier identifiers appear in either the test function name or the enclosing
+# module path. Nextest does not yet expose user-named filterset aliases as a
+# stable feature, so each canonical `just` recipe passes the appropriate
+# expression to `nextest run -E '...'` directly. Treat the expressions below as
+# the authoritative source for shared lifecycle recipes:
+#
+#   level2  = test(/level2_/)
+#   level3  = test(/level3_/)
+#   browser = test(/browser_/)
+#   real    = test(/real_/)
+#   slow    = test(/level2_/) + test(/level3_/) + test(/browser_/) + test(/real_/) + test(/slow_/)
+#
+# `just sanity` uses `!(...slow...)` to exclude every non-default tier in one shot.
+
 [profile.default]
 # Retry failed tests up to 3 times to mitigate flakiness in PTY tests or timing issues
 retries = 3
