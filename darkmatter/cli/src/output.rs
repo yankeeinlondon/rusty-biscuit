@@ -7,9 +7,9 @@ use darkmatter::markdown::output::MermaidMode;
 use darkmatter::markdown::output::terminal::TerminalImageMode;
 use darkmatter::markdown::{Markdown, MarkdownDelta, MarkdownToc, MarkdownTocNode};
 use darkmatter::style::{
-    ComponentStyleOverrides, ListStyleOverrides, PageStyleOverrides, StyleWarning,
-    StyleWarningKind, apply_color_style, apply_component_style, apply_list_style,
-    apply_page_style, from_frontmatter, into_strict,
+    ComponentStyleOverrides, HrStyleOverrides, ListStyleOverrides, PageStyleOverrides,
+    StyleWarning, StyleWarningKind, apply_color_style, apply_component_style, apply_hr_style,
+    apply_list_style, apply_page_style, from_frontmatter, into_strict,
 };
 use std::io::{self, Write};
 use std::path::PathBuf;
@@ -294,6 +294,16 @@ pub fn component_style_overrides_from_cli(cli: &Cli) -> ComponentStyleOverrides 
     }
 }
 
+/// Build an [`HrStyleOverrides`] reflecting which HR frontmatter fields the CLI
+/// has already claimed.
+///
+/// There are currently no HR-specific CLI flags, so this always returns the
+/// default (no overrides). It exists for symmetry with the other override
+/// helpers and to make adding HR CLI flags a one-line change.
+pub fn hr_style_overrides_from_cli(_cli: &Cli) -> HrStyleOverrides {
+    HrStyleOverrides::default()
+}
+
 /// Parse the `style:` frontmatter (if any), promote schema warnings to errors
 /// when `--strict-style` is set, log remaining warnings, and apply the
 /// page-level subset to `page` using the CLI's override summary.
@@ -332,6 +342,10 @@ pub fn apply_style_frontmatter(
 
     let list_overrides = list_style_overrides_from_cli(cli);
     let page = apply_list_style(page, &style, list_overrides)
+        .map_err(|e| eyre!("Failed to apply `style:` frontmatter: {e}"))?;
+
+    let hr_overrides = hr_style_overrides_from_cli(cli);
+    let page = apply_hr_style(page, &style, hr_overrides)
         .map_err(|e| eyre!("Failed to apply `style:` frontmatter: {e}"))?;
 
     apply_color_style(page, &style)
