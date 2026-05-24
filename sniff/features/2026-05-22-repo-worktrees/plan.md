@@ -14,6 +14,14 @@ source_files_during_phase_2:
 docs_updated_during_phase_2: []
 docs_created_during_phase_2: []
 skills_files_updated_during_phase_2: []
+source_files_during_phase_3:
+  - sniff/cli/src/commands/mod.rs
+  - sniff/cli/src/output/repo_json.rs
+  - sniff/cli/tests/cli.rs
+docs_updated_during_phase_3: []
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3:
+  - .claude/skills/sniff/SKILL.md
 packages:
   - sniff
 ---
