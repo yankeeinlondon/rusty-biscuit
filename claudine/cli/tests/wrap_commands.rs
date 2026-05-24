@@ -692,8 +692,18 @@ exit 0
         .assert()
         .success();
 
-    let pwd_actual = fs::read_to_string(&pwd_path).unwrap().trim().trim_end_matches('/').to_string();
-    let pwd_expected = repo_root.canonicalize().unwrap().display().to_string().trim_end_matches('/').to_string();
+    let pwd_actual = fs::read_to_string(&pwd_path)
+        .unwrap()
+        .trim()
+        .trim_end_matches('/')
+        .to_string();
+    let pwd_expected = repo_root
+        .canonicalize()
+        .unwrap()
+        .display()
+        .to_string()
+        .trim_end_matches('/')
+        .to_string();
     assert_eq!(pwd_actual, pwd_expected);
     let env_lines = fs::read_to_string(&env_path).unwrap();
     assert!(env_lines.contains("PACKAGE=claudine-cli"));
@@ -3011,8 +3021,18 @@ exit 0
         .assert()
         .success();
 
-    let pwd_actual = fs::read_to_string(&pwd_path).unwrap().trim().trim_end_matches('/').to_string();
-    let pwd_expected = repo_root.canonicalize().unwrap().display().to_string().trim_end_matches('/').to_string();
+    let pwd_actual = fs::read_to_string(&pwd_path)
+        .unwrap()
+        .trim()
+        .trim_end_matches('/')
+        .to_string();
+    let pwd_expected = repo_root
+        .canonicalize()
+        .unwrap()
+        .display()
+        .to_string()
+        .trim_end_matches('/')
+        .to_string();
     assert_eq!(pwd_actual, pwd_expected);
     let env_lines = fs::read_to_string(&env_path).unwrap();
     assert!(env_lines.contains("PACKAGE=claudine-cli"));
@@ -3065,8 +3085,18 @@ exit 0
         .assert()
         .success();
 
-    let pwd_actual = fs::read_to_string(&pwd_path).unwrap().trim().trim_end_matches('/').to_string();
-    let pwd_expected = repo_root.canonicalize().unwrap().display().to_string().trim_end_matches('/').to_string();
+    let pwd_actual = fs::read_to_string(&pwd_path)
+        .unwrap()
+        .trim()
+        .trim_end_matches('/')
+        .to_string();
+    let pwd_expected = repo_root
+        .canonicalize()
+        .unwrap()
+        .display()
+        .to_string()
+        .trim_end_matches('/')
+        .to_string();
     assert_eq!(pwd_actual, pwd_expected);
     let env_lines = fs::read_to_string(&env_path).unwrap();
     assert!(env_lines.contains("PACKAGE_AREA=claudine"));
