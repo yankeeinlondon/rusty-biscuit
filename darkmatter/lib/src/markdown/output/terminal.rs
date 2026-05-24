@@ -2202,6 +2202,12 @@ fn push_table_link(
     // Render the styled link text into a temporary buffer first, then wrap
     // with the hyperlink color so the SGR sits between the OSC8 open/close
     // sequences and does not break the hyperlink target.
+    // Pass `hyper_fg`/`hyper_bg` as the inner component color so the
+    // user's `style.hyperlinks.color` wins over the theme fallback blue
+    // emitted from `table_link_style` — the inner SGR appears AFTER the
+    // theme foreground and therefore overrides it. The outer
+    // `wrap_with_color` is kept as the reset boundary so attribute leaks
+    // can't bleed into the next cell.
     let mut link_buf = String::new();
     if emit_hyperlinks {
         let _ = write!(link_buf, "\x1b]8;;{}\x07", url);
@@ -2216,8 +2222,8 @@ fn push_table_link(
             None,
             false,
             true,
-            None,
-            None,
+            hyper_fg.cloned(),
+            hyper_bg.cloned(),
             color_depth,
         );
         let styled = crate::style::wrap_with_color(&styled, hyper_fg, hyper_bg, color_depth);
@@ -2235,8 +2241,8 @@ fn push_table_link(
             None,
             false,
             true,
-            None,
-            None,
+            hyper_fg.cloned(),
+            hyper_bg.cloned(),
             color_depth,
         );
         let styled = crate::style::wrap_with_color(&styled, hyper_fg, hyper_bg, color_depth);
