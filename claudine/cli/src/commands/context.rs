@@ -87,7 +87,12 @@ fn parse_context_variables_content(content: &str) -> Vec<ContextSection> {
         // H3 heading
         if let Some(heading) = trimmed.strip_prefix("### ") {
             // Flush any pending variables from previous section/subsection
-            flush_pending(&mut sections, &current_section, &mut current_subsection, &mut pending_variables);
+            flush_pending(
+                &mut sections,
+                &current_section,
+                &mut current_subsection,
+                &mut pending_variables,
+            );
             current_section = Some(heading.trim().to_string());
             current_subsection = None;
             in_table = false;
@@ -96,7 +101,12 @@ fn parse_context_variables_content(content: &str) -> Vec<ContextSection> {
 
         // H4 heading
         if let Some(subheading) = trimmed.strip_prefix("#### ") {
-            flush_pending(&mut sections, &current_section, &mut current_subsection, &mut pending_variables);
+            flush_pending(
+                &mut sections,
+                &current_section,
+                &mut current_subsection,
+                &mut pending_variables,
+            );
             current_subsection = Some(subheading.trim().to_string());
             in_table = false;
             continue;
@@ -123,7 +133,12 @@ fn parse_context_variables_content(content: &str) -> Vec<ContextSection> {
     }
 
     // Flush final pending variables
-    flush_pending(&mut sections, &current_section, &mut current_subsection, &mut pending_variables);
+    flush_pending(
+        &mut sections,
+        &current_section,
+        &mut current_subsection,
+        &mut pending_variables,
+    );
 
     sections
 }
@@ -153,7 +168,9 @@ fn parse_table_row(line: &str) -> Option<ContextVariable> {
     let cells = split_table_cells(line);
 
     // Skip the first empty cell if line starts with |
-    let cells: Vec<&str> = if line.trim_start().starts_with('|') && cells.first().map(|s| s.trim().is_empty()).unwrap_or(false) {
+    let cells: Vec<&str> = if line.trim_start().starts_with('|')
+        && cells.first().map(|s| s.trim().is_empty()).unwrap_or(false)
+    {
         cells.iter().skip(1).map(|s| s.as_str()).collect()
     } else {
         cells.iter().map(|s| s.as_str()).collect()
@@ -224,7 +241,10 @@ fn render_default_report(sections: &[ContextSection]) {
 
     for section in sections {
         if let Some(ref subsection) = section.subsection {
-            let heading = Prose::new(format!("<blue><b>{}</b></blue> — <b>{subsection}</b>", section.heading));
+            let heading = Prose::new(format!(
+                "<blue><b>{}</b></blue> — <b>{subsection}</b>",
+                section.heading
+            ));
             log::data(&heading.render(&term));
         } else {
             let heading = Prose::new(format!("<blue><b>{}</b></blue>", section.heading));
@@ -237,7 +257,9 @@ fn render_default_report(sections: &[ContextSection]) {
             TableColumn::new("Description"),
         ];
         let mut table = Table::new().with_columns(columns);
-        table.layout_mut().margin = biscuit_terminal::utils::layout::Margin::x(biscuit_terminal::utils::layout::Length::ch(1));
+        table.layout_mut().margin = biscuit_terminal::utils::layout::Margin::x(
+            biscuit_terminal::utils::layout::Length::ch(1),
+        );
 
         for var in &section.variables {
             let row: Vec<TableCellContent> = vec![
@@ -261,7 +283,10 @@ fn render_values_report(sections: &[ContextSection]) {
 
     for section in sections {
         if let Some(ref subsection) = section.subsection {
-            let heading = Prose::new(format!("<blue><b>{}</b></blue> — <b>{subsection}</b>", section.heading));
+            let heading = Prose::new(format!(
+                "<blue><b>{}</b></blue> — <b>{subsection}</b>",
+                section.heading
+            ));
             log::data(&heading.render(&term));
         } else {
             let heading = Prose::new(format!("<blue><b>{}</b></blue>", section.heading));
@@ -274,7 +299,9 @@ fn render_values_report(sections: &[ContextSection]) {
             TableColumn::new("Value"),
         ];
         let mut table = Table::new().with_columns(columns);
-        table.layout_mut().margin = biscuit_terminal::utils::layout::Margin::x(biscuit_terminal::utils::layout::Length::ch(1));
+        table.layout_mut().margin = biscuit_terminal::utils::layout::Margin::x(
+            biscuit_terminal::utils::layout::Length::ch(1),
+        );
 
         for var in &section.variables {
             let key = strip_backticks(&var.property);
@@ -317,12 +344,12 @@ fn render_footer() {
     let term = log::terminal();
 
     let msg1 = Prose::new(
-        "<dim><i>use <blue>--expressions</blue> to see the expression engine's operations and functions</i></dim>"
+        "<dim><i>use <blue>--expressions</blue> to see the expression engine's operations and functions</i></dim>",
     );
     log::message(&msg1.render(&term));
 
     let msg2 = Prose::new(
-        "<dim><i>use <blue>--side-effects</blue> to see the available safe side effects that <b>Claudine</b> provides without need for being white listed.</i></dim>"
+        "<dim><i>use <blue>--side-effects</blue> to see the available safe side effects that <b>Claudine</b> provides without need for being white listed.</i></dim>",
     );
     log::message(&msg2.render(&term));
 }
@@ -355,7 +382,10 @@ struct ExprSection {
 #[derive(Debug, Clone, PartialEq)]
 enum ExprBlock {
     Paragraph(String),
-    Table { headers: Vec<String>, rows: Vec<Vec<String>> },
+    Table {
+        headers: Vec<String>,
+        rows: Vec<Vec<String>>,
+    },
     OrderedList(Vec<String>),
     UnorderedList(Vec<String>),
     CodeBlock(String),
@@ -404,7 +434,12 @@ fn parse_expressions_content(content: &str) -> Vec<ExprSection> {
                 code_block_lines.clear();
             } else {
                 flush_expr_paragraph(&mut current_blocks, &mut paragraph);
-                flush_expr_list(&mut current_blocks, &mut list_items, &mut in_ordered_list, &mut in_unordered_list);
+                flush_expr_list(
+                    &mut current_blocks,
+                    &mut list_items,
+                    &mut in_ordered_list,
+                    &mut in_unordered_list,
+                );
                 in_code_block = true;
             }
             continue;
@@ -417,7 +452,12 @@ fn parse_expressions_content(content: &str) -> Vec<ExprSection> {
         // Tables
         if trimmed.starts_with("|---") {
             flush_expr_paragraph(&mut current_blocks, &mut paragraph);
-            flush_expr_list(&mut current_blocks, &mut list_items, &mut in_ordered_list, &mut in_unordered_list);
+            flush_expr_list(
+                &mut current_blocks,
+                &mut list_items,
+                &mut in_ordered_list,
+                &mut in_unordered_list,
+            );
             in_table = true;
             continue;
         }
@@ -437,18 +477,30 @@ fn parse_expressions_content(content: &str) -> Vec<ExprSection> {
         if trimmed.starts_with("- ") || trimmed.starts_with("* ") {
             flush_expr_paragraph(&mut current_blocks, &mut paragraph);
             if in_ordered_list {
-                flush_expr_list(&mut current_blocks, &mut list_items, &mut in_ordered_list, &mut in_unordered_list);
+                flush_expr_list(
+                    &mut current_blocks,
+                    &mut list_items,
+                    &mut in_ordered_list,
+                    &mut in_unordered_list,
+                );
             }
             in_unordered_list = true;
             list_items.push(trimmed[2..].to_string());
             continue;
         }
         if let Some((num, rest)) = trimmed.split_once(". ")
-            && num.parse::<u32>().is_ok() && !trimmed.starts_with('|') && !in_table
+            && num.parse::<u32>().is_ok()
+            && !trimmed.starts_with('|')
+            && !in_table
         {
             flush_expr_paragraph(&mut current_blocks, &mut paragraph);
             if in_unordered_list {
-                flush_expr_list(&mut current_blocks, &mut list_items, &mut in_ordered_list, &mut in_unordered_list);
+                flush_expr_list(
+                    &mut current_blocks,
+                    &mut list_items,
+                    &mut in_ordered_list,
+                    &mut in_unordered_list,
+                );
             }
             in_ordered_list = true;
             list_items.push(rest.to_string());
@@ -475,7 +527,12 @@ fn parse_expressions_content(content: &str) -> Vec<ExprSection> {
         // Blank line
         if trimmed.is_empty() {
             flush_expr_paragraph(&mut current_blocks, &mut paragraph);
-            flush_expr_list(&mut current_blocks, &mut list_items, &mut in_ordered_list, &mut in_unordered_list);
+            flush_expr_list(
+                &mut current_blocks,
+                &mut list_items,
+                &mut in_ordered_list,
+                &mut in_unordered_list,
+            );
             if in_table {
                 if let Some((headers, rows)) = build_expr_table(&table_lines) {
                     current_blocks.push(ExprBlock::Table { headers, rows });
@@ -495,8 +552,14 @@ fn parse_expressions_content(content: &str) -> Vec<ExprSection> {
 
     // Flush remaining
     flush_expr_paragraph(&mut current_blocks, &mut paragraph);
-    flush_expr_list(&mut current_blocks, &mut list_items, &mut in_ordered_list, &mut in_unordered_list);
-    if in_table && !table_lines.is_empty()
+    flush_expr_list(
+        &mut current_blocks,
+        &mut list_items,
+        &mut in_ordered_list,
+        &mut in_unordered_list,
+    );
+    if in_table
+        && !table_lines.is_empty()
         && let Some((headers, rows)) = build_expr_table(&table_lines)
     {
         current_blocks.push(ExprBlock::Table { headers, rows });
@@ -581,7 +644,9 @@ fn render_expressions_report() {
     log::data("");
 
     // Brief description
-    let desc = Prose::new("Expressions evaluate in <b>interpolation</b> <dim>{{ ... }}</dim> and <b>conditions</b> <dim>when=\"...\"</dim> surfaces.");
+    let desc = Prose::new(
+        "Expressions evaluate in <b>interpolation</b> <dim>{{ ... }}</dim> and <b>conditions</b> <dim>when=\"...\"</dim> surfaces.",
+    );
     log::data(&desc.render(&term));
     log::data("");
 
@@ -620,7 +685,11 @@ fn render_precedence_table(term: &biscuit_terminal::terminal::Terminal, sections
                     if let Some(end) = after_start.find("**") {
                         let op_name = &after_start[..end];
                         let rest = after_start[end + 2..].trim();
-                        let desc = rest.strip_prefix("—").or_else(|| rest.strip_prefix("-")).unwrap_or(rest).trim();
+                        let desc = rest
+                            .strip_prefix("—")
+                            .or_else(|| rest.strip_prefix("-"))
+                            .unwrap_or(rest)
+                            .trim();
                         items.push((op_name.to_string(), desc.to_string()));
                     }
                 }
@@ -637,7 +706,8 @@ fn render_precedence_table(term: &biscuit_terminal::terminal::Terminal, sections
         TableColumn::new("Operators"),
     ];
     let mut table = Table::new().with_columns(columns);
-    table.layout_mut().margin = biscuit_terminal::utils::layout::Margin::x(biscuit_terminal::utils::layout::Length::ch(1));
+    table.layout_mut().margin =
+        biscuit_terminal::utils::layout::Margin::x(biscuit_terminal::utils::layout::Length::ch(1));
 
     for (i, (name, desc)) in items.iter().enumerate() {
         let row: Vec<TableCellContent> = vec![
@@ -662,9 +732,14 @@ fn render_truthiness_table(term: &biscuit_terminal::terminal::Terminal, sections
 
     for block in &section.blocks {
         if let ExprBlock::Table { headers, rows } = block {
-            let columns: Vec<TableColumn> = headers.iter().map(|h| TableColumn::new(h.as_str())).collect();
+            let columns: Vec<TableColumn> = headers
+                .iter()
+                .map(|h| TableColumn::new(h.as_str()))
+                .collect();
             let mut table = Table::new().with_columns(columns);
-            table.layout_mut().margin = biscuit_terminal::utils::layout::Margin::x(biscuit_terminal::utils::layout::Length::ch(1));
+            table.layout_mut().margin = biscuit_terminal::utils::layout::Margin::x(
+                biscuit_terminal::utils::layout::Length::ch(1),
+            );
 
             for row in rows {
                 let cells: Vec<TableCellContent> = row.iter().map(|c| c.clone().into()).collect();
@@ -691,16 +766,14 @@ fn render_unary_operators(term: &biscuit_terminal::terminal::Terminal, sections:
         TableColumn::new("Description"),
     ];
     let mut table = Table::new().with_columns(columns);
-    table.layout_mut().margin = biscuit_terminal::utils::layout::Margin::x(biscuit_terminal::utils::layout::Length::ch(1));
+    table.layout_mut().margin =
+        biscuit_terminal::utils::layout::Margin::x(biscuit_terminal::utils::layout::Length::ch(1));
 
     for block in &section.blocks {
         if let ExprBlock::UnorderedList(list) = block {
             for item in list {
                 if let Some((sig, desc)) = parse_function_item(item) {
-                    let row: Vec<TableCellContent> = vec![
-                        format!("`{sig}`").into(),
-                        desc.into(),
-                    ];
+                    let row: Vec<TableCellContent> = vec![format!("`{sig}`").into(), desc.into()];
                     table.add_row(row);
                 }
             }
@@ -732,22 +805,19 @@ fn render_functions(term: &biscuit_terminal::terminal::Terminal, sections: &[Exp
             TableColumn::new("Description"),
         ];
         let mut table = Table::new().with_columns(columns);
-        table.layout_mut().margin = biscuit_terminal::utils::layout::Margin::x(biscuit_terminal::utils::layout::Length::ch(1));
+        table.layout_mut().margin = biscuit_terminal::utils::layout::Margin::x(
+            biscuit_terminal::utils::layout::Length::ch(1),
+        );
 
         for block in &subsection.blocks {
             if let ExprBlock::UnorderedList(list) = block {
                 for item in list {
                     if let Some((sig, desc)) = parse_function_item(item) {
-                        let row: Vec<TableCellContent> = vec![
-                            format!("`{sig}`").into(),
-                            desc.into(),
-                        ];
+                        let row: Vec<TableCellContent> =
+                            vec![format!("`{sig}`").into(), desc.into()];
                         table.add_row(row);
                     } else if !item.trim().is_empty() {
-                        let row: Vec<TableCellContent> = vec![
-                            item.trim().into(),
-                            "".into(),
-                        ];
+                        let row: Vec<TableCellContent> = vec![item.trim().into(), "".into()];
                         table.add_row(row);
                     }
                 }
@@ -833,7 +903,11 @@ mod tests {
     fn test_parse_context_variables_content() {
         let sections = parse_context_variables_content(TEST_MD);
 
-        assert_eq!(sections.len(), 3, "expected 3 sections/subsections with variables");
+        assert_eq!(
+            sections.len(),
+            3,
+            "expected 3 sections/subsections with variables"
+        );
 
         // Section A — Sub A1
         assert_eq!(sections[0].heading, "Section A");
@@ -875,7 +949,10 @@ mod tests {
         assert!(has_date_section, "should discover Date and Time section");
 
         let total_vars: usize = sections.iter().map(|s| s.variables.len()).sum();
-        assert!(total_vars > 10, "should discover many variables, got {total_vars}");
+        assert!(
+            total_vars > 10,
+            "should discover many variables, got {total_vars}"
+        );
     }
 
     const TEST_EXPR_MD: &str = r#"
@@ -917,7 +994,10 @@ mod tests {
         assert!(!sections.is_empty(), "should discover sections");
 
         let precedence = sections.iter().find(|s| s.heading == "Operator Precedence");
-        assert!(precedence.is_some(), "should find Operator Precedence section");
+        assert!(
+            precedence.is_some(),
+            "should find Operator Precedence section"
+        );
 
         let truthiness = sections.iter().find(|s| s.heading == "Truthiness");
         assert!(truthiness.is_some(), "should find Truthiness section");
@@ -945,7 +1025,10 @@ mod tests {
         assert!(!sections.is_empty(), "should discover at least one section");
 
         let has_precedence = sections.iter().any(|s| s.heading == "Operator Precedence");
-        assert!(has_precedence, "should discover Operator Precedence section");
+        assert!(
+            has_precedence,
+            "should discover Operator Precedence section"
+        );
 
         let has_truthiness = sections.iter().any(|s| s.heading == "Truthiness");
         assert!(has_truthiness, "should discover Truthiness section");
