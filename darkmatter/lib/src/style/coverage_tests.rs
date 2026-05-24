@@ -246,6 +246,45 @@ fn descriptor_entry_count_matches_expected() {
     );
 }
 
+/// Test: all wired HR keys produce no `KnownButInactive` warnings.
+#[test]
+fn active_wiring_warnings_for_hr_keys() {
+    let v = json!({
+        "hr": {
+            "kind": "waves",
+            "width": "50%",
+            "max-width": "60ch",
+            "alignment": "center",
+            "color": "red-500",
+            "bg-color": "blue-500",
+            "weight": "thick"
+        }
+    });
+    let (_parsed, warnings) = from_json_value(&v).unwrap();
+
+    let inactive: Vec<&StyleWarning> = warnings
+        .iter()
+        .filter(|w| matches!(w.kind, StyleWarningKind::KnownButInactive { .. }))
+        .collect();
+
+    for path in [
+        "style.hr.kind",
+        "style.hr.width",
+        "style.hr.max-width",
+        "style.hr.alignment",
+        "style.hr.color",
+        "style.hr.bg-color",
+        "style.hr.weight",
+    ] {
+        assert!(
+            !inactive.iter().any(|w| w.path == path),
+            "wired hr key `{}` should not produce KnownButInactive, got: {:?}",
+            path,
+            inactive
+        );
+    }
+}
+
 /// Spot-check: the legacy-aliased nested children that triggered Finding 1
 /// also surface in the alias coverage above. This separate assertion makes
 /// the regression intent obvious in test names.

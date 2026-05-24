@@ -6,6 +6,7 @@ use darkmatter::markdown::highlighting::{ColorMode, ThemePair};
 use darkmatter::markdown::output::MermaidMode;
 use darkmatter::markdown::output::terminal::TerminalImageMode;
 use darkmatter::markdown::{Markdown, MarkdownDelta, MarkdownToc, MarkdownTocNode};
+use darkmatter::markdown::block::scan_inline_hr_warnings;
 use darkmatter::style::{
     ComponentStyleOverrides, HrStyleOverrides, ListStyleOverrides, PageStyleOverrides,
     StyleWarning, StyleWarningKind, apply_color_style, apply_component_style, apply_hr_style,
@@ -320,9 +321,12 @@ pub fn apply_style_frontmatter(
     // through `log_style_warnings` so `RUST_LOG=darkmatter=info` users see
     // future-phase keys regardless of strict mode.
     let (style, warnings) = if cli.strict_style {
-        let (schema, informational): (Vec<_>, Vec<_>) = all_warnings
+        let (mut schema, informational): (Vec<_>, Vec<_>) = all_warnings
             .into_iter()
             .partition(StyleWarning::is_schema_issue);
+        // Also reject inline HR deprecation warnings in strict mode.
+        let inline_hr_warnings = scan_inline_hr_warnings(md.content());
+        schema.extend(inline_hr_warnings);
         let style = into_strict((style, schema))
             .context("`style:` frontmatter rejected by --strict-style")?;
         (style, informational)
