@@ -19,6 +19,8 @@ use biscuit_terminal::components::status::StatusState;
 use biscuit_terminal::components::status_block::StatusBlock;
 use biscuit_terminal::errors::{ErrorHeader, SourceContext, StatusBlockExt};
 
+use crate::markdown::schemas::ValidationProblem;
+
 /// Build the [`StatusBlock`] for [`MarkdownError::FileLoad`].
 pub(crate) fn file_load_block(source: &std::io::Error) -> StatusBlock {
     let kind = format!("{:?}", source.kind());
@@ -131,6 +133,80 @@ pub(crate) fn transform_block(message: &str) -> StatusBlock {
         .error_header(ErrorHeader::new("MarkdownError", "transform failed"))
         .body(message.to_string())
         .hint("Review the transform pipeline inputs and any configured rules.")
+}
+
+/// Build the [`StatusBlock`] for [`MarkdownError::SchemaValidationFailed`].
+pub(crate) fn schema_validation_failed_block(
+    path: &std::path::Path,
+    problems: &[ValidationProblem],
+    _summary: &str,
+    description: &Option<String>,
+) -> StatusBlock {
+    let path_attr = Prose::quoted_attr(&path.to_string_lossy());
+    let path_escaped = Prose::escape_text(&path.to_string_lossy());
+
+    let mut body_lines: Vec<String> = Vec::new();
+
+    // OSC8 link to the source file
+    body_lines.push(format!(
+        "<blue><a href={}>{}</a></blue>",
+        path_attr, path_escaped
+    ));
+
+    // Description line when present
+    if let Some(desc) = description {
+        body_lines.push(format!("<i><dim>{}</dim></i>", Prose::escape_text(desc)));
+    }
+
+    // One bullet per problem
+    for problem in problems {
+        let loc = match (problem.line, problem.column) {
+            (Some(l), Some(c)) => format!(" at {l}:{c}"),
+            (Some(l), None) => format!(" at {l}:1"),
+            _ => String::new(),
+        };
+
+        let arm = match problem.arm_index {
+            Some(idx) => format!(" (schema arm {idx})"),
+            None => String::new(),
+        };
+
+        let target = if let Some(ref prop) = problem.property {
+            Prose::escape_text(prop)
+        } else {
+            let trimmed = problem.path.trim_start_matches('/');
+            if trimmed.is_empty() {
+                "<root>".to_string()
+            } else {
+                Prose::escape_text(trimmed.split('/').next().unwrap_or(trimmed))
+            }
+        };
+
+        let bullet = if problem.property.is_some() {
+            format!(
+                "<red>missing</red> <inverse>{target}</inverse>: required but not provided{loc}{arm}"
+            )
+        } else if problem.message.to_ascii_lowercase().contains("is not of type")
+            || problem.message.to_ascii_lowercase().contains("type")
+        {
+            format!(
+                "<red>type</red> <inverse>{target}</inverse>: {}{loc}{arm}",
+                Prose::escape_text(&problem.message)
+            )
+        } else {
+            format!(
+                "<red>invalid</red> <inverse>{target}</inverse>: {}{loc}{arm}",
+                Prose::escape_text(&problem.message)
+            )
+        };
+
+        body_lines.push(bullet);
+    }
+
+    StatusBlock::new(StatusState::Error)
+        .error_header(ErrorHeader::new("MarkdownError", "schema validation failed"))
+        .body(body_lines.join("\n"))
+        .hint("Correct the frontmatter so it satisfies the declared $schema (or baseline schema).")
 }
 
 #[cfg(test)]

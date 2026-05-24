@@ -1,5 +1,7 @@
 //! Type definitions for the markdown module.
 
+use std::path::PathBuf;
+
 use biscuit_file::YamlParseError;
 use biscuit_terminal::components::status_block::StatusBlock;
 use biscuit_terminal::errors::BlockError;
@@ -8,6 +10,7 @@ use indexmap::IndexMap;
 use thiserror::Error;
 
 use crate::markdown::errors::blocks;
+use crate::markdown::schemas::ValidationProblem;
 
 use biscuit_terminal::errors::SourceContext;
 
@@ -87,6 +90,19 @@ pub enum MarkdownError {
     /// Context merge error (invalid user ctx).
     #[error("Context error: {0}")]
     CtxMerge(#[from] crate::markdown::compose::context::merge::CtxMergeError),
+
+    /// Schema validation failed during compose.
+    #[error("Schema validation failed for {path:?}: {summary}")]
+    SchemaValidationFailed {
+        /// Source file or "<stdin>".
+        path: PathBuf,
+        /// Validation problems reported by the schema subsystem.
+        problems: Vec<ValidationProblem>,
+        /// Short one-line summary for the top-level message.
+        summary: String,
+        /// Document description from frontmatter, when present.
+        description: Option<String>,
+    },
 }
 
 impl From<crate::markdown::compose::TransclusionError> for MarkdownError {
@@ -146,6 +162,12 @@ impl BlockError for MarkdownError {
             MarkdownError::InvalidLineRange(message) => blocks::invalid_line_range_block(message),
             MarkdownError::Serialization(source) => blocks::serialization_block(source),
             MarkdownError::Transform(message) => blocks::transform_block(message),
+            MarkdownError::SchemaValidationFailed {
+                path,
+                problems,
+                summary,
+                description,
+            } => blocks::schema_validation_failed_block(path, problems, summary, description),
         }
     }
 
