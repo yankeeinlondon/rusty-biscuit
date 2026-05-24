@@ -33,9 +33,8 @@ pub use git::{
     GitRepo, LocalBranchInfo, PeriodSpecifier, RemoteInfo, RepoStatus, detect_git,
     detect_git_with_request, detect_merge_conflicts, get_commit_by_sha, get_commit_files,
     get_commits_for_branch, get_commits_for_path, get_recent_commits_by_count,
-    get_recent_commits_by_date,
-    get_recent_commits_by_duration, get_recent_commits_by_hash, get_recent_commits_in_range,
-    parse_period,
+    get_recent_commits_by_date, get_recent_commits_by_duration, get_recent_commits_by_hash,
+    get_recent_commits_in_range, parse_period,
 };
 pub use just::{JustRecipe, JustRecipeParam, JustfileInfo, detect_justfiles};
 pub use languages::{LanguageBreakdown, LanguageStats, detect_languages};

@@ -537,9 +537,8 @@ pub fn render_text(
                         // `--worktree` takes precedence; the worktree handler
                         // upstream already replaced `current_branch` with the
                         // worktree's branch, so use that for the heading.
-                        let target_worktree = worktree
-                            .as_deref()
-                            .zip(git.current_branch.as_deref());
+                        let target_worktree =
+                            worktree.as_deref().zip(git.current_branch.as_deref());
 
                         // Annotate the Status heading only when the user
                         // explicitly named a branch different from the

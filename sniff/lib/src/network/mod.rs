@@ -1373,9 +1373,10 @@ mod tests {
 
         for iface in &info.interfaces {
             for cidr in &iface.ipv4_addresses {
-                let aggregate = info.ip_addresses.v4.iter().find(|a| {
-                    a.interface == iface.name && a.address == cidr.address.to_string()
-                });
+                let aggregate =
+                    info.ip_addresses.v4.iter().find(|a| {
+                        a.interface == iface.name && a.address == cidr.address.to_string()
+                    });
                 assert_eq!(
                     aggregate.and_then(|a| a.prefix_len),
                     cidr.prefix_len,
@@ -1384,9 +1385,10 @@ mod tests {
                 );
             }
             for cidr in &iface.ipv6_addresses {
-                let aggregate = info.ip_addresses.v6.iter().find(|a| {
-                    a.interface == iface.name && a.address == cidr.address.to_string()
-                });
+                let aggregate =
+                    info.ip_addresses.v6.iter().find(|a| {
+                        a.interface == iface.name && a.address == cidr.address.to_string()
+                    });
                 assert_eq!(
                     aggregate.and_then(|a| a.prefix_len),
                     cidr.prefix_len,
