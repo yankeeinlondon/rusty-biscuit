@@ -83,9 +83,9 @@ test-real *args="":
     @just _test_real schematic-definitions {{ args }}
     @just _test_real schematic-gen {{ args }}
 
-# Criterion benches (planned in Phase 4; documented no-op until then).
+# Criterion benches: schematic crates are code-generation focused with no algorithmic hot paths.
 bench:
-    @echo "bench: not applicable for schematic yet (planned Phase 4)"
+    @echo "bench: not applicable for schematic"
 
 # Per-package LCOV coverage for schematic crates.
 coverage *args="":
