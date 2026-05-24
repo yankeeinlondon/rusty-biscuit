@@ -73,3 +73,4 @@ Cargo.lock
 **/*.pending-snap
 
 .opencode/package-lock.json
+.claudine/tmp/
