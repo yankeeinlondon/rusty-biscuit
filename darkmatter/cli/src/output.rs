@@ -8,8 +8,8 @@ use darkmatter::markdown::output::terminal::TerminalImageMode;
 use darkmatter::markdown::{Markdown, MarkdownDelta, MarkdownToc, MarkdownTocNode};
 use darkmatter::style::{
     ComponentStyleOverrides, ListStyleOverrides, PageStyleOverrides, StyleWarning,
-    StyleWarningKind, apply_component_style, apply_list_style, apply_page_style,
-    from_frontmatter, into_strict,
+    StyleWarningKind, apply_color_style, apply_component_style, apply_list_style,
+    apply_page_style, from_frontmatter, into_strict,
 };
 use std::io::{self, Write};
 use std::path::PathBuf;
@@ -331,7 +331,10 @@ pub fn apply_style_frontmatter(
         .map_err(|e| eyre!("Failed to apply `style:` frontmatter: {e}"))?;
 
     let list_overrides = list_style_overrides_from_cli(cli);
-    apply_list_style(page, &style, list_overrides)
+    let page = apply_list_style(page, &style, list_overrides)
+        .map_err(|e| eyre!("Failed to apply `style:` frontmatter: {e}"))?;
+
+    apply_color_style(page, &style)
         .map_err(|e| eyre!("Failed to apply `style:` frontmatter: {e}"))
 }
 
@@ -1136,14 +1139,14 @@ mod tests {
     #[tracing_test::traced_test]
     fn strict_style_still_emits_known_but_inactive_event() {
         // A schema-clean fixture whose only warnings are `KnownButInactive`
-        // (the `table.color` leaf is wired in sub-spec #5). Under
+        // (the `hr.color` leaf is wired in sub-spec #6). Under
         // `--strict-style`, `into_strict` must succeed (no schema issues),
         // and the informational future-phase event must still reach
         // `log_style_warnings`. The old code replaced the warning list with
         // `Vec::new()` in strict mode and silently swallowed it.
         let raw = "---\n\
 style:\n\
-\x20   table:\n\
+\x20   hr:\n\
 \x20       color: red-500\n\
 ---\n\n# Doc\n";
         let md = Markdown::try_from_content(raw).unwrap();
@@ -1161,7 +1164,7 @@ style:\n\
     fn non_strict_style_emits_known_but_inactive_event() {
         let raw = "---\n\
 style:\n\
-\x20   table:\n\
+\x20   hr:\n\
 \x20       color: red-500\n\
 ---\n\n# Doc\n";
         let md = Markdown::try_from_content(raw).unwrap();

@@ -697,9 +697,11 @@ fn level2_list_max_fill_caps_wrap_width() {
 #[test]
 #[serial(level2_terminal)]
 fn level2_list_center_alignment_indents_more_than_left() {
-    // Use very short items + a wider max so no wrap forces marker/content
-    // onto separate lines. The `xy` / `ab` sentinels are unique to the
-    // rendered output (the shell command echo doesn't contain them).
+    // Use short items so we can compare the marker line's leading indent.
+    // Per sub-spec #4, when `style.li.alignment` (or the broadcast `--align-lists`
+    // that writes Li alignment) shifts the body, the body becomes its own block
+    // on a fresh line. We anchor on the body sentinel `xy` so the test works
+    // regardless of whether the marker and body share a line.
     let body = "- xy\n- ab\n";
     let Some((left, _)) = run_md(
         body,
@@ -714,17 +716,15 @@ fn level2_list_center_alignment_indents_more_than_left() {
         return;
     };
 
-    let find_row = |plain: &str, label: &str| -> String {
-        plain
+    let find_body_indent = |plain: &str, label: &str| -> usize {
+        let line = plain
             .lines()
-            .find(|l| l.trim_start().starts_with("- xy"))
-            .map(|l| l.to_string())
-            .unwrap_or_else(|| panic!("{label}: list item not found. plain:\n{plain}"))
+            .find(|l| l.trim_start() == "xy" || l.trim_start().starts_with("- xy"))
+            .unwrap_or_else(|| panic!("{label}: list item not found. plain:\n{plain}"));
+        line.chars().take_while(|c| *c == ' ').count()
     };
-    let left_row = find_row(&left.plain, "left");
-    let center_row = find_row(&center.plain, "center");
-    let left_indent = left_row.chars().take_while(|c| *c == ' ').count();
-    let center_indent = center_row.chars().take_while(|c| *c == ' ').count();
+    let left_indent = find_body_indent(&left.plain, "left");
+    let center_indent = find_body_indent(&center.plain, "center");
     assert!(
         center_indent > left_indent,
         "list center alignment must indent more than left: left={left_indent}, center={center_indent}"

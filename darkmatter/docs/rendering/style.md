@@ -654,17 +654,17 @@ Color and background-color knobs on list buckets (`style.ul.color`, `style.ul.bg
 
 ## Color & Background-Color (Sub-Spec #5)
 
-Sub-spec #5 activates the already-parsed `color` and `bg-color` fields for every `PageComponent` that exists after sub-spec #4. `PageComponent::Hyperlinks` was added in this phase for color storage on `DarkmatterPage`, but its visual rendering was deferred to sub-spec #7 because links are inline content rather than page components. The design stores `StyleColor` directly on `DarkmatterPage` and lowers to target-specific representations at render time.
+Sub-spec #5 activates the already-parsed `color` and `bg-color` fields for every `PageComponent` that exists after sub-spec #4, including `PageComponent::Hyperlinks`. The design stores `StyleColor` directly on `DarkmatterPage` and lowers to target-specific representations at render time.
 
 ### PageComponent::Hyperlinks
 
-The schema already reserved `style.hyperlinks.color` and `style.hyperlinks.bg-color` as sub-spec #5 fields. This phase adds `PageComponent::Hyperlinks` to store those two common color mutations on `DarkmatterPage`; visual rendering is deferred to sub-spec #7:
+The schema already reserved `style.hyperlinks.color` and `style.hyperlinks.bg-color` as sub-spec #5 fields. `PageComponent::Hyperlinks` was added in this phase for color storage and rendering on both terminal and browser targets:
 
 | Routing | Detail |
 |---|---|
 | Color storage | `DarkmatterPage` component color maps (wired sub-spec #5) |
-| Browser selector | `a` (wired sub-spec #7) |
-| Terminal rendering | Wraps link label text with foreground/background SGR while preserving existing OSC8 hyperlink sequences (wired sub-spec #7) |
+| Browser selector | `a` (wired sub-spec #5) |
+| Terminal rendering | Wraps link label text with foreground/background SGR while preserving existing OSC8 hyperlink sequences (wired sub-spec #5) |
 | Full layout and `local-style` | Wired in sub-spec #7 (see [Bespoke Knobs](#bespoke-knobs-sub-spec-7)) |
 
 ### Color Storage and Inheritance
