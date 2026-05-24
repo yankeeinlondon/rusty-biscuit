@@ -360,13 +360,52 @@ conversion bridges:
   `Option<TargetValue<Length>>` for the width-cap meaning, with a separate
   `PageFill::margin_contribution()` for the inset meaning.
 
+### `style:` frontmatter status
+
+Darkmatter's document-level `style:` frontmatter pipeline is now active through
+sub-spec #5 of `renderable/features/2026-05-23-style-property/`:
+
+- **#1 schema/parser** — parses sparse `style:` YAML into
+  `darkmatter::style::StyleFrontmatter`, using `renderable::layout::Length`,
+  `renderable::layout::Alignment`, and `renderable::color::Color`-backed
+  values rather than darkmatter-local duplicates. Canonical keys are
+  kebab-case; snake-case aliases parse with deprecation warnings.
+- **#2 page wiring** — applies `style.page.*` onto `DarkmatterPage`
+  (`margin`, `padding`, `max-width`, `alignment`, `background`) after CLI
+  layout flags. CLI flags win field-by-field. `md --strict-style` promotes
+  unknown and deprecated schema warnings to errors.
+- **#3 component wiring** — applies `style.table.*`, `style.images.*`, and
+  `style.block-quote.*` alignment and width/fill settings.
+- **#4 list wiring** — splits list targets into `ul`, `ol`, and `li`; applies
+  list alignment/fill and `style.ul.left-margin`.
+- **#5 color wiring** — applies `color` / `bg-color` at page and wired
+  component scopes. Page colors are inherited defaults; component colors
+  override them.
+
+The active wiring phase is recorded in
+`darkmatter::style::parse::ACTIVE_STYLE_WIRING_SUB_SPEC` and is currently `5`.
+Valid keys from future phases still parse but emit `KnownButInactive` warnings.
+The remaining planned work is **#6 HR migration** and **#7 bespoke knobs**
+(`page.stylesheet`, `page.meta`, `page.code.theme`, hyperlink/image
+local-style behavior).
+
+This frontmatter pipeline is adjacent to, but not the same thing as,
+`renderable::style::Style`. The frontmatter applicator writes into
+`DarkmatterPage`'s page/component layout and color maps; the render-tree
+`Style` primitive remains the target-agnostic appearance value carried by
+`RenderNode` attributes.
+
 ## 8. See also
 
 - `renderable/docs/tree-rendering.md` — the render-tree architecture `Layout`
   rides on.
+- `darkmatter/docs/rendering/style.md` — user-facing `style:` frontmatter
+  contract and examples.
 - `.claude/skills/renderable/layout.md` — the `renderable::layout` API.
 - `.claude/skills/renderable/style.md` — the `renderable::style` API.
 - `.claude/skills/biscuit-terminal/render-tree.md` — terminal layout
   application.
 - `renderable/features/2026-04-17-layout-and-style/` — the feature spec and
   implementation plan.
+- `renderable/features/2026-05-23-style-property/` — darkmatter `style:`
+  frontmatter sub-specs.

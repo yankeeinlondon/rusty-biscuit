@@ -44,6 +44,24 @@ IR state values:
   and the Terminal, Browser, and Markdown emitters all render from that single
   model. `Prose` implements no `TreeRenderable` and produces no `RenderNode`.
 
+## Darkmatter `style:` frontmatter coverage
+
+The darkmatter `style:` frontmatter pipeline currently wires component-facing
+style for these page components:
+
+- `style.table.*` → `PageComponent::Tables`
+- `style.images.*` → `PageComponent::Images`
+- `style.block-quote.*` → `PageComponent::BlockQuotes`
+- `style.ul.*`, `style.ol.*`, `style.li.*` → concrete list components
+- `style.page.color` / `style.page.bg-color` → inherited page defaults
+- component `color` / `bg-color` keys → component-specific overrides
+
+For layout/fill fields, `width` and `max-width` are mutually exclusive within
+one bucket. `Length::Css` parses in the schema but is rejected when the current
+`DarkmatterPage` storage cannot represent it. CLI flags still win
+field-by-field over frontmatter. HR (`style.hr.*`) and bespoke knobs are
+specified but not wired yet.
+
 | Name            | Kind   | Terminal | Browser | Markdown | Tree | IR State                     | bt CLI        | Location                                                    | Description                                                                         |
 |-----------------|--------|----------|---------|----------|------|------------------------------|---------------|-------------------------------------------------------------|-------------------------------------------------------------------------------------|
 | BlockQuote      | Block  | ✅       | ✅      | ✅       | ✅   | both avail, tree renders     | tree          | `biscuit-terminal/lib/src/components/block_quote.rs`        | Quoted text with a distinctive `│ ` left border and optional attribution.           |
