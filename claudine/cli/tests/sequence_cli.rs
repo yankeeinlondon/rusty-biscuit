@@ -338,7 +338,7 @@ fn sequence_propagates_fail_fast_to_child_env_and_prompt() {
     let prompt_path = workspace.path().join("child-stdin.txt");
 
     let md_file = workspace.path().join("seq.md");
-    // The document body interpolates {{env.FAIL_FAST}} so we can verify
+    // The document body interpolates {{env.CLAUDINE_FAIL_FAST}} so we can verify
     // the composed prompt saw the same value as the child env.
     fs::write(
         &md_file,
@@ -346,18 +346,18 @@ fn sequence_propagates_fail_fast_to_child_env_and_prompt() {
 sequence:
   - only
 ---
-FAIL_FAST={{env.FAIL_FAST}} STATE={{state}}
+CLAUDINE_FAIL_FAST={{env.CLAUDINE_FAIL_FAST}} STATE={{state}}
 "#,
     )
     .unwrap();
 
-    // Provider: record FAIL_FAST from env and capture the `-t <prompt>`
+    // Provider: record CLAUDINE_FAIL_FAST from env and capture the `-t <prompt>`
     // argument (Goose delivers the composed prompt via -t) so the test
     // can inspect both.
     write_executable(
         &path_dir.join("goose"),
         r#"#!/bin/sh
-printf 'FAIL_FAST=%s\n' "$FAIL_FAST" > "$CLAUDINE_ENV_FILE"
+printf 'CLAUDINE_FAIL_FAST=%s\n' "$CLAUDINE_FAIL_FAST" > "$CLAUDINE_ENV_FILE"
 prev=""
 for arg in "$@"; do
   if [ "$prev" = "-t" ]; then
@@ -388,14 +388,14 @@ exit 0
 
     let child_env = fs::read_to_string(&env_path).unwrap();
     assert!(
-        child_env.contains("FAIL_FAST=false"),
-        "child env should expose FAIL_FAST=false; env_file: {child_env}"
+        child_env.contains("CLAUDINE_FAIL_FAST=false"),
+        "child env should expose CLAUDINE_FAIL_FAST=false; env_file: {child_env}"
     );
 
     let child_prompt = fs::read_to_string(&prompt_path).unwrap();
     assert!(
-        child_prompt.contains("FAIL_FAST=false"),
-        "composed prompt should interpolate {{{{env.FAIL_FAST}}}} to false; stdin was: {child_prompt}"
+        child_prompt.contains("CLAUDINE_FAIL_FAST=false"),
+        "composed prompt should interpolate {{{{env.CLAUDINE_FAIL_FAST}}}} to false; stdin was: {child_prompt}"
     );
     assert!(
         child_prompt.contains("STATE=only"),
@@ -995,9 +995,13 @@ if [ "$count" = "1" ]; then
   exit 0
 fi
 
-# Step 2: emit start event so last_event_at is populated, then stall so
-# the step-silence deadline fires.
+# Step 2: emit start + finish so both `last_event_at` and
+# `provider_status` are populated, then stall so the step-silence
+# deadline fires. The OpenCode `provider_status` grace requires at
+# least one observed `step_finish` boundary before allowing
+# `step_timeout` to fire.
 printf '%s\n' '{"type":"step_start","sessionID":"ses_step2"}'
+printf '%s\n' '{"type":"step_finish","sessionID":"ses_step2","part":{"reason":"tool-calls","tokens":{"input":1,"output":1,"total":2}}}'
 sleep 30
 exit 0
 "#,

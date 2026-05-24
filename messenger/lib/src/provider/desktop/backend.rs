@@ -1,9 +1,11 @@
 //! Internal [`DesktopBackend`] trait shared by platform implementations.
 //!
-//! Backends convert a [`DesktopNotificationRequest`] into a native call
+//! Backends convert a [`DesktopNotificationRequest`] into the platform
+//! delivery flow. Each implementation elects installed helpers with
+//! `score() > 0` as the primary path, then falls back to the native floor
 //! (D-Bus on Linux, `UserNotifications.framework` or AppleScript on macOS,
-//! WinRT toasts on Windows). Keeping the trait out of the public surface
-//! lets platform crates evolve independently of the `Provider` API.
+//! WinRT toasts on Windows). Keeping the trait out of the public surface lets
+//! platform crates evolve independently of the `Provider` API.
 
 use async_trait::async_trait;
 
@@ -13,6 +15,9 @@ use crate::receipt::{DesktopPlatform, ProviderKind};
 use super::request::{DesktopNotificationReceipt, DesktopNotificationRequest};
 
 /// Internal abstraction over a platform-specific notification backend.
+///
+/// Implementations own both helper election and native fallback for their
+/// platform.
 ///
 /// Implementations must be `Send + Sync` so the outer
 /// [`DesktopNotificationProvider`](super::DesktopNotificationProvider)

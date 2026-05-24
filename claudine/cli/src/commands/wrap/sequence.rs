@@ -5,7 +5,7 @@ use std::io::IsTerminal;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
-use biscuit_terminal::components::renderable::Renderable;
+use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::components::status::{Status, StatusState};
 use claudine::composition::sequence::build_step_overlay;
 use claudine::composition::{
@@ -65,10 +65,10 @@ pub(crate) fn execute_sequence(
         .fail_fast_override
         .unwrap_or(plan.document_fail_fast);
 
-    // `--step-timeout` applies to every step in the sequence. Parse once so
-    // the CLI flag error grammar is raised at sequence entry, not inside the
-    // hot per-step loop.
-    let cli_step_timeout_secs = shared.step_timeout_secs()?;
+    // `--step-timeout` applies to every step in the sequence. Early
+    // validation happens in the CLI entry point; the raw string is
+    // resolved per-step by the composition executor.
+    let _ = shared.step_timeout_secs()?;
 
     let total_steps = plan.steps.len();
 
@@ -113,117 +113,39 @@ pub(crate) fn execute_sequence(
     let shared_approval_cache: composition::SharedApprovalCache =
         Arc::new(Mutex::new(HashMap::new()));
 
-    // ── Phase 1a: build overlays and prepare each step ─────────────────
-    let mut step_contexts: Vec<StepContext> = Vec::with_capacity(total_steps);
-    for step_index in 0..total_steps {
-        if interrupted.load(Ordering::SeqCst) {
-            if let Some(mut acc) = perf_accumulator {
-                acc.mark_env_setup_complete();
-                acc.set_partial();
-                let total = sequence_start.elapsed();
-                let report = acc.into_report(total);
-                eprint!("{}", crate::perf::render_perf_report(&report));
-            }
-            return Ok(SEQUENCE_INTERRUPT_EXIT_CODE);
-        }
-        let overlay = build_step_overlay(&plan, step_index);
-        let step_set_overrides = overlay.as_set_overrides(user_set_overrides.clone());
+    // ── Phase 1a: resolve target for every step (eager, pre-compose) ────
+    // Hints come from raw source frontmatter so {{env.AGENT}} resolves
+    // during per-step composition. User --set overrides on `agent`/`model`
+    // are honored if present at the top level of `--set`.
+    let raw_hints =
+        composition::parse_selection_hints_from_frontmatter(source.markdown.frontmatter())?;
+    let raw_hints = apply_user_set_to_hints(raw_hints, user_set_overrides.as_ref())?;
 
-        let mut env_overrides: BTreeMap<String, String> = BTreeMap::new();
-        env_overrides.insert("FAIL_FAST".to_string(), effective_fail_fast.to_string());
-
-        let compose_options = {
-            let mut ctx = darkmatter::markdown::compose::ComposeContext::capture();
-            for (key, value) in &env_overrides {
-                ctx.env_mut().insert(key.clone(), value.clone());
-            }
-            let mut opts = darkmatter::markdown::compose::ComposeOptions::new_with_context(ctx)
-                .with_source_file(&source.resolved_path);
-            opts = opts.with_set_overrides(step_set_overrides.clone());
-            opts
-        };
-
-        let approval_options = super::build_harness_shell_options_with_cache(
-            &source.resolved_path,
-            None,
-            Some(Arc::clone(&shared_approval_cache)),
-        );
-
-        // Template pre-flight
-        let template_preflight = composition::resolve_shell_approvals(
-            Some(&source.markdown),
-            Some(&compose_options),
-            None,
-            &approval_options,
-        )?;
-        cumulative_approved.extend(template_preflight.approved_commands.iter().cloned());
-
-        // Prepare composition
-        let prepare_options = PrepareOptions {
-            set_overrides: Some(step_set_overrides.clone()),
-            pre_approved_commands: Some(cumulative_approved.clone()),
-            env_overrides: env_overrides.clone(),
-            perf_enabled: shared.perf,
-        };
-        let prepared = composition::prepare_direct(source, prepare_options)?;
-
-        // Harness pre-flight
-        if has_harness_properties(&prepared.effective_frontmatter) {
-            let effective_repo_root = prepared.source_repo_root.as_deref();
-            let resolve_ctx = HarnessResolutionContext {
-                source_path: &prepared.resolved_path,
-                repo_root: effective_repo_root,
-            };
-            let harness_plan = parse_harness_plan(
-                &prepared.effective_frontmatter,
-                &prepared.resolved_path,
-                &resolve_ctx,
-            )
-            .map_err(|e| eyre!("{e}"))?;
-            let harness_preflight = composition::resolve_shell_approvals(
-                None,
-                None,
-                Some(&harness_plan),
-                &approval_options,
-            )
-            .map_err(|e| eyre!("{e}"))?;
-            cumulative_approved.extend(harness_preflight.approved_commands.iter().cloned());
-        }
-
-        step_contexts.push(StepContext {
-            env_overrides,
-            prepared,
-        });
-    }
-
-    // ── Phase 1b: resolve provider/model for every step ────────────────
-    let clients = sniff::programs::InstalledAiClients::new();
-    let installed: Vec<claudine::events::Provider> = claudine::events::PROVIDERS_DISPLAY_ORDER
-        .into_iter()
-        .filter(|p| clients.path(p.sniff_ai_cli()).is_some())
-        .collect();
-
-    let excluded = shared.excluded();
-    let snapshot = claudine::composition::build_installed_snapshot(&installed, &excluded);
-    let selection_config = super::composition::load_selection_config(
-        step_contexts
-            .first()
-            .and_then(|ctx| ctx.prepared.source_repo_root.as_deref())
-            .unwrap_or(
-                std::env::current_dir()
-                    .ok()
-                    .as_deref()
-                    .unwrap_or(std::path::Path::new(".")),
-            ),
-    );
-    let catalog = match &selection_config {
+    // Phase 2 (2026-05-09-slow-prep): build the per-invocation prep context
+    // once. Later phases (per-step compose, harness preflight, execution
+    // request) reuse the same source-repo-root, selection config, and
+    // installed-provider snapshot instead of rediscovering them.
+    let prep_context = super::composition::CompositionPrepContext::new(
+        &source.original_ref,
+        &source.resolved_path,
+        &shared.excluded(),
+    )?;
+    let snapshot = &prep_context.installed_snapshot;
+    let source_repo_root = prep_context.source_repo_root.clone();
+    let catalog = match prep_context.selection_config.as_ref() {
         Some(cfg) => claudine::model_catalog::ModelCatalogService::with_overrides(
             cfg.model_overrides.clone(),
         ),
         None => claudine::model_catalog::ModelCatalogService::new(),
     };
-    catalog.refresh_blocking();
-    let favorite = selection_config.as_ref().and_then(|c| c.favorite);
+    // Phase 1 (2026-05-09-slow-prep): refresh is provider-scoped and only
+    // happens when a frontmatter `model` hint will actually be validated
+    // against the catalog. The previous unconditional `refresh_blocking()`
+    // shelled out to `opencode models` even for `--claude` runs.
+    let favorite = prep_context
+        .selection_config
+        .as_ref()
+        .and_then(|c| c.favorite);
 
     let explicit_provider = shared.explicit_provider();
     let cli_model = shared.model.as_deref();
@@ -233,41 +155,57 @@ pub(crate) fn execute_sequence(
 
     let mut drafts: Vec<SequenceStepDraft> = Vec::with_capacity(total_steps);
     let mut failures: Vec<claudine::composition::SequenceSelectionFailure> = Vec::new();
+    let mut refreshed_providers: std::collections::BTreeSet<claudine::provider::Provider> =
+        std::collections::BTreeSet::new();
 
-    for (step_index, step_ctx) in step_contexts.iter().enumerate() {
+    for step_index in 0..total_steps {
         let step = &plan.steps[step_index];
-        let prepared = &step_ctx.prepared;
 
-        // Resolve provider for this step
+        // Resolve provider for this step. Provider resolution itself does
+        // not require a catalog, so this first pass uses `None`.
         let provider_result = if let Some(provider) = explicit_provider {
             Ok(provider)
         } else {
-            // Non-TTY resolution per step; TTY mode will use the review screen
-            let target = claudine::composition::resolve_target_non_tty_with_catalog(
-                None,
-                prepared,
-                &snapshot,
-                favorite,
-                cli_model,
-                Some(&catalog),
+            let target = claudine::composition::resolve_target_non_tty_with_hints(
+                None, &raw_hints, snapshot, favorite, cli_model, None,
             );
             target.map(|t| t.provider)
         };
 
-        let provider_plan =
-            match claudine::composition::build_picker_plan(prepared, &snapshot, favorite) {
-                Ok(plan) => plan,
-                Err(_) => claudine::composition::ProviderPickerPlan {
-                    options: Vec::new(),
-                    default_index: 0,
-                },
-            };
+        let provider_plan = match claudine::composition::build_picker_plan_with_hints(
+            &raw_hints, snapshot, favorite,
+        ) {
+            Ok(plan) => plan,
+            Err(_) => claudine::composition::ProviderPickerPlan {
+                options: Vec::new(),
+                default_index: 0,
+            },
+        };
 
         let provider_for_model = explicit_provider.or(provider_result.as_ref().ok().copied());
         let (model, model_reason) = if let Some(provider) = provider_for_model {
-            claudine::composition::resolve_model_with_catalog(
+            // Probe model resolution without catalog so the refresh gate
+            // can observe whether CLI / provider env / generic MODEL would
+            // override the frontmatter `model` hint. Refresh is skipped in
+            // those cases (matches the direct compose path).
+            let (_, probe_reason) = claudine::composition::resolve_model_with_hints(
+                provider, &raw_hints, cli_model, None,
+            );
+            // Refresh once per unique provider, and only when the
+            // frontmatter `model` hint will actually be validated against
+            // the catalog.
+            if refreshed_providers.insert(provider) {
+                let _span = tracing::info_span!("compose_prep.model_catalog", provider = %provider.as_slug(), step = step_index).entered();
+                super::composition::refresh_for_model_validation(
+                    &catalog,
+                    provider,
+                    &raw_hints,
+                    Some(&probe_reason),
+                );
+            }
+            claudine::composition::resolve_model_with_hints(
                 provider,
-                prepared,
+                &raw_hints,
                 cli_model,
                 Some(&catalog),
             )
@@ -302,7 +240,7 @@ pub(crate) fn execute_sequence(
         }
     }
 
-    // ── Phase 1c: review (TTY) or validate (non-TTY) ───────────────────
+    // ── Phase 1b: review (TTY) or validate (non-TTY) ───────────────────
     let resolved_targets: Vec<claudine::composition::ResolvedExecutionTarget> = if !failures
         .is_empty()
     {
@@ -337,7 +275,7 @@ pub(crate) fn execute_sequence(
                             .get(draft.provider_plan.default_index)
                             .map(|o| o.provider)
                     })
-                    .unwrap_or(claudine::events::Provider::Claude);
+                    .unwrap_or(claudine::provider::Provider::Claude);
                 let provider_reason = if explicit_provider.is_some() {
                     claudine::composition::ProviderResolutionReason::ExplicitFlag
                 } else {
@@ -353,6 +291,100 @@ pub(crate) fn execute_sequence(
             .collect()
     };
 
+    // ── Phase 1c: per-step compose with resolved AGENT in env_overrides ─
+    let mut step_contexts: Vec<StepContext> = Vec::with_capacity(total_steps);
+    for step_index in 0..total_steps {
+        if interrupted.load(Ordering::SeqCst) {
+            if let Some(mut acc) = perf_accumulator {
+                acc.mark_env_setup_complete();
+                acc.set_partial();
+                let total = sequence_start.elapsed();
+                let report = acc.into_report(total);
+                eprint!("{}", crate::perf::render_perf_report(&report));
+            }
+            return Ok(SEQUENCE_INTERRUPT_EXIT_CODE);
+        }
+        let overlay = build_step_overlay(&plan, step_index);
+        let step_set_overrides = overlay.as_set_overrides(user_set_overrides.clone());
+
+        let mut env_overrides: BTreeMap<String, String> = BTreeMap::new();
+        env_overrides.insert(
+            "CLAUDINE_FAIL_FAST".to_string(),
+            effective_fail_fast.to_string(),
+        );
+        // Inject AGENT for this step using the resolved target so
+        // {{env.AGENT}} in the body composes correctly.
+        let target = resolved_targets
+            .get(step_index)
+            .ok_or_else(|| eyre!("missing resolved target for step {}", step_index + 1))?;
+        let slug = target.provider.as_slug().to_string();
+        env_overrides.insert("AGENT".to_string(), slug.clone());
+
+        let compose_options = {
+            let mut ctx = darkmatter::markdown::compose::ComposeContext::capture();
+            for (key, value) in &env_overrides {
+                ctx.env_mut().insert(key.clone(), value.clone());
+            }
+            let mut opts = darkmatter::markdown::compose::ComposeOptions::new_with_context(ctx)
+                .with_source_file(&source.resolved_path);
+            opts = opts.with_set_overrides(step_set_overrides.clone());
+            opts
+        };
+
+        let approval_options = super::build_harness_shell_options_with_cache(
+            &source.resolved_path,
+            source_repo_root.as_deref(),
+            Some(Arc::clone(&shared_approval_cache)),
+        );
+
+        // Template pre-flight
+        let template_preflight = composition::resolve_shell_approvals(
+            Some(&source.markdown),
+            Some(&compose_options),
+            None,
+            &approval_options,
+        )?;
+        cumulative_approved.extend(template_preflight.approved_commands.iter().cloned());
+
+        // Prepare composition
+        let prepare_options = PrepareOptions {
+            set_overrides: Some(step_set_overrides.clone()),
+            pre_approved_commands: Some(cumulative_approved.clone()),
+            env_overrides: env_overrides.clone(),
+            perf_enabled: shared.perf,
+            source_repo_root: source_repo_root.clone(),
+        };
+        let prepared = composition::prepare_direct(source, prepare_options)?;
+
+        // Harness pre-flight
+        if has_harness_properties(&prepared.effective_frontmatter) {
+            let effective_repo_root = prepared.source_repo_root.as_deref();
+            let resolve_ctx = HarnessResolutionContext {
+                source_path: &prepared.resolved_path,
+                repo_root: effective_repo_root,
+            };
+            let harness_plan = parse_harness_plan(
+                &prepared.effective_frontmatter,
+                &prepared.resolved_path,
+                &resolve_ctx,
+            )
+            .map_err(|e| eyre!("{e}"))?;
+            let harness_preflight = composition::resolve_shell_approvals(
+                None,
+                None,
+                Some(&harness_plan),
+                &approval_options,
+            )
+            .map_err(|e| eyre!("{e}"))?;
+            cumulative_approved.extend(harness_preflight.approved_commands.iter().cloned());
+        }
+
+        step_contexts.push(StepContext {
+            env_overrides,
+            prepared,
+        });
+    }
+
     if !silent {
         let term = log::terminal();
         let status = Status::from_prose("Starting pre-flight checks".to_string())
@@ -363,7 +395,7 @@ pub(crate) fn execute_sequence(
 
     // ── Phase 1d: shell pre-flight for finalized steps ─────────────────
     let _preflight_span = info_span!("sequence_preflight", total_steps).entered();
-    // (Shell approvals were already collected during Phase 1a)
+    // (Shell approvals were already collected during Phase 1c)
 
     if let Some(ref mut acc) = perf_accumulator {
         acc.mark_env_setup_complete();
@@ -433,8 +465,8 @@ pub(crate) fn execute_sequence(
             model: shared.model.clone(),
             output: shared.output,
             system_prompt_args,
-            timeout: shared.timeout,
-            step_timeout: cli_step_timeout_secs,
+            timeout: shared.timeout.clone(),
+            step_timeout: shared.step_timeout.clone(),
             operation: shared.operation.clone(),
             sandbox: shared.sandbox,
             repo: shared.repo,
@@ -447,6 +479,11 @@ pub(crate) fn execute_sequence(
             silent: shared.silent,
             env_overrides: step_ctx.env_overrides.clone(),
             shared_approval_cache: Some(Arc::clone(&shared_approval_cache)),
+            installed_snapshot: Some(prep_context.installed_snapshot.clone()),
+            prep_launch_workspace: Some(prep_context.launch_workspace.clone()),
+            prep_launch_context: Some(prep_context.launch_context.clone()),
+            prep_env_context: Some(prep_context.env_context.clone()),
+            prep_launch_detection_error: prep_context.launch_detection_error.clone(),
         };
 
         let step_result = super::composition::execute_composition_request_inner(
@@ -626,4 +663,36 @@ pub(crate) fn execute_sequence(
         return Ok(SEQUENCE_INTERRUPT_EXIT_CODE);
     }
     if summary.failed > 0 { Ok(1) } else { Ok(0) }
+}
+
+/// Apply user `--set` overrides to raw selection hints.
+///
+/// Frontmatter `agent`/`model` can be overridden at the top level of
+/// `--set`. The override is interpreted with the same parsing rules
+/// (`agent` may be a string or array of strings; `model` may be a string
+/// or array of strings).
+fn apply_user_set_to_hints(
+    mut hints: claudine::composition::EffectiveSelectionHints,
+    user_set_overrides: Option<&serde_json::Value>,
+) -> Result<claudine::composition::EffectiveSelectionHints> {
+    let Some(serde_json::Value::Object(map)) = user_set_overrides else {
+        return Ok(hints);
+    };
+
+    if let Some(agent_value) = map.get("agent") {
+        let mut fm = darkmatter::markdown::Frontmatter::new();
+        fm.insert("agent", agent_value.clone())
+            .map_err(|e| eyre!("invalid --set agent: {e}"))?;
+        let parsed = composition::parse_selection_hints_from_frontmatter(&fm)?;
+        hints.agent = parsed.agent;
+    }
+    if let Some(model_value) = map.get("model") {
+        let mut fm = darkmatter::markdown::Frontmatter::new();
+        fm.insert("model", model_value.clone())
+            .map_err(|e| eyre!("invalid --set model: {e}"))?;
+        let parsed = composition::parse_selection_hints_from_frontmatter(&fm)?;
+        hints.model = parsed.model;
+    }
+
+    Ok(hints)
 }

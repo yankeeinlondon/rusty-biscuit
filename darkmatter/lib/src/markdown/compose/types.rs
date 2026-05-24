@@ -48,6 +48,10 @@ pub enum ComposeOperation {
     /// with the command's stdout output.
     ShellExpansion,
 
+    /// Executes approved `::shell-block` directives and replaces them
+    /// with the combined output of the block's commands.
+    ShellBlocks,
+
     /// Resolves `::file` and `::url` directives by including the
     /// referenced markdown document (recursively composed).
     BlockTransclusion,
@@ -71,6 +75,16 @@ pub enum ComposeOperation {
     /// Adjusts heading levels to ensure a valid hierarchy
     /// (e.g., no H3 before an H2).
     Normalization,
+
+    /// Resolves all local link targets (Markdown hyperlinks/images and
+    /// supported HTML embeds) to absolute paths during the Inline-Pre stage.
+    LinkResolve,
+
+    /// Converts absolute path links back into portable forms during the
+    /// Finalization stage (relative paths within the same repo, `~/` for
+    /// home-relative paths, `${VAR}` for whitelisted environment-relative
+    /// paths).
+    LinkNormalization,
 }
 
 /// Fixed-size operation set keyed by [`ComposeOperation`] discriminants.
@@ -147,11 +161,14 @@ pub enum ComposePhase {
     Transclusion,
     /// Serial operations after transclusion.
     InlinePost,
+    /// Root-only finalization stage. Runs after Inline-Post completes on the
+    /// outermost document and is skipped on transcluded children.
+    Finalization,
 }
 
 impl ComposeOperation {
     /// Total number of compose operations.
-    pub const COUNT: usize = 12;
+    pub const COUNT: usize = 15;
 
     /// Stable discriminant index for fixed-size operation sets.
     pub const fn index(self) -> usize {
@@ -162,12 +179,15 @@ impl ComposeOperation {
             Self::PageBlocks => 3,
             Self::Interpolation => 4,
             Self::ShellExpansion => 5,
-            Self::BlockTransclusion => 6,
-            Self::FrontmatterTransclusion => 7,
-            Self::CodeTransclusion => 8,
-            Self::TocLinking => 9,
-            Self::Cleanup => 10,
-            Self::Normalization => 11,
+            Self::ShellBlocks => 6,
+            Self::BlockTransclusion => 7,
+            Self::FrontmatterTransclusion => 8,
+            Self::CodeTransclusion => 9,
+            Self::TocLinking => 10,
+            Self::Cleanup => 11,
+            Self::Normalization => 12,
+            Self::LinkResolve => 13,
+            Self::LinkNormalization => 14,
         }
     }
 
@@ -179,7 +199,9 @@ impl ComposeOperation {
             | Self::TextReplacement
             | Self::PageBlocks
             | Self::Interpolation
-            | Self::ShellExpansion => ComposePhase::InlinePre,
+            | Self::ShellExpansion
+            | Self::ShellBlocks
+            | Self::LinkResolve => ComposePhase::InlinePre,
 
             Self::BlockTransclusion
             | Self::FrontmatterTransclusion
@@ -187,6 +209,8 @@ impl ComposeOperation {
             | Self::TocLinking => ComposePhase::Transclusion,
 
             Self::Cleanup | Self::Normalization => ComposePhase::InlinePost,
+
+            Self::LinkNormalization => ComposePhase::Finalization,
         }
     }
 
@@ -200,6 +224,8 @@ impl ComposeOperation {
             Self::PageBlocks,
             Self::Interpolation,
             Self::ShellExpansion,
+            Self::ShellBlocks,
+            Self::LinkResolve,
             // Transclusion (concurrent)
             Self::BlockTransclusion,
             Self::FrontmatterTransclusion,
@@ -208,6 +234,8 @@ impl ComposeOperation {
             // Inline Post (serial)
             Self::Cleanup,
             Self::Normalization,
+            // Finalization (root-only)
+            Self::LinkNormalization,
         ]
     }
 
@@ -226,12 +254,15 @@ impl std::fmt::Display for ComposeOperation {
             Self::PageBlocks => write!(f, "PageBlocks"),
             Self::Interpolation => write!(f, "Interpolation"),
             Self::ShellExpansion => write!(f, "ShellExpansion"),
+            Self::ShellBlocks => write!(f, "ShellBlocks"),
             Self::BlockTransclusion => write!(f, "BlockTransclusion"),
             Self::FrontmatterTransclusion => write!(f, "FrontmatterTransclusion"),
             Self::CodeTransclusion => write!(f, "CodeTransclusion"),
             Self::TocLinking => write!(f, "TocLinking"),
             Self::Cleanup => write!(f, "Cleanup"),
             Self::Normalization => write!(f, "Normalization"),
+            Self::LinkResolve => write!(f, "LinkResolve"),
+            Self::LinkNormalization => write!(f, "LinkNormalization"),
         }
     }
 }
@@ -242,6 +273,7 @@ impl std::fmt::Display for ComposePhase {
             Self::InlinePre => write!(f, "InlinePre"),
             Self::Transclusion => write!(f, "Transclusion"),
             Self::InlinePost => write!(f, "InlinePost"),
+            Self::Finalization => write!(f, "finalization"),
         }
     }
 }
@@ -459,15 +491,27 @@ pub struct ComposeOptions {
 
     // ── Interpolation ─────────────────────────────────────────────
     /// When `true`, body interpolation processes `{{ }}` expressions
-    /// inside inline code spans and fenced code blocks.
+    /// inside fenced and indented code blocks.
     ///
-    /// By default (`false`), the interpolation scanner skips code
-    /// regions to preserve literal code examples. Set this to `true`
-    /// for template documents where backtick-wrapped expressions
-    /// should still be interpolated.
+    /// Inline code spans (single-backticks) are always interpolated —
+    /// this flag only governs fenced/indented code blocks, which by
+    /// default (`false`) are skipped to preserve literal code examples.
     ///
-    /// Can also be set via frontmatter: `interpolate_code_spans: true`.
-    pub(crate) interpolate_code_spans: bool,
+    /// Can also be set via frontmatter: `interpolate_code_blocks: true`.
+    pub(crate) interpolate_code_blocks: bool,
+
+    // ── Link normalization ────────────────────────────────────────
+    /// Environment variables that may be used as path-prefix abstractions
+    /// during the Finalization stage's Link Normalization operation.
+    ///
+    /// Acts as a strict allowlist: only variables present in this list (or
+    /// the built-in default set when this list is empty) are considered
+    /// when collapsing absolute paths to portable `${VAR}/...` form.
+    ///
+    /// Defaults to an empty vector; the Link Normalization operation
+    /// applies a built-in default whitelist (`PROJECT_ROOT`, `DOCS_BASE`)
+    /// when this field is empty.
+    pub(crate) env_path_whitelist: Vec<String>,
 }
 
 impl std::fmt::Debug for ComposeOptions {
@@ -513,7 +557,8 @@ impl std::fmt::Debug for ComposeOptions {
             .field("perf_enabled", &self.perf_enabled)
             .field("replace_parent_wins", &self.replace_parent_wins)
             .field("one_off_replace", &self.one_off_replace)
-            .field("interpolate_code_spans", &self.interpolate_code_spans)
+            .field("interpolate_code_blocks", &self.interpolate_code_blocks)
+            .field("env_path_whitelist", &self.env_path_whitelist)
             .field(
                 "allow_invalid_frontmatter_assignment",
                 &self.allow_invalid_frontmatter_assignment,
@@ -576,8 +621,9 @@ impl ComposeOptions {
             context,
             replace_parent_wins: false,
             one_off_replace: None,
-            interpolate_code_spans: false,
+            interpolate_code_blocks: false,
             shell_strip_ansi: true,
+            env_path_whitelist: Vec::new(),
         }
     }
 
@@ -712,15 +758,52 @@ impl ComposeOptions {
         self
     }
 
-    /// Enables interpolation inside code spans and fenced code blocks.
+    /// Enables interpolation inside fenced and indented code blocks.
     ///
-    /// When set, `{{ }}` expressions inside backticks and code fences
-    /// are evaluated instead of being skipped. Useful for template
-    /// documents where code formatting wraps interpolation targets.
+    /// Inline code spans (single-backticks) are always interpolated —
+    /// this option only opts fenced/indented code blocks into the
+    /// interpolation scan, which is otherwise skipped to preserve
+    /// literal code examples.
     #[must_use]
-    pub fn with_interpolate_code_spans(mut self, enabled: bool) -> Self {
-        self.interpolate_code_spans = enabled;
+    pub fn with_interpolate_code_blocks(mut self, enabled: bool) -> Self {
+        self.interpolate_code_blocks = enabled;
         self
+    }
+
+    /// Sets the strict allowlist of environment variables that the
+    /// Finalization stage may use as path-prefix abstractions.
+    ///
+    /// Each entry is the bare variable name (e.g. `"PROJECT_ROOT"`); the
+    /// Link Normalization operation reads the corresponding value from the
+    /// process environment at evaluation time. Passing an empty vector
+    /// restores the built-in default whitelist.
+    #[must_use]
+    pub fn with_env_path_whitelist(mut self, paths: Vec<String>) -> Self {
+        self.env_path_whitelist = paths;
+        self
+    }
+
+    /// Returns the effective environment-variable allowlist used by Link
+    /// Normalization.
+    ///
+    /// When the user-supplied list (`with_env_path_whitelist`) is empty,
+    /// returns the built-in default fallback set (`PROJECT_ROOT`,
+    /// `DOCS_BASE`); otherwise returns the user-supplied list.
+    pub fn effective_env_path_whitelist(&self) -> Vec<String> {
+        if self.env_path_whitelist.is_empty() {
+            Self::default_env_path_whitelist()
+                .iter()
+                .map(|s| (*s).to_string())
+                .collect()
+        } else {
+            self.env_path_whitelist.clone()
+        }
+    }
+
+    /// Returns the built-in default environment-variable allowlist used
+    /// when the caller has not supplied an explicit whitelist.
+    pub const fn default_env_path_whitelist() -> &'static [&'static str] {
+        &["PROJECT_ROOT", "DOCS_BASE"]
     }
 
     /// Sets shell expansion options from a `ShellExpansionOptions` struct.
@@ -1123,8 +1206,8 @@ impl ComposeContext {
     pub fn env(&self) -> &HashMap<String, String> {
         &self.inner.env
     }
-    /// Access the values map (crate-internal).
-    pub(crate) fn values(&self) -> &serde_json::Map<String, serde_json::Value> {
+    /// Access the values map.
+    pub fn values(&self) -> &serde_json::Map<String, serde_json::Value> {
         &self.inner.values
     }
 }
@@ -1358,10 +1441,13 @@ pub enum ComposeStage {
     PageBlocks,
     Interpolation,
     ShellExpansion,
+    ShellBlocks,
     TransclusionParse,
     TransclusionPrepare,
     TransclusionResolve,
     TransclusionApply,
+    LinkResolve,
+    LinkNormalization,
     Cleanup,
     Normalization,
 }
@@ -1376,10 +1462,13 @@ impl std::fmt::Display for ComposeStage {
             Self::PageBlocks => "page blocks",
             Self::Interpolation => "interpolation",
             Self::ShellExpansion => "shell expansion",
+            Self::ShellBlocks => "shell blocks",
             Self::TransclusionParse => "transclusion parse",
             Self::TransclusionPrepare => "transclusion prepare",
             Self::TransclusionResolve => "transclusion resolve",
             Self::TransclusionApply => "transclusion apply",
+            Self::LinkResolve => "link resolve",
+            Self::LinkNormalization => "link normalization",
             Self::Cleanup => "cleanup",
             Self::Normalization => "normalization",
         })
@@ -1445,6 +1534,9 @@ pub struct ComposeReport {
     /// Number of shell expansions applied.
     pub shell_expansions_applied: usize,
 
+    /// Number of shell blocks applied.
+    pub shell_blocks_applied: usize,
+
     /// Number of shell approvals used.
     pub shell_approvals_used: usize,
 
@@ -1465,6 +1557,12 @@ pub struct ComposeReport {
 
     /// Number of transclusions skipped (conditions/invalid ignored).
     pub transclusions_skipped: usize,
+
+    /// Number of local links resolved to absolute paths.
+    pub link_resolves_applied: usize,
+
+    /// Number of absolute paths normalized to portable forms.
+    pub link_normalizations_applied: usize,
 
     /// Maximum recursive transclusion depth observed.
     pub max_transclusion_depth: usize,
@@ -1512,6 +1610,9 @@ impl ComposeReport {
             || self.interpolations_applied > 0
             || self.toc_links_generated > 0
             || self.shell_expansions_applied > 0
+            || self.shell_blocks_applied > 0
+            || self.link_resolves_applied > 0
+            || self.link_normalizations_applied > 0
             || self.cleanup_changed
             || self.page_blocks_rendered > 0
             || self.transclusions_applied > 0
@@ -1562,8 +1663,23 @@ impl ComposeReport {
             ));
         }
 
+        if self.shell_blocks_applied > 0 {
+            parts.push(format!("{} shell block(s)", self.shell_blocks_applied));
+        }
+
         if self.shell_approvals_used > 0 {
             parts.push(format!("{} shell approval(s)", self.shell_approvals_used));
+        }
+
+        if self.link_resolves_applied > 0 {
+            parts.push(format!("{} link resolve(s)", self.link_resolves_applied));
+        }
+
+        if self.link_normalizations_applied > 0 {
+            parts.push(format!(
+                "{} link normalization(s)",
+                self.link_normalizations_applied
+            ));
         }
 
         if self.cleanup_changed {
@@ -1626,7 +1742,10 @@ impl ComposeReport {
         self.interpolations_applied += other.interpolations_applied;
         self.toc_links_generated += other.toc_links_generated;
         self.shell_expansions_applied += other.shell_expansions_applied;
+        self.shell_blocks_applied += other.shell_blocks_applied;
         self.shell_approvals_used += other.shell_approvals_used;
+        self.link_resolves_applied += other.link_resolves_applied;
+        self.link_normalizations_applied += other.link_normalizations_applied;
         self.cleanup_changed |= other.cleanup_changed;
         self.page_blocks_rendered += other.page_blocks_rendered;
         self.page_blocks_skipped += other.page_blocks_skipped;
@@ -1783,12 +1902,15 @@ mod tests {
                 ComposeOperation::PageBlocks,
                 ComposeOperation::Interpolation,
                 ComposeOperation::ShellExpansion,
+                ComposeOperation::ShellBlocks,
+                ComposeOperation::LinkResolve,
                 ComposeOperation::BlockTransclusion,
                 ComposeOperation::FrontmatterTransclusion,
                 ComposeOperation::CodeTransclusion,
                 ComposeOperation::TocLinking,
                 ComposeOperation::Cleanup,
                 ComposeOperation::Normalization,
+                ComposeOperation::LinkNormalization,
             ]
         );
     }
@@ -1808,6 +1930,7 @@ mod tests {
             (ComposeOperation::PageBlocks, ComposePhase::InlinePre),
             (ComposeOperation::Interpolation, ComposePhase::InlinePre),
             (ComposeOperation::ShellExpansion, ComposePhase::InlinePre),
+            (ComposeOperation::ShellBlocks, ComposePhase::InlinePre),
             (
                 ComposeOperation::BlockTransclusion,
                 ComposePhase::Transclusion,
@@ -1823,6 +1946,11 @@ mod tests {
             (ComposeOperation::TocLinking, ComposePhase::Transclusion),
             (ComposeOperation::Cleanup, ComposePhase::InlinePost),
             (ComposeOperation::Normalization, ComposePhase::InlinePost),
+            (ComposeOperation::LinkResolve, ComposePhase::InlinePre),
+            (
+                ComposeOperation::LinkNormalization,
+                ComposePhase::Finalization,
+            ),
         ];
 
         for (operation, expected_phase) in expectations {
@@ -2234,7 +2362,56 @@ mod tests {
     }
 
     #[test]
-    fn default_order_has_twelve_operations() {
-        assert_eq!(ComposeOperation::default_order().len(), 12);
+    fn default_order_has_fifteen_operations() {
+        assert_eq!(ComposeOperation::default_order().len(), 15);
+    }
+
+    #[test]
+    fn link_resolve_is_last_inline_pre_operation() {
+        let order = ComposeOperation::default_order();
+        let inline_pre = order
+            .iter()
+            .copied()
+            .filter(|op| op.phase() == ComposePhase::InlinePre)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            inline_pre.last().copied(),
+            Some(ComposeOperation::LinkResolve)
+        );
+    }
+
+    #[test]
+    fn link_normalization_is_sole_finalization_operation() {
+        let finalization = ComposeOperation::default_order()
+            .iter()
+            .copied()
+            .filter(|op| op.phase() == ComposePhase::Finalization)
+            .collect::<Vec<_>>();
+        assert_eq!(finalization, vec![ComposeOperation::LinkNormalization]);
+    }
+
+    #[test]
+    fn finalization_phase_displays_lowercase() {
+        assert_eq!(format!("{}", ComposePhase::Finalization), "finalization");
+    }
+
+    #[test]
+    fn env_path_whitelist_default_is_empty_with_known_fallbacks() {
+        let options = ComposeOptions::new();
+        assert!(options.env_path_whitelist.is_empty());
+        assert_eq!(
+            options.effective_env_path_whitelist(),
+            vec!["PROJECT_ROOT".to_string(), "DOCS_BASE".to_string()]
+        );
+    }
+
+    #[test]
+    fn with_env_path_whitelist_overrides_default() {
+        let options = ComposeOptions::new()
+            .with_env_path_whitelist(vec!["MY_VAR".to_string(), "OTHER".to_string()]);
+        assert_eq!(
+            options.effective_env_path_whitelist(),
+            vec!["MY_VAR".to_string(), "OTHER".to_string()]
+        );
     }
 }

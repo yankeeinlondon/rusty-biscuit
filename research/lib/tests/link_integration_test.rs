@@ -514,7 +514,7 @@ async fn test_filtering_works_correctly_type_filters() {
     create_skill(&library, "clap", "library");
     create_skill(&library, "thiserror", "library");
     create_skill(&library, "axum", "framework");
-    create_skill(&library, "tokio", "runtime");
+    create_skill(&library, "tokio", "tool");
 
     // Set RESEARCH_DIR and HOME environment variables
     unsafe {
@@ -686,16 +686,16 @@ async fn test_stale_symlinks_are_removed_before_linking() {
 
     // Verify stale symlinks were removed
     assert!(
-        !claude_skills
+        claude_skills
             .join("stale-claude-skill")
             .symlink_metadata()
-            .is_ok()
+            .is_err()
     );
     assert!(
-        !opencode_skills
+        opencode_skills
             .join("stale-opencode-skill")
             .symlink_metadata()
-            .is_ok()
+            .is_err()
     );
 
     // Verify stale_removed contains our broken symlinks
@@ -1013,12 +1013,12 @@ async fn test_stale_doc_symlinks_also_removed() {
     let link_result = result.unwrap();
 
     // Verify stale doc symlinks were removed
-    assert!(!claude_docs.join("stale-doc.md").symlink_metadata().is_ok());
+    assert!(claude_docs.join("stale-doc.md").symlink_metadata().is_err());
     assert!(
-        !opencode_docs
+        opencode_docs
             .join("another-stale.md")
             .symlink_metadata()
-            .is_ok()
+            .is_err()
     );
 
     // Verify stale_removed contains the doc symlinks

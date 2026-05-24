@@ -104,6 +104,16 @@ impl BorderStyle {
     pub fn is_visible(self) -> bool {
         !matches!(self, BorderStyle::None)
     }
+
+    /// Returns `true` when this style draws a bottom-edge segment.
+    ///
+    /// Used by the standalone runner to decide whether the help-hint
+    /// footer should be inlined into the bottom border (via
+    /// [`FrameChromeConfig::bottom_label`]) or rendered on its own row.
+    pub fn has_bottom(self) -> bool {
+        let (sides, _) = self.ratatui_parts();
+        sides.contains(Borders::BOTTOM)
+    }
 }
 
 /// Four-sided margin in terminal cells.
@@ -160,20 +170,118 @@ impl Margin {
     }
 }
 
+/// Four-sided interior padding in terminal cells.
+///
+/// Padding is applied inside the border (or directly inside the margin
+/// when no border is drawn). It shrinks the area available to the
+/// inner widget after the border has claimed its perimeter.
+///
+/// Defaults to `1` cell on all sides (matches the spec) so widgets do
+/// not visually touch the border. Use [`Padding::zero`] (or its
+/// [`Padding::none`] alias) when chrome should have no interior
+/// spacing at all.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct Padding {
+    /// Cells of padding on the top edge.
+    pub top: u16,
+    /// Cells of padding on the bottom edge.
+    pub bottom: u16,
+    /// Cells of padding on the left edge.
+    pub left: u16,
+    /// Cells of padding on the right edge.
+    pub right: u16,
+}
+
+impl Default for Padding {
+    /// Returns `Padding::uniform(1)`.
+    ///
+    /// This matches the spec's library-level default: chrome adds one
+    /// cell of interior padding on every side so widgets do not bump
+    /// against the border. Use [`Padding::zero`] for no padding at
+    /// all.
+    fn default() -> Self {
+        Self::uniform(1)
+    }
+}
+
+impl Padding {
+    /// Constructs padding with the same value on all four sides.
+    pub const fn uniform(n: u16) -> Self {
+        Self {
+            top: n,
+            bottom: n,
+            left: n,
+            right: n,
+        }
+    }
+
+    /// Constructs padding with `0` on every side.
+    ///
+    /// Prefer this over `Padding { top: 0, .. }` when expressing
+    /// "no interior spacing" — it documents the intent and decouples
+    /// the call site from the [`Default`] impl, which is `uniform(1)`.
+    pub const fn zero() -> Self {
+        Self::uniform(0)
+    }
+
+    /// Alias for [`Padding::zero`].
+    ///
+    /// Reads naturally at call sites that want to opt out of any
+    /// padding entirely (`Padding::none()`).
+    pub const fn none() -> Self {
+        Self::zero()
+    }
+
+    /// Shrinks `area` by the padding on each side, using saturating
+    /// subtraction so overly large padding collapses the rect rather
+    /// than wrapping.
+    pub fn shrink(self, area: Rect) -> Rect {
+        let dx = self.left.min(area.width);
+        let dy = self.top.min(area.height);
+        let x = area.x.saturating_add(dx);
+        let y = area.y.saturating_add(dy);
+        let width = area
+            .width
+            .saturating_sub(dx)
+            .saturating_sub(self.right.min(area.width.saturating_sub(dx)));
+        let height = area
+            .height
+            .saturating_sub(dy)
+            .saturating_sub(self.bottom.min(area.height.saturating_sub(dy)));
+        Rect {
+            x,
+            y,
+            width,
+            height,
+        }
+    }
+}
+
 /// The parsed form of the CLI `--height` flag.
+///
+/// Both variants are treated as a *maximum* — when the live terminal is
+/// smaller than the requested height, the inline viewport is clamped to
+/// the available rows so the prompt never overflows the screen.
 ///
 /// ## Variants
 ///
 /// - [`HeightSpec::Cells`] is an absolute cell count, clamped to the
-///   terminal height when resolved.
+///   terminal height when resolved. Resolved once at prompt start;
+///   ratatui's own `autoresize` clamps the inline viewport to the live
+///   terminal height on subsequent resizes, so the cap never exceeds
+///   the terminal even after a shrink.
 /// - [`HeightSpec::Percent`] is a percentage of the terminal height,
 ///   clamped to a floor of 3 rows so the list always has room for a
-///   header plus two rows.
+///   header plus two rows. Re-resolved on every resize event by
+///   [`crate::core::run_standalone`], so the inline viewport tracks
+///   the requested fraction of the terminal as it grows or shrinks
+///   mid-prompt.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum HeightSpec {
-    /// An absolute cell count.
+    /// An absolute cell count, treated as a maximum.
     Cells(u16),
-    /// A percentage of the current terminal height (1..=100).
+    /// A percentage of the current terminal height (1..=100), tracked
+    /// dynamically across resize events.
     Percent(u8),
 }
 
@@ -200,24 +308,71 @@ impl HeightSpec {
 /// Produced by the CLI layer from the shared `ChooseChromeArgs`
 /// struct. Later phases will flesh out parsing; Phase 1 just fixes
 /// the shape so other call sites can be written against it.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct FrameChromeConfig {
     /// Border style; [`BorderStyle::None`] draws no border.
     pub border: BorderStyle,
     /// Optional title rendered in the top-left of the border.
     pub border_label: Option<String>,
+    /// Optional title rendered in the bottom-left of the border.
+    ///
+    /// Used by the standalone runner to inline the help-hint footer
+    /// inside the bottom border (matching how `border_label` inlines a
+    /// title in the top border) so the hint never overwrites the
+    /// border corners. Ignored when the resolved border has no
+    /// [`Borders::BOTTOM`] segment.
+    pub bottom_label: Option<String>,
     /// Margin applied outside of the border.
     pub margin: Margin,
     /// Style applied to the border glyphs.
     pub border_style: Style,
+    /// Interior padding applied inside the border (or directly inside
+    /// the margin when no border is drawn).
+    pub padding: Padding,
+    /// Preserve the final render after the prompt exits.
+    ///
+    /// When `false` (the default) the standalone runner clears the
+    /// inline viewport on exit so the terminal reclaims the space
+    /// (fzf-style). When `true` the final render is left in place and
+    /// the cursor is positioned on a fresh line just below the chrome.
+    pub show_on_exit: bool,
+}
+
+impl Default for FrameChromeConfig {
+    /// The library-default config: no border, no margin, padding of
+    /// `1` cell on every side.
+    ///
+    /// Padding is written as `Padding::uniform(1)` even though it
+    /// matches `Padding::default()` — the explicit value documents the
+    /// invariant at the call site so a reader does not have to follow
+    /// the [`Default`] impl on [`Padding`] to understand the chrome's
+    /// resting state.
+    fn default() -> Self {
+        Self {
+            border: BorderStyle::default(),
+            border_label: None,
+            bottom_label: None,
+            margin: Margin::default(),
+            border_style: Style::default(),
+            padding: Padding::uniform(1),
+            show_on_exit: false,
+        }
+    }
 }
 
 impl FrameChromeConfig {
-    /// Returns `true` when neither the border nor any margin would
-    /// affect layout. Callers can use this to skip wrapping a widget
-    /// in [`FrameChrome`] entirely.
+    /// Returns `true` when neither the border, margin, nor padding
+    /// would affect layout. Callers can use this to skip wrapping a
+    /// widget in [`FrameChrome`] entirely.
+    ///
+    /// Padding is compared against [`Padding::zero`] rather than
+    /// [`Padding::default`] because the library default is
+    /// `uniform(1)` — a configuration with the default padding still
+    /// affects layout and must not be treated as empty.
     pub fn is_empty(&self) -> bool {
-        !self.border.is_visible() && self.margin == Margin::default()
+        !self.border.is_visible()
+            && self.margin == Margin::default()
+            && self.padding == Padding::zero()
     }
 }
 
@@ -227,30 +382,38 @@ impl FrameChromeConfig {
 /// [`FrameChrome`] implements [`StatefulWidget`], forwarding to the
 /// inner widget's [`StatefulWidget::State`] unchanged. The inner
 /// widget renders inside the rectangle that remains after the margin
-/// has been subtracted and (if any) the border has claimed its own
-/// single-cell perimeter.
+/// has been subtracted, (if any) the border has claimed its own
+/// single-cell perimeter, and padding has been applied inside the
+/// border.
 pub struct FrameChrome<'a, W> {
     /// The widget drawn inside the frame.
     pub inner: W,
-    /// Optional border spec: `(sides, border_type, label)`.
-    pub border: Option<(Borders, BorderType, Option<&'a str>)>,
+    /// Optional border spec: `(sides, border_type, top_label, bottom_label)`.
+    pub border: Option<(Borders, BorderType, Option<&'a str>, Option<&'a str>)>,
     /// Margin applied outside of the border.
     pub margin: Margin,
     /// Style applied to the border glyphs.
     pub border_style: Style,
+    /// Interior padding applied inside the border.
+    pub padding: Padding,
 }
 
 impl<'a, W> FrameChrome<'a, W> {
-    /// Wraps `inner` with no chrome (margin zero, border none). Used
-    /// as the no-op fallback when `FrameChromeConfig::is_empty()`
-    /// returns true but the caller still wants to go through the
-    /// wrapper for type uniformity.
+    /// Wraps `inner` with no chrome (margin zero, border none, padding
+    /// zero). Used as the no-op fallback when
+    /// `FrameChromeConfig::is_empty()` returns true but the caller
+    /// still wants to go through the wrapper for type uniformity.
+    ///
+    /// Note: padding is set to [`Padding::zero`] (not
+    /// [`Padding::default`], which is `uniform(1)`) so the bare
+    /// wrapper truly applies no chrome.
     pub fn bare(inner: W) -> Self {
         Self {
             inner,
             border: None,
             margin: Margin::default(),
             border_style: Style::default(),
+            padding: Padding::zero(),
         }
     }
 
@@ -261,7 +424,12 @@ impl<'a, W> FrameChrome<'a, W> {
     pub fn from_config(inner: W, config: &'a FrameChromeConfig) -> Self {
         let border = if config.border.is_visible() {
             let (sides, ty) = config.border.ratatui_parts();
-            Some((sides, ty, config.border_label.as_deref()))
+            Some((
+                sides,
+                ty,
+                config.border_label.as_deref(),
+                config.bottom_label.as_deref(),
+            ))
         } else {
             None
         };
@@ -270,6 +438,7 @@ impl<'a, W> FrameChrome<'a, W> {
             border,
             margin: config.margin,
             border_style: config.border_style,
+            padding: config.padding,
         }
     }
 }
@@ -282,19 +451,24 @@ where
 
     fn render(self, area: Rect, buf: &mut Buffer, state: &mut Self::State) {
         let area = self.margin.shrink(area);
-        let inner_area = if let Some((sides, ty, label)) = self.border {
+        let inner_area = if let Some((sides, ty, top_label, bottom_label)) = self.border {
             let mut block = Block::default()
                 .borders(sides)
                 .border_type(ty)
                 .style(self.border_style);
-            if let Some(l) = label {
+            if let Some(l) = top_label {
                 block = block.title(l.to_string());
+            }
+            if let Some(l) = bottom_label
+                && sides.contains(Borders::BOTTOM)
+            {
+                block = block.title_bottom(l.to_string());
             }
             let inner = block.inner(area);
             block.render(area, buf);
-            inner
+            self.padding.shrink(inner)
         } else {
-            area
+            self.padding.shrink(area)
         };
         self.inner.render(inner_area, buf, state);
     }
@@ -419,9 +593,34 @@ mod tests {
     }
 
     #[test]
-    fn frame_chrome_config_is_empty_by_default() {
+    fn frame_chrome_config_default_padding_is_uniform_one() {
         let config = FrameChromeConfig::default();
-        assert!(config.is_empty());
+        assert_eq!(config.padding, Padding::uniform(1));
+    }
+
+    #[test]
+    fn frame_chrome_config_is_empty_only_when_padding_is_zero() {
+        // The library-level default padding is now `uniform(1)`, so a
+        // config built from `Default::default()` is *not* empty — the
+        // padding alone affects layout. Explicit `Padding::zero()`
+        // restores the empty state.
+        let default_config = FrameChromeConfig::default();
+        assert!(!default_config.is_empty());
+
+        let zeroed = FrameChromeConfig {
+            padding: Padding::zero(),
+            ..Default::default()
+        };
+        assert!(zeroed.is_empty());
+    }
+
+    #[test]
+    fn frame_chrome_config_is_empty_uses_padding_none_alias() {
+        let zeroed = FrameChromeConfig {
+            padding: Padding::none(),
+            ..Default::default()
+        };
+        assert!(zeroed.is_empty());
     }
 
     #[test]
@@ -467,8 +666,11 @@ mod tests {
         let config = FrameChromeConfig {
             border: BorderStyle::Rounded,
             border_label: Some("Title".to_string()),
+            bottom_label: None,
             margin: Margin::uniform(1),
             border_style: Style::default().fg(Color::Cyan),
+            padding: Padding::zero(),
+            show_on_exit: false,
         };
         let frame = FrameChrome::from_config(Marker, &config);
 
@@ -502,6 +704,7 @@ mod tests {
     fn frame_chrome_margin_only_still_renders_inner() {
         let config = FrameChromeConfig {
             margin: Margin::uniform(1),
+            padding: Padding::zero(),
             ..Default::default()
         };
         let frame = FrameChrome::from_config(Marker, &config);
@@ -527,6 +730,7 @@ mod tests {
         let config = FrameChromeConfig {
             border: BorderStyle::Rounded,
             border_label: Some("A very long title indeed".to_string()),
+            padding: Padding::zero(),
             ..Default::default()
         };
         let frame = FrameChrome::from_config(Marker, &config);
@@ -542,5 +746,223 @@ mod tests {
         assert_eq!(inner.y, 1);
         assert_eq!(inner.width, 6);
         assert_eq!(inner.height, 2);
+    }
+
+    #[test]
+    fn frame_chrome_padding_shrinks_inner_even_without_border() {
+        let config = FrameChromeConfig {
+            padding: Padding::uniform(2),
+            ..Default::default()
+        };
+        let frame = FrameChrome::from_config(Marker, &config);
+
+        let area = Rect::new(0, 0, 10, 6);
+        let mut buf = Buffer::empty(area);
+        let mut state = MarkerState::default();
+        frame.render(area, &mut buf, &mut state);
+
+        let inner = state.last_area.expect("inner widget rendered");
+        assert_eq!(inner.x, 2);
+        assert_eq!(inner.y, 2);
+        assert_eq!(inner.width, 6);
+        assert_eq!(inner.height, 2);
+    }
+
+    #[test]
+    fn frame_chrome_border_plus_padding_shrinks_inner() {
+        let config = FrameChromeConfig {
+            border: BorderStyle::Rounded,
+            padding: Padding::uniform(1),
+            ..Default::default()
+        };
+        let frame = FrameChrome::from_config(Marker, &config);
+
+        let area = Rect::new(0, 0, 10, 6);
+        let mut buf = Buffer::empty(area);
+        let mut state = MarkerState::default();
+        frame.render(area, &mut buf, &mut state);
+
+        let inner = state.last_area.expect("inner widget rendered");
+        // margin 0 + border 1 + padding 1 = 2 on each side
+        assert_eq!(inner.x, 2);
+        assert_eq!(inner.y, 2);
+        assert_eq!(inner.width, 6);
+        assert_eq!(inner.height, 2);
+    }
+
+    #[test]
+    fn padding_uniform() {
+        let p = Padding::uniform(3);
+        assert_eq!(p.top, 3);
+        assert_eq!(p.bottom, 3);
+        assert_eq!(p.left, 3);
+        assert_eq!(p.right, 3);
+    }
+
+    #[test]
+    fn padding_shrink_subtracts_each_side() {
+        let area = Rect::new(0, 0, 20, 10);
+        let shrunk = Padding::uniform(2).shrink(area);
+        assert_eq!(shrunk.x, 2);
+        assert_eq!(shrunk.y, 2);
+        assert_eq!(shrunk.width, 16);
+        assert_eq!(shrunk.height, 6);
+    }
+
+    #[test]
+    fn padding_shrink_saturates_when_too_large() {
+        let area = Rect::new(0, 0, 4, 2);
+        let shrunk = Padding::uniform(10).shrink(area);
+        assert_eq!(shrunk.width, 0);
+        assert_eq!(shrunk.height, 0);
+    }
+
+    #[test]
+    fn padding_default_is_uniform_one() {
+        // Phase 2 of the choose-one improvements feature: the
+        // library-level default for `Padding` is `uniform(1)` so
+        // chrome-bearing widgets never visually touch the border.
+        assert_eq!(Padding::default(), Padding::uniform(1));
+        let p = Padding::default();
+        assert_eq!(p.top, 1);
+        assert_eq!(p.bottom, 1);
+        assert_eq!(p.left, 1);
+        assert_eq!(p.right, 1);
+    }
+
+    #[test]
+    fn padding_zero_is_all_zeros() {
+        let p = Padding::zero();
+        assert_eq!(p.top, 0);
+        assert_eq!(p.bottom, 0);
+        assert_eq!(p.left, 0);
+        assert_eq!(p.right, 0);
+        assert_eq!(p, Padding::uniform(0));
+        // Confirms the Default impl is *not* zero: Padding::default()
+        // and Padding::zero() must now diverge.
+        assert_ne!(Padding::default(), Padding::zero());
+    }
+
+    #[test]
+    fn padding_none_alias_matches_zero() {
+        assert_eq!(Padding::none(), Padding::zero());
+    }
+
+    #[test]
+    fn padding_default_shrinks_rect_by_one_on_each_side() {
+        let area = Rect::new(0, 0, 10, 6);
+        let shrunk = Padding::default().shrink(area);
+        assert_eq!(shrunk.x, 1);
+        assert_eq!(shrunk.y, 1);
+        assert_eq!(shrunk.width, 8);
+        assert_eq!(shrunk.height, 4);
+    }
+
+    #[test]
+    fn border_style_has_bottom_only_for_styles_that_draw_bottom_segment() {
+        // Styles that include the BOTTOM segment in `ratatui_parts`.
+        for style in [
+            BorderStyle::Rounded,
+            BorderStyle::Sharp,
+            BorderStyle::Bold,
+            BorderStyle::Double,
+            BorderStyle::Block,
+            BorderStyle::ThinBlock,
+            BorderStyle::Horizontal,
+            BorderStyle::Bottom,
+        ] {
+            assert!(
+                style.has_bottom(),
+                "{style:?} should report has_bottom() = true",
+            );
+        }
+        // Styles that do not draw a bottom edge.
+        for style in [
+            BorderStyle::None,
+            BorderStyle::Vertical,
+            BorderStyle::Line,
+            BorderStyle::Top,
+            BorderStyle::Left,
+            BorderStyle::Right,
+        ] {
+            assert!(
+                !style.has_bottom(),
+                "{style:?} should report has_bottom() = false",
+            );
+        }
+    }
+
+    #[test]
+    fn frame_chrome_default_show_on_exit_is_false() {
+        // The library default preserves backward-compatible behaviour
+        // (clear-on-exit happens when `show_on_exit == false`).
+        assert!(!FrameChromeConfig::default().show_on_exit);
+        assert!(FrameChromeConfig::default().bottom_label.is_none());
+    }
+
+    #[test]
+    fn frame_chrome_renders_bottom_label_inside_bottom_border() {
+        // The bottom label should appear on the bottom border row,
+        // leaving the corner glyphs at column 0 and column area.right - 1
+        // intact.
+        let config = FrameChromeConfig {
+            border: BorderStyle::Rounded,
+            border_label: None,
+            bottom_label: Some("Hint".to_string()),
+            padding: Padding::zero(),
+            ..Default::default()
+        };
+        let frame = FrameChrome::from_config(Marker, &config);
+
+        let area = Rect::new(0, 0, 16, 4);
+        let mut buf = Buffer::empty(area);
+        let mut state = MarkerState::default();
+        frame.render(area, &mut buf, &mut state);
+
+        let bottom_row = (0..area.width)
+            .map(|x| buf[(x, area.height - 1)].symbol().to_string())
+            .collect::<String>();
+        assert!(
+            bottom_row.contains("Hint"),
+            "bottom border row should contain the label; got {bottom_row:?}",
+        );
+        // Corners must survive — neither column 0 nor the rightmost
+        // column should be a space on the bottom row.
+        assert_ne!(
+            buf[(0, area.height - 1)].symbol(),
+            " ",
+            "bottom-left corner glyph clobbered",
+        );
+        assert_ne!(
+            buf[(area.width - 1, area.height - 1)].symbol(),
+            " ",
+            "bottom-right corner glyph clobbered",
+        );
+    }
+
+    #[test]
+    fn frame_chrome_ignores_bottom_label_when_no_bottom_border() {
+        // BorderStyle::Top draws only a top border, so a bottom_label
+        // must be silently ignored — there is no bottom row to host it.
+        let config = FrameChromeConfig {
+            border: BorderStyle::Top,
+            bottom_label: Some("Hint".to_string()),
+            padding: Padding::zero(),
+            ..Default::default()
+        };
+        let frame = FrameChrome::from_config(Marker, &config);
+
+        let area = Rect::new(0, 0, 16, 4);
+        let mut buf = Buffer::empty(area);
+        let mut state = MarkerState::default();
+        frame.render(area, &mut buf, &mut state);
+
+        let bottom_row = (0..area.width)
+            .map(|x| buf[(x, area.height - 1)].symbol().to_string())
+            .collect::<String>();
+        assert!(
+            !bottom_row.contains("Hint"),
+            "bottom_label should not render when border has no bottom segment; got {bottom_row:?}",
+        );
     }
 }

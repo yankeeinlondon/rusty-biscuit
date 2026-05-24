@@ -2,6 +2,105 @@ use crate::markdown::inline::{HorizontalRuleAttrs, InlineEvent};
 use pulldown_cmark::{Event, Tag, TagEnd};
 use std::collections::VecDeque;
 
+/// Parses a darkmatter HR-attribute paragraph body — `---|***|___` followed by
+/// an optional `{ ... }` attribute block — into [`HorizontalRuleAttrs`].
+///
+/// Returns `None` when `body` is not a recognized HR-attribute paragraph. The
+/// span-aware fold uses this to detect and rewrite HR-attribute paragraphs
+/// without re-implementing the matcher.
+#[must_use]
+pub fn try_parse_hr_attrs(body: &str) -> Option<HorizontalRuleAttrs> {
+    // The matcher requires an attribute block (`{ ... }`); a bare `---`
+    // already arrives from pulldown-cmark as `Event::Rule`, so this helper
+    // intentionally returns `None` for it.
+    let (_, attribute_str) = matches_horizontal_rule_pattern(body)?;
+    Some(parse_attribute_block(&attribute_str))
+}
+
+/// Matches `body` against the HR-attribute paragraph pattern, returning
+/// `(marker, attribute-string)` when the body is a single-line directive.
+fn matches_horizontal_rule_pattern(text: &str) -> Option<(String, String)> {
+    let trimmed = text.trim();
+    if trimmed.len() < 3 {
+        return None;
+    }
+    let first_char = trimmed.chars().next()?;
+    if !['-', '_', '*'].contains(&first_char) {
+        return None;
+    }
+    let mut marker_end = 0;
+    for (i, ch) in trimmed.char_indices() {
+        if ch != first_char {
+            marker_end = i;
+            break;
+        }
+    }
+    if marker_end == 0 {
+        marker_end = trimmed.len();
+    }
+    if marker_end < 3 {
+        return None;
+    }
+    let after_markers = trimmed[marker_end..].trim_start();
+    if !after_markers.starts_with('{') || !after_markers.ends_with('}') {
+        return None;
+    }
+    let attributes = after_markers[1..after_markers.len() - 1].trim();
+    let marker_str = trimmed[..marker_end].to_string();
+    Some((marker_str, attributes.to_string()))
+}
+
+/// Parses an HR attribute string (the content between `{` and `}`) into
+/// [`HorizontalRuleAttrs`] using the same YAML-flow-mapping logic as the
+/// in-place [`RuleProcessor::parse_attributes`] method.
+fn parse_attribute_block(attribute_str: &str) -> HorizontalRuleAttrs {
+    // This is a free-function clone of `RuleProcessor::parse_attributes` so
+    // the span-aware fold can call it without instantiating the generic
+    // processor.
+    if attribute_str.trim().is_empty() {
+        return HorizontalRuleAttrs::default();
+    }
+
+    let yaml_src = format!("{{ {attribute_str} }}");
+    match serde_yaml_ng::from_str::<serde_yaml_ng::Value>(&yaml_src) {
+        Ok(serde_yaml_ng::Value::Mapping(map)) => attrs_from_mapping(&map),
+        _ => HorizontalRuleAttrs::default(),
+    }
+}
+
+/// Builds [`HorizontalRuleAttrs`] from a YAML flow mapping, coercing scalars
+/// to strings and dropping unknown keys.
+fn attrs_from_mapping(map: &serde_yaml_ng::Mapping) -> HorizontalRuleAttrs {
+    let mut attrs = HorizontalRuleAttrs::default();
+    for (yaml_key, yaml_value) in map {
+        let Some(key) = yaml_value_as_string(yaml_key) else {
+            continue;
+        };
+        let Some(value) = yaml_value_as_string(yaml_value) else {
+            continue;
+        };
+        match key.as_str() {
+            "style" => attrs.style = Some(value),
+            "alignment" => attrs.alignment = Some(value),
+            "weight" => attrs.weight = Some(value),
+            "width" => attrs.width = Some(value),
+            "color" => attrs.color = Some(value),
+            _ => {}
+        }
+    }
+    attrs
+}
+
+/// Coerces a YAML scalar to a string, returning `None` for non-scalar shapes.
+fn yaml_value_as_string(value: &serde_yaml_ng::Value) -> Option<String> {
+    match value {
+        serde_yaml_ng::Value::String(s) => Some(s.clone()),
+        serde_yaml_ng::Value::Number(n) => Some(n.to_string()),
+        serde_yaml_ng::Value::Bool(b) => Some(b.to_string()),
+        _ => None,
+    }
+}
+
 /// Iterator adapter that processes paragraph events for horizontal rule syntax with attributes.
 ///
 /// `RuleProcessor` wraps an iterator of `InlineEvent` and transforms

@@ -37,17 +37,24 @@ use crate::components::ChoiceOption;
 /// ## Variants
 ///
 /// - [`SortOrder::Natural`] preserves source order.
-/// - [`SortOrder::Reverse`] reverses source order without comparing
+/// - [`SortOrder::Inverse`] reverses source order without comparing
 ///   labels.
 /// - [`SortOrder::Asc`] sorts lexically by label (ascending).
 /// - [`SortOrder::Desc`] sorts lexically by label (descending).
+///
+/// ## Notes
+///
+/// `Inverse` is the canonical name (matching the public CLI surface and
+/// the spec). The historical `Reverse` spelling remains available as a
+/// deprecated alias via the [`SortOrder::Reverse`] associated constant
+/// for any in-tree call sites that have not yet migrated.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum SortOrder {
     /// Preserve source order (the default).
     #[default]
     Natural,
     /// Reverse source order.
-    Reverse,
+    Inverse,
     /// Sort lexically by label (ascending).
     Asc,
     /// Sort lexically by label (descending).
@@ -55,6 +62,13 @@ pub enum SortOrder {
 }
 
 impl SortOrder {
+    /// Deprecated alias for [`SortOrder::Inverse`]. Kept so that
+    /// pre-rename call sites continue to compile while they migrate to
+    /// the canonical `Inverse` name.
+    #[deprecated(since = "0.2.0", note = "use `SortOrder::Inverse` instead")]
+    #[allow(non_upper_case_globals)]
+    pub const Reverse: SortOrder = SortOrder::Inverse;
+
     /// Applies this ordering to `options` in place.
     ///
     /// The sort is stable (the standard library's `slice::sort_by` is
@@ -63,9 +77,56 @@ impl SortOrder {
     pub fn apply<V>(self, options: &mut [ChoiceOption<V>]) {
         match self {
             SortOrder::Natural => {}
-            SortOrder::Reverse => options.reverse(),
+            SortOrder::Inverse => options.reverse(),
             SortOrder::Asc => options.sort_by(|a, b| a.label.cmp(&b.label)),
             SortOrder::Desc => options.sort_by(|a, b| b.label.cmp(&a.label)),
+        }
+    }
+}
+
+/// Preferred ordering vocabulary for choice components.
+///
+/// Mirrors [`SortOrder`] but uses `Inverse` instead of `Reverse` to
+/// match the public CLI surface. Conversions in both directions are
+/// provided so existing code can migrate incrementally.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum OptionSort {
+    /// Preserve source order (the default).
+    #[default]
+    Natural,
+    /// Reverse source order.
+    Inverse,
+    /// Sort lexically by label (ascending).
+    Asc,
+    /// Sort lexically by label (descending).
+    Desc,
+}
+
+impl OptionSort {
+    /// Applies this ordering to `options` in place.
+    pub fn apply<V>(self, options: &mut [ChoiceOption<V>]) {
+        SortOrder::from(self).apply(options);
+    }
+}
+
+impl From<SortOrder> for OptionSort {
+    fn from(value: SortOrder) -> Self {
+        match value {
+            SortOrder::Natural => OptionSort::Natural,
+            SortOrder::Inverse => OptionSort::Inverse,
+            SortOrder::Asc => OptionSort::Asc,
+            SortOrder::Desc => OptionSort::Desc,
+        }
+    }
+}
+
+impl From<OptionSort> for SortOrder {
+    fn from(value: OptionSort) -> Self {
+        match value {
+            OptionSort::Natural => SortOrder::Natural,
+            OptionSort::Inverse => SortOrder::Inverse,
+            OptionSort::Asc => SortOrder::Asc,
+            OptionSort::Desc => SortOrder::Desc,
         }
     }
 }
@@ -93,13 +154,22 @@ mod tests {
     }
 
     #[test]
-    fn reverse_inverts() {
+    fn inverse_inverts() {
         let mut options = opts();
-        SortOrder::Reverse.apply(&mut options);
+        SortOrder::Inverse.apply(&mut options);
         assert_eq!(
             options.iter().map(|o| o.label.as_str()).collect::<Vec<_>>(),
             vec!["Cherry", "Apple", "Berry"]
         );
+    }
+
+    #[test]
+    #[allow(deprecated)]
+    fn reverse_alias_still_resolves_to_inverse() {
+        // The historical `SortOrder::Reverse` constant must continue
+        // to compile and behave identically to `SortOrder::Inverse`
+        // so in-tree callers can migrate incrementally.
+        assert_eq!(SortOrder::Reverse, SortOrder::Inverse);
     }
 
     #[test]
@@ -150,7 +220,38 @@ mod tests {
         let mut options: Vec<ChoiceOption<String>> = vec![];
         SortOrder::Asc.apply(&mut options);
         assert!(options.is_empty());
-        SortOrder::Reverse.apply(&mut options);
+        SortOrder::Inverse.apply(&mut options);
         assert!(options.is_empty());
+    }
+
+    #[test]
+    fn option_sort_default_is_natural() {
+        assert_eq!(OptionSort::default(), OptionSort::Natural);
+    }
+
+    #[test]
+    fn option_sort_inverse_reverses() {
+        let mut options = opts();
+        OptionSort::Inverse.apply(&mut options);
+        assert_eq!(
+            options.iter().map(|o| o.label.as_str()).collect::<Vec<_>>(),
+            vec!["Cherry", "Apple", "Berry"]
+        );
+    }
+
+    #[test]
+    fn sort_order_to_option_sort_roundtrips() {
+        assert_eq!(OptionSort::from(SortOrder::Natural), OptionSort::Natural);
+        assert_eq!(OptionSort::from(SortOrder::Inverse), OptionSort::Inverse);
+        assert_eq!(OptionSort::from(SortOrder::Asc), OptionSort::Asc);
+        assert_eq!(OptionSort::from(SortOrder::Desc), OptionSort::Desc);
+    }
+
+    #[test]
+    fn option_sort_to_sort_order_roundtrips() {
+        assert_eq!(SortOrder::from(OptionSort::Natural), SortOrder::Natural);
+        assert_eq!(SortOrder::from(OptionSort::Inverse), SortOrder::Inverse);
+        assert_eq!(SortOrder::from(OptionSort::Asc), SortOrder::Asc);
+        assert_eq!(SortOrder::from(OptionSort::Desc), SortOrder::Desc);
     }
 }

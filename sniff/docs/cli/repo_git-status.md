@@ -15,7 +15,7 @@ Shows a compact git status for the current repository: recent commit history, wo
 
 ```
 sniff repo git-status [OPTIONS]
-sniff [--json] [--plain] [-v] repo git-status [--history <N>] [--refresh-remotes] [--compact] [-p <PKG>]
+sniff [--json] [--plain] [-v] repo git-status [--history <N>] [--refresh-remotes] [--compact] [-p <PKG>] [--package-area <AREA>]
 ```
 
 ## Flags and Options
@@ -25,7 +25,8 @@ sniff [--json] [--plain] [-v] repo git-status [--history <N>] [--refresh-remotes
 | `--history <N>` | | `10` | Number of recent commits to display |
 | `--refresh-remotes` | | off | Fetch remotes to check if branches are out of sync (enables `--deep` detection) |
 | `--compact` | | off | Render only the top Status section |
-| `--package <PKG>` | `-p` | | Scope the git view to a specific package or package area |
+| `--package <PKG>` | `-p` | | Scope the git view to a specific package (exact match on `Package.name`) |
+| `--package-area <AREA>` | | | Scope the git view to a specific package area (prefix match on `Package.package_area`) |
 | `--json` | | off | Emit JSON instead of styled text (global flag) |
 | `--plain` | | off | Strip all ANSI escape codes from text output (global flag) |
 | `--verbose` / `-v` | `-v` | 0 | Increase output verbosity; repeatable (`-vv`) |
@@ -42,14 +43,17 @@ Enables deep detection: fetches remote refs to populate tracking data. Without t
 
 Limits text output to the **Status** section. The **Worktrees** and **Meta** sections are omitted. JSON output is unchanged.
 
-### `-p` / `--package <PKG>`
+### `-p` / `--package <PKG>` and `--package-area <AREA>`
 
-Scopes all git output to a single package or package area. Accepts:
+Scopes all git output to a single package, a package area, or the intersection of the two:
 
-- A package name (e.g., `homelab-cli`) — matched against `Package.name` case-insensitively
-- A package area (e.g., `homelab`) — matched against `Package.package_area` case-insensitively
+- `--package <PKG>` matches `Package.name` exactly (case-insensitive). On failure, the error lists valid package names.
+- `--package-area <AREA>` matches `Package.package_area` as a case-insensitive **prefix** (so `--package-area homelab` matches both `homelab` and `homelab/server`). On failure, the error lists valid package areas.
+- When **both** are passed, the resolved package must live within the resolved area. If they do not overlap, the command fails with an error like `error: Package 'sniff-lib' is in area 'sniff', not 'homelab'`. When they do overlap, the narrower (package) prefix is used.
 
-When scoped, recent commits are filtered to paths under the package directory, and file changes are filtered to that path prefix. Staged, unstaged, and untracked counts are recomputed after filtering. If the name matches nothing, an error lists valid package names and areas.
+When scoped, recent commits are filtered to paths under the resolved directory, and file changes are filtered to that path prefix. Staged, unstaged, and untracked counts are recomputed after filtering.
+
+> Breaking change vs. previous releases: passing a **package-area name** (e.g., `homelab`) to `--package` is now an error. Use `--package-area homelab` instead.
 
 ## Default Output
 
@@ -149,106 +153,102 @@ Shows git user identity (`user.name` and `user.email`) when configured. At `verb
 ## JSON Output (`--json`)
 
 ```
-sniff --json repo git-status [--history <N>] [--refresh-remotes] [-p <PKG>]
+sniff --json repo git-status [--history <N>] [--refresh-remotes] [-p <PKG>] [--package-area <AREA>]
 ```
 
-Returns the full `FilesystemInfo` JSON object. The `git` field contains the `GitInfo` structure:
+Returns the `GitInfo` object directly at the top level (not nested under `filesystem.git`). This mirrors what `git-status` shows in text mode and keeps JSON consumers focused on git data instead of unrelated repository structure:
 
 ```json
 {
-  "filesystem": {
-    "git": {
-      "repo_root": "/absolute/path/to/repo",
-      "org": "owner",
-      "repo": "repo-name",
-      "current_branch": "main",
-      "branches": [
+  "repo_root": "/absolute/path/to/repo",
+  "org": "owner",
+  "repo": "repo-name",
+  "current_branch": "main",
+  "branches": [
+    {
+      "name": "main",
+      "short_hash": "a1b2c3d4",
+      "ahead": 0,
+      "behind": 0
+    }
+  ],
+  "in_worktree": false,
+  "base_repo_root": null,
+  "recent": [
+    {
+      "sha": "a1b2c3d4e5f6...",
+      "message": "feat(cli): add new flag",
+      "author": "Ken Snyder",
+      "timestamp": "2026-03-24T12:00:00Z",
+      "refs": [
         {
           "name": "main",
-          "short_hash": "a1b2c3d4",
-          "ahead": 0,
-          "behind": 0
-        }
-      ],
-      "in_worktree": false,
-      "base_repo_root": null,
-      "recent": [
-        {
-          "sha": "a1b2c3d4e5f6...",
-          "message": "feat(cli): add new flag",
-          "author": "Ken Snyder",
-          "timestamp": "2026-03-24T12:00:00Z",
-          "refs": [
-            {
-              "name": "main",
-              "kind": "LocalBranch",
-              "is_head": true
-            }
-          ]
-        }
-      ],
-      "status": {
-        "is_dirty": true,
-        "staged_count": 1,
-        "unstaged_count": 2,
-        "untracked_count": 0,
-        "dirty": [
-          {
-            "filepath": "src/main.rs",
-            "absolute_filepath": "/path/to/repo/src/main.rs",
-            "diff": "--- a/src/main.rs\n+++ b/src/main.rs\n...",
-            "last_local_commit": "a1b2c3d4...",
-            "origin_commit": "a1b2c3d4..."
-          }
-        ],
-        "untracked": [],
-        "is_behind": false
-      },
-      "remotes": [
-        {
-          "name": "origin",
-          "url": "https://github.com/owner/repo.git",
-          "provider": "GitHub",
-          "branches": null,
-          "default_branch": null
-        }
-      ],
-      "worktrees": {
-        "feat/my-feature": {
-          "branch": "feat/my-feature",
-          "filepath": "/path/to/worktrees/feat-my-feature",
-          "sha": "b2c3d4e5f6a1...",
-          "dirty": false,
-          "ahead": 3,
-          "behind": 0,
-          "base_branch": "main",
-          "has_conflicts": false,
-          "merged": false,
-          "changed_files": 0
-        }
-      },
-      "config": {
-        "user_name": "Ken Snyder",
-        "user_email": "ken@example.com"
-      },
-      "tracking": [
-        {
-          "remote": "origin",
-          "ahead": 2,
-          "behind": 0
-        }
-      ],
-      "file_changes": [
-        {
-          "path": "src/main.rs",
-          "status": "Staged",
-          "action": "Modified",
-          "lines_added": 5,
-          "lines_removed": 2
+          "kind": "LocalBranch",
+          "is_head": true
         }
       ]
     }
-  }
+  ],
+  "status": {
+    "is_dirty": true,
+    "staged_count": 1,
+    "unstaged_count": 2,
+    "untracked_count": 0,
+    "dirty": [
+      {
+        "filepath": "src/main.rs",
+        "absolute_filepath": "/path/to/repo/src/main.rs",
+        "diff": "--- a/src/main.rs\n+++ b/src/main.rs\n...",
+        "last_local_commit": "a1b2c3d4...",
+        "origin_commit": "a1b2c3d4..."
+      }
+    ],
+    "untracked": [],
+    "is_behind": false
+  },
+  "remotes": [
+    {
+      "name": "origin",
+      "url": "https://github.com/owner/repo.git",
+      "provider": "GitHub",
+      "branches": null,
+      "default_branch": null
+    }
+  ],
+  "worktrees": {
+    "feat/my-feature": {
+      "branch": "feat/my-feature",
+      "filepath": "/path/to/worktrees/feat-my-feature",
+      "sha": "b2c3d4e5f6a1...",
+      "dirty": false,
+      "ahead": 3,
+      "behind": 0,
+      "base_branch": "main",
+      "has_conflicts": false,
+      "merged": false,
+      "changed_files": 0
+    }
+  },
+  "config": {
+    "user_name": "Ken Snyder",
+    "user_email": "ken@example.com"
+  },
+  "tracking": [
+    {
+      "remote": "origin",
+      "ahead": 2,
+      "behind": 0
+    }
+  ],
+  "file_changes": [
+    {
+      "path": "src/main.rs",
+      "status": "Staged",
+      "action": "Modified",
+      "lines_added": 5,
+      "lines_removed": 2
+    }
+  ]
 }
 ```
 
@@ -263,7 +263,7 @@ Key notes on the JSON schema:
 - `file_changes[].status` — one of `"Staged"`, `"Modified"`, `"Both"`, `"Untracked"`
 - `file_changes[].action` — one of `"Created"`, `"Modified"`, `"Deleted"`
 
-When `-p`/`--package` is used, `recent` commits, `file_changes`, `status.dirty`, `status.untracked`, and the derived counts are all filtered to the package path before serialization.
+When `-p`/`--package` and/or `--package-area` are used, `recent` commits, `file_changes`, `status.dirty`, `status.untracked`, and the derived counts are all filtered to the resolved path prefix before serialization.
 
 ## Plain Output (`--plain`)
 

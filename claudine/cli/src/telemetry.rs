@@ -7,6 +7,7 @@ use chrono::Local;
 use tracing::field::{Field, Visit};
 use tracing::{Event, Span, Subscriber, info_span};
 use tracing_subscriber::EnvFilter;
+use tracing_subscriber::filter::LevelFilter;
 use tracing_subscriber::fmt::format::{FmtSpan, FormatEvent, FormatFields, Writer};
 use tracing_subscriber::fmt::{FmtContext, FormattedFields};
 use tracing_subscriber::prelude::*;
@@ -43,8 +44,10 @@ pub(crate) fn build_env_filter(
     rust_log: Option<&str>,
     debug_level: Option<DebugLevel>,
 ) -> EnvFilter {
-    let builder = tracing_subscriber::EnvFilter::builder()
-        .with_default_directive(tracing::Level::WARN.into());
+    // Default to OFF so no tracing events leak to stderr unless the user
+    // explicitly opts in via RUST_LOG or --debug. See feedback_verbose_vs_debug.
+    let builder =
+        tracing_subscriber::EnvFilter::builder().with_default_directive(LevelFilter::OFF.into());
 
     if let Some(rust_log) = rust_log {
         return builder.parse_lossy(rust_log);
@@ -132,7 +135,7 @@ fn command_name(command: &Commands) -> &'static str {
         Commands::Skills(_) => "skills",
         Commands::Agents(_) => "agents",
         Commands::SlashCommands(_) => "commands",
-        Commands::Providers => "providers",
+        Commands::Providers(_) => "providers",
         Commands::Logs(_) => "logs",
         Commands::Uninstall(_) => "uninstall",
         Commands::Mcp(_) => "mcp",
@@ -146,6 +149,7 @@ fn command_name(command: &Commands) -> &'static str {
         Commands::Compose(_) => "compose",
         Commands::InlineCompose(_) => "inline-compose",
         Commands::Sequence(_) => "sequence",
+        Commands::Context(_) => "context",
     }
 }
 
@@ -552,7 +556,15 @@ mod tests {
 
     #[test]
     fn provider_subcommand_only_exists_for_wrapper_commands() {
-        assert_eq!(provider_subcommand_name(Some(&Commands::Providers)), None);
+        assert_eq!(
+            provider_subcommand_name(Some(&Commands::Providers(
+                crate::commands::providers::ProvidersArgs {
+                    describe: false,
+                    format: crate::commands::providers::ProvidersFormat::Text,
+                }
+            ))),
+            None
+        );
         assert_eq!(
             provider_subcommand_name(Some(&Commands::Codex(minimal_wrapper_args()))),
             Some("codex")
@@ -614,6 +626,24 @@ mod tests {
         .unwrap();
 
         assert_eq!(rendered, r#"(before_tool, shell {"cmd":"git status"})"#);
+    }
+
+    #[test]
+    fn build_env_filter_is_silent_without_opt_in() {
+        let filter = build_env_filter(None, None);
+        assert_eq!(filter.to_string(), "off");
+    }
+
+    #[test]
+    fn build_env_filter_honors_rust_log() {
+        let filter = build_env_filter(Some("info"), None);
+        assert!(filter.to_string().contains("info"));
+    }
+
+    #[test]
+    fn build_env_filter_honors_debug_level() {
+        let filter = build_env_filter(None, Some(DebugLevel::Debug));
+        assert!(filter.to_string().contains("claudine=debug"));
     }
 
     #[test]

@@ -2,6 +2,8 @@
 
 Context variables are variables which Darkmatter provides to the **Interpolation** process as a key/value dictionary under the name of `ctx`.
 
+## Overcoming `ctx` Conflicts
+
 - It is recommended that document authors not use the `ctx` frontmatter variable because of the namespace collision it causes
 - However, when composing a document with `md compose`, if the document DOES have a `ctx` property defined then we will merge the two dictionaries; Darkmatter's runtime values take precedence over the page's when `ctx` keys overlap
 - We will report to STDERR this event as a warning with a message of:
@@ -21,9 +23,23 @@ When composing a document graph, we calculate the context once and reuse it acro
 - This is more efficient
 - It also ensures that we have the same date/time info throughout the composed document
 
-## CWD in Compose
+However, context capture is also **demand-driven**: the document is scanned for `ctx.*` references and only the groups actually referenced are captured. If a document uses only `{{ ctx.today }}`, no git discovery, OS detection, or hardware probing occurs. Within a captured group, all properties in that group are computed; the laziness is at the group boundary, not per-property.
 
-Some of the information provided in the context is based on the current working directory (process CWD, not the input file location).
+### Capture Groups
+
+Variables are organized into capture groups. The expensive I/O for each group runs in parallel via `std::thread::scope`; property derivation from the captured data is negligible string formatting.
+
+| Group | Expensive I/O | Properties |
+|-------|--------------|------------|
+| **DateTime** | `Local::now()` / `Utc::now()` syscalls (near-zero) | `now`, `now_utc`, `today`, `yesterday`, `tomorrow`, all `_utc` date variants, `day`, `day_abbr`, `day_utc`, `day_abbr_utc`, `year`, `year_utc`, `month`, `month_name`, `month_name_abbr`, `day_of_month`, `day_of_month_suffixed`, `time`, `time_military`, `timezone`, `timezone_offset`, `timezone_iana`, week boundaries, `season`, `timestamp`, `timestamp_ms` |
+| **Repo** | `GitRepo::discover` + `detect_repo_structure` | `repo`, `repo_root`, `is_monorepo`, `package_root`, `package_area_root`, `packages`, `packages_list`, `package_areas`, `package_areas_list`, `current_package`, `current_package_area` |
+| **FileChanges** | `GitRepo::file_changes()` | `dirty_files`, `dirty_files_list`, `dirty_source_code_files`, `dirty_source_code_files_list`, `staged_files`, `staged_files_list`, `untracked_files`, `untracked_files_list`, `dirty_packages`, `dirty_packages_list`, `dirty_package_areas`, `dirty_package_areas_list`, `staged_packages`, `staged_packages_list`, `staged_package_areas`, `staged_package_areas_list`, `current_package_has_*`, `current_package_area_has_*` |
+| **Languages** | Reads from already-captured repo info (no additional I/O) | `programming_languages_in_repo`, `programming_language`, `package_manager` |
+| **Documents** | `detect_docs_with_packages` | `docs_readme`, `docs_blast_radius`, `docs_drift`, `docs_skill` |
+| **OS** | `detect_os_with_request` | `os`, `os_distro`, `os_package_manager`, `os_version` |
+| **Hardware** | `detect_hardware_summary` | `memory_total`, `memory_used`, `memory_avail`, `cpu_cores`, `cpu_arch` |
+| **GPU** | `detect_gpus` (subprocess on macOS) | `gpu` |
+
 
 ## Information Provided
 
@@ -31,7 +47,9 @@ We will now provide a grouped overview of all the information stored in Darkmatt
 
 > **Note:** all date and time related information is reported using _local_ time but there will be a `_utc` variant that provides the same utility only using UTC time to resolve.
 
-### Date
+### Date and Time Information
+
+#### Date Only
 
 | Variable                | Type     | Description                                 |
 |-------------------------|----------|---------------------------------------------|
@@ -50,7 +68,7 @@ We will now provide a grouped overview of all the information stored in Darkmatt
 | `end_of_week_mon`       | `String` | End of week (Sunday), `YYYY-MM-DD`          |
 | `end_of_week_mon_utc`   | `String` | End of week (Sunday), UTC                   |
 
-### Date and Time
+#### Date and Time
 
 | Variable  | Type     | Description                                                |
 |-----------|----------|------------------------------------------------------------|
@@ -58,7 +76,7 @@ We will now provide a grouped overview of all the information stored in Darkmatt
 | `now_utc` | `String` | ISO Datetime string for UTC (`YYYY-MM-DDThh:mm:ssZ`)       |
 | `utc`     | `String` | **Alias** for `now_utc` (backward compatibility)           |
 
-### Time
+#### Time Only
 
 | Variable          | Type     | Description                                     |
 |-------------------|----------|-------------------------------------------------|
@@ -68,7 +86,7 @@ We will now provide a grouped overview of all the information stored in Darkmatt
 | `timezone_offset` | `String` | UTC offset (e.g., `-0700`)                      |
 | `timezone_iana`   | `String` | UTC offset (e.g., `America/Los_Angeles`)                      |
 
-### Calendar
+#### Calendar
 
 | Variable                | Type     | Description                                         |
 |-------------------------|----------|-----------------------------------------------------|
@@ -87,7 +105,7 @@ We will now provide a grouped overview of all the information stored in Darkmatt
 | `month_name_abbr`       | `String` | Abbreviated month name (e.g., Jan)                  |
 | `season`                | `String` | Meteorological season: Spring, Summer, Fall, Winter |
 
-### Timestamps
+#### Timestamps
 
 | Variable       | Type     | Description                     |
 |----------------|----------|---------------------------------|
@@ -96,6 +114,8 @@ We will now provide a grouped overview of all the information stored in Darkmatt
 
 ### Filesystem and Git
 
+> **Note:** the CWD in all file/git operations is the directory which _executed_ the `md compose` command **not** the directory where the composed document lives
+> 
 > **Note:** most discovery in this section leverages the `sniff` library
 
 | Variable               | Type              | Description                                                                        |
@@ -200,4 +220,3 @@ We will now provide a grouped overview of all the information stored in Darkmatt
 | `cpu_cores`    | `Number`        | Number of logical CPU cores                                |
 | `cpu_arch`     | `String`        | CPU architecture (e.g., `aarch64`, `x86_64`)               |
 | `gpu`          | `String \| null` | GPU device name(s), comma-separated; null if none detected |
-

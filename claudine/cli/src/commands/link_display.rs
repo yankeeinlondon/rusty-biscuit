@@ -3,7 +3,7 @@ use std::path::Path;
 
 use biscuit_terminal::components::list::UnorderedList;
 use biscuit_terminal::components::prose::Prose;
-use biscuit_terminal::components::renderable::Renderable;
+use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::terminal::Terminal;
 use biscuit_terminal::utils::layout::WordWrap;
 use claudine::linking::{LinkableResource, ProviderSkillPaths, capabilities_for};
@@ -135,7 +135,7 @@ where
 }
 
 pub(crate) fn build_provider_header(provider_name: &str, resource: LinkableResource) -> String {
-    let Some(provider) = claudine::events::Provider::fuzzy_match_cli_name(provider_name) else {
+    let Some(provider) = claudine::provider::Provider::fuzzy_match_cli_name(provider_name) else {
         return format!("<b>{provider_name}</b>");
     };
 

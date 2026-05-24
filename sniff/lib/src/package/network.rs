@@ -498,7 +498,7 @@ impl PackageManagerShape for BunNetwork {
 // Dependency Enrichment
 // ============================================================================
 
-use crate::filesystem::repo::DependencyEntry;
+use crate::package::dependency::DependencyEntry;
 
 /// Enriches a dependency entry with the latest version from its registry.
 ///
@@ -571,7 +571,7 @@ pub async fn enrich_dependencies(entries: Vec<DependencyEntry>) -> Vec<Dependenc
 #[cfg(all(test, feature = "network"))]
 mod tests {
     use super::*;
-    use crate::filesystem::repo::DependencyKind;
+    use crate::package::dependency::DependencyKind;
 
     #[tokio::test]
     async fn test_enrich_dependency_cargo() {

@@ -59,53 +59,68 @@ pub struct HardwareInfo {
 /// or `HardwareRequest::full()` for everything including storage,
 /// GPU, and audio devices.
 #[instrument(skip(request), fields(
+    cpu = request.include_cpu,
+    memory = request.include_memory,
     storage = request.include_storage,
     gpu = request.include_gpu,
     audio = request.include_audio,
 ))]
 pub fn detect_hardware_with_request(request: &HardwareRequest) -> Result<HardwareInfo> {
     let core_started = Instant::now();
-    let sys = System::new_with_specifics(
-        RefreshKind::nothing()
-            .with_cpu(CpuRefreshKind::everything())
-            .with_memory(MemoryRefreshKind::everything()),
-    );
+    let needs_sys = request.include_cpu || request.include_memory;
 
-    let cpu = CpuInfo {
-        brand: sys
-            .cpus()
-            .first()
-            .map(|c| c.brand().to_string())
-            .unwrap_or_default(),
-        arch: {
-            let arch = System::cpu_arch();
-            if arch.is_empty() {
-                std::env::consts::ARCH.to_string()
-            } else {
-                arch
-            }
-        },
-        logical_cores: sys.cpus().len(),
-        physical_cores: System::physical_core_count(),
-        simd: detect_simd(),
-    };
-
-    // On macOS (and possibly other platforms), available_memory() may return 0.
-    // In this case, fall back to free_memory() which provides usable memory info.
-    let available = sys.available_memory();
-    let available_bytes = if available == 0 {
-        sys.free_memory()
+    let sys = if needs_sys {
+        Some(System::new_with_specifics(
+            RefreshKind::nothing()
+                .with_cpu(CpuRefreshKind::everything())
+                .with_memory(MemoryRefreshKind::everything()),
+        ))
     } else {
-        available
+        None
     };
 
-    let memory = MemoryInfo {
-        total_bytes: sys.total_memory(),
-        available_bytes,
-        used_bytes: sys.used_memory(),
-        total_swap: sys.total_swap(),
-        free_swap: sys.free_swap(),
-        used_swap: sys.used_swap(),
+    let cpu = if request.include_cpu {
+        let sys = sys.as_ref();
+        CpuInfo {
+            brand: sys
+                .and_then(|s| s.cpus().first())
+                .map(|c| c.brand().to_string())
+                .unwrap_or_default(),
+            arch: {
+                let arch = System::cpu_arch();
+                if arch.is_empty() {
+                    std::env::consts::ARCH.to_string()
+                } else {
+                    arch
+                }
+            },
+            logical_cores: sys.map(|s| s.cpus().len()).unwrap_or(0),
+            physical_cores: System::physical_core_count(),
+            simd: detect_simd(),
+        }
+    } else {
+        CpuInfo::default()
+    };
+
+    let memory = if request.include_memory {
+        let sys = sys.as_ref();
+        let available = sys.and_then(|s| {
+            let avail = s.available_memory();
+            (avail > 0).then_some(avail)
+        });
+        let available_bytes =
+            available.unwrap_or_else(|| sys.map(|s| s.free_memory()).unwrap_or(0));
+
+        MemoryInfo {
+            total_bytes: sys.map(|s| s.total_memory()).unwrap_or(0),
+            available_bytes,
+            used_bytes: sys.map(|s| s.used_memory()).unwrap_or(0),
+            total_swap: sys.map(|s| s.total_swap()).unwrap_or(0),
+            free_swap: sys.map(|s| s.free_swap()).unwrap_or(0),
+            used_swap: sys.map(|s| s.used_swap()).unwrap_or(0),
+        }
+    } else {
+        MemoryInfo::default()
     };
     performance::record_logged_stage("hardware.core", core_started.elapsed(), Level::DEBUG);
 
@@ -410,5 +425,35 @@ mod tests {
         // Full may have storage, GPU, audio (platform-dependent)
         assert!(all.cpu.logical_cores > 0);
         assert!(all.memory.total_bytes > 0);
+    }
+
+    #[test]
+    fn test_detect_hardware_skips_sys_init_when_cpu_memory_disabled() {
+        let gpu_only = HardwareRequest {
+            include_cpu: false,
+            include_memory: false,
+            include_storage: false,
+            include_gpu: true,
+            include_audio: false,
+        };
+        let info = detect_hardware_with_request(&gpu_only).unwrap();
+        assert!(info.cpu.logical_cores == 0);
+        assert!(info.memory.total_bytes == 0);
+        // GPU presence is environment-dependent (absent on headless CI), so it
+        // is intentionally not asserted here.
+    }
+
+    #[test]
+    fn test_detect_hardware_cpu_only() {
+        let cpu_only = HardwareRequest {
+            include_cpu: true,
+            include_memory: false,
+            include_storage: false,
+            include_gpu: false,
+            include_audio: false,
+        };
+        let info = detect_hardware_with_request(&cpu_only).unwrap();
+        assert!(info.cpu.logical_cores > 0);
+        assert!(info.memory.total_bytes == 0);
     }
 }

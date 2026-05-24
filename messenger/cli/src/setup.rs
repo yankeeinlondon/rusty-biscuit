@@ -1,5 +1,5 @@
 use biscuit_terminal::components::prose::Prose;
-use biscuit_terminal::prelude::Renderable;
+use biscuit_terminal::prelude::TerminalRenderable;
 use biscuit_terminal::terminal::Terminal;
 use color_eyre::eyre::{Result, eyre};
 use inquire::{Confirm, InquireError, Password, PasswordDisplayMode, Select, Text};
@@ -39,6 +39,9 @@ pub fn run(provider_arg: Option<RouteProvider>) -> Result<()> {
                         Config::config_path()?.display()
                     ))
                 );
+                if provider == RouteProvider::Desktop {
+                    print_desktop_info_section(&config);
+                }
                 return Ok(());
             }
         }
@@ -94,7 +97,27 @@ pub fn run(provider_arg: Option<RouteProvider>) -> Result<()> {
         ))
     );
 
+    if provider == RouteProvider::Desktop {
+        print_desktop_info_section(&config);
+    }
+
     Ok(())
+}
+
+/// Print the desktop-specific portion of `messenger info` after a successful
+/// desktop setup. Shows helpers detected on the host and the resulting
+/// election order so the user immediately sees what they gained.
+fn print_desktop_info_section(config: &Config) {
+    let helpers = crate::info::config_helpers_for_host(config, sniff::os::detect_os_type());
+    let report = crate::info::build_report(config, &helpers);
+    println!();
+    println!(
+        "{}",
+        styled("<dim>Detected notification helpers and election order:</dim>")
+    );
+    println!();
+    let term = Terminal::default();
+    print!("{}", crate::info::render_text(&report, &term));
 }
 
 fn select_provider() -> Result<RouteProvider> {
@@ -689,6 +712,7 @@ fn prompt_windows_desktop_config() -> Result<DesktopWindowsConfig> {
 
     Ok(DesktopWindowsConfig {
         app_id: non_empty(raw),
+        prefer_helpers: Vec::new(),
     })
 }
 
@@ -723,6 +747,7 @@ fn prompt_macos_desktop_config() -> Result<DesktopMacOsConfig> {
     Ok(DesktopMacOsConfig {
         bundle_id: non_empty(bundle_id),
         strategy,
+        prefer_helpers: Vec::new(),
     })
 }
 
@@ -741,6 +766,7 @@ fn prompt_linux_desktop_config() -> Result<DesktopLinuxConfig> {
 
     Ok(DesktopLinuxConfig {
         desktop_entry: non_empty(desktop_entry),
+        prefer_helpers: Vec::new(),
     })
 }
 
@@ -831,13 +857,16 @@ mod tests {
             badge_count: None,
             windows: DesktopWindowsConfig {
                 app_id: app_id.map(str::to_string),
+                prefer_helpers: Vec::new(),
             },
             macos: DesktopMacOsConfig {
                 bundle_id: Some("com.rustybiscuit.messenger".into()),
                 strategy: RouteMacOsStrategy::Auto,
+                prefer_helpers: Vec::new(),
             },
             linux: DesktopLinuxConfig {
                 desktop_entry: Some("messenger".into()),
+                prefer_helpers: Vec::new(),
             },
         }
     }

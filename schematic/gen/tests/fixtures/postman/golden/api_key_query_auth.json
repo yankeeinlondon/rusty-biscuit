@@ -1,0 +1,59 @@
+{
+  "auth": {
+    "apikey": [
+      {
+        "key": "key",
+        "value": "api_key"
+      },
+      {
+        "key": "value",
+        "value": "{{apiKey}}"
+      },
+      {
+        "key": "in",
+        "value": "query"
+      }
+    ],
+    "type": "apikey"
+  },
+  "info": {
+    "description": "ApiKeyQuery test API",
+    "name": "ApiKeyQuery",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "item": [
+        {
+          "name": "ListItems",
+          "request": {
+            "description": "List all items",
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "items"
+              ],
+              "raw": "{{baseUrl}}/items"
+            }
+          }
+        }
+      ],
+      "name": "Items"
+    }
+  ],
+  "variable": [
+    {
+      "description": "Base URL for all requests",
+      "key": "baseUrl",
+      "value": "https://api.example.com/v1"
+    },
+    {
+      "description": "API key value",
+      "key": "apiKey",
+      "value": ""
+    }
+  ]
+}

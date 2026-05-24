@@ -25,7 +25,7 @@ unchained-ai/
 │       ├── primitives/   # Pipeline state, Runnable trait, grouping
 │       │   └── services/ # Agent status detection, PTY runner, parsers
 │       ├── rigging/      # Provider registry, model enums, rig tools
-│       ├── models/       # ModelCapability, ModelMetadata
+│       ├── models/       # ModelCapability, ProviderModelMetadata, ModelPricing, ModelDefaultParameters
 │       ├── api/          # OpenAI-compatible model discovery
 │       └── utils/        # Epoch datetime helper
 ├── gen/          # Binary: gen-models (provider enum generator)
@@ -33,7 +33,8 @@ unchained-ai/
 │   └── src/
 │       ├── main.rs          # CLI entry point (clap + clap_complete)
 │       └── commands/
-│           └── limits.rs    # `limits` subcommand (progress bars, JSON)
+│           ├── limits.rs    # `limits` subcommand (progress bars, JSON)
+│           └── models.rs    # `models` subcommand (model listing, verbose metadata)
 ```
 
 ## Key Types
@@ -47,6 +48,9 @@ unchained-ai/
 | `Prompt<V>` | `primitives::atomic` | Multi-modal prompt builder |
 | `ModelCapability` | `models::model_capability` | Abstract model selection |
 | `ProviderModel` | `rigging::providers::models` | Concrete provider/model pair |
+| `ProviderModelMetadata` | `models::model_metadata` | Rich metadata (pricing, params, modalities, etc.) |
+| `ModelPricing` | `models::model_pricing` | Per-token/request pricing (USD) |
+| `ModelDefaultParameters` | `models::model_default_parameters` | Provider-recommended generation defaults |
 | `Provider` | `rigging::providers::provider` | Provider enum with config |
 | `OpenCodeDelegation` | `primitives::atomic` | Agent CLI delegation |
 | `AgentStatus` | `primitives::services::agent_status` | Platform detection and cap limit queries |
@@ -87,7 +91,7 @@ cargo run -p unchained-ai-gen -- --dry-run
 
 ## Implementation Status
 
-**Implemented**: Pipeline state/execution, Prompt building (multi-modal), OpenCode delegation, provider registry (13 providers), model enums (auto-generated), model metadata (Parsera), rig tools (BraveSearch, ScreenScrape), client adaptors (Z.ai, ZenMux), ModelCapability serialization, agent status detection (ClaudeCode, Codex), PTY-based status command execution, cap limit parsing, CLI binary with `limits` subcommand (terminal + JSON output)
+**Implemented**: Pipeline state/execution, Prompt building (multi-modal), OpenCode delegation, provider registry (13 providers), model enums (auto-generated), model metadata (Parsera + provider-native merge), rich OpenRouter metadata (pricing, architecture, default parameters), rig tools (BraveSearch, ScreenScrape), client adaptors (Z.ai, ZenMux), ModelCapability serialization, agent status detection (ClaudeCode, Codex), PTY-based status command execution, cap limit parsing, CLI binary with `limits` subcommand (terminal + JSON output)
 
 **Not implemented**: `Prompt::execute()` (returns fatal "LLM execution not yet implemented"), `UserContent`/`Transcribe` (placeholder structs), `ForeignAgent` trait (incomplete skeleton, not publicly exported), `SmartConcat` (scaffold), HuggingFace API module (empty)
 

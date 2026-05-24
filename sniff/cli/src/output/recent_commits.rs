@@ -4,9 +4,11 @@ use chrono::Utc;
 use sniff::filesystem::git::{PeriodSpecifier, parse_period};
 
 use crate::args::{RecentCommitActionArg, RepoAction};
-use crate::commands::{CliPerf, handle_no_results};
-use crate::output::commit_blocks::{CommitCentricFilter, render_commit_set_styled};
+use crate::output::commit_blocks::{
+    CommitCentricFilter, filter_commit_set, render_commit_set_styled,
+};
 use crate::output::emit_text;
+use crate::perf::{CliPerf, handle_no_results};
 
 pub(crate) fn handle_recent_commits_command(
     action: &RepoAction,
@@ -81,9 +83,42 @@ pub(crate) fn handle_recent_commits_command(
     }
 
     if json {
-        println!("{}", serde_json::to_string_pretty(&commit_set)?);
-        perf.emit_stdout(None);
-        return Ok(());
+        // `recent-commits` keeps today's behavior — emit the full
+        // CommitDescSet untouched. The two filtered modes apply the same
+        // per-commit / per-file filtering used by styled / plain output and
+        // tag the payload with a top-level `filter` field so JSON consumers
+        // can tell the variants apart.
+        match mode {
+            RecentCommitsMode::RecentCommits => {
+                let value = serde_json::to_value(&commit_set)?;
+                crate::output::print_json_value(value, perf.build_report().as_ref());
+                return Ok(());
+            }
+            RecentCommitsMode::SourceCodeChanges | RecentCommitsMode::DocumentationChanges => {
+                let (centric_filter, filter_label) = match mode {
+                    RecentCommitsMode::SourceCodeChanges => {
+                        (CommitCentricFilter::SourceCode, "source_code")
+                    }
+                    RecentCommitsMode::DocumentationChanges => {
+                        (CommitCentricFilter::Documentation, "documentation")
+                    }
+                    RecentCommitsMode::RecentCommits => unreachable!(),
+                };
+                let mut filtered = filter_commit_set(&commit_set, centric_filter);
+                if filtered.commits.is_empty() {
+                    let msg = on_error.clone().unwrap_or_else(|| "none found".to_string());
+                    return handle_no_results(no_error, &Some(msg), plain, perf);
+                }
+                // Trim full package metadata for brevity in filtered commit views.
+                filtered.packages = None;
+                let mut value = serde_json::to_value(&filtered)?;
+                if let Some(obj) = value.as_object_mut() {
+                    obj.insert("filter".into(), serde_json::json!(filter_label));
+                }
+                crate::output::print_json_value(value, perf.build_report().as_ref());
+                return Ok(());
+            }
+        }
     }
 
     if plain {

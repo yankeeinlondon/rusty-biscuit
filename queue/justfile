@@ -32,13 +32,8 @@ build *args="":
 
 # test library and CLI
 test *args="":
-    @echo "Testing {{BOLD}}Library{{RESET}} code"
-    @echo ""
-    @cargo test -p queue {{args}}
-    @echo ""
-    @echo "Testing {{BOLD}}CLI{{RESET}} code"
-    @echo ""
-    @cargo test -p queue-cli {{args}}
+    @just _test queue {{ args }}
+    @just _test queue-cli {{ args }}
 
 # lint with clippy
 lint *args="":

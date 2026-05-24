@@ -1,34 +1,45 @@
 ---
-dir: "$(dirname "{{ spec || design }}")"
+description: "Creates a multi-phase, high confidence plan from a _feature_ or _fix_"
+root: "{{ctx.repo_root}}"
+area: "{{ctx.current_package_area == 'root' ? ctx.current_package || '' : ctx.current_package_area}}"
+dir: "$(dirname '{{ spec }}')"
 spec: ""
 design: ""
 plan: "plan.md"
+start:
+    message: "🖊️ creating a plan for the `{{spec}}` specification"
 success:
-    stderr: "The [{{dir}}/{{plan}}]({{ctx.repo_root}}/{{area}}/{{dir}}/{{plan}}) _plan_ has been completed"
-    message: "✅ the **{{dir}}/{{plan}}** _plan_ has been completed _at_ {{ctx.time}}"
+    stderr: "The **{{area}}/{{dir}}/{{plan}}** _plan_ has been created"
+    message: "✅  the _plan_ for the spec `{{spec}}` was created _at_ {{ctx.time}}"
+failure:
+    message: "❌️  the _plan_ for the spec `{{spec}}` failed to complete!"
 ---
+
 You are a planning agent. Convert the following documents into a high confidence execution plan:
 
 ::block when="spec"
+
 - Functional Specification: {{ctx.current_package_area}}/{{spec}}
-::end-block
-::block when="design"
+  ::end-block
+  ::block when="design"
 - Technical Design: {{ctx.current_package_area}}/{{design}}
-::end-block
+  ::end-block
 
 ## Requirements
 
-- Break work into phases and steps
-- Order steps by dependency
+- Break work into **phases** and **tasks**
+- Order tasks by dependency
 - Flag parallelizable work
 - Include validation checkpoints
-- Keep steps concrete and observable
+- Keep tasks concrete and observable
+- the tasks in the plan lead with a GFM inspired todo marker (e.g., `- [ ] {task}`)
+    - this allows the implementation team to check off items in the plan as they complete them
+- plans should ALWAYS start with Phase 1 (not Phase 0 or something else non-standard)
 
 ## Closure
 
-- Save the plan as "{{ctx.current_package_area}}/{{plan}}" in the same directory as the design document(s).
+- Save the plan as "{{ctx.repo_root}}{{area}}/{{dir}}/{{plan}}" in the same directory as the design document(s).
 - Add frontmatter to the plan document and set:
     - `phases` property to the number of phases defined in this plan
     - `created` add the date in YYYY-MM-DD format
     - `start_phase` set this to the starting phase number; usually 1 but may be 0 sometimes
-

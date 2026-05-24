@@ -6,7 +6,7 @@
 use std::error::Error;
 
 use biscuit_terminal::components::prose::Prose;
-use biscuit_terminal::components::renderable::Renderable;
+use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::terminal::Terminal;
 use sniff::programs::{InstallPlan, InstallPlanOption, InstallPlanReason, InstallationMethod};
 
@@ -256,6 +256,7 @@ pub fn dispatch(
     filter: OutputFilter,
     json: bool,
     plain: bool,
+    performance: Option<&sniff::PerformanceReport>,
 ) -> Result<(), Box<dyn Error>> {
     let name = args
         .program
@@ -273,7 +274,8 @@ pub fn dispatch(
     }
 
     if json {
-        println!("{}", serde_json::to_string_pretty(&plan)?);
+        let value = serde_json::to_value(&plan)?;
+        crate::output::print_json_value(value, performance);
         return Ok(());
     }
 

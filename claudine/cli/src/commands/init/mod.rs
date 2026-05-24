@@ -22,14 +22,13 @@ use claudine::config::{
     get_configurator,
 };
 use claudine::dispatch::loader::{load_claudine_config, save_claudine_config};
-use claudine::events::{
-    AgenticEvent, CanonicalProviderSettings, EventBinding, Provider, recommended_sound,
-};
+use claudine::events::{AgenticEvent, CanonicalProviderSettings, EventBinding, recommended_sound};
 use claudine::linking::{
     CanonicalSelection, LinkableResource, ResourceScope, ranked_provider_preferences,
     resolve_repo_root, select_canonical_provider, set_canonical_provider,
 };
-use claudine::services::ProtectConfig;
+use claudine::protect::config::ProtectConfig;
+use claudine::provider::Provider;
 
 use crate::log;
 
@@ -185,6 +184,7 @@ async fn run_interactive(repo_scope: bool) -> Result<()> {
         logging: true,
         protect,
         actions,
+        matchers: HashMap::new(),
         preferred_agent: first_agent.map(|agent| agent.provider),
         canonical_provider: canonical_provider.and_then(|_| preference.first().copied()),
         models: HashMap::new(),
@@ -458,6 +458,7 @@ fn default_config(repo_scope: bool) -> Result<ClaudineConfig> {
                     effect: recommended_sound(&event).to_string(),
                     volume: 1.0,
                     speed: 1.0,
+                    when: None,
                 }]
             } else {
                 vec![]
@@ -496,6 +497,7 @@ fn default_config(repo_scope: bool) -> Result<ClaudineConfig> {
         logging: true,
         protect: ProtectConfig::default(),
         actions,
+        matchers: HashMap::new(),
         preferred_agent,
         canonical_provider,
         models: HashMap::new(),
@@ -572,6 +574,7 @@ fn create_quick_provider_events(provider: Provider) -> HashMap<AgenticEvent, Eve
                     effect: recommended_sound(&event).to_string(),
                     volume: 1.0,
                     speed: 1.0,
+                    when: None,
                 }]
             } else {
                 vec![]
@@ -602,6 +605,7 @@ mod tests {
             logging: true,
             protect: ProtectConfig::default(),
             actions,
+            matchers: HashMap::new(),
             preferred_agent: Some(Provider::Claude),
             canonical_provider: None,
             models: HashMap::new(),
@@ -664,6 +668,7 @@ mod tests {
                 effect: recommended_sound(&AgenticEvent::HumanInTheLoop).to_string(),
                 volume: 1.0,
                 speed: 1.0,
+                when: None,
             }],
         };
 
@@ -725,6 +730,7 @@ mod tests {
             effect: recommended_sound(&AgenticEvent::HumanInTheLoop).to_string(),
             volume: 1.0,
             speed: 1.0,
+            when: None,
         };
         let config = config_with_actions(vec![
             (AgenticEvent::SessionStart, vec![]),

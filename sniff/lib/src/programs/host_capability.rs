@@ -12,10 +12,11 @@ use std::time::Duration;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
+use crate::executable_index::ExecutableIndex;
 use crate::os::{LinuxFamily, OsType, detect_linux_distro, detect_os_type};
 use crate::performance;
+use crate::programs::categories::{InstalledLanguagePackageManagers, InstalledOsPackageManagers};
 use crate::programs::enums::{LanguagePackageManager, OsPackageManager};
-use crate::programs::pkg_mngrs::{InstalledLanguagePackageManagers, InstalledOsPackageManagers};
 
 const PROBE_TIMEOUT: Duration = Duration::from_secs(2);
 
@@ -59,8 +60,19 @@ impl HostCapabilities {
     /// Detect cheap host facts (no verification probes).
     ///
     /// Does not touch disk cache; call [`HostCapabilities::load_or_detect`]
-    /// (added in a later task) for the cached path.
+    /// for the cached path.
     pub fn detect() -> Self {
+        let index = ExecutableIndex::build_path_only();
+        Self::detect_with_index(&index)
+    }
+
+    /// Detect cheap host facts using a pre-built [`ExecutableIndex`].
+    ///
+    /// Reuses the supplied index for OS- and language-package-manager scans so
+    /// PATH is walked only once across the whole detection. Use this when the
+    /// caller has already built (or will reuse) an index for other detection
+    /// work (e.g. the `messenger info` cold path).
+    pub fn detect_with_index(index: &ExecutableIndex) -> Self {
         let os_type = detect_os_type();
         let is_wsl = detect_is_wsl();
         let linux_family = detect_linux_distro().map(|d| d.family);
@@ -69,9 +81,9 @@ impl HostCapabilities {
         Self {
             os_type,
             is_wsl,
-            has_bash: detect_has_bash(),
-            os_pkg_mgrs: InstalledOsPackageManagers::new(),
-            lang_pkg_mgrs: InstalledLanguagePackageManagers::new(),
+            has_bash: index.find("bash").is_some(),
+            os_pkg_mgrs: InstalledOsPackageManagers::new_with_index(index),
+            lang_pkg_mgrs: InstalledLanguagePackageManagers::new_with_index(index),
             can_sudo: detect_can_sudo(),
             default_os_package_manager: default_pm,
             verified_lang_pkg_mgrs: HashSet::new(),
@@ -79,10 +91,6 @@ impl HostCapabilities {
             detected_at: Utc::now(),
         }
     }
-}
-
-fn detect_has_bash() -> bool {
-    which::which("bash").is_ok()
 }
 
 // ---------------------------------------------------------------------------
@@ -358,6 +366,25 @@ impl HostCapabilities {
         }
         performance::increment_counter("programs.host_capability.cache_misses", 1);
         let host = Self::detect();
+        if let Some(ref p) = path {
+            let _ = save_host_capabilities_to(p, &host);
+        }
+        host
+    }
+
+    /// As [`HostCapabilities::load_or_detect`], but reuses the supplied
+    /// [`ExecutableIndex`] on a cache miss so PATH is scanned only once across
+    /// the surrounding detection work.
+    pub fn load_or_detect_with_index(index: &ExecutableIndex) -> Self {
+        let path = default_cache_path();
+        if let Some(ref p) = path
+            && let Some(host) = load_host_capabilities_from(p)
+        {
+            performance::increment_counter("programs.host_capability.cache_hits", 1);
+            return host;
+        }
+        performance::increment_counter("programs.host_capability.cache_misses", 1);
+        let host = Self::detect_with_index(index);
         if let Some(ref p) = path {
             let _ = save_host_capabilities_to(p, &host);
         }

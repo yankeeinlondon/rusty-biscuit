@@ -1,17 +1,15 @@
 use crate::Result;
-use biscuit_file::toml_crate;
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
-use tracing::{debug, instrument};
+use tracing::instrument;
 
 use crate::filesystem::file_types::{
     FileAssociationStats, FileInventory, FrameworkStats, ProgrammingLanguage,
     ProgrammingLanguageStats,
 };
-use crate::filesystem::repo::detection::{
-    canonicalize_path, is_fixture_manifest, is_generated_manifest,
-};
+use crate::filesystem::repo::detection::canonicalize_path;
+use crate::package::DependencyEntry;
 
 /// Supported monorepo tools and package managers
 #[non_exhaustive]
@@ -76,66 +74,6 @@ pub enum PackageDiscoverySource {
     ManifestScan,
 }
 
-/// The type/category of a dependency.
-#[non_exhaustive]
-#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq, Hash)]
-#[serde(rename_all = "snake_case")]
-pub enum DependencyKind {
-    /// Normal runtime dependency
-    #[default]
-    Normal,
-    /// Development-only dependency (testing, building docs, etc.)
-    Dev,
-    /// Build script dependency (Cargo's build-dependencies)
-    Build,
-    /// Optional dependency (enabled via features)
-    Optional,
-    /// Target-specific dependency (e.g., platform-specific)
-    Target,
-}
-
-/// A single dependency entry with version information.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct DependencyEntry {
-    /// The package/crate name
-    pub name: String,
-    /// The kind of dependency (internal use only, hidden from JSON)
-    #[serde(skip)]
-    pub kind: DependencyKind,
-    /// Version requirement as specified in the manifest (e.g., "^1.0", ">=2.0, <3.0")
-    #[serde(alias = "version_req")]
-    pub targeted_version: String,
-    /// Actual resolved version from the lockfile (if available)
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub actual_version: Option<String>,
-    /// The package manager used for this dependency (e.g., "cargo", "npm")
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub package_manager: Option<String>,
-    /// Latest version available from the registry (only populated with --deep flag)
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub latest_version: Option<String>,
-    /// Target specification for target-specific dependencies (e.g., "cfg(target_os = \"macos\")")
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub target: Option<String>,
-    /// Whether this dependency is optional (feature-gated)
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    pub optional: bool,
-    /// Features enabled for this dependency
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub features: Vec<String>,
-    /// Whether this dependency can be updated (latest != actual)
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    pub is_updatable: bool,
-    /// Whether the available update is a major version bump.
-    ///
-    /// Only set when `is_updatable` is true and both versions follow
-    /// semantic versioning (`major.minor.patch`). Considered major when:
-    /// - The major version is 0 and a newer minor version exists, or
-    /// - A newer major version exists.
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    pub has_major_update: bool,
-}
-
 /// Information about a detected repository
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RepoInfo {
@@ -167,7 +105,7 @@ pub struct RepoInfo {
 }
 
 /// A package within a monorepo.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Package {
     /// Absolute path to the package
     pub path: PathBuf,
@@ -176,7 +114,7 @@ pub struct Package {
     /// Directory path between repo root and package root (e.g., "sniff" for "sniff/lib",
     /// "apps/browser" for "apps/browser/my_package", "root" for top-level packages)
     pub package_area: String,
-    /// Native package name from manifest (Cargo.toml [package].name or package.json name)
+    /// Native package name from manifest (Cargo.toml `[package]`.name or package.json name)
     pub name: String,
     /// The package ecosystem inferred from its manifests.
     #[serde(default)]
@@ -215,10 +153,10 @@ pub struct Package {
     pub command_runner: Vec<PathBuf>,
     /// Detected package managers (e.g., "cargo", "npm", "pnpm")
     pub package_managers: Vec<String>,
-    /// Package version from manifest (Cargo.toml [package].version or package.json version)
+    /// Package version from manifest (Cargo.toml `[package]`.version or package.json version)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub version: Option<String>,
-    /// Feature flags defined by this package (e.g., Cargo [features])
+    /// Feature flags defined by this package (e.g., Cargo `[features]`)
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub features: Vec<String>,
     /// Names of workspace-internal packages this package depends on
@@ -322,177 +260,6 @@ pub(crate) struct PackageScanResult {
     pub(crate) compatibility: PackageFiles,
 }
 
-/// Resolved versions from Cargo.lock.
-pub(crate) struct CargoLockVersions {
-    versions: HashMap<String, Vec<String>>,
-}
-
-impl CargoLockVersions {
-    /// Parse a Cargo.lock file and extract package versions.
-    pub fn parse(lock_path: &Path) -> Option<Self> {
-        let content = std::fs::read_to_string(lock_path)
-            .map_err(|e| {
-                debug!(path = %lock_path.display(), error = %e, "could not read file");
-                e
-            })
-            .ok()?;
-        let parsed: toml_crate::Value = toml_crate::from_str(&content).ok()?;
-
-        let mut versions: HashMap<String, Vec<String>> = HashMap::new();
-
-        if let Some(packages) = parsed.get("package").and_then(|p| p.as_array()) {
-            for pkg in packages {
-                if let (Some(name), Some(version)) = (
-                    pkg.get("name").and_then(|n| n.as_str()),
-                    pkg.get("version").and_then(|v| v.as_str()),
-                ) {
-                    versions
-                        .entry(name.to_string())
-                        .or_default()
-                        .push(version.to_string());
-                }
-            }
-        }
-
-        Some(Self { versions })
-    }
-
-    /// Resolve the version for a dependency name.
-    ///
-    /// Returns the first resolved version if available.
-    pub fn resolve(&self, name: &str) -> Option<String> {
-        self.versions.get(name).and_then(|v| v.first()).cloned()
-    }
-}
-
-/// Manifest file type.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-enum ManifestKind {
-    Cargo,
-    Node,
-    Python,
-    Go,
-}
-
-/// Index of all manifest files in a directory tree.
-///
-/// Performs a single directory walk and caches manifest locations,
-/// avoiding redundant filesystem traversals during package discovery.
-#[derive(Debug, Clone)]
-pub(crate) struct ManifestIndex {
-    /// Map from parent directory to set of manifest kinds found there
-    manifests: HashMap<PathBuf, HashSet<ManifestKind>>,
-}
-
-impl ManifestIndex {
-    /// Build manifest index by walking the directory tree once.
-    pub(crate) fn build(root: &Path) -> Self {
-        let mut manifests: HashMap<PathBuf, HashSet<ManifestKind>> = HashMap::new();
-
-        let walker = walkdir::WalkDir::new(root)
-            .follow_links(false)
-            .into_iter()
-            .filter_entry(|entry| {
-                if !entry.file_type().is_dir() {
-                    return true;
-                }
-
-                let name = entry.file_name().to_string_lossy();
-                name != ".git"
-                    && name != "node_modules"
-                    && name != "target"
-                    && name != ".turbo"
-                    && name != "dist"
-                    && name != "build"
-            });
-
-        for entry in walker.filter_map(|e| e.ok()) {
-            if !entry.file_type().is_file() {
-                continue;
-            }
-
-            let file_name = entry.file_name().to_string_lossy();
-            let kind = match file_name.as_ref() {
-                "Cargo.toml" => ManifestKind::Cargo,
-                "package.json" => ManifestKind::Node,
-                "pyproject.toml" => ManifestKind::Python,
-                "go.mod" => ManifestKind::Go,
-                _ => continue,
-            };
-
-            if is_generated_manifest(entry.path()) {
-                continue;
-            }
-            if is_fixture_manifest(entry.path()) {
-                continue;
-            }
-
-            let Some(parent) = entry.path().parent() else {
-                continue;
-            };
-
-            manifests
-                .entry(parent.to_path_buf())
-                .or_default()
-                .insert(kind);
-        }
-
-        Self { manifests }
-    }
-
-    pub(crate) fn from_manifest_paths(paths: impl IntoIterator<Item = PathBuf>) -> Self {
-        let mut manifests: HashMap<PathBuf, HashSet<ManifestKind>> = HashMap::new();
-
-        for path in paths {
-            let Some(file_name) = path.file_name().and_then(|value| value.to_str()) else {
-                continue;
-            };
-
-            let kind = match file_name {
-                "Cargo.toml" => ManifestKind::Cargo,
-                "package.json" => ManifestKind::Node,
-                "pyproject.toml" => ManifestKind::Python,
-                "go.mod" => ManifestKind::Go,
-                _ => continue,
-            };
-
-            let Some(parent) = path.parent() else {
-                continue;
-            };
-
-            manifests
-                .entry(parent.to_path_buf())
-                .or_default()
-                .insert(kind);
-        }
-
-        Self { manifests }
-    }
-
-    /// Get directories containing manifests within a specific subtree.
-    pub(crate) fn package_dirs_in_tree(&self, search_root: &Path, root: &Path) -> Vec<&Path> {
-        let search_root_canonical = canonicalize_path(search_root);
-        let root_canonical = canonicalize_path(root);
-
-        let mut dirs: Vec<&Path> = self
-            .manifests
-            .keys()
-            .filter_map(|path| {
-                let canonical = canonicalize_path(path);
-                // Must be within search_root but not equal to root
-                if canonical.starts_with(&search_root_canonical) && canonical != root_canonical {
-                    Some(path.as_path())
-                } else {
-                    None
-                }
-            })
-            .collect();
-
-        dirs.sort();
-        dirs
-    }
-}
-
 /// Detect repository configuration in the given directory.
 ///
 /// ## Examples
@@ -539,5 +306,107 @@ pub fn detect_repo_structure(root: &Path) -> Result<Option<RepoInfo>> {
 pub fn detect_repo_with_inventory(
     root: &Path,
 ) -> Result<(Option<RepoInfo>, Option<FileInventory>)> {
-    super::detection::detect_repo_inner(root, false)
+    let options = super::super::system_view::SharedWalkOptions {
+        collect_manifests: true,
+        collect_inventory: true,
+        collect_docs: false,
+    };
+    let view = super::super::system_view::build_filesystem_system_view(root, options);
+    super::detection::detect_repo_inner_with_shared(
+        root,
+        false,
+        view.manifest_index.as_ref(),
+        view.inventory.as_ref(),
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ============================================================================
+    // RepoInfo helper tests
+    // ============================================================================
+
+    #[test]
+    fn repo_info_package_for_dir_finds_deepest_match() {
+        let repo = RepoInfo {
+            is_monorepo: true,
+            monorepo_tool: None,
+            workspace_tools: Vec::new(),
+            root: PathBuf::from("/repo"),
+            dependencies: None,
+            dev_dependencies: None,
+            peer_dependencies: None,
+            optional_dependencies: None,
+            packages: Some(vec![
+                Package {
+                    path: PathBuf::from("/repo/crates"),
+                    relative: "crates".to_string(),
+                    package_area: "root".to_string(),
+                    name: "crates".to_string(),
+                    ecosystem: PackageEcosystem::Cargo,
+                    discovery_sources: Vec::new(),
+                    nested_packages: Vec::new(),
+                    primary_language: None,
+                    secondary_languages: Vec::new(),
+                    languages: Vec::new(),
+                    frameworks: Vec::new(),
+                    file_associations: Vec::new(),
+                    configuration: Vec::new(),
+                    documentation: Vec::new(),
+                    editor_config: None,
+                    command_runner: Vec::new(),
+                    package_managers: Vec::new(),
+                    version: None,
+                    features: Vec::new(),
+                    depends_on: Vec::new(),
+                    used_by: Vec::new(),
+                    dependencies: None,
+                    dev_dependencies: None,
+                    peer_dependencies: None,
+                    optional_dependencies: None,
+                    is_updatable: None,
+                    has_major_update: None,
+                    is_excluded: false,
+                },
+                Package {
+                    path: PathBuf::from("/repo/crates/pkg-a"),
+                    relative: "crates/pkg-a".to_string(),
+                    package_area: "crates".to_string(),
+                    name: "pkg-a".to_string(),
+                    ecosystem: PackageEcosystem::Cargo,
+                    discovery_sources: Vec::new(),
+                    nested_packages: Vec::new(),
+                    primary_language: None,
+                    secondary_languages: Vec::new(),
+                    languages: Vec::new(),
+                    frameworks: Vec::new(),
+                    file_associations: Vec::new(),
+                    configuration: Vec::new(),
+                    documentation: Vec::new(),
+                    editor_config: None,
+                    command_runner: Vec::new(),
+                    package_managers: Vec::new(),
+                    version: None,
+                    features: Vec::new(),
+                    depends_on: Vec::new(),
+                    used_by: Vec::new(),
+                    dependencies: None,
+                    dev_dependencies: None,
+                    peer_dependencies: None,
+                    optional_dependencies: None,
+                    is_updatable: None,
+                    has_major_update: None,
+                    is_excluded: false,
+                },
+            ]),
+        };
+
+        assert_eq!(
+            repo.package_for_dir(Path::new("/repo/crates/pkg-a/src"))
+                .map(|p| p.name.as_str()),
+            Some("pkg-a")
+        );
+    }
 }

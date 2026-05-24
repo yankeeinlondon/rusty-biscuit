@@ -9,34 +9,9 @@ use std::process::{Command, Output, Stdio};
 use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
-use thiserror::Error;
 
 use crate::os::OsType;
-use crate::programs::types::{InstallationMethod, SystemPrerequisite};
-
-/// Errors that can occur during program version detection.
-#[derive(Debug, Error)]
-pub enum ProgramError {
-    /// The program was not found in PATH.
-    #[error("program '{0}' not found in PATH")]
-    NotFound(String),
-
-    /// Failed to execute the version command.
-    #[error("failed to execute version command for '{program}': {source}")]
-    ExecutionFailed {
-        program: String,
-        #[source]
-        source: std::io::Error,
-    },
-
-    /// Failed to parse version output.
-    #[error("failed to parse version output for '{program}': {details}")]
-    ParseFailed { program: String, details: String },
-
-    /// The version command returned non-zero exit code.
-    #[error("version command for '{program}' failed with exit code {code}")]
-    NonZeroExit { program: String, code: i32 },
-}
+use crate::programs::contract::{InstallationMethod, ProgramError, SystemPrerequisite};
 
 const VERSION_COMMAND_TIMEOUT: Duration = Duration::from_secs(3);
 
@@ -299,13 +274,27 @@ pub trait ProgramMetadata: Sized {
     /// - The version output cannot be parsed
     fn version(&self) -> Result<String, ProgramError> {
         let info = self.info();
-
-        // Check if program exists first
         let path = self
             .path()
             .ok_or_else(|| ProgramError::NotFound(info.binary_name.to_string()))?;
+        self.version_from_path(&path)
+    }
 
-        // Get version flag arguments
+    /// Returns the version of this program by invoking the binary at `path`.
+    ///
+    /// Skips the PATH lookup performed by [`ProgramMetadata::version`], which is
+    /// useful when the caller has already resolved the executable (e.g. through
+    /// a [`crate::executable_index::ExecutableIndex`] or a
+    /// [`crate::programs::category_detector::CategoryDetector`]) and wants to avoid a
+    /// redundant `which`-style scan.
+    ///
+    /// ## Errors
+    ///
+    /// Returns an error if the version command cannot be spawned, times out, or
+    /// the output cannot be parsed under the program's `parse_strategy`.
+    fn version_from_path(&self, path: &std::path::Path) -> Result<String, ProgramError> {
+        let info = self.info();
+
         let args = info.version_flag.as_args();
         if args.is_empty() {
             return Err(ProgramError::ParseFailed {
@@ -314,24 +303,19 @@ pub trait ProgramMetadata: Sized {
             });
         }
 
-        // Execute version command
         let output =
-            run_command_with_timeout(&path, args).map_err(|e| ProgramError::ExecutionFailed {
+            run_command_with_timeout(path, args).map_err(|e| ProgramError::ExecutionFailed {
                 program: info.binary_name.to_string(),
                 source: e,
             })?;
 
-        // Check exit code (some programs return non-zero for --version)
-        // We'll be lenient and accept any output
-
-        // Get stdout, falling back to stderr if empty
+        // Some programs print --version to stderr — fall back when stdout is empty.
         let text = if output.stdout.is_empty() {
             String::from_utf8_lossy(&output.stderr).to_string()
         } else {
             String::from_utf8_lossy(&output.stdout).to_string()
         };
 
-        // Parse version based on strategy
         parse_version(&text, info)
     }
 }
@@ -490,7 +474,7 @@ impl ProgramEntry {
     pub fn installed(
         info: &ProgramInfo,
         path: std::path::PathBuf,
-        source: crate::programs::types::ExecutableSource,
+        source: crate::programs::contract::ExecutableSource,
     ) -> Self {
         Self {
             installed: true,

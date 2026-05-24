@@ -11,8 +11,8 @@ use tracing::trace;
 
 use super::OsType;
 use super::distro::LinuxFamily;
+use crate::executable_index::ExecutableIndex;
 use crate::performance;
-use crate::programs::ExecutableIndex;
 
 // ============================================================================
 // Package Manager Detection Infrastructure

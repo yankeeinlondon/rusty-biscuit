@@ -1,15 +1,15 @@
 //! Provider and model resolution for composition workflows.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
-use crate::events::{PROVIDERS_DISPLAY_ORDER, Provider};
 use crate::model_catalog::ModelCatalogService;
+use crate::provider::{PROVIDERS_DISPLAY_ORDER, Provider, provider_info};
 
 use super::error::CompositionError;
 use super::types::{
-    AgentHint, InstalledProviderSnapshot, ModelHint, ModelResolutionReason, ProviderPickerOption,
-    ProviderPickerPlan, ProviderResolutionReason, ResolutionMode, ResolvedExecutionTarget,
-    SelectedProvider, SelectionReason,
+    AgentHint, EffectiveSelectionHints, InstalledProviderSnapshot, ModelHint,
+    ModelResolutionReason, ProviderPickerOption, ProviderPickerPlan, ProviderResolutionReason,
+    ResolutionMode, ResolvedExecutionTarget, SelectedProvider, SelectionReason,
 };
 
 /// Build a snapshot of installed providers from a pre-computed list.
@@ -17,10 +17,10 @@ use super::types::{
 /// The caller (typically the CLI) is responsible for running host
 /// detection once and passing the result here.  This keeps the
 /// library side pure and unit-testable.
-#[allow(dead_code)]
 pub fn build_installed_snapshot(
     installed: &[Provider],
     excluded: &BTreeSet<Provider>,
+    clients: &sniff::programs::InstalledAiClients,
 ) -> InstalledProviderSnapshot {
     let runnable: Vec<Provider> = installed
         .iter()
@@ -28,10 +28,18 @@ pub fn build_installed_snapshot(
         .filter(|p| !excluded.contains(p) && *p != Provider::RooCode)
         .collect();
 
+    let mut binary_paths = BTreeMap::new();
+    for provider in installed {
+        if let Some(path) = clients.path(provider.sniff_ai_cli()) {
+            binary_paths.insert(*provider, path);
+        }
+    }
+
     InstalledProviderSnapshot {
         runnable,
         excluded: excluded.clone(),
         all_installed: installed.to_vec(),
+        binary_paths,
     }
 }
 
@@ -48,7 +56,7 @@ pub fn resolve_target_non_tty(
 ) -> Result<ResolvedExecutionTarget, CompositionError> {
     resolve_target_non_tty_with_env(
         explicit_provider,
-        prepared,
+        &prepared.selection_hints,
         snapshot,
         favorite,
         cli_model,
@@ -72,7 +80,32 @@ pub fn resolve_target_non_tty_with_catalog(
 ) -> Result<ResolvedExecutionTarget, CompositionError> {
     resolve_target_non_tty_with_env(
         explicit_provider,
-        prepared,
+        &prepared.selection_hints,
+        snapshot,
+        favorite,
+        cli_model,
+        |var| std::env::var(var).ok(),
+        catalog,
+    )
+}
+
+/// Resolve provider and model for a non-TTY session using raw selection hints.
+///
+/// Mirrors [`resolve_target_non_tty_with_catalog`] but takes hints directly,
+/// without requiring a fully prepared composition. Used by the CLI for *eager*
+/// target resolution before composition templates are rendered, so
+/// `{{env.AGENT}}` resolves to the chosen provider during body rendering.
+pub fn resolve_target_non_tty_with_hints(
+    explicit_provider: Option<Provider>,
+    hints: &EffectiveSelectionHints,
+    snapshot: &InstalledProviderSnapshot,
+    favorite: Option<Provider>,
+    cli_model: Option<&str>,
+    catalog: Option<&ModelCatalogService>,
+) -> Result<ResolvedExecutionTarget, CompositionError> {
+    resolve_target_non_tty_with_env(
+        explicit_provider,
+        hints,
         snapshot,
         favorite,
         cli_model,
@@ -83,7 +116,7 @@ pub fn resolve_target_non_tty_with_catalog(
 
 fn resolve_target_non_tty_with_env<E>(
     explicit_provider: Option<Provider>,
-    prepared: &super::types::PreparedComposition,
+    hints: &EffectiveSelectionHints,
     snapshot: &InstalledProviderSnapshot,
     favorite: Option<Provider>,
     cli_model: Option<&str>,
@@ -97,7 +130,7 @@ where
     if let Some(provider) = explicit_provider {
         if snapshot.all_installed.contains(&provider) {
             let (model, model_reason) =
-                resolve_model_with_env(provider, prepared, cli_model, &env_lookup, catalog);
+                resolve_model_with_env(provider, hints, cli_model, &env_lookup, catalog);
             return Ok(ResolvedExecutionTarget {
                 provider,
                 provider_reason: ProviderResolutionReason::ExplicitFlag,
@@ -113,7 +146,7 @@ where
     }
 
     // 2. Frontmatter agent hint
-    let provider = if let Some(ref hint) = prepared.selection_hints.agent {
+    let provider = if let Some(ref hint) = hints.agent {
         resolve_agent_hint_non_tty(hint, snapshot)
     } else {
         None
@@ -127,12 +160,12 @@ where
             mode: ResolutionMode::NonTty,
             installed: snapshot.runnable.clone(),
             favorite_agent: favorite,
-            frontmatter_agent_present: prepared.selection_hints.agent.is_some(),
+            frontmatter_agent_present: hints.agent.is_some(),
         });
     };
 
     let (model, model_reason) =
-        resolve_model_with_env(provider, prepared, cli_model, &env_lookup, catalog);
+        resolve_model_with_env(provider, hints, cli_model, &env_lookup, catalog);
 
     // OpenCode non-TTY hard error: model is required
     if provider == Provider::OpenCode && model.is_none() {
@@ -143,7 +176,7 @@ where
     }
 
     // Determine provider resolution reason based on which signal actually resolved
-    let provider_reason = if let Some(ref hint) = prepared.selection_hints.agent {
+    let provider_reason = if let Some(ref hint) = hints.agent {
         let resolved_from_hint = match hint {
             AgentHint::Single(p) => *p == provider,
             AgentHint::List(list) => list
@@ -181,6 +214,17 @@ pub fn build_picker_plan(
     snapshot: &InstalledProviderSnapshot,
     favorite: Option<Provider>,
 ) -> Result<ProviderPickerPlan, CompositionError> {
+    build_picker_plan_with_hints(&prepared.selection_hints, snapshot, favorite)
+}
+
+/// Build a picker plan from raw selection hints, without requiring a
+/// fully prepared composition. Used by the CLI for eager target
+/// resolution before composition templates render.
+pub fn build_picker_plan_with_hints(
+    hints: &EffectiveSelectionHints,
+    snapshot: &InstalledProviderSnapshot,
+    favorite: Option<Provider>,
+) -> Result<ProviderPickerPlan, CompositionError> {
     if snapshot.runnable.is_empty() {
         return Err(CompositionError::NoRunnableProviders);
     }
@@ -198,7 +242,7 @@ pub fn build_picker_plan(
     let mut default_index: usize = 0;
 
     // Apply frontmatter ordering and default-index influence
-    if let Some(ref hint) = prepared.selection_hints.agent {
+    if let Some(ref hint) = hints.agent {
         match hint {
             AgentHint::Single(provider) => {
                 if let Some(pos) = options.iter().position(|o| o.provider == *provider) {
@@ -269,7 +313,7 @@ pub fn resolve_model(
 ) -> (Option<String>, ModelResolutionReason) {
     resolve_model_with_env(
         provider,
-        prepared,
+        &prepared.selection_hints,
         cli_model,
         |var| std::env::var(var).ok(),
         None,
@@ -290,7 +334,26 @@ pub fn resolve_model_with_catalog(
 ) -> (Option<String>, ModelResolutionReason) {
     resolve_model_with_env(
         provider,
-        prepared,
+        &prepared.selection_hints,
+        cli_model,
+        |var| std::env::var(var).ok(),
+        catalog,
+    )
+}
+
+/// Resolve model from raw selection hints, without a prepared composition.
+///
+/// Mirrors [`resolve_model_with_catalog`] for callers that want to resolve
+/// a model before composition runs (e.g. for eager AGENT injection).
+pub fn resolve_model_with_hints(
+    provider: Provider,
+    hints: &EffectiveSelectionHints,
+    cli_model: Option<&str>,
+    catalog: Option<&ModelCatalogService>,
+) -> (Option<String>, ModelResolutionReason) {
+    resolve_model_with_env(
+        provider,
+        hints,
         cli_model,
         |var| std::env::var(var).ok(),
         catalog,
@@ -299,7 +362,7 @@ pub fn resolve_model_with_catalog(
 
 fn resolve_model_with_env<E>(
     provider: Provider,
-    prepared: &super::types::PreparedComposition,
+    hints: &EffectiveSelectionHints,
     cli_model: Option<&str>,
     env_lookup: E,
     catalog: Option<&ModelCatalogService>,
@@ -330,7 +393,7 @@ where
     }
 
     // 4. Frontmatter model (validated against catalog when available)
-    if let Some(ref hint) = prepared.selection_hints.model {
+    if let Some(ref hint) = hints.model {
         match hint {
             ModelHint::Single(model) => {
                 if catalog.is_none() || catalog.unwrap().is_valid(provider, model) {
@@ -359,16 +422,7 @@ where
 /// Return the provider-specific environment variable names to check
 /// for model selection, in priority order.
 fn provider_env_vars(provider: Provider) -> &'static [&'static str] {
-    match provider {
-        Provider::Claude => &["CLAUDE_MODEL", "ANTHROPIC_MODEL"],
-        Provider::Codex => &["CODEX_MODEL", "OPENAI_MODEL"],
-        Provider::Gemini => &["GEMINI_MODEL"],
-        Provider::Goose => &["GOOSE_MODEL"],
-        Provider::KimiCode => &["KIMI_MODEL"],
-        Provider::OpenCode => &["OPENCODE_MODEL"],
-        Provider::QwenCode => &["QWEN_MODEL"],
-        Provider::RooCode => &["ROO_MODEL"],
-    }
+    provider_info(provider).model_env_vars
 }
 
 /// Resolve an agent hint in non-TTY mode.
@@ -411,6 +465,7 @@ pub fn select_provider(
         runnable: build_candidate_set(installed, excluded),
         excluded: excluded.clone(),
         all_installed: installed.to_vec(),
+        binary_paths: std::collections::BTreeMap::new(),
     };
 
     let target = resolve_target_non_tty(explicit_provider, prepared, &snapshot, favorite, None)?;
@@ -478,7 +533,17 @@ mod tests {
         installed: Vec<Provider>,
         excluded: BTreeSet<Provider>,
     ) -> InstalledProviderSnapshot {
-        build_installed_snapshot(&installed, &excluded)
+        let runnable: Vec<Provider> = installed
+            .iter()
+            .copied()
+            .filter(|p| !excluded.contains(p) && *p != Provider::RooCode)
+            .collect();
+        InstalledProviderSnapshot {
+            runnable,
+            excluded,
+            all_installed: installed,
+            binary_paths: std::collections::BTreeMap::new(),
+        }
     }
 
     #[test]
@@ -659,8 +724,13 @@ mod tests {
         let prepared = make_prepared_composition(None, None);
         // Use the internal testable variant with an empty env lookup to verify
         // the fallback chain when no env vars are set:
-        let (model, reason) =
-            resolve_model_with_env(Provider::Codex, &prepared, None, |_| None, None);
+        let (model, reason) = resolve_model_with_env(
+            Provider::Codex,
+            &prepared.selection_hints,
+            None,
+            |_| None,
+            None,
+        );
         assert_eq!(model, None);
         assert!(matches!(reason, ModelResolutionReason::ProviderDefault));
     }
@@ -668,8 +738,13 @@ mod tests {
     #[test]
     fn model_frontmatter_single_used() {
         let prepared = make_prepared_composition(None, Some(ModelHint::Single("gpt-4o".into())));
-        let (model, reason) =
-            resolve_model_with_env(Provider::Codex, &prepared, None, |_| None, None);
+        let (model, reason) = resolve_model_with_env(
+            Provider::Codex,
+            &prepared.selection_hints,
+            None,
+            |_| None,
+            None,
+        );
         assert_eq!(model, Some("gpt-4o".to_string()));
         assert!(matches!(reason, ModelResolutionReason::FrontmatterSingle));
     }
@@ -680,8 +755,13 @@ mod tests {
             None,
             Some(ModelHint::List(vec!["gpt-4o".into(), "o3-mini".into()])),
         );
-        let (model, reason) =
-            resolve_model_with_env(Provider::Codex, &prepared, None, |_| None, None);
+        let (model, reason) = resolve_model_with_env(
+            Provider::Codex,
+            &prepared.selection_hints,
+            None,
+            |_| None,
+            None,
+        );
         assert_eq!(model, Some("gpt-4o".to_string()));
         assert!(matches!(reason, ModelResolutionReason::FrontmatterList));
     }
@@ -692,8 +772,13 @@ mod tests {
     fn model_catalog_rejects_invalid_single_hint() {
         let prepared = make_prepared_composition(None, Some(ModelHint::Single("not-real".into())));
         let catalog = crate::model_catalog::ModelCatalogService::new();
-        let (model, reason) =
-            resolve_model_with_env(Provider::Codex, &prepared, None, |_| None, Some(&catalog));
+        let (model, reason) = resolve_model_with_env(
+            Provider::Codex,
+            &prepared.selection_hints,
+            None,
+            |_| None,
+            Some(&catalog),
+        );
         // Invalid single hint falls through to provider default
         assert_eq!(model, None);
         assert!(matches!(reason, ModelResolutionReason::ProviderDefault));
@@ -706,8 +791,13 @@ mod tests {
             Some(ModelHint::List(vec!["not-real".into(), "o3-mini".into()])),
         );
         let catalog = crate::model_catalog::ModelCatalogService::new();
-        let (model, reason) =
-            resolve_model_with_env(Provider::Codex, &prepared, None, |_| None, Some(&catalog));
+        let (model, reason) = resolve_model_with_env(
+            Provider::Codex,
+            &prepared.selection_hints,
+            None,
+            |_| None,
+            Some(&catalog),
+        );
         assert_eq!(model, Some("o3-mini".to_string()));
         assert!(matches!(reason, ModelResolutionReason::FrontmatterList));
     }
@@ -719,8 +809,13 @@ mod tests {
             Some(ModelHint::List(vec!["not-real".into(), "also-fake".into()])),
         );
         let catalog = crate::model_catalog::ModelCatalogService::new();
-        let (model, reason) =
-            resolve_model_with_env(Provider::Codex, &prepared, None, |_| None, Some(&catalog));
+        let (model, reason) = resolve_model_with_env(
+            Provider::Codex,
+            &prepared.selection_hints,
+            None,
+            |_| None,
+            Some(&catalog),
+        );
         assert_eq!(model, None);
         assert!(matches!(reason, ModelResolutionReason::ProviderDefault));
     }
@@ -729,8 +824,13 @@ mod tests {
     fn model_catalog_valid_single_hint_accepted() {
         let prepared = make_prepared_composition(None, Some(ModelHint::Single("o3-mini".into())));
         let catalog = crate::model_catalog::ModelCatalogService::new();
-        let (model, reason) =
-            resolve_model_with_env(Provider::Codex, &prepared, None, |_| None, Some(&catalog));
+        let (model, reason) = resolve_model_with_env(
+            Provider::Codex,
+            &prepared.selection_hints,
+            None,
+            |_| None,
+            Some(&catalog),
+        );
         assert_eq!(model, Some("o3-mini".to_string()));
         assert!(matches!(reason, ModelResolutionReason::FrontmatterSingle));
     }
@@ -841,7 +941,7 @@ mod tests {
 
         let err = resolve_target_non_tty_with_env(
             None,
-            &prepared,
+            &prepared.selection_hints,
             &snapshot,
             Some(Provider::OpenCode),
             None,
@@ -859,7 +959,7 @@ mod tests {
 
         let target = resolve_target_non_tty_with_env(
             None,
-            &prepared,
+            &prepared.selection_hints,
             &snapshot,
             Some(Provider::OpenCode),
             None,

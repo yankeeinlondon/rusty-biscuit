@@ -4,6 +4,7 @@
 //! login shell (`$SHELL`). This allows `::shell` directives to use common
 //! aliases like `ll`, `la`, etc.
 
+use super::tokenize::ShellToken;
 use super::tokenize::tokenize;
 use std::process::{Command, Stdio};
 
@@ -67,12 +68,23 @@ pub fn resolve_alias(name: &str) -> Option<ResolvedAlias> {
     let definition = parse_alias_value(&alias_output, name)?;
 
     // Tokenize the alias value using our safe tokenizer (rejects metacharacters)
-    let tokens = tokenize(&definition).ok()?;
+    let synthetic_ctx = biscuit_terminal::errors::SourceContext::new(
+        std::path::PathBuf::from("<alias>"),
+        std::path::PathBuf::from("<alias>"),
+        definition.clone(),
+    );
+    let shell_tokens = tokenize(&definition, &synthetic_ctx).ok()?;
+    let tokens: Vec<String> = shell_tokens
+        .into_iter()
+        .filter_map(|t| match t {
+            ShellToken::Word(w) => Some(w),
+            _ => None,
+        })
+        .collect();
     if tokens.is_empty() {
         return None;
     }
 
-    // Verify the resolved executable actually exists on PATH
     if which::which(&tokens[0]).is_err() {
         return None;
     }

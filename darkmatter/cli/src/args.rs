@@ -1,6 +1,13 @@
+// The CLI maps `--align-*` / `--fill-*` arguments onto the deprecated
+// page-layout types (`PageAlignment`, `PageFill`, `WidthUnit`), which remain
+// the public construction path through the `DarkmatterPage` builder. The
+// migration to `renderable::layout::Layout` is tracked separately.
+#![allow(deprecated)]
+
 use clap::{Parser, Subcommand, ValueEnum};
 use clap_complete::Shell;
 use clap_complete::engine::{ArgValueCompleter, CompletionCandidate};
+use darkmatter::layout::{PageAlignment, PageBackground, PageFill, WidthUnit};
 use darkmatter::markdown::highlighting::ThemePair;
 use std::collections::BTreeSet;
 use std::ffi::OsStr;
@@ -298,6 +305,13 @@ pub enum Command {
         strict: bool,
     },
 
+    /// Schema authoring and validation commands.
+    Schema {
+        /// Schema sub-command
+        #[command(subcommand)]
+        target: SchemaTarget,
+    },
+
     /// Visualize a markdown file's dependency graph.
     Graph {
         /// Input file path or file reference
@@ -366,6 +380,81 @@ pub enum ValidateOutputFormat {
     Json,
 }
 
+/// Schema sub-targets.
+#[derive(Clone, Debug, Subcommand)]
+pub enum SchemaTarget {
+    /// Validate markdown frontmatter against a schema.
+    ///
+    /// Positional arguments are either Markdown file paths or
+    /// `<prop>=<value>` assignments applied to every document's frontmatter
+    /// before validation. An argument is treated as an assignment when it
+    /// contains `=` and the text before the first `=` is a dot-separated
+    /// property path (e.g. `title=Hello`, `user.email=ken@ken.net`).
+    /// File paths that contain `=` should be disambiguated with `./` —
+    /// e.g. `./weird=name.md`.
+    Validate {
+        /// Markdown file paths and `<prop>=<value>` assignments
+        #[arg(
+            value_name = "FILE_OR_PROP=VALUE",
+            required = true,
+            num_args = 1..,
+            add = ArgValueCompleter::new(complete_compose_args)
+        )]
+        inputs: Vec<String>,
+
+        /// Baseline schema path (YAML SimplifiedSchema or JSON Schema)
+        #[arg(long, value_name = "PATH")]
+        schema: Option<PathBuf>,
+
+        /// Output format
+        #[arg(long, value_enum, default_value_t = SchemaValidateFormat::Pretty)]
+        format: SchemaValidateFormat,
+
+        /// Suppress success lines; only failures print
+        #[arg(long)]
+        quiet: bool,
+    },
+
+    /// Detect a SimplifiedSchema from one or more markdown documents.
+    Detect {
+        /// Input markdown files
+        #[arg(
+            value_name = "FILE",
+            required = true,
+            num_args = 1..,
+            add = ArgValueCompleter::new(complete_markdown_files)
+        )]
+        files: Vec<PathBuf>,
+
+        /// Output format
+        #[arg(long, value_enum, default_value_t = SchemaDetectFormat::Yaml)]
+        format: SchemaDetectFormat,
+
+        /// Merge multiple files: widen disagreeing types and mark
+        /// properties required only if present in every input file.
+        #[arg(long)]
+        merge: bool,
+    },
+}
+
+/// Output format for `md schema validate`.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
+pub enum SchemaValidateFormat {
+    /// Pretty (terminal) output.
+    Pretty,
+    /// Newline-delimited JSON, one object per file.
+    Json,
+}
+
+/// Output format for `md schema detect`.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
+pub enum SchemaDetectFormat {
+    /// SimplifiedSchema YAML.
+    Yaml,
+    /// JSON Schema (Draft 2020-12).
+    Json,
+}
+
 /// Graph visualization format.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
 pub enum GraphFormat {
@@ -387,11 +476,11 @@ pub struct Cli {
     pub input: Option<PathBuf>,
 
     /// Theme for prose content (kebab-case name)
-    #[arg(long, value_parser = parse_theme_name)]
+    #[arg(long, value_parser = parse_theme_name, add = ArgValueCompleter::new(complete_theme_names))]
     pub theme: Option<ThemePair>,
 
     /// Theme for code blocks (overrides derived theme)
-    #[arg(long, value_parser = parse_theme_name)]
+    #[arg(long, value_parser = parse_theme_name, add = ArgValueCompleter::new(complete_theme_names))]
     pub code_theme: Option<ThemePair>,
 
     /// List available themes
@@ -410,14 +499,169 @@ pub struct Cli {
     #[arg(long)]
     pub save: bool,
 
-    /// Include line numbers in code blocks
-    #[arg(long)]
-    pub line_numbers: bool,
-
     /// Render mermaid diagrams to terminal as images.
     /// Falls back to code blocks if terminal doesn't support images.
     #[arg(long)]
     pub mermaid: bool,
+
+    // ── Layout flags (Phase 5) ──────────────────────────────────────────
+    /// Margin on all sides (cells)
+    #[arg(short = 'm', long, value_name = "N")]
+    pub margin: Option<u16>,
+
+    /// Horizontal margin (left + right)
+    #[arg(long, value_name = "N")]
+    pub mx: Option<u16>,
+
+    /// Vertical margin (top + bottom)
+    #[arg(long, value_name = "N")]
+    pub my: Option<u16>,
+
+    /// Top margin
+    #[arg(long, value_name = "N")]
+    pub mt: Option<u16>,
+
+    /// Bottom margin
+    #[arg(long, value_name = "N")]
+    pub mb: Option<u16>,
+
+    /// Left margin
+    #[arg(long, value_name = "N")]
+    pub ml: Option<u16>,
+
+    /// Right margin
+    #[arg(long, value_name = "N")]
+    pub mr: Option<u16>,
+
+    /// Padding on all sides (cells)
+    #[arg(long, value_name = "N")]
+    pub padding: Option<u16>,
+
+    /// Horizontal padding (left + right)
+    #[arg(long, value_name = "N")]
+    pub px: Option<u16>,
+
+    /// Vertical padding (top + bottom)
+    #[arg(long, value_name = "N")]
+    pub py: Option<u16>,
+
+    /// Top padding
+    #[arg(long, value_name = "N")]
+    pub pt: Option<u16>,
+
+    /// Bottom padding
+    #[arg(long, value_name = "N")]
+    pub pb: Option<u16>,
+
+    /// Left padding
+    #[arg(long, value_name = "N")]
+    pub pl: Option<u16>,
+
+    /// Right padding
+    #[arg(long, value_name = "N")]
+    pub pr: Option<u16>,
+
+    /// Page background style
+    #[arg(
+        long,
+        visible_alias = "page-background",
+        value_enum,
+        value_name = "STYLE"
+    )]
+    pub page_bg: Option<PageBackgroundArg>,
+
+    /// Max content width in columns (0 rejected)
+    #[arg(long, value_name = "N", value_parser = parse_max_width)]
+    pub max_width: Option<u16>,
+
+    /// Include line numbers in code blocks
+    ///
+    /// Accepts `--line-numbers` (defaults to `true`) or
+    /// `--line-numbers <true|false>` for explicit control.
+    #[arg(
+        long,
+        value_name = "BOOL",
+        num_args = 0..=1,
+        default_missing_value = "true",
+        require_equals = false,
+    )]
+    pub line_numbers: Option<bool>,
+
+    /// Default alignment for all components
+    #[arg(long, value_enum, value_name = "ALIGN")]
+    pub alignment: Option<PageAlignmentArg>,
+
+    /// Image alignment
+    #[arg(long, value_enum, value_name = "ALIGN")]
+    pub align_images: Option<PageAlignmentArg>,
+
+    /// List alignment
+    #[arg(long, value_enum, value_name = "ALIGN")]
+    pub align_lists: Option<PageAlignmentArg>,
+
+    /// Unordered list alignment
+    #[arg(long, value_enum, value_name = "ALIGN")]
+    pub align_ul: Option<PageAlignmentArg>,
+
+    /// Ordered list alignment
+    #[arg(long, value_enum, value_name = "ALIGN")]
+    pub align_ol: Option<PageAlignmentArg>,
+
+    /// List item alignment
+    #[arg(long, value_enum, value_name = "ALIGN")]
+    pub align_li: Option<PageAlignmentArg>,
+
+    /// Block quote alignment
+    #[arg(long, value_enum, value_name = "ALIGN")]
+    pub align_block_quotes: Option<PageAlignmentArg>,
+
+    /// Table alignment
+    #[arg(long, value_enum, value_name = "ALIGN")]
+    pub align_tables: Option<PageAlignmentArg>,
+
+    /// Code block alignment
+    #[arg(long, value_enum, value_name = "ALIGN")]
+    pub align_code_blocks: Option<PageAlignmentArg>,
+
+    /// Default fill for all components
+    #[arg(long, value_name = "FILL", value_parser = parse_page_fill)]
+    pub fill: Option<PageFill>,
+
+    /// Image fill
+    #[arg(long, value_name = "FILL", value_parser = parse_page_fill)]
+    pub fill_images: Option<PageFill>,
+
+    /// List fill
+    #[arg(long, value_name = "FILL", value_parser = parse_page_fill)]
+    pub fill_lists: Option<PageFill>,
+
+    /// Unordered list fill
+    #[arg(long, value_name = "FILL", value_parser = parse_page_fill)]
+    pub fill_ul: Option<PageFill>,
+
+    /// Ordered list fill
+    #[arg(long, value_name = "FILL", value_parser = parse_page_fill)]
+    pub fill_ol: Option<PageFill>,
+
+    /// List item fill
+    #[arg(long, value_name = "FILL", value_parser = parse_page_fill)]
+    pub fill_li: Option<PageFill>,
+
+    /// Block quote fill
+    #[arg(long, value_name = "FILL", value_parser = parse_page_fill)]
+    pub fill_block_quotes: Option<PageFill>,
+
+    /// Table fill
+    #[arg(long, value_name = "FILL", value_parser = parse_page_fill)]
+    pub fill_tables: Option<PageFill>,
+
+    /// Code block fill
+    #[arg(long, value_name = "FILL", value_parser = parse_page_fill)]
+    pub fill_code_blocks: Option<PageFill>,
+
+    /// Promote schema-validation warnings (unknown / deprecated keys) to errors.
+    #[arg(long)]
+    pub strict_style: bool,
 
     /// Increase verbosity for styled user-facing output (-v summary, -vv detailed)
     #[arg(
@@ -560,6 +804,27 @@ fn complete_indent_values(current: &OsStr) -> Vec<CompletionCandidate> {
     candidates
 }
 
+/// Completes theme names for `--theme` / `--code-theme`.
+///
+/// Enumerates every available [`ThemePair`](darkmatter::markdown::highlighting::ThemePair)
+/// by its kebab-case name (the same set `--list-themes` prints), attaching each
+/// theme's description as completion help. Without this completer the dynamic
+/// completion engine has no value source for the theme flags, so `--theme <tab>`
+/// offers nothing.
+fn complete_theme_names(current: &OsStr) -> Vec<CompletionCandidate> {
+    use darkmatter::markdown::highlighting::ColorMode;
+
+    let current_str = current.to_string_lossy();
+    darkmatter::markdown::highlighting::ThemePair::all()
+        .iter()
+        .filter(|pair| pair.kebab_name().starts_with(current_str.as_ref()))
+        .map(|pair| {
+            CompletionCandidate::new(pair.kebab_name())
+                .help(Some(pair.description(ColorMode::Dark).into()))
+        })
+        .collect()
+}
+
 /// Parses and validates list indentation width.
 pub fn parse_indent_size(s: &str) -> Result<usize, String> {
     let value = s
@@ -575,6 +840,124 @@ pub fn parse_indent_size(s: &str) -> Result<usize, String> {
 /// Parses a theme name string into ThemePair.
 pub fn parse_theme_name(s: &str) -> Result<darkmatter::markdown::highlighting::ThemePair, String> {
     darkmatter::markdown::highlighting::ThemePair::try_from(s).map_err(|e| e.to_string())
+}
+
+// ── Layout argument types and parsers ─────────────────────────────────────
+
+/// CLI-usable [`PageBackground`] wrapper.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
+pub enum PageBackgroundArg {
+    /// Transparent (default).
+    Transparent,
+    /// Slightly off-background fill.
+    Subtle,
+    /// High-contrast inverse fill.
+    Pronounced,
+}
+
+impl From<PageBackgroundArg> for PageBackground {
+    fn from(arg: PageBackgroundArg) -> Self {
+        match arg {
+            PageBackgroundArg::Transparent => PageBackground::Transparent,
+            PageBackgroundArg::Subtle => PageBackground::Subtle,
+            PageBackgroundArg::Pronounced => PageBackground::Pronounced,
+        }
+    }
+}
+
+/// CLI-usable [`PageAlignment`] wrapper.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
+pub enum PageAlignmentArg {
+    /// Left-aligned.
+    Left,
+    /// Centered.
+    Center,
+    /// Right-aligned.
+    Right,
+}
+
+impl From<PageAlignmentArg> for PageAlignment {
+    fn from(arg: PageAlignmentArg) -> Self {
+        match arg {
+            PageAlignmentArg::Left => PageAlignment::Left,
+            PageAlignmentArg::Center => PageAlignment::Center,
+            PageAlignmentArg::Right => PageAlignment::Right,
+        }
+    }
+}
+
+/// Parses a boolean string (`true`/`false`/`1`/`0`/`yes`/`no`).
+pub fn parse_bool_str(s: &str) -> Result<bool, String> {
+    match s.trim().to_ascii_lowercase().as_str() {
+        "true" | "1" | "yes" | "on" | "y" => Ok(true),
+        "false" | "0" | "no" | "off" | "n" => Ok(false),
+        _ => Err(format!("expected true/false, got '{s}'")),
+    }
+}
+
+/// Parses `--max-width`, rejecting `0`.
+pub fn parse_max_width(s: &str) -> Result<u16, String> {
+    let value = s
+        .parse::<u16>()
+        .map_err(|_| format!("'{s}' is not a valid positive integer"))?;
+    if value == 0 {
+        Err("--max-width must be greater than 0".to_string())
+    } else {
+        Ok(value)
+    }
+}
+
+/// Parses a [`PageFill`] string.
+///
+/// Grammar: `full`, `pad=<n|n%>`, `indent=<n|n%>`, `max=<n|n%>`, `explicit=<n|n%>`
+pub fn parse_page_fill(s: &str) -> Result<PageFill, String> {
+    let s = s.trim();
+
+    if s.eq_ignore_ascii_case("full") {
+        return Ok(PageFill::Full);
+    }
+
+    let (kind, rest) = s
+        .split_once('=')
+        .ok_or_else(|| format!("fill must be 'full' or 'kind=value', got '{s}'"))?;
+
+    let kind = kind.trim().to_ascii_lowercase();
+    let rest = rest.trim();
+
+    if rest.is_empty() {
+        return Err(format!("fill value missing after '=' in '{s}'"));
+    }
+
+    let unit = parse_width_unit(rest)?;
+
+    match kind.as_str() {
+        "pad" => Ok(PageFill::Pad(unit)),
+        "indent" => Ok(PageFill::Indent(unit)),
+        "max" => Ok(PageFill::Max(unit)),
+        "explicit" => Ok(PageFill::Explicit(unit)),
+        _ => Err(format!(
+            "unknown fill kind '{kind}', expected pad/indent/max/explicit"
+        )),
+    }
+}
+
+/// Parses a [`WidthUnit`] string (`n` or `n%`).
+fn parse_width_unit(s: &str) -> Result<WidthUnit, String> {
+    let s = s.trim();
+    if let Some(num) = s.strip_suffix('%') {
+        let p: f32 = num
+            .parse()
+            .map_err(|_| format!("'{s}' is not a valid percentage"))?;
+        if !(0.0..=100.0).contains(&p) {
+            return Err(format!("percentage must be 0-100, got {p}"));
+        }
+        Ok(WidthUnit::Percent(p))
+    } else {
+        let n: u16 = s
+            .parse()
+            .map_err(|_| format!("'{s}' is not a valid positive integer"))?;
+        Ok(WidthUnit::Fixed(n))
+    }
 }
 
 #[cfg(test)]
@@ -599,6 +982,26 @@ mod tests {
 
         let values = completion_values(complete_indent_values(OsStr::new("4")));
         assert_eq!(values, vec!["4"]);
+    }
+
+    #[test]
+    fn test_complete_theme_names() {
+        // Empty prefix enumerates every theme `--list-themes` knows about.
+        let values = completion_values(complete_theme_names(OsStr::new("")));
+        let expected: Vec<String> = darkmatter::markdown::highlighting::ThemePair::all()
+            .iter()
+            .map(|pair| pair.kebab_name().to_string())
+            .collect();
+        assert_eq!(values, expected);
+        assert!(values.contains(&"dracula".to_string()));
+        assert!(values.contains(&"nord".to_string()));
+
+        // A prefix narrows the candidates by kebab name.
+        let values = completion_values(complete_theme_names(OsStr::new("gru")));
+        assert_eq!(values, vec!["gruvbox"]);
+
+        // A non-matching prefix yields nothing.
+        assert!(completion_values(complete_theme_names(OsStr::new("zzz"))).is_empty());
     }
 
     #[test]
@@ -771,5 +1174,194 @@ mod tests {
             }
             _ => panic!("Expected Compose command"),
         }
+    }
+
+    // ---------- Phase 5: layout parser tests ----------
+
+    #[test]
+    fn parse_bool_str_accepts_truthy_values() {
+        for val in ["true", "1", "yes", "on", "y"] {
+            assert!(parse_bool_str(val).unwrap(), "value: {val}");
+        }
+    }
+
+    #[test]
+    fn parse_bool_str_accepts_falsy_values() {
+        for val in ["false", "0", "no", "off", "n"] {
+            assert!(!parse_bool_str(val).unwrap(), "value: {val}");
+        }
+    }
+
+    #[test]
+    fn parse_bool_str_rejects_invalid() {
+        assert!(parse_bool_str("maybe").is_err());
+        assert!(parse_bool_str("").is_err());
+    }
+
+    #[test]
+    fn parse_max_width_accepts_positive() {
+        assert_eq!(parse_max_width("80").unwrap(), 80);
+        assert_eq!(parse_max_width("1").unwrap(), 1);
+    }
+
+    #[test]
+    fn parse_max_width_rejects_zero() {
+        assert!(parse_max_width("0").is_err());
+    }
+
+    #[test]
+    fn parse_max_width_rejects_negative() {
+        assert!(parse_max_width("-1").is_err());
+    }
+
+    #[test]
+    fn parse_page_fill_full() {
+        assert_eq!(parse_page_fill("full").unwrap(), PageFill::Full);
+        assert_eq!(parse_page_fill("FULL").unwrap(), PageFill::Full);
+    }
+
+    #[test]
+    fn parse_page_fill_pad_fixed() {
+        assert_eq!(
+            parse_page_fill("pad=4").unwrap(),
+            PageFill::Pad(WidthUnit::Fixed(4))
+        );
+    }
+
+    #[test]
+    fn parse_page_fill_pad_percent() {
+        assert_eq!(
+            parse_page_fill("pad=10%").unwrap(),
+            PageFill::Pad(WidthUnit::Percent(10.0))
+        );
+    }
+
+    #[test]
+    fn parse_page_fill_indent_max_explicit() {
+        assert_eq!(
+            parse_page_fill("indent=2").unwrap(),
+            PageFill::Indent(WidthUnit::Fixed(2))
+        );
+        assert_eq!(
+            parse_page_fill("max=40").unwrap(),
+            PageFill::Max(WidthUnit::Fixed(40))
+        );
+        assert_eq!(
+            parse_page_fill("explicit=60").unwrap(),
+            PageFill::Explicit(WidthUnit::Fixed(60))
+        );
+    }
+
+    #[test]
+    fn parse_page_fill_rejects_unknown_kind() {
+        assert!(parse_page_fill("unknown=4").is_err());
+    }
+
+    #[test]
+    fn parse_page_fill_rejects_percent_over_100() {
+        assert!(parse_page_fill("pad=150%").is_err());
+    }
+
+    #[test]
+    fn parse_page_fill_rejects_negative() {
+        assert!(parse_page_fill("pad=-1").is_err());
+    }
+
+    #[test]
+    fn parse_page_fill_rejects_malformed() {
+        assert!(parse_page_fill("pad").is_err());
+        assert!(parse_page_fill("=").is_err());
+    }
+
+    #[test]
+    fn parse_width_unit_fixed() {
+        assert_eq!(parse_width_unit("80").unwrap(), WidthUnit::Fixed(80));
+    }
+
+    #[test]
+    fn parse_width_unit_percent() {
+        assert_eq!(parse_width_unit("50%").unwrap(), WidthUnit::Percent(50.0));
+    }
+
+    #[test]
+    fn parse_width_unit_rejects_out_of_range_percent() {
+        assert!(parse_width_unit("150%").is_err());
+        assert!(parse_width_unit("-10%").is_err());
+    }
+
+    #[test]
+    fn cli_margin_flags_parse_correctly() {
+        let cli = Cli::try_parse_from(["md", "doc.md", "--margin", "4", "--mt", "1", "--mx", "2"])
+            .unwrap();
+        assert_eq!(cli.margin, Some(4));
+        assert_eq!(cli.mt, Some(1));
+        assert_eq!(cli.mx, Some(2));
+    }
+
+    #[test]
+    fn cli_padding_flags_parse_correctly() {
+        let cli = Cli::try_parse_from(["md", "doc.md", "--padding", "2", "--px", "1"]).unwrap();
+        assert_eq!(cli.padding, Some(2));
+        assert_eq!(cli.px, Some(1));
+    }
+
+    #[test]
+    fn cli_page_bg_flag_parses() {
+        let cli = Cli::try_parse_from(["md", "doc.md", "--page-bg", "subtle"]).unwrap();
+        assert!(cli.page_bg.is_some());
+    }
+
+    #[test]
+    fn cli_alignment_flags_parse() {
+        let cli = Cli::try_parse_from([
+            "md",
+            "doc.md",
+            "--alignment",
+            "center",
+            "--align-images",
+            "left",
+        ])
+        .unwrap();
+        assert!(cli.alignment.is_some());
+        assert!(cli.align_images.is_some());
+    }
+
+    #[test]
+    fn cli_fill_flags_parse() {
+        let cli = Cli::try_parse_from([
+            "md",
+            "doc.md",
+            "--fill",
+            "pad=4",
+            "--fill-code-blocks",
+            "max=40",
+        ])
+        .unwrap();
+        assert!(cli.fill.is_some());
+        assert!(cli.fill_code_blocks.is_some());
+    }
+
+    #[test]
+    fn cli_line_numbers_bare_flag_parses_as_true() {
+        let cli = Cli::try_parse_from(["md", "doc.md", "--line-numbers"]).unwrap();
+        assert_eq!(cli.line_numbers, Some(true));
+    }
+
+    #[test]
+    fn cli_line_numbers_true_parses() {
+        let cli = Cli::try_parse_from(["md", "doc.md", "--line-numbers", "true"]).unwrap();
+        assert_eq!(cli.line_numbers, Some(true));
+    }
+
+    #[test]
+    fn cli_line_numbers_false_parses() {
+        let cli = Cli::try_parse_from(["md", "doc.md", "--line-numbers", "false"]).unwrap();
+        assert_eq!(cli.line_numbers, Some(false));
+    }
+
+    #[test]
+    fn cli_line_numbers_omitted_is_none() {
+        let cli = Cli::try_parse_from(["md", "doc.md"]).unwrap();
+        assert_eq!(cli.line_numbers, None);
     }
 }

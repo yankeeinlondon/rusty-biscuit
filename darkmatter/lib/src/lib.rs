@@ -7,6 +7,7 @@
 //!
 //! - [`markdown`] - Markdown document manipulation with frontmatter support
 //! - [`diff`] - Reusable diff utilities
+//! - [`layout`] - Page-level layout primitive (`DarkmatterPage`)
 //! - [`mermaid`] - Mermaid diagram theming and rendering
 //! - [`render`] - Hyperlink rendering utilities
 //! - [`terminal`] - Terminal color detection utilities
@@ -14,9 +15,11 @@
 
 pub mod diff;
 pub mod editor;
+pub mod layout;
 pub mod markdown;
 pub mod mermaid;
 pub mod render;
+pub mod style;
 pub mod terminal;
 
 pub mod testing;

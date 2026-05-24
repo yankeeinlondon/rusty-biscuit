@@ -19,6 +19,13 @@
 //! - Credential environment variables: `UCR_CORE_API_KEY`, `UNFOLDED_CIRCLE_API_KEY`.
 //!
 //! API documentation: <https://unfoldedcircle.github.io/core-api/ws/>
+#![allow(
+    clippy::clone_on_copy,
+    clippy::collapsible_if,
+    clippy::possible_missing_else,
+    clippy::result_large_err,
+    clippy::single_match
+)]
 pub use schematic_definitions::unfolded_circle::core_ws::*;
 /// Builds the Unfolded Circle Core WebSocket API definition.
 #[must_use]

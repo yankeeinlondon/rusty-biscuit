@@ -1,11 +1,11 @@
 use std::collections::BTreeMap;
-use std::fs;
 use std::path::PathBuf;
 
+use async_trait::async_trait;
+use tokio::fs;
 use toml_edit::{Array, DocumentMut, Item, value};
 
 use crate::error::{ClaudineError, Result};
-use crate::events::Provider;
 use crate::permissions::backend::{BackendCapabilities, BackendFidelity, ProviderPolicyBackend};
 use crate::permissions::canonical::{
     CanonicalApprovalMode, CanonicalPolicy, CanonicalRuleProvenance, CanonicalSandboxMode,
@@ -22,6 +22,7 @@ use crate::permissions::mutation::{
 use crate::permissions::native::{
     NativeEffectivePolicy, NativePolicyLayer, PolicySource, PolicySourceKind, ProviderCliOverrides,
 };
+use crate::provider::Provider;
 
 #[derive(Debug, Clone, Default)]
 struct CodexProfile {
@@ -65,6 +66,7 @@ struct CodexState {
 #[derive(Debug, Default)]
 pub(crate) struct CodexPolicyBackend;
 
+#[async_trait]
 impl ProviderPolicyBackend for CodexPolicyBackend {
     fn provider(&self) -> Provider {
         Provider::Codex
@@ -83,12 +85,12 @@ impl ProviderPolicyBackend for CodexPolicyBackend {
         }
     }
 
-    fn discover_sources(&self, ctx: &PolicyContext) -> Result<Vec<PolicySource>> {
+    async fn discover_sources(&self, ctx: &PolicyContext) -> Result<Vec<PolicySource>> {
         let mut sources = Vec::new();
 
         if let Some(system_root) = &ctx.system_root {
             let path = system_root.join("etc/codex/config.toml");
-            if path.exists() {
+            if fs::try_exists(&path).await.unwrap_or(false) {
                 sources.push(PolicySource {
                     id: "codex-system".to_owned(),
                     kind: PolicySourceKind::SystemConfig,
@@ -103,7 +105,7 @@ impl ProviderPolicyBackend for CodexPolicyBackend {
             && let Some(repo_root) = &ctx.repo_root
         {
             let path = repo_root.join(".codex/config.toml");
-            if path.exists() {
+            if fs::try_exists(&path).await.unwrap_or(false) {
                 sources.push(PolicySource {
                     id: "codex-repo".to_owned(),
                     kind: PolicySourceKind::RepoConfig,
@@ -116,7 +118,7 @@ impl ProviderPolicyBackend for CodexPolicyBackend {
 
         if let Some(home) = &ctx.home_dir {
             let path = home.join(".codex/config.toml");
-            if path.exists() {
+            if fs::try_exists(&path).await.unwrap_or(false) {
                 sources.push(PolicySource {
                     id: "codex-user".to_owned(),
                     kind: PolicySourceKind::UserConfig,
@@ -131,7 +133,7 @@ impl ProviderPolicyBackend for CodexPolicyBackend {
         Ok(sources)
     }
 
-    fn load_native_layers(
+    async fn load_native_layers(
         &self,
         _ctx: &PolicyContext,
         sources: &[PolicySource],
@@ -144,7 +146,7 @@ impl ProviderPolicyBackend for CodexPolicyBackend {
                     source.id
                 ))
             })?;
-            let content = fs::read_to_string(path)?;
+            let content = fs::read_to_string(path).await?;
             let doc: DocumentMut = content.parse().map_err(|error: toml_edit::TomlError| {
                 ClaudineError::PolicyNativeParse {
                     source_id: source.id.clone(),
@@ -272,7 +274,7 @@ impl ProviderPolicyBackend for CodexPolicyBackend {
         ))
     }
 
-    fn canonicalize(
+    async fn canonicalize(
         &self,
         ctx: &PolicyContext,
         native: &NativeEffectivePolicy,
@@ -542,7 +544,7 @@ impl ProviderPolicyBackend for CodexPolicyBackend {
             }
         }
 
-        if ctx.trust.is_trusted.is_none() && repo_config_exists(ctx) {
+        if ctx.trust.is_trusted.is_none() && repo_config_exists(ctx).await {
             policy.warnings.push(PolicyWarning {
                 code: "codex.trust_unknown".to_owned(),
                 message: "Repo-scoped Codex config is trust-gated and trust was not supplied."
@@ -554,14 +556,14 @@ impl ProviderPolicyBackend for CodexPolicyBackend {
         Ok(policy)
     }
 
-    fn plan_change(
+    async fn plan_change(
         &self,
         ctx: &PolicyContext,
         current: &NativeEffectivePolicy,
         change: &PolicyChange,
     ) -> Result<PolicyMutationPlan> {
         let (config_source_id, config_path) = choose_config_target(ctx, current, change.target)?;
-        let before_text = fs::read_to_string(&config_path).ok();
+        let before_text = fs::read_to_string(&config_path).await.ok();
         let mut doc = before_text
             .as_deref()
             .unwrap_or("")
@@ -657,7 +659,7 @@ impl ProviderPolicyBackend for CodexPolicyBackend {
                 .map(|path| path.to_path_buf())
                 .unwrap_or_else(|| PathBuf::from("."));
             let rules_path = rules_dir.join("rules/claudine-generated.rules");
-            let rules_before = fs::read_to_string(&rules_path).ok();
+            let rules_before = fs::read_to_string(&rules_path).await.ok();
             edits.push(ConfigEditPlan {
                 source_id: "codex-rules".to_owned(),
                 path: rules_path,
@@ -1002,11 +1004,13 @@ fn ensure_toml_table_path<'a>(
     current
 }
 
-fn repo_config_exists(ctx: &PolicyContext) -> bool {
-    ctx.repo_root
-        .as_ref()
-        .map(|root| root.join(".codex/config.toml").exists())
-        .unwrap_or(false)
+async fn repo_config_exists(ctx: &PolicyContext) -> bool {
+    match &ctx.repo_root {
+        Some(root) => fs::try_exists(root.join(".codex/config.toml"))
+            .await
+            .unwrap_or(false),
+        None => false,
+    }
 }
 
 fn first_source_id(native: &NativeEffectivePolicy) -> String {
@@ -1033,8 +1037,8 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let home = dir.path().join("home");
         let repo = dir.path().join("repo");
-        fs::create_dir_all(home.join(".codex")).unwrap();
-        fs::create_dir_all(repo.join(".codex")).unwrap();
+        std::fs::create_dir_all(home.join(".codex")).unwrap();
+        std::fs::create_dir_all(repo.join(".codex")).unwrap();
         (
             dir,
             PolicyContext::new(repo.clone())
@@ -1047,11 +1051,11 @@ mod tests {
         )
     }
 
-    #[test]
-    fn codex_backend_models_workspace_write() {
+    #[tokio::test]
+    async fn codex_backend_models_workspace_write() {
         let (_dir, ctx) = setup_ctx();
         let path = ctx.repo_root.as_ref().unwrap().join(".codex/config.toml");
-        fs::write(
+        tokio::fs::write(
             &path,
             r#"
 sandbox_mode = "workspace-write"
@@ -1062,13 +1066,14 @@ writable_roots = ["/tmp/build-output"]
 network_access = false
 "#,
         )
+        .await
         .unwrap();
 
         let backend = CodexPolicyBackend;
-        let sources = backend.discover_sources(&ctx).unwrap();
-        let layers = backend.load_native_layers(&ctx, &sources).unwrap();
+        let sources = backend.discover_sources(&ctx).await.unwrap();
+        let layers = backend.load_native_layers(&ctx, &sources).await.unwrap();
         let native = backend.compose_native_policy(&ctx, &layers, None).unwrap();
-        let canonical = backend.canonicalize(&ctx, &native).unwrap();
+        let canonical = backend.canonicalize(&ctx, &native).await.unwrap();
         let snapshot =
             ConfiguredPolicySnapshot::from_parts(Provider::Codex, native, canonical, &ctx);
 
@@ -1090,8 +1095,8 @@ network_access = false
         );
     }
 
-    #[test]
-    fn codex_mutation_plan_generates_add_dir_and_rule_file() {
+    #[tokio::test]
+    async fn codex_mutation_plan_generates_add_dir_and_rule_file() {
         let (_dir, ctx) = setup_ctx();
         let backend = CodexPolicyBackend;
         let current = NativeEffectivePolicy::new(
@@ -1107,7 +1112,7 @@ network_access = false
             PolicyChangeOp::DenyCommand(CommandPattern::new("rm -rf")),
         ]);
 
-        let plan = backend.plan_change(&ctx, &current, &change).unwrap();
+        let plan = backend.plan_change(&ctx, &current, &change).await.unwrap();
         assert_eq!(plan.persistent_plan.as_ref().unwrap().edits.len(), 2);
         assert!(
             plan.one_shot_plan
@@ -1118,19 +1123,19 @@ network_access = false
         );
     }
 
-    #[test]
-    fn codex_full_auto_cli_override_is_effective() {
+    #[tokio::test]
+    async fn codex_full_auto_cli_override_is_effective() {
         let (_dir, ctx) = setup_ctx();
         let backend = CodexPolicyBackend;
-        let sources = backend.discover_sources(&ctx).unwrap();
-        let layers = backend.load_native_layers(&ctx, &sources).unwrap();
+        let sources = backend.discover_sources(&ctx).await.unwrap();
+        let layers = backend.load_native_layers(&ctx, &sources).await.unwrap();
         let cli = backend
             .parse_cli_overrides(&ctx, CliPolicyInput::Argv(&["--full-auto".to_owned()]))
             .unwrap();
         let native = backend
             .compose_native_policy(&ctx, &layers, Some(&cli))
             .unwrap();
-        let canonical = backend.canonicalize(&ctx, &native).unwrap();
+        let canonical = backend.canonicalize(&ctx, &native).await.unwrap();
         let snapshot =
             ConfiguredPolicySnapshot::from_parts(Provider::Codex, native, canonical, &ctx);
 
@@ -1150,38 +1155,40 @@ network_access = false
         assert!(snapshot.can_write("/etc/hosts").is_ask());
     }
 
-    #[test]
-    fn codex_unknown_trust_skips_repo_config_and_degrades_query_answers() {
+    #[tokio::test]
+    async fn codex_unknown_trust_skips_repo_config_and_degrades_query_answers() {
         let (_dir, mut ctx) = setup_ctx();
         ctx.trust.is_trusted = None;
         ctx.trust.source = crate::permissions::TrustSource::Unknown;
 
-        fs::write(
+        tokio::fs::write(
             ctx.repo_root.as_ref().unwrap().join(".codex/config.toml"),
             r#"
 sandbox_mode = "danger-full-access"
 approval_policy = "never"
 "#,
         )
+        .await
         .unwrap();
-        fs::write(
+        tokio::fs::write(
             ctx.home_dir.as_ref().unwrap().join(".codex/config.toml"),
             r#"
 sandbox_mode = "read-only"
 approval_policy = "on-request"
 "#,
         )
+        .await
         .unwrap();
 
         let backend = CodexPolicyBackend;
-        let sources = backend.discover_sources(&ctx).unwrap();
+        let sources = backend.discover_sources(&ctx).await.unwrap();
 
         assert_eq!(sources.len(), 1);
         assert_eq!(sources[0].id, "codex-user");
 
-        let layers = backend.load_native_layers(&ctx, &sources).unwrap();
+        let layers = backend.load_native_layers(&ctx, &sources).await.unwrap();
         let native = backend.compose_native_policy(&ctx, &layers, None).unwrap();
-        let canonical = backend.canonicalize(&ctx, &native).unwrap();
+        let canonical = backend.canonicalize(&ctx, &native).await.unwrap();
         let snapshot =
             ConfiguredPolicySnapshot::from_parts(Provider::Codex, native, canonical, &ctx);
         let result = snapshot.can_write("src/main.rs");
@@ -1195,10 +1202,10 @@ approval_policy = "on-request"
         );
     }
 
-    #[test]
-    fn codex_backend_queries_mcp_controls() {
+    #[tokio::test]
+    async fn codex_backend_queries_mcp_controls() {
         let (_dir, ctx) = setup_ctx();
-        fs::write(
+        tokio::fs::write(
             ctx.repo_root.as_ref().unwrap().join(".codex/config.toml"),
             r#"
 [mcp_servers.filesystem]
@@ -1213,13 +1220,14 @@ enabled = true
 enabled_tools = ["navigate"]
 "#,
         )
+        .await
         .unwrap();
 
         let backend = CodexPolicyBackend;
-        let sources = backend.discover_sources(&ctx).unwrap();
-        let layers = backend.load_native_layers(&ctx, &sources).unwrap();
+        let sources = backend.discover_sources(&ctx).await.unwrap();
+        let layers = backend.load_native_layers(&ctx, &sources).await.unwrap();
         let native = backend.compose_native_policy(&ctx, &layers, None).unwrap();
-        let canonical = backend.canonicalize(&ctx, &native).unwrap();
+        let canonical = backend.canonicalize(&ctx, &native).await.unwrap();
         let snapshot =
             ConfiguredPolicySnapshot::from_parts(Provider::Codex, native, canonical, &ctx);
 
@@ -1243,8 +1251,8 @@ enabled_tools = ["navigate"]
         assert!(snapshot.can_use_mcp_tool("browser", "click").is_denied());
     }
 
-    #[test]
-    fn codex_mcp_mutation_plan_updates_config_and_one_shot_args() {
+    #[tokio::test]
+    async fn codex_mcp_mutation_plan_updates_config_and_one_shot_args() {
         let (_dir, ctx) = setup_ctx();
         let backend = CodexPolicyBackend;
         let current = NativeEffectivePolicy::new(
@@ -1263,7 +1271,7 @@ enabled_tools = ["navigate"]
             },
         ]);
 
-        let plan = backend.plan_change(&ctx, &current, &change).unwrap();
+        let plan = backend.plan_change(&ctx, &current, &change).await.unwrap();
         let edit = &plan.persistent_plan.as_ref().unwrap().edits[0];
 
         assert!(edit.after_preview.contains("github"));
@@ -1278,8 +1286,8 @@ enabled_tools = ["navigate"]
         );
     }
 
-    #[test]
-    fn codex_mcp_round_trip_mutation_changes_query_result() {
+    #[tokio::test]
+    async fn codex_mcp_round_trip_mutation_changes_query_result() {
         let (_dir, ctx) = setup_ctx();
         let backend = CodexPolicyBackend;
         let current = NativeEffectivePolicy::new(
@@ -1298,15 +1306,19 @@ enabled_tools = ["navigate"]
             },
         ]);
 
-        let plan = backend.plan_change(&ctx, &current, &change).unwrap();
+        let plan = backend.plan_change(&ctx, &current, &change).await.unwrap();
         let edit = &plan.persistent_plan.as_ref().unwrap().edits[0];
-        fs::create_dir_all(edit.path.parent().unwrap()).unwrap();
-        fs::write(&edit.path, edit.after_preview.as_bytes()).unwrap();
+        tokio::fs::create_dir_all(edit.path.parent().unwrap())
+            .await
+            .unwrap();
+        tokio::fs::write(&edit.path, edit.after_preview.as_bytes())
+            .await
+            .unwrap();
 
-        let sources = backend.discover_sources(&ctx).unwrap();
-        let layers = backend.load_native_layers(&ctx, &sources).unwrap();
+        let sources = backend.discover_sources(&ctx).await.unwrap();
+        let layers = backend.load_native_layers(&ctx, &sources).await.unwrap();
         let native = backend.compose_native_policy(&ctx, &layers, None).unwrap();
-        let canonical = backend.canonicalize(&ctx, &native).unwrap();
+        let canonical = backend.canonicalize(&ctx, &native).await.unwrap();
         let snapshot =
             ConfiguredPolicySnapshot::from_parts(Provider::Codex, native, canonical, &ctx);
 
@@ -1323,8 +1335,8 @@ enabled_tools = ["navigate"]
         );
     }
 
-    #[test]
-    fn codex_local_override_target_returns_error() {
+    #[tokio::test]
+    async fn codex_local_override_target_returns_error() {
         let (_dir, ctx) = setup_ctx();
         let backend = CodexPolicyBackend;
         let current = NativeEffectivePolicy::new(
@@ -1341,7 +1353,7 @@ enabled_tools = ["navigate"]
             persistence: crate::permissions::PolicyPersistence::Persistent,
         };
 
-        let result = backend.plan_change(&ctx, &current, &change);
+        let result = backend.plan_change(&ctx, &current, &change).await;
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
         assert!(err.contains("LocalOverride"));

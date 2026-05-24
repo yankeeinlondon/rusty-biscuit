@@ -6,10 +6,10 @@
 //!
 //! ## Modules
 //!
-//! - [`distro`] - Linux distribution detection and classification
-//! - [`locale`] - Locale detection from environment variables
-//! - [`time`] - Timezone and NTP status detection
-//! - [`package_manager`] - System package manager detection
+//! - `distro` - Linux distribution detection and classification
+//! - `locale` - Locale detection from environment variables
+//! - `time` - Timezone and NTP status detection
+//! - `package_manager` - System package manager detection
 
 use serde::{Deserialize, Serialize};
 use std::time::Instant;
@@ -225,7 +225,7 @@ pub fn detect_os_with_request(request: &OsRequest) -> Result<OsInfo> {
 
     let package_manager_started = Instant::now();
     let system_package_managers = if request.include_package_managers {
-        let index = crate::programs::ExecutableIndex::build_path_only();
+        let index = crate::executable_index::ExecutableIndex::build_path_only();
         match os_type {
             OsType::Linux => Some(detect_linux_package_managers(linux_family, Some(&index))),
             OsType::MacOS => Some(detect_macos_package_managers(Some(&index))),

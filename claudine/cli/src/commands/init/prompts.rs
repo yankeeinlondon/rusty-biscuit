@@ -11,10 +11,11 @@ use std::path::PathBuf;
 
 use claudine::actions::{HookAction, LogTarget};
 use claudine::events::{
-    AgenticEvent, INIT_EVENT_DISPLAY_ORDER, INIT_RECOMMENDED_EVENTS, Provider,
-    default_speak_template, recommended_sound,
+    AgenticEvent, INIT_EVENT_DISPLAY_ORDER, INIT_RECOMMENDED_EVENTS, default_speak_template,
+    recommended_sound,
 };
 use claudine::linking::preference_prompt_count;
+use claudine::provider::Provider;
 use color_eyre::eyre::Result;
 use inquire::{Confirm, MultiSelect, Select, Text};
 
@@ -302,6 +303,7 @@ fn prompt_input_speak_action() -> Result<HookAction> {
         message,
         voice: None,
         gender: None,
+        when: None,
     })
 }
 
@@ -331,6 +333,7 @@ fn prompt_input_sound_effect() -> Result<HookAction> {
         effect: selected.replace(" (recommended)", ""),
         volume: 1.0,
         speed: 1.0,
+        when: None,
     })
 }
 
@@ -356,11 +359,13 @@ fn prompt_input_run_action() -> Result<HookAction> {
             args,
             timeout_ms: None,
             mapper: None,
+            when: None,
         })
     } else {
         Ok(HookAction::Bash {
             command,
             params: params_str,
+            when: None,
         })
     }
 }
@@ -479,15 +484,18 @@ mod tests {
                 message: "hello".to_string(),
                 voice: None,
                 gender: None,
+                when: None,
             },
             HookAction::SoundEffect {
                 effect: "ding".to_string(),
                 volume: 1.0,
                 speed: 1.0,
+                when: None,
             },
             HookAction::Bash {
                 command: "notify-send".to_string(),
                 params: String::new(),
+                when: None,
             },
         ];
 

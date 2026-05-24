@@ -9,6 +9,8 @@ use sniff::filesystem::repo::{Package, RepoInfo, detect_repo};
 use super::profile::WrapperProfile;
 use super::repo_home;
 
+pub(crate) use claudine::composition::{LaunchWorkspaceContext, PackageContext};
+
 #[derive(Debug, Default)]
 #[allow(dead_code)]
 pub(crate) struct EnvPlan {
@@ -26,27 +28,11 @@ pub(crate) struct EnvPlan {
     pub(crate) shadow_home_path: Option<PathBuf>,
 }
 
-#[derive(Debug)]
-#[allow(dead_code)]
-pub(crate) struct LaunchWorkspaceContext {
-    pub(crate) launch_cwd: PathBuf,
-    pub(crate) repo_root: Option<PathBuf>,
-    pub(crate) child_cwd: PathBuf,
-    pub(crate) package_context: Option<PackageContext>,
-    pub(crate) warnings: Vec<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct PackageContext {
-    pub(crate) package_area: String,
-    pub(crate) package: Option<String>,
-    pub(crate) candidates: Vec<String>,
-}
-
 #[allow(clippy::too_many_arguments)]
+#[allow(dead_code)] // kept for tests and legacy callers; production paths use `build_child_env_with_launch`
 pub(crate) fn build_child_env(
     profile: &dyn WrapperProfile,
-    provider: claudine::events::Provider,
+    provider: claudine::provider::Provider,
     include: &[String],
     yolo: bool,
     interactive: bool,
@@ -85,7 +71,7 @@ pub(crate) fn build_child_env(
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn build_child_env_with_launch(
     profile: &dyn WrapperProfile,
-    provider: claudine::events::Provider,
+    provider: claudine::provider::Provider,
     include: &[String],
     yolo: bool,
     interactive: bool,
@@ -182,6 +168,22 @@ pub(crate) fn build_child_env_with_launch(
             set_added_env(&mut env, &mut added, "PACKAGE", package.clone());
         }
     }
+
+    // Sync `PWD` to `child_cwd`. The parent shell sets `PWD` to wherever
+    // the user invoked claudine from (often a package subdirectory of the
+    // worktree). Rust's `set_current_dir` calls `chdir(2)` but does not
+    // update `PWD`, so without this override the spawned child inherits
+    // the stale shell `PWD`. Several downstream tools resolve project
+    // directory from `process.env.PWD` before `process.cwd()` (notably
+    // OpenCode's `cli/cmd/run.ts:276`), which is the standard shell
+    // convention. Inject the corrected `PWD` so the child's project /
+    // git resolution agrees with the cwd we chose.
+    set_added_env(
+        &mut env,
+        &mut added,
+        "PWD",
+        launch_ctx.child_cwd.display().to_string(),
+    );
 
     Ok(EnvPlan {
         env,
@@ -405,15 +407,28 @@ pub(crate) fn resolve_launch_workspace_context(
 /// `SniffResult`; `repo` should come from its repo section. Callers that
 /// have neither can pass `None` for both — the resulting context will
 /// behave as if no repo was detected.
+///
+/// `source_repo_root_hint` preserves the legacy
+/// [`resolve_launch_workspace_context`] split contract: when a composed
+/// markdown source lives in a different repo than the launch CWD (sibling
+/// clone, external prompt), the metadata-bearing `repo_root` should follow
+/// the source's repo so guardrails, MCP defaults, and harness path
+/// resolution key off the document. The `child_cwd` (where the spawned
+/// provider process actually runs) must still follow the launch CWD's
+/// repo root so the provider does not jump into an unrelated worktree.
 pub(crate) fn launch_workspace_context_from_repo_info(
     launch_cwd: &Path,
     git_root: Option<&Path>,
     repo: Option<&RepoInfo>,
+    source_repo_root_hint: Option<&Path>,
 ) -> LaunchWorkspaceContext {
-    let repo_root = git_root
+    let launch_repo_root = git_root
         .map(Path::to_path_buf)
         .or_else(|| repo.map(|r| r.root.clone()));
-    let child_cwd = repo_root
+    let repo_root = source_repo_root_hint
+        .map(Path::to_path_buf)
+        .or_else(|| launch_repo_root.clone());
+    let child_cwd = launch_repo_root
         .clone()
         .unwrap_or_else(|| launch_cwd.to_path_buf());
 
@@ -835,14 +850,130 @@ mod tests {
         );
     }
 
+    fn fake_repo_info(root: &Path) -> RepoInfo {
+        RepoInfo {
+            is_monorepo: false,
+            monorepo_tool: None,
+            workspace_tools: vec![],
+            root: root.to_path_buf(),
+            dependencies: None,
+            dev_dependencies: None,
+            peer_dependencies: None,
+            optional_dependencies: None,
+            packages: None,
+        }
+    }
+
     #[test]
-    fn build_child_env_uses_interactive_without_claudine_duplicate() {
-        let profile = profile_for_provider(claudine::events::Provider::Claude).unwrap();
+    fn launch_workspace_repo_root_follows_source_when_outside_launch_repo() {
+        // Out-of-repo prompt case: launch CWD lives in repo A, prompt
+        // markdown lives in repo B. `repo_root` (metadata) must follow
+        // repo B so guardrails / MCP / harness key off the document repo,
+        // but `child_cwd` must follow repo A so the spawned provider
+        // process stays in the user's worktree.
+        let launch_cwd = PathBuf::from("/repo-a/sub");
+        let launch_git = PathBuf::from("/repo-a");
+        let source_repo = PathBuf::from("/repo-b");
+        let launch_repo_info = fake_repo_info(&launch_git);
+
+        let ctx = launch_workspace_context_from_repo_info(
+            &launch_cwd,
+            Some(&launch_git),
+            Some(&launch_repo_info),
+            Some(&source_repo),
+        );
+
+        assert_eq!(ctx.repo_root.as_deref(), Some(source_repo.as_path()));
+        assert_eq!(ctx.child_cwd, launch_git);
+        assert_eq!(ctx.launch_cwd, launch_cwd);
+    }
+
+    #[test]
+    fn launch_workspace_falls_back_to_launch_repo_when_no_source_hint() {
+        // Common case (source inside launch repo, or direct wrapper with no
+        // source at all): `repo_root` and `child_cwd` should both follow
+        // the launch git root.
+        let launch_cwd = PathBuf::from("/repo-a/sub");
+        let launch_git = PathBuf::from("/repo-a");
+        let launch_repo_info = fake_repo_info(&launch_git);
+
+        let ctx = launch_workspace_context_from_repo_info(
+            &launch_cwd,
+            Some(&launch_git),
+            Some(&launch_repo_info),
+            None,
+        );
+
+        assert_eq!(ctx.repo_root.as_deref(), Some(launch_git.as_path()));
+        assert_eq!(ctx.child_cwd, launch_git);
+    }
+
+    #[test]
+    fn launch_workspace_source_hint_with_no_launch_repo_uses_source_for_meta_only() {
+        // Edge case: launch CWD is not inside any git repo, but the
+        // composed source lives in one. Metadata follows the source repo;
+        // the child process still launches in the user's CWD because we
+        // have no launch-repo root to anchor it.
+        let launch_cwd = PathBuf::from("/tmp/scratch");
+        let source_repo = PathBuf::from("/repo-b");
+
+        let ctx =
+            launch_workspace_context_from_repo_info(&launch_cwd, None, None, Some(&source_repo));
+
+        assert_eq!(ctx.repo_root.as_deref(), Some(source_repo.as_path()));
+        assert_eq!(ctx.child_cwd, launch_cwd);
+    }
+
+    /// Regression: the spawned child's `PWD` env var must equal
+    /// `child_cwd`, not whatever the parent shell set as `PWD` before
+    /// invoking claudine. OpenCode (and other shell-aware tooling)
+    /// reads `process.env.PWD` BEFORE falling back to `process.cwd()`
+    /// when resolving its project root; without this sync claudine
+    /// silently leaks the user's pre-invocation shell PWD (often a
+    /// package subdirectory of the worktree) into the child, causing
+    /// git snapshot pathspec mismatches and external_directory false
+    /// positives.
+    #[test]
+    fn build_child_env_overrides_pwd_to_match_child_cwd() {
+        let profile = profile_for_provider(claudine::provider::Provider::OpenCode).unwrap();
         let cwd = tempfile::tempdir().unwrap();
 
         let plan = build_child_env(
             profile,
-            claudine::events::Provider::Claude,
+            claudine::provider::Provider::OpenCode,
+            &[],
+            false,
+            false,
+            &[],
+            cwd.path(),
+            &[],
+            false,
+            false,
+            None,
+        )
+        .unwrap();
+
+        let pwd = plan
+            .env
+            .get(std::ffi::OsStr::new("PWD"))
+            .map(|v| v.to_string_lossy().into_owned())
+            .expect("env plan must always set PWD for the spawned child");
+        assert_eq!(
+            std::path::PathBuf::from(&pwd),
+            plan.child_cwd,
+            "child PWD must equal child_cwd; got PWD={pwd:?} child_cwd={:?}",
+            plan.child_cwd,
+        );
+    }
+
+    #[test]
+    fn build_child_env_uses_interactive_without_claudine_duplicate() {
+        let profile = profile_for_provider(claudine::provider::Provider::Claude).unwrap();
+        let cwd = tempfile::tempdir().unwrap();
+
+        let plan = build_child_env(
+            profile,
+            claudine::provider::Provider::Claude,
             &[],
             false,
             true,
@@ -902,13 +1033,13 @@ mod tests {
         // (used for guardrails, MCP, harness path resolution). The
         // child process must still spawn in the user's launch directory
         // — never in whatever repo the document happens to live in.
-        let profile = profile_for_provider(claudine::events::Provider::Claude).unwrap();
+        let profile = profile_for_provider(claudine::provider::Provider::Claude).unwrap();
         let cwd = tempfile::tempdir().unwrap();
         let hint_dir = tempfile::tempdir().unwrap();
 
         let plan = build_child_env(
             profile,
-            claudine::events::Provider::Claude,
+            claudine::provider::Provider::Claude,
             &[],
             false,
             false,
@@ -927,12 +1058,12 @@ mod tests {
 
     #[test]
     fn repo_root_hint_none_falls_back_to_cwd_detection() {
-        let profile = profile_for_provider(claudine::events::Provider::Claude).unwrap();
+        let profile = profile_for_provider(claudine::provider::Provider::Claude).unwrap();
         let cwd = tempfile::tempdir().unwrap();
 
         let plan = build_child_env(
             profile,
-            claudine::events::Provider::Claude,
+            claudine::provider::Provider::Claude,
             &[],
             false,
             false,

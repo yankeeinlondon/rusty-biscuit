@@ -4,8 +4,18 @@ use claudine::actions::HookAction;
 use claudine::config::claudine_config::{ClaudineConfig, DefaultSounds};
 use claudine::dispatch::loader::{CanonicalRuntimeConfig, compile_canonical_runtime};
 use claudine::dispatch::{dispatch_canonical_with_runtime, write_dispatch_event_to};
-use claudine::events::{AgenticEvent, EventMeta, Provider};
+use claudine::events::{AgenticEvent, EventMeta};
+use claudine::provider::Provider;
+use rstest::{fixture, rstest};
 use tempfile::TempDir;
+use test_toolkit::{EnvGuard, trace_phase};
+
+#[fixture]
+fn playa_dry_run() -> EnvGuard {
+    trace_phase!("setup_playa_dry_run", {
+        EnvGuard::set_safe("PLAYA_DRY_RUN", "1")
+    })
+}
 
 fn make_config_with_action(event: AgenticEvent, action: HookAction) -> CanonicalRuntimeConfig {
     let mut actions = HashMap::new();
@@ -19,16 +29,21 @@ fn make_config_with_action(event: AgenticEvent, action: HookAction) -> Canonical
     compile_canonical_runtime(config, None).unwrap()
 }
 
-/// Dispatching a `SoundEffect` action for an event that has no audio device
-/// available (in CI) completes without error and returns no blocking response.
+/// Dispatching a `SoundEffect` action completes without error and returns
+/// no blocking response.  Real audio playback is suppressed via
+/// `PLAYA_DRY_RUN=1` so a wedged audio device cannot stall the test.
+#[rstest]
 #[tokio::test]
-async fn dispatch_sound_effect_action() {
+#[serial_test::serial]
+async fn dispatch_sound_effect_action(playa_dry_run: EnvGuard) {
+    let _playa_dry_run = playa_dry_run;
     let runtime = make_config_with_action(
         AgenticEvent::HumanInTheLoop,
         HookAction::SoundEffect {
             effect: "confirmation".to_string(),
             volume: 0.0,
             speed: 1.0,
+            when: None,
         },
     );
 
@@ -62,6 +77,7 @@ async fn dispatch_no_binding_returns_default() {
             effect: "confirmation".to_string(),
             volume: 1.0,
             speed: 1.0,
+            when: None,
         }],
     );
 

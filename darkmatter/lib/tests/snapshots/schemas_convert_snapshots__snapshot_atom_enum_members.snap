@@ -1,0 +1,18 @@
+---
+source: darkmatter/lib/tests/schemas_convert_snapshots.rs
+expression: "convert_atom(\"enum(red, green, blue)\")"
+---
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "properties": {
+    "field": {
+      "enum": [
+        "red",
+        "green",
+        "blue"
+      ]
+    }
+  },
+  "type": "object"
+}

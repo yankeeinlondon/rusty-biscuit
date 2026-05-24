@@ -173,6 +173,10 @@ impl OsRequest {
 /// Controls which hardware subsections are collected.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HardwareRequest {
+    /// Include CPU detection
+    pub include_cpu: bool,
+    /// Include memory detection
+    pub include_memory: bool,
     /// Include storage device inventory
     pub include_storage: bool,
     /// Include GPU detection
@@ -185,6 +189,8 @@ impl HardwareRequest {
     /// CPU and memory only. Skips storage, GPU, and audio (~1.5s savings on macOS).
     pub fn summary() -> Self {
         Self {
+            include_cpu: true,
+            include_memory: true,
             include_storage: false,
             include_gpu: false,
             include_audio: false,
@@ -194,10 +200,22 @@ impl HardwareRequest {
     /// Full hardware detection including storage, GPU, and audio devices.
     pub fn full() -> Self {
         Self {
+            include_cpu: true,
+            include_memory: true,
             include_storage: true,
             include_gpu: true,
             include_audio: true,
         }
+    }
+
+    pub fn include_cpu(mut self, include: bool) -> Self {
+        self.include_cpu = include;
+        self
+    }
+
+    pub fn include_memory(mut self, include: bool) -> Self {
+        self.include_memory = include;
+        self
     }
 
     pub fn include_storage(mut self, include: bool) -> Self {
@@ -274,11 +292,29 @@ pub struct GitRequest {
     pub include_remote_branch_details: bool,
     /// Check which remotes contain recent commits (requires refresh_remote_tracking)
     pub include_commit_remote_containment: bool,
+    /// Maximum number of remote-tracking branches to inspect for commit
+    /// containment. Lower values reduce deep-git latency for repos with many
+    /// remote branches. `None` means no limit.
+    pub max_remote_branches: Option<usize>,
 }
 
 impl GitRequest {
-    /// Minimal: repo root, current branch, dirty status counts.
-    /// No commits, no file details, no worktrees.
+    /// Absolute minimum: branch name and dirty yes/no.
+    /// No counts, no branches, no remotes, no config, no tracking.
+    pub fn minimal() -> Self {
+        Self {
+            commit_count: 0,
+            include_file_changes: false,
+            include_file_diffs: false,
+            include_worktrees: false,
+            refresh_remote_tracking: false,
+            include_remote_branch_details: false,
+            include_commit_remote_containment: false,
+            max_remote_branches: None,
+        }
+    }
+
+    /// Branch + dirty status counts. No commits, no file details, no worktrees.
     pub fn summary() -> Self {
         Self {
             commit_count: 0,
@@ -288,6 +324,7 @@ impl GitRequest {
             refresh_remote_tracking: false,
             include_remote_branch_details: false,
             include_commit_remote_containment: false,
+            max_remote_branches: None,
         }
     }
 
@@ -302,6 +339,7 @@ impl GitRequest {
             refresh_remote_tracking: false,
             include_remote_branch_details: false,
             include_commit_remote_containment: false,
+            max_remote_branches: None,
         }
     }
 
@@ -316,6 +354,7 @@ impl GitRequest {
             refresh_remote_tracking: true,
             include_remote_branch_details: true,
             include_commit_remote_containment: true,
+            max_remote_branches: Some(50),
         }
     }
 
@@ -341,6 +380,20 @@ impl GitRequest {
 
     pub fn refresh_remote_tracking(mut self, include: bool) -> Self {
         self.refresh_remote_tracking = include;
+        self
+    }
+
+    /// Returns true when the request is so minimal that branches, remotes,
+    /// config, and tracking can be skipped entirely.
+    pub fn is_minimal(&self) -> bool {
+        self.commit_count == 0
+            && !self.include_file_changes
+            && !self.include_worktrees
+            && !self.refresh_remote_tracking
+    }
+
+    pub fn max_remote_branches(mut self, limit: Option<usize>) -> Self {
+        self.max_remote_branches = limit;
         self
     }
 }
@@ -484,14 +537,26 @@ mod tests {
     #[test]
     fn hardware_request_detail_levels() {
         let summary = HardwareRequest::summary();
+        assert!(summary.include_cpu);
+        assert!(summary.include_memory);
         assert!(!summary.include_storage);
         assert!(!summary.include_gpu);
         assert!(!summary.include_audio);
 
         let full = HardwareRequest::full();
+        assert!(full.include_cpu);
+        assert!(full.include_memory);
         assert!(full.include_storage);
         assert!(full.include_gpu);
         assert!(full.include_audio);
+
+        let gpu_only = HardwareRequest::summary()
+            .include_gpu(true)
+            .include_cpu(false)
+            .include_memory(false);
+        assert!(!gpu_only.include_cpu);
+        assert!(!gpu_only.include_memory);
+        assert!(gpu_only.include_gpu);
     }
 
     #[test]
@@ -505,6 +570,14 @@ mod tests {
 
     #[test]
     fn git_request_detail_levels() {
+        let minimal = GitRequest::minimal();
+        assert_eq!(minimal.commit_count, 0);
+        assert!(!minimal.include_file_changes);
+        assert!(!minimal.include_file_diffs);
+        assert!(!minimal.include_worktrees);
+        assert!(!minimal.refresh_remote_tracking);
+        assert!(minimal.is_minimal());
+
         let summary = GitRequest::summary();
         assert_eq!(summary.commit_count, 0);
         assert!(!summary.include_file_changes);
@@ -518,6 +591,7 @@ mod tests {
         assert!(!full.include_file_diffs);
         assert!(full.include_worktrees);
         assert!(!full.refresh_remote_tracking);
+        assert!(!full.is_minimal());
 
         let deep = GitRequest::deep();
         assert!(deep.include_file_changes);
@@ -525,6 +599,21 @@ mod tests {
         assert!(deep.refresh_remote_tracking);
         assert!(deep.include_remote_branch_details);
         assert!(deep.include_commit_remote_containment);
+        assert!(!deep.is_minimal());
+    }
+
+    #[test]
+    fn git_request_is_minimal_flags() {
+        assert!(GitRequest::minimal().is_minimal());
+        assert!(GitRequest::summary().is_minimal());
+        assert!(!GitRequest::full().is_minimal());
+        assert!(!GitRequest::deep().is_minimal());
+
+        let with_commits = GitRequest::minimal().commit_count(1);
+        assert!(!with_commits.is_minimal());
+
+        let with_changes = GitRequest::minimal().include_file_changes(true);
+        assert!(!with_changes.is_minimal());
     }
 
     #[test]
@@ -566,5 +655,21 @@ mod tests {
         let fs = parsed.filesystem.unwrap();
         assert_eq!(fs.git.unwrap().commit_count, 5);
         assert!(fs.repo.unwrap().structure_only);
+    }
+
+    #[test]
+    fn hardware_request_serialization_roundtrip() {
+        let gpu_only = HardwareRequest {
+            include_cpu: false,
+            include_memory: false,
+            include_storage: false,
+            include_gpu: true,
+            include_audio: false,
+        };
+        let json = serde_json::to_string(&gpu_only).unwrap();
+        let parsed: HardwareRequest = serde_json::from_str(&json).unwrap();
+        assert!(!parsed.include_cpu);
+        assert!(!parsed.include_memory);
+        assert!(parsed.include_gpu);
     }
 }

@@ -1,14 +1,40 @@
-use super::repo::detect_repo;
+use super::repo::detect_repo_structure;
 use crate::{Result, SniffError};
 use biscuit_file::serde_yaml_ng;
 use biscuit_hash::xx_hash;
 use chrono::{DateTime, NaiveDate, NaiveDateTime, Utc};
 use ignore::WalkBuilder;
+use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
+use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use tracing::{debug, instrument};
+
+/// Parsing detail level for `parse_markdown_meta_with_mode`.
+///
+/// Some callers (e.g. blast-radius scans) only need the `blast_radius`
+/// frontmatter key. Selecting [`DocParseMode::BlastRadiusOnly`] lets the
+/// parser stop reading at the closing frontmatter delimiter, skip body
+/// hashing, and skip the title/`last_updated` work that the full parser
+/// performs on every document.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DocParseMode {
+    /// Read and parse the full document — frontmatter, body, hash, title, mtime.
+    Full,
+    /// Read only the frontmatter and extract `blast_radius` plus its presence flag.
+    ///
+    /// Other [`MarkdownMeta`] fields are filled with cheap defaults so the
+    /// returned value still satisfies the public type's invariants but is
+    /// only suitable for blast-radius matching.
+    BlastRadiusOnly,
+    /// Read only the frontmatter — extracts `prompt`, `title` (from frontmatter only),
+    /// `frontmatter_keys`, and `has_blast_radius`. Skips body hashing, title scanning
+    /// (H1/H2/H3), and mtime resolution. Suitable for filtered queries where only
+    /// frontmatter-derived fields are consumed.
+    FrontmatterOnly,
+}
 
 /// How the document title was resolved.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -90,30 +116,21 @@ impl RepoDocuments {
             .ok_or_else(|| SniffError::NotARepository(path.to_path_buf()))?
             .to_path_buf();
 
-        // Leverage the existing repo detection to get monorepo package locations.
-        // Package.path is absolute, so convert to relative for matching.
-        let packages = detect_repo(&repo_root)
-            .ok()
-            .flatten()
-            .and_then(|info| info.packages)
-            .map(|pkgs| {
-                pkgs.into_iter()
-                    .map(|p| {
-                        let rel_path = p
-                            .path
-                            .strip_prefix(&repo_root)
-                            .unwrap_or(&p.path)
-                            .to_path_buf();
-                        (p.name, rel_path)
-                    })
-                    .collect::<Vec<_>>()
-            })
-            .unwrap_or_default();
+        let packages = detect_repo_packages(&repo_root);
 
         Ok(Self {
             repo_root,
             packages,
         })
+    }
+
+    /// Create a `RepoDocuments` from an already-resolved repo root and
+    /// pre-computed package list, skipping git discovery and repo detection.
+    pub fn from_root(repo_root: PathBuf, packages: Vec<(String, PathBuf)>) -> Self {
+        Self {
+            repo_root,
+            packages,
+        }
     }
 
     /// Returns metadata for all markdown documents in the repository.
@@ -141,6 +158,149 @@ pub fn detect_docs(root: &Path) -> Option<Vec<MarkdownMeta>> {
     if docs.is_empty() { None } else { Some(docs) }
 }
 
+/// Resolve the monorepo package list using structure-only detection.
+///
+/// Returns `(package_name, repo_relative_path)` pairs without performing
+/// per-package language scanning, making it 10-50x faster than `detect_repo`.
+pub fn detect_repo_packages(repo_root: &Path) -> Vec<(String, PathBuf)> {
+    detect_repo_structure(repo_root)
+        .ok()
+        .flatten()
+        .and_then(|info| info.packages)
+        .map(|pkgs| {
+            pkgs.into_iter()
+                .map(|p| {
+                    let rel_path = p
+                        .path
+                        .strip_prefix(repo_root)
+                        .unwrap_or(&p.path)
+                        .to_path_buf();
+                    (p.name, rel_path)
+                })
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default()
+}
+
+/// Lightweight package discovery within specific directories.
+///
+/// Unlike [`detect_repo_packages`] which runs full workspace detection across
+/// the entire repository, this function only scans `Cargo.toml` files in the
+/// given directories (and their immediate children). This is sufficient to
+/// populate the `package` field on [`MarkdownMeta`] when the caller already
+/// knows the target area (e.g. from `--package-area sniff`).
+///
+/// Returns `(package_name, repo_relative_path)` pairs.
+pub fn detect_packages_in_dirs(repo_root: &Path, dirs: &[PathBuf]) -> Vec<(String, PathBuf)> {
+    let mut packages = Vec::new();
+    for dir in dirs {
+        if !dir.is_dir() {
+            continue;
+        }
+        let walker = WalkBuilder::new(dir)
+            .max_depth(Some(3))
+            .hidden(false)
+            .git_ignore(true)
+            .git_global(false)
+            .git_exclude(false)
+            .build();
+        for entry in walker.filter_map(|e| e.ok()) {
+            let path = entry.path();
+            if !path
+                .file_name()
+                .is_some_and(|n| n == "Cargo.toml" || n == "package.json")
+            {
+                continue;
+            }
+            let rel = match path.parent().and_then(|p| p.strip_prefix(repo_root).ok()) {
+                Some(r) => r.to_path_buf(),
+                None => continue,
+            };
+            let name = if path.file_name().is_some_and(|n| n == "Cargo.toml") {
+                fs::read_to_string(path).ok().and_then(|c| {
+                    biscuit_file::toml_crate::from_str::<biscuit_file::toml_crate::Value>(&c)
+                        .ok()
+                        .and_then(|v| {
+                            v.get("package")
+                                .and_then(|p| p.get("name"))
+                                .and_then(|n| n.as_str().map(|s| s.to_string()))
+                        })
+                })
+            } else {
+                fs::read_to_string(path).ok().and_then(|c| {
+                    serde_json::from_str::<serde_json::Value>(&c)
+                        .ok()
+                        .and_then(|v| {
+                            v.get("name")
+                                .and_then(|n| n.as_str().map(|s| s.to_string()))
+                        })
+                })
+            };
+            if let Some(name) = name {
+                packages.push((name, rel));
+            }
+        }
+    }
+    packages
+}
+
+/// Detect markdown documents using a pre-resolved repo root and package list.
+///
+/// Skips `Repository::discover` and full repo detection, going straight to
+/// file collection. Use when the caller already knows the repo root.
+pub fn detect_docs_from_root(
+    repo_root: &Path,
+    packages: &[(String, PathBuf)],
+) -> Option<Vec<MarkdownMeta>> {
+    let repo_docs = RepoDocuments::from_root(repo_root.to_path_buf(), packages.to_vec());
+    let docs = repo_docs.documents();
+    if docs.is_empty() { None } else { Some(docs) }
+}
+
+/// Detect markdown documents that declare a `blast_radius` frontmatter key.
+///
+/// Streams each markdown file only until the closing frontmatter delimiter
+/// and parses just the `blast_radius` key, skipping content hashing, mtime
+/// resolution, and title extraction. Documents without `blast_radius` are
+/// not returned at all.
+///
+/// Returns `None` when the directory is not inside a git repository.
+#[instrument(skip_all, fields(root = %root.display()))]
+pub fn detect_blast_radius_docs(root: &Path) -> Option<Vec<MarkdownMeta>> {
+    let repo = git2::Repository::discover(root).ok()?;
+    let repo_root = repo.workdir()?.to_path_buf();
+
+    let walker = WalkBuilder::new(&repo_root)
+        .hidden(false)
+        .git_ignore(true)
+        .git_global(true)
+        .git_exclude(true)
+        .build();
+
+    let paths: Vec<_> = walker
+        .filter_map(|entry| entry.ok())
+        .filter(|entry| {
+            entry.file_type().is_some_and(|ft| ft.is_file())
+                && entry
+                    .path()
+                    .extension()
+                    .is_some_and(|ext| ext.eq_ignore_ascii_case("md"))
+        })
+        .map(|entry| entry.path().to_path_buf())
+        .collect();
+
+    let mut docs: Vec<MarkdownMeta> = paths
+        .into_par_iter()
+        .filter_map(|path| {
+            parse_markdown_meta_with_mode(&path, &repo_root, &[], DocParseMode::BlastRadiusOnly)
+        })
+        .filter(|doc| doc.has_blast_radius)
+        .collect();
+
+    docs.sort_by(|a, b| a.relative.cmp(&b.relative));
+    if docs.is_empty() { None } else { Some(docs) }
+}
+
 /// Detect markdown documents using pre-computed package info.
 ///
 /// Avoids the redundant `detect_repo()` call that `detect_docs()` performs
@@ -162,7 +322,7 @@ fn collect_markdown_files(repo_root: &Path, packages: &[(String, PathBuf)]) -> V
         .git_exclude(true)
         .build();
 
-    let mut docs: Vec<MarkdownMeta> = walker
+    let paths: Vec<_> = walker
         .filter_map(|entry| entry.ok())
         .filter(|entry| {
             entry.file_type().is_some_and(|ft| ft.is_file())
@@ -171,7 +331,56 @@ fn collect_markdown_files(repo_root: &Path, packages: &[(String, PathBuf)]) -> V
                     .extension()
                     .is_some_and(|ext| ext.eq_ignore_ascii_case("md"))
         })
-        .filter_map(|entry| parse_markdown_meta(entry.path(), repo_root, packages))
+        .map(|entry| entry.path().to_path_buf())
+        .collect();
+
+    let mut docs: Vec<MarkdownMeta> = paths
+        .into_par_iter()
+        .filter_map(|path| parse_markdown_meta(&path, repo_root, packages))
+        .collect();
+
+    docs.sort_by(|a, b| a.relative.cmp(&b.relative));
+    docs
+}
+
+pub fn collect_markdown_files_filtered<F>(
+    repo_root: &Path,
+    packages: &[(String, PathBuf)],
+    mode: DocParseMode,
+    path_filter: F,
+) -> Vec<MarkdownMeta>
+where
+    F: Fn(&str) -> bool + Sync,
+{
+    let walker = WalkBuilder::new(repo_root)
+        .hidden(false)
+        .git_ignore(true)
+        .git_global(true)
+        .git_exclude(true)
+        .build();
+
+    let paths: Vec<_> = walker
+        .filter_map(|entry| entry.ok())
+        .filter(|entry| {
+            entry.file_type().is_some_and(|ft| ft.is_file())
+                && entry
+                    .path()
+                    .extension()
+                    .is_some_and(|ext| ext.eq_ignore_ascii_case("md"))
+        })
+        .filter(|entry| {
+            entry
+                .path()
+                .strip_prefix(repo_root)
+                .map(|rel| path_filter(&rel.to_string_lossy()))
+                .unwrap_or(false)
+        })
+        .map(|entry| entry.path().to_path_buf())
+        .collect();
+
+    let mut docs: Vec<MarkdownMeta> = paths
+        .into_par_iter()
+        .filter_map(|path| parse_markdown_meta_with_mode(&path, repo_root, packages, mode))
         .collect();
 
     docs.sort_by(|a, b| a.relative.cmp(&b.relative));
@@ -230,11 +439,200 @@ pub fn collect_markdown_paths(root: &Path) -> Vec<PathBuf> {
         .collect()
 }
 
+/// Walk one or more root directories and return every markdown file path.
+///
+/// This is the multi-root counterpart to [`collect_markdown_paths`]. Each
+/// directory in `dirs` is walked independently with the same gitignore
+/// configuration. Pass a single-element `dirs` containing the repo root to
+/// reproduce [`collect_markdown_paths`] behaviour; pass targeted
+/// sub-directories (e.g. `["sniff/"]`) to avoid walking the entire
+/// repository.
+pub fn collect_markdown_paths_from_dirs(dirs: &[PathBuf]) -> Vec<PathBuf> {
+    let mut all = Vec::new();
+    for dir in dirs {
+        if !dir.is_dir() {
+            continue;
+        }
+        let walker = WalkBuilder::new(dir)
+            .hidden(true)
+            .git_ignore(true)
+            .git_global(true)
+            .git_exclude(true)
+            .build();
+        let paths: Vec<_> = walker
+            .filter_map(|entry| entry.ok())
+            .filter(|entry| {
+                entry.file_type().is_some_and(|ft| ft.is_file())
+                    && entry
+                        .path()
+                        .extension()
+                        .is_some_and(|ext| ext.eq_ignore_ascii_case("md"))
+            })
+            .map(|entry| entry.path().to_path_buf())
+            .collect();
+        all.extend(paths);
+    }
+    all
+}
+
+/// Fast path for collecting markdown paths without gitignore checking.
+///
+/// Intended for targeted directory walks (e.g. `--package-area sniff`)
+/// where the directory is known to be curated and the overhead of
+/// gitignore resolution is not justified by the small file count.
+/// Do NOT use for full-repo walks — without gitignore the walker will
+/// descend into `target/`, `.git/`, `node_modules/`, etc.
+pub fn collect_markdown_paths_fast(dirs: &[PathBuf]) -> Vec<PathBuf> {
+    let mut all = Vec::new();
+    for dir in dirs {
+        if !dir.is_dir() {
+            continue;
+        }
+        let walker = WalkBuilder::new(dir)
+            .hidden(true)
+            .git_ignore(false)
+            .git_global(false)
+            .git_exclude(false)
+            .build();
+        let paths: Vec<_> = walker
+            .filter_map(|entry| entry.ok())
+            .filter(|entry| {
+                entry.file_type().is_some_and(|ft| ft.is_file())
+                    && entry
+                        .path()
+                        .extension()
+                        .is_some_and(|ext| ext.eq_ignore_ascii_case("md"))
+            })
+            .map(|entry| entry.path().to_path_buf())
+            .collect();
+        all.extend(paths);
+    }
+    all
+}
+
+/// Walk one or more root directories, parse matching markdown files, and
+/// return their [`MarkdownMeta`].
+///
+/// This is the multi-root counterpart to
+/// [`collect_markdown_files_filtered`]. When `dirs` contains targeted
+/// sub-directories (e.g. derived from `--package-area` flags), only those
+/// directories are walked — skipping potentially thousands of unrelated
+/// files in the rest of the repository.
+pub fn collect_markdown_files_from_dirs<F>(
+    dirs: &[PathBuf],
+    repo_root: &Path,
+    packages: &[(String, PathBuf)],
+    mode: DocParseMode,
+    path_filter: F,
+) -> Vec<MarkdownMeta>
+where
+    F: Fn(&str) -> bool + Sync,
+{
+    let mut all_paths = Vec::new();
+    for dir in dirs {
+        if !dir.is_dir() {
+            continue;
+        }
+        let walker = WalkBuilder::new(dir)
+            .hidden(false)
+            .git_ignore(true)
+            .git_global(true)
+            .git_exclude(true)
+            .build();
+        let paths: Vec<_> = walker
+            .filter_map(|entry| entry.ok())
+            .filter(|entry| {
+                entry.file_type().is_some_and(|ft| ft.is_file())
+                    && entry
+                        .path()
+                        .extension()
+                        .is_some_and(|ext| ext.eq_ignore_ascii_case("md"))
+            })
+            .filter(|entry| {
+                entry
+                    .path()
+                    .strip_prefix(repo_root)
+                    .map(|rel| path_filter(&rel.to_string_lossy()))
+                    .unwrap_or(false)
+            })
+            .map(|entry| entry.path().to_path_buf())
+            .collect();
+        all_paths.extend(paths);
+    }
+
+    let mut docs: Vec<MarkdownMeta> = all_paths
+        .into_par_iter()
+        .filter_map(|path| parse_markdown_meta_with_mode(&path, repo_root, packages, mode))
+        .collect();
+
+    docs.sort_by(|a, b| a.relative.cmp(&b.relative));
+    docs
+}
+
+/// Parse a pre-resolved list of markdown file paths into [`MarkdownMeta`].
+///
+/// Unlike the `collect_*` functions that walk directories, this function
+/// takes an explicit set of file paths — useful when a prior
+/// [`FrontmatterOnly`] pass has already narrowed the candidates.
+pub fn parse_markdown_files(
+    paths: &[PathBuf],
+    repo_root: &Path,
+    packages: &[(String, PathBuf)],
+    mode: DocParseMode,
+) -> Vec<MarkdownMeta> {
+    let mut docs: Vec<MarkdownMeta> = paths
+        .into_par_iter()
+        .filter_map(|path| parse_markdown_meta_with_mode(path, repo_root, packages, mode))
+        .collect();
+    docs.sort_by(|a, b| a.relative.cmp(&b.relative));
+    docs
+}
+
 /// Parse a single markdown file into its metadata.
 pub(crate) fn parse_markdown_meta(
     path: &Path,
     repo_root: &Path,
     packages: &[(String, PathBuf)],
+) -> Option<MarkdownMeta> {
+    parse_markdown_meta_with_mode(path, repo_root, packages, DocParseMode::Full)
+}
+
+/// Parse a single markdown file with the requested level of detail.
+///
+/// [`DocParseMode::Full`] reproduces the historical behavior of
+/// [`parse_markdown_meta`]. [`DocParseMode::BlastRadiusOnly`] streams only
+/// until the closing frontmatter delimiter and parses just the `blast_radius`
+/// key, skipping hashing, mtime resolution, and full-body title scanning.
+pub(crate) fn parse_markdown_meta_with_mode(
+    path: &Path,
+    repo_root: &Path,
+    packages: &[(String, PathBuf)],
+    mode: DocParseMode,
+) -> Option<MarkdownMeta> {
+    let relative = path
+        .strip_prefix(repo_root)
+        .ok()?
+        .to_string_lossy()
+        .to_string();
+    let relative_path = Path::new(&relative);
+    let package = determine_package(relative_path, packages);
+
+    match mode {
+        DocParseMode::Full => parse_markdown_meta_full(path, repo_root, package, relative),
+        DocParseMode::BlastRadiusOnly => {
+            parse_markdown_meta_blast_radius_only(path, repo_root, package, relative)
+        }
+        DocParseMode::FrontmatterOnly => {
+            parse_markdown_meta_frontmatter_only(path, package, relative)
+        }
+    }
+}
+
+fn parse_markdown_meta_full(
+    path: &Path,
+    repo_root: &Path,
+    package: Option<String>,
+    relative: String,
 ) -> Option<MarkdownMeta> {
     let content = fs::read_to_string(path)
         .map_err(|e| {
@@ -244,14 +642,6 @@ pub(crate) fn parse_markdown_meta(
         .ok()?;
     let (frontmatter, body) = extract_frontmatter(&content);
 
-    let relative = path
-        .strip_prefix(repo_root)
-        .ok()?
-        .to_string_lossy()
-        .to_string();
-
-    let relative_path = Path::new(&relative);
-    let package = determine_package(relative_path, packages);
     let (title, title_source) = extract_title(&frontmatter, body);
     let model = get_string_field(&frontmatter, "model");
     let prompt = get_string_field(&frontmatter, "prompt");
@@ -279,6 +669,115 @@ pub(crate) fn parse_markdown_meta(
         blast_radius,
         frontmatter_keys,
     })
+}
+
+fn parse_markdown_meta_blast_radius_only(
+    path: &Path,
+    repo_root: &Path,
+    package: Option<String>,
+    relative: String,
+) -> Option<MarkdownMeta> {
+    let frontmatter = read_frontmatter_only(path)?;
+    let has_blast_radius = frontmatter.contains_key("blast_radius");
+    let blast_radius = parse_blast_radius(&frontmatter, repo_root);
+
+    Some(MarkdownMeta {
+        filepath: path.to_path_buf(),
+        relative,
+        package,
+        title: String::new(),
+        title_source: TitleSource::None,
+        model: None,
+        prompt: None,
+        last_updated: DateTime::<Utc>::from_timestamp(0, 0).unwrap_or_default(),
+        updated_source: UpdatedSource::FileMetadata,
+        content_hash: String::new(),
+        has_blast_radius,
+        blast_radius,
+        frontmatter_keys: Vec::new(),
+    })
+}
+
+fn parse_markdown_meta_frontmatter_only(
+    path: &Path,
+    package: Option<String>,
+    relative: String,
+) -> Option<MarkdownMeta> {
+    let frontmatter = read_frontmatter_only(path)?;
+
+    let title = get_string_field(&frontmatter, "title").unwrap_or_default();
+    let title_source = if title.is_empty() {
+        TitleSource::None
+    } else {
+        TitleSource::FrontmatterTitle
+    };
+    let model = get_string_field(&frontmatter, "model");
+    let prompt = get_string_field(&frontmatter, "prompt");
+    let has_blast_radius = frontmatter.contains_key("blast_radius");
+
+    let mut frontmatter_keys: Vec<String> = frontmatter.keys().cloned().collect();
+    frontmatter_keys.sort();
+
+    Some(MarkdownMeta {
+        filepath: path.to_path_buf(),
+        relative,
+        package,
+        title,
+        title_source,
+        model,
+        prompt,
+        last_updated: DateTime::<Utc>::from_timestamp(0, 0).unwrap_or_default(),
+        updated_source: UpdatedSource::FileMetadata,
+        content_hash: String::new(),
+        has_blast_radius,
+        blast_radius: None,
+        frontmatter_keys,
+    })
+}
+
+/// Stream-read just the YAML frontmatter from `path` and parse it.
+///
+/// Stops reading at the closing `---` delimiter, so large documents are not
+/// loaded into memory when only frontmatter keys are needed. Returns an empty
+/// map when the file has no frontmatter, and `None` when the file cannot be
+/// opened or its frontmatter is malformed.
+fn read_frontmatter_only(path: &Path) -> Option<HashMap<String, serde_yaml_ng::Value>> {
+    let file = fs::File::open(path)
+        .map_err(|e| {
+            debug!(path = %path.display(), error = %e, "could not read doc file");
+            e
+        })
+        .ok()?;
+    let mut reader = BufReader::new(file);
+
+    let mut first_line = String::new();
+    if reader.read_line(&mut first_line).ok()? == 0 {
+        return Some(HashMap::new());
+    }
+    if first_line.trim_end_matches(['\r', '\n']) != "---" {
+        return Some(HashMap::new());
+    }
+
+    let mut yaml = String::new();
+    let mut found_close = false;
+    let mut line = String::new();
+    while reader.read_line(&mut line).ok()? > 0 {
+        if line.trim_end_matches(['\r', '\n']) == "---" {
+            found_close = true;
+            break;
+        }
+        yaml.push_str(&line);
+        line.clear();
+    }
+
+    if !found_close {
+        return Some(HashMap::new());
+    }
+    if yaml.trim().is_empty() {
+        return Some(HashMap::new());
+    }
+
+    serde_yaml_ng::from_str::<HashMap<String, serde_yaml_ng::Value>>(&yaml).ok()
 }
 
 /// Extract YAML frontmatter from markdown content.
@@ -523,7 +1022,7 @@ pub(crate) fn determine_package(
     None
 }
 
-pub(crate) fn assign_packages(
+pub fn assign_packages(
     docs: &mut [MarkdownMeta],
     packages: &[(String, PathBuf)],
     repo_root: &Path,
@@ -1128,6 +1627,102 @@ mod tests {
                 .collect();
             assert!(names.contains("top.md"));
             assert!(names.contains("deep.md"));
+        }
+    }
+
+    mod frontmatter_only_mode {
+        use super::*;
+        use std::fs;
+        use tempfile::TempDir;
+
+        fn write_file(path: &Path, contents: &str) {
+            if let Some(parent) = path.parent() {
+                fs::create_dir_all(parent).unwrap();
+            }
+            fs::write(path, contents).unwrap();
+        }
+
+        #[test]
+        fn frontmatter_only_extracts_prompt() {
+            let tmp = TempDir::new().unwrap();
+            let root = tmp.path();
+            write_file(
+                &root.join("doc.md"),
+                "---\ntitle: Test\nprompt: Do stuff\n---\n# Body",
+            );
+
+            let packages: Vec<(String, PathBuf)> = vec![];
+            let docs = collect_markdown_files_filtered(
+                root,
+                &packages,
+                DocParseMode::FrontmatterOnly,
+                |_| true,
+            );
+            assert_eq!(docs.len(), 1);
+            assert_eq!(docs[0].prompt.as_deref(), Some("Do stuff"));
+            assert_eq!(docs[0].title, "Test");
+            assert_eq!(docs[0].title_source, TitleSource::FrontmatterTitle);
+            assert!(docs[0].content_hash.is_empty());
+        }
+
+        #[test]
+        fn frontmatter_only_skips_body_hash_and_mtime() {
+            let tmp = TempDir::new().unwrap();
+            let root = tmp.path();
+            write_file(
+                &root.join("doc.md"),
+                "---\ntitle: Hello\n---\n# Body content here",
+            );
+
+            let packages: Vec<(String, PathBuf)> = vec![];
+            let docs = collect_markdown_files_filtered(
+                root,
+                &packages,
+                DocParseMode::FrontmatterOnly,
+                |_| true,
+            );
+            assert_eq!(docs.len(), 1);
+            assert!(docs[0].content_hash.is_empty());
+            assert_eq!(
+                docs[0].last_updated,
+                DateTime::<Utc>::from_timestamp(0, 0).unwrap()
+            );
+        }
+
+        #[test]
+        fn frontmatter_only_path_filter_excludes_non_matching() {
+            let tmp = TempDir::new().unwrap();
+            let root = tmp.path();
+            write_file(&root.join("sniff/lib/doc.md"), "---\ntitle: A\n---\nBody");
+            write_file(&root.join("homelab/doc.md"), "---\ntitle: B\n---\nBody");
+
+            let packages: Vec<(String, PathBuf)> = vec![];
+            let docs = collect_markdown_files_filtered(
+                root,
+                &packages,
+                DocParseMode::FrontmatterOnly,
+                |rel| rel.starts_with("sniff/"),
+            );
+            assert_eq!(docs.len(), 1);
+            assert_eq!(docs[0].title, "A");
+        }
+
+        #[test]
+        fn frontmatter_only_no_frontmatter_still_returns_doc() {
+            let tmp = TempDir::new().unwrap();
+            let root = tmp.path();
+            write_file(&root.join("plain.md"), "# Just a heading");
+
+            let packages: Vec<(String, PathBuf)> = vec![];
+            let docs = collect_markdown_files_filtered(
+                root,
+                &packages,
+                DocParseMode::FrontmatterOnly,
+                |_| true,
+            );
+            assert_eq!(docs.len(), 1);
+            assert!(docs[0].title.is_empty());
+            assert_eq!(docs[0].title_source, TitleSource::None);
         }
     }
 }

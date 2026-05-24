@@ -11,12 +11,11 @@ use darkmatter::markdown::Markdown;
 use darkmatter::markdown::compose::ComposeOptions;
 use darkmatter::markdown::compose::shell_expansion::discovery::collect_shell_commands;
 use darkmatter::markdown::compose::shell_expansion::policy::normalize_command;
-use darkmatter::markdown::compose::shell_expansion::tokenize::tokenize;
 
 use crate::composition::error::CompositionError;
 use crate::harness::audit::collect_auditable_commands;
 use crate::harness::model::HarnessPlan;
-use crate::harness::shell::ShellApprovalOptions;
+use crate::harness::shell::{ShellApprovalOptions, tokenize_words_strict};
 
 /// Result of pre-flight shell command approval.
 #[derive(Debug)]
@@ -100,7 +99,8 @@ pub fn resolve_shell_approvals(
     // -- Check each command against policy -------------------------------------
     for (normalized, source_file, line) in &unique {
         // Split normalized command back into parts for the existing validator.
-        let parts: Vec<String> = tokenize(normalized).unwrap_or_else(|_| vec![normalized.clone()]);
+        let parts: Vec<String> =
+            tokenize_words_strict(normalized).unwrap_or_else(|_| vec![normalized.clone()]);
 
         match crate::harness::shell::validate_and_approve_command_parts(
             &parts,
@@ -311,6 +311,7 @@ mod tests {
             },
             message_template: None,
             subject_key: None,
+            source: None,
         });
 
         let (_dir, approval_options) = approval_options_with_whitelist(&["echo"]);
@@ -360,6 +361,7 @@ mod tests {
             },
             message_template: None,
             subject_key: None,
+            source: None,
         });
 
         let (_dir, approval_options) = approval_options_with_whitelist(&["echo"]);
@@ -608,6 +610,7 @@ mod tests {
                 },
                 message_template: None,
                 subject_key: None,
+                source: None,
             }],
             post_checks: Vec::new(),
             handlers: HandlerTable::default(),

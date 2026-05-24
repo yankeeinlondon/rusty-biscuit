@@ -154,10 +154,10 @@ fn bind_pass(tree_file: &TreeFile, index: &mut FileSymbolIndex) -> Result<(), Tr
     let mut references_by_owner: Vec<Vec<SymbolRef>> = vec![Vec::new(); index.symbols.len()];
     let mut dependencies_by_owner: Vec<Vec<SymbolRef>> = vec![Vec::new(); index.symbols.len()];
     let mut referenced_by_target: HashMap<crate::shared::SymbolId, Vec<SymbolRef>> = HashMap::new();
+    let owner_index = OwnerSymbolIndex::new(&index.symbols);
 
     for reference in tree_file.referenced_symbols()? {
-        let Some(owner_idx) = find_owner_symbol(
-            &index.symbols,
+        let Some(owner_idx) = owner_index.find(
             reference.range.start_byte as u32,
             reference.range.end_byte as u32,
         ) else {
@@ -281,26 +281,131 @@ fn push_unique_ref(targets: &mut Vec<SymbolRef>, candidate: SymbolRef) {
     }
 }
 
-fn find_owner_symbol(
-    symbols: &[crate::shared::SymbolRecord],
+#[derive(Debug, Clone, Copy)]
+struct OwnerSymbolEntry {
+    idx: usize,
     start_byte: u32,
     end_byte: u32,
-) -> Option<usize> {
-    symbols
-        .iter()
-        .enumerate()
-        .filter(|(_, symbol)| {
-            let span = &symbol.source.declaration_span;
-            span.start_byte <= start_byte && span.end_byte >= end_byte
-        })
-        .min_by_key(|(_, symbol)| {
-            symbol
-                .source
-                .declaration_span
-                .end_byte
-                .saturating_sub(symbol.source.declaration_span.start_byte)
-        })
-        .map(|(idx, _)| idx)
+}
+
+impl OwnerSymbolEntry {
+    fn contains(self, start_byte: u32, end_byte: u32) -> bool {
+        self.start_byte <= start_byte && self.end_byte >= end_byte
+    }
+
+    fn len(self) -> u32 {
+        self.end_byte.saturating_sub(self.start_byte)
+    }
+}
+
+#[derive(Debug)]
+struct OwnerSymbolIndex {
+    root: Option<Box<OwnerSymbolNode>>,
+}
+
+impl OwnerSymbolIndex {
+    fn new(symbols: &[crate::shared::SymbolRecord]) -> Self {
+        let entries = symbols
+            .iter()
+            .enumerate()
+            .map(|(idx, symbol)| {
+                let span = &symbol.source.declaration_span;
+                OwnerSymbolEntry {
+                    idx,
+                    start_byte: span.start_byte,
+                    end_byte: span.end_byte,
+                }
+            })
+            .collect();
+
+        Self {
+            root: OwnerSymbolNode::build(entries),
+        }
+    }
+
+    fn find(&self, start_byte: u32, end_byte: u32) -> Option<usize> {
+        self.root
+            .as_ref()
+            .and_then(|root| root.find(start_byte, end_byte).map(|entry| entry.idx))
+    }
+}
+
+#[derive(Debug)]
+struct OwnerSymbolNode {
+    center: u32,
+    spanning: Vec<OwnerSymbolEntry>,
+    left: Option<Box<OwnerSymbolNode>>,
+    right: Option<Box<OwnerSymbolNode>>,
+}
+
+impl OwnerSymbolNode {
+    fn build(mut entries: Vec<OwnerSymbolEntry>) -> Option<Box<Self>> {
+        if entries.is_empty() {
+            return None;
+        }
+
+        entries.sort_by_key(|entry| (entry.start_byte, entry.end_byte, entry.idx));
+        let center = entries[entries.len() / 2].start_byte;
+
+        let mut left = Vec::new();
+        let mut spanning = Vec::new();
+        let mut right = Vec::new();
+
+        for entry in entries {
+            if entry.end_byte < center {
+                left.push(entry);
+            } else if entry.start_byte > center {
+                right.push(entry);
+            } else {
+                spanning.push(entry);
+            }
+        }
+
+        spanning.sort_by_key(|entry| (entry.len(), entry.start_byte, entry.end_byte, entry.idx));
+
+        Some(Box::new(Self {
+            center,
+            spanning,
+            left: Self::build(left),
+            right: Self::build(right),
+        }))
+    }
+
+    fn find(&self, start_byte: u32, end_byte: u32) -> Option<OwnerSymbolEntry> {
+        let mut best = self
+            .spanning
+            .iter()
+            .copied()
+            .find(|entry| entry.contains(start_byte, end_byte));
+
+        let child = if end_byte < self.center {
+            self.left.as_ref()
+        } else if start_byte > self.center {
+            self.right.as_ref()
+        } else {
+            None
+        };
+
+        if let Some(candidate) = child.and_then(|node| node.find(start_byte, end_byte))
+            && best.is_none_or(|current| {
+                (
+                    candidate.len(),
+                    candidate.start_byte,
+                    candidate.end_byte,
+                    candidate.idx,
+                ) < (
+                    current.len(),
+                    current.start_byte,
+                    current.end_byte,
+                    current.idx,
+                )
+            })
+        {
+            best = Some(candidate);
+        }
+
+        best
+    }
 }
 
 fn find_reference_target<'a>(

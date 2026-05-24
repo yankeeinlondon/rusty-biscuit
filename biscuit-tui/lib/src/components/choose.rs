@@ -29,6 +29,53 @@ pub enum SelectionMode {
     Multiple,
 }
 
+/// Layout direction for a choice list.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum Orientation {
+    /// One item per row, stacked vertically (the default).
+    #[default]
+    Vertical,
+    /// Items packed left-to-right, wrapping to new rows.
+    Horizontal,
+}
+
+/// A keyboard shortcut that selects an option without moving the
+/// active cursor.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum HotkeySpec {
+    /// `Ctrl+<char>` shortcut.
+    Ctrl(char),
+    /// `Alt+<char>` shortcut.
+    Alt(char),
+}
+
+/// When (if ever) hotkey badges are rendered next to option labels.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum HotkeyDisplayMode {
+    /// Badges are never shown (the default).
+    #[default]
+    Hidden,
+    /// Badges shown only while `Ctrl` is held.
+    CtrlHeld,
+    /// Badges shown only while `Alt` is held.
+    AltHeld,
+}
+
+/// Background color used for the actively hovered option in a choice
+/// list.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum ActiveChoiceColor {
+    /// Neutral grey (safe on both light and dark terminals).
+    #[default]
+    Grey,
+    /// Green accent.
+    Green,
+    /// Yellow accent.
+    Yellow,
+    /// Red accent.
+    Red,
+}
+
 /// A single option rendered by `ChooseOne` or `ChooseMany`.
 ///
 /// `V` is the typed value associated with the option; defaults to
@@ -46,6 +93,12 @@ pub struct ChoiceOption<V = String> {
     /// When `true`, the option is rendered dimmed and cannot be
     /// selected.
     pub disabled: bool,
+    /// Optional keyboard shortcut that selects this option. `None`
+    /// means the option has no hotkey at all — no badge, no keypress
+    /// binding. Hotkeys are only created by explicit assignment
+    /// (`with_hotkey()`, `[CTRL+x]` in CLI options, object-source
+    /// `hotkey` field, or `--numeric-hot-keys`).
+    pub hotkey: Option<HotkeySpec>,
 }
 
 impl<V> ChoiceOption<V> {
@@ -65,6 +118,7 @@ impl<V> ChoiceOption<V> {
             label: label.into(),
             value: value.into(),
             disabled: false,
+            hotkey: None,
         }
     }
 
@@ -72,6 +126,24 @@ impl<V> ChoiceOption<V> {
     pub fn disabled(mut self) -> Self {
         self.disabled = true;
         self
+    }
+
+    /// Sets a keyboard shortcut for this option.
+    pub fn with_hotkey(mut self, hotkey: HotkeySpec) -> Self {
+        self.hotkey = Some(hotkey);
+        self
+    }
+
+    /// Returns the keyboard shortcut bound to this option, if any.
+    ///
+    /// Returns the explicit `hotkey` set via [`with_hotkey`](Self::with_hotkey),
+    /// or `None` when no hotkey was assigned. Disabled options never
+    /// have a hotkey.
+    pub fn effective_hotkey(&self) -> Option<HotkeySpec> {
+        if self.disabled {
+            return None;
+        }
+        self.hotkey
     }
 
     /// Projects the option's value into a new type `U`.
@@ -84,6 +156,7 @@ impl<V> ChoiceOption<V> {
             label: self.label,
             value: f(self.value),
             disabled: self.disabled,
+            hotkey: self.hotkey,
         }
     }
 }
@@ -131,6 +204,18 @@ pub struct ChoiceInput<V = String> {
     /// search-on-type behaviour by calling
     /// [`with_filter_enabled(true)`](ChoiceInput::with_filter_enabled).
     pub filter_enabled: bool,
+    /// Layout direction for the option list.
+    pub orientation: Orientation,
+    /// Optional ordering applied to the option list before state
+    /// construction.
+    pub sort: Option<crate::core::SortOrder>,
+    /// Background colour used for the actively hovered option.
+    ///
+    /// Defaults to [`ActiveChoiceColor::Grey`]. The renderer combines
+    /// this colour with the detected terminal background to pick a
+    /// foreground that meets the spec's contrast requirements (see
+    /// [`crate::core::resolve_active_style`]).
+    pub active_color: ActiveChoiceColor,
 }
 
 impl<V> ChoiceInput<V> {
@@ -147,6 +232,9 @@ impl<V> ChoiceInput<V> {
             max_selections: None,
             shuffle_options: false,
             filter_enabled: false,
+            orientation: Orientation::default(),
+            sort: None,
+            active_color: ActiveChoiceColor::default(),
         }
     }
 
@@ -205,6 +293,47 @@ impl<V> ChoiceInput<V> {
         self.filter_enabled = enabled;
         self
     }
+
+    /// Sets the layout `orientation`.
+    pub fn with_orientation(mut self, orientation: Orientation) -> Self {
+        self.orientation = orientation;
+        self
+    }
+
+    /// Sets the `sort` order applied before state construction.
+    pub fn with_sort(mut self, sort: crate::core::SortOrder) -> Self {
+        self.sort = Some(sort);
+        self
+    }
+
+    /// Sets the [`ActiveChoiceColor`] used for the actively hovered
+    /// option's background.
+    pub fn with_active_color(mut self, color: ActiveChoiceColor) -> Self {
+        self.active_color = color;
+        self
+    }
+
+    /// Applies the configured [`crate::core::SortOrder`] (if any) to
+    /// `self.options` in place.
+    ///
+    /// Library state constructors call this before building the hotkey
+    /// map and `cached_labels` so that `ChoiceInput` is the single
+    /// authority on option ordering. CLI callers used to invoke a
+    /// duplicate `apply_sort` helper; that helper now delegates to the
+    /// configured `with_sort` builder via this method.
+    ///
+    /// ## Notes
+    ///
+    /// - Sorts by `option.label` for `Asc`/`Desc`, reverses for
+    ///   `Reverse`, and is a no-op for `Natural` or when `sort` is
+    ///   `None`.
+    /// - The standard library's `slice::sort_by` is stable, so options
+    ///   with equal labels keep their relative input order.
+    pub(crate) fn sort_options_in_place(&mut self) {
+        if let Some(order) = self.sort {
+            order.apply(&mut self.options);
+        }
+    }
 }
 
 #[cfg(test)]
@@ -218,6 +347,36 @@ mod tests {
         assert_eq!(option.label, "Red");
         assert_eq!(option.value, "red");
         assert!(!option.disabled);
+        assert!(option.hotkey.is_none());
+    }
+
+    #[test]
+    fn choice_option_with_hotkey_sets_hotkey() {
+        let option: ChoiceOption =
+            ChoiceOption::new("r", "Red", "red").with_hotkey(HotkeySpec::Ctrl('r'));
+        assert_eq!(option.hotkey, Some(HotkeySpec::Ctrl('r')));
+    }
+
+    #[test]
+    fn effective_hotkey_returns_none_when_unassigned() {
+        // An option with no explicit hotkey has no badge / no binding.
+        let option: ChoiceOption = ChoiceOption::new("r", "Red", "red");
+        assert_eq!(option.effective_hotkey(), None);
+    }
+
+    #[test]
+    fn effective_hotkey_returns_explicit_assignment() {
+        let option: ChoiceOption =
+            ChoiceOption::new("r", "Red", "red").with_hotkey(HotkeySpec::Alt('x'));
+        assert_eq!(option.effective_hotkey(), Some(HotkeySpec::Alt('x')));
+    }
+
+    #[test]
+    fn effective_hotkey_ignores_disabled_options() {
+        let option: ChoiceOption = ChoiceOption::new("r", "Red", "red")
+            .with_hotkey(HotkeySpec::Ctrl('r'))
+            .disabled();
+        assert_eq!(option.effective_hotkey(), None);
     }
 
     #[test]
@@ -245,6 +404,14 @@ mod tests {
     }
 
     #[test]
+    fn map_value_preserves_hotkey() {
+        let option: ChoiceOption<String> =
+            ChoiceOption::new("one", "One", "1".to_string()).with_hotkey(HotkeySpec::Alt('o'));
+        let projected: ChoiceOption<u32> = option.map_value(|v| v.parse().unwrap());
+        assert_eq!(projected.hotkey, Some(HotkeySpec::Alt('o')));
+    }
+
+    #[test]
     fn choice_input_new_defaults_to_single_mode() {
         let input: ChoiceInput = ChoiceInput::new("c", "Pick one");
         assert_eq!(input.selection_mode, SelectionMode::Single);
@@ -254,6 +421,16 @@ mod tests {
         assert!(input.max_selections.is_none());
         assert!(!input.shuffle_options);
         assert!(!input.filter_enabled);
+        assert_eq!(input.orientation, Orientation::Vertical);
+        assert!(input.sort.is_none());
+        assert_eq!(input.active_color, ActiveChoiceColor::Grey);
+    }
+
+    #[test]
+    fn with_active_color_sets_the_color() {
+        let input: ChoiceInput =
+            ChoiceInput::new("c", "Pick one").with_active_color(ActiveChoiceColor::Green);
+        assert_eq!(input.active_color, ActiveChoiceColor::Green);
     }
 
     #[test]
@@ -273,6 +450,8 @@ mod tests {
             .with_max_selections(3)
             .with_help_text("Choose wisely")
             .with_shuffle_options(true)
+            .with_orientation(Orientation::Horizontal)
+            .with_sort(crate::core::SortOrder::Asc)
             .with_options(vec![ChoiceOption::new("r", "Red", "red")]);
         assert_eq!(input.selection_mode, SelectionMode::Multiple);
         assert!(input.required);
@@ -281,5 +460,7 @@ mod tests {
         assert_eq!(input.help_text.as_deref(), Some("Choose wisely"));
         assert_eq!(input.options.len(), 1);
         assert!(input.shuffle_options);
+        assert_eq!(input.orientation, Orientation::Horizontal);
+        assert_eq!(input.sort, Some(crate::core::SortOrder::Asc));
     }
 }

@@ -3,25 +3,33 @@
 //! Resolves `{{ variable }}` expressions inside frontmatter values using
 //! non-templated (seed) frontmatter values, `ctx.*`, and `env.*` as inputs.
 //!
-//! ## Seed-Only Semantics
+//! ## Incremental Seed Semantics
 //!
 //! Top-level frontmatter entries are partitioned into:
 //! - **Seed** values: contain no `{{ }}` expressions
 //! - **Templated** values: contain at least one `{{ }}` expression
+//! - **Shell-pending** values: top-level strings that start with `$(` and
+//!   await frontmatter shell expansion
 //!
-//! The lookup state is built from seed values only. This means chained
-//! references between templated values are not supported — if `spec`
-//! references `base`, and `plan` references `spec`, then `plan` will
-//! see the raw (unrewritten) value of `spec`, not its resolved form.
+//! Templated keys are resolved in dependency order: a key is only processed
+//! once all other templated keys it references have been resolved. After
+//! each key is resolved its value is added to the seed map so that
+//! subsequent keys can reference it. This allows a frontmatter variable
+//! like `area` to be defined as `{{ctx.current_package_area}}` and then
+//! referenced by `success.stderr` as `{{area}}`.
+//!
+//! When `defer_shell_pending` is enabled, templated keys whose references
+//! include shell-pending keys are deferred — they remain unresolved so the
+//! caller can run frontmatter shell expansion and then call this function a
+//! second time to resolve those keys against the shell-expanded values.
 
-use super::interpolation::{
-    Evaluator, ExpressionFinder, InterpolationLookup, ScanMode, interpolate_text,
-};
+use super::expression::{EvaluationLookup, Expr, ExpressionFinder, parse};
+use super::interpolation::{Evaluator, ScanMode, interpolate_text};
 use super::types::{ComposeContext, ComposeWarning};
 use crate::markdown::frontmatter::Frontmatter;
 use crate::markdown::types::MarkdownError;
 use serde_json::Value;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 /// Returns `true` if the JSON value tree contains any `{{ }}` interpolation expressions.
 pub(crate) fn contains_interpolation(value: &Value) -> bool {
@@ -48,7 +56,7 @@ impl FrontmatterSeedState {
     }
 }
 
-impl InterpolationLookup for FrontmatterSeedState {
+impl EvaluationLookup for FrontmatterSeedState {
     fn get(&self, path: &str) -> Option<Value> {
         // ctx.* prefix
         if let Some(ctx_key) = path.strip_prefix("ctx.") {
@@ -102,7 +110,7 @@ fn get_nested(value: &Value, path: &str) -> Option<Value> {
 }
 
 /// Recursively rewrites interpolation expressions in a JSON value tree.
-fn rewrite_value<L: InterpolationLookup>(
+fn rewrite_value<L: EvaluationLookup>(
     value: &Value,
     evaluator: &Evaluator<L>,
     fail_fast: bool,
@@ -162,23 +170,43 @@ pub(crate) struct FrontmatterInterpolationReport {
 /// Interpolates templated frontmatter values using seed (non-templated) values.
 ///
 /// Classifies top-level frontmatter entries into seed values (no `{{ }}`)
-/// and templated values (contain `{{ }}`). Builds a lookup state from the
-/// seed values plus the runtime context, then rewrites the templated values.
+/// and templated values (contain `{{ }}`). Templated keys are resolved in
+/// dependency order: a key is only processed once all other templated keys
+/// it references have been resolved. After each key is resolved its value
+/// is added to the seed map so that later keys can reference it.
+///
+/// When `defer_shell_pending` is `true`, top-level string values that begin
+/// with `$(` are treated as shell-pending. Templated keys that reference any
+/// shell-pending key are left unresolved so a caller can run frontmatter
+/// shell expansion and invoke this function again to finish the work.
 pub(crate) fn interpolate_frontmatter(
     frontmatter: &mut Frontmatter,
     context: &ComposeContext,
     fail_fast: bool,
+    defer_shell_pending: bool,
 ) -> Result<FrontmatterInterpolationReport, MarkdownError> {
     let fm = frontmatter.as_map();
 
-    // Partition: seed keys have no interpolation, templated keys have at least one.
+    let shell_pending_keys: HashSet<String> = if defer_shell_pending {
+        fm.iter()
+            .filter_map(|(k, v)| match v {
+                Value::String(s) if s.starts_with("$(") => Some(k.clone()),
+                _ => None,
+            })
+            .collect()
+    } else {
+        HashSet::new()
+    };
+
     let mut seed_map: HashMap<String, Value> = HashMap::new();
-    let mut templated_keys: Vec<String> = Vec::new();
+    let templated_keys: Vec<String> = fm
+        .iter()
+        .filter(|(_, v)| contains_interpolation(v))
+        .map(|(k, _)| k.clone())
+        .collect();
 
     for (key, value) in fm.iter() {
-        if contains_interpolation(value) {
-            templated_keys.push(key.clone());
-        } else {
+        if !contains_interpolation(value) {
             seed_map.insert(key.clone(), value.clone());
         }
     }
@@ -190,34 +218,188 @@ pub(crate) fn interpolate_frontmatter(
         });
     }
 
-    // Build seed state
-    let seed_state = FrontmatterSeedState::new(seed_map, context.clone());
-    let evaluator = Evaluator::new(&seed_state);
+    let original_values: HashMap<String, Value> = templated_keys
+        .iter()
+        .filter_map(|k| fm.get(k).cloned().map(|v| (k.clone(), v)))
+        .collect();
 
+    let templated_set: HashSet<String> = templated_keys.iter().cloned().collect();
+    let mut resolved: HashSet<String> = HashSet::new();
     let mut total_replacements = 0;
     let mut all_warnings = Vec::new();
 
-    // Rewrite each templated key's value tree
-    let fm_mut = frontmatter.as_map_mut();
-    for key in &templated_keys {
-        if let Some(value) = fm_mut.get(key).cloned() {
-            let (new_value, count, mut warnings) = rewrite_value(&value, &evaluator, fail_fast)?;
+    loop {
+        let mut made_progress = false;
 
-            // Add key context to warnings
+        for key in &templated_keys {
+            if resolved.contains(key) {
+                continue;
+            }
+
+            let original = match original_values.get(key) {
+                Some(v) => v,
+                None => continue,
+            };
+
+            let refs = extract_frontmatter_key_refs(original);
+            let has_unresolved = refs
+                .iter()
+                .any(|r| templated_set.contains(r) && !resolved.contains(r));
+            let has_shell_pending = refs.iter().any(|r| shell_pending_keys.contains(r));
+            if has_unresolved || has_shell_pending {
+                continue;
+            }
+
+            let seed_state = FrontmatterSeedState::new(seed_map.clone(), context.clone());
+            let evaluator = Evaluator::new(&seed_state);
+            let (new_value, count, mut warnings) = rewrite_value(original, &evaluator, fail_fast)?;
+
             for w in &mut warnings {
                 w.message = format!("key '{}': {}", key, w.message);
             }
 
-            fm_mut.insert(key.clone(), new_value);
+            frontmatter
+                .as_map_mut()
+                .insert(key.clone(), new_value.clone());
+            seed_map.insert(key.clone(), new_value);
+            resolved.insert(key.clone());
             total_replacements += count;
             all_warnings.extend(warnings);
+            made_progress = true;
         }
+
+        if !made_progress {
+            break;
+        }
+    }
+
+    for key in &templated_keys {
+        if resolved.contains(key) {
+            continue;
+        }
+
+        let original = match original_values.get(key) {
+            Some(v) => v,
+            None => continue,
+        };
+
+        // Leave keys with shell-pending refs alone; the caller will rerun
+        // interpolation after frontmatter shell expansion has produced
+        // concrete values for those refs.
+        if !shell_pending_keys.is_empty() {
+            let refs = extract_frontmatter_key_refs(original);
+            if refs.iter().any(|r| shell_pending_keys.contains(r)) {
+                continue;
+            }
+        }
+
+        let seed_state = FrontmatterSeedState::new(seed_map.clone(), context.clone());
+        let evaluator = Evaluator::new(&seed_state);
+        let (new_value, count, mut warnings) = rewrite_value(original, &evaluator, fail_fast)?;
+
+        for w in &mut warnings {
+            w.message = format!("key '{}': {}", key, w.message);
+        }
+
+        frontmatter
+            .as_map_mut()
+            .insert(key.clone(), new_value.clone());
+        seed_map.insert(key.clone(), new_value);
+        total_replacements += count;
+        all_warnings.extend(warnings);
     }
 
     Ok(FrontmatterInterpolationReport {
         replacements: total_replacements,
         warnings: all_warnings,
     })
+}
+
+/// Extracts frontmatter-key references from a JSON value tree.
+///
+/// Parses each interpolation expression as an AST and collects the root names
+/// of every `Expr::Variable` that resolves against frontmatter (i.e. not
+/// prefixed with `ctx.` or `env.`). This descends through ternary conditions
+/// and both branches, fallback expressions, comparisons, parenthesized
+/// expressions, unary operators, and function arguments — so that
+/// `{{ use ? spec : 'none' }}` is recognised as depending on `use` and `spec`.
+///
+/// Expressions that fail to parse contribute no dependencies; the rewrite
+/// pass surfaces those errors with full diagnostics.
+fn extract_frontmatter_key_refs(value: &Value) -> Vec<String> {
+    let mut refs = Vec::new();
+    collect_frontmatter_key_refs(value, &mut refs);
+    refs.sort();
+    refs.dedup();
+    refs
+}
+
+fn collect_frontmatter_key_refs(value: &Value, refs: &mut Vec<String>) {
+    match value {
+        Value::String(s) => {
+            for loc in ExpressionFinder::find_all_plain(s) {
+                let Ok(expr) = parse(&loc.expression) else {
+                    continue;
+                };
+                collect_variable_roots(&expr, refs);
+            }
+        }
+        Value::Array(arr) => arr
+            .iter()
+            .for_each(|v| collect_frontmatter_key_refs(v, refs)),
+        Value::Object(obj) => obj
+            .values()
+            .for_each(|v| collect_frontmatter_key_refs(v, refs)),
+        _ => {}
+    }
+}
+
+/// Walks an `Expr` AST and pushes the root segment of every `Variable` node
+/// onto `refs`, skipping `ctx.*` and `env.*` since those resolve from the
+/// runtime context, not seed frontmatter.
+fn collect_variable_roots(expr: &Expr, refs: &mut Vec<String>) {
+    match expr {
+        Expr::Variable(path) => {
+            if path.starts_with("ctx.") || path.starts_with("env.") {
+                return;
+            }
+            let root = path.split('.').next().unwrap_or(path);
+            if !root.is_empty() {
+                refs.push(root.to_string());
+            }
+        }
+        Expr::StringLiteral(_) | Expr::NumberLiteral(_) | Expr::BoolLiteral(_) => {}
+        Expr::UnaryNot(inner)
+        | Expr::UnaryMinus(inner)
+        | Expr::Paren(inner)
+        | Expr::MemberAccess { base: inner, .. } => collect_variable_roots(inner, refs),
+        Expr::Fallback { primary, fallback } => {
+            collect_variable_roots(primary, refs);
+            collect_variable_roots(fallback, refs);
+        }
+        Expr::Ternary {
+            condition,
+            then_branch,
+            else_branch,
+        } => {
+            collect_variable_roots(condition, refs);
+            collect_variable_roots(then_branch, refs);
+            collect_variable_roots(else_branch, refs);
+        }
+        Expr::Comparison { left, right, .. } | Expr::Binary { left, right, .. } => {
+            collect_variable_roots(left, refs);
+            collect_variable_roots(right, refs);
+        }
+        Expr::Index { base, index } => {
+            collect_variable_roots(base, refs);
+            collect_variable_roots(index, refs);
+        }
+        Expr::FunctionCall { args, .. } => {
+            for arg in args {
+                collect_variable_roots(arg, refs);
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -357,7 +539,7 @@ mod tests {
                 "spec": "{{base}}/spec.md",
                 "plan": "{{base}}/plan.md"
             }));
-            let report = interpolate_frontmatter(&mut fm, &test_context(), false).unwrap();
+            let report = interpolate_frontmatter(&mut fm, &test_context(), false, false).unwrap();
             assert_eq!(report.replacements, 2);
             assert_eq!(
                 fm.as_map().get("spec"),
@@ -377,7 +559,7 @@ mod tests {
                 "title": "Hello",
                 "count": 42
             }));
-            let report = interpolate_frontmatter(&mut fm, &test_context(), false).unwrap();
+            let report = interpolate_frontmatter(&mut fm, &test_context(), false, false).unwrap();
             assert_eq!(report.replacements, 0);
         }
 
@@ -390,7 +572,7 @@ mod tests {
                     "owner": "Alice"
                 }
             }));
-            let report = interpolate_frontmatter(&mut fm, &test_context(), false).unwrap();
+            let report = interpolate_frontmatter(&mut fm, &test_context(), false, false).unwrap();
             assert_eq!(report.replacements, 1);
             let meta = fm.as_map().get("metadata").unwrap();
             assert_eq!(meta.get("home"), Some(&json!("/docs/home")));
@@ -403,7 +585,7 @@ mod tests {
                 "base": "/root",
                 "paths": ["{{base}}/a", "{{base}}/b"]
             }));
-            let report = interpolate_frontmatter(&mut fm, &test_context(), false).unwrap();
+            let report = interpolate_frontmatter(&mut fm, &test_context(), false, false).unwrap();
             assert_eq!(report.replacements, 2);
             let paths = fm.as_map().get("paths").unwrap().as_array().unwrap();
             assert_eq!(paths[0], json!("/root/a"));
@@ -415,7 +597,7 @@ mod tests {
             let mut fm = fm_from_json(json!({
                 "spec": "{{missing}}/spec.md"
             }));
-            let report = interpolate_frontmatter(&mut fm, &test_context(), false).unwrap();
+            let report = interpolate_frontmatter(&mut fm, &test_context(), false, false).unwrap();
             assert_eq!(report.replacements, 1);
             assert_eq!(fm.as_map().get("spec"), Some(&json!("/spec.md")));
         }
@@ -425,25 +607,25 @@ mod tests {
             let mut fm = fm_from_json(json!({
                 "date": "{{ctx.today}}"
             }));
-            let report = interpolate_frontmatter(&mut fm, &test_context(), false).unwrap();
+            let report = interpolate_frontmatter(&mut fm, &test_context(), false, false).unwrap();
             assert_eq!(report.replacements, 1);
             assert_eq!(fm.as_map().get("date"), Some(&json!("2024-06-15")));
         }
 
         #[test]
-        fn chained_reference_not_supported() {
-            // spec is templated, so it's excluded from seed state
-            // plan references spec, which won't resolve
+        fn chained_reference_resolved_incrementally() {
+            // spec is templated but resolved before plan, so plan can reference spec
             let mut fm = fm_from_json(json!({
                 "base": "/root",
                 "spec": "{{base}}/spec.md",
                 "plan": "{{spec}}.plan.md"
             }));
-            let report = interpolate_frontmatter(&mut fm, &test_context(), false).unwrap();
-            // base resolved in spec and plan, but spec itself is not available as seed
+            let report = interpolate_frontmatter(&mut fm, &test_context(), false, false).unwrap();
             assert_eq!(fm.as_map().get("spec"), Some(&json!("/root/spec.md")));
-            // plan resolves {{spec}} to empty string since spec is templated
-            assert_eq!(fm.as_map().get("plan"), Some(&json!(".plan.md")));
+            assert_eq!(
+                fm.as_map().get("plan"),
+                Some(&json!("/root/spec.md.plan.md"))
+            );
             assert!(report.replacements >= 2);
         }
 
@@ -452,7 +634,7 @@ mod tests {
             let mut fm = fm_from_json(json!({
                 "bad": "{{ > invalid }}"
             }));
-            let result = interpolate_frontmatter(&mut fm, &test_context(), true);
+            let result = interpolate_frontmatter(&mut fm, &test_context(), true, false);
             assert!(result.is_err());
         }
 
@@ -461,8 +643,63 @@ mod tests {
             let mut fm = fm_from_json(json!({
                 "bad": "{{ > invalid }}"
             }));
-            let report = interpolate_frontmatter(&mut fm, &test_context(), false).unwrap();
+            let report = interpolate_frontmatter(&mut fm, &test_context(), false, false).unwrap();
             assert!(!report.warnings.is_empty());
+        }
+
+        #[test]
+        fn defer_shell_pending_leaves_dependent_keys_unresolved() {
+            let mut fm = fm_from_json(json!({
+                "pwd": "$(pwd)",
+                "uname": "$(uname)",
+                "combined": "cwd is {{pwd}} and os is {{uname}}",
+                "plain": "literal"
+            }));
+            let report = interpolate_frontmatter(&mut fm, &test_context(), false, true).unwrap();
+            // combined depends on shell-pending keys, so it stays templated.
+            assert_eq!(
+                fm.as_map().get("combined"),
+                Some(&json!("cwd is {{pwd}} and os is {{uname}}"))
+            );
+            // shell-pending values are untouched.
+            assert_eq!(fm.as_map().get("pwd"), Some(&json!("$(pwd)")));
+            assert_eq!(fm.as_map().get("uname"), Some(&json!("$(uname)")));
+            assert_eq!(report.replacements, 0);
+        }
+
+        #[test]
+        fn defer_shell_pending_resolves_after_shell_values_become_concrete() {
+            let mut fm = fm_from_json(json!({
+                "pwd": "$(pwd)",
+                "combined": "cwd is {{pwd}}"
+            }));
+            // First pass: defer because pwd is shell-pending.
+            interpolate_frontmatter(&mut fm, &test_context(), false, true).unwrap();
+            assert_eq!(fm.as_map().get("combined"), Some(&json!("cwd is {{pwd}}")));
+
+            // Simulate frontmatter shell expansion completing.
+            fm.as_map_mut()
+                .insert("pwd".to_string(), json!("/real/path"));
+
+            // Second pass: pwd is now concrete (no longer starts with `$(`).
+            let report = interpolate_frontmatter(&mut fm, &test_context(), false, true).unwrap();
+            assert_eq!(
+                fm.as_map().get("combined"),
+                Some(&json!("cwd is /real/path"))
+            );
+            assert_eq!(report.replacements, 1);
+        }
+
+        #[test]
+        fn defer_shell_pending_false_resolves_against_literal_shell_text() {
+            let mut fm = fm_from_json(json!({
+                "pwd": "$(pwd)",
+                "combined": "cwd is {{pwd}}"
+            }));
+            // With defer disabled, the literal `$(pwd)` flows through.
+            let report = interpolate_frontmatter(&mut fm, &test_context(), false, false).unwrap();
+            assert_eq!(fm.as_map().get("combined"), Some(&json!("cwd is $(pwd)")));
+            assert_eq!(report.replacements, 1);
         }
     }
 }

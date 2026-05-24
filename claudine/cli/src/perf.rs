@@ -21,7 +21,17 @@ pub(crate) struct CliOverheadReport {
     pub arg_parsing: Duration,
     pub config_loading: Duration,
     pub tracing_init: Duration,
+    pub pre_dispatch: Duration,
+    pub prep_phase: Duration,
     pub environment_setup: Duration,
+    pub substages: Vec<SubstageTiming>,
+}
+
+/// A single named sub-stage timing within environment setup.
+#[derive(Debug, Clone)]
+pub(crate) struct SubstageTiming {
+    pub name: &'static str,
+    pub elapsed: Duration,
 }
 
 #[derive(Debug)]
@@ -29,6 +39,10 @@ pub(crate) struct StartupTimings {
     pub arg_parsing: Duration,
     pub tracing_init: Duration,
     pub config_loading: Duration,
+    /// Duration from process start to subcommand dispatch (Phase A).
+    pub pre_dispatch: Duration,
+    /// Duration from subcommand entry to the start of `execute_composition_request_inner` (Phase B).
+    pub prep_phase: Duration,
 }
 
 pub(crate) fn scan_perf_bootstrap(raw: &[OsString]) -> PerfBootstrap {
@@ -109,6 +123,7 @@ pub(crate) struct SequencePerfAccumulator {
     startup: StartupTimings,
     env_setup_started_at: Option<std::time::Instant>,
     env_setup_elapsed: Duration,
+    substages: Vec<SubstageTiming>,
     steps: Vec<SequenceStepPerf>,
     dry_run: bool,
     partial: bool,
@@ -123,6 +138,7 @@ impl SequencePerfAccumulator {
             startup,
             env_setup_started_at: Some(std::time::Instant::now()),
             env_setup_elapsed: Duration::ZERO,
+            substages: Vec::new(),
             steps: Vec::new(),
             dry_run: false,
             partial: false,
@@ -134,6 +150,12 @@ impl SequencePerfAccumulator {
         if let Some(started) = self.env_setup_started_at.take() {
             self.env_setup_elapsed = started.elapsed();
         }
+    }
+
+    /// Record a named sub-stage timing.
+    #[allow(dead_code)]
+    pub fn mark_substage(&mut self, name: &'static str, elapsed: Duration) {
+        self.substages.push(SubstageTiming { name, elapsed });
     }
 
     /// Append a step's performance data.
@@ -235,7 +257,10 @@ impl SequencePerfAccumulator {
                 arg_parsing: self.startup.arg_parsing,
                 config_loading: self.startup.config_loading,
                 tracing_init: self.startup.tracing_init,
+                pre_dispatch: self.startup.pre_dispatch,
+                prep_phase: self.startup.prep_phase,
                 environment_setup: self.env_setup_elapsed,
+                substages: self.substages,
             },
             composition,
             agent: if self.dry_run { None } else { agent },
@@ -254,6 +279,7 @@ pub(crate) struct CommandPerfCollector {
     startup: StartupTimings,
     env_setup_started_at: Option<std::time::Instant>,
     env_setup_elapsed: Duration,
+    substages: Vec<SubstageTiming>,
     agent_perf: Option<AgentExecutionPerf>,
     composition_perf: Option<darkmatter::markdown::compose::ComposePerfReport>,
     dry_run: bool,
@@ -269,6 +295,7 @@ impl CommandPerfCollector {
             startup,
             env_setup_started_at: Some(std::time::Instant::now()),
             env_setup_elapsed: Duration::ZERO,
+            substages: Vec::new(),
             agent_perf: None,
             composition_perf: None,
             dry_run: false,
@@ -286,6 +313,7 @@ impl CommandPerfCollector {
             startup,
             env_setup_started_at: Some(std::time::Instant::now()),
             env_setup_elapsed: Duration::ZERO,
+            substages: Vec::new(),
             agent_perf: None,
             composition_perf,
             dry_run: false,
@@ -297,6 +325,11 @@ impl CommandPerfCollector {
         if let Some(started) = self.env_setup_started_at.take() {
             self.env_setup_elapsed = started.elapsed();
         }
+    }
+
+    /// Record a named sub-stage timing.
+    pub fn mark_substage(&mut self, name: &'static str, elapsed: Duration) {
+        self.substages.push(SubstageTiming { name, elapsed });
     }
 
     /// Set the agent execution perf.
@@ -324,7 +357,10 @@ impl CommandPerfCollector {
                 arg_parsing: self.startup.arg_parsing,
                 config_loading: self.startup.config_loading,
                 tracing_init: self.startup.tracing_init,
+                pre_dispatch: self.startup.pre_dispatch,
+                prep_phase: self.startup.prep_phase,
                 environment_setup: self.env_setup_elapsed,
+                substages: self.substages,
             },
             composition: self.composition_perf,
             agent: if self.dry_run { None } else { self.agent_perf },
@@ -349,11 +385,170 @@ fn fmt_duration(d: Duration) -> String {
     }
 }
 
+/// A single row within a report section.
+struct Row {
+    label: String,
+    value: String,
+    indent: usize,
+    /// Raw duration this row represents when it should contribute to a
+    /// section's [`TotalKind::Sum`]. `None` for non-numeric rows (e.g., a
+    /// launch count) and for overlapping diagnostic rows that would
+    /// double-count if summed (e.g., substages of `environment setup`,
+    /// or sub-buckets of `pre-dispatch`).
+    sum_contribution: Option<Duration>,
+}
+
+/// How a section total should be computed.
+enum TotalKind {
+    /// Sum the raw durations of rows that opted into the sum via
+    /// `Row::sum_contribution`. Overlapping diagnostic rows must set
+    /// `sum_contribution = None` to avoid double-counting.
+    Sum,
+    /// Use a specific pre-computed value (for Agent Execution use
+    /// `total_elapsed`; for Composition Report use `ComposePerfReport::total`).
+    Fixed(Duration),
+}
+
+/// A report section with rows and an optional total.
+struct Section {
+    title: &'static str,
+    rows: Vec<Row>,
+    total: Option<(TotalKind, &'static str)>,
+}
+
+impl Section {
+    fn new(title: &'static str) -> Self {
+        Self {
+            title,
+            rows: Vec::new(),
+            total: None,
+        }
+    }
+
+    fn with_total(mut self, kind: TotalKind, label: &'static str) -> Self {
+        self.total = Some((kind, label));
+        self
+    }
+
+    /// Add a row whose raw duration contributes to the section sum.
+    fn push_sum(&mut self, label: impl Into<String>, duration: Duration) {
+        self.rows.push(Row {
+            label: label.into(),
+            value: fmt_duration(duration),
+            indent: 2,
+            sum_contribution: Some(duration),
+        });
+    }
+
+    /// Add a non-numeric row (e.g., launch count) — never contributes to a sum.
+    fn push_value(&mut self, label: impl Into<String>, value: impl Into<String>) {
+        self.rows.push(Row {
+            label: label.into(),
+            value: value.into(),
+            indent: 2,
+            sum_contribution: None,
+        });
+    }
+
+    /// Add a duration row that does **not** contribute to the section sum.
+    ///
+    /// Use for rows whose duration overlaps another row already counted
+    /// (e.g., `arg parsing` is a sub-bucket of `pre-dispatch`).
+    fn push_diagnostic(&mut self, label: impl Into<String>, duration: Duration) {
+        self.rows.push(Row {
+            label: label.into(),
+            value: fmt_duration(duration),
+            indent: 2,
+            sum_contribution: None,
+        });
+    }
+
+    /// Add an indented diagnostic row (sub-stage). Never contributes to
+    /// the section sum because the parent row already does.
+    fn push_indented(&mut self, label: impl Into<String>, duration: Duration) {
+        self.rows.push(Row {
+            label: label.into(),
+            value: fmt_duration(duration),
+            indent: 4,
+            sum_contribution: None,
+        });
+    }
+}
+
+/// Compute the total duration for a section based on its [`TotalKind`].
+fn compute_total(kind: &TotalKind, rows: &[Row]) -> Duration {
+    match kind {
+        TotalKind::Fixed(d) => *d,
+        TotalKind::Sum => rows
+            .iter()
+            .filter_map(|r| r.sum_contribution)
+            .fold(Duration::ZERO, |acc, d| acc + d),
+    }
+}
+
+/// Render a single [`Section`] into the given string buffer.
+fn render_section(body: &mut String, section: &Section) {
+    if section.rows.is_empty() {
+        return;
+    }
+
+    body.push_str("\n<b>");
+    body.push_str(section.title);
+    body.push_str("</b>\n");
+
+    // Compute per-section column widths.
+    let label_width = section
+        .rows
+        .iter()
+        .map(|r| r.label.chars().count() + r.indent)
+        .max()
+        .unwrap_or(0)
+        .max(4)
+        + 2; // 2-space gutter between label and value column
+
+    let value_width = section
+        .rows
+        .iter()
+        .map(|r| r.value.chars().count())
+        .max()
+        .unwrap_or(0)
+        .max(4);
+
+    for row in &section.rows {
+        body.push_str(&format!(
+            "{:indent$}{:<label_width$}{:>value_width$}\n",
+            "",
+            row.label,
+            row.value,
+            indent = row.indent,
+            label_width = label_width,
+            value_width = value_width,
+        ));
+    }
+
+    if let Some((ref kind, label)) = section.total {
+        let total = compute_total(kind, &section.rows);
+        let total_value = fmt_duration(total);
+        let sep_width = label_width + value_width;
+        let sep = "═".repeat(sep_width);
+        body.push_str(&format!("{:indent$}{sep}\n", "", indent = 2,));
+        body.push_str(&format!(
+            "{:indent$}{:<label_width$}{:>value_width$}\n",
+            "",
+            format!("<b>{}</b>", label),
+            total_value,
+            indent = 2,
+            label_width = label_width,
+            value_width = value_width,
+        ));
+    }
+}
+
 /// Render a [`CommandPerfReport`] to a styled string suitable for stderr.
 pub(crate) fn render_perf_report(report: &CommandPerfReport) -> String {
     use biscuit_terminal::components::block_quote::BlockQuote;
     use biscuit_terminal::components::prose::Prose;
-    use biscuit_terminal::components::renderable::Renderable as _;
+    use biscuit_terminal::components::renderable::TerminalRenderable as _;
     use biscuit_terminal::utils::color::{Color, Tailwind};
 
     let mut body = String::new();
@@ -364,67 +559,52 @@ pub(crate) fn render_perf_report(report: &CommandPerfReport) -> String {
         fmt_duration(report.total_elapsed)
     ));
 
-    // CLI Overhead
-    body.push_str("\n<b>CLI Overhead</b>\n");
-    body.push_str(&format!(
-        "  {:20}{}\n",
-        "arg parsing:",
-        fmt_duration(report.cli.arg_parsing)
-    ));
-    body.push_str(&format!(
-        "  {:20}{}\n",
-        "config loading:",
-        fmt_duration(report.cli.config_loading)
-    ));
-    body.push_str(&format!(
-        "  {:20}{}\n",
-        "tracing init:",
-        fmt_duration(report.cli.tracing_init)
-    ));
-    body.push_str(&format!(
-        "  {:20}{}\n",
-        "environment setup:",
-        fmt_duration(report.cli.environment_setup)
-    ));
+    // CLI Overhead section.
+    //
+    // Only `pre-dispatch`, `prep phase`, and `environment setup` are
+    // disjoint and add up to the wall-clock CLI overhead; the rest are
+    // diagnostic sub-buckets that overlap their parent row and must NOT
+    // be counted into the section TOTAL.
+    let mut cli = Section::new("CLI Overhead").with_total(TotalKind::Sum, "TOTAL:");
+    cli.push_sum("pre-dispatch:", report.cli.pre_dispatch);
+    cli.push_sum("prep phase:", report.cli.prep_phase);
+    cli.push_diagnostic("arg parsing:", report.cli.arg_parsing);
+    cli.push_diagnostic("config loading:", report.cli.config_loading);
+    cli.push_diagnostic("tracing init:", report.cli.tracing_init);
+    cli.push_sum("environment setup:", report.cli.environment_setup);
+    for sub in &report.cli.substages {
+        cli.push_indented(format!("{}:", sub.name), sub.elapsed);
+    }
+    render_section(&mut body, &cli);
 
-    // Composition Report
+    // Composition Report section: use the authoritative `compose.total`
+    // produced by the darkmatter compose pass rather than summing
+    // individual stage rows. The stage rows are diagnostic — their sum
+    // can drift from `total` due to fmt rounding and stages that overlap
+    // by design (e.g., transclusion calling back into compose).
     if let Some(compose) = &report.composition {
-        body.push_str("\n<b>Composition Report</b>\n");
-        body.push_str(&format!(
-            "  {:20}{}\n",
-            "total:",
-            fmt_duration(compose.total)
-        ));
+        let mut comp = Section::new("Composition Report")
+            .with_total(TotalKind::Fixed(compose.total), "TOTAL:");
         for metric in &compose.metrics {
-            body.push_str(&format!(
-                "  {:20}{}\n",
-                format!("{}:", metric.stage),
-                fmt_duration(metric.elapsed)
-            ));
+            comp.push_diagnostic(format!("{}:", metric.stage), metric.elapsed);
         }
+        render_section(&mut body, &comp);
     }
 
-    // Agent Execution
+    // Agent Execution section
     if let Some(agent) = &report.agent {
-        body.push_str("\n<b>Agent Execution</b>\n");
-        body.push_str(&format!("  {:20}{}\n", "launches:", agent.launches));
+        let mut exec = Section::new("Agent Execution")
+            .with_total(TotalKind::Fixed(agent.total_elapsed), "TOTAL:");
+        exec.push_value("launches:", agent.launches.to_string());
         if let Some(latency) = agent.first_response_latency {
-            body.push_str(&format!(
-                "  {:20}{}\n",
-                "first response:",
-                fmt_duration(latency)
-            ));
+            exec.push_diagnostic("first response:", latency);
         } else {
-            body.push_str(&format!("  {:20}{}\n", "first response:", "--"));
+            exec.push_value("first response:", "--".to_string());
         }
-        body.push_str(&format!(
-            "  {:20}{}\n",
-            "total execution:",
-            fmt_duration(agent.total_elapsed)
-        ));
         if let Some(api) = agent.provider_api_duration {
-            body.push_str(&format!("  {:20}{}\n", "provider api:", fmt_duration(api)));
+            exec.push_diagnostic("provider api duration:", api);
         }
+        render_section(&mut body, &exec);
     }
 
     for note in &report.notes {
@@ -535,7 +715,39 @@ mod tests {
                 arg_parsing: Duration::from_micros(2100),
                 config_loading: Duration::from_millis(18),
                 tracing_init: Duration::from_micros(4500),
+                pre_dispatch: Duration::from_micros(500),
+                prep_phase: Duration::from_millis(50),
                 environment_setup: Duration::from_millis(312),
+                substages: vec![
+                    SubstageTiming {
+                        name: "target resolution",
+                        elapsed: Duration::from_millis(100),
+                    },
+                    SubstageTiming {
+                        name: "header env plan",
+                        elapsed: Duration::from_millis(50),
+                    },
+                    SubstageTiming {
+                        name: "child env build",
+                        elapsed: Duration::from_millis(80),
+                    },
+                    SubstageTiming {
+                        name: "mcp composition",
+                        elapsed: Duration::ZERO,
+                    },
+                    SubstageTiming {
+                        name: "argv assembly",
+                        elapsed: Duration::from_millis(30),
+                    },
+                    SubstageTiming {
+                        name: "system prompt",
+                        elapsed: Duration::from_millis(40),
+                    },
+                    SubstageTiming {
+                        name: "stream + prompt delivery",
+                        elapsed: Duration::from_millis(12),
+                    },
+                ],
             },
             composition: Some(darkmatter::markdown::compose::ComposePerfReport {
                 total: Duration::from_millis(280),
@@ -571,9 +783,22 @@ mod tests {
             "missing CLI Overhead: {rendered}"
         );
         assert!(
+            rendered.contains("pre-dispatch:"),
+            "missing pre-dispatch: {rendered}"
+        );
+        assert!(
+            rendered.contains("prep phase:"),
+            "missing prep phase: {rendered}"
+        );
+        assert!(
             rendered.contains("arg parsing:"),
             "missing arg parsing: {rendered}"
         );
+        assert!(
+            rendered.contains("target resolution:"),
+            "missing target resolution: {rendered}"
+        );
+        assert!(rendered.contains("TOTAL:"), "missing TOTAL: {rendered}");
         assert!(
             rendered.contains("Composition Report"),
             "missing Composition Report: {rendered}"
@@ -591,8 +816,8 @@ mod tests {
             "missing first response: {rendered}"
         );
         assert!(
-            rendered.contains("provider api:"),
-            "missing provider api: {rendered}"
+            rendered.contains("provider api duration:"),
+            "missing provider api duration: {rendered}"
         );
     }
 
@@ -605,7 +830,10 @@ mod tests {
                 arg_parsing: Duration::ZERO,
                 config_loading: Duration::ZERO,
                 tracing_init: Duration::ZERO,
+                pre_dispatch: Duration::ZERO,
+                prep_phase: Duration::ZERO,
                 environment_setup: Duration::ZERO,
+                substages: vec![],
             },
             composition: None,
             agent: None,
@@ -636,7 +864,10 @@ mod tests {
                 arg_parsing: Duration::ZERO,
                 config_loading: Duration::ZERO,
                 tracing_init: Duration::ZERO,
+                pre_dispatch: Duration::ZERO,
+                prep_phase: Duration::ZERO,
                 environment_setup: Duration::ZERO,
+                substages: vec![],
             },
             composition: None,
             agent: Some(AgentExecutionPerf {
@@ -650,12 +881,12 @@ mod tests {
 
         let rendered = render_perf_report(&report);
         assert!(
-            rendered.contains("first response:     --"),
+            rendered.contains("first response:") && rendered.contains(" --"),
             "expected '--' fallback: {rendered}"
         );
         assert!(
-            !rendered.contains("provider api:"),
-            "should omit api when none: {rendered}"
+            !rendered.contains("provider api duration:"),
+            "should omit api duration when none: {rendered}"
         );
     }
 
@@ -665,6 +896,8 @@ mod tests {
             arg_parsing: Duration::from_millis(1),
             tracing_init: Duration::from_millis(2),
             config_loading: Duration::from_millis(3),
+            pre_dispatch: Duration::from_micros(100),
+            prep_phase: Duration::from_millis(5),
         };
         let mut acc = SequencePerfAccumulator::new(startup);
         acc.mark_env_setup_complete();
@@ -680,6 +913,8 @@ mod tests {
             arg_parsing: Duration::ZERO,
             tracing_init: Duration::ZERO,
             config_loading: Duration::ZERO,
+            pre_dispatch: Duration::ZERO,
+            prep_phase: Duration::ZERO,
         };
         let mut acc = SequencePerfAccumulator::new(startup);
         acc.mark_env_setup_complete();
@@ -763,6 +998,8 @@ mod tests {
             arg_parsing: Duration::ZERO,
             tracing_init: Duration::ZERO,
             config_loading: Duration::ZERO,
+            pre_dispatch: Duration::ZERO,
+            prep_phase: Duration::ZERO,
         };
         let mut acc = SequencePerfAccumulator::new(startup);
         acc.mark_env_setup_complete();
@@ -817,6 +1054,8 @@ mod tests {
             arg_parsing: Duration::ZERO,
             tracing_init: Duration::ZERO,
             config_loading: Duration::ZERO,
+            pre_dispatch: Duration::ZERO,
+            prep_phase: Duration::ZERO,
         };
         let mut acc = SequencePerfAccumulator::new(startup);
         acc.mark_env_setup_complete();
@@ -835,6 +1074,8 @@ mod tests {
             arg_parsing: Duration::from_millis(1),
             tracing_init: Duration::from_millis(2),
             config_loading: Duration::from_millis(3),
+            pre_dispatch: Duration::from_micros(100),
+            prep_phase: Duration::from_millis(5),
         };
         let mut collector = CommandPerfCollector::new("Test", startup);
         collector.mark_env_setup_complete();
@@ -856,6 +1097,8 @@ mod tests {
             arg_parsing: Duration::ZERO,
             tracing_init: Duration::ZERO,
             config_loading: Duration::ZERO,
+            pre_dispatch: Duration::ZERO,
+            prep_phase: Duration::ZERO,
         };
         let mut collector = CommandPerfCollector::new("Test", startup);
         collector.set_dry_run();
@@ -870,6 +1113,8 @@ mod tests {
             arg_parsing: Duration::ZERO,
             tracing_init: Duration::ZERO,
             config_loading: Duration::ZERO,
+            pre_dispatch: Duration::ZERO,
+            prep_phase: Duration::ZERO,
         };
         let compose = darkmatter::markdown::compose::ComposePerfReport {
             total: Duration::from_millis(100),
@@ -878,6 +1123,180 @@ mod tests {
         let collector = CommandPerfCollector::new_with_composition("Test", startup, Some(compose));
         let report = collector.into_report(Duration::from_secs(1));
         assert!(report.composition.is_some());
+    }
+
+    /// Strip ANSI CSI escapes so snapshot assertions stay stable across
+    /// terminal capability detection. Mirrors the helper used by the
+    /// integration tests in `tests/common/mod.rs`.
+    fn strip_ansi(input: &str) -> String {
+        let mut out = String::with_capacity(input.len());
+        let mut chars = input.chars().peekable();
+        while let Some(ch) = chars.next() {
+            if ch == '\u{1b}' {
+                if chars.peek() == Some(&'[') {
+                    chars.next();
+                    for code in chars.by_ref() {
+                        if ('@'..='~').contains(&code) {
+                            break;
+                        }
+                    }
+                }
+                continue;
+            }
+            out.push(ch);
+        }
+        out
+    }
+
+    /// Snapshot-style coverage for the rendered perf report.
+    ///
+    /// Locks down behaviour the previous string-parse-based total
+    /// calculation got wrong: microsecond rows must show their value
+    /// (not zero), long labels must not abut their value, the CLI TOTAL
+    /// must not double-count overlapping rows, and the Composition Report
+    /// TOTAL must come from `compose.total` rather than summing rounded
+    /// stage rows.
+    #[test]
+    fn render_perf_report_snapshot_locks_totals_and_alignment() {
+        let report = CommandPerfReport {
+            title: "Compose",
+            total_elapsed: Duration::from_millis(420),
+            cli: CliOverheadReport {
+                arg_parsing: Duration::from_micros(1_500),
+                config_loading: Duration::from_micros(871),
+                tracing_init: Duration::from_micros(166),
+                pre_dispatch: Duration::from_micros(1_800),
+                prep_phase: Duration::from_micros(538_400),
+                environment_setup: Duration::from_micros(419_300),
+                substages: vec![
+                    SubstageTiming {
+                        name: "target resolution",
+                        elapsed: Duration::from_micros(45),
+                    },
+                    SubstageTiming {
+                        name: "header env plan",
+                        elapsed: Duration::from_micros(144),
+                    },
+                    SubstageTiming {
+                        name: "child env build",
+                        elapsed: Duration::from_micros(298),
+                    },
+                    SubstageTiming {
+                        name: "mcp composition",
+                        elapsed: Duration::ZERO,
+                    },
+                    SubstageTiming {
+                        name: "argv assembly",
+                        elapsed: Duration::from_micros(3),
+                    },
+                    SubstageTiming {
+                        // Long label that overflowed the legacy 20-char
+                        // column and ran into the value with no space.
+                        name: "system prompt",
+                        elapsed: Duration::from_micros(418_800),
+                    },
+                    SubstageTiming {
+                        name: "stream + prompt delivery",
+                        elapsed: Duration::from_micros(19),
+                    },
+                ],
+            },
+            composition: Some(darkmatter::markdown::compose::ComposePerfReport {
+                // `compose.total` is the source of truth — it is NOT the
+                // sum of `metrics[*].elapsed`, on purpose. The TOTAL row
+                // must mirror this value exactly, not a sum of rows.
+                total: Duration::from_micros(165),
+                metrics: vec![
+                    darkmatter::markdown::compose::ComposePerfMetric {
+                        stage: darkmatter::markdown::compose::ComposeStage::Interpolation,
+                        elapsed: Duration::from_micros(8),
+                        calls: 1,
+                    },
+                    darkmatter::markdown::compose::ComposePerfMetric {
+                        stage: darkmatter::markdown::compose::ComposeStage::ShellExpansion,
+                        elapsed: Duration::from_micros(3),
+                        calls: 1,
+                    },
+                ],
+            }),
+            agent: None,
+            notes: vec!["Agent execution skipped (dry run)".into()],
+        };
+
+        let plain = strip_ansi(&render_perf_report(&report));
+        let lines: Vec<&str> = plain.lines().collect();
+
+        // Title line carries the elapsed wall-clock; strip the leading
+        // BlockQuote border ("▌ ") before asserting.
+        let title_line = lines
+            .iter()
+            .find(|l| l.contains("Performance"))
+            .unwrap_or_else(|| panic!("missing title; got:\n{plain}"));
+        assert!(
+            title_line.contains("(elapsed 420.0ms)"),
+            "expected '(elapsed 420.0ms)'; got: {title_line:?}"
+        );
+
+        // Microsecond row must render with its value, not zero. This is
+        // the row that the broken `parse_fmt_duration` previously
+        // suppressed when computing the section total.
+        let micro_line = lines
+            .iter()
+            .find(|l| l.contains("target resolution:"))
+            .unwrap_or_else(|| panic!("missing target resolution row; got:\n{plain}"));
+        assert!(
+            micro_line.contains("45µs"),
+            "microsecond value missing; got: {micro_line:?}"
+        );
+
+        // Long label must keep at least one space between label and value.
+        let long_label = lines
+            .iter()
+            .find(|l| l.contains("stream + prompt delivery:"))
+            .unwrap_or_else(|| panic!("missing long label row; got:\n{plain}"));
+        assert!(
+            long_label.contains("delivery: ") || long_label.contains("delivery:  "),
+            "long label collided with value; got: {long_label:?}"
+        );
+        assert!(
+            long_label.contains("19µs"),
+            "long label row missing value; got: {long_label:?}"
+        );
+
+        // CLI Overhead TOTAL must equal pre_dispatch + prep_phase +
+        // environment_setup (overlapping diagnostic rows excluded).
+        // 1_800 + 538_400 + 419_300 = 959_500 µs ≈ 959.5ms.
+        let cli_total_line = lines
+            .iter()
+            .skip_while(|l| !l.contains("CLI Overhead"))
+            .find(|l| l.contains("TOTAL:"))
+            .unwrap_or_else(|| panic!("missing CLI TOTAL; got:\n{plain}"));
+        assert!(
+            cli_total_line.contains("959.5ms"),
+            "CLI TOTAL should be 959.5ms (sum of disjoint rows), not parsed-string sum; got: {cli_total_line:?}"
+        );
+
+        // Composition Report TOTAL must come from `compose.total` (165µs),
+        // not from re-summing the formatted stage rows.
+        let comp_total_line = lines
+            .iter()
+            .skip_while(|l| !l.contains("Composition Report"))
+            .find(|l| l.contains("TOTAL:"))
+            .unwrap_or_else(|| panic!("missing Composition TOTAL; got:\n{plain}"));
+        assert!(
+            comp_total_line.contains("165µs"),
+            "Composition TOTAL should mirror compose.total; got: {comp_total_line:?}"
+        );
+
+        // Dry-run note replaces the agent section entirely.
+        assert!(
+            !plain.contains("Agent Execution"),
+            "dry run should omit Agent Execution; got:\n{plain}"
+        );
+        assert!(
+            plain.contains("Agent execution skipped (dry run)"),
+            "missing dry-run note; got:\n{plain}"
+        );
     }
 
     #[test]

@@ -1054,6 +1054,10 @@ schematic-gen generate --api openai --openapi-out specs/ --openapi-format yaml
 
 Exported specs include `x-schematic` extensions preserving Schematic-specific metadata (module path, request suffix, env mapping, per-endpoint type names) for round-trip fidelity.
 
+APIs that share a generated Rust module are exported as one OpenAPI document
+using the module filename. For example, `OllamaNative` and `OllamaOpenAI`
+produce `ollama.json`, while `EmqxBasic` and `EmqxBearer` produce `emqx.json`.
+
 > **Note**: All 16 APIs now have complete schema registries for OpenAPI export. Missing a registry for a new API will produce an error (use `--no-openapi` to skip).
 
 ### Module Reference: `import_pipeline`
@@ -1066,7 +1070,8 @@ Exported specs include `x-schematic` extensions preserving Schematic-specific me
 
 | Function | Description |
 |----------|-------------|
-| `write_openapi(&api, &registry, &options, &dir)` | Export API definition to OpenAPI spec file |
+| `write_openapi(&api, &registry, &options, &dir)` | Export a single API definition to an OpenAPI spec file named from its resolved module |
+| `write_openapi_grouped(&apis, &module_name, &registry, &options, &dir)` | Export all APIs in a shared module to one module-named OpenAPI spec file |
 
 ### Module Reference: `postman_output`
 

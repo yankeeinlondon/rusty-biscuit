@@ -1,28 +1,63 @@
 ---
 name: darkmatter
-description: Expert knowledge for the darkmatter Rust library - markdown parsing, rendering (terminal/HTML), syntax highlighting, frontmatter, and document comparison. Delegates terminal rendering to biscuit-terminal. Use when parsing markdown, generating terminal/HTML output, working with frontmatter, or comparing documents.
+description: Expert knowledge for the darkmatter Rust library - Markdown parsing, composition, frontmatter, terminal/HTML rendering, style frontmatter, syntax highlighting, and document comparison. Use when parsing or composing Markdown, rendering Markdown to terminal/HTML/Markdown, working with DarkmatterPage, `style:` frontmatter, frontmatter hashing, or comparing documents.
 ---
 
 # darkmatter
 
-Markdown parsing, rendering, and composition library. Part of the dockhand monorepo.
+Darkmatter owns Markdown parsing, composition, frontmatter, document comparison,
+and the public Markdown rendering paths. Terminal capability detection,
+terminal components, images, Mermaid, and graph rendering are delegated to
+`biscuit-terminal`.
 
-**Key principle**: darkmatter handles **markdown parsing and composition**. Terminal rendering (images, mermaid, detection) is delegated to `biscuit-terminal`.
+## Start Here
+
+- Use `darkmatter::markdown::Markdown` for document content.
+- Use the compose pipeline for source transformations before rendering.
+- Use `DarkmatterPage` for page-level terminal/browser layout around Markdown.
+- Use `darkmatter::style` for document `style:` frontmatter.
+- Use `biscuit-terminal` components for rich terminal UI outside ordinary
+  parsed Markdown rendering.
 
 ## Responsibility Split
 
-| Responsibility | Package |
-|----------------|---------|
-| Markdown parsing (CommonMark + GFM) | darkmatter |
-| Compose pipeline (Inline Pre + Transclusion + Inline Post) | darkmatter |
-| Syntax highlighting | darkmatter (syntect) |
-| Frontmatter extraction | darkmatter |
-| HTML output | darkmatter |
-| Visual diff utilities | darkmatter |
-| Document comparison/normalization | darkmatter |
-| Terminal detection, image/mermaid rendering, tables | **biscuit-terminal** |
+| Need | Owner |
+|------|-------|
+| CommonMark/GFM parsing | `darkmatter` |
+| Compose pipeline, interpolation, shell directives, transclusion | `darkmatter` |
+| Frontmatter extraction and Markdown-aware hashing | `darkmatter` / `md hash` |
+| `style:` frontmatter parsing and application | `darkmatter::style` |
+| HTML and terminal Markdown renderers | `darkmatter` |
+| Terminal capability detection, images, Mermaid, graph adapters | `biscuit-terminal` |
+| Shared render tree and target-agnostic layout/style types | `renderable` |
 
-## Quick Start
+## `style:` Frontmatter Status
+
+The active style-frontmatter wiring phase is
+`darkmatter::style::parse::ACTIVE_STYLE_WIRING_SUB_SPEC = 5`.
+
+Implemented:
+
+- schema/parser with kebab-case canonical keys and snake-case deprecation
+  aliases
+- `style.page.*` layout/background wiring
+- `style.table.*`, `style.images.*`, `style.block-quote.*` layout/fill wiring
+- `style.ul.*`, `style.ol.*`, `style.li.*` list wiring
+- page and component `color` / `bg-color` wiring
+- `md --strict-style`, which fails on unknown/deprecated schema keys but not
+  on valid future-phase keys
+
+Still planned:
+
+- sub-spec #6 HR migration from top-level `hr:` to `style.hr.*`
+- sub-spec #7 bespoke knobs: `page.stylesheet`, `page.meta`,
+  `page.code.theme`, hyperlink/image local-style behavior
+
+CLI flags win over frontmatter field-by-field. For implementation details, read
+`darkmatter/lib/src/style/{parse.rs,apply.rs}` and
+`renderable/features/2026-05-23-style-property/`.
+
+## Common Entry Points
 
 ```rust
 use darkmatter::markdown::{Markdown, output::{TerminalOptions, write_terminal}};
@@ -32,133 +67,47 @@ let mut stdout = std::io::stdout();
 write_terminal(&mut stdout, &md, TerminalOptions::default())?;
 ```
 
-## Compose Pipeline
-
-Three-phase pipeline for document preparation:
-
-**Inline Pre** (serial):
-1. **Frontmatter Interpolation** - `{{ variable }}` in frontmatter resolves before effective state is built
-2. **Frontmatter Shell Expansion** - top-level `$(cmd)` frontmatter values execute after interpolation and write trimmed `stdout` back into frontmatter
-3. **Text Replacement** - `replace:` frontmatter replaces literal strings
-4. **Page Blocks** - `::block` / `::end-block` conditional regions; nest to arbitrary depth with stack-based pairing, lazy child evaluation (skipped parents never evaluate inner `when`), and code-fence protection at every depth
-5. **Interpolation** - `{{ variable }}` expressions expand to values
-6. **Shell Expansion** - `::shell` directives execute approved commands and inject combined `stdout` + `stderr`
-
-**Transclusion** (prepared serially, resolved concurrently):
-- `::file ./doc.md` - Markdown transclusion with recursive processing
-- `::code ./main.rs` - Code/text transclusion with fenced block generation
-- `::toc-linking ./doc.md` - Linked heading lists from another document's raw source headings
-- `prologue` / `epilogue` - Frontmatter-driven transclusion
-- `when="..."` conditions, ancestry-based cycle detection, depth limits
-- `set=` / `set.NAME=` - Override child frontmatter before child pipeline stages run (three-layer deep-merge: child FM < object-form `set=` < property-form `set.NAME=`). Overlay does not propagate to grandchildren.
-- `--allow-invalid-frontmatter-assignment` / `--allow-reassigned-frontmatter-property` - Permissive-mode CLI flags that downgrade set-override errors to warnings
-
-**Inline Post** (serial):
-1. **Cleanup** - Normalizes formatting (spacing, tables)
-2. **Normalization** - Adjusts heading levels
-
 ```rust
-use darkmatter::markdown::{Markdown, compose::{ComposeOptions, ComposeOperation}};
+use biscuit_terminal::terminal::Terminal;
+use darkmatter::layout::{DarkmatterPage, PageBackground};
+use darkmatter::markdown::Markdown;
 
-// All operations (default)
-let mut md: Markdown = content.into();
-let report = md.compose_mut()?;
-
-// Full pipeline with transclusion (requires source file path)
-let md = Markdown::try_from(std::path::Path::new("docs/root.md"))?;
-let options = ComposeOptions::new()
-    .with_source_file("docs/root.md");
-let (composed, report) = md.compose_with(options)?;
-
-// Only specific operations
-let options = ComposeOptions::new()
-    .only(&[ComposeOperation::Interpolation, ComposeOperation::Cleanup]);
+let term = Terminal::new_optimistic(120);
+let md: Markdown = "# Hello\n\nWorld".into();
+let output = DarkmatterPage::new(&term)
+    .with_margin(2)
+    .with_padding(1)
+    .with_page_background(PageBackground::Subtle)
+    .with_max_width(100)
+    .render(&md)?;
 ```
 
-### Interpolation Expressions
+## Progressive Disclosure
 
-| Expression | Example | Description |
-|------------|---------|-------------|
-| Variable | `{{ name }}` | Frontmatter value |
-| Nested | `{{ user.email }}` | Nested object access |
-| Context | `{{ ctx.today }}` | Runtime context (today, year, etc.) |
-| Environment | `{{ env.HOME }}` | Environment variable |
-| Fallback | `{{ color || "unknown" }}` | Default if missing |
-| Ternary | `{{ x ? "yes" : "no" }}` | Conditional |
-| Comparison | `{{ count > 0 ? "has" : "empty" }}` | Numeric comparison |
-| Functions | `{{ length(items) }}` | Helper functions |
+Open only the topic file needed for the task:
 
-### Helper Functions
+| Topic | File |
+|-------|------|
+| Compose pipeline | `compose.md` |
+| Terminal rendering options | `terminal.md` |
+| Frontmatter model | `frontmatter.md` |
+| Error/status block conventions | `errors.md` |
+| Document comparison | `comparison.md` |
+| Module layout | `structure.md` |
+| Parser details | `pulldown-cmark.md` |
 
-- `length(x)` - String/array/object length
-- `number(x, default)` - Parse as number
-- `round(x, default)` - Round to integer
+For render-tree work, switch to the `renderable` skill for the IR model and
+the `biscuit-terminal` skill for terminal tree rendering.
 
-### Shell Expansion Notes
+## Current Rendering Notes
 
-- Body `::shell` and top-level frontmatter `$(...)` share policy loading, whitelist/blacklist checks, approval, and timeout behavior.
-- Frontmatter shell expansion stores trimmed `stdout` only and treats malformed matching expressions as hard errors.
-- Independent top-level frontmatter shell commands execute concurrently after approval/policy resolution.
-- `--allow-shell-timeout` / `ComposeOptions::with_allow_shell_timeout(true)` convert timeouts into empty-string replacements plus compose warnings.
-
-## Detailed Topics
-
-- [Compose Pipeline](./compose.md) - Text replacement, interpolation, cleanup
-- [Terminal Output](./terminal.md) - ANSI rendering, themes, options
-- [Frontmatter](./frontmatter.md) - YAML parsing, merge strategies
-- [Document Comparison](./comparison.md) - Structural diff, change classification
-- [Module Structure](./structure.md) - Package organization and dependencies
-
-## CLI
-
-```bash
-md doc.md                        # Render to terminal (auto mode)
-md doc.md --output html          # HTML output
-md doc.md --output json          # AST JSON output
-md doc.md --output markdown      # Plain markdown text
-md doc.md --clean                # Normalize formatting (stdout)
-md doc.md --clean-save           # Normalize and save back to file
-md doc.md --output html --show   # Open in default app
-md toc doc.md                    # Table of contents
-md delta old.md new.md           # Document comparison
-md -v delta old.md new.md        # Verbose comparison (-v is top-level)
-md graph doc.md                  # Dependency graph visualization
-md graph doc.md --follow         # Recurse into transclusions
-md graph doc.md --validate       # Inline validation overlays
-```
-
-### FileTree Component
-
-`FileTree` is a `Renderable` component that visualizes a Markdown file's dependency surface:
-- References (hyperlinks, images, CSS/script imports) above the file line
-- Transclusions below the file line with section-aware captions
-- Optional recursive expansion via `.follow_transclusions()`
-- Optional validation overlays via `.validate()`
-
-Located in `darkmatter/lib/src/markdown/reference/file_tree/`.
-
-### Horizontal Rules
-
-Darkmatter styles CommonMark `---` / `___` / `***` horizontal rules from page-level `hr` frontmatter defaults, with optional per-rule attribute-block overrides (YAML flow-mapping syntax), and dispatches rendering to biscuit-terminal's `HorizontalRule` (`Renderable` + `BrowserRenderable`).
-
-- **Markdown syntax**: `--- { style: waves, width: "50%" }`
-- **Supported attributes** (all optional):
-  - `style`: `dashes` (default), `dots`, `waves`, `line-star`, `line-circle`, `inset-line`, `curtain-rod`
-  - `alignment`: `full` (default), `centered`, `left`, `right`
-  - `weight`: `thin`, `medium` (default), `thick`
-  - `width`: CSS-like string (`"75%"`, `"200px"`)
-  - `color`: CSS color name or `#rrggbb`
-- **Preferred page defaults:** put these fields under frontmatter `hr:`; per-rule attributes override only specified keys.
-- **Validation:** unknown enum values or unknown attribute keys fall back to the component default and emit `tracing::warn!` (visible via `RUST_LOG=darkmatter=warn`).
-- **Bare `---`:** produces a configured rule when `hr:` frontmatter is present, otherwise the default dashed rule.
-- **Terminal rendering tiers:**
-  1. **Tier 1 (SVG → PNG via `resvg` + `TerminalImage`):** primary path for Kitty-compatible image terminals.
-  2. **Tier 2 (Unicode):** fallback when image rendering is unavailable and the locale signals UTF-8.
-  3. **Tier 3 (ASCII):** fallback otherwise.
-- **Browser rendering:** SVG with `--hr-weight`, `--hr-color`, `--hr-width` CSS variables; per-instance overrides via `render_to_browser_with_inline_variables`.
-
-Located in `darkmatter/lib/src/markdown/inline/types.rs`, `darkmatter/lib/src/markdown/block/rule_processor.rs`, and `darkmatter/lib/src/markdown/output/`.
-
-## See Also
-
-- [biscuit-terminal skill](../biscuit-terminal/SKILL.md) - Terminal rendering dependency
+- Public `Markdown::as_html` and `for_terminal` still use the mature
+  `pulldown-cmark` event-stream renderers.
+- `darkmatter::markdown::render_tree::fold_markdown_to_document` is the
+  experimental Markdown-to-`Document` bridge.
+- `YamlBlock` projects to the render tree and uses shared code-block helpers
+  for terminal and browser syntax highlighting.
+- Code-block themes resolve against the inverted page color mode for contrast;
+  ordinary prose follows the real mode.
+- Horizontal rules still use the legacy top-level `hr:` defaults and inline
+  `{ style: ... }` attributes until style-property sub-spec #6 lands.

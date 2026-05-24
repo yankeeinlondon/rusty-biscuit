@@ -1,6 +1,6 @@
 ---
 name: async-trait
-description: Expert knowledge for Rust async-trait crate - #[async_trait] macro for object-safe async traits, Send/Sync bounds, ?Send variant, performance implications of boxing futures, and comparison with native async fn in traits
+description: Expert knowledge for the Rust async-trait crate — the #[async_trait] macro for object-safe async traits, Send/Sync bounds, the ?Send variant, and the performance trade-offs of boxing futures. Use when adding async methods to traits, building object-safe async trait objects, or deciding between async-trait and native async fn in traits.
 hash: async-trait-skill-v1
 ---
 

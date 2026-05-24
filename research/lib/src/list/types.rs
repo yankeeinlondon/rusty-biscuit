@@ -6,6 +6,70 @@
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
+/// The type/category of a research topic.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum TopicType {
+    /// Software library (npm package, Rust crate, Python package, etc.)
+    #[default]
+    Library,
+    /// Software framework or platform
+    Framework,
+    /// Software application or system
+    Software,
+    /// Command-line tool or utility
+    Tool,
+    /// Individual person
+    Person,
+    /// Solution area / problem space
+    #[serde(alias = "solutionarea")]
+    SolutionArea,
+    /// Programming language
+    Language,
+    /// API
+    Api,
+}
+
+impl TopicType {
+    /// Returns the canonical string representation of this topic type.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Library => "library",
+            Self::Framework => "framework",
+            Self::Software => "software",
+            Self::Tool => "tool",
+            Self::Person => "person",
+            Self::SolutionArea => "solution_area",
+            Self::Language => "language",
+            Self::Api => "api",
+        }
+    }
+}
+
+impl std::fmt::Display for TopicType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.as_str())
+    }
+}
+
+impl std::str::FromStr for TopicType {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            "library" => Ok(Self::Library),
+            "framework" => Ok(Self::Framework),
+            "software" => Ok(Self::Software),
+            "tool" => Ok(Self::Tool),
+            "person" => Ok(Self::Person),
+            "solution_area" | "solutionarea" => Ok(Self::SolutionArea),
+            "language" => Ok(Self::Language),
+            "api" => Ok(Self::Api),
+            _ => Err(format!("unknown topic type: '{}'", s)),
+        }
+    }
+}
+
 /// Represents the different types of research output deliverables.
 ///
 /// Each research topic should produce multiple output files documenting
@@ -63,9 +127,9 @@ pub struct TopicInfo {
     /// The name of the topic (directory name)
     pub name: String,
 
-    /// The type/kind of the topic (e.g., "library", "software", "framework")
+    /// The type/kind of the topic (e.g., library, software, framework)
     #[serde(rename = "type")]
-    pub topic_type: String,
+    pub topic_type: TopicType,
 
     /// One-sentence description from metadata.json `brief` property
     pub description: Option<String>,
@@ -99,7 +163,7 @@ impl TopicInfo {
     pub fn new(name: String, location: PathBuf) -> Self {
         Self {
             name,
-            topic_type: "library".to_string(),
+            topic_type: TopicType::Library,
             description: None,
             language: None,
             additional_files: Vec::new(),
@@ -177,7 +241,7 @@ mod tests {
         let topic = TopicInfo::new("test-topic".to_string(), PathBuf::from("/test/path"));
 
         assert_eq!(topic.name, "test-topic");
-        assert_eq!(topic.topic_type, "library");
+        assert_eq!(topic.topic_type, TopicType::Library);
         assert_eq!(topic.description, None);
         assert!(topic.additional_files.is_empty());
         assert!(topic.missing_underlying.is_empty());
@@ -187,7 +251,7 @@ mod tests {
 
     #[test]
     fn test_topic_info_has_issues() {
-        let mut topic = TopicInfo::new("test".to_string(), PathBuf::from("/test"));
+        let topic = TopicInfo::new("test".to_string(), PathBuf::from("/test"));
         assert!(!topic.has_issues());
 
         let mut topic2 = TopicInfo::new("test".to_string(), PathBuf::from("/test"));
@@ -201,7 +265,7 @@ mod tests {
 
     #[test]
     fn test_topic_info_has_critical_issues() {
-        let mut topic = TopicInfo::new("test".to_string(), PathBuf::from("/test"));
+        let topic = TopicInfo::new("test".to_string(), PathBuf::from("/test"));
         assert!(!topic.has_critical_issues());
 
         let mut topic2 = TopicInfo::new("test".to_string(), PathBuf::from("/test"));
@@ -228,10 +292,60 @@ mod tests {
     }
 
     #[test]
+    fn test_topic_type_as_str() {
+        assert_eq!(TopicType::Library.as_str(), "library");
+        assert_eq!(TopicType::Framework.as_str(), "framework");
+        assert_eq!(TopicType::Software.as_str(), "software");
+        assert_eq!(TopicType::Tool.as_str(), "tool");
+        assert_eq!(TopicType::Person.as_str(), "person");
+        assert_eq!(TopicType::SolutionArea.as_str(), "solution_area");
+        assert_eq!(TopicType::Language.as_str(), "language");
+        assert_eq!(TopicType::Api.as_str(), "api");
+    }
+
+    #[test]
+    fn test_topic_type_display() {
+        assert_eq!(TopicType::Library.to_string(), "library");
+        assert_eq!(TopicType::SolutionArea.to_string(), "solution_area");
+    }
+
+    #[test]
+    fn test_topic_type_from_str() {
+        assert_eq!("library".parse::<TopicType>().unwrap(), TopicType::Library);
+        assert_eq!(
+            "FRAMEWORK".parse::<TopicType>().unwrap(),
+            TopicType::Framework
+        );
+        assert_eq!(
+            "solution_area".parse::<TopicType>().unwrap(),
+            TopicType::SolutionArea
+        );
+        assert_eq!(
+            "solutionarea".parse::<TopicType>().unwrap(),
+            TopicType::SolutionArea
+        );
+        assert!("invalid".parse::<TopicType>().is_err());
+    }
+
+    #[test]
+    fn test_topic_type_serde_roundtrip() {
+        let tt = TopicType::Library;
+        let json = serde_json::to_string(&tt).unwrap();
+        assert_eq!(json, r#""library""#);
+        let roundtrip: TopicType = serde_json::from_str(&json).unwrap();
+        assert_eq!(roundtrip, TopicType::Library);
+    }
+
+    #[test]
+    fn test_topic_type_default() {
+        assert_eq!(TopicType::default(), TopicType::Library);
+    }
+
+    #[test]
     fn test_topic_info_serialization() {
         let topic = TopicInfo {
             name: "test-lib".to_string(),
-            topic_type: "library".to_string(),
+            topic_type: TopicType::Library,
             description: Some("A test library".to_string()),
             language: None,
             additional_files: vec!["custom_prompt".to_string()],
@@ -245,7 +359,7 @@ mod tests {
         let deserialized: TopicInfo = serde_json::from_str(&json).unwrap();
 
         assert_eq!(deserialized.name, topic.name);
-        assert_eq!(deserialized.topic_type, topic.topic_type);
+        assert_eq!(deserialized.topic_type, TopicType::Library);
         assert_eq!(deserialized.description, topic.description);
         assert_eq!(deserialized.additional_files, topic.additional_files);
         assert_eq!(deserialized.missing_underlying, topic.missing_underlying);

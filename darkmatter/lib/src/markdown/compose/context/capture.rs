@@ -51,7 +51,7 @@ pub(crate) enum ContextGroup {
 
 impl ContextGroup {
     /// All available groups.
-    pub(crate) fn all() -> HashSet<ContextGroup> {
+    pub(crate) fn all() -> [ContextGroup; 8] {
         [
             Self::DateTime,
             Self::Repo,
@@ -62,12 +62,10 @@ impl ContextGroup {
             Self::Hardware,
             Self::Gpu,
         ]
-        .into_iter()
-        .collect()
     }
 
     /// Map a ctx variable name to its owning group.
-    fn for_key(key: &str) -> Option<ContextGroup> {
+    pub(crate) fn for_key(key: &str) -> Option<ContextGroup> {
         match key {
             // DateTime
             "now"
@@ -244,7 +242,7 @@ impl ContextCapture {
     /// Uses `GitRepo` for atomic queries. `GitRepo::discover` is the only
     /// sequential step (cheap — just finds `.git`). All other probes run
     /// in parallel via `std::thread::scope`.
-    fn new(base_dir: &Path, groups: &HashSet<ContextGroup>) -> Self {
+    fn new(base_dir: &Path, groups: &[ContextGroup]) -> Self {
         let mut diagnostics = Vec::new();
         let mut timings = Vec::new();
 
@@ -558,17 +556,17 @@ pub(crate) fn capture_runtime_context(base_dir: &Path) -> CaptureResult {
 /// groups. If no `ctx.*` references are found, only populates datetime
 /// (which is purely local computation with no I/O).
 pub(crate) fn capture_runtime_context_for_content(base_dir: &Path, content: &str) -> CaptureResult {
-    let groups = scan_needed_groups(content);
+    let mut groups = scan_needed_groups(content);
     // DateTime is always included (zero-cost local computation)
-    let mut groups = groups;
     groups.insert(ContextGroup::DateTime);
-    capture_runtime_context_for_groups(base_dir, &groups)
+    let groups_vec: Vec<ContextGroup> = groups.into_iter().collect();
+    capture_runtime_context_for_groups(base_dir, &groups_vec)
 }
 
 /// Capture runtime context for the specified groups only.
-fn capture_runtime_context_for_groups(
+pub(crate) fn capture_runtime_context_for_groups(
     base_dir: &Path,
-    groups: &HashSet<ContextGroup>,
+    groups: &[ContextGroup],
 ) -> CaptureResult {
     let cap = ContextCapture::new(base_dir, groups);
     let mut values = Map::new();
@@ -787,6 +785,30 @@ pub(crate) fn populate_datetime(values: &mut Map<String, Value>) {
         "timestamp_ms".into(),
         Value::Number(now_utc.timestamp_millis().into()),
     );
+
+    // Backward-compatible aliases (documented in `context-variables.md`).
+    // Keep these in sync with the docs: any documented alias must resolve to
+    // the same value as its canonical key so interpolation and the
+    // `claudine context --values` report agree.
+    populate_datetime_aliases(values);
+}
+
+/// Insert documented backward-compatible aliases for date/time keys.
+///
+/// Each alias mirrors the value of an existing canonical key. Aliases are
+/// inserted only when the canonical key is present so a missing canonical
+/// value cannot leak as a populated alias.
+fn populate_datetime_aliases(values: &mut Map<String, Value>) {
+    const ALIASES: &[(&str, &str)] = &[
+        ("utc", "now_utc"),
+        ("dow", "day"),
+        ("dow_abbr", "day_abbr"),
+    ];
+    for (alias, canonical) in ALIASES {
+        if let Some(value) = values.get(*canonical).cloned() {
+            values.insert((*alias).to_string(), value);
+        }
+    }
 }
 
 // ── Repo context ──────────────────────────────────────────────────
@@ -1526,6 +1548,37 @@ mod tests {
         assert!(values.contains_key("season"));
         assert!(values.contains_key("timestamp"));
         assert!(values.contains_key("timestamp_ms"));
+    }
+
+    /// Regression: documented backward-compatible aliases (`utc`, `dow`,
+    /// `dow_abbr`) must be populated by `populate_datetime` so they
+    /// resolve in interpolation and in `claudine context --values` reports
+    /// instead of rendering as `null`.
+    #[test]
+    fn populate_datetime_populates_documented_aliases() {
+        let mut values = Map::new();
+        populate_datetime(&mut values);
+
+        for (alias, canonical) in [
+            ("utc", "now_utc"),
+            ("dow", "day"),
+            ("dow_abbr", "day_abbr"),
+        ] {
+            let alias_value = values
+                .get(alias)
+                .unwrap_or_else(|| panic!("alias `{alias}` must be present"));
+            let canonical_value = values
+                .get(canonical)
+                .unwrap_or_else(|| panic!("canonical `{canonical}` must be present"));
+            assert!(
+                !alias_value.is_null(),
+                "alias `{alias}` must not be null",
+            );
+            assert_eq!(
+                alias_value, canonical_value,
+                "alias `{alias}` must mirror canonical `{canonical}`",
+            );
+        }
     }
 
     #[test]

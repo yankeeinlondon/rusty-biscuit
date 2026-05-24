@@ -27,22 +27,29 @@
 //! // Output contains ANSI escape codes for terminal display
 //! ```
 
+// `PageAlignment`/`PageFill` are deprecated in favor of
+// `renderable::layout::Layout`; the page-level component-layout pipeline in
+// this module still consumes them while that migration completes.
+#[allow(deprecated)]
+use crate::layout::{LayoutContext, PageAlignment, PageComponent, PageFill};
+use crate::style::color::{StyleColor, lower_to_sgr, wrap_with_color};
 use crate::markdown::{
     Markdown, MarkdownError,
     block::{RuleProcessor, build_rule_with_defaults, hr_defaults_from_frontmatter},
-    dsl::parse_code_info,
+    dsl::{CodeBlockMeta, parse_code_info},
     highlighting::{
         CodeHighlighter, ColorMode, ThemePair, prose::ProseHighlighter, scope_cache::ScopeCache,
     },
-    inline::{InlineEvent, InlineTag, MarkProcessor},
+    inline::{InlineEvent, InlineStyleProcessor, InlineTag},
+    output::code_block,
 };
 use biscuit_terminal::components::horizontal_rule::HorizontalRule;
 use biscuit_terminal::components::image_options::TerminalImageOptions;
 use biscuit_terminal::components::prose::Prose;
-use biscuit_terminal::components::renderable::Renderable;
-use biscuit_terminal::components::table::table::{
-    Table as TerminalTable, TableCellContent, TableColumn,
-};
+use biscuit_terminal::components::renderable::TerminalRenderable;
+use biscuit_terminal::components::table::cell::TableCellContent;
+use biscuit_terminal::components::table::column::TableColumn;
+use biscuit_terminal::components::table::table::Table as TerminalTable;
 use biscuit_terminal::components::table::types::ColumnType;
 use biscuit_terminal::components::terminal_image::{ImageWidth, TerminalImage, parse_width_spec};
 use biscuit_terminal::discovery::detection::ColorDepth as TerminalColorDepth;
@@ -51,10 +58,17 @@ use biscuit_terminal::terminal::Terminal;
 use biscuit_terminal::utils::UnicodeWidthStr;
 use biscuit_terminal::utils::layout::Alignment;
 use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
+use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
-use syntect::easy::HighlightLines;
 use syntect::highlighting::{Color, Style};
-use syntect::parsing::{Scope, SyntaxReference};
+use syntect::parsing::Scope;
+
+// Re-export shared code-block helpers so existing call sites and tests keep working.
+#[cfg(test)]
+pub(crate) use code_block::compute_highlight_bg;
+#[cfg(test)]
+pub(crate) use code_block::find_syntax;
+pub(crate) use code_block::render_terminal_code_block as highlight_code;
 
 /// Parse image alt text to extract optional width specification.
 ///
@@ -154,6 +168,28 @@ impl ColorDepth {
     }
 }
 
+impl From<TerminalColorDepth> for ColorDepth {
+    /// Project a biscuit-terminal [`ColorDepth`](TerminalColorDepth) onto the
+    /// darkmatter renderer's coarser palette using the same thresholds as
+    /// [`ColorDepth::auto_detect`].
+    ///
+    /// Darkmatter has no 8-color variant, so biscuit's `Minimal` (8 colors)
+    /// falls below the 16-color floor and maps to [`ColorDepth::None`] — the
+    /// same projection [`auto_detect`](Self::auto_detect) makes via
+    /// [`crate::terminal::color_depth`]. Preserving that mapping is what lets
+    /// a [`crate::layout::DarkmatterPage`] built from a real
+    /// [`biscuit_terminal::terminal::Terminal`] render byte-for-byte
+    /// identically to `for_terminal(&md, TerminalOptions::default())`.
+    fn from(depth: TerminalColorDepth) -> Self {
+        match depth {
+            TerminalColorDepth::TrueColor => ColorDepth::TrueColor,
+            TerminalColorDepth::Enhanced => ColorDepth::Colors256,
+            TerminalColorDepth::Basic => ColorDepth::Colors16,
+            TerminalColorDepth::Minimal | TerminalColorDepth::None => ColorDepth::None,
+        }
+    }
+}
+
 /// Controls how italic text is rendered to the terminal.
 ///
 /// Different terminals have varying levels of support for italic text rendering.
@@ -209,6 +245,65 @@ impl ItalicMode {
             ItalicMode::Auto => crate::terminal::supports_italics(),
             ItalicMode::Always => true,
             ItalicMode::Never => false,
+        }
+    }
+}
+
+/// Controls how dim/faint text is rendered to the terminal.
+///
+/// Different terminals have varying levels of support for dim text rendering.
+/// This enum allows explicit control over dim behavior.
+///
+/// ## Examples
+///
+/// ```
+/// use darkmatter::markdown::output::terminal::{TerminalOptions, DimMode};
+///
+/// // Auto-detect (safe default)
+/// let mut options = TerminalOptions::default();
+/// assert!(matches!(options.dim_mode, DimMode::Auto));
+///
+/// // Force dim for pre-rendering to unknown terminals
+/// options.dim_mode = DimMode::Always;
+///
+/// // Disable dim for terminals known not to support it
+/// options.dim_mode = DimMode::Never;
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum DimMode {
+    /// Auto-detect dim support using terminal capabilities.
+    ///
+    /// Uses [`supports_dim()`](crate::terminal::supports_dim) to query
+    /// the terminal. This is the safest option for direct terminal output.
+    #[default]
+    Auto,
+
+    /// Always emit dim escape codes (`\x1b[2m`).
+    ///
+    /// Use this when pre-rendering content for a future terminal where
+    /// capabilities cannot be detected. Assumes dim support is available.
+    Always,
+
+    /// Never emit dim escape codes.
+    ///
+    /// Use this when rendering for terminals known not to support dim,
+    /// or when dim styling is not desired.
+    Never,
+}
+
+impl DimMode {
+    /// Resolves the mode to a boolean indicating whether to emit dim codes.
+    ///
+    /// ## Returns
+    ///
+    /// - `Auto`: Result of `supports_dim()` terminal capability check
+    /// - `Always`: `true`
+    /// - `Never`: `false`
+    fn should_emit_dim(&self) -> bool {
+        match self {
+            DimMode::Auto => crate::terminal::supports_dim(),
+            DimMode::Always => true,
+            DimMode::Never => false,
         }
     }
 }
@@ -583,7 +678,7 @@ impl ImageRenderer {
             return format!("▉ IMAGE[{}]\n", alt_text);
         }
 
-        // Render via Renderable fallback (protocol-aware string output)
+        // Render via TerminalRenderable fallback (protocol-aware string output)
         let render_terminal = self.render_terminal();
         let output = term_image.render(&render_terminal);
         if output.is_empty() {
@@ -661,6 +756,12 @@ pub struct TerminalOptions {
     /// - `Always`: Always emit italic escape codes (for pre-rendering)
     /// - `Never`: Never emit italic escape codes
     pub italic_mode: ItalicMode,
+    /// Controls how dim/faint text is rendered.
+    ///
+    /// - `Auto` (default): Detect terminal capability via `supports_dim()`
+    /// - `Always`: Always emit dim escape codes (for pre-rendering)
+    /// - `Never`: Never emit dim escape codes
+    pub dim_mode: DimMode,
     /// Maximum line width for text wrapping.
     ///
     /// If `None` (default), auto-detects from terminal size (defaults to 80 if detection fails).
@@ -680,6 +781,8 @@ pub struct TerminalOptions {
     pub hyperlink_mode: HyperlinkMode,
 }
 
+static DETECTED_COLOR_MODE: std::sync::OnceLock<ColorMode> = std::sync::OnceLock::new();
+
 impl Default for TerminalOptions {
     fn default() -> Self {
         use crate::markdown::highlighting::{
@@ -688,7 +791,7 @@ impl Default for TerminalOptions {
 
         let prose_theme = detect_prose_theme();
         let code_theme = detect_code_theme(prose_theme);
-        let color_mode = detect_color_mode();
+        let color_mode = *DETECTED_COLOR_MODE.get_or_init(detect_color_mode);
 
         Self {
             code_theme,
@@ -699,6 +802,7 @@ impl Default for TerminalOptions {
             image_mode: TerminalImageMode::default(),
             base_path: None,
             italic_mode: ItalicMode::default(),
+            dim_mode: DimMode::default(),
             max_width: None,
             mermaid_mode: MermaidMode::default(),
             hyperlink_mode: HyperlinkMode::default(),
@@ -720,7 +824,7 @@ fn convert_alignment(align: &pulldown_cmark::Alignment) -> Alignment {
 ///
 /// This function renders markdown content with syntax-highlighted code blocks
 /// using ANSI escape sequences for terminal display. Inline images are rendered
-/// via biscuit-terminal's protocol-aware `Renderable` trait (Kitty/iTerm2).
+/// via biscuit-terminal's protocol-aware `TerminalRenderable` trait (Kitty/iTerm2).
 ///
 /// ## Examples
 ///
@@ -736,8 +840,18 @@ fn convert_alignment(align: &pulldown_cmark::Alignment) -> Alignment {
 ///
 /// Returns an error if theme loading fails or syntax highlighting encounters issues.
 pub fn for_terminal(md: &Markdown, options: TerminalOptions) -> Result<String, MarkdownError> {
+    for_terminal_with_layout(md, options, None)
+}
+
+/// Internal entry point that accepts an optional [`LayoutContext`] for
+/// page-level component alignment and fill.
+pub(crate) fn for_terminal_with_layout(
+    md: &Markdown,
+    options: TerminalOptions,
+    layout_ctx: Option<&LayoutContext>,
+) -> Result<String, MarkdownError> {
     let mut output = Vec::new();
-    write_terminal(&mut output, md, options)?;
+    write_terminal_with_layout(&mut output, md, options, layout_ctx)?;
     Ok(String::from_utf8_lossy(&output).into_owned())
 }
 
@@ -767,16 +881,24 @@ pub fn write_terminal<W: std::io::Write>(
     md: &Markdown,
     options: TerminalOptions,
 ) -> Result<(), MarkdownError> {
-    let color_depth = options.color_depth.unwrap_or_else(ColorDepth::auto_detect);
+    write_terminal_with_layout(writer, md, options, None)
+}
 
-    // Early return if no color support
-    if color_depth == ColorDepth::None {
-        write!(writer, "{}", md.content()).ok();
-        return Ok(());
-    }
+/// Internal entry point that accepts an optional [`LayoutContext`] for
+/// page-level component alignment and fill.
+pub(crate) fn write_terminal_with_layout<W: std::io::Write>(
+    writer: &mut W,
+    md: &Markdown,
+    options: TerminalOptions,
+    layout_ctx: Option<&LayoutContext>,
+) -> Result<(), MarkdownError> {
+    let color_depth = options.color_depth.unwrap_or_else(ColorDepth::auto_detect);
 
     // Resolve italic mode once at start (avoids repeated capability detection)
     let emit_italic = options.italic_mode.should_emit_italic();
+
+    // Resolve dim mode once at start (avoids repeated capability detection)
+    let emit_dim = options.dim_mode.should_emit_dim();
 
     // Resolve hyperlink mode once at start (avoids repeated capability detection)
     let emit_hyperlinks = options.hyperlink_mode.should_emit_osc8();
@@ -787,7 +909,23 @@ pub fn write_terminal<W: std::io::Write>(
         .unwrap_or_else(|| biscuit_terminal::discovery::detection::terminal_width() as u16);
     tracing::debug!(terminal_width, "Terminal width for rendering");
 
-    let code_highlighter = CodeHighlighter::new(options.code_theme, options.color_mode);
+    // Code blocks contrast against the page: they resolve their theme *variant*
+    // against the INVERTED color mode (a light code panel in a dark terminal,
+    // and vice versa). Prose, headings, and tables keep `options.color_mode`.
+    // See `ColorMode::inverted` for the rationale and the theme-name
+    // abstraction.
+    let code_highlighter = CodeHighlighter::new(options.code_theme, options.color_mode.inverted());
+    // The panel's internal contrast (header pill text color, highlight-line
+    // background math) keys off the *resolved* theme background, not the
+    // requested mode — single-variant themes (e.g. dracula) don't invert, so
+    // their dark panel must still get light header text.
+    let code_color_mode = crate::markdown::output::code_block::mode_for_background(
+        code_highlighter
+            .theme()
+            .settings
+            .background
+            .unwrap_or(Color::BLACK),
+    );
     let hr_defaults = hr_defaults_from_frontmatter(md);
 
     // Load prose theme for ProseHighlighter
@@ -796,18 +934,19 @@ pub fn write_terminal<W: std::io::Write>(
     let prose_highlighter = ProseHighlighter::new(&prose_syntect_theme);
 
     // Use LineWrapper for proper word wrapping at terminal width
-    let mut wrapper = LineWrapper::new(terminal_width as usize, emit_hyperlinks);
+    let mut wrapper = LineWrapper::new(terminal_width as usize, emit_hyperlinks, color_depth);
 
     // Track scope stack for prose highlighting (functional style)
     let mut scope_stack: Vec<Scope> = vec![prose_highlighter.base_scope()];
 
     // Enable table parsing extension and wrap with MarkProcessor for ==highlight== support
     // and RuleProcessor for horizontal rules with attributes
+    let preprocessed = crate::markdown::inline::preprocess_escaped_markers(md.content());
     let parser = Parser::new_ext(
-        md.content(),
+        &preprocessed,
         Options::ENABLE_TABLES | Options::ENABLE_STRIKETHROUGH,
     );
-    let events = RuleProcessor::new(MarkProcessor::new(parser));
+    let events = RuleProcessor::new(InlineStyleProcessor::new(parser));
     let mut in_code_block = false;
     let mut code_buffer = String::new();
     let mut code_language = String::new();
@@ -869,6 +1008,7 @@ pub fn write_terminal<W: std::io::Write>(
     let mut in_strong = false;
     let mut in_strikethrough = false;
     let mut in_mark = false;
+    let mut in_dim = false;
 
     // Track hyperlinks for OSC8 terminal escape sequences
     let mut in_link = false;
@@ -900,6 +1040,16 @@ pub fn write_terminal<W: std::io::Write>(
             }
             InlineEvent::End(InlineTag::Mark) => {
                 in_mark = false;
+                scope_stack.pop();
+            }
+
+            InlineEvent::Start(InlineTag::Dim) => {
+                in_dim = true;
+                let scope = ScopeCache::global().scope_for_inline_tag(InlineTag::Dim);
+                scope_stack.push(scope);
+            }
+            InlineEvent::End(InlineTag::Dim) => {
+                in_dim = false;
                 scope_stack.pop();
             }
 
@@ -956,47 +1106,51 @@ pub fn write_terminal<W: std::io::Write>(
 
                     match options.mermaid_mode {
                         MermaidMode::Text => {
-                            // Ensure header starts on a fresh line (not appended to previous content)
-                            if wrapper.current_col() > 0 {
-                                wrapper.newline();
-                            }
-                            // Text mode: show header with title and "mermaid" label (it's a code block)
-                            let header = format_header_row(
-                                meta.title.as_deref(),
-                                "mermaid",
-                                bg_color,
-                                options.color_mode,
-                                terminal_width,
-                            );
-                            wrapper.push_with_newlines(&header);
-                            wrapper.newline();
-                            // Render with syntax highlighting (same as regular code blocks)
-                            let highlighted = highlight_code(
+                            // Text mode renders the mermaid source as a regular
+                            // code block, so route it through the shared emitter —
+                            // same width resolution, code-panel color mode, and
+                            // page-layout handling as ordinary fences (no `\x1b[K`
+                            // right-margin gap under decoration; pill and body
+                            // share the right boundary).
+                            emit_highlighted_code_block(
+                                &mut wrapper,
                                 &code_buffer,
                                 "mermaid",
+                                &meta,
                                 &code_highlighter,
                                 &options,
-                                &meta,
-                                options.color_mode,
+                                code_color_mode,
+                                terminal_width,
+                                layout_ctx,
+                                color_depth,
                             )?;
-                            wrapper.push_with_newlines(&highlighted);
-                            wrapper.push_with_newlines("\n\n");
                         }
                         MermaidMode::Image => {
                             // Flush output before viuer prints to stdout
                             // (don't emit header yet - we'll emit after knowing if rendering succeeds)
                             write!(writer, "{}", wrapper.output()).ok();
                             writer.flush().ok();
-                            wrapper = LineWrapper::new(terminal_width as usize, emit_hyperlinks);
+                            wrapper = LineWrapper::new(terminal_width as usize, emit_hyperlinks, color_depth);
 
                             // Render mermaid diagram as image using mmdc CLI
                             let diagram = crate::mermaid::Mermaid::new(&code_buffer);
 
-                            let render_succeeded = match diagram.render_for_terminal() {
-                                Ok(()) => true,
-                                Err(e) => {
-                                    tracing::warn!(error = %e, "Mermaid image rendering failed");
-                                    false
+                            // `TerminalImageMode::Never` means "always use text
+                            // fallback", so skip the mmdc attempt entirely and
+                            // route straight to the highlighted-source fallback.
+                            // This honors the image-mode contract and gives
+                            // callers a deterministic, in-process way to exercise
+                            // the fallback path regardless of `mmdc`/TTY presence.
+                            let render_succeeded = if options.image_mode == TerminalImageMode::Never
+                            {
+                                false
+                            } else {
+                                match diagram.render_for_terminal() {
+                                    Ok(()) => true,
+                                    Err(e) => {
+                                        tracing::warn!(error = %e, "Mermaid image rendering failed");
+                                        false
+                                    }
                                 }
                             };
 
@@ -1016,73 +1170,48 @@ pub fn write_terminal<W: std::io::Write>(
                                 // viuer already prints a newline, just add one more for spacing
                                 wrapper.push_with_newlines("\n");
                             } else {
-                                // Rendering failed - show fallback with syntax highlighting
-                                // Ensure header starts on a fresh line
-                                if wrapper.current_col() > 0 {
-                                    wrapper.newline();
-                                }
-                                // Emit header row with title and "mermaid" label
-                                let header = format_header_row(
-                                    meta.title.as_deref(),
-                                    "mermaid",
-                                    bg_color,
-                                    options.color_mode,
-                                    terminal_width,
-                                );
-                                wrapper.push_with_newlines(&header);
-                                wrapper.newline();
-                                // Render with syntax highlighting (same as regular code blocks)
-                                let highlighted = highlight_code(
+                                // Rendering failed — fall back to the mermaid
+                                // source as a regular code block via the shared
+                                // emitter, so the fallback honors page decoration
+                                // identically to ordinary fences (same width,
+                                // code-panel color mode, and right-margin
+                                // boundary).
+                                emit_highlighted_code_block(
+                                    &mut wrapper,
                                     &code_buffer,
                                     "mermaid",
+                                    &meta,
                                     &code_highlighter,
                                     &options,
-                                    &meta,
-                                    options.color_mode,
+                                    code_color_mode,
+                                    terminal_width,
+                                    layout_ctx,
+                                    color_depth,
                                 )?;
-                                wrapper.push_with_newlines(&highlighted);
-                                wrapper.push_with_newlines("\n\n");
                             }
                         }
                         MermaidMode::Off => unreachable!(),
                     }
                 } else {
-                    // Render code block with highlighting (normal path)
+                    // Render code block with highlighting (normal path) via the
+                    // shared emitter — see `emit_highlighted_code_block`. The
+                    // emitter resolves the component width, pads the body to it
+                    // (never `\x1b[K` under a layout context), and applies page
+                    // layout so prose fences, mermaid text, and the mermaid
+                    // image-fallback all behave identically.
                     let meta = parse_code_info(&code_info_string).unwrap_or_default();
-
-                    // Get background color from theme for header row
-                    let theme = code_highlighter.theme();
-                    let bg_color = theme.settings.background.unwrap_or(Color::BLACK);
-
-                    // Ensure header starts on a fresh line (not appended to previous content)
-                    if wrapper.current_col() > 0 {
-                        wrapper.newline();
-                    }
-
-                    // Add header row with title and language (right-aligned)
-                    let header = format_header_row(
-                        meta.title.as_deref(),
-                        &code_language,
-                        bg_color,
-                        options.color_mode,
-                        terminal_width,
-                    );
-                    wrapper.push_with_newlines(&header);
-                    wrapper.newline();
-
-                    // Highlight and render code
-                    let highlighted = highlight_code(
+                    emit_highlighted_code_block(
+                        &mut wrapper,
                         &code_buffer,
                         &code_language,
+                        &meta,
                         &code_highlighter,
                         &options,
-                        &meta,
-                        options.color_mode,
+                        code_color_mode,
+                        terminal_width,
+                        layout_ctx,
+                        color_depth,
                     )?;
-                    wrapper.push_with_newlines(&highlighted);
-                    // highlight_code ends with a bottom padding row, add newline after it
-                    // then add blank line for separation from following content
-                    wrapper.push_with_newlines("\n\n");
                 }
             }
             InlineEvent::Standard(Event::Text(text)) if in_code_block => {
@@ -1158,18 +1287,50 @@ pub fn write_terminal<W: std::io::Write>(
                 if let Some(scope) = ScopeCache::global().scope_for_tag(tag) {
                     scope_stack.push(scope);
                 }
+                // Push hyperlink color scope
+                if let Some(ctx) = layout_ctx {
+                    let fg = ctx.component_color(PageComponent::Hyperlinks).cloned();
+                    let bg = ctx.component_bg_color(PageComponent::Hyperlinks).cloned();
+                    wrapper.push_component_color(fg, bg);
+                }
             }
             InlineEvent::Standard(Event::End(TagEnd::Link)) => {
                 if in_table {
                     scope_stack.pop();
                     let style = table_link_style(&prose_highlighter, &scope_stack);
-                    current_cell.push_str(&render_table_link(
+                    // Resolve the effective hyperlink color: prefer an explicit
+                    // `style.hyperlinks.*`, then fall back to the surrounding
+                    // table color, then the page color. Links in regular prose
+                    // use the wrapper's nested color stack; table cells render
+                    // outside that stack, so the lookup happens directly here.
+                    let (hyper_fg, hyper_bg) = layout_ctx
+                        .map(|ctx| {
+                            let fg = ctx
+                                .component_colors
+                                .get(&PageComponent::Hyperlinks)
+                                .or_else(|| ctx.component_colors.get(&PageComponent::Tables))
+                                .or(ctx.page_color.as_ref())
+                                .cloned();
+                            let bg = ctx
+                                .component_bg_colors
+                                .get(&PageComponent::Hyperlinks)
+                                .or_else(|| ctx.component_bg_colors.get(&PageComponent::Tables))
+                                .or(ctx.page_bg_color.as_ref())
+                                .cloned();
+                            (fg, bg)
+                        })
+                        .unwrap_or((None, None));
+                    push_table_link(
+                        &mut current_cell,
                         &current_link_text,
                         &current_link_url,
                         style,
                         emit_italic,
                         emit_hyperlinks,
-                    ));
+                        hyper_fg.as_ref(),
+                        hyper_bg.as_ref(),
+                        color_depth,
+                    );
                 } else {
                     // Pop link scope to get parent scopes, then query theme for link styling
                     // (The link scope was pushed in Start(Link))
@@ -1214,27 +1375,100 @@ pub fn write_terminal<W: std::io::Write>(
                 in_link = false;
                 current_link_url.clear();
                 current_link_text.clear();
+                // Pop hyperlink color scope
+                wrapper.pop_component_color();
             }
 
             // List handling
             InlineEvent::Standard(Event::Start(Tag::List(start_num))) => {
-                // When a nested list starts inside an item, add newline to separate from parent text
-                if !list_stack.is_empty()
-                    && !wrapper.output().is_empty()
-                    && !wrapper.output().ends_with('\n')
-                {
-                    wrapper.newline();
+                // Ensure list starts on a new line
+                if !wrapper.output().is_empty() && !wrapper.output().ends_with('\n') {
+                    if blockquote_depth > 0 {
+                        wrapper.emit_newline_with_prefix();
+                    } else {
+                        wrapper.newline();
+                    }
                 }
+
+                let list_component = match start_num {
+                    None => PageComponent::Ul,
+                    Some(_) => PageComponent::Ol,
+                };
+
+                // Push list container color scope
+                if let Some(ctx) = layout_ctx {
+                    let fg = ctx.component_color(list_component).cloned();
+                    let bg = ctx.component_bg_color(list_component).cloned();
+                    wrapper.push_component_color(fg, bg);
+                }
+
+                // Apply page-level layout for top-level lists.
+                if list_stack.is_empty()
+                    && let Some(ctx) = layout_ctx
+                {
+                    let component = list_component;
+                    let component_width = ctx
+                        .resolve_component_width(component)
+                        .unwrap_or(terminal_width);
+
+                    // For unordered lists, resolve left-margin against the
+                    // effective width first, then cap the body width so the
+                    // body still wraps at the component's resolved width
+                    // (e.g. `ul.max-width`). The left margin is an additional
+                    // offset outside the body, not subtracted from it.
+                    let left_margin = if component == PageComponent::Ul {
+                        ctx.list_left_margin(PageComponent::Ul)
+                            .and_then(|u| u.resolve(ctx.effective_width).ok())
+                            .unwrap_or(0)
+                    } else {
+                        0
+                    };
+                    let available_for_body = ctx.effective_width.saturating_sub(left_margin);
+                    let body_width = component_width.min(available_for_body);
+                    wrapper.push_component_width(body_width as usize);
+                    // Treat (left_margin + body) as a single aligned block so
+                    // a right/center alignment does not push the body past the
+                    // effective width.
+                    let block_width = body_width.saturating_add(left_margin);
+                    let pad = ctx.alignment_padding(component, block_width);
+                    wrapper.alignment_offset = (left_margin + pad) as usize;
+                }
+
                 list_stack.push(start_num);
             }
             InlineEvent::Standard(Event::End(TagEnd::List(_))) => {
+                wrapper.pop_component_color();
                 list_stack.pop();
                 // Add blank line after top-level list ends
                 if list_stack.is_empty() {
+                    wrapper.pop_component_width();
+                    wrapper.alignment_offset = 0;
                     wrapper.newline();
                 }
             }
             InlineEvent::Standard(Event::Start(Tag::Item)) => {
+                // Per spec, `style.li.*` affects the item body only; the marker
+                // is governed by the containing Ul/Ol and must keep its column.
+                // We emit the marker first under the existing list
+                // alignment_offset, then push Li overrides for body wrapping.
+                //
+                // Two flavors of Li override:
+                //   * width-only (Left alignment): the body stays inline with
+                //     the marker but wraps at the Li width. push_indent keeps
+                //     wrapped continuation lines aligned with the body.
+                //   * alignment != Left: the body becomes its own block on a
+                //     new line so its alignment_offset can take effect without
+                //     dragging the marker along.
+                let (li_width_active, li_alignment_active) = layout_ctx
+                    .map(|ctx| {
+                        let li_alignment = ctx.component_alignment(PageComponent::Li);
+                        let li_fill = ctx.component_fill(PageComponent::Li);
+                        #[allow(deprecated)]
+                        (li_fill != PageFill::Full, li_alignment != PageAlignment::Left)
+                    })
+                    .unwrap_or((false, false));
+                let li_block_body = li_alignment_active;
+
                 // Calculate indentation based on nesting level
                 let indent = "  ".repeat(list_stack.len().saturating_sub(1));
 
@@ -1244,27 +1478,78 @@ pub fn write_terminal<W: std::io::Write>(
                         Some(num) => {
                             // Ordered list: emit number and increment
                             let style = prose_highlighter.base_style();
-                            wrapper.emit_styled_marker(
-                                &format!("{}{}. ", indent, num),
-                                style,
-                                emit_italic,
-                            );
+                            let marker = format!("{}{}. ", indent, num);
+                            let marker_width = UnicodeWidthStr::width(marker.as_str());
+                            wrapper.emit_styled_marker(&marker, style, emit_italic);
+                            // When the body is a block (Li alignment shifts it),
+                            // skip push_indent so the body's own alignment_offset
+                            // controls placement on the new line.
+                            if !li_block_body {
+                                wrapper.push_indent(marker_width);
+                            }
                             *num += 1;
                         }
                         None => {
                             // Unordered list: emit bullet
                             let style = prose_highlighter.base_style();
-                            wrapper.emit_styled_marker(
-                                &format!("{}- ", indent),
-                                style,
-                                emit_italic,
-                            );
+                            let marker = format!("{}- ", indent);
+                            let marker_width = UnicodeWidthStr::width(marker.as_str());
+                            wrapper.emit_styled_marker(&marker, style, emit_italic);
+                            if !li_block_body {
+                                wrapper.push_indent(marker_width);
+                            }
                         }
+                    }
+                }
+
+                // Push Li color scope after the marker so the marker keeps
+                // the Ul/Ol container color and the body gets the Li color.
+                if let Some(ctx) = layout_ctx {
+                    let fg = ctx.component_color(PageComponent::Li).cloned();
+                    let bg = ctx.component_bg_color(PageComponent::Li).cloned();
+                    wrapper.push_component_color(fg, bg);
+                }
+
+                // Apply Li-scoped overrides for the body. Width is always
+                // pushed when set; the alignment_offset only matters once the
+                // body actually starts on a new line.
+                if (li_width_active || li_alignment_active)
+                    && let Some(ctx) = layout_ctx
+                {
+                    let li_width = ctx
+                        .resolve_component_width(PageComponent::Li)
+                        .unwrap_or(terminal_width);
+                    wrapper.push_component_width(li_width as usize);
+                    if li_block_body {
+                        let li_pad = ctx.alignment_padding(PageComponent::Li, li_width);
+                        // Newline so the body starts on a fresh line where the
+                        // new alignment_offset takes effect.
+                        wrapper.newline();
+                        wrapper.push_alignment_offset(li_pad as usize);
                     }
                 }
             }
             InlineEvent::Standard(Event::End(TagEnd::Item)) => {
+                let (li_width_active, li_alignment_active) = layout_ctx
+                    .map(|ctx| {
+                        let li_alignment = ctx.component_alignment(PageComponent::Li);
+                        let li_fill = ctx.component_fill(PageComponent::Li);
+                        #[allow(deprecated)]
+                        (li_fill != PageFill::Full, li_alignment != PageAlignment::Left)
+                    })
+                    .unwrap_or((false, false));
+                let li_block_body = li_alignment_active;
+
+                wrapper.pop_component_color();
                 wrapper.newline();
+                if li_width_active || li_alignment_active {
+                    wrapper.pop_component_width();
+                }
+                if li_block_body {
+                    wrapper.pop_alignment_offset();
+                } else {
+                    wrapper.pop_indent();
+                }
             }
 
             InlineEvent::Standard(Event::Start(Tag::Paragraph)) => {
@@ -1308,20 +1593,24 @@ pub fn write_terminal<W: std::io::Write>(
                         in_strong,
                         in_strikethrough,
                         in_mark,
+                        in_dim,
                         blockquote_depth > 0,
                     );
-                    current_cell.push_str(&render_table_cell_text(
+                    push_table_cell_text(
+                        &mut current_cell,
                         &text,
                         style,
                         emit_italic,
+                        emit_dim,
                         TableCellInlineState {
                             in_strikethrough,
                             in_mark,
                             in_emphasis,
                             in_strong,
+                            in_dim,
                         },
                         &render_terminal,
-                    ));
+                    );
                 } else {
                     let style = resolve_prose_text_style(
                         &prose_highlighter,
@@ -1330,12 +1619,21 @@ pub fn write_terminal<W: std::io::Write>(
                         in_strong,
                         in_strikethrough,
                         in_mark,
+                        in_dim,
                         blockquote_depth > 0,
                     );
 
                     // Use LineWrapper for proper word wrapping
                     // Pass in_mark to enable background highlighting
-                    wrapper.emit_styled(&text, style, emit_italic, in_strikethrough, in_mark);
+                    wrapper.emit_styled(
+                        &text,
+                        style,
+                        emit_italic,
+                        in_strikethrough,
+                        in_mark,
+                        in_dim,
+                        emit_dim,
+                    );
                 }
             }
 
@@ -1347,7 +1645,7 @@ pub fn write_terminal<W: std::io::Write>(
                     current_alt.push('`');
                 } else if in_table {
                     let style = prose_highlighter.style_for_inline_code(&scope_stack);
-                    current_cell.push_str(&emit_inline_code(&code, style));
+                    push_inline_code(&mut current_cell, &code, style);
                 } else {
                     // Inline code with styling (no backticks in terminal output)
                     let style = prose_highlighter.style_for_inline_code(&scope_stack);
@@ -1382,12 +1680,26 @@ pub fn write_terminal<W: std::io::Write>(
             }
             InlineEvent::Standard(Event::End(TagEnd::Table)) => {
                 in_table = false;
-                // Render the buffered table with proper formatting
-                wrapper.push_with_newlines(&render_table(
-                    &table_rows,
-                    &table_alignments,
+                // Resolve component width when a layout context is present.
+                let table_width = resolve_component_render_width(
+                    PageComponent::Tables,
                     terminal_width,
-                ));
+                    layout_ctx,
+                );
+                // Render the buffered table with proper formatting
+                let table_output = render_table(&table_rows, &table_alignments, table_width);
+                let table_output = if let Some(ctx) = layout_ctx {
+                    apply_component_layout(&table_output, PageComponent::Tables, ctx)
+                } else {
+                    table_output
+                };
+                let table_output = wrap_with_color(
+                    &table_output,
+                    layout_ctx.and_then(|ctx| ctx.component_color(PageComponent::Tables)),
+                    layout_ctx.and_then(|ctx| ctx.component_bg_color(PageComponent::Tables)),
+                    color_depth,
+                );
+                wrapper.push_with_newlines(&table_output);
                 // Add blank line after table for spacing from following content
                 wrapper.push_with_newlines("\n\n");
                 table_rows.clear();
@@ -1440,11 +1752,16 @@ pub fn write_terminal<W: std::io::Write>(
                         write!(writer, "{}", wrapper.output()).ok();
                         writer.flush().ok();
                         // Clear the wrapper by creating a new one (preserving max_width)
-                        wrapper = LineWrapper::new(terminal_width as usize, emit_hyperlinks);
+                        wrapper = LineWrapper::new(terminal_width as usize, emit_hyperlinks, color_depth);
                         // render_image returns protocol output on success,
                         // fallback text on failure
                         let result =
                             renderer.render_image(&current_image_path, &parsed_alt, parsed_width);
+                        let result = if let Some(ctx) = layout_ctx {
+                            apply_component_layout(&result, PageComponent::Images, ctx)
+                        } else {
+                            result
+                        };
                         if !result.is_empty() {
                             // Print rendered output (or fallback text on failure)
                             write!(writer, "{}", result).ok();
@@ -1452,15 +1769,32 @@ pub fn write_terminal<W: std::io::Write>(
                         writer.flush().ok();
                         just_rendered_image = true;
                     } else {
-                        wrapper.push_with_newlines(&renderer.render_image(
-                            &current_image_path,
-                            &parsed_alt,
-                            parsed_width,
-                        ));
+                        let mut result =
+                            renderer.render_image(&current_image_path, &parsed_alt, parsed_width);
+                        if let Some(ctx) = layout_ctx {
+                            result = apply_component_layout(&result, PageComponent::Images, ctx);
+                        }
+                        let result = wrap_with_color(
+                            &result,
+                            layout_ctx.and_then(|ctx| ctx.component_color(PageComponent::Images)),
+                            layout_ctx.and_then(|ctx| ctx.component_bg_color(PageComponent::Images)),
+                            color_depth,
+                        );
+                        wrapper.push_with_newlines(&result);
                         just_rendered_image = true;
                     }
                 } else {
-                    wrapper.push_with_newlines(&format!("▉ IMAGE[{}]\n", parsed_alt));
+                    let mut result = format!("▉ IMAGE[{}]\n", parsed_alt);
+                    if let Some(ctx) = layout_ctx {
+                        result = apply_component_layout(&result, PageComponent::Images, ctx);
+                    }
+                    let result = wrap_with_color(
+                        &result,
+                        layout_ctx.and_then(|ctx| ctx.component_color(PageComponent::Images)),
+                        layout_ctx.and_then(|ctx| ctx.component_bg_color(PageComponent::Images)),
+                        color_depth,
+                    );
+                    wrapper.push_with_newlines(&result);
                     just_rendered_image = true;
                 }
                 in_image = false;
@@ -1477,6 +1811,16 @@ pub fn write_terminal<W: std::io::Write>(
                             wrapper.push_with_newlines("\n\n");
                         }
                     }
+                    // Apply page-level layout for top-level blockquotes.
+                    if let Some(ctx) = layout_ctx {
+                        let component = PageComponent::BlockQuotes;
+                        let component_width = ctx
+                            .resolve_component_width(component)
+                            .unwrap_or(terminal_width);
+                        wrapper.push_component_width(component_width as usize);
+                        let pad = ctx.alignment_padding(component, component_width);
+                        wrapper.alignment_offset = pad as usize;
+                    }
                 } else {
                     // Nested blockquote - end current line with outer prefix, add blank line
                     wrapper.emit_newline_with_prefix(); // Ends current line, adds outer prefix for blank line
@@ -1487,14 +1831,24 @@ pub fn write_terminal<W: std::io::Write>(
                 if let Some(scope) = ScopeCache::global().scope_for_tag(tag) {
                     scope_stack.push(scope);
                 }
+                // Push blockquote color scope
+                if let Some(ctx) = layout_ctx {
+                    let fg = ctx.component_color(PageComponent::BlockQuotes).cloned();
+                    let bg = ctx.component_bg_color(PageComponent::BlockQuotes).cloned();
+                    wrapper.push_component_color(fg, bg);
+                }
                 // Emit the blockquote prefix for the first line of this blockquote level
                 wrapper.emit_blockquote_prefix(blockquote_depth, blockquote_bg);
             }
             InlineEvent::Standard(Event::End(TagEnd::BlockQuote(_))) => {
                 blockquote_depth = blockquote_depth.saturating_sub(1);
                 scope_stack.pop();
+                wrapper.pop_component_color();
                 // Update wrapper's blockquote state
                 if blockquote_depth == 0 {
+                    // Pop any layout overrides applied at blockquote entry.
+                    wrapper.pop_component_width();
+                    wrapper.alignment_offset = 0;
                     blockquote_has_content = false; // Reset only when fully exiting blockquotes
                     wrapper.clear_blockquote();
                     // Add blank line after blockquote (like headings and paragraphs)
@@ -1518,11 +1872,33 @@ pub fn write_terminal<W: std::io::Write>(
     // Always emit terminal reset at end
     output.push_str("\x1b[0m");
 
+    // When color depth is `None`, the terminal cannot render any color SGR;
+    // the visible text and layout must still be preserved. We strip CSI
+    // sequences (which carry SGR codes such as `\x1b[38;2;...m` and
+    // `\x1b[0m`) while leaving OSC sequences (OSC8 hyperlinks) intact, so
+    // the page layout, table structure, and bullets are unaffected.
+    if color_depth == ColorDepth::None {
+        output = strip_csi_sequences(&output);
+    }
+
     // Write final output
     write!(writer, "{}", output).ok();
     writer.flush().ok();
 
     Ok(())
+}
+
+/// Strip CSI (Control Sequence Introducer) sequences from text while
+/// preserving OSC sequences (e.g. OSC8 hyperlinks).
+///
+/// Used by [`write_terminal_with_layout`] when `ColorDepth::None` is in
+/// effect so the visible text/layout survives but no color SGR escapes
+/// reach a terminal that cannot interpret them.
+fn strip_csi_sequences(text: &str) -> String {
+    static CSI_RE: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+        regex::Regex::new(r"\x1b\[[0-9;?]*[A-Za-z]").expect("invalid CSI regex")
+    });
+    CSI_RE.replace_all(text, "").into_owned()
 }
 
 /// Emits prose text with foreground color and font style (bold, italic, underline).
@@ -1535,6 +1911,10 @@ pub fn write_terminal<W: std::io::Write>(
 /// * `in_strikethrough` - Whether to apply strikethrough formatting
 /// * `in_mark` - Whether to apply highlight background color
 /// * `blockquote_bg` - Optional background color for blockquote context
+/// * `in_dim` - Whether to apply dim/faint formatting
+/// * `emit_dim` - Whether to emit dim escape codes
+#[allow(clippy::too_many_arguments)]
+#[cfg(test)]
 fn emit_prose_text(
     text: &str,
     style: Style,
@@ -1542,73 +1922,173 @@ fn emit_prose_text(
     in_strikethrough: bool,
     in_mark: bool,
     blockquote_bg: Option<Color>,
+    in_dim: bool,
+    emit_dim: bool,
 ) -> String {
+    let mut result = String::new();
+    push_prose_text(
+        &mut result,
+        text,
+        style,
+        emit_italic,
+        in_strikethrough,
+        in_mark,
+        blockquote_bg,
+        in_dim,
+        emit_dim,
+        None,
+        None,
+        ColorDepth::TrueColor,
+    );
+    result
+}
+
+#[allow(clippy::too_many_arguments)]
+fn push_prose_text(
+    output: &mut String,
+    text: &str,
+    style: Style,
+    emit_italic: bool,
+    in_strikethrough: bool,
+    in_mark: bool,
+    blockquote_bg: Option<Color>,
+    in_dim: bool,
+    emit_dim: bool,
+    component_fg: Option<StyleColor>,
+    component_bg: Option<StyleColor>,
+    color_depth: ColorDepth,
+) {
     use syntect::highlighting::FontStyle;
 
     let fg = style.foreground;
-    let mut result = String::new();
 
-    // Apply font styles (bold=1, italic=3, underline=4, strikethrough=9)
+    // Apply font styles (bold=1, dim=2, italic=3, underline=4, strikethrough=9)
     if style.font_style.contains(FontStyle::BOLD) {
-        result.push_str("\x1b[1m");
+        output.push_str("\x1b[1m");
+    }
+    if emit_dim && in_dim {
+        output.push_str("\x1b[2m");
     }
     if emit_italic && style.font_style.contains(FontStyle::ITALIC) {
-        result.push_str("\x1b[3m");
+        output.push_str("\x1b[3m");
     }
     if style.font_style.contains(FontStyle::UNDERLINE) {
-        result.push_str("\x1b[4m");
+        output.push_str("\x1b[4m");
     }
     if in_strikethrough {
-        result.push_str("\x1b[9m");
+        output.push_str("\x1b[9m");
     }
 
     // Apply background color for highlighted/marked text
     // Uses a yellow background similar to <mark> in HTML
     if in_mark {
         // Yellow highlight background (255, 243, 184) - matches CSS var(--highlight-bg, #fff3b8)
-        result.push_str("\x1b[48;2;255;243;184m");
+        output.push_str("\x1b[48;2;255;243;184m");
         // Use dark text for contrast on yellow background
-        result.push_str(&format!("\x1b[38;2;0;0;0m{}\x1b[0m", text));
+        let mut sgr = String::new();
+        sgr.push_str("\x1b[38;2;0;0;0m");
+        if let Some(cfg) = component_fg
+            && let Some(seq) = lower_to_sgr(&cfg, color_depth, false) {
+                sgr.push_str(&seq);
+            }
+        let _ = write!(output, "{sgr}{text}\x1b[0m");
     } else if let Some(bg) = blockquote_bg {
-        // Apply blockquote background color with foreground color
-        result.push_str(&format!(
-            "\x1b[48;2;{};{};{}m\x1b[38;2;{};{};{}m{}\x1b[0m",
-            bg.r, bg.g, bg.b, fg.r, fg.g, fg.b, text
-        ));
+        // Apply blockquote background color with foreground color.
+        //
+        // ## Soft reset rationale
+        //
+        // We use a "soft" SGR reset (`\x1b[22;23;24;25;27;28;29;39m`) instead of the
+        // usual hard reset (`\x1b[0m`) so that the background color is **preserved**
+        // across word boundaries.  Hard reset clears *all* attributes including the
+        // background, which causes a tiny gap (one cell wide) where the terminal's
+        // default background shows through.  In blockquotes this is especially
+        // visible because every word and space is a separate ANSI segment, so the
+        // gaps add up and create a "dotted line" effect on the background.
+        //
+        // The soft reset only clears:
+        //   - 22 (normal intensity), 23 (italic off), 24 (underline off)
+        //   - 25 (blink off), 27 (inverse off), 28 (conceal off), 29 (strikethrough off)
+        //   - 39 (default foreground)
+        // while leaving the background (48) intact.
+        //
+        // See biscuit-terminal skill → "Terminal rendering: background gaps" for more.
+        let mut sgr = String::new();
+        sgr.push_str(&format!("\x1b[48;2;{};{};{}m", bg.r, bg.g, bg.b));
+        if let Some(cbg) = component_bg
+            && let Some(seq) = lower_to_sgr(&cbg, color_depth, true) {
+                sgr.push_str(&seq);
+            }
+        sgr.push_str(&format!("\x1b[38;2;{};{};{}m", fg.r, fg.g, fg.b));
+        if let Some(cfg) = component_fg
+            && let Some(seq) = lower_to_sgr(&cfg, color_depth, false) {
+                sgr.push_str(&seq);
+            }
+        let _ = write!(output, "{sgr}{text}\x1b[22;23;24;25;27;28;29;39m");
     } else {
         // Apply foreground color and text
-        result.push_str(&format!(
-            "\x1b[38;2;{};{};{}m{}\x1b[0m",
-            fg.r, fg.g, fg.b, text
-        ));
+        let mut sgr = String::new();
+        sgr.push_str(&format!("\x1b[38;2;{};{};{}m", fg.r, fg.g, fg.b));
+        if let Some(cfg) = component_fg
+            && let Some(seq) = lower_to_sgr(&cfg, color_depth, false) {
+                sgr.push_str(&seq);
+            }
+        if let Some(cbg) = component_bg
+            && let Some(seq) = lower_to_sgr(&cbg, color_depth, true) {
+                sgr.push_str(&seq);
+            }
+        let _ = write!(output, "{sgr}{text}\x1b[0m");
     }
-    result
 }
 
 /// Emits inline code with both foreground and background colors.
 ///
 /// Uses the style's background color if available, otherwise uses a subtle gray.
+#[cfg(test)]
 fn emit_inline_code(text: &str, style: Style) -> String {
+    let mut result = String::new();
+    push_inline_code(&mut result, text, style);
+    result
+}
+
+fn push_inline_code(output: &mut String, text: &str, style: Style) {
+    push_inline_code_with_bg(output, text, style, None);
+}
+
+fn push_inline_code_with_bg(
+    output: &mut String,
+    text: &str,
+    style: Style,
+    preserve_bg: Option<Color>,
+) {
     let fg = style.foreground;
     let bg = style.background;
+
+    let reset = if preserve_bg.is_some() {
+        "[22;23;24;25;27;28;29;39m"
+    } else {
+        "[0m"
+    };
 
     // Check if background is meaningful (not transparent/zero alpha)
     if bg.a > 0 && (bg.r > 0 || bg.g > 0 || bg.b > 0) {
         // Use provided background
-        format!(
-            "\x1b[48;2;{};{};{}m\x1b[38;2;{};{};{}m{}\x1b[0m",
-            bg.r, bg.g, bg.b, fg.r, fg.g, fg.b, text
-        )
+        let _ = write!(
+            output,
+            "\x1b[48;2;{};{};{}m\x1b[38;2;{};{};{}m{}{}",
+            bg.r, bg.g, bg.b, fg.r, fg.g, fg.b, text, reset
+        );
     } else {
         // Use a subtle dark gray background for contrast
-        format!(
-            "\x1b[48;2;{};{};{}m\x1b[38;2;{};{};{}m{}\x1b[0m",
-            50, 50, 55, fg.r, fg.g, fg.b, text
-        )
+        let _ = write!(
+            output,
+            "\x1b[48;2;{};{};{}m\x1b[38;2;{};{};{}m{}{}",
+            50, 50, 55, fg.r, fg.g, fg.b, text, reset
+        );
     }
 }
 
 /// Resolves prose text style from the scope stack and semantic inline states.
+#[allow(clippy::too_many_arguments)]
 fn resolve_prose_text_style(
     prose_highlighter: &ProseHighlighter<'_>,
     scope_stack: &[Scope],
@@ -1616,18 +2096,20 @@ fn resolve_prose_text_style(
     in_strong: bool,
     in_strikethrough: bool,
     in_mark: bool,
+    in_dim: bool,
     in_blockquote: bool,
 ) -> Style {
     use syntect::highlighting::FontStyle;
 
-    let mut style = if in_emphasis || in_strong || in_strikethrough || in_mark {
+    let mut style = if in_emphasis || in_strong || in_strikethrough || in_mark || in_dim {
         // Compute style from parent scopes (exclude inline formatting scopes)
         // to preserve the parent's color.
         let parent_depth = scope_stack.len()
             - (in_emphasis as usize)
             - (in_strong as usize)
             - (in_strikethrough as usize)
-            - (in_mark as usize);
+            - (in_mark as usize)
+            - (in_dim as usize);
         let parent_scopes = &scope_stack[..parent_depth.max(1)];
         prose_highlighter.style_for_tag(&Tag::Paragraph, parent_scopes)
     } else if scope_stack.len() > 1 {
@@ -1676,26 +2158,68 @@ fn table_link_style(prose_highlighter: &ProseHighlighter<'_>, scope_stack: &[Sco
 }
 
 /// Renders a table-cell hyperlink while honoring hyperlink mode behavior.
-fn render_table_link(
+///
+/// When `hyper_fg` or `hyper_bg` are provided they wrap the link's styled
+/// text with an SGR foreground/background and a `\x1b[0m` reset so the
+/// `style.hyperlinks.color` overrides the surrounding table color without
+/// breaking the OSC8 sequence.
+#[allow(clippy::too_many_arguments)]
+fn push_table_link(
+    output: &mut String,
     text: &str,
     url: &str,
     style: Style,
     emit_italic: bool,
     emit_hyperlinks: bool,
-) -> String {
+    hyper_fg: Option<&StyleColor>,
+    hyper_bg: Option<&StyleColor>,
+    color_depth: ColorDepth,
+) {
+    // Render the styled link text into a temporary buffer first, then wrap
+    // with the hyperlink color so the SGR sits between the OSC8 open/close
+    // sequences and does not break the hyperlink target.
+    let mut link_buf = String::new();
     if emit_hyperlinks {
-        format!(
-            "\x1b]8;;{}\x07{}\x1b]8;;\x07",
-            url,
-            emit_prose_text(text, style, emit_italic, false, false, None)
-        )
+        let _ = write!(link_buf, "\x1b]8;;{}\x07", url);
+        let mut styled = String::new();
+        push_prose_text(
+            &mut styled,
+            text,
+            style,
+            emit_italic,
+            false,
+            false,
+            None,
+            false,
+            true,
+            None,
+            None,
+            color_depth,
+        );
+        let styled = crate::style::wrap_with_color(&styled, hyper_fg, hyper_bg, color_depth);
+        link_buf.push_str(&styled);
+        link_buf.push_str("\x1b]8;;\x07");
     } else {
-        format!(
-            "{} [{}]",
-            emit_prose_text(text, style, emit_italic, false, false, None),
-            url
-        )
+        let mut styled = String::new();
+        push_prose_text(
+            &mut styled,
+            text,
+            style,
+            emit_italic,
+            false,
+            false,
+            None,
+            false,
+            true,
+            None,
+            None,
+            color_depth,
+        );
+        let styled = crate::style::wrap_with_color(&styled, hyper_fg, hyper_bg, color_depth);
+        link_buf.push_str(&styled);
+        let _ = write!(link_buf, " [{}]", url);
     }
+    output.push_str(&link_buf);
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -1704,27 +2228,44 @@ struct TableCellInlineState {
     in_mark: bool,
     in_emphasis: bool,
     in_strong: bool,
+    in_dim: bool,
 }
 
-fn render_table_cell_text(
+fn push_table_cell_text(
+    output: &mut String,
     text: &str,
     style: Style,
     emit_italic: bool,
+    emit_dim: bool,
     state: TableCellInlineState,
     terminal: &Terminal,
-) -> String {
+) {
     if text.is_empty() {
-        return String::new();
+        return;
     }
 
     // Keep mark/highlight rendering on Darkmatter's style path.
     if state.in_mark {
-        return emit_prose_text(text, style, emit_italic, state.in_strikethrough, true, None);
+        push_prose_text(
+            output,
+            text,
+            style,
+            emit_italic,
+            state.in_strikethrough,
+            true,
+            None,
+            state.in_dim,
+            emit_dim,
+            None,
+            None,
+            ColorDepth::TrueColor,
+        );
+        return;
     }
 
     // Use Prose selectively for semantic inline style serialization in table cells.
     // This keeps table layout logic in biscuit-terminal while Darkmatter owns markdown parsing.
-    if state.in_strong || state.in_emphasis || state.in_strikethrough {
+    if state.in_strong || state.in_emphasis || state.in_strikethrough || state.in_dim {
         let mut serialized = String::new();
         if state.in_strong {
             serialized.push_str("<bold>");
@@ -1735,7 +2276,13 @@ fn render_table_cell_text(
         if state.in_strikethrough {
             serialized.push_str("<strikethrough>");
         }
+        if state.in_dim && emit_dim {
+            serialized.push_str("<dim>");
+        }
         serialized.push_str(text);
+        if state.in_dim && emit_dim {
+            serialized.push_str("</dim>");
+        }
         if state.in_strikethrough {
             serialized.push_str("</strikethrough>");
         }
@@ -1750,18 +2297,29 @@ fn render_table_cell_text(
         if !text.contains('<') && !text.contains('{') {
             let prose = Prose::new(serialized).render(terminal);
             let fg = style.foreground;
-            return format!("\x1b[38;2;{};{};{}m{}\x1b[0m", fg.r, fg.g, fg.b, prose);
+            let _ = write!(
+                output,
+                "\x1b[38;2;{};{};{}m{}\x1b[0m",
+                fg.r, fg.g, fg.b, prose
+            );
+            return;
         }
     }
 
-    emit_prose_text(
+    push_prose_text(
+        output,
         text,
         style,
         emit_italic,
         state.in_strikethrough,
         false,
         None,
-    )
+        state.in_dim,
+        emit_dim,
+        None,
+        None,
+        ColorDepth::TrueColor,
+    );
 }
 
 /// Renders a buffered markdown table via `biscuit-terminal::Table`.
@@ -1865,7 +2423,13 @@ fn header_text_color(color_mode: ColorMode) -> (u8, u8, u8) {
 /// ANSI-formatted string with title (if present) on the left and language right-aligned.
 /// Title is bold, language is not. For title-only headers (empty language with title),
 /// only the title is rendered.
-fn format_header_row(
+///
+/// ## Notes
+///
+/// This helper is also reused by [`crate::markdown::yaml_block::YamlBlock`] to keep
+/// the YAML-fence header row byte-identical between Markdown and YamlBlock outputs.
+/// Any signature change here must keep that consumer in sync.
+pub(crate) fn format_header_row(
     title: Option<&str>,
     language: &str,
     bg_color: Color,
@@ -1930,20 +2494,6 @@ fn format_header_row(
     output
 }
 
-/// Emits a padding row with the specified background color.
-///
-/// The padding row consists of:
-/// - Setting the background color
-/// - Clearing to end of line (\x1b[K)
-/// - Resetting all attributes (\x1b[0m)
-/// - Adding a newline
-fn emit_padding_row(bg_color: Color) -> String {
-    format!(
-        "\x1b[48;2;{};{};{}m\x1b[K\x1b[0m\n",
-        bg_color.r, bg_color.g, bg_color.b
-    )
-}
-
 /// A wrapper that handles word-based line wrapping for prose text.
 ///
 /// Tracks the current column position and wraps at word boundaries to prevent
@@ -1961,11 +2511,31 @@ struct LineWrapper {
     blockquote_bg: Option<Color>,
     /// Whether to emit OSC 8 hyperlinks (cached detection result)
     supports_hyperlinks: bool,
+    /// Stack of indentation widths for wrapped continuation lines (e.g. for nested list items)
+    indent_stack: Vec<usize>,
+    /// Left padding (in columns) to apply at the start of each line for
+    /// component alignment (e.g. centering a blockquote).
+    alignment_offset: usize,
+    /// Stack of *previous* max-width values saved when a component-specific
+    /// width override is pushed (e.g. a blockquote or list narrowing the
+    /// wrap width). The active wrap width is always `self.max_width`; this
+    /// stack only exists so `pop_component_width` can restore the prior value.
+    previous_widths: Vec<usize>,
+    /// Stack of *previous* alignment_offset values saved when a nested
+    /// component overrides alignment (e.g. a list item with explicit
+    /// alignment inside a list with different alignment).
+    previous_alignment_offsets: Vec<usize>,
+    /// Terminal color depth for SGR lowering.
+    color_depth: ColorDepth,
+    /// Stack of active component colors. The top entry is the current color
+    /// scope; inner components override outer ones.
+    component_color_stack: Vec<(Option<StyleColor>, Option<StyleColor>)>,
 }
 
 impl LineWrapper {
-    /// Creates a new LineWrapper with the given maximum width and hyperlink support flag.
-    fn new(max_width: usize, supports_hyperlinks: bool) -> Self {
+    /// Creates a new LineWrapper with the given maximum width, hyperlink support flag,
+    /// and terminal color depth.
+    fn new(max_width: usize, supports_hyperlinks: bool, color_depth: ColorDepth) -> Self {
         Self {
             current_col: 0,
             max_width,
@@ -1973,7 +2543,102 @@ impl LineWrapper {
             blockquote_depth: 0,
             blockquote_bg: None,
             supports_hyperlinks,
+            indent_stack: Vec::new(),
+            alignment_offset: 0,
+            previous_widths: Vec::new(),
+            previous_alignment_offsets: Vec::new(),
+            color_depth,
+            component_color_stack: Vec::new(),
         }
+    }
+
+    /// Push a component color scope onto the stack.
+    fn push_component_color(&mut self, fg: Option<StyleColor>, bg: Option<StyleColor>) {
+        self.component_color_stack.push((fg, bg));
+    }
+
+    /// Pop the most recent component color scope.
+    fn pop_component_color(&mut self) {
+        self.component_color_stack.pop();
+    }
+
+    /// Return the active component foreground and background colors.
+    ///
+    /// Walks the stack from innermost to outermost so an inner scope only
+    /// overrides a slot when it explicitly sets that slot. This mirrors CSS
+    /// inheritance: an `<li>` with no `color` inherits its `<ul>`'s color
+    /// instead of clearing it. Without this, pushing a list-item scope with
+    /// `(None, None)` would mask the list container's color for the body
+    /// text.
+    fn active_component_color(&self) -> (Option<StyleColor>, Option<StyleColor>) {
+        let mut fg: Option<StyleColor> = None;
+        let mut bg: Option<StyleColor> = None;
+        for (entry_fg, entry_bg) in self.component_color_stack.iter().rev() {
+            if fg.is_none()
+                && let Some(value) = entry_fg
+            {
+                fg = Some(value.clone());
+            }
+            if bg.is_none()
+                && let Some(value) = entry_bg
+            {
+                bg = Some(value.clone());
+            }
+            if fg.is_some() && bg.is_some() {
+                break;
+            }
+        }
+        (fg, bg)
+    }
+
+    /// Push a component-specific max-width override.
+    fn push_component_width(&mut self, width: usize) {
+        self.previous_widths.push(self.max_width);
+        self.max_width = width;
+    }
+
+    /// Pop the most recent component-specific max-width override.
+    fn pop_component_width(&mut self) {
+        if let Some(w) = self.previous_widths.pop() {
+            self.max_width = w;
+        }
+    }
+
+    /// Push a nested alignment_offset override.
+    fn push_alignment_offset(&mut self, offset: usize) {
+        self.previous_alignment_offsets.push(self.alignment_offset);
+        self.alignment_offset = offset;
+    }
+
+    /// Pop the most recent alignment_offset override.
+    fn pop_alignment_offset(&mut self) {
+        if let Some(o) = self.previous_alignment_offsets.pop() {
+            self.alignment_offset = o;
+        }
+    }
+
+    /// Current effective max width, accounting for any component overrides.
+    ///
+    /// `self.max_width` is always the active wrap width — component overrides
+    /// assign to it directly via [`Self::push_component_width`]. The
+    /// `previous_widths` stack only stores values to restore on pop.
+    fn effective_max_width(&self) -> usize {
+        self.max_width
+    }
+
+    /// Pushes a new indentation width onto the stack.
+    fn push_indent(&mut self, indent: usize) {
+        self.indent_stack.push(indent);
+    }
+
+    /// Pops the last indentation width from the stack.
+    fn pop_indent(&mut self) {
+        self.indent_stack.pop();
+    }
+
+    /// Gets the current total indentation width.
+    fn current_indent(&self) -> usize {
+        *self.indent_stack.last().unwrap_or(&0)
     }
 
     /// Sets blockquote state without emitting the prefix.
@@ -1984,6 +2649,50 @@ impl LineWrapper {
         self.blockquote_bg = Some(bg);
     }
 
+    /// Ensures the blockquote prefix and list indentation are emitted at the start of a line.
+    fn ensure_prefix(&mut self) {
+        if self.current_col == 0 {
+            let mut current_pos = 0;
+
+            // Emit alignment offset for page-component alignment (e.g. centered blockquotes).
+            if self.alignment_offset > 0 {
+                let spaces = " ".repeat(self.alignment_offset);
+                self.output.push_str(&spaces);
+                current_pos += self.alignment_offset;
+            }
+
+            if self.blockquote_depth > 0
+                && let Some(bg) = self.blockquote_bg
+            {
+                let prefix = "▐   ".repeat(self.blockquote_depth);
+                let prefix_width = UnicodeWidthStr::width(prefix.as_str());
+                self.output.push_str(&format!(
+                    "\x1b[38;2;100;100;100m\x1b[48;2;{};{};{}m{}\x1b[0m",
+                    bg.r, bg.g, bg.b, prefix
+                ));
+                current_pos += prefix_width;
+            }
+
+            let indent = self.current_indent();
+            if indent > 0 {
+                let spaces = " ".repeat(indent);
+                if self.blockquote_depth > 0 {
+                    if let Some(bg) = self.blockquote_bg {
+                        self.output.push_str(&format!(
+                            "\x1b[48;2;{};{};{}m{}\x1b[0m",
+                            bg.r, bg.g, bg.b, spaces
+                        ));
+                    }
+                } else {
+                    self.output.push_str(&spaces);
+                }
+                current_pos += indent;
+            }
+
+            self.current_col = current_pos;
+        }
+    }
+
     /// Emits a blockquote prefix with styled bar and indentation.
     ///
     /// Uses `▐` character followed by 3 spaces for visual separation.
@@ -1992,19 +2701,8 @@ impl LineWrapper {
         self.blockquote_depth = depth;
         self.blockquote_bg = Some(bg);
 
-        // Build the prefix: "▐   " repeated for each nesting level
-        // The bar character ▐ has width 1, plus 3 spaces = 4 chars per level
-        let prefix = "▐   ".repeat(depth);
-        let prefix_width = UnicodeWidthStr::width(prefix.as_str());
-
-        // Emit with background color (gray for bar, subtle bg for spaces)
-        // Bar: bright gray foreground
-        // Spaces: subtle background extends
-        self.output.push_str(&format!(
-            "\x1b[38;2;100;100;100m\x1b[48;2;{};{};{}m{}\x1b[0m",
-            bg.r, bg.g, bg.b, prefix
-        ));
-        self.current_col = prefix_width;
+        // Emit for the current line
+        self.ensure_prefix();
     }
 
     /// Clears the blockquote context (called when exiting all blockquotes).
@@ -2012,6 +2710,7 @@ impl LineWrapper {
     /// Pads the final line to terminal width before clearing to ensure uniform background.
     fn clear_blockquote(&mut self) {
         self.pad_to_width();
+        self.output.push_str("[0m");
         self.blockquote_depth = 0;
         self.blockquote_bg = None;
     }
@@ -2020,39 +2719,25 @@ impl LineWrapper {
     ///
     /// Called before newlines in blockquotes to ensure uniform background width.
     fn pad_to_width(&mut self) {
+        let max = self.effective_max_width();
         if let Some(bg) = self.blockquote_bg
-            && self.current_col < self.max_width
+            && self.current_col < max
+            && self.current_col > 0
         {
-            let padding = self.max_width - self.current_col;
+            let padding = max - self.current_col;
             let spaces = " ".repeat(padding);
             self.output.push_str(&format!(
                 "\x1b[48;2;{};{};{}m{}\x1b[0m",
                 bg.r, bg.g, bg.b, spaces
             ));
-            self.current_col = self.max_width;
+            self.current_col = max;
         }
     }
 
     /// Emits a newline and the blockquote prefix if we're in a blockquote.
     fn emit_newline_with_prefix(&mut self) {
-        // Pad line to terminal width before newline (for uniform blockquote background)
-        self.pad_to_width();
-        self.output.push('\n');
-        if self.blockquote_depth > 0 {
-            if let Some(bg) = self.blockquote_bg {
-                let prefix = "▐   ".repeat(self.blockquote_depth);
-                let prefix_width = UnicodeWidthStr::width(prefix.as_str());
-                self.output.push_str(&format!(
-                    "\x1b[38;2;100;100;100m\x1b[48;2;{};{};{}m{}\x1b[0m",
-                    bg.r, bg.g, bg.b, prefix
-                ));
-                self.current_col = prefix_width;
-            } else {
-                self.current_col = 0;
-            }
-        } else {
-            self.current_col = 0;
-        }
+        self.newline();
+        self.ensure_prefix();
     }
 
     /// Emits styled text with word wrapping.
@@ -2068,6 +2753,9 @@ impl LineWrapper {
     /// * `emit_italic` - Whether to emit italic escape codes
     /// * `in_strikethrough` - Whether to apply strikethrough formatting
     /// * `in_mark` - Whether to apply highlight background
+    /// * `in_dim` - Whether to apply dim/faint formatting
+    /// * `emit_dim` - Whether to emit dim escape codes
+    #[allow(clippy::too_many_arguments)]
     fn emit_styled(
         &mut self,
         text: &str,
@@ -2075,6 +2763,8 @@ impl LineWrapper {
         emit_italic: bool,
         in_strikethrough: bool,
         in_mark: bool,
+        in_dim: bool,
+        emit_dim: bool,
     ) {
         // Split into segments, preserving whitespace
         // We iterate over whitespace-separated words, handling spaces between them
@@ -2084,7 +2774,15 @@ impl LineWrapper {
             if ch.is_whitespace() {
                 // Emit accumulated word first
                 if !current_word.is_empty() {
-                    self.emit_word(&current_word, style, emit_italic, in_strikethrough, in_mark);
+                    self.emit_word(
+                        &current_word,
+                        style,
+                        emit_italic,
+                        in_strikethrough,
+                        in_mark,
+                        in_dim,
+                        emit_dim,
+                    );
                     current_word.clear();
                 }
                 // Handle whitespace
@@ -2096,13 +2794,21 @@ impl LineWrapper {
                     if self.current_col > 0 {
                         // Check if space would overflow the line
                         // If at max width, skip the space (next word will wrap anyway)
-                        if self.current_col >= self.max_width {
+                        if self.current_col >= self.effective_max_width() {
                             // At or past max width - don't emit space, let next word trigger wrap
                             continue;
                         }
                         // For marked text or blockquote, emit styled space to preserve background
                         if in_mark || self.blockquote_bg.is_some() {
-                            self.emit_word(" ", style, emit_italic, in_strikethrough, in_mark);
+                            self.emit_word(
+                                " ",
+                                style,
+                                emit_italic,
+                                in_strikethrough,
+                                in_mark,
+                                in_dim,
+                                emit_dim,
+                            );
                         } else {
                             self.output.push(' ');
                             self.current_col += 1;
@@ -2110,17 +2816,29 @@ impl LineWrapper {
                     }
                 }
             } else {
+                if current_word.is_empty() {
+                    self.ensure_prefix();
+                }
                 current_word.push(ch);
             }
         }
 
         // Emit any remaining word
         if !current_word.is_empty() {
-            self.emit_word(&current_word, style, emit_italic, in_strikethrough, in_mark);
+            self.emit_word(
+                &current_word,
+                style,
+                emit_italic,
+                in_strikethrough,
+                in_mark,
+                in_dim,
+                emit_dim,
+            );
         }
     }
 
     /// Emits a single word, wrapping if necessary.
+    #[allow(clippy::too_many_arguments)]
     fn emit_word(
         &mut self,
         word: &str,
@@ -2128,30 +2846,44 @@ impl LineWrapper {
         emit_italic: bool,
         in_strikethrough: bool,
         in_mark: bool,
+        in_dim: bool,
+        emit_dim: bool,
     ) {
         let word_width = UnicodeWidthStr::width(word);
+        self.ensure_prefix();
 
         // Check if word fits on current line
-        if self.current_col > 0 && self.current_col + word_width > self.max_width {
+        let max = self.effective_max_width();
+        if self.current_col > (self.blockquote_depth * 4 + self.current_indent())
+            && self.current_col + word_width > max
+        {
             // Need to wrap - emit newline (with blockquote prefix if applicable)
             self.emit_newline_with_prefix();
         }
 
         // Emit the styled word with blockquote background if applicable
-        self.output.push_str(&emit_prose_text(
+        let (comp_fg, comp_bg) = self.active_component_color();
+        push_prose_text(
+            &mut self.output,
             word,
             style,
             emit_italic,
             in_strikethrough,
             in_mark,
             self.blockquote_bg,
-        ));
+            in_dim,
+            emit_dim,
+            comp_fg,
+            comp_bg,
+            self.color_depth,
+        );
         self.current_col += word_width;
     }
 
     /// Emits a raw string without styling (for markers, bullets, etc.).
     /// Updates column position based on visual width.
     fn emit_raw(&mut self, text: &str) {
+        self.ensure_prefix();
         self.output.push_str(text);
         // Update column for non-newline content
         if let Some(last_line) = text.rsplit('\n').next() {
@@ -2166,15 +2898,22 @@ impl LineWrapper {
     /// Emits styled text for markers/prefixes (bullets, numbers).
     /// These are emitted directly without word-wrap logic.
     fn emit_styled_marker(&mut self, text: &str, style: Style, emit_italic: bool) {
-        // Note: markers don't use blockquote background (they have their own styling)
-        self.output.push_str(&emit_prose_text(
+        self.ensure_prefix();
+        let (comp_fg, comp_bg) = self.active_component_color();
+        push_prose_text(
+            &mut self.output,
             text,
             style,
             emit_italic,
             false,
             false,
-            None,
-        ));
+            self.blockquote_bg,
+            false,
+            true,
+            comp_fg,
+            comp_bg,
+            self.color_depth,
+        );
         self.current_col += UnicodeWidthStr::width(text);
     }
 
@@ -2190,6 +2929,8 @@ impl LineWrapper {
     /// OSC8 Format: `ESC]8;;URL BEL <styled_text> ESC]8;; BEL`
     /// Fallback Format: `<styled_text> [url]`
     fn emit_styled_hyperlink(&mut self, text: &str, url: &str, style: Style, emit_italic: bool) {
+        self.ensure_prefix();
+        let (comp_fg, comp_bg) = self.active_component_color();
         if self.supports_hyperlinks {
             // OSC8 hyperlink start: ESC ] 8 ; ; <url> BEL
             self.output.push_str("\x1b]8;;");
@@ -2198,14 +2939,20 @@ impl LineWrapper {
 
             // Emit styled text INSIDE the hyperlink
             // Note: We don't use word wrapping for links - they stay on one line
-            self.output.push_str(&emit_prose_text(
+            push_prose_text(
+                &mut self.output,
                 text,
                 style,
                 emit_italic,
                 false,
                 false,
-                None,
-            ));
+                self.blockquote_bg,
+                false,
+                true,
+                comp_fg,
+                comp_bg,
+                self.color_depth,
+            );
 
             // OSC8 hyperlink end: ESC ] 8 ; ; BEL
             self.output.push_str("\x1b]8;;\x07");
@@ -2213,14 +2960,20 @@ impl LineWrapper {
             self.current_col += UnicodeWidthStr::width(text);
         } else {
             // Fallback format: styled text followed by [url]
-            self.output.push_str(&emit_prose_text(
+            push_prose_text(
+                &mut self.output,
                 text,
                 style,
                 emit_italic,
                 false,
                 false,
-                None,
-            ));
+                self.blockquote_bg,
+                false,
+                true,
+                comp_fg,
+                comp_bg,
+                self.color_depth,
+            );
             self.current_col += UnicodeWidthStr::width(text);
 
             // Append URL in brackets (unstyled)
@@ -2233,28 +2986,44 @@ impl LineWrapper {
     /// Emits inline code with styling.
     fn emit_inline_code(&mut self, code: &str, style: Style) {
         let code_width = UnicodeWidthStr::width(code);
+        self.ensure_prefix();
 
         // Check if code fits on current line
-        if self.current_col > 0 && self.current_col + code_width > self.max_width {
+        let max = self.effective_max_width();
+        if self.current_col > (self.blockquote_depth * 4 + self.current_indent())
+            && self.current_col + code_width > max
+        {
             // Wrap before inline code (with blockquote prefix if applicable)
             self.emit_newline_with_prefix();
         }
 
-        self.output.push_str(&emit_inline_code(code, style));
+        push_inline_code_with_bg(&mut self.output, code, style, self.blockquote_bg);
         self.current_col += code_width;
     }
 
     /// Adds a newline and resets column position.
     fn newline(&mut self) {
+        if self.blockquote_depth > 0 && self.current_col == 0 {
+            self.ensure_prefix();
+        }
+        self.pad_to_width();
         self.output.push('\n');
         self.current_col = 0;
     }
 
     /// Adds content that includes newlines (resets column tracking).
     fn push_with_newlines(&mut self, text: &str) {
-        self.output.push_str(text);
-        if text.ends_with('\n') {
-            self.current_col = 0;
+        let mut first = true;
+        for line in text.split('\n') {
+            if !first {
+                self.newline();
+            }
+            if !line.is_empty() {
+                self.ensure_prefix();
+                self.output.push_str(line);
+                self.current_col += UnicodeWidthStr::width(line);
+            }
+            first = false;
         }
     }
 
@@ -2274,23 +3043,42 @@ impl LineWrapper {
     }
 }
 
+/// Resolve a [`Layout`](biscuit_terminal::utils::layout::Layout) margin side
+/// to a whole-cell count for the terminal target.
+///
+/// Universal `Ch` and `Zero` lengths resolve directly; `Percent` is resolved
+/// against `terminal_width`. Per-target and CSS-only values resolve to `0`.
+fn resolve_terminal_margin(
+    side: &biscuit_terminal::utils::layout::TargetValue<biscuit_terminal::utils::layout::Length>,
+    terminal_width: u32,
+) -> u32 {
+    use biscuit_terminal::utils::layout::Length;
+    use renderable::target::RenderTarget;
+    match side.resolve(RenderTarget::Terminal) {
+        Some(Length::Zero) | None => 0,
+        Some(Length::Ch(n)) => *n,
+        Some(Length::Percent(p)) => ((terminal_width as f32) * p / 100.0).round() as u32,
+        Some(Length::Css(_)) => 0,
+    }
+}
+
 /// Emits a rendered [`HorizontalRule`] into `wrapper`, honoring the rule's
 /// [`Layout`](biscuit_terminal::utils::layout::Layout) margins (B3) and using
 /// the outer [`Terminal`] context (B2).
 ///
-/// The rule's `top_margin` and `bottom_margin` are resolved to character
-/// counts via [`Layout::resolve_margin`](biscuit_terminal::utils::layout::Layout::resolve_margin)
-/// and emitted as blank lines. A default-layout rule (`Margin::None`) produces
-/// a single trailing blank line to match the surrounding markdown rhythm —
-/// replacing the previous hardcoded double `\n\n` spacing.
+/// The rule's top and bottom margins are resolved to character counts via
+/// [`resolve_terminal_margin`] and emitted as blank lines. A default-layout
+/// rule (zero bottom margin) produces a single trailing blank line to match
+/// the surrounding markdown rhythm — replacing the previous hardcoded double
+/// `\n\n` spacing.
 fn write_horizontal_rule(
     wrapper: &mut LineWrapper,
     rule: &HorizontalRule,
     term: &Terminal,
     terminal_width: u16,
 ) {
-    use biscuit_terminal::components::renderable::Renderable;
-    use biscuit_terminal::utils::layout::{Layout, Margin};
+    use biscuit_terminal::components::renderable::TerminalRenderable;
+    use biscuit_terminal::utils::layout::{Length, TargetValue};
 
     // If we're mid-line, break to column 0 before emitting margins.
     if wrapper.current_col() > 0 {
@@ -2298,7 +3086,7 @@ fn write_horizontal_rule(
     }
 
     let layout = rule.layout();
-    let top = Layout::resolve_margin(&layout.top_margin, terminal_width as u32);
+    let top = resolve_terminal_margin(&layout.margin.top, terminal_width as u32);
     for _ in 0..top {
         wrapper.newline();
     }
@@ -2309,17 +3097,190 @@ fn write_horizontal_rule(
     wrapper.push_with_newlines(&rule.render(term));
     wrapper.push_with_newlines("\n");
 
-    let bottom = Layout::resolve_margin(&layout.bottom_margin, terminal_width as u32);
-    if matches!(layout.bottom_margin, Margin::None) {
+    let bottom_is_default = layout.margin.bottom == TargetValue::universal(Length::Zero);
+    let bottom = resolve_terminal_margin(&layout.margin.bottom, terminal_width as u32);
+    if bottom_is_default {
         // Default behavior: one blank line after the rule so subsequent
         // blocks visually separate without forcing authors to set an
         // explicit margin. Callers that want tighter or looser spacing can
-        // configure `layout.bottom_margin` on the rule.
+        // configure `layout.margin.bottom` on the rule.
         wrapper.push_with_newlines("\n");
     } else {
         for _ in 0..bottom {
             wrapper.newline();
         }
+    }
+}
+
+/// Emit a syntax-highlighted code block (header pill + padded body) into
+/// `wrapper`, applying the same component width resolution, code-panel color
+/// mode, and page layout (margins/alignment) as the ordinary fenced-code path.
+///
+/// Shared by the normal Markdown code fence and the Mermaid text /
+/// image-fallback paths so all three honor page decoration identically: the
+/// body pads with background-colored spaces to the resolved content width
+/// (never `\x1b[K` under a layout context, which is incompatible with the
+/// page's post-hoc row decoration), the language pill and body share the same
+/// right boundary, and the highlight-line background math keys off the
+/// resolved `code_color_mode` rather than the page mode. Only the true
+/// zero-config path (no layout context, code spans the terminal from column 0)
+/// keeps `None`, preserving byte-for-byte equivalence with the legacy renderer.
+#[allow(clippy::too_many_arguments)]
+fn emit_highlighted_code_block(
+    wrapper: &mut LineWrapper,
+    code: &str,
+    language: &str,
+    meta: &CodeBlockMeta,
+    highlighter: &CodeHighlighter,
+    options: &TerminalOptions,
+    code_color_mode: ColorMode,
+    terminal_width: u16,
+    layout_ctx: Option<&LayoutContext>,
+    _color_depth: ColorDepth,
+) -> Result<(), MarkdownError> {
+    let theme_bg = highlighter
+        .theme()
+        .settings
+        .background
+        .unwrap_or(Color::BLACK);
+
+    // Resolve component/page background color override for code blocks.
+    // When set, this replaces the theme background for the panel fill so
+    // the code block honors page/component styling. Token-level syntax
+    // highlighting foregrounds are left untouched.
+    let override_bg = layout_ctx
+        .and_then(|ctx| ctx.component_bg_color(PageComponent::CodeBlocks))
+        .and_then(|sc| {
+            let (r, g, b) = sc.color.to_rgb()?;
+            Some(Color { r, g, b, a: 255 })
+        });
+    let bg_color = override_bg.unwrap_or(theme_bg);
+
+    // Ensure the header starts on a fresh line (not appended to previous content).
+    if wrapper.current_col() > 0 {
+        wrapper.newline();
+    }
+
+    // Resolve component width when a layout context is present.
+    let code_width =
+        resolve_component_render_width(PageComponent::CodeBlocks, terminal_width, layout_ctx);
+
+    // Header row with title and language (right-aligned pill).
+    let header = format_header_row(
+        meta.title.as_deref(),
+        language,
+        bg_color,
+        code_color_mode,
+        code_width,
+    );
+    let header = if let Some(ctx) = layout_ctx {
+        apply_component_layout(&header, PageComponent::CodeBlocks, ctx)
+    } else {
+        header
+    };
+    wrapper.push_with_newlines(&header);
+    wrapper.newline();
+
+    // Body. Pad to the resolved width whenever a layout context is present (or
+    // the component is narrower than the terminal); otherwise let the body clear
+    // to the physical edge with `\x1b[K` on the genuine zero-config path.
+    let body_width = if layout_ctx.is_some() || code_width < terminal_width {
+        Some(code_width)
+    } else {
+        None
+    };
+    let highlighted = highlight_code(
+        code,
+        language,
+        highlighter,
+        options,
+        meta,
+        code_color_mode,
+        body_width,
+        override_bg,
+    )?;
+    let highlighted = if let Some(ctx) = layout_ctx {
+        apply_component_layout(&highlighted, PageComponent::CodeBlocks, ctx)
+    } else {
+        highlighted
+    };
+    wrapper.push_with_newlines(&highlighted);
+    // `highlight_code` ends with a bottom padding row; the first newline
+    // terminates it, the second separates the block from following content.
+    wrapper.push_with_newlines("\n\n");
+    Ok(())
+}
+
+/// Apply page-level alignment and fill to a rendered component string.
+///
+/// When `layout_ctx` is present and carries non-default alignment or fill for
+/// `component`, the rendered text is padded on the left so it positions
+/// correctly inside the page content rectangle.
+///
+/// For [`PageFill::Pad`] and [`PageFill::Indent`] the left-side padding comes
+/// from [`LayoutContext::component_side_padding`] — symmetric for `Pad`,
+/// one-sided for `Indent` (based on alignment). This applies for every
+/// alignment including `Left`, which is the default.
+///
+/// For [`PageFill::Full`], [`PageFill::Max`] and [`PageFill::Explicit`] the
+/// component renders at the resolved width and is then aligned within the
+/// effective page width via [`LayoutContext::alignment_padding`].
+#[allow(deprecated)]
+fn apply_component_layout(
+    text: &str,
+    component: PageComponent,
+    layout_ctx: &LayoutContext,
+) -> String {
+    let fill = layout_ctx.component_fill(component);
+    let alignment = layout_ctx.component_alignment(component);
+
+    let left_pad = match fill {
+        PageFill::Pad(_) | PageFill::Indent(_) => layout_ctx
+            .component_side_padding(component)
+            .map(|(l, _)| l)
+            .unwrap_or(0),
+        PageFill::Full | PageFill::Max(_) | PageFill::Explicit(_) => {
+            if alignment == PageAlignment::Left {
+                0
+            } else {
+                let max_visible_width = text
+                    .lines()
+                    .map(biscuit_terminal::utils::block_constraint::visible_width)
+                    .max()
+                    .unwrap_or(0) as u16;
+                layout_ctx.alignment_padding(component, max_visible_width)
+            }
+        }
+    };
+
+    if left_pad == 0 {
+        return text.to_string();
+    }
+
+    let spaces = " ".repeat(left_pad as usize);
+    text.lines()
+        .map(|line| format!("{}{}", spaces, line))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// Resolve the width to pass to a component renderer (code block, table, etc.)
+/// given an optional [`LayoutContext`].
+///
+/// Returns the smaller of `terminal_width` and the component's resolved fill
+/// width when a layout context is present and the component has a non-default
+/// fill. Otherwise returns `terminal_width` unchanged.
+fn resolve_component_render_width(
+    component: PageComponent,
+    terminal_width: u16,
+    layout_ctx: Option<&LayoutContext>,
+) -> u16 {
+    let Some(ctx) = layout_ctx else {
+        return terminal_width;
+    };
+    match ctx.resolve_component_width(component) {
+        Ok(w) => terminal_width.min(w),
+        Err(_) => terminal_width,
     }
 }
 
@@ -2345,7 +3306,7 @@ fn write_horizontal_rule(
 /// let adjusted = adjust_background(theme_bg, ColorMode::Dark, (30, 25, 0), (20, 15, 0));
 /// // Result: Color { r: 70, g: 65, b: 40, a: 255 }
 /// ```
-fn adjust_background(
+pub(crate) fn adjust_background(
     base: Color,
     color_mode: ColorMode,
     dark_delta: (u8, u8, u8),
@@ -2367,214 +3328,12 @@ fn adjust_background(
     }
 }
 
-/// Computes a highlighted background color based on the theme background and color mode.
-///
-/// Uses warmer tones (more red/green) to create a visual highlight effect.
-#[inline]
-fn compute_highlight_bg(theme_bg: Color, color_mode: ColorMode) -> Color {
-    adjust_background(theme_bg, color_mode, (30, 25, 0), (20, 15, 0))
-}
-
 /// Computes a subtle background color for blockquotes based on the theme background.
 ///
 /// Uses uniform brightness adjustment for subtle visual separation.
 #[inline]
 fn compute_blockquote_bg(theme_bg: Color, color_mode: ColorMode) -> Color {
-    adjust_background(theme_bg, color_mode, (20, 20, 20), (15, 15, 15))
-}
-
-/// Highlights code with syntax highlighting and optional line numbers.
-///
-/// Applies syntax highlighting using syntect, adds top/bottom padding rows,
-/// and optionally renders line numbers and line highlighting based on DSL metadata.
-///
-/// ## Arguments
-///
-/// * `code` - Source code to highlight
-/// * `language` - Programming language identifier (e.g., "rust", "python")
-/// * `highlighter` - Code highlighter with loaded syntax set and theme
-/// * `options` - Terminal rendering options (includes global line numbering flag)
-/// * `meta` - Code block DSL metadata (title, highlight ranges, line numbering override)
-/// * `color_mode` - Dark or light mode for computing highlight background colors
-///
-/// ## Returns
-///
-/// ANSI-formatted string with:
-/// - Top padding row (blank line with theme background)
-/// - Code lines with syntax highlighting, optional line numbers, and highlight backgrounds
-/// - Bottom padding row (blank line with theme background)
-///
-/// ## Examples
-///
-/// ```ignore
-/// use darkmatter::markdown::highlighting::{CodeHighlighter, ThemePair, ColorMode};
-/// use darkmatter::markdown::output::TerminalOptions;
-/// use darkmatter::markdown::dsl::CodeBlockMeta;
-///
-/// let highlighter = CodeHighlighter::new(ThemePair::Github, ColorMode::Dark);
-/// let options = TerminalOptions::default();
-/// let meta = CodeBlockMeta::default();
-///
-/// let result = highlight_code(
-///     "fn main() {}",
-///     "rust",
-///     &highlighter,
-///     &options,
-///     &meta,
-///     ColorMode::Dark
-/// );
-/// // Result: ANSI-formatted code with padding, syntax colors, and backgrounds
-/// ```
-fn highlight_code(
-    code: &str,
-    language: &str,
-    highlighter: &CodeHighlighter,
-    options: &TerminalOptions,
-    meta: &crate::markdown::dsl::CodeBlockMeta,
-    color_mode: ColorMode,
-) -> Result<String, MarkdownError> {
-    let syntax = find_syntax(language, highlighter.syntax_set())
-        .unwrap_or_else(|| highlighter.syntax_set().find_syntax_plain_text());
-    let theme = highlighter.theme();
-
-    // Get background color from theme
-    let bg_color = theme.settings.background.unwrap_or(Color::BLACK);
-
-    // Use LinesWithEndings to preserve newlines - required for proper multi-line
-    // syntax parsing in grammars like bash/shell that track state across lines
-    use syntect::util::LinesWithEndings;
-    let lines: Vec<&str> = LinesWithEndings::from(code).collect();
-    let mut output = String::with_capacity(code.len() * 2);
-
-    // Determine line number width
-    let line_number_width = if options.include_line_numbers || meta.line_numbering {
-        format!("{}", lines.len()).len()
-    } else {
-        0
-    };
-
-    // Add top padding row
-    output.push_str(&emit_padding_row(bg_color));
-
-    // Create highlighter for this code block
-    let mut hl = HighlightLines::new(syntax, theme);
-
-    for (idx, line) in lines.iter().enumerate() {
-        let line_number = idx + 1;
-
-        // Determine if this line should be highlighted
-        let is_highlighted = meta.highlight.contains(line_number);
-        let line_bg = if is_highlighted {
-            compute_highlight_bg(bg_color, color_mode)
-        } else {
-            bg_color
-        };
-
-        // Set background color for the line (applies to gutter and content)
-        output.push_str(&format!(
-            "\x1b[48;2;{};{};{}m",
-            line_bg.r, line_bg.g, line_bg.b
-        ));
-
-        // Add line number gutter if enabled (with background already set)
-        if line_number_width > 0 {
-            // Gray foreground for line numbers, background already set above
-            output.push_str(&format!(
-                "\x1b[38;2;128;128;128m{:>width$} │ ",
-                line_number,
-                width = line_number_width
-            ));
-        } else {
-            // Add left padding (1 character) when no line numbers
-            output.push(' ');
-        }
-
-        // Highlight the line and get styled ranges
-        let ranges = hl
-            .highlight_line(line, highlighter.syntax_set())
-            .map_err(|e| MarkdownError::ThemeLoad(format!("Syntax highlighting failed: {}", e)))?;
-
-        // Convert styled ranges to ANSI escape codes, but filter out newlines
-        // from the output (we handle line breaks ourselves)
-        for (style, text) in &ranges {
-            let text_without_newline = text.trim_end_matches('\n');
-            if !text_without_newline.is_empty() {
-                output.push_str(&format!(
-                    "\x1b[38;2;{};{};{}m{}",
-                    style.foreground.r,
-                    style.foreground.g,
-                    style.foreground.b,
-                    text_without_newline
-                ));
-            }
-        }
-
-        // Clear to end of line with background color, then reset
-        // \x1b[K clears from cursor to end of line using current background
-        output.push_str("\x1b[K\x1b[0m");
-
-        // Add newline after each line (including last line, so bottom padding is on its own line)
-        output.push('\n');
-    }
-
-    // Add bottom padding row (without trailing newline to avoid double spacing)
-    output.push_str(&format!(
-        "\x1b[48;2;{};{};{}m\x1b[K\x1b[0m",
-        bg_color.r, bg_color.g, bg_color.b
-    ));
-
-    Ok(output)
-}
-
-/// Finds syntax definition by language identifier.
-///
-/// Searches in the following order:
-/// 1. By file extension (e.g., "rs", "py", "js")
-/// 2. By exact name (e.g., "Rust", "Python")
-/// 3. By case-insensitive name match (e.g., "rust" -> "Rust")
-/// 4. By common alias mapping (e.g., "shell" -> "bash", "c++" -> "cpp")
-fn find_syntax<'a>(
-    language: &str,
-    syntax_set: &'a syntect::parsing::SyntaxSet,
-) -> Option<&'a SyntaxReference> {
-    if language.is_empty() {
-        return None;
-    }
-
-    // Try by extension first (common case)
-    if let Some(syntax) = syntax_set.find_syntax_by_extension(language) {
-        return Some(syntax);
-    }
-
-    // Try by exact name
-    if let Some(syntax) = syntax_set.find_syntax_by_name(language) {
-        return Some(syntax);
-    }
-
-    // Try case-insensitive name match
-    let language_lower = language.to_lowercase();
-    for syntax in syntax_set.syntaxes() {
-        if syntax.name.to_lowercase() == language_lower {
-            return Some(syntax);
-        }
-    }
-
-    // Try common aliases that differ from extension/name
-    let alias = match language_lower.as_str() {
-        "shell" | "zsh" => "bash",
-        "c++" => "cpp",
-        "dockerfile" => "Dockerfile",
-        "makefile" | "make" => "Makefile",
-        "javascript" => "js",
-        "typescript" => "ts",
-        "python3" => "py",
-        _ => return None,
-    };
-
-    // Try alias as extension first, then as name
-    syntax_set
-        .find_syntax_by_extension(alias)
-        .or_else(|| syntax_set.find_syntax_by_name(alias))
+    adjust_background(theme_bg, color_mode, (10, 10, 10), (8, 8, 8))
 }
 
 #[cfg(test)]
@@ -2608,6 +3367,7 @@ mod tests {
             image_mode: TerminalImageMode::Never,
             base_path: None,
             italic_mode: ItalicMode::Always,
+            dim_mode: DimMode::Always,
             max_width: Some(80),
             mermaid_mode: MermaidMode::Off,
             hyperlink_mode: HyperlinkMode::Always,
@@ -3140,7 +3900,16 @@ fn main() {}
         let meta = crate::markdown::dsl::CodeBlockMeta::default();
 
         let code = "fn main() {}";
-        let result = highlight_code(code, "rust", &highlighter, &options, &meta, ColorMode::Dark);
+        let result = highlight_code(
+            code,
+            "rust",
+            &highlighter,
+            &options,
+            &meta,
+            ColorMode::Dark,
+            None,
+            None,
+        );
 
         assert!(result.is_ok());
         let output = result.unwrap();
@@ -3156,7 +3925,16 @@ fn main() {}
         let meta = crate::markdown::dsl::CodeBlockMeta::default();
 
         let code = "fn main() {}";
-        let result = highlight_code(code, "rust", &highlighter, &options, &meta, ColorMode::Dark);
+        let result = highlight_code(
+            code,
+            "rust",
+            &highlighter,
+            &options,
+            &meta,
+            ColorMode::Dark,
+            None,
+            None,
+        );
 
         assert!(result.is_ok());
         let output = result.unwrap();
@@ -3186,7 +3964,16 @@ fn main() {}
         let meta = crate::markdown::dsl::CodeBlockMeta::default();
 
         let code = "fn main() {}";
-        let result = highlight_code(code, "rust", &highlighter, &options, &meta, ColorMode::Dark);
+        let result = highlight_code(
+            code,
+            "rust",
+            &highlighter,
+            &options,
+            &meta,
+            ColorMode::Dark,
+            None,
+            None,
+        );
 
         assert!(result.is_ok());
         let output = result.unwrap();
@@ -3211,7 +3998,16 @@ fn main() {}
         let meta = crate::markdown::dsl::CodeBlockMeta::default();
 
         let code = "test";
-        let result = highlight_code(code, "rust", &highlighter, &options, &meta, ColorMode::Dark);
+        let result = highlight_code(
+            code,
+            "rust",
+            &highlighter,
+            &options,
+            &meta,
+            ColorMode::Dark,
+            None,
+            None,
+        );
 
         assert!(result.is_ok());
         let output = result.unwrap();
@@ -3244,7 +4040,16 @@ fn main() {}
         meta.highlight.add_line(2);
 
         let code = "line 1\nline 2\nline 3";
-        let result = highlight_code(code, "rust", &highlighter, &options, &meta, ColorMode::Dark);
+        let result = highlight_code(
+            code,
+            "rust",
+            &highlighter,
+            &options,
+            &meta,
+            ColorMode::Dark,
+            None,
+            None,
+        );
 
         assert!(result.is_ok());
         let output = result.unwrap();
@@ -3279,7 +4084,16 @@ fn main() {}
         meta.highlight.add_range(2, 4).unwrap();
 
         let code = "line 1\nline 2\nline 3\nline 4\nline 5";
-        let result = highlight_code(code, "rust", &highlighter, &options, &meta, ColorMode::Dark);
+        let result = highlight_code(
+            code,
+            "rust",
+            &highlighter,
+            &options,
+            &meta,
+            ColorMode::Dark,
+            None,
+            None,
+        );
 
         assert!(result.is_ok());
         let output = result.unwrap();
@@ -3310,7 +4124,16 @@ fn main() {}
         meta.highlight.add_range(4, 6).unwrap();
 
         let code = "line 1\nline 2\nline 3\nline 4\nline 5\nline 6";
-        let result = highlight_code(code, "rust", &highlighter, &options, &meta, ColorMode::Dark);
+        let result = highlight_code(
+            code,
+            "rust",
+            &highlighter,
+            &options,
+            &meta,
+            ColorMode::Dark,
+            None,
+            None,
+        );
 
         assert!(result.is_ok());
         let output = result.unwrap();
@@ -3346,7 +4169,16 @@ fn main() {}
         meta.highlight.add_line(2);
 
         let code = "line 1\nline 2\nline 3";
-        let result = highlight_code(code, "rust", &highlighter, &options, &meta, ColorMode::Dark);
+        let result = highlight_code(
+            code,
+            "rust",
+            &highlighter,
+            &options,
+            &meta,
+            ColorMode::Dark,
+            None,
+            None,
+        );
 
         assert!(result.is_ok());
         let output = result.unwrap();
@@ -3383,7 +4215,16 @@ fn main() {}
 
         let code =
             "line 1\nline 2\nline 3\nline 4\nline 5\nline 6\nline 7\nline 8\nline 9\nline 10";
-        let result = highlight_code(code, "rust", &highlighter, &options, &meta, ColorMode::Dark);
+        let result = highlight_code(
+            code,
+            "rust",
+            &highlighter,
+            &options,
+            &meta,
+            ColorMode::Dark,
+            None,
+            None,
+        );
 
         assert!(result.is_ok());
         let output = result.unwrap();
@@ -3416,7 +4257,16 @@ fn main() {}
         let meta = crate::markdown::dsl::CodeBlockMeta::default();
 
         let code = "let x = 1;";
-        let result = highlight_code(code, "rust", &highlighter, &options, &meta, ColorMode::Dark);
+        let result = highlight_code(
+            code,
+            "rust",
+            &highlighter,
+            &options,
+            &meta,
+            ColorMode::Dark,
+            None,
+            None,
+        );
 
         assert!(result.is_ok());
         let output = result.unwrap();
@@ -3466,7 +4316,16 @@ fn main() {}
         meta.highlight.add_line(0); // Line 0 should be ignored (1-indexed)
 
         let code = "line 1\nline 2\nline 3";
-        let result = highlight_code(code, "rust", &highlighter, &options, &meta, ColorMode::Dark);
+        let result = highlight_code(
+            code,
+            "rust",
+            &highlighter,
+            &options,
+            &meta,
+            ColorMode::Dark,
+            None,
+            None,
+        );
 
         assert!(result.is_ok());
         let output = result.unwrap();
@@ -3503,7 +4362,16 @@ fn main() {}
         meta.highlight.add_line(100); // Line 100 on 5-line code should be ignored
 
         let code = "line 1\nline 2\nline 3\nline 4\nline 5";
-        let result = highlight_code(code, "rust", &highlighter, &options, &meta, ColorMode::Dark);
+        let result = highlight_code(
+            code,
+            "rust",
+            &highlighter,
+            &options,
+            &meta,
+            ColorMode::Dark,
+            None,
+            None,
+        );
 
         assert!(result.is_ok());
         let output = result.unwrap();
@@ -3607,7 +4475,7 @@ fn main() {}
     }
 
     #[test]
-    fn test_color_depth_no_color_returns_plain_text() {
+    fn test_color_depth_no_color_emits_no_csi_but_keeps_layout() {
         let md: Markdown = "# Test\n\n```rust\nfn main() {}\n```".into();
 
         let mut options = test_options();
@@ -3615,14 +4483,24 @@ fn main() {}
 
         let output = for_terminal(&md, options).unwrap();
 
-        // Should not contain ANSI codes
-        assert!(!output.contains("\x1b["));
+        // No CSI/SGR sequences should reach a terminal that cannot interpret
+        // them. (OSC8 hyperlinks would start with `\x1b]` and are preserved.)
+        assert!(
+            !output.contains("\x1b["),
+            "ColorDepth::None must suppress CSI sequences; got: {output:?}"
+        );
 
-        // Should return plain content
-        assert_eq!(output, md.content());
+        // Layout still runs: the heading text is present and the code-fence
+        // pipeline renders its panel (with the language tag) rather than
+        // returning the raw `# Test` markdown.
+        assert!(output.contains("Test"), "heading text should be present");
+        assert!(
+            output.contains("fn main() {}"),
+            "code block body should be present"
+        );
     }
 
-    /// Test that ColorDepth::None still renders table structure with box-drawing characters
+    /// Test that ColorDepth::None still renders table structure with box-drawing characters.
     #[test]
     fn test_color_depth_none_tables_still_render() {
         let md: Markdown = "| Header |\n|--------|\n| Data |".into();
@@ -3632,14 +4510,21 @@ fn main() {}
 
         let output = for_terminal(&md, options).unwrap();
 
-        // With ColorDepth::None, we return plain markdown (early return)
-        // So tables won't be rendered with box-drawing - they'll be plain markdown
-        assert!(!output.contains("\x1b["), "Should not have ANSI codes");
-        assert_eq!(output, md.content(), "Should return plain markdown content");
-
-        // To actually test that tables CAN render without colors (if we didn't early return),
-        // we'd need to modify the implementation. But the current behavior is correct:
-        // ColorDepth::None means "no formatting at all", so we return raw markdown.
+        // Per spec #5 #5, visible text/layout must survive when color is
+        // disabled — only color SGR is stripped.
+        assert!(!output.contains("\x1b["), "Should not have CSI sequences");
+        assert!(
+            output.contains("Header"),
+            "table header text should be present; got: {output:?}"
+        );
+        assert!(
+            output.contains("Data"),
+            "table body text should be present; got: {output:?}"
+        );
+        assert!(
+            output.contains('┌') || output.contains('+'),
+            "table structure (box-drawing or ascii) should be rendered; got: {output:?}"
+        );
     }
 
     #[test]
@@ -3702,7 +4587,7 @@ fn main() {}
             font_style: FontStyle::empty(),
         };
 
-        let result = emit_prose_text("Hello", style, true, false, false, None);
+        let result = emit_prose_text("Hello", style, true, false, false, None, false, true);
 
         // Should have foreground
         assert!(result.contains("\x1b[38;2;255;128;64m"));
@@ -3737,7 +4622,7 @@ fn main() {}
         };
 
         // With emit_italic=true, should emit italic code
-        let result = emit_prose_text("italic text", style, true, false, false, None);
+        let result = emit_prose_text("italic text", style, true, false, false, None, false, true);
 
         // Should have italic escape code
         assert!(
@@ -3775,7 +4660,7 @@ fn main() {}
         };
 
         // With emit_italic=false, should NOT emit italic code
-        let result = emit_prose_text("italic text", style, false, false, false, None);
+        let result = emit_prose_text("italic text", style, false, false, false, None, false, true);
 
         // Should NOT have italic escape code
         assert!(
@@ -3808,7 +4693,7 @@ fn main() {}
             font_style: FontStyle::BOLD,
         };
 
-        let result = emit_prose_text("bold text", style, true, false, false, None);
+        let result = emit_prose_text("bold text", style, true, false, false, None, false, true);
 
         // Should have bold escape code
         assert!(
@@ -3841,7 +4726,16 @@ fn main() {}
             font_style: FontStyle::UNDERLINE,
         };
 
-        let result = emit_prose_text("underline text", style, true, false, false, None);
+        let result = emit_prose_text(
+            "underline text",
+            style,
+            true,
+            false,
+            false,
+            None,
+            false,
+            true,
+        );
 
         // Should have underline escape code
         assert!(
@@ -3872,7 +4766,7 @@ fn main() {}
             font_style: FontStyle::BOLD | FontStyle::ITALIC,
         };
 
-        let result = emit_prose_text("bold italic", style, true, false, false, None);
+        let result = emit_prose_text("bold italic", style, true, false, false, None, false, true);
 
         // Should have both escape codes
         assert!(result.contains("\x1b[1m"), "Should have bold");
@@ -3900,7 +4794,7 @@ fn main() {}
             font_style: FontStyle::BOLD | FontStyle::ITALIC,
         };
 
-        let result = emit_prose_text("bold italic", style, false, false, false, None);
+        let result = emit_prose_text("bold italic", style, false, false, false, None, false, true);
 
         // Should have bold but NOT italic
         assert!(result.contains("\x1b[1m"), "Should have bold");
@@ -3931,7 +4825,16 @@ fn main() {}
             font_style: FontStyle::empty(),
         };
 
-        let result = emit_prose_text("strikethrough text", style, true, true, false, None);
+        let result = emit_prose_text(
+            "strikethrough text",
+            style,
+            true,
+            true,
+            false,
+            None,
+            false,
+            true,
+        );
 
         // Should have strikethrough escape code
         assert!(
@@ -3966,7 +4869,16 @@ fn main() {}
             font_style: FontStyle::BOLD | FontStyle::ITALIC,
         };
 
-        let result = emit_prose_text("bold italic strikethrough", style, true, true, false, None);
+        let result = emit_prose_text(
+            "bold italic strikethrough",
+            style,
+            true,
+            true,
+            false,
+            None,
+            false,
+            true,
+        );
 
         // Should have all three escape codes
         assert!(result.contains("\x1b[1m"), "Should have bold");
@@ -6322,8 +7234,16 @@ fn line6() {}
         };
 
         // Create wrapper with narrow width (no hyperlink support for this test)
-        let mut wrapper = LineWrapper::new(20, false);
-        wrapper.emit_styled("Hello world this is a test", style, false, false, false);
+        let mut wrapper = LineWrapper::new(20, false, ColorDepth::TrueColor);
+        wrapper.emit_styled(
+            "Hello world this is a test",
+            style,
+            false,
+            false,
+            false,
+            false,
+            true,
+        );
 
         let output = wrapper.into_output();
         let plain = strip_ansi_codes(&output);
@@ -6371,7 +7291,7 @@ fn line6() {}
             font_style: syntect::highlighting::FontStyle::empty(),
         };
 
-        let mut wrapper = LineWrapper::new(30, false);
+        let mut wrapper = LineWrapper::new(30, false, ColorDepth::TrueColor);
         wrapper.emit_raw("Command: ");
         wrapper.emit_inline_code("cargo build", style);
         wrapper.emit_raw(" runs the build");
@@ -6456,10 +7376,18 @@ fn line6() {}
             font_style: FontStyle::ITALIC,
         };
 
-        let mut wrapper = LineWrapper::new(40, true);
-        wrapper.emit_styled("This has ", bold_style, true, false, false);
-        wrapper.emit_styled("mixed styles", italic_style, true, false, false);
-        wrapper.emit_styled(" in one line", bold_style, true, false, false);
+        let mut wrapper = LineWrapper::new(40, true, ColorDepth::TrueColor);
+        wrapper.emit_styled("This has ", bold_style, true, false, false, false, true);
+        wrapper.emit_styled(
+            "mixed styles",
+            italic_style,
+            true,
+            false,
+            false,
+            false,
+            true,
+        );
+        wrapper.emit_styled(" in one line", bold_style, true, false, false, false, true);
 
         let output = wrapper.into_output();
 
@@ -6807,12 +7735,36 @@ fn bar() {}
 
         // Test at various widths to find where the bug appears
         for width in [60, 70, 75, 78, 79, 80, 81, 82, 85, 90, 100] {
-            let mut wrapper = LineWrapper::new(width, true);
+            let mut wrapper = LineWrapper::new(width, true, ColorDepth::TrueColor);
 
             // Simulate: "prefix ==highlighted== suffix"
-            wrapper.emit_styled("prefix text before ", base_style, false, false, false);
-            wrapper.emit_styled("highlighted text here", base_style, false, false, true); // in_mark=true
-            wrapper.emit_styled(" suffix text after", base_style, false, false, false);
+            wrapper.emit_styled(
+                "prefix text before ",
+                base_style,
+                false,
+                false,
+                false,
+                false,
+                true,
+            );
+            wrapper.emit_styled(
+                "highlighted text here",
+                base_style,
+                false,
+                false,
+                true,
+                false,
+                true,
+            ); // in_mark=true
+            wrapper.emit_styled(
+                " suffix text after",
+                base_style,
+                false,
+                false,
+                false,
+                false,
+                true,
+            );
 
             let output = wrapper.output();
             let plain = strip_ansi_codes(output);
@@ -7856,6 +8808,477 @@ flowchart LR
         assert!(
             matches!(options.hyperlink_mode, HyperlinkMode::Auto),
             "Default hyperlink_mode should be Auto"
+        );
+    }
+
+    // =========================================================================
+    // Dim (⌄text⌄) tests
+    // =========================================================================
+
+    #[test]
+    fn test_terminal_dim_basic() {
+        let md: Markdown = "This is ⌄dimmed⌄ text.".into();
+        let output = for_terminal(&md, test_options()).unwrap();
+
+        // Should contain dim ANSI code \x1b[2m
+        assert!(
+            output.contains("\x1b[2m"),
+            "Should contain dim ANSI code, got: {:?}",
+            output
+        );
+
+        // Content should be present when stripped
+        let plain = strip_ansi_codes(&output);
+        assert!(plain.contains("dimmed"));
+    }
+
+    #[test]
+    fn test_terminal_dim_never_strips_delimiters() {
+        let md: Markdown = "This is ⌄dimmed⌄ text.".into();
+        let mut options = test_options();
+        options.dim_mode = DimMode::Never;
+        let output = for_terminal(&md, options).unwrap();
+
+        // Should NOT contain dim ANSI code
+        assert!(
+            !output.contains("\x1b[2m"),
+            "DimMode::Never should not produce \x1b[2m, got: {:?}",
+            output
+        );
+
+        // Delimiters should be stripped (inline processor removes them)
+        let plain = strip_ansi_codes(&output);
+        assert!(plain.contains("dimmed"));
+        assert!(
+            !plain.contains("⌄"),
+            "Delimiters should be stripped in terminal output"
+        );
+    }
+
+    #[test]
+    fn test_terminal_dim_nested_bold() {
+        let md: Markdown = "This is **⌄bold dim⌄** text.".into();
+        let output = for_terminal(&md, test_options()).unwrap();
+
+        // Should contain both bold and dim codes
+        assert!(output.contains("\x1b[1m"), "Should contain bold code");
+        assert!(output.contains("\x1b[2m"), "Should contain dim code");
+
+        // Neither style should leak into following text
+        let plain = strip_ansi_codes(&output);
+        assert!(plain.contains("bold dim"));
+        assert!(plain.contains("text."));
+    }
+
+    #[test]
+    fn test_terminal_dim_unclosed() {
+        let md: Markdown = "This has ⌄unclosed dim markers.".into();
+        let output = for_terminal(&md, test_options()).unwrap();
+
+        // Unclosed markers should render literally
+        let plain = strip_ansi_codes(&output);
+        assert!(
+            plain.contains("⌄unclosed"),
+            "Unclosed dim markers should render literally, got: {:?}",
+            plain
+        );
+    }
+
+    #[test]
+    fn test_terminal_dim_in_inline_code() {
+        let md: Markdown = "Use `⌄code⌄` syntax.".into();
+        let output = for_terminal(&md, test_options()).unwrap();
+
+        // Inline code should NOT be dimmed
+        assert!(
+            !output.contains("\x1b[2m"),
+            "Inline code should not trigger dim, got: {:?}",
+            output
+        );
+
+        let plain = strip_ansi_codes(&output);
+        assert!(
+            plain.contains("⌄code⌄"),
+            "Inline code should preserve literal delimiters"
+        );
+    }
+
+    #[test]
+    fn test_terminal_dim_in_fenced_code() {
+        let md: Markdown = "```\n⌄dim\n```".into();
+        let output = for_terminal(&md, test_options()).unwrap();
+
+        // Fenced code should NOT be dimmed
+        assert!(
+            !output.contains("\x1b[2m"),
+            "Fenced code should not trigger dim, got: {:?}",
+            output
+        );
+
+        let plain = strip_ansi_codes(&output);
+        assert!(
+            plain.contains("⌄dim"),
+            "Fenced code should preserve literal delimiters"
+        );
+    }
+
+    #[test]
+    fn test_terminal_dim_in_list() {
+        let md: Markdown = "- ⌄dimmed item⌄\n- normal item".into();
+        let output = for_terminal(&md, test_options()).unwrap();
+
+        // Should contain dim code
+        assert!(
+            output.contains("\x1b[2m"),
+            "Dim should work in list items, got: {:?}",
+            output
+        );
+
+        let plain = strip_ansi_codes(&output);
+        assert!(plain.contains("dimmed item"));
+        assert!(plain.contains("normal item"));
+    }
+
+    #[test]
+    fn test_terminal_dim_in_blockquote() {
+        let md: Markdown = "> ⌄dimmed quote⌄".into();
+        let output = for_terminal(&md, test_options()).unwrap();
+
+        // Should contain dim code
+        assert!(
+            output.contains("\x1b[2m"),
+            "Dim should work in blockquotes, got: {:?}",
+            output
+        );
+
+        let plain = strip_ansi_codes(&output);
+        assert!(plain.contains("dimmed quote"));
+    }
+
+    #[test]
+    fn test_terminal_dim_table_cell() {
+        let md: Markdown = "| Header |\n|--------|\n| ⌄dim⌄ |".into();
+        let output = for_terminal(&md, test_options()).unwrap();
+
+        let plain = strip_ansi_codes(&output);
+        // Table cell should contain the dimmed text without delimiters
+        assert!(plain.contains("dim"), "Table cell should contain dim text");
+        assert!(
+            !plain.contains("⌄"),
+            "Table cell should not expose delimiters"
+        );
+    }
+
+    #[test]
+    fn test_dim_mode_always_and_never_resolve() {
+        // Static modes resolve without consulting terminal capabilities.
+        assert!(
+            DimMode::Always.should_emit_dim(),
+            "DimMode::Always should emit dim"
+        );
+        assert!(
+            !DimMode::Never.should_emit_dim(),
+            "DimMode::Never should not emit dim"
+        );
+    }
+
+    /// RAII helper for setting an env var for the duration of a test.
+    ///
+    /// Pairs with `#[serial]` to avoid concurrent env mutation across threads.
+    struct ScopedEnv {
+        key: String,
+        original: Option<String>,
+    }
+
+    impl ScopedEnv {
+        fn set(key: &str, value: &str) -> Self {
+            let original = std::env::var(key).ok();
+            // SAFETY: callers must mark their tests `#[serial]`.
+            unsafe { std::env::set_var(key, value) };
+            Self {
+                key: key.to_string(),
+                original,
+            }
+        }
+    }
+
+    impl Drop for ScopedEnv {
+        fn drop(&mut self) {
+            // SAFETY: callers must mark their tests `#[serial]`.
+            unsafe {
+                match &self.original {
+                    Some(v) => std::env::set_var(&self.key, v),
+                    None => std::env::remove_var(&self.key),
+                }
+            }
+        }
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn test_terminal_dim_mode_auto_with_dumb_terminal() {
+        // With TERM=dumb (and stdout not a TTY in tests), supports_dim()
+        // returns false, so DimMode::Auto must NOT emit `\x1b[2m`.
+        let _env = ScopedEnv::set("TERM", "dumb");
+
+        let md: Markdown = "This has ⌄dim⌄ text.".into();
+        let mut options = test_options();
+        options.dim_mode = DimMode::Auto;
+        let output = for_terminal(&md, options).unwrap();
+
+        assert!(
+            !output.contains("\x1b[2m"),
+            "DimMode::Auto with TERM=dumb must not emit \\x1b[2m, got: {:?}",
+            output
+        );
+    }
+
+    #[test]
+    fn test_terminal_dim_cross_event_remains_literal() {
+        // Cross-text-event dim spans (delimiters split across pulldown-cmark
+        // events by an intervening tag like **strong**) currently degrade to
+        // literal `⌄` characters. This test pins that behavior so any future
+        // pairing-state lift is intentional.
+        let md: Markdown = "⌄dim and **strong**⌄".into();
+        let output = for_terminal(&md, test_options()).unwrap();
+
+        assert!(
+            !output.contains("\x1b[2m"),
+            "Cross-event dim must not currently emit dim SGR, got: {:?}",
+            output
+        );
+
+        let plain = strip_ansi_codes(&output);
+        let dim_count = plain.matches('\u{2304}').count();
+        assert_eq!(
+            dim_count, 2,
+            "Both delimiters must remain literal across the strong span, got: {:?}",
+            plain
+        );
+    }
+
+    #[test]
+    fn test_terminal_dim_empty() {
+        let md: Markdown = "This has ⌄⌄ empty dim.".into();
+        let output = for_terminal(&md, test_options()).unwrap();
+
+        // Empty dim (⌄⌄) creates start + end events with no content between
+        let plain = strip_ansi_codes(&output);
+        assert!(
+            plain.contains("empty dim"),
+            "Text after empty dim should render"
+        );
+    }
+
+    #[test]
+    fn test_terminal_dim_multiple() {
+        let md: Markdown = "This has ⌄one⌄ and ⌄two⌄ dims.".into();
+        let output = for_terminal(&md, test_options()).unwrap();
+
+        // Should contain dim code
+        assert!(output.contains("\x1b[2m"), "Should contain dim code");
+
+        let plain = strip_ansi_codes(&output);
+        assert!(plain.contains("one"));
+        assert!(plain.contains("two"));
+    }
+
+    #[test]
+    fn test_emit_prose_text_dim() {
+        use syntect::highlighting::{Color, FontStyle, Style};
+
+        let style = Style {
+            foreground: Color {
+                r: 255,
+                g: 128,
+                b: 64,
+                a: 255,
+            },
+            background: Color {
+                r: 0,
+                g: 0,
+                b: 0,
+                a: 255,
+            },
+            font_style: FontStyle::empty(),
+        };
+
+        // With in_dim=true and emit_dim=true, should emit dim code
+        let result = emit_prose_text("dim text", style, true, false, false, None, true, true);
+        assert!(
+            result.contains("\x1b[2m"),
+            "Dim text should include \x1b[2m escape code, got: {:?}",
+            result
+        );
+        assert!(result.contains("\x1b[38;2;255;128;64m"));
+        assert!(result.contains("\x1b[0m"));
+    }
+
+    #[test]
+    fn test_emit_prose_text_dim_suppressed() {
+        use syntect::highlighting::{Color, FontStyle, Style};
+
+        let style = Style {
+            foreground: Color {
+                r: 255,
+                g: 128,
+                b: 64,
+                a: 255,
+            },
+            background: Color {
+                r: 0,
+                g: 0,
+                b: 0,
+                a: 255,
+            },
+            font_style: FontStyle::empty(),
+        };
+
+        // With emit_dim=false, should NOT emit dim code
+        let result = emit_prose_text("dim text", style, true, false, false, None, true, false);
+        assert!(
+            !result.contains("\x1b[2m"),
+            "Dim text with emit_dim=false should NOT include \x1b[2m, got: {:?}",
+            result
+        );
+        assert!(result.contains("\x1b[38;2;255;128;64m"));
+    }
+
+    #[test]
+    fn test_emit_prose_text_bold_dim() {
+        use syntect::highlighting::{Color, FontStyle, Style};
+
+        let style = Style {
+            foreground: Color {
+                r: 255,
+                g: 128,
+                b: 64,
+                a: 255,
+            },
+            background: Color {
+                r: 0,
+                g: 0,
+                b: 0,
+                a: 255,
+            },
+            font_style: FontStyle::BOLD,
+        };
+
+        let result = emit_prose_text("bold dim", style, true, false, false, None, true, true);
+
+        // Should have both bold and dim escape codes
+        assert!(result.contains("\x1b[1m"), "Should have bold");
+        assert!(result.contains("\x1b[2m"), "Should have dim");
+    }
+
+    #[test]
+    fn test_blockquote_list_wrapping_and_links() {
+        let content = r#"> Note: interpolation can point to frontmatter properties defined on the page but it also always gets two lookup variables defined for it:
+> - env - the env property is a dictionary of environment variables
+> - ctx - the ctx (short for "context") property is a dictionary of contextual information about the environment the page is being executed in. This is defined in detail in [Context Variables](https://example.com) document.
+"#;
+        let md: Markdown = content.into();
+        let mut options = test_options();
+        options.max_width = Some(60); // Force wrapping
+
+        let output = for_terminal(&md, options).unwrap();
+
+        // 1. Check for blockquote prefix on ALL lines
+        for line in output.lines() {
+            let plain = strip_ansi_codes(line);
+            if !plain.trim().is_empty() {
+                assert!(
+                    line.contains("▐"),
+                    "Line missing blockquote prefix:\n{:?}\nPlain: {:?}",
+                    line,
+                    plain
+                );
+            }
+        }
+
+        // 2. Check for hanging indent in wrapped list items
+        // "ctx - the ctx (short for \"context\") property is a dictionary of contextual information..."
+        // The wrapped lines should be indented by 2 spaces (after blockquote prefix)
+        let lines: Vec<&str> = output.lines().collect();
+
+        // Find the line that starts with "- ctx" (ignoring ANSI codes for search)
+        let ctx_line_idx = lines
+            .iter()
+            .position(|l| strip_ansi_codes(l).contains("- ctx"))
+            .expect("Could not find ctx list item");
+
+        // Check next line for indentation
+        // Ensure there IS a next line and it's part of the same list item's wrapped content
+        let next_line = lines[ctx_line_idx + 1];
+        let plain_next = strip_ansi_codes(next_line);
+
+        // Blockquote prefix width is 4. Next 2 should be spaces (total 6 leading spaces in plain text).
+        assert!(
+            plain_next.starts_with("▐     "),
+            "Wrapped line missing hanging indent:\nExpected: \"▐     ...\"\nActual:   {:?}",
+            plain_next
+        );
+
+        // 3. Check for hyperlink background color
+        // Hyperlink should have the same background color as the blockquote
+        assert!(output.contains("Context Variables"));
+
+        // Find the line containing the link
+        let link_line = lines
+            .iter()
+            .find(|l| l.contains("Context Variables"))
+            .unwrap();
+
+        // OneHalf dark bg: (40, 44, 52)
+        // compute_blockquote_bg adds (10, 10, 10) -> (50, 54, 62)
+        assert!(
+            link_line.contains("\x1b[48;2;50;54;62m"),
+            "Link missing blockquote background color (50, 54, 62):\n{}",
+            link_line
+        );
+    }
+
+    #[test]
+    fn test_list_after_paragraph_in_blockquote() {
+        let content = "> Paragraph one\n> - Item 1\n> - Item 2";
+        let md: Markdown = content.into();
+        let options = test_options();
+        let output = for_terminal(&md, options).unwrap();
+
+        let plain = strip_ansi_codes(&output);
+        assert!(!plain.contains("Paragraph one- Item 1"));
+
+        // List directly follows paragraph inside a blockquote without an
+        // intervening blank styled line.
+        let lines: Vec<&str> = plain.lines().map(|l| l.trim_end()).collect();
+        let p_idx = lines
+            .iter()
+            .position(|l| l.contains("Paragraph one"))
+            .unwrap();
+        assert_eq!(lines[p_idx + 1], "▐   - Item 1");
+        assert_eq!(lines[p_idx + 2], "▐   - Item 2");
+    }
+
+    #[test]
+    fn test_blockquote_soft_reset() {
+        let content = "> Note: this is not the first review we've done\n";
+        let md: Markdown = content.into();
+        let mut options = test_options();
+        options.max_width = Some(80);
+        let output = for_terminal(&md, options).unwrap();
+
+        // Check that blockquote words use soft reset
+        let soft_reset = "\x1b[22;23;24;25;27;28;29;39m";
+        let hard_reset = "\x1b[0m";
+
+        println!("Output: {:?}", output);
+        println!("Soft reset count: {}", output.matches(soft_reset).count());
+        println!("Hard reset count: {}", output.matches(hard_reset).count());
+
+        // The blockquote words should use soft reset
+        assert!(
+            output.contains(soft_reset),
+            "Should use soft reset for blockquote words"
         );
     }
 }

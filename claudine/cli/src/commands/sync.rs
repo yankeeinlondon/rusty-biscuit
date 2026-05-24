@@ -2,21 +2,20 @@ use std::collections::HashMap;
 
 use biscuit_terminal::components::list::UnorderedList;
 use biscuit_terminal::components::prose::Prose;
-use biscuit_terminal::components::renderable::{Renderable, RenderableContent};
-use biscuit_terminal::utils::layout::Margin;
+use biscuit_terminal::components::renderable::{RenderableTerminalContent, TerminalRenderable};
+use biscuit_terminal::utils::layout::{Length, Margin};
 use clap::Args;
 use color_eyre::eyre::Result;
 
+use crate::cli_utils::event_name_pascal;
+use crate::log;
+use crate::provider_values::provider_value_parser;
 use claudine::config::claudine_config::ClaudineConfig;
 use claudine::config::{
     ProviderHookPlan, RegistrationResult, SkipReason, detect_agents, get_configurator,
 };
 use claudine::dispatch::loader::load_claudine_config;
-use claudine::events::Provider;
-
-use crate::cli_utils::event_name_pascal;
-use crate::log;
-use crate::provider_values::provider_value_parser;
+use claudine::provider::Provider;
 
 /// Arguments for the sync subcommand.
 #[derive(Args)]
@@ -139,14 +138,14 @@ fn prose_error(msg: &str) -> Prose {
 
 /// Build a provider section with its actions.
 fn build_provider_section(provider: Provider, actions: Vec<SyncAction>) -> UnorderedList {
-    let mut items: Vec<RenderableContent> = vec![];
+    let mut items: Vec<RenderableTerminalContent> = vec![];
 
     // Provider header
     let header = Prose::new(format!("<b><blue>{}</blue></b>", provider));
-    items.push(RenderableContent::from(header));
+    items.push(RenderableTerminalContent::from(header));
 
     // Build action list
-    let action_proses: Vec<RenderableContent> = actions
+    let action_proses: Vec<RenderableTerminalContent> = actions
         .into_iter()
         .map(|action| {
             let prose = match action {
@@ -163,17 +162,17 @@ fn build_provider_section(provider: Provider, actions: Vec<SyncAction>) -> Unord
                 SyncAction::Deregistered => prose_deregistered(),
                 SyncAction::Error(msg) => prose_error(&msg),
             };
-            RenderableContent::from(prose)
+            RenderableTerminalContent::from(prose)
         })
         .collect();
 
     if !action_proses.is_empty() {
         let action_list = UnorderedList::from(action_proses).with_bullet("  ◦ ");
-        items.push(RenderableContent::from(action_list));
+        items.push(RenderableTerminalContent::from(action_list));
     }
 
     let mut list = UnorderedList::from(items).with_bullet("• ");
-    list.layout_mut().top_margin = Margin::Chars(1);
+    list.layout_mut().margin = Margin::y(Length::ch(1));
     list
 }
 

@@ -78,7 +78,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
-See [Ratatui Architecture](./ratatui-architecture.md) for the full app pattern with event loop and state management.
+- see [Ratatui Architecture](./ratatui-architecture.md) for the full app pattern with event loop and state management.
+- see [Ratatui Testing Tools](./testing-tools.md) for an overview of the most commonly used crates/tools for testing Ratatui TUI applications
+
 
 ## Bubble Tea Quick Start
 

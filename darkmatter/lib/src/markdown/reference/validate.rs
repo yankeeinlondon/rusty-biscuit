@@ -710,6 +710,7 @@ fn normalize_remote_url(raw: &str, source: &ComposeSource) -> String {
 mod tests {
     use super::*;
     use crate::markdown::Markdown;
+    use serial_test::serial;
 
     #[test]
     fn validate_valid_url_syntax() {
@@ -931,6 +932,7 @@ mod tests {
     /// on a relative path returned by `resolve_relative()`, which resolved
     /// against CWD instead of the document's base directory.
     #[test]
+    #[serial]
     fn validate_magic_path_independent_of_cwd() {
         use biscuit_file::PathPosition;
 

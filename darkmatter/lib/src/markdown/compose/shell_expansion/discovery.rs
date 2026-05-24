@@ -18,11 +18,61 @@ use crate::markdown::compose::prepare_frontmatter_for_compose;
 use crate::markdown::compose::shell_expansion::alias::resolve_alias;
 use crate::markdown::compose::shell_expansion::parser::parse_directives;
 use crate::markdown::compose::shell_expansion::policy::normalize_command;
-use crate::markdown::compose::shell_expansion::types::{ShellCommandEntry, ShellCommandOrigin};
+use crate::markdown::compose::shell_expansion::types::{
+    ShellCommandEntry, ShellCommandOrigin, ShellDirective,
+};
 use crate::markdown::compose::state;
 use crate::markdown::compose::transclusion;
 use crate::markdown::compose::types::SourceRange;
 use crate::markdown::types::MarkdownResult;
+
+use super::super::block_pairs;
+use super::super::shell_blocks::body::split_logical_commands;
+
+/// Renders a single action back to its raw command form for display in
+/// discovery output (without any preceding chain operator).
+fn render_action(executable: &str, args: &[String]) -> String {
+    if args.is_empty() {
+        return executable.to_string();
+    }
+    let mut out = String::from(executable);
+    for arg in args {
+        out.push(' ');
+        if arg.contains(' ') || arg.contains('"') || arg.contains('\'') {
+            out.push('"');
+            out.push_str(&arg.replace('"', "\\\""));
+            out.push('"');
+        } else {
+            out.push_str(arg);
+        }
+    }
+    out
+}
+
+/// Yields one tuple per executable action in a directive: the per-action raw
+/// command rendering, the executable, and its args. For non-pipeline
+/// directives this yields a single entry.
+fn directive_action_iter(directive: &ShellDirective) -> Vec<(String, String, Vec<String>)> {
+    if let Some(ref pipeline) = directive.pipeline
+        && pipeline.actions.len() > 1
+    {
+        return pipeline
+            .actions
+            .iter()
+            .map(|a| {
+                let exe = a.command.executable.clone();
+                let args = a.command.args.clone();
+                let raw = render_action(&exe, &args);
+                (raw, exe, args)
+            })
+            .collect();
+    }
+    vec![(
+        directive.raw_command.clone(),
+        directive.executable.clone(),
+        directive.args.clone(),
+    )]
+}
 
 /// Looks up the originating source file for a byte position in composed output.
 ///
@@ -128,39 +178,107 @@ pub fn collect_shell_commands(
 
     // Parse ::shell directives from the fully-resolved content.
     // ShellExpansionError converts into MarkdownError via From impl.
-    let directives = parse_directives(composed.content())?;
+    let directives = parse_directives(composed.content(), composed.source_context_for_errors())?;
 
     for directive in directives {
-        let (executable, args) = if which::which(&directive.executable).is_ok() {
-            (directive.executable.clone(), directive.args.clone())
-        } else if let Some(resolved) = resolve_alias(&directive.executable) {
-            let mut merged_args = resolved.args;
-            merged_args.extend_from_slice(&directive.args);
-            (resolved.executable, merged_args)
-        } else {
-            (directive.executable.clone(), directive.args.clone())
-        };
+        // Look up provenance from the source map (shared by every action)
+        let (source_file, line) = lookup_provenance(
+            directive.span.start,
+            directive.origin.line_number(),
+            &report.source_map,
+            composed.content(),
+            &default_source,
+        );
 
-        let normalized = normalize_command(&executable, &args);
+        for (raw_action, exe_raw, args_raw) in directive_action_iter(&directive) {
+            let (executable, args) = if which::which(&exe_raw).is_ok() {
+                (exe_raw.clone(), args_raw.clone())
+            } else if let Some(resolved) = resolve_alias(&exe_raw) {
+                let mut merged_args = resolved.args;
+                merged_args.extend_from_slice(&args_raw);
+                (resolved.executable, merged_args)
+            } else {
+                (exe_raw.clone(), args_raw.clone())
+            };
 
-        if seen.insert(normalized.clone()) {
-            // Look up provenance from the source map
-            let (source_file, line) = lookup_provenance(
-                directive.span.start,
-                directive.origin.line_number(),
+            let normalized = normalize_command(&executable, &args);
+
+            if seen.insert(normalized.clone()) {
+                entries.push(ShellCommandEntry {
+                    raw_command: raw_action,
+                    executable,
+                    args,
+                    normalized,
+                    source_file: source_file.clone(),
+                    origin: ShellCommandOrigin::Body { line },
+                });
+            }
+        }
+    }
+
+    // Discover shell-block commands from the fully-resolved content.
+    let block_pairs = block_pairs::scan_block_pairs(composed.content())
+        .map_err(|e| crate::markdown::types::MarkdownError::Transform(e.to_string()))?;
+
+    for pair in block_pairs {
+        if !matches!(pair.kind, block_pairs::BlockOpenKind::Shell) {
+            continue;
+        }
+
+        let body_text = &composed.content()[pair.body_span.clone()];
+        let commands = split_logical_commands(body_text, pair.start_line + 1)
+            .map_err(|e| crate::markdown::types::MarkdownError::Transform(e.to_string()))?;
+
+        for command in commands {
+            let (source_file, command_line) = lookup_provenance(
+                pair.body_span.start + command.physical_span.start,
+                command.start_line,
                 &report.source_map,
                 composed.content(),
                 &default_source,
             );
 
-            entries.push(ShellCommandEntry {
-                raw_command: directive.raw_command,
-                executable,
-                args,
-                normalized,
-                source_file,
-                origin: ShellCommandOrigin::Body { line },
-            });
+            let (_, start_line) = lookup_provenance(
+                pair.span.start,
+                pair.start_line,
+                &report.source_map,
+                composed.content(),
+                &default_source,
+            );
+
+            for action in &command.pipeline.actions {
+                let exe_raw = action.command.executable.clone();
+                let args_raw = action.command.args.clone();
+                let raw_command = render_action(&exe_raw, &args_raw);
+
+                let (executable, args) = if which::which(&exe_raw).is_ok() {
+                    (exe_raw.clone(), args_raw.clone())
+                } else if let Some(resolved) = resolve_alias(&exe_raw) {
+                    let mut merged_args = resolved.args;
+                    merged_args.extend_from_slice(&args_raw);
+                    (resolved.executable, merged_args)
+                } else {
+                    (exe_raw.clone(), args_raw.clone())
+                };
+
+                let normalized = normalize_command(&executable, &args);
+
+                if !seen.insert(normalized.clone()) {
+                    continue;
+                }
+
+                entries.push(ShellCommandEntry {
+                    raw_command,
+                    executable,
+                    args,
+                    normalized,
+                    source_file: source_file.clone(),
+                    origin: ShellCommandOrigin::ShellBlock {
+                        start_line,
+                        command_line,
+                    },
+                });
+            }
         }
     }
 
@@ -221,13 +339,19 @@ fn collect_frontmatter_commands_recursive(
         .with_allow_ctx_override(options.allow_ctx_override)
         .build()?;
 
-    for directive in transclusion::parse_directives(prepared.content())? {
+    let prepared_ctx = prepared.source_context_for_errors();
+    for directive in transclusion::parse_directives(prepared.content(), prepared_ctx.clone())? {
         if directive.kind != transclusion::DirectiveKind::File {
             continue;
         }
 
         if let Some(expr) = &directive.options.when_expr
-            && !transclusion::evaluate_condition(expr, &state, directive.line)?
+            && !transclusion::evaluate_condition(
+                expr,
+                &state,
+                directive.line,
+                prepared_ctx.clone(),
+            )?
         {
             continue;
         }
@@ -239,6 +363,7 @@ fn collect_frontmatter_commands_recursive(
             &transclusion_opts,
             &options.source,
             directive.line,
+            prepared_ctx.clone(),
         )?
         else {
             continue;
@@ -266,7 +391,10 @@ fn collect_frontmatter_commands_recursive(
         )?;
     }
 
-    let refs = transclusion::parse_frontmatter_refs(prepared.frontmatter().as_map())?;
+    let refs = transclusion::parse_frontmatter_refs(
+        prepared.frontmatter().as_map(),
+        prepared_ctx.clone(),
+    )?;
     for reference in refs.prologue.iter().chain(refs.epilogue.iter()) {
         if !transclusion::is_url_like(reference) && !transclusion::is_file_like_reference(reference)
         {
@@ -279,8 +407,14 @@ fn collect_frontmatter_commands_recursive(
             transclusion::DirectiveKind::File
         };
 
-        let transclusion::ResolvedTarget::File { path, .. } =
-            transclusion::resolve_target(kind, reference, &transclusion_opts, &options.source, 0)?
+        let transclusion::ResolvedTarget::File { path, .. } = transclusion::resolve_target(
+            kind,
+            reference,
+            &transclusion_opts,
+            &options.source,
+            0,
+            prepared_ctx.clone(),
+        )?
         else {
             continue;
         };
@@ -308,35 +442,58 @@ fn scan_one_frontmatter(
     let mut fm_clone = markdown.clone();
     let pre_interpolation_snapshot = prepare_frontmatter_for_compose(&mut fm_clone, options, true);
     if options.is_enabled(ComposeOperation::FrontmatterInterpolation) {
-        let _ = interpolate_frontmatter(fm_clone.frontmatter_mut(), options.context(), false);
+        let _ =
+            interpolate_frontmatter(fm_clone.frontmatter_mut(), options.context(), false, false);
     }
 
-    let candidates = scan_frontmatter(fm_clone.frontmatter(), pre_interpolation_snapshot.as_ref())?;
+    let scan_ctx = fm_clone.source_context_for_errors();
+    let candidates = scan_frontmatter(
+        fm_clone.frontmatter(),
+        pre_interpolation_snapshot.as_ref(),
+        &scan_ctx,
+    )?;
 
     for candidate in candidates {
-        let (executable, args) = if which::which(&candidate.executable).is_ok() {
-            (candidate.executable.clone(), candidate.args.clone())
-        } else if let Some(resolved) = resolve_alias(&candidate.executable) {
-            let mut merged_args = resolved.args;
-            merged_args.extend_from_slice(&candidate.args);
-            (resolved.executable, merged_args)
-        } else {
-            (candidate.executable.clone(), candidate.args.clone())
+        // Build a synthetic ShellDirective so we can reuse the chain expander.
+        let directive = ShellDirective {
+            raw_command: candidate.raw_command.clone(),
+            executable: candidate.executable.clone(),
+            args: candidate.args.clone(),
+            span: 0..0,
+            origin: ShellCommandOrigin::Frontmatter {
+                key: candidate.key.clone(),
+            },
+            error_handling: Default::default(),
+            timeout_override: candidate.timeout_override,
+            pipeline: candidate.pipeline.clone(),
+            ctx: scan_ctx.clone(),
         };
 
-        let normalized = normalize_command(&executable, &args);
+        for (raw_action, exe_raw, args_raw) in directive_action_iter(&directive) {
+            let (executable, args) = if which::which(&exe_raw).is_ok() {
+                (exe_raw.clone(), args_raw.clone())
+            } else if let Some(resolved) = resolve_alias(&exe_raw) {
+                let mut merged_args = resolved.args;
+                merged_args.extend_from_slice(&args_raw);
+                (resolved.executable, merged_args)
+            } else {
+                (exe_raw.clone(), args_raw.clone())
+            };
 
-        if seen.insert(normalized.clone()) {
-            entries.push(ShellCommandEntry {
-                raw_command: candidate.raw_command,
-                executable,
-                args,
-                normalized,
-                source_file: source_file.to_path_buf(),
-                origin: ShellCommandOrigin::Frontmatter {
-                    key: candidate.key.clone(),
-                },
-            });
+            let normalized = normalize_command(&executable, &args);
+
+            if seen.insert(normalized.clone()) {
+                entries.push(ShellCommandEntry {
+                    raw_command: raw_action,
+                    executable,
+                    args,
+                    normalized,
+                    source_file: source_file.to_path_buf(),
+                    origin: ShellCommandOrigin::Frontmatter {
+                        key: candidate.key.clone(),
+                    },
+                });
+            }
         }
     }
 
@@ -683,5 +840,212 @@ replace:
             err.to_string()
                 .contains("Frontmatter shell executable may not come from interpolation")
         );
+    }
+
+    /// Body chains report every action so `md compose --shell` mirrors the
+    /// approval/execution surface. Regression for review-3.
+    #[test]
+    fn body_chain_emits_one_entry_per_action() {
+        let content = "::shell echo ok && pwd || ls\n";
+        let md: Markdown = content.into();
+        let options = ComposeOptions::new();
+
+        let entries = collect_shell_commands(&md, &options).unwrap();
+
+        let raw: Vec<&str> = entries.iter().map(|e| e.raw_command.as_str()).collect();
+        assert!(raw.contains(&"echo ok"), "missing echo ok: {raw:?}");
+        assert!(raw.contains(&"pwd"), "missing pwd: {raw:?}");
+        assert!(raw.contains(&"ls"), "missing ls: {raw:?}");
+
+        let executables: Vec<&str> = entries.iter().map(|e| e.executable.as_str()).collect();
+        assert!(executables.contains(&"echo"));
+        assert!(executables.contains(&"pwd"));
+        assert!(executables.contains(&"ls"));
+    }
+
+    /// Frontmatter `$()` chains also expand into per-action entries.
+    #[test]
+    fn frontmatter_chain_emits_one_entry_per_action() {
+        let content = "---\nfiles: \"$(echo first || pwd)\"\n---\n";
+        let md: Markdown = content.into();
+        let options = ComposeOptions::new();
+
+        let entries = collect_shell_commands(&md, &options).unwrap();
+
+        let executables: Vec<&str> = entries.iter().map(|e| e.executable.as_str()).collect();
+        assert!(
+            executables.contains(&"echo"),
+            "missing echo: {executables:?}"
+        );
+        assert!(executables.contains(&"pwd"), "missing pwd: {executables:?}");
+    }
+
+    /// Body chains with redirection still emit a per-action entry, and the
+    /// redirected action is preserved as a separate entry.
+    #[test]
+    fn body_chain_with_redirection_emits_per_action_entries() {
+        let content = "::shell echo silent > /dev/null && pwd\n";
+        let md: Markdown = content.into();
+        let options = ComposeOptions::new();
+
+        let entries = collect_shell_commands(&md, &options).unwrap();
+
+        let executables: Vec<&str> = entries.iter().map(|e| e.executable.as_str()).collect();
+        assert!(executables.contains(&"echo"));
+        assert!(executables.contains(&"pwd"));
+    }
+
+    #[test]
+    fn discovers_shell_block_commands() {
+        let content = "::shell-block\necho hello\necho world\n::end-block\n";
+        let md: Markdown = content.into();
+        let options = ComposeOptions::new();
+
+        let entries = collect_shell_commands(&md, &options).unwrap();
+
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].raw_command, "echo hello");
+        assert_eq!(entries[1].raw_command, "echo world");
+        assert_eq!(
+            entries[0].origin,
+            ShellCommandOrigin::ShellBlock {
+                start_line: 1,
+                command_line: 2,
+            }
+        );
+    }
+
+    #[test]
+    fn shell_block_chain_emits_one_entry_per_action() {
+        let content = "::shell-block\necho ok && pwd || ls\n::end-block\n";
+        let md: Markdown = content.into();
+        let options = ComposeOptions::new();
+
+        let entries = collect_shell_commands(&md, &options).unwrap();
+
+        let raw: Vec<&str> = entries.iter().map(|e| e.raw_command.as_str()).collect();
+        assert!(raw.contains(&"echo ok"), "missing echo ok: {raw:?}");
+        assert!(raw.contains(&"pwd"), "missing pwd: {raw:?}");
+        assert!(raw.contains(&"ls"), "missing ls: {raw:?}");
+
+        let blocks: Vec<_> = entries
+            .iter()
+            .filter(|e| matches!(e.origin, ShellCommandOrigin::ShellBlock { .. }))
+            .collect();
+        assert_eq!(blocks.len(), 3);
+    }
+
+    #[test]
+    fn discovers_mixed_shell_and_shell_block_commands() {
+        let content = "::shell echo standalone\n::shell-block\necho block\n::end-block\n";
+        let md: Markdown = content.into();
+        let options = ComposeOptions::new();
+
+        let entries = collect_shell_commands(&md, &options).unwrap();
+
+        assert_eq!(entries.len(), 2);
+        let standalones: Vec<_> = entries
+            .iter()
+            .filter(|e| matches!(e.origin, ShellCommandOrigin::Body { .. }))
+            .collect();
+        let blocks: Vec<_> = entries
+            .iter()
+            .filter(|e| matches!(e.origin, ShellCommandOrigin::ShellBlock { .. }))
+            .collect();
+        assert_eq!(standalones.len(), 1);
+        assert_eq!(blocks.len(), 1);
+        assert_eq!(standalones[0].raw_command, "echo standalone");
+        assert_eq!(blocks[0].raw_command, "echo block");
+    }
+
+    #[test]
+    fn shell_block_commands_deduplicate_with_shell_directives() {
+        // Same command in both ::shell and ::shell-block — should only appear once
+        let content = "::shell echo hello\n::shell-block\necho hello\n::end-block\n";
+        let md: Markdown = content.into();
+        let options = ComposeOptions::new();
+
+        let entries = collect_shell_commands(&md, &options).unwrap();
+
+        // Deduplicated by normalized form
+        assert_eq!(entries.len(), 1);
+    }
+
+    #[test]
+    fn excludes_shell_block_commands_inside_false_page_blocks() {
+        let content = "\
+---
+include_shell: false
+---
+::shell echo always
+::block when=\"include_shell\"
+::shell-block
+::shell echo conditional
+::end-block
+::end-block
+";
+        let md: Markdown = content.into();
+        let options = ComposeOptions::new();
+
+        let entries = collect_shell_commands(&md, &options).unwrap();
+
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].raw_command, "echo always");
+    }
+
+    #[test]
+    fn discovers_shell_block_commands_in_transcluded_files() {
+        let temp_dir = TempDir::new().unwrap();
+
+        // Child document with a shell block
+        let child_path = temp_dir.path().join("child.md");
+        let mut child_file = std::fs::File::create(&child_path).unwrap();
+        writeln!(child_file, "# Child").unwrap();
+        writeln!(child_file, "::shell-block").unwrap();
+        writeln!(child_file, "echo from-child").unwrap();
+        writeln!(child_file, "::end-block").unwrap();
+
+        // Root document with its own directive and a transclusion
+        let root_path = temp_dir.path().join("root.md");
+        let mut root_file = std::fs::File::create(&root_path).unwrap();
+        writeln!(root_file, "::shell echo from-root").unwrap();
+        writeln!(root_file, "::file ./child.md").unwrap();
+
+        let root_content = std::fs::read_to_string(&root_path).unwrap();
+        let md: Markdown = root_content.into();
+        let options = ComposeOptions::new().with_source_file(&root_path);
+
+        let entries = collect_shell_commands(&md, &options).unwrap();
+
+        assert_eq!(entries.len(), 2);
+
+        let root_entry = entries
+            .iter()
+            .find(|e| e.raw_command == "echo from-root")
+            .unwrap();
+        assert_eq!(
+            root_entry.source_file.canonicalize().unwrap(),
+            root_path.canonicalize().unwrap()
+        );
+
+        let child_entry = entries
+            .iter()
+            .find(|e| e.raw_command == "echo from-child")
+            .unwrap();
+        assert_eq!(
+            child_entry.source_file.canonicalize().unwrap(),
+            child_path.canonicalize().unwrap()
+        );
+        match &child_entry.origin {
+            ShellCommandOrigin::ShellBlock {
+                start_line,
+                command_line,
+            } => {
+                // In child.md: line 2 is "::shell-block", line 3 is "echo from-child"
+                assert_eq!(*start_line, 2);
+                assert_eq!(*command_line, 3);
+            }
+            other => panic!("Expected ShellBlock origin, got: {:?}", other),
+        }
     }
 }

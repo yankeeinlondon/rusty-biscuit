@@ -2,11 +2,10 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::PathBuf;
 
+use super::canonical::{MappingFidelity, PolicyWarning};
 use crate::config::atomic::atomic_write;
 use crate::error::{ClaudineError, Result};
-use crate::events::Provider;
-
-use super::canonical::{MappingFidelity, PolicyWarning};
+use crate::provider::Provider;
 
 /// Structured mutation plan produced by a backend.
 ///

@@ -1,7 +1,7 @@
 {
   "openapi": "3.0.3",
   "info": {
-    "title": "ElevenLabs",
+    "title": "elevenlabs",
     "description": "ElevenLabs Creative Platform API for text-to-speech, voice management, and sound generation",
     "version": "0.1.0"
   },
@@ -1792,46 +1792,432 @@
   },
   "components": {
     "schemas": {
-      "SpeechWithTimestampsResponse": {
-        "title": "SpeechWithTimestampsResponse",
-        "description": "Response from TTS with timestamps endpoints.",
+      "CreateSpeechBody": {
+        "title": "CreateSpeechBody",
         "type": "object",
         "properties": {
-          "alignment": {
-            "description": "Timing data for original text."
+          "apply_language_text_normalization": {
+            "type": "boolean"
           },
-          "audioBase64": {
-            "description": "Base64-encoded audio data.",
+          "apply_text_normalization": {},
+          "language_code": {
             "type": "string"
           },
-          "normalizedAlignment": {
-            "description": "Timing data for normalized text."
+          "model_id": {
+            "type": "string"
+          },
+          "next_request_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "next_text": {
+            "type": "string"
+          },
+          "previous_request_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "previous_text": {
+            "type": "string"
+          },
+          "pronunciation_dictionary_locators": {
+            "type": "array",
+            "items": {
+              "allOf": [
+                {
+                  "$ref": "#/components/schemas/PronunciationDictionaryLocator"
+                }
+              ]
+            }
+          },
+          "seed": {
+            "type": "integer",
+            "format": "uint32"
+          },
+          "text": {
+            "type": "string"
+          },
+          "voice_settings": {}
+        },
+        "required": [
+          "text"
+        ]
+      },
+      "PronunciationDictionaryLocator": {
+        "type": "object",
+        "properties": {
+          "pronunciation_dictionary_id": {
+            "type": "string"
+          },
+          "version_id": {
+            "type": "string"
           }
+        },
+        "required": [
+          "pronunciation_dictionary_id",
+          "version_id"
+        ]
+      },
+      "TextNormalization": {
+        "type": "string"
+      },
+      "VoiceSettings": {
+        "title": "VoiceSettings",
+        "type": "object",
+        "properties": {
+          "similarity_boost": {
+            "type": "number",
+            "format": "double"
+          },
+          "speed": {
+            "type": "number",
+            "format": "double"
+          },
+          "stability": {
+            "type": "number",
+            "format": "double"
+          },
+          "style": {
+            "type": "number",
+            "format": "double"
+          },
+          "use_speaker_boost": {
+            "type": "boolean"
+          }
+        }
+      },
+      "AddSharedVoiceBody": {
+        "title": "AddSharedVoiceBody",
+        "type": "object",
+        "properties": {
+          "new_name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "new_name"
+        ]
+      },
+      "CreatePvcVoiceBody": {
+        "title": "CreatePvcVoiceBody",
+        "type": "object",
+        "properties": {
+          "description": {
+            "type": "string"
+          },
+          "labels": {
+            "type": "object"
+          },
+          "language": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "language"
+        ]
+      },
+      "TrainPvcVoiceBody": {
+        "title": "TrainPvcVoiceBody",
+        "type": "object",
+        "properties": {
+          "model_id": {
+            "type": "string"
+          }
+        }
+      },
+      "CreateSoundEffectBody": {
+        "title": "CreateSoundEffectBody",
+        "type": "object",
+        "properties": {
+          "duration_seconds": {
+            "type": "number",
+            "format": "double"
+          },
+          "loop": {
+            "type": "boolean"
+          },
+          "model_id": {
+            "type": "string"
+          },
+          "prompt_influence": {
+            "type": "number",
+            "format": "double"
+          },
+          "text": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "text"
+        ]
+      },
+      "DownloadHistoryBody": {
+        "title": "DownloadHistoryBody",
+        "type": "object",
+        "properties": {
+          "history_item_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "output_format": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "history_item_ids"
+        ]
+      },
+      "ShareResourceBody": {
+        "title": "ShareResourceBody",
+        "type": "object",
+        "properties": {
+          "group_id": {
+            "type": "string"
+          },
+          "resource_type": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ResourceType"
+              }
+            ]
+          },
+          "role": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/AccessLevel"
+              }
+            ]
+          },
+          "user_email": {
+            "type": "string"
+          },
+          "workspace_api_key_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "role",
+          "resource_type"
+        ]
+      },
+      "AccessLevel": {
+        "type": "string"
+      },
+      "ResourceType": {
+        "type": "string"
+      },
+      "UnshareResourceBody": {
+        "title": "UnshareResourceBody",
+        "type": "object",
+        "properties": {
+          "group_id": {
+            "type": "string"
+          },
+          "resource_type": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ResourceType"
+              }
+            ]
+          },
+          "user_email": {
+            "type": "string"
+          },
+          "workspace_api_key_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "resource_type"
+        ]
+      },
+      "CopyResourceBody": {
+        "title": "CopyResourceBody",
+        "type": "object",
+        "properties": {
+          "resource_type": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ResourceType"
+              }
+            ]
+          },
+          "target_user_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "resource_type",
+          "target_user_id"
+        ]
+      },
+      "CreateApiKeyBody": {
+        "title": "CreateApiKeyBody",
+        "type": "object",
+        "properties": {
+          "character_limit": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "name": {
+            "type": "string"
+          },
+          "permissions": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/PermissionSpec"
+              }
+            ]
+          }
+        },
+        "required": [
+          "name",
+          "permissions"
+        ]
+      },
+      "ApiPermission": {
+        "type": "string"
+      },
+      "PermissionSpec": {},
+      "UpdateApiKeyBody": {
+        "title": "UpdateApiKeyBody",
+        "type": "object",
+        "properties": {
+          "character_limit": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "is_enabled": {
+            "type": "boolean"
+          },
+          "name": {
+            "type": "string"
+          },
+          "permissions": {}
+        }
+      },
+      "CreateWebhookBody": {
+        "title": "CreateWebhookBody",
+        "type": "object",
+        "properties": {
+          "settings": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/WebhookSettings"
+              }
+            ]
+          }
+        },
+        "required": [
+          "settings"
+        ]
+      },
+      "WebhookAuthType": {
+        "type": "string"
+      },
+      "WebhookSettings": {
+        "type": "object",
+        "properties": {
+          "auth_type": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/WebhookAuthType"
+              }
+            ]
+          },
+          "name": {
+            "type": "string"
+          },
+          "webhook_url": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "auth_type",
+          "webhook_url"
+        ]
+      },
+      "UpdateWebhookBody": {
+        "title": "UpdateWebhookBody",
+        "type": "object",
+        "properties": {
+          "is_disabled": {
+            "type": "boolean"
+          },
+          "name": {
+            "type": "string"
+          }
+        }
+      },
+      "SpeechWithTimestampsResponse": {
+        "title": "SpeechWithTimestampsResponse",
+        "type": "object",
+        "properties": {
+          "alignment": {},
+          "audioBase64": {
+            "type": "string"
+          },
+          "normalizedAlignment": {}
         },
         "required": [
           "audioBase64"
         ]
       },
+      "HttpAlignment": {
+        "type": "object",
+        "properties": {
+          "characterEndTimesSeconds": {
+            "type": "array",
+            "items": {
+              "type": "number",
+              "format": "double"
+            }
+          },
+          "characterStartTimesSeconds": {
+            "type": "array",
+            "items": {
+              "type": "number",
+              "format": "double"
+            }
+          },
+          "characters": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "characters",
+          "characterStartTimesSeconds",
+          "characterEndTimesSeconds"
+        ]
+      },
       "ListVoicesResponse": {
         "title": "ListVoicesResponse",
-        "description": "Response from list voices endpoint.",
         "type": "object",
         "properties": {
           "has_more": {
-            "description": "Whether more results exist.",
             "type": "boolean"
           },
           "next_page_token": {
-            "description": "Token for next page.",
             "type": "string"
           },
           "total_count": {
-            "description": "Total count of matching voices.",
             "type": "integer",
             "format": "int64"
           },
           "voices": {
-            "description": "List of voices.",
             "type": "array",
             "items": {
               "allOf": [
@@ -1846,85 +2232,147 @@
           "voices"
         ]
       },
+      "FineTuningModel": {
+        "type": "object",
+        "properties": {
+          "dataset_duration_seconds": {},
+          "is_allowed_to_fine_tune": {},
+          "language": {},
+          "manual_verification_requested": {},
+          "max_verification_attempts": {},
+          "message": {},
+          "model_id": {},
+          "next_max_verification_attempts_reset_unix_ms": {},
+          "progress": {},
+          "state": {},
+          "verification_attempts_count": {},
+          "verification_failures": {},
+          "verification_required": {}
+        }
+      },
+      "FineTuningState": {
+        "type": "string"
+      },
+      "LanguageModel": {
+        "type": "object",
+        "properties": {
+          "accent": {},
+          "language_id": {
+            "type": "string"
+          },
+          "locale": {},
+          "model_id": {},
+          "name": {
+            "type": "string"
+          },
+          "preview_url": {}
+        },
+        "required": [
+          "language_id"
+        ]
+      },
+      "SafetyControl": {
+        "type": "string"
+      },
+      "SampleModel": {
+        "type": "object",
+        "properties": {
+          "file_name": {
+            "type": "string"
+          },
+          "hash": {
+            "type": "string"
+          },
+          "mime_type": {
+            "type": "string"
+          },
+          "sample_id": {
+            "type": "string"
+          },
+          "size_bytes": {
+            "type": "integer",
+            "format": "int64"
+          }
+        },
+        "required": [
+          "sample_id",
+          "file_name",
+          "mime_type",
+          "size_bytes",
+          "hash"
+        ]
+      },
+      "SharingModel": {
+        "type": "object",
+        "properties": {
+          "cloned_by_count": {},
+          "is_public": {
+            "type": "boolean"
+          },
+          "public_owner_id": {}
+        }
+      },
+      "VoiceCategory": {
+        "type": "string"
+      },
       "VoiceResponseModel": {
         "title": "VoiceResponseModel",
-        "description": "Full voice response model.",
         "type": "object",
         "properties": {
           "available_for_tiers": {
-            "description": "Subscription tiers this voice is available for.",
             "type": "array",
             "items": {
               "type": "string"
             }
           },
-          "category": {
-            "description": "Voice category."
-          },
+          "category": {},
           "collection_ids": {
-            "description": "Collection IDs this voice belongs to.",
             "type": "array",
             "items": {
               "type": "string"
             }
           },
           "created_at_unix": {
-            "description": "Unix timestamp when the voice was created.",
             "type": "integer",
             "format": "int64"
           },
           "description": {
-            "description": "Voice description.",
             "type": "string"
           },
           "favorited_at_unix": {
-            "description": "Unix timestamp when the voice was favorited.",
             "type": "integer",
             "format": "int64"
           },
-          "fine_tuning": {
-            "description": "Fine-tuning information."
-          },
+          "fine_tuning": {},
           "high_quality_base_model_ids": {
-            "description": "Base model IDs that support high-quality for this voice.",
             "type": "array",
             "items": {
               "type": "string"
             }
           },
           "is_legacy": {
-            "description": "Whether this is a legacy voice.",
             "type": "boolean"
           },
           "is_mixed": {
-            "description": "Whether this voice uses mixed models.",
             "type": "boolean"
           },
           "is_owner": {
-            "description": "Whether the current user owns this voice.",
             "type": "boolean"
           },
           "labels": {
-            "description": "Voice labels (language, accent, gender, age).",
             "type": "object"
           },
           "name": {
-            "description": "Voice display name.",
             "type": "string"
           },
           "permission_on_resource": {
-            "description": "Permission level on this resource.",
             "type": "string"
           },
           "preview_url": {
-            "description": "URL to preview audio for this voice.",
             "type": "string"
           },
-          "safety_control": {
-            "description": "Safety control level for this voice."
-          },
+          "safety_control": {},
           "samples": {
-            "description": "Voice samples.",
             "type": "array",
             "items": {
               "allOf": [
@@ -1934,14 +2382,9 @@
               ]
             }
           },
-          "settings": {
-            "description": "Voice settings."
-          },
-          "sharing": {
-            "description": "Sharing information."
-          },
+          "settings": {},
+          "sharing": {},
           "verified_languages": {
-            "description": "Verified languages.",
             "type": "array",
             "items": {
               "allOf": [
@@ -1952,25 +2395,35 @@
             }
           },
           "voice_id": {
-            "description": "Voice identifier.",
             "type": "string"
           },
-          "voice_verification": {
-            "description": "Voice verification status."
-          }
+          "voice_verification": {}
         },
         "required": [
           "voice_id",
           "name"
         ]
       },
+      "VoiceVerificationModel": {
+        "type": "object",
+        "properties": {
+          "is_verified": {
+            "type": "boolean"
+          },
+          "requires_verification": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "requires_verification",
+          "is_verified"
+        ]
+      },
       "StatusResponse": {
         "title": "StatusResponse",
-        "description": "Generic status response for many API operations.",
         "type": "object",
         "properties": {
           "status": {
-            "description": "Status message (typically \"ok\").",
             "type": "string"
           }
         },
@@ -1978,44 +2431,11 @@
           "status"
         ]
       },
-      "VoiceSettings": {
-        "title": "VoiceSettings",
-        "description": "Voice settings for TTS generation.",
-        "type": "object",
-        "properties": {
-          "similarity_boost": {
-            "description": "Adherence to original voice (0-1).",
-            "type": "number",
-            "format": "double"
-          },
-          "speed": {
-            "description": "Speech rate (0.7-1.2).",
-            "type": "number",
-            "format": "double"
-          },
-          "stability": {
-            "description": "Voice stability/randomness (0-1).",
-            "type": "number",
-            "format": "double"
-          },
-          "style": {
-            "description": "Style exaggeration (V2+ models).",
-            "type": "number",
-            "format": "double"
-          },
-          "use_speaker_boost": {
-            "description": "Enhanced similarity (V2+ models).",
-            "type": "boolean"
-          }
-        }
-      },
       "AddSampleResponse": {
         "title": "AddSampleResponse",
-        "description": "Response from adding a voice sample.",
         "type": "object",
         "properties": {
           "sample_id": {
-            "description": "The sample ID.",
             "type": "string"
           }
         },
@@ -2025,19 +2445,15 @@
       },
       "ListSharedVoicesResponse": {
         "title": "ListSharedVoicesResponse",
-        "description": "Response from list shared voices endpoint.",
         "type": "object",
         "properties": {
           "has_more": {
-            "description": "Whether more results exist.",
             "type": "boolean"
           },
           "last_sort_id": {
-            "description": "Cursor for pagination.",
             "type": "string"
           },
           "voices": {
-            "description": "List of shared voices.",
             "type": "array",
             "items": {
               "allOf": [
@@ -2053,13 +2469,29 @@
           "has_more"
         ]
       },
+      "LibraryVoiceResponseModel": {
+        "type": "object",
+        "properties": {
+          "category": {},
+          "description": {},
+          "name": {
+            "type": "string"
+          },
+          "public_owner_id": {},
+          "voice_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "voice_id",
+          "name"
+        ]
+      },
       "AddSharedVoiceResponse": {
         "title": "AddSharedVoiceResponse",
-        "description": "Response from add shared voice endpoint.",
         "type": "object",
         "properties": {
           "voice_id": {
-            "description": "The new voice ID in your library.",
             "type": "string"
           }
         },
@@ -2078,13 +2510,70 @@
           ]
         }
       },
+      "ModelInfo": {
+        "type": "object",
+        "properties": {
+          "can_be_finetuned": {
+            "type": "boolean"
+          },
+          "can_do_text_to_speech": {
+            "type": "boolean"
+          },
+          "can_do_voice_conversion": {
+            "type": "boolean"
+          },
+          "can_use_speaker_boost": {
+            "type": "boolean"
+          },
+          "can_use_style": {
+            "type": "boolean"
+          },
+          "concurrency_group": {},
+          "description": {
+            "type": "string"
+          },
+          "languages": {},
+          "max_characters_request_free_user": {},
+          "max_characters_request_subscribed_user": {},
+          "maximum_text_length_per_request": {},
+          "model_id": {
+            "type": "string"
+          },
+          "model_rates": {},
+          "name": {
+            "type": "string"
+          },
+          "requires_alpha_access": {
+            "type": "boolean"
+          },
+          "serves_pro_voices": {
+            "type": "boolean"
+          },
+          "token_cost_factor": {}
+        },
+        "required": [
+          "model_id",
+          "name",
+          "description"
+        ]
+      },
+      "ModelRates": {
+        "type": "object",
+        "properties": {
+          "character_cost_multiplier": {
+            "type": "number",
+            "format": "double"
+          }
+        },
+        "required": [
+          "character_cost_multiplier"
+        ]
+      },
       "SingleUseTokenResponse": {
         "title": "SingleUseTokenResponse",
-        "description": "Response containing a single-use token.",
         "type": "object",
         "properties": {
           "token": {
-            "description": "The generated token.",
             "type": "string"
           }
         },
@@ -2094,15 +2583,12 @@
       },
       "GetHistoryResponse": {
         "title": "GetHistoryResponse",
-        "description": "Response from get history endpoint.",
         "type": "object",
         "properties": {
           "has_more": {
-            "description": "Whether more items exist.",
             "type": "boolean"
           },
           "history": {
-            "description": "List of history items.",
             "type": "array",
             "items": {
               "allOf": [
@@ -2113,11 +2599,9 @@
             }
           },
           "last_history_item_id": {
-            "description": "Last item ID for pagination.",
             "type": "string"
           },
           "scanned_until": {
-            "description": "Scan timestamp.",
             "type": "integer",
             "format": "int64"
           }
@@ -2127,54 +2611,55 @@
           "has_more"
         ]
       },
-      "SpeechHistoryItemResponseModel": {
-        "title": "SpeechHistoryItemResponseModel",
-        "description": "Speech history item.",
+      "AlignmentModel": {
         "type": "object",
         "properties": {
-          "alignments": {
-            "description": "Character alignments."
-          },
+          "character_end_times_seconds": {},
+          "character_start_times_seconds": {},
+          "characters": {}
+        }
+      },
+      "FeedbackModel": {
+        "type": "object",
+        "properties": {
+          "feedback": {},
+          "thumbs_up": {}
+        }
+      },
+      "HistorySource": {
+        "type": "string"
+      },
+      "SpeechHistoryItemResponseModel": {
+        "title": "SpeechHistoryItemResponseModel",
+        "type": "object",
+        "properties": {
+          "alignments": {},
           "content_type": {
-            "description": "Content type of audio.",
             "type": "string"
           },
           "date_unix": {
-            "description": "Unix timestamp.",
             "type": "integer",
             "format": "int64"
           },
-          "feedback": {
-            "description": "User feedback."
-          },
+          "feedback": {},
           "history_item_id": {
-            "description": "History item ID.",
             "type": "string"
           },
           "model_id": {
-            "description": "Model ID used.",
             "type": "string"
           },
-          "source": {
-            "description": "Source of generation."
-          },
+          "source": {},
           "state": {
-            "description": "Generation state.",
             "type": "string"
           },
           "text": {
-            "description": "The text that was converted.",
             "type": "string"
           },
-          "voice_category": {
-            "description": "Voice category."
-          },
+          "voice_category": {},
           "voice_id": {
-            "description": "Voice ID used.",
             "type": "string"
           },
           "voice_name": {
-            "description": "Voice name.",
             "type": "string"
           }
         },
@@ -2186,11 +2671,9 @@
       },
       "UsageStatsResponse": {
         "title": "UsageStatsResponse",
-        "description": "Usage statistics response.",
         "type": "object",
         "properties": {
           "time": {
-            "description": "Time points.",
             "type": "array",
             "items": {
               "type": "integer",
@@ -2198,7 +2681,6 @@
             }
           },
           "usage": {
-            "description": "Usage data by category.",
             "type": "object"
           }
         },
@@ -2209,35 +2691,26 @@
       },
       "UserResponse": {
         "title": "UserResponse",
-        "description": "User response model.",
         "type": "object",
         "properties": {
           "created_at": {
-            "description": "Account creation timestamp.",
             "type": "integer",
             "format": "int64"
           },
           "first_name": {
-            "description": "First name.",
             "type": "string"
           },
           "is_new_user": {
-            "description": "Is new user.",
             "type": "boolean"
           },
           "is_onboarding_completed": {
-            "description": "Onboarding completion.",
             "type": "boolean"
           },
-          "subscription": {
-            "description": "Subscription info."
-          },
+          "subscription": {},
           "user_id": {
-            "description": "User identifier.",
             "type": "string"
           },
           "xi_api_key": {
-            "description": "API key (if visible).",
             "type": "string"
           }
         },
@@ -2245,59 +2718,56 @@
           "user_id"
         ]
       },
-      "SubscriptionModel": {
-        "title": "SubscriptionModel",
-        "description": "Subscription model.",
+      "BillingPeriod": {
+        "type": "string"
+      },
+      "Currency": {
+        "type": "string"
+      },
+      "InvoiceModel": {
         "type": "object",
         "properties": {
-          "billing_period": {
-            "description": "Billing period."
-          },
+          "amount_due": {},
+          "currency": {},
+          "due_date_unix": {}
+        }
+      },
+      "SubscriptionModel": {
+        "title": "SubscriptionModel",
+        "type": "object",
+        "properties": {
+          "billing_period": {},
           "character_count": {
-            "description": "Characters used.",
             "type": "integer",
             "format": "int64"
           },
           "character_limit": {
-            "description": "Character limit.",
             "type": "integer",
             "format": "int64"
           },
-          "currency": {
-            "description": "Currency."
-          },
+          "currency": {},
           "max_character_limit_extension": {
-            "description": "Max extension limit.",
             "type": "integer",
             "format": "int64"
           },
-          "next_invoice": {
-            "description": "Next invoice."
-          },
+          "next_invoice": {},
           "professional_voice_limit": {
-            "description": "Pro voice limit.",
             "type": "integer",
             "format": "int64"
           },
           "professional_voice_slots_used": {
-            "description": "Pro voice slots used.",
             "type": "integer",
             "format": "int64"
           },
-          "status": {
-            "description": "Subscription status."
-          },
+          "status": {},
           "tier": {
-            "description": "Subscription tier.",
             "type": "string"
           },
           "voice_limit": {
-            "description": "Voice slot limit.",
             "type": "integer",
             "format": "int64"
           },
           "voice_slots_used": {
-            "description": "Voice slots used.",
             "type": "integer",
             "format": "int64"
           }
@@ -2308,31 +2778,31 @@
           "character_limit"
         ]
       },
+      "SubscriptionStatus": {
+        "type": "string"
+      },
       "ResourceResponse": {
         "title": "ResourceResponse",
-        "description": "Resource response model.",
         "type": "object",
         "properties": {
-          "anonymous_access_level_override": {
-            "description": "Anonymous access level override."
-          },
+          "anonymous_access_level_override": {},
           "creator_user_id": {
-            "description": "Creator user ID.",
             "type": "string"
           },
           "resource_id": {
-            "description": "Resource identifier.",
             "type": "string"
           },
           "resource_type": {
-            "description": "Resource type."
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ResourceType"
+              }
+            ]
           },
           "role_to_group_ids": {
-            "description": "Role to group ID mapping.",
             "type": "object"
           },
           "share_options": {
-            "description": "Share options.",
             "type": "array",
             "items": {
               "allOf": [
@@ -2348,13 +2818,28 @@
           "resource_type"
         ]
       },
+      "ShareOptionModel": {
+        "type": "object",
+        "properties": {
+          "group_id": {},
+          "role": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/AccessLevel"
+              }
+            ]
+          },
+          "user_email": {}
+        },
+        "required": [
+          "role"
+        ]
+      },
       "ListServiceAccountsResponse": {
         "title": "ListServiceAccountsResponse",
-        "description": "Response from list service accounts endpoint.",
         "type": "object",
         "properties": {
           "service-accounts": {
-            "description": "List of service accounts.",
             "type": "array",
             "items": {
               "allOf": [
@@ -2369,13 +2854,52 @@
           "service-accounts"
         ]
       },
+      "ApiKeyModel": {
+        "type": "object",
+        "properties": {
+          "character_count": {},
+          "character_limit": {},
+          "created_at_unix": {},
+          "hint": {},
+          "is_disabled": {
+            "type": "boolean"
+          },
+          "key_id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "permissions": {},
+          "service_account_user_id": {}
+        },
+        "required": [
+          "name",
+          "key_id"
+        ]
+      },
+      "ServiceAccountModel": {
+        "type": "object",
+        "properties": {
+          "api-keys": {},
+          "created_at_unix": {},
+          "name": {
+            "type": "string"
+          },
+          "service_account_user_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "service_account_user_id",
+          "name"
+        ]
+      },
       "ListApiKeysResponse": {
         "title": "ListApiKeysResponse",
-        "description": "Response from list API keys endpoint.",
         "type": "object",
         "properties": {
           "api-keys": {
-            "description": "List of API keys.",
             "type": "array",
             "items": {
               "allOf": [
@@ -2392,15 +2916,12 @@
       },
       "CreateApiKeyResponse": {
         "title": "CreateApiKeyResponse",
-        "description": "Response from create API key endpoint.",
         "type": "object",
         "properties": {
           "key-id": {
-            "description": "Key identifier.",
             "type": "string"
           },
           "xi-api-key": {
-            "description": "The full API key (only shown once).",
             "type": "string"
           }
         },
@@ -2411,11 +2932,9 @@
       },
       "ListWebhooksResponse": {
         "title": "ListWebhooksResponse",
-        "description": "Response from list webhooks endpoint.",
         "type": "object",
         "properties": {
           "webhooks": {
-            "description": "List of webhooks.",
             "type": "array",
             "items": {
               "allOf": [
@@ -2430,17 +2949,62 @@
           "webhooks"
         ]
       },
+      "ProductModel": {
+        "type": "object",
+        "properties": {
+          "name": {},
+          "product_id": {}
+        }
+      },
+      "WebhookModel": {
+        "type": "object",
+        "properties": {
+          "auth_type": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/WebhookAuthType"
+              }
+            ]
+          },
+          "created_at_unix": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "is_auto_disabled": {
+            "type": "boolean"
+          },
+          "is_disabled": {
+            "type": "boolean"
+          },
+          "most_recent_failure_error_code": {},
+          "most_recent_failure_timestamp": {},
+          "name": {
+            "type": "string"
+          },
+          "usage": {},
+          "webhook_id": {
+            "type": "string"
+          },
+          "webhook_url": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "webhook_id",
+          "webhook_url",
+          "created_at_unix",
+          "auth_type"
+        ]
+      },
       "CreateWebhookResponse": {
         "title": "CreateWebhookResponse",
-        "description": "Response from create webhook endpoint.",
         "type": "object",
         "properties": {
           "webhook_id": {
-            "description": "Webhook identifier.",
             "type": "string"
           },
           "webhook_secret": {
-            "description": "Webhook secret (for HMAC auth).",
             "type": "string"
           }
         },
@@ -2482,5 +3046,8 @@
       "basic_user": null,
       "bearer_token": null
     }
-  }
+  },
+  "x-schematic-grouped-from": [
+    "ElevenLabs"
+  ]
 }

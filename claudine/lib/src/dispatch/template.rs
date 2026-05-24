@@ -1,16 +1,14 @@
 use std::borrow::Cow;
 use std::sync::LazyLock;
 
+use darkmatter::markdown::compose::expression::{
+    Expr, ExpressionFinder, ParseMode, Parser, evaluate, scalar_string,
+};
 use regex::Regex;
 use tracing::warn;
 
+use crate::dispatch::expression::EventMetaExpressionLookup;
 use crate::events::EventMeta;
-
-/// Compiled regex matching Handlebars-style `{{placeholder}}` patterns.
-///
-/// Captures the inner expression for variable lookup.
-static HANDLEBARS_RE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"\{\{\s*([^{}]+?)\s*\}\}").expect("placeholder regex is valid"));
 
 /// Legacy single-brace placeholder key validation.
 static LEGACY_KEY_RE: LazyLock<Regex> =
@@ -397,6 +395,7 @@ impl TemplateVariable {
 /// ```
 /// # use claudine::dispatch::template::interpolate;
 /// # use claudine::events::*;
+/// # use claudine::provider::Provider;
 /// # use std::collections::HashMap;
 /// # use chrono::Utc;
 /// # let meta = EventMeta {
@@ -413,56 +412,106 @@ impl TemplateVariable {
 /// ```
 pub fn interpolate(template: &str, meta: &EventMeta) -> String {
     let rewritten = rewrite_legacy_single_brace_placeholders(template);
+    let source = rewritten.as_ref();
 
-    HANDLEBARS_RE
-        .replace_all(rewritten.as_ref(), |caps: &regex::Captures| {
-            let full = caps
-                .get(0)
-                .map(|m| m.as_str())
-                .unwrap_or_default()
-                .to_string();
-            let expr = caps.get(1).map(|m| m.as_str()).unwrap_or_default();
-            resolve_expression(expr, meta).unwrap_or(Cow::Owned(full))
-        })
-        .into_owned()
-}
-
-/// Resolve a single Handlebars expression to its replacement string.
-///
-/// Returns `None` for unknown/malformed expressions so callers can preserve
-/// the original token unchanged.
-fn resolve_expression<'a>(expression: &str, meta: &'a EventMeta) -> Option<Cow<'a, str>> {
-    let expression = expression.trim();
-
-    if let Some(env_key) = expression.strip_prefix("env.") {
-        return resolve_env_expression(env_key);
+    let locations = ExpressionFinder::find_all_plain(source);
+    if locations.is_empty() {
+        return rewritten.into_owned();
     }
 
-    TemplateVariable::from_key(expression).map(|variable| variable.resolve(meta))
+    let lookup = EventMetaExpressionLookup::new(meta);
+    let mut output = String::with_capacity(source.len());
+    let mut cursor = 0;
+    for location in &locations {
+        output.push_str(&source[cursor..location.start]);
+        let original = &source[location.start..location.end];
+        match render_expression(&location.expression, &lookup) {
+            Some(rendered) => output.push_str(&rendered),
+            None => output.push_str(original),
+        }
+        cursor = location.end;
+    }
+    output.push_str(&source[cursor..]);
+    output
 }
 
-fn resolve_env_expression(expression: &str) -> Option<Cow<'static, str>> {
-    let (name_part, default) = if let Some((name, fallback)) = expression.split_once('|') {
-        (name.trim(), parse_default_literal(fallback.trim())?)
-    } else {
-        (expression.trim(), String::new())
-    };
-
-    if name_part.is_empty() {
+/// Render a single `{{...}}` expression body, or `None` to preserve the
+/// original token (matching legacy `interpolate()` behavior for unknown or
+/// malformed expressions).
+fn render_expression(expression: &str, lookup: &EventMetaExpressionLookup<'_>) -> Option<String> {
+    let trimmed = expression.trim();
+    if trimmed.is_empty() {
         return None;
     }
 
-    match std::env::var(name_part) {
-        Ok(value) => Some(Cow::Owned(value)),
-        Err(std::env::VarError::NotPresent) => Some(Cow::Owned(default)),
-        Err(std::env::VarError::NotUnicode(_)) => Some(Cow::Owned(default)),
+    let parsed = Parser::with_mode(trimmed, ParseMode::Interpolation)
+        .ok()?
+        .parse()
+        .ok()?;
+
+    // Preserve unknown bare-variable references unchanged so e.g.
+    // `{{unknown_field}}` does not silently render as the empty string.
+    // Composite expressions (fallbacks, ternaries, comparisons, function
+    // calls) always evaluate, since their authors intentionally opted into
+    // expression semantics.
+    if let Expr::Variable(path) = &parsed
+        && !is_known_path(path)
+    {
+        return None;
     }
+
+    evaluate(&parsed, lookup)
+        .ok()
+        .map(|value| scalar_string(&value))
 }
 
-fn parse_default_literal(input: &str) -> Option<String> {
-    let trimmed = input.trim();
-    let inner = trimmed.strip_prefix('"')?.strip_suffix('"')?;
-    Some(inner.to_string())
+/// Returns whether a dotted path is a recognized template variable handled
+/// by [`EventMetaExpressionLookup`].
+fn is_known_path(path: &str) -> bool {
+    if path.starts_with("env.")
+        || path.starts_with("extra.")
+        || path.starts_with("tool_input.")
+        || path.starts_with("tool_response.")
+        || path.starts_with("ctx.")
+        || path == "ctx"
+    {
+        return true;
+    }
+    matches!(
+        path,
+        "provider"
+            | "event"
+            | "timestamp"
+            | "session_id"
+            | "cwd"
+            | "tool_name"
+            | "tool_input"
+            | "tool_response"
+            | "error"
+            | "prompt"
+            | "agent_type"
+            | "notification_type"
+            | "notification_message"
+            | "extra"
+            | "os.name"
+            | "os.type"
+            | "os.version"
+            | "os.hostname"
+            | "hardware.arch"
+            | "hardware.cpu"
+            | "hardware.cores"
+            | "git.branch"
+            | "git.is_dirty"
+            | "git.head_sha"
+            | "git.head_message"
+            | "git.remote"
+            | "git.hosting"
+            | "git.repo_name"
+            | "git.repo_org"
+            | "project.language"
+            | "project.is_monorepo"
+            | "project.monorepo_tool"
+    )
 }
 
 fn rewrite_legacy_single_brace_placeholders(template: &str) -> Cow<'_, str> {
@@ -549,6 +598,7 @@ fn opt_nested_to_cow(opt: Option<&str>) -> Cow<'static, str> {
 mod tests {
     use super::*;
     use crate::events::*;
+    use crate::provider::Provider;
     use chrono::Utc;
     use std::collections::HashMap;
 
@@ -706,10 +756,78 @@ mod tests {
     fn env_variable_default_is_used_when_not_present() {
         let meta = sample_meta();
         let rendered = interpolate(
-            "{{env.CLAUDINE_TEMPLATE_TEST_MISSING | \"fallback\"}}",
+            "{{env.CLAUDINE_TEMPLATE_TEST_MISSING || \"fallback\"}}",
             &meta,
         );
         assert_eq!(rendered, "fallback");
+    }
+
+    #[test]
+    fn ternary_on_git_is_dirty() {
+        let meta = sample_meta();
+        let rendered = interpolate("Status: {{git.is_dirty ? \"dirty\" : \"clean\"}}", &meta);
+        assert_eq!(rendered, "Status: dirty");
+    }
+
+    #[test]
+    fn numeric_comparison_on_hardware_cores() {
+        let meta = sample_meta();
+        let rendered = interpolate("Speed: {{hardware.cores > 8 ? \"fast\" : \"slow\"}}", &meta);
+        assert_eq!(rendered, "Speed: fast");
+    }
+
+    #[test]
+    fn fallback_on_missing_env_variable() {
+        let meta = sample_meta();
+        // SAFETY: tests run sequentially in a single process; we remove the
+        // var on the way out.
+        unsafe {
+            std::env::remove_var("CLAUDINE_TEMPLATE_TEST_FALLBACK_X");
+        }
+        let rendered = interpolate(
+            "Mode: {{env.CLAUDINE_TEMPLATE_TEST_FALLBACK_X || \"local\"}}",
+            &meta,
+        );
+        assert_eq!(rendered, "Mode: local");
+    }
+
+    #[test]
+    fn length_helper_on_branch_name() {
+        let meta = sample_meta();
+        let rendered = interpolate(
+            "{{length(git.branch) > 30 ? \"long-branch\" : git.branch}}",
+            &meta,
+        );
+        // sample_meta branch is "main" (4 chars), so we get the branch name.
+        assert_eq!(rendered, "main");
+    }
+
+    #[test]
+    fn boolean_value_renders_as_text() {
+        let meta = sample_meta();
+        assert_eq!(interpolate("{{git.is_dirty}}", &meta), "true");
+    }
+
+    #[test]
+    fn malformed_expression_is_preserved() {
+        let meta = sample_meta();
+        // `+` is not a supported operator; parser fails -> token preserved.
+        assert_eq!(interpolate("{{a + b}}", &meta), "{{a + b}}");
+    }
+
+    #[test]
+    fn legacy_single_pipe_fallback_is_preserved_verbatim() {
+        // Single-pipe `|` is no longer recognised as a fallback operator;
+        // Darkmatter's interpolation lexer only accepts `||`. The token
+        // must therefore round-trip unchanged so operators can spot stale
+        // configs in their output.
+        let meta = sample_meta();
+        let raw = "{{env.CLAUDINE_TEMPLATE_TEST_LEGACY_PIPE | \"fallback\"}}";
+        // SAFETY: tests run sequentially in this module.
+        unsafe {
+            std::env::remove_var("CLAUDINE_TEMPLATE_TEST_LEGACY_PIPE");
+        }
+        assert_eq!(interpolate(raw, &meta), raw);
     }
 
     #[test]

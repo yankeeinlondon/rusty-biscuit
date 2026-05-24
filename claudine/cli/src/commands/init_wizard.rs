@@ -4,6 +4,7 @@ use clap::Args;
 use color_eyre::eyre::Result;
 use tracing::info_span;
 
+use crate::log;
 use biscuit_speaks::detection::get_available_providers as get_available_tts_providers;
 use biscuit_speaks::types::{CloudTtsProvider, HostTtsProvider, TtsProvider};
 use claudine::actions::HookAction;
@@ -13,9 +14,8 @@ use claudine::config::claudine_config::{
 use claudine::config::{
     ProviderHookPlan, RegistrationResult, SkipReason, discover_agents_full, get_configurator,
 };
-use claudine::events::{AgenticEvent, Provider, recommended_sound};
-
-use crate::log;
+use claudine::events::{AgenticEvent, recommended_sound};
+use claudine::provider::Provider;
 
 #[derive(Debug, Args)]
 pub struct InitArgs {
@@ -256,6 +256,7 @@ fn build_config(
             effect: recommended_sound(&AgenticEvent::HumanInTheLoop).to_string(),
             volume: 1.0,
             speed: 1.0,
+            when: None,
         }],
     );
 
@@ -263,8 +264,9 @@ fn build_config(
         tts,
         messenger,
         logging: true,
-        protect: claudine::services::protect::config::ProtectConfig::default(),
+        protect: claudine::protect::config::ProtectConfig::default(),
         actions,
+        matchers: HashMap::new(),
         preferred_agent,
         canonical_provider: None,
         models: HashMap::new(),

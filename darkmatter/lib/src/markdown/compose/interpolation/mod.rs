@@ -20,6 +20,7 @@
 //!
 //! Ternary expressions:
 //! - `{{ color ? "known" : "unknown" }}` - Boolean switch
+//! - `{{ show ? has_name ? name : "unnamed" : "hidden" }}` - Nested ternary
 //!
 //! Comparisons:
 //! - `{{ count > 0 ? "has items" : "empty" }}` - Numeric comparison
@@ -38,9 +39,10 @@
 //!
 //! ## Code Exclusion
 //!
-//! Interpolation placeholders inside code spans or fenced code blocks
-//! are NOT processed. This preserves code examples that might contain
-//! template syntax.
+//! Interpolation placeholders inside fenced or indented code blocks are
+//! NOT processed. Inline code spans (single backticks) ARE processed by
+//! default, since the templating pattern `` `var_{{ phase }}` `` is a
+//! common use case.
 //!
 //! ## Examples
 //!
@@ -58,18 +60,24 @@
 //! // Parse a ternary with comparison
 //! let expr = parse(r#"count > 0 ? "items" : "empty""#).unwrap();
 //! assert!(matches!(expr, Expr::Ternary { .. }));
+//!
+//! // Parse a nested ternary
+//! let expr = parse(r#"a ? b ? "c" : "d" : "e""#).unwrap();
+//! assert!(matches!(expr, Expr::Ternary { .. }));
 //! ```
 
-mod ast;
 mod evaluator;
-mod lexer;
-mod parser;
 pub(crate) mod rewrite;
 
-pub use ast::Expr;
-pub use evaluator::{EvalResult, EvalValue, Evaluator, InterpolationLookup};
-pub use lexer::{
-    ComparisonOp, ExpressionFinder, ExpressionLocation, Lexer, LexerError, ParseMode, Token,
+// Re-export core expression types from the expression module for backward
+// compatibility. The canonical location is now `compose::expression`.
+pub use super::expression::{
+    ComparisonOp, Expr, ExpressionFinder, ExpressionLocation, Lexer, LexerError, ParseError,
+    ParseMode, Parser, Token, parse, parse_condition,
 };
-pub use parser::{ParseError, Parser, parse, parse_condition};
+
+// Re-export the lookup trait with its old name for backward compatibility.
+pub use super::expression::EvaluationLookup as InterpolationLookup;
+
+pub use evaluator::{EvalResult, EvalValue, Evaluator};
 pub(crate) use rewrite::{ScanMode, interpolate_text};

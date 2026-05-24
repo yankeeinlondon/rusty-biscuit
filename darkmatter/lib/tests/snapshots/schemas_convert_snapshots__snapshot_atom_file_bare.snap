@@ -1,0 +1,15 @@
+---
+source: darkmatter/lib/tests/schemas_convert_snapshots.rs
+expression: "convert_atom(\"file\")"
+---
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "properties": {
+    "field": {
+      "format": "darkmatter-file",
+      "type": "string"
+    }
+  },
+  "type": "object"
+}

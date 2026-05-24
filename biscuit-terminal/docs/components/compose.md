@@ -12,21 +12,21 @@ use biscuit_terminal::prelude::*;
 // From a vec of pre-converted items
 let compose = Compose::new(vec![
     RenderableContent::from("Hello, "),
-    RenderableContent::from(Prose::new("{{bold}}world{{reset}}!")),
+    RenderableContent::from(Prose::new("<b>world</b>!")),
 ]);
 
 // Builder-style with fluent API
 let mut compose = Compose::default();
 compose
     .add_text("Hello, ")
-    .add_prose(Prose::new("{{bold}}world{{reset}}!"));
+    .add_prose(Prose::new("<b>world</b>!"));
 
 // Building a mixed-content document
 let mut doc = Compose::default();
 doc
     .add_heading("Project Overview", 1)
     .add_text("This project contains ")
-    .add_prose(Prose::new("{{bold}}important{{reset}} files"))
+    .add_prose(Prose::new("<b>important</b> files"))
     .add_text(" for processing.");
 
 // From conversions

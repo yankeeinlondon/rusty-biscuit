@@ -21,6 +21,10 @@ use super::types::ResolvedCompositionSource;
 pub fn resolve_composition_source(
     file_ref: &str,
 ) -> Result<ResolvedCompositionSource, CompositionError> {
+    // Phase 3 (2026-05-09-slow-prep): instrument the file-reference
+    // resolution phase so trace inspection / `--perf` reporting can see
+    // when the `biscuit-file` resolver dominates compose prep cost.
+    let _span = tracing::info_span!("compose_prep.file_reference", file = %file_ref).entered();
     let reference = FileReference::new(file_ref)
         .map_err(|e| CompositionError::InvalidReference(format!("{file_ref}: {e}")))?
         .with_package_area_magic_path();

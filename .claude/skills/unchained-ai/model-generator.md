@@ -38,7 +38,10 @@ cargo run -p unchained-ai-gen -- -vvv  # TRACE
 gen/src/
 ├── main.rs                 # CLI entrypoint (clap-based)
 ├── generator.rs            # ModelEnumGenerator - produces Rust enum source
-├── metadata_generator.rs   # MetadataGenerator - produces metadata lookup table
+├── metadata_generator.rs   # MetadataGenerator - produces metadata lookup tables
+├── provider_metadata/      # Provider-native metadata parsers
+│   ├── mod.rs              # Dispatcher routing to provider-specific parsers
+│   └── openrouter.rs       # OpenRouter metadata extraction (pricing, params, etc.)
 ├── parsera.rs              # Parsera LLM Specs API integration
 └── errors.rs               # GeneratorError type
 ```
@@ -46,10 +49,13 @@ gen/src/
 ### Pipeline
 
 1. **Fetch Parsera specs** - Single fetch at startup from `api.parsera.org/v1/llm-specs` (with 2s delay + 1 retry on failure; graceful degradation on failure)
-2. **Fetch provider models** - Parallel queries to each provider's `/models` endpoint using API keys from environment
-3. **Generate enum files** - One `.rs` file per provider with `#[derive(ModelId)]` enum
-4. **Generate metadata file** - `metadata_generated.rs` mapping model IDs to `ModelMetadata`
-5. **Write atomically** - Temp file + rename to prevent corruption
+2. **Fetch provider models** - Parallel queries to each provider's `/models` endpoint using API keys from environment; raw metadata preserved per model
+3. **Parse provider-native metadata** - Route raw JSON through provider-specific parsers (e.g., OpenRouter) to extract pricing, architecture, default parameters
+4. **Merge metadata** - Priority: Provider-Native > Parsera for overlapping fields; both sources fill gaps
+5. **Generate enum files** - One `.rs` file per provider with `#[derive(ModelId)]` enum
+6. **Generate compact metadata file** - `metadata_generated.rs` mapping model IDs to `ModelMetadata` (with `..Default::default()` for brevity)
+7. **Generate rich OpenRouter metadata file** - `metadata_openrouter_generated.rs` with full `ProviderModelMetadata` entries including pricing, parameters, etc.
+8. **Write atomically** - Temp file + rename to prevent corruption
 
 ### ModelEnumGenerator (`generator.rs`)
 
@@ -118,7 +124,18 @@ pub enum ProviderModelOpenAi {
 
 ### Metadata Lookup Table (`metadata_generated.rs`)
 
-Static `MODEL_METADATA` hashmap mapping model ID strings to `ModelMetadata` structs. Referenced by the `#[model_id_metadata]` attribute on provider enums.
+Static `MODEL_METADATA` hashmap mapping model ID strings to `ModelMetadata` structs. Uses `..Default::default()` for compact entries. Referenced by the `#[model_id_metadata]` attribute on provider enums.
+
+### Rich OpenRouter Metadata (`metadata_openrouter_generated.rs`)
+
+Static `OPENROUTER_MODEL_METADATA` hashmap with full `ProviderModelMetadata` entries for OpenRouter models, including pricing, architecture, default parameters, knowledge cutoff, and description. Populated only when OpenRouter API access is available during generation.
+
+### Provider Metadata Parsing (`provider_metadata/`)
+
+Provider-specific parsers extract rich metadata from raw API responses:
+
+- **OpenRouter parser** (`openrouter.rs`): Extracts pricing (prompt/completion/cache_read/web_search), architecture (modalities, tokenizer), top_provider (context_window, max_completion_tokens), supported_parameters, default_parameters, description, and knowledge_cutoff.
+- **Dispatcher** (`mod.rs`): Routes to the appropriate parser based on `Provider` enum.
 
 ## Environment Variables
 

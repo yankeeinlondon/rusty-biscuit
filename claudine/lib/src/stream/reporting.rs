@@ -55,6 +55,7 @@ pub fn summary_to_event_meta_with_context(
         StreamProtocol::StreamJson => "stream-json",
         StreamProtocol::Ndjson => "ndjson",
         StreamProtocol::Jsonl => "jsonl",
+        StreamProtocol::WireJsonRpc => "wire-json-rpc",
     };
     extra.insert("stream_protocol".into(), Value::String(protocol_str.into()));
 
@@ -98,6 +99,13 @@ pub fn summary_to_event_meta_with_context(
 
     // Exit code
     extra.insert("exit_code".into(), Value::Number(summary.exit_code.into()));
+
+    // Exit reason (mirrors `summary.error_kind`). Present only when the
+    // summary recorded a typed termination kind (e.g. `timeout`,
+    // `step_timeout`, `billing_error`).
+    if let Some(kind) = &summary.error_kind {
+        extra.insert("exit_reason".into(), Value::String(kind.clone()));
+    }
 
     // Provider status
     if let Some(status) = &summary.provider_status {
@@ -188,7 +196,7 @@ pub fn summary_to_event_meta_with_context(
 ///   same way [`summary_to_event_meta_with_context`] does.
 pub fn semantic_event_to_event_meta(
     event: &SemanticEvent,
-    provider: crate::events::Provider,
+    provider: crate::provider_id::Provider,
     env: &EnvironmentContext,
     context_extra: Option<&HashMap<String, Value>>,
 ) -> EventMeta {
@@ -400,7 +408,7 @@ pub fn write_summary_event(meta: &EventMeta) -> Result<(), std::io::Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::events::Provider;
+    use crate::provider_id::Provider;
     use crate::stream::token_usage::NormalizedTokenUsage;
 
     fn make_test_summary() -> StreamExecutionSummary {

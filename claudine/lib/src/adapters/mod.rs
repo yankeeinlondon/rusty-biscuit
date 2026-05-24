@@ -1,17 +1,18 @@
-mod claude;
-mod codex;
-mod gemini;
-mod goose;
-mod kimicode;
-mod opencode;
-mod qwen;
-mod roo;
+pub(crate) mod claude;
+pub(crate) mod codex;
+pub(crate) mod gemini;
+pub(crate) mod goose;
+pub(crate) mod kimicode;
+pub(crate) mod opencode;
+pub(crate) mod qwen;
+pub(crate) mod roo;
 
 use serde_json::Value;
 
 use crate::actions::HookResponse;
-use crate::events::{AgenticEvent, EventMeta, Provider};
-use crate::services::protect::decision::ProtectDecision;
+use crate::events::{AgenticEvent, EventMeta};
+use crate::protect::decision::ProtectDecision;
+use crate::provider::Provider;
 
 /// Adapter-level parse/format errors.
 #[derive(Debug, thiserror::Error)]
@@ -106,27 +107,20 @@ pub trait ProviderAdapter: Send + Sync {
     }
 }
 
-static CLAUDE_ADAPTER: claude::ClaudeAdapter = claude::ClaudeAdapter;
-static CODEX_ADAPTER: codex::CodexAdapter = codex::CodexAdapter;
-static GEMINI_ADAPTER: gemini::GeminiAdapter = gemini::GeminiAdapter;
-static GOOSE_ADAPTER: goose::GooseAdapter = goose::GooseAdapter;
-static KIMI_ADAPTER: kimicode::KimiCodeAdapter = kimicode::KimiCodeAdapter;
-static OPENCODE_ADAPTER: opencode::OpenCodeAdapter = opencode::OpenCodeAdapter;
-static QWEN_ADAPTER: qwen::QwenAdapter = qwen::QwenAdapter;
-static ROO_ADAPTER: roo::RooAdapter = roo::RooAdapter;
+pub(crate) static CLAUDE_ADAPTER: claude::ClaudeAdapter = claude::ClaudeAdapter;
+pub(crate) static CODEX_ADAPTER: codex::CodexAdapter = codex::CodexAdapter;
+pub(crate) static GEMINI_ADAPTER: gemini::GeminiAdapter = gemini::GeminiAdapter;
+pub(crate) static GOOSE_ADAPTER: goose::GooseAdapter = goose::GooseAdapter;
+pub(crate) static KIMI_ADAPTER: kimicode::KimiCodeAdapter = kimicode::KimiCodeAdapter;
+pub(crate) static OPENCODE_ADAPTER: opencode::OpenCodeAdapter = opencode::OpenCodeAdapter;
+pub(crate) static QWEN_ADAPTER: qwen::QwenAdapter = qwen::QwenAdapter;
+pub(crate) static ROO_ADAPTER: roo::RooAdapter = roo::RooAdapter;
 
 /// Returns the adapter singleton for a provider.
 pub fn adapter_for(provider: Provider) -> &'static dyn ProviderAdapter {
-    match provider {
-        Provider::Claude => &CLAUDE_ADAPTER,
-        Provider::Codex => &CODEX_ADAPTER,
-        Provider::Gemini => &GEMINI_ADAPTER,
-        Provider::Goose => &GOOSE_ADAPTER,
-        Provider::KimiCode => &KIMI_ADAPTER,
-        Provider::OpenCode => &OPENCODE_ADAPTER,
-        Provider::QwenCode => &QWEN_ADAPTER,
-        Provider::RooCode => &ROO_ADAPTER,
-    }
+    crate::provider::provider_info(provider)
+        .adapter
+        .provider_adapter()
 }
 
 pub(crate) fn str_field(raw: &Value, key: &str) -> Option<String> {
@@ -193,8 +187,8 @@ mod tests {
 
     #[test]
     fn protect_outcome_mapping_allow_and_block() {
-        use crate::services::protect::catalog::{RuleGroup, ScanSurface};
-        use crate::services::protect::decision::ProtectMatch;
+        use crate::protect::catalog::{RuleGroup, ScanSurface};
+        use crate::protect::decision::ProtectMatch;
 
         let fixture_events = [
             AgenticEvent::BeforeTool,
@@ -242,16 +236,20 @@ mod tests {
 
     #[test]
     fn shared_native_mappings_are_hook_supported() {
+        use crate::provider::provider_info;
+
         for provider in [Provider::Claude, Provider::Gemini, Provider::OpenCode] {
-            for mapping in provider.shared_native_mappings() {
+            for mapping in provider_info(provider).event_mapping.registration_targets() {
                 assert!(
                     provider.supports_event_via_hook(&mapping.event),
                     "shared mapping marks {provider}/{:?} but provider is not hook-supported",
                     mapping.event
                 );
                 assert_eq!(
-                    provider.registration_native_event_name(&mapping.event),
-                    Some(mapping.native_name),
+                    provider_info(provider)
+                        .event_mapping
+                        .registration_native_name(mapping.event),
+                    mapping.support_level.native_name(),
                     "shared registration mapping mismatch for {provider}/{:?}",
                     mapping.event
                 );
@@ -261,10 +259,12 @@ mod tests {
 
     #[test]
     fn adapters_conform_to_shared_native_mappings() {
+        use crate::provider::provider_info;
+
         for provider in [Provider::Claude, Provider::Gemini, Provider::OpenCode] {
             let adapter = adapter_for(provider);
 
-            for mapping in provider.shared_native_mappings() {
+            for mapping in provider_info(provider).event_mapping.registration_targets() {
                 for alias in mapping.parse_aliases {
                     let raw = raw_for_native(provider, alias);
                     let (event, _) = adapter.parse_event(&raw).unwrap_or_else(|err| {

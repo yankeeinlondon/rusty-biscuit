@@ -196,6 +196,12 @@ pub enum RouteConfig {
 pub struct DesktopWindowsConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub app_id: Option<String>,
+    /// Caller-supplied helper preference order (e.g. `["snore_toast"]`).
+    ///
+    /// Names are parsed via [`sniff::programs::NotificationHelper`]'s
+    /// `FromStr` impl. Unknown names are dropped at conversion time.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub prefer_helpers: Vec<String>,
 }
 
 /// macOS-specific fields persisted in the desktop route config.
@@ -205,6 +211,9 @@ pub struct DesktopMacOsConfig {
     pub bundle_id: Option<String>,
     #[serde(default)]
     pub strategy: RouteMacOsStrategy,
+    /// Caller-supplied helper preference order (e.g. `["alerter"]`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub prefer_helpers: Vec<String>,
 }
 
 /// Linux-specific fields persisted in the desktop route config.
@@ -212,6 +221,66 @@ pub struct DesktopMacOsConfig {
 pub struct DesktopLinuxConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub desktop_entry: Option<String>,
+    /// Caller-supplied helper preference order (e.g. `["dunstify"]`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub prefer_helpers: Vec<String>,
+}
+
+/// Environment variable that overrides desktop `prefer_helpers` for all OSes.
+///
+/// Values are comma-separated (e.g. `"dunstify,notify_send"`). Names that do
+/// not match a known [`sniff::programs::NotificationHelper`] variant are
+/// silently dropped. When set, the env-derived list **prepends** the
+/// per-OS config list during conversion to the messenger library config.
+pub const PREFER_HELPERS_ENV: &str = "MESSENGER_DESKTOP_PREFER_HELPERS";
+
+/// Parse a helper name string, accepting both the strum snake_case form and
+/// the helper's [`binary_name`](sniff::programs::ProgramMetadata::binary_name)
+/// (e.g. both `"terminal_notifier"` and `"terminal-notifier"` resolve to
+/// [`sniff::programs::NotificationHelper::TerminalNotifier`]).
+pub fn parse_helper_name(name: &str) -> Option<sniff::programs::NotificationHelper> {
+    use sniff::programs::ProgramMetadata;
+    use strum::IntoEnumIterator;
+
+    let trimmed = name.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    if let Ok(helper) = trimmed.parse::<sniff::programs::NotificationHelper>() {
+        return Some(helper);
+    }
+    let lower = trimmed.to_lowercase();
+    sniff::programs::NotificationHelper::iter().find(|h| h.binary_name().to_lowercase() == lower)
+}
+
+/// Resolve the helper preference list for a desktop send.
+///
+/// Combines the env-var override (parsed once) with the per-OS config list,
+/// dropping names that do not parse as a known
+/// [`sniff::programs::NotificationHelper`]. Order: env-var entries first,
+/// then config entries; duplicates are removed (first occurrence wins).
+pub fn resolve_prefer_helpers(
+    config_helpers: &[String],
+) -> Vec<sniff::programs::NotificationHelper> {
+    let env_helpers = std::env::var(PREFER_HELPERS_ENV)
+        .ok()
+        .map(|raw| {
+            raw.split(',')
+                .filter_map(parse_helper_name)
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+
+    let mut combined: Vec<sniff::programs::NotificationHelper> = Vec::new();
+    for helper in env_helpers
+        .into_iter()
+        .chain(config_helpers.iter().filter_map(|s| parse_helper_name(s)))
+    {
+        if !combined.contains(&helper) {
+            combined.push(helper);
+        }
+    }
+    combined
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -326,8 +395,14 @@ struct LegacyRouteConfig {
     token_env: String,
 }
 
+// `RouteConfigSerde` exists only to bridge the legacy single-shape config
+// into the typed enum via serde's untagged deserialization. The variants
+// have very different sizes by design (the legacy shape is a tiny migration
+// shim) and the enum is constructed once per deserialize call, so the size
+// asymmetry has no runtime cost.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(untagged)]
+#[allow(clippy::large_enum_variant)]
 enum RouteConfigSerde {
     New(RouteConfigRepr),
     Legacy(LegacyRouteConfig),
@@ -965,5 +1040,150 @@ mod tests {
         let loaded = Config::load_from_path(&path).unwrap();
 
         assert_eq!(loaded, config);
+    }
+
+    #[test]
+    fn parse_helper_name_accepts_strum_form() {
+        assert_eq!(
+            parse_helper_name("dunstify"),
+            Some(sniff::programs::NotificationHelper::Dunstify)
+        );
+        assert_eq!(
+            parse_helper_name("notify_send"),
+            Some(sniff::programs::NotificationHelper::NotifySend)
+        );
+        assert_eq!(
+            parse_helper_name("terminal_notifier"),
+            Some(sniff::programs::NotificationHelper::TerminalNotifier)
+        );
+    }
+
+    #[test]
+    fn parse_helper_name_accepts_binary_form() {
+        // `binary_name()` uses dashes for some helpers — accept that too so
+        // users can configure the same string they'd type at the shell.
+        assert_eq!(
+            parse_helper_name("notify-send"),
+            Some(sniff::programs::NotificationHelper::NotifySend)
+        );
+        assert_eq!(
+            parse_helper_name("terminal-notifier"),
+            Some(sniff::programs::NotificationHelper::TerminalNotifier)
+        );
+    }
+
+    #[test]
+    fn parse_helper_name_returns_none_for_unknown() {
+        assert!(parse_helper_name("not-a-helper").is_none());
+        assert!(parse_helper_name("").is_none());
+        assert!(parse_helper_name("   ").is_none());
+    }
+
+    #[test]
+    fn desktop_route_parses_prefer_helpers_array() {
+        let raw = r#"{
+            "provider": "desktop",
+            "linux": { "prefer_helpers": ["dunstify", "notify_send"] }
+        }"#;
+        let parsed: RouteConfig = serde_json::from_str(raw).unwrap();
+        match parsed {
+            RouteConfig::Desktop { linux, .. } => {
+                assert_eq!(linux.prefer_helpers, vec!["dunstify", "notify_send"]);
+            }
+            other => panic!("expected RouteConfig::Desktop, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn desktop_route_round_trips_prefer_helpers_for_each_os() {
+        let route = RouteConfig::Desktop {
+            app_name: "Messenger".into(),
+            default_title: None,
+            icon: None,
+            category: None,
+            urgency: RouteUrgency::Normal,
+            timeout_ms: None,
+            actions: Vec::new(),
+            progress: None,
+            badge_count: None,
+            windows: DesktopWindowsConfig {
+                app_id: None,
+                prefer_helpers: vec!["snore_toast".into()],
+            },
+            macos: DesktopMacOsConfig {
+                bundle_id: None,
+                strategy: RouteMacOsStrategy::Auto,
+                prefer_helpers: vec!["alerter".into()],
+            },
+            linux: DesktopLinuxConfig {
+                desktop_entry: None,
+                prefer_helpers: vec!["dunstify".into()],
+            },
+        };
+        let json = serde_json::to_string(&route).unwrap();
+        let parsed: RouteConfig = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed, route);
+    }
+
+    #[test]
+    fn resolve_prefer_helpers_drops_unknown_names() {
+        // Run with the env var unset so only the config list is considered.
+        unsafe {
+            std::env::remove_var(PREFER_HELPERS_ENV);
+        }
+        let resolved = resolve_prefer_helpers(&[
+            "dunstify".into(),
+            "not-a-helper".into(),
+            "notify-send".into(),
+        ]);
+        assert_eq!(
+            resolved,
+            vec![
+                sniff::programs::NotificationHelper::Dunstify,
+                sniff::programs::NotificationHelper::NotifySend,
+            ]
+        );
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn resolve_prefer_helpers_env_var_takes_precedence() {
+        unsafe {
+            std::env::set_var(PREFER_HELPERS_ENV, "alerter, terminal_notifier");
+        }
+        let resolved = resolve_prefer_helpers(&["dunstify".into()]);
+        unsafe {
+            std::env::remove_var(PREFER_HELPERS_ENV);
+        }
+
+        // Env entries appear first; config entry is appended afterwards.
+        assert_eq!(
+            resolved,
+            vec![
+                sniff::programs::NotificationHelper::Alerter,
+                sniff::programs::NotificationHelper::TerminalNotifier,
+                sniff::programs::NotificationHelper::Dunstify,
+            ]
+        );
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn resolve_prefer_helpers_dedupes_env_and_config_entries() {
+        unsafe {
+            std::env::set_var(PREFER_HELPERS_ENV, "dunstify");
+        }
+        let resolved = resolve_prefer_helpers(&["dunstify".into(), "notify_send".into()]);
+        unsafe {
+            std::env::remove_var(PREFER_HELPERS_ENV);
+        }
+
+        assert_eq!(
+            resolved,
+            vec![
+                sniff::programs::NotificationHelper::Dunstify,
+                sniff::programs::NotificationHelper::NotifySend,
+            ]
+        );
     }
 }

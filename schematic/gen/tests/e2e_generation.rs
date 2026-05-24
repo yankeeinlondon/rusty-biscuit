@@ -15,11 +15,52 @@ use std::process::Command;
 
 use tempfile::TempDir;
 
+use schematic_define::openapi::ExportOptions;
+use schematic_definitions::apis_by_module;
 use schematic_definitions::elevenlabs::define_elevenlabs_rest_api;
 use schematic_definitions::openai::define_openai_api;
+use schematic_definitions::registry::get_registries_for_module;
 use schematic_gen::cargo_gen::write_cargo_toml;
+use schematic_gen::export::openapi::write_openapi_grouped;
 use schematic_gen::infer_module_path;
 use schematic_gen::output::{generate_and_write, generate_and_write_all};
+
+/// Returns true if a module exists as either a single `.rs` file or a directory
+/// with `mod.rs`.
+fn module_exists(src_dir: &Path, module_name: &str) -> bool {
+    let single_file = src_dir.join(format!("{}.rs", module_name));
+    let dir_mod = src_dir.join(module_name).join("mod.rs");
+    single_file.exists() || dir_mod.exists()
+}
+
+/// Reads module content from either a single file or concatenates all files
+/// in a split directory.
+fn read_module_content(src_dir: &Path, module_name: &str) -> String {
+    let single_file = src_dir.join(format!("{}.rs", module_name));
+    if single_file.exists() {
+        return std::fs::read_to_string(&single_file)
+            .unwrap_or_else(|e| panic!("Failed to read {}: {}", single_file.display(), e));
+    }
+
+    let dir = src_dir.join(module_name);
+    if dir.join("mod.rs").exists() {
+        let mut content = String::new();
+        for file_name in &["mod.rs", "requests.rs", "responses.rs", "client.rs"] {
+            let path = dir.join(file_name);
+            if path.exists() {
+                content.push_str(&std::fs::read_to_string(&path).unwrap_or_default());
+                content.push('\n');
+            }
+        }
+        return content;
+    }
+
+    panic!(
+        "Module '{}' not found as either file or directory in {}",
+        module_name,
+        src_dir.display()
+    );
+}
 
 /// Returns the absolute path to the schematic workspace directory.
 ///
@@ -671,8 +712,7 @@ fn elevenlabs_binary_endpoints_generate_correctly() {
 
     generate_and_write(&api, &src_dir, false).expect("Failed to generate code");
 
-    let api_content = std::fs::read_to_string(src_dir.join("elevenlabs.rs"))
-        .expect("Failed to read elevenlabs.rs");
+    let api_content = read_module_content(&src_dir, "elevenlabs");
 
     // Must have request_bytes for binary endpoints
     assert!(
@@ -724,8 +764,8 @@ fn multiple_apis_generate_together() {
     // Verify both API modules exist
     assert!(src_dir.join("openai.rs").exists(), "openai.rs should exist");
     assert!(
-        src_dir.join("elevenlabs.rs").exists(),
-        "elevenlabs.rs should exist"
+        module_exists(&src_dir, "elevenlabs"),
+        "elevenlabs module should exist"
     );
 
     // Verify lib.rs includes both modules
@@ -887,5 +927,185 @@ fn shared_module_contains_paginated_trait() {
     assert!(
         shared_content.contains("Marker trait for paginated request types"),
         "Paginated trait should have doc comment"
+    );
+}
+
+// =============================================================================
+// Module-Grouped OpenAPI Export Tests (Phase 2)
+// =============================================================================
+
+/// Verifies that running grouped OpenAPI export across every module produces
+/// module-named files (e.g. `ollama.json`, `emqx.json`) and never legacy
+/// per-API filenames (e.g. `ollamanative.json`, `emqxbasic.json`).
+#[test]
+fn generated_openapi_filenames_use_module_names() {
+    let temp_dir = TempDir::new().expect("Failed to create temp directory");
+    let openapi_dir = temp_dir.path();
+
+    let grouped = apis_by_module();
+    assert!(!grouped.is_empty(), "apis_by_module() should not be empty");
+
+    for (module_name, module_apis) in grouped.iter() {
+        let registry = get_registries_for_module(module_name).unwrap_or_else(|| {
+            panic!(
+                "Missing schema registry for module '{}' — every module must \
+                 supply openapi_registry() entries",
+                module_name
+            )
+        });
+        let api_refs: Vec<&schematic_define::RestApi> = module_apis.iter().collect();
+        write_openapi_grouped(
+            &api_refs,
+            module_name,
+            &registry,
+            &ExportOptions::new(),
+            openapi_dir,
+        )
+        .unwrap_or_else(|e| panic!("write_openapi_grouped failed for '{}': {}", module_name, e));
+    }
+
+    // Required module-grouped files MUST exist.
+    let expected = [
+        "ollama.json",
+        "emqx.json",
+        "huggingface.json",
+        "samsung_smart_tv.json",
+        "unfolded_circle_core_rest.json",
+    ];
+    for name in expected {
+        assert!(
+            openapi_dir.join(name).exists(),
+            "expected grouped file {} to exist",
+            name,
+        );
+    }
+
+    // Legacy per-API filenames MUST NOT appear.
+    let legacy = [
+        "ollamanative.json",
+        "ollamaopenai.json",
+        "emqxbasic.json",
+        "emqxbearer.json",
+        "huggingfacehub.json",
+        "samsungsmarttv.json",
+        "unfoldedcirclecorerest.json",
+    ];
+    for name in legacy {
+        assert!(
+            !openapi_dir.join(name).exists(),
+            "legacy per-API filename '{}' must not be produced",
+            name,
+        );
+    }
+
+    // Parse ollama.json and assert paths from BOTH variants are present.
+    let ollama_content = std::fs::read_to_string(openapi_dir.join("ollama.json"))
+        .expect("ollama.json should be readable");
+    let ollama_doc: openapiv3::OpenAPI =
+        serde_json::from_str(&ollama_content).expect("ollama.json should parse as OpenAPI");
+    let path_keys: std::collections::BTreeSet<&str> =
+        ollama_doc.paths.paths.keys().map(String::as_str).collect();
+
+    let ollama_module_apis = grouped.get("ollama").expect("ollama module present");
+    assert!(
+        ollama_module_apis.len() >= 2,
+        "ollama module should contain at least 2 APIs, got {}",
+        ollama_module_apis.len(),
+    );
+    for api in ollama_module_apis {
+        let owned = api
+            .endpoints
+            .iter()
+            .any(|e| path_keys.contains(e.path.as_str()));
+        assert!(
+            owned,
+            "grouped ollama.json missing any endpoint owned by '{}'",
+            api.name,
+        );
+    }
+}
+
+/// Verifies that the grouped writer surfaces a useful, module-named error
+/// when no schema registry is available for the supplied module. This
+/// mirrors the strict-failure path inside `run_generate_all`.
+#[test]
+fn grouped_export_fails_when_module_registry_missing() {
+    use schematic_define::{ApiResponse, AuthStrategy, Endpoint, RestApi, RestMethod};
+    use schematic_definitions::registry::SchemaRegistry;
+    use schematic_gen::errors::GeneratorError;
+
+    fn synth(name: &str) -> RestApi {
+        RestApi {
+            name: name.to_string(),
+            description: format!("{} synthetic", name),
+            base_url: "https://synthetic.example.com".to_string(),
+            docs_url: None,
+            auth: AuthStrategy::None,
+            auth_policy: None,
+            env_auth: vec![],
+            env_username: None,
+            env_mapping: None,
+            headers: vec![],
+            endpoints: vec![Endpoint {
+                id: format!("{}Endpoint", name),
+                method: RestMethod::Get,
+                path: format!("/{}", name.to_lowercase()),
+                description: String::new(),
+                request: None,
+                response: ApiResponse::Empty,
+                headers: vec![],
+                params: None,
+                oauth_scopes: None,
+            }],
+            module_path: Some("synthetic_unknown_module".to_string()),
+            request_suffix: None,
+            version: None,
+        }
+    }
+
+    // Confirm the module is NOT known to apis_by_module().
+    assert!(
+        get_registries_for_module("synthetic_unknown_module").is_none(),
+        "test fixture relies on this module being unknown",
+    );
+
+    // Simulate the run_generate_all error path — the lookup itself returns
+    // None, and downstream callers convert that to a ConfigError naming the
+    // module.
+    let module_name = "synthetic_unknown_module";
+    let lookup = get_registries_for_module(module_name);
+    assert!(lookup.is_none(), "missing registry should return None");
+
+    let err = GeneratorError::ConfigError(format!(
+        "Missing schema registry for module \"{module_name}\". \
+         Add openapi_registry() to schematic-definitions or skip with --no-openapi."
+    ));
+    let msg = err.to_string();
+    assert!(
+        msg.contains(module_name),
+        "error message must name the module: {msg}",
+    );
+    assert!(
+        msg.contains("--no-openapi"),
+        "error message must mention escape hatch: {msg}",
+    );
+
+    // And the writer itself, given a synthetic empty registry, still emits
+    // the file name from `module_name` (Phase 2 invariant: no `api.name`
+    // anywhere in OpenAPI filename derivation).
+    let temp = TempDir::new().unwrap();
+    let api = synth("FooBar");
+    let api_refs = vec![&api];
+    let path = write_openapi_grouped(
+        &api_refs,
+        module_name,
+        &SchemaRegistry::new(),
+        &ExportOptions::new(),
+        temp.path(),
+    )
+    .expect("write_openapi_grouped should succeed");
+    assert_eq!(
+        path.file_name().unwrap().to_str().unwrap(),
+        format!("{}.json", module_name),
     );
 }

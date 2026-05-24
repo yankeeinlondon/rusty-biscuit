@@ -1,0 +1,32 @@
+]11;?=== Terminal Information ===
+
+Application: Wezterm
+Operating System: MacOS
+
+=== Dimensions ===
+
+Width:  80 columns
+Height: 24 rows
+
+=== Capabilities ===
+
+TTY:            yes
+CI Environment: no
+Color Depth:    TrueColor
+Color Mode:     Dark
+Italics:        yes
+Images:         Kitty
+OSC8 Links:     yes
+
+=== Underline Support ===
+
+Straight: yes
+Double:   yes
+Curly:    yes
+Dotted:   yes
+Dashed:   yes
+Colored:  yes
+
+=== Config ===
+
+Config file: /Users/ken/.config/wezterm/wezterm.lua

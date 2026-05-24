@@ -24,7 +24,7 @@ In non-interactive mode, Claudine instructs the wrapped provider to emit structu
 | Claude | StreamJson | `--print --output-format stream-json` |
 | Codex | Jsonl | `exec` entrypoint + `--json` |
 | Gemini | StreamJson | `--output-format stream-json` |
-| Kimi Code | StreamJson | `--print` |
+| Kimi Code | WireJsonRpc | `--wire` (JSON-RPC 2.0 over stdin/stdout) |
 | OpenCode | Ndjson | `run` entrypoint + `--format json` |
 | Qwen Code | StreamJson | _(automatic)_ |
 | Goose | — | No structured streaming support |
@@ -145,10 +145,11 @@ Provider coverage:
 | Claude | `content_block_delta` with `delta.type = "thinking_delta"` |
 | Codex | `item.completed` / `item.updated` with `item.type = "reasoning"` |
 | OpenCode | Top-level `{"type":"reasoning","text":"…"}` (also resolves nested `part.text`) |
+| Kimi | `ContentPart` event with `payload.type = "think"` (per-token deltas concatenated into a thinking block at `TurnEnd` or when the part type changes) |
 | Gemini | _not yet surfaced_ — `thinkingConfig.includeThoughts` controls model-side emission but no dedicated stream-json event has been observed in this repo's research or fixtures |
 | Qwen | _not yet surfaced_ — when `enable_thinking` is on, the model emits `<think>…</think>` blocks inline inside normal message content rather than as a separate event |
 
-Goose and Kimi do not surface reasoning in their stream protocols; nothing is rendered for them. Adding a typed `Reasoning` variant for Gemini or Qwen requires first observing the wire format; contributions welcome.
+Goose does not surface reasoning in its stream protocol; nothing is rendered for it. Adding a typed `Reasoning` variant for Gemini or Qwen requires first observing the wire format; contributions welcome.
 
 Claude also promotes assistant prose from mixed `assistant` envelopes that contain both `text` and `tool_use` into `Reasoning`. Those "tool preface" lines are planning narration, not final answer text, and rendering them in `Section::Thinking` avoids stray stdout paragraphs and extra section separators during tool-heavy turns.
 
@@ -197,7 +198,8 @@ The same recipe (`with_border("▌ ").with_left_block_color(...)`) is used by [`
 | Codex | `error.type = "usage_limit_reached"` | `ApiRemote` |
 | Codex | `error.type = "auth"` / `account` | `Configuration` |
 | OpenCode | `error_type` literal table | `AgentNative` (default) |
-| Gemini / Qwen / Kimi | regex on `error.message` | best-effort |
+| Gemini / Qwen | regex on `error.message` | best-effort |
+| Kimi | JSON-RPC `error.code` from `kimi_cli/wire/jsonrpc.py::ErrorCodes` (`-32004 AUTH_EXPIRED` → `Configuration`, `-32003 CHAT_PROVIDER_ERROR` → `ApiRemote`, `-32601`/`-32602` → `Configuration`, others → `AgentNative`); message-keyword fallback covers rate/quota/billing → `ApiRemote`, auth/api-key/permission → `Configuration`, interrupt/cancel → `Interrupted` |
 | Any | SIGINT / SIGTERM exit | `Interrupted` |
 
 Anything unmatched defaults to `Unknown`, which renders as a red `Agent Error` block.
@@ -229,14 +231,15 @@ Wrapper passthrough runs with no prompt file skip the header entirely; their onl
 OpenCode has an additional recovery path because its structured stdout stream is not a reliable process-lifecycle contract:
 
 - Some successful runs end on `step_finish.part.reason = "stop"` and then never exit cleanly.
-- Some subagent-heavy runs go completely silent after the last visible `Task(...)` completion even though the parent process remains alive.
+- Some subagent-heavy runs go completely silent after the last visible `Task(...)` completion even though the parent process remains alive. OpenCode dispatches the `task` tool as an ordinary tool, so the parent stream sees `tool_use` / `tool_result` for each subagent (not `task_started` / `task_completed`); after every dispatched task returns, the parent sometimes never emits a final `step_finish` with `reason = "stop"`.
 
-To avoid indefinite hangs in those cases, Claudine's OpenCode wait loop now polls `LiveMetricsState` while it waits for process exit:
+To avoid indefinite hangs in those cases, Claudine's OpenCode wait loop polls `LiveMetricsState` while it waits for process exit. The hang-recovery rule fires when **all** of these hold:
 
-- If OpenCode has already reported `provider_status = "stop"` and then stays silent for the normal stall window (default **120 s**), Claudine terminates the hung process and treats the run as successful.
-- If OpenCode has no visible in-flight work and stays silent for the hard recovery window (default **300 s**), Claudine terminates the process and synthesizes `error_kind = "provider_stalled"`.
+- At least one `step_finish` event has been observed (i.e. `provider_status` is not `None`). This guarantees the parser has crossed at least one step boundary, which rules out slow-startup false positives.
+- No tools and no subagents are in flight (`in_flight` and `in_flight_subagents` are both empty).
+- The stream has been silent for the recovery window (default **120 s**).
 
-Set `CLAUDINE_OPENCODE_HANG_TIMEOUT_SECONDS=<seconds>` to override the hard silent-stall recovery window.
+When all conditions hold, Claudine SIGTERMs the hung process and treats the run as successful (`CompletedButHung`). The synthesized message names the last observed `step_finish.reason` (`stop` or `tool-calls`) so operators can distinguish a clean-finish hang from a parallel-tool-dispatch hang.
 
 ## Timing Threads
 
@@ -314,9 +317,11 @@ This includes the full (non-truncated) session ID, model name, turn count, per-t
 
 Non-interactive sessions use two delivery mechanisms depending on the provider:
 
-**stdin pipe** — the prompt is written to the child's stdin, then the pipe is closed (EOF). This avoids `ENAMETOOLONG` errors when composed prompts exceed OS argument length limits. Used by: Claude, Kimi Code.
+**stdin pipe** — the prompt is written to the child's stdin, then the pipe is closed (EOF). This avoids `ENAMETOOLONG` errors when composed prompts exceed OS argument length limits. Used by: Claude.
 
 **Positional/flag arguments** — the prompt is passed as a CLI argument. Some providers convert positionals to flags (e.g., Gemini converts to `--prompt`). Used by: Codex, Gemini, Goose, OpenCode.
+
+**Wire JSON-RPC `prompt` request** — the prompt is delivered as the `params.user_input` of a JSON-RPC `prompt` request after the `initialize` handshake completes. Stdin remains open for the duration of the turn so Claudine can answer Kimi's `ApprovalRequest`/`QuestionRequest`/`ToolCallRequest`/`HookRequest` envelopes inline. Used by: Kimi Code (non-interactive only; interactive `kimi` runs continue to use the native `--prompt` flag).
 
 Even when the prompt is delivered via CLI args, structured non-interactive runs do not inherit the caller's stdin. Claudine closes stdin for those child processes unless it is actively seeding prompt content, which prevents providers from lingering on an open terminal after the non-interactive task is already complete.
 
@@ -411,7 +416,7 @@ strings (`30s`, `5m`, `2h`):
 
 | Property | Frontmatter | CLI flag | Semantics |
 |----------|-------------|----------|-----------|
-| Wall clock | `timeout` | `--timeout <SECONDS>` | Deadline for total runtime. Checked every poll against `Instant::now() - loop_start`. |
+| Wall clock | `timeout` | `--timeout <DURATION>` | Deadline for total runtime like 30s, 5m, 2h. Enforced by the watchdog ticker. |
 | Step silence | `step_timeout` | `--step-timeout <DURATION>` | Deadline for silence between stream events. Resets on every `SemanticEvent`; fires when `last_event_at` is older than the budget. |
 
 At either deadline, Claudine sends SIGTERM to the child; after a 5-second

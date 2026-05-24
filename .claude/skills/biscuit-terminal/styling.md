@@ -46,51 +46,30 @@ let text = curly_underline("error", &term);
 
 ## Prose Component
 
-The `Prose` struct allows styled text with inline tokens:
+The `Prose` struct allows styled text with bracketed tags and a Markdown subset.
+It renders Terminal, Browser, Markdown, and MarkdownPlus from a shared
+`ProseDocument` IR.
 
 ```rust
 use biscuit_terminal::components::prose::Prose;
-use biscuit_terminal::components::renderable::Renderable;
+use biscuit_terminal::components::renderable::TerminalRenderable;
 
 // Create prose with inline styling
-let prose = Prose::new("Hello {{bold}}world{{reset}}!");
-let output = prose.render(None);
+let prose = Prose::new("Hello <b>world</b>!");
+let output = prose.render_optimistic(None);
 // → "Hello \x1b[1mworld\x1b[0m!\x1b[0m"
 
 // With builder pattern
 let prose = Prose::new("<b>Important</b> message")
-    .with_word_wrap(WordWrap::WrapProse(None))
+    .with_word_wrap(WordWrap::WrapProse(None, None))
     .with_left_margin(Margin::Chars(4));
 ```
 
-### Atomic Tokens
+### Block Tags
 
-Single-point style changes that require manual reset:
-
-```
-{{bold}}      {{dim}}       {{italic}}
-{{underline}} {{strikethrough}}
-{{double-underline}} {{curly-underline}} {{dotted-underline}} {{dashed-underline}}
-{{blink}}     {{inverse}}   {{hidden}}
-{{red}}       {{green}}     {{blue}}
-{{yellow}}    {{cyan}}      {{magenta}}
-{{bright-red}} {{bright-green}} ...
-{{bg-red}}    {{bg-blue}}   ...
-{{reset}}     {{reset-fg}}  {{reset-bg}}
-{{normal-font-weight}} {{not-italic}} {{not-underline}} {{not-strikethrough}}
-```
-
-**Note:** Reset tokens (`reset`, `reset-fg`, `not-italic`, etc.) are atomic-only.
-
-Example:
-```
-"This is {{bold}}important{{reset}} text"
-→ "This is \x1b[1mimportant\x1b[0m text"
-```
-
-### Block Tokens
-
-HTML-like tags that auto-reset. Same names as atomic tokens, with short aliases:
+HTML-like tags that auto-reset. Former atomic tokens (`{{bold}}`,
+`{{reset}}`, etc.) were removed in the 2026-05-17 Prose cross-target work and
+now render as literal text.
 
 | Token | Alias | Effect |
 |-------|-------|--------|
@@ -152,6 +131,45 @@ Example:
 ```
 "Click <a href=\"https://example.com\">here</a> for more"
 → "Click \x1b]8;;https://example.com\x07here\x1b]8;;\x07 for more"
+```
+
+### Markdown Subset
+
+A strict CommonMark subset is recognised in addition to block tags. Markdown forms are pre-processed into the equivalent internal tag form before rendering:
+
+| Markdown        | Equivalent block tag           |
+|-----------------|--------------------------------|
+| `[desc](ref)`   | `<a href="ref">desc</a>`       |
+| `**text**`      | `<b>text</b>`                  |
+| `_text_`        | `<i>text</i>`                  |
+
+Strict subset — `__bold__` and `*italics*` are **not** recognised; both pass through as literal text. The pre-processor runs in a fixed order: links → bold → italics → block-tag parser. Link URLs are placeholdered before the bold/italics phases so a URL like `https://example.com/path_with_underscores` is never re-interpreted.
+
+#### Flanking rule (intra-word inhibition)
+
+`_` and `**` are treated as **literal text** when they sit between two word characters (Unicode alphanumerics on both sides). This protects identifier-shaped strings from being mangled when interpolated into Prose format strings:
+
+| Input | Output | Why |
+|-------|--------|-----|
+| `OPENCODE_CONFIG_CONTENT` | `OPENCODE_CONFIG_CONTENT` | Every `_` is intra-word |
+| `_foo_bar_` | `<i>foo_bar</i>` | Outer `_` flanked by start/end; inner `_` skipped |
+| `foo**bar**baz` | `foo**bar**baz` | Both `**` runs intra-word |
+| `**foo**bar**baz**` | `<b>foo**bar**baz</b>` | Outer `**` flanked; inner pairs intra-word |
+| `(_text_)` | `(<i>text</i>)` | Punctuation neighbours form boundaries |
+| `<dim>=OPENCODE_CONFIG_CONTENT</dim>` | unchanged | Tag wrapper preserved; intra-word `_` not triggered inside body |
+
+The rule is symmetric across openers and closers and applies to both `_` and `**`. It is a deliberately simpler rule than full CommonMark left/right-flanking — terminal markup is overwhelmingly ASCII identifiers and predictability beats spec parity.
+
+**Practical consequence for callers:** dynamic content interpolated into a Prose format string (env-var keys, file paths, identifiers) usually does **not** require escaping — the flanking rule already protects identifier-shaped values.
+
+#### Escape mechanism
+
+A backslash escapes the immediately following character. Escapable: `* _ [ ] ( ) < > { \`. Use this when you need a literal Markdown sigil at a position where the flanking rule would *not* already inhibit it (e.g. `\_emphasis_` for a leading literal `_`).
+
+```
+\_text\_  →  _text_   (literal underscores, no italics)
+\*\*x\*\* →  **x**    (literal asterisks)
+\\        →  \        (literal backslash)
 ```
 
 ### Prose Options

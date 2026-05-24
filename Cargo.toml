@@ -1,6 +1,9 @@
 [workspace]
 resolver = "2"
 members = [
+    "biscuit-clipboard/cli",
+    "biscuit-clipboard/lib",
+    "biscuit-clipboard/service",
     "biscuit-file/cli",
     "biscuit-file/lib",
     "biscuit-hash/cli",
@@ -43,6 +46,7 @@ members = [
     "tree-hugger/lib",
     "biscuit-tui/cli",
     "biscuit-tui/lib",
+    "renderable",
     "unchained-ai/cli",
     "unchained-ai/gen",
     "unchained-ai/lib",
@@ -52,6 +56,8 @@ members = [
     "biscuit-visualized/src",
     "worktree/lib",
     "worktree/cli",
+    "darkmatter/dmls",
+    "tools/test-toolkit",
 ]
 exclude = ["schematic/schema"]
 

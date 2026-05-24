@@ -118,9 +118,13 @@ Conflicting combinations (e.g. `--json --no-output`) should produce a clear erro
 | Unit | `#[test]` | Internal helpers, serialization, parsers in args/commands/output |
 | Integration | `assert_cmd` | End-to-end: exit codes, flag combos, missing args, help text |
 | Snapshot | `insta` | Visual output, tables, ANSI content (set `NO_COLOR=1`) |
-| PTY | `expectrl` | TTY-dependent paths: terminal width, interactive prompts, `is_terminal()` |
+| PTY (Level 1) | `expectrl` | TTY-dependent paths with manufactured input bytes |
+| Real-terminal (Level 2) | `wezterm cli`, `kitty @`, `tmux` | Render correctness in an actual terminal/multiplexer; capture pane text |
+| Real-keyboard (Level 3) | `cliclick` (macOS), `xdotool` (Linux) | OS-level key injection so the terminal's input encoder fires |
 | Property | `proptest` | Fuzz custom parsers for edge cases |
 | Runner | `cargo-nextest` | Fast execution with retries for flaky TTY/timeout tests |
+
+**Test rigor matters as much as test count.** A user-observable requirement of the form "when the user holds modifier X, behaviour Y happens" cannot be covered by Level 1 tests alone — the terminal's encoder is never exercised. See [`cli-best-practices.md` §Test Rigor](cli-best-practices.md) for the Level 1 / 2 / 3 vocabulary and the rule for when to require which level. In the rusty-biscuit monorepo, the Level 2/3 harness implementations live in the shared `biscuit-test-harness` crate — its `biscuit-test-harness/README.md` documents the harness variants, when to use each, and the environment each requires.
 
 ## Detailed References
 

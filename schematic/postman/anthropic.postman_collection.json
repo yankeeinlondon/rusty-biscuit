@@ -9,6 +9,11 @@
       "key": "baseUrl",
       "value": "https://api.anthropic.com/v1",
       "description": "Base URL for all requests"
+    },
+    {
+      "key": "apiKey",
+      "value": "",
+      "description": "API key value"
     }
   ],
   "auth": {
@@ -16,11 +21,11 @@
     "apikey": [
       {
         "key": "key",
-        "value": "{{apiKey}}"
+        "value": "X-Api-Key"
       },
       {
         "key": "value",
-        "value": "X-Api-Key"
+        "value": "{{apiKey}}"
       },
       {
         "key": "in",

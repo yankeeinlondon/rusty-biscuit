@@ -2,8 +2,8 @@ use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::prelude::*;
 use ratatui::widgets::*;
 
-use claudine::services::protect::catalog::RuleGroup;
-use claudine::services::protect::config::{ProtectRuleToggles, RuleGroupConfig};
+use claudine::protect::catalog::RuleGroup;
+use claudine::protect::config::{ProtectRuleToggles, RuleGroupConfig};
 
 use super::super::app::{App, AppMode, ModalState};
 use super::super::widgets::toggle::Toggle;
@@ -438,7 +438,7 @@ mod tests {
     use ratatui::backend::TestBackend;
 
     use claudine::config::claudine_config::ClaudineConfig;
-    use claudine::services::protect::catalog::RuleGroup;
+    use claudine::protect::catalog::RuleGroup;
 
     use crate::commands::config_tui::app::Tab;
 

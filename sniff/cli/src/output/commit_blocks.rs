@@ -19,15 +19,15 @@ use std::path::{Path, PathBuf};
 
 use biscuit_terminal::components::list::UnorderedList;
 use biscuit_terminal::components::prose::Prose;
-use biscuit_terminal::components::renderable::Renderable;
+use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::terminal::Terminal;
 use chrono::{DateTime, Duration, Local, NaiveDate};
 use darkmatter::markdown::Markdown;
 use darkmatter::markdown::output::terminal::{TerminalOptions, for_terminal};
 
-use sniff::filesystem::blast_radius::{is_documentation_path, is_source_code_path};
 use sniff::filesystem::git::ConventionalCommit;
 use sniff::filesystem::git::recent_commits::{CommitDesc, CommitDescSet, CommitFileChange};
+use sniff::filesystem::path_kind::{is_documentation_path, is_source_code_path};
 
 /// Which commits and which files to include in the output.
 #[derive(Debug, Clone, Copy)]
@@ -58,6 +58,48 @@ impl CommitCentricFilter {
             Self::SourceCode => is_source_code_path(&p),
             Self::Documentation => is_documentation_path(&p),
         }
+    }
+}
+
+/// Filter a [`CommitDescSet`] in-place style by returning a new set whose
+/// commits have been pruned to match `filter`.
+///
+/// For each commit in `set`, files are filtered by [`CommitCentricFilter::file_matches`].
+/// Commits whose filtered file list is empty are dropped. `period_label`,
+/// `repo_root`, and `packages` are preserved verbatim.
+///
+/// ## Notes
+///
+/// Used by the JSON path of `source-code-changes` and `documentation-changes`
+/// to apply the same per-commit / per-file filtering that the styled and
+/// plain text paths apply via [`render_commit_set_styled`] /
+/// [`CommitDescSet::source_code_changes`].
+pub(crate) fn filter_commit_set(set: &CommitDescSet, filter: CommitCentricFilter) -> CommitDescSet {
+    let commits = set
+        .commits
+        .iter()
+        .filter_map(|commit| {
+            let files: Vec<CommitFileChange> = commit
+                .files
+                .iter()
+                .filter(|f| filter.file_matches(&f.path))
+                .cloned()
+                .collect();
+            if files.is_empty() {
+                None
+            } else {
+                let mut filtered = commit.clone();
+                filtered.files = files;
+                Some(filtered)
+            }
+        })
+        .collect();
+
+    CommitDescSet {
+        commits,
+        period_label: set.period_label.clone(),
+        repo_root: set.repo_root.clone(),
+        packages: set.packages.clone(),
     }
 }
 
@@ -221,4 +263,93 @@ fn file_url(path: &Path) -> String {
     url::Url::from_file_path(path)
         .map(|u| u.to_string())
         .unwrap_or_else(|()| format!("file://{}", path.to_string_lossy()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use sniff::filesystem::git::discovery::DeltaKind;
+    use std::path::PathBuf;
+
+    fn change(path: &str) -> CommitFileChange {
+        CommitFileChange {
+            path: path.to_string(),
+            kind: DeltaKind::Modified,
+        }
+    }
+
+    fn commit(hash: &str, files: Vec<CommitFileChange>) -> CommitDesc {
+        CommitDesc {
+            hash: hash.to_string(),
+            datetime: "2026-04-28T12:00:00+00:00".to_string(),
+            packages: None,
+            package_areas: None,
+            files,
+            description: format!("commit {hash}"),
+            bullet_points: vec![],
+        }
+    }
+
+    fn fixture_set() -> CommitDescSet {
+        CommitDescSet {
+            commits: vec![
+                commit("aaaa", vec![change("src/main.rs"), change("README.md")]),
+                commit("bbbb", vec![change("README.md")]),
+            ],
+            period_label: "last 3d".to_string(),
+            repo_root: PathBuf::from("/tmp/repo"),
+            packages: None,
+        }
+    }
+
+    #[test]
+    fn filter_commit_set_source_code_keeps_only_source_files() {
+        let set = fixture_set();
+        let filtered = filter_commit_set(&set, CommitCentricFilter::SourceCode);
+
+        // Only the first commit has a source-code file, and only that file
+        // should remain in the filtered output.
+        assert_eq!(filtered.commits.len(), 1, "expected one commit kept");
+        assert_eq!(filtered.commits[0].hash, "aaaa");
+        let paths: Vec<&str> = filtered.commits[0]
+            .files
+            .iter()
+            .map(|f| f.path.as_str())
+            .collect();
+        assert_eq!(paths, vec!["src/main.rs"]);
+    }
+
+    #[test]
+    fn filter_commit_set_documentation_keeps_only_doc_files() {
+        let set = fixture_set();
+        let filtered = filter_commit_set(&set, CommitCentricFilter::Documentation);
+
+        // Both commits touched README.md so both must survive, each with
+        // only the docs file remaining.
+        assert_eq!(filtered.commits.len(), 2);
+        for commit in &filtered.commits {
+            let paths: Vec<&str> = commit.files.iter().map(|f| f.path.as_str()).collect();
+            assert_eq!(paths, vec!["README.md"]);
+        }
+    }
+
+    #[test]
+    fn filter_commit_set_all_returns_identical_data() {
+        let set = fixture_set();
+        let filtered = filter_commit_set(&set, CommitCentricFilter::All);
+
+        assert_eq!(filtered.commits.len(), set.commits.len());
+        for (a, b) in filtered.commits.iter().zip(set.commits.iter()) {
+            assert_eq!(a.hash, b.hash);
+            assert_eq!(a.files.len(), b.files.len());
+        }
+    }
+
+    #[test]
+    fn filter_commit_set_preserves_period_label_and_root() {
+        let set = fixture_set();
+        let filtered = filter_commit_set(&set, CommitCentricFilter::SourceCode);
+        assert_eq!(filtered.period_label, set.period_label);
+        assert_eq!(filtered.repo_root, set.repo_root);
+    }
 }

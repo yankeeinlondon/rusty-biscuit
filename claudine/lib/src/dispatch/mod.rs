@@ -1,5 +1,7 @@
+pub(crate) mod deps;
+pub mod expression;
 pub mod loader;
-mod matcher;
+pub mod matcher;
 pub mod runner;
 pub mod template;
 
@@ -13,10 +15,11 @@ use tracing::{debug, info, info_span, warn};
 use crate::actions::{HookDecision, HookResponse};
 use crate::adapters::{self, AdapterError};
 use crate::error::Result;
-use crate::events::{AgenticEvent, EnvironmentContext, EventMeta, Provider, ResolvedHook};
-use crate::services::protect::decision::ProtectDecision;
-use crate::services::protect::observe::extract_protect_request;
-use crate::services::protect::report::format_blocked_message;
+use crate::events::{AgenticEvent, EnvironmentContext, EventMeta, ResolvedHook};
+use crate::protect::decision::ProtectDecision;
+use crate::protect::observe::extract_protect_request;
+use crate::protect::report::format_blocked_message;
+use crate::provider::Provider;
 
 /// Wrapper-session-scoped dispatch runtime.
 ///
@@ -289,7 +292,7 @@ pub async fn dispatch_canonical_with_runtime(
         if !binding.enabled() {
             debug!(%event, "Canonical binding disabled, skipping actions");
             None
-        } else if !matcher::matches_with_regex(binding.matcher(), &meta) {
+        } else if !matcher::matches(binding.matcher(), &meta) {
             debug!(%event, "Matcher did not match in canonical binding, skipping actions");
             None
         } else {
@@ -397,7 +400,8 @@ pub async fn dispatch_canonical_with_runtime(
 ///
 /// ```no_run
 /// # use claudine::dispatch::write_dispatch_event_to;
-/// # use claudine::events::{EventMeta, Provider, AgenticEvent};
+/// # use claudine::events::{AgenticEvent, EventMeta};
+/// # use claudine::provider::Provider;
 /// # use std::path::Path;
 /// let meta = EventMeta::new(Provider::Claude, AgenticEvent::SessionStart);
 /// write_dispatch_event_to(&meta, Path::new("/tmp/test.jsonl")).unwrap();
@@ -657,8 +661,10 @@ fn finalize_response(
 mod tests {
     use super::*;
     use crate::actions::*;
-    use crate::config::claudine_config::{ClaudineConfig, TtsValue, VoiceSelection};
+    use crate::config::claudine_config::ClaudineConfig;
+    use crate::config::tts::{TtsValue, VoiceSelection};
     use crate::events::*;
+    use crate::provider::Provider;
     use serde_json::json;
     use std::collections::HashMap;
 
@@ -829,7 +835,10 @@ mod tests {
         let mut config = ClaudineConfig::default();
         config.actions.insert(
             AgenticEvent::SessionStart,
-            vec![HookAction::Report { handler: None }],
+            vec![HookAction::Report {
+                handler: None,
+                when: None,
+            }],
         );
 
         let config_path = repo.path().join(".claudine/config.json");
@@ -904,7 +913,10 @@ mod tests {
         let mut config = ClaudineConfig::default();
         config.actions.insert(
             AgenticEvent::SessionStart,
-            vec![HookAction::Report { handler: None }],
+            vec![HookAction::Report {
+                handler: None,
+                when: None,
+            }],
         );
 
         let config_path = repo.path().join(".claudine/config.json");
@@ -1147,9 +1159,8 @@ mod tests {
 
     #[test]
     fn bridge_settings_from_tts_config() {
-        use crate::config::claudine_config::{
-            ClaudineConfig, Gender, TtsConfigSettings, TtsValue, VoiceSelection,
-        };
+        use crate::config::claudine_config::ClaudineConfig;
+        use crate::config::tts::{Gender, TtsConfigSettings, TtsValue, VoiceSelection};
         let config = ClaudineConfig {
             tts: TtsValue::Config(TtsConfigSettings {
                 provider: "say".to_string(),
@@ -1166,9 +1177,8 @@ mod tests {
 
     #[test]
     fn bridge_settings_from_tts_config_gendered_voice() {
-        use crate::config::claudine_config::{
-            ClaudineConfig, Gender, TtsConfigSettings, TtsValue, VoiceSelection,
-        };
+        use crate::config::claudine_config::ClaudineConfig;
+        use crate::config::tts::{Gender, TtsConfigSettings, TtsValue, VoiceSelection};
         let config = ClaudineConfig {
             tts: TtsValue::Config(TtsConfigSettings {
                 provider: "elevenlabs".to_string(),
@@ -1250,7 +1260,10 @@ mod tests {
         config.default_sounds = DefaultSounds::default();
         config.actions.insert(
             AgenticEvent::SessionStart,
-            vec![HookAction::Report { handler: None }],
+            vec![HookAction::Report {
+                handler: None,
+                when: None,
+            }],
         );
 
         let runtime = loader::compile_canonical_runtime(config, None).unwrap();
@@ -1302,6 +1315,90 @@ mod tests {
         assert!(
             outcome.response.is_some(),
             "should produce provider-native deny response"
+        );
+    }
+
+    /// Integration smoke test for the full
+    /// loader → matcher → dispatch → runner pipeline with a `when`-gated
+    /// action.
+    ///
+    /// The runner-level tests in `dispatch::runner::tests::when*` exercise
+    /// `evaluate_when` semantics directly. The loader tests in
+    /// `dispatch::loader::tests` cover compilation. This test guards the
+    /// handoff between those layers: a `ClaudineConfig` whose only action
+    /// is a `Call` with `when: "tool_name == 'Bash'"` must execute and
+    /// synthesize a blocking deny when `tool_name` matches, and must skip
+    /// the action (no blocking response) when it does not. Both assertions
+    /// run against the same compiled `CanonicalRuntimeConfig`, which also
+    /// proves the runtime is reusable across dispatches.
+    #[tokio::test]
+    async fn canonical_dispatch_when_gated_action_executes_or_skips_via_runtime_binding() {
+        use crate::config::claudine_config::{ClaudineConfig, DefaultSounds};
+
+        let mut config = ClaudineConfig::default();
+        config.protect.enabled = false;
+        config.logging = false;
+        config.default_sounds = DefaultSounds::default();
+        config.actions.insert(
+            AgenticEvent::BeforeTool,
+            vec![HookAction::Call {
+                command: "__claudine_pipeline_when_gated_missing__".to_string(),
+                args: None,
+                timeout_ms: Some(50),
+                mapper: None,
+                when: Some("tool_name == 'Bash'".to_string()),
+            }],
+        );
+
+        let runtime = loader::compile_canonical_runtime(config, None)
+            .expect("runtime should compile from a `when`-gated config");
+
+        // Branch 1: `when` evaluates true → Call runs, fails to launch the
+        // missing command, and the runner synthesizes a blocking deny.
+        let mut meta_bash = EventMeta::new(Provider::Claude, AgenticEvent::BeforeTool);
+        meta_bash.tool_name = Some("Bash".to_string());
+        meta_bash.tool_input = Some(json!({"command": "echo hi"}));
+        meta_bash.env = EnvironmentContext::default();
+
+        let outcome_bash = dispatch_canonical_with_runtime(
+            Provider::Claude,
+            AgenticEvent::BeforeTool,
+            meta_bash,
+            &runtime,
+        )
+        .await
+        .expect("dispatch must not error on a truthy `when`");
+
+        assert!(
+            outcome_bash.response.is_some(),
+            "truthy `when` must let the Call action run end-to-end through the configured runtime binding and produce a blocking deny response",
+        );
+        assert!(
+            outcome_bash.protect_pre.is_none() && outcome_bash.protect_post.is_none(),
+            "no protect rules are active in this config; the response must come from the action path, not protect",
+        );
+
+        // Branch 2: `when` evaluates false → Call is skipped, no blocking
+        // response is produced, and dispatch returns the empty
+        // BeforeTool ack.
+        let mut meta_read = EventMeta::new(Provider::Claude, AgenticEvent::BeforeTool);
+        meta_read.tool_name = Some("Read".to_string());
+        meta_read.tool_input = Some(json!({"path": "Cargo.toml"}));
+        meta_read.env = EnvironmentContext::default();
+
+        let outcome_read = dispatch_canonical_with_runtime(
+            Provider::Claude,
+            AgenticEvent::BeforeTool,
+            meta_read,
+            &runtime,
+        )
+        .await
+        .expect("dispatch must not error on a falsy `when`");
+
+        assert!(
+            outcome_read.response.is_none(),
+            "falsy `when` must skip the Call action through the configured runtime binding so no blocking response is produced (got {:?})",
+            outcome_read.response,
         );
     }
 }

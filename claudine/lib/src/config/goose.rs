@@ -1,9 +1,8 @@
 use std::path::{Path, PathBuf};
 
-use crate::error::Result;
-use crate::events::Provider;
-
 use super::trait_def::{AgentConfigurator, ProviderHookPlan, RegistrationResult, SkipReason};
+use crate::error::Result;
+use crate::provider::Provider;
 
 pub(crate) struct GooseConfigurator;
 

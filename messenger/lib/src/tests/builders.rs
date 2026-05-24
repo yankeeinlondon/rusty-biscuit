@@ -191,3 +191,84 @@ fn prepared_message_render_body_for_provider_none() {
     let result = prepared.render_body_for_provider(ProviderKind::Discord);
     assert_eq!(result, "");
 }
+
+#[test]
+fn summarized_message_builder() {
+    let msg = Message::summarized("plain hi", "**bold** hi");
+    match msg.body {
+        Some(MessageBody::Summarized {
+            ref summary,
+            ref markdown,
+        }) => {
+            assert_eq!(summary, "plain hi");
+            assert_eq!(markdown, "**bold** hi");
+        }
+        other => panic!("expected Summarized, got {other:?}"),
+    }
+}
+
+#[test]
+fn markdown_stripped_produces_plain_body() {
+    let msg = Message::markdown_stripped("**bold** and `code`");
+    match msg.body {
+        Some(MessageBody::Plain(ref s)) => {
+            assert!(!s.contains("**"));
+            assert!(!s.contains('`'));
+            assert!(s.contains("bold"));
+            assert!(s.contains("code"));
+        }
+        other => panic!("expected Plain, got {other:?}"),
+    }
+}
+
+#[test]
+fn prepared_render_summary_for_summarized() {
+    let msg = Message::summarized("plain summary", "**rich** body");
+    let prepared = PreparedMessage::new(&msg);
+    assert_eq!(prepared.render_summary(), "plain summary");
+}
+
+#[test]
+fn prepared_render_summary_for_markdown_strips() {
+    let msg = Message::markdown("**bold** text");
+    let prepared = PreparedMessage::new(&msg);
+    let s = prepared.render_summary();
+    assert!(!s.contains("**"));
+    assert!(s.contains("bold"));
+}
+
+#[test]
+fn prepared_render_summary_for_plain() {
+    let msg = Message::text("hello");
+    let prepared = PreparedMessage::new(&msg);
+    assert_eq!(prepared.render_summary(), "hello");
+}
+
+#[test]
+fn prepared_render_summary_for_empty_body() {
+    let msg = Message::location(0.0, 0.0);
+    let prepared = PreparedMessage::new(&msg);
+    assert_eq!(prepared.render_summary(), "");
+}
+
+#[test]
+fn prepared_render_rich_returns_some_only_for_summarized() {
+    let summarized = PreparedMessage::new(&Message::summarized("s", "**m**"));
+    assert!(summarized.render_rich(ProviderKind::Discord).is_some());
+
+    let markdown = PreparedMessage::new(&Message::markdown("**m**"));
+    assert!(markdown.render_rich(ProviderKind::Discord).is_none());
+
+    let plain = PreparedMessage::new(&Message::text("p"));
+    assert!(plain.render_rich(ProviderKind::Discord).is_none());
+}
+
+#[test]
+fn prepared_render_rich_renders_for_provider_flavor() {
+    let msg = Message::summarized("s", "**bold** _italic_");
+    let prepared = PreparedMessage::new(&msg);
+    // Discord uses *italic* (single asterisk in our renderer)
+    let rich = prepared.render_rich(ProviderKind::Discord).unwrap();
+    assert!(rich.contains("**bold**"));
+    assert!(rich.contains("*italic*"));
+}

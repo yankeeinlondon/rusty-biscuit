@@ -4,11 +4,12 @@ use std::sync::LazyLock;
 use serde::{Deserialize, Serialize};
 
 use crate::components::prose::Prose;
-use crate::components::renderable::Renderable;
+use crate::components::renderable::TerminalRenderable;
 use crate::discovery::detection::{ColorDepth, ColorMode};
 use crate::terminal::Terminal;
 use crate::utils::color::{Color, Tailwind, TailwindColorWrapper};
-use crate::utils::layout::{Layout, RenderableWrapper, WordWrap};
+use crate::utils::layout::{Layout, LayoutTerminalExt, RenderableWrapper};
+use crate::utils::wrap_policy::WordWrap;
 
 // ── Nerd Font icons ── Circular theme ──────────────────────────────────────
 
@@ -48,7 +49,12 @@ const NERD_TIMELINE_SUBAGENT: &str = "\u{f0012}";
 const FB_NOT_STARTED: &str = "\u{25fb}"; // ◻
 const FB_ACTIVE: &str = "\u{25fd}"; // ◽
 const FB_SUCCESS: &str = "\u{2713}"; // ✓
-const FB_FAILURE: &str = "\u{2a2b}"; // ⤫
+// U+292B (RISING DIAGONAL CROSSING FALLING DIAGONAL — `⤫`). The previous
+// constant pointed at U+2A2B (`⨫`, "slanted equal to or less-than"), which
+// shipped only because the inline comment looked identical to the intended
+// glyph. `StatusBlock::severity_icon` already uses `\u{292b}`; sharing the
+// value here keeps the bespoke and tree-rendering paths visually consistent.
+const FB_FAILURE: &str = "\u{292b}"; // ⤫
 const FB_WARNING: &str = "\u{26a0}"; // ⚠
 const FB_INFO: &str = "\u{2139}"; // ℹ
 const FB_TOOL_USE: &str = "\u{1f527}"; // 🔧
@@ -382,7 +388,7 @@ static ICON_LOOKUP: LazyLock<HashMap<(StatusTheme, StatusState), StatusIconDef>>
 ///
 /// ```
 /// use biscuit_terminal::components::status::{Status, StatusState, StatusTheme};
-/// use biscuit_terminal::components::renderable::Renderable;
+/// use biscuit_terminal::components::renderable::TerminalRenderable;
 ///
 /// let status = Status::new("Deploy to production")
 ///     .state(StatusState::Success)
@@ -505,7 +511,7 @@ impl Status {
         let should_colorize = self.color_icons && has_color;
 
         let icon = if should_colorize {
-            let tw_color = match (Terminal::color_mode(), icon_def.color_alt) {
+            let tw_color = match (term.color_mode(), icon_def.color_alt) {
                 (ColorMode::Light, Some(alt)) => alt,
                 _ => icon_def.color,
             };
@@ -524,7 +530,7 @@ impl Status {
     }
 }
 
-impl Renderable for Status {
+impl TerminalRenderable for Status {
     fn render_optimistic(&self, term_width: Option<u32>) -> String {
         let width = term_width.unwrap_or(80);
         let term = Terminal::new_optimistic(width);
@@ -758,7 +764,7 @@ mod tests {
         assert_eq!(status.description, "Chained");
     }
 
-    // ── Renderable trait tests ─────────────────────────────────────────
+    // ── TerminalRenderable trait tests ─────────────────────────────────────────
 
     #[test]
     fn render_optimistic_works() {

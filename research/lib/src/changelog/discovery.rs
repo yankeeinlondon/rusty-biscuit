@@ -38,6 +38,7 @@
 use super::types::VersionSignificance;
 use super::types::{ChangelogError, ChangelogSource, VersionInfo};
 use regex::Regex;
+use std::sync::LazyLock;
 use std::time::Duration;
 
 /// Maximum changelog file size (5MB)
@@ -48,6 +49,14 @@ const MAX_LINES_TO_PARSE: usize = 5000;
 
 /// HTTP timeout for changelog file fetching (15 seconds)
 const FETCH_TIMEOUT: Duration = Duration::from_secs(15);
+
+static GITHUB_HTTPS_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"https?://github\.com/([^/]+)/([^/]+)").expect("github https regex must compile")
+});
+
+static GITHUB_SSH_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"git@github\.com:([^/]+)/(.+)").expect("github ssh regex must compile")
+});
 
 /// Common changelog file names to search for (in priority order)
 const CHANGELOG_FILES: &[&str] = &[
@@ -95,10 +104,7 @@ pub fn parse_github_url(url: &str) -> Result<GitHubRepo, ChangelogError> {
     let url = url.trim_end_matches(".git");
 
     // Try HTTPS format first
-    if let Some(captures) = Regex::new(r"https?://github\.com/([^/]+)/([^/]+)")
-        .unwrap()
-        .captures(url)
-    {
+    if let Some(captures) = GITHUB_HTTPS_RE.captures(url) {
         let owner = captures.get(1).unwrap().as_str().to_string();
         let repo = captures.get(2).unwrap().as_str().to_string();
         return Ok(GitHubRepo {
@@ -109,10 +115,7 @@ pub fn parse_github_url(url: &str) -> Result<GitHubRepo, ChangelogError> {
     }
 
     // Try SSH format
-    if let Some(captures) = Regex::new(r"git@github\.com:([^/]+)/(.+)")
-        .unwrap()
-        .captures(url)
-    {
+    if let Some(captures) = GITHUB_SSH_RE.captures(url) {
         let owner = captures.get(1).unwrap().as_str().to_string();
         let repo = captures.get(2).unwrap().as_str().to_string();
         return Ok(GitHubRepo {

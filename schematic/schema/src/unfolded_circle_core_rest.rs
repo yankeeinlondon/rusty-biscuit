@@ -49,7 +49,7 @@
 //! let client = UnfoldedCircleCoreRest::with_base_url("https://staging.example.com/v1");
 //! ```
 use crate::shared::{RequestParts, SchematicError};
-pub use schematic_definitions::unfolded_circle_core_rest::*;
+pub use schematic_definitions::unfolded_circle::core_rest::*;
 use serde::{Deserialize, Serialize};
 /// Request for `Login` endpoint.
 ///
@@ -893,6 +893,60 @@ impl UnfoldedCircleCoreRest {
             variant_hooks: crate::shared::VariantHooks::default(),
         }
     }
+    /// Returns a reference to the underlying HTTP client.
+    ///
+    /// Use this for custom requests that aren't covered by the generated methods,
+    /// such as paginated endpoints that require query parameters.
+    pub fn http_client(&self) -> &reqwest::Client {
+        &self.client
+    }
+    /// Returns the base URL for this API client.
+    pub fn api_base_url(&self) -> &str {
+        &self.base_url
+    }
+    /// Returns the effective authentication policy for this client.
+    pub fn auth_policy(&self) -> &schematic_define::AuthPolicy {
+        &self.auth_policy
+    }
+    /// Returns OAuth2 provider metadata, if this client accepts OAuth tokens.
+    pub fn oauth_config(&self) -> Option<&schematic_define::OAuth2Config> {
+        self.auth_policy.oauth2()
+    }
+    /// Returns the API key header name and value for authentication.
+    ///
+    /// Returns `None` if the authentication strategy is not `ApiKey`
+    /// or if the API key environment variable is not set.
+    pub fn api_key_header(&self) -> Option<(String, String)> {
+        let header = self
+            .auth_policy
+            .explicit
+            .iter()
+            .find_map(|method| match method {
+                schematic_define::AuthMethod::ApiKey { header } => Some(header.clone()),
+                _ => None,
+            })
+            .or_else(|| {
+                self.headers
+                    .env_mapping()
+                    .api_key
+                    .as_ref()
+                    .map(|api_key| api_key.header.clone())
+            });
+        header.and_then(|header| {
+            self.headers
+                .env_mapping()
+                .api_key
+                .as_ref()
+                .and_then(|api_key| {
+                    api_key
+                        .names
+                        .names()
+                        .iter()
+                        .find_map(|env_name| std::env::var(env_name).ok())
+                })
+                .map(|value| (header, value))
+        })
+    }
     /// Creates a variant builder for customizing this API client.
     ///
     /// The builder pattern allows fluent configuration of:
@@ -979,60 +1033,6 @@ impl UnfoldedCircleCoreRest {
     /// ```
     pub fn variant_with_headers(&self, headers: schematic_define::Headers) -> Self {
         self.variant().headers_builder(headers).build()
-    }
-    /// Returns a reference to the underlying HTTP client.
-    ///
-    /// Use this for custom requests that aren't covered by the generated methods,
-    /// such as paginated endpoints that require query parameters.
-    pub fn http_client(&self) -> &reqwest::Client {
-        &self.client
-    }
-    /// Returns the base URL for this API client.
-    pub fn api_base_url(&self) -> &str {
-        &self.base_url
-    }
-    /// Returns the effective authentication policy for this client.
-    pub fn auth_policy(&self) -> &schematic_define::AuthPolicy {
-        &self.auth_policy
-    }
-    /// Returns OAuth2 provider metadata, if this client accepts OAuth tokens.
-    pub fn oauth_config(&self) -> Option<&schematic_define::OAuth2Config> {
-        self.auth_policy.oauth2()
-    }
-    /// Returns the API key header name and value for authentication.
-    ///
-    /// Returns `None` if the authentication strategy is not `ApiKey`
-    /// or if the API key environment variable is not set.
-    pub fn api_key_header(&self) -> Option<(String, String)> {
-        let header = self
-            .auth_policy
-            .explicit
-            .iter()
-            .find_map(|method| match method {
-                schematic_define::AuthMethod::ApiKey { header } => Some(header.clone()),
-                _ => None,
-            })
-            .or_else(|| {
-                self.headers
-                    .env_mapping()
-                    .api_key
-                    .as_ref()
-                    .map(|api_key| api_key.header.clone())
-            });
-        header.and_then(|header| {
-            self.headers
-                .env_mapping()
-                .api_key
-                .as_ref()
-                .and_then(|api_key| {
-                    api_key
-                        .names
-                        .names()
-                        .iter()
-                        .find_map(|env_name| std::env::var(env_name).ok())
-                })
-                .map(|value| (header, value))
-        })
     }
     /// Returns a clone of this client configured with an explicit bearer token.
     #[must_use]

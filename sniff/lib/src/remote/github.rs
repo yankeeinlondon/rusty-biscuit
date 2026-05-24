@@ -5,13 +5,14 @@
 
 use async_trait::async_trait;
 use schematic_schema::github::*;
-use schematic_schema::shared::SchematicError;
+use schematic_schema::shared::{AuthStrategy, SchematicError, UpdateStrategy};
 
 use super::{
     provider::RemoteRepoProvider,
     types::{
         CiCdInfo, DocumentCategory, DocumentRef, GitProvider, IssueInfo, KeyUrls, LicenseRef,
-        OrgInfo, OrgRepoRef, PullRequestInfo, ReleaseInfo, RepoMetadata, TagInfo, TagsAndReleases,
+        OrgInfo, OrgRepoRef, PullRequestInfo, PullRequestState, ReleaseInfo, RepoMetadata, TagInfo,
+        TagsAndReleases,
     },
 };
 use crate::error::SniffError;
@@ -70,18 +71,57 @@ impl Default for GitHubRemote {
     }
 }
 
+impl GitHubRemote {
+    /// Build a GitHub API client variant that performs no authentication.
+    ///
+    /// The client is constructed by overriding both the env-fallback list
+    /// (so no credentials can be picked up from `GITHUB_TOKEN`, `GH_TOKEN`,
+    /// etc.) **and** the auth strategy itself (so the schematic runtime
+    /// does not pre-flight-reject the request for missing credentials).
+    /// The combination produces a truly anonymous client whose request
+    /// passes through to the wire and is judged by the API alone.
+    ///
+    /// This is used for the "attempt unauthenticated" fallback mandated by
+    /// the `sniff repo pr` spec: when an authenticated request fails because
+    /// no credentials are configured, we retry once with this anonymous
+    /// client before surfacing a `MissingCredentials` error to the user.
+    fn unauthenticated_client(&self) -> GitHub {
+        self.client
+            .variant()
+            .env_auth(Vec::new())
+            .auth_update(UpdateStrategy::ChangeTo(AuthStrategy::None))
+            .build()
+    }
+}
+
 /// Map a [`SchematicError`] to a [`SniffError`].
 ///
 /// Handles special cases:
-/// - 401 -> `MissingCredentials`
+/// - `MissingCredential` / `AuthenticationRequired` -> `MissingCredentials`
+/// - 401 -> `InvalidCredentials`
 /// - 403 with rate limit info -> `RateLimited`
 /// - 404 -> `RemoteApi` with "Not found"
 /// - Other HTTP errors -> `RemoteApi`
+///
+/// ## Notes
+///
+/// `MissingCredentials` is only emitted *after* the anonymous retry has
+/// failed (see [`GitHubRemote::unauthenticated_client`]) or when the API
+/// explicitly demands credentials for a private resource. Call sites that
+/// want the "attempt unauthenticated" behaviour must use the
+/// `try_with_anonymous_fallback`-style wrapper rather than mapping the
+/// first failure directly through this function.
 fn map_schematic_error(err: SchematicError) -> SniffError {
     match err {
         SchematicError::MissingCredential { env_vars } => SniffError::MissingCredentials {
             provider: "GitHub".to_string(),
             env_var: env_vars.join(" or "),
+        },
+        SchematicError::AuthenticationRequired {
+            env_fallback_vars, ..
+        } => SniffError::MissingCredentials {
+            provider: "GitHub".to_string(),
+            env_var: env_fallback_vars.join(" or "),
         },
         SchematicError::ApiError { status: 401, body } => {
             let message = serde_json::from_str::<serde_json::Value>(&body)
@@ -294,15 +334,39 @@ impl RemoteRepoProvider for GitHubRemote {
         &self,
         owner: &str,
         repo: &str,
+        state: PullRequestState,
     ) -> Result<Vec<PullRequestInfo>, SniffError> {
-        let request = ListPullRequestsRequest::new(owner, repo);
-        let prs: Vec<PullRequestSummary> = self
-            .client
-            .request(request)
-            .await
-            .map_err(map_schematic_error)?;
+        let mut request = ListPullRequestsRequest::new(owner, repo);
 
-        Ok(prs
+        // Map PullRequestState to GitHub API state parameter
+        match state {
+            PullRequestState::Open => {
+                request = request.with_state("open".to_string());
+            }
+            PullRequestState::Closed => {
+                request = request.with_state("closed".to_string());
+            }
+            PullRequestState::Merged | PullRequestState::Draft | PullRequestState::All => {
+                request = request.with_state("all".to_string());
+            }
+        }
+
+        // Attempt the request with the configured client first. If it fails
+        // because no credentials are available, retry once with an explicitly
+        // unauthenticated client. Only after the anonymous retry also fails
+        // (or on a real 401/403) do we surface a credentials error.
+        let prs: Vec<PullRequestSummary> = match self.client.request(request.clone()).await {
+            Ok(prs) => prs,
+            Err(SchematicError::MissingCredential { .. })
+            | Err(SchematicError::AuthenticationRequired { .. }) => self
+                .unauthenticated_client()
+                .request(request)
+                .await
+                .map_err(map_schematic_error)?,
+            Err(err) => return Err(map_schematic_error(err)),
+        };
+
+        let mut prs: Vec<PullRequestInfo> = prs
             .into_iter()
             .map(|pr| PullRequestInfo {
                 number: pr.number,
@@ -312,12 +376,27 @@ impl RemoteRepoProvider for GitHubRemote {
                 draft: pr.draft.unwrap_or(false),
                 source_branch: Some(pr.head.ref_name),
                 target_branch: Some(pr.base.ref_name),
+                labels: pr.labels.into_iter().map(|l| l.name).collect(),
+                body: pr.body,
                 created_at: pr.created_at,
                 updated_at: Some(pr.updated_at),
                 merged_at: pr.merged_at,
                 html_url: pr.html_url,
             })
-            .collect())
+            .collect();
+
+        // Post-filter for states GitHub API doesn't support directly
+        match state {
+            PullRequestState::Merged => {
+                prs.retain(|pr| pr.merged_at.is_some());
+            }
+            PullRequestState::Draft => {
+                prs.retain(|pr| pr.draft);
+            }
+            _ => {}
+        }
+
+        Ok(prs)
     }
 
     async fn list_issues(&self, owner: &str, repo: &str) -> Result<Vec<IssueInfo>, SniffError> {

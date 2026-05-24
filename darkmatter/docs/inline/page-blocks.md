@@ -70,9 +70,9 @@ Inner content
 - `::block` / `::end-block` lines inside fenced code blocks are ignored at every depth, so nested examples in documentation do not interfere with real directives in the surrounding document.
 - `::end-block` must stand alone on its line — any trailing non-whitespace content is a parse error.
 
-## Boolean Conditional Logic
+## Darkmatter Expressions
 
-The `when` expression uses Darkmatter's shared [Boolean Conditional Logic](../topics/boolean-conditional-logic.md) system. That same evaluator is also used by block transclusion.
+The `when` expression uses Darkmatter's shared [Darkmatter Expressions](../topics/darkmatter-expressions.md) system. That same evaluator is also used by block transclusion.
 
 Common examples:
 
@@ -85,7 +85,7 @@ display when the AGENT environment variable is set
 display when the AGENT environment variable is equal to `claude`
 ::end-block
 
-::block when="And(draft, user.role == 'admin')"
+::block when="and(draft, user.role == 'admin')"
 display only when both conditions are true
 ::end-block
 ```

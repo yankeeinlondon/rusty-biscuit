@@ -1,0 +1,28 @@
+[package]
+name = "biscuit-clipboard"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+base64 = "0.22"
+biscuit-hash = { path = "../../biscuit-hash/lib" }
+chrono = { version = "0.4", features = ["serde"] }
+clipboard-rs = "0.3"
+dirs = "6"
+eventsource-stream = "0.2"
+futures-core = "0.3"
+futures-util = { version = "0.3", default-features = false, features = ["std"] }
+libc = "0.2"
+reqwest = { version = "0.13", default-features = false, features = ["rustls", "json", "stream"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sysinfo = { version = "0.38", default-features = false, features = ["system"] }
+thiserror = "2"
+tokio = { version = "1", features = ["sync", "time", "rt", "macros"] }
+tracing = "0.1"
+
+[dev-dependencies]
+serial_test = "3"
+tempfile = "3"
+tokio = { version = "1", features = ["sync", "time", "rt", "macros", "rt-multi-thread"] }
+wiremock = "0.6"

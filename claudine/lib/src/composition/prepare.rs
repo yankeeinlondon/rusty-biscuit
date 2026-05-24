@@ -19,7 +19,7 @@ fn map_compose_error(source_path: &std::path::Path, err: MarkdownError) -> Compo
     match err {
         MarkdownError::ShellExpansion(shell_err) => CompositionError::ShellExpansionFailed {
             source_path: source_path.to_path_buf(),
-            error: Box::new(shell_err),
+            error: shell_err,
         },
         other => CompositionError::ComposeFailed(other),
     }
@@ -36,6 +36,16 @@ pub struct PrepareOptions {
     pub env_overrides: BTreeMap<String, String>,
     /// Enable Darkmatter composition performance collection.
     pub perf_enabled: bool,
+    /// Pre-computed source repo root.
+    ///
+    /// When `Some`, [`prepare_direct`] and [`prepare_inline`] use this value
+    /// instead of walking up from the source path. CLI callers populate this
+    /// from a shared `CompositionPrepContext` so the same repo-root value is
+    /// reused across eager target resolution, shell preflight, and
+    /// composition preparation. When `None`, the fallback walk
+    /// (`find_git_root_from_path`) preserves the original behavior for
+    /// library-only callers and tests.
+    pub source_repo_root: Option<PathBuf>,
 }
 
 /// Walk up from a file path to find the nearest `.git` directory.
@@ -57,8 +67,7 @@ use super::types::{
     AgentHint, CompositionClosurePlan, CompositionMode, EffectiveSelectionHints, InlineClosurePlan,
     ModelHint, PreparedComposition, ResolvedCompositionSource,
 };
-use crate::events::Provider;
-
+use crate::provider::Provider;
 /// Prepare a direct (chained) composition with effective frontmatter.
 ///
 /// Composes the entire document through Darkmatter and extracts the
@@ -101,9 +110,11 @@ pub fn prepare_direct(
         agent: agent_hint,
         model: model_hint,
     };
-    let lifecycle = parse_lifecycle_config(&effective_frontmatter)?;
+    let lifecycle = parse_lifecycle_config(&effective_frontmatter, &source.resolved_path)?;
 
-    let source_repo_root = find_git_root_from_path(&source.resolved_path);
+    let source_repo_root = options
+        .source_repo_root
+        .or_else(|| find_git_root_from_path(&source.resolved_path));
 
     Ok(PreparedComposition {
         mode: CompositionMode::ChainedDocument,
@@ -177,11 +188,13 @@ pub fn prepare_inline(
         agent: agent_hint,
         model: model_hint,
     };
-    let lifecycle = parse_lifecycle_config(&effective_frontmatter)?;
+    let lifecycle = parse_lifecycle_config(&effective_frontmatter, &source.resolved_path)?;
 
     let mut prompt = composed.content().to_string();
 
-    let source_repo_root = find_git_root_from_path(&source.resolved_path);
+    let source_repo_root = options
+        .source_repo_root
+        .or_else(|| find_git_root_from_path(&source.resolved_path));
 
     // Append guardrails with the new inline contract
     let guardrails = load_or_create_guardrails(source_repo_root.as_deref());
@@ -215,6 +228,31 @@ fn frontmatter_to_value(fm: &darkmatter::markdown::Frontmatter) -> serde_json::V
             .map(|(k, v)| (k.clone(), v.clone()))
             .collect(),
     )
+}
+
+/// Parse selection hints (`agent`, `model`) from a raw Markdown frontmatter
+/// without composing the document.
+///
+/// The CLI uses this for *eager* target resolution: it lets the wrapper
+/// know which provider will run before composition templates are rendered,
+/// so `{{env.AGENT}}` and similar references resolve correctly during
+/// body and inline-prompt rendering.
+///
+/// Untemplated, literal `agent`/`model` values are recognized; values that
+/// require composition to materialize (e.g. `agent: "{{env.SOMETHING}}"`)
+/// are not resolved here and fall through to post-compose resolution.
+///
+/// ## Errors
+///
+/// Returns a [`CompositionError`] if either field is present but holds an
+/// unsupported type, or if `agent` references an unknown provider.
+pub fn parse_selection_hints_from_frontmatter(
+    fm: &darkmatter::markdown::Frontmatter,
+) -> Result<EffectiveSelectionHints, CompositionError> {
+    let map = fm.as_map();
+    let agent = map.get("agent").map_or(Ok(None), parse_agent_hint)?;
+    let model = map.get("model").map_or(Ok(None), parse_model_hint)?;
+    Ok(EffectiveSelectionHints { agent, model })
 }
 
 /// Parse the `agent` frontmatter value into a typed `AgentHint`.
@@ -306,7 +344,7 @@ fn json_type_name(value: &serde_json::Value) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::events::Provider;
+    use crate::provider::Provider;
     use darkmatter::markdown::Frontmatter;
     use serde_json::json;
     use std::fs;
@@ -325,9 +363,9 @@ mod tests {
         let md = Markdown::with_frontmatter(fm, content);
         fs::write(&file, md.as_string()).unwrap();
 
-        // Re-parse from disk to match real workflow
-        let markdown = Markdown::try_from(file.as_path()).unwrap();
+        // Read once and construct Markdown from the string to avoid double I/O
         let original_text = fs::read_to_string(&file).unwrap();
+        let markdown: Markdown = original_text.clone().into();
         ResolvedCompositionSource {
             original_ref: file.to_str().unwrap().to_string(),
             resolved_path: file,

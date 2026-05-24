@@ -1,9 +1,10 @@
 use std::io::Write;
+use std::sync::LazyLock;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use biscuit_terminal::components::prose::Prose;
-use biscuit_terminal::components::renderable::Renderable;
-use biscuit_terminal::discovery::detection::ColorDepth;
+use biscuit_terminal::components::renderable::TerminalRenderable;
+use biscuit_terminal::discovery::detection::{ColorDepth, ColorMode};
 use biscuit_terminal::terminal::Terminal;
 
 static PLAIN: AtomicBool = AtomicBool::new(false);
@@ -41,23 +42,29 @@ fn forced_width(default: u32) -> u32 {
         .unwrap_or(default)
 }
 
+fn compute_terminal() -> Terminal {
+    if colors_disabled() {
+        plain_terminal(forced_width(80))
+    } else if force_color_enabled() {
+        Terminal::new_optimistic(forced_width(80))
+    } else {
+        Terminal::new()
+    }
+}
+
+static TERMINAL: LazyLock<Terminal> = LazyLock::new(compute_terminal);
+
 /// Returns a [`Terminal`] appropriate for the current mode.
 ///
 /// In plain mode, returns a terminal with `is_tty: false` and
 /// `color_depth: None` so components render with correct alignment
 /// but no ANSI escape codes. In normal mode, returns a standard
 /// detected terminal.
+///
+/// The result is memoised per-process via [`LazyLock`] to avoid
+/// repeated capability detection on every call.
 pub fn terminal() -> Terminal {
-    if colors_disabled() {
-        Terminal::builder()
-            .is_tty(false)
-            .color_depth(ColorDepth::None)
-            .build()
-    } else if force_color_enabled() {
-        Terminal::new_optimistic(forced_width(80))
-    } else {
-        Terminal::new()
-    }
+    TERMINAL.clone()
 }
 
 /// Returns an optimistic [`Terminal`] that respects plain mode.
@@ -68,13 +75,18 @@ pub fn terminal() -> Terminal {
 pub fn optimistic_terminal(width: Option<u32>) -> Terminal {
     let w = width.unwrap_or(80);
     if colors_disabled() {
-        Terminal::builder()
-            .is_tty(false)
-            .color_depth(ColorDepth::None)
-            .build()
+        plain_terminal(w)
     } else {
         Terminal::new_optimistic(w)
     }
+}
+
+fn plain_terminal(width: u32) -> Terminal {
+    let mut term = Terminal::new_optimistic(width);
+    term.is_tty = false;
+    term.color_depth = ColorDepth::None;
+    term.color_mode = ColorMode::Dark;
+    term
 }
 
 /// Strip ANSI escape codes if plain mode is active, otherwise return as-is.
@@ -144,9 +156,10 @@ mod tests {
             std::env::remove_var("FORCE_COLOR");
         }
 
-        let term = terminal();
+        let term = compute_terminal();
         assert!(!term.is_tty);
         assert_eq!(term.color_depth, ColorDepth::None);
+        assert!(matches!(term.color_mode, ColorMode::Dark));
 
         unsafe {
             std::env::remove_var("NO_COLOR");
@@ -163,7 +176,7 @@ mod tests {
             std::env::set_var("TERM_WIDTH", "120");
         }
 
-        let term = terminal();
+        let term = compute_terminal();
         assert!(term.is_tty);
         assert_eq!(term.color_depth, ColorDepth::TrueColor);
         assert_eq!(term.width(), 120);
@@ -185,10 +198,21 @@ mod tests {
         let term = optimistic_terminal(Some(100));
         assert!(!term.is_tty);
         assert_eq!(term.color_depth, ColorDepth::None);
+        assert!(matches!(term.color_mode, ColorMode::Dark));
 
         set_plain(false);
         unsafe {
             std::env::remove_var("FORCE_COLOR");
         }
+    }
+
+    #[test]
+    fn terminal_is_memoized() {
+        let t1 = terminal();
+        let t2 = terminal();
+        // Clones from the same LazyLock must have identical properties.
+        assert_eq!(t1.is_tty, t2.is_tty);
+        assert_eq!(t1.color_depth, t2.color_depth);
+        assert_eq!(t1.width(), t2.width());
     }
 }

@@ -1,0 +1,10 @@
+---
+source: darkmatter/lib/tests/render_tree_roundtrip.rs
+expression: rendered.output
+---
+---
+
+## title: Example Document
+author: Test Suite
+
+The body paragraph that follows a YAML frontmatter block.

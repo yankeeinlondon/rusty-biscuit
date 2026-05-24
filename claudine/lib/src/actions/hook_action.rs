@@ -3,7 +3,7 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
-use crate::config::claudine_config::Gender;
+use crate::config::tts::Gender;
 
 /// Logging destination for event log output.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -125,6 +125,13 @@ pub enum HookAction {
         /// Playback speed multiplier.
         #[serde(default = "default_speed")]
         speed: f32,
+
+        /// Optional Darkmatter boolean condition controlling whether this
+        /// action runs. Evaluated against the active [`EventMeta`] before
+        /// the action executes; a falsy or invalid expression skips the
+        /// action.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        when: Option<String>,
     },
 
     /// Speak a message aloud using biscuit-speaks TTS.
@@ -139,6 +146,10 @@ pub enum HookAction {
         /// Optional gender preference for voice selection.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         gender: Option<Gender>,
+
+        /// Optional Darkmatter boolean condition gating execution.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        when: Option<String>,
     },
 
     /// Execute a shell command asynchronously without waiting for a result.
@@ -149,6 +160,10 @@ pub enum HookAction {
         /// Template-interpolated parameters appended to the command.
         #[serde(default)]
         params: String,
+
+        /// Optional Darkmatter boolean condition gating execution.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        when: Option<String>,
     },
 
     /// Execute a command synchronously and map its output to a hook response.
@@ -167,6 +182,12 @@ pub enum HookAction {
         /// Optional response mapper.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         mapper: Option<Mapper>,
+
+        /// Optional Darkmatter boolean condition gating execution. A
+        /// skipped `Call` action cannot replace a previously selected
+        /// blocking [`HookResponse`].
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        when: Option<String>,
     },
 
     /// Report the event into the agent's output stream.
@@ -174,6 +195,10 @@ pub enum HookAction {
         /// Report output handler.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         handler: Option<ReportHandler>,
+
+        /// Optional Darkmatter boolean condition gating execution.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        when: Option<String>,
     },
 
     /// Send a message to the configured messaging destination.
@@ -181,6 +206,10 @@ pub enum HookAction {
         message: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         image: Option<String>,
+
+        /// Optional Darkmatter boolean condition gating execution.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        when: Option<String>,
     },
 }
 
@@ -206,6 +235,24 @@ impl HookAction {
             HookAction::Call { .. } => "Call",
             HookAction::Report { .. } => "Report",
             HookAction::Message { .. } => "Message",
+        }
+    }
+
+    /// Returns the optional Darkmatter boolean condition gating this
+    /// action's execution.
+    ///
+    /// When `Some`, the runner evaluates the expression against the
+    /// active [`EventMeta`] before running the action. A falsy result or
+    /// a parse/evaluation error causes the action to be skipped without
+    /// short-circuiting the rest of the binding.
+    pub fn when(&self) -> Option<&str> {
+        match self {
+            HookAction::SoundEffect { when, .. }
+            | HookAction::Speak { when, .. }
+            | HookAction::Bash { when, .. }
+            | HookAction::Call { when, .. }
+            | HookAction::Report { when, .. }
+            | HookAction::Message { when, .. } => when.as_deref(),
         }
     }
 }
@@ -242,6 +289,7 @@ mod tests {
             effect,
             volume,
             speed,
+            when,
         } = action
         else {
             panic!("expected sound_effect");
@@ -250,6 +298,7 @@ mod tests {
         assert_eq!(effect, "success");
         assert_eq!(volume, 1.0);
         assert_eq!(speed, 1.0);
+        assert!(when.is_none());
     }
 
     #[test]
@@ -266,6 +315,7 @@ mod tests {
             effect,
             volume,
             speed,
+            when,
         } = action
         else {
             panic!("expected sound_effect");
@@ -274,6 +324,7 @@ mod tests {
         assert_eq!(effect, "ding");
         assert_eq!(volume, 0.5);
         assert_eq!(speed, 1.5);
+        assert!(when.is_none());
     }
 
     #[test]
@@ -290,6 +341,7 @@ mod tests {
             message,
             voice,
             gender,
+            when,
         } = action
         else {
             panic!("expected speak");
@@ -298,6 +350,7 @@ mod tests {
         assert_eq!(message, "Hello world");
         assert_eq!(voice.as_deref(), Some("Samantha"));
         assert_eq!(gender, Some(Gender::Female));
+        assert!(when.is_none());
     }
 
     #[test]
@@ -312,6 +365,7 @@ mod tests {
             message,
             voice,
             gender,
+            when,
         } = action
         else {
             panic!("expected speak");
@@ -320,6 +374,7 @@ mod tests {
         assert_eq!(message, "Hello");
         assert!(voice.is_none());
         assert!(gender.is_none());
+        assert!(when.is_none());
     }
 
     #[test]
@@ -328,11 +383,13 @@ mod tests {
             message: "test".to_string(),
             voice: None,
             gender: None,
+            when: None,
         };
 
         let json = serde_json::to_value(&action).unwrap();
         assert!(json.get("voice").is_none());
         assert!(json.get("gender").is_none());
+        assert!(json.get("when").is_none());
     }
 
     #[test]
@@ -344,12 +401,18 @@ mod tests {
         });
 
         let action: HookAction = serde_json::from_value(json).unwrap();
-        let HookAction::Bash { command, params } = action else {
+        let HookAction::Bash {
+            command,
+            params,
+            when,
+        } = action
+        else {
             panic!("expected bash");
         };
 
         assert_eq!(command, "notify-send");
         assert_eq!(params, "{{tool_name}}");
+        assert!(when.is_none());
     }
 
     #[test]
@@ -360,12 +423,18 @@ mod tests {
         });
 
         let action: HookAction = serde_json::from_value(json).unwrap();
-        let HookAction::Bash { command, params } = action else {
+        let HookAction::Bash {
+            command,
+            params,
+            when,
+        } = action
+        else {
             panic!("expected bash");
         };
 
         assert_eq!(command, "echo hello");
         assert_eq!(params, "");
+        assert!(when.is_none());
     }
 
     #[test]
@@ -373,6 +442,7 @@ mod tests {
         let action = HookAction::Bash {
             command: "echo".to_string(),
             params: String::new(),
+            when: None,
         };
 
         assert_eq!(action.type_slug(), "bash");
@@ -388,6 +458,7 @@ mod tests {
             mapper: Some(Mapper::JsonField {
                 field: "decision".to_string(),
             }),
+            when: None,
         };
 
         let json = serde_json::to_value(&action).unwrap();
@@ -405,12 +476,18 @@ mod tests {
         });
 
         let action: HookAction = serde_json::from_value(json).unwrap();
-        let HookAction::Message { message, image } = action else {
+        let HookAction::Message {
+            message,
+            image,
+            when,
+        } = action
+        else {
             panic!("expected message");
         };
 
         assert_eq!(message, "Deploy complete");
         assert!(image.is_none());
+        assert!(when.is_none());
     }
 
     #[test]
@@ -422,12 +499,18 @@ mod tests {
         });
 
         let action: HookAction = serde_json::from_value(json).unwrap();
-        let HookAction::Message { message, image } = action else {
+        let HookAction::Message {
+            message,
+            image,
+            when,
+        } = action
+        else {
             panic!("expected message");
         };
 
         assert_eq!(message, "Screenshot attached");
         assert_eq!(image.as_deref(), Some("/tmp/screenshot.png"));
+        assert!(when.is_none());
     }
 
     #[test]
@@ -435,6 +518,7 @@ mod tests {
         let action = HookAction::Message {
             message: "**build** done".to_string(),
             image: Some("~/artifacts/build.png".to_string()),
+            when: None,
         };
 
         let json = serde_json::to_value(&action).unwrap();
@@ -451,9 +535,113 @@ mod tests {
         let action = HookAction::Message {
             message: "test".to_string(),
             image: None,
+            when: None,
         };
 
         assert_eq!(action.type_slug(), "message");
         assert_eq!(action.type_pascal_case(), "Message");
+    }
+
+    // =========================================================================
+    // `when` round-trip and accessor tests (Phase 3 of leverage-dm-parser)
+    // =========================================================================
+
+    #[test]
+    fn old_action_configs_without_when_still_deserialize() {
+        let json = serde_json::json!({
+            "type": "bash",
+            "command": "echo hi"
+        });
+        let action: HookAction = serde_json::from_value(json).unwrap();
+        assert!(action.when().is_none());
+    }
+
+    #[test]
+    fn sound_effect_round_trips_with_when() {
+        let action = HookAction::SoundEffect {
+            effect: "ding".to_string(),
+            volume: 1.0,
+            speed: 1.0,
+            when: Some("tool_name == 'Bash'".to_string()),
+        };
+        let json = serde_json::to_value(&action).unwrap();
+        assert_eq!(json["when"], "tool_name == 'Bash'");
+        let back: HookAction = serde_json::from_value(json).unwrap();
+        assert_eq!(back, action);
+        assert_eq!(back.when(), Some("tool_name == 'Bash'"));
+    }
+
+    #[test]
+    fn speak_round_trips_with_when() {
+        let action = HookAction::Speak {
+            message: "ready".to_string(),
+            voice: None,
+            gender: None,
+            when: Some("provider == 'claude'".to_string()),
+        };
+        let json = serde_json::to_value(&action).unwrap();
+        let back: HookAction = serde_json::from_value(json).unwrap();
+        assert_eq!(back, action);
+        assert_eq!(back.when(), Some("provider == 'claude'"));
+    }
+
+    #[test]
+    fn bash_round_trips_with_when() {
+        let action = HookAction::Bash {
+            command: "echo".to_string(),
+            params: String::new(),
+            when: Some("git.is_dirty".to_string()),
+        };
+        let json = serde_json::to_value(&action).unwrap();
+        let back: HookAction = serde_json::from_value(json).unwrap();
+        assert_eq!(back, action);
+    }
+
+    #[test]
+    fn call_round_trips_with_when() {
+        let action = HookAction::Call {
+            command: "security-check".to_string(),
+            args: None,
+            timeout_ms: None,
+            mapper: None,
+            when: Some("tool_name == 'Bash'".to_string()),
+        };
+        let json = serde_json::to_value(&action).unwrap();
+        let back: HookAction = serde_json::from_value(json).unwrap();
+        assert_eq!(back, action);
+    }
+
+    #[test]
+    fn report_round_trips_with_when() {
+        let action = HookAction::Report {
+            handler: None,
+            when: Some("event == 'tool_error'".to_string()),
+        };
+        let json = serde_json::to_value(&action).unwrap();
+        let back: HookAction = serde_json::from_value(json).unwrap();
+        assert_eq!(back, action);
+    }
+
+    #[test]
+    fn message_round_trips_with_when() {
+        let action = HookAction::Message {
+            message: "alert".to_string(),
+            image: None,
+            when: Some("error".to_string()),
+        };
+        let json = serde_json::to_value(&action).unwrap();
+        let back: HookAction = serde_json::from_value(json).unwrap();
+        assert_eq!(back, action);
+    }
+
+    #[test]
+    fn when_field_omitted_from_serialization_when_none() {
+        let action = HookAction::Bash {
+            command: "echo".to_string(),
+            params: String::new(),
+            when: None,
+        };
+        let json = serde_json::to_value(&action).unwrap();
+        assert!(json.get("when").is_none());
     }
 }

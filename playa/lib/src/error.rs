@@ -97,6 +97,13 @@ pub enum PlaybackError {
         /// The exit code, if available.
         exit_code: Option<i32>,
     },
+    /// Native playback hit an audio-device failure that should be reported
+    /// directly instead of silently falling through to another path.
+    #[error("audio subsystem problem: {detail}")]
+    AudioSubsystem {
+        /// Human-readable details from the failing backend.
+        detail: String,
+    },
     /// The audio state lock was poisoned.
     #[error("audio state lock poisoned")]
     StateLock,

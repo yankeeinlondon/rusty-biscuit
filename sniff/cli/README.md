@@ -131,6 +131,10 @@ sniff repo git-status --history 20   # Show more commits
 sniff repo git-status --compact      # Show only the Status section
 sniff repo hash HEAD                 # Show latest commit details
 sniff repo remote origin             # Inspect remote repository
+sniff repo pr                        # List open pull requests
+sniff repo pr --status merged        # List merged pull requests
+sniff repo pr --status draft --json  # Draft PRs as JSON
+sniff repo pr -v                     # Verbose PR block output
 sniff repo deps                      # Text dependency list
 sniff repo deps --ui                 # Mermaid dependency diagram
 sniff repo packages                  # List all package names (CSV)
@@ -141,6 +145,11 @@ sniff repo packages --verbose        # Annotate each entry with its root dir
 sniff repo package                   # Package name for current directory
 sniff repo package-area              # Package area for current directory
 sniff repo dirty-packages            # Packages with uncommitted changes
+sniff repo worktrees                 # List all worktrees (marks current with *)
+sniff repo worktrees --list          # Bullet list output
+sniff repo worktrees --csv           # Comma-separated names on a single line
+sniff repo worktrees --verbose       # Name, branch, and path for each worktree
+sniff repo worktrees --json          # JSON output with full worktree metadata
 sniff repo has-merge-conflict        # Check for merge conflicts
 ```
 
@@ -424,6 +433,47 @@ Returns init system and service list:
 }
 ```
 
+### Repo Subcommand JSON Shapes
+
+Every `sniff repo` subcommand emits a focused JSON shape that mirrors
+its text-mode output — no two subcommands return identical JSON. The
+table summarises the contract; see the per-subcommand docs under
+`sniff/docs/cli/` for full schemas and examples.
+
+| Subcommand | JSON shape |
+|---|---|
+| `repo` / `repo structure` | Full `RepoInfo` blob (`is_monorepo`, `packages`, `dependencies`, ...) |
+| `repo git-status` | `GitInfo` object directly (`repo_root`, `status`, `recent`, `branches`, ...) |
+| `repo deps` | `{ packages: [{ name, depends_on, used_by, dependencies, dev_dependencies, ... }] }` |
+| `repo dirty-packages` | `{ scope: "dirty", kind: "packages", names: [...] }` |
+| `repo dirty-package-areas` | `{ scope: "dirty", kind: "package_areas", names: [...] }` |
+| `repo staged-packages` | `{ scope: "staged", kind: "packages", names: [...] }` |
+| `repo staged-package-areas` | `{ scope: "staged", kind: "package_areas", names: [...] }` |
+| `repo unstaged-packages` | `{ scope: "unstaged", kind: "packages", names: [...] }` |
+| `repo unstaged-package-areas` | `{ scope: "unstaged", kind: "package_areas", names: [...] }` |
+| `repo dirty-files` / `staged-files` / `staged-source-code` / `unstaged-source-code` / `dirty-source-code` | `{ scope, kind, paths: [...] }` |
+| `repo packages` | `["pkg-a", "pkg-b", ...]` (array of strings) |
+| `repo package-areas` | `["area-a", "area-b", ...]` (array of strings) |
+| `repo package` / `package-area` | `{ name: "<value>" }` |
+| `repo package-root` / `package-area-root` | `{ root: "<abs-path>" }` (empty string + exit 1 when not in scope) |
+| `repo is-current-package-area-dirty` | `{ dirty: bool }` (exit 0 when true, 1 when false) |
+| `repo package-area-has-source-code-changes` | `{ has_source_code_changes: bool }` (exit 0/1 mirror) |
+| `repo has-merge-conflict` | `{ has_merge_conflict: bool }` (exit 0/1 mirror) |
+| `repo recent-commits <period>` | Full `CommitDescSet` (no `filter` field) |
+| `repo source-code-changes <period>` | Filtered `CommitDescSet` with `"filter": "source_code"` |
+| `repo documentation-changes <period>` | Filtered `CommitDescSet` with `"filter": "documentation"` |
+| `repo hash <ref>` | `{ commit: {...}, files: [...] }` |
+| `repo root` | `{ root: "<abs-path>" }` |
+| `repo remote <url-or-name>` | `RemoteReport` JSON |
+| `repo pr` | Array of `PullRequest` JSON objects |
+| `repo worktrees` | `{ worktrees: [{ name, branch, path, current, detached }] }` |
+| `repo unstaged-files` / `untracked-files` | Array of `FileChange` objects |
+
+`--perf --json` injects a top-level `performance` field into any
+object-shaped output (everything above except the array shapes); for
+array outputs (`packages`, `package-areas`, `pr`, file lists) the
+array is wrapped in `{ data: [...], performance: {...} }`.
+
 ## Architecture
 
 ### CLI Layer (`sniff/cli`)
@@ -663,6 +713,12 @@ sniff repo remote origin
 
 # Or specify a URL directly
 sniff repo remote https://github.com/rust-lang/cargo
+
+# List pull requests
+sniff repo pr
+sniff repo pr --status merged
+sniff repo pr --status draft --json
+sniff repo pr -v
 ```
 
 **Output includes:**
@@ -682,6 +738,34 @@ sniff repo remote https://github.com/rust-lang/cargo
 | GitLab | `GITLAB_TOKEN` or `GITLAB_PRIVATE_TOKEN` |
 | Gitea | `GITEA_TOKEN` (or `CODEBERG_TOKEN` for Codeberg) |
 | Bitbucket | `BITBUCKET_USERNAME` + `BITBUCKET_APP_PASSWORD` |
+
+### Authentication Strategy
+
+Sniff uses an **attempt-unauthenticated-first** strategy for remote repository
+inspection (`sniff repo remote`, `sniff repo pr`):
+
+1. The CLI first issues the API request **anonymously**, with no credentials
+   attached — even if relevant token environment variables happen to be set
+   on the calling shell. This lets public-repo lookups succeed without any
+   configuration.
+2. Only if the unauthenticated request is rejected with a `401 Unauthorized`,
+   `403 Forbidden`, or rate-limit error does the CLI surface a
+   `MissingCredentials` error advising the user which environment variable
+   to set.
+3. If credentials *are* provided but the API rejects them, a separate
+   `InvalidCredentials` error is shown.
+
+This means the typical user never has to provide a token to query a public
+repository, and only sees the credential prompt when the resource genuinely
+requires one (private repos, rate limits, etc.).
+
+### Pull Request Limitations by Provider
+
+| Limitation | Affects | Notes |
+|---|---|---|
+| Draft PR filter (`--status draft`) | **Bitbucket Cloud** | Returns an empty list. Bitbucket Cloud has no native concept of draft pull requests. |
+| Verbose body / description | **Bitbucket Cloud** | The list-pull-requests endpoint does not return PR descriptions. The `body` field is `None` for Bitbucket PRs in both default and verbose output. (A per-PR follow-up fetch is a planned enhancement.) |
+| Labels | **Bitbucket Cloud** | The Bitbucket Cloud PR API does not expose labels (labels exist on Issues only). The `labels` field is always empty for Bitbucket PRs. |
 
 ### Error Handling
 

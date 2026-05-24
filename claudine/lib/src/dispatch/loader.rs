@@ -5,17 +5,7 @@ use biscuit_file::Json5;
 use regex::Regex;
 use tracing::{debug, info, warn};
 
-use crate::actions::{CompiledMapper, HookAction, Mapper};
-use crate::config::atomic::atomic_write;
-use crate::config::claudine_config::{
-    ClaudineConfig, ClaudineMessengerConfig, MessengerProviderConfig, RepoOverrideConfig,
-};
-use crate::config::migration;
-use crate::error::{ClaudineError, Result};
-use crate::events::{AgenticEvent, GlobalSettings};
-use crate::messaging::{MessagingRouteConfig, RuntimeMessagingSettings, ScopedMessagingSettings};
-use crate::services::protect::catalog::ProtectPlatform;
-use crate::services::protect::service::ProtectService;
+use super::deps::*;
 
 /// Candidate file names for user-level configuration.
 const USER_CONFIG_NAMES: &[&str] = &[".claudine/config.json"];
@@ -28,7 +18,7 @@ const REPO_CONFIG_NAME: &str = ".claudine/config.json";
 pub struct RuntimeEventBinding {
     enabled: bool,
     actions: Vec<HookAction>,
-    matcher: Option<Regex>,
+    matcher: Option<RuntimeMatcher>,
     compiled_mappers: Vec<Option<CompiledMapper>>,
 }
 
@@ -43,8 +33,8 @@ impl RuntimeEventBinding {
         &self.actions
     }
 
-    /// Precompiled matcher regex for this binding.
-    pub fn matcher(&self) -> Option<&Regex> {
+    /// Precompiled matcher (regex or expression) for this binding.
+    pub fn matcher(&self) -> Option<&RuntimeMatcher> {
         self.matcher.as_ref()
     }
 
@@ -55,7 +45,11 @@ impl RuntimeEventBinding {
 
     /// Build a RuntimeEventBinding directly for testing.
     #[cfg(test)]
-    pub fn new_for_test(enabled: bool, actions: Vec<HookAction>, matcher: Option<Regex>) -> Self {
+    pub fn new_for_test(
+        enabled: bool,
+        actions: Vec<HookAction>,
+        matcher: Option<RuntimeMatcher>,
+    ) -> Self {
         let compiled_mappers = vec![None; actions.len()];
         Self {
             enabled,
@@ -120,13 +114,38 @@ pub fn compile_canonical_runtime(
             .map(|action| compile_canonical_action_mapper(action, *event))
             .collect::<Result<Vec<_>>>()?;
 
+        let matcher = config
+            .matchers
+            .get(event)
+            .and_then(|raw| RuntimeMatcher::compile(raw));
+
         events.insert(
             *event,
             RuntimeEventBinding {
                 enabled: true,
                 actions: actions.clone(),
-                matcher: None,
+                matcher,
                 compiled_mappers,
+            },
+        );
+    }
+
+    // Bindings that have a matcher configured but no actions still need a
+    // runtime binding so that future protect-only or logging-only flows
+    // can honor the matcher. Today this is harmless: dispatch will skip
+    // the actions block but still run protect/log paths.
+    for (event, raw) in &config.matchers {
+        if events.contains_key(event) {
+            continue;
+        }
+        let matcher = RuntimeMatcher::compile(raw);
+        events.insert(
+            *event,
+            RuntimeEventBinding {
+                enabled: true,
+                actions: Vec::new(),
+                matcher,
+                compiled_mappers: Vec::new(),
             },
         );
     }
@@ -195,7 +214,7 @@ fn compile_canonical_mapper(mapper: &Mapper, event: AgenticEvent) -> Result<Comp
 /// Constructs a minimal [`GlobalSettings`] containing only the TTS
 /// configuration, suitable for [`LifecycleRuntimeContext`].
 pub fn bridge_tts_settings(config: &ClaudineConfig) -> GlobalSettings {
-    use crate::config::claudine_config::{Gender, TtsValue, VoiceSelection};
+    use crate::config::tts::{Gender, TtsValue, VoiceSelection};
     use crate::events::TtsSettings;
 
     let tts = match &config.tts {
@@ -472,31 +491,6 @@ pub fn save_repo_override_config(config: &RepoOverrideConfig, path: &Path) -> Re
     Ok(())
 }
 
-/// Merge a repo-level [`RepoOverrideConfig`] into a user-level config.
-///
-/// Merge rules:
-/// - `canonical_provider`: repo overrides user if repo has `Some`.
-/// - `actions`: per-event replacement — if repo defines actions for an event,
-///   that vector fully replaces the user's entry for the same event.
-fn merge_repo_override(user: &mut ClaudineConfig, repo: &RepoOverrideConfig) {
-    // canonical_provider: repo overrides user if set
-    if repo.canonical_provider.is_some() {
-        user.canonical_provider = repo.canonical_provider;
-    }
-
-    // actions: per-event replacement
-    for (event, repo_actions) in &repo.actions {
-        user.actions.insert(*event, repo_actions.clone());
-    }
-
-    // active_messenger: repo overrides the active config key only
-    if let Some(override_value) = &repo.active_messenger
-        && let Some(messenger) = &mut user.messenger
-    {
-        messenger.active_config = override_value.clone();
-    }
-}
-
 /// Parse a raw string as JSON5 and return a [`serde_json::Value`].
 fn parse_json5_to_value(raw: &str) -> Result<serde_json::Value> {
     let json5 = Json5::from_str(raw)
@@ -510,6 +504,7 @@ mod tests {
     use crate::actions::*;
     use crate::config::claudine_config::DefaultSounds;
     use crate::events::*;
+    use crate::provider::Provider;
 
     use std::collections::HashMap;
 
@@ -598,125 +593,6 @@ mod tests {
     }
 
     #[test]
-    fn merge_repo_canonical_provider_overrides_user() {
-        let mut user = ClaudineConfig {
-            canonical_provider: Some(Provider::Claude),
-            ..ClaudineConfig::default()
-        };
-        let repo = RepoOverrideConfig {
-            canonical_provider: Some(Provider::Gemini),
-            ..RepoOverrideConfig::default()
-        };
-        merge_repo_override(&mut user, &repo);
-        assert_eq!(user.canonical_provider, Some(Provider::Gemini));
-    }
-
-    #[test]
-    fn merge_repo_actions_replace_user_per_event() {
-        let mut user = ClaudineConfig::default();
-        user.actions.insert(
-            AgenticEvent::SessionStart,
-            vec![HookAction::SoundEffect {
-                effect: "user-sound".to_string(),
-                volume: 1.0,
-                speed: 1.0,
-            }],
-        );
-        user.actions.insert(
-            AgenticEvent::TurnComplete,
-            vec![HookAction::Report { handler: None }],
-        );
-
-        let repo = RepoOverrideConfig {
-            actions: std::collections::HashMap::from([(
-                AgenticEvent::SessionStart,
-                vec![HookAction::SoundEffect {
-                    effect: "repo-sound".to_string(),
-                    volume: 0.5,
-                    speed: 1.0,
-                }],
-            )]),
-            ..RepoOverrideConfig::default()
-        };
-
-        merge_repo_override(&mut user, &repo);
-
-        let session_start = &user.actions[&AgenticEvent::SessionStart];
-        assert_eq!(session_start.len(), 1);
-        if let HookAction::SoundEffect { effect, .. } = &session_start[0] {
-            assert_eq!(effect, "repo-sound");
-        } else {
-            panic!("Expected SoundEffect");
-        }
-
-        assert!(user.actions.contains_key(&AgenticEvent::TurnComplete));
-    }
-
-    #[test]
-    fn merge_repo_override_applies_active_messenger() {
-        use crate::config::claudine_config::{ClaudineMessengerConfig, MessengerProviderConfig};
-
-        let mut user = ClaudineConfig {
-            messenger: Some(ClaudineMessengerConfig {
-                active_config: Some("personal".to_string()),
-                configurations: {
-                    let mut m = std::collections::HashMap::new();
-                    m.insert(
-                        "personal".to_string(),
-                        MessengerProviderConfig::Discord {
-                            channel_id: "123".to_string(),
-                            bot_token_env: "TOKEN".to_string(),
-                        },
-                    );
-                    m.insert(
-                        "work".to_string(),
-                        MessengerProviderConfig::Slack {
-                            channel_id: "C456".to_string(),
-                            bot_token_env: "SLACK_URL".to_string(),
-                        },
-                    );
-                    m
-                },
-            }),
-            ..Default::default()
-        };
-
-        let repo = RepoOverrideConfig {
-            active_messenger: Some(Some("work".to_string())),
-            ..Default::default()
-        };
-
-        merge_repo_override(&mut user, &repo);
-
-        assert_eq!(
-            user.messenger.as_ref().unwrap().active_config.as_deref(),
-            Some("work"),
-        );
-    }
-
-    #[test]
-    fn merge_repo_override_disables_messenger_with_null() {
-        use crate::config::claudine_config::ClaudineMessengerConfig;
-
-        let mut user = ClaudineConfig {
-            messenger: Some(ClaudineMessengerConfig {
-                active_config: Some("personal".to_string()),
-                configurations: std::collections::HashMap::new(),
-            }),
-            ..Default::default()
-        };
-
-        let repo = RepoOverrideConfig {
-            active_messenger: Some(None),
-            ..Default::default()
-        };
-
-        merge_repo_override(&mut user, &repo);
-
-        assert_eq!(user.messenger.as_ref().unwrap().active_config, None);
-    }
-
-    #[test]
     fn save_and_reload_claudine_config() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join(".claudine/config.json");
@@ -742,6 +618,7 @@ mod tests {
                 effect: "doorbell".to_string(),
                 volume: 1.0,
                 speed: 1.0,
+                when: None,
             }],
         );
         config.default_sounds = DefaultSounds::default();
@@ -785,6 +662,7 @@ mod tests {
                     pattern: r"(?P<decision>allow|deny)\s+because\s+(?P<reason>.*)".to_string(),
                 }),
                 timeout_ms: None,
+                when: None,
             }],
         );
 
@@ -795,6 +673,164 @@ mod tests {
         assert_eq!(binding.actions().len(), 1);
         assert_eq!(binding.compiled_mappers().len(), 1);
         assert!(binding.compiled_mappers()[0].is_some());
+    }
+
+    #[test]
+    fn compile_canonical_runtime_compiles_expression_matcher() {
+        let mut config = ClaudineConfig::default();
+        config.protect.enabled = false;
+        config.default_sounds = DefaultSounds::default();
+        config.actions.insert(
+            AgenticEvent::BeforeTool,
+            vec![HookAction::Report {
+                handler: None,
+                when: None,
+            }],
+        );
+        config.matchers.insert(
+            AgenticEvent::BeforeTool,
+            "tool_name == 'Bash' && git.branch == 'main'".to_string(),
+        );
+
+        let runtime = compile_canonical_runtime(config, None).unwrap();
+        let binding = runtime
+            .get_binding(&AgenticEvent::BeforeTool)
+            .expect("missing binding");
+        match binding.matcher().expect("matcher should be compiled") {
+            crate::dispatch::matcher::RuntimeMatcher::Expression { source, .. } => {
+                assert_eq!(source, "tool_name == 'Bash' && git.branch == 'main'");
+            }
+            other => panic!("expected expression matcher, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn compile_canonical_runtime_compiles_regex_matcher_fallback() {
+        let mut config = ClaudineConfig::default();
+        config.protect.enabled = false;
+        config.default_sounds = DefaultSounds::default();
+        config.actions.insert(
+            AgenticEvent::BeforeTool,
+            vec![HookAction::Report {
+                handler: None,
+                when: None,
+            }],
+        );
+        config
+            .matchers
+            .insert(AgenticEvent::BeforeTool, "Bash|Edit".to_string());
+
+        let runtime = compile_canonical_runtime(config, None).unwrap();
+        let binding = runtime
+            .get_binding(&AgenticEvent::BeforeTool)
+            .expect("missing binding");
+        assert!(matches!(
+            binding.matcher().expect("matcher should be compiled"),
+            crate::dispatch::matcher::RuntimeMatcher::Regex(_)
+        ));
+    }
+
+    #[test]
+    fn compile_canonical_runtime_drops_unparseable_matcher() {
+        let mut config = ClaudineConfig::default();
+        config.protect.enabled = false;
+        config.default_sounds = DefaultSounds::default();
+        config.actions.insert(
+            AgenticEvent::BeforeTool,
+            vec![HookAction::Report {
+                handler: None,
+                when: None,
+            }],
+        );
+        config
+            .matchers
+            .insert(AgenticEvent::BeforeTool, "[invalid(regex".to_string());
+
+        let runtime = compile_canonical_runtime(config, None).unwrap();
+        let binding = runtime
+            .get_binding(&AgenticEvent::BeforeTool)
+            .expect("missing binding");
+        assert!(binding.matcher().is_none());
+    }
+
+    #[test]
+    fn invalid_matcher_in_config_compiles_to_unconditional_binding() {
+        // End-to-end pin for the production semantics described in
+        // [`crate::dispatch::matcher::RuntimeMatcher::compile`]: a matcher
+        // string that is neither a valid Darkmatter condition nor a valid
+        // regex must drop to `matcher() == None`, and `matcher::matches`
+        // must then return `true`, so the binding fires unconditionally
+        // rather than silently disappearing.
+        //
+        // The test-only helper [`matches_with_pattern`] returns `false`
+        // for the same input, which is the *opposite* of production
+        // behaviour. This test exists so a future contributor reading
+        // that helper does not "fix" it in the wrong direction.
+        let invalid_matcher = "[invalid(regex";
+
+        let mut config = ClaudineConfig::default();
+        config.protect.enabled = false;
+        config.default_sounds = DefaultSounds::default();
+        config.actions.insert(
+            AgenticEvent::BeforeTool,
+            vec![HookAction::Report {
+                handler: None,
+                when: None,
+            }],
+        );
+        config
+            .matchers
+            .insert(AgenticEvent::BeforeTool, invalid_matcher.to_string());
+
+        let runtime = compile_canonical_runtime(config, None).unwrap();
+        let binding = runtime
+            .get_binding(&AgenticEvent::BeforeTool)
+            .expect("missing binding");
+
+        assert!(
+            binding.matcher().is_none(),
+            "invalid matcher string must compile to None",
+        );
+
+        let meta = EventMeta {
+            provider: Provider::Claude,
+            event: AgenticEvent::BeforeTool,
+            timestamp: chrono::Utc::now(),
+            session_id: None,
+            cwd: None,
+            tool_name: Some("Bash".to_string()),
+            tool_input: None,
+            tool_response: None,
+            error: None,
+            prompt: None,
+            agent_type: None,
+            notification_type: None,
+            notification_message: None,
+            extra: HashMap::new(),
+            env: EnvironmentContext::default(),
+        };
+
+        assert!(
+            crate::dispatch::matcher::matches(binding.matcher(), &meta),
+            "binding with no matcher must fire unconditionally",
+        );
+    }
+
+    #[test]
+    fn compile_canonical_runtime_creates_binding_for_matcher_only_event() {
+        let mut config = ClaudineConfig::default();
+        config.protect.enabled = false;
+        config.default_sounds = DefaultSounds::default();
+        config
+            .matchers
+            .insert(AgenticEvent::BeforeTool, "tool_name == 'Bash'".to_string());
+
+        let runtime = compile_canonical_runtime(config, None).unwrap();
+        let binding = runtime
+            .get_binding(&AgenticEvent::BeforeTool)
+            .expect("matcher-only event should produce a binding");
+        assert!(binding.matcher().is_some());
+        assert!(binding.actions().is_empty());
     }
 
     #[test]
@@ -811,6 +847,7 @@ mod tests {
                     pattern: "[invalid(".to_string(),
                 }),
                 timeout_ms: None,
+                when: None,
             }],
         );
 
@@ -822,7 +859,7 @@ mod tests {
 
     #[test]
     fn compile_canonical_runtime_bridges_messenger_config() {
-        use crate::config::claudine_config::{ClaudineMessengerConfig, MessengerProviderConfig};
+        use crate::config::messaging_block::{ClaudineMessengerConfig, MessengerProviderConfig};
 
         let mut config = ClaudineConfig::default();
         config.protect.enabled = false;

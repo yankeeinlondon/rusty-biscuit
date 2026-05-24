@@ -6,23 +6,13 @@ Complete command documentation with examples and options.
 
 | Option | Description |
 |--------|-------------|
-| `-v, --verbose` | Enable verbose output |
+| `-v, --verbose` | Increase presentation detail for human-facing output (repeatable) |
+| `--debug <LEVEL>` | Set diagnostic tracing level (`trace`/`debug`/`info`/`warn`/`error`) |
+| `--plain` | Strip ANSI escape codes from all output |
 | `--version` | Print version information |
 | `-h, --help` | Print help information |
 
-Environment variables:
-- `DEBUG=INFO` - Enable debug logging
-- `HOME` - Used to resolve `~` paths
-
----
-
-## `claudine about`
-
-Display rich help documentation using darkmatter markdown rendering with biscuit-terminal fallback.
-
-```bash
-claudine about
-```
+`-v`/`--verbose` controls styled user-facing output; `--debug` (or `RUST_LOG`) controls raw tracing — they are separate surfaces. Running `claudine` with no subcommand renders rich grouped help (the retired `about` command).
 
 ---
 
@@ -117,27 +107,22 @@ Shows which events each provider supports:
 
 ---
 
-## `claudine link`
+## `claudine skills` · `claudine commands` · `claudine agents`
 
-Analyze and optionally repair skill/command/agent/script link state across providers.
+List shared resources across providers and show their link/sync state. Each command targets one resource type (the former unified `link` command was split into these three):
 
-```bash
-claudine link [OPTIONS] [PROVIDER]
-```
+| Command | Resource |
+|---------|----------|
+| `claudine skills` | Agentic skills |
+| `claudine commands` | Slash commands |
+| `claudine agents` | Agent/subagent definitions |
 
-| Option | Description |
-|--------|-------------|
-| `--support` | Provider resource support matrix (Skill/Command/Agent/Script) |
-| `<provider>` | Detailed capability view for one provider (fuzzy matching) |
-| `--scope <user\|repo>` | Choose user-scope or repo-scope analysis (default: `user`) |
-| `--apply` | Apply auto-fixable states (`LinkMissing`, `DerivedMissing`, `DerivedStale`) |
-| `--filter <name>` | Analyze only resources with this name |
-| `--detailed` | Show detailed output |
+Each accepts an optional `[provider]` (fuzzy-matched) for a detailed per-provider view and shows link state across providers.
 
 **Behavior:**
 
-- Inside git repo: Links repo-scoped skills using **relative** symlinks
-- Outside git repo: Links user-scoped skills using **absolute** symlinks
+- Inside git repo: links repo-scoped resources using **relative** symlinks
+- Outside git repo: links user-scoped resources using **absolute** symlinks
 
 **Example output:**
 
@@ -155,6 +140,31 @@ Skipped:
 Conflicts:
   ✗ react        Claude (a1b2c3) ≠ Codex (e5f6g7)
 ```
+
+---
+
+## `claudine actions`
+
+Show which actions are configured and for which events, across providers.
+
+```bash
+claudine actions
+```
+
+---
+
+## `claudine config`
+
+Manage Claudine configuration through a TUI. The current TUI focus is messenger routes — bot-token routes (Discord, Slack, Signal, WhatsApp) and webhook routes (Discord/Slack webhooks).
+
+```bash
+claudine config
+```
+
+- Webhook URL fields use masked input and are validated before advancing; env-only routes (blank URL + non-empty env var) are allowed.
+- Inline webhook URLs never render raw (shown as `webhook: ********`); all webhook send errors run through `redact_webhook_urls`.
+- A **Test Connection** workflow (press `T` during webhook input) sends a test message without saving the route.
+- Desktop notifications are intentionally absent — they are zero-config and triggered via lifecycle `notify` frontmatter only.
 
 ---
 
@@ -277,26 +287,8 @@ claudine sequence @research.md topic="async traits"
 - `-i, --interactive`
 - `-m, --model <MODEL>`
 - `-s, --system-prompt <PROMPT|FILE>`
-- `-t, --timeout <SECONDS>`
+- `-t, --timeout <DURATION>`
 - `--dry-run`, `-q, --quiet`, `--silent`
-
----
-
-## `claudine dry-run <event>`
-
-Test what would happen for an event without side effects.
-
-```bash
-claudine dry-run <EVENT> [--provider <name>]
-```
-
-Accepts event names in multiple formats: canonical (`turn_complete`), native (`Stop`), PascalCase (`TurnComplete`), kebab-case (`turn-complete`) — all case-insensitive. When no stdin is provided, generates realistic mock payloads for the selected provider.
-
-Shows:
-- Which actions would fire
-- Template interpolation results
-- Matcher checks
-- Provider overrides applied
 
 ---
 
@@ -369,7 +361,7 @@ Claudine can wrap provider CLIs with preflight checks, argument translation, env
 | `-m, --model <MODEL>` | Override the model used by the provider |
 | `--asp <FILE>` | Append a system prompt from a file (alias: `--append-system-prompt`) |
 | `--rsp <FILE>` | Replace the provider's system prompt with contents from a file (alias: `--replace-system-prompt`) |
-| `-t, --timeout <SECONDS>` | Timeout in seconds (non-interactive only) |
+| `-t, --timeout <DURATION>` | Wall-clock timeout like 30s, 5m, 2h (non-interactive only) |
 | `-o, --output <FORMAT>` | Set output format (json, text, stream) |
 | `--include <ENV_NAME>` | Keep a sensitive env var name that would otherwise be filtered |
 | `--mcp` | Compose a Claudine-managed MCP session from the effective defaults |
@@ -447,31 +439,31 @@ claudine uninstall [OPTIONS]
 
 ```
 cli/src/
-├── main.rs              → Entry point, clap parser, command dispatch
+├── main.rs              → Entry point, clap parsing, command dispatch
+├── args.rs              → CLI/Commands clap definitions
 ├── log.rs               → Output formatting (message/data/info/warn/error)
 ├── output.rs            → Execution line, badges, env details, prompt display
 └── commands/
-    ├── about.rs         → Rich help rendering
-    ├── completions.rs   → Shell completion generation
-    ├── dry_run.rs       → Event simulation with mock payloads
+    ├── actions.rs       → Configured-action inspection
+    ├── agents.rs        → Agent/subagent listing and link state
+    ├── completions.rs   → Shell completion generation (+ hidden __complete engine)
+    ├── compose.rs       → compose / inline-compose
+    ├── config_tui/      → Configuration TUI (messenger routes)
     ├── handle.rs        → Event processing from stdin
-    ├── hooks.rs         → Hook inspection and validation
-    ├── link.rs          → Skill synchronization management
-    ├── logs.rs          → JSONL log reporting queries
-    ├── mcp.rs           → MCP catalog, defaults, aliasing, import, and sync commands
+    ├── help.rs          → Rich grouped help (no-subcommand entry)
+    ├── hooks/           → Hook inspection and validation
+    ├── init/            → Setup wizard orchestration
+    ├── init_wizard.rs   → Wizard flow
+    ├── link_display.rs  → Shared link-state rendering
+    ├── logs/            → JSONL log reporting queries
+    ├── mcp/             → MCP catalog, defaults, aliasing, import, and sync commands
     ├── providers.rs     → Provider capability matrix (skill/slash/agent/hooks)
+    ├── sequence.rs      → Serial composition sequence
+    ├── skills.rs        → Skill listing and link state
+    ├── slash_commands.rs → Slash command listing and link state
     ├── sync.rs          → Hook re-registration
     ├── uninstall.rs     → Hook removal
-    ├── wrap/
-    │   ├── mod.rs       → Shared wrapper pipeline, args, interactivity logic, stream summary
-    │   ├── profile.rs   → Provider mapping profiles (yolo/non-interactive/model/output)
-    │   ├── env.rs       → Env sanitization + injected context vars
-    │   ├── exec.rs      → Child process execution, structured stream capture, timeout
-    │   ├── prompt_file.rs → Prompt file resolution and Darkmatter composition
-    │   └── repo_home.rs → Shadow HOME for repo-scoped resource isolation
-    └── init/
-        ├── mod.rs       → Wizard orchestration (interactive + quick modes, default configs)
-        └── prompts.rs   → inquire-based interactive prompts
+    └── wrap/            → Shared wrapper pipeline, env sanitization, exec, stream capture, MCP injection
 ```
 
 ## Output System
@@ -524,7 +516,7 @@ Rich formatting uses biscuit-terminal components (Table, Prose with `{{bold}}` /
 
 | Variable | Description |
 |----------|-------------|
-| `DEBUG` | Enable debug logging (`DEBUG=INFO`) |
+| `RUST_LOG` | Diagnostic tracing level (also set via the `--debug <LEVEL>` flag) |
 | `HOME` | Used for path resolution |
 | `PATH` | Must include `claudine` binary |
 | `AGENT` | Injected by wrapper: provider name |

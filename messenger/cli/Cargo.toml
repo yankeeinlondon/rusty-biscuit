@@ -3,6 +3,10 @@ name = "messenger-cli"
 version = "0.1.0"
 edition = "2024"
 
+[lib]
+name = "messenger_cli"
+path = "src/lib.rs"
+
 [[bin]]
 name = "messenger"
 path = "src/main.rs"
@@ -15,10 +19,12 @@ sfx-native-linux = []
 
 [dependencies]
 messenger = { path = "../lib", features = ["discord", "slack", "signal", "whatsapp", "telegram", "desktop"] }
+sniff = { path = "../../sniff/lib" }
 biscuit-terminal = { path = "../../biscuit-terminal/lib" }
 clap = { version = "4", features = ["derive"] }
 clap_complete = { version = "4.5", features = ["unstable-dynamic"] }
 inquire = "0.9"
+strum = "0.28"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -31,3 +37,4 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 [dev-dependencies]
 tempfile = "3.15"
 serial_test = "3"
+insta = "1.47"

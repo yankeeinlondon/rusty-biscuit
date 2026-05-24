@@ -49,4 +49,27 @@ Columns support type hints (`ColumnType::Text`, `Integer`, `Float`, `Currency`),
 
 ## CLI
 
-Not directly exposed as a standalone CLI command. Tables are used programmatically and rendered by other tools (e.g., `darkmatter` for GFM table rendering).
+`bt table` renders a table through the render tree (`render_terminal_node`),
+so the typed `TableStyle` striping and header/body slot styling are applied by
+the terminal tree renderer.
+
+```bash
+bt table --columns "Name,Score" --row "Ann,90" --row "Bob,75"
+bt table --columns "Name,Score" --row "Ann,90" --row "Bob,75" --striped
+bt table --columns "Name,Score" --row "Ann,90" --row "Bob,75" --striped --stripe-bg blue
+bt table --columns "Name,Score" --row "Ann,90" --bold-header --body-color cyan
+```
+
+Options:
+
+- `--columns`: Comma-separated column headers (required)
+- `--row`: Comma-separated cell values (repeatable — one per data row)
+- `--striped`: Apply an alternating background stripe to even data rows
+- `--stripe-bg`: Explicit stripe background color (named or `#rrggbb`)
+- `--stripe-text`: Explicit stripe text color (named or `#rrggbb`)
+- `--bold-header`: Render every column header in bold
+- `--header-color`: Header text color (named or `#rrggbb`)
+- `--body-color`: Body (data cell) text color (named or `#rrggbb`)
+
+Tables are also used programmatically and rendered by other tools (e.g.,
+`darkmatter` for GFM table rendering).

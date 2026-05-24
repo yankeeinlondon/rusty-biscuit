@@ -252,7 +252,7 @@ fn map_weight(rule: HorizontalRule, raw: &str) -> HorizontalRule {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use biscuit_terminal::components::renderable::{BrowserRenderable, Renderable};
+    use biscuit_terminal::components::renderable::{BrowserRenderable, TerminalRenderable};
     use biscuit_terminal::discovery::detection::ImageSupport;
     use biscuit_terminal::terminal::Terminal;
 
@@ -376,8 +376,8 @@ mod tests {
             color: Some("blue".into()),
         };
 
-        let svg_a = build_rule(&attrs).render_to_browser();
-        let svg_b = build_rule(&attrs).render_to_browser();
+        let svg_a = build_rule(&attrs).render_html_fragment().render();
+        let svg_b = build_rule(&attrs).render_html_fragment().render();
         assert_eq!(svg_a, svg_b);
         assert!(svg_a.contains("--hr-weight: 2"));
         assert!(svg_a.contains("--hr-color: blue"));

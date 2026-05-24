@@ -6,13 +6,21 @@
 //! Both commands are thin request builders that delegate to
 //! [`execute_composition_request`] for wrapper-grade execution.
 
+// `CompositionError` carries variants with several `PathBuf` and other
+// owned fields (e.g. `LoopIterationFailed`, `LoopRateLimited`) so the
+// enum-on-the-stack is sizable. Boxing the inner data would ripple
+// through every existing call site for marginal benefit; the closures
+// in this file legitimately propagate the typed error and that's the
+// shape they need to keep.
+#![allow(clippy::result_large_err)]
+
 use std::collections::BTreeSet;
 
 use clap::Args;
 use claudine::composition::{
     self, CompositionExecutionRequest, CompositionMode, OutputFormat as CompositionOutputFormat,
 };
-use claudine::events::Provider;
+use claudine::provider::Provider;
 use claudine::system_prompt::SystemPromptArgs;
 use color_eyre::eyre::{Result, eyre};
 use tracing::info_span;
@@ -77,7 +85,14 @@ pub struct SharedComposeArgs {
     pub exclude: Vec<Provider>,
 
     /// Enable provider-specific YOLO/auto-approval mode.
-    #[arg(short = 'y', long)]
+    ///
+    /// `CLAUDINE_YOLO=true` (or `=1`, `=yes`, `=on`) in the environment
+    /// is equivalent to passing `--yolo` on the command line; both
+    /// activate the same single intent signal that drives the provider's
+    /// native bypass flag. The legacy short `YOLO` env var is no longer
+    /// honored here — the reporter previously read it independently,
+    /// producing diverging signals between launch behavior and reporting.
+    #[arg(short = 'y', long, env = "CLAUDINE_YOLO")]
     pub yolo: bool,
 
     /// Run the provider session in interactive mode.
@@ -114,9 +129,10 @@ pub struct SharedComposeArgs {
     )]
     pub replace_system_prompt: Option<String>,
 
-    /// Timeout in seconds (sends SIGTERM then SIGKILL). Only valid in non-interactive mode.
-    #[arg(short = 't', long = "timeout", value_name = "SECONDS")]
-    pub timeout: Option<u64>,
+    /// Wall-clock timeout (e.g. `30s`, `5m`, `2h`). Sends SIGTERM then SIGKILL.
+    /// Only valid in non-interactive mode.
+    #[arg(short = 't', long = "timeout", value_name = "DURATION")]
+    pub timeout: Option<String>,
 
     /// Step-silence timeout (e.g. `30s`, `5m`). Kills the child when no stream
     /// event is observed for this long. Only valid in non-interactive
@@ -167,6 +183,44 @@ pub struct SharedComposeArgs {
     /// Emit a performance report to stderr after command completion.
     #[arg(long)]
     pub perf: bool,
+
+    /// Maximum number of loop iterations (overrides `loop.max` frontmatter).
+    #[arg(long = "max-iterations", value_name = "N")]
+    pub max_iterations: Option<usize>,
+
+    /// What to do when a completed loop iteration reports a provider
+    /// rate-limit signal. Overrides `loop.on_rate_limit` frontmatter.
+    ///
+    /// `pause` (default) sleeps until the provider's reset time, then runs
+    /// the next iteration. `abort` halts the loop with a structured error
+    /// (exit code 75 — `EX_TEMPFAIL`). `continue` proceeds without pausing.
+    /// If `reset_at` is missing or already past, `pause` falls back to
+    /// `abort` to avoid unbounded sleeps.
+    #[arg(long = "on-rate-limit", value_name = "POLICY", value_enum)]
+    pub on_rate_limit: Option<OnRateLimitArg>,
+}
+
+/// CLI-facing wrapper for [`claudine::composition::OnRateLimit`], exposed
+/// as a [`clap::ValueEnum`] so that `--on-rate-limit` accepts the canonical
+/// `pause | abort | continue` tokens.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+pub enum OnRateLimitArg {
+    /// Pause until the provider's reset time, then continue (default).
+    Pause,
+    /// Halt the loop with a structured error (exit code 75).
+    Abort,
+    /// Proceed without pausing.
+    Continue,
+}
+
+impl From<OnRateLimitArg> for claudine::composition::OnRateLimit {
+    fn from(value: OnRateLimitArg) -> Self {
+        match value {
+            OnRateLimitArg::Pause => Self::Pause,
+            OnRateLimitArg::Abort => Self::Abort,
+            OnRateLimitArg::Continue => Self::Continue,
+        }
+    }
 }
 
 impl SharedComposeArgs {
@@ -268,19 +322,45 @@ pub fn run_inline_compose(
 fn run_compose_inner(
     args: ComposeArgs,
     verbose: u8,
-    startup_timings: Option<crate::perf::StartupTimings>,
+    mut startup_timings: Option<crate::perf::StartupTimings>,
 ) -> Result<i32> {
+    let compose_entry = std::time::Instant::now();
     let ComposeArgs { shared, args } = args;
     let parsed = parse_composition_positionals(&args)?;
     let file = parsed.file_ref.ok_or_else(|| {
         eyre!("missing file reference: expected exactly one file reference plus optional key=value setters")
     })?;
+
+    // Receipt banner: immediate feedback that the request was accepted.
+    // Suppressed only by `--silent`. Per spec W1, `--quiet` follows the
+    // existing execution header's detail rules — which include emitting
+    // the brief one-liner — so the banner appears under `--quiet`.
+    if !shared.silent {
+        use biscuit_terminal::components::renderable::TerminalRenderable;
+        use biscuit_terminal::components::status::Status;
+        let term = crate::log::terminal();
+        let status = Status::from_prose(format!("→ Composing {file}…"));
+        crate::log::message(&status.render(&term));
+    }
+
+    // Install the process-scoped SIGINT handler now so Ctrl+C during the
+    // (potentially slow) compose prep phase produces the same INFO notice
+    // and exit-130 outcome the loop emits during its iterations.
+    let _user_interrupt_guard = install_user_interrupt_guard(&file);
+    if shared.timeout.is_some() && shared.interactive {
+        return Err(eyre!("--timeout cannot be used with --interactive mode"));
+    }
     if shared.step_timeout.is_some() && shared.interactive {
         return Err(eyre!(
             "--step-timeout cannot be used with --interactive mode"
         ));
     }
-    let cli_step_timeout_secs = shared.step_timeout_secs()?;
+    // Early validation: both flags share the same duration grammar.
+    if let Some(ref raw) = shared.timeout {
+        claudine::harness::parse_timeout(raw, std::path::Path::new("<--timeout>"))
+            .map_err(|e| eyre!("invalid --timeout value: {e}"))?;
+    }
+    shared.step_timeout_secs()?;
     let set_overrides = merge_set_overrides(shared.set.as_deref(), parsed.shorthand_setters)?;
     let system_prompt_args = shared.system_prompt_args();
 
@@ -293,6 +373,39 @@ fn run_compose_inner(
         interactive = shared.interactive,
     )
     .entered();
+
+    // Phase 2 (2026-05-09-slow-prep): build the per-invocation prep context
+    // immediately after source resolution. The context owns the single
+    // source-repo-root discovery, the loaded selection config, and the
+    // installed-provider snapshot used by every later prep phase.
+    let prep_context = super::wrap::composition::CompositionPrepContext::new(
+        &file,
+        &source.resolved_path,
+        &shared.excluded(),
+    )?;
+
+    // -- Eager target resolution -------------------------------------------
+    // Resolve the execution target *before* composing templates so that
+    // `{{env.AGENT}}` in the body resolves to the chosen provider's slug.
+    // Hints come from the raw frontmatter (no compose).
+    let raw_hints =
+        composition::parse_selection_hints_from_frontmatter(source.markdown.frontmatter())?;
+    let resolved_target = {
+        let _span = info_span!("compose_prep.eager_target").entered();
+        super::wrap::composition::eagerly_resolve_target(
+            &prep_context,
+            &raw_hints,
+            shared.explicit_provider(),
+            shared.model.as_deref(),
+        )?
+    };
+
+    let mut env_overrides: std::collections::BTreeMap<String, String> =
+        std::collections::BTreeMap::new();
+    super::wrap::composition::install_agent_env_for_composition(
+        &resolved_target,
+        &mut env_overrides,
+    );
 
     // ── Pre-flight shell approval ────────────────────────────────────
     let compose_options = {
@@ -309,32 +422,165 @@ fn run_compose_inner(
 
     let approval_options = super::wrap::build_harness_shell_options_with_cache(
         &source.resolved_path,
-        None,
+        prep_context.source_repo_root.as_deref(),
         Some(std::sync::Arc::clone(&shared_approval_cache)),
     );
 
-    let preflight = composition::resolve_shell_approvals(
-        Some(&source.markdown),
-        Some(&compose_options),
-        None,
-        &approval_options,
-    )?;
+    let preflight = {
+        let _span = info_span!("compose_prep.shell_preflight").entered();
+        composition::resolve_shell_approvals(
+            Some(&source.markdown),
+            Some(&compose_options),
+            None,
+            &approval_options,
+        )?
+    };
 
-    let prepared = composition::prepare_direct(
-        &source,
-        composition::PrepareOptions {
-            set_overrides,
-            pre_approved_commands: Some(preflight.approved_commands),
-            perf_enabled: shared.perf,
-            ..Default::default()
-        },
-    )?;
+    // Post-prep interrupt checkpoint. If the user pressed Ctrl+C during
+    // any of the prep phases (compose source parse, target resolution,
+    // env install, shell preflight) the SIGINT handler has already
+    // emitted the INFO notice — short-circuit before launching the agent
+    // or entering the loop.
+    if crate::output::user_interrupt_observed() {
+        return Ok(USER_INTERRUPT_EXIT_CODE);
+    }
+
+    // ── Loop detection and execution ─────────────────────────────────────
+    let loop_options = claudine::composition::LoopExecutionOptions {
+        max_iterations: shared
+            .max_iterations
+            .or(claudine::composition::resolve_max_iterations_from_env()),
+        fail_fast: claudine::composition::resolve_fail_fast_from_env(),
+        on_rate_limit: shared.on_rate_limit.map(Into::into),
+        // Engine polls this during rate-limit pause sleeps so Ctrl+C
+        // surfaces as `LoopInterrupted` instead of waiting out the timer.
+        interrupt_check: Some(crate::output::user_interrupt_observed),
+    };
+
+    let file_for_loop = file.clone();
+    if let Some(loop_result) =
+        run_loop_with_overrides(&source, set_overrides.as_ref(), loop_options, |ctx| {
+            let prepared = {
+                let _span = info_span!("compose_prep.prepare_direct").entered();
+                composition::prepare_direct(
+                    &source,
+                    composition::PrepareOptions {
+                        set_overrides: Some(ctx.as_set_overrides()),
+                        pre_approved_commands: Some(preflight.approved_commands.clone()),
+                        env_overrides: env_overrides.clone(),
+                        perf_enabled: shared.perf,
+                        source_repo_root: prep_context.source_repo_root.clone(),
+                    },
+                )?
+            };
+
+            let request = CompositionExecutionRequest {
+                mode: CompositionMode::ChainedDocument,
+                file_ref: file_for_loop.clone(),
+                prepared,
+                resolved_target: Some(resolved_target.clone()),
+                explicit_provider: shared.explicit_provider(),
+                excluded: shared.excluded(),
+                yolo: shared.yolo,
+                include: shared.include.clone(),
+                model: shared.model.clone(),
+                output: shared.output,
+                system_prompt_args: system_prompt_args.clone(),
+                timeout: shared.timeout.clone(),
+                step_timeout: shared.step_timeout.clone(),
+                operation: shared.operation.clone(),
+                sandbox: shared.sandbox,
+                repo: shared.repo,
+                dry_run: shared.dry_run,
+                mcp: shared.mcp,
+                mcp_use: shared.mcp_use.clone(),
+                strict: shared.strict,
+                session_interactive: shared.interactive,
+                quiet: shared.quiet,
+                silent: shared.silent,
+                env_overrides: env_overrides.clone(),
+                shared_approval_cache: Some(std::sync::Arc::clone(&shared_approval_cache)),
+                sequence: false,
+                installed_snapshot: Some(prep_context.installed_snapshot.clone()),
+                prep_launch_workspace: Some(prep_context.launch_workspace.clone()),
+                prep_launch_context: Some(prep_context.launch_context.clone()),
+                prep_env_context: Some(prep_context.env_context.clone()),
+                prep_launch_detection_error: prep_context.launch_detection_error.clone(),
+            };
+
+            let outcome = super::wrap::composition::execute_composition_request_inner(
+                request,
+                verbose,
+                None,
+                shared.perf,
+            )
+            .map_err(|e| {
+                // Pre-spawn execution wiring failed (binary lookup, env
+                // build, etc.). Surface as an iteration failure — these
+                // are runtime problems, not malformed loop frontmatter.
+                claudine::composition::CompositionError::LoopIterationFailed {
+                    iteration: ctx.iteration,
+                    prompt_path: source.resolved_path.clone(),
+                    exit_code: 1,
+                    reason: e.to_string(),
+                    exit_reason: None,
+                }
+            })?;
+
+            Ok(build_loop_iteration_output(
+                ctx.iteration,
+                &source.resolved_path,
+                outcome,
+            ))
+        })?
+    {
+        if let Some(error) = loop_result.error {
+            // The interrupt path already announced itself via the INFO
+            // status line; suppress the red `Error:` echo and exit with
+            // the conventional 130 code so the shell sees a clean Ctrl+C.
+            if matches!(
+                error,
+                claudine::composition::CompositionError::LoopInterrupted { .. }
+            ) {
+                return Ok(loop_result.final_exit_code);
+            }
+            // Rate-limit halt has its own conventional exit code
+            // (`EX_TEMPFAIL` = 75) so shell wrappers can recognize a
+            // transient halt and retry-after-cool-off. Render the styled
+            // error block inline, then return `Ok(75)` so the outer
+            // process exits with the right code.
+            if matches!(
+                error,
+                claudine::composition::CompositionError::LoopRateLimited { .. }
+            ) {
+                emit_rate_limit_halt(&error);
+                return Ok(claudine::composition::LOOP_RATE_LIMITED_EXIT_CODE);
+            }
+            return Err(error.into());
+        }
+        return Ok(loop_result.final_exit_code);
+    }
+
+    // ── Single execution path (no loop) ──────────────────────────────────
+    let prepared = {
+        let _span = info_span!("compose_prep.prepare_direct").entered();
+        composition::prepare_direct(
+            &source,
+            composition::PrepareOptions {
+                set_overrides,
+                pre_approved_commands: Some(preflight.approved_commands),
+                env_overrides: env_overrides.clone(),
+                perf_enabled: shared.perf,
+                source_repo_root: prep_context.source_repo_root.clone(),
+            },
+        )?
+    };
 
     let request = CompositionExecutionRequest {
         mode: CompositionMode::ChainedDocument,
         file_ref: file,
         prepared,
-        resolved_target: None,
+        resolved_target: Some(resolved_target),
         explicit_provider: shared.explicit_provider(),
         excluded: shared.excluded(),
         yolo: shared.yolo,
@@ -342,8 +588,8 @@ fn run_compose_inner(
         model: shared.model,
         output: shared.output,
         system_prompt_args,
-        timeout: shared.timeout,
-        step_timeout: cli_step_timeout_secs,
+        timeout: shared.timeout.clone(),
+        step_timeout: shared.step_timeout.clone(),
         operation: shared.operation,
         sandbox: shared.sandbox,
         repo: shared.repo,
@@ -354,10 +600,19 @@ fn run_compose_inner(
         session_interactive: shared.interactive,
         quiet: shared.quiet,
         silent: shared.silent,
-        env_overrides: std::collections::BTreeMap::new(),
+        env_overrides,
         shared_approval_cache: Some(shared_approval_cache),
         sequence: false,
+        installed_snapshot: Some(prep_context.installed_snapshot.clone()),
+        prep_launch_workspace: Some(prep_context.launch_workspace.clone()),
+        prep_launch_context: Some(prep_context.launch_context.clone()),
+        prep_env_context: Some(prep_context.env_context.clone()),
+        prep_launch_detection_error: prep_context.launch_detection_error.clone(),
     };
+
+    if let Some(ref mut timings) = startup_timings {
+        timings.prep_phase = compose_entry.elapsed();
+    }
 
     execute_composition_request(request, verbose, startup_timings, shared.perf)
 }
@@ -365,19 +620,45 @@ fn run_compose_inner(
 fn run_inline_compose_inner(
     args: InlineComposeArgs,
     verbose: u8,
-    startup_timings: Option<crate::perf::StartupTimings>,
+    mut startup_timings: Option<crate::perf::StartupTimings>,
 ) -> Result<i32> {
+    let inline_compose_entry = std::time::Instant::now();
     let InlineComposeArgs { shared, args } = args;
     let parsed = parse_composition_positionals(&args)?;
     let file = parsed.file_ref.ok_or_else(|| {
         eyre!("missing file reference: expected exactly one file reference plus optional key=value setters")
     })?;
+
+    // Receipt banner: immediate feedback that the request was accepted.
+    // Suppressed only by `--silent`. Per spec W1, `--quiet` follows the
+    // existing execution header's detail rules — which include emitting
+    // the brief one-liner — so the banner appears under `--quiet`.
+    if !shared.silent {
+        use biscuit_terminal::components::renderable::TerminalRenderable;
+        use biscuit_terminal::components::status::Status;
+        let term = crate::log::terminal();
+        let status = Status::from_prose(format!("→ Composing {file}…"));
+        crate::log::message(&status.render(&term));
+    }
+
+    // Install the process-scoped SIGINT handler now so Ctrl+C during the
+    // (potentially slow) compose prep phase produces the same INFO notice
+    // and exit-130 outcome the loop emits during its iterations.
+    let _user_interrupt_guard = install_user_interrupt_guard(&file);
+    if shared.timeout.is_some() && shared.interactive {
+        return Err(eyre!("--timeout cannot be used with --interactive mode"));
+    }
     if shared.step_timeout.is_some() && shared.interactive {
         return Err(eyre!(
             "--step-timeout cannot be used with --interactive mode"
         ));
     }
-    let cli_step_timeout_secs = shared.step_timeout_secs()?;
+    // Early validation: both flags share the same duration grammar.
+    if let Some(ref raw) = shared.timeout {
+        claudine::harness::parse_timeout(raw, std::path::Path::new("<--timeout>"))
+            .map_err(|e| eyre!("invalid --timeout value: {e}"))?;
+    }
+    shared.step_timeout_secs()?;
     let set_overrides = merge_set_overrides(shared.set.as_deref(), parsed.shorthand_setters)?;
     let system_prompt_args = shared.system_prompt_args();
     let show_checks = !shared.silent;
@@ -427,6 +708,35 @@ fn run_inline_compose_inner(
         claudine::harness::report::report_prompt_property(has_prompt, is_non_empty, t);
     }
 
+    // Phase 2 (2026-05-09-slow-prep): single source-root discovery for the
+    // whole inline-compose invocation; downstream prep phases reuse this
+    // context rather than rediscovering the repo root.
+    let prep_context = super::wrap::composition::CompositionPrepContext::new(
+        &file,
+        &source.resolved_path,
+        &shared.excluded(),
+    )?;
+
+    // -- Eager target resolution ------------------------------------------
+    let raw_hints =
+        composition::parse_selection_hints_from_frontmatter(source.markdown.frontmatter())?;
+    let resolved_target = {
+        let _span = info_span!("compose_prep.eager_target").entered();
+        super::wrap::composition::eagerly_resolve_target(
+            &prep_context,
+            &raw_hints,
+            shared.explicit_provider(),
+            shared.model.as_deref(),
+        )?
+    };
+
+    let mut env_overrides: std::collections::BTreeMap<String, String> =
+        std::collections::BTreeMap::new();
+    super::wrap::composition::install_agent_env_for_composition(
+        &resolved_target,
+        &mut env_overrides,
+    );
+
     // ── Pre-flight shell approval ────────────────────────────────────
     let compose_options = {
         let mut opts = darkmatter::markdown::compose::ComposeOptions::new()
@@ -442,32 +752,165 @@ fn run_inline_compose_inner(
 
     let approval_options = super::wrap::build_harness_shell_options_with_cache(
         &source.resolved_path,
-        None,
+        prep_context.source_repo_root.as_deref(),
         Some(std::sync::Arc::clone(&shared_approval_cache)),
     );
 
-    let preflight = composition::resolve_shell_approvals(
-        Some(&source.markdown),
-        Some(&compose_options),
-        None,
-        &approval_options,
-    )?;
+    let preflight = {
+        let _span = info_span!("compose_prep.shell_preflight").entered();
+        composition::resolve_shell_approvals(
+            Some(&source.markdown),
+            Some(&compose_options),
+            None,
+            &approval_options,
+        )?
+    };
 
-    let prepared = composition::prepare_inline(
-        &source,
-        composition::PrepareOptions {
-            set_overrides,
-            pre_approved_commands: Some(preflight.approved_commands),
-            perf_enabled: shared.perf,
-            ..Default::default()
-        },
-    )?;
+    // Post-prep interrupt checkpoint. If the user pressed Ctrl+C during
+    // any of the prep phases (compose source parse, target resolution,
+    // env install, shell preflight) the SIGINT handler has already
+    // emitted the INFO notice — short-circuit before launching the agent
+    // or entering the loop.
+    if crate::output::user_interrupt_observed() {
+        return Ok(USER_INTERRUPT_EXIT_CODE);
+    }
+
+    // ── Loop detection and execution ─────────────────────────────────────
+    let loop_options = claudine::composition::LoopExecutionOptions {
+        max_iterations: shared
+            .max_iterations
+            .or(claudine::composition::resolve_max_iterations_from_env()),
+        fail_fast: claudine::composition::resolve_fail_fast_from_env(),
+        on_rate_limit: shared.on_rate_limit.map(Into::into),
+        // Engine polls this during rate-limit pause sleeps so Ctrl+C
+        // surfaces as `LoopInterrupted` instead of waiting out the timer.
+        interrupt_check: Some(crate::output::user_interrupt_observed),
+    };
+
+    let file_for_loop = file.clone();
+    if let Some(loop_result) =
+        run_loop_with_overrides(&source, set_overrides.as_ref(), loop_options, |ctx| {
+            let prepared = {
+                let _span = info_span!("compose_prep.prepare_inline").entered();
+                composition::prepare_inline(
+                    &source,
+                    composition::PrepareOptions {
+                        set_overrides: Some(ctx.as_set_overrides()),
+                        pre_approved_commands: Some(preflight.approved_commands.clone()),
+                        env_overrides: env_overrides.clone(),
+                        perf_enabled: shared.perf,
+                        source_repo_root: prep_context.source_repo_root.clone(),
+                    },
+                )?
+            };
+
+            let request = CompositionExecutionRequest {
+                mode: CompositionMode::InlineFrontmatterPrompt,
+                file_ref: file_for_loop.clone(),
+                prepared,
+                resolved_target: Some(resolved_target.clone()),
+                explicit_provider: shared.explicit_provider(),
+                excluded: shared.excluded(),
+                yolo: shared.yolo,
+                include: shared.include.clone(),
+                model: shared.model.clone(),
+                output: shared.output,
+                system_prompt_args: system_prompt_args.clone(),
+                timeout: shared.timeout.clone(),
+                step_timeout: shared.step_timeout.clone(),
+                operation: shared.operation.clone(),
+                sandbox: shared.sandbox,
+                repo: shared.repo,
+                dry_run: shared.dry_run,
+                mcp: shared.mcp,
+                mcp_use: shared.mcp_use.clone(),
+                strict: shared.strict,
+                session_interactive: shared.interactive,
+                quiet: shared.quiet,
+                silent: shared.silent,
+                env_overrides: env_overrides.clone(),
+                shared_approval_cache: Some(std::sync::Arc::clone(&shared_approval_cache)),
+                sequence: false,
+                installed_snapshot: Some(prep_context.installed_snapshot.clone()),
+                prep_launch_workspace: Some(prep_context.launch_workspace.clone()),
+                prep_launch_context: Some(prep_context.launch_context.clone()),
+                prep_env_context: Some(prep_context.env_context.clone()),
+                prep_launch_detection_error: prep_context.launch_detection_error.clone(),
+            };
+
+            let outcome = super::wrap::composition::execute_composition_request_inner(
+                request,
+                verbose,
+                None,
+                shared.perf,
+            )
+            .map_err(|e| {
+                // Pre-spawn execution wiring failed (binary lookup, env
+                // build, etc.). Surface as an iteration failure — these
+                // are runtime problems, not malformed loop frontmatter.
+                claudine::composition::CompositionError::LoopIterationFailed {
+                    iteration: ctx.iteration,
+                    prompt_path: source.resolved_path.clone(),
+                    exit_code: 1,
+                    reason: e.to_string(),
+                    exit_reason: None,
+                }
+            })?;
+
+            Ok(build_loop_iteration_output(
+                ctx.iteration,
+                &source.resolved_path,
+                outcome,
+            ))
+        })?
+    {
+        if let Some(error) = loop_result.error {
+            // The interrupt path already announced itself via the INFO
+            // status line; suppress the red `Error:` echo and exit with
+            // the conventional 130 code so the shell sees a clean Ctrl+C.
+            if matches!(
+                error,
+                claudine::composition::CompositionError::LoopInterrupted { .. }
+            ) {
+                return Ok(loop_result.final_exit_code);
+            }
+            // Rate-limit halt has its own conventional exit code
+            // (`EX_TEMPFAIL` = 75) so shell wrappers can recognize a
+            // transient halt and retry-after-cool-off. Render the styled
+            // error block inline, then return `Ok(75)` so the outer
+            // process exits with the right code.
+            if matches!(
+                error,
+                claudine::composition::CompositionError::LoopRateLimited { .. }
+            ) {
+                emit_rate_limit_halt(&error);
+                return Ok(claudine::composition::LOOP_RATE_LIMITED_EXIT_CODE);
+            }
+            return Err(error.into());
+        }
+        return Ok(loop_result.final_exit_code);
+    }
+
+    // ── Single execution path (no loop) ──────────────────────────────────
+    let prepared = {
+        let _span = info_span!("compose_prep.prepare_inline").entered();
+        composition::prepare_inline(
+            &source,
+            composition::PrepareOptions {
+                set_overrides,
+                pre_approved_commands: Some(preflight.approved_commands),
+                env_overrides: env_overrides.clone(),
+                perf_enabled: shared.perf,
+                source_repo_root: prep_context.source_repo_root.clone(),
+            },
+        )?
+    };
 
     let request = CompositionExecutionRequest {
         mode: CompositionMode::InlineFrontmatterPrompt,
         file_ref: file,
         prepared,
-        resolved_target: None,
+        resolved_target: Some(resolved_target),
         explicit_provider: shared.explicit_provider(),
         excluded: shared.excluded(),
         yolo: shared.yolo,
@@ -475,8 +918,8 @@ fn run_inline_compose_inner(
         model: shared.model,
         output: shared.output,
         system_prompt_args,
-        timeout: shared.timeout,
-        step_timeout: cli_step_timeout_secs,
+        timeout: shared.timeout.clone(),
+        step_timeout: shared.step_timeout.clone(),
         operation: shared.operation,
         sandbox: shared.sandbox,
         repo: shared.repo,
@@ -487,12 +930,281 @@ fn run_inline_compose_inner(
         session_interactive: shared.interactive,
         quiet: shared.quiet,
         silent: shared.silent,
-        env_overrides: std::collections::BTreeMap::new(),
+        env_overrides,
         shared_approval_cache: Some(shared_approval_cache),
         sequence: false,
+        installed_snapshot: Some(prep_context.installed_snapshot.clone()),
+        prep_launch_workspace: Some(prep_context.launch_workspace.clone()),
+        prep_launch_context: Some(prep_context.launch_context.clone()),
+        prep_env_context: Some(prep_context.env_context.clone()),
+        prep_launch_detection_error: prep_context.launch_detection_error.clone(),
     };
 
+    if let Some(ref mut timings) = startup_timings {
+        timings.prep_phase = inline_compose_entry.elapsed();
+    }
+
     execute_composition_request(request, verbose, startup_timings, shared.perf)
+}
+
+/// Render a `LoopRateLimited` error inline so the user sees the styled
+/// halt notice before the wrapper exits with `EX_TEMPFAIL`.
+fn emit_rate_limit_halt(error: &claudine::composition::CompositionError) {
+    use biscuit_terminal::errors::BlockError;
+    let term = crate::log::terminal();
+    let rendered = error.report_block_error(&term);
+    crate::log::message("");
+    crate::log::message(&rendered);
+    crate::log::message("");
+}
+
+/// Translate a [`SingleCompositionOutcome`] into a
+/// [`claudine::composition::LoopIterationOutput`] that the loop engine can
+/// inspect for rate-limit policy and honest error classification.
+///
+/// On a non-zero `outcome.exit_code` this builds a
+/// [`claudine::composition::CompositionError::LoopIterationFailed`] with a
+/// `reason` and `exit_reason` pulled from the iteration's session_end
+/// signals (e.g. `step_timeout`) — never the old
+/// `LoopInvalid("provider exited with code N")` overload, which was
+/// reserved for malformed `loop:` frontmatter.
+///
+/// Always attaches the iteration's rate-limit trailer and
+/// provider/model attribution so the engine can apply the configured
+/// [`claudine::composition::OnRateLimit`] policy between iterations.
+fn build_loop_iteration_output(
+    iteration: usize,
+    prompt_path: &std::path::Path,
+    outcome: super::wrap::composition::SingleCompositionOutcome,
+) -> claudine::composition::LoopIterationOutput {
+    let signals = outcome.iteration_signals.unwrap_or_default();
+    let rate_limit = signals.rate_limit.clone();
+    let exit_reason = signals.exit_reason.clone();
+    let provider_id = signals.provider_id.clone();
+    let model_id = signals.model_id.clone();
+
+    if outcome.exit_code == 0 {
+        claudine::composition::LoopIterationOutput::success("")
+            .with_rate_limit(rate_limit)
+            .with_exit_reason(exit_reason)
+            .with_attribution(provider_id, model_id)
+    } else {
+        // Build a human-readable cause that surfaces the structured
+        // exit_reason at the top. Watchdog detail (e.g. "no stream
+        // activity for 30m; terminating due to step_timeout") rides
+        // along on the next line.
+        let reason = match (&exit_reason, &signals.error_message) {
+            (Some(kind), Some(detail)) => format!("{kind}\n  ↳ {detail}"),
+            (Some(kind), None) => kind.clone(),
+            (None, Some(detail)) => detail.clone(),
+            (None, None) => "provider exited non-zero".to_string(),
+        };
+        let error = claudine::composition::CompositionError::LoopIterationFailed {
+            iteration,
+            prompt_path: prompt_path.to_path_buf(),
+            exit_code: outcome.exit_code,
+            reason,
+            exit_reason: exit_reason.clone(),
+        };
+        claudine::composition::LoopIterationOutput::failure("", outcome.exit_code, error)
+            .with_rate_limit(rate_limit)
+            .with_exit_reason(exit_reason)
+            .with_attribution(provider_id, model_id)
+    }
+}
+
+/// Run a composition loop with CLI `--set` / shorthand setter overrides
+/// merged into the loop's initial frontmatter.
+///
+/// Returns `Ok(None)` when the source has no `loop` frontmatter, matching
+/// [`claudine::composition::execute_loop`].
+///
+/// CLI overrides shadow on-disk frontmatter values from the very first
+/// iteration so that the loop condition and templated body see the values
+/// the user passed on the command line.
+fn run_loop_with_overrides<F>(
+    source: &claudine::composition::ResolvedCompositionSource,
+    set_overrides: Option<&serde_json::Value>,
+    options: claudine::composition::LoopExecutionOptions,
+    mut executor: F,
+) -> std::result::Result<
+    Option<claudine::composition::LoopExecutionResult>,
+    claudine::composition::CompositionError,
+>
+where
+    F: FnMut(
+        claudine::composition::LoopIterationContext,
+    ) -> std::result::Result<
+        claudine::composition::LoopIterationOutput,
+        claudine::composition::CompositionError,
+    >,
+{
+    let Some(config) = claudine::composition::resolve_loop_config(source)? else {
+        return Ok(None);
+    };
+
+    let mut initial_frontmatter: serde_json::Map<String, serde_json::Value> = source
+        .markdown
+        .frontmatter()
+        .as_map()
+        .iter()
+        .map(|(k, v)| (k.clone(), v.clone()))
+        .collect();
+
+    if let Some(serde_json::Value::Object(overrides)) = set_overrides {
+        for (k, v) in overrides {
+            initial_frontmatter.insert(k.clone(), v.clone());
+        }
+    }
+
+    let prompt_path = source.resolved_path.clone();
+
+    // The Ctrl+C SIGINT handler is installed at the top of the compose
+    // subcommand (see `install_user_interrupt_guard`) so it covers the
+    // entire prep window, not just the loop. The wrapped executor below
+    // simply observes the process-scoped flag and short-circuits
+    // remaining iterations once the user has interrupted.
+    let prompt_path_for_executor = prompt_path.clone();
+    let wrapped_executor = move |ctx: claudine::composition::LoopIterationContext| {
+        if crate::output::user_interrupt_observed() {
+            return Ok(claudine::composition::LoopIterationOutput::failure(
+                "",
+                USER_INTERRUPT_EXIT_CODE,
+                claudine::composition::CompositionError::LoopInterrupted {
+                    prompt_path: prompt_path_for_executor.clone(),
+                },
+            ));
+        }
+        let output = executor(ctx)?;
+        if crate::output::user_interrupt_observed() {
+            return Ok(claudine::composition::LoopIterationOutput::failure(
+                output.output,
+                USER_INTERRUPT_EXIT_CODE,
+                claudine::composition::CompositionError::LoopInterrupted {
+                    prompt_path: prompt_path_for_executor.clone(),
+                },
+            ));
+        }
+        Ok(output)
+    };
+
+    let mut result = claudine::composition::execute_loop_with_config(
+        &source.resolved_path,
+        &config,
+        initial_frontmatter,
+        options,
+        wrapped_executor,
+    )?;
+
+    if crate::output::user_interrupt_observed() {
+        // Force the interrupt outcome regardless of fail-fast: under
+        // `fail_fast: false` the engine would have continued past the
+        // first short-circuited iteration, so overwrite the result so
+        // callers see exit code 130 and a `LoopInterrupted` error.
+        result.final_exit_code = USER_INTERRUPT_EXIT_CODE;
+        result.error = Some(claudine::composition::CompositionError::LoopInterrupted {
+            prompt_path: prompt_path.clone(),
+        });
+    }
+
+    Ok(Some(result))
+}
+
+/// Exit code emitted when Ctrl+C is observed during a compose run.
+/// Matches the standard `128 + SIGINT(2)` convention used by shells.
+pub(crate) const USER_INTERRUPT_EXIT_CODE: i32 = 130;
+
+/// RAII guard returned by [`install_user_interrupt_guard`]. Drops the
+/// underlying `signal_hook` registration when the compose subcommand
+/// returns, restoring whatever handler was previously installed.
+pub(crate) struct UserInterruptGuard {
+    #[cfg(unix)]
+    _hook: Option<signal_hook::SigId>,
+}
+
+/// Install a process-scoped SIGINT handler that covers the **entire**
+/// compose / inline-compose run — including the slow prep phase before
+/// the loop is entered. The handler:
+///
+/// - Marks the process-scoped `USER_INTERRUPTED` flag so any downstream
+///   surface (loop executor, live semantic sink, post-prep checkpoints)
+///   can branch on it.
+/// - Writes a pre-rendered INFO notice to stderr exactly once via
+///   async-signal-safe `libc::write(2)`. The notice has a leading `\n`
+///   so it lands at column 1 (off the terminal's echoed `^C`) and the
+///   prompt is rendered as an OSC8 hyperlink whose visible text is the
+///   user's CLI argument verbatim.
+///
+/// `signal_hook::low_level::register` stacks handlers, so this one
+/// composes cleanly with the per-iteration SIGINT handler the wrapper
+/// installs around each agent child.
+pub(crate) fn install_user_interrupt_guard(prompt_argv: &str) -> UserInterruptGuard {
+    let bytes = std::sync::Arc::new(format_user_interrupt_message(prompt_argv).into_bytes());
+    let printed = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+
+    #[cfg(unix)]
+    {
+        let bytes_handler = std::sync::Arc::clone(&bytes);
+        let printed_handler = std::sync::Arc::clone(&printed);
+        let hook = unsafe {
+            signal_hook::low_level::register(signal_hook::consts::SIGINT, move || {
+                crate::output::mark_user_interrupted();
+                // Print our notice exactly once. `write(2)` on a file
+                // descriptor is async-signal-safe; the Rust stdio
+                // macros (`eprintln!`, `println!`) are not, and any
+                // allocation or `tracing` call would be unsafe here.
+                if !printed_handler.swap(true, std::sync::atomic::Ordering::SeqCst) {
+                    let buf = bytes_handler.as_slice();
+                    libc::write(
+                        libc::STDERR_FILENO,
+                        buf.as_ptr() as *const libc::c_void,
+                        buf.len(),
+                    );
+                }
+            })
+        }
+        .ok();
+        UserInterruptGuard { _hook: hook }
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = (bytes, printed);
+        UserInterruptGuard {}
+    }
+}
+
+/// Build the rendered interrupt notice (with a leading newline so the
+/// terminal's echoed `^C` does not share a line) for async-signal-safe
+/// `libc::write(2)` emission from the SIGINT handler.
+///
+/// At install time we have only the user's CLI argument (e.g. the
+/// relative path they typed). We use that verbatim as the OSC8 visible
+/// text, and best-effort canonicalise it against the current working
+/// directory to produce an absolute `file://` link target. If
+/// canonicalisation fails (path doesn't exist yet, permission denied,
+/// etc.) we fall back to a plain (non-hyperlinked) prose line.
+fn format_user_interrupt_message(prompt_argv: &str) -> String {
+    use biscuit_terminal::components::renderable::TerminalRenderable;
+    use biscuit_terminal::components::status::{Status, StatusState};
+
+    let absolute = std::env::current_dir()
+        .ok()
+        .map(|cwd| cwd.join(prompt_argv))
+        .and_then(|p| p.canonicalize().ok())
+        .map(|p| p.display().to_string());
+
+    let prose = if let Some(absolute) = absolute {
+        format!("User interrupted compose operation in [{prompt_argv}](file://{absolute})")
+    } else {
+        format!("User interrupted compose operation in <yellow>{prompt_argv}</yellow>")
+    };
+
+    let term = crate::log::terminal();
+    let body = Status::from_prose(prose)
+        .state(StatusState::Info)
+        .render(&term);
+
+    format!("\n{body}")
 }
 
 /// Parse `--set` JSON/JSON5, validate it's an object, return as `serde_json::Value`.
@@ -854,5 +1566,48 @@ mod tests {
         short.insert("b".into(), json!(2));
         let result = merge_set_overrides(Some(r#"{"a":"1"}"#), short).unwrap();
         assert_eq!(result, Some(json!({"a": "1", "b": 2})));
+    }
+
+    // ── SIGINT / Ctrl+C during prep (Phase 5) ────────────────────────
+
+    #[cfg(unix)]
+    #[test]
+    #[serial_test::serial]
+    fn sigint_during_prep_sets_interrupt_flag_and_renders_notice() {
+        // Ensure the global flag starts clean and will be restored on exit.
+        crate::output::clear_user_interrupt_for_tests();
+        assert!(!crate::output::user_interrupt_observed());
+
+        let prompt = "prompts/test.md";
+        let _guard = install_user_interrupt_guard(prompt);
+
+        // Deliver SIGINT to ourselves. The handler must be async-signal-safe
+        // and may run on this thread or a signal-delivery thread.
+        unsafe {
+            libc::kill(libc::getpid(), libc::SIGINT);
+        }
+
+        // Give the kernel a moment to deliver the signal.
+        std::thread::sleep(std::time::Duration::from_millis(50));
+
+        assert!(
+            crate::output::user_interrupt_observed(),
+            "SIGINT should set the user-interrupt flag"
+        );
+
+        // The notice formatting should produce a non-empty string containing
+        // the prompt argument.
+        let notice = format_user_interrupt_message(prompt);
+        assert!(
+            notice.contains("User interrupted compose operation"),
+            "notice should contain the interrupt message"
+        );
+        assert!(
+            notice.contains(prompt),
+            "notice should reference the prompt file"
+        );
+
+        // Clean up so later tests in the same process see a clean flag.
+        crate::output::clear_user_interrupt_for_tests();
     }
 }

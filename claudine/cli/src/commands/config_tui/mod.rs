@@ -17,9 +17,9 @@ use ratatui::widgets::*;
 
 use biscuit_speaks::detection::get_available_providers as get_available_tts_providers;
 use biscuit_speaks::types::{CloudTtsProvider, HostTtsProvider, TtsProvider};
-use claudine::events::{PROVIDERS_DISPLAY_ORDER, Provider};
-use claudine::services::protect::catalog::RuleGroup;
-use claudine::services::protect::config::{ProtectRuleToggles, RuleGroupConfig};
+use claudine::protect::catalog::RuleGroup;
+use claudine::protect::config::{ProtectRuleToggles, RuleGroupConfig};
+use claudine::provider::{PROVIDERS_DISPLAY_ORDER, Provider};
 
 use crate::commands::config_tui::app::{ActionView, App};
 use crate::log;
@@ -427,11 +427,11 @@ fn build_hotkey_line(pairs: &[(&str, &str)]) -> Line<'static> {
     Line::from(spans)
 }
 
-fn get_provider_list() -> Vec<claudine::events::Provider> {
+fn get_provider_list() -> Vec<claudine::provider::Provider> {
     PROVIDERS_DISPLAY_ORDER.to_vec()
 }
 
-fn get_available_providers(app: &App) -> Vec<claudine::events::Provider> {
+fn get_available_providers(app: &App) -> Vec<claudine::provider::Provider> {
     app.available_providers()
 }
 

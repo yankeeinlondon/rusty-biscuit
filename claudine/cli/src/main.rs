@@ -1,6 +1,6 @@
 use std::ffi::OsString;
 
-use claudine::events::Provider;
+use claudine::provider::Provider;
 use color_eyre::eyre::{Report, Result};
 
 mod args;
@@ -58,53 +58,109 @@ async fn ensure_config_exists() -> Result<()> {
 
 /// CLI parsing over an already-normalized argv.
 ///
-/// Non-wrapper subcommands go through a single strict `Cli::parse_from`
-/// call — that's the common path and the one that produces rich clap
-/// errors on unknown args or invalid values.
+/// Both wrapper and non-wrapper paths go through a manually constructed
+/// `clap::Command` so we can:
 ///
-/// Wrapper subcommands (`claude`, `codex`, …) need a lenient pass so that
-/// unknown flags destined for the wrapped agent CLI flow into the
-/// `passthrough` bucket instead of aborting with a clap error. That lenient
-/// pass is constructed by cloning the clap `Command` and marking each
-/// wrapper subcommand with `ignore_errors(true)`, then calling
-/// `try_get_matches_from` + `Cli::from_arg_matches`.
+/// - Inject `--help`/`-h` (an `ArgAction::Help`) on every non-wrapper
+///   subcommand. The root `Cli` sets `disable_help_flag = true` for custom
+///   help routing, and clap propagates that disable through to subcommands,
+///   so without injection `claudine <subcmd> --help` errors with
+///   `unexpected argument '--help'`.
+/// - Mark each wrapper subcommand with `ignore_errors(true)` so unknown
+///   flags destined for the wrapped agent CLI flow into the `passthrough`
+///   bucket instead of aborting with a clap error.
 ///
-/// Both `unwrap_or_else` / `Err(_) =>` branches fall back to
-/// `Cli::parse_from(...)` on the same normalized argv. Those fallbacks are
-/// defensive: in practice the lenient pass cannot fail for
-/// wrapper-targeted argv, because `ignore_errors(true)` absorbs every
-/// unknown token. The fallbacks exist so a future clap upgrade that tightens
-/// `from_arg_matches` cannot silently drop into an `unwrap()` panic — the
-/// strict pass then produces the user-facing clap error message. This does
-/// mean the lenient diagnostic is swallowed on the rare failure path; if
-/// that becomes a problem, emit a `tracing::debug!` before falling through.
+/// Wrapper subcommands deliberately keep their own `help: bool` field plus
+/// `print_wrapper_help`; we do not inject `ArgAction::Help` on those, so
+/// `claudine codex --help` still routes through the custom wrapper-help
+/// renderer.
+///
+/// On `try_get_matches_from`:
+///
+/// - `Ok` → build `Cli` from matches.
+/// - `Err(DisplayHelp | DisplayVersion | DisplayHelpOnMissingArgumentOrSubcommand)`
+///   → call `err.exit()` so the injected `ArgAction::Help` prints clap's
+///   per-subcommand help screen and exits (matching `Cli::parse_from`'s
+///   exit-on-help semantics).
+/// - Any other error → fall back to `Cli::parse_from`, which produces the
+///   standard clap error message and exits. The fallback is defensive: in
+///   practice the manual pass cannot fail for argv we accept here, but a
+///   future clap upgrade that tightens `from_arg_matches` cannot silently
+///   drop into an `unwrap()` panic.
 fn parse_cli_from(argv: &[OsString]) -> Cli {
+    use clap::error::ErrorKind;
     use clap::{CommandFactory, FromArgMatches, Parser};
 
     let is_wrapper = argv::find_subcommand(argv, argv::WRAPPER_SUBCOMMANDS).is_some();
 
-    if !is_wrapper {
-        return Cli::parse_from(argv.iter().cloned());
-    }
-
-    // Lenient pass: allow unknown args so they flow into passthrough.
-    // Build a command tree where wrapper subcommands ignore unknown args.
     let mut cmd = <Cli as CommandFactory>::command();
-    for name in argv::WRAPPER_SUBCOMMANDS {
-        if let Some(sub) = cmd.find_subcommand_mut(*name) {
-            let muted = std::mem::replace(sub, clap::Command::new("__placeholder__"));
-            let _ = std::mem::replace(sub, muted.ignore_errors(true));
+    inject_subcommand_help_flag(&mut cmd);
+
+    if is_wrapper {
+        for name in argv::WRAPPER_SUBCOMMANDS {
+            if let Some(sub) = cmd.find_subcommand_mut(*name) {
+                let muted = std::mem::replace(sub, clap::Command::new("__placeholder__"));
+                let _ = std::mem::replace(sub, muted.ignore_errors(true));
+            }
         }
     }
 
     match cmd.try_get_matches_from(argv.iter().cloned()) {
         Ok(matches) => Cli::from_arg_matches(&matches)
             .unwrap_or_else(|_| Cli::parse_from(argv.iter().cloned())),
-        Err(_) => Cli::parse_from(argv.iter().cloned()),
+        Err(err) => match err.kind() {
+            ErrorKind::DisplayHelp
+            | ErrorKind::DisplayVersion
+            | ErrorKind::DisplayHelpOnMissingArgumentOrSubcommand => err.exit(),
+            _ => Cli::parse_from(argv.iter().cloned()),
+        },
+    }
+}
+
+/// Subcommand names that must NOT receive an `ArgAction::Help` injection.
+///
+/// Wrapper subcommands manage their own help via a manual `help: bool` field
+/// plus `print_wrapper_help`. Hidden subcommands either declare their own help
+/// surface or are never invoked interactively by users.
+fn skip_help_injection(name: &str) -> bool {
+    argv::WRAPPER_SUBCOMMANDS.contains(&name) || name == "__complete"
+}
+
+/// Add `--help`/`-h` (an `ArgAction::Help`) to every subcommand for which
+/// [`skip_help_injection`] returns `false`.
+///
+/// This is necessary because the root `Cli` sets `disable_help_flag = true`
+/// (so the custom grouped help can fire on `claudine` / `claudine --help`),
+/// and clap propagates that setting to subcommands. Without re-injection,
+/// `claudine <subcmd> --help` errors with `unexpected argument '--help'`.
+fn inject_subcommand_help_flag(cmd: &mut clap::Command) {
+    use clap::{Arg, ArgAction};
+
+    let names: Vec<String> = cmd
+        .get_subcommands()
+        .filter(|sub| !skip_help_injection(sub.get_name()))
+        .map(|sub| sub.get_name().to_string())
+        .collect();
+
+    for name in names {
+        if let Some(sub) = cmd.find_subcommand_mut(&name) {
+            let owned = std::mem::replace(sub, clap::Command::new("__placeholder__"));
+            let injected = owned.arg(
+                Arg::new("help")
+                    .short('h')
+                    .long("help")
+                    .action(ArgAction::Help)
+                    .help("Print help"),
+            );
+            let _ = std::mem::replace(sub, injected);
+        }
     }
 }
 
 fn main() -> Result<()> {
+    rustls::crypto::ring::default_provider()
+        .install_default()
+        .ok();
     color_eyre::install()?;
 
     match run() {
@@ -132,6 +188,8 @@ fn render_top_level_error(report: &Report) {
 }
 
 fn run() -> Result<()> {
+    let process_start = std::time::Instant::now();
+
     // When invoked as a completion subprocess (COMPLETE=<shell> claudine …),
     // `maybe_complete` writes either a registration snippet or candidate
     // list to stdout and exits before returning. In normal runs it is a
@@ -163,13 +221,19 @@ fn run() -> Result<()> {
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()?;
-    runtime.block_on(async_main(argv, perf_bootstrap, arg_parse_start))
+    runtime.block_on(async_main(
+        argv,
+        perf_bootstrap,
+        arg_parse_start,
+        process_start,
+    ))
 }
 
 async fn async_main(
     argv: Vec<OsString>,
     perf_bootstrap: perf::PerfBootstrap,
     arg_parse_start: std::time::Instant,
+    process_start: std::time::Instant,
 ) -> Result<()> {
     let cli = parse_cli_from(&argv);
     let perf_arg_parsing = arg_parse_start.elapsed();
@@ -187,6 +251,8 @@ async fn async_main(
 
     let perf_enabled = perf_bootstrap.enabled;
 
+    let pre_dispatch = process_start.elapsed();
+
     let command = match wrapper_command(cli.command.unwrap()) {
         Ok((provider, args)) => {
             // Wrapper commands also need config — check before launching
@@ -199,6 +265,8 @@ async fn async_main(
                     arg_parsing: perf_arg_parsing,
                     tracing_init: perf_tracing_init,
                     config_loading: perf_config_loading,
+                    pre_dispatch,
+                    prep_phase: std::time::Duration::ZERO,
                 })
             } else {
                 None
@@ -235,6 +303,8 @@ async fn async_main(
             arg_parsing: perf_arg_parsing,
             tracing_init: perf_tracing_init,
             config_loading: perf_config_loading,
+            pre_dispatch,
+            prep_phase: std::time::Duration::ZERO,
         })
     } else {
         None
@@ -251,7 +321,7 @@ async fn async_main(
         Commands::Skills(args) => commands::skills::run(args, cli.verbose > 0).await,
         Commands::Agents(args) => commands::agents::run(args, cli.verbose > 0).await,
         Commands::SlashCommands(args) => commands::slash_commands::run(args, cli.verbose > 0).await,
-        Commands::Providers => commands::providers::run(),
+        Commands::Providers(args) => commands::providers::run(args),
         Commands::Logs(args) => commands::logs::run(args).await,
         Commands::Uninstall(args) => commands::uninstall::run(args),
         Commands::Mcp(args) => commands::mcp::run(args),
@@ -271,5 +341,6 @@ async fn async_main(
         Commands::Sequence(args) => {
             commands::sequence::run_sequence(args, cli.verbose, startup_timings)
         }
+        Commands::Context(args) => commands::context::run(args),
     }
 }

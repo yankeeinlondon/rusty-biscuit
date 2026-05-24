@@ -136,6 +136,7 @@ pub mod auth;
 pub mod headers;
 pub mod models;
 pub mod oauth;
+pub mod pagination;
 pub mod params;
 pub mod prelude;
 pub mod request;
@@ -157,9 +158,8 @@ pub use models::{
     TypeRef,
 };
 pub use oauth::{OAuth2ClientAuthMethod, OAuth2Config, OAuth2GrantType, PkceRequirement};
-pub use params::{
-    EndpointParams, PaginationResponse, PaginationStyle, ParamDef, ParamStyle, QueryParamType,
-};
+pub use pagination::{PaginationResponse, PaginationStyle};
+pub use params::{EndpointParams, ParamDef, ParamStyle, QueryParamType};
 pub use request::{ApiRequest, FormField, FormFieldKind};
 pub use response::ApiResponse;
 pub use schema::{Schema, SchemaObject};

@@ -1,13 +1,38 @@
-use crate::{Result, SniffError};
-use biscuit_file::serde_yaml_ng;
+use crate::Result;
 use biscuit_file::toml_crate;
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
-use tracing::debug;
 
-use crate::filesystem::file_types::{FileAssociation, FileInventory, is_command_runner_filename};
+use crate::filesystem::file_types::{
+    FileAssociation, FileInventory, FrameworkAccumulator, FrameworkKind, LanguageAccumulator,
+    ProgrammingLanguage, accumulate_language_classification, build_association_breakdown,
+    build_language_summary, is_command_runner_filename,
+};
 
-use super::types::*;
+use super::cargo::{
+    cargo_dependencies_from_value, cargo_features_from_value, cargo_package_name,
+    cargo_package_version, detect_cargo_workspace,
+};
+use super::go::{go_mod_dependencies_from_content, go_module_name_from_content};
+use super::manifest_index::{
+    CargoLockVersions, ManifestIndex, discover_packages_from_index,
+    discover_packages_with_optional_index as mi_discover_packages_with_optional_index,
+};
+use super::npm::{
+    detect_npm_workspace, detect_pnpm_workspace, detect_yarn_workspace, npm_package_name,
+    npm_package_version, package_json_dependencies_from_value,
+    parse_package_json_workspace_patterns, parse_pnpm_workspace_patterns,
+    resolve_js_package_manager,
+};
+use super::nx_turbo::{detect_lerna, detect_nx, detect_turborepo, parse_lerna_workspace_patterns};
+use super::python::{
+    parse_requirements_txt_dependencies, pyproject_dependencies_from_value, pyproject_package_name,
+    pyproject_package_version,
+};
+use super::types::{
+    MonorepoTool, Package, PackageDiscoverySource, PackageEcosystem, PackageFiles,
+    PackageScanResult, RepoInfo,
+};
 
 pub(crate) fn detect_repo_inner(
     root: &Path,
@@ -17,50 +42,72 @@ pub(crate) fn detect_repo_inner(
 }
 
 /// Cache for parsed manifest files to avoid redundant I/O during repo detection.
+///
+/// Each manifest file is read and parsed at most once per `create_package`
+/// invocation. Returned values are owned so multiple downstream helpers can
+/// inspect them without re-reading from disk.
 #[derive(Default)]
-#[allow(dead_code)]
-struct ManifestCache {
-    cargo: HashMap<PathBuf, toml_crate::Value>,
-    npm: HashMap<PathBuf, serde_json::Value>,
-    pyproject: HashMap<PathBuf, toml_crate::Value>,
-    go_mod: HashMap<PathBuf, String>,
+pub(crate) struct ManifestCache {
+    cargo: HashMap<PathBuf, Option<toml_crate::Value>>,
+    npm: HashMap<PathBuf, Option<serde_json::Value>>,
+    pyproject: HashMap<PathBuf, Option<toml_crate::Value>>,
+    go_mod: HashMap<PathBuf, Option<String>>,
 }
 
-#[allow(dead_code)]
 impl ManifestCache {
-    fn get_cargo(&mut self, path: &Path) -> Option<&toml_crate::Value> {
-        if !self.cargo.contains_key(path) {
-            let content = std::fs::read_to_string(path).ok()?;
-            let parsed = toml_crate::from_str(&content).ok()?;
-            self.cargo.insert(path.to_path_buf(), parsed);
-        }
-        self.cargo.get(path)
+    pub(crate) fn cargo(&mut self, path: &Path) -> Option<&toml_crate::Value> {
+        let entry = self.cargo.entry(path.to_path_buf()).or_insert_with(|| {
+            std::fs::read_to_string(path)
+                .ok()
+                .and_then(|content| toml_crate::from_str(&content).ok())
+        });
+        entry.as_ref()
     }
 
-    fn get_npm(&mut self, path: &Path) -> Option<&serde_json::Value> {
-        if !self.npm.contains_key(path) {
-            let content = std::fs::read_to_string(path).ok()?;
-            let parsed = serde_json::from_str(&content).ok()?;
-            self.npm.insert(path.to_path_buf(), parsed);
-        }
-        self.npm.get(path)
+    pub(crate) fn npm(&mut self, path: &Path) -> Option<&serde_json::Value> {
+        let entry = self.npm.entry(path.to_path_buf()).or_insert_with(|| {
+            std::fs::read_to_string(path)
+                .ok()
+                .and_then(|content| serde_json::from_str(&content).ok())
+        });
+        entry.as_ref()
     }
 
-    fn get_pyproject(&mut self, path: &Path) -> Option<&toml_crate::Value> {
-        if !self.pyproject.contains_key(path) {
-            let content = std::fs::read_to_string(path).ok()?;
-            let parsed = toml_crate::from_str(&content).ok()?;
-            self.pyproject.insert(path.to_path_buf(), parsed);
-        }
-        self.pyproject.get(path)
+    pub(crate) fn pyproject(&mut self, path: &Path) -> Option<&toml_crate::Value> {
+        let entry = self.pyproject.entry(path.to_path_buf()).or_insert_with(|| {
+            std::fs::read_to_string(path)
+                .ok()
+                .and_then(|content| toml_crate::from_str(&content).ok())
+        });
+        entry.as_ref()
     }
 
-    fn get_go_mod(&mut self, path: &Path) -> Option<&str> {
-        if !self.go_mod.contains_key(path) {
-            let content = std::fs::read_to_string(path).ok()?;
-            self.go_mod.insert(path.to_path_buf(), content);
+    pub(crate) fn go_mod(&mut self, path: &Path) -> Option<&str> {
+        let entry = self
+            .go_mod
+            .entry(path.to_path_buf())
+            .or_insert_with(|| std::fs::read_to_string(path).ok());
+        entry.as_deref()
+    }
+}
+
+/// Build context shared while constructing `Package` values.
+///
+/// Bundles a per-call manifest cache with the optional `Cargo.lock` version
+/// resolver so each manifest file is read at most once per `create_package`
+/// invocation. The `ManifestCache` is cleared for each package so cache
+/// growth is bounded by the manifests of a single package.
+pub(crate) struct PackageBuildContext<'a> {
+    pub(crate) manifests: ManifestCache,
+    pub(crate) lock_versions: &'a Option<CargoLockVersions>,
+}
+
+impl<'a> PackageBuildContext<'a> {
+    pub(crate) fn new(lock_versions: &'a Option<CargoLockVersions>) -> Self {
+        Self {
+            manifests: ManifestCache::default(),
+            lock_versions,
         }
-        self.go_mod.get(path).map(|s| s.as_str())
     }
 }
 
@@ -196,852 +243,7 @@ fn collect_repo_info(
     }
 }
 
-fn detect_cargo_workspace(root: &Path) -> Result<Option<RepoInfo>> {
-    let cargo_toml = root.join("Cargo.toml");
-    if !cargo_toml.exists() {
-        return Ok(None);
-    }
-
-    let content = std::fs::read_to_string(&cargo_toml)?;
-    let parsed: toml_crate::Value =
-        toml_crate::from_str(&content).map_err(|e| SniffError::SystemInfo {
-            domain: "repo",
-            message: e.to_string(),
-        })?;
-
-    let workspace = match parsed.get("workspace") {
-        Some(w) => w,
-        None => return Ok(None),
-    };
-
-    let members = workspace
-        .get("members")
-        .and_then(|m| m.as_array())
-        .map(|arr| {
-            arr.iter()
-                .filter_map(|v| v.as_str().map(String::from))
-                .collect::<Vec<_>>()
-        })
-        .unwrap_or_default();
-
-    if members.is_empty() {
-        return Ok(None);
-    }
-
-    // Parse Cargo.lock once for version resolution
-    let lock_versions = CargoLockVersions::parse(&root.join("Cargo.lock"));
-
-    let excludes = workspace
-        .get("exclude")
-        .and_then(|m| m.as_array())
-        .map(|arr| {
-            arr.iter()
-                .filter_map(|v| v.as_str().map(String::from))
-                .collect::<Vec<_>>()
-        })
-        .unwrap_or_default();
-
-    // Expand globs and collect packages with dependencies
-    let mut packages = expand_glob_patterns_with_deps(
-        root,
-        &members,
-        MonorepoTool::CargoWorkspace,
-        &lock_versions,
-    );
-
-    // Expand excluded patterns and mark them
-    let mut excluded_packages = expand_glob_patterns_with_deps(
-        root,
-        &excludes,
-        MonorepoTool::CargoWorkspace,
-        &lock_versions,
-    );
-    for pkg in &mut excluded_packages {
-        pkg.is_excluded = true;
-    }
-    packages.extend(excluded_packages);
-
-    // Resolve internal dependency graph
-    resolve_internal_deps(&mut packages);
-
-    Ok(Some(RepoInfo {
-        is_monorepo: true,
-        monorepo_tool: Some(MonorepoTool::CargoWorkspace),
-        workspace_tools: vec![MonorepoTool::CargoWorkspace],
-        root: root.to_path_buf(),
-        dependencies: None,
-        dev_dependencies: None,
-        peer_dependencies: None,
-        optional_dependencies: None,
-        packages: Some(packages),
-    }))
-}
-
-/// Parses Cargo.toml dependencies into DependencyEntry structs.
-fn parse_cargo_dependencies(
-    toml_path: &Path,
-    lock_versions: &Option<CargoLockVersions>,
-) -> Option<(
-    Vec<DependencyEntry>,
-    Vec<DependencyEntry>,
-    Vec<DependencyEntry>,
-)> {
-    let content = std::fs::read_to_string(toml_path)
-        .map_err(|e| {
-            debug!(path = %toml_path.display(), error = %e, "could not read file");
-            e
-        })
-        .ok()?;
-    let parsed: toml_crate::Value = toml_crate::from_str(&content).ok()?;
-
-    let normal_deps = parse_cargo_dep_section(
-        &parsed,
-        "dependencies",
-        DependencyKind::Normal,
-        lock_versions,
-    );
-    let dev_deps = parse_cargo_dep_section(
-        &parsed,
-        "dev-dependencies",
-        DependencyKind::Dev,
-        lock_versions,
-    );
-    let build_deps = parse_cargo_dep_section(
-        &parsed,
-        "build-dependencies",
-        DependencyKind::Build,
-        lock_versions,
-    );
-
-    Some((normal_deps, dev_deps, build_deps))
-}
-
-/// Parses a single dependencies section from Cargo.toml.
-fn parse_cargo_dep_section(
-    parsed: &toml_crate::Value,
-    section: &str,
-    kind: DependencyKind,
-    lock_versions: &Option<CargoLockVersions>,
-) -> Vec<DependencyEntry> {
-    let Some(deps) = parsed.get(section).and_then(|d| d.as_table()) else {
-        return Vec::new();
-    };
-
-    deps.iter()
-        .map(|(name, value)| {
-            let (version_req, features, optional) = match value {
-                toml_crate::Value::String(v) => (v.clone(), Vec::new(), false),
-                toml_crate::Value::Table(t) => {
-                    let version = t
-                        .get("version")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("*")
-                        .to_string();
-                    let features = t
-                        .get("features")
-                        .and_then(|f| f.as_array())
-                        .map(|arr| {
-                            arr.iter()
-                                .filter_map(|v| v.as_str().map(String::from))
-                                .collect()
-                        })
-                        .unwrap_or_default();
-                    let optional = t.get("optional").and_then(|o| o.as_bool()).unwrap_or(false);
-                    (version, features, optional)
-                }
-                _ => ("*".to_string(), Vec::new(), false),
-            };
-
-            let actual_version = lock_versions.as_ref().and_then(|lv| lv.resolve(name));
-
-            DependencyEntry {
-                name: name.clone(),
-                kind,
-                targeted_version: version_req,
-                actual_version,
-                package_manager: Some("cargo".to_string()),
-                latest_version: None,
-                target: None,
-                optional,
-                features,
-                is_updatable: false,
-                has_major_update: false,
-            }
-        })
-        .collect()
-}
-
-/// Parses a single dependency section from package.json.
-fn parse_package_json_dep_section(
-    parsed: &serde_json::Value,
-    section: &str,
-    kind: DependencyKind,
-    package_manager: &str,
-    optional: bool,
-) -> Vec<DependencyEntry> {
-    let Some(deps) = parsed.get(section).and_then(|d| d.as_object()) else {
-        return Vec::new();
-    };
-
-    deps.iter()
-        .map(|(name, value)| {
-            let targeted_version = value
-                .as_str()
-                .map(String::from)
-                .or_else(|| {
-                    value
-                        .get("version")
-                        .and_then(|v| v.as_str())
-                        .map(String::from)
-                })
-                .unwrap_or_else(|| "*".to_string());
-
-            DependencyEntry {
-                name: name.clone(),
-                kind,
-                targeted_version,
-                actual_version: None,
-                package_manager: Some(package_manager.to_string()),
-                latest_version: None,
-                target: None,
-                optional,
-                features: Vec::new(),
-                is_updatable: false,
-                has_major_update: false,
-            }
-        })
-        .collect()
-}
-
-/// Parses package.json dependencies into category-specific vectors.
-#[allow(clippy::type_complexity)]
-fn parse_package_json_dependencies(
-    package_json_path: &Path,
-    package_manager: &str,
-) -> Option<(
-    Vec<DependencyEntry>,
-    Vec<DependencyEntry>,
-    Vec<DependencyEntry>,
-    Vec<DependencyEntry>,
-)> {
-    let content = std::fs::read_to_string(package_json_path)
-        .map_err(|e| {
-            debug!(path = %package_json_path.display(), error = %e, "could not read file");
-            e
-        })
-        .ok()?;
-    let parsed: serde_json::Value = serde_json::from_str(&content).ok()?;
-
-    let deps = parse_package_json_dep_section(
-        &parsed,
-        "dependencies",
-        DependencyKind::Normal,
-        package_manager,
-        false,
-    );
-    let dev_deps = parse_package_json_dep_section(
-        &parsed,
-        "devDependencies",
-        DependencyKind::Dev,
-        package_manager,
-        false,
-    );
-    let peer_deps = parse_package_json_dep_section(
-        &parsed,
-        "peerDependencies",
-        DependencyKind::Normal,
-        package_manager,
-        false,
-    );
-    let optional_deps = parse_package_json_dep_section(
-        &parsed,
-        "optionalDependencies",
-        DependencyKind::Optional,
-        package_manager,
-        true,
-    );
-
-    Some((deps, dev_deps, peer_deps, optional_deps))
-}
-
-/// Extracts package name from a PEP 508 requirement string.
-fn parse_python_requirement_name(requirement: &str) -> Option<String> {
-    let without_comment = requirement.split('#').next()?.trim();
-    if without_comment.is_empty() {
-        return None;
-    }
-
-    let before_marker = without_comment
-        .split(';')
-        .next()
-        .unwrap_or(without_comment)
-        .trim();
-    if before_marker.is_empty() {
-        return None;
-    }
-
-    let before_at = before_marker
-        .split('@')
-        .next()
-        .unwrap_or(before_marker)
-        .trim();
-    if before_at.is_empty() {
-        return None;
-    }
-
-    let end = before_at
-        .find(|c: char| {
-            c == '['
-                || c == '<'
-                || c == '>'
-                || c == '='
-                || c == '!'
-                || c == '~'
-                || c.is_whitespace()
-        })
-        .unwrap_or(before_at.len());
-    let name = before_at[..end].trim();
-
-    if name.is_empty() {
-        None
-    } else {
-        Some(name.to_string())
-    }
-}
-
-/// Parses pyproject.toml dependencies from PEP 621 `[project]` sections.
-fn parse_pyproject_dependencies(
-    pyproject_path: &Path,
-) -> Option<(Vec<DependencyEntry>, Vec<DependencyEntry>)> {
-    let content = std::fs::read_to_string(pyproject_path)
-        .map_err(|e| {
-            debug!(path = %pyproject_path.display(), error = %e, "could not read file");
-            e
-        })
-        .ok()?;
-    let parsed: toml_crate::Value = toml_crate::from_str(&content).ok()?;
-    let project = parsed.get("project")?;
-
-    let dependencies = project
-        .get("dependencies")
-        .and_then(|v| v.as_array())
-        .map(|deps| {
-            deps.iter()
-                .filter_map(|entry| entry.as_str())
-                .filter_map(|req| parse_python_requirement_name(req).map(|name| (name, req)))
-                .map(|(name, req)| DependencyEntry {
-                    name,
-                    kind: DependencyKind::Normal,
-                    targeted_version: req.to_string(),
-                    actual_version: None,
-                    package_manager: Some("pip".to_string()),
-                    latest_version: None,
-                    target: None,
-                    optional: false,
-                    features: Vec::new(),
-                    is_updatable: false,
-                    has_major_update: false,
-                })
-                .collect::<Vec<_>>()
-        })
-        .unwrap_or_default();
-
-    let optional_dependencies = project
-        .get("optional-dependencies")
-        .and_then(|v| v.as_table())
-        .map(|groups| {
-            groups
-                .values()
-                .filter_map(|value| value.as_array())
-                .flat_map(|entries| entries.iter())
-                .filter_map(|entry| entry.as_str())
-                .filter_map(|req| parse_python_requirement_name(req).map(|name| (name, req)))
-                .map(|(name, req)| DependencyEntry {
-                    name,
-                    kind: DependencyKind::Optional,
-                    targeted_version: req.to_string(),
-                    actual_version: None,
-                    package_manager: Some("pip".to_string()),
-                    latest_version: None,
-                    target: None,
-                    optional: true,
-                    features: Vec::new(),
-                    is_updatable: false,
-                    has_major_update: false,
-                })
-                .collect::<Vec<_>>()
-        })
-        .unwrap_or_default();
-
-    Some((dependencies, optional_dependencies))
-}
-
-/// Parses requirements.txt dependency lines.
-fn parse_requirements_txt_dependencies(requirements_path: &Path) -> Option<Vec<DependencyEntry>> {
-    let content = std::fs::read_to_string(requirements_path)
-        .map_err(|e| {
-            debug!(path = %requirements_path.display(), error = %e, "could not read file");
-            e
-        })
-        .ok()?;
-    let mut deps = Vec::new();
-
-    for line in content.lines() {
-        let trimmed = line.trim();
-        if trimmed.is_empty() || trimmed.starts_with('#') {
-            continue;
-        }
-
-        let Some(name) = parse_python_requirement_name(trimmed) else {
-            continue;
-        };
-
-        deps.push(DependencyEntry {
-            name,
-            kind: DependencyKind::Normal,
-            targeted_version: trimmed.to_string(),
-            actual_version: None,
-            package_manager: Some("pip".to_string()),
-            latest_version: None,
-            target: None,
-            optional: false,
-            features: Vec::new(),
-            is_updatable: false,
-            has_major_update: false,
-        });
-    }
-
-    if deps.is_empty() { None } else { Some(deps) }
-}
-
-/// Parses go.mod `require` entries.
-fn parse_go_mod_dependencies(go_mod_path: &Path) -> Option<Vec<DependencyEntry>> {
-    let content = std::fs::read_to_string(go_mod_path)
-        .map_err(|e| {
-            debug!(path = %go_mod_path.display(), error = %e, "could not read file");
-            e
-        })
-        .ok()?;
-    let mut deps = Vec::new();
-    let mut in_require_block = false;
-
-    for line in content.lines() {
-        let trimmed = line.trim();
-        if trimmed.is_empty() || trimmed.starts_with("//") {
-            continue;
-        }
-
-        if in_require_block {
-            if trimmed.starts_with(')') {
-                in_require_block = false;
-                continue;
-            }
-
-            let line_without_comment = trimmed.split("//").next().unwrap_or(trimmed).trim();
-            let mut parts = line_without_comment.split_whitespace();
-            let Some(name) = parts.next() else {
-                continue;
-            };
-            let Some(version) = parts.next() else {
-                continue;
-            };
-
-            deps.push(DependencyEntry {
-                name: name.to_string(),
-                kind: DependencyKind::Normal,
-                targeted_version: version.to_string(),
-                actual_version: None,
-                package_manager: Some("go".to_string()),
-                latest_version: None,
-                target: None,
-                optional: false,
-                features: Vec::new(),
-                is_updatable: false,
-                has_major_update: false,
-            });
-
-            continue;
-        }
-
-        if trimmed.starts_with("require (") {
-            in_require_block = true;
-            continue;
-        }
-
-        if let Some(rest) = trimmed.strip_prefix("require ") {
-            let line_without_comment = rest.split("//").next().unwrap_or(rest).trim();
-            let mut parts = line_without_comment.split_whitespace();
-            let Some(name) = parts.next() else {
-                continue;
-            };
-            let Some(version) = parts.next() else {
-                continue;
-            };
-
-            deps.push(DependencyEntry {
-                name: name.to_string(),
-                kind: DependencyKind::Normal,
-                targeted_version: version.to_string(),
-                actual_version: None,
-                package_manager: Some("go".to_string()),
-                latest_version: None,
-                target: None,
-                optional: false,
-                features: Vec::new(),
-                is_updatable: false,
-                has_major_update: false,
-            });
-        }
-    }
-
-    if deps.is_empty() { None } else { Some(deps) }
-}
-
-fn detect_pnpm_workspace(root: &Path) -> Result<Option<RepoInfo>> {
-    let pnpm_workspace = root.join("pnpm-workspace.yaml");
-    if !pnpm_workspace.exists() {
-        return Ok(None);
-    }
-
-    let packages = parse_pnpm_workspace_patterns(&pnpm_workspace)?;
-
-    if packages.is_empty() {
-        return Ok(None);
-    }
-
-    let lock_versions = None;
-    let mut package_locations = expand_glob_patterns_with_deps(
-        root,
-        &packages,
-        MonorepoTool::PnpmWorkspaces,
-        &lock_versions,
-    );
-    package_locations = dedupe_packages(package_locations);
-    resolve_internal_deps(&mut package_locations);
-
-    Ok(Some(RepoInfo {
-        is_monorepo: true,
-        monorepo_tool: Some(MonorepoTool::PnpmWorkspaces),
-        workspace_tools: vec![MonorepoTool::PnpmWorkspaces],
-        root: root.to_path_buf(),
-        dependencies: None,
-        dev_dependencies: None,
-        peer_dependencies: None,
-        optional_dependencies: None,
-        packages: Some(package_locations),
-    }))
-}
-
-fn detect_npm_workspace(root: &Path) -> Result<Option<RepoInfo>> {
-    let package_json = root.join("package.json");
-    if !package_json.exists() {
-        return Ok(None);
-    }
-
-    let workspaces = parse_package_json_workspace_patterns(&package_json)?.unwrap_or_default();
-
-    if workspaces.is_empty() {
-        return Ok(None);
-    }
-
-    let lock_versions = None;
-    let mut packages = expand_glob_patterns_with_deps(
-        root,
-        &workspaces,
-        MonorepoTool::NpmWorkspaces,
-        &lock_versions,
-    );
-    packages = dedupe_packages(packages);
-    resolve_internal_deps(&mut packages);
-
-    Ok(Some(RepoInfo {
-        is_monorepo: true,
-        monorepo_tool: Some(MonorepoTool::NpmWorkspaces),
-        workspace_tools: vec![MonorepoTool::NpmWorkspaces],
-        root: root.to_path_buf(),
-        dependencies: None,
-        dev_dependencies: None,
-        peer_dependencies: None,
-        optional_dependencies: None,
-        packages: Some(packages),
-    }))
-}
-
-fn detect_yarn_workspace(root: &Path) -> Result<Option<RepoInfo>> {
-    if !root.join("yarn.lock").exists() {
-        return Ok(None);
-    }
-
-    let package_json = root.join("package.json");
-    if !package_json.exists() {
-        return Ok(None);
-    }
-
-    let workspaces = parse_package_json_workspace_patterns(&package_json)?.unwrap_or_default();
-
-    if workspaces.is_empty() {
-        return Ok(None);
-    }
-
-    let lock_versions = None;
-    let mut packages = expand_glob_patterns_with_deps(
-        root,
-        &workspaces,
-        MonorepoTool::YarnWorkspaces,
-        &lock_versions,
-    );
-    packages = dedupe_packages(packages);
-    resolve_internal_deps(&mut packages);
-
-    Ok(Some(RepoInfo {
-        is_monorepo: true,
-        monorepo_tool: Some(MonorepoTool::YarnWorkspaces),
-        workspace_tools: vec![MonorepoTool::YarnWorkspaces],
-        root: root.to_path_buf(),
-        dependencies: None,
-        dev_dependencies: None,
-        peer_dependencies: None,
-        optional_dependencies: None,
-        packages: Some(packages),
-    }))
-}
-
-fn detect_nx(root: &Path, index: Option<&ManifestIndex>) -> Result<Option<RepoInfo>> {
-    let nx_json = root.join("nx.json");
-    if !nx_json.exists() {
-        return Ok(None);
-    }
-
-    let mut patterns = collect_default_workspace_patterns(root);
-    patterns.extend(parse_nx_layout_patterns(&nx_json));
-    patterns = dedupe_patterns(patterns);
-
-    let lock_versions = None;
-    let mut packages = if patterns.is_empty() {
-        discover_packages_with_optional_index(
-            root,
-            MonorepoTool::Nx,
-            &lock_versions,
-            PackageDiscoverySource::Nx,
-            index,
-        )
-    } else {
-        expand_glob_patterns_with_deps(root, &patterns, MonorepoTool::Nx, &lock_versions)
-    };
-    if packages.is_empty() {
-        packages = discover_packages_with_optional_index(
-            root,
-            MonorepoTool::Nx,
-            &lock_versions,
-            PackageDiscoverySource::Nx,
-            index,
-        );
-    }
-    packages = dedupe_packages(packages);
-    resolve_internal_deps(&mut packages);
-
-    Ok(Some(RepoInfo {
-        is_monorepo: true,
-        monorepo_tool: Some(MonorepoTool::Nx),
-        workspace_tools: vec![MonorepoTool::Nx],
-        root: root.to_path_buf(),
-        dependencies: None,
-        dev_dependencies: None,
-        peer_dependencies: None,
-        optional_dependencies: None,
-        packages: Some(packages),
-    }))
-}
-
-fn detect_turborepo(root: &Path, index: Option<&ManifestIndex>) -> Result<Option<RepoInfo>> {
-    let turbo_json = root.join("turbo.json");
-    if !turbo_json.exists() {
-        return Ok(None);
-    }
-
-    let patterns = collect_default_workspace_patterns(root);
-    let lock_versions = None;
-    let mut packages = if patterns.is_empty() {
-        discover_packages_with_optional_index(
-            root,
-            MonorepoTool::Turborepo,
-            &lock_versions,
-            PackageDiscoverySource::Turborepo,
-            index,
-        )
-    } else {
-        expand_glob_patterns_with_deps(root, &patterns, MonorepoTool::Turborepo, &lock_versions)
-    };
-    if packages.is_empty() {
-        packages = discover_packages_with_optional_index(
-            root,
-            MonorepoTool::Turborepo,
-            &lock_versions,
-            PackageDiscoverySource::Turborepo,
-            index,
-        );
-    }
-    packages = dedupe_packages(packages);
-    resolve_internal_deps(&mut packages);
-
-    Ok(Some(RepoInfo {
-        is_monorepo: true,
-        monorepo_tool: Some(MonorepoTool::Turborepo),
-        workspace_tools: vec![MonorepoTool::Turborepo],
-        root: root.to_path_buf(),
-        dependencies: None,
-        dev_dependencies: None,
-        peer_dependencies: None,
-        optional_dependencies: None,
-        packages: Some(packages),
-    }))
-}
-
-fn detect_lerna(root: &Path, index: Option<&ManifestIndex>) -> Result<Option<RepoInfo>> {
-    let lerna_json = root.join("lerna.json");
-    if !lerna_json.exists() {
-        return Ok(None);
-    }
-
-    let mut patterns = parse_lerna_workspace_patterns(&lerna_json).unwrap_or_default();
-    patterns.extend(collect_default_workspace_patterns(root));
-    patterns = dedupe_patterns(patterns);
-
-    let lock_versions = None;
-    let mut packages = if patterns.is_empty() {
-        discover_packages_with_optional_index(
-            root,
-            MonorepoTool::Lerna,
-            &lock_versions,
-            PackageDiscoverySource::Lerna,
-            index,
-        )
-    } else {
-        expand_glob_patterns_with_deps(root, &patterns, MonorepoTool::Lerna, &lock_versions)
-    };
-    if packages.is_empty() {
-        packages = discover_packages_with_optional_index(
-            root,
-            MonorepoTool::Lerna,
-            &lock_versions,
-            PackageDiscoverySource::Lerna,
-            index,
-        );
-    }
-    packages = dedupe_packages(packages);
-    resolve_internal_deps(&mut packages);
-
-    Ok(Some(RepoInfo {
-        is_monorepo: true,
-        monorepo_tool: Some(MonorepoTool::Lerna),
-        workspace_tools: vec![MonorepoTool::Lerna],
-        root: root.to_path_buf(),
-        dependencies: None,
-        dev_dependencies: None,
-        peer_dependencies: None,
-        optional_dependencies: None,
-        packages: Some(packages),
-    }))
-}
-
-fn parse_pnpm_workspace_patterns(pnpm_workspace_path: &Path) -> Result<Vec<String>> {
-    let content = std::fs::read_to_string(pnpm_workspace_path)?;
-    let parsed: serde_yaml_ng::Value =
-        serde_yaml_ng::from_str(&content).map_err(|e| SniffError::SystemInfo {
-            domain: "repo",
-            message: e.to_string(),
-        })?;
-
-    Ok(parsed
-        .get("packages")
-        .and_then(|p| p.as_sequence())
-        .map(|seq| {
-            seq.iter()
-                .filter_map(|v| v.as_str().map(String::from))
-                .collect::<Vec<_>>()
-        })
-        .unwrap_or_default())
-}
-
-fn parse_package_json_workspace_patterns(package_json_path: &Path) -> Result<Option<Vec<String>>> {
-    let content = std::fs::read_to_string(package_json_path)?;
-    let parsed: serde_json::Value =
-        serde_json::from_str(&content).map_err(|e| SniffError::SystemInfo {
-            domain: "repo",
-            message: e.to_string(),
-        })?;
-    let Some(workspaces) = parsed.get("workspaces") else {
-        return Ok(None);
-    };
-
-    if let Some(arr) = workspaces.as_array() {
-        return Ok(Some(
-            arr.iter()
-                .filter_map(|v| v.as_str().map(String::from))
-                .collect(),
-        ));
-    }
-
-    if let Some(obj) = workspaces.as_object() {
-        return Ok(Some(
-            obj.get("packages")
-                .and_then(|v| v.as_array())
-                .map(|arr| {
-                    arr.iter()
-                        .filter_map(|v| v.as_str().map(String::from))
-                        .collect()
-                })
-                .unwrap_or_default(),
-        ));
-    }
-
-    Ok(Some(Vec::new()))
-}
-
-fn parse_lerna_workspace_patterns(lerna_json_path: &Path) -> Option<Vec<String>> {
-    let content = std::fs::read_to_string(lerna_json_path)
-        .map_err(|e| {
-            debug!(path = %lerna_json_path.display(), error = %e, "could not read file");
-            e
-        })
-        .ok()?;
-    let parsed: serde_json::Value = serde_json::from_str(&content).ok()?;
-
-    parsed
-        .get("packages")
-        .and_then(|v| v.as_array())
-        .map(|arr| {
-            arr.iter()
-                .filter_map(|v| v.as_str().map(String::from))
-                .collect()
-        })
-}
-
-fn parse_nx_layout_patterns(nx_json_path: &Path) -> Vec<String> {
-    let content = match std::fs::read_to_string(nx_json_path) {
-        Ok(content) => content,
-        Err(_) => return Vec::new(),
-    };
-    let parsed: serde_json::Value = match serde_json::from_str(&content) {
-        Ok(parsed) => parsed,
-        Err(_) => return Vec::new(),
-    };
-
-    let apps_dir = parsed
-        .get("workspaceLayout")
-        .and_then(|v| v.get("appsDir"))
-        .and_then(|v| v.as_str())
-        .unwrap_or("apps");
-    let libs_dir = parsed
-        .get("workspaceLayout")
-        .and_then(|v| v.get("libsDir"))
-        .and_then(|v| v.as_str())
-        .unwrap_or("libs");
-
-    vec![format!("{apps_dir}/*"), format!("{libs_dir}/*")]
-}
-
-fn collect_default_workspace_patterns(root: &Path) -> Vec<String> {
+pub(crate) fn collect_default_workspace_patterns(root: &Path) -> Vec<String> {
     let mut patterns = Vec::new();
 
     if let Ok(Some(package_json_patterns)) =
@@ -1059,103 +261,6 @@ fn collect_default_workspace_patterns(root: &Path) -> Vec<String> {
     }
 
     dedupe_patterns(patterns)
-}
-
-// ============================================================================
-// Package name reading helpers
-// ============================================================================
-
-/// Reads the package name from a Cargo.toml file.
-fn read_cargo_package_name(cargo_toml: &Path) -> Option<String> {
-    let content = std::fs::read_to_string(cargo_toml).ok()?;
-    let parsed: toml_crate::Value = toml_crate::from_str(&content).ok()?;
-    parsed
-        .get("package")
-        .and_then(|p| p.get("name"))
-        .and_then(|n| n.as_str())
-        .map(String::from)
-}
-
-/// Reads the package version from a Cargo.toml file.
-fn read_cargo_package_version(cargo_toml: &Path) -> Option<String> {
-    let content = std::fs::read_to_string(cargo_toml).ok()?;
-    let parsed: toml_crate::Value = toml_crate::from_str(&content).ok()?;
-    parsed
-        .get("package")
-        .and_then(|p| p.get("version"))
-        .and_then(|v| v.as_str())
-        .map(String::from)
-}
-
-/// Reads the package name from a package.json file.
-fn read_npm_package_name(package_json: &Path) -> Option<String> {
-    let content = std::fs::read_to_string(package_json).ok()?;
-    let parsed: serde_json::Value = serde_json::from_str(&content).ok()?;
-    parsed
-        .get("name")
-        .and_then(|n| n.as_str())
-        .map(String::from)
-}
-
-/// Reads the package version from a package.json file.
-fn read_npm_package_version(package_json: &Path) -> Option<String> {
-    let content = std::fs::read_to_string(package_json).ok()?;
-    let parsed: serde_json::Value = serde_json::from_str(&content).ok()?;
-    parsed
-        .get("version")
-        .and_then(|v| v.as_str())
-        .map(String::from)
-}
-
-/// Reads package name from a pyproject.toml `[project].name`.
-fn read_pyproject_package_name(pyproject_toml: &Path) -> Option<String> {
-    let content = std::fs::read_to_string(pyproject_toml).ok()?;
-    let parsed: toml_crate::Value = toml_crate::from_str(&content).ok()?;
-    parsed
-        .get("project")
-        .and_then(|p| p.get("name"))
-        .and_then(|n| n.as_str())
-        .map(String::from)
-}
-
-/// Reads package version from a pyproject.toml `[project].version`.
-fn read_pyproject_package_version(pyproject_toml: &Path) -> Option<String> {
-    let content = std::fs::read_to_string(pyproject_toml).ok()?;
-    let parsed: toml_crate::Value = toml_crate::from_str(&content).ok()?;
-    parsed
-        .get("project")
-        .and_then(|p| p.get("version"))
-        .and_then(|v| v.as_str())
-        .map(String::from)
-}
-
-/// Reads module name from a go.mod file (module directive).
-fn read_go_module_name(go_mod: &Path) -> Option<String> {
-    let content = std::fs::read_to_string(go_mod).ok()?;
-    content.lines().find_map(|line| {
-        let trimmed = line.trim();
-        trimmed
-            .strip_prefix("module ")
-            .map(|value| value.trim().to_string())
-    })
-}
-
-/// Reads the feature flag names from a Cargo.toml `[features]` section.
-fn read_cargo_features(cargo_toml: &Path) -> Vec<String> {
-    let content = match std::fs::read_to_string(cargo_toml) {
-        Ok(c) => c,
-        Err(_) => return Vec::new(),
-    };
-    let parsed: toml_crate::Value = match toml_crate::from_str(&content) {
-        Ok(v) => v,
-        Err(_) => return Vec::new(),
-    };
-    let Some(features) = parsed.get("features").and_then(|f| f.as_table()) else {
-        return Vec::new();
-    };
-    let mut names: Vec<String> = features.keys().cloned().collect();
-    names.sort();
-    names
 }
 
 // ============================================================================
@@ -1217,31 +322,40 @@ fn package_relative_path(package_relative: &str, path: &Path) -> PathBuf {
 // ============================================================================
 
 /// Determines the native package name based on manifests present in the package.
-fn resolve_package_name(path: &Path, root: &Path) -> String {
+fn resolve_package_name(ctx: &mut PackageBuildContext<'_>, path: &Path, root: &Path) -> String {
     let cargo_toml = path.join("Cargo.toml");
     if cargo_toml.exists()
-        && let Some(name) = read_cargo_package_name(&cargo_toml)
+        && let Some(name) = ctx
+            .manifests
+            .cargo(&cargo_toml)
+            .and_then(cargo_package_name)
     {
         return name;
     }
 
     let package_json = path.join("package.json");
     if package_json.exists()
-        && let Some(name) = read_npm_package_name(&package_json)
+        && let Some(name) = ctx.manifests.npm(&package_json).and_then(npm_package_name)
     {
         return name;
     }
 
     let pyproject_toml = path.join("pyproject.toml");
     if pyproject_toml.exists()
-        && let Some(name) = read_pyproject_package_name(&pyproject_toml)
+        && let Some(name) = ctx
+            .manifests
+            .pyproject(&pyproject_toml)
+            .and_then(pyproject_package_name)
     {
         return name;
     }
 
     let go_mod = path.join("go.mod");
     if go_mod.exists()
-        && let Some(name) = read_go_module_name(&go_mod)
+        && let Some(name) = ctx
+            .manifests
+            .go_mod(&go_mod)
+            .and_then(go_module_name_from_content)
     {
         return name;
     }
@@ -1251,28 +365,45 @@ fn resolve_package_name(path: &Path, root: &Path) -> String {
 }
 
 /// Determines the package version based on manifests present in the package.
-fn resolve_package_version(path: &Path, root: &Path) -> Option<String> {
+fn resolve_package_version(
+    ctx: &mut PackageBuildContext<'_>,
+    path: &Path,
+    root: &Path,
+) -> Option<String> {
     let cargo_toml = path.join("Cargo.toml");
     if cargo_toml.exists() {
-        return read_cargo_package_version(&cargo_toml);
+        return ctx
+            .manifests
+            .cargo(&cargo_toml)
+            .and_then(cargo_package_version);
     }
 
     let package_json = path.join("package.json");
     if package_json.exists() {
-        if let Some(version) = read_npm_package_version(&package_json) {
+        if let Some(version) = ctx
+            .manifests
+            .npm(&package_json)
+            .and_then(npm_package_version)
+        {
             return Some(version);
         }
         if path != root {
             let root_package_json = root.join("package.json");
             if root_package_json.exists() {
-                return read_npm_package_version(&root_package_json);
+                return ctx
+                    .manifests
+                    .npm(&root_package_json)
+                    .and_then(npm_package_version);
             }
         }
     }
 
     let pyproject_toml = path.join("pyproject.toml");
     if pyproject_toml.exists()
-        && let Some(version) = read_pyproject_package_version(&pyproject_toml)
+        && let Some(version) = ctx
+            .manifests
+            .pyproject(&pyproject_toml)
+            .and_then(pyproject_package_version)
     {
         return Some(version);
     }
@@ -1289,8 +420,7 @@ fn resolve_package_version(path: &Path, root: &Path) -> Option<String> {
 /// Two-pass algorithm:
 /// 1. Scan each package's dependency lists for names matching other package names → `depends_on`
 /// 2. Invert the relationship → `used_by`
-fn resolve_internal_deps(packages: &mut [Package]) {
-    // Collect all package names into owned Strings first to avoid borrow issues
+pub(crate) fn resolve_internal_deps(packages: &mut [Package]) {
     let package_names: HashSet<String> = packages.iter().map(|p| p.name.clone()).collect();
 
     // Pass 1: populate depends_on
@@ -1320,8 +450,6 @@ fn resolve_internal_deps(packages: &mut [Package]) {
     }
 
     // Pass 2: invert to populate used_by
-    // Build a HashMap from dependency name → list of packages that depend on it.
-    // We collect into owned data first to avoid borrow issues during mutation.
     let mut used_by_map: HashMap<String, Vec<String>> = HashMap::new();
     for pkg in packages.iter() {
         for dep in &pkg.depends_on {
@@ -1370,7 +498,7 @@ pub(crate) fn canonicalize_path(path: &Path) -> PathBuf {
 ///
 /// Cleans up `.` and `..` components and resolves relative paths against
 /// the current working directory when needed.
-fn normalize_path(path: &Path) -> PathBuf {
+pub(crate) fn normalize_path(path: &Path) -> PathBuf {
     if path.is_absolute() {
         let mut normalized = PathBuf::new();
         for component in path.components() {
@@ -1386,7 +514,6 @@ fn normalize_path(path: &Path) -> PathBuf {
         }
         normalized
     } else {
-        // For relative paths, resolve against current dir then normalize
         std::env::current_dir()
             .unwrap_or_default()
             .join(path)
@@ -1426,10 +553,8 @@ fn detect_package_languages(
     repo_inventory: Option<&FileInventory>,
 ) -> PackageScanResult {
     let inventory = if let Some(repo_inv) = repo_inventory {
-        // Use shared repo inventory and project to this package
         crate::filesystem::file_types::project_package_inventory(repo_inv, path, exclude_roots)
     } else {
-        // Fall back to per-package scanning
         match crate::filesystem::file_types::scan_file_inventory_with_exclusions(
             path,
             exclude_roots,
@@ -1479,33 +604,7 @@ fn detect_package_managers(path: &Path) -> Vec<String> {
     managers
 }
 
-fn resolve_js_package_manager(
-    tool: MonorepoTool,
-    root: &Path,
-    package_managers: &[String],
-) -> &'static str {
-    match tool {
-        MonorepoTool::PnpmWorkspaces => return "pnpm",
-        MonorepoTool::YarnWorkspaces => return "yarn",
-        _ => {}
-    }
-
-    if package_managers.iter().any(|manager| manager == "pnpm")
-        || root.join("pnpm-lock.yaml").exists()
-    {
-        return "pnpm";
-    }
-    if package_managers.iter().any(|manager| manager == "yarn") || root.join("yarn.lock").exists() {
-        return "yarn";
-    }
-    if root.join("bun.lock").exists() || root.join("bun.lockb").exists() {
-        return "bun";
-    }
-
-    "npm"
-}
-
-fn discovery_source_for_tool(tool: MonorepoTool) -> PackageDiscoverySource {
+pub(crate) fn discovery_source_for_tool(tool: MonorepoTool) -> PackageDiscoverySource {
     match tool {
         MonorepoTool::CargoWorkspace => PackageDiscoverySource::CargoWorkspace,
         MonorepoTool::PnpmWorkspaces => PackageDiscoverySource::PnpmWorkspace,
@@ -1535,7 +634,7 @@ fn detect_package_ecosystem(path: &Path) -> PackageEcosystem {
     PackageEcosystem::Unknown
 }
 
-fn dedupe_patterns(patterns: Vec<String>) -> Vec<String> {
+pub(crate) fn dedupe_patterns(patterns: Vec<String>) -> Vec<String> {
     let mut seen = HashSet::new();
     let mut deduped = Vec::new();
 
@@ -1548,7 +647,7 @@ fn dedupe_patterns(patterns: Vec<String>) -> Vec<String> {
     deduped
 }
 
-fn dedupe_packages(packages: Vec<Package>) -> Vec<Package> {
+pub(crate) fn dedupe_packages(packages: Vec<Package>) -> Vec<Package> {
     let mut seen = HashSet::new();
     let mut deduped = Vec::new();
 
@@ -1657,218 +756,195 @@ fn merge_path_lists(existing: &[PathBuf], incoming: &[PathBuf]) -> Vec<PathBuf> 
     merged
 }
 
-fn refresh_package_boundaries(packages: &mut [Package], repo_inventory: Option<&FileInventory>) {
-    // Build sorted list of (canonical_root, original_path, name, index) for efficient lookup
-    let mut sorted_packages: Vec<(PathBuf, PathBuf, String, usize)> = packages
+/// Re-compute language/file stats for every package using a shared repo
+/// inventory.
+///
+/// ## Algorithm
+///
+/// 1. Build a HashMap from canonical package path → index.
+/// 2. Derive nested-package relationships by walking parent directories.
+/// 3. When a repo inventory is provided, do a single pass over all
+///    classifications, assign each to the deepest containing package, and
+///    accumulate stats directly into per-package buckets.
+///
+/// This is O(F·depth + P·depth) instead of the previous O(P·F) + O(P²).
+#[doc(hidden)]
+pub fn refresh_package_boundaries(
+    packages: &mut [Package],
+    repo_inventory: Option<&FileInventory>,
+) {
+    if packages.is_empty() {
+        return;
+    }
+
+    let package_rel_to_index: HashMap<&Path, usize> = packages
         .iter()
         .enumerate()
-        .map(|(i, pkg)| {
-            (
-                canonicalize_path(&pkg.path),
-                pkg.path.clone(),
-                pkg.name.clone(),
-                i,
-            )
-        })
+        .map(|(i, pkg)| (Path::new(&pkg.relative), i))
         .collect();
-    // Sort by path depth (shorter paths first = ancestors first)
-    sorted_packages.sort_by_key(|a| a.0.components().count());
 
-    // Build a map from original index to its descendants
-    let mut descendants: Vec<Vec<(PathBuf, String)>> = vec![Vec::new(); packages.len()];
+    let mut nested_packages: Vec<Vec<String>> = vec![Vec::new(); packages.len()];
+    for (child_idx, package) in packages.iter().enumerate() {
+        let mut current = Path::new(&package.relative);
+        while let Some(parent) = current.parent() {
+            if let Some(&parent_idx) = package_rel_to_index.get(parent)
+                && parent_idx != child_idx
+            {
+                nested_packages[parent_idx].push(package.name.clone());
+                break;
+            }
+            current = parent;
+        }
+    }
+    for list in &mut nested_packages {
+        list.sort();
+    }
 
-    // For each package, only check packages that come AFTER it in the sorted list
-    // (which are guaranteed to be at least as deep)
-    for i in 0..sorted_packages.len() {
-        let (root_i, _, _, idx_i) = &sorted_packages[i];
-        for (root_j, path_j, name_j, idx_j) in sorted_packages.iter().skip(i + 1) {
-            if root_j.starts_with(root_i) && idx_i != idx_j {
-                descendants[*idx_i].push((path_j.clone(), name_j.clone()));
+    if let Some(inventory) = repo_inventory {
+        let mut per_pkg_lang: Vec<HashMap<ProgrammingLanguage, LanguageAccumulator>> =
+            (0..packages.len()).map(|_| HashMap::new()).collect();
+        let mut per_pkg_fw: Vec<HashMap<FrameworkKind, FrameworkAccumulator>> =
+            (0..packages.len()).map(|_| HashMap::new()).collect();
+        let mut per_pkg_assoc: Vec<HashMap<FileAssociation, Vec<PathBuf>>> =
+            (0..packages.len()).map(|_| HashMap::new()).collect();
+        let mut per_pkg_files: Vec<PackageFiles> = (0..packages.len())
+            .map(|_| PackageFiles::default())
+            .collect();
+        let mut per_pkg_total: Vec<usize> = vec![0; packages.len()];
+
+        for classification in inventory.classifications.iter() {
+            let mut assigned_pkg = None;
+            let mut current = classification.path.as_path();
+            while let Some(parent) = current.parent() {
+                if let Some(&pkg_idx) = package_rel_to_index.get(parent) {
+                    assigned_pkg = Some(pkg_idx);
+                    break;
+                }
+                current = parent;
+            }
+
+            let Some(pkg_idx) = assigned_pkg else {
+                continue;
+            };
+
+            per_pkg_total[pkg_idx] += 1;
+
+            accumulate_language_classification(
+                classification,
+                &mut per_pkg_lang[pkg_idx],
+                &mut per_pkg_fw[pkg_idx],
+            );
+
+            per_pkg_assoc[pkg_idx]
+                .entry(classification.association)
+                .or_default()
+                .push(classification.path.clone());
+
+            let package_relative = &packages[pkg_idx].relative;
+            let repo_relative = package_relative_path(package_relative, &classification.path);
+            let file_name = classification
+                .path
+                .file_name()
+                .and_then(|v| v.to_str())
+                .unwrap_or_default();
+
+            if file_name == ".editorconfig" {
+                per_pkg_files[pkg_idx].editor_config = Some(repo_relative);
+            } else if is_command_runner_filename(file_name) {
+                per_pkg_files[pkg_idx].command_runner.push(repo_relative);
+            } else {
+                match classification.association {
+                    FileAssociation::Configuration => {
+                        per_pkg_files[pkg_idx].configuration.push(repo_relative);
+                    }
+                    FileAssociation::Documentation => {
+                        per_pkg_files[pkg_idx].documentation.push(repo_relative);
+                    }
+                    _ => {}
+                }
             }
         }
-    }
 
-    for (index, package) in packages.iter_mut().enumerate() {
-        let mut nested_roots: Vec<PathBuf> = Vec::new();
-        let mut nested_packages: Vec<String> = Vec::new();
+        for (i, package) in packages.iter_mut().enumerate() {
+            package.nested_packages = nested_packages[i].clone();
 
-        for (path, name) in &descendants[index] {
-            nested_roots.push(path.clone());
-            nested_packages.push(name.clone());
+            let lang_summary = build_language_summary(
+                std::mem::take(&mut per_pkg_lang[i]),
+                std::mem::take(&mut per_pkg_fw[i]),
+                per_pkg_total[i],
+            );
+            package.primary_language = lang_summary.primary;
+            package.secondary_languages = lang_summary.secondary;
+            package.languages = lang_summary.languages;
+            package.frameworks = lang_summary.frameworks;
+
+            package.file_associations = build_association_breakdown(
+                std::mem::take(&mut per_pkg_assoc[i]),
+                per_pkg_total[i],
+            );
+
+            per_pkg_files[i].configuration.sort();
+            per_pkg_files[i].configuration.dedup();
+            per_pkg_files[i].documentation.sort();
+            per_pkg_files[i].documentation.dedup();
+            per_pkg_files[i].command_runner.sort();
+            per_pkg_files[i].command_runner.dedup();
+
+            package.configuration = std::mem::take(&mut per_pkg_files[i].configuration);
+            package.documentation = std::mem::take(&mut per_pkg_files[i].documentation);
+            package.editor_config = per_pkg_files[i].editor_config.take();
+            package.command_runner = std::mem::take(&mut per_pkg_files[i].command_runner);
+        }
+    } else {
+        let name_to_path: HashMap<&str, PathBuf> = packages
+            .iter()
+            .map(|p| (p.name.as_str(), p.path.clone()))
+            .collect();
+        let mut nested_roots_by_index: Vec<Vec<PathBuf>> = vec![Vec::new(); packages.len()];
+        for (index, names) in nested_packages.iter().enumerate() {
+            for name in names {
+                if let Some(path) = name_to_path.get(name.as_str()) {
+                    nested_roots_by_index[index].push(path.clone());
+                }
+            }
+            nested_roots_by_index[index].sort();
         }
 
-        nested_roots.sort();
-        nested_packages.sort();
-
-        let scan = detect_package_languages(
-            &package.relative,
-            &package.path,
-            &nested_roots,
-            repo_inventory,
-        );
-        package.primary_language = scan.language_breakdown.primary;
-        package.secondary_languages = scan.language_breakdown.secondary;
-        package.languages = scan.language_breakdown.languages;
-        package.frameworks = scan.language_breakdown.frameworks;
-        package.file_associations = scan.file_breakdown.by_association;
-        package.configuration = scan.compatibility.configuration;
-        package.documentation = scan.compatibility.documentation;
-        package.editor_config = scan.compatibility.editor_config;
-        package.command_runner = scan.compatibility.command_runner;
-        package.nested_packages = nested_packages;
+        for (index, package) in packages.iter_mut().enumerate() {
+            let scan = detect_package_languages(
+                &package.relative,
+                &package.path,
+                &nested_roots_by_index[index],
+                None,
+            );
+            package.primary_language = scan.language_breakdown.primary;
+            package.secondary_languages = scan.language_breakdown.secondary;
+            package.languages = scan.language_breakdown.languages;
+            package.frameworks = scan.language_breakdown.frameworks;
+            package.file_associations = scan.file_breakdown.by_association;
+            package.configuration = scan.compatibility.configuration;
+            package.documentation = scan.compatibility.documentation;
+            package.editor_config = scan.compatibility.editor_config;
+            package.command_runner = scan.compatibility.command_runner;
+            package.nested_packages = nested_packages[index].clone();
+        }
     }
 }
 
-fn discover_packages_from_manifests(
-    root: &Path,
-    tool: MonorepoTool,
-    lock_versions: &Option<CargoLockVersions>,
-    discovery_source: PackageDiscoverySource,
-) -> Vec<Package> {
-    discover_packages_from_manifests_in_tree(root, root, tool, lock_versions, discovery_source)
-}
-
-/// Discover packages using manifest index if available, otherwise walk filesystem.
-fn discover_packages_with_optional_index(
+/// Re-export wrapper for use by sibling submodules.
+pub(crate) fn discover_packages_with_optional_index(
     root: &Path,
     tool: MonorepoTool,
     lock_versions: &Option<CargoLockVersions>,
     discovery_source: PackageDiscoverySource,
     index: Option<&ManifestIndex>,
 ) -> Vec<Package> {
-    if let Some(idx) = index {
-        // Use package_dirs_in_tree to exclude root itself (matches original
-        // discover_packages_from_manifests_in_tree which skips search_root)
-        idx.package_dirs_in_tree(root, root)
-            .iter()
-            .map(|path| create_package(path, root, tool, lock_versions, discovery_source))
-            .collect()
-    } else {
-        discover_packages_from_manifests(root, tool, lock_versions, discovery_source)
-    }
-}
-
-fn discover_packages_from_manifests_in_tree(
-    search_root: &Path,
-    repo_root: &Path,
-    tool: MonorepoTool,
-    lock_versions: &Option<CargoLockVersions>,
-    discovery_source: PackageDiscoverySource,
-) -> Vec<Package> {
-    let mut discovered_dirs = HashSet::new();
-
-    let walker = walkdir::WalkDir::new(search_root)
-        .follow_links(false)
-        .into_iter()
-        .filter_entry(|entry| {
-            if !entry.file_type().is_dir() {
-                return true;
-            }
-
-            let name = entry.file_name().to_string_lossy();
-            name != ".git"
-                && name != "node_modules"
-                && name != "target"
-                && name != ".turbo"
-                && name != "dist"
-                && name != "build"
-        });
-
-    for entry in walker.filter_map(|entry| entry.ok()) {
-        if !entry.file_type().is_file() {
-            continue;
-        }
-
-        let file_name = entry.file_name().to_string_lossy();
-        let is_manifest = matches!(
-            file_name.as_ref(),
-            "Cargo.toml" | "package.json" | "pyproject.toml" | "go.mod"
-        );
-        if !is_manifest {
-            continue;
-        }
-        if is_generated_manifest(entry.path()) {
-            continue;
-        }
-        if is_fixture_manifest(entry.path()) {
-            continue;
-        }
-
-        let Some(parent) = entry.path().parent() else {
-            continue;
-        };
-        if parent == search_root {
-            continue;
-        }
-        discovered_dirs.insert(parent.to_path_buf());
-    }
-
-    let mut dirs: Vec<PathBuf> = discovered_dirs.into_iter().collect();
-    dirs.sort();
-
-    dirs.iter()
-        .map(|path| create_package(path, repo_root, tool, lock_versions, discovery_source))
-        .collect()
-}
-
-/// Discover packages from manifest index (optimized path).
-///
-/// Uses pre-built manifest index instead of walking the filesystem.
-fn discover_packages_from_index(
-    search_root: &Path,
-    repo_root: &Path,
-    tool: MonorepoTool,
-    lock_versions: &Option<CargoLockVersions>,
-    discovery_source: PackageDiscoverySource,
-    index: &ManifestIndex,
-) -> Vec<Package> {
-    let dirs = index.package_dirs_in_tree(search_root, repo_root);
-
-    dirs.iter()
-        .map(|path| create_package(path, repo_root, tool, lock_versions, discovery_source))
-        .collect()
-}
-
-pub(crate) fn is_generated_manifest(path: &Path) -> bool {
-    let Some(file_name) = path.file_name().and_then(|name| name.to_str()) else {
-        return false;
-    };
-
-    if !matches!(file_name, "Cargo.toml" | "pyproject.toml") {
-        return false;
-    }
-
-    let Ok(content) = std::fs::read_to_string(path) else {
-        return false;
-    };
-    let content_lower = content.to_lowercase();
-
-    content_lower.contains("automatically generated")
-        || content_lower.contains("auto-generated")
-        || content_lower.contains("do not edit manually")
-}
-
-pub(crate) fn is_fixture_manifest(path: &Path) -> bool {
-    let components: Vec<String> = path
-        .components()
-        .filter_map(|component| component.as_os_str().to_str().map(|s| s.to_lowercase()))
-        .collect();
-
-    if components
-        .iter()
-        .any(|component| matches!(component.as_str(), "__fixtures__" | "testdata"))
-    {
-        return true;
-    }
-
-    components.windows(2).any(|window| {
-        matches!(window[0].as_str(), "test" | "tests" | "spec" | "specs") && window[1] == "fixtures"
-    })
+    mi_discover_packages_with_optional_index(root, tool, lock_versions, discovery_source, index)
 }
 
 #[allow(dead_code)]
 /// Expand glob patterns and parse dependencies for Cargo workspaces.
-fn expand_glob_patterns_with_deps(
+pub(crate) fn expand_glob_patterns_with_deps(
     root: &Path,
     patterns: &[String],
     tool: MonorepoTool,
@@ -1914,24 +990,27 @@ fn expand_glob_patterns_with_deps(
 }
 
 /// Creates a Package with all metadata and parsed dependencies.
-fn create_package(
+pub(crate) fn create_package(
     path: &Path,
     root: &Path,
     tool: MonorepoTool,
     lock_versions: &Option<CargoLockVersions>,
     discovery_source: PackageDiscoverySource,
 ) -> Package {
+    let mut ctx = PackageBuildContext::new(lock_versions);
     let relative = make_relative_path(path, root);
     let package_area = make_package_area(&relative);
-    let name = resolve_package_name(path, root);
     let ecosystem = detect_package_ecosystem(path);
     let package_managers = detect_package_managers(path);
-    let version = resolve_package_version(path, root);
+    let name = resolve_package_name(&mut ctx, path, root);
+    let version = resolve_package_version(&mut ctx, path, root);
 
-    // Read feature flags (Cargo only for now)
     let cargo_toml = path.join("Cargo.toml");
     let features = if cargo_toml.exists() {
-        read_cargo_features(&cargo_toml)
+        ctx.manifests
+            .cargo(&cargo_toml)
+            .map(cargo_features_from_value)
+            .unwrap_or_default()
     } else {
         Vec::new()
     };
@@ -1942,8 +1021,9 @@ fn create_package(
     let mut optional_dependencies = Vec::new();
 
     if cargo_toml.exists()
-        && let Some((normal, dev, build)) = parse_cargo_dependencies(&cargo_toml, lock_versions)
+        && let Some(parsed) = ctx.manifests.cargo(&cargo_toml)
     {
+        let (normal, dev, build) = cargo_dependencies_from_value(parsed, ctx.lock_versions);
         let mut all_deps = normal;
         all_deps.extend(build);
 
@@ -1958,9 +1038,9 @@ fn create_package(
     let package_json = path.join("package.json");
     if package_json.exists() {
         let js_package_manager = resolve_js_package_manager(tool, root, &package_managers);
-        if let Some((normal, dev, peer, optional)) =
-            parse_package_json_dependencies(&package_json, js_package_manager)
-        {
+        if let Some(parsed) = ctx.manifests.npm(&package_json) {
+            let (normal, dev, peer, optional) =
+                package_json_dependencies_from_value(parsed, js_package_manager);
             dependencies.extend(normal);
             dev_dependencies.extend(dev);
             peer_dependencies.extend(peer);
@@ -1971,7 +1051,10 @@ fn create_package(
     // Parse Python dependencies from pyproject.toml / requirements.txt.
     let pyproject_toml = path.join("pyproject.toml");
     if pyproject_toml.exists()
-        && let Some((normal, optional)) = parse_pyproject_dependencies(&pyproject_toml)
+        && let Some((normal, optional)) = ctx
+            .manifests
+            .pyproject(&pyproject_toml)
+            .and_then(pyproject_dependencies_from_value)
     {
         dependencies.extend(normal);
         optional_dependencies.extend(optional);
@@ -1986,7 +1069,10 @@ fn create_package(
     // Parse Go module dependencies when available.
     let go_mod = path.join("go.mod");
     if go_mod.exists()
-        && let Some(go_deps) = parse_go_mod_dependencies(&go_mod)
+        && let Some(go_deps) = ctx
+            .manifests
+            .go_mod(&go_mod)
+            .and_then(go_mod_dependencies_from_content)
     {
         dependencies.extend(go_deps);
     };
@@ -2047,6 +1133,7 @@ fn create_package(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::package::{DependencyEntry, DependencyKind};
 
     fn make_test_package(name: &str, deps: Vec<DependencyEntry>) -> Package {
         Package {
@@ -2180,7 +1267,7 @@ mod tests {
     }
 
     // ============================================================================
-    // normalize_path tests (issue #18)
+    // normalize_path tests
     // ============================================================================
 
     #[test]
@@ -2210,5 +1297,382 @@ mod tests {
         let path = Path::new("/a/b/c/../../d");
         let normalized = normalize_path(path);
         assert_eq!(normalized, PathBuf::from("/a/d"));
+    }
+
+    // ============================================================================
+    // ManifestCache tests
+    // ============================================================================
+
+    #[test]
+    fn manifest_cache_parses_cargo_toml_once() {
+        use std::io::Write;
+        use tempfile::tempdir;
+
+        let dir = tempdir().unwrap();
+        let cargo_toml = dir.path().join("Cargo.toml");
+        let mut file = std::fs::File::create(&cargo_toml).unwrap();
+        file.write_all(
+            b"[package]\nname = \"test-pkg\"\nversion = \"1.2.3\"\nedition = \"2021\"\n\n\
+             [dependencies]\nserde = \"1.0\"\n\n\
+             [features]\ndefault = [\"std\"]\nstd = []\n",
+        )
+        .unwrap();
+        drop(file);
+
+        let mut cache = ManifestCache::default();
+
+        let parsed = cache.cargo(&cargo_toml);
+        assert!(parsed.is_some());
+        assert_eq!(
+            parsed
+                .unwrap()
+                .get("package")
+                .and_then(|p| p.get("name"))
+                .and_then(|n| n.as_str()),
+            Some("test-pkg")
+        );
+
+        let parsed = cache.cargo(&cargo_toml);
+        assert!(parsed.is_some());
+        assert_eq!(
+            parsed
+                .unwrap()
+                .get("package")
+                .and_then(|p| p.get("name"))
+                .and_then(|n| n.as_str()),
+            Some("test-pkg")
+        );
+    }
+
+    #[test]
+    fn manifest_cache_parses_package_json_once() {
+        use std::io::Write;
+        use tempfile::tempdir;
+
+        let dir = tempdir().unwrap();
+        let package_json = dir.path().join("package.json");
+        let mut file = std::fs::File::create(&package_json).unwrap();
+        file.write_all(
+            br#"{"name":"test-app","version":"2.0.0","dependencies":{"lodash":"^4.0.0"}}"#,
+        )
+        .unwrap();
+        drop(file);
+
+        let mut cache = ManifestCache::default();
+
+        let parsed = cache.npm(&package_json);
+        assert!(parsed.is_some());
+        assert_eq!(
+            parsed.unwrap().get("name").and_then(|n| n.as_str()),
+            Some("test-app")
+        );
+
+        let parsed = cache.npm(&package_json);
+        assert!(parsed.is_some());
+        assert_eq!(
+            parsed.unwrap().get("name").and_then(|n| n.as_str()),
+            Some("test-app")
+        );
+    }
+
+    #[test]
+    fn manifest_cache_parses_pyproject_toml_once() {
+        use std::io::Write;
+        use tempfile::tempdir;
+
+        let dir = tempdir().unwrap();
+        let pyproject = dir.path().join("pyproject.toml");
+        let mut file = std::fs::File::create(&pyproject).unwrap();
+        file.write_all(b"[project]\nname = \"test-py\"\nversion = \"3.0.0\"\n")
+            .unwrap();
+        drop(file);
+
+        let mut cache = ManifestCache::default();
+
+        let parsed = cache.pyproject(&pyproject);
+        assert!(parsed.is_some());
+        assert_eq!(
+            parsed
+                .unwrap()
+                .get("project")
+                .and_then(|p| p.get("name"))
+                .and_then(|n| n.as_str()),
+            Some("test-py")
+        );
+
+        let parsed = cache.pyproject(&pyproject);
+        assert!(parsed.is_some());
+        assert_eq!(
+            parsed
+                .unwrap()
+                .get("project")
+                .and_then(|p| p.get("name"))
+                .and_then(|n| n.as_str()),
+            Some("test-py")
+        );
+    }
+
+    #[test]
+    fn manifest_cache_reads_go_mod_once() {
+        use std::io::Write;
+        use tempfile::tempdir;
+
+        let dir = tempdir().unwrap();
+        let go_mod = dir.path().join("go.mod");
+        let mut file = std::fs::File::create(&go_mod).unwrap();
+        file.write_all(b"module example.com/test\n\ngo 1.21\n")
+            .unwrap();
+        drop(file);
+
+        let mut cache = ManifestCache::default();
+
+        let content = cache.go_mod(&go_mod);
+        assert!(content.is_some());
+        assert!(content.unwrap().contains("example.com/test"));
+
+        let content = cache.go_mod(&go_mod);
+        assert!(content.is_some());
+        assert!(content.unwrap().contains("example.com/test"));
+    }
+
+    #[test]
+    fn package_build_context_derives_all_fields_from_cached_manifests() {
+        use std::io::Write;
+        use tempfile::tempdir;
+
+        let dir = tempdir().unwrap();
+        let cargo_toml = dir.path().join("Cargo.toml");
+        let mut file = std::fs::File::create(&cargo_toml).unwrap();
+        file.write_all(
+            b"[package]\nname = \"ctx-pkg\"\nversion = \"0.5.0\"\nedition = \"2021\"\n\n\
+             [dependencies]\nserde = \"1.0\"\n\n\
+             [features]\ndefault = [\"std\"]\nstd = []\n",
+        )
+        .unwrap();
+        drop(file);
+
+        let lock_versions: Option<CargoLockVersions> = None;
+        let mut ctx = PackageBuildContext::new(&lock_versions);
+
+        let name = ctx
+            .manifests
+            .cargo(&cargo_toml)
+            .and_then(cargo_package_name);
+        assert_eq!(name, Some("ctx-pkg".to_string()));
+
+        let version = ctx
+            .manifests
+            .cargo(&cargo_toml)
+            .and_then(cargo_package_version);
+        assert_eq!(version, Some("0.5.0".to_string()));
+
+        let features = ctx
+            .manifests
+            .cargo(&cargo_toml)
+            .map(cargo_features_from_value)
+            .unwrap_or_default();
+        assert!(features.contains(&"default".to_string()));
+        assert!(features.contains(&"std".to_string()));
+
+        if let Some(parsed) = ctx.manifests.cargo(&cargo_toml) {
+            let (normal, _dev, _build) = cargo_dependencies_from_value(parsed, ctx.lock_versions);
+            assert_eq!(normal.len(), 1);
+            assert_eq!(normal[0].name, "serde");
+        }
+    }
+
+    // ============================================================================
+    // refresh_package_boundaries tests
+    // ============================================================================
+
+    #[test]
+    fn refresh_boundaries_assigns_files_to_deepest_package() {
+        use std::fs;
+        use tempfile::tempdir;
+
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+
+        fs::create_dir_all(root.join("packages/foo/src")).unwrap();
+        fs::create_dir_all(root.join("packages/bar/src")).unwrap();
+        fs::write(root.join("packages/foo/src/main.rs"), "fn main() {}").unwrap();
+        fs::write(
+            root.join("packages/foo/Cargo.toml"),
+            "[package]\nname = 'foo'\n",
+        )
+        .unwrap();
+        fs::write(root.join("packages/bar/src/lib.rs"), "pub fn lib() {}").unwrap();
+        fs::write(
+            root.join("packages/bar/Cargo.toml"),
+            "[package]\nname = 'bar'\n",
+        )
+        .unwrap();
+        fs::write(root.join("README.md"), "# Repo").unwrap();
+
+        let inventory = crate::filesystem::file_types::scan_file_inventory(root).unwrap();
+        assert_eq!(inventory.total_files_scanned, 5);
+
+        let mut packages = vec![
+            Package {
+                name: "foo".to_string(),
+                path: root.join("packages/foo"),
+                relative: "packages/foo".to_string(),
+                package_area: "packages".to_string(),
+                ..Default::default()
+            },
+            Package {
+                name: "bar".to_string(),
+                path: root.join("packages/bar"),
+                relative: "packages/bar".to_string(),
+                package_area: "packages".to_string(),
+                ..Default::default()
+            },
+        ];
+
+        refresh_package_boundaries(&mut packages, Some(&inventory));
+
+        assert_eq!(packages[0].languages.len(), 1);
+        assert_eq!(packages[0].languages[0].language, ProgrammingLanguage::Rust);
+        assert_eq!(packages[0].languages[0].direct_file_count, 1);
+
+        assert_eq!(packages[1].languages.len(), 1);
+        assert_eq!(packages[1].languages[0].language, ProgrammingLanguage::Rust);
+        assert_eq!(packages[1].languages[0].direct_file_count, 1);
+    }
+
+    #[test]
+    fn refresh_boundaries_excludes_nested_package_files_from_parent() {
+        use std::fs;
+        use tempfile::tempdir;
+
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+
+        fs::create_dir_all(root.join("apps/browser/src")).unwrap();
+        fs::create_dir_all(root.join("apps/browser/embedded/src")).unwrap();
+        fs::write(
+            root.join("apps/browser/package.json"),
+            r#"{"name":"browser"}"#,
+        )
+        .unwrap();
+        fs::write(
+            root.join("apps/browser/embedded/Cargo.toml"),
+            "[package]\nname = 'embedded'\n",
+        )
+        .unwrap();
+        fs::write(
+            root.join("apps/browser/embedded/src/main.rs"),
+            "fn main() {}",
+        )
+        .unwrap();
+
+        let inventory = crate::filesystem::file_types::scan_file_inventory(root).unwrap();
+
+        let mut packages = vec![
+            Package {
+                name: "browser".to_string(),
+                path: root.join("apps/browser"),
+                relative: "apps/browser".to_string(),
+                package_area: "apps".to_string(),
+                ..Default::default()
+            },
+            Package {
+                name: "embedded".to_string(),
+                path: root.join("apps/browser/embedded"),
+                relative: "apps/browser/embedded".to_string(),
+                package_area: "apps/browser".to_string(),
+                ..Default::default()
+            },
+        ];
+
+        refresh_package_boundaries(&mut packages, Some(&inventory));
+
+        assert_eq!(packages[0].nested_packages, vec!["embedded"]);
+        assert!(packages[0].languages.is_empty());
+
+        assert_eq!(packages[1].languages.len(), 1);
+        assert_eq!(packages[1].languages[0].language, ProgrammingLanguage::Rust);
+    }
+
+    #[test]
+    fn refresh_boundaries_root_package_does_not_steal_all_files() {
+        use std::fs;
+        use tempfile::tempdir;
+
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+
+        fs::create_dir_all(root.join("src")).unwrap();
+        fs::create_dir_all(root.join("sub/src")).unwrap();
+        fs::write(root.join("Cargo.toml"), "[package]\nname = 'root'\n").unwrap();
+        fs::write(root.join("src/main.rs"), "fn main() {}").unwrap();
+        fs::write(root.join("sub/Cargo.toml"), "[package]\nname = 'sub'\n").unwrap();
+        fs::write(root.join("sub/src/lib.rs"), "pub fn lib() {}").unwrap();
+
+        let inventory = crate::filesystem::file_types::scan_file_inventory(root).unwrap();
+
+        let mut packages = vec![
+            Package {
+                name: "root".to_string(),
+                path: root.to_path_buf(),
+                relative: "".to_string(),
+                package_area: "root".to_string(),
+                ..Default::default()
+            },
+            Package {
+                name: "sub".to_string(),
+                path: root.join("sub"),
+                relative: "sub".to_string(),
+                package_area: "root".to_string(),
+                ..Default::default()
+            },
+        ];
+
+        refresh_package_boundaries(&mut packages, Some(&inventory));
+
+        assert_eq!(packages[0].languages.len(), 1);
+        assert_eq!(packages[0].languages[0].direct_file_count, 1);
+
+        assert_eq!(packages[1].languages.len(), 1);
+        assert_eq!(packages[1].languages[0].direct_file_count, 1);
+
+        assert_eq!(packages[0].nested_packages, vec!["sub"]);
+    }
+
+    #[test]
+    fn refresh_boundaries_file_associations_and_compatibility() {
+        use std::fs;
+        use tempfile::tempdir;
+
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+
+        fs::create_dir_all(root.join("pkg/src")).unwrap();
+        fs::write(root.join("pkg/src/main.rs"), "fn main() {}").unwrap();
+        fs::write(root.join("pkg/README.md"), "# pkg").unwrap();
+        fs::write(root.join("pkg/.editorconfig"), "root = true").unwrap();
+        fs::write(root.join("pkg/justfile"), "build:").unwrap();
+
+        let inventory = crate::filesystem::file_types::scan_file_inventory(root).unwrap();
+
+        let mut packages = vec![Package {
+            name: "pkg".to_string(),
+            path: root.join("pkg"),
+            relative: "pkg".to_string(),
+            package_area: "root".to_string(),
+            ..Default::default()
+        }];
+
+        refresh_package_boundaries(&mut packages, Some(&inventory));
+
+        assert!(!packages[0].documentation.is_empty());
+        assert!(packages[0].editor_config.is_some());
+        assert!(!packages[0].command_runner.is_empty());
+
+        let doc_assoc = packages[0]
+            .file_associations
+            .iter()
+            .find(|a| a.association == FileAssociation::Documentation);
+        assert!(doc_assoc.is_some());
     }
 }

@@ -1,20 +1,22 @@
 use std::any::Any;
-use std::collections::HashMap;
 use std::rc::Rc;
 
-use crate::terminal::Terminal;
-use crate::utils::layout::{Alignment, Layout, Margin, RowFill, WordWrap};
+use renderable::tree::RenderNode;
 
-/// A struct or enum which implements the **Renderable** trait
+use crate::terminal::Terminal;
+use crate::utils::layout::{Alignment, Layout, Length, TargetValue, add_cells};
+use crate::utils::wrap_policy::WordWrap;
+
+/// A struct or enum which implements the **TerminalRenderable** trait
 /// can be reduced down to a string designed to be displayed
 /// in a terminal.
 ///
-/// Every implementor owns a [`Layout`] that controls margins,
+/// Every implementer owns a [`Layout`] that controls margins,
 /// alignment, word-wrap, and row-fill strategy. The required
 /// accessors `layout()` / `layout_mut()` expose it, while
 /// the provided builder methods let callers configure it
 /// fluently.
-pub trait Renderable: std::fmt::Debug + Any {
+pub trait TerminalRenderable: std::fmt::Debug + Any {
     /// **Terminal-Aware Render**
     ///
     /// Renders the component using capabilities from the provided
@@ -54,38 +56,38 @@ pub trait Renderable: std::fmt::Debug + Any {
     fn layout_mut(&mut self) -> &mut Layout;
 
     /// Set the left margin on this component's layout.
-    fn left_margin(mut self, margin: Margin) -> Self
+    fn left_margin(mut self, margin: TargetValue<Length>) -> Self
     where
         Self: Sized,
     {
-        self.layout_mut().left_margin = margin;
+        self.layout_mut().margin.left = margin;
         self
     }
 
     /// Set the right margin on this component's layout.
-    fn right_margin(mut self, margin: Margin) -> Self
+    fn right_margin(mut self, margin: TargetValue<Length>) -> Self
     where
         Self: Sized,
     {
-        self.layout_mut().right_margin = margin;
+        self.layout_mut().margin.right = margin;
         self
     }
 
     /// Set the top margin on this component's layout.
-    fn top_margin(mut self, margin: Margin) -> Self
+    fn top_margin(mut self, margin: TargetValue<Length>) -> Self
     where
         Self: Sized,
     {
-        self.layout_mut().top_margin = margin;
+        self.layout_mut().margin.top = margin;
         self
     }
 
     /// Set the bottom margin on this component's layout.
-    fn bottom_margin(mut self, margin: Margin) -> Self
+    fn bottom_margin(mut self, margin: TargetValue<Length>) -> Self
     where
         Self: Sized,
     {
-        self.layout_mut().bottom_margin = margin;
+        self.layout_mut().margin.bottom = margin;
         self
     }
 
@@ -95,15 +97,6 @@ pub trait Renderable: std::fmt::Debug + Any {
         Self: Sized,
     {
         self.layout_mut().alignment = alignment;
-        self
-    }
-
-    /// Set the row-fill strategy on this component's layout.
-    fn row_fill_strategy(mut self, strategy: RowFill) -> Self
-    where
-        Self: Sized,
-    {
-        self.layout_mut().row_fill_strategy = strategy;
         self
     }
 
@@ -135,15 +128,15 @@ pub trait Renderable: std::fmt::Debug + Any {
 
     /// Adjust this component's margins to nest inside a parent layout.
     ///
-    /// Adds `left_offset` characters to the parent's left margin and
-    /// `right_offset` characters to the parent's right margin, using
-    /// lazy `Margin::Offset` composition so percentages resolve later.
+    /// Adds `left_offset` cells to the parent's left margin and `right_offset`
+    /// cells to the parent's right margin. Only universal cell-based margins
+    /// can absorb the offset; per-target margins are inherited unchanged.
     fn with_parent_layout(mut self, parent: &Layout, left_offset: u32, right_offset: u32) -> Self
     where
         Self: Sized,
     {
-        self.layout_mut().left_margin = parent.left_margin.clone().add_chars(left_offset);
-        self.layout_mut().right_margin = parent.right_margin.clone().add_chars(right_offset);
+        self.layout_mut().margin.left = add_cells(&parent.margin.left, left_offset);
+        self.layout_mut().margin.right = add_cells(&parent.margin.right, right_offset);
         self
     }
 
@@ -153,7 +146,7 @@ pub trait Renderable: std::fmt::Debug + Any {
     ///
     /// This is the method CLI programs should use when printing a
     /// component directly to the terminal. It is a thin wrapper around
-    /// [`render()`](Renderable::render) that guarantees the returned
+    /// [`render()`](TerminalRenderable::render) that guarantees the returned
     /// string ends with a newline.
     ///
     /// ## Why not `render()` directly?
@@ -193,103 +186,123 @@ pub trait Renderable: std::fmt::Debug + Any {
             format!("{rendered}\n")
         }
     }
-}
 
-/// **Browser-Aware Render**
-///
-/// Renders the component as HTML/SVG suitable for browser display.
-/// This trait is used by libraries like darkmatter to generate
-/// web-compatible output from terminal components.
-pub trait BrowserRenderable: std::fmt::Debug + Any {
-    /// Renders the component to browser-compatible HTML/SVG.
-    fn render_to_browser(&self) -> String;
-
-    /// Renders the component to browser-compatible HTML/SVG with inline CSS variables.
-    /// The `variables` parameter provides CSS variable definitions that can be used
-    /// in the rendered output for dynamic styling.
-    fn render_to_browser_with_inline_variables(
-        &self,
-        _variables: &HashMap<String, String>,
-    ) -> String {
-        // Default implementation ignores variables and calls the basic render method
-        self.render_to_browser()
+    /// Projects this component to a canonical render tree node.
+    ///
+    /// Components that support tree-based rendering return `Some(node)` with
+    /// their content projected into the canonical [`RenderNode`] structure.
+    /// Components that only support bespoke terminal rendering return `None`.
+    ///
+    /// ## Default
+    ///
+    /// Returns `None`. Components opt into tree projection by overriding
+    /// this method.
+    ///
+    /// ## Notes
+    ///
+    /// The returned node uses [`SourceSpan::synthetic()`] since the content
+    /// is generated at runtime rather than parsed from source.
+    ///
+    /// [`SourceSpan::synthetic()`]: renderable::tree::SourceSpan::synthetic
+    fn render_tree_node(&self) -> Option<RenderNode> {
+        None
     }
 
-    fn as_any(&self) -> &dyn Any;
+    /// Returns the stable Rust type name for this component.
+    ///
+    /// Used by the render tree projection layer to produce stable, derive-free
+    /// diagnostic labels and observability events when a component falls back
+    /// from canonical tree projection to ANSI-stripped text.
+    ///
+    /// ## Default
+    ///
+    /// Returns [`std::any::type_name::<Self>()`]. Implementors should not
+    /// override this — the default is the authoritative source.
+    fn type_name(&self) -> &'static str {
+        std::any::type_name::<Self>()
+    }
 }
+
+/// Re-export of the browser render trait, now homed in `renderable`.
+///
+/// The trait moved to the `renderable` crate so non-terminal render
+/// targets can depend on it without depending on `biscuit-terminal`.
+pub use renderable::browser::BrowserRenderable;
 
 /// Content that can be rendered as either plain text or a component.
 ///
 /// This enum allows unified handling of both simple string content and
-/// complex renderable components that implement the `Renderable` trait.
+/// complex renderable components that implement the `TerminalRenderable` trait.
 ///
 /// ## Variants
 ///
 /// - **`String(String)`**: Plain text content that is rendered directly.
-/// - **`Component(Rc<dyn Renderable>)**: A reference-counted pointer to a
-///   component that implements the `Renderable` trait.
+/// - **`Component(Rc<dyn TerminalRenderable>)**: A reference-counted pointer to a
+///   component that implements the `TerminalRenderable` trait.
 ///
 /// ## Examples
 ///
 /// ```rust
-/// use biscuit_terminal::components::renderable::{Renderable, RenderableContent};
+/// use biscuit_terminal::components::renderable::{TerminalRenderable, RenderableTerminalContent};
 /// use biscuit_terminal::terminal::Terminal;
 ///
 /// // Create from a plain string
-/// let content: RenderableContent = RenderableContent::String("Hello, world!".to_string());
+/// let content: RenderableTerminalContent = RenderableTerminalContent::String("Hello, world!".to_string());
 ///
 /// // Or use the From impl for seamless conversion
-/// let string_content: RenderableContent = "Hello".into();
+/// let string_content: RenderableTerminalContent = "Hello".into();
 /// ```
 ///
 /// ```rust
-/// use biscuit_terminal::components::renderable::{Renderable, RenderableContent};
+/// use biscuit_terminal::components::renderable::{TerminalRenderable, RenderableTerminalContent};
 /// use biscuit_terminal::components::prose::Prose;
 ///
 /// // Create from a Prose component
 /// let prose = Prose::new("<bold>Styled text</bold>");
-/// let component_content: RenderableContent = prose.into();
+/// let component_content: RenderableTerminalContent = prose.into();
 /// ```
 ///
 /// ## Extracting Content
 ///
 /// ```rust
-/// use biscuit_terminal::components::renderable::RenderableContent;
+/// use biscuit_terminal::components::renderable::RenderableTerminalContent;
 ///
-/// let string_content = RenderableContent::String("hello".to_string());
+/// let string_content = RenderableTerminalContent::String("hello".to_string());
 /// let text = string_content.as_text();
 /// assert_eq!(text, "hello");
 /// ```
 #[derive(Debug)]
-pub enum RenderableContent {
+pub enum RenderableTerminalContent {
     String(String),
-    Component(Rc<dyn Renderable>),
+    Component(Rc<dyn TerminalRenderable>),
 }
 
-impl Clone for RenderableContent {
+impl Clone for RenderableTerminalContent {
     fn clone(&self) -> Self {
         match self {
-            RenderableContent::String(s) => RenderableContent::String(s.clone()),
-            RenderableContent::Component(c) => RenderableContent::Component(Rc::clone(c)),
+            RenderableTerminalContent::String(s) => RenderableTerminalContent::String(s.clone()),
+            RenderableTerminalContent::Component(c) => {
+                RenderableTerminalContent::Component(Rc::clone(c))
+            }
         }
     }
 }
 
-impl<T: Renderable + 'static> From<T> for RenderableContent {
+impl<T: TerminalRenderable + 'static> From<T> for RenderableTerminalContent {
     fn from(value: T) -> Self {
-        RenderableContent::Component(Rc::new(value))
+        RenderableTerminalContent::Component(Rc::new(value))
     }
 }
 
-impl RenderableContent {
+impl RenderableTerminalContent {
     /// Returns the text content as a string.
     ///
     /// For String variants, returns the string directly.
     /// For Component variants, renders with default terminal detection.
     pub fn as_text(&self) -> String {
         match self {
-            RenderableContent::String(s) => s.clone(),
-            RenderableContent::Component(c) => {
+            RenderableTerminalContent::String(s) => s.clone(),
+            RenderableTerminalContent::Component(c) => {
                 let term = Terminal::default();
                 c.render(&term)
             }
@@ -297,20 +310,20 @@ impl RenderableContent {
     }
 }
 
-impl From<String> for RenderableContent {
+impl From<String> for RenderableTerminalContent {
     fn from(value: String) -> Self {
-        RenderableContent::String(value)
+        RenderableTerminalContent::String(value)
     }
 }
 
-impl From<&str> for RenderableContent {
+impl From<&str> for RenderableTerminalContent {
     fn from(value: &str) -> Self {
-        RenderableContent::String(value.to_string())
+        RenderableTerminalContent::String(value.to_string())
     }
 }
 
-impl<'a> From<&'a String> for RenderableContent {
+impl<'a> From<&'a String> for RenderableTerminalContent {
     fn from(value: &'a String) -> Self {
-        RenderableContent::String(value.clone())
+        RenderableTerminalContent::String(value.clone())
     }
 }

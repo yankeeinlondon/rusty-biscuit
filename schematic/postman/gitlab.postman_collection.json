@@ -9,6 +9,11 @@
       "key": "baseUrl",
       "value": "https://gitlab.com/api/v4",
       "description": "Base URL for all requests"
+    },
+    {
+      "key": "apiKey",
+      "value": "",
+      "description": "API key value"
     }
   ],
   "auth": {
@@ -16,11 +21,11 @@
     "apikey": [
       {
         "key": "key",
-        "value": "{{apiKey}}"
+        "value": "PRIVATE-TOKEN"
       },
       {
         "key": "value",
-        "value": "PRIVATE-TOKEN"
+        "value": "{{apiKey}}"
       },
       {
         "key": "in",
@@ -188,6 +193,35 @@
               }
             ],
             "description": "Get file content (Base64 encoded, provide git_ref for branch/tag)"
+          }
+        },
+        {
+          "name": "GetProject",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/projects/:id",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "projects",
+                ":id"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "<id>"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "User-Agent",
+                "value": "schematic-gitlab-client"
+              }
+            ],
+            "description": "Get project metadata (use URL-encoded path or numeric ID)"
           }
         },
         {
@@ -694,35 +728,6 @@
               }
             ],
             "description": "Get the latest release"
-          }
-        },
-        {
-          "name": "GetProject",
-          "request": {
-            "method": "GET",
-            "url": {
-              "raw": "{{baseUrl}}/projects/:id",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "projects",
-                ":id"
-              ],
-              "variable": [
-                {
-                  "key": "id",
-                  "value": "<id>"
-                }
-              ]
-            },
-            "header": [
-              {
-                "key": "User-Agent",
-                "value": "schematic-gitlab-client"
-              }
-            ],
-            "description": "Get project metadata (use URL-encoded path or numeric ID)"
           }
         },
         {

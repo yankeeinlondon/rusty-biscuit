@@ -100,6 +100,7 @@ let result = detect_with_config(config)?;
 | `ServicesInfo` | Init system + service list (via `ServiceManager::detect()`) |
 | `Package` | Package path, languages, managers, dependencies |
 | `GitRepo` | libgit2 handle from `GitRepo::discover(path)` |
+| `get_current_worktree_name` | Early-return helper: returns the basename of the linked worktree directory, or `None` if in the main worktree |
 
 ## Shared-Work Highlights
 
@@ -108,7 +109,10 @@ let result = detect_with_config(config)?;
 - **Shared repo inventory**: full repo detection returns its `FileInventory` alongside the `RepoInfo` via `detect_repo_with_inventory`, so the file-inventory stage skips rescanning
 - **Manifest Index**: single walk records every `Cargo.toml`/`package.json`/`pyproject.toml`/`go.mod` for full repo mode; structure mode skips it entirely
 - **Git status layers**: counts-only vs full file changes vs full unified diffs, selectable via `GitRequest` flags
+- **Parallel remote fetch**: deep git mode fetches multiple remotes concurrently with bounded parallelism; `GIT_TERMINAL_PROMPT=0` is preserved to avoid interactive hangs
+- **Ancestry-walk containment**: per-commit remote containment is computed with a single ancestry walk per remote, cached in a `HashMap<Oid, Vec<remote>>`
 - **ExecutableIndex**: scans `PATH` + macOS bundles once, shared across all 8 program categories via `Arc`
+- **CLI async model**: the CLI is a single-shot command runner; most paths are synchronous (git, filesystem, subprocess) and run directly in the async entrypoint. `spawn_blocking` is avoided unless true concurrent async work exists
 
 ## CLI
 
@@ -128,7 +132,12 @@ sniff topics               # Table of available topics
 sniff just                 # Justfiles and recipes
 sniff repo                 # Repository/monorepo structure
 sniff repo git-status      # Git status with commit history
+sniff repo language        # Primary programming language for the repository
+sniff repo worktree        # Linked worktree name (exit 1 if main worktree)
+sniff repo worktrees       # List all worktrees (default, --list, --csv, --verbose, --json)
 sniff repo remote origin   # Inspect remote repository
+sniff repo pr              # List open pull requests
+sniff repo pr --status merged  # List merged pull requests
 sniff repo recent-commits 1w  # Commits from last week
 sniff repo source-code-changes today  # Today's source changes
 sniff blast-radius         # Docs affected by dirty changes

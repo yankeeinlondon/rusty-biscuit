@@ -1,16 +1,11 @@
 pub mod badges;
-pub mod claude_semantic;
-pub mod codex_semantic;
-pub mod gemini_semantic;
-pub mod kimi_semantic;
 pub mod logs;
-pub mod opencode_semantic;
 pub mod parser;
 pub mod path_link;
 pub mod progress;
 pub mod prompt_timing;
 pub mod protocol;
-pub mod qwen_semantic;
+pub mod providers;
 pub mod reporting;
 pub mod semantic;
 pub mod stderr;
@@ -22,7 +17,7 @@ pub mod tool_display;
 use serde::{Deserialize, Serialize};
 use tracing::trace;
 
-use crate::events::Provider;
+use crate::provider_id::Provider;
 use parser::SemanticStreamParser;
 
 pub use semantic::{NullSemanticSink, SemanticEvent, SemanticEventSink};
@@ -49,6 +44,10 @@ pub enum StreamProtocol {
     StreamJson,
     Ndjson,
     Jsonl,
+    /// JSON-RPC 2.0 over line-delimited JSON. Used by Kimi Code's `--wire`
+    /// mode where stdout carries `{"jsonrpc":"2.0",…}` envelopes (events,
+    /// requests, responses) instead of provider-specific stream-json shapes.
+    WireJsonRpc,
 }
 
 /// Optional configuration for parser construction.
@@ -60,43 +59,24 @@ pub struct ParserConfig {
 
 /// Create a semantic-event parser for a provider.
 ///
-/// Every supported provider has a native [`SemanticStreamParser`]
-/// implementation that emits [`SemanticEvent`]s directly. Providers without
-/// a structured stream format fall back to the Claude parser as a degenerate
-/// no-op.
-pub fn create_semantic_parser<S: SemanticEventSink + 'static>(
+/// Dispatches through the provider's
+/// [`ProviderBehavior::create_semantic_parser`](crate::provider::ProviderBehavior::create_semantic_parser)
+/// implementation. Providers without a native semantic parser fall back
+/// through the trait default to a degenerate Claude-shaped parser.
+pub fn create_semantic_parser<S: SemanticEventSink + Send + 'static>(
     provider: Provider,
     sink: S,
     config: ParserConfig,
 ) -> Box<dyn SemanticStreamParser> {
-    match provider {
-        Provider::Claude => Box::new(claude_semantic::ClaudeSemanticStreamParser::new(sink)),
-        Provider::Codex => Box::new(codex_semantic::CodexSemanticStreamParser::new(
-            sink,
-            config.model.clone(),
-        )),
-        Provider::Gemini => Box::new(gemini_semantic::GeminiSemanticStreamParser::new(sink)),
-        Provider::OpenCode => Box::new(opencode_semantic::OpenCodeSemanticStreamParser::new(
-            sink,
-            config.model.clone(),
-        )),
-        Provider::KimiCode => Box::new(kimi_semantic::KimiSemanticStreamParser::new(sink)),
-        Provider::QwenCode => Box::new(qwen_semantic::QwenSemanticStreamParser::new(sink)),
-        _ => Box::new(claude_semantic::ClaudeSemanticStreamParser::new(sink)),
-    }
+    let boxed: Box<dyn SemanticEventSink + Send + 'static> = Box::new(sink);
+    crate::provider::provider_info(provider)
+        .behavior
+        .create_semantic_parser(boxed, config)
 }
 
 /// Return the stream protocol used by a provider, if supported.
 pub fn stream_protocol_for(provider: Provider) -> Option<StreamProtocol> {
-    match provider {
-        Provider::Claude => Some(StreamProtocol::StreamJson),
-        Provider::Codex => Some(StreamProtocol::Jsonl),
-        Provider::Gemini => Some(StreamProtocol::StreamJson),
-        Provider::KimiCode => Some(StreamProtocol::StreamJson),
-        Provider::OpenCode => Some(StreamProtocol::Ndjson),
-        Provider::QwenCode => Some(StreamProtocol::StreamJson),
-        _ => None,
-    }
+    crate::provider::provider_info(provider).stream_protocol
 }
 
 pub(crate) fn trace_parser_event(provider: Provider, event_type: &str, line_num: usize) {
@@ -222,6 +202,7 @@ mod tests {
             (StreamProtocol::StreamJson, "\"stream-json\""),
             (StreamProtocol::Ndjson, "\"ndjson\""),
             (StreamProtocol::Jsonl, "\"jsonl\""),
+            (StreamProtocol::WireJsonRpc, "\"wire-json-rpc\""),
         ];
         for (proto, expected_json) in &protocols {
             let json = serde_json::to_string(proto).unwrap();
@@ -245,6 +226,10 @@ mod tests {
             stream_protocol_for(Provider::OpenCode),
             Some(StreamProtocol::Ndjson)
         );
+        assert_eq!(
+            stream_protocol_for(Provider::KimiCode),
+            Some(StreamProtocol::WireJsonRpc)
+        );
     }
 
     #[test]
@@ -258,8 +243,7 @@ mod tests {
         use super::super::{
             ParserConfig, SemanticEvent, SemanticEventSink, create_semantic_parser,
         };
-        use crate::events::Provider;
-
+        use crate::provider_id::Provider;
         struct RecordingSemanticSink {
             events: Arc<Mutex<Vec<SemanticEvent>>>,
         }

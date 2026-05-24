@@ -20,7 +20,7 @@ last_updated: 2026-04-16
 | `tower-lsp`        | Trait-based, opinionated    | Yes   | v0.20.0 (Aug 2023) | Stalled     |
 | `tower-lsp-server` | Community fork of tower-lsp | Yes   | v0.23.0 (Dec 2025) | Active      |
 | `async-lsp`        | Tower Layer middleware      | Yes   | v0.2.3 (Mar 2026)  | Active      |
-| `lsp-server`       | Sync crossbeam scaffold     | No    | v0.7.9 (Aug 2025)  | Active      |
+| [`lsp-server`](./tower-lsp.md)       | Sync crossbeam scaffold     | No    | v0.7.9 (Aug 2025)  | Active      |
 | `lsp-types`        | Type definitions only       | N/A   | v0.97.0            | Active      |
 | `lspower`          | Fork of tower-lsp           | Yes   | v1.5.0 (Dec 2021)  | Archived    |
 

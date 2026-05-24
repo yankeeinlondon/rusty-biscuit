@@ -50,7 +50,6 @@ impl DeviceDiscovery for SonyDiscovery {
                 .into_iter()
                 .filter_map(|(key, value)| value.map(|value| (key, value)))
                 .collect(),
-                ..Default::default()
             })
         })
         .await;

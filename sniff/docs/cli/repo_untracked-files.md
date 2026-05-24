@@ -24,7 +24,8 @@ Only includes files that git considers untracked (not ignored). Ignored files (m
 
 | Argument | Description |
 |----------|-------------|
-| `-p/--package <PKG>` | Scope output to files within a specific package or package area |
+| `-p/--package <PKG>` | Scope output to files within a specific package (exact match on `Package.name`) |
+| `--package-area <AREA>` | Scope output to files within a specific package area (prefix match on `Package.package_area`) |
 
 ## Exit Codes
 
@@ -33,14 +34,17 @@ Only includes files that git considers untracked (not ignored). Ignored files (m
 | `0` | One or more untracked files found |
 | `1` | No untracked files in scope |
 
-## Package Scoping (`-p`)
+## Package Scoping (`-p` and `--package-area`)
 
-When `-p/--package` is provided, only untracked files within that package's directory are returned:
+`-p/--package` scopes the listing to a single package; `--package-area` scopes to all packages whose area starts with the supplied prefix. Passing both narrows to the intersection (and errors if the package is not inside the area).
 
 ```bash
-sniff repo untracked-files -p sniff       # New files in sniff/ area
-sniff repo untracked-files -p research    # New files in research/ area
+sniff repo untracked-files -p sniff-cli                  # New files in sniff/cli/
+sniff repo untracked-files --package-area sniff          # New files in sniff/* (sniff/cli, sniff/lib, …)
+sniff repo untracked-files --package-area research       # New files in research/* areas
 ```
+
+> Breaking change vs. previous releases: passing a **package-area name** (e.g., `sniff`) to `-p/--package` is now an error. Use `--package-area sniff` instead.
 
 ## JSON Output (`--json`)
 
@@ -66,7 +70,7 @@ Returns an empty array `[]` when no untracked files are found (exit code 1 still
 sniff repo untracked-files | tr ',' '\n'
 
 # Check if new files exist in a package area
-if sniff repo untracked-files -p sniff > /dev/null; then
+if sniff repo untracked-files --package-area sniff > /dev/null; then
     echo "New files detected in sniff/"
 fi
 ```

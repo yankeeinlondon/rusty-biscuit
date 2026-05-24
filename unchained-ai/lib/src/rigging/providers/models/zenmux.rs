@@ -1,6 +1,6 @@
 //! Auto-generated provider model enum
 //!
-//! Generated: 2026-01-11T20:35:21.745420+00:00
+//! Generated: 2026-05-07T02:07:06.174438+00:00
 //! Generator: gen-models v0.1.0
 //! Provider: ZenMux
 //!
@@ -18,8 +18,6 @@ use model_id::ModelId;
 pub enum ProviderModelZenMux {
     /// Model: `anthropic/claude-3.5-haiku`
     Anthropic___Claude__3_5__Haiku,
-    /// Model: `anthropic/claude-3.5-sonnet`
-    Anthropic___Claude__3_5__Sonnet,
     /// Model: `anthropic/claude-3.7-sonnet`
     Anthropic___Claude__3_7__Sonnet,
     /// Model: `anthropic/claude-haiku-4.5`
@@ -30,14 +28,32 @@ pub enum ProviderModelZenMux {
     Anthropic___Claude__Opus__4_1,
     /// Model: `anthropic/claude-opus-4.5`
     Anthropic___Claude__Opus__4_5,
+    /// Model: `anthropic/claude-opus-4.6`
+    Anthropic___Claude__Opus__4_6,
+    /// Model: `anthropic/claude-opus-4.7`
+    Anthropic___Claude__Opus__4_7,
     /// Model: `anthropic/claude-sonnet-4`
     Anthropic___Claude__Sonnet__4,
     /// Model: `anthropic/claude-sonnet-4.5`
     Anthropic___Claude__Sonnet__4_5,
+    /// Model: `anthropic/claude-sonnet-4.6`
+    Anthropic___Claude__Sonnet__4_6,
     /// Model: `baidu/ernie-5.0-thinking-preview`
     Baidu___Ernie__5_0__Thinking__Preview,
     /// Model: `baidu/ernie-x1.1-preview`
     Baidu___Ernie__X1_1__Preview,
+    /// Model: `bytedance/doubao-seed-1.8`
+    Bytedance___Doubao__Seed__1_8,
+    /// Model: `bytedance/doubao-seed-2.0-code`
+    Bytedance___Doubao__Seed__2_0__Code,
+    /// Model: `bytedance/doubao-seed-2.0-lite`
+    Bytedance___Doubao__Seed__2_0__Lite,
+    /// Model: `bytedance/doubao-seed-2.0-mini`
+    Bytedance___Doubao__Seed__2_0__Mini,
+    /// Model: `bytedance/doubao-seed-2.0-pro`
+    Bytedance___Doubao__Seed__2_0__Pro,
+    /// Model: `bytedance/doubao-seed-code`
+    Bytedance___Doubao__Seed__Code,
     /// Model: `deepseek/deepseek-chat`
     Deepseek___Deepseek__Chat,
     /// Model: `deepseek/deepseek-chat-v3.1`
@@ -50,10 +66,10 @@ pub enum ProviderModelZenMux {
     Deepseek___Deepseek__V3_2,
     /// Model: `deepseek/deepseek-v3.2-exp`
     Deepseek___Deepseek__V3_2__Exp,
-    /// Model: `google/gemini-2.0-flash`
-    Google___Gemini__2_0__Flash,
-    /// Model: `google/gemini-2.0-flash-lite-001`
-    Google___Gemini__2_0__Flash__Lite__001,
+    /// Model: `deepseek/deepseek-v4-flash`
+    Deepseek___Deepseek__V4__Flash,
+    /// Model: `deepseek/deepseek-v4-pro`
+    Deepseek___Deepseek__V4__Pro,
     /// Model: `google/gemini-2.5-flash`
     Google___Gemini__2_5__Flash,
     /// Model: `google/gemini-2.5-flash-lite`
@@ -62,38 +78,50 @@ pub enum ProviderModelZenMux {
     Google___Gemini__2_5__Pro,
     /// Model: `google/gemini-3-flash-preview`
     Google___Gemini__3__Flash__Preview,
-    /// Model: `google/gemini-3-pro-preview`
-    Google___Gemini__3__Pro__Preview,
+    /// Model: `google/gemini-3.1-flash-lite-preview`
+    Google___Gemini__3_1__Flash__Lite__Preview,
+    /// Model: `google/gemini-3.1-pro-preview`
+    Google___Gemini__3_1__Pro__Preview,
     /// Model: `google/gemma-3-12b-it`
     Google___Gemma__3__12b__It,
     /// Model: `inclusionai/ling-1t`
     Inclusionai___Ling__1t,
+    /// Model: `inclusionai/ling-2.6-1t`
+    Inclusionai___Ling__2_6__1t,
+    /// Model: `inclusionai/ling-2.6-flash`
+    Inclusionai___Ling__2_6__Flash,
     /// Model: `inclusionai/ling-flash-2.0`
     Inclusionai___Ling__Flash__2_0,
     /// Model: `inclusionai/ling-mini-2.0`
     Inclusionai___Ling__Mini__2_0,
-    /// Model: `inclusionai/llada2.0-flash-cap`
-    Inclusionai___Llada2_0__Flash__Cap,
-    /// Model: `inclusionai/ming-flash-omni-preview`
-    Inclusionai___Ming__Flash__Omni__Preview,
+    /// Model: `inclusionai/llada2.1-flash`
+    Inclusionai___Llada2_1__Flash,
     /// Model: `inclusionai/ring-1t`
     Inclusionai___Ring__1t,
     /// Model: `inclusionai/ring-flash-2.0`
     Inclusionai___Ring__Flash__2_0,
     /// Model: `inclusionai/ring-mini-2.0`
     Inclusionai___Ring__Mini__2_0,
-    /// Model: `kuaishou/kat-coder-pro-v1`
-    Kuaishou___Kat__Coder__Pro__V1,
-    /// Model: `kuaishou/kat-coder-pro-v1-free`
-    Kuaishou___Kat__Coder__Pro__V1__Free,
+    /// Model: `kuaishou/kat-coder-pro-v2`
+    Kuaishou___Kat__Coder__Pro__V2,
     /// Model: `meta/llama-3.3-70b-instruct`
     Meta___Llama__3_3__70b__Instruct,
     /// Model: `meta/llama-4-scout-17b-16e-instruct`
     Meta___Llama__4__Scout__17b__16e__Instruct,
     /// Model: `minimax/minimax-m2`
     Minimax___Minimax__M2,
+    /// Model: `minimax/minimax-m2-her`
+    Minimax___Minimax__M2__Her,
     /// Model: `minimax/minimax-m2.1`
     Minimax___Minimax__M2_1,
+    /// Model: `minimax/minimax-m2.5`
+    Minimax___Minimax__M2_5,
+    /// Model: `minimax/minimax-m2.5-lightning`
+    Minimax___Minimax__M2_5__Lightning,
+    /// Model: `minimax/minimax-m2.7`
+    Minimax___Minimax__M2_7,
+    /// Model: `minimax/minimax-m2.7-highspeed`
+    Minimax___Minimax__M2_7__Highspeed,
     /// Model: `mistralai/mistral-large-2512`
     Mistralai___Mistral__Large__2512,
     /// Model: `moonshotai/kimi-k2-0711`
@@ -104,6 +132,12 @@ pub enum ProviderModelZenMux {
     Moonshotai___Kimi__K2__Thinking,
     /// Model: `moonshotai/kimi-k2-thinking-turbo`
     Moonshotai___Kimi__K2__Thinking__Turbo,
+    /// Model: `moonshotai/kimi-k2.5`
+    Moonshotai___Kimi__K2_5,
+    /// Model: `moonshotai/kimi-k2.6`
+    Moonshotai___Kimi__K2_6,
+    /// Model: `openai/chat-latest`
+    Openai___Chat__Latest,
     /// Model: `openai/gpt-4.1`
     Openai___Gpt__4_1,
     /// Model: `openai/gpt-4.1-mini`
@@ -138,8 +172,26 @@ pub enum ProviderModelZenMux {
     Openai___Gpt__5_2,
     /// Model: `openai/gpt-5.2-chat`
     Openai___Gpt__5_2__Chat,
+    /// Model: `openai/gpt-5.2-codex`
+    Openai___Gpt__5_2__Codex,
     /// Model: `openai/gpt-5.2-pro`
     Openai___Gpt__5_2__Pro,
+    /// Model: `openai/gpt-5.3-chat`
+    Openai___Gpt__5_3__Chat,
+    /// Model: `openai/gpt-5.3-codex`
+    Openai___Gpt__5_3__Codex,
+    /// Model: `openai/gpt-5.4`
+    Openai___Gpt__5_4,
+    /// Model: `openai/gpt-5.4-mini`
+    Openai___Gpt__5_4__Mini,
+    /// Model: `openai/gpt-5.4-nano`
+    Openai___Gpt__5_4__Nano,
+    /// Model: `openai/gpt-5.4-pro`
+    Openai___Gpt__5_4__Pro,
+    /// Model: `openai/gpt-5.5`
+    Openai___Gpt__5_5,
+    /// Model: `openai/gpt-5.5-pro`
+    Openai___Gpt__5_5__Pro,
     /// Model: `openai/o4-mini`
     Openai___O4__Mini,
     /// Model: `qwen/qwen3-14b`
@@ -154,18 +206,32 @@ pub enum ProviderModelZenMux {
     Qwen___Qwen3__Coder__Plus,
     /// Model: `qwen/qwen3-max`
     Qwen___Qwen3__Max,
-    /// Model: `qwen/qwen3-max-preview`
-    Qwen___Qwen3__Max__Preview,
     /// Model: `qwen/qwen3-vl-plus`
     Qwen___Qwen3__Vl__Plus,
+    /// Model: `qwen/qwen3.5-flash`
+    Qwen___Qwen3_5__Flash,
+    /// Model: `qwen/qwen3.5-plus`
+    Qwen___Qwen3_5__Plus,
+    /// Model: `qwen/qwen3.6-flash`
+    Qwen___Qwen3_6__Flash,
+    /// Model: `qwen/qwen3.6-max-preview`
+    Qwen___Qwen3_6__Max__Preview,
+    /// Model: `qwen/qwen3.6-plus`
+    Qwen___Qwen3_6__Plus,
+    /// Model: `sapiens-ai/agnes-1.5-flash`
+    Sapiens__Ai___Agnes__1_5__Flash,
+    /// Model: `sapiens-ai/agnes-1.5-lite`
+    Sapiens__Ai___Agnes__1_5__Lite,
+    /// Model: `sapiens-ai/agnes-1.5-pro`
+    Sapiens__Ai___Agnes__1_5__Pro,
     /// Model: `stepfun/step-3`
     Stepfun___Step__3,
-    /// Model: `volcengine/doubao-seed-1-6-vision`
-    Volcengine___Doubao__Seed__1__6__Vision,
-    /// Model: `volcengine/doubao-seed-1.8`
-    Volcengine___Doubao__Seed__1_8,
-    /// Model: `volcengine/doubao-seed-code`
-    Volcengine___Doubao__Seed__Code,
+    /// Model: `stepfun/step-3.5-flash`
+    Stepfun___Step__3_5__Flash,
+    /// Model: `tencent/hunyuan-2.0-thinking`
+    Tencent___Hunyuan__2_0__Thinking,
+    /// Model: `tencent/hy3-preview`
+    Tencent___Hy3__Preview,
     /// Model: `x-ai/grok-4`
     X__Ai___Grok__4,
     /// Model: `x-ai/grok-4-fast`
@@ -176,12 +242,24 @@ pub enum ProviderModelZenMux {
     X__Ai___Grok__4_1__Fast,
     /// Model: `x-ai/grok-4.1-fast-non-reasoning`
     X__Ai___Grok__4_1__Fast__Non__Reasoning,
+    /// Model: `x-ai/grok-4.2-fast`
+    X__Ai___Grok__4_2__Fast,
+    /// Model: `x-ai/grok-4.2-fast-non-reasoning`
+    X__Ai___Grok__4_2__Fast__Non__Reasoning,
+    /// Model: `x-ai/grok-4.3`
+    X__Ai___Grok__4_3,
     /// Model: `x-ai/grok-code-fast-1`
     X__Ai___Grok__Code__Fast__1,
     /// Model: `xiaomi/mimo-v2-flash`
     Xiaomi___Mimo__V2__Flash,
-    /// Model: `xiaomi/mimo-v2-flash-free`
-    Xiaomi___Mimo__V2__Flash__Free,
+    /// Model: `xiaomi/mimo-v2-omni`
+    Xiaomi___Mimo__V2__Omni,
+    /// Model: `xiaomi/mimo-v2-pro`
+    Xiaomi___Mimo__V2__Pro,
+    /// Model: `xiaomi/mimo-v2.5`
+    Xiaomi___Mimo__V2_5,
+    /// Model: `xiaomi/mimo-v2.5-pro`
+    Xiaomi___Mimo__V2_5__Pro,
     /// Model: `z-ai/glm-4.5`
     Z__Ai___Glm__4_5,
     /// Model: `z-ai/glm-4.5-air`
@@ -196,6 +274,18 @@ pub enum ProviderModelZenMux {
     Z__Ai___Glm__4_6v__Flash__Free,
     /// Model: `z-ai/glm-4.7`
     Z__Ai___Glm__4_7,
+    /// Model: `z-ai/glm-4.7-flash-free`
+    Z__Ai___Glm__4_7__Flash__Free,
+    /// Model: `z-ai/glm-4.7-flashx`
+    Z__Ai___Glm__4_7__Flashx,
+    /// Model: `z-ai/glm-5`
+    Z__Ai___Glm__5,
+    /// Model: `z-ai/glm-5-turbo`
+    Z__Ai___Glm__5__Turbo,
+    /// Model: `z-ai/glm-5.1`
+    Z__Ai___Glm__5_1,
+    /// Model: `z-ai/glm-5v-turbo`
+    Z__Ai___Glm__5v__Turbo,
     /// Custom model ID not in the predefined list.
     Bespoke(String),
 }

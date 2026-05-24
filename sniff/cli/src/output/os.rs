@@ -1,7 +1,7 @@
 //! OS section output formatting.
 use std::fmt::Write;
 
-use biscuit_terminal::components::{prose::Prose, renderable::Renderable};
+use biscuit_terminal::components::{prose::Prose, renderable::TerminalRenderable};
 
 use sniff::hardware::NtpStatus;
 

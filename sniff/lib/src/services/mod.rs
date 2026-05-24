@@ -30,10 +30,13 @@ use serde::{Deserialize, Serialize};
 use std::{
     env, fmt, fs,
     path::{Path, PathBuf},
-    process::Command,
 };
-use tracing::{debug, instrument, warn};
+use tracing::{debug, instrument};
 
+mod launchd;
+mod openrc;
+mod runit;
+mod systemd;
 mod windows_scm;
 
 // =============================================================================
@@ -383,10 +386,10 @@ impl ServiceManager {
     /// - **Others**: Returns empty list (not yet implemented)
     pub fn services_detailed(&self, state: ServiceState) -> Vec<Service> {
         let all_services = match self.init_system {
-            InitSystem::Launchd => list_launchd_services(),
-            InitSystem::Systemd => list_systemd_services(),
-            InitSystem::OpenRc => list_openrc_services(),
-            InitSystem::Runit => list_runit_services(),
+            InitSystem::Launchd => launchd::list_launchd_services(),
+            InitSystem::Systemd => systemd::list_systemd_services(),
+            InitSystem::OpenRc => openrc::list_openrc_services(),
+            InitSystem::Runit => runit::list_runit_services(),
             InitSystem::WindowsScm => windows_scm::list_windows_scm_services(),
             _ => Vec::new(),
         };
@@ -515,255 +518,6 @@ fn has_in_path(exe_name: &str) -> bool {
     {
         env::split_paths(&path_var).any(|dir| dir.join(exe_name).is_file())
     }
-}
-
-// =============================================================================
-// Init System Service Listing Implementations
-// =============================================================================
-
-/// List services using launchd (macOS).
-///
-/// Parses output from `launchctl list` which has format:
-/// ```text
-/// PID     Status  Label
-/// -       0       com.apple.example.stopped
-/// 123     0       com.apple.example.running
-/// ```
-fn list_launchd_services() -> Vec<Service> {
-    let output = match Command::new("launchctl").arg("list").output().map_err(|e| {
-        warn!(error = %e, cmd = "launchctl", "service detection subprocess failed");
-        e
-    }) {
-        Ok(o) if o.status.success() => o,
-        _ => return Vec::new(),
-    };
-
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let mut services = Vec::new();
-
-    for line in stdout.lines().skip(1) {
-        // Skip header line
-        let parts: Vec<&str> = line.split_whitespace().collect();
-        if parts.len() >= 3 {
-            let pid = parts[0].parse::<u32>().ok();
-            let status = parts[1].parse::<i32>().ok();
-            let name = parts[2..].join(" ");
-
-            services.push(Service {
-                name,
-                pid,
-                running: pid.is_some(),
-                status,
-            });
-        }
-    }
-
-    services
-}
-
-/// List services using systemd (Linux).
-///
-/// Parses output from `systemctl list-units --type=service --all --no-pager --plain`
-fn list_systemd_services() -> Vec<Service> {
-    let output = match Command::new("systemctl")
-        .args([
-            "list-units",
-            "--type=service",
-            "--all",
-            "--no-pager",
-            "--plain",
-        ])
-        .output()
-        .map_err(|e| {
-            warn!(error = %e, cmd = "systemctl", "service detection subprocess failed");
-            e
-        }) {
-        Ok(o) if o.status.success() => o,
-        _ => return Vec::new(),
-    };
-
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let mut services = Vec::new();
-
-    for line in stdout.lines() {
-        // Format: UNIT LOAD ACTIVE SUB DESCRIPTION
-        // e.g.: ssh.service loaded active running OpenBSD Secure Shell server
-        let parts: Vec<&str> = line.split_whitespace().collect();
-        if parts.len() >= 4 {
-            let unit = parts[0];
-            // Only include .service units
-            if !unit.ends_with(".service") {
-                continue;
-            }
-
-            let name = unit.trim_end_matches(".service").to_string();
-            let active = parts[2];
-            let sub = parts[3];
-
-            let running = active == "active" && sub == "running";
-            let pid = if running {
-                get_systemd_service_pid(&name)
-            } else {
-                None
-            };
-
-            services.push(Service {
-                name,
-                pid,
-                running,
-                status: None,
-            });
-        }
-    }
-
-    services
-}
-
-/// Get the main PID of a systemd service.
-fn get_systemd_service_pid(service_name: &str) -> Option<u32> {
-    let output = Command::new("systemctl")
-        .args([
-            "show",
-            &format!("{}.service", service_name),
-            "--property=MainPID",
-        ])
-        .output()
-        .map_err(|e| {
-            warn!(error = %e, cmd = "systemctl", "service detection subprocess failed");
-            e
-        })
-        .ok()?;
-
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    // Output: MainPID=1234
-    stdout
-        .trim()
-        .strip_prefix("MainPID=")
-        .and_then(|s| s.parse::<u32>().ok())
-        .filter(|&pid| pid > 0)
-}
-
-/// List services using OpenRC.
-///
-/// Parses output from `rc-status --all`
-fn list_openrc_services() -> Vec<Service> {
-    let output = match Command::new("rc-status")
-        .arg("--all")
-        .output()
-        .map_err(|e| {
-            warn!(error = %e, cmd = "rc-status", "service detection subprocess failed");
-            e
-        }) {
-        Ok(o) if o.status.success() => o,
-        _ => return Vec::new(),
-    };
-
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let mut services = Vec::new();
-
-    for line in stdout.lines() {
-        // Format varies, but typically:
-        // service_name                      [  started  ]
-        // service_name                      [  stopped  ]
-        let line = line.trim();
-        if line.is_empty() || line.starts_with("Runlevel:") || !line.contains('[') {
-            continue;
-        }
-
-        if let Some(bracket_pos) = line.find('[') {
-            let name = line[..bracket_pos].trim().to_string();
-            let status_part = &line[bracket_pos..];
-
-            let running = status_part.contains("started");
-
-            if !name.is_empty() {
-                services.push(Service {
-                    name,
-                    pid: None, // OpenRC doesn't provide PID in rc-status
-                    running,
-                    status: None,
-                });
-            }
-        }
-    }
-
-    services
-}
-
-/// List services using runit.
-///
-/// Scans the service directory (default `/var/service/` or `$SVDIR`).
-fn list_runit_services() -> Vec<Service> {
-    let sv_dir = env::var("SVDIR")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| PathBuf::from("/var/service"));
-
-    let entries = match fs::read_dir(&sv_dir).map_err(|e| {
-        debug!(path = %sv_dir.display(), error = %e, "could not read service file");
-        e
-    }) {
-        Ok(e) => e,
-        Err(_) => return Vec::new(),
-    };
-
-    let mut services = Vec::new();
-
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if !path.is_dir() {
-            continue;
-        }
-
-        let name = match path.file_name().and_then(|n| n.to_str()) {
-            Some(n) => n.to_string(),
-            None => continue,
-        };
-
-        // Check if service is running using `sv status`
-        let (running, pid) = check_runit_service_status(&name);
-
-        services.push(Service {
-            name,
-            pid,
-            running,
-            status: None,
-        });
-    }
-
-    services
-}
-
-/// Check runit service status using `sv status`.
-fn check_runit_service_status(service_name: &str) -> (bool, Option<u32>) {
-    let output = match Command::new("sv")
-        .args(["status", service_name])
-        .output()
-        .map_err(|e| {
-            warn!(error = %e, cmd = "sv", "service detection subprocess failed");
-            e
-        }) {
-        Ok(o) => o,
-        Err(_) => return (false, None),
-    };
-
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    // Output format: "run: service_name: (pid 1234) 100s"
-    // or: "down: service_name: 10s, normally up"
-
-    let running = stdout.starts_with("run:");
-
-    let pid = if running {
-        // Extract PID from "(pid 1234)"
-        stdout.find("(pid ").and_then(|start| {
-            let rest = &stdout[start + 5..];
-            rest.find(')')
-                .and_then(|end| rest[..end].parse::<u32>().ok())
-        })
-    } else {
-        None
-    };
-
-    (running, pid)
 }
 
 // =============================================================================
@@ -954,95 +708,6 @@ mod tests {
         assert_eq!(service.pid, Some(1234));
         assert!(service.running);
         assert_eq!(service.status, Some(0));
-    }
-
-    #[test]
-    #[cfg(target_os = "macos")]
-    fn test_launchd_services_returns_services() {
-        // On macOS, we should get some services from launchctl
-        let services = list_launchd_services();
-        // launchctl list should return at least some system services
-        assert!(
-            !services.is_empty(),
-            "launchctl list should return services on macOS"
-        );
-
-        // Verify structure of returned services
-        for service in &services {
-            assert!(!service.name.is_empty(), "Service name should not be empty");
-        }
-    }
-
-    #[test]
-    #[cfg(target_os = "macos")]
-    fn test_service_manager_services_on_macos() {
-        let sm = ServiceManager::detect();
-        let all_services = sm.services(ServiceState::All);
-        assert!(!all_services.is_empty(), "Should have services on macOS");
-
-        let running_services = sm.services(ServiceState::Running);
-        // There should be at least some running services on a live system
-        // (but we don't assert this as it could vary)
-        let _ = running_services;
-    }
-
-    #[test]
-    #[cfg(target_os = "linux")]
-    fn test_systemd_services_if_available() {
-        // Only test if systemd is the init system
-        let sm = ServiceManager::detect();
-        if sm.init_system == InitSystem::Systemd {
-            let services = sm.services(ServiceState::All);
-            // Systemd systems should have services
-            assert!(!services.is_empty(), "systemd should return services");
-        }
-    }
-
-    #[test]
-    fn test_init_evidence_construction() {
-        let ev = InitEvidence::new();
-        assert!(ev.pid1_comm.is_none());
-        assert!(ev.pid1_exe.is_none());
-        assert!(ev.hints.is_empty());
-        assert!(ev.notes.is_empty());
-    }
-
-    #[test]
-    fn test_path_ends_with_component() {
-        assert!(path_ends_with_component(
-            Path::new("/usr/bin/systemd"),
-            "systemd"
-        ));
-        assert!(path_ends_with_component(Path::new("systemd"), "systemd"));
-        assert!(!path_ends_with_component(
-            Path::new("/usr/bin/systemd"),
-            "init"
-        ));
-        assert!(!path_ends_with_component(Path::new(""), "systemd"));
-    }
-
-    #[test]
-    fn test_canonicalish_with_valid_path() {
-        // Current directory should always work
-        let result = canonicalish(PathBuf::from("."));
-        assert!(result.is_ok());
-    }
-
-    #[test]
-    fn test_canonicalish_with_nonexistent_path() {
-        // Should return the original path on failure
-        let nonexistent = PathBuf::from("/nonexistent/path/that/doesnt/exist");
-        let result = canonicalish(nonexistent.clone());
-        assert!(result.is_ok());
-        assert_eq!(result.unwrap(), nonexistent);
-    }
-
-    #[test]
-    fn test_host_os_display() {
-        assert_eq!(HostOs::Linux.to_string(), "Linux");
-        assert_eq!(HostOs::Macos.to_string(), "macOS");
-        assert_eq!(HostOs::Windows.to_string(), "Windows");
-        assert_eq!(HostOs::Other.to_string(), "Other");
     }
 
     #[test]

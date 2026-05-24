@@ -29,7 +29,8 @@ use crate::markdown::block::{
 };
 use crate::markdown::dsl::parse_code_info;
 use crate::markdown::highlighting::{CodeHighlighter, ColorMode, ThemePair};
-use crate::markdown::inline::{InlineEvent, InlineTag, MarkProcessor};
+use crate::markdown::inline::{InlineEvent, InlineStyleProcessor, InlineTag};
+use crate::markdown::output::code_block;
 use crate::markdown::output::terminal::MermaidMode;
 use crate::markdown::{Markdown, MarkdownResult};
 use crate::mermaid::Mermaid;
@@ -38,8 +39,6 @@ use biscuit_terminal::components::horizontal_rule::HorizontalRule;
 use biscuit_terminal::components::renderable::BrowserRenderable;
 use html_escape;
 use pulldown_cmark::{CodeBlockKind, Event, Options, Parser, Tag, TagEnd};
-use syntect::easy::HighlightLines;
-use syntect::util::LinesWithEndings;
 
 /// Options for HTML output with sensible defaults.
 ///
@@ -75,18 +74,30 @@ pub struct HtmlOptions {
     /// - `Image`: Render as interactive mermaid diagrams (includes mermaid.js)
     /// - `Text`: Show as fenced code blocks (fallback format)
     pub mermaid_mode: MermaidMode,
-    /// Overrides for horizontal-rule CSS custom properties.
+    /// Page-level declarations for horizontal-rule CSS custom properties.
     ///
-    /// When non-empty, each emitted `<svg>` for a [`HorizontalRule`] is run
-    /// through
-    /// [`BrowserRenderable::render_to_browser_with_inline_variables`],
-    /// which substitutes `var(--hr-*)` tokens with concrete values. Keys
-    /// match the CSS variable names *without* the `--` prefix (e.g.,
-    /// `hr-weight`, `hr-color`, `hr-width`).
+    /// When non-empty, [`as_html`] emits a `:root` CSS block declaring each
+    /// entry as a custom property. Keys match the CSS variable names
+    /// *without* the `--` prefix (e.g., `hr-weight`, `hr-color`,
+    /// `hr-width`); each becomes a `--{key}: {value};` declaration.
     ///
-    /// An empty map (the default) means "no overrides" — the generated SVG
-    /// keeps its `var(--hr-*, …)` expressions so page-level CSS or
-    /// downstream code can override them.
+    /// Components keep their `var(--hr-*, …)` expressions literal in the
+    /// emitted SVG — they are never substituted. The declared `:root`
+    /// values resolve against those `var()` expressions in the browser,
+    /// overriding the per-`var()` fallbacks.
+    ///
+    /// ## Notes
+    ///
+    /// The `:root` block is emitted regardless of [`include_styles`], so
+    /// the override still applies when the full stylesheet is suppressed.
+    /// An empty map (the default) emits no `:root` block — the SVG's
+    /// per-`var()` fallbacks then take effect.
+    ///
+    /// Values must be valid CSS token sequences. Entries whose key or
+    /// value contains a `<` character or a newline are ignored, since
+    /// they could break out of the `<style>` element or emit invalid CSS.
+    ///
+    /// [`include_styles`]: HtmlOptions::include_styles
     pub hr_css_variables: std::collections::HashMap<String, String>,
 }
 
@@ -128,18 +139,41 @@ pub fn as_html(md: &Markdown, options: HtmlOptions) -> MarkdownResult<String> {
     let mut output = String::new();
     let hr_defaults = hr_defaults_from_frontmatter(md);
 
-    // Create highlighter for code blocks
-    let code_highlighter = CodeHighlighter::new(options.code_theme, options.color_mode);
+    // Create highlighter for code blocks.
+    //
+    // Code blocks contrast against the page: resolve the code `ThemePair`
+    // against the INVERTED color mode so a dark page gets a light code panel
+    // (and vice versa), matching the terminal renderer for cross-target parity.
+    // This is code-blocks-only — prose follows `options.color_mode`. Single-
+    // variant themes (dracula, nord, …) ignore the mode, so inversion is a
+    // deliberate no-op for them. See
+    // `renderable/fixes/2026-05-22-darkmatter-failures/spec.md`, defect D.
+    let code_highlighter = CodeHighlighter::new(options.code_theme, options.color_mode.inverted());
+
+    // Emit page-level `:root` declarations for horizontal-rule CSS custom
+    // properties. This is independent of `include_styles` — the override
+    // must still apply when the full stylesheet is suppressed.
+    if !options.hr_css_variables.is_empty() {
+        output.push_str(&generate_hr_root_block(&options.hr_css_variables));
+    }
 
     // Include styles if requested
     if options.include_styles {
         output.push_str(&generate_styles(&code_highlighter, &options));
     }
 
-    // Parse markdown content with GFM strikethrough extension and wrap with MarkProcessor
-    // and RuleProcessor for horizontal rules with attributes
-    let parser = Parser::new_ext(md.content(), Options::ENABLE_STRIKETHROUGH);
-    let events = RuleProcessor::new(MarkProcessor::new(parser));
+    // Parse markdown content with GFM strikethrough + GFM tables, and wrap
+    // with MarkProcessor and RuleProcessor for horizontal rules with
+    // attributes. `ENABLE_TABLES` was missing from the legacy HTML parser
+    // (the terminal renderer already enabled it); this closed a parity gap
+    // where pipe-table syntax fell through as paragraph text in HTML.
+    // See `renderable/features/2026-05-20-darkmatter-tree/parser-options.md`.
+    let preprocessed = crate::markdown::inline::preprocess_escaped_markers(md.content());
+    let parser = Parser::new_ext(
+        &preprocessed,
+        Options::ENABLE_STRIKETHROUGH | Options::ENABLE_TABLES,
+    );
+    let events = RuleProcessor::new(InlineStyleProcessor::new(parser));
 
     // Track state for code blocks
     let mut in_code_block = false;
@@ -161,12 +195,18 @@ pub fn as_html(md: &Markdown, options: HtmlOptions) -> MarkdownResult<String> {
             InlineEvent::End(InlineTag::Mark) => {
                 output.push_str("</mark>");
             }
+            InlineEvent::Start(InlineTag::Dim) => {
+                output.push('⌄');
+            }
+            InlineEvent::End(InlineTag::Dim) => {
+                output.push('⌄');
+            }
             // Handle horizontal rule with attributes
             InlineEvent::HorizontalRule(attrs) => {
                 // Create HorizontalRule from attributes via the shared builder
                 // so terminal and HTML renderers stay consistent (Phase 5).
                 let rule = build_rule_with_defaults(hr_defaults.as_ref(), &attrs);
-                output.push_str(&render_rule_browser(&rule, &options.hr_css_variables));
+                output.push_str(&render_rule_browser(&rule));
                 output.push('\n');
             }
             // Phase 5 (B4): bare `---` / `***` / `___` lines surface as
@@ -178,7 +218,7 @@ pub fn as_html(md: &Markdown, options: HtmlOptions) -> MarkdownResult<String> {
                     hr_defaults.as_ref(),
                     &crate::markdown::inline::HorizontalRuleAttrs::default(),
                 );
-                output.push_str(&render_rule_browser(&rule, &options.hr_css_variables));
+                output.push_str(&render_rule_browser(&rule));
                 output.push('\n');
             }
             // Handle standard pulldown-cmark events
@@ -223,7 +263,7 @@ pub fn as_html(md: &Markdown, options: HtmlOptions) -> MarkdownResult<String> {
                     }
                 } else {
                     // Render code block with highlighting
-                    let highlighted = highlight_code_block(
+                    let highlighted = code_block::render_html_code_block(
                         &code_buffer,
                         &code_lang,
                         &meta,
@@ -420,6 +460,35 @@ pub fn as_html(md: &Markdown, options: HtmlOptions) -> MarkdownResult<String> {
                 // Raw HTML - escape it for safety
                 output.push_str(html_escape::encode_text(&html).as_ref());
             }
+            // GFM table tag handling. `ENABLE_TABLES` is now enabled at the
+            // parser; without these arms the catch-all below would silently
+            // drop the structural events and only the cell text would land
+            // in the output.
+            //
+            // The column-alignment vector from `Tag::Table(_)` is ignored
+            // here; richer per-cell alignment can be added when needed. The
+            // important parity invariant is that a `<table>` element now
+            // wraps the cell text.
+            InlineEvent::Standard(Event::Start(Tag::Table(_))) => {
+                output.push_str("<table>\n");
+            }
+            InlineEvent::Standard(Event::End(TagEnd::Table)) => {
+                output.push_str("</table>\n");
+            }
+            InlineEvent::Standard(Event::Start(Tag::TableHead))
+            | InlineEvent::Standard(Event::Start(Tag::TableRow)) => {
+                output.push_str("<tr>");
+            }
+            InlineEvent::Standard(Event::End(TagEnd::TableHead))
+            | InlineEvent::Standard(Event::End(TagEnd::TableRow)) => {
+                output.push_str("</tr>\n");
+            }
+            InlineEvent::Standard(Event::Start(Tag::TableCell)) => {
+                output.push_str("<td>");
+            }
+            InlineEvent::Standard(Event::End(TagEnd::TableCell)) => {
+                output.push_str("</td>");
+            }
             _ => {}
         }
     }
@@ -442,25 +511,43 @@ pub fn as_html(md: &Markdown, options: HtmlOptions) -> MarkdownResult<String> {
     Ok(output)
 }
 
-/// Renders a [`HorizontalRule`] to browser SVG, optionally substituting
-/// `var(--hr-*)` custom properties with caller-provided overrides.
+/// Renders a [`HorizontalRule`] to browser SVG.
 ///
 /// ## Notes
 ///
-/// When `vars` is `Some`, each `var(--name)` token in the default SVG is
-/// replaced via
-/// [`BrowserRenderable::render_to_browser_with_inline_variables`]. When
-/// `vars` is `None`, the SVG keeps its `var(--…)` expressions so page-level
-/// CSS (or downstream post-processing) can control the appearance.
-fn render_rule_browser(
-    rule: &HorizontalRule,
-    vars: &std::collections::HashMap<String, String>,
-) -> String {
-    if vars.is_empty() {
-        rule.render_to_browser()
-    } else {
-        rule.render_to_browser_with_inline_variables(vars)
+/// The SVG keeps its literal `var(--hr-*, …)` expressions. Page-level
+/// overrides are declared separately via a `:root` block (see
+/// [`HtmlOptions::hr_css_variables`]); the SVG is never string-substituted.
+fn render_rule_browser(rule: &HorizontalRule) -> String {
+    rule.render_html_fragment().render()
+}
+
+/// Builds a `:root` `<style>` block declaring the horizontal-rule CSS
+/// custom properties from `vars`.
+///
+/// Keys are CSS variable names without the `--` prefix; each becomes a
+/// `--{key}: {value};` declaration. Keys are sorted so the output is
+/// deterministic.
+///
+/// Entries whose key or value contains a `<` character or a newline are
+/// skipped, since they could terminate the `<style>` element or emit
+/// invalid CSS.
+fn generate_hr_root_block(vars: &std::collections::HashMap<String, String>) -> String {
+    let mut keys: Vec<&String> = vars.keys().collect();
+    keys.sort();
+
+    let is_safe = |s: &str| !s.contains('<') && !s.contains('\n');
+
+    let mut block = String::from("<style>\n:root {\n");
+    for key in keys {
+        let value = &vars[key];
+        if !is_safe(key) || !is_safe(value) {
+            continue;
+        }
+        block.push_str(&format!("  --{key}: {value};\n"));
     }
+    block.push_str("}\n</style>\n");
+    block
 }
 
 fn image_ref_from_parts(alt: &str, src: &str, title: &str) -> Option<ImageRef> {
@@ -502,128 +589,6 @@ fn escape_markdown_image_url(value: &str) -> String {
 
 fn escape_markdown_title(value: &str) -> String {
     value.replace('\\', "\\\\").replace('"', "\\\"")
-}
-
-/// Highlights a code block with syntax highlighting and optional line numbers.
-fn highlight_code_block(
-    code: &str,
-    language: &str,
-    meta: &crate::markdown::dsl::CodeBlockMeta,
-    highlighter: &CodeHighlighter,
-    options: &HtmlOptions,
-) -> MarkdownResult<String> {
-    let mut output = String::new();
-
-    // Add title if present
-    if let Some(title) = &meta.title {
-        output.push_str(&format!(
-            r#"<div class="code-block-title">{}</div>"#,
-            html_escape::encode_text(title)
-        ));
-        output.push('\n');
-    }
-
-    // Determine if we should show line numbers
-    let show_line_numbers = meta.line_numbering || options.include_line_numbers;
-
-    // Find syntax definition
-    let syntax = if language.is_empty() {
-        highlighter.syntax_set().find_syntax_plain_text()
-    } else {
-        highlighter
-            .syntax_set()
-            .find_syntax_by_token(language)
-            .unwrap_or_else(|| highlighter.syntax_set().find_syntax_plain_text())
-    };
-
-    // Start code block container
-    output.push_str(r#"<div class="code-block">"#);
-    output.push('\n');
-
-    // Create highlighter for this code block
-    let mut hl = HighlightLines::new(syntax, highlighter.theme());
-
-    if show_line_numbers {
-        // Use table layout for line numbers
-        output.push_str(r#"<table class="code-table"><tbody>"#);
-        output.push('\n');
-
-        let lines: Vec<&str> = LinesWithEndings::from(code).collect();
-
-        for (idx, line) in lines.iter().enumerate() {
-            let line_num = idx + 1;
-            let is_highlighted = meta.highlight.contains(line_num);
-
-            output.push_str(&format!(
-                r#"<tr{}><td class="ln-gutter"><span class="ln">{}</span></td><td class="code-content">"#,
-                if is_highlighted { r#" class="highlighted""# } else { "" },
-                line_num
-            ));
-
-            // Highlight the line
-            let ranges = hl
-                .highlight_line(line, highlighter.syntax_set())
-                .map_err(|e| {
-                    crate::markdown::MarkdownError::ThemeLoad(format!(
-                        "Syntax highlighting failed: {}",
-                        e
-                    ))
-                })?;
-
-            for (style, text) in ranges {
-                let fg = style.foreground;
-                output.push_str(&format!(
-                    r#"<span style="color: #{:02x}{:02x}{:02x};">{}</span>"#,
-                    fg.r,
-                    fg.g,
-                    fg.b,
-                    html_escape::encode_text(text)
-                ));
-            }
-
-            output.push_str("</td></tr>\n");
-        }
-
-        output.push_str("</tbody></table>\n");
-    } else {
-        // Simple pre/code block without line numbers
-        output.push_str("<pre><code");
-        if !language.is_empty() {
-            output.push_str(&format!(
-                r#" class="language-{}""#,
-                html_escape::encode_text(language)
-            ));
-        }
-        output.push('>');
-
-        for line in LinesWithEndings::from(code) {
-            let ranges = hl
-                .highlight_line(line, highlighter.syntax_set())
-                .map_err(|e| {
-                    crate::markdown::MarkdownError::ThemeLoad(format!(
-                        "Syntax highlighting failed: {}",
-                        e
-                    ))
-                })?;
-
-            for (style, text) in ranges {
-                let fg = style.foreground;
-                output.push_str(&format!(
-                    r#"<span style="color: #{:02x}{:02x}{:02x};">{}</span>"#,
-                    fg.r,
-                    fg.g,
-                    fg.b,
-                    html_escape::encode_text(text)
-                ));
-            }
-        }
-
-        output.push_str("</code></pre>\n");
-    }
-
-    output.push_str("</div>\n");
-
-    Ok(output)
 }
 
 /// Generates CSS styles for syntax highlighting.
@@ -717,6 +682,44 @@ mod tests {
         assert_eq!(options.color_mode, ColorMode::Dark);
         assert!(!options.include_line_numbers);
         assert!(options.include_styles);
+    }
+
+    #[test]
+    fn test_generate_hr_root_block_sorts_keys() {
+        let mut vars = std::collections::HashMap::new();
+        vars.insert(String::from("hr-width"), String::from("80%"));
+        vars.insert(String::from("hr-color"), String::from("red"));
+        vars.insert(String::from("hr-weight"), String::from("2px"));
+
+        let block = generate_hr_root_block(&vars);
+
+        assert!(block.starts_with("<style>\n:root {\n"));
+        assert!(block.ends_with("}\n</style>\n"));
+
+        let color_at = block.find("--hr-color").unwrap();
+        let weight_at = block.find("--hr-weight").unwrap();
+        let width_at = block.find("--hr-width").unwrap();
+        assert!(color_at < weight_at, "keys must be emitted in sorted order");
+        assert!(weight_at < width_at, "keys must be emitted in sorted order");
+    }
+
+    #[test]
+    fn test_generate_hr_root_block_skips_unsafe_value() {
+        let mut vars = std::collections::HashMap::new();
+        vars.insert(String::from("hr-color"), String::from("red"));
+        vars.insert(
+            String::from("hr-evil"),
+            String::from("red</style><script>alert(1)</script>"),
+        );
+
+        let block = generate_hr_root_block(&vars);
+
+        assert!(block.contains("--hr-color: red;"));
+        assert!(
+            !block.contains("--hr-evil"),
+            "entry with `<` in value must be skipped"
+        );
+        assert!(!block.contains("<script>"));
     }
 
     #[test]
@@ -1137,6 +1140,70 @@ fn main() {}
         assert!(html.contains("<strong>"), "Should preserve strong");
         assert!(html.contains("<mark>"), "Should have mark");
         assert!(html.contains("<em>"), "Should preserve em");
+    }
+
+    // Dim tests
+    #[test]
+    fn test_html_dim_renders_as_literal() {
+        let md: Markdown = "This is ⌄dimmed⌄ text.".into();
+        let html = as_html(&md, HtmlOptions::default()).unwrap();
+        assert!(
+            html.contains("⌄dimmed⌄"),
+            "Should preserve ⌄ delimiters as literal, got: {}",
+            html
+        );
+        assert!(!html.contains("<dim>"), "Should not have <dim> tag");
+    }
+
+    #[test]
+    fn test_html_dim_with_nested_strong() {
+        let md: Markdown = "⌄dim and **strong**⌄".into();
+        let html = as_html(&md, HtmlOptions::default()).unwrap();
+        assert!(
+            html.contains("<p>⌄dim and <strong>strong</strong>⌄</p>"),
+            "Should preserve delimiters around nested HTML, got: {}",
+            html
+        );
+    }
+
+    #[test]
+    fn test_html_dim_in_inline_code() {
+        let md: Markdown = "Use `⌄code⌄` syntax.".into();
+        let html = as_html(&md, HtmlOptions::default()).unwrap();
+        assert!(html.contains("<code>"), "Should contain code tag");
+        assert!(
+            html.contains("⌄code⌄"),
+            "Should preserve ⌄ in inline code, got: {}",
+            html
+        );
+    }
+
+    #[test]
+    fn test_html_dim_in_fenced_code() {
+        let content = "```\n⌄dim\n```";
+        let md: Markdown = content.into();
+        let html = as_html(&md, HtmlOptions::default()).unwrap();
+        assert!(
+            html.contains("⌄dim"),
+            "Should preserve ⌄ in fenced code, got: {}",
+            html
+        );
+    }
+
+    #[test]
+    fn test_html_dim_escaping() {
+        let md: Markdown = "⌄<script>alert('xss')</script>⌄".into();
+        let html = as_html(&md, HtmlOptions::default()).unwrap();
+        assert!(
+            !html.contains("<script>alert"),
+            "Should escape script inside dim span"
+        );
+        assert!(
+            html.contains("&lt;script&gt;") || html.contains("&#60;script&#62;"),
+            "Should have escaped entities inside dim span, got: {}",
+            html
+        );
+        assert!(html.contains("⌄"), "Should preserve ⌄ delimiters");
     }
 
     // Mermaid rendering tests - regression tests for mermaid code block rendering bug

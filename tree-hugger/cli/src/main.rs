@@ -1,10 +1,13 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use std::ffi::OsStr;
 use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 
-use clap::{CommandFactory, Parser, Subcommand, ValueEnum};
-use clap_complete::{Generator, Shell};
+use clap::{CommandFactory, Parser, Subcommand, ValueEnum, ValueHint};
+use clap_complete::engine::{ArgValueCompleter, CompletionCandidate};
+use clap_complete::env::{CompleteEnv, Shells};
+use clap_complete::Shell;
 use ignore::WalkBuilder;
 use ignore::overrides::OverrideBuilder;
 use owo_colors::{OwoColorize, Style};
@@ -26,7 +29,14 @@ use tree_hugger::{
 )]
 struct Cli {
     /// Glob patterns for files to exclude from scanning
-    #[arg(long, value_name = "GLOB", global = true, display_order = 10)]
+    #[arg(
+        long,
+        value_name = "GLOB",
+        global = true,
+        display_order = 10,
+        value_hint = ValueHint::AnyPath,
+        add = ArgValueCompleter::new(complete_source_path),
+    )]
     exclude_files: Vec<String>,
 
     /// Glob patterns for symbol names to exclude from output
@@ -97,7 +107,12 @@ struct CommonArgs {
     /// `*width*` => wildcard match.
     ///
     /// `parse_width_spec!` => exact symbol name match.
-    #[arg(value_name = "FILTER", num_args = 0..)]
+    #[arg(
+        value_name = "FILTER",
+        num_args = 0..,
+        value_hint = ValueHint::AnyPath,
+        add = ArgValueCompleter::new(complete_source_path),
+    )]
     filters: Vec<String>,
 
     /// Show only exported (public) symbols
@@ -123,7 +138,12 @@ struct ClassArgs {
     /// `*Widget*` => wildcard match.
     ///
     /// `Widget!` => exact class name match.
-    #[arg(value_name = "FILTER", num_args = 0..)]
+    #[arg(
+        value_name = "FILTER",
+        num_args = 0..,
+        value_hint = ValueHint::AnyPath,
+        add = ArgValueCompleter::new(complete_source_path),
+    )]
     filters: Vec<String>,
 
     /// Filter by class name
@@ -151,7 +171,12 @@ struct ClassArgs {
 #[derive(clap::Args, Debug, Clone)]
 struct LintArgs {
     /// File filters (glob patterns or paths)
-    #[arg(value_name = "FILTER", num_args = 0..)]
+    #[arg(
+        value_name = "FILTER",
+        num_args = 0..,
+        value_hint = ValueHint::AnyPath,
+        add = ArgValueCompleter::new(complete_source_path),
+    )]
     filters: Vec<String>,
 
     /// Show only lint diagnostics (pattern-based and semantic rules)
@@ -186,13 +211,19 @@ enum Command {
     /// Run lint diagnostics on the file(s)
     Lint(LintArgs),
     /// Generate shell completions
+    ///
+    /// Emits a dynamic-completion registration script. The script delegates
+    /// each completion request back to the `hug` binary at runtime, so
+    /// completions stay in sync with the installed CLI and can return
+    /// context-aware candidates (e.g. only source files in the current
+    /// directory).
     #[command(after_help = "\
 Examples:
   # Bash (add to ~/.bashrc)
-  hug completions bash >> ~/.bashrc
+  echo 'source <(hug completions bash)' >> ~/.bashrc
 
-  # Zsh (add to ~/.zshrc, ensure fpath includes the directory)
-  hug completions zsh > ~/.zfunc/_hug
+  # Zsh (add to ~/.zshrc)
+  echo 'source <(hug completions zsh)' >> ~/.zshrc
 
   # Fish
   hug completions fish > ~/.config/fish/completions/hug.fish
@@ -654,11 +685,19 @@ impl From<LanguageArg> for ProgrammingLanguage {
 }
 
 fn main() -> Result<(), TreeHuggerError> {
+    // Handle dynamic completion requests (COMPLETE=<shell> hug ...). This must
+    // run before any other stdout writes; it exits the process if a completion
+    // request was served.
+    CompleteEnv::with_factory(Cli::command).complete();
+
     let cli = Cli::parse();
 
     // Handle completions command early (doesn't need file processing)
     if let Command::Completions(args) = &cli.command {
-        print_completions(args.shell, &mut Cli::command());
+        if let Err(err) = print_completions(args.shell) {
+            eprintln!("failed to write completions: {err}");
+            std::process::exit(1);
+        }
         return Ok(());
     }
 
@@ -876,14 +915,125 @@ fn current_dir() -> Result<PathBuf, TreeHuggerError> {
     })
 }
 
-/// Prints shell completions to stdout.
-fn print_completions<G: Generator>(generator: G, cmd: &mut clap::Command) {
-    clap_complete::generate(
-        generator,
-        cmd,
-        cmd.get_name().to_string(),
+/// Directory names skipped when completing filter paths (build/dep output).
+const COMPLETION_SKIPPED_DIRS: &[&str] = &[
+    "target",
+    "node_modules",
+    "dist",
+    "build",
+    "vendor",
+    ".git",
+];
+
+/// Dynamic completer for FILTER positionals.
+///
+/// Lists entries under the directory implied by `current` (or the cwd when
+/// `current` has no directory component), keeping only:
+///
+/// - directories `hug` would descend into (skipping build output / dotfiles)
+/// - files whose extension maps to a supported [`ProgrammingLanguage`]
+fn complete_source_path(current: &OsStr) -> Vec<CompletionCandidate> {
+    let value = Path::new(current);
+    let (prefix, partial) = split_completion_input(value);
+    let partial = partial.to_string_lossy();
+
+    let search_root = if prefix.as_os_str().is_empty() {
+        match std::env::current_dir() {
+            Ok(cwd) => cwd,
+            Err(_) => return Vec::new(),
+        }
+    } else if prefix.is_absolute() {
+        prefix.to_path_buf()
+    } else {
+        match std::env::current_dir() {
+            Ok(cwd) => cwd.join(prefix),
+            Err(_) => return Vec::new(),
+        }
+    };
+
+    let mut candidates = Vec::new();
+    let Ok(entries) = std::fs::read_dir(&search_root) else {
+        return candidates;
+    };
+    for entry in entries.filter_map(Result::ok) {
+        let raw = entry.file_name();
+        let Some(name) = raw.to_str() else {
+            continue;
+        };
+        if !name.starts_with(partial.as_ref()) {
+            continue;
+        }
+        if name.starts_with('.') {
+            continue;
+        }
+
+        let path = entry.path();
+        if path.is_dir() {
+            if COMPLETION_SKIPPED_DIRS.contains(&name) {
+                continue;
+            }
+            let mut suggestion = prefix.join(&raw).into_os_string();
+            suggestion.push("/");
+            candidates.push(CompletionCandidate::new(suggestion));
+        } else if ProgrammingLanguage::from_path(&path).is_some() {
+            let suggestion = prefix.join(&raw).into_os_string();
+            candidates.push(CompletionCandidate::new(suggestion));
+        }
+    }
+    candidates.sort_by(|a, b| a.get_value().cmp(b.get_value()));
+    candidates
+}
+
+/// Splits a partial path into `(directory_prefix, name_partial)`.
+///
+/// Mirrors clap_complete's internal helper: a trailing `/` keeps the whole
+/// value as the directory and uses an empty partial; otherwise the final
+/// component is the partial filename.
+fn split_completion_input(path: &Path) -> (&Path, &OsStr) {
+    let ends_with_sep = path
+        .as_os_str()
+        .as_encoded_bytes()
+        .last()
+        .is_some_and(|b| *b == b'/' || *b == b'\\');
+    if ends_with_sep || path.as_os_str().is_empty() {
+        (path, OsStr::new(""))
+    } else {
+        let parent = path.parent().unwrap_or_else(|| Path::new(""));
+        let name = path.file_name().unwrap_or_else(|| OsStr::new(""));
+        (parent, name)
+    }
+}
+
+/// Writes the dynamic-completion registration script for `shell` to stdout.
+///
+/// The emitted script registers a hook that re-invokes this binary with
+/// `COMPLETE=<shell>` set, so completion logic stays in sync with the CLI
+/// definition (no stale static scripts).
+fn print_completions(shell: Shell) -> std::io::Result<()> {
+    let shell_name = shell.to_string();
+    let shells = Shells::builtins();
+    let completer = shells
+        .completer(&shell_name)
+        .expect("clap_complete::Shell variant has a builtin EnvCompleter");
+
+    let mut cmd = Cli::command();
+    cmd.build();
+    let name = cmd.get_name().to_owned();
+    let bin = cmd
+        .get_bin_name()
+        .map(str::to_owned)
+        .unwrap_or_else(|| name.clone());
+    let completer_path = std::env::current_exe()
+        .map(|p| p.to_string_lossy().into_owned())
+        .unwrap_or_else(|_| bin.clone());
+
+    completer.write_registration(
+        "COMPLETE",
+        &name,
+        &bin,
+        &completer_path,
         &mut std::io::stdout(),
-    );
+    )
 }
 
 /// Resolves symbol names and direct export entries from a prelude module.

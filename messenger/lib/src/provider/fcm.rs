@@ -126,6 +126,7 @@ impl super::Provider for FcmProvider {
         let body = match message.body() {
             Some(MessageBody::Plain(text)) => Some(text.as_str()),
             Some(MessageBody::Markdown(text)) => Some(text.as_str()),
+            Some(MessageBody::Summarized { summary, .. }) => Some(summary.as_str()),
             None => None,
         };
 

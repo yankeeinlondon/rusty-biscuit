@@ -1,0 +1,6 @@
+---
+source: darkmatter/lib/tests/render_tree_roundtrip.rs
+expression: rendered.output
+---
+- [x] completed task
+- [ ] pending task

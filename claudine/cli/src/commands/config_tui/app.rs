@@ -107,7 +107,7 @@ pub enum ModalState {
     },
     ProtectRules {
         highlighted: usize,
-        staged_rules: Box<claudine::services::protect::config::ProtectRuleToggles>,
+        staged_rules: Box<claudine::protect::config::ProtectRuleToggles>,
     },
     EditActions {
         event: claudine::events::AgenticEvent,
@@ -236,7 +236,7 @@ impl App {
     }
 
     /// Returns the list of available (installed) providers from the cached discovery.
-    pub fn available_providers(&self) -> Vec<claudine::events::Provider> {
+    pub fn available_providers(&self) -> Vec<claudine::provider::Provider> {
         self.cached_agents
             .iter()
             .filter(|a| a.on_path)

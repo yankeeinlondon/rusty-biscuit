@@ -6,15 +6,81 @@ use std::io::{self, BufRead};
 use std::path::PathBuf;
 use tracing_subscriber::{filter::EnvFilter, fmt, layer::SubscriberExt, util::SubscriberInitExt};
 
+/// Debug trace level for tracing output.
+///
+/// Use this to control the verbosity of internal debug traces.
+/// The default is `warn`, which only shows warnings and errors.
+/// Use `RUST_LOG` environment variable to override.
+#[derive(clap::ValueEnum, Clone, Debug, Default)]
+enum DebugLevel {
+    /// Trace level - most verbose, shows all debug details
+    Trace,
+    /// Debug level - detailed debug information
+    Debug,
+    /// Info level - informational messages
+    Info,
+    /// Warn level - warnings only (default)
+    #[default]
+    Warn,
+    /// Error level - only errors
+    Error,
+    /// Disable all tracing output
+    Off,
+}
+
+impl std::fmt::Display for DebugLevel {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            DebugLevel::Trace => write!(f, "trace"),
+            DebugLevel::Debug => write!(f, "debug"),
+            DebugLevel::Info => write!(f, "info"),
+            DebugLevel::Warn => write!(f, "warn"),
+            DebugLevel::Error => write!(f, "error"),
+            DebugLevel::Off => write!(f, "off"),
+        }
+    }
+}
+
+impl DebugLevel {
+    fn as_str(&self) -> Option<&'static str> {
+        match self {
+            DebugLevel::Trace => Some("trace"),
+            DebugLevel::Debug => Some("debug"),
+            DebugLevel::Info => Some("info"),
+            DebugLevel::Warn => Some("warn"),
+            DebugLevel::Error => Some("error"),
+            DebugLevel::Off => None,
+        }
+    }
+}
+
 #[derive(Parser)]
 #[command(name = "research")]
 #[command(about = "Automated research tool for software libraries", long_about = None)]
 struct Cli {
-    /// Increase verbosity (-v, -vv, -vvv)
+    /// Increase output verbosity (-v, -vv, -vvv) for richer console output
+    ///
+    /// This flag controls the amount of human-readable status output shown to the user.
+    /// It does NOT control debug tracing - use --debug <level> for that.
     #[arg(short = 'v', action = clap::ArgAction::Count, global = true)]
-    log_verbosity: u8,
+    verbose: u8,
 
-    /// Output logs as JSON
+    /// Debug trace level: trace, debug, info, warn, error
+    ///
+    /// Controls the verbosity of internal debug traces sent to stderr.
+    /// Use `RUST_LOG` environment variable to override this setting.
+    ///
+    /// Examples:
+    ///   --debug debug    Show debug messages
+    ///   --debug trace    Show all trace messages (most verbose)
+    ///   --debug off     Disable all tracing output
+    #[arg(long, global = true, value_name = "LEVEL", default_value_t = DebugLevel::Warn)]
+    debug: DebugLevel,
+
+    /// Output results as JSON (for data output)
+    ///
+    /// This affects the format of data written to stdout.
+    /// Tracing output format is controlled separately via RUST_LOG.
     #[arg(long, global = true)]
     json: bool,
 
@@ -175,35 +241,29 @@ fn show_topic(topic: &str) -> Result<(), Box<dyn std::error::Error>> {
     .into())
 }
 
-/// Initialize tracing subscriber based on verbosity and output format
-fn init_tracing(verbose: u8, json: bool) {
-    // Determine base filter from RUST_LOG or verbosity flags
-    // Default (verbose=0) shows only WARN level to reduce noise
-    // Use -v flags to increase verbosity for debugging
-    let base_filter = match std::env::var("RUST_LOG") {
-        Ok(filter) => filter,
-        Err(_) => match verbose {
-            // Default: WARN only to reduce stderr noise
-            0 => "warn".to_string(),
-            // -v: Show INFO for research progress and tool calls
-            1 => "warn,research=info,shared::tools=info".to_string(),
-            // -vv: Show DEBUG for research and shared
-            2 => "info,research=debug,shared=debug".to_string(),
-            // -vvv+: Show TRACE for detailed debugging
-            _ => "debug,research=trace,shared=trace".to_string(),
-        },
-    };
+/// Initialize tracing subscriber based on debug level and output format.
+///
+/// Tracing output goes to stderr to keep stdout clean for data output.
+///
+/// Precedence for filter level:
+/// 1. RUST_LOG environment variable (if set)
+/// 2. --debug command line flag
+/// 3. Default: warn
+fn init_tracing(debug_level: DebugLevel, verbose: u8, json: bool) {
+    // Precedence: RUST_LOG > --debug > default
+    let filter = std::env::var("RUST_LOG")
+        .ok()
+        .or_else(|| debug_level.as_str().map(String::from))
+        .unwrap_or_else(|| "warn".to_string());
 
-    let filter = EnvFilter::try_new(&base_filter).unwrap_or_else(|_| EnvFilter::new("warn"));
+    let filter = EnvFilter::try_new(&filter).unwrap_or_else(|_| EnvFilter::new("warn"));
 
     if json {
-        // JSON output for structured log processing
         tracing_subscriber::registry()
             .with(filter)
             .with(fmt::layer().json().with_writer(std::io::stderr))
             .init();
     } else {
-        // Human-readable console output to stderr
         tracing_subscriber::registry()
             .with(filter)
             .with(
@@ -226,7 +286,7 @@ async fn main() {
     dotenvy::dotenv().ok();
 
     let cli = Cli::parse();
-    init_tracing(cli.log_verbosity, cli.json);
+    init_tracing(cli.debug, cli.verbose, cli.json);
 
     tracing::info!("Research CLI starting");
 

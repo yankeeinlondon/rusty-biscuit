@@ -4,21 +4,17 @@
 //! component via [`tui_chrome::run_standalone`], and writes the
 //! captured option value according to the current [`OutputMode`].
 
-use std::fs;
 use std::io::{self, Write};
-use std::path::PathBuf;
 
 use clap::Args;
-use tui_chrome::helpers::choice_builders::{
-    choose_one_from_csv, choose_one_from_dictionary, choose_one_from_markdown_list,
-};
 use tui_chrome::{
-    ABORTED_KIND, CANCELLED_KIND, ChoiceInput, ChooseOne, ChooseOneState, HeightSpec, Label,
+    ChoiceInput, ChooseOne, ChooseOneState, HeightSpec, Label, SelectionMode,
     run_standalone_with_chrome,
 };
 
 use crate::commands::common_choose::{
-    ChooseChromeArgs, apply_sort, build_chrome, build_options, resolve_option_strings,
+    ChooseChromeArgs, ChooseSourceArgs, build_choice_input as build_common_choice_input,
+    build_chrome, resolve_hotkey_badges, run_choice_with_writer,
 };
 use crate::commands::text_input::LabelPositionArg;
 use crate::output::{OutputMode, write_scalar};
@@ -26,23 +22,8 @@ use crate::output::{OutputMode, write_scalar};
 /// Arguments accepted by the `choose-one` subcommand.
 #[derive(Debug, Args)]
 pub struct ChooseOneArgs {
-    /// Option strings. Trailing positional arguments become the list
-    /// of options when no legacy `--options*` flag is set.
-    #[arg(value_name = "OPTIONS")]
-    pub positional: Vec<String>,
-
-    /// Comma-separated list of option values.
-    #[arg(long, conflicts_with_all = ["options_from_file", "options_from_dictionary"])]
-    pub options: Option<String>,
-
-    /// Path to a markdown file containing a bullet/numbered list of
-    /// options.
-    #[arg(long, conflicts_with_all = ["options", "options_from_dictionary"])]
-    pub options_from_file: Option<PathBuf>,
-
-    /// Path to a YAML/JSON file containing a mapping of label → value.
-    #[arg(long, conflicts_with_all = ["options", "options_from_file"])]
-    pub options_from_dictionary: Option<PathBuf>,
+    #[command(flatten)]
+    pub source: ChooseSourceArgs,
 
     /// Label text rendered next to the list.
     #[arg(long)]
@@ -77,10 +58,16 @@ pub struct ChooseOneArgs {
 /// `Ok(0)` on submission, `Ok(1)` when the user pressed `Esc`,
 /// `Ok(130)` when the user pressed `Ctrl-C`, `Err` on a terminal I/O
 /// error.
-pub fn run(args: ChooseOneArgs, output: OutputMode, height: Option<HeightSpec>) -> io::Result<i32> {
+pub fn run(
+    args: ChooseOneArgs,
+    output: OutputMode,
+    height: Option<HeightSpec>,
+    show_on_exit: bool,
+) -> io::Result<i32> {
     let stdout = io::stdout();
     let mut lock = stdout.lock();
-    let chrome = build_chrome(&args.chrome);
+    let mut chrome = build_chrome(&args.chrome);
+    chrome.show_on_exit = show_on_exit;
     run_with_writer(args, output, height, &mut lock, |state, height| {
         run_standalone_with_chrome(ChooseOne::new(), state, height, chrome)
     })
@@ -103,6 +90,7 @@ where
     }
 
     let selected = effective_selected(&args).map(str::to_string);
+    let hotkey_override = resolve_hotkey_badges(args.chrome.hotkey_badges);
     let mut state = ChooseOneState::new(input);
     if let Some(text) = args.label {
         state = state.with_label(Label::new(text, args.label_position.into()));
@@ -110,18 +98,21 @@ where
     if let Some(value) = selected.as_deref() {
         state = state.with_initial_value(value);
     }
-
-    match run_prompt(state, height) {
-        Ok(value) => {
-            let rendered = value.unwrap_or_default();
-            write_scalar(writer, &rendered, output)?;
-            writer.flush()?;
-            Ok(0)
-        }
-        Err(e) if e.kind() == CANCELLED_KIND => Ok(130),
-        Err(e) if e.kind() == ABORTED_KIND => Ok(1),
-        Err(e) => Err(e),
+    if let Some(mode) = hotkey_override {
+        state = state.with_hotkey_display(mode);
     }
+
+    run_choice_with_writer(
+        state,
+        output,
+        height,
+        writer,
+        run_prompt,
+        |writer, value, output| {
+            let rendered = value.unwrap_or_default();
+            write_scalar(writer, &rendered, output)
+        },
+    )
 }
 
 fn effective_selected(args: &ChooseOneArgs) -> Option<&str> {
@@ -136,34 +127,17 @@ fn effective_selected(args: &ChooseOneArgs) -> Option<&str> {
 }
 
 fn build_choice_input(args: &ChooseOneArgs) -> io::Result<ChoiceInput<String>> {
-    let mut input = if let Some(csv) = args.options.as_deref() {
-        choose_one_from_csv("choice", "", csv)
-    } else if let Some(path) = args.options_from_file.as_ref() {
-        let body = fs::read_to_string(path)?;
-        choose_one_from_markdown_list("choice", "", &body)
-    } else if let Some(path) = args.options_from_dictionary.as_ref() {
-        let body = fs::read_to_string(path)?;
-        choose_one_from_dictionary("choice", "", &body)
-            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))?
-    } else {
-        let resolved = resolve_option_strings(false, args.positional.clone())?
-            .expect("resolve_option_strings returns Some when no legacy source is set");
-        ChoiceInput::new("choice", "").with_options(build_options(resolved, args.chrome.delimiter))
-    };
-    apply_sort(&mut input.options, args.chrome.sort.into());
-    Ok(input.with_filter_enabled(!args.chrome.no_filter))
+    build_common_choice_input(&args.source, &args.chrome, SelectionMode::Single)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tui_chrome::CANCELLED_KIND;
 
     fn default_args() -> ChooseOneArgs {
         ChooseOneArgs {
-            positional: Vec::new(),
-            options: None,
-            options_from_file: None,
-            options_from_dictionary: None,
+            source: ChooseSourceArgs::default(),
             label: None,
             label_position: LabelPositionArg::Above,
             selected: None,
@@ -173,10 +147,45 @@ mod tests {
         }
     }
 
+    fn source_csv(csv: String) -> ChooseSourceArgs {
+        ChooseSourceArgs {
+            csv: Some(csv),
+            ..ChooseSourceArgs::default()
+        }
+    }
+
+    fn source_list(list: String) -> ChooseSourceArgs {
+        ChooseSourceArgs {
+            list: Some(list),
+            ..ChooseSourceArgs::default()
+        }
+    }
+
+    fn source_positional(positional: Vec<String>) -> ChooseSourceArgs {
+        ChooseSourceArgs {
+            positional,
+            ..ChooseSourceArgs::default()
+        }
+    }
+
+    fn source_file(file: std::path::PathBuf) -> ChooseSourceArgs {
+        ChooseSourceArgs {
+            file: Some(file),
+            ..ChooseSourceArgs::default()
+        }
+    }
+
+    fn source_md(md: Vec<String>) -> ChooseSourceArgs {
+        ChooseSourceArgs {
+            md: Some(md),
+            ..ChooseSourceArgs::default()
+        }
+    }
+
     #[test]
     fn build_choice_input_from_csv_returns_options() {
         let args = ChooseOneArgs {
-            options: Some("Red,Green,Blue".into()),
+            source: source_csv("Red,Green,Blue".into()),
             ..default_args()
         };
         let input = build_choice_input(&args).unwrap();
@@ -184,9 +193,22 @@ mod tests {
     }
 
     #[test]
+    fn build_choice_input_from_list_strips_markdown_bullets() {
+        let args = ChooseOneArgs {
+            source: source_list("- Red\n* Green\n1) Blue\n".into()),
+            ..default_args()
+        };
+        let input = build_choice_input(&args).unwrap();
+        let labels: Vec<&str> = input.options.iter().map(|o| o.label.as_str()).collect();
+        let values: Vec<&str> = input.options.iter().map(|o| o.value.as_str()).collect();
+        assert_eq!(labels, vec!["Red", "Green", "Blue"]);
+        assert_eq!(values, vec!["Red", "Green", "Blue"]);
+    }
+
+    #[test]
     fn build_choice_input_from_positional_args() {
         let args = ChooseOneArgs {
-            positional: vec!["alpha".into(), "beta".into(), "gamma".into()],
+            source: source_positional(vec!["alpha".into(), "beta".into(), "gamma".into()]),
             ..default_args()
         };
         let input = build_choice_input(&args).unwrap();
@@ -198,7 +220,7 @@ mod tests {
     #[test]
     fn build_choice_input_enables_filter_for_positional_args_by_default() {
         let args = ChooseOneArgs {
-            positional: vec!["alpha".into(), "beta".into()],
+            source: source_positional(vec!["alpha".into(), "beta".into()]),
             ..default_args()
         };
         let input = build_choice_input(&args).unwrap();
@@ -208,7 +230,7 @@ mod tests {
     #[test]
     fn build_choice_input_enables_filter_for_legacy_csv_by_default() {
         let args = ChooseOneArgs {
-            options: Some("alpha,beta".into()),
+            source: source_csv("alpha,beta".into()),
             ..default_args()
         };
         let input = build_choice_input(&args).unwrap();
@@ -218,7 +240,7 @@ mod tests {
     #[test]
     fn build_choice_input_respects_no_filter_flag() {
         let args = ChooseOneArgs {
-            positional: vec!["alpha".into(), "beta".into()],
+            source: source_positional(vec!["alpha".into(), "beta".into()]),
             chrome: ChooseChromeArgs {
                 no_filter: true,
                 ..ChooseChromeArgs::default()
@@ -232,7 +254,7 @@ mod tests {
     #[test]
     fn build_choice_input_from_positional_with_delimiter_splits_label_value() {
         let args = ChooseOneArgs {
-            positional: vec!["Apple:1".into(), "Berry:2".into()],
+            source: source_positional(vec!["Apple:1".into(), "Berry:2".into()]),
             chrome: ChooseChromeArgs {
                 delimiter: Some(':'),
                 ..ChooseChromeArgs::default()
@@ -248,9 +270,13 @@ mod tests {
 
     #[test]
     fn build_choice_input_applies_sort_ascending_across_positional_source() {
+        // Sorting now happens inside `ChooseOneState::new`, driven by
+        // `ChoiceInput::with_sort`. The CLI builder must therefore
+        // configure `sort` so that constructing a state yields the
+        // expected order.
         use crate::commands::common_choose::SortOrderArg;
         let args = ChooseOneArgs {
-            positional: vec!["Berry".into(), "Apple".into(), "Cherry".into()],
+            source: source_positional(vec!["Berry".into(), "Apple".into(), "Cherry".into()]),
             chrome: ChooseChromeArgs {
                 sort: SortOrderArg::Asc,
                 ..ChooseChromeArgs::default()
@@ -258,7 +284,9 @@ mod tests {
             ..default_args()
         };
         let input = build_choice_input(&args).unwrap();
-        let labels: Vec<&str> = input.options.iter().map(|o| o.label.as_str()).collect();
+        assert_eq!(input.sort, Some(tui_chrome::SortOrder::Asc));
+        let state = ChooseOneState::new(input);
+        let labels: Vec<&str> = state.options().iter().map(|o| o.label.as_str()).collect();
         assert_eq!(labels, vec!["Apple", "Berry", "Cherry"]);
     }
 
@@ -266,7 +294,7 @@ mod tests {
     fn build_choice_input_applies_sort_ascending_across_legacy_csv_source() {
         use crate::commands::common_choose::SortOrderArg;
         let args = ChooseOneArgs {
-            options: Some("Berry,Apple,Cherry".into()),
+            source: source_csv("Berry,Apple,Cherry".into()),
             chrome: ChooseChromeArgs {
                 sort: SortOrderArg::Asc,
                 ..ChooseChromeArgs::default()
@@ -274,7 +302,9 @@ mod tests {
             ..default_args()
         };
         let input = build_choice_input(&args).unwrap();
-        let labels: Vec<&str> = input.options.iter().map(|o| o.label.as_str()).collect();
+        assert_eq!(input.sort, Some(tui_chrome::SortOrder::Asc));
+        let state = ChooseOneState::new(input);
+        let labels: Vec<&str> = state.options().iter().map(|o| o.label.as_str()).collect();
         assert_eq!(labels, vec!["Apple", "Berry", "Cherry"]);
     }
 
@@ -314,7 +344,7 @@ mod tests {
     #[test]
     fn run_writes_json_selected_value_from_initial_option() {
         let args = ChooseOneArgs {
-            options: Some("Red,Green,Blue".into()),
+            source: source_csv("Red,Green,Blue".into()),
             selected: Some("Green".into()),
             required: true,
             ..default_args()
@@ -341,7 +371,7 @@ mod tests {
     #[test]
     fn run_propagates_percent_height_to_prompt() {
         let args = ChooseOneArgs {
-            options: Some("A,B,C".into()),
+            source: source_csv("A,B,C".into()),
             selected: Some("B".into()),
             ..default_args()
         };
@@ -366,7 +396,7 @@ mod tests {
     #[test]
     fn run_writes_raw_selected_value_with_newline() {
         let args = ChooseOneArgs {
-            options: Some("Alpha,Beta,Gamma".into()),
+            source: source_csv("Alpha,Beta,Gamma".into()),
             selected: Some("Beta".into()),
             ..default_args()
         };
@@ -388,7 +418,7 @@ mod tests {
     #[test]
     fn run_writes_hovered_value_from_positional_args() {
         let args = ChooseOneArgs {
-            positional: vec!["alpha".into(), "beta".into(), "gamma".into()],
+            source: source_positional(vec!["alpha".into(), "beta".into(), "gamma".into()]),
             ..default_args()
         };
         let mut output = Vec::new();
@@ -414,7 +444,7 @@ mod tests {
     #[test]
     fn run_writes_delimited_positional_value() {
         let args = ChooseOneArgs {
-            positional: vec!["Apple:1".into(), "Berry:2".into()],
+            source: source_positional(vec!["Apple:1".into(), "Berry:2".into()]),
             chrome: ChooseChromeArgs {
                 delimiter: Some(':'),
                 ..ChooseChromeArgs::default()
@@ -444,7 +474,7 @@ mod tests {
     #[test]
     fn run_selected_default_matches_delimited_value() {
         let args = ChooseOneArgs {
-            positional: vec!["Apple:1".into(), "Berry:2".into()],
+            source: source_positional(vec!["Apple:1".into(), "Berry:2".into()]),
             selected: Some("2".into()),
             chrome: ChooseChromeArgs {
                 delimiter: Some(':'),
@@ -475,7 +505,7 @@ mod tests {
     #[test]
     fn run_builds_filter_enabled_state_by_default() {
         let args = ChooseOneArgs {
-            positional: vec!["alpha".into(), "beta".into()],
+            source: source_positional(vec!["alpha".into(), "beta".into()]),
             ..default_args()
         };
         let mut output = Vec::new();
@@ -501,7 +531,7 @@ mod tests {
     #[test]
     fn run_writes_null_output_with_nul_terminator() {
         let args = ChooseOneArgs {
-            options: Some("X,Y,Z".into()),
+            source: source_csv("X,Y,Z".into()),
             selected: Some("Z".into()),
             ..default_args()
         };
@@ -523,7 +553,7 @@ mod tests {
     #[test]
     fn run_returns_130_without_output_on_ctrl_c() {
         let args = ChooseOneArgs {
-            options: Some("Red,Green".into()),
+            source: source_csv("Red,Green".into()),
             ..default_args()
         };
         let mut output = Vec::new();
@@ -541,10 +571,217 @@ mod tests {
         assert!(output.is_empty());
     }
 
+    // --- Phase 3: object-record source preservation ---------------------
+
+    /// Helper that writes the given body to a temp file with the given
+    /// extension and returns the resulting path. The caller is
+    /// responsible for cleanup.
+    fn write_temp_file(name: &str, body: &str) -> std::path::PathBuf {
+        let path = std::env::temp_dir().join(name);
+        std::fs::write(&path, body).unwrap();
+        path
+    }
+
     #[test]
-    fn run_returns_1_without_output_on_esc() {
+    fn build_choice_input_from_json_object_array_preserves_value_and_hotkey() {
+        let path = write_temp_file(
+            "choose_one_phase3_objects.json",
+            r#"[{"label":"Red","value":"apple","hotkey":"CTRL+R"},{"label":"Blue","value":"sky"}]"#,
+        );
         let args = ChooseOneArgs {
-            options: Some("Red,Green".into()),
+            source: source_file(path.clone()),
+            ..default_args()
+        };
+        let input = build_choice_input(&args).unwrap();
+        assert_eq!(input.options.len(), 2);
+        assert_eq!(input.options[0].label, "Red");
+        assert_eq!(input.options[0].value, "apple");
+        assert_eq!(
+            input.options[0].hotkey,
+            Some(tui_chrome::HotkeySpec::Ctrl('r'))
+        );
+        assert_eq!(input.options[1].label, "Blue");
+        assert_eq!(input.options[1].value, "sky");
+        assert!(input.options[1].hotkey.is_none());
+        std::fs::remove_file(&path).unwrap();
+    }
+
+    #[test]
+    fn build_choice_input_from_yaml_object_array_preserves_value_and_hotkey() {
+        let body = "- label: Red\n  value: apple\n  hotkey: CTRL+R\n- label: Blue\n  value: sky\n  hotkey: ALT+B\n";
+        let path = write_temp_file("choose_one_phase3_objects.yaml", body);
+        let args = ChooseOneArgs {
+            source: source_file(path.clone()),
+            ..default_args()
+        };
+        let input = build_choice_input(&args).unwrap();
+        assert_eq!(input.options.len(), 2);
+        assert_eq!(input.options[0].label, "Red");
+        assert_eq!(input.options[0].value, "apple");
+        assert_eq!(
+            input.options[0].hotkey,
+            Some(tui_chrome::HotkeySpec::Ctrl('r'))
+        );
+        assert_eq!(input.options[1].label, "Blue");
+        assert_eq!(input.options[1].value, "sky");
+        assert_eq!(
+            input.options[1].hotkey,
+            Some(tui_chrome::HotkeySpec::Alt('b'))
+        );
+        std::fs::remove_file(&path).unwrap();
+    }
+
+    #[test]
+    fn build_choice_input_from_jsonl_object_lines_preserves_value_and_hotkey() {
+        let body = "{\"label\":\"Red\",\"value\":\"apple\",\"hotkey\":\"CTRL+R\"}\n{\"label\":\"Blue\",\"value\":\"sky\"}\n";
+        let path = write_temp_file("choose_one_phase3_objects.jsonl", body);
+        let args = ChooseOneArgs {
+            source: source_file(path.clone()),
+            ..default_args()
+        };
+        let input = build_choice_input(&args).unwrap();
+        assert_eq!(input.options.len(), 2);
+        assert_eq!(input.options[0].value, "apple");
+        assert_eq!(
+            input.options[0].hotkey,
+            Some(tui_chrome::HotkeySpec::Ctrl('r'))
+        );
+        assert_eq!(input.options[1].value, "sky");
+        std::fs::remove_file(&path).unwrap();
+    }
+
+    #[test]
+    fn build_choice_input_from_ndjson_object_lines_preserves_value_and_hotkey() {
+        let body = "{\"label\":\"Red\",\"value\":\"apple\",\"hotkey\":\"CTRL+R\"}\n";
+        let path = write_temp_file("choose_one_phase3_objects.ndjson", body);
+        let args = ChooseOneArgs {
+            source: source_file(path.clone()),
+            ..default_args()
+        };
+        let input = build_choice_input(&args).unwrap();
+        assert_eq!(input.options.len(), 1);
+        assert_eq!(input.options[0].value, "apple");
+        assert_eq!(
+            input.options[0].hotkey,
+            Some(tui_chrome::HotkeySpec::Ctrl('r'))
+        );
+        std::fs::remove_file(&path).unwrap();
+    }
+
+    #[test]
+    fn build_choice_input_from_csv_three_columns_preserves_value_and_hotkey() {
+        let body = "Red,apple,CTRL+R\nBlue,sky,ALT+B\n";
+        let path = write_temp_file("choose_one_phase3_objects.csv", body);
+        let args = ChooseOneArgs {
+            source: source_file(path.clone()),
+            ..default_args()
+        };
+        let input = build_choice_input(&args).unwrap();
+        assert_eq!(input.options.len(), 2);
+        assert_eq!(input.options[0].label, "Red");
+        assert_eq!(input.options[0].value, "apple");
+        assert_eq!(
+            input.options[0].hotkey,
+            Some(tui_chrome::HotkeySpec::Ctrl('r'))
+        );
+        assert_eq!(input.options[1].label, "Blue");
+        assert_eq!(input.options[1].value, "sky");
+        assert_eq!(
+            input.options[1].hotkey,
+            Some(tui_chrome::HotkeySpec::Alt('b'))
+        );
+        std::fs::remove_file(&path).unwrap();
+    }
+
+    #[test]
+    fn build_choice_input_from_markdown_frontmatter_object_array_preserves_fields() {
+        let body = "---\nitems:\n  - label: Red\n    value: apple\n    hotkey: CTRL+R\n  - label: Blue\n    value: sky\n---\n# Title\n";
+        let path = write_temp_file("choose_one_phase3_objects.md", body);
+        let args = ChooseOneArgs {
+            source: source_md(vec![
+                path.to_string_lossy().to_string(),
+                "items".to_string(),
+            ]),
+            ..default_args()
+        };
+        let input = build_choice_input(&args).unwrap();
+        assert_eq!(input.options.len(), 2);
+        assert_eq!(input.options[0].label, "Red");
+        assert_eq!(input.options[0].value, "apple");
+        assert_eq!(
+            input.options[0].hotkey,
+            Some(tui_chrome::HotkeySpec::Ctrl('r'))
+        );
+        assert_eq!(input.options[1].label, "Blue");
+        assert_eq!(input.options[1].value, "sky");
+        std::fs::remove_file(&path).unwrap();
+    }
+
+    #[test]
+    fn run_emits_object_value_not_label_for_json_source() {
+        // Anchor for review-1 finding 3: when the JSON object supplies
+        // value="apple", the CLI must echo "apple" — not the label
+        // "Red" — when the option is selected.
+        let path = write_temp_file(
+            "choose_one_phase3_value_emit.json",
+            r#"[{"label":"Red","value":"apple"}]"#,
+        );
+        let args = ChooseOneArgs {
+            source: source_file(path.clone()),
+            selected: Some("apple".into()),
+            ..default_args()
+        };
+        let mut output = Vec::new();
+        let status = run_with_writer(
+            args,
+            OutputMode::Raw,
+            None,
+            &mut output,
+            |state, _height| {
+                assert_eq!(state.options()[0].label, "Red");
+                assert_eq!(state.options()[0].value, "apple");
+                assert_eq!(state.selected_id(), Some("apple"));
+                Ok(state.selected_value().cloned())
+            },
+        )
+        .unwrap();
+        assert_eq!(status, 0);
+        assert_eq!(output, b"apple\n");
+        std::fs::remove_file(&path).unwrap();
+    }
+
+    #[test]
+    fn build_choice_input_active_color_default_is_grey() {
+        // Phase 5: omitting --active-color resolves to ActiveChoiceColor::Grey
+        let args = ChooseOneArgs {
+            source: source_csv("Red,Green".into()),
+            ..default_args()
+        };
+        let input = build_choice_input(&args).unwrap();
+        assert_eq!(input.active_color, tui_chrome::ActiveChoiceColor::Grey);
+    }
+
+    #[test]
+    fn build_choice_input_active_color_green_propagates_to_input() {
+        use crate::commands::common_choose::ActiveColorArg;
+        let args = ChooseOneArgs {
+            source: source_csv("Red,Green".into()),
+            chrome: ChooseChromeArgs {
+                active_color: ActiveColorArg::Green,
+                ..ChooseChromeArgs::default()
+            },
+            ..default_args()
+        };
+        let input = build_choice_input(&args).unwrap();
+        assert_eq!(input.active_color, tui_chrome::ActiveChoiceColor::Green);
+    }
+
+    #[test]
+    fn run_returns_0_on_esc_with_restored_value() {
+        // Phase 5: ChooseOne Esc restores the initial selection and
+        // submits, so the CLI exits 0 rather than 1.
+        let args = ChooseOneArgs {
+            source: source_csv("Red,Green".into()),
             ..default_args()
         };
         let mut output = Vec::new();
@@ -554,11 +791,11 @@ mod tests {
             OutputMode::Raw,
             None,
             &mut output,
-            |_state, _height| Err(io::Error::new(ABORTED_KIND, "cancelled")),
+            |_state, _height| Ok(Some("Red".into())),
         )
         .unwrap();
 
-        assert_eq!(status, 1);
-        assert!(output.is_empty());
+        assert_eq!(status, 0);
+        assert_eq!(output, b"Red\n");
     }
 }

@@ -2,10 +2,10 @@ use std::collections::HashMap;
 
 use serde_json::Value;
 
-use crate::actions::HookResponse;
-use crate::events::{AgenticEvent, EventMeta, Provider};
-
 use super::{AdapterError, ProviderAdapter, str_field};
+use crate::actions::HookResponse;
+use crate::events::{AgenticEvent, EventMeta};
+use crate::provider::Provider;
 
 pub(crate) struct CodexAdapter;
 

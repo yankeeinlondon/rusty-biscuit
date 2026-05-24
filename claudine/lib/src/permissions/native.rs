@@ -2,8 +2,7 @@ use std::any::Any;
 use std::fmt;
 use std::path::PathBuf;
 
-use crate::events::Provider;
-
+use crate::provider::Provider;
 /// A discovered policy source from which native config can be loaded.
 #[derive(Debug, Clone)]
 pub struct PolicySource {

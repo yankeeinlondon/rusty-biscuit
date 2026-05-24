@@ -28,10 +28,13 @@ The [`core`](src/core) module provides cross-cutting primitives shared by every 
 - **`run_standalone`** — drives a single component in a dedicated terminal (fullscreen or inline)
 - **`KeyBindings`** — fully configurable key bindings with vim-compatible defaults (`h`/`j`/`k`/`l`)
 - **`ComponentTheme`** — centralized visual constants (glyphs, colors, styles)
-- **`FrameChrome`** / **`FrameChromeConfig`** — optional borders, margins, and height specs
+- **`FrameChrome`** / **`FrameChromeConfig`** — optional borders, margins, padding, and height specs
 - **`FuzzyFilter`** — fast fuzzy search over option labels via `nucleo-matcher`
 - **`ValidationState`** — uniform read access to submit-time validation errors
 - **`Label`** / **`LabelPosition`** / **`render_with_label`** — shared label placement
+- **`Padding`** — four-sided interior padding inside the border
+- **`TerminalStyle`** / **`TerminalBackground`** / **`NerdFontStatus`** — conservative terminal capability detection
+- **`ActiveChoiceColor`** / **`resolve_active_style`** — choice-list active-row styling driven by spec-aligned palettes (Grey/Green/Yellow/Red) tuned per-background, returned as a `ratatui::style::Style` with bold + contrast-correct foreground
 
 The [`prelude`](src/prelude.rs) module re-exports the most commonly used types for convenient glob imports.
 
@@ -80,24 +83,35 @@ match run_standalone(TextInput, state, None) {
 }
 ```
 
-The third parameter to `run_standalone` is `height: Option<HeightSpec>`:
+The third parameter to `run_standalone` is `height: Option<HeightSpec>`.
+Both inline variants are treated as a **maximum** — the inline viewport
+is clamped to whatever rows the live terminal actually has, so the
+prompt never overflows the screen.
 
 - `None` → fullscreen mode using `AlternateScreen`
-- `Some(HeightSpec::Cells(n))` → inline mode rendering `n` rows below
-  the current cursor
+- `Some(HeightSpec::Cells(n))` → inline mode rendering up to `n` rows
+  below the current cursor (ratatui's autoresize clamps when the
+  terminal is smaller than `n`)
 - `Some(HeightSpec::Percent(p))` → inline mode sized at `p` percent of
-  the live terminal height (clamped to a floor of 3 rows)
+  the live terminal height (clamped to a floor of 3 rows). The
+  percentage is **re-resolved on every terminal resize**, so the inline
+  viewport tracks the requested fraction as the terminal grows or
+  shrinks mid-prompt
 
 ## Key Bindings
 
 All components support configurable key bindings. The defaults are:
 
 - **Submit**: `Enter` (single components), `Ctrl-S` (InputTable)
-- **Cancel**: `Esc`
+- **Cancel / Reset**: `Esc` — behaviour varies by component:
+  - `ChooseOne`: restores the initial selection and submits (exit `0`)
+  - `ChooseMany`, `TextInput`, etc.: cancels the interaction (exit `1`)
+- **Ctrl-C**: always cancels with exit `130`
 - **Navigation**: arrow keys + vim keys (`h`/`j`/`k`/`l`)
-- **Toggle**: `Space` (BooleanSwitch, ChooseOne, ChooseMany)
+- **Toggle / Select**: `Space` (BooleanSwitch, ChooseOne, ChooseMany)
+- **Select all / Clear**: `Ctrl+A` / `Ctrl+D` (ChooseMany)
 
-Customize via `state.with_key_bindings(KeyBindings::default())` (introduced in Phase 2).
+Customize via `state.with_key_bindings(KeyBindings::default())`.
 
 ## Typed Values
 
@@ -158,6 +172,25 @@ Two-tier validation model:
 
 1. **Keystroke-time rejection** — hard limits (`max_length`, `max_selections`) silently block input that would exceed the cap.
 2. **Submit-time validation** — `required` and `min_selections` are checked on submit. If violated, `handle_event` returns `Consumed` and the component renders an inline error message. The error text is accessible via `state.validation_error()`.
+
+## Testing
+
+Library unit tests cover state transitions, layout math, fuzzy filter
+behaviour, and rendering of choice badges / hotkey display modes. Run
+them with `cargo test -p tui-chrome --lib`.
+
+For end-to-end and real-terminal verification (Level 1 / Level 2 /
+Level 3 testing rigor — including the `wezterm cli` / `kitty @` / `tmux`
+harnesses and `cliclick` keyboard injection on macOS), see the
+[`tui-chrome-cli` README's "Test Rigor" section](../cli/README.md#test-rigor--level-1--level-2--level-3)
+and the shared harness crate's
+[`biscuit-test-harness/README.md`](../../biscuit-test-harness/README.md),
+which documents the harness variants and the environment each requires.
+
+The lib's render correctness for hotkey badges is verified at Level 2 by
+piping kitty keyboard-protocol bytes into a real WezTerm pane via
+`wezterm cli send-text` and capturing the rendered output — see
+`cli/tests/real_terminal_render.rs::level2_wezterm_bare_ctrl_kitty_bytes_reveal_badges`.
 
 ## Documentation
 

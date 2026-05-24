@@ -378,6 +378,8 @@ Uses `libgit2` (via `git2` crate) for repository inspection.
 - `HostingProvider` - GitHub, GitLab, Bitbucket, etc.
 - `BehindStatus` - Whether local branch is behind remote
 - `WorktreeInfo` - Linked worktree information
+- `WorktreeEntry` - Worktree name, branch, path, current flag, and detached-HEAD state
+- `list_worktrees` - List all worktrees including the main worktree (sorted alphabetically)
 
 **Detection Strategy:**
 
@@ -423,6 +425,15 @@ if let Some(info) = git_deep {
                 println!("Behind: {}", remotes.join(", "));
             }
         }
+    }
+}
+
+// List all worktrees
+if let Some(worktrees) = sniff::filesystem::git::list_worktrees(Path::new("."))? {
+    for wt in &worktrees {
+        let marker = if wt.is_current { "* " } else { "  " };
+        let branch = wt.branch.as_deref().unwrap_or("detached HEAD");
+        println!("{}{} (on {})", marker, wt.name, branch);
     }
 }
 ```
@@ -922,8 +933,60 @@ useful for explaining *where* an observed regression lives.
   `filesystem_repo::repo_structure_monorepo`, and
   `inventory::programs_detect` cover the highest-risk shared-walk and
   fan-out paths.
+- `git_dirty_scaling::git_full/{N}` and
+  `git_dirty_scaling::git_deep/{N}` measure how per-file diff cost
+  scales with dirty file count (default `N` ∈ {10, 100}; set
+  `SNIFF_BENCH_DEEP_DIRTY=1` to also run `N=1000`). Use these to
+  validate the batched-diff aggregation work.
+- `filesystem_docs::detect_docs_full` vs.
+  `filesystem_docs::detect_blast_radius_only` quantify the win from
+  the blast-radius-only frontmatter parser on a synthetic 200-doc
+  fixture.
+- `filesystem_repo::repo_full_monorepo` isolates the per-package
+  language/framework refresh on a 90-package fixture.
+- `programs::index_build_lazy` vs. `programs::index_build_eager_path`
+  and `programs_bulk_lookup::lookup_lazy` vs.
+  `programs_bulk_lookup::lookup_eager_path` measure the eager-PATH
+  index trade-off used by `ProgramsInfo::detect`.
 - Audio/GPU benches are informational and should not be used to gate
   merges across platforms.
+
+### Phase 4 baseline measurements
+
+Targeted profiling runs for ad-hoc baseline capture:
+
+```bash
+# Git dirty-file scaling (10/100/1000 dirty files; 1000 is opt-in)
+SNIFF_BENCH_DEEP_DIRTY=1 cargo bench -p sniff --features network \
+    --bench perf -- ^git_dirty_scaling
+
+# Repo package-boundary refresh
+cargo bench -p sniff --features network --bench perf -- ^filesystem_repo
+
+# Docs full vs. blast-radius-only parser
+cargo bench -p sniff --features network --bench perf -- ^filesystem_docs
+
+# Eager vs. lazy PATH index, plus full ProgramsInfo fan-out
+cargo bench -p sniff --features network --bench perf -- '^(programs|programs_bulk_lookup|programs_fanout)/'
+
+# PATH-length scaling on the compiled CLI (requires hyperfine)
+cargo build --release -p sniff-cli
+SNIFF_BIN="$(cargo metadata --format-version 1 --no-deps \
+    | python3 -c 'import json,sys; print(json.load(sys.stdin)["target_directory"])')/release/sniff"
+SHORT_PATH="/usr/bin:/bin"
+LONG_PATH="${PATH}"
+hyperfine --warmup 3 \
+    -n short_path "PATH=${SHORT_PATH} ${SNIFF_BIN} programs --json >/dev/null" \
+    -n full_path  "PATH=${LONG_PATH}  ${SNIFF_BIN} programs --json >/dev/null"
+
+# Flamegraph the high-fan-out CLI commands
+cargo flamegraph --profile profiling -p sniff-cli -- repo git-status
+cargo flamegraph --profile profiling -p sniff-cli -- programs --json
+
+# Compile-time / symbol-cost baselines for Phase 5.3
+cargo bloat -p sniff-cli --release --bin sniff
+cargo llvm-lines -p sniff-cli --release
+```
 
 ## Design Principles
 

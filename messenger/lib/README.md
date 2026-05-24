@@ -264,6 +264,30 @@ The crate includes:
 - unit tests for message builders, normalization, Markdown rendering, and provider adapters
 - `wiremock`-backed provider integration tests
 - ignored smoke tests in `tests/integration.rs` for real Slack and Discord sends
+- desktop helper integration tests in `tests/desktop_helpers.rs` that exercise real `tokio::process::Command` invocations against stub binaries
+
+### Desktop Helper Test Conventions
+
+All desktop backend modules (`linux.rs`, `macos.rs`, `windows.rs`) and helper modules (`dunstify.rs`, `notify_send.rs`, `terminal_notifier.rs`, `alerter.rs`, `snoretoast.rs`, `burnttoast.rs`) compile on every host. Their unit tests run on macOS, Linux, and Windows alike, so a contributor on one platform can validate the full helper matrix.
+
+Stub helper binaries live under [`tests/bin/`](./tests/bin/). Each stub is a tiny Rust program that mimics the real helper's stdout/exit-code contract under environment-variable control:
+
+- `stub_dunstify`, `stub_notify_send` — Linux helpers
+- `stub_snoretoast`, `stub_burnttoast` — Windows helpers
+- `stub_terminal_notifier`, `stub_alerter` — macOS helpers
+
+The integration test in `tests/desktop_helpers.rs` exercises every helper against its stub. When you add a new helper, you must:
+
+1. Add a `stub_<helper>` binary under `tests/bin/<name>/main.rs` that reproduces the real helper's exit-code and stdout protocol.
+2. Add a corresponding integration test to `tests/desktop_helpers.rs` covering success, interactive (actions/reply), replace, timeout, non-zero exit, and parse-error paths.
+3. Make the helper module compile on all platforms (gate native API calls with `#[cfg(target_os = "...")]`, not the entire module).
+
+Optional nextest check for desktop helper changes:
+
+```bash
+cargo build -p messenger --features desktop --bins
+cargo nextest run -p messenger --features desktop
+```
 
 ## Key Crates
 

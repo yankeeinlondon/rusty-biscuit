@@ -1,6 +1,6 @@
 //! Auto-generated provider model enum
 //!
-//! Generated: 2026-01-11T20:35:20.727748+00:00
+//! Generated: 2026-05-07T02:07:05.704419+00:00
 //! Generator: gen-models v0.1.0
 //! Provider: Zai
 //!
@@ -24,6 +24,12 @@ pub enum ProviderModelZai {
     Glm__4_6,
     /// Model: `glm-4.7`
     Glm__4_7,
+    /// Model: `glm-5`
+    Glm__5,
+    /// Model: `glm-5-turbo`
+    Glm__5__Turbo,
+    /// Model: `glm-5.1`
+    Glm__5_1,
     /// Custom model ID not in the predefined list.
     Bespoke(String),
 }

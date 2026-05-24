@@ -1,11 +1,11 @@
 //! Metadata tables and implementations for program categories.
 
+use crate::programs::contract::{CategoryEnum, InstallationMethod};
 use crate::programs::schema::{ProgramInfo, ProgramMetadata, VersionFlag, VersionParseStrategy};
-use crate::programs::types::InstallationMethod;
 
 use super::categories::{
-    ALL_OS, AiCli, CategoryEnum, Editor, HeadlessAudio, LINUX_ONLY, LanguagePackageManager,
-    MACOS_ONLY, OsPackageManager, TerminalApp, TtsClient, UNIX_ONLY, Utility, WINDOWS_ONLY,
+    ALL_OS, AiCli, Editor, HeadlessAudio, LINUX_ONLY, LanguagePackageManager, MACOS_ONLY,
+    NotificationHelper, OsPackageManager, TerminalApp, TtsClient, UNIX_ONLY, Utility, WINDOWS_ONLY,
 };
 
 pub(crate) static BREW_INSTALL: &[InstallationMethod] = &[InstallationMethod::RemoteBash(
@@ -2170,13 +2170,16 @@ impl CategoryEnum for TtsClient {
 
     fn platform_override(
         &self,
-    ) -> Option<(std::path::PathBuf, crate::programs::types::ExecutableSource)> {
+    ) -> Option<(
+        std::path::PathBuf,
+        crate::programs::contract::ExecutableSource,
+    )> {
         match self {
             TtsClient::WindowsSapi => {
                 if cfg!(target_os = "windows") {
                     Some((
                         std::path::PathBuf::from("sapi"),
-                        crate::programs::types::ExecutableSource::Path,
+                        crate::programs::contract::ExecutableSource::Path,
                     ))
                 } else {
                     None
@@ -3061,4 +3064,189 @@ impl CategoryEnum for AiCli {
             AiCli::QwenCli => "qwen_cli",
         }
     }
+}
+
+// Notification helper installation methods
+pub(crate) static TERMINAL_NOTIFIER_INSTALL: &[InstallationMethod] =
+    &[InstallationMethod::Brew("terminal-notifier")];
+pub(crate) static ALERTER_INSTALL: &[InstallationMethod] =
+    &[InstallationMethod::Brew("vjeantet/tap/alerter")];
+pub(crate) static SNORETOAST_INSTALL: &[InstallationMethod] = &[
+    InstallationMethod::Chocolatey("snoretoast"),
+    InstallationMethod::Scoop("snoretoast"),
+];
+pub(crate) static BURNTTOAST_INSTALL: &[InstallationMethod] = &[InstallationMethod::RemoteBash(
+    "https://raw.githubusercontent.com/Windos/BurntToast/main/install.ps1",
+)];
+pub(crate) static DUNSTIFY_INSTALL: &[InstallationMethod] = &[
+    InstallationMethod::Apt("dunst"),
+    InstallationMethod::Dnf("dunst"),
+    InstallationMethod::Pacman("dunst"),
+];
+pub(crate) static NOTIFY_SEND_INSTALL: &[InstallationMethod] = &[
+    InstallationMethod::Apt("libnotify-bin"),
+    InstallationMethod::Dnf("libnotify"),
+    InstallationMethod::Pacman("libnotify"),
+];
+
+/// Metadata lookup table for notification helpers.
+pub(crate) static NOTIFICATION_HELPER_INFO: &[ProgramInfo] = &[
+    ProgramInfo {
+        binary_name: "terminal-notifier",
+        display_name: "terminal-notifier",
+        description: "macOS notification helper with rich controls",
+        website: "https://github.com/julienXX/terminal-notifier",
+        version_flag: VersionFlag::Custom("-help"),
+        parse_strategy: VersionParseStrategy::FirstLine,
+        version_regex: None,
+        version_prefix: None,
+        alternate_binary_names: &[],
+        os_availability: MACOS_ONLY,
+        repo: Some("https://github.com/julienXX/terminal-notifier"),
+        installation_methods: TERMINAL_NOTIFIER_INSTALL,
+        system_prerequisites: &[],
+    },
+    ProgramInfo {
+        binary_name: "alerter",
+        display_name: "alerter",
+        description: "macOS notification helper with actions and replies",
+        website: "https://github.com/vjeantet/alerter",
+        version_flag: VersionFlag::Custom("-help"),
+        parse_strategy: VersionParseStrategy::Regex,
+        version_regex: Some(r"(?i)version\s+([\d.]+)"),
+        version_prefix: None,
+        alternate_binary_names: &[],
+        os_availability: MACOS_ONLY,
+        repo: Some("https://github.com/vjeantet/alerter"),
+        installation_methods: ALERTER_INSTALL,
+        system_prerequisites: &[],
+    },
+    ProgramInfo {
+        binary_name: "snoretoast",
+        display_name: "SnoreToast",
+        description: "Windows toast notification helper",
+        website: "https://github.com/KDE/snoretoast",
+        version_flag: VersionFlag::Short,
+        parse_strategy: VersionParseStrategy::FirstLine,
+        version_regex: None,
+        version_prefix: None,
+        alternate_binary_names: &[],
+        os_availability: WINDOWS_ONLY,
+        repo: Some("https://github.com/KDE/snoretoast"),
+        installation_methods: SNORETOAST_INSTALL,
+        system_prerequisites: &[],
+    },
+    ProgramInfo {
+        binary_name: "BurntToast",
+        display_name: "BurntToast",
+        description: "PowerShell module for Windows toast notifications",
+        website: "https://github.com/Windos/BurntToast",
+        version_flag: VersionFlag::None,
+        parse_strategy: VersionParseStrategy::Custom,
+        version_regex: None,
+        version_prefix: None,
+        alternate_binary_names: &[],
+        os_availability: WINDOWS_ONLY,
+        repo: Some("https://github.com/Windos/BurntToast"),
+        installation_methods: BURNTTOAST_INSTALL,
+        system_prerequisites: &[],
+    },
+    ProgramInfo {
+        binary_name: "dunstify",
+        display_name: "dunstify",
+        description: "Dunst notification helper for Linux",
+        website: "https://dunst-project.org/",
+        version_flag: VersionFlag::Long,
+        parse_strategy: VersionParseStrategy::FirstLine,
+        version_regex: None,
+        version_prefix: None,
+        alternate_binary_names: &[],
+        os_availability: LINUX_ONLY,
+        repo: Some("https://github.com/dunst-project/dunst"),
+        installation_methods: DUNSTIFY_INSTALL,
+        system_prerequisites: &[],
+    },
+    ProgramInfo {
+        binary_name: "notify-send",
+        display_name: "notify-send",
+        description: "libnotify CLI for Linux desktop notifications",
+        website: "https://gitlab.gnome.org/GNOME/libnotify",
+        version_flag: VersionFlag::Long,
+        parse_strategy: VersionParseStrategy::FirstLine,
+        version_regex: None,
+        version_prefix: None,
+        alternate_binary_names: &[],
+        os_availability: LINUX_ONLY,
+        repo: Some("https://gitlab.gnome.org/GNOME/libnotify"),
+        installation_methods: NOTIFY_SEND_INSTALL,
+        system_prerequisites: &[],
+    },
+];
+
+impl ProgramMetadata for NotificationHelper {
+    fn info(&self) -> &'static ProgramInfo {
+        &NOTIFICATION_HELPER_INFO[*self as usize]
+    }
+}
+
+impl CategoryEnum for NotificationHelper {
+    fn category_name() -> &'static str {
+        "notification_helpers"
+    }
+
+    fn variant_index(&self) -> usize {
+        *self as usize
+    }
+
+    fn serde_key(&self) -> &'static str {
+        match self {
+            NotificationHelper::TerminalNotifier => "terminal_notifier",
+            NotificationHelper::Alerter => "alerter",
+            NotificationHelper::SnoreToast => "snore_toast",
+            NotificationHelper::BurntToast => "burnt_toast",
+            NotificationHelper::Dunstify => "dunstify",
+            NotificationHelper::NotifySend => "notify_send",
+        }
+    }
+
+    fn platform_override(
+        &self,
+    ) -> Option<(
+        std::path::PathBuf,
+        crate::programs::contract::ExecutableSource,
+    )> {
+        match self {
+            NotificationHelper::BurntToast => {
+                if cfg!(target_os = "windows") && is_burnttoast_available() {
+                    Some((
+                        std::path::PathBuf::from("BurntToast"),
+                        crate::programs::contract::ExecutableSource::Path,
+                    ))
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        }
+    }
+}
+
+/// Cached per-process result of the BurntToast PowerShell module probe.
+static BURNTTOAST_AVAILABLE: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+
+/// Probe whether the BurntToast PowerShell module is installed.
+fn is_burnttoast_available() -> bool {
+    *BURNTTOAST_AVAILABLE.get_or_init(|| {
+        let output = std::process::Command::new("pwsh")
+            .args([
+                "-NoProfile",
+                "-Command",
+                "if (Get-Module -ListAvailable BurntToast) { 'yes' } else { 'no' }",
+            ])
+            .output();
+        match output {
+            Ok(out) => String::from_utf8_lossy(&out.stdout).trim() == "yes",
+            Err(_) => false,
+        }
+    })
 }

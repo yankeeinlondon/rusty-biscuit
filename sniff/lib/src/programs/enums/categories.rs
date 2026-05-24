@@ -4,7 +4,6 @@
 //! metadata lookup support via the `ProgramMetadata` trait from schema.rs.
 
 use serde::{Deserialize, Serialize};
-use std::fmt;
 use std::hash::Hash;
 use strum::{Display, EnumCount, EnumIter, EnumString, IntoStaticStr};
 
@@ -15,47 +14,6 @@ pub(crate) static UNIX_ONLY: &[OsType] = &[OsType::MacOS, OsType::Linux];
 pub(crate) static MACOS_ONLY: &[OsType] = &[OsType::MacOS];
 pub(crate) static LINUX_ONLY: &[OsType] = &[OsType::Linux];
 pub(crate) static WINDOWS_ONLY: &[OsType] = &[OsType::Windows];
-
-/// Trait bridging category enums to the generic `CategoryDetector<E>`.
-///
-/// Implementors provide category-level metadata and variant indexing
-/// that enables a single generic detector struct to work across all
-/// program categories.
-pub trait CategoryEnum:
-    ProgramMetadata
-    + strum::IntoEnumIterator
-    + strum::EnumCount
-    + Copy
-    + Clone
-    + Eq
-    + Hash
-    + fmt::Debug
-    + fmt::Display
-    + Send
-    + Sync
-    + 'static
-{
-    /// Human-readable category name (e.g., "editors", "utilities").
-    fn category_name() -> &'static str;
-
-    /// Returns the ordinal index of this variant (0-based, contiguous).
-    fn variant_index(&self) -> usize;
-
-    /// Serialization key for JSON output (snake_case variant name).
-    fn serde_key(&self) -> &'static str;
-
-    /// Platform-specific detection override.
-    ///
-    /// Returns `Some(...)` to inject a synthetic detection result instead of
-    /// searching PATH. Used for Windows SAPI which isn't a real executable.
-    fn platform_override(
-        &self,
-    ) -> Option<(std::path::PathBuf, crate::programs::types::ExecutableSource)> {
-        None
-    }
-}
-
-use crate::programs::schema::ProgramMetadata;
 
 // ============================================================================
 // Editor Enum
@@ -384,4 +342,34 @@ pub enum AiCli {
     Goose,
     KimiCli,
     QwenCli,
+}
+
+// ============================================================================
+// Notification Helper Enum
+// ============================================================================
+
+/// Desktop notification helper utilities.
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Hash,
+    Serialize,
+    Deserialize,
+    Display,
+    EnumString,
+    EnumIter,
+    EnumCount,
+    IntoStaticStr,
+)]
+#[strum(serialize_all = "snake_case")]
+pub enum NotificationHelper {
+    TerminalNotifier,
+    Alerter,
+    SnoreToast,
+    BurntToast,
+    Dunstify,
+    NotifySend,
 }

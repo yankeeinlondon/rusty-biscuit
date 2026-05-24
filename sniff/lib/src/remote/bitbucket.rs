@@ -5,13 +5,14 @@
 
 use async_trait::async_trait;
 use schematic_schema::bitbucket::*;
-use schematic_schema::shared::SchematicError;
+use schematic_schema::shared::{AuthStrategy, SchematicError, UpdateStrategy};
 
 use super::{
     provider::RemoteRepoProvider,
     types::{
         CiCdInfo, DocumentCategory, DocumentRef, GitProvider, IssueInfo, KeyUrls, OrgInfo,
-        OrgRepoRef, PullRequestInfo, ReleaseInfo, RepoMetadata, TagInfo, TagsAndReleases,
+        OrgRepoRef, PullRequestInfo, PullRequestState, ReleaseInfo, RepoMetadata, TagInfo,
+        TagsAndReleases,
     },
 };
 use crate::error::SniffError;
@@ -82,19 +83,60 @@ impl Default for BitbucketRemote {
     }
 }
 
+impl BitbucketRemote {
+    /// Build a Bitbucket API client variant that performs no authentication.
+    ///
+    /// The client is constructed by overriding both the env-fallback list
+    /// (so no credentials can be picked up from `BITBUCKET_USERNAME`,
+    /// `BITBUCKET_APP_PASSWORD`) **and** the auth strategy itself (so the
+    /// schematic runtime does not pre-flight-reject the request for
+    /// missing credentials). The combination produces a truly anonymous
+    /// client whose request passes through to the wire and is judged by
+    /// the API alone.
+    ///
+    /// This supports the "attempt unauthenticated" fallback: when an
+    /// authenticated request fails because no credentials are configured,
+    /// we retry once with this anonymous client before surfacing a
+    /// `MissingCredentials` error to the user. Public Bitbucket Cloud
+    /// repositories can be read anonymously.
+    fn unauthenticated_client(&self) -> Bitbucket {
+        self.client
+            .variant()
+            .env_auth(Vec::new())
+            .auth_update(UpdateStrategy::ChangeTo(AuthStrategy::None))
+            .build()
+    }
+}
+
 /// Map a [`SchematicError`] to a [`SniffError`].
 ///
 /// Handles special cases:
-/// - Missing credentials -> `MissingCredentials`
-/// - 401 -> `MissingCredentials`
+/// - `MissingCredential` / `AuthenticationRequired` -> `MissingCredentials`
+/// - 401 -> `MissingCredentials` (anonymous request rejected)
 /// - 403/429 -> `RateLimited`
 /// - 404 -> `RemoteApi` with "Not found"
 /// - Other HTTP errors -> `RemoteApi`
+///
+/// ## Notes
+///
+/// `MissingCredentials` is only emitted *after* the anonymous retry has
+/// failed (see [`BitbucketRemote::unauthenticated_client`]) or when the
+/// API explicitly demands credentials for a private resource (a real 401
+/// response). Call sites that want the "attempt unauthenticated"
+/// behaviour must wrap the initial request in a
+/// `MissingCredential`/`AuthenticationRequired` retry rather than mapping
+/// the first failure directly through this function.
 fn map_schematic_error(err: SchematicError) -> SniffError {
     match err {
         SchematicError::MissingCredential { env_vars } => SniffError::MissingCredentials {
             provider: "Bitbucket".to_string(),
             env_var: env_vars.join(" or "),
+        },
+        SchematicError::AuthenticationRequired {
+            env_fallback_vars, ..
+        } => SniffError::MissingCredentials {
+            provider: "Bitbucket".to_string(),
+            env_var: env_fallback_vars.join(" or "),
         },
         SchematicError::ApiError { status: 401, body } => SniffError::MissingCredentials {
             provider: "Bitbucket".to_string(),
@@ -403,16 +445,42 @@ impl RemoteRepoProvider for BitbucketRemote {
         &self,
         workspace: &str,
         repo_slug: &str,
+        state: PullRequestState,
     ) -> Result<Vec<PullRequestInfo>, SniffError> {
-        let request = ListPullRequestsRequest::new(workspace, repo_slug);
-        let response: PaginatedResponse<PullRequest> = self
-            .client
-            .request(request)
-            .await
-            .map_err(map_schematic_error)?;
+        let mut request = ListPullRequestsRequest::new(workspace, repo_slug);
+
+        // Map PullRequestState to Bitbucket API state parameter
+        match state {
+            PullRequestState::Open => {
+                request = request.with_state("OPEN".to_string());
+            }
+            PullRequestState::Merged => {
+                request = request.with_state("MERGED".to_string());
+            }
+            PullRequestState::Closed | PullRequestState::Draft | PullRequestState::All => {
+                // Bitbucket doesn't support querying multiple states or "ALL" in a single
+                // request. Leave state unset to get all PRs, then post-filter.
+            }
+        }
+
+        // Attempt the request with the configured client first. If it fails
+        // because no credentials are available, retry once with an explicitly
+        // unauthenticated client. Only after the anonymous retry also fails
+        // (or on a real 401/403) do we surface a credentials error.
+        let response: PaginatedResponse<PullRequest> =
+            match self.client.request(request.clone()).await {
+                Ok(resp) => resp,
+                Err(SchematicError::MissingCredential { .. })
+                | Err(SchematicError::AuthenticationRequired { .. }) => self
+                    .unauthenticated_client()
+                    .request(request)
+                    .await
+                    .map_err(map_schematic_error)?,
+                Err(err) => return Err(map_schematic_error(err)),
+            };
 
         // Extract .values from paginated response (first page only for MVP)
-        Ok(response
+        let mut prs: Vec<PullRequestInfo> = response
             .values
             .into_iter()
             .map(|pr| {
@@ -453,13 +521,37 @@ impl RemoteRepoProvider for BitbucketRemote {
                         .destination
                         .as_ref()
                         .and_then(|d| d.branch_name().map(String::from)),
+                    // Bitbucket Cloud's PR API does not expose labels,
+                    // priority, or kind — those fields exist on Issues only.
+                    // The list endpoint also omits the PR description; a
+                    // per-PR `GET /pullrequests/{id}` follow-up would be
+                    // required to populate `body`.
+                    labels: Vec::new(),
+                    body: None,
                     created_at: pr.created_on.unwrap_or_default(),
                     updated_at,
                     merged_at,
                     html_url,
                 }
             })
-            .collect())
+            .collect();
+
+        // Post-filter for states Bitbucket API doesn't support directly
+        match state {
+            PullRequestState::Closed => {
+                prs.retain(|pr| pr.state == "declined" || pr.state == "superseded");
+            }
+            PullRequestState::Merged => {
+                prs.retain(|pr| pr.state == "merged");
+            }
+            PullRequestState::Draft => {
+                // Bitbucket doesn't have draft PRs
+                prs.clear();
+            }
+            _ => {}
+        }
+
+        Ok(prs)
     }
 
     async fn list_issues(

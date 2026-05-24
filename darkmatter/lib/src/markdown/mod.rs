@@ -42,8 +42,11 @@ mod inline_html;
 pub mod normalize;
 pub mod output;
 pub mod reference;
+pub mod render_tree;
+pub mod schemas;
 pub mod toc;
 mod types;
+pub mod yaml_block;
 
 pub use delta::{
     BrokenLink, ChangeAction, CodeBlockChange, ContentChange, DeltaStatistics, DocumentChange,
@@ -59,8 +62,10 @@ pub use reference::{
     ReferenceError, ReferenceGraph, ReferenceGraphOptions, ReferenceKind, ReferenceRecord,
     ReferenceSet, TransclusionRef,
 };
+pub use render_tree::TerminalCodeRenderer;
 pub use toc::{CodeBlockInfo, InternalLinkInfo, MarkdownToc, MarkdownTocNode};
 pub use types::{FrontmatterMap, MarkdownError, MarkdownResult};
+pub use yaml_block::{YamlBlock, YamlBlockError};
 
 use std::path::Path;
 
@@ -164,6 +169,24 @@ impl Markdown {
         &self.source
     }
 
+    /// Build a [`SourceContext`] for error rendering from the document's
+    /// source and content.
+    pub fn source_context_for_errors(&self) -> biscuit_terminal::errors::SourceContext {
+        use std::sync::Arc;
+        let content = Arc::from(self.content.as_str());
+        match &self.source {
+            Some(ComposeSource::File(path)) => {
+                let absolute = path.canonicalize().unwrap_or_else(|_| path.clone());
+                biscuit_terminal::errors::SourceContext::new(absolute, path.clone(), content)
+            }
+            _ => biscuit_terminal::errors::SourceContext::new(
+                std::path::PathBuf::from("unknown"),
+                std::path::PathBuf::from("unknown"),
+                content,
+            ),
+        }
+    }
+
     /// Sets the compose source, returning the modified document.
     pub fn with_source(mut self, source: ComposeSource) -> Self {
         self.source = Some(source);
@@ -190,7 +213,12 @@ impl Markdown {
     /// are still accepted and returned with an empty [`Frontmatter`].
     pub fn try_from_content(content: impl Into<String>) -> MarkdownResult<Self> {
         let content = content.into();
-        let (frontmatter, remaining) = frontmatter::parse_frontmatter(&content)?;
+        let ctx = biscuit_terminal::errors::SourceContext::new(
+            std::path::PathBuf::from("unknown"),
+            std::path::PathBuf::from("unknown"),
+            content.as_str(),
+        );
+        let (frontmatter, remaining) = frontmatter::parse_frontmatter(&content, ctx)?;
         Ok(Self::with_frontmatter(frontmatter, remaining))
     }
 
@@ -589,6 +617,16 @@ impl Markdown {
         output::for_terminal(self, options)
     }
 
+    /// Internal entry point that passes an optional page layout context through
+    /// to the terminal renderer so per-component alignment and fill are honoured.
+    pub(crate) fn as_terminal_with_layout(
+        &self,
+        options: output::TerminalOptions,
+        layout_ctx: Option<&crate::layout::LayoutContext>,
+    ) -> MarkdownResult<String> {
+        output::terminal::for_terminal_with_layout(self, options, layout_ctx)
+    }
+
     /// Extracts a Table of Contents from the markdown document.
     ///
     /// Returns a `MarkdownToc` struct containing:
@@ -789,7 +827,12 @@ impl Markdown {
 
 impl From<String> for Markdown {
     fn from(content: String) -> Self {
-        match frontmatter::parse_frontmatter(&content) {
+        let ctx = biscuit_terminal::errors::SourceContext::new(
+            std::path::PathBuf::from("unknown"),
+            std::path::PathBuf::from("unknown"),
+            content.as_str(),
+        );
+        match frontmatter::parse_frontmatter(&content, ctx) {
             Ok((frontmatter, remaining_content)) => {
                 Self::with_frontmatter(frontmatter, remaining_content)
             }
@@ -1337,5 +1380,113 @@ title: Test
         assert!(!md.content().contains("## A"));
         assert!(md.content().contains("## B"));
         assert!(!md.content().contains("## C"));
+    }
+
+    // =========================================================================
+    // Dim (⌄text⌄) integration tests
+    // =========================================================================
+
+    /// Full pipeline: Markdown source `⌄dim⌄` → terminal output contains `\x1b[2m`.
+    #[test]
+    fn test_dim_full_pipeline_terminal() {
+        use crate::markdown::highlighting::{ColorMode, ThemePair};
+        use crate::markdown::output::terminal::{
+            ColorDepth, DimMode, TerminalOptions, for_terminal,
+        };
+
+        let md: Markdown = "This is ⌄dimmed⌄ text.".into();
+        let options = TerminalOptions {
+            code_theme: ThemePair::OneHalf,
+            prose_theme: ThemePair::OneHalf,
+            color_mode: ColorMode::Dark,
+            include_line_numbers: false,
+            color_depth: Some(ColorDepth::TrueColor),
+            image_mode: crate::markdown::output::terminal::TerminalImageMode::Never,
+            base_path: None,
+            italic_mode: crate::markdown::output::terminal::ItalicMode::Always,
+            dim_mode: DimMode::Always,
+            max_width: Some(80),
+            mermaid_mode: crate::markdown::output::terminal::MermaidMode::Off,
+            hyperlink_mode: crate::markdown::output::terminal::HyperlinkMode::Always,
+        };
+        let output = for_terminal(&md, options).unwrap();
+
+        assert!(
+            output.contains("\x1b[2m"),
+            "Terminal output should contain dim ANSI code \\x1b[2m, got: {:?}",
+            output
+        );
+
+        // Delimiters should be stripped by the inline processor
+        assert!(
+            !output.contains("⌄"),
+            "Terminal output should not contain ⌄ delimiters"
+        );
+    }
+
+    /// Full pipeline: Markdown source `⌄dim⌄` → HTML output contains literal `⌄dim⌄`.
+    #[test]
+    fn test_dim_full_pipeline_html() {
+        use crate::markdown::output::{HtmlOptions, as_html};
+
+        let md: Markdown = "This is ⌄dimmed⌄ text.".into();
+        let html = as_html(&md, HtmlOptions::default()).unwrap();
+
+        assert!(
+            html.contains("⌄dimmed⌄"),
+            "HTML output should preserve ⌄ delimiters as literal, got: {}",
+            html
+        );
+        assert!(
+            !html.contains("<dim>"),
+            "HTML output should not contain <dim> tag"
+        );
+    }
+
+    /// Cross-format consistency: terminal-rendered `⌄text⌄` and HTML `⌄text⌄`
+    /// both preserve the visible text content.
+    #[test]
+    fn test_dim_cross_format_consistency() {
+        use crate::markdown::highlighting::{ColorMode, ThemePair};
+        use crate::markdown::output::terminal::{
+            ColorDepth, DimMode, TerminalOptions, for_terminal,
+        };
+        use crate::markdown::output::{HtmlOptions, as_html};
+        use crate::testing::strip_ansi_codes;
+
+        let md: Markdown = "The ⌄dimmed text⌄ here.".into();
+
+        // Terminal output
+        let terminal_options = TerminalOptions {
+            code_theme: ThemePair::OneHalf,
+            prose_theme: ThemePair::OneHalf,
+            color_mode: ColorMode::Dark,
+            include_line_numbers: false,
+            color_depth: Some(ColorDepth::TrueColor),
+            image_mode: crate::markdown::output::terminal::TerminalImageMode::Never,
+            base_path: None,
+            italic_mode: crate::markdown::output::terminal::ItalicMode::Always,
+            dim_mode: DimMode::Always,
+            max_width: Some(80),
+            mermaid_mode: crate::markdown::output::terminal::MermaidMode::Off,
+            hyperlink_mode: crate::markdown::output::terminal::HyperlinkMode::Always,
+        };
+        let terminal_output = for_terminal(&md, terminal_options).unwrap();
+        let terminal_plain = strip_ansi_codes(&terminal_output);
+
+        // HTML output
+        let html = as_html(&md, HtmlOptions::default()).unwrap();
+
+        // Both should contain the visible text "dimmed text"
+        assert!(
+            terminal_plain.contains("dimmed text"),
+            "Terminal plain text should contain 'dimmed text', got: {:?}",
+            terminal_plain
+        );
+        assert!(
+            html.contains("dimmed text"),
+            "HTML should contain 'dimmed text', got: {}",
+            html
+        );
     }
 }

@@ -1,0 +1,10 @@
+---
+source: darkmatter/lib/tests/error_snapshots/reference.rs
+assertion_line: 52
+expression: out
+---
+⤫ ReferenceError: missing source context
+┃ Could not resolve ./sibling.md at line 3.
+┃ 
+┃ Note: Relative references require a file-backed source.
+Try using an absolute path or `@/` repo-root reference.

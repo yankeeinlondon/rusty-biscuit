@@ -1,7 +1,17 @@
+pub mod cargo;
 pub mod detection;
+pub mod go;
+pub mod identity;
+pub(crate) mod manifest_index;
+pub mod npm;
+pub mod nx_turbo;
+pub mod python;
 pub mod types;
 
+pub use identity::{RepoIdentity, detect_repo_identity};
 pub use types::{
-    DependencyEntry, DependencyKind, MonorepoTool, Package, PackageDiscoverySource,
-    PackageEcosystem, RepoInfo, detect_repo, detect_repo_structure, detect_repo_with_inventory,
+    MonorepoTool, Package, PackageDiscoverySource, PackageEcosystem, RepoInfo, detect_repo,
+    detect_repo_structure, detect_repo_with_inventory,
 };
+
+pub use crate::package::{DependencyEntry, DependencyKind};

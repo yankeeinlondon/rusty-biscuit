@@ -16,7 +16,7 @@ use std::collections::HashMap;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
-use crate::{LibraryInfoMetadata, ResearchKind};
+use crate::{LibraryInfo, ResearchKind};
 
 /// Legacy metadata format (schema_version: 0 or missing).
 ///
@@ -61,7 +61,7 @@ pub struct MetadataV0 {
 
     /// Information about the library (if kind is Library)
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub library_info: Option<LibraryInfoMetadata>,
+    pub library_info: Option<LibraryInfo>,
 
     /// Additional files created from user prompts (filename -> prompt)
     #[serde(default)]

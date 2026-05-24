@@ -10,7 +10,7 @@ use std::io;
 use claudine::composition::{
     ProviderPickerOption, ProviderPickerPlan, ResolvedExecutionTarget, SequenceStepDraft,
 };
-use claudine::events::Provider;
+use claudine::provider::Provider;
 use tui_chrome::components::input_table::TextInputConfig;
 use tui_chrome::prelude::*;
 

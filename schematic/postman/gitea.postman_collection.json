@@ -9,6 +9,11 @@
       "key": "baseUrl",
       "value": "https://gitea.example.com/api/v1",
       "description": "Base URL for all requests"
+    },
+    {
+      "key": "apiKey",
+      "value": "",
+      "description": "API key value"
     }
   ],
   "auth": {
@@ -16,11 +21,11 @@
     "apikey": [
       {
         "key": "key",
-        "value": "{{apiKey}}"
+        "value": "Authorization"
       },
       {
         "key": "value",
-        "value": "Authorization"
+        "value": "{{apiKey}}"
       },
       {
         "key": "in",

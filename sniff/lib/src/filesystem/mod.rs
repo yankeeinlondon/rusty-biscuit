@@ -15,6 +15,7 @@ pub mod formatting;
 pub mod git;
 pub mod just;
 pub mod languages;
+pub mod path_kind;
 pub mod repo;
 mod system_view;
 
@@ -31,9 +32,9 @@ pub use git::{
     BehindStatus, CommitDesc, CommitDescSet, CommitInfo, DeltaKind, GitHostingProvider, GitInfo,
     GitRepo, LocalBranchInfo, PeriodSpecifier, RemoteInfo, RepoStatus, detect_git,
     detect_git_with_request, detect_merge_conflicts, get_commit_by_sha, get_commit_files,
-    get_commits_for_path, get_recent_commits_by_count, get_recent_commits_by_date,
-    get_recent_commits_by_duration, get_recent_commits_by_hash, get_recent_commits_in_range,
-    parse_period,
+    get_commits_for_branch, get_commits_for_path, get_recent_commits_by_count,
+    get_recent_commits_by_date, get_recent_commits_by_duration, get_recent_commits_by_hash,
+    get_recent_commits_in_range, parse_period,
 };
 pub use just::{JustRecipe, JustRecipeParam, JustfileInfo, detect_justfiles};
 pub use languages::{LanguageBreakdown, LanguageStats, detect_languages};
@@ -87,8 +88,7 @@ pub fn detect_filesystem_with_request(
     let need_shared_view = need_repo_full
         || request.include_file_inventory
         || request.include_docs
-        || request.include_formatting
-        || request.repo.is_some();
+        || request.include_formatting;
     let shared_root = determine_shared_walk_root(root, request);
 
     std::thread::scope(|scope| {
@@ -128,7 +128,7 @@ pub fn detect_filesystem_with_request(
             let collector = collector.clone();
             let shared_root = shared_root.clone();
             let options = system_view::SharedWalkOptions {
-                collect_manifests: request.repo.is_some() || request.include_docs,
+                collect_manifests: need_repo_full || request.include_docs,
                 collect_inventory: request.include_file_inventory || need_repo_full,
                 collect_docs: request.include_docs,
             };
@@ -392,8 +392,7 @@ mod tests {
         let need_shared_view = need_repo_full
             || request.include_file_inventory
             || request.include_docs
-            || request.include_formatting
-            || request.repo.is_some();
+            || request.include_formatting;
 
         assert!(
             need_shared_view,
@@ -411,12 +410,34 @@ mod tests {
         let need_shared_view = need_repo_full
             || request.include_file_inventory
             || request.include_docs
-            || request.include_formatting
-            || request.repo.is_some();
+            || request.include_formatting;
 
         assert!(
             need_shared_view,
             "repo detection should trigger shared view"
+        );
+    }
+
+    #[test]
+    fn need_shared_view_false_for_structure_only_repo() {
+        let request = FilesystemRequest::new()
+            .git(GitRequest::summary())
+            .repo(RepoRequest::structure())
+            .without_docs()
+            .without_formatting()
+            .without_file_inventory();
+        let need_repo_full = request
+            .repo
+            .as_ref()
+            .is_some_and(|repo| !repo.structure_only);
+        let need_shared_view = need_repo_full
+            || request.include_file_inventory
+            || request.include_docs
+            || request.include_formatting;
+
+        assert!(
+            !need_shared_view,
+            "structure-only repo without other shared features should not trigger shared view"
         );
     }
 
@@ -431,8 +452,7 @@ mod tests {
         let need_shared_view = need_repo_full
             || request.include_file_inventory
             || request.include_docs
-            || request.include_formatting
-            || request.repo.is_some();
+            || request.include_formatting;
 
         assert!(
             need_shared_view,
@@ -455,8 +475,7 @@ mod tests {
         let need_shared_view = need_repo_full
             || request.include_file_inventory
             || request.include_docs
-            || request.include_formatting
-            || request.repo.is_some();
+            || request.include_formatting;
 
         assert!(
             !need_shared_view,

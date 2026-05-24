@@ -63,6 +63,39 @@ Process an incoming event from a provider hook (hidden from help). Reads JSON pa
 
 Show which actions are configured and for which events across the user and repo configs.
 
+### Dispatch Expressions
+
+Hook action templates, conditional `when` clauses, event binding matchers, and harness validation messages all share a single expression evaluator backed by Darkmatter's parser (see `claudine/lib/src/dispatch/expression.rs`). The same paths exposed by `claudine hooks --variables` are available everywhere expressions are evaluated.
+
+**Template Interpolation.** Speak messages, bash params, report templates, and message bodies pass through `{{...}}` interpolation. In addition to simple variable references, authors can use:
+
+- Fallbacks: `{{env.CI || "local"}}`
+- Ternaries: `{{git.is_dirty ? "dirty" : "clean"}}`
+- Comparisons: `{{hardware.cores > 8 ? "fast" : "slow"}}`
+- Helper functions: `{{length(git.branch) > 30 ? "long-branch" : git.branch}}`
+
+Booleans render as `true`/`false`. Unknown bare-variable references like `{{unknown_field}}` are preserved verbatim so misspellings stay visible. Composite expressions that fail to parse are also preserved unchanged. Legacy single-brace placeholders such as `{tool_name}` are still rewritten to `{{tool_name}}` for one compatibility cycle and emit a deprecation warning.
+
+**Action `when` Clauses.** Every hook action variant accepts an optional `when` boolean expression. When it evaluates to false (or fails to parse), the action is skipped without short-circuiting the rest of the binding. A skipped `Call` action cannot replace a previously selected blocking response.
+
+```json
+{ "type": "speak", "message": "Bash on {{git.branch}}", "when": "tool_name == 'Bash'" }
+{ "type": "bash",  "command": "say done", "when": "git.is_dirty" }
+{ "type": "call",  "command": "/usr/local/bin/check", "when": "provider == 'claude' && tool_name == 'Bash'" }
+{ "type": "message", "message": "build red on {{git.branch}}", "when": "event == 'tool_error'" }
+```
+
+**Matcher Modes.** Event binding matchers accept either a Darkmatter condition or a regex (legacy mode). Matcher strings are first attempted as conditions; bare-variable strings like `Bash|Edit` deliberately fall through to regex compilation so historical configurations keep their original semantics. Examples:
+
+| Matcher | Mode | Behavior |
+|---------|------|----------|
+| `Bash\|Edit` | Regex | Matches `tool_name` for tool events, `notification_type` for notifications |
+| `tool_name == 'Bash' && git.branch == 'main'` | Expression | Evaluated against full `EventMeta` |
+| `provider == 'claude' && !git.is_dirty` | Expression | Multi-field condition |
+| `[invalid(regex` | Neither | Warned and skipped (binding fires unconditionally) |
+
+Expression matchers that fail to evaluate at runtime log a warning and are treated as non-matches.
+
 ### `claudine skills`
 
 List shared skills across providers with their scopes. Displays link/sync state per resource using the four-type linking model (Skill, Command, Agent, Script). Replaces the retired `claudine link skills` subcommand.
@@ -129,7 +162,7 @@ Shared wrapper flags:
 | `-i, --interactive` | Force interactive mode even when a prompt string is provided |
 | `-m, --model <MODEL>` | Override the model used by the provider |
 | `-s, --system-prompt <PROMPT\|FILE>` | Set or append a system prompt (string or file path) |
-| `-t, --timeout <SECONDS>` | Timeout in seconds (non-interactive only) |
+| `-t, --timeout <DURATION>` | Wall-clock timeout like 30s, 5m, 2h (non-interactive only) |
 | `-o, --output <FORMAT>` | Set output format (json, text, stream) |
 | `--include <ENV_NAME>` | Keep a sensitive env var name that would otherwise be filtered |
 | `--mcp` | Compose a Claudine-managed MCP session from the effective defaults |
@@ -146,11 +179,13 @@ Wrapper behavior:
 
 - **Interactivity default**: providing a prompt string implies non-interactive mode. Use `-i`/`--interactive` to override back to interactive when providing a startup prompt.
 - **Execution line**: displays `Claudine ▸ {provider} {badges} {prompt}` — only the user's prompt text is shown (provider-specific switches are not leaked). Truncated to one terminal line.
-- **Structured streaming**: non-interactive runs use provider-native structured output (stream-json, JSONL, NDJSON) as the internal control plane. Claudine deserializes each line into a strongly typed `*Event` enum from `claudine::stream::protocol` (one module per provider), reconstructs clean assistant text for stdout, and emits metadata summaries to stderr. Every run follows a **9-section model** (execution line, env, system prompt, agent prompt, session ID, thinking prose, tool/info events, final STDOUT, and metadata) with strictly enforced spacing (at most one blank line between sections).
+- **Structured streaming**: non-interactive runs use provider-native structured output (stream-json, JSONL, NDJSON, or JSON-RPC 2.0 for Kimi) as the internal control plane. Claudine deserializes each line into a strongly typed `*Event` / `*Envelope` enum from `claudine::stream::protocol` (one module per provider), reconstructs clean assistant text for stdout, and emits metadata summaries to stderr. Every run follows a **9-section model** (execution line, env, system prompt, agent prompt, session ID, thinking prose, tool/info events, final STDOUT, and metadata) with strictly enforced spacing (at most one blank line between sections).
+- **Kimi wire mode**: non-interactive `claudine kimi` and Kimi-resolved composition runs launch the Kimi child with `--wire` and drive a JSON-RPC 2.0 line transport (`claudine/cli/src/commands/wrap/wire_io.rs`). Claudine sends `initialize` (declaring `supports_question: false` and `supports_plan_mode: false`) and a `prompt` request whose `params.user_input` carries the resolved prompt body. `ApprovalRequest` envelopes are auto-approved and surface as visible `auto_approved` info lines; `QuestionRequest` envelopes (which should not arrive given the declared capabilities) are answered with empty synthetic answers and a warning; `ToolCallRequest` is rejected with `-32601 method not found`; `HookRequest` is forwarded through Claudine's existing dispatch pipeline. Cancellation (Ctrl+C / deadline) sends a `cancel` JSON-RPC request before tearing down the child. The legacy `--print --output-format stream-json` Kimi path was removed — that mode emitted OpenAI-shaped envelopes with no top-level `type` field, so every event silently dropped to `ProviderExtension`.
 - **Thinking prose**: reasoning and thinking content from providers (Claude, Codex, OpenCode, etc.) is rendered on stderr in `Section::Thinking` as a `BlockQuote` with the wider `▌ ` border (matching System Prompt and Agent Prompt) and dim-italic gray text, ensuring continuous feedback during long turns. OpenCode reasoning (`{"type":"reasoning","text":"…"}`, including nested `part.text`) routes through `SemanticEvent::Reasoning` like every other provider rather than falling through `ProviderExtension`. Claude assistant prose that appears in the same `assistant` envelope as a `tool_use` is also promoted to `Reasoning`, so "Let me investigate..." tool-preface narration no longer leaks onto stdout or creates extra section breaks between tool calls.
 - **Stderr status lines**: `LiveSemanticSink` renders tool/subagent/info/warning/error status lines. Tool calls use a canonical humanized contract — `→ {Name}({summary})` for outgoing and `← {Name}({slot})` for incoming — that reads like a function call. Shell tools (`Bash`, `bash`, `run_command`, Codex `shell`) prepend the canonical shell name to the command (`bash ls -la`) so the user can see how the line would actually execute. `Task` summaries prefer `description → subject → prompt → task` so the agent's task body wins over arbitrary fields like `subagent_type`. Unknown event types fall through to a silent skip so provider format drift never turns into a hard failure. Raw JSON is never dumped to the terminal for known tools.
 - **Typed error blocks**: `SemanticEvent::Error` now carries a `SemanticErrorKind` (`Configuration`, `AgentNative`, `ApiRemote`, `Interrupted`, `Unknown`) and renders as a colored `BlockQuote` with `▌ ` border instead of a single failure status line. Border colors and labels are: orange `Configuration Error`, red `Agent Error`, red `API Error`, yellow `Interrupted`, red `Error`. Replays of older JSONL streams without a `kind` field default to `Unknown` via `#[serde(default)]`. The kind maps directly onto `AgentErrorCategory` for end-of-run reports via `From<SemanticErrorKind> for AgentErrorCategory`. Dispatch behavior remains keyed off `terminal: bool`; `kind` is classificatory metadata, not a new dispatch switch.
 - **Idle output flush**: `StreamTextRenderer` records when the block buffer last grew. When the heartbeat thread runs, it calls `flush_if_idle(silence_window)` (default **30 s**) before emitting its own status line, so a dangling final paragraph from a slow-to-close provider becomes visible within the silence window even if the provider never closes stdout. Buffered content always appears above the next heartbeat.
+- **Unified timeout watchdog** (OpenCode stability): the wrapper enforces exactly two timeouts via a single ticker — `timeout` (wall-clock budget from child spawn, opt-in, no default) and `step_timeout` (stream-silence since the last parent-stream event, default **30m**). Both can be set via CLI flags (`--timeout`, `--step-timeout`), markdown frontmatter (`timeout:`, `step_timeout:`), or env-var defaults (`CLAUDINE_TIMEOUT`, `CLAUDINE_STEP_TIMEOUT`); precedence is CLI > frontmatter > env > built-in. Setting an env var to `0s` disables that rule. Watchdog cadence and SIGTERM→SIGKILL grace are tunable via `CLAUDINE_WATCHDOG_INTERVAL` (default **5s**) and `CLAUDINE_KILL_GRACE` (default **10s**). On breach, the watchdog renders an `Agent Error` `BlockQuote` on stderr (enumerating any outstanding subagents for `step_timeout`) and the synthesised summary records `error_kind: "timeout"` or `"step_timeout"`. See [`docs/topics/timeouts.md`](../docs/topics/timeouts.md) for the canonical reference.
 - **Verbosity**: `--quiet` shows only a compact completion line; `--silent` suppresses all Claudine output; `-v` adds detailed human-facing metadata on the second summary line.
 - **Diagnostics**: `--debug <level>` controls Claudine tracing (`trace`, `debug`, `info`, `warn`, `error`). `RUST_LOG` takes precedence and supports per-module targeting such as `RUST_LOG=claudine::dispatch=trace,claudine::stream=debug`.
 - Validates provider binary availability before spawn (with provider docs URL in errors).
@@ -257,7 +292,7 @@ All user-facing output goes through `log.rs`:
 | `warn()` | stderr | Yellow "warning:" prefix |
 | `error()` | stderr | Red "Error:" prefix (with leading blank line) |
 
-Rich formatting uses biscuit-terminal components (Table, Prose with `{{bold}}` / `{{cyan}}` / `{{dim}}` markup, UnorderedList, OSC8 hyperlinks).
+Rich formatting uses biscuit-terminal components (Table, Prose with `<b>` / `<cyan>` / `<dim>` bracketed-tag markup, UnorderedList, OSC8 hyperlinks).
 
 ## Key Dependencies
 

@@ -67,18 +67,15 @@ Based on this research we've been able to establish the following schemas for th
 
 ### Kimi Code
 
-- **Flags:** `kimi --print --output-format stream-json` (thin, one-way) or `kimi --wire` (rich JSON-RPC 2.0, bidirectional)
-- **Format:**
-    - `--print --output-format stream-json`: JSONL assistant/tool-role messages plus occasional non-message objects (notifications, plan displays)
-    - `--wire`: JSON-RPC 2.0 over stdin/stdout, one complete envelope per line
-- **Schema source:** provider-authored Python Pydantic models in `src/kimi_cli/wire/types.py` (canonical), JSON-RPC envelope in `src/kimi_cli/wire/jsonrpc.py`, protocol version constant in `src/kimi_cli/wire/protocol.py`. No JSON Schema, OpenAPI, or AsyncAPI spec. Docs lag source (docs describe `1.4`; source ships `1.8` as of April 2026).
-- **Wire envelope:** `{ "jsonrpc": "2.0", "method": "event"|"request"|<rpc>, "params": { "event"|"request": { "type": <string>, "payload": <object> } } }`
-- **Wire method surface:** `initialize`, `prompt`, `steer`, `replay`, `set_plan_mode`, `cancel`, `event`, `request`
-- **Event union (`method: "event"`):** `TurnBegin`, `TurnEnd`, `StepBegin`, `StatusUpdate`, `Notification`, `PlanDisplay`, `SubagentEvent`, `ToolCall`, `ToolCallPart`, `ToolResult`, `ApprovalResponse`, `HookTriggered`, `HookResolved`
-- **Request union (`method: "request"`):** `ApprovalRequest`, `QuestionRequest` (only when client advertises support), `ToolCallRequest`, `HookRequest`
-- **Response payloads:** `QuestionResponse`, `HookResponse`
-- **Print-mode `stream-json`** is much thinner: assistant messages include embedded `tool_calls`; tool outputs arrive as tool-role messages flattened into the stream; no full request/approval/hook lifecycle.
-- **Notes:** `StatusUpdate.token_usage` is the primary token channel in wire mode. There is no dedicated event for model identity, quota, or no-funds. `--yolo` auto-dismisses `AskUserQuestion` and injects non-interactive guidance into agent prompts. Wire mode gates structured question handling through `initialize` capability negotiation.
+- **Flag:** `kimi --wire` (JSON-RPC 2.0 over stdin/stdout, bidirectional). Claudine non-interactive runs always use wire mode; the legacy `--print --output-format stream-json` print-mode branch was removed in the 2026-04-26 fix-kimi feature because every print-mode line dropped to `ProviderExtension` (no top-level `type` field, OpenAI-shaped envelopes only).
+- **Format:** one complete JSON-RPC envelope per line on stdin and stdout.
+- **Schema source:** provider-authored Python Pydantic models in `src/kimi_cli/wire/types.py` (canonical), JSON-RPC envelope in `src/kimi_cli/wire/jsonrpc.py`, protocol version constant in `src/kimi_cli/wire/protocol.py`. No JSON Schema, OpenAPI, or AsyncAPI spec. Docs lag source (docs describe `1.4`; the live capture against `kimi 1.38.0` reports protocol `1.9`).
+- **Wire envelope shapes:** notification `{ jsonrpc, method: "event", params: { type, payload } }`; request `{ jsonrpc, id, method: "request", params: { type, payload } }`; success response `{ jsonrpc, id, result }`; error response `{ jsonrpc, id, error: { code, message, data? } }`.
+- **Wire method surface:** `initialize`, `prompt` (param shape is `{ user_input: str | list[ContentPart] }`), `cancel`, `event`, `request`. `steer`, `replay`, `set_plan_mode` are post-MVP for Claudine.
+- **Event union (`method: "event"`):** `TurnBegin`, `SteerInput`, `TurnEnd`, `StepBegin`, `StepInterrupted`, `CompactionBegin`, `CompactionEnd`, `MCPLoadingBegin`, `MCPLoadingEnd`, `StatusUpdate`, `Notification`, `PlanDisplay`, `ContentPart` (assistant `text` and reasoning `think` deltas share this shape, distinguished by inner `payload.type`), `ToolCall`, `ToolCallPart`, `ToolResult`, `ApprovalResponse`, `SubagentEvent`, `BtwBegin`, `BtwEnd`. There is **no** `MessageStart` / `MessageDelta` / `MessageEnd` / `Thinking` / `DiffDisplayBlock` / `Cancelled` / top-level `Error` event in the live capture; older spec material that mentioned them was based on draft type definitions, not shipping behavior.
+- **Request union (`method: "request"`):** `ApprovalRequest`, `QuestionRequest` (Claudine declares `supports_question: false`, so it should not arrive — but a synthetic empty answer is wired up as a defensive fallback), `ToolCallRequest`, `HookRequest`.
+- **Cancellation contract:** client sends `cancel` → kimi replies `{ result: {} }` → kimi emits `TurnEnd` → kimi returns the originating `prompt` request with `{ result: { status: "cancelled" } }`. There is no `Cancelled` event; `prompt` response `result.status` is one of `finished`, `cancelled`, `max_steps_reached`, `steered` (per `kimi_cli/wire/jsonrpc.py::Statuses`).
+- **Notes:** `StatusUpdate.token_usage` (`input_other`, `output`, `input_cache_read`, `input_cache_creation`) is the primary token channel; `context_usage` and `context_tokens` / `max_context_tokens` drive the 80% context-pressure warning. There is no dedicated event for model identity, quota, or no-funds — model identity flows from the `initialize` response's `server` block. `--yolo` is forwarded to the child but the auto-approve runtime contract is enforced inside Claudine's wire IO loop, which replies to every `ApprovalRequest` with `response: "approve"` and emits a visible `auto_approved` info event so the user sees what was accepted.
 
 ### Opencode CLI
 
@@ -166,7 +163,9 @@ claudine/lib/src/stream/protocol/
 ├── gemini.rs    — GeminiEvent + 9 structs
 ├── opencode.rs  — OpenCodeEvent + 12 structs, `#[serde(flatten)]` for dual-location fields
 ├── qwen.rs      — QwenEvent + 9 structs, subtype-dispatched system events
-└── kimi.rs      — KimiEvent + 10 structs, three-way content fallback
+└── kimi.rs      — KimiEnvelope (JSON-RPC dispatch) + KimiWireEvent (20 event variants) +
+                   KimiWireRequest (4 request variants) + per-payload structs;
+                   wire-mode-only since 2026-04-26 (legacy stream-json types removed)
 ```
 
 Every protocol module has its own `#[cfg(test)] mod tests` block covering each event variant, the major field aliases, and the `unknown_event_type_fails_typed` contract. Those tests deserialize raw JSON strings to guarantee the serde derives line up with the wire format — they are the safety net for provider format drift.
@@ -210,7 +209,7 @@ Handler methods take the typed struct by value (e.g. `fn handle_result(&mut self
 
 **Qwen** — The `system` event is dispatched only when `subtype == "session_start"` via `QwenSystem::is_session_start()` + `into_init()`. `QwenEvent::Assistant` (where the event type is literally `"assistant"`) skips the `role == "assistant"` filter that `QwenEvent::Message` / `QwenEvent::AssistantMessage` require, matching the legacy parser's dual-check logic. `QwenTool::take_input()` accepts all five aliases: `input`, `parameters`, `arguments`, `args`, `params` — the legacy type audit caught `args`/`params` as missing from the design doc, and the protocol module fixes that.
 
-**Kimi** — `KimiContent::resolved_text()` implements the three-way fallback (`content` array → top-level `text` → `content` as string) in one method. `KimiStatusUpdate::resolved_context()` returns a `KimiContextUsage` struct whose `computed_percent()` method falls back to computing `used/total * 100.0` when the provider doesn't pre-supply `percent` — the 80% warning logic stays in the parser, not the type, because it's a sink-dispatch concern. Tool input aliases include `args`/`params` for parity with Qwen.
+**Kimi** — Wire-only since 2026-04-26. The line-level dispatch goes through `KimiEnvelope::classify(value)`, which matches on JSON-RPC envelope shape rather than a single top-level `type` field: `Notification` (`method == "event"`), `Request` (`method == "request"`), `SuccessResponse` (`id` + `result`), and `ErrorResponse` (`id` + `error`). Notification payloads then deserialize into `KimiWireEvent` and request payloads into `KimiWireRequest` — both tagged on the inner `params.type`. Because the assistant text and reasoning streams are flattened into a single `ContentPart` event family, the parser tracks pending text/think buffers per turn and flushes them at `TurnEnd` (or when the part type changes mid-turn). Tool calls accumulate via the `ToolCall` → repeated `ToolCallPart` deltas pattern; `KimiToolCall::take_arguments_string()` + `parse_arguments_string()` hand the resolved JSON arguments back to the live sink as structured input. Cancellation is detected on the originating `prompt` request's response: `result.status == "cancelled"` (per `kimi_cli/wire/jsonrpc.py::Statuses`) maps to `SemanticErrorKind::Interrupted`.
 
 ### Why `raw.clone()` is acceptable
 
@@ -226,3 +225,73 @@ A `rg '\.get\('` across the parser files turns up only legitimate uses after the
 4. **Test assertions like `raw.get("tools").is_none()`** — verifying the `raw_summary` compaction pass stripped the large arrays.
 
 No handler method accepts `&Value` for field extraction anymore.
+
+## Raw Stream Capture (Diagnostic)
+
+When a provider stalls — most often OpenCode going silent after subagent completion or between "I'll do X" assistant text and the corresponding `tool_use` — the semantic parser only records what it successfully decoded. To make post-mortem analysis possible, Claudine offers an opt-in raw NDJSON capture that mirrors every line the wrapped child writes to stdout, with millisecond timing relative to spawn. The capture is implemented at the spawn layer, not the parser, so even lines that the typed dispatch silently skips (unknown event types, format drift) end up on disk.
+
+### Activation
+
+Set `CLAUDINE_RAW_STREAM_DIR` to a writable directory. Any non-empty value enables capture; unset or empty disables it (and the in-loop hook is zero-cost). The variable accepts `~`-prefixed paths.
+
+```bash
+CLAUDINE_RAW_STREAM_DIR=~/claudine-traces claudine opencode "say hi"
+```
+
+### File layout
+
+For each spawn that produces a structured stream, two files appear under the configured directory:
+
+```
+<provider-slug>-<YYYYMMDDTHHMMSS>-<pid>.ndjson      # raw capture
+<provider-slug>-<YYYYMMDDTHHMMSS>-<pid>.meta.json   # sidecar
+```
+
+The `.ndjson` file is one JSON object per line. Each line wraps the original raw line emitted by the child, preserving the original verbatim but adding a timestamp so timing is recoverable without separately joining to the child's clock:
+
+```json
+{"ts_ms": 0,    "raw": "{\"type\":\"step_start\",\"sessionID\":\"ses_1\"}"}
+{"ts_ms": 125,  "raw": "{\"type\":\"text\",\"text\":\"hello\"}"}
+{"ts_ms": 4830, "raw": "{\"type\":\"step_finish\",\"part\":{...}}"}
+```
+
+- `ts_ms` is milliseconds elapsed since the wrapper's `Instant::now()` at spawn — the same reference the byte-heartbeat and silence detector use.
+- `raw` is the exact line as read from the child's stdout (no trailing newline, no normalization).
+- Whitespace-only lines are skipped (matching the byte-heartbeat policy in `spawn.rs`) so blank flushes don't pollute the trace.
+
+The `.meta.json` sidecar carries the run's provenance:
+
+```json
+{
+  "provider": "opencode",
+  "pid": 12345,
+  "started_at": "2026-05-10T18:42:15-07:00",
+  "claudine_version": "0.1.0"
+}
+```
+
+### Inspection patterns
+
+Time deltas between consecutive emissions are the most useful signal when diagnosing a stall:
+
+```bash
+# Show timing + first 80 chars of each captured line.
+jq -rc '"\(.ts_ms) \(.raw[:80])"' ~/claudine-traces/opencode-*.ndjson | tail -50
+
+# Compute gaps between events (the gap right before the kill is the smoking gun).
+jq -s 'map(.ts_ms) | . as $t | [range(1; length)] | map($t[.] - $t[.-1])' \
+  ~/claudine-traces/opencode-*.ndjson
+```
+
+A common pattern observed on OpenCode + Minimax 2.7 stalls: a normal cadence of events while subagents run, then a single assistant `text` line announcing the next action ("Running sniff repo to get the repo state:"), followed by *zero* further lines until the `step_timeout` watchdog fires. That confirms the silence is on the provider side, not in claudine's parsing — the typed dispatch never had a chance to drop anything because nothing was emitted.
+
+### Where it's hooked
+
+`StreamCapture` is owned by the stdout reader thread inside `run_child_stream_semantic` ([`claudine/cli/src/commands/wrap/exec/stream_capture.rs`](../../../claudine/cli/src/commands/wrap/exec/stream_capture.rs), wired in [`claudine/cli/src/commands/wrap/exec/spawn.rs`](../../../claudine/cli/src/commands/wrap/exec/spawn.rs)). It runs right after the byte-heartbeat and before `parser.feed_line`, so a captured line is guaranteed to have refreshed `last_byte_at` even if the typed parser silently discards it. All capture I/O errors are debug-traced and never propagate — the goal is diagnostic visibility, never a new failure mode.
+
+### Scope and limitations
+
+- Only stdout is captured today. Stderr capture can be added if a future diagnosis requires it.
+- The capture is per-spawn; sequence / inline-compose loops produce one pair of files per child invocation.
+- File rotation is not built in. The intended use is short, targeted runs while reproducing a stall; long-running campaigns should rotate or prune externally.
+- The capture is purely passive. It does not influence parser dispatch, watchdog timing, or any user-facing rendering.

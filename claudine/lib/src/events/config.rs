@@ -1,9 +1,9 @@
 use serde::{Deserialize, Serialize};
 
-use super::provider::Provider;
 use crate::actions::{HookAction, LogTarget};
 use crate::messaging::ScopedMessagingSettings;
-use crate::services::protect::ProtectConfig;
+use crate::protect::ProtectConfig;
+use crate::provider::Provider;
 
 /// Global settings that apply to all event bindings.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]

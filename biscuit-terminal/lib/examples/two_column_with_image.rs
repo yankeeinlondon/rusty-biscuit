@@ -3,7 +3,7 @@
 //! Run with: `cargo run -p biscuit-terminal --example two_column_with_image`
 
 use biscuit_terminal::components::prose::Prose;
-use biscuit_terminal::components::renderable::Renderable;
+use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::components::terminal_image::{ImageWidth, TerminalImage};
 use biscuit_terminal::components::two_column::TwoColumn;
 use biscuit_terminal::terminal::Terminal;
@@ -22,7 +22,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Right-hand column with a short description.
     let description = Prose::new(concat!(
-        "{{bold}}biscuit-terminal{{reset}}\n\n",
+        "<bold>biscuit-terminal</bold>\n\n",
         "Terminal-aware rendering with capability detection, inline images, \n",
         "Mermaid diagrams, and graceful fallbacks when features are missing."
     ))

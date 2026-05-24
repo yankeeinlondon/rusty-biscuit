@@ -1,6 +1,5 @@
 ---
 source: claudine/cli/tests/wrap_commands.rs
-assertion_line: 159
 expression: strip_ansi(&stdout)
 ---
 Claudine
@@ -39,6 +38,7 @@ Administration:
   providers         Show provider capability matrix
   logs              Query and sync Claudine JSONL logs
   completions       Generate shell completions
+  context           Show Darkmatter runtime context, expression engine, and side effects
 
 Options:
   -v, --verbose     Increase presentation detail for human-facing output

@@ -36,8 +36,8 @@ All notable changes to this project will be documented in this file.
 - `--sort <natural|reverse|asc|desc>` orders the option list before
   rendering.
 - Inline fuzzy search: typing alphanumerics opens the search prompt
-  and filters the list live. Use `--no-filter` to restore the legacy
-  first-letter shortcut behaviour.
+  and filters the list live. Use `--no-filter` to disable filtering
+  (alphanumeric keys are then ignored).
 - `Ctrl+A` selects every enabled option in `choose-many`; `Ctrl+D`
   clears the selection.
 - Fallback submit: pressing Enter with no explicit selection promotes

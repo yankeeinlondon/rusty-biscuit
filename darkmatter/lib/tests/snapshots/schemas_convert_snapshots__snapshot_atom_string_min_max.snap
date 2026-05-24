@@ -1,0 +1,16 @@
+---
+source: darkmatter/lib/tests/schemas_convert_snapshots.rs
+expression: "convert_atom(\"string(min(5); max(80))\")"
+---
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "properties": {
+    "field": {
+      "maxLength": 80,
+      "minLength": 5,
+      "type": "string"
+    }
+  },
+  "type": "object"
+}

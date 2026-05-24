@@ -9,6 +9,7 @@ import "../just/review.just"
 import "../just/notify.just"
 import "../just/ai.just"
 import "../just/devops.just"
+import "../just/spec.just"
 
 BOLD := '\033[1m'
 DIM := '\033[2m'
@@ -28,7 +29,6 @@ SCHEMATIC := lowercase(PACKAGE)
 DEFINE_NAME := PACKAGE + " Define Library"
 DEFINE := SCHEMATIC + "-define"
 
-
 default:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -45,18 +45,17 @@ default:
     just --list | grep -v 'default'
     echo
 
-
 # build schematic packages (define, definitions, gen)
 build *args="":
-    @just _build schematic-define "Schematic Define" {{args}}
-    @just _build schematic-gen "Schematic Generation" {{args}}
-    @just _build schematic-definitions "Schematic Definitions" {{args}}
+    @just _build schematic-define "Schematic Define" {{ args }}
+    @just _build schematic-gen "Schematic Generation" {{ args }}
+    @just _build schematic-definitions "Schematic Definitions" {{ args }}
 
 # run tests for schematic packages
 test *args="":
-    @just _test schematic-define {{args}}
-    @just _test schematic-gen {{args}}
-    @just _test schematic-definitions {{args}}
+    @just _test schematic-define {{ args }}
+    @just _test schematic-gen {{ args }}
+    @just _test schematic-definitions {{ args }}
 
 # check for artifact drift (run after making definition changes)
 check-drift:
@@ -88,16 +87,15 @@ generate:
     @echo ""
     @cargo run -p schematic-gen -- generate --api all --output schema/src \
         --openapi-out openapi --postman-out postman -v
-    @just _notify "The Schematic definitions in schematic-definitions were generated to schematic-schema"
-
+    @just _notify "The Schematic definitions in schematic-definitions were generated to schematic-schema" "Schematic"
 
 # generate a single API client to schematic/schema
 generate-one api:
     @echo ""
-    @echo "Generating {{api}} API Client"
+    @echo "Generating {{ api }} API Client"
     @echo "------------------------------"
     @echo ""
-    @cargo run -p schematic-gen -- generate --api {{api}} --output schema/src \
+    @cargo run -p schematic-gen -- generate --api {{ api }} --output schema/src \
         --openapi-out openapi --postman-out postman -v
 
 # generate only OpenAPI specs (no Postman)
@@ -118,26 +116,25 @@ generate-postman:
     @cargo run -p schematic-gen -- generate --api all --output schema/src \
         --postman-out postman --no-openapi -v
 
-
 # build, install CLI, generate schemas, and verify
 install:
     @echo ""
-    @echo -e "Installing {{BOLD}}{{YELLOW}}Schematic{{RESET}}"
+    @echo -e "Installing {{ BOLD }}{{ YELLOW }}Schematic{{ RESET }}"
     @echo "--------------------"
     @echo ""
-    @echo -e "{{BOLD}}Building schematic packages (release){{RESET}}"
+    @echo -e "{{ BOLD }}Building schematic packages (release){{ RESET }}"
     @cargo build --release -p schematic-define -p schematic-definitions -p schematic-gen  || ( playa effect error-2 2>/dev/null && exit 1 )
     @echo ""
-    @echo -e "{{BOLD}}Installing schematic-gen CLI{{RESET}}"
+    @echo -e "{{ BOLD }}Installing schematic-gen CLI{{ RESET }}"
     @cargo install --path gen --locked  || ( playa effect error-2 2>/dev/null && exit 1 )
     @echo ""
-    @echo -e "{{BOLD}}Generating all API clients{{RESET}}"
+    @echo -e "{{ BOLD }}Generating all API clients{{ RESET }}"
     @cargo run --release -p schematic-gen -- --api all --output schema/src -v  || ( playa effect error-2 2>/dev/null && exit 1 )
     @echo ""
-    @echo -e "{{BOLD}}Verifying generated code compiles{{RESET}}"
+    @echo -e "{{ BOLD }}Verifying generated code compiles{{ RESET }}"
     @cargo check -p schematic-schema  || ( playa effect error-2 2>/dev/null && exit 1 )
     @echo ""
-    @echo -e "{{BLUE}}{{BOLD}}Schematic installed successfully!{{RESET}}"
+    @echo -e "{{ BLUE }}{{ BOLD }}Schematic installed successfully!{{ RESET }}"
     @echo ""
     @playa effect drop-4 2>/dev/null || exit 0
 
@@ -174,7 +171,7 @@ docs:
     @echo "Documentation for Schematic packages"
     @echo ""
     @cargo doc --workspace --no-deps --open
-    @just _speak "Documentation for {{PACKAGE}} was built";
+    @just _speak "Documentation for {{ PACKAGE }} was built";
 
 release:
     @just lint
@@ -186,39 +183,38 @@ release:
 # Provides a two-step review of an API defined in Schematic
 review-api api design:
     @echo ""
-    @echo "Review the {{BOLD}}{{api}}{{RESET}} API in schematic"
-    @echo "{{DIM}}{{ITALIC}}- review file located at {{BLUE}}./docs/{{TODAY}}-review-of-{{api}}.md{{RESET}}"
-    @touch "./docs/{{TODAY}}-review-of-{{api}}.md"
-    @claudine gemini --ni "Your task is to review the {{api}} API definition(s) which are defined in the schematic-definitions as well the generated API clients for {{api}} API's in schematic-schema. Keep in mind the best practices for API definitions found in @schematic/skill/best-practices-in-designing-an-api.md . Also review the original design document found at @schematic/docs/{{design}} . Look for for all opportunities to improve the ergonomics and/or performance of the code. Also look at the quality of documentation and ensure that it's high quality in both the schematic-definitions package but that the generated API client in schematic-schema is fully documented. Make sure that this API also exports a valid OpenAPI definition as part of the generation step. Write all your recommendations to @schematic/docs/{{TODAY}}-review-of-{{api}}.md . Remember that this is a non-interactive process so avoid asking questions and just complete the task."
+    @echo "Review the {{ BOLD }}{{ api }}{{ RESET }} API in schematic"
+    @echo "{{ DIM }}{{ ITALIC }}- review file located at {{ BLUE }}./docs/{{ TODAY }}-review-of-{{ api }}.md{{ RESET }}"
+    @touch "./docs/{{ TODAY }}-review-of-{{ api }}.md"
+    @claudine gemini --ni "Your task is to review the {{ api }} API definition(s) which are defined in the schematic-definitions as well the generated API clients for {{ api }} API's in schematic-schema. Keep in mind the best practices for API definitions found in @schematic/skill/best-practices-in-designing-an-api.md . Also review the original design document found at @schematic/docs/{{ design }} . Look for for all opportunities to improve the ergonomics and/or performance of the code. Also look at the quality of documentation and ensure that it's high quality in both the schematic-definitions package but that the generated API client in schematic-schema is fully documented. Make sure that this API also exports a valid OpenAPI definition as part of the generation step. Write all your recommendations to @schematic/docs/{{ TODAY }}-review-of-{{ api }}.md . Remember that this is a non-interactive process so avoid asking questions and just complete the task."
     @echo
     @echo "First Stage of Review is Complete. Now will validate that Completion Steps have been completed."
     @echo
-    @claudine gem --ni "A review on the {{api}} API in schematic was performed and produced the suggestions found in @schematic/docs/{{TODAY}}-review-of-{{api}}.md ; your task is to apply the completion checklist found in @schematic/skill/completion-checklist.md to the {{api}} API implementation and then add any additional suggestions you have to the same @schematic/docs/{{TODAY}}-review-of-{{api}}.md document. Remember that this is a non-interactive process so avoid asking questions and just complete the task."
+    @claudine gem --ni "A review on the {{ api }} API in schematic was performed and produced the suggestions found in @schematic/docs/{{ TODAY }}-review-of-{{ api }}.md ; your task is to apply the completion checklist found in @schematic/skill/completion-checklist.md to the {{ api }} API implementation and then add any additional suggestions you have to the same @schematic/docs/{{ TODAY }}-review-of-{{ api }}.md document. Remember that this is a non-interactive process so avoid asking questions and just complete the task."
 
 # stages all files in package area and then commits and pushes
 cp:
     @echo ""
-    @echo -e "Staging all {{BOLD}}modified{{RESET}} or {{BOLD}}untracked{{RESET}} files for the {{PACKAGE}} package area."
+    @echo -e "Staging all {{ BOLD }}modified{{ RESET }} or {{ BOLD }}untracked{{ RESET }} files for the {{ PACKAGE }} package area."
     @echo ""
     @git add .
     @echo ""
     @echo "Files have been added"
     @echo
-    @sniff git --package "{{PACKAGE}}"
+    @sniff git --package "{{ PACKAGE }}"
     @echo ""
     @just commit
     @echo ""
     @git push
     @echo ""
     @just _play select-4
-    @echo -e "All committed files from {{BOLD}}{{PACKAGE}}{{RESET}} have now been pushed to remote."
+    @echo -e "All committed files from {{ BOLD }}{{ PACKAGE }}{{ RESET }} have now been pushed to remote."
     @echo
-
 
 # Show the dependencies for this package
 deps:
     @echo "Dependencies:"
-    @echo "$(just -f ../justfile repo-deps 2>/dev/null)" | rg "{{DEFINE}}*:"
+    @echo "$(just -f ../justfile repo-deps 2>/dev/null)" | rg "{{ DEFINE }}*:"
 
 readme:
     _readme_files schematic
@@ -226,4 +222,4 @@ readme:
 # No-op recipe: reference color vars so linters won't report them as unused.
 # Run `just _colors` if you want to exercise this (it does nothing).
 _colors:
-    @: {{BOLD}} {{ITALIC}} {{RESET}} {{BLACK}} {{RED}} {{GREEN}} {{YELLOW}} {{BLUE}} {{MAGENTA}} {{CYAN}} {{WHITE}} >/dev/null || true
+    @: {{ BOLD }} {{ ITALIC }} {{ RESET }} {{ BLACK }} {{ RED }} {{ GREEN }} {{ YELLOW }} {{ BLUE }} {{ MAGENTA }} {{ CYAN }} {{ WHITE }} >/dev/null || true

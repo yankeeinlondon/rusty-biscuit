@@ -12,7 +12,7 @@ fn prelude_exports_horizontal_rule_types() {
         .alignment(RuleAlignment::Full)
         .weight(RuleWeight::Medium);
 
-    // Terminal rendering is reachable via the Renderable trait (also prelude).
+    // Terminal rendering is reachable via the TerminalRenderable trait (also prelude).
     let term = Terminal::default();
     let out = rule.render(&term);
     assert!(!out.is_empty(), "expected non-empty terminal output");
@@ -23,7 +23,7 @@ fn prelude_exports_browser_renderable_trait() {
     // `BrowserRenderable` must be importable from the prelude so generic
     // code can be written against it without reaching into submodules.
     fn takes_browser_renderable<T: BrowserRenderable>(r: &T) -> String {
-        r.render_to_browser()
+        r.render_html_fragment().render()
     }
 
     let rule = HorizontalRule::new();

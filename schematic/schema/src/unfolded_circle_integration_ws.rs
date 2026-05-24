@@ -16,6 +16,13 @@
 //! - Credential environment variables: `UCR_INTEGRATION_TOKEN`.
 //!
 //! API documentation: <https://unfoldedcircle.github.io/core-api/integration/>
+#![allow(
+    clippy::clone_on_copy,
+    clippy::collapsible_if,
+    clippy::possible_missing_else,
+    clippy::result_large_err,
+    clippy::single_match
+)]
 pub use schematic_definitions::unfolded_circle::integration_ws::*;
 /// Builds the Unfolded Circle Integration WebSocket API definition.
 #[must_use]

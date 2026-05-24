@@ -10,9 +10,10 @@ use darkmatter::markdown::Markdown;
 use darkmatter::markdown::compose::ComposePerfReport;
 use serde::{Deserialize, Serialize};
 
+use super::launch_workspace::LaunchWorkspaceContext;
 use super::lifecycle::LifecycleConfig;
-use crate::events::Provider;
 use crate::harness::shell::CachedApprovalDecision;
+use crate::provider::Provider;
 
 /// Shared approval cache that can be reused across composition runs
 /// (e.g. steps of one sequence) so that previously approved commands
@@ -39,6 +40,159 @@ pub struct ResolvedCompositionSource {
     pub original_text: String,
     /// The parsed Markdown document.
     pub markdown: Markdown,
+}
+
+/// Validated loop configuration parsed from a prompt's `loop` frontmatter.
+#[derive(Debug, Clone, PartialEq)]
+pub struct LoopConfig {
+    /// The condition that decides whether loop execution continues.
+    pub condition: LoopCondition,
+    /// Actions applied to frontmatter after each completed iteration.
+    pub actions: Vec<LoopAction>,
+    /// Optional per-document positive iteration cap.
+    pub max_iterations: Option<usize>,
+    /// Optional per-document failure behavior.
+    pub fail_fast: Option<bool>,
+    /// Optional per-document policy for what to do when a completed iteration
+    /// reports a provider rate-limit signal. `None` falls back to
+    /// [`OnRateLimit::Pause`].
+    pub on_rate_limit: Option<OnRateLimit>,
+}
+
+/// Policy for how the loop engine reacts to a rate-limit signal observed on
+/// a completed iteration.
+///
+/// The signal is read from [`crate::stream::summary::RateLimitInfo`] when
+/// `is_throttled == Some(true)`. The policy is resolved from
+/// `LoopExecutionOptions.on_rate_limit` (CLI) > `LoopConfig.on_rate_limit`
+/// (frontmatter) > [`OnRateLimit::Pause`] (default).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum OnRateLimit {
+    /// Sleep until `reset_at` + a small safety margin, then proceed to the
+    /// next iteration. If `reset_at` is missing or already past, behave as
+    /// [`OnRateLimit::Abort`] (no unbounded sleep).
+    #[default]
+    Pause,
+    /// Halt the loop with a structured [`super::error::CompositionError::LoopRateLimited`].
+    Abort,
+    /// Proceed to the next iteration without pausing. Reserved for soft
+    /// per-request limits that won't recur; not recommended.
+    Continue,
+}
+
+impl OnRateLimit {
+    /// Parse from the frontmatter string form.
+    pub fn parse(value: &str) -> Result<Self, String> {
+        match value {
+            "pause" => Ok(Self::Pause),
+            "abort" => Ok(Self::Abort),
+            "continue" => Ok(Self::Continue),
+            other => Err(format!(
+                "must be one of `pause`, `abort`, `continue`, got `{other}`"
+            )),
+        }
+    }
+
+    /// Return the canonical string form (matches the frontmatter accepted form).
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Pause => "pause",
+            Self::Abort => "abort",
+            Self::Continue => "continue",
+        }
+    }
+}
+
+/// A loop condition. `while` continues while truthy; `until` continues until truthy.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LoopCondition {
+    /// Continue while this expression evaluates to true.
+    While(String),
+    /// Continue until this expression evaluates to true.
+    Until(String),
+}
+
+/// A frontmatter mutation action executed between loop iterations.
+#[derive(Debug, Clone, PartialEq)]
+pub enum LoopAction {
+    /// Increment a numeric property by one.
+    Increment(String),
+    /// Decrement a numeric property by one.
+    Decrement(String),
+    /// Set a property to the provided value.
+    Set {
+        /// Frontmatter property to update.
+        prop: String,
+        /// New value.
+        value: serde_json::Value,
+    },
+    /// Append a value to a property.
+    Append {
+        /// Frontmatter property to update.
+        prop: String,
+        /// Value to append.
+        value: serde_json::Value,
+    },
+    /// Prepend a value to a property.
+    Prepend {
+        /// Frontmatter property to update.
+        prop: String,
+        /// Value to prepend.
+        value: serde_json::Value,
+    },
+    /// Shallow-merge an object into a property.
+    Merge {
+        /// Frontmatter property to update.
+        prop: String,
+        /// Object value to merge.
+        value: serde_json::Value,
+    },
+}
+
+/// Ambient loop variables injected into each loop iteration.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AmbientVariable {
+    /// 1-based loop iteration number.
+    Iteration,
+    /// Whether the current iteration is the first.
+    IsFirst,
+    /// Whether the current iteration is expected to be the last.
+    IsLast,
+    /// Captured output from the previous iteration.
+    LastOutput,
+    /// Exit code from the previous iteration.
+    LastExitCode,
+}
+
+impl AmbientVariable {
+    /// Reserved ambient variable names.
+    ///
+    /// All loop ambient variables are namespaced under the `_loop_` prefix
+    /// to avoid shadowing user-defined frontmatter properties named
+    /// `iteration`, `is_first`, `last_output`, etc.
+    pub const NAMES: &[&str] = &[
+        "_loop_count",
+        "_loop_is_first",
+        "_loop_is_last",
+        "_loop_last_output",
+        "_loop_last_exit_code",
+    ];
+
+    /// Returns true when `name` is a reserved ambient variable.
+    pub fn is_reserved(name: &str) -> bool {
+        Self::NAMES.contains(&name)
+    }
+
+    /// Return the frontmatter/template key for this ambient variable.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Iteration => "_loop_count",
+            Self::IsFirst => "_loop_is_first",
+            Self::IsLast => "_loop_is_last",
+            Self::LastOutput => "_loop_last_output",
+            Self::LastExitCode => "_loop_last_exit_code",
+        }
+    }
 }
 
 /// Why a particular provider was selected.
@@ -90,6 +244,15 @@ pub struct InstalledProviderSnapshot {
     pub excluded: BTreeSet<Provider>,
     /// All installed providers (including excluded ones).
     pub all_installed: Vec<Provider>,
+    /// Resolved binary paths for each installed provider.
+    pub binary_paths: BTreeMap<Provider, PathBuf>,
+}
+
+impl InstalledProviderSnapshot {
+    /// Return the resolved binary path for a provider, if known.
+    pub fn binary_path(&self, provider: Provider) -> Option<&std::path::Path> {
+        self.binary_paths.get(&provider).map(|p| p.as_path())
+    }
 }
 
 /// Why a provider was chosen.
@@ -329,14 +492,15 @@ pub struct CompositionExecutionRequest {
     pub output: Option<OutputFormat>,
     /// Parsed system prompt CLI args for the session.
     pub system_prompt_args: crate::system_prompt::SystemPromptArgs,
-    /// Timeout in seconds for non-interactive mode.
-    pub timeout: Option<u64>,
-    /// Step-silence timeout in seconds for structured streaming runs.
+    /// Wall-clock timeout as a duration string (e.g. `30s`, `5m`, `2h`).
+    /// Parsed by the composition executor. Only valid in non-interactive mode.
+    pub timeout: Option<String>,
+    /// Step-silence timeout as a duration string (e.g. `30s`, `5m`).
     ///
     /// Resets on every stream event; when silence exceeds this budget the
     /// child is killed with `TimedOut`. Ignored in capture and passthrough
     /// modes (warning emitted). `None` means no silence deadline is applied.
-    pub step_timeout: Option<u64>,
+    pub step_timeout: Option<String>,
     /// OPERATION env var value for the composed session.
     pub operation: Option<String>,
     /// Enable provider-specific sandboxing.
@@ -370,6 +534,35 @@ pub struct CompositionExecutionRequest {
     /// Whether this request is part of a sequence run. When `true`, the
     /// execution header shows a `Sequence` badge.
     pub sequence: bool,
+    /// Pre-computed installed-provider snapshot, supplied by callers that
+    /// already ran host detection during prep (e.g. `CompositionPrepContext`).
+    /// When `Some`, the executor skips the `InstalledAiClients::new()` scan
+    /// and uses this snapshot for both provider selection and binary path
+    /// resolution.
+    pub installed_snapshot: Option<InstalledProviderSnapshot>,
+    /// Pre-computed launch-CWD `LaunchWorkspaceContext`, supplied by callers
+    /// that already ran a shared `sniff::detect_with_plan` scan during prep
+    /// (e.g. `CompositionPrepContext`). When `Some`, the executor reuses it
+    /// instead of calling `resolve_launch_workspace_context` again for both
+    /// the header env plan and the child env build.
+    pub prep_launch_workspace: Option<LaunchWorkspaceContext>,
+    /// Pre-computed launch-CWD `LaunchContext`, supplied by callers that
+    /// already ran a shared `sniff::detect_with_plan` scan during prep
+    /// (e.g. `CompositionPrepContext`). When `Some`, the executor reuses
+    /// it instead of calling `LaunchContext::from_cwd` again.
+    pub prep_launch_context: Option<crate::system_prompt::LaunchContext>,
+    /// Pre-computed launch-CWD `EnvironmentContext` derived from the
+    /// same shared sniff scan. When `Some` and the effective env-detect
+    /// root matches the launch CWD, the executor reuses it instead of
+    /// calling `detect_environment_fast` again.
+    pub prep_env_context: Option<crate::events::EnvironmentContext>,
+    /// Captured error message from the shared prep-time sniff scan, if
+    /// it failed. The shared scan defaults to an empty
+    /// [`crate::system_prompt::LaunchContext`] on failure to keep
+    /// best-effort callers happy, so the executor reads this field to
+    /// preserve the legacy hard-fail contract for `--repo`. `None` (or
+    /// no prep context at all) means no failure happened during prep.
+    pub prep_launch_detection_error: Option<String>,
 }
 
 /// Describes where the sequence definition was found.

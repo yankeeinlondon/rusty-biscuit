@@ -28,7 +28,7 @@ feature feat:
         echo
         echo -e "A {{ italic }}spec{{ reset }} file for the feature {{ blue }}${file_link}{{ reset }} already exists inside the {{ italic }}_unscheduled{{ reset }} folder"
         echo
-        eza -lhga --git --hyperlink --group "${file}" 2>/dev/null
+        eza -lhga --git --icons=always --hyperlink --group "${file}" 2>/dev/null
         echo
 
         if just _file_has_content "${file}" 2>/dev/null; then
@@ -44,8 +44,12 @@ feature feat:
             if [[ "$(just _confirm "Do you want to create a {{ bold }}{{ italic }}technical design{{ reset }} now from the specification file?")" == y ]]; then
                 just design "${dasherized}"
             else
-                echo "Ok. Bye."
-                exit 0
+                if [[ "$(just _confirm "Would you like to create a {{ bold }}{{ italic }}plan{{ reset }} for this feature instead?")" == y ]]; then
+                    just plan-feature "${file}"
+                else
+                    echo "Ok. Bye."
+                    exit 0
+                fi
             fi
         else
             if [[ "$(just _confirm "The spec file is {{ italic }}empty{{ reset }}; do you want to edit the specification now?")" == y ]]; then
@@ -63,8 +67,12 @@ feature feat:
                     if [[ "$(just _confirm "Do you want to create a {{ bold }}{{ italic }}technical design{{ reset }} now from the specification file?")" == y ]]; then
                         just design "${dasherized}"
                     else
-                        echo "Ok. Bye."
-                        exit 0
+                        if [[ "$(just _confirm "Would you like to create a {{ bold }}{{ italic }}plan{{ reset }} for this feature instead?")" == y ]]; then
+                            just plan-feature "${file}"
+                        else
+                            echo "Ok. Bye."
+                            exit 0
+                        fi
                     fi
                 fi
             else
@@ -93,8 +101,12 @@ feature feat:
         if [[ "$(just _confirm "Do you want to create a {{ bold }}{{ italic }}technical design{{ reset }} now from the specification file?")" == "y" ]]; then
             just design "${dasherized}"
         else
-            echo "Ok. Bye."
-            exit 0
+            if [[ "$(just _confirm "Would you like to create a {{ bold }}{{ italic }}plan{{ reset }} for this feature instead?")" == "y" ]]; then
+                just plan-feature "${file}"
+            else
+                echo "Ok. Bye."
+                exit 0
+            fi
         fi
     else
         # rm -rf "${dir}"
@@ -106,10 +118,10 @@ fix name="":
     #!/usr/bin/env bash
     set -euo pipefail
 
-    if [[ -z "{{name}}" ]]; then
+    if [[ -z "{{ name }}" ]]; then
         use_name="$(just _choose_fix)"
     else
-        use_name="{{name}}"
+        use_name="{{ name }}"
     fi
 
     descriptive="$(just _title_case "${use_name}")"
@@ -237,13 +249,16 @@ fix name="":
     fi
 
 # adds a complimentary tech design to the specification file
+[arg("dir", long="dir")]
+[arg("spec", long="spec")]
 design filter="" spec="" dir="":
     #!/usr/bin/env bash
     set -euo pipefail
 
-    file="{{spec}}"
-    use_dir="{{dir}}"
+    file="{{ spec }}"
+    use_dir="{{ dir }}"
 
+    # ensure that `file` is set
     if [[ -z "${file}" ]]; then
         if [[ -z "{{ filter }}" ]]; then
             file="$(just _choose_spec)"
@@ -288,7 +303,7 @@ clarify filter="" agent="":
         file="$(fd -g '*{spec,design}*.md' --exclude '_completed' | rg "{{ filter }}" | fzf --height=15 --border --border-label 'Choose a spec or design file' )"
     fi
 
-    use_agent="{{agent}}"
+    use_agent="{{ agent }}"
     if [[ -z "${use_agent}" ]]; then
         use_agent="$(just _choose_agent)"
     fi
@@ -309,7 +324,7 @@ clarify filter="" agent="":
     if [[ "${file}" == *spec* ]]; then
         spec_dir="$(dirname "${file}")"
         if [[ "$(just _confirm "Do you want to create a {{ bold }}{{ italic }}technical design{{ reset }} for this spec?")" == "y" ]]; then
-            just design spec="${file}" dir="${spec_dir}"
+            just design --spec="${file}" --dir="${spec_dir}"
         fi
     fi
 

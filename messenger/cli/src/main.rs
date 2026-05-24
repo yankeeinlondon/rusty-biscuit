@@ -1,11 +1,10 @@
 use std::path::PathBuf;
 
-use biscuit_terminal::components::renderable::Renderable;
-use biscuit_terminal::components::status::{Status, StatusState};
 use clap::{ArgAction, CommandFactory, Parser, Subcommand};
 use clap_complete::CompleteEnv;
 use color_eyre::eyre::{Result, eyre};
 use secrecy::SecretString;
+use serde::Serialize;
 use tracing_subscriber::EnvFilter;
 
 const COMPLETIONS_HELP: &str = r#"
@@ -27,10 +26,7 @@ Examples:
   COMPLETE=0
 "#;
 
-mod config;
-mod desktop_setup;
-mod receipt_store;
-mod setup;
+use messenger_cli::{config, info, install, receipt_store, setup};
 
 use config::{Config, RouteConfig, RouteProvider, RouteUrgency};
 
@@ -41,6 +37,11 @@ struct Cli {
     /// Enable developer tracing output. Repeat for more detail.
     #[arg(long, action = ArgAction::Count, global = true)]
     debug: u8,
+
+    /// Suppress success output (JSON response and compatibility warnings).
+    /// Errors are still reported.
+    #[arg(long, global = true)]
+    quiet: bool,
 
     #[command(subcommand)]
     command: Commands,
@@ -90,8 +91,23 @@ enum Commands {
         strict: bool,
 
         /// Send as plain text (disable Markdown rendering).
-        #[arg(long)]
+        #[arg(long, conflicts_with = "summary")]
         plain: bool,
+
+        /// Plain notification summary paired with a Markdown body.
+        ///
+        /// On providers with a notification surface distinct from the rendered
+        /// surface (Discord), the summary becomes the notification banner text and
+        /// the message argument becomes a rich embed. Implies Markdown body —
+        /// cannot combine with --plain.
+        #[arg(long, conflicts_with = "plain")]
+        summary: Option<String>,
+
+        /// Strip Markdown formatting from the message body before sending.
+        ///
+        /// Mutually exclusive with --plain (redundant) and --summary (incoherent).
+        #[arg(long, conflicts_with_all = ["plain", "summary"])]
+        strip_markdown: bool,
 
         /// Attach a geographic location (format: "LAT,LON").
         #[arg(long, value_name = "LAT,LON")]
@@ -212,6 +228,25 @@ enum Commands {
         /// Provider to configure.
         provider: Option<RouteProvider>,
     },
+    /// Show host detection, notification helpers, and configured routes.
+    Info {
+        /// Emit a JSON record instead of styled terminal output.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Install one or more notification helpers via the host package manager.
+    Install {
+        /// Skip interactive selection — install every uninstalled helper that
+        /// applies to the host (or every helper named via `--helper`).
+        #[arg(long)]
+        yes: bool,
+        /// Restrict the install set to the named helpers. Repeatable.
+        #[arg(long, value_name = "NAME")]
+        helper: Vec<String>,
+        /// Show what would be installed without executing the commands.
+        #[arg(long)]
+        dry_run: bool,
+    },
     /// Show shell completions setup instructions.
     #[command(after_help = COMPLETIONS_HELP)]
     Completions,
@@ -230,6 +265,7 @@ async fn main() -> Result<()> {
     color_eyre::install()?;
     let cli = Cli::parse();
     init_tracing(cli.debug)?;
+    let quiet = cli.quiet;
 
     match cli.command {
         Commands::Send {
@@ -243,6 +279,8 @@ async fn main() -> Result<()> {
             silent,
             strict,
             plain,
+            summary,
+            strip_markdown,
             location,
             title,
             subtitle,
@@ -268,6 +306,8 @@ async fn main() -> Result<()> {
                 silent,
                 strict,
                 plain,
+                summary,
+                strip_markdown,
                 location,
                 title,
                 subtitle,
@@ -281,6 +321,7 @@ async fn main() -> Result<()> {
                 progress_total,
                 badge_count,
                 action,
+                quiet,
             })
             .await?;
         }
@@ -313,14 +354,29 @@ async fn main() -> Result<()> {
                 progress_total,
                 badge_count,
                 image,
+                quiet,
             })
             .await?;
         }
         Commands::Dismiss { receipt } => {
-            dismiss_notification(receipt).await?;
+            dismiss_notification(receipt, quiet).await?;
         }
         Commands::Setup { provider } | Commands::Init { provider } => {
             setup::run(provider)?;
+        }
+        Commands::Info { json } => {
+            info::run(json)?;
+        }
+        Commands::Install {
+            yes,
+            helper,
+            dry_run,
+        } => {
+            install::run(install::InstallArgs {
+                yes,
+                helpers: helper,
+                dry_run,
+            })?;
         }
         Commands::Completions => {
             print!("{}", COMPLETIONS_HELP.trim_start());
@@ -384,6 +440,8 @@ struct SendArgs {
     silent: bool,
     strict: bool,
     plain: bool,
+    summary: Option<String>,
+    strip_markdown: bool,
     location: Option<String>,
     title: Option<String>,
     subtitle: Option<String>,
@@ -397,6 +455,61 @@ struct SendArgs {
     progress_total: Option<u32>,
     badge_count: Option<u32>,
     action: Vec<String>,
+    quiet: bool,
+}
+
+/// Machine-readable response emitted on stdout after a successful send or
+/// replace.
+///
+/// Suppressed entirely when `--quiet` is passed.
+#[derive(Debug, Serialize)]
+struct SendResponse {
+    /// Provider-native identifier from the [`messenger::SendReceipt`].
+    id: String,
+    /// Absolute path to the saved receipt JSON file.
+    receipt: String,
+    /// Helper program that delivered the notification, when applicable.
+    ///
+    /// Present for desktop sends served by a third-party helper (e.g.
+    /// `alerter`, `terminal-notifier`, `dunstify`, `snoretoast`). Absent for
+    /// non-desktop providers, the native desktop backend, or when the field
+    /// is not recorded.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    helper: Option<String>,
+    /// Host operating system label.
+    os: &'static str,
+}
+
+/// Map [`std::env::consts::OS`] onto the labels documented in the response
+/// schema. Unknown platforms fall through with the raw value.
+fn host_os_label() -> &'static str {
+    match std::env::consts::OS {
+        "macos" => "macOS",
+        "linux" => "Linux",
+        "windows" => "Windows",
+        other => other,
+    }
+}
+
+/// Print a [`SendResponse`] to stdout as pretty JSON, unless suppressed.
+fn emit_send_response(
+    receipt: &messenger::SendReceipt,
+    receipt_path: &std::path::Path,
+    quiet: bool,
+) -> Result<()> {
+    if quiet {
+        return Ok(());
+    }
+    let response = SendResponse {
+        id: receipt.raw_id.clone(),
+        receipt: receipt_path.display().to_string(),
+        helper: receipt.helper_used().map(str::to_string),
+        os: host_os_label(),
+    };
+    let json = serde_json::to_string_pretty(&response)
+        .map_err(|error| eyre!("failed to serialize response: {error}"))?;
+    println!("{json}");
+    Ok(())
 }
 
 #[tracing::instrument(skip_all, fields(route = tracing::field::Empty, provider = tracing::field::Empty))]
@@ -412,6 +525,8 @@ async fn send_message(args: SendArgs) -> Result<()> {
         silent,
         strict,
         plain,
+        summary,
+        strip_markdown,
         location,
         title,
         subtitle,
@@ -425,6 +540,7 @@ async fn send_message(args: SendArgs) -> Result<()> {
         progress_total,
         badge_count,
         action,
+        quiet,
     } = args;
 
     let message_text = message_text.as_deref().map(unescape);
@@ -453,7 +569,11 @@ async fn send_message(args: SendArgs) -> Result<()> {
 
     let mut message = match message_text.as_deref() {
         Some(text) if !text.is_empty() => {
-            if plain {
+            if strip_markdown {
+                messenger::Message::markdown_stripped(text)
+            } else if let Some(summary_text) = summary.as_deref() {
+                messenger::Message::summarized(summary_text, text)
+            } else if plain {
                 messenger::Message::text(text)
             } else {
                 messenger::Message::markdown(text)
@@ -515,7 +635,7 @@ async fn send_message(args: SendArgs) -> Result<()> {
     }
 
     let plan = messenger.plan_send(dispatch, &message)?;
-    emit_compatibility_warnings(&plan.warnings);
+    emit_compatibility_warnings(&plan.warnings, quiet);
 
     let receipt = messenger.send_planned(plan).await?;
     let receipt_path = receipt_store::save_receipt(&receipt, resolved_route.name.as_deref())?;
@@ -525,12 +645,7 @@ async fn send_message(args: SendArgs) -> Result<()> {
         receipt_path = %receipt_path.display(),
         "CLI send complete"
     );
-    eprintln!(
-        "Sent via {} (id: {})\nReceipt: {}",
-        receipt.provider,
-        receipt.raw_id,
-        receipt_path.display()
-    );
+    emit_send_response(&receipt, &receipt_path, quiet)?;
 
     Ok(())
 }
@@ -616,19 +731,22 @@ fn icon_string_to_messenger(value: String) -> messenger::NotificationIcon {
     }
 }
 
-fn emit_compatibility_warnings(warnings: &[messenger::CompatibilityWarning]) {
+/// Emit compatibility warnings to stderr.
+///
+/// The "Desktop will drop any Markdown formatting" warning is suppressed
+/// unconditionally — desktop providers always strip Markdown and the notice
+/// is noise. All other warnings are emitted unless `quiet` is set.
+fn emit_compatibility_warnings(warnings: &[messenger::CompatibilityWarning], quiet: bool) {
+    if quiet {
+        return;
+    }
     for warning in warnings {
         if warning.provider == messenger::ProviderKind::Desktop
             && warning.feature == "markdown rendering"
         {
-            let status = Status::from_prose(
-                "the <b>Desktop</b> platform will drop any Markdown formatting provided",
-            )
-            .state(StatusState::Info);
-            eprintln!("{}", status.render_optimistic(Some(80)));
-        } else {
-            eprintln!("{warning}");
+            continue;
         }
+        eprintln!("{warning}");
     }
 }
 
@@ -646,6 +764,7 @@ struct ReplaceArgs {
     progress_total: Option<u32>,
     badge_count: Option<u32>,
     image: Option<PathBuf>,
+    quiet: bool,
 }
 
 #[tracing::instrument(skip_all)]
@@ -731,17 +850,12 @@ async fn replace_notification(args: ReplaceArgs) -> Result<()> {
         receipt_path = %receipt_path.display(),
         "CLI replace complete"
     );
-    eprintln!(
-        "Replaced via {} (id: {})\nReceipt: {}",
-        new_receipt.provider,
-        new_receipt.raw_id,
-        receipt_path.display()
-    );
+    emit_send_response(&new_receipt, &receipt_path, args.quiet)?;
 
     Ok(())
 }
 
-async fn dismiss_notification(receipt_spec: String) -> Result<()> {
+async fn dismiss_notification(receipt_spec: String, quiet: bool) -> Result<()> {
     let receipt = receipt_store::load_receipt(&receipt_spec)?;
     if receipt.provider != messenger::ProviderKind::Desktop {
         return Err(eyre!(
@@ -762,7 +876,9 @@ async fn dismiss_notification(receipt_spec: String) -> Result<()> {
 
     desktop_provider.dismiss(&receipt).await?;
     tracing::info!(raw_id = %receipt.raw_id, "CLI dismiss complete");
-    eprintln!("Dismissed notification {}", receipt.raw_id);
+    if !quiet {
+        eprintln!("Dismissed notification {}", receipt.raw_id);
+    }
 
     Ok(())
 }
@@ -770,6 +886,22 @@ async fn dismiss_notification(receipt_spec: String) -> Result<()> {
 fn build_desktop_provider_from_route(
     route: &RouteConfig,
 ) -> Result<messenger::DesktopNotificationProvider> {
+    match route {
+        RouteConfig::Desktop { .. } => {
+            let config = build_desktop_config_from_route(route)?;
+            Ok(messenger::DesktopNotificationProvider::new(config))
+        }
+        _ => Err(eyre!("expected Desktop route")),
+    }
+}
+
+/// Convert a CLI `RouteConfig::Desktop` into the library's `DesktopConfig`.
+///
+/// Centralises the field mapping (including helper preference resolution
+/// from the per-OS config plus the `MESSENGER_DESKTOP_PREFER_HELPERS`
+/// env override) so both `register_provider` and the standalone provider
+/// builder agree on the resolved configuration.
+fn build_desktop_config_from_route(route: &RouteConfig) -> Result<messenger::DesktopConfig> {
     match route {
         RouteConfig::Desktop {
             app_name,
@@ -784,49 +916,47 @@ fn build_desktop_provider_from_route(
             windows,
             macos,
             linux,
-        } => {
-            let config = messenger::DesktopConfig {
-                app_name: app_name.clone(),
-                default_title: default_title.clone(),
-                category: category.clone(),
-                urgency: route_urgency_to_messenger(*urgency),
-                timeout_ms: *timeout_ms,
-                icon: icon.clone().map(icon_string_to_messenger),
-                actions: actions
-                    .iter()
-                    .map(|a| messenger::NotificationAction {
-                        id: a.id.clone(),
-                        label: a.label.clone(),
-                    })
-                    .collect(),
-                progress: progress.map(|p| messenger::NotificationProgress {
-                    current: p.current,
-                    total: p.total,
-                }),
-                badge_count: *badge_count,
-                windows: messenger::WindowsDesktopConfig {
-                    app_id: windows.app_id.clone(),
+        } => Ok(messenger::DesktopConfig {
+            app_name: app_name.clone(),
+            default_title: default_title.clone(),
+            category: category.clone(),
+            urgency: route_urgency_to_messenger(*urgency),
+            timeout_ms: *timeout_ms,
+            icon: icon.clone().map(icon_string_to_messenger),
+            actions: actions
+                .iter()
+                .map(|a| messenger::NotificationAction {
+                    id: a.id.clone(),
+                    label: a.label.clone(),
+                })
+                .collect(),
+            progress: progress.map(|p| messenger::NotificationProgress {
+                current: p.current,
+                total: p.total,
+            }),
+            badge_count: *badge_count,
+            windows: messenger::WindowsDesktopConfig {
+                app_id: windows.app_id.clone(),
+                prefer_helpers: config::resolve_prefer_helpers(&windows.prefer_helpers),
+            },
+            macos: messenger::MacOsDesktopConfig {
+                bundle_id: macos.bundle_id.clone(),
+                strategy: match macos.strategy {
+                    config::RouteMacOsStrategy::Auto => messenger::MacOsNotificationStrategy::Auto,
+                    config::RouteMacOsStrategy::NativeUserNotifications => {
+                        messenger::MacOsNotificationStrategy::NativeUserNotifications
+                    }
+                    config::RouteMacOsStrategy::AppleScript => {
+                        messenger::MacOsNotificationStrategy::AppleScript
+                    }
                 },
-                macos: messenger::MacOsDesktopConfig {
-                    bundle_id: macos.bundle_id.clone(),
-                    strategy: match macos.strategy {
-                        config::RouteMacOsStrategy::Auto => {
-                            messenger::MacOsNotificationStrategy::Auto
-                        }
-                        config::RouteMacOsStrategy::NativeUserNotifications => {
-                            messenger::MacOsNotificationStrategy::NativeUserNotifications
-                        }
-                        config::RouteMacOsStrategy::AppleScript => {
-                            messenger::MacOsNotificationStrategy::AppleScript
-                        }
-                    },
-                },
-                linux: messenger::LinuxDesktopConfig {
-                    desktop_entry: linux.desktop_entry.clone(),
-                },
-            };
-            Ok(messenger::DesktopNotificationProvider::new(config))
-        }
+                prefer_helpers: config::resolve_prefer_helpers(&macos.prefer_helpers),
+            },
+            linux: messenger::LinuxDesktopConfig {
+                desktop_entry: linux.desktop_entry.clone(),
+                prefer_helpers: config::resolve_prefer_helpers(&linux.prefer_helpers),
+            },
+        }),
         _ => Err(eyre!("expected Desktop route")),
     }
 }
@@ -993,60 +1123,8 @@ fn register_provider(messenger: &mut messenger::Messenger, route: &RouteConfig) 
                 ),
             ));
         }
-        RouteConfig::Desktop {
-            app_name,
-            default_title,
-            icon,
-            category,
-            urgency,
-            timeout_ms,
-            actions,
-            progress,
-            badge_count,
-            windows,
-            macos,
-            linux,
-        } => {
-            let config = messenger::DesktopConfig {
-                app_name: app_name.clone(),
-                default_title: default_title.clone(),
-                category: category.clone(),
-                urgency: route_urgency_to_messenger(*urgency),
-                timeout_ms: *timeout_ms,
-                icon: icon.clone().map(icon_string_to_messenger),
-                actions: actions
-                    .iter()
-                    .map(|a| messenger::NotificationAction {
-                        id: a.id.clone(),
-                        label: a.label.clone(),
-                    })
-                    .collect(),
-                progress: progress.map(|p| messenger::NotificationProgress {
-                    current: p.current,
-                    total: p.total,
-                }),
-                badge_count: *badge_count,
-                windows: messenger::WindowsDesktopConfig {
-                    app_id: windows.app_id.clone(),
-                },
-                macos: messenger::MacOsDesktopConfig {
-                    bundle_id: macos.bundle_id.clone(),
-                    strategy: match macos.strategy {
-                        config::RouteMacOsStrategy::Auto => {
-                            messenger::MacOsNotificationStrategy::Auto
-                        }
-                        config::RouteMacOsStrategy::NativeUserNotifications => {
-                            messenger::MacOsNotificationStrategy::NativeUserNotifications
-                        }
-                        config::RouteMacOsStrategy::AppleScript => {
-                            messenger::MacOsNotificationStrategy::AppleScript
-                        }
-                    },
-                },
-                linux: messenger::LinuxDesktopConfig {
-                    desktop_entry: linux.desktop_entry.clone(),
-                },
-            };
+        RouteConfig::Desktop { .. } => {
+            let config = build_desktop_config_from_route(route)?;
             messenger.register(Box::new(messenger::DesktopNotificationProvider::new(
                 config,
             )));
@@ -1594,25 +1672,41 @@ mod tests {
     }
 
     #[test]
-    fn desktop_markdown_warning_renders_as_info_status() {
-        let _warning = messenger::CompatibilityWarning {
-            provider: messenger::ProviderKind::Desktop,
-            feature: "markdown rendering",
-        };
-
-        let status = Status::from_prose(
-            "the <b>Desktop</b> platform will drop any Markdown formatting provided",
-        )
-        .state(StatusState::Info);
-        let rendered = status.render_optimistic(Some(80));
-
+    fn host_os_label_recognizes_supported_platforms() {
+        let label = host_os_label();
         assert!(
-            rendered.contains("Desktop"),
-            "rendered output should contain 'Desktop': {rendered}"
+            ["macOS", "Linux", "Windows"].contains(&label) || label == std::env::consts::OS,
+            "unexpected host_os_label: {label}"
         );
+    }
+
+    #[test]
+    fn send_response_serializes_with_helper_when_present() {
+        let response = SendResponse {
+            id: "abc-123".into(),
+            receipt: "/tmp/receipt.json".into(),
+            helper: Some("alerter".into()),
+            os: "macOS",
+        };
+        let json = serde_json::to_value(&response).unwrap();
+        assert_eq!(json["id"], "abc-123");
+        assert_eq!(json["receipt"], "/tmp/receipt.json");
+        assert_eq!(json["helper"], "alerter");
+        assert_eq!(json["os"], "macOS");
+    }
+
+    #[test]
+    fn send_response_omits_helper_when_absent() {
+        let response = SendResponse {
+            id: "abc-123".into(),
+            receipt: "/tmp/receipt.json".into(),
+            helper: None,
+            os: "Linux",
+        };
+        let json = serde_json::to_value(&response).unwrap();
         assert!(
-            rendered.contains("will drop any Markdown formatting provided"),
-            "rendered output should contain message: {rendered}"
+            json.get("helper").is_none(),
+            "helper field should be omitted when None: {json:?}"
         );
     }
 
@@ -1678,13 +1772,16 @@ mod tests {
             badge_count: None,
             windows: config::DesktopWindowsConfig {
                 app_id: Some("RustyBiscuit.Messenger".into()),
+                prefer_helpers: Vec::new(),
             },
             macos: config::DesktopMacOsConfig {
                 bundle_id: Some("com.rustybiscuit.messenger".into()),
                 strategy: config::RouteMacOsStrategy::NativeUserNotifications,
+                prefer_helpers: Vec::new(),
             },
             linux: config::DesktopLinuxConfig {
                 desktop_entry: Some("messenger".into()),
+                prefer_helpers: Vec::new(),
             },
         };
 
