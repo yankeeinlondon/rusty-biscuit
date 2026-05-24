@@ -1,3 +1,4 @@
+use biscuit_terminal::components::renderable::TerminalRenderable;
 use clap::{CommandFactory, Parser};
 use clap_complete::{CompleteEnv, Shell};
 use sniff::filesystem::blast_radius::{ChangeScope, ChangedPathKind, find_blast_radius_documents};
@@ -15,6 +16,7 @@ use crate::args::{
 };
 use crate::output::{self, OutputFilter, PathListFormat};
 use crate::perf::{CliPerf, handle_no_results};
+use std::fmt::Write as FmtWrite;
 
 mod remote;
 mod repo;
@@ -745,6 +747,72 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 }
                 return handle_no_results(*no_error, on_error, cli.plain, &perf);
             }
+            crate::args::RepoAction::Worktrees { list, csv, .. } => {
+                let dir = base_dir
+                    .as_deref()
+                    .unwrap_or_else(|| std::path::Path::new("."));
+                let worktrees = sniff::filesystem::git::list_worktrees(dir)?;
+                let Some(entries) = worktrees else {
+                    return Err("Not a git repository".into());
+                };
+
+                if cli.json {
+                    let json = output::repo_json::worktrees_value(&entries);
+                    output::print_json_value(json, perf.build_report().as_ref());
+                } else if *csv {
+                    let names: Vec<String> = entries.iter().map(|e| e.name.clone()).collect();
+                    println!("{}", names.join(", "));
+                } else if cli.verbose > 0 {
+                    let home = std::env::var_os("HOME").map(std::path::PathBuf::from);
+                    let terminal = biscuit_terminal::terminal::Terminal::default();
+                    let mut lines = Vec::new();
+                    for entry in &entries {
+                        let marker = if entry.is_current { "* " } else { "  " };
+                        let branch_text = if entry.is_detached {
+                            "detached HEAD".to_string()
+                        } else {
+                            entry
+                                .branch
+                                .clone()
+                                .unwrap_or_else(|| "unknown".to_string())
+                        };
+                        let display_path = if let Some(ref home) = home {
+                            if let Ok(stripped) = entry.path.strip_prefix(home) {
+                                format!("~/{}", stripped.display())
+                            } else {
+                                entry.path.display().to_string()
+                            }
+                        } else {
+                            entry.path.display().to_string()
+                        };
+                        let absolute_path = entry.path.display().to_string();
+                        let markup = format!(
+                            "{marker}<b>{}</b> (on <green>{}</green> branch, located at <a href=\"{}\">{}</a>)",
+                            entry.name, branch_text, absolute_path, display_path
+                        );
+                        let prose = biscuit_terminal::components::prose::Prose::new(&markup);
+                        lines.push(prose.render(&terminal));
+                    }
+                    let rendered = lines.join("\n") + "\n";
+                    output::emit_text(&rendered, cli.plain);
+                } else if *list {
+                    let mut out = String::new();
+                    for entry in &entries {
+                        let marker = if entry.is_current { "* " } else { "" };
+                        writeln!(out, "- {}{}", marker, entry.name).unwrap();
+                    }
+                    output::emit_text(&out, cli.plain);
+                } else {
+                    let mut out = String::new();
+                    for entry in &entries {
+                        let marker = if entry.is_current { "* " } else { "  " };
+                        writeln!(out, "{}{}", marker, entry.name).unwrap();
+                    }
+                    output::emit_text(&out, cli.plain);
+                }
+                perf.emit_stderr(None);
+                return Ok(());
+            }
             crate::args::RepoAction::RecentCommits { .. }
             | crate::args::RepoAction::SourceCodeChanges { .. }
             | crate::args::RepoAction::DocumentationChanges { .. } => {
@@ -1070,11 +1138,8 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 .as_deref()
                 .unwrap_or_else(|| std::path::Path::new("."));
             if let Ok(repo) = git2::Repository::discover(dir) {
-                git.recent = sniff::filesystem::get_commits_for_branch(
-                    &repo,
-                    &branch_name,
-                    history_count,
-                );
+                git.recent =
+                    sniff::filesystem::get_commits_for_branch(&repo, &branch_name, history_count);
             }
 
             // Working-tree state belongs to the currently checked-out branch,
@@ -1116,9 +1181,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
 
         match matched {
             Some(info) => {
-                if let Some(wt_repo) =
-                    sniff::filesystem::git::GitRepo::discover(&info.filepath)?
-                {
+                if let Some(wt_repo) = sniff::filesystem::git::GitRepo::discover(&info.filepath)? {
                     git.recent = wt_repo.recent_commits(history_count);
 
                     let file_changes = wt_repo.file_changes().unwrap_or_default();
@@ -1143,9 +1206,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 } else {
                     format!("available: {}", names.join(", "))
                 };
-                return Err(
-                    format!("Worktree not found: {} ({})", wt_selector, listing).into(),
-                );
+                return Err(format!("Worktree not found: {} ({})", wt_selector, listing).into());
             }
         }
     }

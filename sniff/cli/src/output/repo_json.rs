@@ -354,6 +354,21 @@ pub(crate) fn worktree_outcome(name: Option<&str>, no_error: bool) -> BuildOutco
     }
 }
 
+/// Build the JSON value for `repo worktrees --json`.
+///
+/// Returns `{ "worktrees": [ { name, branch, path, current, detached }, ... ] }`.
+pub(crate) fn worktrees_value(entries: &[sniff::filesystem::git::WorktreeEntry]) -> Value {
+    json!({
+        "worktrees": entries.iter().map(|e| json!({
+            "name": e.name,
+            "branch": e.branch,
+            "path": e.path,
+            "current": e.is_current,
+            "detached": e.is_detached,
+        })).collect::<Vec<_>>(),
+    })
+}
+
 /// Build the `{ scope, kind, names }` JSON shape used by the package and
 /// package-area families.
 ///
@@ -1169,6 +1184,58 @@ mod tests {
                 Some(1),
                 "empty name must surface failure exit code"
             );
+        }
+
+        #[test]
+        fn worktrees_value_shapes_entries() {
+            use sniff::filesystem::git::WorktreeEntry;
+            use std::path::PathBuf;
+
+            let entries = vec![
+                WorktreeEntry {
+                    name: "main".to_string(),
+                    branch: Some("main".to_string()),
+                    path: PathBuf::from("/tmp/repo"),
+                    is_current: true,
+                    is_detached: false,
+                },
+                WorktreeEntry {
+                    name: "feature".to_string(),
+                    branch: Some("feature-branch".to_string()),
+                    path: PathBuf::from("/tmp/repo/feature"),
+                    is_current: false,
+                    is_detached: false,
+                },
+            ];
+            let value = worktrees_value(&entries);
+            let arr = value["worktrees"].as_array().expect("worktrees array");
+            assert_eq!(arr.len(), 2);
+            assert_eq!(arr[0]["name"], "main");
+            assert_eq!(arr[0]["branch"], "main");
+            assert_eq!(arr[0]["current"], true);
+            assert_eq!(arr[0]["detached"], false);
+            assert_eq!(arr[1]["name"], "feature");
+            assert_eq!(arr[1]["branch"], "feature-branch");
+            assert_eq!(arr[1]["current"], false);
+            assert_eq!(arr[1]["detached"], false);
+        }
+
+        #[test]
+        fn worktrees_value_detached_head_omits_branch() {
+            use sniff::filesystem::git::WorktreeEntry;
+            use std::path::PathBuf;
+
+            let entries = vec![WorktreeEntry {
+                name: "detached".to_string(),
+                branch: None,
+                path: PathBuf::from("/tmp/repo/detached"),
+                is_current: false,
+                is_detached: true,
+            }];
+            let value = worktrees_value(&entries);
+            let arr = value["worktrees"].as_array().expect("worktrees array");
+            assert_eq!(arr[0]["branch"], Value::Null);
+            assert_eq!(arr[0]["detached"], true);
         }
     }
 
