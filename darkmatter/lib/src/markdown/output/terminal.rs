@@ -1371,7 +1371,11 @@ pub(crate) fn write_terminal_with_layout<W: std::io::Write>(
                         .resolve_component_width(component)
                         .unwrap_or(terminal_width);
 
-                    // For unordered lists, apply left-margin stacking.
+                    // For unordered lists, resolve left-margin against the
+                    // effective width first, then cap the body width so the
+                    // body still wraps at the component's resolved width
+                    // (e.g. `ul.max-width`). The left margin is an additional
+                    // offset outside the body, not subtracted from it.
                     let left_margin = if component == PageComponent::Ul {
                         ctx.list_left_margin(PageComponent::Ul)
                             .and_then(|u| u.resolve(ctx.effective_width).ok())
@@ -1379,9 +1383,14 @@ pub(crate) fn write_terminal_with_layout<W: std::io::Write>(
                     } else {
                         0
                     };
-                    let body_width = component_width.saturating_sub(left_margin);
+                    let available_for_body = ctx.effective_width.saturating_sub(left_margin);
+                    let body_width = component_width.min(available_for_body);
                     wrapper.push_component_width(body_width as usize);
-                    let pad = ctx.alignment_padding(component, component_width);
+                    // Treat (left_margin + body) as a single aligned block so
+                    // a right/center alignment does not push the body past the
+                    // effective width.
+                    let block_width = body_width.saturating_add(left_margin);
+                    let pad = ctx.alignment_padding(component, block_width);
                     wrapper.alignment_offset = (left_margin + pad) as usize;
                 }
 
@@ -1397,21 +1406,27 @@ pub(crate) fn write_terminal_with_layout<W: std::io::Write>(
                 }
             }
             InlineEvent::Standard(Event::Start(Tag::Item)) => {
-                // Apply Li-scoped width/alignment overrides BEFORE marker emission
-                // so alignment_offset is honoured on the item's first line.
-                if let Some(ctx) = layout_ctx {
-                    let li_alignment = ctx.component_alignment(PageComponent::Li);
-                    let li_fill = ctx.component_fill(PageComponent::Li);
-                    #[allow(deprecated)]
-                    if li_alignment != PageAlignment::Left || li_fill != PageFill::Full {
-                        let li_width = ctx
-                            .resolve_component_width(PageComponent::Li)
-                            .unwrap_or(terminal_width);
-                        let li_pad = ctx.alignment_padding(PageComponent::Li, li_width);
-                        wrapper.push_component_width(li_width as usize);
-                        wrapper.push_alignment_offset(li_pad as usize);
-                    }
-                }
+                // Per spec, `style.li.*` affects the item body only; the marker
+                // is governed by the containing Ul/Ol and must keep its column.
+                // We emit the marker first under the existing list
+                // alignment_offset, then push Li overrides for body wrapping.
+                //
+                // Two flavors of Li override:
+                //   * width-only (Left alignment): the body stays inline with
+                //     the marker but wraps at the Li width. push_indent keeps
+                //     wrapped continuation lines aligned with the body.
+                //   * alignment != Left: the body becomes its own block on a
+                //     new line so its alignment_offset can take effect without
+                //     dragging the marker along.
+                let (li_width_active, li_alignment_active) = layout_ctx
+                    .map(|ctx| {
+                        let li_alignment = ctx.component_alignment(PageComponent::Li);
+                        let li_fill = ctx.component_fill(PageComponent::Li);
+                        #[allow(deprecated)]
+                        (li_fill != PageFill::Full, li_alignment != PageAlignment::Left)
+                    })
+                    .unwrap_or((false, false));
+                let li_block_body = li_alignment_active;
 
                 // Calculate indentation based on nesting level
                 let indent = "  ".repeat(list_stack.len().saturating_sub(1));
@@ -1425,7 +1440,12 @@ pub(crate) fn write_terminal_with_layout<W: std::io::Write>(
                             let marker = format!("{}{}. ", indent, num);
                             let marker_width = UnicodeWidthStr::width(marker.as_str());
                             wrapper.emit_styled_marker(&marker, style, emit_italic);
-                            wrapper.push_indent(marker_width);
+                            // When the body is a block (Li alignment shifts it),
+                            // skip push_indent so the body's own alignment_offset
+                            // controls placement on the new line.
+                            if !li_block_body {
+                                wrapper.push_indent(marker_width);
+                            }
                             *num += 1;
                         }
                         None => {
@@ -1434,24 +1454,51 @@ pub(crate) fn write_terminal_with_layout<W: std::io::Write>(
                             let marker = format!("{}- ", indent);
                             let marker_width = UnicodeWidthStr::width(marker.as_str());
                             wrapper.emit_styled_marker(&marker, style, emit_italic);
-                            wrapper.push_indent(marker_width);
+                            if !li_block_body {
+                                wrapper.push_indent(marker_width);
+                            }
                         }
+                    }
+                }
+
+                // Apply Li-scoped overrides for the body. Width is always
+                // pushed when set; the alignment_offset only matters once the
+                // body actually starts on a new line.
+                if (li_width_active || li_alignment_active)
+                    && let Some(ctx) = layout_ctx
+                {
+                    let li_width = ctx
+                        .resolve_component_width(PageComponent::Li)
+                        .unwrap_or(terminal_width);
+                    wrapper.push_component_width(li_width as usize);
+                    if li_block_body {
+                        let li_pad = ctx.alignment_padding(PageComponent::Li, li_width);
+                        // Newline so the body starts on a fresh line where the
+                        // new alignment_offset takes effect.
+                        wrapper.newline();
+                        wrapper.push_alignment_offset(li_pad as usize);
                     }
                 }
             }
             InlineEvent::Standard(Event::End(TagEnd::Item)) => {
+                let (li_width_active, li_alignment_active) = layout_ctx
+                    .map(|ctx| {
+                        let li_alignment = ctx.component_alignment(PageComponent::Li);
+                        let li_fill = ctx.component_fill(PageComponent::Li);
+                        #[allow(deprecated)]
+                        (li_fill != PageFill::Full, li_alignment != PageAlignment::Left)
+                    })
+                    .unwrap_or((false, false));
+                let li_block_body = li_alignment_active;
+
                 wrapper.newline();
-                wrapper.pop_indent();
-                // Pop any Li-scoped overrides after the newline so the item's
-                // width is active for the entire line.
-                if let Some(ctx) = layout_ctx {
-                    let li_alignment = ctx.component_alignment(PageComponent::Li);
-                    let li_fill = ctx.component_fill(PageComponent::Li);
-                    #[allow(deprecated)]
-                    if li_alignment != PageAlignment::Left || li_fill != PageFill::Full {
-                        wrapper.pop_component_width();
-                        wrapper.pop_alignment_offset();
-                    }
+                if li_width_active || li_alignment_active {
+                    wrapper.pop_component_width();
+                }
+                if li_block_body {
+                    wrapper.pop_alignment_offset();
+                } else {
+                    wrapper.pop_indent();
                 }
             }
 

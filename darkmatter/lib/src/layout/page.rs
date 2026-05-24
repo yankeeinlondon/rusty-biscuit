@@ -390,12 +390,13 @@ impl DarkmatterPage {
     }
 
     /// Apply the same alignment to every [`PageComponent`].
+    ///
+    /// Writes only the concrete variants in [`PageComponent::ALL`]; the
+    /// deprecated [`PageComponent::Lists`] is not written.
     pub fn use_alignment_for_all(mut self, alignment: PageAlignment) -> Self {
         for component in PageComponent::ALL {
             self.alignments.insert(component, alignment);
         }
-        #[allow(deprecated)]
-        self.alignments.insert(PageComponent::Lists, alignment);
         self
     }
 
@@ -406,31 +407,51 @@ impl DarkmatterPage {
     }
 
     /// Apply the same fill to every [`PageComponent`].
+    ///
+    /// Writes only the concrete variants in [`PageComponent::ALL`]; the
+    /// deprecated [`PageComponent::Lists`] is not written.
     pub fn with_fill_for_all(mut self, fill: PageFill) -> Self {
         for component in PageComponent::ALL {
             self.fills.insert(component, fill);
         }
-        #[allow(deprecated)]
-        self.fills.insert(PageComponent::Lists, fill);
         self
     }
 
     /// Set the list left margin for a single [`PageComponent`].
     ///
-    /// # Panics
+    /// Only [`PageComponent::Ul`] is accepted; other components return a
+    /// fallible error via [`Self::try_with_list_left_margin`].
     ///
-    /// Panics when `component` is not [`PageComponent::Ul`].
-    /// Set the list left margin for a single [`PageComponent`].
+    /// ## Panics
     ///
-    /// # Panics
+    /// Panics when `component` is not [`PageComponent::Ul`]. Callers that
+    /// cannot guarantee the component statically should use the fallible
+    /// [`Self::try_with_list_left_margin`] instead.
+    pub fn with_list_left_margin(self, component: PageComponent, margin: WidthUnit) -> Self {
+        match self.try_with_list_left_margin(component, margin) {
+            Ok(page) => page,
+            Err(_) => panic!("with_list_left_margin only accepts PageComponent::Ul"),
+        }
+    }
+
+    /// Fallible variant of [`Self::with_list_left_margin`].
     ///
-    /// Panics when `component` is not [`PageComponent::Ul`].
-    pub fn with_list_left_margin(mut self, component: PageComponent, margin: WidthUnit) -> Self {
+    /// ## Errors
+    ///
+    /// Returns [`PageRenderError::InvalidListLeftMarginComponent`] when
+    /// `component` is not [`PageComponent::Ul`]. This is the channel
+    /// `apply_list_style` uses to surface a clear apply error instead of
+    /// panicking when frontmatter targets an unsupported list bucket.
+    pub fn try_with_list_left_margin(
+        mut self,
+        component: PageComponent,
+        margin: WidthUnit,
+    ) -> Result<Self, PageRenderError> {
         if component != PageComponent::Ul {
-            panic!("with_list_left_margin only accepts PageComponent::Ul");
+            return Err(PageRenderError::InvalidListLeftMarginComponent);
         }
         self.list_left_margins.insert(component, margin);
-        self
+        Ok(self)
     }
 
     // ---------- TerminalOptions passthrough ----------
@@ -1229,6 +1250,38 @@ mod tests {
 
     #[test]
     #[allow(deprecated)]
+    fn use_alignment_for_all_does_not_write_deprecated_lists() {
+        // New broadcast paths must not write `PageComponent::Lists`; only the
+        // concrete variants in `PageComponent::ALL` should be set.
+        let page = page().use_alignment_for_all(PageAlignment::Center);
+        assert_eq!(
+            page.alignment_for(PageComponent::Lists),
+            PageAlignment::Left,
+            "use_alignment_for_all must not write deprecated Lists"
+        );
+        // But the concrete variants are written.
+        assert_eq!(page.alignment_for(PageComponent::Ul), PageAlignment::Center);
+        assert_eq!(page.alignment_for(PageComponent::Ol), PageAlignment::Center);
+        assert_eq!(page.alignment_for(PageComponent::Li), PageAlignment::Center);
+    }
+
+    #[test]
+    #[allow(deprecated)]
+    fn with_fill_for_all_does_not_write_deprecated_lists() {
+        let page = page().with_fill_for_all(PageFill::Max(WidthUnit::Fixed(40)));
+        assert_eq!(
+            page.fill_for(PageComponent::Lists),
+            PageFill::Full,
+            "with_fill_for_all must not write deprecated Lists"
+        );
+        assert_eq!(
+            page.fill_for(PageComponent::Ul),
+            PageFill::Max(WidthUnit::Fixed(40))
+        );
+    }
+
+    #[test]
+    #[allow(deprecated)]
     fn fill_for_ol_falls_back_to_lists() {
         let page = page().with_fill(PageComponent::Lists, PageFill::Max(WidthUnit::Fixed(40)));
         assert_eq!(
@@ -1271,6 +1324,41 @@ mod tests {
     #[should_panic(expected = "with_list_left_margin only accepts PageComponent::Ul")]
     fn list_left_margin_rejects_li_component() {
         let _ = page().with_list_left_margin(PageComponent::Li, WidthUnit::Fixed(4));
+    }
+
+    #[test]
+    fn try_with_list_left_margin_accepts_ul() {
+        let page = page()
+            .try_with_list_left_margin(PageComponent::Ul, WidthUnit::Fixed(6))
+            .unwrap();
+        assert_eq!(
+            page.list_left_margin_for(PageComponent::Ul),
+            Some(WidthUnit::Fixed(6))
+        );
+    }
+
+    #[test]
+    fn try_with_list_left_margin_rejects_ol() {
+        let err = page()
+            .try_with_list_left_margin(PageComponent::Ol, WidthUnit::Fixed(4))
+            .unwrap_err();
+        assert_eq!(err, PageRenderError::InvalidListLeftMarginComponent);
+    }
+
+    #[test]
+    fn try_with_list_left_margin_rejects_li() {
+        let err = page()
+            .try_with_list_left_margin(PageComponent::Li, WidthUnit::Fixed(4))
+            .unwrap_err();
+        assert_eq!(err, PageRenderError::InvalidListLeftMarginComponent);
+    }
+
+    #[test]
+    fn try_with_list_left_margin_rejects_non_list_component() {
+        let err = page()
+            .try_with_list_left_margin(PageComponent::Images, WidthUnit::Fixed(4))
+            .unwrap_err();
+        assert_eq!(err, PageRenderError::InvalidListLeftMarginComponent);
     }
 
     #[test]
@@ -2218,12 +2306,30 @@ mod tests {
         let out = page.render(&md).unwrap();
         let plain = crate::testing::strip_ansi_codes(&out);
         let lines: Vec<&str> = plain.lines().collect();
-        let max_len = lines.iter().map(|l| l.chars().count()).max().unwrap_or(0);
-        // left_margin (4) + body_width (36) = 40 total
+        // Body wraps at <= ul.max-width (40 cells); the 4-cell left margin
+        // sits outside the body, so total line length is <= 44 cells.
+        let max_total = lines.iter().map(|l| l.chars().count()).max().unwrap_or(0);
         assert!(
-            max_len <= 40,
-            "list lines should be capped to 40 cols (4 margin + 36 body), got max={}:\n{}",
-            max_len,
+            max_total <= 44,
+            "list lines should fit in left-margin (4) + body (<= 40) = 44 cols, got max={}:\n{}",
+            max_total,
+            plain
+        );
+        // Body width: stripping the 4-cell margin, the remaining content
+        // must wrap at no more than 40 cells.
+        let max_body = lines
+            .iter()
+            .filter(|l| !l.trim().is_empty())
+            .map(|l| {
+                let trimmed = l.strip_prefix("    ").unwrap_or(l);
+                trimmed.chars().count()
+            })
+            .max()
+            .unwrap_or(0);
+        assert!(
+            max_body <= 40,
+            "body (after 4ch margin) should wrap at <= 40 cols, got max body={}:\n{}",
+            max_body,
             plain
         );
         // First non-empty line should start with 4 spaces of left margin.
@@ -2276,15 +2382,37 @@ mod tests {
 
         let out = page.render(&md).unwrap();
         let plain = crate::testing::strip_ansi_codes(&out);
-        let list_line = plain.lines().find(|l| l.contains("Hello")).unwrap();
-        // Li block is 40 cols wide, right-aligned in 80 => 40 cols of left padding.
-        // The marker is part of the block and shifts with it.
-        let leading_spaces = list_line.len() - list_line.trim_start().len();
+        let lines: Vec<&str> = plain.lines().collect();
+        // Per spec, `li.alignment` affects the item body only; the marker
+        // stays at the column dictated by the containing Ul (column 0 here,
+        // since Ul has no override). The body becomes a block on a new line
+        // that is right-aligned within `effective_width - body_width = 40`.
+        let marker_line = lines
+            .iter()
+            .find(|l| l.trim_start().starts_with('-'))
+            .copied()
+            .unwrap_or("");
+        assert!(
+            marker_line.starts_with("- "),
+            "marker should remain at column 0 (Ul column), got: {:?}",
+            marker_line
+        );
+        let body_line = lines
+            .iter()
+            .find(|l| l.contains("Hello"))
+            .copied()
+            .unwrap_or("");
+        assert!(
+            !body_line.contains('-'),
+            "body should not contain the marker (marker is on its own line): {:?}",
+            body_line
+        );
+        let leading_spaces = body_line.len() - body_line.trim_start().len();
         assert!(
             leading_spaces >= 35,
-            "li body should be right-aligned, got {} leading spaces: {:?}",
+            "li body should be right-aligned within effective_width, got {} leading spaces: {:?}",
             leading_spaces,
-            list_line
+            body_line
         );
     }
 

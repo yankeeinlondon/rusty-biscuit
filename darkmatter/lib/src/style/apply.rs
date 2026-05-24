@@ -440,7 +440,9 @@ pub fn apply_list_style(
             && let Some(left_margin) = ul.left_margin.as_ref()
         {
             let unit = lower_length_to_width_unit(left_margin, "ul", "left-margin")?;
-            page = page.with_list_left_margin(PageComponent::Ul, unit);
+            page = page
+                .try_with_list_left_margin(PageComponent::Ul, unit)
+                .map_err(|_| StyleApplyError::InvalidListLeftMarginComponent)?;
         }
     }
 

@@ -42,4 +42,11 @@ pub enum PageRenderError {
     /// An underlying markdown render failure surfaced through page rendering.
     #[error("markdown render failed: {0}")]
     Render(String),
+
+    /// A list left-margin builder was called with a non-`Ul` component.
+    ///
+    /// Only [`PageComponent::Ul`](super::PageComponent::Ul) supports the
+    /// independent left-margin channel in the current sub-spec.
+    #[error("list left margin only accepts `PageComponent::Ul`")]
+    InvalidListLeftMarginComponent,
 }
