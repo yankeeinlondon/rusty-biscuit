@@ -2995,4 +2995,84 @@ mod tests {
             "code block should retain multiple syntax highlight colors; got: {out:?}"
         );
     }
+
+    // ---------- Review-5 follow-ups: terminal layout fidelity ----------
+
+    /// With `ColorDepth::None`, a styled page must still render the full
+    /// table layout (box-drawing characters and cell contents) — the
+    /// pipeline no longer falls back to raw Markdown source.
+    #[test]
+    fn color_depth_none_preserves_table_layout_when_page_color_set() {
+        let term = Terminal::new_optimistic(80);
+        let page = DarkmatterPage::new(&term)
+            .with_page_color(red_color())
+            .with_color_depth(ColorDepth::None);
+        let md: Markdown = "| H |\n|---|\n| C |\n".into();
+
+        let out = page.render(&md).unwrap();
+        assert!(
+            !out.contains("\x1b[38;2;"),
+            "ColorDepth::None must suppress color SGR even with style.page.color; got: {out:?}"
+        );
+        assert!(
+            out.contains('H') && out.contains('C'),
+            "table cell text must survive ColorDepth::None; got: {out:?}"
+        );
+        assert!(
+            out.contains('┌') || out.contains('+') || out.contains('|'),
+            "table structure must render under ColorDepth::None; got: {out:?}"
+        );
+    }
+
+    /// `style.ul.color` must apply to list-item body text even when
+    /// `style.li.color` is unset — list items inherit through their
+    /// container scope just like CSS. The Tailwind Red-500 SGR triplet
+    /// resolves at render time, so we look up the canonical bytes from the
+    /// shared lowering helper rather than hard-coding RGB values.
+    #[test]
+    fn ul_color_inherits_into_li_body_when_li_color_unset() {
+        let term = Terminal::new_optimistic(80);
+        let page = DarkmatterPage::new(&term)
+            .with_component_color(PageComponent::Ul, red_color());
+        let md: Markdown = "- alpha\n- beta\n".into();
+
+        let out = page.render(&md).unwrap();
+        let red_sgr = crate::style::lower_to_sgr(&red_color(), ColorDepth::TrueColor, false)
+            .expect("red_color must lower to truecolor SGR");
+        // The ul color should wrap the marker AND the body, even though the
+        // li scope has no explicit color of its own (the body would
+        // otherwise inherit a None scope from li).
+        let occurrences = out.matches(&red_sgr).count();
+        assert!(
+            occurrences >= 2,
+            "ul color must wrap each item's body; got: {out:?}"
+        );
+    }
+
+    /// `style.hyperlinks.color` must wrap link label text inside table
+    /// cells, while preserving the OSC8 sequence — and it overrides the
+    /// surrounding table color.
+    #[test]
+    fn hyperlink_color_applies_inside_table_cells() {
+        let term = Terminal::new_optimistic(80);
+        let page = DarkmatterPage::new(&term)
+            .with_hyperlink_mode(HyperlinkMode::Always)
+            .with_component_color(PageComponent::Tables, blue_color())
+            .with_component_color(PageComponent::Hyperlinks, red_color());
+        let md: Markdown = "| col |\n|---|\n| [click](https://example.com) |\n".into();
+
+        let out = page.render(&md).unwrap();
+        // OSC8 sequences must still be present so the link remains clickable.
+        assert!(
+            out.contains("\x1b]8;;https://example.com\x07")
+                || out.contains("\x1b]8;;https://example.com\x1b\\"),
+            "OSC8 open sequence must be preserved in table; got: {out:?}"
+        );
+        let red_sgr = crate::style::lower_to_sgr(&red_color(), ColorDepth::TrueColor, false)
+            .expect("red_color must lower to truecolor SGR");
+        assert!(
+            out.contains(&red_sgr),
+            "hyperlink color must wrap table-link text; got: {out:?}"
+        );
+    }
 }
