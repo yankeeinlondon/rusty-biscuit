@@ -115,12 +115,10 @@ fn underline_color_is_dropped_from_projection() {
         // dropped underline color through `NodeAttrs`. Serialize the attrs and
         // assert no key suggesting "underline color" survives. The data-hint
         // surface uses kebab-case keys like `data-underline-color`.
-        let attrs_json =
-            serde_json::to_value(&node.attrs).expect("NodeAttrs serializes to JSON");
+        let attrs_json = serde_json::to_value(&node.attrs).expect("NodeAttrs serializes to JSON");
         let attrs_text = attrs_json.to_string().to_ascii_lowercase();
         assert!(
-            !attrs_text.contains("underline-color")
-                && !attrs_text.contains("underline_color"),
+            !attrs_text.contains("underline-color") && !attrs_text.contains("underline_color"),
             "{label}: no underline-color hint should appear in NodeAttrs: {attrs_text}"
         );
     }
@@ -330,10 +328,7 @@ fn strikethrough_activates_through_tree() {
     block.use_strikethrough_on_content();
     let term = test_terminal(80);
     let tree = block.render(&term);
-    assert!(
-        tree.contains("\x1b[9m"),
-        "tree strikethrough SGR: {tree:?}"
-    );
+    assert!(tree.contains("\x1b[9m"), "tree strikethrough SGR: {tree:?}");
 }
 
 #[test]
@@ -480,9 +475,7 @@ fn browser_strikethrough_preserves_strike_semantics() {
     block.use_strikethrough_on_content();
     let html = block.render_html_fragment().render();
     assert!(
-        html.contains("<s>")
-            || html.contains("<s ")
-            || html.contains("line-through"),
+        html.contains("<s>") || html.contains("<s ") || html.contains("line-through"),
         "strike semantics preserved: {html:?}"
     );
 }

@@ -595,20 +595,14 @@ mod tests {
     fn escaped_brackets_render_as_literal_text() {
         // Both `\[` and `\]` escapes survive pre-processing; downstream
         // tokens.rs converts them to literal `[` and `]`.
-        assert_eq!(
-            pp(r"\[not a link\](url)"),
-            r"\[not a link\](url)"
-        );
+        assert_eq!(pp(r"\[not a link\](url)"), r"\[not a link\](url)");
     }
 
     #[test]
     fn escaped_paren_inside_description_does_not_terminate_link() {
         // `[desc\]](url)` -> description preserves `\]` as escape, link
         // closes at the unescaped `]`.
-        assert_eq!(
-            pp(r"[desc\]](url)"),
-            "<a href=\"url\">desc\\]</a>",
-        );
+        assert_eq!(pp(r"[desc\]](url)"), "<a href=\"url\">desc\\]</a>",);
     }
 
     #[test]
@@ -637,10 +631,7 @@ mod tests {
 
     #[test]
     fn bold_escaped_asterisks_left_literal() {
-        assert_eq!(
-            pp(r"\*\*not bold\*\*"),
-            r"\*\*not bold\*\*",
-        );
+        assert_eq!(pp(r"\*\*not bold\*\*"), r"\*\*not bold\*\*",);
     }
 
     #[test]
@@ -677,10 +668,7 @@ mod tests {
 
     #[test]
     fn nested_bold_italics() {
-        assert_eq!(
-            pp("**_bold italics_**"),
-            "<b><i>bold italics</i></b>",
-        );
+        assert_eq!(pp("**_bold italics_**"), "<b><i>bold italics</i></b>",);
     }
 
     #[test]
@@ -716,10 +704,7 @@ mod tests {
 
     #[test]
     fn plain_text_passes_through_unchanged() {
-        assert_eq!(
-            pp("just some plain prose"),
-            "just some plain prose",
-        );
+        assert_eq!(pp("just some plain prose"), "just some plain prose",);
     }
 
     #[test]
@@ -795,15 +780,9 @@ mod tests {
         // The canonical regression case: env-var-style identifiers must
         // pass through pre-processing unchanged. Every `_` here has a
         // word character on both sides and therefore cannot open or close.
-        assert_eq!(
-            pp("OPENCODE_CONFIG_CONTENT"),
-            "OPENCODE_CONFIG_CONTENT",
-        );
+        assert_eq!(pp("OPENCODE_CONFIG_CONTENT"), "OPENCODE_CONFIG_CONTENT",);
         assert_eq!(pp("foo_bar"), "foo_bar");
-        assert_eq!(
-            pp("CLAUDINE_SESSION_ID"),
-            "CLAUDINE_SESSION_ID",
-        );
+        assert_eq!(pp("CLAUDINE_SESSION_ID"), "CLAUDINE_SESSION_ID",);
     }
 
     #[test]
@@ -826,10 +805,7 @@ mod tests {
         // Outer `**` are flanked by start/end (boundaries); inner `**`
         // pairs are intra-word and therefore literal. The outer pair
         // wraps the whole inner slice as bold.
-        assert_eq!(
-            pp("**foo**bar**baz**"),
-            "<b>foo**bar**baz</b>",
-        );
+        assert_eq!(pp("**foo**bar**baz**"), "<b>foo**bar**baz</b>",);
     }
 
     #[test]
@@ -845,10 +821,7 @@ mod tests {
         // Inside `<dim>…</dim>` the body is processed normally; the
         // tag declarations themselves are copied verbatim. The outer
         // `_` flanks against space and `<`, both non-word.
-        assert_eq!(
-            pp("<dim>one _two_</dim>"),
-            "<dim>one <i>two</i></dim>",
-        );
+        assert_eq!(pp("<dim>one _two_</dim>"), "<dim>one <i>two</i></dim>",);
     }
 
     #[test]

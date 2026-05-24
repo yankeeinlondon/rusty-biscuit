@@ -98,7 +98,9 @@ fn dir_example_terminal_default_still_works() {
         .success()
         // The example renders the repo's own dir with --depth 1 --filter ".rs"
         // and prints the example command afterwards.
-        .stdout(predicate::str::contains(r#"bt dir . --depth 1 --filter ".rs""#));
+        .stdout(predicate::str::contains(
+            r#"bt dir . --depth 1 --filter ".rs""#,
+        ));
 }
 
 #[test]
@@ -109,7 +111,9 @@ fn dir_example_with_md_still_prints_example_command() {
         .args(["dir", "--example", "--md"])
         .assert()
         .success()
-        .stdout(predicate::str::contains(r#"bt dir . --depth 1 --filter ".rs""#));
+        .stdout(predicate::str::contains(
+            r#"bt dir . --depth 1 --filter ".rs""#,
+        ));
 }
 
 #[test]

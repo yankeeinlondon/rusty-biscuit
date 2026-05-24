@@ -5,12 +5,12 @@ use biscuit_terminal::components::block_quote::BlockQuote;
 use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::components::renderable::{RenderableTerminalContent, TerminalRenderable};
 use biscuit_terminal::render_tree::{
-    render_terminal_node, BrowserTreeComponent, TerminalRenderOptions,
+    BrowserTreeComponent, TerminalRenderOptions, render_terminal_node,
 };
 use biscuit_terminal::utils::layout::{Length, TargetValue};
 use clap::Args as ClapArgs;
 use renderable::browser::BrowserRenderable;
-use renderable::tree::render::{render_markdown_node, MarkdownRenderOptions};
+use renderable::tree::render::{MarkdownRenderOptions, render_markdown_node};
 use renderable::tree::{RenderNode, RenderStrictness, TreeRenderable};
 use std::rc::Rc;
 

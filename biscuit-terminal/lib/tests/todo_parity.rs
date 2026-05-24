@@ -289,10 +289,7 @@ fn nerd_font_terminal_uses_nerd_glyph_open() {
     let todo = Todo::new("Open task");
     let out = todo.render(&term);
     let nerd_open = TODO_CHAR_LOOKUP[&TodoState::Open].nerd;
-    assert!(
-        out.contains(nerd_open),
-        "expected nerd open glyph: {out:?}"
-    );
+    assert!(out.contains(nerd_open), "expected nerd open glyph: {out:?}");
 }
 
 #[test]
@@ -505,10 +502,7 @@ fn markdown_in_progress_degrades_to_unchecked() {
         md.contains("- [ ] Doing"),
         "InProgress degrades to '- [ ]': {md:?}"
     );
-    assert!(
-        !md.contains("- [x]"),
-        "InProgress is not checked: {md:?}"
-    );
+    assert!(!md.contains("- [x]"), "InProgress is not checked: {md:?}");
 }
 
 #[test]

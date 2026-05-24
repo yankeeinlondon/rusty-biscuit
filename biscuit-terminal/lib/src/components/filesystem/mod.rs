@@ -2351,11 +2351,7 @@ fn fs_strip_icon_spans(node: &mut RenderNode) {
         let mut i = 0;
         while i < children.len() {
             let is_icon = matches!(&children[i].kind, NodeKind::Span { .. })
-                && children[i]
-                    .attrs
-                    .classes
-                    .iter()
-                    .any(|c| c == CLASS_ICON);
+                && children[i].attrs.classes.iter().any(|c| c == CLASS_ICON);
             if is_icon {
                 children.remove(i);
                 // If the next sibling is the canonical " " separator, drop
@@ -4205,10 +4201,7 @@ mod tests {
         };
 
         let fs = FileSystem::new(".").unwrap().layout(custom_layout.clone());
-        assert_eq!(
-            fs.layout.margin.left,
-            TargetValue::universal(Length::ch(4))
-        );
+        assert_eq!(fs.layout.margin.left, TargetValue::universal(Length::ch(4)));
     }
 
     #[test]
@@ -5388,8 +5381,7 @@ mod tests {
         use crate::components::renderable::TerminalRenderable;
         use crate::utils::layout::{Length, TargetValue};
         let mut fs = FileSystem::default();
-        TerminalRenderable::layout_mut(&mut fs).margin.left =
-            TargetValue::universal(Length::ch(4));
+        TerminalRenderable::layout_mut(&mut fs).margin.left = TargetValue::universal(Length::ch(4));
 
         assert_eq!(
             TerminalRenderable::layout(&fs).margin.left,
@@ -6798,7 +6790,10 @@ mod tests {
             .layout()
             .expect("layout seeded on root when non-default");
         // Tree connectors must never wrap.
-        assert!(matches!(layout.word_wrap, renderable::layout::WordWrap::None));
+        assert!(matches!(
+            layout.word_wrap,
+            renderable::layout::WordWrap::None
+        ));
         // Other layout slots survive the override.
         assert_eq!(layout.alignment, Alignment::Center);
     }
@@ -7030,8 +7025,14 @@ mod tests {
 
         let html = fs.render_html_fragment().render();
         assert!(html.contains("fs-dir"), "expected fs-dir class in: {html}");
-        assert!(html.contains("fs-file"), "expected fs-file class in: {html}");
-        assert!(html.contains("fs-icon"), "expected fs-icon class in: {html}");
+        assert!(
+            html.contains("fs-file"),
+            "expected fs-file class in: {html}"
+        );
+        assert!(
+            html.contains("fs-icon"),
+            "expected fs-icon class in: {html}"
+        );
     }
 
     #[test]
@@ -7040,9 +7041,7 @@ mod tests {
         std::fs::write(temp.path().join("keep.rs"), "fn x(){}").unwrap();
         std::fs::write(temp.path().join("drop.txt"), "skip").unwrap();
 
-        let mut fs = FileSystem::new(temp.path())
-            .expect("fs")
-            .filter(".rs");
+        let mut fs = FileSystem::new(temp.path()).expect("fs").filter(".rs");
         fs.ensure_tree_built();
 
         let node = fs.render_tree();

@@ -34,7 +34,10 @@ fn main() {
         for scenario in scenarios() {
             let (via_render, tree) = (case.render)(&scenario);
             let title = format!("{} × {} (w{})", case.name, scenario.name, scenario.width);
-            print!("{}", side_by_side(&title, &via_render, &tree, scenario.width));
+            print!(
+                "{}",
+                side_by_side(&title, &via_render, &tree, scenario.width)
+            );
         }
     }
     println!();

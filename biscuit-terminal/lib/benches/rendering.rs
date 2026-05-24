@@ -45,9 +45,7 @@ fn bench_prose_render(c: &mut Criterion) {
     let simple = "Hello world, this is a simple prose string.";
     let tokens = "Hello <bold>world</bold>! This is <red>important</red> text with <italic>emphasis</italic>.";
     let long_tokens = (0..20)
-        .map(|i| {
-            format!("Item <bold>{i}</bold>: description of item {i} with <red>color</red>")
-        })
+        .map(|i| format!("Item <bold>{i}</bold>: description of item {i} with <red>color</red>"))
         .collect::<Vec<_>>()
         .join(". ");
 

@@ -238,7 +238,6 @@ impl TextBlock {
             }
         }
     }
-
 }
 
 /// Maps the bespoke [`UnderliningRequest`] to a render-tree
@@ -487,5 +486,4 @@ mod tests {
             "canonical and compatibility projections must serialize identically"
         );
     }
-
 }

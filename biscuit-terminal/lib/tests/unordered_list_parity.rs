@@ -762,10 +762,9 @@ fn nested_ordered_list_inside_unordered_list_item_projects_ordered_list_node() {
     let items = list_item_children(&node);
 
     assert!(
-        items.iter().any(|item| walk_has_kind(
-            item,
-            |k| matches!(k, NodeKind::List { ordered: true, .. })
-        )),
+        items
+            .iter()
+            .any(|item| walk_has_kind(item, |k| matches!(k, NodeKind::List { ordered: true, .. }))),
         "nested OrderedList must appear as a structural ordered List node inside a ListItem: \
          {items:?}"
     );
@@ -782,10 +781,10 @@ fn nested_unordered_list_inside_unordered_list_item_projects_unordered_list_node
     let items = list_item_children(&node);
 
     assert!(
-        items.iter().any(|item| walk_has_kind(
-            item,
-            |k| matches!(k, NodeKind::List { ordered: false, .. })
-        )),
+        items.iter().any(|item| walk_has_kind(item, |k| matches!(
+            k,
+            NodeKind::List { ordered: false, .. }
+        ))),
         "nested UnorderedList must appear as a structural unordered List node inside a \
          ListItem: {items:?}"
     );

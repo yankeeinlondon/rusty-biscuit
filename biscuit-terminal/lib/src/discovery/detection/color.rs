@@ -62,9 +62,7 @@ pub fn color_depth() -> ColorDepth {
         || env::var_os("CLICOLOR_FORCE")
             .filter(|v| !v.is_empty())
             .is_some();
-    let no_color = env::var_os("NO_COLOR")
-        .filter(|v| !v.is_empty())
-        .is_some();
+    let no_color = env::var_os("NO_COLOR").filter(|v| !v.is_empty()).is_some();
     if no_color && !force_color {
         tracing::debug!(
             color_depth = ?ColorDepth::None,

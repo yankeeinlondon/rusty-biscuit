@@ -8,9 +8,9 @@ use crate::discovery::raw_mode::{RawModeGuard, TERMINAL_QUERY_MUTEX};
 use crate::discovery::detection::{TerminalApp, get_terminal_app, is_tty};
 use crate::discovery::os_detection::is_ci;
 
-use super::parse::{ansi_index_to_rgb, parse_colorfgbg};
 #[cfg(unix)]
 use super::parse::parse_osc_color_response;
+use super::parse::{ansi_index_to_rgb, parse_colorfgbg};
 use super::types::{DEFAULT_TIMEOUT, OscQueryError, RgbValue};
 
 /// Human-readable name for an OSC color query code.

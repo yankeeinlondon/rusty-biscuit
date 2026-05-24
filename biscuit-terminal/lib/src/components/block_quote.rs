@@ -1,14 +1,14 @@
 use std::any::Any;
 use std::rc::Rc;
 
-use renderable::browser::fragment::{BrowserFragment, Ready};
 use renderable::browser::PageOptions;
+use renderable::browser::fragment::{BrowserFragment, Ready};
 use renderable::html::HtmlPage;
 use renderable::layout::TargetValue;
 use renderable::markdown::MarkdownRenderable;
 use renderable::style::{Border, BorderSides, PerMode, Style};
 use renderable::target::RenderTarget;
-use renderable::tree::render::{render_markdown_node, MarkdownDialect, MarkdownRenderOptions};
+use renderable::tree::render::{MarkdownDialect, MarkdownRenderOptions, render_markdown_node};
 use renderable::tree::{NodeKind, RenderNode, RenderStrictness, TreeRenderable};
 
 use crate::{
@@ -16,7 +16,7 @@ use crate::{
         prose::Prose,
         renderable::{BrowserRenderable, RenderableTerminalContent, TerminalRenderable},
     },
-    render_tree::{render_terminal_node, BrowserTreeComponent, TerminalRenderOptions},
+    render_tree::{BrowserTreeComponent, TerminalRenderOptions, render_terminal_node},
     terminal::Terminal,
     utils::{
         block_constraint::{split_lines, visible_width, wrap_lines},
@@ -557,7 +557,9 @@ impl BlockQuote {
 
         let nodes = project_renderable_content(
             &self.content,
-            ProjectionMode::Structural { terminal_hint: None },
+            ProjectionMode::Structural {
+                terminal_hint: None,
+            },
         );
 
         if nodes.iter().all(|n| is_inline_node_kind(&n.kind)) {
@@ -1088,8 +1090,8 @@ mod tests {
 
     // `render_markdown_node`, `MarkdownRenderOptions`, and `TreeRenderable` are
     // already imported at the file level via `use super::*`.
-    use renderable::tree::render::{render_browser_node, BrowserRenderOptions};
     use renderable::tree::NodeKind;
+    use renderable::tree::render::{BrowserRenderOptions, render_browser_node};
 
     #[test]
     fn test_render_tree_root_is_block_quote() {

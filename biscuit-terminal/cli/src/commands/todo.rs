@@ -10,8 +10,7 @@ use clap::Args as ClapArgs;
 use renderable::markdown::MarkdownRenderable;
 
 const TODO_EXAMPLE_DESCRIPTION: &str = "Review pull request #42";
-const TODO_EXAMPLE_CMD: &str =
-    r#"bt todo "Review pull request #42" --state completed"#;
+const TODO_EXAMPLE_CMD: &str = r#"bt todo "Review pull request #42" --state completed"#;
 
 /// Five visible states a [`Todo`] item can be in.
 ///
@@ -148,10 +147,7 @@ impl Run for TodoArgs {
         if self.md_plus {
             println!(
                 "{}",
-                render_markdown_with_layout_frontmatter(
-                    &todo.render_markdown_plus(),
-                    &self.layout
-                )
+                render_markdown_with_layout_frontmatter(&todo.render_markdown_plus(), &self.layout)
             );
             if self.example {
                 print_example_command(TODO_EXAMPLE_CMD);

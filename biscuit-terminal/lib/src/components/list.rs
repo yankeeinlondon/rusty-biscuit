@@ -242,7 +242,6 @@ impl OrderedList {
             }
         }
     }
-
 }
 
 impl TerminalRenderable for OrderedList {
@@ -426,10 +425,8 @@ fn project_list_items(
                 RenderableTerminalContent::Component(c)
                     if c.as_any().downcast_ref::<Prose>().is_some()
             );
-            let projected = project_renderable_content(
-                item,
-                ProjectionMode::Structural { terminal_hint },
-            );
+            let projected =
+                project_renderable_content(item, ProjectionMode::Structural { terminal_hint });
             let children = if is_prose {
                 vec![RenderNode::paragraph(projected)]
             } else {
@@ -718,7 +715,6 @@ impl UnorderedList {
             }
         }
     }
-
 }
 
 impl TerminalRenderable for UnorderedList {

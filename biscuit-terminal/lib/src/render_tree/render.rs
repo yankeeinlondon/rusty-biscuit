@@ -413,12 +413,9 @@ impl Writer<'_> {
                     None => body,
                 })
             }
-            NodeKind::Code { lang, meta, value } => Ok(self.render_code_node(
-                lang.as_deref(),
-                value,
-                meta.as_deref(),
-                &node.attrs,
-            )),
+            NodeKind::Code { lang, meta, value } => {
+                Ok(self.render_code_node(lang.as_deref(), value, meta.as_deref(), &node.attrs))
+            }
             NodeKind::ThematicBreak => {
                 let rule = horizontal_rule_from_attrs(&node.attrs);
                 Ok(rule.render(&self.opts.context.terminal))
@@ -870,10 +867,7 @@ impl Writer<'_> {
     /// same no-marker policy. No bullet, ordinal, or connector is emitted.
     ///
     /// [`ListMarkerPolicy::None`]: renderable::tree::ListMarkerPolicy::None
-    fn render_marker_free_list(
-        &mut self,
-        children: &[RenderNode],
-    ) -> Result<String, RenderError> {
+    fn render_marker_free_list(&mut self, children: &[RenderNode]) -> Result<String, RenderError> {
         let mut lines = Vec::with_capacity(children.len());
         for child in children {
             let body = match &child.kind {
@@ -944,18 +938,15 @@ impl Writer<'_> {
                     ..
                 } = &item_child.kind
                 {
-                    nested.push(
-                        self.render_tree_connector_list(nested_children, &continuation)?,
-                    );
+                    nested.push(self.render_tree_connector_list(nested_children, &continuation)?);
                 } else if is_inline_block(item_child) {
                     let markup = match &item_child.kind {
                         NodeKind::Paragraph { children } => {
                             self.render_inline(children, &Style::default())?
                         }
-                        _ => self.render_inline(
-                            std::slice::from_ref(item_child),
-                            &Style::default(),
-                        )?,
+                        _ => {
+                            self.render_inline(std::slice::from_ref(item_child), &Style::default())?
+                        }
                     };
                     label_parts.push(self.render_prose(&markup));
                 } else {
@@ -1099,8 +1090,7 @@ impl Writer<'_> {
                 (&self.opts.context.color_depth).into(),
                 (&self.opts.context.color_mode).into(),
             );
-            if let Some(rendered) =
-                renderer.render_terminal_code(lang, value, meta, attrs, context)
+            if let Some(rendered) = renderer.render_terminal_code(lang, value, meta, attrs, context)
             {
                 return rendered;
             }
@@ -1613,7 +1603,10 @@ fn apply_classes(inner: &str, classes: &[String]) -> String {
 ///
 /// The marker applies only to the checkbox; description styling (a `Cancelled`
 /// item's strikethrough/dim) is carried by the item's child nodes and `Style`.
-fn task_state_marker(state: renderable::tree::TaskState, term: &crate::terminal::Terminal) -> String {
+fn task_state_marker(
+    state: renderable::tree::TaskState,
+    term: &crate::terminal::Terminal,
+) -> String {
     use crate::components::todo::{
         FB_CHECKBOX_BLOCKED_NOCOLOR, FB_CHECKBOX_CANCELLED_NOCOLOR, FB_CHECKBOX_COMPLETED_NOCOLOR,
         FB_CHECKBOX_IN_PROGRESS_NOCOLOR, FB_CHECKBOX_OPEN, TODO_CHAR_LOOKUP, TodoState,
@@ -2006,11 +1999,9 @@ mod render_tree_tests {
 
     #[test]
     fn render_tree_root_with_sequence_join_has_no_separator() {
-        let mut root = RenderNode::root(vec![
-            RenderNode::text("foo"),
-            RenderNode::text("bar"),
-        ]);
-        root.attrs.set_sequence_join(renderable::tree::SequenceJoin::None);
+        let mut root = RenderNode::root(vec![RenderNode::text("foo"), RenderNode::text("bar")]);
+        root.attrs
+            .set_sequence_join(renderable::tree::SequenceJoin::None);
         let out = strip_escape_codes(&render(&root).output);
         assert_eq!(out, "foobar");
     }
@@ -2021,7 +2012,8 @@ mod render_tree_tests {
             RenderNode::text("inline"),
             RenderNode::paragraph(vec![RenderNode::text("para")]),
         ]);
-        root.attrs.set_sequence_join(renderable::tree::SequenceJoin::None);
+        root.attrs
+            .set_sequence_join(renderable::tree::SequenceJoin::None);
         let out = strip_escape_codes(&render(&root).output);
         assert_eq!(out, "inlinepara");
     }
@@ -2036,22 +2028,14 @@ mod render_tree_tests {
 
     #[test]
     fn render_tree_list_default_policy_unchanged() {
-        let list = RenderNode::list(
-            false,
-            None,
-            vec![item("a", vec![]), item("b", vec![])],
-        );
+        let list = RenderNode::list(false, None, vec![item("a", vec![]), item("b", vec![])]);
         let out = strip_escape_codes(&render(&list).output);
         assert_eq!(out, "- a\n- b");
     }
 
     #[test]
     fn render_tree_list_marker_policy_none_emits_no_marker() {
-        let mut list = RenderNode::list(
-            false,
-            None,
-            vec![item("a", vec![]), item("b", vec![])],
-        );
+        let mut list = RenderNode::list(false, None, vec![item("a", vec![]), item("b", vec![])]);
         list.attrs
             .set_list_marker_policy(renderable::tree::ListMarkerPolicy::None);
         let out = strip_escape_codes(&render(&list).output);
@@ -2109,10 +2093,7 @@ mod render_tree_tests {
         list.attrs
             .set_list_marker_policy(renderable::tree::ListMarkerPolicy::TreeConnectors);
         let out = strip_escape_codes(&render(&list).output);
-        assert_eq!(
-            out,
-            "├── dir1\n│   └── child\n└── dir2\n    └── leaf"
-        );
+        assert_eq!(out, "├── dir1\n│   └── child\n└── dir2\n    └── leaf");
     }
 
     // ── RT-TODO-001: task-state hints ──────────────────────────────────────
@@ -2173,11 +2154,7 @@ mod render_tree_tests {
         use renderable::tree::TaskState;
         // Color but no Nerd Font: the colored ASCII fallback is used.
         let opts = opts_with(ColorDepth::TrueColor, Some(false));
-        let list = RenderNode::list(
-            false,
-            None,
-            vec![task_item(TaskState::Completed, "done")],
-        );
+        let list = RenderNode::list(false, None, vec![task_item(TaskState::Completed, "done")]);
         let out = render_terminal_node(&list, &opts).expect("render").output;
         // The fallback for Completed contains a ✔ glyph.
         assert!(out.contains('✔'), "{out:?}");
@@ -2228,12 +2205,8 @@ mod render_tree_tests {
         let mut table = RenderNode::table(
             vec![ColumnAlign::Left],
             vec![
-                RenderNode::table_row(vec![RenderNode::table_cell(vec![RenderNode::text(
-                    "Name",
-                )])]),
-                RenderNode::table_row(vec![RenderNode::table_cell(vec![RenderNode::text(
-                    "Ann",
-                )])]),
+                RenderNode::table_row(vec![RenderNode::table_cell(vec![RenderNode::text("Name")])]),
+                RenderNode::table_row(vec![RenderNode::table_cell(vec![RenderNode::text("Ann")])]),
             ],
         );
         table.attrs.set_table_title(title);
@@ -3062,6 +3035,9 @@ mod render_tree_tests {
             "tree path must match bespoke output for a bold-header table"
         );
         // And the styling must actually be present (not flattened away).
-        assert!(tree_out.contains("\x1b[1m"), "bold SGR missing: {tree_out:?}");
+        assert!(
+            tree_out.contains("\x1b[1m"),
+            "bold SGR missing: {tree_out:?}"
+        );
     }
 }

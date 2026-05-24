@@ -511,8 +511,8 @@ fn render_via_tree_honors_right_margin() {
     // A right margin of 4 cells must constrain the column block to
     // `width - 4` visible cells. Use unique, space-free tokens so columns
     // do not collapse, and assert every emitted line is short enough.
-    let cols = TwoColumn::new("LeftWord", "RightWord")
-        .right_margin(TargetValue::universal(Length::ch(4)));
+    let cols =
+        TwoColumn::new("LeftWord", "RightWord").right_margin(TargetValue::universal(Length::ch(4)));
     let term = test_terminal(80);
     let bespoke = strip_ansi(&cols.render_bespoke(&term));
     let tree = strip_ansi(&cols.render(&term));

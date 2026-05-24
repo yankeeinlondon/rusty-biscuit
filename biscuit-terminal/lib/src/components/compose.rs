@@ -1,12 +1,12 @@
 use std::any::Any;
 
-use renderable::browser::fragment::{BrowserFragment, Ready};
 use renderable::browser::PageOptions;
+use renderable::browser::fragment::{BrowserFragment, Ready};
 use renderable::html::HtmlPage;
 use renderable::markdown::MarkdownRenderable;
 use renderable::tree::render::{
-    render_browser_node, render_markdown_node, BrowserRenderOptions, MarkdownDialect,
-    MarkdownRenderOptions,
+    BrowserRenderOptions, MarkdownDialect, MarkdownRenderOptions, render_browser_node,
+    render_markdown_node,
 };
 use renderable::tree::{RenderNode, RenderStrictness, SequenceJoin, TreeRenderable};
 
@@ -18,7 +18,7 @@ use crate::components::{
     section::{HeadingLevel, Section},
     table::table::Table,
 };
-use crate::render_tree::{render_terminal_node, TerminalRenderOptions};
+use crate::render_tree::{TerminalRenderOptions, render_terminal_node};
 use crate::terminal::Terminal;
 use crate::utils::layout::Layout;
 
@@ -307,10 +307,7 @@ impl Compose {
         // The shared helper handles the Prose downcast + bespoke-only
         // terminal-threaded fallback; Compose only adds its own `Root`
         // flattening on top.
-        let nodes = project_renderable_content(
-            part,
-            ProjectionMode::Structural { terminal_hint },
-        );
+        let nodes = project_renderable_content(part, ProjectionMode::Structural { terminal_hint });
         // A nested `Compose` (or any tree-renderable that returns a `Root`
         // node) is invalid as a child of our outer `Root`. Inline its
         // children so the nested sequence's contents become siblings —
@@ -1002,25 +999,37 @@ mod tests {
     #[test]
     fn test_left_margin_builder() {
         let compose = Compose::from("test").left_margin(TargetValue::universal(Length::ch(4)));
-        assert_eq!(compose.layout().margin.left, TargetValue::universal(Length::ch(4)));
+        assert_eq!(
+            compose.layout().margin.left,
+            TargetValue::universal(Length::ch(4))
+        );
     }
 
     #[test]
     fn test_right_margin_builder() {
         let compose = Compose::from("test").right_margin(TargetValue::universal(Length::ch(4)));
-        assert_eq!(compose.layout().margin.right, TargetValue::universal(Length::ch(4)));
+        assert_eq!(
+            compose.layout().margin.right,
+            TargetValue::universal(Length::ch(4))
+        );
     }
 
     #[test]
     fn test_top_margin_builder() {
         let compose = Compose::from("test").top_margin(TargetValue::universal(Length::ch(2)));
-        assert_eq!(compose.layout().margin.top, TargetValue::universal(Length::ch(2)));
+        assert_eq!(
+            compose.layout().margin.top,
+            TargetValue::universal(Length::ch(2))
+        );
     }
 
     #[test]
     fn test_bottom_margin_builder() {
         let compose = Compose::from("test").bottom_margin(TargetValue::universal(Length::ch(2)));
-        assert_eq!(compose.layout().margin.bottom, TargetValue::universal(Length::ch(2)));
+        assert_eq!(
+            compose.layout().margin.bottom,
+            TargetValue::universal(Length::ch(2))
+        );
     }
 
     #[test]
@@ -1041,8 +1050,14 @@ mod tests {
             .left_margin(TargetValue::universal(Length::ch(2)))
             .right_margin(TargetValue::universal(Length::ch(2)))
             .alignment(Alignment::Center);
-        assert_eq!(compose.layout().margin.left, TargetValue::universal(Length::ch(2)));
-        assert_eq!(compose.layout().margin.right, TargetValue::universal(Length::ch(2)));
+        assert_eq!(
+            compose.layout().margin.left,
+            TargetValue::universal(Length::ch(2))
+        );
+        assert_eq!(
+            compose.layout().margin.right,
+            TargetValue::universal(Length::ch(2))
+        );
         assert_eq!(compose.layout().alignment, Alignment::Center);
     }
 
@@ -1092,7 +1107,10 @@ mod tests {
         // budget. We don't check the right edge directly (Compose does not
         // pad to the right edge), but we do check that the left margin is
         // honored.
-        assert!(line.starts_with("  hi"), "expected 2-space indent + `hi`, got: {line:?}");
+        assert!(
+            line.starts_with("  hi"),
+            "expected 2-space indent + `hi`, got: {line:?}"
+        );
     }
 
     /// Builds a Compose with `max_width` applied directly to its layout —
@@ -1154,8 +1172,8 @@ mod tests {
         // What we DO assert is that the Layout's `word_wrap` is correctly
         // seeded on the projected sequence container so downstream
         // consumers (paragraph/prose nodes nested inside) can opt in.
-        let compose = Compose::from("alphabet soup is tasty")
-            .word_wrap(WordWrap::WrapProse(None, None));
+        let compose =
+            Compose::from("alphabet soup is tasty").word_wrap(WordWrap::WrapProse(None, None));
         let node = TreeRenderable::render_tree(&compose);
         let layout = node.attrs.layout().expect("layout recorded");
         assert_eq!(layout.word_wrap, WordWrap::WrapProse(None, None));
@@ -1461,8 +1479,7 @@ mod tests {
         }
         let term = Terminal::new_optimistic(80);
         let opts = TerminalRenderOptions::new(&term, RenderStrictness::Strict);
-        let result =
-            crate::render_tree::render_terminal_node(&node, &opts);
+        let result = crate::render_tree::render_terminal_node(&node, &opts);
         assert!(
             result.is_err(),
             "Strict mode must reject the unsupported child; got Ok: {:?}",
@@ -1617,8 +1634,7 @@ mod tests {
     #[test]
     fn test_browser_single_string_wrapped_in_div() {
         let compose: Compose = "hello".into();
-        let html =
-            renderable::browser::BrowserRenderable::render_html_fragment(&compose).render();
+        let html = renderable::browser::BrowserRenderable::render_html_fragment(&compose).render();
         assert!(html.contains("hello"));
         assert!(html.contains("<div"));
     }
@@ -1629,8 +1645,7 @@ mod tests {
             RenderableTerminalContent::from("foo"),
             RenderableTerminalContent::from("bar"),
         ]);
-        let html =
-            renderable::browser::BrowserRenderable::render_html_fragment(&compose).render();
+        let html = renderable::browser::BrowserRenderable::render_html_fragment(&compose).render();
         // The two text nodes appear in DOM order with no inserted text
         // separator between them.
         let foo_idx = html.find("foo").expect("foo present");
@@ -1649,8 +1664,7 @@ mod tests {
     fn test_browser_string_plus_section_emits_heading_after_string() {
         let mut compose = Compose::default();
         compose.add_text("Intro").add_heading("Title", 2);
-        let html =
-            renderable::browser::BrowserRenderable::render_html_fragment(&compose).render();
+        let html = renderable::browser::BrowserRenderable::render_html_fragment(&compose).render();
         let intro_idx = html.find("Intro").expect("Intro present");
         let heading_idx = html.find("<h2").expect("<h2 present");
         assert!(intro_idx < heading_idx);
@@ -1662,8 +1676,7 @@ mod tests {
         compose
             .add_text("Items")
             .add_unordered_list(UnorderedList::new(vec!["a", "b"]));
-        let html =
-            renderable::browser::BrowserRenderable::render_html_fragment(&compose).render();
+        let html = renderable::browser::BrowserRenderable::render_html_fragment(&compose).render();
         assert!(html.contains("Items"));
         assert!(html.contains("<ul"));
         assert!(html.contains("a"));

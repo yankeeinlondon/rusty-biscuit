@@ -89,10 +89,7 @@ impl ProseDocument {
     pub(super) fn parse(content: &str) -> ProseDocument {
         let preprocessed = super::markdown::preprocess_markdown(content);
         ProseDocument {
-            children: super::tokens::parse_nodes(
-                &preprocessed.text,
-                &preprocessed.code_blocks,
-            ),
+            children: super::tokens::parse_nodes(&preprocessed.text, &preprocessed.code_blocks),
         }
     }
 }

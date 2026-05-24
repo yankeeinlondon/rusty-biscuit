@@ -308,8 +308,8 @@ pub(super) fn parse_nodes(content: &str, code_blocks: &[FencedCode]) -> Vec<Pros
     while let Some(ch) = chars.next() {
         // ── Fenced-code placeholders: \u{0002}CODE<n>\u{0002} ────────────
         if ch == CODE_BLOCK_PLACEHOLDER_MARK {
-            if let Some(block) = take_code_placeholder(&mut chars)
-                .and_then(|index| code_blocks.get(index))
+            if let Some(block) =
+                take_code_placeholder(&mut chars).and_then(|index| code_blocks.get(index))
             {
                 flush_text(&mut text, &mut nodes);
                 nodes.push(ProseNode::CodeBlock {
