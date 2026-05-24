@@ -153,6 +153,21 @@ visibility is irrelevant. `AppleTerminalHarness` always spawns behind
 the developer's frontmost app (it snapshots and restores focus around
 the `do script` call).
 
+## Defensive cleanup
+
+The harness defensively removes stale resources before opening new
+real-terminal sessions. WezTerm panes, tmux sessions, and Terminal.app
+windows are tagged with the creating process id; later runs close only
+tagged resources whose process is no longer alive, so active concurrent
+test runs are left alone.
+
+`cleanup_stale_terminal_harness_resources()` is available for explicit
+suite setup or local maintenance. Backend spawns also call their own
+cleanup path once per process. For historical WezTerm leaks created
+before tagging existed, the WezTerm cleanup sweeps untagged panes in the
+`biscuit-bg` workspace when that workspace grows past a conservative
+limit, or when `BISCUIT_TEST_HARNESS_SWEEP_LEGACY_WEZTERM=1` is set.
+
 ## Environment prerequisites
 
 `available()` gates every harness. It returns `false` cleanly when the
@@ -241,6 +256,7 @@ Re-exported from the crate root:
 | `SpawnVisibility` | `Background` (default) / `Foreground`. |
 | `strip_ansi(&str)` | Remove CSI/OSC/SGR/charset-designation escapes (ECMA-48 §5.4 aware). |
 | `skip_with_reason(&str)` | Print `skipping: requires <X>` to stderr; returns `true`. |
+| `cleanup_stale_terminal_harness_resources()` | Best-effort cleanup for tagged stale WezTerm, tmux, and Terminal.app resources. |
 | `detect_shell()` | Pick a POSIX shell (`bash` → `sh` → `$SHELL`). |
 | `cargo_bin_dir(name)` | Locate the directory of a built cargo binary, for `PATH` augmentation. |
 | `apply_color_forcing_env(&mut Command)` | Set `FORCE_COLOR`/`CLICOLOR_FORCE`/`TERM`/`COLORTERM`, clear `NO_COLOR`. |

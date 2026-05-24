@@ -16,12 +16,16 @@
 use std::ffi::OsString;
 use std::io;
 use std::process::{Command, Stdio};
+use std::sync::Once;
 use std::time::Duration;
 
 use super::{
     CAPTURE_TIMEOUT, CLEANUP_TIMEOUT, CapturedFrame, SEND_TIMEOUT, SPAWN_TIMEOUT, TerminalHarness,
-    run_with_timeout, wait_for_prompt,
+    current_process_id, process_is_alive, run_with_timeout, wait_for_prompt,
 };
+
+const SESSION_PREFIX: &str = "biscuit_test_";
+static CLEANUP_ONCE: Once = Once::new();
 
 /// Harness that runs each spawned binary inside a fresh detached tmux
 /// session.
@@ -76,6 +80,43 @@ impl TmuxHarness {
     }
 }
 
+/// Removes stale tmux sessions created by earlier
+/// [`TmuxHarness`] instances whose owning test process no longer exists.
+///
+/// Session names include the creating process id
+/// (`biscuit_test_<pid>_<seq>`), so this avoids killing active sessions
+/// from another concurrent test process.
+pub fn cleanup_stale_tmux_sessions() {
+    if !TmuxHarness::available() {
+        return;
+    }
+    let mut cmd = Command::new("tmux");
+    cmd.arg("ls");
+    let Ok(out) = run_with_timeout(&mut cmd, Duration::from_secs(2)) else {
+        return;
+    };
+    if !out.status.success() {
+        return;
+    }
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    for line in stdout.lines() {
+        let Some(name) = line.split(':').next() else {
+            continue;
+        };
+        let Some(pid) = tmux_pid_from_session(name) else {
+            continue;
+        };
+        if pid == current_process_id() || process_is_alive(pid) {
+            continue;
+        }
+        let mut kill = Command::new("tmux");
+        kill.args(["kill-session", "-t", name])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+        let _ = run_with_timeout(&mut kill, CLEANUP_TIMEOUT);
+    }
+}
+
 impl Default for TmuxHarness {
     fn default() -> Self {
         Self::new()
@@ -100,6 +141,7 @@ impl TerminalHarness for TmuxHarness {
         if !Self::available() {
             return Err(io::Error::other("tmux not available"));
         }
+        CLEANUP_ONCE.call_once(cleanup_stale_tmux_sessions);
         let session = unique_session_name();
         let shell = super::detect_shell();
         let shell_cmd = format!("{} -l", shell);
@@ -148,6 +190,7 @@ impl TerminalHarness for TmuxHarness {
         if !Self::available() {
             return Err(io::Error::other("tmux not available"));
         }
+        CLEANUP_ONCE.call_once(cleanup_stale_tmux_sessions);
         let session = unique_session_name();
         let mut shell_cmd = shell_quote(program);
         for a in args {
@@ -215,6 +258,11 @@ fn unique_session_name() -> String {
     format!("biscuit_test_{}_{n}", std::process::id())
 }
 
+fn tmux_pid_from_session(name: &str) -> Option<u32> {
+    let rest = name.strip_prefix(SESSION_PREFIX)?;
+    rest.split('_').next()?.parse().ok()
+}
+
 fn shell_quote(s: &str) -> String {
     let mut out = String::with_capacity(s.len() + 2);
     out.push('\'');
@@ -237,4 +285,24 @@ fn which(bin: &str) -> bool {
         .status()
         .map(|s| s.success())
         .unwrap_or(false)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn tmux_pid_from_session_extracts_pid() {
+        assert_eq!(tmux_pid_from_session("biscuit_test_123_0"), Some(123));
+    }
+
+    #[test]
+    fn tmux_pid_from_session_rejects_wrong_prefix() {
+        assert_eq!(tmux_pid_from_session("other_123_0"), None);
+    }
+
+    #[test]
+    fn tmux_pid_from_session_rejects_invalid_pid() {
+        assert_eq!(tmux_pid_from_session("biscuit_test_nope_0"), None);
+    }
 }
