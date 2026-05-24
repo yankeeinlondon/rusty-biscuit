@@ -303,7 +303,10 @@ fn parity_triple_digit_prefix() {
     assert!(tree_norm.contains("9. item 9"), "single-digit row");
     assert!(tree_norm.contains("99. item 99"), "double-digit row");
     assert!(tree_norm.contains("100. item 100"), "triple-digit row");
-    assert!(tree_norm.contains("105. item 105"), "final triple-digit row");
+    assert!(
+        tree_norm.contains("105. item 105"),
+        "final triple-digit row"
+    );
 }
 
 #[test]
@@ -343,7 +346,10 @@ fn parity_triple_digit_prefix_wraps_with_5char_hanging_indent() {
             "continuation under 100. row must indent ≥5 spaces: {line:?}"
         );
     }
-    assert!(saw_continuation, "expected at least one wrapped line for the 100. item");
+    assert!(
+        saw_continuation,
+        "expected at least one wrapped line for the 100. item"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -648,10 +654,9 @@ fn nested_ordered_list_inside_ordered_list_item_projects_ordered_list_node() {
     let items = list_item_children(&node);
 
     assert!(
-        items.iter().any(|item| walk_has_kind(
-            item,
-            |k| matches!(k, NodeKind::List { ordered: true, .. })
-        )),
+        items
+            .iter()
+            .any(|item| walk_has_kind(item, |k| matches!(k, NodeKind::List { ordered: true, .. }))),
         "nested OrderedList must appear as a structural ordered List node inside a ListItem: \
          {items:?}"
     );
@@ -670,10 +675,10 @@ fn nested_unordered_list_inside_ordered_list_item_projects_unordered_list_node()
     let items = list_item_children(&node);
 
     assert!(
-        items.iter().any(|item| walk_has_kind(
-            item,
-            |k| matches!(k, NodeKind::List { ordered: false, .. })
-        )),
+        items.iter().any(|item| walk_has_kind(item, |k| matches!(
+            k,
+            NodeKind::List { ordered: false, .. }
+        ))),
         "nested UnorderedList must appear as a structural unordered List node inside a \
          ListItem: {items:?}"
     );

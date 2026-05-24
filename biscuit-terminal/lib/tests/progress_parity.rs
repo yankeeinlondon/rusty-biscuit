@@ -383,8 +383,7 @@ fn tree_renderable_and_render_tree_node_share_one_projection() {
 #[test]
 fn left_margin_is_honored_through_tree_path() {
     use biscuit_terminal::utils::layout::{Length, TargetValue};
-    let bar =
-        Progress::new(0.5).left_margin(TargetValue::universal(Length::ch(4)));
+    let bar = Progress::new(0.5).left_margin(TargetValue::universal(Length::ch(4)));
     let term = test_terminal(80);
     let out = strip_ansi(&bar.render(&term));
     assert!(
@@ -418,9 +417,7 @@ fn markdown_renderable_unlabeled_emits_percentage_text() {
 #[test]
 fn markdown_renderable_labeled_emits_label_and_percentage() {
     use renderable::markdown::MarkdownRenderable;
-    let md = Progress::new(0.5)
-        .with_label("Loading")
-        .render_markdown();
+    let md = Progress::new(0.5).with_label("Loading").render_markdown();
     assert_eq!(md.trim(), "Loading 50%");
 }
 
@@ -484,11 +481,10 @@ fn markdown_plus_unlabeled_omits_label_span() {
 #[test]
 fn markdown_falls_through_for_plain_paragraph() {
     // A plain Paragraph (no ProgressHints) renders as ordinary Markdown.
-    use renderable::tree::{RenderNode, render_markdown_node};
     use renderable::tree::render::MarkdownRenderOptions;
+    use renderable::tree::{RenderNode, render_markdown_node};
     let para = RenderNode::paragraph(vec![RenderNode::text("Plain text.")]);
-    let out = render_markdown_node(&para, &MarkdownRenderOptions::default())
-        .expect("markdown ok");
+    let out = render_markdown_node(&para, &MarkdownRenderOptions::default()).expect("markdown ok");
     assert_eq!(out.output.trim(), "Plain text.");
 }
 
@@ -553,8 +549,7 @@ fn tree_render_skips_sgr_at_color_depth_none() {
     use biscuit_terminal::discovery::detection::ColorDepth;
     use biscuit_terminal::terminal::Terminal;
     use renderable::color::{BasicColor, Color};
-    let bar = Progress::new(0.5)
-        .with_filled_color(Color::BasicColor(BasicColor::Green));
+    let bar = Progress::new(0.5).with_filled_color(Color::BasicColor(BasicColor::Green));
     let mut term = Terminal::new_optimistic(80);
     term.color_depth = ColorDepth::None;
     let out = bar.render(&term);

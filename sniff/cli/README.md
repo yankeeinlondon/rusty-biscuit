@@ -145,6 +145,11 @@ sniff repo packages --verbose        # Annotate each entry with its root dir
 sniff repo package                   # Package name for current directory
 sniff repo package-area              # Package area for current directory
 sniff repo dirty-packages            # Packages with uncommitted changes
+sniff repo worktrees                 # List all worktrees (marks current with *)
+sniff repo worktrees --list          # Bullet list output
+sniff repo worktrees --csv           # Comma-separated names on a single line
+sniff repo worktrees --verbose       # Name, branch, and path for each worktree
+sniff repo worktrees --json          # JSON output with full worktree metadata
 sniff repo has-merge-conflict        # Check for merge conflicts
 ```
 
@@ -461,6 +466,7 @@ table summarises the contract; see the per-subcommand docs under
 | `repo root` | `{ root: "<abs-path>" }` |
 | `repo remote <url-or-name>` | `RemoteReport` JSON |
 | `repo pr` | Array of `PullRequest` JSON objects |
+| `repo worktrees` | `{ worktrees: [{ name, branch, path, current, detached }] }` |
 | `repo unstaged-files` / `untracked-files` | Array of `FileChange` objects |
 
 `--perf --json` injects a top-level `performance` field into any

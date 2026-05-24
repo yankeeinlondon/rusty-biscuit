@@ -92,8 +92,7 @@ fn make_highlight_fixture() -> tempfile::TempDir {
 fn make_symlink_fixture() -> Option<tempfile::TempDir> {
     let dir = tempfile::tempdir().expect("create tempdir");
     fs::write(dir.path().join("target.txt"), "t").expect("write target");
-    std::os::unix::fs::symlink(dir.path().join("target.txt"), dir.path().join("link.txt"))
-        .ok()?;
+    std::os::unix::fs::symlink(dir.path().join("target.txt"), dir.path().join("link.txt")).ok()?;
     Some(dir)
 }
 
@@ -348,7 +347,10 @@ fn fixture_highlight_precedence_records_divergence() {
     let red_in_tree = via_tree.contains("\x1b[31m") || via_tree.contains(";31m");
 
     // Pin the present-day asymmetry as evidence for the §3a.3 decision.
-    assert!(red_in_bespoke, "bespoke must emit highlight red: {bespoke:?}");
+    assert!(
+        red_in_bespoke,
+        "bespoke must emit highlight red: {bespoke:?}"
+    );
     assert!(
         !red_in_tree,
         "GAP: tree path does NOT emit highlight red — \
@@ -414,7 +416,10 @@ fn fixture_dotfile_italic_records_divergence() {
     let italic_in_bespoke = bespoke.contains("\x1b[3m") || bespoke.contains(";3m");
     let italic_in_tree = via_tree.contains("\x1b[3m") || via_tree.contains(";3m");
 
-    assert!(italic_in_bespoke, "bespoke must emit italic SGR: {bespoke:?}");
+    assert!(
+        italic_in_bespoke,
+        "bespoke must emit italic SGR: {bespoke:?}"
+    );
     assert!(
         !italic_in_tree,
         "GAP: tree path does NOT emit italic — \
@@ -465,10 +470,11 @@ fn fixture_symlink_styling_records_divergence() {
     } else {
         // Scanner did not mark the symlink (some platforms / fs combos);
         // both paths agree on plain content, no styling.
-        assert!(!cyan_in_tree, "tree unexpectedly emitted cyan: {via_tree:?}");
-        eprintln!(
-            "note: scanner did not flag the symlink; both paths emitted plain text"
+        assert!(
+            !cyan_in_tree,
+            "tree unexpectedly emitted cyan: {via_tree:?}"
         );
+        eprintln!("note: scanner did not flag the symlink; both paths emitted plain text");
     }
 
     assert!(strip_ansi(&bespoke).contains("link.txt"));

@@ -8,8 +8,8 @@ use renderable::tree::render::{
     render_markdown_node,
 };
 use renderable::tree::{
-    ColumnAlign, ColumnConditional, RenderNode, RenderStrictness, TableCellHints,
-    TableColumnHints, TableTerminalHints, TreeRenderable,
+    ColumnAlign, ColumnConditional, RenderNode, RenderStrictness, TableCellHints, TableColumnHints,
+    TableTerminalHints, TreeRenderable,
 };
 
 use renderable::style::Style;
@@ -1449,8 +1449,7 @@ impl Table {
             .columns
             .iter()
             .map(|col| {
-                let mut cell =
-                    RenderNode::table_cell(vec![RenderNode::text(col.header.clone())]);
+                let mut cell = RenderNode::table_cell(vec![RenderNode::text(col.header.clone())]);
                 let header_style = col.effective_header_style(&self.style.header);
                 if !header_style.is_empty() {
                     cell.attrs.set_style(&header_style);
@@ -4350,7 +4349,12 @@ mod tests {
                 vec!["Row3".into()],
             ]);
 
-        let result = table.render_content(None, Some(bg_escape(&ColorMode::Dark)), None, &Terminal::default());
+        let result = table.render_content(
+            None,
+            Some(bg_escape(&ColorMode::Dark)),
+            None,
+            &Terminal::default(),
+        );
         let lines: Vec<&str> = result.lines().collect();
 
         // Data rows start at line 3 (border=0, header=1, separator=2)
@@ -4380,7 +4384,12 @@ mod tests {
             .with_columns(vec![TableColumn::new("X")])
             .with_data(vec![vec!["A".into()], vec!["B".into()]]);
 
-        let result = table.render_content(None, Some(bg_escape(&ColorMode::Dark)), None, &Terminal::default());
+        let result = table.render_content(
+            None,
+            Some(bg_escape(&ColorMode::Dark)),
+            None,
+            &Terminal::default(),
+        );
         // Striped rows should have a background reset at the end
         let striped_lines: Vec<&str> = result
             .lines()
@@ -4403,7 +4412,12 @@ mod tests {
             .with_columns(vec![TableColumn::new("X")])
             .with_data(vec![vec!["A".into()], vec!["B".into()]]);
 
-        let result = table.render_content(None, Some(bg_escape(&ColorMode::Light)), None, &Terminal::default());
+        let result = table.render_content(
+            None,
+            Some(bg_escape(&ColorMode::Light)),
+            None,
+            &Terminal::default(),
+        );
         let bg_light = bg_escape(&ColorMode::Light);
         assert!(
             result.contains(bg_light),
@@ -4417,7 +4431,12 @@ mod tests {
             .with_columns(vec![TableColumn::new("X")])
             .with_data(vec![vec!["Only".into()]]);
 
-        let result = table.render_content(None, Some(bg_escape(&ColorMode::Dark)), None, &Terminal::default());
+        let result = table.render_content(
+            None,
+            Some(bg_escape(&ColorMode::Dark)),
+            None,
+            &Terminal::default(),
+        );
         // Single row at index 0 should not be striped
         assert!(
             !result.contains("\x1b[48;2;"),
@@ -4432,8 +4451,12 @@ mod tests {
             .with_data(vec![vec!["A".into()], vec!["B".into()]])
             .prefer_cursor_alignment();
 
-        let result =
-            table.render_with_cursor_positioning(80, Some(bg_escape(&ColorMode::Dark)), None, &Terminal::default());
+        let result = table.render_with_cursor_positioning(
+            80,
+            Some(bg_escape(&ColorMode::Dark)),
+            None,
+            &Terminal::default(),
+        );
         let bg_dark = bg_escape(&ColorMode::Dark);
         // Row 1 (index 1) should be striped
         assert!(
@@ -4452,7 +4475,12 @@ mod tests {
             .with_columns(vec![TableColumn::new("X")])
             .with_data(vec![vec!["A".into()], vec!["B".into()]]);
 
-        let result = table.render_content(None, Some(bg_escape(&ColorMode::Dark)), None, &Terminal::default());
+        let result = table.render_content(
+            None,
+            Some(bg_escape(&ColorMode::Dark)),
+            None,
+            &Terminal::default(),
+        );
         let bg = bg_escape(&ColorMode::Dark);
 
         // Find the striped line (row index 1 = second data row)
@@ -4483,8 +4511,12 @@ mod tests {
             .with_data(vec![vec!["A".into()], vec!["B".into()]])
             .prefer_cursor_alignment();
 
-        let result =
-            table.render_with_cursor_positioning(80, Some(bg_escape(&ColorMode::Dark)), None, &Terminal::default());
+        let result = table.render_with_cursor_positioning(
+            80,
+            Some(bg_escape(&ColorMode::Dark)),
+            None,
+            &Terminal::default(),
+        );
         let bg = bg_escape(&ColorMode::Dark);
 
         // Find the striped line
@@ -4527,7 +4559,12 @@ mod tests {
             ]);
 
         let bg = bg_escape(&ColorMode::Dark);
-        let result = table.render_content(None, Some(bg_escape(&ColorMode::Dark)), None, &Terminal::default());
+        let result = table.render_content(
+            None,
+            Some(bg_escape(&ColorMode::Dark)),
+            None,
+            &Terminal::default(),
+        );
 
         // Find the striped line (row 1)
         let striped_line = result
@@ -4564,8 +4601,12 @@ mod tests {
             .prefer_cursor_alignment();
 
         let bg = bg_escape(&ColorMode::Dark);
-        let result =
-            table.render_with_cursor_positioning(80, Some(bg_escape(&ColorMode::Dark)), None, &Terminal::default());
+        let result = table.render_with_cursor_positioning(
+            80,
+            Some(bg_escape(&ColorMode::Dark)),
+            None,
+            &Terminal::default(),
+        );
 
         // Find the striped data line containing "row1"
         let striped_line = result
@@ -4600,7 +4641,12 @@ mod tests {
             ]);
 
         let bg = bg_escape(&ColorMode::Dark);
-        let result = table.render_content(None, Some(bg_escape(&ColorMode::Dark)), None, &Terminal::default());
+        let result = table.render_content(
+            None,
+            Some(bg_escape(&ColorMode::Dark)),
+            None,
+            &Terminal::default(),
+        );
 
         let striped_line = result
             .lines()
@@ -4642,8 +4688,12 @@ mod tests {
             .prefer_cursor_alignment();
 
         let bg = bg_escape(&ColorMode::Dark);
-        let result =
-            table.render_with_cursor_positioning(80, Some(bg_escape(&ColorMode::Dark)), None, &Terminal::default());
+        let result = table.render_with_cursor_positioning(
+            80,
+            Some(bg_escape(&ColorMode::Dark)),
+            None,
+            &Terminal::default(),
+        );
 
         let striped_line = result
             .lines()
@@ -4755,7 +4805,12 @@ mod tests {
                 vec!["Row3".into()],
             ]);
 
-        let result = table.render_content(None, None, Some(fg_escape(&ColorMode::Dark)), &Terminal::default());
+        let result = table.render_content(
+            None,
+            None,
+            Some(fg_escape(&ColorMode::Dark)),
+            &Terminal::default(),
+        );
         let lines: Vec<&str> = result.lines().collect();
 
         let fg_dark = fg_escape(&ColorMode::Dark);
@@ -4786,7 +4841,12 @@ mod tests {
             .with_columns(vec![TableColumn::new("X")])
             .with_data(vec![vec!["A".into()], vec!["B".into()]]);
 
-        let result = table.render_content(None, None, Some(fg_escape(&ColorMode::Dark)), &Terminal::default());
+        let result = table.render_content(
+            None,
+            None,
+            Some(fg_escape(&ColorMode::Dark)),
+            &Terminal::default(),
+        );
         let tinted_lines: Vec<&str> = result
             .lines()
             .filter(|l| l.contains("\x1b[38;2;"))
@@ -4808,7 +4868,12 @@ mod tests {
             .with_columns(vec![TableColumn::new("X")])
             .with_data(vec![vec!["A".into()], vec!["B".into()]]);
 
-        let result = table.render_content(None, None, Some(fg_escape(&ColorMode::Light)), &Terminal::default());
+        let result = table.render_content(
+            None,
+            None,
+            Some(fg_escape(&ColorMode::Light)),
+            &Terminal::default(),
+        );
         let fg_light = fg_escape(&ColorMode::Light);
         assert!(
             result.contains(fg_light),
@@ -4822,7 +4887,12 @@ mod tests {
             .with_columns(vec![TableColumn::new("X")])
             .with_data(vec![vec!["Only".into()]]);
 
-        let result = table.render_content(None, None, Some(fg_escape(&ColorMode::Dark)), &Terminal::default());
+        let result = table.render_content(
+            None,
+            None,
+            Some(fg_escape(&ColorMode::Dark)),
+            &Terminal::default(),
+        );
         assert!(
             !result.contains("\x1b[38;2;"),
             "Single row should not have text tint (row 0 is untinted)"
@@ -4835,7 +4905,12 @@ mod tests {
             .with_columns(vec![TableColumn::new("X")])
             .with_data(vec![vec!["A".into()], vec!["B".into()]]);
 
-        let result = table.render_content(None, None, Some(fg_escape(&ColorMode::Dark)), &Terminal::default());
+        let result = table.render_content(
+            None,
+            None,
+            Some(fg_escape(&ColorMode::Dark)),
+            &Terminal::default(),
+        );
         let fg = fg_escape(&ColorMode::Dark);
 
         let tinted_line = result
@@ -4865,8 +4940,12 @@ mod tests {
             .with_data(vec![vec!["A".into()], vec!["B".into()]])
             .prefer_cursor_alignment();
 
-        let result =
-            table.render_with_cursor_positioning(80, None, Some(fg_escape(&ColorMode::Dark)), &Terminal::default());
+        let result = table.render_with_cursor_positioning(
+            80,
+            None,
+            Some(fg_escape(&ColorMode::Dark)),
+            &Terminal::default(),
+        );
         let fg_dark = fg_escape(&ColorMode::Dark);
         assert!(
             result.contains(fg_dark),
@@ -4920,7 +4999,12 @@ mod tests {
             ]);
 
         let fg = fg_escape(&ColorMode::Dark);
-        let result = table.render_content(None, None, Some(fg_escape(&ColorMode::Dark)), &Terminal::default());
+        let result = table.render_content(
+            None,
+            None,
+            Some(fg_escape(&ColorMode::Dark)),
+            &Terminal::default(),
+        );
 
         let tinted_line = result
             .lines()

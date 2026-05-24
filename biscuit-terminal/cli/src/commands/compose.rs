@@ -161,9 +161,9 @@ impl ComposeArgs {
             ));
         }
         for pair in self.heading.chunks(2) {
-            let level: u8 = pair[0]
-                .parse()
-                .map_err(|e| color_eyre::eyre::eyre!("invalid --heading LEVEL '{}': {e}", pair[0]))?;
+            let level: u8 = pair[0].parse().map_err(|e| {
+                color_eyre::eyre::eyre!("invalid --heading LEVEL '{}': {e}", pair[0])
+            })?;
             if !(1..=6).contains(&level) {
                 return Err(color_eyre::eyre::eyre!(
                     "--heading LEVEL must be 1..=6; got {level}"
@@ -464,7 +464,8 @@ mod tests {
         let compose = apply_layout_args(Compose::from("text"), &layout);
         // The layout flows onto the layout, observable via `layout()`.
         assert_eq!(
-            biscuit_terminal::components::renderable::TerminalRenderable::layout(&compose).alignment,
+            biscuit_terminal::components::renderable::TerminalRenderable::layout(&compose)
+                .alignment,
             Alignment::Center,
         );
     }

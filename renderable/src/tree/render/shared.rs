@@ -63,10 +63,7 @@ pub(crate) fn progress_html(
     let mut data_attrs = String::new();
     let mut push_data = |name: &str, value: char, default: char| {
         if value != default {
-            data_attrs.push_str(&format!(
-                r#" {name}="{}""#,
-                escape_html(&value.to_string())
-            ));
+            data_attrs.push_str(&format!(r#" {name}="{}""#, escape_html(&value.to_string())));
         }
     };
     push_data("data-fill-char", hints.fill_char, defaults.fill_char);
@@ -118,7 +115,12 @@ pub(crate) fn progress_html(
     };
 
     let label_html = label
-        .map(|label| format!(r#"<span class="progress-label">{}</span>"#, escape_html(label)))
+        .map(|label| {
+            format!(
+                r#"<span class="progress-label">{}</span>"#,
+                escape_html(label)
+            )
+        })
         .unwrap_or_default();
 
     format!(

@@ -294,8 +294,7 @@ mod tests {
             v: Option<Length>,
         }
         // 5_000_000_000 > u32::MAX (4_294_967_295); must error.
-        let err =
-            serde_json::from_str::<Wrap>(r#"{"v": 5000000000}"#).unwrap_err();
+        let err = serde_json::from_str::<Wrap>(r#"{"v": 5000000000}"#).unwrap_err();
         assert!(err.to_string().contains("0..=4294967295"));
     }
 }

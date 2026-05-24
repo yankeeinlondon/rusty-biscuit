@@ -897,25 +897,39 @@ mod tests {
     #[test]
     fn test_left_margin_builder() {
         let inline = InlineContent::from("test").left_margin(TargetValue::universal(Length::ch(4)));
-        assert_eq!(inline.layout().margin.left, TargetValue::universal(Length::ch(4)));
+        assert_eq!(
+            inline.layout().margin.left,
+            TargetValue::universal(Length::ch(4))
+        );
     }
 
     #[test]
     fn test_right_margin_builder() {
-        let inline = InlineContent::from("test").right_margin(TargetValue::universal(Length::ch(4)));
-        assert_eq!(inline.layout().margin.right, TargetValue::universal(Length::ch(4)));
+        let inline =
+            InlineContent::from("test").right_margin(TargetValue::universal(Length::ch(4)));
+        assert_eq!(
+            inline.layout().margin.right,
+            TargetValue::universal(Length::ch(4))
+        );
     }
 
     #[test]
     fn test_top_margin_builder() {
         let inline = InlineContent::from("test").top_margin(TargetValue::universal(Length::ch(2)));
-        assert_eq!(inline.layout().margin.top, TargetValue::universal(Length::ch(2)));
+        assert_eq!(
+            inline.layout().margin.top,
+            TargetValue::universal(Length::ch(2))
+        );
     }
 
     #[test]
     fn test_bottom_margin_builder() {
-        let inline = InlineContent::from("test").bottom_margin(TargetValue::universal(Length::ch(2)));
-        assert_eq!(inline.layout().margin.bottom, TargetValue::universal(Length::ch(2)));
+        let inline =
+            InlineContent::from("test").bottom_margin(TargetValue::universal(Length::ch(2)));
+        assert_eq!(
+            inline.layout().margin.bottom,
+            TargetValue::universal(Length::ch(2))
+        );
     }
 
     #[test]
@@ -936,8 +950,14 @@ mod tests {
             .left_margin(TargetValue::universal(Length::ch(2)))
             .right_margin(TargetValue::universal(Length::ch(2)))
             .alignment(Alignment::Center);
-        assert_eq!(inline.layout().margin.left, TargetValue::universal(Length::ch(2)));
-        assert_eq!(inline.layout().margin.right, TargetValue::universal(Length::ch(2)));
+        assert_eq!(
+            inline.layout().margin.left,
+            TargetValue::universal(Length::ch(2))
+        );
+        assert_eq!(
+            inline.layout().margin.right,
+            TargetValue::universal(Length::ch(2))
+        );
         assert_eq!(inline.layout().alignment, Alignment::Center);
     }
 
@@ -947,7 +967,10 @@ mod tests {
             .with("hello")
             .left_margin(TargetValue::universal(Length::ch(4)))
             .with(" world");
-        assert_eq!(inline.layout().margin.left, TargetValue::universal(Length::ch(4)));
+        assert_eq!(
+            inline.layout().margin.left,
+            TargetValue::universal(Length::ch(4))
+        );
         assert_eq!(inline.len(), 2);
     }
 

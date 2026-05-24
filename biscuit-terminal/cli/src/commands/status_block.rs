@@ -15,8 +15,7 @@ use renderable::markdown::MarkdownRenderable;
 const STATUS_BLOCK_EXAMPLE_HEADER: &str = "<b>Shell Expansion Failed</b>";
 const STATUS_BLOCK_EXAMPLE_BODY: &str = "Missing closing brace in `${...}` directive.";
 const STATUS_BLOCK_EXAMPLE_HINT: &str = "Check the template syntax and retry.";
-const STATUS_BLOCK_EXAMPLE_CMD: &str =
-    r#"bt status-block --severity error --header "<b>Shell Expansion Failed</b>" --hint "Check the template syntax and retry." "Missing closing brace in \`${...}\` directive.""#;
+const STATUS_BLOCK_EXAMPLE_CMD: &str = r#"bt status-block --severity error --header "<b>Shell Expansion Failed</b>" --hint "Check the template syntax and retry." "Missing closing brace in \`${...}\` directive.""#;
 
 /// Severity values accepted by the CLI.
 ///
@@ -140,10 +139,10 @@ impl Run for StatusBlockArgs {
             vec![Prose::new(self.body.join(" "))]
         };
 
-        let header = self
-            .header
-            .clone()
-            .or_else(|| self.example.then(|| STATUS_BLOCK_EXAMPLE_HEADER.to_string()));
+        let header = self.header.clone().or_else(|| {
+            self.example
+                .then(|| STATUS_BLOCK_EXAMPLE_HEADER.to_string())
+        });
         let hint = self
             .hint
             .clone()
@@ -164,10 +163,7 @@ impl Run for StatusBlockArgs {
         apply_renderable_layout(&mut block, &self.layout);
 
         if self.html {
-            println!(
-                "{}",
-                block.render_html_fragment().render()
-            );
+            println!("{}", block.render_html_fragment().render());
             if self.example {
                 print_example_command(STATUS_BLOCK_EXAMPLE_CMD);
             }

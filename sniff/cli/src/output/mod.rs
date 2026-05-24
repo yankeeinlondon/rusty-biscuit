@@ -525,11 +525,43 @@ pub fn render_text(
                     // Side-effect only: calls std::process::exit
                     print_package_area_has_source_code_changes(result, base_dir, verbose);
                 }
-                Some(RepoAction::GitStatus { compact, .. }) => {
+                Some(RepoAction::GitStatus {
+                    compact,
+                    branch,
+                    worktree,
+                    ..
+                }) => {
                     if let Some(ref filesystem) = result.filesystem
                         && let Some(ref git) = filesystem.git
                     {
-                        out.push_str(&render_git_section(git, history_count, verbose, *compact));
+                        // `--worktree` takes precedence; the worktree handler
+                        // upstream already replaced `current_branch` with the
+                        // worktree's branch, so use that for the heading.
+                        let target_worktree =
+                            worktree.as_deref().zip(git.current_branch.as_deref());
+
+                        // Annotate the Status heading only when the user
+                        // explicitly named a branch different from the
+                        // currently checked-out one. `--branch` with no
+                        // value (Some(None)) resolves to current and is a
+                        // no-op for both data and heading.
+                        let target_branch = match branch {
+                            Some(Some(name))
+                                if !name.is_empty()
+                                    && git.current_branch.as_deref() != Some(name.as_str()) =>
+                            {
+                                Some(name.as_str())
+                            }
+                            _ => None,
+                        };
+                        out.push_str(&render_git_section(
+                            git,
+                            history_count,
+                            verbose,
+                            *compact,
+                            target_branch,
+                            target_worktree,
+                        ));
                     }
                 }
                 Some(RepoAction::Language { breakdown: true }) => {

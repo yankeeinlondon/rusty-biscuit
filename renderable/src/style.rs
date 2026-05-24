@@ -585,9 +585,9 @@ mod tests {
     #[test]
     fn border_serde_roundtrip() {
         let border = Border {
-            color: Some(TargetValue::universal(PerMode::universal(
-                Color::Tailwind(Tailwind::Indigo500),
-            ))),
+            color: Some(TargetValue::universal(PerMode::universal(Color::Tailwind(
+                Tailwind::Indigo500,
+            )))),
             weight: BorderWeight::Thick,
             line_style: BorderLineStyle::Double,
             sides: BorderSides::Sides {
@@ -631,9 +631,9 @@ mod tests {
                 Color::Tailwind(Tailwind::Blue700),
                 Color::Tailwind(Tailwind::Blue300),
             ))),
-            background: Some(TargetValue::universal(PerMode::universal(
-                Color::Tailwind(Tailwind::Slate100),
-            ))),
+            background: Some(TargetValue::universal(PerMode::universal(Color::Tailwind(
+                Tailwind::Slate100,
+            )))),
             emphasis: TextEmphasis {
                 bold: true,
                 italic: true,
@@ -692,9 +692,9 @@ mod tests {
     #[test]
     fn style_inheritance_color_falls_back_to_parent() {
         let parent = Style {
-            color: Some(TargetValue::universal(PerMode::universal(
-                Color::Tailwind(Tailwind::Blue700),
-            ))),
+            color: Some(TargetValue::universal(PerMode::universal(Color::Tailwind(
+                Tailwind::Blue700,
+            )))),
             ..Style::default()
         };
         // A child with no color of its own inherits the parent's.
@@ -703,9 +703,9 @@ mod tests {
 
         // A child with its own color keeps it.
         let own = Style {
-            color: Some(TargetValue::universal(PerMode::universal(
-                Color::Tailwind(Tailwind::Red500),
-            ))),
+            color: Some(TargetValue::universal(PerMode::universal(Color::Tailwind(
+                Tailwind::Red500,
+            )))),
             ..Style::default()
         };
         assert_eq!(own.inherited_from(&parent).color, own.color);
@@ -714,9 +714,9 @@ mod tests {
     #[test]
     fn style_inheritance_box_painting_does_not_inherit() {
         let parent = Style {
-            background: Some(TargetValue::universal(PerMode::universal(
-                Color::Tailwind(Tailwind::Slate100),
-            ))),
+            background: Some(TargetValue::universal(PerMode::universal(Color::Tailwind(
+                Tailwind::Slate100,
+            )))),
             border: Some(Border::default()),
             fill: Some(Fill::default()),
             ..Style::default()

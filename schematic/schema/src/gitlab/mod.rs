@@ -51,9 +51,9 @@
 //!
 //! let client = GitLab::with_base_url("https://staging.example.com/v1");
 //! ```
+pub mod client;
 pub mod requests;
 pub mod responses;
-pub mod client;
 pub use requests::*;
 pub use responses::*;
 /// GitLab REST API v4 for repository, MR, issue, and release workflows client.
@@ -84,16 +84,16 @@ impl GitLab {
             client: reqwest::Client::new(),
             base_url: Self::BASE_URL.to_string(),
             env_auth: vec![
-                "GITLAB_TOKEN".to_string(), "GITLAB_PRIVATE_TOKEN".to_string()
+                "GITLAB_TOKEN".to_string(),
+                "GITLAB_PRIVATE_TOKEN".to_string(),
             ],
             auth_strategy: schematic_define::AuthStrategy::ApiKey {
                 header: "PRIVATE-TOKEN".to_string(),
             },
             auth_policy: schematic_define::AuthPolicy {
-                explicit: vec![
-                    schematic_define::AuthMethod::ApiKey { header : "PRIVATE-TOKEN"
-                    .to_string() }
-                ],
+                explicit: vec![schematic_define::AuthMethod::ApiKey {
+                    header: "PRIVATE-TOKEN".to_string(),
+                }],
                 env_fallback: Some(schematic_define::EnvAuthStrategy::ApiKey {
                     header: "PRIVATE-TOKEN".to_string(),
                 }),
@@ -105,12 +105,10 @@ impl GitLab {
                     basic_user: None,
                     basic_pass: None,
                     api_key: Some(schematic_define::ApiKeyEnv {
-                        names: schematic_define::EnvList::new(
-                            vec![
-                                "GITLAB_TOKEN".to_string(), "GITLAB_PRIVATE_TOKEN"
-                                .to_string()
-                            ],
-                        ),
+                        names: schematic_define::EnvList::new(vec![
+                            "GITLAB_TOKEN".to_string(),
+                            "GITLAB_PRIVATE_TOKEN".to_string(),
+                        ]),
                         header: "PRIVATE-TOKEN".to_string(),
                     }),
                     oauth_client_id: None,
@@ -133,16 +131,16 @@ impl GitLab {
             client: reqwest::Client::new(),
             base_url: base_url.into(),
             env_auth: vec![
-                "GITLAB_TOKEN".to_string(), "GITLAB_PRIVATE_TOKEN".to_string()
+                "GITLAB_TOKEN".to_string(),
+                "GITLAB_PRIVATE_TOKEN".to_string(),
             ],
             auth_strategy: schematic_define::AuthStrategy::ApiKey {
                 header: "PRIVATE-TOKEN".to_string(),
             },
             auth_policy: schematic_define::AuthPolicy {
-                explicit: vec![
-                    schematic_define::AuthMethod::ApiKey { header : "PRIVATE-TOKEN"
-                    .to_string() }
-                ],
+                explicit: vec![schematic_define::AuthMethod::ApiKey {
+                    header: "PRIVATE-TOKEN".to_string(),
+                }],
                 env_fallback: Some(schematic_define::EnvAuthStrategy::ApiKey {
                     header: "PRIVATE-TOKEN".to_string(),
                 }),
@@ -154,12 +152,10 @@ impl GitLab {
                     basic_user: None,
                     basic_pass: None,
                     api_key: Some(schematic_define::ApiKeyEnv {
-                        names: schematic_define::EnvList::new(
-                            vec![
-                                "GITLAB_TOKEN".to_string(), "GITLAB_PRIVATE_TOKEN"
-                                .to_string()
-                            ],
-                        ),
+                        names: schematic_define::EnvList::new(vec![
+                            "GITLAB_TOKEN".to_string(),
+                            "GITLAB_PRIVATE_TOKEN".to_string(),
+                        ]),
                         header: "PRIVATE-TOKEN".to_string(),
                     }),
                     oauth_client_id: None,
@@ -188,16 +184,16 @@ impl GitLab {
             client,
             base_url: Self::BASE_URL.to_string(),
             env_auth: vec![
-                "GITLAB_TOKEN".to_string(), "GITLAB_PRIVATE_TOKEN".to_string()
+                "GITLAB_TOKEN".to_string(),
+                "GITLAB_PRIVATE_TOKEN".to_string(),
             ],
             auth_strategy: schematic_define::AuthStrategy::ApiKey {
                 header: "PRIVATE-TOKEN".to_string(),
             },
             auth_policy: schematic_define::AuthPolicy {
-                explicit: vec![
-                    schematic_define::AuthMethod::ApiKey { header : "PRIVATE-TOKEN"
-                    .to_string() }
-                ],
+                explicit: vec![schematic_define::AuthMethod::ApiKey {
+                    header: "PRIVATE-TOKEN".to_string(),
+                }],
                 env_fallback: Some(schematic_define::EnvAuthStrategy::ApiKey {
                     header: "PRIVATE-TOKEN".to_string(),
                 }),
@@ -209,12 +205,10 @@ impl GitLab {
                     basic_user: None,
                     basic_pass: None,
                     api_key: Some(schematic_define::ApiKeyEnv {
-                        names: schematic_define::EnvList::new(
-                            vec![
-                                "GITLAB_TOKEN".to_string(), "GITLAB_PRIVATE_TOKEN"
-                                .to_string()
-                            ],
-                        ),
+                        names: schematic_define::EnvList::new(vec![
+                            "GITLAB_TOKEN".to_string(),
+                            "GITLAB_PRIVATE_TOKEN".to_string(),
+                        ]),
                         header: "PRIVATE-TOKEN".to_string(),
                     }),
                     oauth_client_id: None,
@@ -236,24 +230,21 @@ impl GitLab {
     ///     .unwrap();
     /// let api = Api::with_client_and_base_url(custom_client, "http://localhost:8080");
     /// ```
-    pub fn with_client_and_base_url(
-        client: reqwest::Client,
-        base_url: impl Into<String>,
-    ) -> Self {
+    pub fn with_client_and_base_url(client: reqwest::Client, base_url: impl Into<String>) -> Self {
         Self {
             client,
             base_url: base_url.into(),
             env_auth: vec![
-                "GITLAB_TOKEN".to_string(), "GITLAB_PRIVATE_TOKEN".to_string()
+                "GITLAB_TOKEN".to_string(),
+                "GITLAB_PRIVATE_TOKEN".to_string(),
             ],
             auth_strategy: schematic_define::AuthStrategy::ApiKey {
                 header: "PRIVATE-TOKEN".to_string(),
             },
             auth_policy: schematic_define::AuthPolicy {
-                explicit: vec![
-                    schematic_define::AuthMethod::ApiKey { header : "PRIVATE-TOKEN"
-                    .to_string() }
-                ],
+                explicit: vec![schematic_define::AuthMethod::ApiKey {
+                    header: "PRIVATE-TOKEN".to_string(),
+                }],
                 env_fallback: Some(schematic_define::EnvAuthStrategy::ApiKey {
                     header: "PRIVATE-TOKEN".to_string(),
                 }),
@@ -265,12 +256,10 @@ impl GitLab {
                     basic_user: None,
                     basic_pass: None,
                     api_key: Some(schematic_define::ApiKeyEnv {
-                        names: schematic_define::EnvList::new(
-                            vec![
-                                "GITLAB_TOKEN".to_string(), "GITLAB_PRIVATE_TOKEN"
-                                .to_string()
-                            ],
-                        ),
+                        names: schematic_define::EnvList::new(vec![
+                            "GITLAB_TOKEN".to_string(),
+                            "GITLAB_PRIVATE_TOKEN".to_string(),
+                        ]),
                         header: "PRIVATE-TOKEN".to_string(),
                     }),
                     oauth_client_id: None,
@@ -320,21 +309,20 @@ impl GitLab {
                     .as_ref()
                     .map(|api_key| api_key.header.clone())
             });
-        header
-            .and_then(|header| {
-                self.headers
-                    .env_mapping()
-                    .api_key
-                    .as_ref()
-                    .and_then(|api_key| {
-                        api_key
-                            .names
-                            .names()
-                            .iter()
-                            .find_map(|env_name| std::env::var(env_name).ok())
-                    })
-                    .map(|value| (header, value))
-            })
+        header.and_then(|header| {
+            self.headers
+                .env_mapping()
+                .api_key
+                .as_ref()
+                .and_then(|api_key| {
+                    api_key
+                        .names
+                        .names()
+                        .iter()
+                        .find_map(|env_name| std::env::var(env_name).ok())
+                })
+                .map(|value| (header, value))
+        })
     }
     /// Creates a variant builder for customizing this API client.
     ///
@@ -537,7 +525,9 @@ impl<'a> GitLabVariantBuilder<'a> {
         F: Fn(
                 &crate::shared::ResponseContext,
                 serde_json::Value,
-            ) -> Result<serde_json::Value, crate::shared::SchematicError> + Send + Sync
+            ) -> Result<serde_json::Value, crate::shared::SchematicError>
+            + Send
+            + Sync
             + 'static,
     {
         self.pre_response_json = Some(std::sync::Arc::new(hook));
@@ -565,13 +555,15 @@ impl<'a> GitLabVariantBuilder<'a> {
         F: Fn(
                 &crate::shared::ResponseContext,
                 &mut R::Response,
-            ) -> Result<(), crate::shared::SchematicError> + Send + Sync + 'static,
+            ) -> Result<(), crate::shared::SchematicError>
+            + Send
+            + Sync
+            + 'static,
     {
-        self.response_mutators
-            .insert(
-                R::ENDPOINT_ID,
-                std::sync::Arc::new(crate::shared::TypedMutator::new(hook)),
-            );
+        self.response_mutators.insert(
+            R::ENDPOINT_ID,
+            std::sync::Arc::new(crate::shared::TypedMutator::new(hook)),
+        );
         self
     }
     /// Builds the variant API client with the configured options.
@@ -597,17 +589,15 @@ impl<'a> GitLabVariantBuilder<'a> {
         let headers = match self.headers {
             Some(headers) => headers,
             None if has_env_auth_override
-                || !matches!(auth_update, schematic_define::UpdateStrategy::NoChange) => {
-                self.base
-                    .headers
-                    .clone()
-                    .with_env_mapping(
-                        schematic_define::RestApi::legacy_env_mapping_for(
-                            &auth_strategy,
-                            &env_auth,
-                            self.base.env_username.as_deref(),
-                        ),
-                    )
+                || !matches!(auth_update, schematic_define::UpdateStrategy::NoChange) =>
+            {
+                self.base.headers.clone().with_env_mapping(
+                    schematic_define::RestApi::legacy_env_mapping_for(
+                        &auth_strategy,
+                        &env_auth,
+                        self.base.env_username.as_deref(),
+                    ),
+                )
             }
             None => self.base.headers.clone(),
         };

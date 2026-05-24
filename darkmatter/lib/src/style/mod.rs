@@ -49,7 +49,7 @@ pub mod warning;
 #[cfg(test)]
 mod coverage_tests;
 
-pub use apply::{apply_page_style, PageStyleOverrides, StyleApplyError};
+pub use apply::{PageStyleOverrides, StyleApplyError, apply_page_style};
 pub use color::StyleColor;
 pub use error::StyleParseError;
 pub use parse::{from_frontmatter, from_json_value, into_strict};

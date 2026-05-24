@@ -30,14 +30,16 @@ fn enumerate_windows_scm_services() -> windows::core::Result<Vec<Service>> {
     use windows::Win32::Foundation::ERROR_MORE_DATA;
     use windows::Win32::System::Services::{
         CloseServiceHandle, ENUM_SERVICE_STATUS_PROCESSW, EnumServicesStatusExW, OpenSCManagerW,
-        SC_ENUM_PROCESS_INFO, SC_HANDLE, SC_MANAGER_ENUMERATE_SERVICE,
-        SERVICE_STATE_ALL, SERVICE_STATUS_PROCESS, SERVICE_WIN32,
+        SC_ENUM_PROCESS_INFO, SC_HANDLE, SC_MANAGER_ENUMERATE_SERVICE, SERVICE_STATE_ALL,
+        SERVICE_STATUS_PROCESS, SERVICE_WIN32,
     };
     use windows::core::PCWSTR;
 
     let scm: SC_HANDLE =
         unsafe { OpenSCManagerW(PCWSTR::null(), PCWSTR::null(), SC_MANAGER_ENUMERATE_SERVICE)? };
-    let _guard = ScopeGuard::new(|| unsafe { CloseServiceHandle(scm).ok(); });
+    let _guard = ScopeGuard::new(|| unsafe {
+        CloseServiceHandle(scm).ok();
+    });
 
     let mut bytes_needed: u32 = 0;
     let mut services_returned: u32 = 0;

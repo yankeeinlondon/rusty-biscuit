@@ -390,8 +390,14 @@ fn nested_ordered_list_in_block_quote_projects_structural_list() {
 
     let term = test_terminal();
     let plain = strip_escape_codes(quote.render(&term));
-    assert!(plain.contains("First"), "nested ordered item survives: {plain:?}");
-    assert!(plain.contains("Second"), "nested ordered item survives: {plain:?}");
+    assert!(
+        plain.contains("First"),
+        "nested ordered item survives: {plain:?}"
+    );
+    assert!(
+        plain.contains("Second"),
+        "nested ordered item survives: {plain:?}"
+    );
 }
 
 /// An `UnorderedList` inside a `BlockQuote` projects structurally — a
@@ -420,8 +426,14 @@ fn nested_unordered_list_in_block_quote_projects_structural_list() {
 
     let term = test_terminal();
     let plain = strip_escape_codes(quote.render(&term));
-    assert!(plain.contains("Alpha"), "nested unordered item survives: {plain:?}");
-    assert!(plain.contains("Beta"), "nested unordered item survives: {plain:?}");
+    assert!(
+        plain.contains("Alpha"),
+        "nested unordered item survives: {plain:?}"
+    );
+    assert!(
+        plain.contains("Beta"),
+        "nested unordered item survives: {plain:?}"
+    );
 }
 
 /// Sanity check: every case renders through both paths without panicking.

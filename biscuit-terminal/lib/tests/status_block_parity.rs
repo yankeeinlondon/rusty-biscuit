@@ -161,8 +161,7 @@ fn body_only_token_parity() {
 fn body_with_styled_prose_token_parity() {
     // Prose styling is documented as flattened in the tree projection; this
     // test asserts that the visible *words* still match across both paths.
-    let block =
-        StatusBlock::new(StatusState::Info).body(Prose::new("<b>bold</b> body text"));
+    let block = StatusBlock::new(StatusState::Info).body(Prose::new("<b>bold</b> body text"));
     assert_token_parity(&block, 80);
 }
 
@@ -185,8 +184,8 @@ fn header_plus_body_plus_hint_token_parity() {
 
 #[test]
 fn multiple_body_items_token_parity() {
-    let block = StatusBlock::new(StatusState::Info)
-        .body(vec![Prose::new("first"), Prose::new("second")]);
+    let block =
+        StatusBlock::new(StatusState::Info).body(vec![Prose::new("first"), Prose::new("second")]);
     assert_token_parity(&block, 80);
 }
 
@@ -251,7 +250,10 @@ fn default_right_margin_drives_wrapping() {
     let block = StatusBlock::new(StatusState::Error)
         .body("one two three four five six seven eight nine ten eleven twelve");
     let rendered = strip_ansi(&block.render(&term));
-    assert!(rendered.lines().count() > 1, "expected wrapping: {rendered:?}");
+    assert!(
+        rendered.lines().count() > 1,
+        "expected wrapping: {rendered:?}"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -344,7 +346,10 @@ fn custom_border_does_not_leak_into_markdown() {
         .body("Body")
         .border("!! ");
     let md = block.render_markdown();
-    assert!(!md.contains("!! "), "custom border leaked into Markdown: {md:?}");
+    assert!(
+        !md.contains("!! "),
+        "custom border leaked into Markdown: {md:?}"
+    );
     assert!(md.contains("> Body"));
 }
 
@@ -355,7 +360,10 @@ fn custom_border_does_not_leak_into_html() {
         .body("Body")
         .border("!! ");
     let html = BrowserRenderable::render_html_fragment(&block).render();
-    assert!(!html.contains("!! "), "custom border leaked into HTML: {html:?}");
+    assert!(
+        !html.contains("!! "),
+        "custom border leaked into HTML: {html:?}"
+    );
     assert!(html.contains("<blockquote"));
 }
 

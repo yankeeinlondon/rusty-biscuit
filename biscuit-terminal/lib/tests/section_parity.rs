@@ -289,7 +289,9 @@ fn left_margin_is_honored_through_tree_path() {
     let term = test_terminal(80);
     let out = strip_ansi(&section.render(&term));
     assert!(
-        out.lines().next().is_some_and(|first| first.starts_with("    ")),
+        out.lines()
+            .next()
+            .is_some_and(|first| first.starts_with("    ")),
         "left margin of 4 spaces applied through tree: {out:?}"
     );
 }
@@ -304,7 +306,10 @@ fn markdown_renders_heading_and_body() {
     let section = sample_section();
     let md = section.render_markdown();
     assert!(md.contains("## Getting Started"), "heading prefix: {md:?}");
-    assert!(md.contains("Welcome to the tutorial."), "body item 1: {md:?}");
+    assert!(
+        md.contains("Welcome to the tutorial."),
+        "body item 1: {md:?}"
+    );
     assert!(
         md.contains("Let's begin with installation."),
         "body item 2: {md:?}"

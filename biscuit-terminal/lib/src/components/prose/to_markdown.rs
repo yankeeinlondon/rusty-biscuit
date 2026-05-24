@@ -83,9 +83,7 @@ fn node_to_markdown(node: &ProseNode, plus: bool, html: bool, out: &mut String) 
             // inline HTML wrapper, so its children (and their descendants)
             // are HTML-escaped when they become that wrapper's body.
             let wraps_html = plus
-                && (style.fg.is_some()
-                    || style.bg.is_some()
-                    || style.emphasis.underline.is_some());
+                && (style.fg.is_some() || style.bg.is_some() || style.emphasis.underline.is_some());
             let inner = emit(children, plus, html || wraps_html);
             out.push_str(&wrap_span(style, &inner, plus));
         }

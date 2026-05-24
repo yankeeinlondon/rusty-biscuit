@@ -269,11 +269,12 @@ fn type_to_display_text(type_name: &str, key: &str, description: &str) -> String
         .map(|token| {
             let token = token.trim();
             // Convert [X] to X[]
-            let display_token = if let Some(inner) = token.strip_prefix('[').and_then(|s| s.strip_suffix(']')) {
-                format!("{inner}[]")
-            } else {
-                token.to_string()
-            };
+            let display_token =
+                if let Some(inner) = token.strip_prefix('[').and_then(|s| s.strip_suffix(']')) {
+                    format!("{inner}[]")
+                } else {
+                    token.to_string()
+                };
 
             // Apply variant to String or String[]
             if let Some(variant) = variant

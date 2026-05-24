@@ -122,7 +122,10 @@ mod tests {
     #[test]
     fn validate_rejects_css_in_universal() {
         let v = TargetValue::universal(Length::css(CssSizing::rem(1.0)));
-        assert!(matches!(v.validate(), Err(LayoutError::NonUniversalUnit(_))));
+        assert!(matches!(
+            v.validate(),
+            Err(LayoutError::NonUniversalUnit(_))
+        ));
     }
 
     #[test]

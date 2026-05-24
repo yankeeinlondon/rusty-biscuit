@@ -1176,11 +1176,9 @@ mod tests {
 
     #[test]
     fn root_with_sequence_join_concatenates_without_separator() {
-        let mut root = RenderNode::root(vec![
-            RenderNode::text("foo"),
-            RenderNode::text("bar"),
-        ]);
-        root.attrs.set_sequence_join(crate::tree::SequenceJoin::None);
+        let mut root = RenderNode::root(vec![RenderNode::text("foo"), RenderNode::text("bar")]);
+        root.attrs
+            .set_sequence_join(crate::tree::SequenceJoin::None);
         assert_eq!(render(&root).output, "foobar");
     }
 
@@ -1193,7 +1191,9 @@ mod tests {
             RenderNode::paragraph(vec![RenderNode::text("two")]),
         ]);
         let mut outer = RenderNode::root(vec![RenderNode::text("lead"), inner]);
-        outer.attrs.set_sequence_join(crate::tree::SequenceJoin::None);
+        outer
+            .attrs
+            .set_sequence_join(crate::tree::SequenceJoin::None);
         // The two text/blockquote children concatenate with no separator;
         // the block quote internally keeps its `>` blank-line spacing.
         assert_eq!(render(&outer).output, "lead> one\n>\n> two");
@@ -1205,7 +1205,8 @@ mod tests {
             RenderNode::text("inline"),
             RenderNode::paragraph(vec![RenderNode::text("para")]),
         ]);
-        root.attrs.set_sequence_join(crate::tree::SequenceJoin::None);
+        root.attrs
+            .set_sequence_join(crate::tree::SequenceJoin::None);
         assert_eq!(render(&root).output, "inlinepara");
     }
 
@@ -1214,8 +1215,10 @@ mod tests {
     #[test]
     fn progress_plain_markdown_renders_fallback_text() {
         let mut para = RenderNode::paragraph(vec![RenderNode::text("Loading 60%")]);
-        para.attrs
-            .set_progress_hints(&crate::tree::ProgressHints { value: 0.6, ..Default::default() });
+        para.attrs.set_progress_hints(&crate::tree::ProgressHints {
+            value: 0.6,
+            ..Default::default()
+        });
         let rendered = render_with(
             &para,
             &opts(MarkdownDialect::Markdown, RenderStrictness::Warn),
@@ -1226,8 +1229,10 @@ mod tests {
     #[test]
     fn progress_markdown_plus_emits_progress_html() {
         let mut para = RenderNode::paragraph(vec![RenderNode::text("Loading 60%")]);
-        para.attrs
-            .set_progress_hints(&crate::tree::ProgressHints { value: 0.6, ..Default::default() });
+        para.attrs.set_progress_hints(&crate::tree::ProgressHints {
+            value: 0.6,
+            ..Default::default()
+        });
         let rendered = render_with(
             &para,
             &opts(MarkdownDialect::MarkdownPlus, RenderStrictness::Warn),
@@ -1269,7 +1274,11 @@ mod tests {
             &para,
             &opts(MarkdownDialect::MarkdownPlus, RenderStrictness::Warn),
         );
-        assert!(rendered.output.contains("background-color:#"), "{}", rendered.output);
+        assert!(
+            rendered.output.contains("background-color:#"),
+            "{}",
+            rendered.output
+        );
     }
 
     #[test]
@@ -1326,12 +1335,8 @@ mod tests {
         RenderNode::table(
             vec![ColumnAlign::Left],
             vec![
-                RenderNode::table_row(vec![RenderNode::table_cell(vec![RenderNode::text(
-                    "H",
-                )])]),
-                RenderNode::table_row(vec![RenderNode::table_cell(vec![RenderNode::text(
-                    "a",
-                )])]),
+                RenderNode::table_row(vec![RenderNode::table_cell(vec![RenderNode::text("H")])]),
+                RenderNode::table_row(vec![RenderNode::table_cell(vec![RenderNode::text("a")])]),
             ],
         )
     }
@@ -1359,9 +1364,7 @@ mod tests {
         RenderNode::table(
             vec![ColumnAlign::None],
             vec![
-                RenderNode::table_row(vec![RenderNode::table_cell(vec![RenderNode::text(
-                    "H",
-                )])]),
+                RenderNode::table_row(vec![RenderNode::table_cell(vec![RenderNode::text("H")])]),
                 RenderNode::table_row(vec![RenderNode::table_cell(vec![cell])]),
             ],
         )
@@ -1424,11 +1427,7 @@ mod tests {
 
     #[test]
     fn table_cell_escapes_pipe_in_link_url_and_title() {
-        let link = RenderNode::link(
-            "a|b",
-            Some("t|t".into()),
-            vec![RenderNode::text("label")],
-        );
+        let link = RenderNode::link("a|b", Some("t|t".into()), vec![RenderNode::text("label")]);
         let out = render(&one_cell_table(link)).output;
         assert!(out.contains(r#"[label](a\|b "t\|t")"#), "{out}");
     }
@@ -1464,7 +1463,10 @@ mod tests {
     #[test]
     fn columns_plain_markdown_stays_sequential() {
         let node = columns_node(
-            crate::tree::ColumnsHints { left_count: 1, ..Default::default() },
+            crate::tree::ColumnsHints {
+                left_count: 1,
+                ..Default::default()
+            },
             vec![
                 RenderNode::paragraph(vec![RenderNode::text("left")]),
                 RenderNode::paragraph(vec![RenderNode::text("right")]),
@@ -1480,7 +1482,11 @@ mod tests {
     #[test]
     fn columns_markdown_plus_emits_flex_container() {
         let node = columns_node(
-            crate::tree::ColumnsHints { left_count: 1, gap: 4, ..Default::default() },
+            crate::tree::ColumnsHints {
+                left_count: 1,
+                gap: 4,
+                ..Default::default()
+            },
             vec![
                 RenderNode::paragraph(vec![RenderNode::text("left")]),
                 RenderNode::paragraph(vec![RenderNode::text("right")]),
@@ -1491,7 +1497,10 @@ mod tests {
             &opts(MarkdownDialect::MarkdownPlus, RenderStrictness::Warn),
         );
         let out = rendered.output;
-        assert!(out.contains(r#"<div class="columns" style="display:flex;gap:4ch">"#), "{out}");
+        assert!(
+            out.contains(r#"<div class="columns" style="display:flex;gap:4ch">"#),
+            "{out}"
+        );
         assert!(out.contains(r#"<div class="column""#), "{out}");
         assert!(out.contains("left"), "{out}");
         assert!(out.contains("right"), "{out}");
@@ -1543,7 +1552,10 @@ mod tests {
     #[test]
     fn columns_markdown_plus_empty_columns() {
         let node = columns_node(
-            crate::tree::ColumnsHints { left_count: 0, ..Default::default() },
+            crate::tree::ColumnsHints {
+                left_count: 0,
+                ..Default::default()
+            },
             vec![],
         );
         let out = render_with(
@@ -1558,15 +1570,16 @@ mod tests {
     #[test]
     fn columns_markdown_plus_emphasis_and_prose_content() {
         let node = columns_node(
-            crate::tree::ColumnsHints { left_count: 1, ..Default::default() },
+            crate::tree::ColumnsHints {
+                left_count: 1,
+                ..Default::default()
+            },
             vec![
                 RenderNode::paragraph(vec![
                     RenderNode::text("plain "),
                     RenderNode::strong(vec![RenderNode::text("bold")]),
                 ]),
-                RenderNode::paragraph(vec![RenderNode::emphasis(vec![RenderNode::text(
-                    "italic",
-                )])]),
+                RenderNode::paragraph(vec![RenderNode::emphasis(vec![RenderNode::text("italic")])]),
             ],
         );
         let out = render_with(
@@ -1581,7 +1594,10 @@ mod tests {
     #[test]
     fn columns_markdown_plus_nested_block_content() {
         let node = columns_node(
-            crate::tree::ColumnsHints { left_count: 1, ..Default::default() },
+            crate::tree::ColumnsHints {
+                left_count: 1,
+                ..Default::default()
+            },
             vec![
                 RenderNode::list(
                     false,
@@ -1610,7 +1626,10 @@ mod tests {
         // An image is valid Markdown image syntax embedded in the HTML
         // container; the column markup stays well-formed under Warn.
         let warn = columns_node(
-            crate::tree::ColumnsHints { left_count: 1, ..Default::default() },
+            crate::tree::ColumnsHints {
+                left_count: 1,
+                ..Default::default()
+            },
             vec![
                 RenderNode::paragraph(vec![RenderNode::image("pic.png", None, "alt")]),
                 RenderNode::paragraph(vec![RenderNode::text("R")]),
@@ -1628,7 +1647,10 @@ mod tests {
         // Under Strict the same content renders without error — an image is a
         // portable Markdown construct, so no lossy rejection is triggered.
         let strict = columns_node(
-            crate::tree::ColumnsHints { left_count: 1, ..Default::default() },
+            crate::tree::ColumnsHints {
+                left_count: 1,
+                ..Default::default()
+            },
             vec![
                 RenderNode::paragraph(vec![RenderNode::image("pic.png", None, "alt")]),
                 RenderNode::paragraph(vec![RenderNode::text("R")]),
@@ -1650,7 +1672,10 @@ mod tests {
         // raw HTML block, so the markup is well-formed at the renderer level
         // but a downstream strict parser may not nest the second block.
         let node = columns_node(
-            crate::tree::ColumnsHints { left_count: 2, ..Default::default() },
+            crate::tree::ColumnsHints {
+                left_count: 2,
+                ..Default::default()
+            },
             vec![
                 RenderNode::paragraph(vec![RenderNode::text("left-one")]),
                 RenderNode::paragraph(vec![RenderNode::text("left-two")]),
@@ -1672,9 +1697,7 @@ mod tests {
 
     #[test]
     fn block_quote_without_columns_unchanged() {
-        let bq = RenderNode::block_quote(vec![RenderNode::paragraph(vec![RenderNode::text(
-            "q",
-        )])]);
+        let bq = RenderNode::block_quote(vec![RenderNode::paragraph(vec![RenderNode::text("q")])]);
         let rendered = render_with(
             &bq,
             &opts(MarkdownDialect::MarkdownPlus, RenderStrictness::Warn),
@@ -1707,11 +1730,7 @@ mod tests {
 
     #[test]
     fn list_marker_policy_rejected_under_strict() {
-        let mut list = RenderNode::list(
-            false,
-            None,
-            vec![RenderNode::list_item(None, vec![])],
-        );
+        let mut list = RenderNode::list(false, None, vec![RenderNode::list_item(None, vec![])]);
         list.attrs
             .set_list_marker_policy(crate::tree::ListMarkerPolicy::None);
         let result = render_markdown_node(

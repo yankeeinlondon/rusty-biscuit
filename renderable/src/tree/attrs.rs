@@ -1782,9 +1782,9 @@ mod tests {
         use crate::style::{PerMode, Style, TextEmphasis};
 
         let style = Style {
-            color: Some(TargetValue::universal(PerMode::universal(
-                Color::Tailwind(Tailwind::Blue500),
-            ))),
+            color: Some(TargetValue::universal(PerMode::universal(Color::Tailwind(
+                Tailwind::Blue500,
+            )))),
             emphasis: TextEmphasis {
                 bold: true,
                 ..Default::default()
@@ -1803,7 +1803,10 @@ mod tests {
         attrs.set_hint(HintNamespace::STYLE, "style", json!("a"));
         attrs.set_hint(HintNamespace::LAYOUT, "layout", json!("b"));
         assert_eq!(attrs.data.get("renderable.style.style"), Some(&json!("a")));
-        assert_eq!(attrs.data.get("renderable.layout.layout"), Some(&json!("b")));
+        assert_eq!(
+            attrs.data.get("renderable.layout.layout"),
+            Some(&json!("b"))
+        );
     }
 
     #[test]
@@ -1878,12 +1881,16 @@ mod tests {
         assert_eq!(hints.right_bracket, ')');
         assert_eq!(
             hints.filled_color,
-            Some(crate::color::Color::BasicColor(crate::color::BasicColor::Green))
+            Some(crate::color::Color::BasicColor(
+                crate::color::BasicColor::Green
+            ))
         );
         assert_eq!(hints.empty_color, None);
         assert_eq!(
             hints.bracket_color,
-            Some(crate::color::Color::BasicColor(crate::color::BasicColor::Cyan))
+            Some(crate::color::Color::BasicColor(
+                crate::color::BasicColor::Cyan
+            ))
         );
     }
 
@@ -1901,10 +1908,13 @@ mod tests {
 
         let hints = attrs.progress_hints().expect("value present");
         assert!((hints.value - 0.25).abs() < 1e-6);
-        assert_eq!(hints, ProgressHints {
-            value: hints.value,
-            ..Default::default()
-        });
+        assert_eq!(
+            hints,
+            ProgressHints {
+                value: hints.value,
+                ..Default::default()
+            }
+        );
     }
 
     #[test]
@@ -1972,15 +1982,18 @@ mod tests {
     #[test]
     fn table_column_hints_round_trip() {
         let mut attrs = NodeAttrs::default();
-        attrs.set_table_column_hints(1, &TableColumnHints {
-            min_width: Some(4),
-            max_width: Some(40),
-            fixed_width: Some(12),
-            conditional: ColumnConditional::WidthGreaterThan(80),
-            droppable: true,
-            drop_note: Some("notes hidden".into()),
-            uniform_alignment: true,
-        });
+        attrs.set_table_column_hints(
+            1,
+            &TableColumnHints {
+                min_width: Some(4),
+                max_width: Some(40),
+                fixed_width: Some(12),
+                conditional: ColumnConditional::WidthGreaterThan(80),
+                droppable: true,
+                drop_note: Some("notes hidden".into()),
+                uniform_alignment: true,
+            },
+        );
 
         let hints = attrs.table_column_hints(1);
         assert_eq!(hints.min_width, Some(4));
@@ -1998,11 +2011,14 @@ mod tests {
     #[test]
     fn table_column_hints_droppable_without_note_round_trips() {
         let mut attrs = NodeAttrs::default();
-        attrs.set_table_column_hints(0, &TableColumnHints {
-            droppable: true,
-            drop_note: None,
-            ..Default::default()
-        });
+        attrs.set_table_column_hints(
+            0,
+            &TableColumnHints {
+                droppable: true,
+                drop_note: None,
+                ..Default::default()
+            },
+        );
 
         let hints = attrs.table_column_hints(0);
         assert!(
@@ -2043,14 +2059,20 @@ mod tests {
     #[test]
     fn table_column_hints_indexed_independently() {
         let mut attrs = NodeAttrs::default();
-        attrs.set_table_column_hints(0, &TableColumnHints {
-            min_width: Some(5),
-            ..Default::default()
-        });
-        attrs.set_table_column_hints(1, &TableColumnHints {
-            min_width: Some(9),
-            ..Default::default()
-        });
+        attrs.set_table_column_hints(
+            0,
+            &TableColumnHints {
+                min_width: Some(5),
+                ..Default::default()
+            },
+        );
+        attrs.set_table_column_hints(
+            1,
+            &TableColumnHints {
+                min_width: Some(9),
+                ..Default::default()
+            },
+        );
         assert_eq!(attrs.table_column_hints(0).min_width, Some(5));
         assert_eq!(attrs.table_column_hints(1).min_width, Some(9));
     }
@@ -2107,7 +2129,9 @@ mod tests {
         assert!(!hints.alternate_text_color);
         assert_eq!(
             hints.stripe_bg,
-            Some(crate::color::Color::BasicColor(crate::color::BasicColor::Blue))
+            Some(crate::color::Color::BasicColor(
+                crate::color::BasicColor::Blue
+            ))
         );
         assert_eq!(hints.stripe_text, None);
     }

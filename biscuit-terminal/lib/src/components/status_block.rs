@@ -4,9 +4,7 @@ use renderable::browser::PageOptions;
 use renderable::browser::fragment::{BrowserFragment, Ready};
 use renderable::html::HtmlPage;
 use renderable::markdown::MarkdownRenderable;
-use renderable::style::{
-    Border, BorderLineStyle, BorderSides, BorderWeight, PerMode, Style,
-};
+use renderable::style::{Border, BorderLineStyle, BorderSides, BorderWeight, PerMode, Style};
 use renderable::tree::render::{
     BrowserRenderOptions, MarkdownDialect, MarkdownRenderOptions, render_browser_node,
     render_markdown_node,
@@ -17,9 +15,7 @@ use crate::{
     components::{
         block_quote::BlockQuote,
         prose::Prose,
-        renderable::{
-            BrowserRenderable, RenderableTerminalContent, TerminalRenderable,
-        },
+        renderable::{BrowserRenderable, RenderableTerminalContent, TerminalRenderable},
         status::{Status, StatusState},
     },
     discovery::detection::ColorDepth,
@@ -175,7 +171,7 @@ impl StatusBlock {
             StatusState::Success => "\u{2713}",    // ✓
             StatusState::Error => "\u{292b}",      // ⤫
             #[allow(deprecated)]
-            StatusState::Failure => "\u{292b}",    // ⤫ (deprecated alias for Error)
+            StatusState::Failure => "\u{292b}", // ⤫ (deprecated alias for Error)
             StatusState::Warning => "\u{26a0}",    // ⚠
             StatusState::Info => "\u{2139}",       // ℹ
             StatusState::ToolUse => "\u{1f527}",   // 🔧
@@ -257,9 +253,10 @@ impl StatusBlock {
 
         if !self.body.is_empty() {
             let body_text = self.body_plain_text();
-            let mut node = RenderNode::block_quote(vec![RenderNode::paragraph(vec![
-                RenderNode::text(body_text),
-            ])]);
+            let mut node =
+                RenderNode::block_quote(vec![RenderNode::paragraph(vec![RenderNode::text(
+                    body_text,
+                )])]);
             node.attrs.classes = vec!["status-block__body".into()];
             node.attrs.set_style(&Style {
                 border: Some(Border {
@@ -772,10 +769,7 @@ mod tests {
         assert_eq!(StatusBlock::severity_icon(&StatusState::Info), "ℹ");
         assert_eq!(StatusBlock::severity_icon(&StatusState::Success), "✓");
         assert_eq!(StatusBlock::severity_icon(&StatusState::Active), "◽");
-        assert_eq!(
-            StatusBlock::severity_icon(&StatusState::NotStarted),
-            "◻"
-        );
+        assert_eq!(StatusBlock::severity_icon(&StatusState::NotStarted), "◻");
         assert_eq!(StatusBlock::severity_icon(&StatusState::ToolUse), "🔧");
         assert_eq!(StatusBlock::severity_icon(&StatusState::Subagent), "🤖");
     }
@@ -806,8 +800,7 @@ mod tests {
 
     #[test]
     fn body_prose_tags_are_flattened() {
-        let block =
-            StatusBlock::new(StatusState::Info).body(Prose::new("<b>bold</b> text"));
+        let block = StatusBlock::new(StatusState::Info).body(Prose::new("<b>bold</b> text"));
         let md = block.render_markdown();
         assert!(!md.contains("<b>"));
         assert!(md.contains("bold"));

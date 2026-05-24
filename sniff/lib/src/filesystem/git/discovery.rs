@@ -529,3 +529,76 @@ pub(crate) fn get_commits_for_path_with_decorations(
 
     commits
 }
+
+/// Get the last N commits walked from a named branch's tip.
+///
+/// Looks up `branch_name` as a local branch ref first, then falls back to
+/// `revparse_single` so callers may pass a remote-tracking name (e.g.
+/// `origin/main`) or any other ref-like specifier. Returns an empty vector
+/// when the branch cannot be resolved.
+///
+/// ## Examples
+///
+/// ```no_run
+/// use git2::Repository;
+/// use sniff::filesystem::git::get_commits_for_branch;
+///
+/// let repo = Repository::discover(".").unwrap();
+/// for commit in get_commits_for_branch(&repo, "main", 10) {
+///     println!("{} {}", &commit.sha[..7], commit.message);
+/// }
+/// ```
+pub fn get_commits_for_branch(
+    repo: &Repository,
+    branch_name: &str,
+    count: usize,
+) -> Vec<CommitInfo> {
+    let mut commits = Vec::new();
+
+    let start_oid = repo
+        .find_branch(branch_name, git2::BranchType::Local)
+        .ok()
+        .and_then(|b| b.into_reference().target())
+        .or_else(|| {
+            repo.revparse_single(branch_name)
+                .ok()
+                .map(|obj| obj.peel_to_commit().ok().map(|c| c.id()))
+                .unwrap_or(None)
+        });
+
+    let Some(oid) = start_oid else {
+        debug!(branch = %branch_name, "could not resolve branch ref for commit walk");
+        return commits;
+    };
+
+    let Ok(mut revwalk) = repo.revwalk() else {
+        return commits;
+    };
+    if revwalk.push(oid).is_err() {
+        return commits;
+    }
+
+    let decorations = collect_ref_decorations(repo);
+
+    for oid_result in revwalk.take(count) {
+        let Ok(oid) = oid_result else {
+            continue;
+        };
+        let Ok(commit) = repo.find_commit(oid) else {
+            continue;
+        };
+
+        let refs = decorations.get(&oid).cloned().unwrap_or_default();
+        let author = commit.author();
+        commits.push(CommitInfo {
+            sha: commit.id().to_string(),
+            message: commit.message().unwrap_or("").trim().to_string(),
+            author: author.name().unwrap_or("Unknown").to_string(),
+            timestamp: DateTime::from_timestamp(commit.time().seconds(), 0).unwrap_or_default(),
+            remotes: None,
+            refs,
+        });
+    }
+
+    commits
+}

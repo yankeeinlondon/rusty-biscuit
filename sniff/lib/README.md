@@ -378,6 +378,8 @@ Uses `libgit2` (via `git2` crate) for repository inspection.
 - `HostingProvider` - GitHub, GitLab, Bitbucket, etc.
 - `BehindStatus` - Whether local branch is behind remote
 - `WorktreeInfo` - Linked worktree information
+- `WorktreeEntry` - Worktree name, branch, path, current flag, and detached-HEAD state
+- `list_worktrees` - List all worktrees including the main worktree (sorted alphabetically)
 
 **Detection Strategy:**
 
@@ -423,6 +425,15 @@ if let Some(info) = git_deep {
                 println!("Behind: {}", remotes.join(", "));
             }
         }
+    }
+}
+
+// List all worktrees
+if let Some(worktrees) = sniff::filesystem::git::list_worktrees(Path::new("."))? {
+    for wt in &worktrees {
+        let marker = if wt.is_current { "* " } else { "  " };
+        let branch = wt.branch.as_deref().unwrap_or("detached HEAD");
+        println!("{}{} (on {})", marker, wt.name, branch);
     }
 }
 ```

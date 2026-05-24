@@ -11,9 +11,7 @@ use renderable::tree::{HeadingDepth, RenderNode, RenderStrictness, TreeRenderabl
 use std::any::Any;
 
 use crate::{
-    components::renderable::{
-        BrowserRenderable, RenderableTerminalContent, TerminalRenderable,
-    },
+    components::renderable::{BrowserRenderable, RenderableTerminalContent, TerminalRenderable},
     render_tree::{
         TerminalRenderOptions,
         projection::{ProjectionMode, project_renderable_content},
@@ -257,7 +255,6 @@ impl Section {
             }
         }
     }
-
 }
 
 impl TerminalRenderable for Section {
@@ -437,10 +434,7 @@ mod tests {
         // blank line (`{heading}\n\n{body}`), where the bespoke renderer
         // used a single newline. This is the user-facing canonical shape
         // after the flip.
-        assert_eq!(
-            result,
-            "\x1b[1m## Header\x1b[0m\n\nSome content here."
-        );
+        assert_eq!(result, "\x1b[1m## Header\x1b[0m\n\nSome content here.");
     }
 
     #[test]
@@ -474,5 +468,4 @@ mod tests {
             "canonical and compatibility projections must serialize identically"
         );
     }
-
 }

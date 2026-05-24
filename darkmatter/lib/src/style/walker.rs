@@ -8,9 +8,7 @@
 //! `UnknownKey` for the child. The same property holds for the nested
 //! `hyperlinks.local_style.*` and `images.local_style.*` paths.
 
-use crate::style::descriptor::{
-    is_canonical_container, join_path, kebabify, leaf_for_canonical,
-};
+use crate::style::descriptor::{is_canonical_container, join_path, kebabify, leaf_for_canonical};
 use crate::style::warning::{StyleWarning, StyleWarningKind};
 
 /// Walk the raw style value and collect schema-validation warnings.
@@ -142,10 +140,7 @@ mod tests {
             w,
             vec![
                 deprecated("style.block_quote", "block-quote"),
-                deprecated(
-                    "style.block_quote.max_width",
-                    "block-quote.max-width",
-                ),
+                deprecated("style.block_quote.max_width", "block-quote.max-width",),
             ]
         );
     }
@@ -158,10 +153,7 @@ mod tests {
         assert_eq!(
             w,
             vec![
-                deprecated(
-                    "style.hyperlinks.local_style",
-                    "hyperlinks.local-style",
-                ),
+                deprecated("style.hyperlinks.local_style", "hyperlinks.local-style",),
                 deprecated(
                     "style.hyperlinks.local_style.max_width",
                     "hyperlinks.local-style.max-width",
@@ -200,10 +192,7 @@ mod tests {
         let w = warnings_for(json!({
             "hyperlinks": {"local-style": {"maxx-width": "50%"}}
         }));
-        assert_eq!(
-            w,
-            vec![unknown("style.hyperlinks.local-style.maxx-width")]
-        );
+        assert_eq!(w, vec![unknown("style.hyperlinks.local-style.maxx-width")]);
     }
 
     #[test]

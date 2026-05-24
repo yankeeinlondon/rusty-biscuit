@@ -52,7 +52,10 @@ mod tests {
         for token in ["{{bold}}", "{{reset}}", "{{red}}", "{{bg-blue}}"] {
             let result = Prose::new(token).render_optimistic(None);
             assert_eq!(result, token, "token {token:?} must render literally");
-            assert!(!result.contains('\x1b'), "token {token:?} emitted an escape");
+            assert!(
+                !result.contains('\x1b'),
+                "token {token:?} emitted an escape"
+            );
         }
     }
 
@@ -94,7 +97,10 @@ mod tests {
         );
 
         let prose = Prose::new("<curly-underline>curly</curly-underline>");
-        assert_eq!(prose.render_optimistic(None), "\x1b[4:3mcurly\x1b[24m\x1b[0m");
+        assert_eq!(
+            prose.render_optimistic(None),
+            "\x1b[4:3mcurly\x1b[24m\x1b[0m"
+        );
 
         let prose = Prose::new("<dotted-underline>dotted</dotted-underline>");
         assert_eq!(
@@ -273,7 +279,10 @@ mod tests {
 
     #[test]
     fn test_resolve_href_absolute_path() {
-        assert_eq!(resolve_href("/usr/local/bin/test"), "file:///usr/local/bin/test");
+        assert_eq!(
+            resolve_href("/usr/local/bin/test"),
+            "file:///usr/local/bin/test"
+        );
     }
 
     #[test]
