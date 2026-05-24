@@ -90,9 +90,9 @@ lint:
     @just _lint biscuit-file
     @just _lint biscuit-file-cli
 
-# Criterion benches (planned in Phase 4; documented no-op until then).
-bench:
-    @echo "bench: not applicable for biscuit-file yet (planned Phase 4)"
+# Criterion benches for biscuit-file format parsers.
+bench *args="":
+    @just _bench biscuit-file {{ args }}
 
 # Per-package LCOV coverage for the library and CLI.
 coverage *args="":
@@ -104,9 +104,12 @@ doctest *args="":
     @just _doctest biscuit-file {{ args }}
     @just _doctest biscuit-file-cli {{ args }}
 
-# Fuzz targets (planned in Phase 5; documented no-op until then).
-fuzz:
-    @echo "fuzz: not applicable for biscuit-file yet (planned Phase 5)"
+# Fuzz targets for biscuit-file parsers and round-tripping.
+fuzz *args="":
+    @just _fuzz lib pdf_extract {{ args }}
+    @just _fuzz lib toml_roundtrip {{ args }}
+    @just _fuzz lib yaml_roundtrip {{ args }}
+    @just _fuzz lib json5_roundtrip {{ args }}
 
 # Canonical PR-gate runner: sanity → lint → doctest → test → test-l2 → test-browser.
 all:
