@@ -97,6 +97,7 @@ impl PageStyleOverrides {
             PageComponent::BlockQuotes => self.align_block_quotes,
             PageComponent::Tables => self.align_tables,
             PageComponent::CodeBlocks => self.align_code_blocks,
+            PageComponent::Hyperlinks => false,
         }
     }
 }
@@ -469,6 +470,74 @@ pub fn apply_list_style(
     }
 
     Ok(page)
+}
+
+/// Apply parsed color and background-color style onto a [`DarkmatterPage`]
+/// builder.
+///
+/// Color has no CLI override in this sub-spec, so frontmatter is the only
+/// source. Should be called **after** [`apply_page_style`],
+/// [`apply_component_style`], and [`apply_list_style`].
+///
+/// Page-level `color`/`bg-color` are applied first as inherited defaults;
+/// component-level values then override them for the specific component.
+pub fn apply_color_style(
+    page: DarkmatterPage,
+    style: &StyleFrontmatter,
+) -> Result<DarkmatterPage, StyleApplyError> {
+    let mut page = page;
+
+    // Page-level inherited colors.
+    if let Some(page_style) = style.page.as_ref() {
+        if let Some(color) = page_style.color.clone() {
+            page = page.with_page_color(color);
+        }
+        if let Some(bg_color) = page_style.bg_color.clone() {
+            page = page.with_page_bg_color(bg_color);
+        }
+    }
+
+    // Component-level colors override page-level inheritance.
+    if let Some(table) = style.table.as_ref() {
+        page = apply_common_color(page, PageComponent::Tables, &table.common);
+    }
+    if let Some(images) = style.images.as_ref() {
+        page = apply_common_color(page, PageComponent::Images, &images.common);
+    }
+    if let Some(block_quote) = style.block_quote.as_ref() {
+        page = apply_common_color(page, PageComponent::BlockQuotes, &block_quote.common);
+    }
+    if let Some(hyperlinks) = style.hyperlinks.as_ref() {
+        page = apply_common_color(page, PageComponent::Hyperlinks, &hyperlinks.common);
+    }
+    if let Some(ul) = style.ul.as_ref() {
+        page = apply_common_color(page, PageComponent::Ul, &ul.common);
+    }
+    if let Some(ol) = style.ol.as_ref() {
+        page = apply_common_color(page, PageComponent::Ol, &ol.common);
+    }
+    if let Some(li) = style.li.as_ref() {
+        page = apply_common_color(page, PageComponent::Li, &li.common);
+    }
+
+    Ok(page)
+}
+
+/// Apply `color` and `bg-color` from a [`CommonStyle`] onto `page` for a
+/// single component.
+fn apply_common_color(
+    page: DarkmatterPage,
+    component: PageComponent,
+    style: &CommonStyle,
+) -> DarkmatterPage {
+    let mut page = page;
+    if let Some(color) = style.color.clone() {
+        page = page.with_component_color(component, color);
+    }
+    if let Some(bg_color) = style.bg_color.clone() {
+        page = page.with_component_bg_color(component, bg_color);
+    }
+    page
 }
 
 /// Apply one list bucket's [`CommonStyle`] onto `page`.

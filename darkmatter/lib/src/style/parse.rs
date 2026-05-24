@@ -20,7 +20,7 @@ use crate::style::warning::{StyleWarning, StyleWarningKind};
 /// `sub_spec` is `<=` this constant are considered wired and stay silent.
 ///
 /// Advance this constant whenever a future sub-spec wires its keys.
-pub const ACTIVE_STYLE_WIRING_SUB_SPEC: u8 = 4;
+pub const ACTIVE_STYLE_WIRING_SUB_SPEC: u8 = 5;
 
 /// Parse a `serde_json::Value` representing the value at the `style:` key.
 ///
@@ -484,9 +484,9 @@ mod tests {
 
     #[test]
     fn future_phase_key_still_emits_known_but_inactive() {
-        // `table.color` is wired in sub-spec #5 — currently inactive.
+        // `hr.color` is wired in sub-spec #6 — still inactive.
         let (_, w) = from_json_value(&json!({
-            "table": {"color": "red-500"}
+            "hr": {"color": "red-500"}
         }))
         .unwrap();
         let inactive: Vec<_> = w
@@ -494,10 +494,10 @@ mod tests {
             .filter(|w| matches!(w.kind, StyleWarningKind::KnownButInactive { .. }))
             .collect();
         assert_eq!(inactive.len(), 1);
-        assert_eq!(inactive[0].path, "style.table.color");
+        assert_eq!(inactive[0].path, "style.hr.color");
         assert!(matches!(
             inactive[0].kind,
-            StyleWarningKind::KnownButInactive { sub_spec: 5 }
+            StyleWarningKind::KnownButInactive { sub_spec: 6 }
         ));
     }
 
@@ -532,29 +532,22 @@ mod tests {
     }
 
     #[test]
-    fn sub_spec_3_color_keys_still_emit_known_but_inactive() {
-        // Color keys for the same buckets remain inactive (sub-spec #5).
+    fn sub_spec_6_7_keys_still_emit_known_but_inactive() {
+        // Keys wired in sub-specs #6 and #7 remain inactive.
         let cases = [
-            ("style.table.color", json!({"table": {"color": "red-500"}})),
+            ("style.hr.color", json!({"hr": {"color": "red-500"}}), 6),
             (
-                "style.table.bg-color",
-                json!({"table": {"bg-color": "blue-200"}}),
-            ),
-            ("style.images.color", json!({"images": {"color": "red-500"}})),
-            (
-                "style.images.bg-color",
-                json!({"images": {"bg-color": "blue-200"}}),
+                "style.hr.bg-color",
+                json!({"hr": {"bg-color": "blue-200"}}),
+                6,
             ),
             (
-                "style.block-quote.color",
-                json!({"block-quote": {"color": "red-500"}}),
-            ),
-            (
-                "style.block-quote.bg-color",
-                json!({"block-quote": {"bg-color": "blue-200"}}),
+                "style.hyperlinks.local-style.color",
+                json!({"hyperlinks": {"local-style": {"color": "red-500"}}}),
+                7,
             ),
         ];
-        for (path, v) in &cases {
+        for (path, v, expected_sub_spec) in &cases {
             let (_, w) = from_json_value(v).unwrap();
             let inactive: Vec<_> = w
                 .iter()
@@ -562,10 +555,16 @@ mod tests {
                 .collect();
             assert_eq!(inactive.len(), 1, "expected 1 inactive for {}", path);
             assert_eq!(inactive[0].path, *path);
-            assert!(matches!(
-                inactive[0].kind,
-                StyleWarningKind::KnownButInactive { sub_spec: 5 }
-            ));
+            assert!(
+                matches!(
+                    inactive[0].kind,
+                    StyleWarningKind::KnownButInactive { sub_spec }
+                    if sub_spec == *expected_sub_spec
+                ),
+                "expected sub_spec {}, got {:?}",
+                expected_sub_spec,
+                inactive[0].kind
+            );
         }
     }
 
@@ -746,51 +745,31 @@ mod tests {
             .filter(|w| matches!(w.kind, StyleWarningKind::KnownButInactive { .. }))
             .collect();
 
-        // Non-color list keys (sub_spec 4) should NOT produce inactive warnings.
+        // All list keys including color/bg-color (sub_spec 4 and 5) should NOT
+        // produce inactive warnings.
         for path in [
             "style.ul.width",
             "style.ul.max-width",
             "style.ul.alignment",
             "style.ul.left-margin",
+            "style.ul.color",
+            "style.ul.bg-color",
             "style.ol.width",
             "style.ol.max-width",
             "style.ol.alignment",
+            "style.ol.color",
+            "style.ol.bg-color",
             "style.li.width",
             "style.li.max-width",
             "style.li.alignment",
+            "style.li.color",
+            "style.li.bg-color",
         ] {
             assert!(
                 !inactive.iter().any(|w| w.path == path),
                 "wired list key `{}` should not produce KnownButInactive, got: {:?}",
                 path,
                 inactive
-            );
-        }
-
-        // Color and bg-color keys (sub_spec 5) still produce inactive warnings.
-        for path in [
-            "style.ul.color",
-            "style.ul.bg-color",
-            "style.ol.color",
-            "style.ol.bg-color",
-            "style.li.color",
-            "style.li.bg-color",
-        ] {
-            let found = inactive
-                .iter()
-                .find(|w| w.path == path);
-            assert!(
-                found.is_some(),
-                "color/bg-color key `{}` should still produce KnownButInactive, got: {:?}",
-                path,
-                inactive
-            );
-            let kind = &found.unwrap().kind;
-            assert!(
-                matches!(kind, StyleWarningKind::KnownButInactive { sub_spec: 5 }),
-                "color/bg-color key `{}` should have sub_spec 5, got: {:?}",
-                path,
-                kind
             );
         }
     }

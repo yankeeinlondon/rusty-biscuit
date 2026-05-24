@@ -482,6 +482,90 @@ where
     }
 }
 
+// ---------------------------------------------------------------------------
+// Target-specific lowering helpers (Phase 2)
+// ---------------------------------------------------------------------------
+
+use crate::markdown::output::terminal::ColorDepth;
+
+/// Lower a [`StyleColor`] to a CSS color value string.
+///
+/// ## Returns
+///
+/// - RGB-capable colors produce `rgb(r, g, b)` or `rgba(r, g, b, a)` when
+///   opacity is present.
+/// - Tailwind special values map to CSS keywords:
+///   - `transparent` → `"transparent"`
+///   - `current` → `"currentColor"`
+///   - `inherit` → `"inherit"`
+/// - Non-RGB values (`DefaultForeground`, `DefaultBackground`, `Reset`)
+///   return `None`.
+pub fn lower_to_css(style_color: &StyleColor) -> Option<String> {
+    match &style_color.color {
+        Color::Tailwind(Tailwind::Transparent) => Some("transparent".to_string()),
+        Color::Tailwind(Tailwind::Current) => Some("currentColor".to_string()),
+        Color::Tailwind(Tailwind::Inherit) => Some("inherit".to_string()),
+        Color::DefaultForeground | Color::DefaultBackground | Color::Reset => None,
+        _ => {
+            let (r, g, b) = style_color.color.to_rgb()?;
+            match style_color.opacity {
+                None => Some(format!("rgb({r}, {g}, {b})")),
+                Some(op) => {
+                    let alpha = f32::from(op) / 100.0;
+                    Some(format!("rgba({r}, {g}, {b}, {alpha})"))
+                }
+            }
+        }
+    }
+}
+
+/// Lower a [`StyleColor`] to an SGR escape sequence.
+///
+/// ## Returns
+///
+/// - `ColorDepth::None` → `None`.
+/// - RGB-capable colors emit `\x1b[38;2;r;g;b`m` for foreground or
+///   `\x1b[48;2;r;g;b`m` for background.
+/// - Non-RGB values (`DefaultForeground`, `DefaultBackground`, `Reset`,
+///   Tailwind specials) return `None`.
+pub fn lower_to_sgr(style_color: &StyleColor, color_depth: ColorDepth, is_background: bool) -> Option<String> {
+    if color_depth == ColorDepth::None {
+        return None;
+    }
+    let (r, g, b) = style_color.color.to_rgb()?;
+    let lead = if is_background { 48 } else { 38 };
+    Some(format!("\x1b[{lead};2;{r};{g};{b}m"))
+}
+
+/// Wrap `content` with SGR sequences when foreground or background colors
+/// are present, guaranteeing a reset (`\x1b[0m`) when any SGR is opened.
+///
+/// Returns `content` unchanged when both colors are `None` or when
+/// `color_depth` is `ColorDepth::None`.
+pub fn wrap_with_color(
+    content: &str,
+    fg: Option<&StyleColor>,
+    bg: Option<&StyleColor>,
+    color_depth: ColorDepth,
+) -> String {
+    let mut open = String::new();
+    if let Some(fg) = fg
+        && let Some(seq) = lower_to_sgr(fg, color_depth, false)
+    {
+        open.push_str(&seq);
+    }
+    if let Some(bg) = bg
+        && let Some(seq) = lower_to_sgr(bg, color_depth, true)
+    {
+        open.push_str(&seq);
+    }
+    if open.is_empty() {
+        content.to_string()
+    } else {
+        format!("{open}{content}\x1b[0m")
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -676,5 +760,178 @@ mod tests {
                 assert_eq!(parsed.opacity, Some(50), "`{}` opacity", input);
             }
         }
+    }
+
+    // ---------- Phase 2: lowering helper tests ----------
+
+    use super::{lower_to_css, lower_to_sgr, wrap_with_color};
+    use crate::markdown::output::terminal::ColorDepth;
+
+    fn red_rgb() -> StyleColor {
+        StyleColor {
+            color: Color::Rgb(renderable::color::RgbColor::new(255, 0, 0, renderable::color::BasicColor::Red)),
+            opacity: None,
+        }
+    }
+
+    fn red_with_opacity() -> StyleColor {
+        StyleColor {
+            color: Color::Rgb(renderable::color::RgbColor::new(255, 0, 0, renderable::color::BasicColor::Red)),
+            opacity: Some(50),
+        }
+    }
+
+    #[test]
+    fn lower_to_css_rgb() {
+        assert_eq!(lower_to_css(&red_rgb()), Some("rgb(255, 0, 0)".to_string()));
+    }
+
+    #[test]
+    fn lower_to_css_rgba_with_opacity() {
+        assert_eq!(
+            lower_to_css(&red_with_opacity()),
+            Some("rgba(255, 0, 0, 0.5)".to_string())
+        );
+    }
+
+    #[test]
+    fn lower_to_css_tailwind_specials() {
+        assert_eq!(
+            lower_to_css(&StyleColor { color: Color::Tailwind(Tailwind::Transparent), opacity: None }),
+            Some("transparent".to_string())
+        );
+        assert_eq!(
+            lower_to_css(&StyleColor { color: Color::Tailwind(Tailwind::Current), opacity: None }),
+            Some("currentColor".to_string())
+        );
+        assert_eq!(
+            lower_to_css(&StyleColor { color: Color::Tailwind(Tailwind::Inherit), opacity: None }),
+            Some("inherit".to_string())
+        );
+    }
+
+    #[test]
+    fn lower_to_css_unsupported_returns_none() {
+        assert!(lower_to_css(&StyleColor { color: Color::DefaultForeground, opacity: None }).is_none());
+        assert!(lower_to_css(&StyleColor { color: Color::DefaultBackground, opacity: None }).is_none());
+        assert!(lower_to_css(&StyleColor { color: Color::Reset, opacity: None }).is_none());
+    }
+
+    #[test]
+    fn lower_to_sgr_truecolor_fg() {
+        assert_eq!(
+            lower_to_sgr(&red_rgb(), ColorDepth::TrueColor, false),
+            Some("\x1b[38;2;255;0;0m".to_string())
+        );
+    }
+
+    #[test]
+    fn lower_to_sgr_truecolor_bg() {
+        assert_eq!(
+            lower_to_sgr(&red_rgb(), ColorDepth::TrueColor, true),
+            Some("\x1b[48;2;255;0;0m".to_string())
+        );
+    }
+
+    #[test]
+    fn lower_to_sgr_none_emits_nothing() {
+        assert_eq!(lower_to_sgr(&red_rgb(), ColorDepth::None, false), None);
+        assert_eq!(lower_to_sgr(&red_rgb(), ColorDepth::None, true), None);
+    }
+
+    #[test]
+    fn lower_to_sgr_non_rgb_returns_none() {
+        let transparent = StyleColor { color: Color::Tailwind(Tailwind::Transparent), opacity: None };
+        assert_eq!(lower_to_sgr(&transparent, ColorDepth::TrueColor, false), None);
+
+        let current = StyleColor { color: Color::Tailwind(Tailwind::Current), opacity: None };
+        assert_eq!(lower_to_sgr(&current, ColorDepth::TrueColor, false), None);
+
+        let inherit = StyleColor { color: Color::Tailwind(Tailwind::Inherit), opacity: None };
+        assert_eq!(lower_to_sgr(&inherit, ColorDepth::TrueColor, false), None);
+    }
+
+    #[test]
+    fn wrap_with_color_no_colors_returns_unchanged() {
+        assert_eq!(wrap_with_color("hello", None, None, ColorDepth::TrueColor), "hello");
+    }
+
+    #[test]
+    fn wrap_with_color_fg_only() {
+        let out = wrap_with_color("hello", Some(&red_rgb()), None, ColorDepth::TrueColor);
+        assert_eq!(out, "\x1b[38;2;255;0;0mhello\x1b[0m");
+    }
+
+    #[test]
+    fn wrap_with_color_bg_only() {
+        let out = wrap_with_color("hello", None, Some(&red_rgb()), ColorDepth::TrueColor);
+        assert_eq!(out, "\x1b[48;2;255;0;0mhello\x1b[0m");
+    }
+
+    #[test]
+    fn wrap_with_color_fg_and_bg() {
+        let out = wrap_with_color("hello", Some(&red_rgb()), Some(&red_rgb()), ColorDepth::TrueColor);
+        assert_eq!(out, "\x1b[38;2;255;0;0m\x1b[48;2;255;0;0mhello\x1b[0m");
+    }
+
+    #[test]
+    fn wrap_with_color_none_depth_ignores_colors() {
+        assert_eq!(
+            wrap_with_color("hello", Some(&red_rgb()), Some(&red_rgb()), ColorDepth::None),
+            "hello"
+        );
+    }
+
+    #[test]
+    fn wrap_with_color_reset_only_when_sgr_opened() {
+        // A non-RGB color should not trigger reset.
+        let transparent = StyleColor { color: Color::Tailwind(Tailwind::Transparent), opacity: None };
+        assert_eq!(
+            wrap_with_color("hello", Some(&transparent), None, ColorDepth::TrueColor),
+            "hello"
+        );
+    }
+
+    #[test]
+    fn lower_to_css_web_color() {
+        let orange = StyleColor {
+            color: Color::Web(renderable::color::WebColor::Orange),
+            opacity: None,
+        };
+        assert_eq!(lower_to_css(&orange), Some("rgb(255, 165, 0)".to_string()));
+    }
+
+    #[test]
+    fn lower_to_sgr_basic_color() {
+        let basic = StyleColor {
+            color: Color::BasicColor(renderable::color::BasicColor::Red),
+            opacity: None,
+        };
+        assert_eq!(
+            lower_to_sgr(&basic, ColorDepth::TrueColor, false),
+            Some("\x1b[38;2;128;0;0m".to_string())
+        );
+    }
+
+    #[test]
+    fn lower_to_sgr_tailwind_concrete() {
+        let red = StyleColor {
+            color: Color::Tailwind(Tailwind::Red500),
+            opacity: None,
+        };
+        let sgr = lower_to_sgr(&red, ColorDepth::TrueColor, false);
+        assert!(sgr.is_some());
+        assert!(sgr.as_ref().unwrap().starts_with("\x1b[38;2;"));
+    }
+
+    #[test]
+    fn lower_to_css_tailwind_concrete() {
+        let red = StyleColor {
+            color: Color::Tailwind(Tailwind::Red500),
+            opacity: Some(75),
+        };
+        let css = lower_to_css(&red).unwrap();
+        assert!(css.starts_with("rgba("));
+        assert!(css.contains("0.75"));
     }
 }

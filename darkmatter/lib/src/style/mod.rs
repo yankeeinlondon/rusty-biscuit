@@ -50,10 +50,10 @@ pub mod warning;
 mod coverage_tests;
 
 pub use apply::{
-    apply_component_style, apply_list_style, apply_page_style, ComponentStyleOverrides,
-    ListStyleOverrides, PageStyleOverrides, StyleApplyError,
+    apply_color_style, apply_component_style, apply_list_style, apply_page_style,
+    ComponentStyleOverrides, ListStyleOverrides, PageStyleOverrides, StyleApplyError,
 };
-pub use color::StyleColor;
+pub use color::{lower_to_css, lower_to_sgr, wrap_with_color, StyleColor};
 pub use error::StyleParseError;
 pub use parse::{from_frontmatter, from_json_value, into_strict};
 pub use schema::StyleFrontmatter;
