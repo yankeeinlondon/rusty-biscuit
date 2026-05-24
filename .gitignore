@@ -71,6 +71,7 @@ trace/*
 **/*.snap.new
 **/*.pending-snap
 
+.opencode/package-lock.json
 # Timing artifacts emitted by `just _lint` / `just _test` recipes
 **/lint-*-timing.jsonl
 **/test-*-timing.jsonl
