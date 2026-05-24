@@ -3226,6 +3226,33 @@ fn layout_resolved_alignment_global_then_component_specific() {
 }
 
 #[test]
+fn layout_resolved_align_lists_does_not_write_deprecated_lists_slot() {
+    // `--align-lists` must broadcast to Ul/Ol/Li only; the deprecated
+    // PageComponent::Lists must remain unset so first-party CLI paths cannot
+    // resurrect the legacy broadcast.
+    let page = resolved_page(&["fixture.md", "--align-lists", "right"]);
+    #[allow(deprecated)]
+    let lists_align = page.alignment_for(PageComponent::Lists);
+    assert_eq!(
+        lists_align,
+        PageAlignment::Left,
+        "--align-lists must not write PageComponent::Lists"
+    );
+}
+
+#[test]
+fn layout_resolved_fill_lists_does_not_write_deprecated_lists_slot() {
+    let page = resolved_page(&["fixture.md", "--fill-lists", "max=40"]);
+    #[allow(deprecated)]
+    let lists_fill = page.fill_for(PageComponent::Lists);
+    assert_eq!(
+        lists_fill,
+        PageFill::Full,
+        "--fill-lists must not write PageComponent::Lists"
+    );
+}
+
+#[test]
 fn layout_resolved_align_lists_broadcast_then_granular_override() {
     // `--align-lists right --align-ul left`: broadcast sets all three list
     // components to Right, then the granular flag overrides only Ul.

@@ -149,10 +149,6 @@ pub fn apply_cli_layout_flags(page: DarkmatterPage, cli: &Cli) -> DarkmatterPage
         for component in PageComponent::LISTS {
             page = page.use_alignment(component, align.into());
         }
-        #[allow(deprecated)]
-        {
-            page = page.use_alignment(PageComponent::Lists, align.into());
-        }
     }
     if let Some(align) = cli.align_ul {
         page = page.use_alignment(PageComponent::Ul, align.into());
@@ -183,10 +179,6 @@ pub fn apply_cli_layout_flags(page: DarkmatterPage, cli: &Cli) -> DarkmatterPage
     if let Some(fill) = cli.fill_lists {
         for component in PageComponent::LISTS {
             page = page.with_fill(component, fill);
-        }
-        #[allow(deprecated)]
-        {
-            page = page.with_fill(PageComponent::Lists, fill);
         }
     }
     if let Some(fill) = cli.fill_ul {
