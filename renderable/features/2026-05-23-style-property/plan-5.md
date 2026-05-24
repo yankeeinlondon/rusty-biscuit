@@ -2,6 +2,28 @@
 phases: 5
 created: 2026-05-23
 start_phase: 1
+source_files_during_phase_1:
+  - darkmatter/lib/src/layout/types.rs
+  - darkmatter/lib/src/layout/page.rs
+  - darkmatter/lib/src/layout/context.rs
+  - darkmatter/lib/src/style/apply.rs
+docs_updated_during_phase_1: []
+docs_created_during_phase_1: []
+skills_files_updated_during_phase_1: []
+source_files_during_phase_2:
+  - darkmatter/lib/src/style/color.rs
+docs_updated_during_phase_2: []
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2: []
+source_files_during_phase_5:
+  - darkmatter/lib/src/layout/page.rs
+  - darkmatter/lib/tests/style_frontmatter.rs
+docs_updated_during_phase_5:
+  - darkmatter/docs/rendering/style.md
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5: []
+packages:
+  - darkmatter
 ---
 
 # Execution Plan: Sub-Spec #5 - Color & Background-Color Mutations
@@ -22,8 +44,8 @@ This execution plan implements sub-spec #5, enabling color and background-color 
 ## Phase 2: Target-Specific Lowering Helpers (Parallelizable)
 **Focus:** Implement pure functions that translate `StyleColor` into valid output representations (CSS and Terminal SGR).
 
-- [ ] Task: Implement browser lowering helper for `StyleColor` to CSS. Translate RGB-capable to `rgb(...)`/`rgba(...)` (preserving opacity), map `Tailwind` special values (`transparent`, `current`, `inherit`), and return `None` for unsupported values.
-- [ ] Task: Implement terminal lowering helper that emits SGR sequences based on `StyleColor.color.to_rgb()`. It must emit `38;2;r;g;b` (foreground) or `48;2;r;g;b` (background) depending on the color depth, emit nothing for `ColorDepth::None`, and wrap content to guarantee a reset sequence `\x1b[0m` is printed if any SGR is opened.
+- [x] Task: Implement browser lowering helper for `StyleColor` to CSS. Translate RGB-capable to `rgb(...)`/`rgba(...)` (preserving opacity), map `Tailwind` special values (`transparent`, `current`, `inherit`), and return `None` for unsupported values.
+- [x] Task: Implement terminal lowering helper that emits SGR sequences based on `StyleColor.color.to_rgb()`. It must emit `38;2;r;g;b` (foreground) or `48;2;r;g;b` (background) depending on the color depth, emit nothing for `ColorDepth::None`, and wrap content to guarantee a reset sequence `\x1b[0m` is printed if any SGR is opened.
 
 ## Phase 3: Component CSS & Terminal Output Wiring
 **Focus:** Inject lowering helpers into the actual text layout engines.

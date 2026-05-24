@@ -1,10 +1,48 @@
 ---
-ready: false
+ready: true
 agent: codex
 model: ""
 ---
 
 # Review: Sub-Spec #4 `ul` / `ol` / `li` Split + Wiring
+
+## Resolution (2026-05-23)
+
+All findings addressed:
+
+- **High #1 (UL left-margin math)** — terminal renderer now resolves
+  `ul.left-margin` against `effective_width`, then caps the body width to
+  `min(component_width, effective_width - left_margin)`. Alignment treats
+  `(left_margin + body)` as a single block. Test
+  `render_ul_left_margin_and_max_width` asserts body wraps at <= 40 cols and
+  total line <= 44 (4 margin + 40 body). Level 2 coverage added.
+- **High #2 (LI alignment body-only)** — marker is now emitted under the
+  containing Ul/Ol layout first. When `style.li.alignment` shifts the body the
+  body becomes a block on its own line so the marker column is preserved;
+  width-only Li overrides (Left alignment) keep the body inline with the
+  marker. Test `render_li_body_alignment_right` asserts marker stays at column
+  0 and body is right-aligned on its own line. Level 2 coverage added.
+- **High #3 (Level 2 list coverage)** — seven new Level 2 tests added in
+  `darkmatter/cli/tests/level2_layout.rs` exercising
+  `style.ul.left-margin`, `style.ul.max-width`, combined margin/max-width,
+  `style.ol.alignment`, `style.li.alignment`, `--align-lists` broadcast, and
+  `--align-ul` granular. All pass in a real WezTerm pane.
+- **Medium #4 (deprecated Lists writes)** — `apply_cli_layout_flags`,
+  `use_alignment_for_all`, and `with_fill_for_all` no longer write
+  `PageComponent::Lists`. Fallback reads in `LayoutContext` are preserved.
+  Tests asserting `Lists` remains unset for first-party broadcast paths added
+  in both `layout/page.rs` and `cli/tests/cli.rs`.
+- **Medium #5 (fallible list-margin builder)** — `try_with_list_left_margin`
+  returns `PageRenderError::InvalidListLeftMarginComponent` for non-`Ul`
+  components and is what `apply_list_style` uses (mapping to
+  `StyleApplyError::InvalidListLeftMarginComponent`). Panicking
+  `with_list_left_margin` is retained as a documented convenience for callers
+  that know the component statically. Error-path tests added.
+
+Verification: `cargo test -p darkmatter --lib` (3121 passed),
+`cargo test -p darkmatter-cli --test cli` (227 passed),
+`cargo test -p darkmatter-cli --test level2_layout -- --test-threads=1`
+(33 passed, including the 7 new list cases) all green.
 
 ## Findings
 
