@@ -182,6 +182,11 @@ pub enum RepoAction {
         no_error: bool,
         on_error: Option<String>,
     },
+    Worktrees {
+        list: bool,
+        csv: bool,
+        verbose: bool,
+    },
     Name,
 }
 
@@ -578,6 +583,17 @@ pub enum RepoSubcommand {
         /// Message to display when no results found
         #[arg(long, value_name = "MESSAGE", allow_hyphen_values = true)]
         on_error: Option<String>,
+    },
+    /// List all worktrees in the repository
+    #[command(name = "worktrees")]
+    Worktrees {
+        /// Output as bullet list (one item per line with `- ` prefix)
+        #[arg(long, conflicts_with = "csv")]
+        list: bool,
+
+        /// Output as comma-separated values on a single line
+        #[arg(long, conflicts_with = "list")]
+        csv: bool,
     },
     /// Output the repository name (plain text); use -v for version + language/monorepo info
     Name,

@@ -932,6 +932,11 @@ impl Commands {
                     no_error: *no_error,
                     on_error: on_error.clone(),
                 },
+                Some(RepoSubcommand::Worktrees { list, csv }) => RepoAction::Worktrees {
+                    list: *list,
+                    csv: *csv,
+                    verbose: false,
+                },
                 Some(RepoSubcommand::Name) => RepoAction::Name,
             }),
             _ => None,
@@ -2102,6 +2107,64 @@ mod tests {
                 panic!("Expected repo worktree --on-error");
             }
         }
+
+        #[test]
+        fn repo_worktrees_parses() {
+            let cli = parse_args(&["repo", "worktrees"]).unwrap();
+            if let Some(Commands::Repo {
+                repo_subcommand: Some(RepoSubcommand::Worktrees { list, csv }),
+                ..
+            }) = cli.command
+            {
+                assert!(!list);
+                assert!(!csv);
+            } else {
+                panic!("Expected repo worktrees");
+            }
+        }
+
+        #[test]
+        fn repo_worktrees_list_parses() {
+            let cli = parse_args(&["repo", "worktrees", "--list"]).unwrap();
+            if let Some(Commands::Repo {
+                repo_subcommand: Some(RepoSubcommand::Worktrees { list, csv }),
+                ..
+            }) = cli.command
+            {
+                assert!(list);
+                assert!(!csv);
+            } else {
+                panic!("Expected repo worktrees --list");
+            }
+        }
+
+        #[test]
+        fn repo_worktrees_csv_parses() {
+            let cli = parse_args(&["repo", "worktrees", "--csv"]).unwrap();
+            if let Some(Commands::Repo {
+                repo_subcommand: Some(RepoSubcommand::Worktrees { list, csv }),
+                ..
+            }) = cli.command
+            {
+                assert!(!list);
+                assert!(csv);
+            } else {
+                panic!("Expected repo worktrees --csv");
+            }
+        }
+
+        #[test]
+        fn repo_worktrees_verbose_global_flag() {
+            let cli = parse_args(&["repo", "worktrees", "-v"]).unwrap();
+            assert!(matches!(
+                cli.command,
+                Some(Commands::Repo {
+                    repo_subcommand: Some(RepoSubcommand::Worktrees { .. }),
+                    ..
+                })
+            ));
+            assert_eq!(cli.verbose, 1);
+        }
     }
 
     mod repo_action_normalization {
@@ -2200,6 +2263,24 @@ mod tests {
                 _ => panic!("Expected Worktree action"),
             }
         }
+
+        #[test]
+        fn to_repo_action_worktrees() {
+            let cmd = Commands::Repo {
+                repo_subcommand: Some(RepoSubcommand::Worktrees {
+                    list: true,
+                    csv: false,
+                }),
+            };
+            match cmd.to_repo_action() {
+                Some(RepoAction::Worktrees { list, csv, verbose }) => {
+                    assert!(list);
+                    assert!(!csv);
+                    assert!(!verbose);
+                }
+                _ => panic!("Expected Worktrees action"),
+            }
+        }
     }
 
     mod blast_radius_commands {
@@ -2248,6 +2329,12 @@ mod tests {
         #[test]
         fn blast_radius_list_csv_conflict() {
             let result = parse_args(&["blast-radius", "--list", "--csv"]);
+            assert!(result.is_err(), "--list and --csv should conflict");
+        }
+
+        #[test]
+        fn repo_worktrees_list_csv_conflict() {
+            let result = parse_args(&["repo", "worktrees", "--list", "--csv"]);
             assert!(result.is_err(), "--list and --csv should conflict");
         }
 
