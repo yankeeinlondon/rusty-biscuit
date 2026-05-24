@@ -19,6 +19,8 @@ source_files_during_phase_2:
 docs_updated_during_phase_2: []
 docs_created_during_phase_2: []
 skills_files_updated_during_phase_2: []
+packages_during_phase_2:
+  - darkmatter
 source_files_during_phase_3:
   - darkmatter/lib/src/style/apply.rs
   - darkmatter/cli/src/args.rs
