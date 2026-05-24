@@ -157,6 +157,10 @@ fn context_default_writes_footer_to_stderr() {
 
     let stderr = String::from_utf8_lossy(&assert.get_output().stderr);
     assert!(
+        stderr.contains("--values"),
+        "stderr should mention --values; got: {stderr}"
+    );
+    assert!(
         stderr.contains("--expressions"),
         "stderr should mention --expressions; got: {stderr}"
     );
@@ -176,6 +180,10 @@ fn context_values_writes_footer_to_stderr() {
         .success();
 
     let stderr = String::from_utf8_lossy(&assert.get_output().stderr);
+    assert!(
+        !stderr.contains("--values"),
+        "stderr should NOT mention --values when already using --values; got: {stderr}"
+    );
     assert!(
         stderr.contains("--expressions"),
         "stderr should mention --expressions; got: {stderr}"
@@ -197,6 +205,10 @@ fn context_expressions_writes_footer_to_stderr() {
 
     let stderr = String::from_utf8_lossy(&assert.get_output().stderr);
     assert!(
+        stderr.contains("--values"),
+        "stderr should mention --values; got: {stderr}"
+    );
+    assert!(
         stderr.contains("--expressions"),
         "stderr should mention --expressions; got: {stderr}"
     );
@@ -216,6 +228,10 @@ fn context_side_effects_writes_footer_to_stderr() {
         .success();
 
     let stderr = String::from_utf8_lossy(&assert.get_output().stderr);
+    assert!(
+        stderr.contains("--values"),
+        "stderr should mention --values; got: {stderr}"
+    );
     assert!(
         stderr.contains("--expressions"),
         "stderr should mention --expressions; got: {stderr}"

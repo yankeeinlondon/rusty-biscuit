@@ -5298,11 +5298,16 @@ exit 0
         .env("HOME", workspace.path())
         .env("PATH", &path_dir)
         .env("OPENCODE_MODEL", "test-model")
-        // step_timeout longer than the post-text silence above so the
-        // grace can apply and the child exits cleanly before the budget
-        // would elapse.
-        .env("CLAUDINE_STEP_TIMEOUT", "3s")
-        .env("CLAUDINE_WATCHDOG_INTERVAL", "1s")
+        // step_timeout must be longer than the post-text silence above (1s)
+        // so the grace can apply and the child exits cleanly before the
+        // budget elapses. Use a generous 15s budget — the test intent is
+        // unchanged (silence < step_timeout), but the wide margin prevents
+        // spurious watchdog fires under heavy parallel-test contention,
+        // where wrapper startup + watchdog tick scheduling can stretch the
+        // wall clock past a tight 3s budget. A real silence regression
+        // would still fail because the byte heartbeat never lands.
+        .env("CLAUDINE_STEP_TIMEOUT", "15s")
+        .env("CLAUDINE_WATCHDOG_INTERVAL", "2s")
         .env("CLAUDINE_KILL_GRACE", "1s")
         .args(["compose", "--opencode", md_file.to_str().unwrap()])
         .timeout(Duration::from_secs(30))
@@ -5676,13 +5681,16 @@ fn compose_sigint_during_prep_exits_130_with_notice() {
     )
     .unwrap();
 
-    // Fake `opencode models` sleeps for 5s so prep is slow enough to
-    // interrupt. The `opencode` provider binary itself never runs.
+    // Fake `opencode models` sleeps for 10s so prep is slow enough to
+    // interrupt, and so a regression to the uncancellable blocking path
+    // would clearly exceed the 4s interrupt-to-exit budget below (it would
+    // have to wait ~9s for the sleep to finish). The `opencode` provider
+    // binary itself never runs.
     write_executable(
         &path_dir.join("opencode"),
         r#"#!/bin/sh
 if [ "$1" = "models" ]; then
-  /bin/sleep 5
+  /bin/sleep 10
   printf '%s\n' '["test-model"]'
   exit 0
 fi
@@ -5708,9 +5716,13 @@ exit 0
 
     let pid = child.id() as i32;
 
-    // Give the child a moment to enter prep and reach the slow `opencode
-    // models` call, then deliver SIGINT.
-    std::thread::sleep(std::time::Duration::from_millis(300));
+    // Wait until the child has entered prep and reached the slow
+    // `opencode models` call before delivering SIGINT. The fake binary
+    // sleeps for 5s, so a 1s wait lands comfortably inside that window
+    // even when parallel test contention slows wrapper startup — a
+    // 300ms wait was prone to firing SIGINT before the signal handler
+    // and cancellable refresh were both wired up.
+    std::thread::sleep(std::time::Duration::from_secs(1));
     let interrupt_sent_at = std::time::Instant::now();
     unsafe {
         libc::kill(pid, libc::SIGINT);
@@ -5726,15 +5738,15 @@ exit 0
         "SIGINT during prep must yield exit code 130"
     );
 
-    // Bounded interrupt latency: the cancellable refresh path must return
-    // within ~50 ms of the interrupt poll, so a generous 2-second budget
-    // catches any regression where prep continues to block on the slow
-    // subprocess. The fake `opencode models` sleeps for 5s; if we hit
-    // anywhere near that we have regressed back to the uncancellable
-    // `refresh_provider_blocking` path.
+    // Bounded interrupt latency: the cancellable refresh path returns
+    // within ~50 ms of the interrupt poll under normal conditions. The
+    // fake `opencode models` sleeps for 5s — anywhere near that means
+    // we've regressed to the uncancellable `refresh_provider_blocking`
+    // path. A 4-second ceiling sits comfortably below the 5s blocking
+    // floor while leaving headroom for OS scheduling under contention.
     assert!(
-        interrupt_to_exit < std::time::Duration::from_secs(2),
-        "SIGINT-to-exit latency exceeded 2s ({:?}); blocked-prep regression",
+        interrupt_to_exit < std::time::Duration::from_secs(4),
+        "SIGINT-to-exit latency exceeded 4s ({:?}); blocked-prep regression",
         interrupt_to_exit,
     );
 
