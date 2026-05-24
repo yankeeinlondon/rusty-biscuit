@@ -40,5 +40,8 @@ jobs:
       - name: Install cargo-nextest
         uses: taiki-e/install-action@nextest
 
+      - name: Validate canonical recipe set
+        run: just check-canonical
+
       - name: Run all canonical tiers
         run: just all

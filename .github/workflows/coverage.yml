@@ -46,10 +46,29 @@ jobs:
       - name: Install cargo-nextest
         uses: taiki-e/install-action@nextest
 
+      - name: Generate per-package coverage
+        run: just coverage
+
+      - name: Collect per-package LCOV reports
+        run: |
+          mkdir -p coverage-reports
+          # Per-package recipes drop `lcov-<pkg>.info` next to each package
+          # area; gather them for upload.
+          find . -type f -name 'lcov-*.info' \
+            -not -path './coverage-reports/*' \
+            -not -path './target/*' \
+            -print -exec cp {} coverage-reports/ \;
+
+      - name: Upload per-package LCOV artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: lcov-per-package
+          path: coverage-reports/
+
       - name: Generate workspace coverage
         run: cargo llvm-cov --workspace --lcov --output-path lcov-workspace.info
 
-      - name: Upload LCOV artifact
+      - name: Upload workspace LCOV artifact
         uses: actions/upload-artifact@v4
         with:
           name: lcov-workspace
