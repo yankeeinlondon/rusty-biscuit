@@ -4,6 +4,9 @@
 //! for running operations in three phases:
 //!
 //! **Inline Pre** (serial):
+//! 0. **Schema Validation** - Validate frontmatter against `$schema` or
+//!    `ComposeOptions::baseline_schema`. Runs after `--set` / `--state`
+//!    overrides are applied but before interpolation or shell expansion.
 //! 1. **Frontmatter Interpolation** - Resolve `{{variable}}` in frontmatter values.
 //!    When shell expansion is enabled, templated keys that reference
 //!    shell-pending values (top-level `$(...)`) are deferred for a second
@@ -56,6 +59,7 @@ mod frontmatter_interpolation;
 pub(crate) mod frontmatter_shell_expansion;
 pub(crate) mod parse_utils;
 pub(crate) mod perf;
+mod schema_validation;
 mod state;
 mod types;
 
@@ -491,6 +495,14 @@ impl Markdown {
                 &options,
                 options.is_enabled(ComposeOperation::FrontmatterShellExpansion),
             );
+
+            // Schema Validation: check frontmatter against $schema or baseline
+            // after overrides are applied but before interpolation/shell expansion.
+            let sv_start = perf.is_enabled().then(std::time::Instant::now);
+            schema_validation::run(self, &options)?;
+            if let Some(start) = sv_start {
+                perf.record(perf::PerfMetricKind::SchemaValidation, start.elapsed());
+            }
 
             let shell_expansion_enabled =
                 options.is_enabled(ComposeOperation::FrontmatterShellExpansion);
@@ -4550,6 +4562,137 @@ Rounded: {{ round(pi) }}"#;
                 "Expected bare pipe error in condition, got: {}",
                 err_string
             );
+        }
+    }
+
+    // ============================================
+    // Schema Validation integration tests
+    // ============================================
+
+    mod schema_validation_integration {
+        use super::*;
+
+        #[test]
+        fn schema_validation_fails_fast_before_shell_expansion() {
+            // Document matching the shape of the failing planner prompt:
+            // spec is empty, and dir uses shell expansion that would fail
+            // if spec stays empty.
+            let content = "---\n$schema:\n  spec: 'file(required)'\nspec: \"\"\ndir: \"$(dirname '{{ spec }}')\"\n---\nBody\n";
+            let md: Markdown = content.into();
+
+            let options = ComposeOptions::new().only(&[
+                ComposeOperation::FrontmatterInterpolation,
+                ComposeOperation::FrontmatterShellExpansion,
+                ComposeOperation::Interpolation,
+            ]);
+
+            let err = md.compose_with(options).unwrap_err();
+            let err_string = format!("{err}");
+            assert!(
+                err_string.contains("Schema validation failed"),
+                "Expected schema validation error, got: {err_string}"
+            );
+            assert!(
+                !err_string.contains("dirname"),
+                "Shell expansion should not have run, got: {err_string}"
+            );
+
+            // The error variant itself should name the failing property.
+            match err {
+                MarkdownError::SchemaValidationFailed { problems, .. } => {
+                    assert!(
+                        problems.iter().any(|p| {
+                            p.property.as_deref() == Some("spec") || p.path == "/spec"
+                        }),
+                        "Error should mention the spec property, got: {problems:?}"
+                    );
+                }
+                other => panic!("Expected SchemaValidationFailed, got {other:?}"),
+            }
+        }
+
+        #[test]
+        fn schema_validation_reports_zero_shell_replacements() {
+            let content = "---\n$schema:\n  spec: 'file(required)'\nspec: \"\"\ndir: \"$(dirname '{{ spec }}')\"\n---\nBody\n";
+            let md: Markdown = content.into();
+
+            // Even with fail_fast=false, schema validation is a hard error.
+            let options = ComposeOptions::new()
+                .only(&[
+                    ComposeOperation::FrontmatterInterpolation,
+                    ComposeOperation::FrontmatterShellExpansion,
+                    ComposeOperation::Interpolation,
+                ])
+                .with_fail_fast(false);
+
+            let err = md.compose_with(options).unwrap_err();
+            match err {
+                MarkdownError::SchemaValidationFailed { .. } => {}
+                other => panic!("Expected SchemaValidationFailed, got {other:?}"),
+            }
+        }
+
+        #[test]
+        fn parent_set_overlay_satisfies_child_schema() {
+            let dir = tempfile::tempdir().unwrap();
+            let root = dir.path().join("root.md");
+            let child = dir.path().join("child.md");
+
+            // Child has a schema requiring child_input
+            std::fs::write(
+                &child,
+                "---\n$schema:\n  child_input: 'string(required)'\n---\nChild body\n",
+            )
+            .unwrap();
+
+            // Parent transcludes child with set.child_input="ok"
+            std::fs::write(
+                &root,
+                "# Parent\n\n::file ./child.md set.child_input=\"ok\"\n",
+            )
+            .unwrap();
+
+            let md = Markdown::try_from(root.as_path()).unwrap();
+            let options = ComposeOptions::new().with_source_file(root);
+            let (composed, report) = md.compose_with(options).unwrap();
+
+            assert!(composed.content().contains("Child body"));
+            assert_eq!(report.transclusions_applied, 1);
+        }
+
+        #[test]
+        fn parent_set_overlay_missing_child_schema_fails() {
+            let dir = tempfile::tempdir().unwrap();
+            let root = dir.path().join("root.md");
+            let child = dir.path().join("child.md");
+
+            // Child has a schema requiring child_input
+            std::fs::write(
+                &child,
+                "---\n$schema:\n  child_input: 'string(required)'\n---\nChild body\n",
+            )
+            .unwrap();
+
+            // Parent transcludes child WITHOUT the set overlay
+            std::fs::write(&root, "# Parent\n\n::file ./child.md\n").unwrap();
+
+            let md = Markdown::try_from(root.as_path()).unwrap();
+            // fail_fast=true so the schema validation error propagates rather
+            // than being downgraded to a transclusion warning.
+            let options = ComposeOptions::new()
+                .with_source_file(root)
+                .with_fail_fast(true);
+            let err = md.compose_with(options).unwrap_err();
+
+            match err {
+                MarkdownError::SchemaValidationFailed { problems, .. } => {
+                    assert!(
+                        problems.iter().any(|p| p.property.as_deref() == Some("child_input")),
+                        "Expected problem on child_input, got: {problems:?}"
+                    );
+                }
+                other => panic!("Expected SchemaValidationFailed, got {other:?}"),
+            }
         }
     }
 }

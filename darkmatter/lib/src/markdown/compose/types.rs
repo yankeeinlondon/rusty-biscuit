@@ -500,6 +500,12 @@ pub struct ComposeOptions {
     /// Can also be set via frontmatter: `interpolate_code_blocks: true`.
     pub(crate) interpolate_code_blocks: bool,
 
+    // ── Schema ────────────────────────────────────────────────────
+    /// Optional baseline schema merged with any document `$schema`
+    /// before validation runs. When both baseline and document declare
+    /// the same property, the document wins.
+    pub(crate) baseline_schema: Option<crate::markdown::schemas::SimplifiedSchema>,
+
     // ── Link normalization ────────────────────────────────────────
     /// Environment variables that may be used as path-prefix abstractions
     /// during the Finalization stage's Link Normalization operation.
@@ -558,6 +564,14 @@ impl std::fmt::Debug for ComposeOptions {
             .field("replace_parent_wins", &self.replace_parent_wins)
             .field("one_off_replace", &self.one_off_replace)
             .field("interpolate_code_blocks", &self.interpolate_code_blocks)
+            .field(
+                "baseline_schema",
+                if self.baseline_schema.is_some() {
+                    &"Some(..)"
+                } else {
+                    &"None"
+                },
+            )
             .field("env_path_whitelist", &self.env_path_whitelist)
             .field(
                 "allow_invalid_frontmatter_assignment",
@@ -624,6 +638,7 @@ impl ComposeOptions {
             interpolate_code_blocks: false,
             shell_strip_ansi: true,
             env_path_whitelist: Vec::new(),
+            baseline_schema: None,
         }
     }
 
@@ -991,6 +1006,23 @@ impl ComposeOptions {
     #[must_use]
     pub fn with_shell_strip_ansi(mut self, enabled: bool) -> Self {
         self.shell_strip_ansi = enabled;
+        self
+    }
+
+    /// Attach a baseline `SimplifiedSchema` that is merged with any
+    /// `$schema` declared in the document before validation runs.
+    ///
+    /// Callers (e.g. claudine) can register a workspace-wide schema
+    /// without editing every prompt file. When both baseline and
+    /// document `$schema` declare the same property, the document
+    /// side wins — matching the existing `schemas::resolve::merge`
+    /// rule.
+    #[must_use]
+    pub fn with_baseline_schema(
+        mut self,
+        schema: crate::markdown::schemas::SimplifiedSchema,
+    ) -> Self {
+        self.baseline_schema = Some(schema);
         self
     }
 
@@ -1434,6 +1466,7 @@ pub struct ComposePerfReport {
 /// a deterministic, intuitive ordering.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ComposeStage {
+    SchemaValidation,
     FrontmatterInterpolation,
     FrontmatterShellExpansion,
     EffectiveStateBuild,
@@ -1455,6 +1488,7 @@ pub enum ComposeStage {
 impl std::fmt::Display for ComposeStage {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(match self {
+            Self::SchemaValidation => "schema validation",
             Self::FrontmatterInterpolation => "frontmatter interpolation",
             Self::FrontmatterShellExpansion => "frontmatter shell expansion",
             Self::EffectiveStateBuild => "effective state build",
