@@ -19,70 +19,41 @@
 //! provision WezTerm should always set this so Level 2 coverage is
 //! actually enforced, not just nominally present.
 
+use biscuit_test_harness::shared::SharedHarness;
 use biscuit_test_harness::wezterm::WezTermHarness;
-use biscuit_test_harness::{CapturedFrame, TerminalHarness, skip_with_reason};
+use biscuit_test_harness::{CapturedFrame, TerminalHarness};
 use serial_test::serial;
 use std::fs;
 use std::sync::atomic::{AtomicU32, Ordering};
-use std::sync::{Mutex, Once};
 use std::time::{Duration, Instant};
 use tempfile::tempdir;
+use test_toolkit::{Level, LevelDecision, evaluate_level};
 
-/// Returns `true` when the environment requires Level 2 tests to run (CI mode).
-fn level2_required() -> bool {
-    matches!(
+/// Compatibility shim: honour the deprecated `DARKMATTER_LEVEL2_REQUIRED`
+/// variable as an alias for `BISCUIT_TEST_LEVEL_REQUIRED=2`.
+fn wezterm_decision() -> LevelDecision {
+    let legacy_required = matches!(
         std::env::var("DARKMATTER_LEVEL2_REQUIRED").as_deref(),
         Ok("1") | Ok("true") | Ok("TRUE")
-    )
+    );
+    if legacy_required && std::env::var("BISCUIT_TEST_LEVEL_REQUIRED").is_err() {
+        // SAFETY: test binaries serialize env access through `serial_test`.
+        unsafe {
+            std::env::set_var("BISCUIT_TEST_LEVEL_REQUIRED", "2");
+        }
+    }
+    evaluate_level(Level::L2, WezTermHarness::available(), "WezTerm")
 }
 
 /// Process-wide shared WezTerm pane reused across every test in this file.
 ///
-/// Spawning a fresh WezTerm window is the dominant cost in Level 2 layout
-/// tests (≈2–3 s per spawn plus the prompt-readiness wait). All tests in
-/// this file are `#[serial(level2_terminal)]`, so they execute one at a
-/// time and can safely share a single pane.
-///
-/// Between invocations the pane is reset with `clear` so each test sees a
-/// clean visible region. At process exit, [`ensure_atexit_cleanup`]
-/// registers a `libc::atexit` handler that takes the harness out of the
-/// mutex and drops it — `WezTermHarness::drop` calls `wezterm cli kill-pane`
-/// so the pane is reclaimed instead of leaking into the
-/// `biscuit-bg` workspace. Rust never runs `Drop` on `static` values, so
-/// the atexit hook is what prevents pty exhaustion across many test runs.
-static SHARED_HARNESS: Mutex<Option<WezTermHarness>> = Mutex::new(None);
-
-/// Ensures the shared WezTerm pane is killed at process exit, even though
-/// Rust does not run `Drop` on `static` values.
-///
-/// Called from [`run_md_env`] the first time the shared harness is spawned.
-/// The registered handler is idempotent — running it again after the harness
-/// has been taken is a no-op.
-fn ensure_atexit_cleanup() {
-    static REGISTER_ATEXIT: Once = Once::new();
-    REGISTER_ATEXIT.call_once(|| {
-        extern "C" fn cleanup_shared_harness() {
-            // atexit handlers must not unwind. The lock may be poisoned by
-            // a panicking test; recover and proceed so the pane is still
-            // killed. `WezTermHarness::drop` shells out to `wezterm cli
-            // kill-pane`, which is itself best-effort.
-            let _ = std::panic::catch_unwind(|| {
-                let mut guard = SHARED_HARNESS
-                    .lock()
-                    .unwrap_or_else(|poison| poison.into_inner());
-                // `take` moves the harness out so its `Drop` runs here at
-                // process exit instead of being skipped for the static.
-                drop(guard.take());
-            });
-        }
-        // SAFETY: `cleanup_shared_harness` is `extern "C" fn()` with no
-        // captures, matching `libc::atexit`'s required signature. Registration
-        // itself is thread-safe; macOS allows up to 32 atexit handlers.
-        unsafe {
-            libc::atexit(cleanup_shared_harness);
-        }
-    });
-}
+/// Spawning a fresh WezTerm window costs ≈2–3 s plus prompt readiness. Every
+/// test in this file is `#[serial(level2_terminal)]`, so a single pane is
+/// safe to share. [`SharedHarness`] wraps the `Mutex<Option<T>>` +
+/// `libc::atexit` cleanup pattern so the pane is killed at process exit
+/// instead of leaking into the `biscuit-bg` workspace (Rust does not run
+/// `Drop` on `static` values).
+static SHARED_HARNESS: SharedHarness<WezTermHarness> = SharedHarness::new();
 
 /// Monotonic counter for sentinel uniqueness across tests in this binary.
 static SENTINEL_COUNTER: AtomicU32 = AtomicU32::new(0);
@@ -153,37 +124,24 @@ fn run_md_env(
     extra_args: &str,
     env: &[(&str, &str)],
 ) -> Option<(CapturedFrame, std::path::PathBuf)> {
-    if !WezTermHarness::available() {
-        if level2_required() {
-            panic!(
-                "DARKMATTER_LEVEL2_REQUIRED=1 set but WezTerm is unavailable. \
-                 Provision WezTerm in this environment or unset the variable."
-            );
+    match wezterm_decision() {
+        LevelDecision::Run => {}
+        LevelDecision::Skip(msg) => {
+            eprintln!("{msg}");
+            return None;
         }
-        skip_with_reason("WezTerm CLI (set WEZTERM_UNIX_SOCKET)");
-        return None;
+        LevelDecision::Panic(msg) => panic!("{msg}"),
     }
 
     let dir = tempdir().unwrap();
     let file_path = dir.path().join("layout.md");
     fs::write(&file_path, file_body).unwrap();
 
-    // Recover from a previous test's panic — poisoned mutexes are fine here
-    // since the harness state is just a pane id we re-validate via `clear`.
-    let mut guard = SHARED_HARNESS
-        .lock()
-        .unwrap_or_else(|poison| poison.into_inner());
-    if guard.is_none() {
+    let mut guard = SHARED_HARNESS.get_or_init(|| {
         let mut harness = WezTermHarness::new();
         harness.spawn_shell().expect("spawn_shell failed");
-        *guard = Some(harness);
-        // Register the process-exit cleanup the first time we actually own a
-        // pane. Registering before spawn would leave a no-op handler in place
-        // for runs where every test skips (WezTerm absent), which is harmless
-        // but wasteful — registering here keeps the hook paired with the
-        // resource it cleans up.
-        ensure_atexit_cleanup();
-    }
+        harness
+    });
     let harness = guard.as_mut().unwrap();
 
     // Reset the visible region so the previous test's output does not bleed

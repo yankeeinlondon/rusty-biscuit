@@ -40,8 +40,9 @@ use biscuit_terminal::render_tree::{
     TerminalRenderContext, TerminalRenderOptions, render_terminal_document,
 };
 use biscuit_terminal::terminal::Terminal;
+use biscuit_test_harness::shared::SharedHarness;
 use biscuit_test_harness::wezterm::WezTermHarness;
-use biscuit_test_harness::{CapturedFrame, TerminalHarness, skip_with_reason};
+use biscuit_test_harness::{CapturedFrame, TerminalHarness};
 use darkmatter::layout::DarkmatterPage;
 use darkmatter::markdown::Markdown;
 use darkmatter::markdown::highlighting::{CodeHighlighter, ColorMode, ThemePair};
@@ -53,19 +54,31 @@ use renderable::tree::{RenderStrictness, SourceDescriptor};
 use serial_test::serial;
 use std::fs;
 use std::rc::Rc;
-use std::sync::Mutex;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::{Duration, Instant};
 use tempfile::tempdir;
+use test_toolkit::{Level, LevelDecision, evaluate_level};
 
-fn level2_required() -> bool {
-    matches!(
+/// Compatibility shim: honour the deprecated `DARKMATTER_LEVEL2_REQUIRED`
+/// variable as an alias for `BISCUIT_TEST_LEVEL_REQUIRED=2`. The new helper
+/// is preferred; the alias keeps existing CI scripts working until they
+/// migrate.
+fn wezterm_decision() -> LevelDecision {
+    let legacy_required = matches!(
         std::env::var("DARKMATTER_LEVEL2_REQUIRED").as_deref(),
         Ok("1") | Ok("true") | Ok("TRUE")
-    )
+    );
+    if legacy_required && std::env::var("BISCUIT_TEST_LEVEL_REQUIRED").is_err() {
+        // SAFETY: test binaries serialize env access through `serial_test`.
+        // Setting the unified variable on first call upgrades the alias.
+        unsafe {
+            std::env::set_var("BISCUIT_TEST_LEVEL_REQUIRED", "2");
+        }
+    }
+    evaluate_level(Level::L2, WezTermHarness::available(), "WezTerm")
 }
 
-static SHARED_HARNESS: Mutex<Option<WezTermHarness>> = Mutex::new(None);
+static SHARED_HARNESS: SharedHarness<WezTermHarness> = SharedHarness::new();
 static SENTINEL_COUNTER: AtomicU32 = AtomicU32::new(0);
 const SENTINEL_TIMEOUT: Duration = Duration::from_secs(30);
 
@@ -181,26 +194,21 @@ fn drive_pane(
     name: &str,
     render: fn(&str, &str) -> (tempfile::TempDir, std::path::PathBuf),
 ) -> Option<(CapturedFrame, tempfile::TempDir)> {
-    if !WezTermHarness::available() {
-        if level2_required() {
-            panic!(
-                "DARKMATTER_LEVEL2_REQUIRED=1 set but WezTerm is unavailable. \
-                 Provision WezTerm in this environment or unset the variable."
-            );
+    match wezterm_decision() {
+        LevelDecision::Run => {}
+        LevelDecision::Skip(msg) => {
+            eprintln!("{msg}");
+            return None;
         }
-        skip_with_reason("WezTerm CLI (set WEZTERM_UNIX_SOCKET)");
-        return None;
+        LevelDecision::Panic(msg) => panic!("{msg}"),
     }
 
     let (dir, path) = render(body, name);
-    let mut guard = SHARED_HARNESS
-        .lock()
-        .unwrap_or_else(|poison| poison.into_inner());
-    if guard.is_none() {
+    let mut guard = SHARED_HARNESS.get_or_init(|| {
         let mut harness = WezTermHarness::new();
         harness.spawn_shell().expect("spawn_shell failed");
-        *guard = Some(harness);
-    }
+        harness
+    });
     let harness = guard.as_mut().unwrap();
 
     // Reset visible region between tests.
@@ -733,25 +741,20 @@ fn run_page_in_pane(
     mt: u16,
     mb: u16,
 ) -> Option<(CapturedFrame, usize)> {
-    if !WezTermHarness::available() {
-        if level2_required() {
-            panic!(
-                "DARKMATTER_LEVEL2_REQUIRED=1 set but WezTerm is unavailable. \
-                 Provision WezTerm in this environment or unset the variable."
-            );
+    match wezterm_decision() {
+        LevelDecision::Run => {}
+        LevelDecision::Skip(msg) => {
+            eprintln!("{msg}");
+            return None;
         }
-        skip_with_reason("WezTerm CLI (set WEZTERM_UNIX_SOCKET)");
-        return None;
+        LevelDecision::Panic(msg) => panic!("{msg}"),
     }
 
-    let mut guard = SHARED_HARNESS
-        .lock()
-        .unwrap_or_else(|poison| poison.into_inner());
-    if guard.is_none() {
+    let mut guard = SHARED_HARNESS.get_or_init(|| {
         let mut harness = WezTermHarness::new();
         harness.spawn_shell().expect("spawn_shell failed");
-        *guard = Some(harness);
-    }
+        harness
+    });
     let harness = guard.as_mut().unwrap();
     let cols = harness
         .pane_size()
