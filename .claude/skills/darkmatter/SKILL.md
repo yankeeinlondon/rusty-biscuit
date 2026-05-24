@@ -1,6 +1,7 @@
 ---
 name: darkmatter
 description: Expert knowledge for the darkmatter Rust library - Markdown parsing, composition, frontmatter, terminal/HTML rendering, style frontmatter, syntax highlighting, and document comparison. Use when parsing or composing Markdown, rendering Markdown to terminal/HTML/Markdown, working with DarkmatterPage, `style:` frontmatter, frontmatter hashing, or comparing documents.
+hash: f2684be908858a21
 ---
 
 # darkmatter
@@ -87,6 +88,35 @@ let output = DarkmatterPage::new(&term)
     .with_max_width(100)
     .render(&md)?;
 ```
+
+## Compose Pipeline
+
+The compose pipeline runs in three phases:
+
+**Inline Pre** (serial):
+
+1. **Schema Validation** - Validate frontmatter against `$schema` or `ComposeOptions::baseline_schema`. Runs after `--set` / `--state` overrides but before interpolation or shell expansion.
+2. **Frontmatter Interpolation** - Resolve `{{ variable }}` in frontmatter values.
+3. **Frontmatter Shell Expansion** - Execute top-level `$(cmd)` frontmatter values.
+4. **Text Replacement** - Replace literal strings from `replace:` map.
+5. **Page Blocks** - Evaluate `::block`/`::end-block` conditional regions.
+6. **Interpolation** - Expand `{{ variable }}` in body content.
+7. **Shell Expansion** - Execute `::shell` directives.
+8. **Link Resolve** - Resolve local links to absolute paths.
+
+**Transclusion** (concurrent):
+
+- `::file`, `::code`, `::toc-linking`, `prologue`/`epilogue`
+
+**Inline Post** (serial):
+
+- Cleanup and normalization.
+
+**Finalization** (root-only):
+
+- Link normalization (absolute → portable paths).
+
+See `compose.md` for the full API, interpolation syntax, and transclusion details.
 
 ## Progressive Disclosure
 
