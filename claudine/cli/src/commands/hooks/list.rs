@@ -607,10 +607,7 @@ pub(super) fn run_simple(
             legend_parts.push("<red>red</red> = stale (remove with sync)");
             legend_parts.push("<yellow>orange</yellow> = missing (add with sync)");
         }
-        let legend = Prose::new(format!(
-            "<dim>- Legend: {}</dim>",
-            legend_parts.join(", ")
-        ));
+        let legend = Prose::new(format!("<dim>- Legend: {}</dim>", legend_parts.join(", ")));
         log::data(&format!(
             " {}",
             legend.render(&crate::log::optimistic_terminal(Some(120)))

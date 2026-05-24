@@ -171,8 +171,20 @@ fn run_hooks_colored(home: &std::path::Path, args: &[&str]) -> String {
 
 /// Raw bracketed style tags that must never survive into rendered output.
 const RAW_STYLE_TAGS: &[&str] = &[
-    "<dim>", "</dim>", "<bold>", "</bold>", "<blue>", "</blue>", "<cyan>", "</cyan>",
-    "<red>", "</red>", "<green>", "</green>", "<yellow>", "</yellow>",
+    "<dim>",
+    "</dim>",
+    "<bold>",
+    "</bold>",
+    "<blue>",
+    "</blue>",
+    "<cyan>",
+    "</cyan>",
+    "<red>",
+    "</red>",
+    "<green>",
+    "</green>",
+    "<yellow>",
+    "</yellow>",
 ];
 
 /// Assert rendered output emits ANSI styling and leaks no raw tag markup.
@@ -202,7 +214,10 @@ fn hooks_support_view_emits_ansi_styling() {
 
     let output = run_hooks_colored(&home, &["hooks", "--support"]);
     assert_styled(&output);
-    assert!(output.contains('❌'), "support legend missing glyph:\n{output:?}");
+    assert!(
+        output.contains('❌'),
+        "support legend missing glyph:\n{output:?}"
+    );
 }
 
 #[test]

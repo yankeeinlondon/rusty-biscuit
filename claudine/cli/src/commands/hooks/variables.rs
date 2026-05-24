@@ -92,11 +92,7 @@ pub(super) fn run_variables() -> Result<()> {
             } else {
                 current_value.to_string()
             };
-            Prose::new(format!(
-                "<green>{}</green>",
-                Prose::escape_text(&truncated)
-            ))
-            .render(&term)
+            Prose::new(format!("<green>{}</green>", Prose::escape_text(&truncated))).render(&term)
         };
 
         ctx_table.add_row(vec![
