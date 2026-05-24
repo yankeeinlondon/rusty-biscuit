@@ -263,20 +263,29 @@ mod tests {
     ///
     /// ## Notes
     ///
-    /// The request targets `http://0.0.0.0:1` which has no listener and fails
-    /// instantly. If this proves flaky in CI, the test can be replaced with a
-    /// compile-time assertion that `url_fetch_block` accepts `&reqwest::Error`.
+    /// The request targets a loopback port whose listener has been bound
+    /// then dropped, guaranteeing `ECONNREFUSED` immediately on both Linux
+    /// and macOS. `no_proxy()` skips system-proxy detection (which can be
+    /// slow on macOS via SCDynamicStore) and `tcp_nodelay`/short timeouts
+    /// ensure the test exits quickly even if the kernel queues the RST.
     #[tokio::test]
     async fn url_fetch_block_renders_with_reqwest_error() {
+        let listener =
+            std::net::TcpListener::bind("127.0.0.1:0").expect("bind ephemeral port");
+        let port = listener.local_addr().expect("local_addr").port();
+        drop(listener);
+        let url = format!("http://127.0.0.1:{port}");
         let client = reqwest::Client::builder()
-            .timeout(std::time::Duration::from_millis(100))
+            .no_proxy()
+            .connect_timeout(std::time::Duration::from_millis(500))
+            .timeout(std::time::Duration::from_secs(1))
             .build()
             .expect("client builder should not fail");
-        let result = client.get("http://0.0.0.0:1").send().await;
-        let err = result.expect_err("request to 0.0.0.0:1 should fail");
+        let result = client.get(&url).send().await;
+        let err = result.expect_err("request to closed port should fail");
         let out = render_block(&url_fetch_block(&err));
         assert!(out.contains("MarkdownError"), "missing header type: {out}");
         assert!(out.contains("URL fetch failed"), "missing summary: {out}");
-        assert!(out.contains("http://0.0.0.0:1"), "missing URL: {out}");
+        assert!(out.contains(&url), "missing URL: {out}");
     }
 }

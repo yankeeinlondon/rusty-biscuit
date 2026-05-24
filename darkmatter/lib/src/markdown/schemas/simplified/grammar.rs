@@ -840,7 +840,7 @@ impl<'a> Parser<'a> {
             let tok = self.next_token(LexMode::ArgList)?;
             let arg = match tok.tok {
                 Tok::Number(n) => Arg {
-                    lex: format_number(n),
+                    lex: self.src[tok.span.clone()].to_string(),
                     number: Some(n),
                     span: tok.span,
                 },
