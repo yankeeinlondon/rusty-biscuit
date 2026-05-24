@@ -6,7 +6,7 @@ Darkmatter styles CommonMark horizontal rules (`---`, `___`, `***`) with configu
 
 Two layers of configuration control how every horizontal rule looks:
 
-1. **Page defaults** via frontmatter `hr:` — the preferred mechanism for consistent styling across a document.
+1. **Page defaults** via frontmatter `style.hr.*` — the preferred mechanism for consistent styling across a document.
 2. **Per-rule overrides** via an attribute block after the marker — for occasional exceptions.
 
 Per-rule attributes override only the keys they specify. Missing keys inherit from frontmatter defaults. Missing frontmatter keys fall back to the `HorizontalRule` component default.
@@ -16,14 +16,15 @@ Per-rule attributes override only the keys they specify. Missing keys inherit fr
 For each option, Darkmatter resolves the effective value in this order:
 
 1. Per-rule attribute block
-2. Page frontmatter `hr:` configuration
-3. `HorizontalRule` component default
+2. Page frontmatter `style.hr.*` configuration
+3. Top-level `hr:` alias (deprecated; fills only values not set by `style.hr`)
+4. `HorizontalRule` component default
 
 ## Markdown Syntax
 
 ### Bare Rules (Standard Markdown)
 
-A plain `---`, `___`, or `***` on its own line is valid CommonMark. When `hr:` frontmatter is present, the rule picks up those defaults; otherwise it renders with the component default (dashes, full-width, medium weight).
+A plain `---`, `___`, or `***` on its own line is valid CommonMark. When `style.hr` frontmatter is present, the rule picks up those defaults; otherwise it renders with the component default (dashes, full-width, medium weight).
 
 ```markdown
 ---
@@ -35,13 +36,21 @@ ___
 
 ### Attribute-Block Rules (Darkmatter Extension)
 
-Attach a YAML flow mapping after the marker to override specific attributes for that rule:
+Attach a YAML flow mapping after the marker to override specific attributes for that rule. The canonical key for the visual style is `kind`:
 
 ```markdown
---- { style: waves, width: "50%" }
-___ { style: dots, alignment: centered, weight: thick }
-*** { style: line-star, color: "#ff0000" }
+--- { kind: waves, width: "50%" }
+___ { kind: dots, alignment: center, weight: thick }
+*** { kind: line-star, color: "#ff0000" }
 ```
+
+The legacy inline key `style` is accepted as a deprecated alias for one release cycle:
+
+```markdown
+--- { style: waves }
+```
+
+If both `kind` and `style` are present, `kind` wins and a deprecation warning is still emitted because the document contains deprecated syntax.
 
 The attribute block is a YAML flow mapping parsed by `serde_yaml_ng`, so quoted values with embedded commas or colons (e.g., `color: "rgb(255, 0, 0)"`) are handled correctly. A legacy ad-hoc splitter serves as a graceful fallback when the YAML parser rejects malformed input.
 
@@ -52,10 +61,10 @@ Bare and attribute-block rules inside blockquotes are supported:
 ```markdown
 > ---
 
-> --- { style: waves }
+> --- { kind: waves }
 ```
 
-The resulting `HorizontalRule` event stays wrapped by the surrounding blockquote tags — it is not promoted to document level. Page-level `hr` frontmatter defaults apply inside blockquotes just as they do at the top level.
+The resulting `HorizontalRule` event stays wrapped by the surrounding blockquote tags — it is not promoted to document level. Page-level `style.hr` frontmatter defaults apply inside blockquotes just as they do at the top level.
 
 ## Supported Attributes
 
@@ -63,21 +72,23 @@ All attributes are optional.
 
 | Attribute   | Values                                        | Default    |
 |-------------|-----------------------------------------------|------------|
-| `style`     | `dashes`, `dots`, `waves`, `line-star`, `line-circle`, `inset-line`, `curtain-rod` | `dashes`   |
-| `alignment` | `full`, `centered`, `left`, `right`           | `full`     |
+| `kind`      | `dashes`, `dots`, `waves`, `line-star`, `line-circle`, `inset-line`, `curtain-rod` | `dashes`   |
+| `alignment` | `full`, `center`, `left`, `right`             | `full`     |
 | `weight`    | `thin`, `medium`, `thick`                     | `medium`   |
 | `width`     | CSS-like string (`"75%"`, `"200px"`)          | _none_     |
 | `color`     | CSS color name or `#rrggbb`                   | _none_     |
 
-### `style`
+### `kind`
 
 Controls the visual pattern of the rule. Some styles (e.g., `waves`, `line-star`, `curtain-rod`) benefit significantly from image rendering; Unicode approximations are lower fidelity.
 
 ### `alignment`
 
 - **`full`** — spans the full available width, respecting margins and padding.
-- **`centered`** — a fixed-width rule centered within the available width.
+- **`center`** — a fixed-width rule centered within the available width.
 - **`left`** / **`right`** — a fixed-width rule aligned to the respective edge.
+
+The legacy spelling `centered` is accepted as a deprecated alias for `center`.
 
 ### `width`
 
@@ -93,19 +104,42 @@ A CSS color name or hex value. When no color is specified, image rendering detec
 
 ## Page-Level Defaults in Frontmatter
 
-Set a top-level `hr:` mapping in YAML frontmatter to configure all horizontal rules in the document:
+Set `style.hr` in YAML frontmatter to configure all horizontal rules in the document:
+
+```yaml
+---
+style:
+  hr:
+    kind: waves
+    width: "50%"
+    alignment: center
+    weight: medium
+---
+```
+
+The legacy top-level `hr:` block is still accepted as a deprecated alias for one release cycle:
 
 ```yaml
 ---
 hr:
   style: waves
   width: "50%"
-  alignment: centered
-  weight: medium
 ---
 ```
 
-Non-string scalars (numbers, booleans) are coerced to strings so `width: 50` works the same as `width: "50"`. Unknown keys emit a `tracing::warn!` and are dropped.
+If both `style.hr` and top-level `hr` are present, `style.hr` wins **field-by-field**; the legacy `hr:` block only fills values not set in `style.hr`.
+
+Non-string scalars (numbers, booleans) are coerced to strings in the legacy top-level `hr:` path so `width: 50` works the same as `width: "50"`. Unknown keys emit a `tracing::warn!` and are dropped.
+
+## `--strict-style`
+
+`md --strict-style` treats deprecated HR syntax as an error:
+
+- Documents with a top-level `hr:` block fail validation.
+- Documents with inline `--- { style: waves }` fail validation.
+- Documents with `style.hr.alignment: centered` fail validation.
+
+Use strict mode in CI to catch deprecated syntax early.
 
 ## Parsing
 
@@ -142,7 +176,7 @@ The `HtmlOptions.hr_css_variables` map can substitute concrete values for these 
 
 ## Validation
 
-- **Unknown enum values** for `style`, `alignment`, or `weight` fall back to the component default and emit `tracing::warn!`. The renderer always produces output.
+- **Unknown enum values** for `kind`, `alignment`, or `weight` fall back to the component default and emit `tracing::warn!`. The renderer always produces output.
 - **Unknown attribute keys** are dropped during parsing with `tracing::warn!`.
 - **Non-scalar values** (arrays, objects, null) for recognized keys are skipped with a warning; remaining sibling keys still apply.
 - Warnings are visible via `RUST_LOG=darkmatter=warn`.
