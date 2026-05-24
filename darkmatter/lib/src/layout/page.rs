@@ -977,12 +977,28 @@ fn wrap_browser_html(body: &str, ctx: &LayoutContext) -> String {
 fn build_component_css(ctx: &LayoutContext) -> String {
     let mut css = String::new();
 
+    // Emit deprecated `Lists` rules first so concrete variant rules
+    // override them via normal cascade (more specific selectors).
+    #[allow(deprecated)]
+    {
+        let alignment = ctx.component_alignment(PageComponent::Lists);
+        let fill = ctx.component_fill(PageComponent::Lists);
+        if alignment != PageAlignment::Left || fill != PageFill::Full {
+            let selectors = component_selectors(PageComponent::Lists);
+            css.push_str(&format!(".darkmatter-page {} {{\n", selectors));
+            emit_component_css_rules(&mut css, ctx, alignment, fill);
+            css.push_str("}\n");
+        }
+    }
+
     for component in PageComponent::ALL {
         let alignment = ctx.component_alignment(component);
         let fill = ctx.component_fill(component);
+        let has_left_margin = component == PageComponent::Ul
+            && ctx.list_left_margin(PageComponent::Ul).is_some();
 
-        // Only emit CSS when non-default.
-        if alignment == PageAlignment::Left && fill == PageFill::Full {
+        // Only emit CSS when non-default or when Ul has left-margin.
+        if alignment == PageAlignment::Left && fill == PageFill::Full && !has_left_margin {
             continue;
         }
 
@@ -993,64 +1009,82 @@ fn build_component_css(ctx: &LayoutContext) -> String {
 
         css.push_str(&format!(".darkmatter-page {} {{\n", selectors));
 
-        // Alignment.
-        match alignment {
-            PageAlignment::Left => {
-                // Default, no rule needed.
-            }
-            PageAlignment::Center => {
-                css.push_str("  margin-left: auto;\n");
-                css.push_str("  margin-right: auto;\n");
-            }
-            PageAlignment::Right => {
-                css.push_str("  margin-left: auto;\n");
-                css.push_str("  margin-right: 0;\n");
-            }
-        }
+        emit_component_css_rules(&mut css, ctx, alignment, fill);
 
-        // Fill.
-        match fill {
-            PageFill::Full => {
-                // Default, no rule needed.
-            }
-            PageFill::Pad(unit) => {
-                if let Ok(pad) = resolve_width_unit_for_browser(unit, ctx) {
-                    css.push_str(&format!("  padding-left: {pad}ch;\n"));
-                    css.push_str(&format!("  padding-right: {pad}ch;\n"));
-                }
-            }
-            PageFill::Indent(unit) => {
-                if let Ok(indent) = resolve_width_unit_for_browser(unit, ctx) {
-                    match alignment {
-                        PageAlignment::Left => {
-                            css.push_str(&format!("  padding-left: {indent}ch;\n"));
-                        }
-                        PageAlignment::Right => {
-                            css.push_str(&format!("  padding-right: {indent}ch;\n"));
-                        }
-                        PageAlignment::Center => {
-                            css.push_str(&format!("  padding-left: {indent}ch;\n"));
-                            css.push_str(&format!("  padding-right: {indent}ch;\n"));
-                        }
-                    }
-                }
-            }
-            PageFill::Max(unit) => {
-                if let Ok(max) = resolve_width_unit_for_browser(unit, ctx) {
-                    css.push_str(&format!("  max-width: {max}ch;\n"));
-                }
-            }
-            PageFill::Explicit(unit) => {
-                if let Ok(width) = resolve_width_unit_for_browser(unit, ctx) {
-                    css.push_str(&format!("  width: {width}ch;\n"));
-                }
-            }
+        // Left margin for unordered lists.
+        if component == PageComponent::Ul
+            && let Some(margin) = ctx.list_left_margin(PageComponent::Ul)
+            && let Ok(ch) = resolve_width_unit_for_browser(margin, ctx)
+        {
+            css.push_str(&format!("  margin-left: {ch}ch;\n"));
         }
 
         css.push_str("}\n");
     }
 
     css
+}
+
+/// Emit alignment and fill CSS rules for a single component.
+fn emit_component_css_rules(
+    css: &mut String,
+    ctx: &LayoutContext,
+    alignment: PageAlignment,
+    fill: PageFill,
+) {
+    // Alignment.
+    match alignment {
+        PageAlignment::Left => {
+            // Default, no rule needed.
+        }
+        PageAlignment::Center => {
+            css.push_str("  margin-left: auto;\n");
+            css.push_str("  margin-right: auto;\n");
+        }
+        PageAlignment::Right => {
+            css.push_str("  margin-left: auto;\n");
+            css.push_str("  margin-right: 0;\n");
+        }
+    }
+
+    // Fill.
+    match fill {
+        PageFill::Full => {
+            // Default, no rule needed.
+        }
+        PageFill::Pad(unit) => {
+            if let Ok(pad) = resolve_width_unit_for_browser(unit, ctx) {
+                css.push_str(&format!("  padding-left: {pad}ch;\n"));
+                css.push_str(&format!("  padding-right: {pad}ch;\n"));
+            }
+        }
+        PageFill::Indent(unit) => {
+            if let Ok(indent) = resolve_width_unit_for_browser(unit, ctx) {
+                match alignment {
+                    PageAlignment::Left => {
+                        css.push_str(&format!("  padding-left: {indent}ch;\n"));
+                    }
+                    PageAlignment::Right => {
+                        css.push_str(&format!("  padding-right: {indent}ch;\n"));
+                    }
+                    PageAlignment::Center => {
+                        css.push_str(&format!("  padding-left: {indent}ch;\n"));
+                        css.push_str(&format!("  padding-right: {indent}ch;\n"));
+                    }
+                }
+            }
+        }
+        PageFill::Max(unit) => {
+            if let Ok(max) = resolve_width_unit_for_browser(unit, ctx) {
+                css.push_str(&format!("  max-width: {max}ch;\n"));
+            }
+        }
+        PageFill::Explicit(unit) => {
+            if let Ok(width) = resolve_width_unit_for_browser(unit, ctx) {
+                css.push_str(&format!("  width: {width}ch;\n"));
+            }
+        }
+    }
 }
 
 /// CSS selectors for a page component.
@@ -2132,6 +2166,208 @@ mod tests {
         assert!(
             plain.len() <= 120,
             "content line should not exceed terminal width"
+        );
+    }
+
+    // ---------- Phase 4: list split + wiring tests ----------
+
+    #[test]
+    fn render_ul_left_margin() {
+        let term = Terminal::new_optimistic(80);
+        let page = DarkmatterPage::new(&term)
+            .with_list_left_margin(PageComponent::Ul, WidthUnit::Fixed(4));
+        let md: Markdown = "- Hello world\n".into();
+
+        let out = page.render(&md).unwrap();
+        let plain = crate::testing::strip_ansi_codes(&out);
+        let list_line = plain.lines().find(|l| l.contains("Hello")).unwrap();
+        assert!(
+            list_line.starts_with("    - "),
+            "unordered list should have 4ch left margin before marker, got: {:?}",
+            list_line
+        );
+    }
+
+    #[test]
+    fn render_ul_max_width() {
+        let term = Terminal::new_optimistic(80);
+        let page = DarkmatterPage::new(&term)
+            .with_fill(PageComponent::Ul, PageFill::Max(WidthUnit::Fixed(40)));
+        let md: Markdown = "- This is an unusually long bullet item that ought to be forced to wrap once Max(40) constrains the list rendering width to forty columns.\n".into();
+
+        let out = page.render(&md).unwrap();
+        let plain = crate::testing::strip_ansi_codes(&out);
+        let lines: Vec<&str> = plain.lines().collect();
+        let max_len = lines.iter().map(|l| l.chars().count()).max().unwrap_or(0);
+        assert!(
+            max_len <= 40,
+            "list lines should be capped to 40 cols, got max={}:\n{}",
+            max_len,
+            plain
+        );
+    }
+
+    #[test]
+    fn render_ul_left_margin_and_max_width() {
+        let term = Terminal::new_optimistic(80);
+        let page = DarkmatterPage::new(&term)
+            .with_list_left_margin(PageComponent::Ul, WidthUnit::Fixed(4))
+            .with_fill(PageComponent::Ul, PageFill::Max(WidthUnit::Fixed(40)));
+        let md: Markdown = "- This is an unusually long bullet item that ought to be forced to wrap once Max(40) constrains the list rendering width to forty columns.\n".into();
+
+        let out = page.render(&md).unwrap();
+        let plain = crate::testing::strip_ansi_codes(&out);
+        let lines: Vec<&str> = plain.lines().collect();
+        let max_len = lines.iter().map(|l| l.chars().count()).max().unwrap_or(0);
+        // left_margin (4) + body_width (36) = 40 total
+        assert!(
+            max_len <= 40,
+            "list lines should be capped to 40 cols (4 margin + 36 body), got max={}:\n{}",
+            max_len,
+            plain
+        );
+        // First non-empty line should start with 4 spaces of left margin.
+        let first_line = lines.iter().find(|l| !l.trim().is_empty()).copied().unwrap_or("");
+        assert!(
+            first_line.starts_with("    - "),
+            "first line should start with 4ch left margin, got: {:?}",
+            first_line
+        );
+    }
+
+    #[test]
+    fn render_ol_alignment_right() {
+        let term = Terminal::new_optimistic(80);
+        let page = DarkmatterPage::new(&term)
+            .with_fill(PageComponent::Ol, PageFill::Max(WidthUnit::Fixed(40)))
+            .use_alignment(PageComponent::Ol, PageAlignment::Right);
+        let md: Markdown = "1. Hello world\n".into();
+
+        let out = page.render(&md).unwrap();
+        let plain = crate::testing::strip_ansi_codes(&out);
+        let list_line = plain.lines().find(|l| l.contains("Hello")).unwrap();
+        // Component is 40 cols wide, right-aligned in 80 => 40 cols of left padding.
+        let leading_spaces = list_line.len() - list_line.trim_start().len();
+        assert!(
+            leading_spaces >= 35,
+            "ordered list should be right-aligned, got {} leading spaces: {:?}",
+            leading_spaces,
+            list_line
+        );
+    }
+
+    #[test]
+    fn render_li_body_alignment_right() {
+        let term = Terminal::new_optimistic(80);
+        let page = DarkmatterPage::new(&term)
+            .with_fill(PageComponent::Li, PageFill::Max(WidthUnit::Fixed(40)))
+            .use_alignment(PageComponent::Li, PageAlignment::Right);
+        let md: Markdown = "- Hello world\n".into();
+
+        assert!(!page.is_default_layout(), "page should not be default layout");
+        assert_eq!(
+            page.fill_for(PageComponent::Li),
+            PageFill::Max(WidthUnit::Fixed(40))
+        );
+        assert_eq!(
+            page.alignment_for(PageComponent::Li),
+            PageAlignment::Right
+        );
+
+        let out = page.render(&md).unwrap();
+        let plain = crate::testing::strip_ansi_codes(&out);
+        let list_line = plain.lines().find(|l| l.contains("Hello")).unwrap();
+        // Li block is 40 cols wide, right-aligned in 80 => 40 cols of left padding.
+        // The marker is part of the block and shifts with it.
+        let leading_spaces = list_line.len() - list_line.trim_start().len();
+        assert!(
+            leading_spaces >= 35,
+            "li body should be right-aligned, got {} leading spaces: {:?}",
+            leading_spaces,
+            list_line
+        );
+    }
+
+    #[test]
+    fn browser_selectors_split_for_lists() {
+        let term = Terminal::new_optimistic(120);
+        let page = DarkmatterPage::new(&term)
+            .use_alignment(PageComponent::Ul, PageAlignment::Center)
+            .use_alignment(PageComponent::Ol, PageAlignment::Right)
+            .with_fill(PageComponent::Li, PageFill::Max(WidthUnit::Fixed(30)));
+        let md: Markdown = "- item\n".into();
+
+        let html = page.render_to_browser(&md).unwrap();
+        // Concrete variants should each have their own selector.
+        assert!(html.contains(".darkmatter-page ul {"), "should have ul selector: {}", html);
+        assert!(html.contains(".darkmatter-page ol {"), "should have ol selector: {}", html);
+        assert!(html.contains(".darkmatter-page li {"), "should have li selector: {}", html);
+        // Deprecated Lists selector should NOT appear since Lists has no explicit style.
+        assert!(
+            !html.contains(".darkmatter-page ul, ol {"),
+            "should not have deprecated Lists selector when Lists is unset"
+        );
+    }
+
+    #[test]
+    #[allow(deprecated)]
+    fn browser_selectors_include_deprecated_lists_when_set() {
+        let term = Terminal::new_optimistic(120);
+        let page = DarkmatterPage::new(&term)
+            .use_alignment(PageComponent::Lists, PageAlignment::Center)
+            .use_alignment(PageComponent::Ul, PageAlignment::Right);
+        let md: Markdown = "- item\n".into();
+
+        let html = page.render_to_browser(&md).unwrap();
+        // Deprecated selector should appear first.
+        assert!(html.contains(".darkmatter-page ul, ol {"), "should have deprecated selector: {}", html);
+        // Concrete selector should also appear to override.
+        assert!(html.contains(".darkmatter-page ul {"), "should have ul selector: {}", html);
+    }
+
+    #[test]
+    fn browser_ul_left_margin_css() {
+        let term = Terminal::new_optimistic(120);
+        let page = DarkmatterPage::new(&term)
+            .with_list_left_margin(PageComponent::Ul, WidthUnit::Fixed(4));
+        let md: Markdown = "- item\n".into();
+
+        let html = page.render_to_browser(&md).unwrap();
+        assert!(
+            html.contains("margin-left: 4ch;"),
+            "should emit margin-left CSS for ul, got: {}",
+            html
+        );
+    }
+
+    #[test]
+    fn li_independent_of_ul_ol() {
+        let term = Terminal::new_optimistic(80);
+        let page = DarkmatterPage::new(&term)
+            .use_alignment(PageComponent::Ul, PageAlignment::Left)
+            .use_alignment(PageComponent::Ol, PageAlignment::Center)
+            .use_alignment(PageComponent::Li, PageAlignment::Right)
+            .with_fill(PageComponent::Ul, PageFill::Max(WidthUnit::Fixed(30)))
+            .with_fill(PageComponent::Ol, PageFill::Max(WidthUnit::Fixed(40)))
+            .with_fill(PageComponent::Li, PageFill::Max(WidthUnit::Fixed(50)));
+
+        // Each component retains its own alignment independently.
+        assert_eq!(page.alignment_for(PageComponent::Ul), PageAlignment::Left);
+        assert_eq!(page.alignment_for(PageComponent::Ol), PageAlignment::Center);
+        assert_eq!(page.alignment_for(PageComponent::Li), PageAlignment::Right);
+
+        // Each component retains its own fill independently.
+        assert_eq!(
+            page.fill_for(PageComponent::Ul),
+            PageFill::Max(WidthUnit::Fixed(30))
+        );
+        assert_eq!(
+            page.fill_for(PageComponent::Ol),
+            PageFill::Max(WidthUnit::Fixed(40))
+        );
+        assert_eq!(
+            page.fill_for(PageComponent::Li),
+            PageFill::Max(WidthUnit::Fixed(50))
         );
     }
 }

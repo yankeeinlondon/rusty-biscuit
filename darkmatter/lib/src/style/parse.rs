@@ -20,7 +20,7 @@ use crate::style::warning::{StyleWarning, StyleWarningKind};
 /// `sub_spec` is `<=` this constant are considered wired and stay silent.
 ///
 /// Advance this constant whenever a future sub-spec wires its keys.
-pub const ACTIVE_STYLE_WIRING_SUB_SPEC: u8 = 3;
+pub const ACTIVE_STYLE_WIRING_SUB_SPEC: u8 = 4;
 
 /// Parse a `serde_json::Value` representing the value at the `style:` key.
 ///
@@ -611,10 +611,10 @@ mod tests {
             .iter()
             .filter(|w| matches!(w.kind, StyleWarningKind::KnownButInactive { .. }))
             .collect();
-        // Sub-specs #2 and #3 wire the page leaves and the table
-        // alignment/max-width leaves. Only the 1 ol + 3 ul = 4 sub-spec #4
-        // leaves remain future-phase.
-        assert_eq!(inactive.len(), 4, "got {:?}", inactive);
+        // Sub-specs #2, #3, and #4 wire the page leaves, the table
+        // alignment/max-width leaves, and all list leaves. No inactive
+        // warnings remain for this document.
+        assert_eq!(inactive.len(), 0, "got {:?}", inactive);
     }
 
     #[test]
@@ -711,5 +711,87 @@ mod tests {
         }))
         .unwrap();
         assert!(into_strict(parsed).is_ok());
+    }
+
+    #[test]
+    fn active_wiring_warnings_for_list_keys() {
+        let v = json!({
+            "ul": {
+                "width": "40ch",
+                "max-width": "50%",
+                "alignment": "left",
+                "left-margin": "4ch",
+                "color": "red-500",
+                "bg-color": "blue-500"
+            },
+            "ol": {
+                "width": "40ch",
+                "max-width": "50%",
+                "alignment": "right",
+                "color": "red-500",
+                "bg-color": "blue-500"
+            },
+            "li": {
+                "width": "40ch",
+                "max-width": "50%",
+                "alignment": "center",
+                "color": "red-500",
+                "bg-color": "blue-500"
+            }
+        });
+        let (_parsed, warnings) = from_json_value(&v).unwrap();
+
+        let inactive: Vec<&StyleWarning> = warnings
+            .iter()
+            .filter(|w| matches!(w.kind, StyleWarningKind::KnownButInactive { .. }))
+            .collect();
+
+        // Non-color list keys (sub_spec 4) should NOT produce inactive warnings.
+        for path in [
+            "style.ul.width",
+            "style.ul.max-width",
+            "style.ul.alignment",
+            "style.ul.left-margin",
+            "style.ol.width",
+            "style.ol.max-width",
+            "style.ol.alignment",
+            "style.li.width",
+            "style.li.max-width",
+            "style.li.alignment",
+        ] {
+            assert!(
+                !inactive.iter().any(|w| w.path == path),
+                "wired list key `{}` should not produce KnownButInactive, got: {:?}",
+                path,
+                inactive
+            );
+        }
+
+        // Color and bg-color keys (sub_spec 5) still produce inactive warnings.
+        for path in [
+            "style.ul.color",
+            "style.ul.bg-color",
+            "style.ol.color",
+            "style.ol.bg-color",
+            "style.li.color",
+            "style.li.bg-color",
+        ] {
+            let found = inactive
+                .iter()
+                .find(|w| w.path == path);
+            assert!(
+                found.is_some(),
+                "color/bg-color key `{}` should still produce KnownButInactive, got: {:?}",
+                path,
+                inactive
+            );
+            let kind = &found.unwrap().kind;
+            assert!(
+                matches!(kind, StyleWarningKind::KnownButInactive { sub_spec: 5 }),
+                "color/bg-color key `{}` should have sub_spec 5, got: {:?}",
+                path,
+                kind
+            );
+        }
     }
 }

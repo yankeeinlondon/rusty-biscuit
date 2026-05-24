@@ -78,7 +78,9 @@ fn fixture_parses_to_expected_style_frontmatter() {
         .iter()
         .filter(|w| matches!(w.kind, StyleWarningKind::KnownButInactive { .. }))
         .count();
-    assert!(inactive_count > 0, "expected KnownButInactive warnings");
+    // After sub-specs #2–#4 land, all keys in the fixture are wired and
+    // produce no KnownButInactive warnings.
+    assert_eq!(inactive_count, 0, "expected zero KnownButInactive warnings");
 }
 
 #[test]
@@ -129,9 +131,8 @@ fn fixture_applies_expected_page_margins() {
 
 #[test]
 fn fixture_no_known_but_inactive_for_page_keys() {
-    // After sub-spec #2 lands, page-level keys must NOT emit
-    // `KnownButInactive`. UL / OL keys still emit them (they are wired in
-    // sub-spec #4).
+    // After sub-specs #2–#4 land, page-level keys and list keys must NOT emit
+    // `KnownButInactive`.
     let raw = fs::read_to_string(fixture_path()).expect("read fixture");
     let md = Markdown::try_from_content(&raw).expect("parse markdown");
     let (_style, warnings) = from_frontmatter(md.frontmatter()).expect("parse style");

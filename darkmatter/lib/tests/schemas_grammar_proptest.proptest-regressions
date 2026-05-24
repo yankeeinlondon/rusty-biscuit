@@ -6,3 +6,4 @@
 # everyone who runs the test benefits from these saved cases.
 cc ecc1faaa80e68efada80c3a7cecf6ceb079159fc998dbe41c611e75d3e01b93c # shrinks to atom = PropertyAtom { ty: File, is_array: false, constraints: [Match(["]"])], array_constraints: [], description: None }
 cc 47586f8cd60fc36aa4656714da06d421588a095dd641fb1df9969c38f8ad0928 # shrinks to atom = PropertyAtom { ty: File, is_array: false, constraints: [Match(["0]"])], array_constraints: [], description: None }
+cc ec81589e3dde40d145f218fd610bb448ba6da88ef03bba124190b83cc6613aae # shrinks to atom = PropertyAtom { ty: File, is_array: false, constraints: [Match(["00"])], array_constraints: [], description: None }

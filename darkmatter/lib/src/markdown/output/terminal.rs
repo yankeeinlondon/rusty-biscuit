@@ -1363,14 +1363,26 @@ pub(crate) fn write_terminal_with_layout<W: std::io::Write>(
                 if list_stack.is_empty()
                     && let Some(ctx) = layout_ctx
                 {
-                    #[allow(deprecated)]
-                    let component = PageComponent::Lists;
+                    let component = match start_num {
+                        None => PageComponent::Ul,
+                        Some(_) => PageComponent::Ol,
+                    };
                     let component_width = ctx
                         .resolve_component_width(component)
                         .unwrap_or(terminal_width);
-                    wrapper.push_component_width(component_width as usize);
+
+                    // For unordered lists, apply left-margin stacking.
+                    let left_margin = if component == PageComponent::Ul {
+                        ctx.list_left_margin(PageComponent::Ul)
+                            .and_then(|u| u.resolve(ctx.effective_width).ok())
+                            .unwrap_or(0)
+                    } else {
+                        0
+                    };
+                    let body_width = component_width.saturating_sub(left_margin);
+                    wrapper.push_component_width(body_width as usize);
                     let pad = ctx.alignment_padding(component, component_width);
-                    wrapper.alignment_offset = pad as usize;
+                    wrapper.alignment_offset = (left_margin + pad) as usize;
                 }
 
                 list_stack.push(start_num);
@@ -1385,6 +1397,22 @@ pub(crate) fn write_terminal_with_layout<W: std::io::Write>(
                 }
             }
             InlineEvent::Standard(Event::Start(Tag::Item)) => {
+                // Apply Li-scoped width/alignment overrides BEFORE marker emission
+                // so alignment_offset is honoured on the item's first line.
+                if let Some(ctx) = layout_ctx {
+                    let li_alignment = ctx.component_alignment(PageComponent::Li);
+                    let li_fill = ctx.component_fill(PageComponent::Li);
+                    #[allow(deprecated)]
+                    if li_alignment != PageAlignment::Left || li_fill != PageFill::Full {
+                        let li_width = ctx
+                            .resolve_component_width(PageComponent::Li)
+                            .unwrap_or(terminal_width);
+                        let li_pad = ctx.alignment_padding(PageComponent::Li, li_width);
+                        wrapper.push_component_width(li_width as usize);
+                        wrapper.push_alignment_offset(li_pad as usize);
+                    }
+                }
+
                 // Calculate indentation based on nesting level
                 let indent = "  ".repeat(list_stack.len().saturating_sub(1));
 
@@ -1414,6 +1442,17 @@ pub(crate) fn write_terminal_with_layout<W: std::io::Write>(
             InlineEvent::Standard(Event::End(TagEnd::Item)) => {
                 wrapper.newline();
                 wrapper.pop_indent();
+                // Pop any Li-scoped overrides after the newline so the item's
+                // width is active for the entire line.
+                if let Some(ctx) = layout_ctx {
+                    let li_alignment = ctx.component_alignment(PageComponent::Li);
+                    let li_fill = ctx.component_fill(PageComponent::Li);
+                    #[allow(deprecated)]
+                    if li_alignment != PageAlignment::Left || li_fill != PageFill::Full {
+                        wrapper.pop_component_width();
+                        wrapper.pop_alignment_offset();
+                    }
+                }
             }
 
             InlineEvent::Standard(Event::Start(Tag::Paragraph)) => {
@@ -2281,6 +2320,10 @@ struct LineWrapper {
     /// wrap width). The active wrap width is always `self.max_width`; this
     /// stack only exists so `pop_component_width` can restore the prior value.
     previous_widths: Vec<usize>,
+    /// Stack of *previous* alignment_offset values saved when a nested
+    /// component overrides alignment (e.g. a list item with explicit
+    /// alignment inside a list with different alignment).
+    previous_alignment_offsets: Vec<usize>,
 }
 
 impl LineWrapper {
@@ -2296,6 +2339,7 @@ impl LineWrapper {
             indent_stack: Vec::new(),
             alignment_offset: 0,
             previous_widths: Vec::new(),
+            previous_alignment_offsets: Vec::new(),
         }
     }
 
@@ -2309,6 +2353,19 @@ impl LineWrapper {
     fn pop_component_width(&mut self) {
         if let Some(w) = self.previous_widths.pop() {
             self.max_width = w;
+        }
+    }
+
+    /// Push a nested alignment_offset override.
+    fn push_alignment_offset(&mut self, offset: usize) {
+        self.previous_alignment_offsets.push(self.alignment_offset);
+        self.alignment_offset = offset;
+    }
+
+    /// Pop the most recent alignment_offset override.
+    fn pop_alignment_offset(&mut self) {
+        if let Some(o) = self.previous_alignment_offsets.pop() {
+            self.alignment_offset = o;
         }
     }
 
