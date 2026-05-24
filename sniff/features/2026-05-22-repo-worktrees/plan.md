@@ -30,6 +30,15 @@ docs_updated_during_phase_4:
   - sniff/lib/CHANGELOG.md
 docs_created_during_phase_4: []
 skills_files_updated_during_phase_4: []
+source_files_during_phase_5:
+  - sniff/cli/src/output/mod.rs
+  - sniff/lib/src/filesystem/mod.rs
+  - sniff/lib/src/network/mod.rs
+  - sniff/lib/src/services/windows_scm.rs
+docs_updated_during_phase_5:
+  - sniff/features/2026-05-22-repo-worktrees/plan.md
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5: []
 packages:
   - sniff
 ---
@@ -114,17 +123,17 @@ Parallelizable after Phase 3 behavior is decided:
 
 ## Phase 5 - Full Verification and Cleanup
 
-- [ ] Run targeted library tests for git worktree discovery.
-- [ ] Run targeted CLI tests for `repo worktrees` and existing `repo worktree` to confirm no regression.
-- [ ] Run formatting with the repository's standard Rust formatter.
-- [ ] Run the package-area lint or nearest available focused lint command for `sniff`.
-- [ ] Manually inspect `sniff repo worktrees`, `sniff repo worktrees --list`, `sniff repo worktrees --csv`, `sniff repo worktrees --verbose`, `sniff repo worktrees --plain --verbose`, and `sniff repo worktrees --json` in a repository with at least one linked worktree.
-- [ ] Confirm behavior on main worktree and linked worktree paths, including current marker placement.
-- [ ] Review the diff to ensure changes are limited to the library API, CLI args, command handling, output rendering, tests, and docs required by this feature.
+- [x] Run targeted library tests for git worktree discovery.
+- [x] Run targeted CLI tests for `repo worktrees` and existing `repo worktree` to confirm no regression.
+- [x] Run formatting with the repository's standard Rust formatter.
+- [x] Run the package-area lint or nearest available focused lint command for `sniff`.
+- [x] Manually inspect `sniff repo worktrees`, `sniff repo worktrees --list`, `sniff repo worktrees --csv`, `sniff repo worktrees --verbose`, `sniff repo worktrees --plain --verbose`, and `sniff repo worktrees --json` in a repository with at least one linked worktree.
+- [x] Confirm behavior on main worktree and linked worktree paths, including current marker placement.
+- [x] Review the diff to ensure changes are limited to the library API, CLI args, command handling, output rendering, tests, and docs required by this feature.
 
 Validation checkpoint:
 
-- [ ] Run `cargo fmt --all`.
-- [ ] Run `cargo test -p sniff-lib --color=never`.
-- [ ] Run `cargo test -p sniff-cli --color=never`.
-- [ ] Run the local `just` recipe for the sniff package area if one exists and is scoped enough for this change.
+- [x] Run `cargo fmt --all`.
+- [x] Run `cargo test -p sniff` (package name is `sniff`, not `sniff-lib`).
+- [x] Run `cargo test -p sniff-cli`.
+- [x] Run the local `just` recipe for the sniff package area (`just lint` and `just test`).
