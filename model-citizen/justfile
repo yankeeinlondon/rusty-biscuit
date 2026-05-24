@@ -48,15 +48,68 @@ build *args="":
     @echo ""
     @cargo build -p model-citizen -p model-citizen-cli {{args}}
 
+# --- Canonical lifecycle recipe set (testing-best-practices Phase 3) -------
+
+# Fast confidence subset (≤15s, lib + bin, !slow). Doctests live in `doctest`.
+sanity:
+    @just _sanity model-citizen
+    @just _sanity model-citizen-cli
+
 # Test both library and CLI.
 test *args="":
     @just _test model-citizen {{args}}
     @just _test model-citizen-cli {{args}}
 
+# not applicable: model-citizen has no real-terminal (Level-2) tests
+test-l2:
+    @echo "test-l2: not applicable for model-citizen"
+
+# not applicable: model-citizen has no OS-keyboard-injection (Level-3) tests
+test-l3:
+    @echo "test-l3: not applicable for model-citizen"
+
+# not applicable: model-citizen does not emit HTML
+test-browser:
+    @echo "test-browser: not applicable for model-citizen"
+
+# Real-resource tests (local Ollama / LM Studio / HF). Skip-clean when absent.
+test-real *args="":
+    @just _test_real model-citizen {{args}}
+    @just _test_real model-citizen-cli {{args}}
+
 # Lint both the library and CLI
 lint:
     @just _lint model-citizen
     @just _lint model-citizen-cli
+
+# not applicable: no criterion benches (work is I/O-bound)
+bench:
+    @echo "bench: not applicable for model-citizen"
+
+# Per-package LCOV coverage.
+coverage *args="":
+    @just _coverage model-citizen {{args}}
+    @just _coverage model-citizen-cli {{args}}
+
+# Doctests.
+doctest *args="":
+    @just _doctest model-citizen {{args}}
+    @just _doctest model-citizen-cli {{args}}
+
+# not applicable: no cargo-fuzz targets
+fuzz:
+    @echo "fuzz: not applicable for model-citizen"
+
+# Canonical PR-gate runner: sanity → lint → doctest → test → test-l2 → test-browser.
+all:
+    @just sanity
+    @just lint
+    @just doctest
+    @just test
+    @just test-l2
+    @just test-browser
+
+# ----------------------------------------------------------------------------
 
 # Lint (and fix) both the library and CLI
 lint-fix:

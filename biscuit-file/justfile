@@ -53,10 +53,33 @@ build *args="":
     @just _build biscuit-file "biscuit-file Library" {{ args }}
     @just _build biscuit-file-cli "biscuit-file CLI" {{ args }}
 
+# --- Canonical lifecycle recipe set (testing-best-practices Phase 2) -------
+
+# Fast confidence subset (≤15s, lib + bin, !slow). Doctests live in `doctest`.
+sanity:
+    @just _sanity biscuit-file
+    @just _sanity biscuit-file-cli
+
 # run tests for biscuit-file packages
 test *args="":
     @just _test biscuit-file {{ args }}
     @just _test biscuit-file-cli {{ args }}
+
+# not applicable: biscuit-file has no real-terminal (Level-2) tests
+test-l2:
+    @echo "test-l2: not applicable for biscuit-file"
+
+# not applicable: biscuit-file has no OS-keyboard-injection (Level-3) tests
+test-l3:
+    @echo "test-l3: not applicable for biscuit-file"
+
+# not applicable: biscuit-file emits files, not HTML
+test-browser:
+    @echo "test-browser: not applicable for biscuit-file"
+
+# not applicable: biscuit-file has no real-resource tier
+test-real:
+    @echo "test-real: not applicable for biscuit-file"
 
 # run clippy on biscuit-file packages
 lint:
@@ -64,8 +87,37 @@ lint:
     @echo "Linting {{ BOLD }}biscuit-file{{ RESET }} Packages"
     @echo "--------------------------"
     @echo ""
-    @cargo clippy -p biscuit-file -- -D warnings
-    @cargo clippy -p biscuit-file-cli -- -D warnings
+    @just _lint biscuit-file
+    @just _lint biscuit-file-cli
+
+# Criterion benches (planned in Phase 4; documented no-op until then).
+bench:
+    @echo "bench: not applicable for biscuit-file yet (planned Phase 4)"
+
+# Per-package LCOV coverage for the library and CLI.
+coverage *args="":
+    @just _coverage biscuit-file {{ args }}
+    @just _coverage biscuit-file-cli {{ args }}
+
+# Doctests for the library and CLI.
+doctest *args="":
+    @just _doctest biscuit-file {{ args }}
+    @just _doctest biscuit-file-cli {{ args }}
+
+# Fuzz targets (planned in Phase 5; documented no-op until then).
+fuzz:
+    @echo "fuzz: not applicable for biscuit-file yet (planned Phase 5)"
+
+# Canonical PR-gate runner: sanity → lint → doctest → test → test-l2 → test-browser.
+all:
+    @just sanity
+    @just lint
+    @just doctest
+    @just test
+    @just test-l2
+    @just test-browser
+
+# ----------------------------------------------------------------------------
 
 # install the biscuit-file CLI
 install:

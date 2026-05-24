@@ -26,15 +26,67 @@ build *args="":
     @just _build tree-hugger "Tree Hugger Library" {{args}}
     @just _build tree-hugger-cli "Tree Hugger CLI" {{args}}
 
+# --- Canonical lifecycle recipe set (testing-best-practices Phase 3) -------
+
+# Fast confidence subset (≤15s, lib + bin, !slow). Doctests live in `doctest`.
+sanity:
+    @just _sanity tree-hugger
+    @just _sanity tree-hugger-cli
+
 # test library and CLI
 test *args="":
     @just _test tree-hugger {{args}}
     @just _test tree-hugger-cli {{args}}
 
+# not applicable: tree-hugger has no real-terminal (Level-2) tests
+test-l2:
+    @echo "test-l2: not applicable for tree-hugger"
+
+# not applicable: tree-hugger has no OS-keyboard-injection (Level-3) tests
+test-l3:
+    @echo "test-l3: not applicable for tree-hugger"
+
+# not applicable: tree-hugger emits symbol data, not HTML
+test-browser:
+    @echo "test-browser: not applicable for tree-hugger"
+
+# not applicable: tree-hugger has no real-resource tier
+test-real:
+    @echo "test-real: not applicable for tree-hugger"
+
 # lint with clippy
 lint:
     @just _lint tree-hugger
     @just _lint tree-hugger-cli
+
+# Criterion benches (planned in Phase 4; documented no-op until then).
+bench:
+    @echo "bench: not applicable for tree-hugger yet (planned Phase 4)"
+
+# Per-package LCOV coverage.
+coverage *args="":
+    @just _coverage tree-hugger {{args}}
+    @just _coverage tree-hugger-cli {{args}}
+
+# Doctests.
+doctest *args="":
+    @just _doctest tree-hugger {{args}}
+    @just _doctest tree-hugger-cli {{args}}
+
+# not applicable: tree-hugger has no cargo-fuzz targets yet
+fuzz:
+    @echo "fuzz: not applicable for tree-hugger"
+
+# Canonical PR-gate runner: sanity → lint → doctest → test → test-l2 → test-browser.
+all:
+    @just sanity
+    @just lint
+    @just doctest
+    @just test
+    @just test-l2
+    @just test-browser
+
+# ----------------------------------------------------------------------------
 
 lint-fix:
     @just _lint tree-hugger || just _fix_lint tree-hugger

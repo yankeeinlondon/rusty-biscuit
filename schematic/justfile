@@ -51,11 +51,68 @@ build *args="":
     @just _build schematic-gen "Schematic Generation" {{ args }}
     @just _build schematic-definitions "Schematic Definitions" {{ args }}
 
+# --- Canonical lifecycle recipe set (testing-best-practices Phase 3) -------
+
+# Fast confidence subset (≤15s, lib + bin, !slow). Doctests live in `doctest`.
+sanity:
+    @just _sanity schematic-define
+    @just _sanity schematic-definitions
+    @just _sanity schematic-gen
+
 # run tests for schematic packages
 test *args="":
     @just _test schematic-define {{ args }}
     @just _test schematic-gen {{ args }}
     @just _test schematic-definitions {{ args }}
+
+# not applicable: schematic has no real-terminal (Level-2) tests
+test-l2:
+    @echo "test-l2: not applicable for schematic"
+
+# not applicable: schematic has no OS-keyboard-injection (Level-3) tests
+test-l3:
+    @echo "test-l3: not applicable for schematic"
+
+# not applicable: schematic emits API client code, not HTML
+test-browser:
+    @echo "test-browser: not applicable for schematic"
+
+# E2E generation tests live behind `--ignored`; expose via test-real.
+test-real *args="":
+    @just _test_real schematic-define {{ args }}
+    @just _test_real schematic-definitions {{ args }}
+    @just _test_real schematic-gen {{ args }}
+
+# Criterion benches (planned in Phase 4; documented no-op until then).
+bench:
+    @echo "bench: not applicable for schematic yet (planned Phase 4)"
+
+# Per-package LCOV coverage for schematic crates.
+coverage *args="":
+    @just _coverage schematic-define {{ args }}
+    @just _coverage schematic-definitions {{ args }}
+    @just _coverage schematic-gen {{ args }}
+
+# Doctests for schematic crates.
+doctest *args="":
+    @just _doctest schematic-define {{ args }}
+    @just _doctest schematic-definitions {{ args }}
+    @just _doctest schematic-gen {{ args }}
+
+# not applicable: schematic has no cargo-fuzz targets
+fuzz:
+    @echo "fuzz: not applicable for schematic"
+
+# Canonical PR-gate runner: sanity → lint → doctest → test → test-l2 → test-browser.
+all:
+    @just sanity
+    @just lint
+    @just doctest
+    @just test
+    @just test-l2
+    @just test-browser
+
+# ----------------------------------------------------------------------------
 
 # check for artifact drift (run after making definition changes)
 check-drift:

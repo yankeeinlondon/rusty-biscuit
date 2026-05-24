@@ -33,15 +33,67 @@ build *args="":
     @just _build biscuit-hash "Biscuit Hash Library" {{args}}
     @just _build biscuit-hash-cli "Biscuit Hash CLI" {{args}}
 
+# --- Canonical lifecycle recipe set (testing-best-practices Phase 3) -------
+
+# Fast confidence subset (≤15s, lib + bin, !slow). Doctests live in `doctest`.
+sanity:
+    @just _sanity biscuit-hash
+    @just _sanity biscuit-hash-cli
+
 # test library and CLI
 test *args="":
     @just _test biscuit-hash {{args}}
     @just _test biscuit-hash-cli {{args}}
 
+# not applicable: biscuit-hash has no real-terminal (Level-2) tests
+test-l2:
+    @echo "test-l2: not applicable for biscuit-hash"
+
+# not applicable: biscuit-hash has no OS-keyboard-injection (Level-3) tests
+test-l3:
+    @echo "test-l3: not applicable for biscuit-hash"
+
+# not applicable: biscuit-hash emits hashes, not HTML
+test-browser:
+    @echo "test-browser: not applicable for biscuit-hash"
+
+# not applicable: biscuit-hash has no real-resource tier
+test-real:
+    @echo "test-real: not applicable for biscuit-hash"
+
 # Lint both the library and CLI
 lint:
     @just _lint biscuit-hash
     @just _lint biscuit-hash-cli
+
+# Criterion benches (planned in Phase 4; documented no-op until then).
+bench:
+    @echo "bench: not applicable for biscuit-hash yet (planned Phase 4)"
+
+# Per-package LCOV coverage for the library and CLI.
+coverage *args="":
+    @just _coverage biscuit-hash {{args}}
+    @just _coverage biscuit-hash-cli {{args}}
+
+# Doctests for the library and CLI.
+doctest *args="":
+    @just _doctest biscuit-hash {{args}}
+    @just _doctest biscuit-hash-cli {{args}}
+
+# not applicable: biscuit-hash has no cargo-fuzz targets
+fuzz:
+    @echo "fuzz: not applicable for biscuit-hash"
+
+# Canonical PR-gate runner: sanity → lint → doctest → test → test-l2 → test-browser.
+all:
+    @just sanity
+    @just lint
+    @just doctest
+    @just test
+    @just test-l2
+    @just test-browser
+
+# ----------------------------------------------------------------------------
 
 # Lint (and fix) both the library and CLI
 lint-fix:

@@ -53,22 +53,67 @@ install *args="":
     @just build --release
     @just _install "./cli" "biscuit-terminal" {{ args }}
 
-# Test both library and CLI.
+# --- Canonical lifecycle recipe set (testing-best-practices Phase 2) -------
+
+# Fast confidence subset (≤15s, lib + bin, !slow). Doctests live in `doctest`.
+sanity:
+    @just _sanity {{ LIBRARY }}
+    @just _sanity {{ CLI }}
+
+# Test both library and CLI (Level-1 only — `test-l2` runs real-terminal tests).
 test *args="":
-    @just _test biscuit-terminal {{ args }}
-    @just _test biscuit-terminal-cli {{ args }}
+    @just _test {{ LIBRARY }} {{ args }}
+    @just _test {{ CLI }} {{ args }}
     @echo
-    @echo "👀 {{ BOLD }}Note:{{ RESET }} running {{ BLUE }}just test{{ RESET }} runs level 1 and 2 test but not level 3"
+    @echo "👀 {{ BOLD }}Note:{{ RESET }} {{ BLUE }}just test{{ RESET }} runs Level-1 only; use {{ BLUE }}just test-l2{{ RESET }} for real-terminal tests"
     @echo
 
-# Run only Level-2 real-terminal tests
+# Level-2 real-terminal tests. Skips cleanly if the harness is unavailable
+# unless `BISCUIT_TEST_LEVEL_REQUIRED=2` is set in the environment.
 test-l2 *args="":
-    @cargo test -p biscuit-terminal-cli --test level2_cursor_and_hygiene --test level2_diagrams --test level2_image --test level2_prose_styling --test level2_apple_terminal_prose {{ args }}
+    @just _test_l2 {{ CLI }} {{ args }}
+
+# not applicable: biscuit-terminal has no OS-keyboard-injection (Level-3) tests
+test-l3:
+    @echo "test-l3: not applicable for biscuit-terminal"
+
+# not applicable today; planned alongside the BrowserRenderable target
+test-browser:
+    @echo "test-browser: not applicable for biscuit-terminal yet"
+
+# not applicable: biscuit-terminal has no real-resource tier
+test-real:
+    @echo "test-real: not applicable for biscuit-terminal"
 
 # Lint both the library and CLI
 lint:
-    @just _lint biscuit-terminal
-    @just _lint biscuit-terminal-cli
+    @just _lint {{ LIBRARY }}
+    @just _lint {{ CLI }}
+
+# Per-package LCOV coverage for the library and CLI.
+coverage *args="":
+    @just _coverage {{ LIBRARY }} {{ args }}
+    @just _coverage {{ CLI }} {{ args }}
+
+# Doctests for the library and CLI.
+doctest *args="":
+    @just _doctest {{ LIBRARY }} {{ args }}
+    @just _doctest {{ CLI }} {{ args }}
+
+# not applicable: biscuit-terminal has no cargo-fuzz targets (Phase 5 scope)
+fuzz:
+    @echo "fuzz: not applicable for biscuit-terminal (planned Phase 5)"
+
+# Canonical PR-gate runner: sanity → lint → doctest → test → test-l2 → test-browser.
+all:
+    @just sanity
+    @just lint
+    @just doctest
+    @just test
+    @just test-l2
+    @just test-browser
+
+# ----------------------------------------------------------------------------
 
 # Outdated packages
 outdated:
