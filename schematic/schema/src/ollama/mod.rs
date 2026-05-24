@@ -11,9 +11,9 @@
 //! Generated API client for [OllamaOpenAI](https://github.com/ollama/ollama/blob/main/docs/openai.md).
 //!
 //! Ollama OpenAI-compatible REST API for drop-in replacement of OpenAI clients
+pub mod client;
 pub mod requests;
 pub mod responses;
-pub mod client;
 pub use requests::*;
 pub use responses::*;
 /// Ollama native REST API for local LLM inference and model management client.
@@ -37,9 +37,8 @@ impl OllamaNative {
     /// Base URL for the API.
     pub const BASE_URL: &'static str = "http://localhost:11434";
     /// Official API documentation URL, if available.
-    pub const DOCS_URL: Option<&'static str> = Some(
-        "https://github.com/ollama/ollama/blob/main/docs/api.md",
-    );
+    pub const DOCS_URL: Option<&'static str> =
+        Some("https://github.com/ollama/ollama/blob/main/docs/api.md");
     /// Creates a new API client with the default base URL.
     pub fn new() -> Self {
         Self {
@@ -52,8 +51,8 @@ impl OllamaNative {
                 env_fallback: None,
             },
             env_username: None,
-            headers: schematic_define::Headers::default()
-                .with_env_mapping(schematic_define::EnvMapping {
+            headers: schematic_define::Headers::default().with_env_mapping(
+                schematic_define::EnvMapping {
                     bearer_token: None,
                     basic_user: None,
                     basic_pass: None,
@@ -61,7 +60,8 @@ impl OllamaNative {
                     oauth_client_id: None,
                     oauth_client_secret: None,
                     oauth_redirect_uri: None,
-                }),
+                },
+            ),
             variant_hooks: crate::shared::VariantHooks::default(),
         }
     }
@@ -83,8 +83,8 @@ impl OllamaNative {
                 env_fallback: None,
             },
             env_username: None,
-            headers: schematic_define::Headers::default()
-                .with_env_mapping(schematic_define::EnvMapping {
+            headers: schematic_define::Headers::default().with_env_mapping(
+                schematic_define::EnvMapping {
                     bearer_token: None,
                     basic_user: None,
                     basic_pass: None,
@@ -92,7 +92,8 @@ impl OllamaNative {
                     oauth_client_id: None,
                     oauth_client_secret: None,
                     oauth_redirect_uri: None,
-                }),
+                },
+            ),
             variant_hooks: crate::shared::VariantHooks::default(),
         }
     }
@@ -120,8 +121,8 @@ impl OllamaNative {
                 env_fallback: None,
             },
             env_username: None,
-            headers: schematic_define::Headers::default()
-                .with_env_mapping(schematic_define::EnvMapping {
+            headers: schematic_define::Headers::default().with_env_mapping(
+                schematic_define::EnvMapping {
                     bearer_token: None,
                     basic_user: None,
                     basic_pass: None,
@@ -129,7 +130,8 @@ impl OllamaNative {
                     oauth_client_id: None,
                     oauth_client_secret: None,
                     oauth_redirect_uri: None,
-                }),
+                },
+            ),
             variant_hooks: crate::shared::VariantHooks::default(),
         }
     }
@@ -144,10 +146,7 @@ impl OllamaNative {
     ///     .unwrap();
     /// let api = Api::with_client_and_base_url(custom_client, "http://localhost:8080");
     /// ```
-    pub fn with_client_and_base_url(
-        client: reqwest::Client,
-        base_url: impl Into<String>,
-    ) -> Self {
+    pub fn with_client_and_base_url(client: reqwest::Client, base_url: impl Into<String>) -> Self {
         Self {
             client,
             base_url: base_url.into(),
@@ -158,8 +157,8 @@ impl OllamaNative {
                 env_fallback: None,
             },
             env_username: None,
-            headers: schematic_define::Headers::default()
-                .with_env_mapping(schematic_define::EnvMapping {
+            headers: schematic_define::Headers::default().with_env_mapping(
+                schematic_define::EnvMapping {
                     bearer_token: None,
                     basic_user: None,
                     basic_pass: None,
@@ -167,7 +166,8 @@ impl OllamaNative {
                     oauth_client_id: None,
                     oauth_client_secret: None,
                     oauth_redirect_uri: None,
-                }),
+                },
+            ),
             variant_hooks: crate::shared::VariantHooks::default(),
         }
     }
@@ -210,21 +210,20 @@ impl OllamaNative {
                     .as_ref()
                     .map(|api_key| api_key.header.clone())
             });
-        header
-            .and_then(|header| {
-                self.headers
-                    .env_mapping()
-                    .api_key
-                    .as_ref()
-                    .and_then(|api_key| {
-                        api_key
-                            .names
-                            .names()
-                            .iter()
-                            .find_map(|env_name| std::env::var(env_name).ok())
-                    })
-                    .map(|value| (header, value))
-            })
+        header.and_then(|header| {
+            self.headers
+                .env_mapping()
+                .api_key
+                .as_ref()
+                .and_then(|api_key| {
+                    api_key
+                        .names
+                        .names()
+                        .iter()
+                        .find_map(|env_name| std::env::var(env_name).ok())
+                })
+                .map(|value| (header, value))
+        })
     }
     /// Creates a variant builder for customizing this API client.
     ///
@@ -420,7 +419,9 @@ impl<'a> OllamaNativeVariantBuilder<'a> {
         F: Fn(
                 &crate::shared::ResponseContext,
                 serde_json::Value,
-            ) -> Result<serde_json::Value, crate::shared::SchematicError> + Send + Sync
+            ) -> Result<serde_json::Value, crate::shared::SchematicError>
+            + Send
+            + Sync
             + 'static,
     {
         self.pre_response_json = Some(std::sync::Arc::new(hook));
@@ -448,13 +449,15 @@ impl<'a> OllamaNativeVariantBuilder<'a> {
         F: Fn(
                 &crate::shared::ResponseContext,
                 &mut R::Response,
-            ) -> Result<(), crate::shared::SchematicError> + Send + Sync + 'static,
+            ) -> Result<(), crate::shared::SchematicError>
+            + Send
+            + Sync
+            + 'static,
     {
-        self.response_mutators
-            .insert(
-                R::ENDPOINT_ID,
-                std::sync::Arc::new(crate::shared::TypedMutator::new(hook)),
-            );
+        self.response_mutators.insert(
+            R::ENDPOINT_ID,
+            std::sync::Arc::new(crate::shared::TypedMutator::new(hook)),
+        );
         self
     }
     /// Builds the variant API client with the configured options.
@@ -480,17 +483,15 @@ impl<'a> OllamaNativeVariantBuilder<'a> {
         let headers = match self.headers {
             Some(headers) => headers,
             None if has_env_auth_override
-                || !matches!(auth_update, schematic_define::UpdateStrategy::NoChange) => {
-                self.base
-                    .headers
-                    .clone()
-                    .with_env_mapping(
-                        schematic_define::RestApi::legacy_env_mapping_for(
-                            &auth_strategy,
-                            &env_auth,
-                            self.base.env_username.as_deref(),
-                        ),
-                    )
+                || !matches!(auth_update, schematic_define::UpdateStrategy::NoChange) =>
+            {
+                self.base.headers.clone().with_env_mapping(
+                    schematic_define::RestApi::legacy_env_mapping_for(
+                        &auth_strategy,
+                        &env_auth,
+                        self.base.env_username.as_deref(),
+                    ),
+                )
             }
             None => self.base.headers.clone(),
         };
@@ -530,9 +531,8 @@ impl OllamaOpenAI {
     /// Base URL for the API.
     pub const BASE_URL: &'static str = "http://localhost:11434";
     /// Official API documentation URL, if available.
-    pub const DOCS_URL: Option<&'static str> = Some(
-        "https://github.com/ollama/ollama/blob/main/docs/openai.md",
-    );
+    pub const DOCS_URL: Option<&'static str> =
+        Some("https://github.com/ollama/ollama/blob/main/docs/openai.md");
     /// Creates a new API client with the default base URL.
     pub fn new() -> Self {
         Self {
@@ -545,8 +545,8 @@ impl OllamaOpenAI {
                 env_fallback: None,
             },
             env_username: None,
-            headers: schematic_define::Headers::default()
-                .with_env_mapping(schematic_define::EnvMapping {
+            headers: schematic_define::Headers::default().with_env_mapping(
+                schematic_define::EnvMapping {
                     bearer_token: None,
                     basic_user: None,
                     basic_pass: None,
@@ -554,7 +554,8 @@ impl OllamaOpenAI {
                     oauth_client_id: None,
                     oauth_client_secret: None,
                     oauth_redirect_uri: None,
-                }),
+                },
+            ),
             variant_hooks: crate::shared::VariantHooks::default(),
         }
     }
@@ -576,8 +577,8 @@ impl OllamaOpenAI {
                 env_fallback: None,
             },
             env_username: None,
-            headers: schematic_define::Headers::default()
-                .with_env_mapping(schematic_define::EnvMapping {
+            headers: schematic_define::Headers::default().with_env_mapping(
+                schematic_define::EnvMapping {
                     bearer_token: None,
                     basic_user: None,
                     basic_pass: None,
@@ -585,7 +586,8 @@ impl OllamaOpenAI {
                     oauth_client_id: None,
                     oauth_client_secret: None,
                     oauth_redirect_uri: None,
-                }),
+                },
+            ),
             variant_hooks: crate::shared::VariantHooks::default(),
         }
     }
@@ -613,8 +615,8 @@ impl OllamaOpenAI {
                 env_fallback: None,
             },
             env_username: None,
-            headers: schematic_define::Headers::default()
-                .with_env_mapping(schematic_define::EnvMapping {
+            headers: schematic_define::Headers::default().with_env_mapping(
+                schematic_define::EnvMapping {
                     bearer_token: None,
                     basic_user: None,
                     basic_pass: None,
@@ -622,7 +624,8 @@ impl OllamaOpenAI {
                     oauth_client_id: None,
                     oauth_client_secret: None,
                     oauth_redirect_uri: None,
-                }),
+                },
+            ),
             variant_hooks: crate::shared::VariantHooks::default(),
         }
     }
@@ -637,10 +640,7 @@ impl OllamaOpenAI {
     ///     .unwrap();
     /// let api = Api::with_client_and_base_url(custom_client, "http://localhost:8080");
     /// ```
-    pub fn with_client_and_base_url(
-        client: reqwest::Client,
-        base_url: impl Into<String>,
-    ) -> Self {
+    pub fn with_client_and_base_url(client: reqwest::Client, base_url: impl Into<String>) -> Self {
         Self {
             client,
             base_url: base_url.into(),
@@ -651,8 +651,8 @@ impl OllamaOpenAI {
                 env_fallback: None,
             },
             env_username: None,
-            headers: schematic_define::Headers::default()
-                .with_env_mapping(schematic_define::EnvMapping {
+            headers: schematic_define::Headers::default().with_env_mapping(
+                schematic_define::EnvMapping {
                     bearer_token: None,
                     basic_user: None,
                     basic_pass: None,
@@ -660,7 +660,8 @@ impl OllamaOpenAI {
                     oauth_client_id: None,
                     oauth_client_secret: None,
                     oauth_redirect_uri: None,
-                }),
+                },
+            ),
             variant_hooks: crate::shared::VariantHooks::default(),
         }
     }
@@ -703,21 +704,20 @@ impl OllamaOpenAI {
                     .as_ref()
                     .map(|api_key| api_key.header.clone())
             });
-        header
-            .and_then(|header| {
-                self.headers
-                    .env_mapping()
-                    .api_key
-                    .as_ref()
-                    .and_then(|api_key| {
-                        api_key
-                            .names
-                            .names()
-                            .iter()
-                            .find_map(|env_name| std::env::var(env_name).ok())
-                    })
-                    .map(|value| (header, value))
-            })
+        header.and_then(|header| {
+            self.headers
+                .env_mapping()
+                .api_key
+                .as_ref()
+                .and_then(|api_key| {
+                    api_key
+                        .names
+                        .names()
+                        .iter()
+                        .find_map(|env_name| std::env::var(env_name).ok())
+                })
+                .map(|value| (header, value))
+        })
     }
     /// Creates a variant builder for customizing this API client.
     ///
@@ -913,7 +913,9 @@ impl<'a> OllamaOpenAIVariantBuilder<'a> {
         F: Fn(
                 &crate::shared::ResponseContext,
                 serde_json::Value,
-            ) -> Result<serde_json::Value, crate::shared::SchematicError> + Send + Sync
+            ) -> Result<serde_json::Value, crate::shared::SchematicError>
+            + Send
+            + Sync
             + 'static,
     {
         self.pre_response_json = Some(std::sync::Arc::new(hook));
@@ -941,13 +943,15 @@ impl<'a> OllamaOpenAIVariantBuilder<'a> {
         F: Fn(
                 &crate::shared::ResponseContext,
                 &mut R::Response,
-            ) -> Result<(), crate::shared::SchematicError> + Send + Sync + 'static,
+            ) -> Result<(), crate::shared::SchematicError>
+            + Send
+            + Sync
+            + 'static,
     {
-        self.response_mutators
-            .insert(
-                R::ENDPOINT_ID,
-                std::sync::Arc::new(crate::shared::TypedMutator::new(hook)),
-            );
+        self.response_mutators.insert(
+            R::ENDPOINT_ID,
+            std::sync::Arc::new(crate::shared::TypedMutator::new(hook)),
+        );
         self
     }
     /// Builds the variant API client with the configured options.
@@ -973,17 +977,15 @@ impl<'a> OllamaOpenAIVariantBuilder<'a> {
         let headers = match self.headers {
             Some(headers) => headers,
             None if has_env_auth_override
-                || !matches!(auth_update, schematic_define::UpdateStrategy::NoChange) => {
-                self.base
-                    .headers
-                    .clone()
-                    .with_env_mapping(
-                        schematic_define::RestApi::legacy_env_mapping_for(
-                            &auth_strategy,
-                            &env_auth,
-                            self.base.env_username.as_deref(),
-                        ),
-                    )
+                || !matches!(auth_update, schematic_define::UpdateStrategy::NoChange) =>
+            {
+                self.base.headers.clone().with_env_mapping(
+                    schematic_define::RestApi::legacy_env_mapping_for(
+                        &auth_strategy,
+                        &env_auth,
+                        self.base.env_username.as_deref(),
+                    ),
+                )
             }
             None => self.base.headers.clone(),
         };
