@@ -6,5 +6,6 @@ publish = false
 license = "AGPL-3.0-only"
 
 [dependencies]
+libc = "0.2"
 serde_json = "1.0"
 unicode-width = "0.2"
