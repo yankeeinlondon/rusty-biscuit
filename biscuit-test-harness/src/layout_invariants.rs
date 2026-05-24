@@ -592,10 +592,7 @@ mod tests {
     fn containment_flags_cjk_overflow_chars_alone_miss() {
         // Three full-width glyphs = 6 cells, exceeding the 5-cell terminal
         // width. `chars().count()` would report 3 and falsely pass I1.
-        let narrow = LayoutExpectation {
-            width: 5,
-            ..EXP
-        };
+        let narrow = LayoutExpectation { width: 5, ..EXP };
         assert!(containment("日本語", &narrow).is_err());
     }
 }
