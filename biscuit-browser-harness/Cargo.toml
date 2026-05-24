@@ -1,0 +1,18 @@
+[package]
+name = "biscuit-browser-harness"
+version = "0.1.0"
+edition = "2024"
+publish = false
+license = "AGPL-3.0-only"
+description = "Shared headless-browser test harness for the Rusty Biscuit workspace"
+
+[dependencies]
+async-trait = "0.1"
+chromiumoxide = { version = "0.7", default-features = false, features = ["tokio-runtime"] }
+futures-util = "0.3"
+tempfile = "3"
+thiserror = "2.0"
+tokio = { version = "1.48", features = ["macros", "rt-multi-thread", "time"] }
+
+[dev-dependencies]
+serial_test = "3"
