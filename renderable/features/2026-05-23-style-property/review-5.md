@@ -1,10 +1,47 @@
 ---
-ready: false
+ready: true
 agent: codex
 model: ""
 ---
 
 # Review: Sub-Spec #5 Color & Background-Color Mutations
+
+## Resolution (2026-05-24)
+
+All findings addressed:
+
+- **High #1 (`ColorDepth::None` bypass)** — `write_terminal_with_layout`
+  no longer short-circuits to raw Markdown when color is disabled. Layout
+  now runs end-to-end and a final `strip_csi_sequences` pass removes color
+  SGR while preserving OSC8 link sequences. New Level 1 tests
+  (`test_color_depth_no_color_emits_no_csi_but_keeps_layout`,
+  `test_color_depth_none_tables_still_render`,
+  `color_depth_none_preserves_table_layout_when_page_color_set`) assert
+  layout parity. Level 2 coverage added in
+  `level2_color_depth_none_preserves_visible_layout` (forces `TERM=dumb`).
+- **High #2 (UL/OL color erased by Li scope)** —
+  `LineWrapper::active_component_color` walks the color stack from
+  innermost to outermost so a pushed `(None, None)` Li scope no longer
+  masks the container's color. New Level 1 test
+  `ul_color_inherits_into_li_body_when_li_color_unset` and Level 2 test
+  `level2_ul_color_inherits_into_li_body` cover the inheritance chain.
+- **High #3 (Hyperlink color in table cells)** — `push_table_link`
+  resolves the effective hyperlink color (with fallback through table
+  color and page color) and wraps the styled label with `wrap_with_color`,
+  inside the OSC8 sequence so links stay clickable. New Level 1 test
+  `hyperlink_color_applies_inside_table_cells` and Level 2 test
+  `level2_hyperlink_color_applies_inside_table` assert both the SGR and
+  the OSC8 envelope.
+- **High #4 (User-visible verification level)** — three new Level 2
+  cases (above) exercise color-disabled layout, list color inheritance,
+  and table-cell hyperlink color in a real terminal pane. The original
+  Level 1 byte assertions remain for fast feedback.
+
+Verification: `cargo test -p darkmatter --lib` (3169 passed),
+`cargo test -p darkmatter --test style_frontmatter` (12 passed),
+`cargo test -p darkmatter-cli --test cli` (227 passed). The Level 2
+cases skip silently when WezTerm is unavailable in the local environment
+and run under `DARKMATTER_LEVEL2_REQUIRED=1` in CI.
 
 ## Findings
 
