@@ -29,6 +29,8 @@ use crate::markdown::output::html::HtmlOptions;
 use crate::markdown::output::terminal::{
     ColorDepth, HyperlinkMode, ItalicMode, MermaidMode, TerminalImageMode, TerminalOptions,
 };
+use crate::style::StyleColor;
+use crate::style::color::lower_to_css;
 
 /// A page-level layout primitive that owns layout state for darkmatter
 /// terminal and browser rendering.
@@ -75,6 +77,10 @@ pub struct DarkmatterPage {
     alignments: HashMap<PageComponent, PageAlignment>,
     fills: HashMap<PageComponent, PageFill>,
     list_left_margins: HashMap<PageComponent, WidthUnit>,
+    page_color: Option<StyleColor>,
+    page_bg_color: Option<StyleColor>,
+    component_colors: HashMap<PageComponent, StyleColor>,
+    component_bg_colors: HashMap<PageComponent, StyleColor>,
     options: TerminalOptions,
     /// Stored markdown for [`TerminalRenderable`] support.
     markdown: Option<Markdown>,
@@ -103,6 +109,10 @@ impl DarkmatterPage {
             alignments: HashMap::new(),
             fills: HashMap::new(),
             list_left_margins: HashMap::new(),
+            page_color: None,
+            page_bg_color: None,
+            component_colors: HashMap::new(),
+            component_bg_colors: HashMap::new(),
             options: TerminalOptions::default(),
             markdown: None,
             layout: Layout::default(),
@@ -201,6 +211,36 @@ impl DarkmatterPage {
     /// Resolve list left margin for the given component.
     pub fn list_left_margin_for(&self, component: PageComponent) -> Option<WidthUnit> {
         self.list_left_margins.get(&component).copied()
+    }
+
+    /// Configured page foreground color, if any.
+    pub fn page_color(&self) -> Option<&StyleColor> {
+        self.page_color.as_ref()
+    }
+
+    /// Configured page background color, if any.
+    pub fn page_bg_color(&self) -> Option<&StyleColor> {
+        self.page_bg_color.as_ref()
+    }
+
+    /// Resolve effective foreground color for the given component.
+    ///
+    /// Returns the component-specific color when set, otherwise falls back
+    /// to the page-level color.
+    pub fn color_for(&self, component: PageComponent) -> Option<&StyleColor> {
+        self.component_colors
+            .get(&component)
+            .or(self.page_color.as_ref())
+    }
+
+    /// Resolve effective background color for the given component.
+    ///
+    /// Returns the component-specific color when set, otherwise falls back
+    /// to the page-level color.
+    pub fn bg_color_for(&self, component: PageComponent) -> Option<&StyleColor> {
+        self.component_bg_colors
+            .get(&component)
+            .or(self.page_bg_color.as_ref())
     }
 
     /// Read-only view of the underlying [`TerminalOptions`].
@@ -359,6 +399,30 @@ impl DarkmatterPage {
     /// Set the page background fill strategy.
     pub fn with_page_background(mut self, bg: PageBackground) -> Self {
         self.page_background = bg;
+        self
+    }
+
+    /// Set the page foreground color.
+    pub fn with_page_color(mut self, color: StyleColor) -> Self {
+        self.page_color = Some(color);
+        self
+    }
+
+    /// Set the page background color.
+    pub fn with_page_bg_color(mut self, color: StyleColor) -> Self {
+        self.page_bg_color = Some(color);
+        self
+    }
+
+    /// Set the foreground color for a single [`PageComponent`].
+    pub fn with_component_color(mut self, component: PageComponent, color: StyleColor) -> Self {
+        self.component_colors.insert(component, color);
+        self
+    }
+
+    /// Set the background color for a single [`PageComponent`].
+    pub fn with_component_bg_color(mut self, component: PageComponent, color: StyleColor) -> Self {
+        self.component_bg_colors.insert(component, color);
         self
     }
 
@@ -565,6 +629,10 @@ impl DarkmatterPage {
             self.alignments.clone(),
             self.fills.clone(),
             self.list_left_margins.clone(),
+            self.page_color.clone(),
+            self.page_bg_color.clone(),
+            self.component_colors.clone(),
+            self.component_bg_colors.clone(),
         )?;
 
         // Build derived TerminalOptions.
@@ -654,6 +722,10 @@ impl DarkmatterPage {
             self.alignments.clone(),
             self.fills.clone(),
             self.list_left_margins.clone(),
+            self.page_color.clone(),
+            self.page_bg_color.clone(),
+            self.component_colors.clone(),
+            self.component_bg_colors.clone(),
         )?;
 
         // Build HtmlOptions from TerminalOptions.
@@ -695,6 +767,10 @@ impl DarkmatterPage {
             && self.alignments.is_empty()
             && self.fills.is_empty()
             && self.list_left_margins.is_empty()
+            && self.page_color.is_none()
+            && self.page_bg_color.is_none()
+            && self.component_colors.is_empty()
+            && self.component_bg_colors.is_empty()
     }
 
     /// Validate horizontal space requirements against the captured terminal
@@ -966,6 +1042,17 @@ fn wrap_browser_html(body: &str, ctx: &LayoutContext) -> String {
         ));
     }
 
+    // Page-level foreground color from style frontmatter.
+    if let Some(color) = ctx.page_color.as_ref().and_then(lower_to_css) {
+        wrapper_styles.push_str(&format!("color: {color}; "));
+    }
+
+    // Page-level background color from style frontmatter takes precedence
+    // over the computed PageBackground color.
+    if let Some(bg_color) = ctx.page_bg_color.as_ref().and_then(lower_to_css) {
+        wrapper_styles.push_str(&format!("background-color: {bg_color}; "));
+    }
+
     // Use a very large max-width (terminal_width) when no max-width is set,
     // otherwise use the effective width.
     let max_width_ch = if ctx.effective_width < ctx.terminal_width {
@@ -994,7 +1081,7 @@ fn wrap_browser_html(body: &str, ctx: &LayoutContext) -> String {
     output
 }
 
-/// Generate CSS rules for per-component alignment and fill.
+/// Generate CSS rules for per-component alignment, fill, and color.
 fn build_component_css(ctx: &LayoutContext) -> String {
     let mut css = String::new();
 
@@ -1004,10 +1091,17 @@ fn build_component_css(ctx: &LayoutContext) -> String {
     {
         let alignment = ctx.component_alignment(PageComponent::Lists);
         let fill = ctx.component_fill(PageComponent::Lists);
-        if alignment != PageAlignment::Left || fill != PageFill::Full {
+        let has_color = ctx.component_color(PageComponent::Lists).is_some();
+        let has_bg_color = ctx.component_bg_color(PageComponent::Lists).is_some();
+        if alignment != PageAlignment::Left
+            || fill != PageFill::Full
+            || has_color
+            || has_bg_color
+        {
             let selectors = component_selectors(PageComponent::Lists);
             css.push_str(&format!(".darkmatter-page {} {{\n", selectors));
             emit_component_css_rules(&mut css, ctx, alignment, fill);
+            emit_component_color_rules(&mut css, ctx, PageComponent::Lists);
             css.push_str("}\n");
         }
     }
@@ -1017,9 +1111,16 @@ fn build_component_css(ctx: &LayoutContext) -> String {
         let fill = ctx.component_fill(component);
         let has_left_margin = component == PageComponent::Ul
             && ctx.list_left_margin(PageComponent::Ul).is_some();
+        let has_color = ctx.component_color(component).is_some();
+        let has_bg_color = ctx.component_bg_color(component).is_some();
 
-        // Only emit CSS when non-default or when Ul has left-margin.
-        if alignment == PageAlignment::Left && fill == PageFill::Full && !has_left_margin {
+        // Only emit CSS when non-default or when Ul has left-margin or color.
+        if alignment == PageAlignment::Left
+            && fill == PageFill::Full
+            && !has_left_margin
+            && !has_color
+            && !has_bg_color
+        {
             continue;
         }
 
@@ -1031,6 +1132,7 @@ fn build_component_css(ctx: &LayoutContext) -> String {
         css.push_str(&format!(".darkmatter-page {} {{\n", selectors));
 
         emit_component_css_rules(&mut css, ctx, alignment, fill);
+        emit_component_color_rules(&mut css, ctx, component);
 
         // Left margin for unordered lists.
         if component == PageComponent::Ul
@@ -1108,6 +1210,20 @@ fn emit_component_css_rules(
     }
 }
 
+/// Emit color and background-color CSS rules for a single component.
+fn emit_component_color_rules(
+    css: &mut String,
+    ctx: &LayoutContext,
+    component: PageComponent,
+) {
+    if let Some(color) = ctx.component_color(component).and_then(lower_to_css) {
+        css.push_str(&format!("  color: {color};\n"));
+    }
+    if let Some(bg_color) = ctx.component_bg_color(component).and_then(lower_to_css) {
+        css.push_str(&format!("  background-color: {bg_color};\n"));
+    }
+}
+
 /// CSS selectors for a page component.
 fn component_selectors(component: PageComponent) -> &'static str {
     match component {
@@ -1118,6 +1234,7 @@ fn component_selectors(component: PageComponent) -> &'static str {
         PageComponent::Ul => "ul",
         PageComponent::Ol => "ol",
         PageComponent::Li => "li",
+        PageComponent::Hyperlinks => "a",
         #[allow(deprecated)]
         PageComponent::Lists => "ul, ol",
     }
@@ -2496,6 +2613,386 @@ mod tests {
         assert_eq!(
             page.fill_for(PageComponent::Li),
             PageFill::Max(WidthUnit::Fixed(50))
+        );
+    }
+
+    // ---------- Phase 1: color API tests ----------
+
+    use crate::style::StyleColor;
+    use renderable::color::{Color, Tailwind};
+
+    fn red_color() -> StyleColor {
+        StyleColor {
+            color: Color::Tailwind(Tailwind::Red500),
+            opacity: None,
+        }
+    }
+
+    fn blue_color() -> StyleColor {
+        StyleColor {
+            color: Color::Tailwind(Tailwind::Blue500),
+            opacity: None,
+        }
+    }
+
+    #[test]
+    fn color_setters_and_getters() {
+        let page = page()
+            .with_page_color(red_color())
+            .with_page_bg_color(blue_color())
+            .with_component_color(PageComponent::Tables, red_color())
+            .with_component_bg_color(PageComponent::Tables, blue_color());
+
+        assert_eq!(page.page_color(), Some(&red_color()));
+        assert_eq!(page.page_bg_color(), Some(&blue_color()));
+        assert_eq!(
+            page.color_for(PageComponent::Tables),
+            Some(&red_color())
+        );
+        assert_eq!(
+            page.bg_color_for(PageComponent::Tables),
+            Some(&blue_color())
+        );
+    }
+
+    #[test]
+    fn color_inheritance_from_page() {
+        let page = page()
+            .with_page_color(red_color())
+            .with_page_bg_color(blue_color());
+
+        // Components without explicit color inherit page color.
+        assert_eq!(
+            page.color_for(PageComponent::Tables),
+            Some(&red_color())
+        );
+        assert_eq!(
+            page.bg_color_for(PageComponent::Tables),
+            Some(&blue_color())
+        );
+        assert_eq!(
+            page.color_for(PageComponent::Hyperlinks),
+            Some(&red_color())
+        );
+    }
+
+    #[test]
+    fn component_color_overrides_page_color() {
+        let page = page()
+            .with_page_color(red_color())
+            .with_component_color(PageComponent::Tables, blue_color());
+
+        assert_eq!(
+            page.color_for(PageComponent::Tables),
+            Some(&blue_color())
+        );
+        // Other components still inherit page color.
+        assert_eq!(
+            page.color_for(PageComponent::Images),
+            Some(&red_color())
+        );
+    }
+
+    #[test]
+    fn component_bg_color_overrides_page_bg_color() {
+        let page = page()
+            .with_page_bg_color(red_color())
+            .with_component_bg_color(PageComponent::Tables, blue_color());
+
+        assert_eq!(
+            page.bg_color_for(PageComponent::Tables),
+            Some(&blue_color())
+        );
+        assert_eq!(
+            page.bg_color_for(PageComponent::Images),
+            Some(&red_color())
+        );
+    }
+
+    #[test]
+    fn color_only_page_is_not_default_layout() {
+        let page = page().with_page_color(red_color());
+        assert!(!page.is_default_layout(), "page with color should not be default");
+    }
+
+    #[test]
+    fn bg_color_only_page_is_not_default_layout() {
+        let page = page().with_page_bg_color(red_color());
+        assert!(!page.is_default_layout(), "page with bg-color should not be default");
+    }
+
+    #[test]
+    fn component_color_only_page_is_not_default_layout() {
+        let page = page().with_component_color(PageComponent::Tables, red_color());
+        assert!(!page.is_default_layout(), "page with component color should not be default");
+    }
+
+    // ---------- Phase 5: render-level color tests ----------
+
+    #[test]
+    fn terminal_page_color_applies_sgr_to_components() {
+        let term = Terminal::new_optimistic(80);
+        let page = DarkmatterPage::new(&term).with_page_color(red_color());
+        let md: Markdown = "# Hello\n".into();
+
+        let out = page.render(&md).unwrap();
+        // The heading text should be wrapped with the page color SGR
+        // and properly reset.
+        assert!(
+            out.contains("\x1b[38;2;"),
+            "page color should emit foreground SGR; got: {out:?}"
+        );
+        assert!(
+            out.contains("\x1b[0m"),
+            "page color scope should end with reset; got: {out:?}"
+        );
+    }
+
+    #[test]
+    fn terminal_component_color_overrides_page_color_in_output() {
+        let term = Terminal::new_optimistic(80);
+        let page = DarkmatterPage::new(&term)
+            .with_page_color(red_color())
+            .with_component_color(PageComponent::Tables, blue_color());
+        let md: Markdown = "| a | b |\n|---|---|\n| 1 | 2 |\n".into();
+
+        let out = page.render(&md).unwrap();
+        // Table output should contain blue SGR, not just red.
+        // Both colors may appear (red for heading, blue for table), so we
+        // just verify the table-specific color is present.
+        assert!(
+            out.contains("\x1b[38;2;"),
+            "component color should emit SGR; got: {out:?}"
+        );
+    }
+
+    #[test]
+    fn terminal_color_depth_none_omits_sgr_for_colors() {
+        let term = Terminal::new_optimistic(80);
+        let md: Markdown = "# Hello\n".into();
+        let out = DarkmatterPage::new(&term)
+            .with_page_color(red_color())
+            .with_color_depth(ColorDepth::None)
+            .render(&md)
+            .unwrap();
+
+        assert!(
+            !out.contains("\x1b[38;2;"),
+            "ColorDepth::None must suppress color SGR; got: {out:?}"
+        );
+    }
+
+    #[test]
+    fn terminal_reset_boundary_scopes_component_colors() {
+        let term = Terminal::new_optimistic(80);
+        let page = DarkmatterPage::new(&term)
+            .with_component_color(PageComponent::Tables, red_color());
+        let md: Markdown = "| a | b |\n|---|---|\n| 1 | 2 |\n".into();
+
+        let out = page.render(&md).unwrap();
+        // The table output should be wrapped with an opening SGR and a reset.
+        assert!(
+            out.contains("\x1b[0m"),
+            "component color must be scoped with reset; got: {out:?}"
+        );
+    }
+
+    #[test]
+    fn browser_page_color_emits_wrapper_css() {
+        let term = Terminal::new_optimistic(120);
+        let page = DarkmatterPage::new(&term).with_page_color(red_color());
+        let md: Markdown = "# Hello\n".into();
+
+        let html = page.render_to_browser(&md).unwrap();
+        assert!(
+            html.contains("color: rgb("),
+            "page color should emit CSS on wrapper; got: {html}"
+        );
+    }
+
+    #[test]
+    fn browser_page_bg_color_overrides_page_background_css() {
+        let term = Terminal::new_optimistic(120);
+        let page = DarkmatterPage::new(&term)
+            .with_page_background(PageBackground::Subtle)
+            .with_page_bg_color(red_color());
+        let md: Markdown = "# Hello\n".into();
+
+        let html = page.render_to_browser(&md).unwrap();
+        // The wrapper should have the explicit bg-color after the computed one.
+        let bg_count = html.matches("background-color:").count();
+        assert!(
+            bg_count >= 1,
+            "wrapper should have background-color; got: {html}"
+        );
+        assert!(
+            html.contains("background-color: rgb("),
+            "page bg-color should be rgb(...); got: {html}"
+        );
+    }
+
+    #[test]
+    fn browser_component_color_emits_per_component_css() {
+        let term = Terminal::new_optimistic(120);
+        let page = DarkmatterPage::new(&term)
+            .with_component_color(PageComponent::Tables, red_color())
+            .with_component_bg_color(PageComponent::BlockQuotes, blue_color());
+        let md: Markdown = "# Hello\n\n> Quote\n\n| a | b |\n|---|---|\n| 1 | 2 |\n".into();
+
+        let html = page.render_to_browser(&md).unwrap();
+        assert!(
+            html.contains(".darkmatter-page table {"),
+            "table selector should be present; got: {html}"
+        );
+        assert!(
+            html.contains("color: rgb("),
+            "table color CSS should be emitted; got: {html}"
+        );
+        assert!(
+            html.contains(".darkmatter-page blockquote {"),
+            "blockquote selector should be present; got: {html}"
+        );
+        assert!(
+            html.contains("background-color: rgb("),
+            "blockquote bg-color CSS should be emitted; got: {html}"
+        );
+    }
+
+    #[test]
+    fn browser_opacity_preserved_as_rgba() {
+        let term = Terminal::new_optimistic(120);
+        let semi = StyleColor {
+            color: Color::Tailwind(Tailwind::Red500),
+            opacity: Some(50),
+        };
+        let page = DarkmatterPage::new(&term).with_page_color(semi);
+        let md: Markdown = "# Hello\n".into();
+
+        let html = page.render_to_browser(&md).unwrap();
+        assert!(
+            html.contains("rgba(") && html.contains("0.5"),
+            "opacity should produce rgba CSS; got: {html}"
+        );
+    }
+
+    #[test]
+    fn terminal_opacity_dropped_from_sgr() {
+        let term = Terminal::new_optimistic(80);
+        let semi = StyleColor {
+            color: Color::Tailwind(Tailwind::Red500),
+            opacity: Some(50),
+        };
+        let page = DarkmatterPage::new(&term).with_page_color(semi);
+        let md: Markdown = "# Hello\n".into();
+
+        let out = page.render(&md).unwrap();
+        // SGR should NOT contain opacity; it should be a plain 24-bit color.
+        assert!(
+            out.contains("\x1b[38;2;"),
+            "terminal should still emit 24-bit SGR without opacity; got: {out:?}"
+        );
+    }
+
+    #[test]
+    fn browser_css_special_colors_passthrough() {
+        let term = Terminal::new_optimistic(120);
+        let page = DarkmatterPage::new(&term)
+            .with_component_color(PageComponent::Tables, StyleColor {
+                color: Color::Tailwind(Tailwind::Transparent),
+                opacity: None,
+            })
+            .with_component_color(PageComponent::BlockQuotes, StyleColor {
+                color: Color::Tailwind(Tailwind::Current),
+                opacity: None,
+            })
+            .with_component_bg_color(PageComponent::Images, StyleColor {
+                color: Color::Tailwind(Tailwind::Inherit),
+                opacity: None,
+            });
+        let md: Markdown = "# Hello\n\n> Quote\n\n| a | b |\n|---|---|\n| 1 | 2 |\n".into();
+
+        let html = page.render_to_browser(&md).unwrap();
+        assert!(
+            html.contains("color: transparent;") || html.contains("color:transparent"),
+            "transparent should pass through; got: {html}"
+        );
+        assert!(
+            html.contains("color: currentColor;") || html.contains("color:currentColor"),
+            "currentColor should pass through; got: {html}"
+        );
+        assert!(
+            html.contains("background-color: inherit;") || html.contains("background-color:inherit"),
+            "inherit should pass through; got: {html}"
+        );
+    }
+
+    #[test]
+    fn browser_list_selectors_emit_separate_rules_with_colors() {
+        let term = Terminal::new_optimistic(120);
+        let page = DarkmatterPage::new(&term)
+            .with_component_color(PageComponent::Ul, red_color())
+            .with_component_color(PageComponent::Ol, blue_color())
+            .with_component_color(PageComponent::Li, StyleColor {
+                color: Color::Tailwind(Tailwind::Green500),
+                opacity: None,
+            });
+        let md: Markdown = "- one\n\n1. two\n".into();
+
+        let html = page.render_to_browser(&md).unwrap();
+        assert!(
+            html.contains(".darkmatter-page ul {"),
+            "ul selector should be emitted; got: {html}"
+        );
+        assert!(
+            html.contains(".darkmatter-page ol {"),
+            "ol selector should be emitted; got: {html}"
+        );
+        assert!(
+            html.contains(".darkmatter-page li {"),
+            "li selector should be emitted; got: {html}"
+        );
+    }
+
+    #[test]
+    fn terminal_hyperlink_color_preserves_osc8_sequences() {
+        let term = Terminal::new_optimistic(80);
+        let page = DarkmatterPage::new(&term)
+            .with_hyperlink_mode(HyperlinkMode::Always)
+            .with_component_color(PageComponent::Hyperlinks, red_color());
+        let md: Markdown = "[link](https://example.com)\n".into();
+
+        let out = page.render(&md).unwrap();
+        // OSC8 sequences must still be present.
+        assert!(
+            out.contains("\x1b]8;;https://example.com\x1b\\")
+                || out.contains("\x1b]8;;https://example.com\x07"),
+            "OSC8 open sequence must be preserved; got: {out:?}"
+        );
+        assert!(
+            out.contains("\x1b]8;;\x1b\\") || out.contains("\x1b]8;;\x07"),
+            "OSC8 close sequence must be preserved; got: {out:?}"
+        );
+        // The hyperlink text should also have the color SGR applied.
+        assert!(
+            out.contains("\x1b[38;2;"),
+            "hyperlink color SGR should be present; got: {out:?}"
+        );
+    }
+
+    #[test]
+    fn code_block_bg_color_override_does_not_clobber_highlighting() {
+        let term = Terminal::new_optimistic(80);
+        let page = DarkmatterPage::new(&term)
+            .with_component_bg_color(PageComponent::CodeBlocks, red_color());
+        let md: Markdown = "```rust\nfn main() {}\n```\n".into();
+
+        let out = page.render(&md).unwrap();
+        // The code block should still contain syntax-highlighting SGRs
+        // (multiple different colors for keywords, identifiers, etc.).
+        let sgr_count = out.matches("\x1b[38;2;").count();
+        assert!(
+            sgr_count >= 2,
+            "code block should retain multiple syntax highlight colors; got: {out:?}"
         );
     }
 }

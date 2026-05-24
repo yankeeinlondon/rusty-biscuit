@@ -149,6 +149,8 @@ pub enum PageComponent {
     Ol,
     /// List items.
     Li,
+    /// Hyperlinks.
+    Hyperlinks,
     /// Lists (ordered and unordered).
     #[deprecated(note = "use PageComponent::{Ul, Ol, Li}")]
     Lists,
@@ -156,7 +158,7 @@ pub enum PageComponent {
 
 impl PageComponent {
     /// All page-component variants in canonical order.
-    pub const ALL: [PageComponent; 7] = [
+    pub const ALL: [PageComponent; 8] = [
         PageComponent::Images,
         PageComponent::BlockQuotes,
         PageComponent::Tables,
@@ -164,6 +166,7 @@ impl PageComponent {
         PageComponent::Ul,
         PageComponent::Ol,
         PageComponent::Li,
+        PageComponent::Hyperlinks,
     ];
 
     /// The three concrete list component variants.
@@ -500,7 +503,7 @@ mod tests {
 
     #[test]
     fn page_component_all_covers_every_variant() {
-        assert_eq!(PageComponent::ALL.len(), 7);
+        assert_eq!(PageComponent::ALL.len(), 8);
     }
 
     #[test]

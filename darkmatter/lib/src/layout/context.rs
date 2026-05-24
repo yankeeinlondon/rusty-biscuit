@@ -12,6 +12,7 @@ use super::types::{
     PageAlignment, PageBackground, PageComponent, PageFill, PageMargin, PagePadding, WidthUnit,
 };
 use crate::markdown::highlighting::ColorMode;
+use crate::style::StyleColor;
 
 /// Resolved layout state used during terminal rendering.
 ///
@@ -57,6 +58,18 @@ pub(crate) struct LayoutContext {
     pub fills: std::collections::HashMap<PageComponent, PageFill>,
     /// Per-component list left margins.
     pub list_left_margins: std::collections::HashMap<PageComponent, WidthUnit>,
+    /// Page foreground color.
+    #[allow(dead_code)]
+    pub page_color: Option<StyleColor>,
+    /// Page background color.
+    #[allow(dead_code)]
+    pub page_bg_color: Option<StyleColor>,
+    /// Per-component foreground colors.
+    #[allow(dead_code)]
+    pub component_colors: std::collections::HashMap<PageComponent, StyleColor>,
+    /// Per-component background colors.
+    #[allow(dead_code)]
+    pub component_bg_colors: std::collections::HashMap<PageComponent, StyleColor>,
 }
 
 /// Concrete RGB background color resolved from [`PageBackground`] and the
@@ -130,6 +143,10 @@ impl LayoutContext {
         alignments: std::collections::HashMap<PageComponent, PageAlignment>,
         fills: std::collections::HashMap<PageComponent, PageFill>,
         list_left_margins: std::collections::HashMap<PageComponent, WidthUnit>,
+        page_color: Option<StyleColor>,
+        page_bg_color: Option<StyleColor>,
+        component_colors: std::collections::HashMap<PageComponent, StyleColor>,
+        component_bg_colors: std::collections::HashMap<PageComponent, StyleColor>,
     ) -> Result<Self, PageRenderError> {
         let margin_x = margin.horizontal();
         let padding_x = padding.horizontal();
@@ -154,7 +171,11 @@ impl LayoutContext {
             || max_width.is_some()
             || !alignments.is_empty()
             || !fills.is_empty()
-            || !list_left_margins.is_empty();
+            || !list_left_margins.is_empty()
+            || page_color.is_some()
+            || page_bg_color.is_some()
+            || !component_colors.is_empty()
+            || !component_bg_colors.is_empty();
 
         // Per spec, page background resolution uses the *terminal's* detected
         // color mode (so `Subtle` picks a dark-vs-light surface based on the
@@ -203,6 +224,10 @@ impl LayoutContext {
             alignments,
             fills,
             list_left_margins,
+            page_color,
+            page_bg_color,
+            component_colors,
+            component_bg_colors,
         })
     }
 
@@ -213,7 +238,33 @@ impl LayoutContext {
 
     /// Whether any per-component alignment or fill is configured.
     pub fn has_component_styles(&self) -> bool {
-        !self.alignments.is_empty() || !self.fills.is_empty() || !self.list_left_margins.is_empty()
+        !self.alignments.is_empty()
+            || !self.fills.is_empty()
+            || !self.list_left_margins.is_empty()
+            || !self.component_colors.is_empty()
+            || !self.component_bg_colors.is_empty()
+    }
+
+    /// Resolve effective foreground color for a component.
+    ///
+    /// Returns the component-specific color when set, otherwise falls back
+    /// to the page-level color.
+    #[allow(dead_code)]
+    pub fn component_color(&self, component: PageComponent) -> Option<&StyleColor> {
+        self.component_colors
+            .get(&component)
+            .or(self.page_color.as_ref())
+    }
+
+    /// Resolve effective background color for a component.
+    ///
+    /// Returns the component-specific color when set, otherwise falls back
+    /// to the page-level color.
+    #[allow(dead_code)]
+    pub fn component_bg_color(&self, component: PageComponent) -> Option<&StyleColor> {
+        self.component_bg_colors
+            .get(&component)
+            .or(self.page_bg_color.as_ref())
     }
 
     /// Get the list left margin for a component, if any.
@@ -384,6 +435,10 @@ mod tests {
             alignments: HashMap::new(),
             fills: HashMap::new(),
             list_left_margins: HashMap::new(),
+            page_color: None,
+            page_bg_color: None,
+            component_colors: HashMap::new(),
+            component_bg_colors: HashMap::new(),
         }
     }
 
@@ -619,6 +674,98 @@ mod tests {
             c.component_side_padding(PageComponent::BlockQuotes)
                 .unwrap(),
             (6, 6)
+        );
+    }
+
+    // ---------- Phase 1: color context tests ----------
+
+    use crate::style::StyleColor;
+    use renderable::color::{Color, Tailwind};
+
+    fn red_style_color() -> StyleColor {
+        StyleColor {
+            color: Color::Tailwind(Tailwind::Red500),
+            opacity: None,
+        }
+    }
+
+    fn blue_style_color() -> StyleColor {
+        StyleColor {
+            color: Color::Tailwind(Tailwind::Blue500),
+            opacity: None,
+        }
+    }
+
+    #[test]
+    fn needs_decoration_true_when_page_color_set() {
+        let mut c = ctx(100, 80);
+        c.page_color = Some(red_style_color());
+        assert!(c.needs_decoration());
+    }
+
+    #[test]
+    fn needs_decoration_true_when_page_bg_color_set() {
+        let mut c = ctx(100, 80);
+        c.page_bg_color = Some(red_style_color());
+        assert!(c.needs_decoration());
+    }
+
+    #[test]
+    fn needs_decoration_true_when_component_color_set() {
+        let mut c = ctx(100, 80);
+        c.component_colors
+            .insert(PageComponent::Tables, red_style_color());
+        assert!(c.needs_decoration());
+    }
+
+    #[test]
+    fn has_component_styles_true_when_component_colors_set() {
+        let mut c = ctx(100, 80);
+        assert!(!c.has_component_styles());
+        c.component_colors
+            .insert(PageComponent::Tables, red_style_color());
+        assert!(c.has_component_styles());
+    }
+
+    #[test]
+    fn has_component_styles_true_when_component_bg_colors_set() {
+        let mut c = ctx(100, 80);
+        c.component_bg_colors
+            .insert(PageComponent::Tables, red_style_color());
+        assert!(c.has_component_styles());
+    }
+
+    #[test]
+    fn component_color_inherits_from_page() {
+        let mut c = ctx(100, 80);
+        c.page_color = Some(red_style_color());
+        c.component_colors
+            .insert(PageComponent::Tables, blue_style_color());
+
+        assert_eq!(
+            c.component_color(PageComponent::Tables),
+            Some(&blue_style_color())
+        );
+        assert_eq!(
+            c.component_color(PageComponent::Images),
+            Some(&red_style_color())
+        );
+    }
+
+    #[test]
+    fn component_bg_color_inherits_from_page() {
+        let mut c = ctx(100, 80);
+        c.page_bg_color = Some(red_style_color());
+        c.component_bg_colors
+            .insert(PageComponent::Tables, blue_style_color());
+
+        assert_eq!(
+            c.component_bg_color(PageComponent::Tables),
+            Some(&blue_style_color())
+        );
+        assert_eq!(
+            c.component_bg_color(PageComponent::Images),
+            Some(&red_style_color())
         );
     }
 }
