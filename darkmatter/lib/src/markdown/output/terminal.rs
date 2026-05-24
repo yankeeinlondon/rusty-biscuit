@@ -4475,7 +4475,7 @@ fn main() {}
     }
 
     #[test]
-    fn test_color_depth_no_color_returns_plain_text() {
+    fn test_color_depth_no_color_emits_no_csi_but_keeps_layout() {
         let md: Markdown = "# Test\n\n```rust\nfn main() {}\n```".into();
 
         let mut options = test_options();
@@ -4483,14 +4483,24 @@ fn main() {}
 
         let output = for_terminal(&md, options).unwrap();
 
-        // Should not contain ANSI codes
-        assert!(!output.contains("\x1b["));
+        // No CSI/SGR sequences should reach a terminal that cannot interpret
+        // them. (OSC8 hyperlinks would start with `\x1b]` and are preserved.)
+        assert!(
+            !output.contains("\x1b["),
+            "ColorDepth::None must suppress CSI sequences; got: {output:?}"
+        );
 
-        // Should return plain content
-        assert_eq!(output, md.content());
+        // Layout still runs: the heading text is present and the code-fence
+        // pipeline renders its panel (with the language tag) rather than
+        // returning the raw `# Test` markdown.
+        assert!(output.contains("Test"), "heading text should be present");
+        assert!(
+            output.contains("fn main() {}"),
+            "code block body should be present"
+        );
     }
 
-    /// Test that ColorDepth::None still renders table structure with box-drawing characters
+    /// Test that ColorDepth::None still renders table structure with box-drawing characters.
     #[test]
     fn test_color_depth_none_tables_still_render() {
         let md: Markdown = "| Header |\n|--------|\n| Data |".into();
@@ -4500,14 +4510,21 @@ fn main() {}
 
         let output = for_terminal(&md, options).unwrap();
 
-        // With ColorDepth::None, we return plain markdown (early return)
-        // So tables won't be rendered with box-drawing - they'll be plain markdown
-        assert!(!output.contains("\x1b["), "Should not have ANSI codes");
-        assert_eq!(output, md.content(), "Should return plain markdown content");
-
-        // To actually test that tables CAN render without colors (if we didn't early return),
-        // we'd need to modify the implementation. But the current behavior is correct:
-        // ColorDepth::None means "no formatting at all", so we return raw markdown.
+        // Per spec #5 #5, visible text/layout must survive when color is
+        // disabled — only color SGR is stripped.
+        assert!(!output.contains("\x1b["), "Should not have CSI sequences");
+        assert!(
+            output.contains("Header"),
+            "table header text should be present; got: {output:?}"
+        );
+        assert!(
+            output.contains("Data"),
+            "table body text should be present; got: {output:?}"
+        );
+        assert!(
+            output.contains('┌') || output.contains('+'),
+            "table structure (box-drawing or ascii) should be rendered; got: {output:?}"
+        );
     }
 
     #[test]
