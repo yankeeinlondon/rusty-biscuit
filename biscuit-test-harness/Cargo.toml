@@ -9,3 +9,7 @@ license = "AGPL-3.0-only"
 libc = "0.2"
 serde_json = "1.0"
 unicode-width = "0.2"
+
+# Opt-out of benchmarking: this crate has no algorithmic hot paths.
+[package.metadata.benchmarks]
+required = false

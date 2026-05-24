@@ -16,3 +16,7 @@ tokio = { version = "1.48", features = ["macros", "rt-multi-thread", "time"] }
 
 [dev-dependencies]
 serial_test = "3"
+
+# Opt-out of benchmarking: this crate has no algorithmic hot paths.
+[package.metadata.benchmarks]
+required = false

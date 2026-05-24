@@ -43,3 +43,7 @@ schematic-schema = { path = "../../schematic/schema" }
 [dev-dependencies]
 serial_test = { version = "3.4", features = ["file_locks"] }
 tempfile = "3.26"
+
+# Opt-out of benchmarking: this crate has no algorithmic hot paths.
+[package.metadata.benchmarks]
+required = false
