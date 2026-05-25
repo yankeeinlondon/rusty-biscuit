@@ -8,37 +8,25 @@
 
 Replace the nine-file, twenty-one-symbol `prompt_reporting` module with two
 encapsulated report types — `SystemPromptReport` and `AgentPromptReport` —
-backed by a single `ReportMode` enum. Apply a comment-quality rubric to the
-rewrite and codify the rubric for reuse on other modules. Make the change
-without disturbing visual output or external behavior.
+backed by a single `ReportMode` enum. Make the change without disturbing
+visual output or external behavior.
 
 ## Motivation
 
-The current module exhibits two problems that compound each other:
+Twenty-one functions, three enums, and two boolean-bag config structs are
+stitched together by call sites that must choose between
+`report_system_prompt` and `report_system_prompt_empty` based on which
+variant of `EffectiveSystemPrompt` they hold. The precedence resolver
+produces only four distinct config shapes; the `truncation` field is always
+`FrontBack` in practice; and combinations like
+`show_header=false, show_summary=true` are representable but unreachable.
+The booleans carry no information that a four-way enum would not carry more
+precisely.
 
-1. **Diffuse implementation.** Twenty-one functions, three enums, and two
-   boolean-bag config structs are stitched together by call sites that must
-   choose between `report_system_prompt` and `report_system_prompt_empty`
-   based on which variant of `EffectiveSystemPrompt` they hold. The
-   precedence resolver produces only four distinct config shapes; the
-   `truncation` field is always `FrontBack` in practice; and combinations
-   like `show_header=false, show_summary=true` are representable but
-   unreachable. The booleans carry no information that a four-way enum
-   would not carry more precisely.
-
-2. **Doc comments that describe HOW.** Doc blocks restate exact format
-   strings (`<bg-orange-500><white><b>📔 System Prompt(<i>{action}</i>) </b>…`),
-   spell out implementation steps in prose, and attach runnable examples
-   that assert tautologies. Several have already drifted from the code —
-   the header doc still describes a `📔` glyph and a white-on-orange band
-   that the implementation replaced with `■` and `<orange-500>`. This is
-   the failure mode the rubric below is meant to prevent.
-
-These problems will compound when the reports are migrated to
-`TerminalRenderable` + `BrowserRenderable` (Stage 1, Stage 3): a flat module
-of free functions has no obvious place to hang a trait impl. Encapsulating
-first makes every subsequent stage a small addition rather than a
-restructure.
+This will compound when the reports are migrated to `TerminalRenderable` +
+`BrowserRenderable` (Stage 1, Stage 3): a flat module of free functions has
+no obvious place to hang a trait impl. Encapsulating first makes every
+subsequent stage a small addition rather than a restructure.
 
 ## Non-goals
 
@@ -208,29 +196,6 @@ Mechanical find/replace across 8 files, 72 references:
 
 No semantic change.
 
-## Comment-quality rubric
-
-Applied throughout the rewrite and codified here so the same rubric can be
-pointed at when the same problem is found elsewhere in the codebase.
-
-1. **Doc comments express the WHAT (purpose, contract, surprises), not the
-   HOW.** If a sentence describes the implementation in prose, delete it —
-   the code already says that.
-2. **No examples on small, strongly-typed functions.** Examples earn their
-   place only when the type composes interestingly enough that signature
-   plus name does not tell you how to use it.
-3. **No `## Arguments` / `## Returns` blocks that restate field docs.** Let
-   the type's own doc carry that. Use these sections only when the parameter
-   has a constraint or behavior that the type alone does not convey.
-4. **WHY comments live at the line that does the surprising thing**, not in
-   the surrounding function's doc. One short line. The darkmatter `\n\n`
-   workaround in `render_markdown_for_terminal` is a good example — keep it
-   inline, drop it from the function's prose.
-5. **No narrating exact format strings or color names in prose.** Those are
-   guaranteed to drift. The header doc that still describes a `📔` glyph
-   and a white-on-orange band the code no longer emits is the failure mode
-   this rule prevents.
-
 ## Risks
 
 - **Test breakage from the rename.** 72 references; `cargo check` will
@@ -265,8 +230,6 @@ pointed at when the same problem is found elsewhere in the codebase.
   `ResolvedSystemPrompt::{None, Disabled}` dispatch through
   `SystemPromptReport::render`.
 - `cargo doc -p claudine` produces no warnings about broken intra-doc links.
-- A spot-check of doc comments in `prompt_reporting/` shows no remaining
-  format-string narrations or tautological examples.
 
 ## Trajectory
 
@@ -276,7 +239,7 @@ when its turn comes.
 
 | Stage | Scope |
 |---|---|
-| **0 — Encapsulation (this design)** | Report types, `ReportMode`, rename, comment rubric. |
+| **0 — Encapsulation (this design)** | Report types, `ReportMode`, `ResolvedSystemPrompt` rename. |
 | **1 — Renderable trait** | Implement `TerminalRenderable` on both report types. `render` becomes the trait impl body. No behavior change. |
 | **2 — `SessionConfig`** | Introduce a session-state owner that merges CLI flags, env vars, and disk config once at startup. Expose `.system_prompt_report(&ResolvedSystemPrompt) -> SystemPromptReport` and `.agent_prompt_report(&str) -> AgentPromptReport`. Migrate call sites from boolean-threading to `&SessionConfig`. |
 | **3 — `BrowserRenderable` + tree IR** | Add `BrowserRenderable` impls; later migrate to `TreeRenderable` per `renderable/docs/tree-rendering.md`. |
