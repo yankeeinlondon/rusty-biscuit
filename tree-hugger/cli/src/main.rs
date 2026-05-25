@@ -323,6 +323,11 @@ struct PreludeFilter {
     names: HashSet<String>,
     /// Resolved prelude export symbols keyed by prelude file path.
     exports_by_file: HashMap<PathBuf, Vec<SymbolInfo>>,
+    /// Names contributed only by the `PRELUDE` env var (no resolved metadata).
+    ///
+    /// These need to be filtered against file scans because they aren't
+    /// represented in [`Self::exports_by_file`].
+    env_only_names: HashSet<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -1086,11 +1091,22 @@ fn resolve_prelude_symbols(root_dir: &Path) -> Result<PreludeFilter, TreeHuggerE
         exports_by_file.insert(candidate, resolved_exports);
     }
 
+    let resolved_names: HashSet<String> = exports_by_file
+        .values()
+        .flatten()
+        .map(|symbol| symbol.name.clone())
+        .collect();
+
+    let mut env_only_names = HashSet::new();
     if let Ok(env_val) = std::env::var("PRELUDE") {
         for name in env_val.split(',') {
             let trimmed = name.trim();
-            if !trimmed.is_empty() {
-                names.insert(trimmed.to_string());
+            if trimmed.is_empty() {
+                continue;
+            }
+            names.insert(trimmed.to_string());
+            if !resolved_names.contains(trimmed) {
+                env_only_names.insert(trimmed.to_string());
             }
         }
     }
@@ -1098,6 +1114,7 @@ fn resolve_prelude_symbols(root_dir: &Path) -> Result<PreludeFilter, TreeHuggerE
     Ok(PreludeFilter {
         names,
         exports_by_file,
+        env_only_names,
     })
 }
 
@@ -1602,31 +1619,31 @@ fn summarize_file(
                     summary.exports = exports.clone();
                 }
                 SymbolFilter::Prelude(filter) => {
-                    if filter.exports_by_file.is_empty() {
-                        // Backwards-compatible fallback for PRELUDE env-only filtering.
-                        summary.symbols = all_symbols
-                            .clone()
-                            .into_iter()
-                            .filter(|s| filter.names.contains(&s.name))
-                            .collect();
-                        summary.exports = exports
-                            .clone()
-                            .into_iter()
-                            .filter(|s| filter.names.contains(&s.name))
-                            .collect();
-                        summary.locals = locals
-                            .clone()
-                            .into_iter()
-                            .filter(|s| filter.names.contains(&s.name))
-                            .collect();
-                    } else if let Some(prelude_exports) = filter.exports_by_file.get(&index.file) {
+                    if let Some(prelude_exports) = filter.exports_by_file.get(&index.file) {
                         summary.symbols = prelude_exports.clone();
                         summary.exports = summary.symbols.clone();
                         summary.locals.clear();
                     } else {
-                        summary.symbols.clear();
-                        summary.exports.clear();
-                        summary.locals.clear();
+                        let name_filter = if filter.exports_by_file.is_empty() {
+                            &filter.names
+                        } else {
+                            &filter.env_only_names
+                        };
+                        summary.symbols = all_symbols
+                            .clone()
+                            .into_iter()
+                            .filter(|s| name_filter.contains(&s.name))
+                            .collect();
+                        summary.exports = exports
+                            .clone()
+                            .into_iter()
+                            .filter(|s| name_filter.contains(&s.name))
+                            .collect();
+                        summary.locals = locals
+                            .clone()
+                            .into_iter()
+                            .filter(|s| name_filter.contains(&s.name))
+                            .collect();
                     }
                 }
                 SymbolFilter::None => {

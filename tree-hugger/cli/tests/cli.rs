@@ -914,7 +914,7 @@ fn test_prelude_flag_with_real_prelude_file() {
         .to_path_buf();
     let bt_lib = repo_root.join("biscuit-terminal/lib");
 
-    let mut cmd = Command::cargo_bin("hug").unwrap();
+    let mut cmd = hug_cmd();
     cmd.current_dir(&bt_lib)
         .args(["symbols", "src/terminal.rs", "--prelude", "--plain"])
         .assert()
@@ -927,7 +927,7 @@ fn test_prelude_flag_with_real_prelude_file() {
 fn test_symbols_prelude_reports_direct_prelude_exports() {
     let fixture_pkg = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/prelude_pkg");
 
-    let mut cmd = Command::cargo_bin("hug").unwrap();
+    let mut cmd = hug_cmd();
     cmd.current_dir(&fixture_pkg)
         .args(["symbols", "--prelude", "--plain"])
         .assert()
@@ -947,7 +947,7 @@ fn test_symbols_prelude_reports_direct_prelude_exports() {
 fn test_symbols_prelude_comments_show_resolved_doc_comments() {
     let fixture_pkg = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/prelude_pkg");
 
-    let mut cmd = Command::cargo_bin("hug").unwrap();
+    let mut cmd = hug_cmd();
     cmd.current_dir(&fixture_pkg)
         .args(["symbols", "--prelude", "--plain", "--comments"])
         .assert()
@@ -970,7 +970,7 @@ fn test_functions_prelude_from_package_area_root_discovers_child_package_prelude
         .to_path_buf();
     let package_area_root = repo_root.join("biscuit-terminal");
 
-    let mut cmd = Command::cargo_bin("hug").unwrap();
+    let mut cmd = hug_cmd();
     cmd.current_dir(&package_area_root)
         .args(["functions", "--prelude", "--plain"])
         .assert()
