@@ -22,15 +22,9 @@ pub fn run(name: &str, force: u8, delete_branch_flag: bool) -> Result<(), Worktr
     // Disallow removing the main checkout — git itself rejects this, but
     // surface a friendlier error before we run any prompts.
     if entry.is_main {
-        let msg = format!(
-            "<red><b>Error:</b></red> refusing to remove the main checkout \
-            <blue>{}</blue>. Use plain <dim>git</dim> for that.",
-            name
-        );
-        eprintln!("{}", Prose::new(msg).render(&terminal));
-        return Err(WorktreeError::GitCommand(
-            "cannot remove the main worktree".into(),
-        ));
+        return Err(WorktreeError::GitCommand(format!(
+            "refusing to remove the main checkout '{name}'. Use plain git for that."
+        )));
     }
 
     let dirty = list_dirty_files(&entry.path);
@@ -98,8 +92,8 @@ fn decide_prompt(force: u8, dirty: &DirtyFiles) -> bool {
         return false;
     }
     if dirty.paths.is_empty() {
-        // Clean worktree: any force level skips prompt; no flag also skips.
-        return false;
+        // Clean worktree: prompt only when no force flag is given.
+        return force == 0;
     }
     if force == 0 {
         return true;
@@ -134,7 +128,7 @@ fn build_prompt_message(display_name: &str, dirty: &DirtyFiles) -> String {
         )
     } else if count > 0 {
         format!(
-            "- the <blue>{display_name}</blue> has {count} files which have not been \
+            "- the <blue>{display_name}</blue> has {count} non-source files which have not been \
             committed to <b>git</b>! Are you sure you want to remove this worktree? \
             All file changes will be lost."
         )
@@ -174,8 +168,8 @@ mod tests {
     }
 
     #[test]
-    fn no_force_clean_does_not_prompt() {
-        assert!(!decide_prompt(0, &DirtyFiles::default()));
+    fn no_force_clean_prompts() {
+        assert!(decide_prompt(0, &DirtyFiles::default()));
     }
 
     #[test]
@@ -228,7 +222,7 @@ mod tests {
     fn prompt_message_non_source_variant() {
         let d = dirty_with(vec!["a.md", "b.md"], false);
         let msg = build_prompt_message("feat-x", &d);
-        assert!(msg.contains("has 2 files"));
+        assert!(msg.contains("has 2 non-source files"));
         assert!(msg.contains("<blue>feat-x</blue>"));
     }
 }
