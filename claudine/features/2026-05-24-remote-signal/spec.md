@@ -85,7 +85,7 @@ graph TD
         Batcher[Micro-Batching Thread]
         
         %% Network
-        SyncMgr[Sync & Gossip Manager]
+        SyncMgr[Sync / Broadcast Manager]
         WT[web-transport]
     end
 
@@ -130,7 +130,8 @@ For the Session-log POC, only AI Agent Session Log Data is in scope. Node capabi
 AI session logs are aggregated locally and synced between explicitly paired nodes.
 
 - **Ownership & Permissions:** The local Daemon (tailing log files) and the local Client App both have write access to the local node's session documents. Remote mesh peers act strictly as **read-only listeners**.
-- **POC Document Type:** The POC must define one concrete session-log CRDT document type with enough structure to append log entries, preserve ordering within a session, identify the owning node, and replay the same document from redb after restart. Production Claudine log ingestion is out of scope.
+- **POC Document Type:** The POC uses one Loro document per chunk. The deterministic document identity should follow `session/{owner_node_id}/{session_id}/part/{chunk_index}`. Each chunk document includes deterministic metadata for `owner_node_id`, `session_id`, `chunk_index`, `created_at`, and `previous_chunk_id`, plus an append-only `entries` list.
+- **POC Entry Schema:** Each session-log entry includes `sequence`, `created_at`, `source`, `level`, `message`, and optional structured metadata. This schema is intentionally generic; production Claudine log ingestion and provider-specific event modeling are out of scope.
 - **Chunking Strategy:** To prevent infinite CRDT history growth, log documents must be aggressively chunked (e.g., session-[ID]-part-1, session-[ID]-part-2) based on byte size or line count. The POC must make the chunk threshold deterministic and testable.
 - **Conflict Profile:** Low risk. Merge conflicts are restricted to local Daemon vs. local Client updates, ensuring high-speed state vector resolution across the mesh.
 
@@ -168,6 +169,22 @@ One of the big features that eventually could be provided to Claudine is the abi
 To support both real-time UI synchronization and complex historical analytics, the daemon implements a Command Query Responsibility Segregation (CQRS) pattern.
 - **Transactional Path (redb):** All Loro document snapshots and incremental binary deltas are synchronously saved to redb. redb is the source of truth for CRDT durability. Local writes are acknowledged only after the relevant snapshot/delta is durable in redb. This ensures immediate crash-recovery and provides the raw byte arrays required to respond to state-vector sync requests from remote peers.
 - **Analytical Path (duckdb):** Clients query the daemon for metadata and historical rollups via gRPC (e.g., "Get sessions from today"). The daemon serves these requests from DuckDB, but DuckDB is an asynchronous, disposable, rebuildable projection. It may lag behind redb and must not be treated as authoritative.
+
+### Signed Sync Envelope
+
+Network sync and replay use a canonical signed envelope, not raw Loro bytes alone. The envelope is persisted with the CRDT payload so restart/replay, deduplication, and rejection behavior are defined by the same data that was accepted from the network.
+
+The POC envelope must include at least:
+
+- `sender_node_id`
+- `sender_public_key`
+- `document_id`
+- `payload_kind` (`delta` or `snapshot`)
+- a monotonic per-sender message ID
+- payload hash
+- payload bytes
+
+Receivers verify the envelope signature before applying the payload. The signed envelope defines the rejection boundary for invalid signatures, mismatched sender identity, unknown or unpaired senders, duplicate message IDs, and payload hash mismatches.
 
 ### Asynchronous Ingestion Pipeline
 
@@ -229,7 +246,9 @@ mDNS is magic when it works, but it is routinely blocked by strict enterprise fi
 
 ## Gossip
 
-OPEN DECISION:
+Gossip is not required for the Session-log POC. The POC should define a small internal sync/broadcast abstraction and use direct paired-peer sync as the first backend. This keeps the initial implementation aligned with the two-node acceptance criteria while preserving a place to add gossip later.
+
+OPEN DECISION for post-POC work:
 
 - decide between `foca` or `plumtree` for Gossip
 - [`foca`](@claudine/docs/research/remote-signal/foca.md):
@@ -253,11 +272,14 @@ Research available at:
 
 ## Acceptance Criteria
 
-- Two explicitly paired local nodes can append to the POC session-log document type, exchange signed Loro deltas, and converge to the same document state after sync.
+- Two explicitly paired local nodes can append to the POC session-log chunk document type, exchange signed Loro deltas through the direct sync backend, and converge to the same document state after sync.
+- Session-log chunk document IDs are deterministic and follow the selected one-document-per-chunk model. Replaying from redb restores the same chunk metadata and append-only entry ordering.
 - A discovered but unpaired mDNS peer cannot exchange session-log deltas. Data exchange begins only after manual invitation or explicit local approval.
-- A CRDT delta with an invalid signature, mismatched sender identity, or unknown unpaired sender is rejected and does not mutate local redb state.
+- A CRDT delta with an invalid envelope signature, mismatched sender identity, unknown unpaired sender, duplicate message ID, or payload hash mismatch is rejected and does not mutate local redb state.
+- Accepted network payloads are represented as persisted signed envelopes, including sender identity, document identity, payload kind, per-sender message ID, payload hash, and payload bytes.
 - Local session-log writes are acknowledged only after the corresponding Loro snapshot/delta is durable in redb.
 - After daemon restart, the node rebuilds its Loro state from redb and can replay/sync with a paired peer without losing acknowledged writes.
 - DuckDB may lag behind redb. Tests can demonstrate that DuckDB is rebuilt from redb and that redb, not DuckDB, is authoritative for sync/replay.
 - Chunking is deterministic and testable: appending beyond the configured threshold creates the next session-log chunk and both paired nodes converge on the same chunk set.
+- The sync/broadcast layer has a direct paired-peer backend for the POC. `foca` versus `plumtree` remains deferred until a later milestone with 3+ peer broadcast requirements.
 - The Session-log POC excludes compute jobs and production Claudine log ingestion. Node capabilities remain future work unless a minimal field is required for test support.
