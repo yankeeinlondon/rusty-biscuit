@@ -1831,6 +1831,7 @@ pub(crate) fn write_terminal_with_layout<W: std::io::Write>(
                         // fallback text on failure
                         let mut result =
                             renderer.render_image(&current_image_path, &parsed_alt, parsed_width);
+                        result = layout_alt(&result);
                         if let Some(ctx) = layout_ctx {
                             result = apply_component_layout(&result, PageComponent::Images, ctx);
                         }
