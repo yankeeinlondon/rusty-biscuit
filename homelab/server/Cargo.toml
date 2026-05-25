@@ -35,3 +35,8 @@ mime_guess = "2"
 axum-test = "18"
 tempfile = "3.15"
 serial_test = "3.2"
+
+# Opt-out of benchmarking: HTTP/REST server glue around the homelab library.
+[package.metadata.benchmarks]
+required = false
+reason = "HTTP server glue around homelab; no measurable hot paths."

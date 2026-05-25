@@ -18,3 +18,9 @@ darkmatter = { path = "../../darkmatter/lib" }
 sniff = { path = "../../sniff/lib" }
 strum = "0.28"
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+
+# Opt-out of benchmarking: this is a thin CLI wrapper; benchmarks belong
+# on the underlying library crate.
+[package.metadata.benchmarks]
+required = false
+reason = "Thin CLI wrapper around biscuit-speaks; no measurable hot paths."

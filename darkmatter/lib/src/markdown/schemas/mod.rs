@@ -291,6 +291,22 @@ pub struct ValidationReport {
     pub problems: Vec<ValidationProblem>,
 }
 
+/// Coarse classification of a validation problem.
+///
+/// Renderers use this to pick the right category label (e.g. `missing`,
+/// `type`, `invalid`) without having to infer from `property` presence or
+/// substring-matching `message`. Mapped from `jsonschema::ValidationErrorKind`
+/// at problem-construction time.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ValidationProblemKind {
+    /// A required property is missing from the instance.
+    Missing,
+    /// The instance value did not match the expected schema type.
+    Type,
+    /// Any other constraint failure (format, range, length, pattern, etc.).
+    Invalid,
+}
+
 /// A single validation problem.
 #[derive(Debug, Clone)]
 pub struct ValidationProblem {
@@ -302,6 +318,8 @@ pub struct ValidationProblem {
     pub path: String,
     /// Human-readable message; format mirrors `jsonschema`'s default.
     pub message: String,
+    /// Coarse failure category, derived from the underlying validator error.
+    pub kind: ValidationProblemKind,
     /// Name of the missing property, set only for `Required` failures.
     pub property: Option<String>,
     /// Source line of the problem in the frontmatter, when available.

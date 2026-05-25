@@ -151,6 +151,8 @@ pub enum PageComponent {
     Li,
     /// Hyperlinks.
     Hyperlinks,
+    /// Horizontal rules.
+    Hr,
     /// Lists (ordered and unordered).
     #[deprecated(note = "use PageComponent::{Ul, Ol, Li}")]
     Lists,
@@ -158,7 +160,7 @@ pub enum PageComponent {
 
 impl PageComponent {
     /// All page-component variants in canonical order.
-    pub const ALL: [PageComponent; 8] = [
+    pub const ALL: [PageComponent; 9] = [
         PageComponent::Images,
         PageComponent::BlockQuotes,
         PageComponent::Tables,
@@ -167,6 +169,7 @@ impl PageComponent {
         PageComponent::Ol,
         PageComponent::Li,
         PageComponent::Hyperlinks,
+        PageComponent::Hr,
     ];
 
     /// The three concrete list component variants.
@@ -503,7 +506,7 @@ mod tests {
 
     #[test]
     fn page_component_all_covers_every_variant() {
-        assert_eq!(PageComponent::ALL.len(), 8);
+        assert_eq!(PageComponent::ALL.len(), 9);
     }
 
     #[test]

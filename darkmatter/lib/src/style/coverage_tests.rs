@@ -45,6 +45,9 @@ fn sample_for(kind: LeafType) -> Value {
         LeafType::BackgroundEnum => json!("subtle"),
         LeafType::StringValue => json!("x"),
         LeafType::OpaqueValue => json!({"k": "v"}),
+        LeafType::HrKind => json!("waves"),
+        LeafType::HrWeight => json!("medium"),
+        LeafType::HrAlignment => json!("center"),
     }
 }
 
@@ -234,13 +237,52 @@ fn descriptor_entry_count_matches_expected() {
         // ul: 6
         // hyperlinks: 5 outer + 5 local-style = 10
         // images: 5 outer + 5 local-style = 10
-        // hr: 6
-        16 + 5 + 5 + 5 + 5 + 6 + 10 + 10 + 6;
+        // hr: 7
+        16 + 5 + 5 + 5 + 5 + 6 + 10 + 10 + 7;
     assert_eq!(
         SCHEMA.len(),
         EXPECTED,
         "descriptor entry count drifted — update EXPECTED if intentional"
     );
+}
+
+/// Test: all wired HR keys produce no `KnownButInactive` warnings.
+#[test]
+fn active_wiring_warnings_for_hr_keys() {
+    let v = json!({
+        "hr": {
+            "kind": "waves",
+            "width": "50%",
+            "max-width": "60ch",
+            "alignment": "center",
+            "color": "red-500",
+            "bg-color": "blue-500",
+            "weight": "thick"
+        }
+    });
+    let (_parsed, warnings) = from_json_value(&v).unwrap();
+
+    let inactive: Vec<&StyleWarning> = warnings
+        .iter()
+        .filter(|w| matches!(w.kind, StyleWarningKind::KnownButInactive { .. }))
+        .collect();
+
+    for path in [
+        "style.hr.kind",
+        "style.hr.width",
+        "style.hr.max-width",
+        "style.hr.alignment",
+        "style.hr.color",
+        "style.hr.bg-color",
+        "style.hr.weight",
+    ] {
+        assert!(
+            !inactive.iter().any(|w| w.path == path),
+            "wired hr key `{}` should not produce KnownButInactive, got: {:?}",
+            path,
+            inactive
+        );
+    }
 }
 
 /// Spot-check: the legacy-aliased nested children that triggered Finding 1

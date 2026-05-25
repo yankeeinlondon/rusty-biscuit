@@ -54,3 +54,21 @@ struct PostMeta {
 
 let meta: PostMeta = md.fm_parse()?;
 ```
+
+## `style:` Frontmatter
+
+`darkmatter::style` owns the document-level `style:` schema and applicators.
+It uses renderable primitives (`Length`, `Alignment`, color-backed values),
+but it writes policy onto `DarkmatterPage`; it is separate from
+`renderable::style::Style` on render-tree nodes.
+
+Active wiring is sub-spec 7:
+
+- page layout, background, color, stylesheet, meta, and code theme
+- table, image, block-quote, `ul`, `ol`, `li`, and HR layout/color policy
+- `style.hr.*` as the canonical horizontal-rule namespace
+- hyperlink style plus local hyperlink/image style overrides
+
+`KnownButInactive` should be empty for valid v1 schema keys. `--strict-style`
+promotes unknown and deprecated keys to errors, while valid unsupported
+combinations fail through documented `StyleApplyError` variants.

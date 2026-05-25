@@ -12,8 +12,10 @@ use biscuit_terminal::terminal::Terminal;
 use darkmatter::layout::{DarkmatterPage, PageAlignment, PageBackground, PageComponent};
 use darkmatter::markdown::Markdown;
 use darkmatter::style::warning::StyleWarningKind;
+use darkmatter::markdown::highlighting::ThemePair;
 use darkmatter::style::{
-    PageStyleOverrides, StyleFrontmatter, apply_page_style, from_frontmatter, into_strict,
+    BespokeStyleOverrides, PageStyleOverrides, StyleFrontmatter, apply_bespoke_style,
+    apply_page_style, from_frontmatter, into_strict,
 };
 use renderable::layout::{Alignment, Length};
 
@@ -322,5 +324,41 @@ fn color_frontmatter_applies_to_page_via_apply_color_style() {
     assert!(
         page.color_for(PageComponent::Tables).is_some(),
         "table color should be set from frontmatter"
+    );
+}
+
+#[test]
+fn code_theme_frontmatter_applies_via_apply_bespoke_style() {
+    let yaml = "---\nstyle:\n    page:\n        code:\n            theme: dracula\n---\n\n# Doc\n";
+    let md = Markdown::try_from_content(yaml).expect("parse markdown");
+    let (style, _warnings) = from_frontmatter(md.frontmatter()).expect("parse style");
+
+    let page = page_with_width(80);
+    let page = apply_bespoke_style(page, &style, BespokeStyleOverrides::default(), None)
+        .expect("apply_bespoke_style");
+
+    assert_eq!(
+        page.page_code_theme(),
+        Some(&ThemePair::Dracula),
+        "page code theme should be set from frontmatter"
+    );
+}
+
+#[test]
+fn code_theme_cli_override_skips_frontmatter_in_bespoke_apply() {
+    let yaml = "---\nstyle:\n    page:\n        code:\n            theme: dracula\n---\n\n# Doc\n";
+    let md = Markdown::try_from_content(yaml).expect("parse markdown");
+    let (style, _warnings) = from_frontmatter(md.frontmatter()).expect("parse style");
+
+    let page = page_with_width(80);
+    let overrides = BespokeStyleOverrides {
+        code_theme: true,
+        ..BespokeStyleOverrides::default()
+    };
+    let page = apply_bespoke_style(page, &style, overrides, None).expect("apply_bespoke_style");
+
+    assert!(
+        page.page_code_theme().is_none(),
+        "CLI code_theme override should skip frontmatter value"
     );
 }

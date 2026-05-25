@@ -187,13 +187,15 @@ the already extracted metadata and attach it to `DocumentMetadata`.
 
 The `style:` frontmatter pipeline reinforces this boundary. Today
 `darkmatter::style` parses the document-level style object into
-`StyleFrontmatter` and applies implemented phases 1 through 5 onto
+`StyleFrontmatter` and applies implemented phases 1 through 7 onto
 `DarkmatterPage` before rendering. That includes page layout, table/image/
-block-quote/list layout, and page/component colors. It does not mean the fold
-should parse YAML or reinterpret style keys itself. A tree-native darkmatter
-entry point should receive already-resolved page/component policy, and then
-decide which parts become `DocumentMetadata`, `NodeAttrs` layout/style hints,
-or renderer options.
+block-quote/list layout, page/component colors, HR defaults, page
+stylesheet/meta/code-theme settings, hyperlink style, and local
+hyperlink/image style. It does not mean the fold should parse YAML or
+reinterpret style keys itself. A tree-native darkmatter entry point should
+receive already-resolved page/component policy, and then decide which parts
+become `DocumentMetadata`, `NodeAttrs` layout/style hints, or renderer
+options.
 
 This keeps responsibilities clean:
 

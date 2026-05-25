@@ -149,6 +149,11 @@ pub struct OpenCodeLogBridge<S: SemanticEventSink> {
     /// records so the bridge can convert subsequent `service=session.prompt
     /// ... exiting loop` records into [`SemanticEvent::SubagentStop`] events.
     child_sessions: BTreeMap<String, ChildSessionInfo>,
+    /// Last `step` value emitted per session for `step_loop` records.
+    /// OpenCode emits a `service=session.prompt … loop` record at every
+    /// HTTP-span boundary inside the same reasoning step, so we suppress
+    /// repeats and only re-emit when `step` actually advances.
+    last_step_per_session: BTreeMap<String, u32>,
 }
 
 /// Bookkeeping for an OpenCode child session observed on the stderr stream.
@@ -181,6 +186,7 @@ impl<S: SemanticEventSink> OpenCodeLogBridge<S> {
             early_terminate_fired: false,
             primary_session_emitted: false,
             child_sessions: BTreeMap::new(),
+            last_step_per_session: BTreeMap::new(),
         }
     }
 
@@ -689,15 +695,21 @@ impl<S: SemanticEventSink> OpenCodeLogBridge<S> {
         session_id: String,
         step: u32,
     ) -> StderrIngestOutcome {
+        // OpenCode emits a `service=session.prompt … loop` record at every
+        // HTTP-span boundary inside the same step. Suppress repeats so only
+        // genuine step transitions surface.
+        if self.last_step_per_session.get(&session_id) == Some(&step) {
+            return StderrIngestOutcome::Consumed;
+        }
+        self.last_step_per_session
+            .insert(session_id.clone(), step);
+
         let mut extra_map = base_extra(record, "step_loop");
         extra_map.insert("session_id".into(), Value::String(session_id.clone()));
         extra_map.insert("step".into(), json!(step));
 
         self.sink.on_semantic_event(SemanticEvent::Info {
-            message: format!(
-                "step_loop step={step} session={}",
-                short_session(&session_id)
-            ),
+            message: format!("step_loop step={step} session={session_id}"),
             extra: Value::Object(extra_map),
         });
         StderrIngestOutcome::Consumed
@@ -708,11 +720,15 @@ impl<S: SemanticEventSink> OpenCodeLogBridge<S> {
         record: &OpenCodeLogRecord,
         session_id: String,
     ) -> StderrIngestOutcome {
+        // Drop the dedup entry so a follow-up prompt on the same session
+        // starts fresh.
+        self.last_step_per_session.remove(&session_id);
+
         let mut extra_map = base_extra(record, "step_exit");
         extra_map.insert("session_id".into(), Value::String(session_id.clone()));
 
         self.sink.on_semantic_event(SemanticEvent::Info {
-            message: format!("exiting_loop session={}", short_session(&session_id)),
+            message: format!("exiting_loop session={session_id}"),
             extra: Value::Object(extra_map),
         });
 
@@ -842,26 +858,6 @@ impl<S: SemanticEventSink> OpenCodeLogBridge<S> {
             );
         }
     }
-}
-
-/// Compact a session id for inline display: keep the `ses_` prefix and the
-/// last 6 hex characters so a 28-character id like `ses_27262f0abffeUMCCfD7fDPCivR`
-/// renders as `ses_…DPCivR`.
-fn short_session(session_id: &str) -> String {
-    const TAIL_LEN: usize = 6;
-    let body = session_id.strip_prefix("ses_").unwrap_or(session_id);
-    if body.chars().count() <= TAIL_LEN + 4 {
-        return session_id.to_string();
-    }
-    let tail: String = body
-        .chars()
-        .rev()
-        .take(TAIL_LEN)
-        .collect::<Vec<_>>()
-        .into_iter()
-        .rev()
-        .collect();
-    format!("ses_…{tail}")
 }
 
 /// Render the inline message string for a `service=llm ... stream` event.
@@ -1553,15 +1549,63 @@ mod tests {
         assert_eq!(bridge.ingest(line), StderrIngestOutcome::Consumed);
         match &bridge.sink.events[0] {
             SemanticEvent::Info { message, extra } => {
-                assert!(
-                    message.starts_with("step_loop step=3 session="),
-                    "expected enriched step_loop message, got {message:?}",
-                );
+                assert_eq!(message, "step_loop step=3 session=ses_a");
                 assert_string(extra, "session_id", "ses_a");
                 assert_eq!(extra.get("step"), Some(&json!(3)));
             }
             other => panic!("expected Info, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn step_loop_dedups_repeated_step_in_same_session() {
+        let mut bridge = OpenCodeLogBridge::new(RecordingSink::default(), stdout_seen(), None);
+        let same_step = "INFO  2026-05-12T20:00:12 +0ms service=session.prompt session.id=ses_a step=0 logSpan.http.span.4=55ms loop";
+        let later_span = "INFO  2026-05-12T20:00:13 +0ms service=session.prompt session.id=ses_a step=0 logSpan.http.span.4=2143ms loop";
+        let new_step = "INFO  2026-05-12T20:00:14 +0ms service=session.prompt session.id=ses_a step=1 logSpan.http.span.4=2200ms loop";
+
+        assert_eq!(bridge.ingest(same_step), StderrIngestOutcome::Consumed);
+        assert_eq!(bridge.ingest(later_span), StderrIngestOutcome::Consumed);
+        assert_eq!(bridge.ingest(new_step), StderrIngestOutcome::Consumed);
+
+        let step_loops: Vec<_> = bridge
+            .sink
+            .events
+            .iter()
+            .filter_map(|e| match e {
+                SemanticEvent::Info { message, .. } if message.starts_with("step_loop ") => {
+                    Some(message.clone())
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            step_loops,
+            vec![
+                "step_loop step=0 session=ses_a".to_string(),
+                "step_loop step=1 session=ses_a".to_string(),
+            ],
+        );
+    }
+
+    #[test]
+    fn step_loop_dedup_resets_after_step_exit() {
+        let mut bridge = OpenCodeLogBridge::new(RecordingSink::default(), stdout_seen(), None);
+        let first = "INFO  2026-05-12T20:00:12 +0ms service=session.prompt session.id=ses_a step=0 logSpan.http.span.4=55ms loop";
+        let exit = "INFO  2026-05-12T20:00:19 +0ms service=session.prompt session.id=ses_a logSpan.http.span.4=7437ms exiting loop";
+        let after = "INFO  2026-05-12T20:01:00 +0ms service=session.prompt session.id=ses_a step=0 logSpan.http.span.5=10ms loop";
+
+        assert_eq!(bridge.ingest(first), StderrIngestOutcome::Consumed);
+        assert_eq!(bridge.ingest(exit), StderrIngestOutcome::Consumed);
+        assert_eq!(bridge.ingest(after), StderrIngestOutcome::Consumed);
+
+        let step_loops = bridge
+            .sink
+            .events
+            .iter()
+            .filter(|e| matches!(e, SemanticEvent::Info { message, .. } if message.starts_with("step_loop ")))
+            .count();
+        assert_eq!(step_loops, 2, "exit should reset dedup so the next step=0 emits again");
     }
 
     #[test]
@@ -1572,10 +1616,7 @@ mod tests {
         assert_eq!(bridge.sink.events.len(), 1);
         match &bridge.sink.events[0] {
             SemanticEvent::Info { message, extra } => {
-                assert!(
-                    message.starts_with("exiting_loop session="),
-                    "expected enriched exiting_loop message, got {message:?}",
-                );
+                assert_eq!(message, "exiting_loop session=ses_a");
                 assert_string(extra, "session_id", "ses_a");
             }
             other => panic!("expected Info, got {other:?}"),

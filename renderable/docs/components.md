@@ -34,9 +34,9 @@ IR state values:
   > projection covers Browser and Markdown but whose **terminal** `render`
   > still calls the bespoke directory-tree renderer. The connector geometry
   > (`├──`, `└──`, `│`) is presentation, not document structure, and the
-  > tree path's terminal output is not yet at parity. Stage 3 will pick
-  > one of: flip to tree, document as a permanent escape hatch, or defer.
-  > See `stage3-spec.md` §S3-1c.
+  > tree path's terminal output is not yet at parity. Stage 3 deferred the
+  > terminal flip to Stage 4 pending connector-list `Style` lowering and
+  > icon-name spacing parity. See `stage3-spec.md` §S3-1c.
 - `component IR (ProseDocument)` means the component has fully migrated to its
   own component-local intermediate representation rather than the shared
   render tree. `Prose` is the only such component: it parses to a
@@ -55,12 +55,19 @@ style for these page components:
 - `style.ul.*`, `style.ol.*`, `style.li.*` → concrete list components
 - `style.page.color` / `style.page.bg-color` → inherited page defaults
 - component `color` / `bg-color` keys → component-specific overrides
+- `style.hr.*` → horizontal-rule kind, weight, layout, and color defaults
+- `style.page.stylesheet`, `style.page.meta`, `style.page.code.theme` →
+  HTML page CSS, metadata, and code-block theme defaults
+- `style.hyperlinks.*`, `style.hyperlinks.local-style.*`, and
+  `style.images.local-style.*` → inline link/image styling, with local-style
+  overrides only for local references
 
 For layout/fill fields, `width` and `max-width` are mutually exclusive within
 one bucket. `Length::Css` parses in the schema but is rejected when the current
 `DarkmatterPage` storage cannot represent it. CLI flags still win
-field-by-field over frontmatter. HR (`style.hr.*`) and bespoke knobs are
-specified but not wired yet.
+field-by-field over frontmatter. `ACTIVE_STYLE_WIRING_SUB_SPEC` is `7`, so no
+valid v1 schema key should emit `KnownButInactive`; unsupported combinations
+fail with documented `StyleApplyError` variants.
 
 | Name            | Kind   | Terminal | Browser | Markdown | Tree | IR State                     | bt CLI        | Location                                                    | Description                                                                         |
 |-----------------|--------|----------|---------|----------|------|------------------------------|---------------|-------------------------------------------------------------|-------------------------------------------------------------------------------------|

@@ -5,16 +5,17 @@
 //! pane per test would push each test past the nextest slow-test termination
 //! threshold (`slow-timeout = 5s`, `terminate-after = 3` → 15 s).
 
+use biscuit_test_harness::shared::SharedHarness;
 use biscuit_test_harness::wezterm::WezTermHarness;
-use biscuit_test_harness::{CapturedFrame, TerminalHarness, skip_with_reason};
+use biscuit_test_harness::{CapturedFrame, TerminalHarness};
 use serial_test::serial;
 use std::fs;
-use std::sync::Mutex;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::{Duration, Instant};
 use tempfile::tempdir;
+use test_toolkit::{Level, LevelDecision, evaluate_level};
 
-static SHARED_HARNESS: Mutex<Option<WezTermHarness>> = Mutex::new(None);
+static SHARED_HARNESS: SharedHarness<WezTermHarness> = SharedHarness::new();
 static SENTINEL_COUNTER: AtomicU32 = AtomicU32::new(0);
 
 const SENTINEL_TIMEOUT: Duration = Duration::from_secs(30);
@@ -65,24 +66,32 @@ fn run_with_sentinel(harness: &mut WezTermHarness, cmd: &str) -> CapturedFrame {
 /// Acquires the shared harness, spawning a pane on first use. Returns `None`
 /// when WezTerm is unavailable so callers can skip cleanly.
 fn run_md_compose(file_body: &str) -> Option<(CapturedFrame, std::path::PathBuf)> {
-    if !WezTermHarness::available() {
-        skip_with_reason("WezTerm CLI (set WEZTERM_UNIX_SOCKET)");
-        return None;
+    run_md_compose_named("unterminated.md", file_body)
+}
+
+fn run_md_compose_named(
+    file_name: &str,
+    file_body: &str,
+) -> Option<(CapturedFrame, std::path::PathBuf)> {
+    match evaluate_level(Level::L2, WezTermHarness::available(), "WezTerm") {
+        LevelDecision::Run => {}
+        LevelDecision::Skip(msg) => {
+            eprintln!("{msg}");
+            return None;
+        }
+        LevelDecision::Panic(msg) => panic!("{msg}"),
     }
 
     let dir = tempdir().unwrap();
-    let file_path = dir.path().join("unterminated.md");
+    let file_path = dir.path().join(file_name);
     fs::write(&file_path, file_body).unwrap();
     let canonical = file_path.canonicalize().expect("canonicalize failed");
 
-    let mut guard = SHARED_HARNESS
-        .lock()
-        .unwrap_or_else(|poison| poison.into_inner());
-    if guard.is_none() {
+    let mut guard = SHARED_HARNESS.get_or_init(|| {
         let mut harness = WezTermHarness::new();
         harness.spawn_shell().expect("spawn_shell failed");
-        *guard = Some(harness);
-    }
+        harness
+    });
     let harness = guard.as_mut().unwrap();
 
     // Reset the visible region so a previous test's output does not bleed
@@ -98,6 +107,13 @@ fn run_md_compose(file_body: &str) -> Option<(CapturedFrame, std::path::PathBuf)
 
 // Unterminated page block to trigger PageBlockError::UnterminatedBlock.
 const UNTERMINATED_BLOCK: &str = "::block when=\"true\"\nbody\n";
+
+// Document with an inline `$schema` requiring a property the frontmatter does
+// not satisfy. Drives the styled `SchemaValidationFailed` block through the
+// real binary + terminal so SGR/OSC8 behavior is captured live, not just
+// asserted against a process-local renderer.
+const MISSING_REQUIRED_SCHEMA: &str =
+    "---\n$schema:\n  spec: 'string(min(1); required)'\nspec: \"\"\n---\nBody\n";
 
 #[test]
 #[serial(level2_terminal)]
@@ -120,6 +136,71 @@ fn level2_error_header_contains_osc8_hyperlink() {
         frame.plain.contains("unterminated.md"),
         "expected plain text to contain label 'unterminated.md'. plain:\n{}",
         frame.plain
+    );
+}
+
+/// Level-2 capture for the `SchemaValidationFailed` styled block: drives
+/// `md compose` against a fixture with an inline schema, captures the live
+/// terminal pane, and verifies the user-visible styling requirements survive
+/// the real binary path (OSC8 source link, red category label on the bullet,
+/// inverse property name, and dim/italic SGR for the rendered block).
+#[test]
+#[serial(level2_terminal)]
+fn level2_schema_validation_block_renders_styled_link_and_bullet() {
+    let Some((frame, canonical)) =
+        run_md_compose_named("planner-schema.md", MISSING_REQUIRED_SCHEMA)
+    else {
+        return;
+    };
+
+    // OSC8 hyperlink to the source file in the styled header/body. macOS
+    // aliases `/var` to `/private/var`; the binary embeds whichever spelling
+    // the user passed on the command line, so accept either form.
+    let canonical_url = format!("file://{}", canonical.to_string_lossy());
+    let aliased_url = canonical_url.replacen("file:///private", "file://", 1);
+    let osc8_canonical = format!("\x1b]8;;{}", canonical_url);
+    let osc8_aliased = format!("\x1b]8;;{}", aliased_url);
+    assert!(
+        frame.raw.contains(&osc8_canonical) || frame.raw.contains(&osc8_aliased),
+        "expected OSC8 hyperlink for {canonical_url} (or aliased {aliased_url}). raw:\n{}",
+        frame.raw
+    );
+
+    // The header text and failing-property bullet must be visible in plain.
+    assert!(
+        frame.plain.contains("schema validation failed"),
+        "expected schema-validation header text. plain:\n{}",
+        frame.plain
+    );
+    assert!(
+        frame.plain.contains("spec"),
+        "expected failing property `spec` to appear on the bullet. plain:\n{}",
+        frame.plain
+    );
+    assert!(
+        frame.plain.contains("planner-schema.md"),
+        "expected source filename in styled block. plain:\n{}",
+        frame.plain
+    );
+
+    // Red SGR (31 / 91 / 38;5;1 / 38;2;...) somewhere in the rendered block,
+    // and inverse SGR (7) on the property name. Be tolerant of theme palette
+    // differences: any one of the red ANSI variants is enough.
+    let has_red = frame.raw.contains("\x1b[31m")
+        || frame.raw.contains("\x1b[91m")
+        || frame.raw.contains("\x1b[0;31m")
+        || frame.raw.contains("\x1b[38;5;1")
+        || frame.raw.contains("\x1b[38;2;");
+    assert!(
+        has_red,
+        "expected red SGR for `missing`/`invalid` category label. raw:\n{}",
+        frame.raw
+    );
+    let has_inverse = frame.raw.contains("\x1b[7m") || frame.raw.contains("\x1b[0;7m");
+    assert!(
+        has_inverse,
+        "expected inverse SGR for property name. raw:\n{}",
+        frame.raw
     );
 }
 

@@ -12,6 +12,7 @@ use std::time::{Duration, Instant};
 /// report has a deterministic, intuitive ordering.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) enum PerfMetricKind {
+    SchemaValidation,
     FrontmatterInterpolation,
     FrontmatterShellExpansion,
     EffectiveStateBuild,
@@ -34,6 +35,7 @@ impl PerfMetricKind {
     /// Convert to the public `ComposeStage` enum.
     fn stage(self) -> ComposeStage {
         match self {
+            Self::SchemaValidation => ComposeStage::SchemaValidation,
             Self::FrontmatterInterpolation => ComposeStage::FrontmatterInterpolation,
             Self::FrontmatterShellExpansion => ComposeStage::FrontmatterShellExpansion,
             Self::EffectiveStateBuild => ComposeStage::EffectiveStateBuild,
@@ -56,6 +58,7 @@ impl PerfMetricKind {
     /// All variants in pipeline execution order.
     fn all() -> &'static [PerfMetricKind] {
         &[
+            Self::SchemaValidation,
             Self::FrontmatterInterpolation,
             Self::FrontmatterShellExpansion,
             Self::EffectiveStateBuild,
@@ -83,7 +86,7 @@ pub(crate) struct PerfCollector {
     enabled: bool,
     start: Option<Instant>,
     /// Fixed-size array indexed by `PerfMetricKind` ordinal.
-    durations: [(Duration, usize); 16],
+    durations: [(Duration, usize); 17],
 }
 
 impl PerfCollector {
@@ -93,7 +96,7 @@ impl PerfCollector {
         Self {
             enabled,
             start: if enabled { Some(Instant::now()) } else { None },
-            durations: [(Duration::ZERO, 0); 16],
+            durations: [(Duration::ZERO, 0); 17],
         }
     }
 

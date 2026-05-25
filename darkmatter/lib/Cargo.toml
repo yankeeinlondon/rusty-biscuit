@@ -90,7 +90,13 @@ git2 = "0.20"
 proptest = "1.6"
 criterion = { version = "0.5", features = ["html_reports"] }
 biscuit-test-harness = { path = "../../biscuit-test-harness" }
+biscuit-browser-harness = { path = "../../biscuit-browser-harness" }
+test-toolkit = { path = "../../tools/test-toolkit" }
 tempfile = "3"
+# Used by the `html_to_png` example for direct visual inspection. The browser
+# *tests* go through biscuit-browser-harness; the example reaches for the
+# chromiumoxide screenshot API directly because the harness intentionally
+# doesn't expose `full_page` screenshots.
 chromiumoxide = { version = "0.7", default-features = false, features = ["tokio-runtime"] }
 futures-util = "0.3"
 

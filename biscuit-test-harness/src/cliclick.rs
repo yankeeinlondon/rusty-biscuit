@@ -166,6 +166,35 @@ pub fn click_then_ctrl_chord(x: i32, y: i32, key: &str) -> io::Result<()> {
     ])
 }
 
+/// Clicks at `(x, y)` and dispatches an Alt+`key` chord **in a single
+/// cliclick invocation**.
+///
+/// Mirror of [`click_then_ctrl_chord`] for the Alt/Option modifier. On
+/// macOS, the chord rides along with the letter keyDown as a normal
+/// CGEvent (the modifier flag is set on the same event), so this path
+/// reaches WezTerm even though bare-Option presses do not — see the
+/// commentary in [`system_events_key_down`] for the flagsChanged
+/// distinction.
+///
+/// ## Errors
+///
+/// Returns `io::Error` when cliclick is missing or returns non-zero.
+pub fn click_then_alt_chord(x: i32, y: i32, key: &str) -> io::Result<()> {
+    if !available() {
+        return Err(io::Error::other("cliclick not installed"));
+    }
+    run_verbose(&[
+        "-m",
+        "verbose",
+        "-w",
+        "100",
+        &format!("c:{x},{y}"),
+        "kd:alt",
+        &format!("t:{key}"),
+        "ku:alt",
+    ])
+}
+
 /// Holds a bare modifier (e.g. `"control"`, `"option"`, `"command"`,
 /// `"shift"`) down via AppleScript / System Events — **not** cliclick.
 ///

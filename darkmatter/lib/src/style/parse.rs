@@ -19,7 +19,7 @@ use crate::style::warning::{StyleWarning, StyleWarningKind};
 /// `sub_spec` is `<=` this constant are considered wired and stay silent.
 ///
 /// Advance this constant whenever a future sub-spec wires its keys.
-pub const ACTIVE_STYLE_WIRING_SUB_SPEC: u8 = 5;
+pub const ACTIVE_STYLE_WIRING_SUB_SPEC: u8 = 7;
 
 /// Parse a `serde_json::Value` representing the value at the `style:` key.
 ///
@@ -58,7 +58,41 @@ pub fn from_json_value(
     // Pass 3: emit `KnownButInactive` for every leaf that is in the schema.
     annotate_known_but_inactive(value, &mut warnings);
 
+    // Pass 4: detect deprecated typed-enum spellings that serde's `alias`
+    // attribute accepts silently. Currently this covers
+    // `style.hr.alignment: centered`, which is accepted as an alias for
+    // `center` but must surface a `Deprecated` warning so `--strict-style`
+    // rejects it.
+    scan_deprecated_enum_aliases(value, &mut warnings);
+
     Ok((parsed, warnings))
+}
+
+/// Detect typed-enum aliases that serde's `#[serde(alias = ...)]` accepts
+/// without surfacing the spelling used by the document.
+///
+/// Today this covers a single case: `style.hr.alignment: "centered"` is
+/// accepted as an alias for `"center"`, but Design Decision #10 of sub-spec #6
+/// requires a `Deprecated { replacement: "center" }` warning so strict mode
+/// can reject the legacy spelling. The schema walker only handles
+/// snake-case → kebab-case aliasing, so this special case lives here.
+fn scan_deprecated_enum_aliases(value: &Value, warnings: &mut Vec<StyleWarning>) {
+    let Value::Object(root) = value else {
+        return;
+    };
+    let Some(Value::Object(hr)) = root.get("hr") else {
+        return;
+    };
+    if let Some(Value::String(s)) = hr.get("alignment") {
+        if s == "centered" {
+            warnings.push(StyleWarning::new(
+                "style.hr.alignment",
+                StyleWarningKind::Deprecated {
+                    replacement: "center".into(),
+                },
+            ));
+        }
+    }
 }
 
 /// Walk the raw style value and validate every known typed leaf. Returns
@@ -107,7 +141,10 @@ fn validate_leaf(
         LeafType::Alignment
         | LeafType::BackgroundEnum
         | LeafType::StringValue
-        | LeafType::OpaqueValue => Ok(()),
+        | LeafType::OpaqueValue
+        | LeafType::HrKind
+        | LeafType::HrWeight
+        | LeafType::HrAlignment => Ok(()),
     }
 }
 
@@ -240,9 +277,14 @@ fn annotate_inner(value: &Value, canonical_path: &str, warnings: &mut Vec<StyleW
 }
 
 use crate::markdown::Frontmatter;
+use crate::style::schema::hr::HrStyle;
 
 /// Parse the `style:` value from a `Frontmatter`. Returns
 /// `(StyleFrontmatter::default(), vec![])` when no `style:` key is present.
+///
+/// If a top-level `hr:` key exists in the frontmatter, its values are merged
+/// into `style.hr` as a deprecated alias, emitting
+/// [`StyleWarningKind::Deprecated`] for every field that is used.
 ///
 /// ## Errors
 ///
@@ -250,9 +292,131 @@ use crate::markdown::Frontmatter;
 pub fn from_frontmatter(
     fm: &Frontmatter,
 ) -> Result<(StyleFrontmatter, Vec<StyleWarning>), StyleParseError> {
-    match fm.as_map().get("style") {
-        Some(value) => from_json_value(value),
-        None => Ok((StyleFrontmatter::default(), Vec::new())),
+    let (mut style, mut warnings) = match fm.as_map().get("style") {
+        Some(value) => from_json_value(value)?,
+        None => (StyleFrontmatter::default(), Vec::new()),
+    };
+
+    if let Some(hr_value) = fm.as_map().get("hr") {
+        merge_deprecated_top_level_hr(hr_value, &mut style, &mut warnings);
+    }
+
+    Ok((style, warnings))
+}
+
+/// Merge a deprecated top-level `hr:` frontmatter block into
+/// `StyleFrontmatter::hr`, field-by-field, emitting deprecation warnings.
+///
+/// Warnings are emitted on **alias presence**, not on successful typed
+/// migration: any top-level `hr:` key (or a non-mapping `hr:` value) produces
+/// a `Deprecated` warning even if the typed `HrStyle` deserialization fails.
+/// This keeps `--strict-style` honest — strict mode rejects the deprecated
+/// alias regardless of whether the legacy block happens to also be typed-valid.
+///
+/// `style.hr` wins when a field is present in both; top-level `hr` only fills
+/// missing values when typed deserialization of the legacy block succeeds.
+fn merge_deprecated_top_level_hr(
+    hr_value: &serde_json::Value,
+    style: &mut StyleFrontmatter,
+    warnings: &mut Vec<StyleWarning>,
+) {
+    let serde_json::Value::Object(map) = hr_value else {
+        // Non-mapping top-level `hr:` (scalar, null, array, ...) is still
+        // alias usage. Emit a single deprecation warning so strict mode
+        // rejects the document.
+        warnings.push(StyleWarning::new(
+            "hr",
+            StyleWarningKind::Deprecated {
+                replacement: "style.hr".into(),
+            },
+        ));
+        return;
+    };
+
+    // Pass 1: emit a Deprecated warning for every recognized legacy key
+    // present in the raw map. This must happen before any typed
+    // deserialization so invalid-but-legacy-tolerated shapes (e.g.
+    // `alignment: true`) still trip strict mode.
+    let mut emitted_any = false;
+    for key in map.keys() {
+        let (canonical_legacy_path, replacement) = match key.as_str() {
+            "width" => ("hr.width", "style.hr.width"),
+            "max-width" | "max_width" => ("hr.max-width", "style.hr.max-width"),
+            "color" => ("hr.color", "style.hr.color"),
+            "bg-color" | "bg_color" => ("hr.bg-color", "style.hr.bg-color"),
+            "alignment" => ("hr.alignment", "style.hr.alignment"),
+            "style" => ("hr.style", "style.hr.kind"),
+            "kind" => ("hr.kind", "style.hr.kind"),
+            "weight" => ("hr.weight", "style.hr.weight"),
+            _ => continue,
+        };
+        warnings.push(StyleWarning::new(
+            canonical_legacy_path,
+            StyleWarningKind::Deprecated {
+                replacement: replacement.into(),
+            },
+        ));
+        emitted_any = true;
+    }
+
+    // If the map has no recognized HR keys, the alias itself is still in
+    // use (and would have been a no-op silently before). Emit a top-level
+    // deprecation so strict mode rejects it.
+    if !emitted_any {
+        warnings.push(StyleWarning::new(
+            "hr",
+            StyleWarningKind::Deprecated {
+                replacement: "style.hr".into(),
+            },
+        ));
+    }
+
+    // Pass 2: best-effort typed migration. Build a temporary JSON object
+    // that maps the legacy top-level `hr` keys onto the `HrStyle` schema
+    // (style -> kind, everything else passes through unchanged), then merge
+    // any fields that deserialize cleanly into `style.hr`. If the typed
+    // deserialization fails, the alias warnings above still ensure strict
+    // mode rejects the document; non-strict callers just lose the legacy
+    // values, which matches the prior behavior.
+    let mut mapped = serde_json::Map::new();
+    for (key, value) in map {
+        let canonical_key = match key.as_str() {
+            "style" => "kind",
+            other => other,
+        };
+        mapped.insert(canonical_key.to_string(), value.clone());
+    }
+
+    let hr_style: HrStyle = match serde_json::from_value(serde_json::Value::Object(mapped)) {
+        Ok(h) => h,
+        Err(_) => return,
+    };
+
+    // Ensure `style.hr` exists so we can fill missing fields.
+    let target = style.hr.get_or_insert_with(HrStyle::default);
+
+    // Values are merged only when `style.hr` is missing that field. Warnings
+    // were already emitted in pass 1 from the raw map keys.
+    if hr_style.width.is_some() && target.width.is_none() {
+        target.width = hr_style.width;
+    }
+    if hr_style.max_width.is_some() && target.max_width.is_none() {
+        target.max_width = hr_style.max_width;
+    }
+    if hr_style.color.is_some() && target.color.is_none() {
+        target.color = hr_style.color;
+    }
+    if hr_style.bg_color.is_some() && target.bg_color.is_none() {
+        target.bg_color = hr_style.bg_color;
+    }
+    if hr_style.alignment.is_some() && target.alignment.is_none() {
+        target.alignment = hr_style.alignment;
+    }
+    if hr_style.kind.is_some() && target.kind.is_none() {
+        target.kind = hr_style.kind;
+    }
+    if hr_style.weight.is_some() && target.weight.is_none() {
+        target.weight = hr_style.weight;
     }
 }
 
@@ -481,22 +645,29 @@ mod tests {
     }
 
     #[test]
-    fn future_phase_key_still_emits_known_but_inactive() {
-        // `hr.color` is wired in sub-spec #6 — still inactive.
-        let (_, w) = from_json_value(&json!({
-            "hr": {"color": "red-500"}
-        }))
-        .unwrap();
-        let inactive: Vec<_> = w
-            .iter()
-            .filter(|w| matches!(w.kind, StyleWarningKind::KnownButInactive { .. }))
-            .collect();
-        assert_eq!(inactive.len(), 1);
-        assert_eq!(inactive[0].path, "style.hr.color");
-        assert!(matches!(
-            inactive[0].kind,
-            StyleWarningKind::KnownButInactive { sub_spec: 6 }
-        ));
+    fn sub_spec_7_keys_no_longer_emit_known_but_inactive() {
+        // After sub-spec #7 lands, all its keys are wired and silent.
+        let cases = [
+            json!({"hyperlinks": {"local-style": {"color": "red-500"}}}),
+            json!({"page": {"stylesheet": "https://example.com/style.css"}}),
+            json!({"page": {"meta": {"description": "A page"}}}),
+            json!({"page": {"code": {"theme": "dracula"}}}),
+            json!({"hyperlinks": {"width": "40ch"}}),
+            json!({"images": {"local-style": {"color": "blue-500"}}}),
+        ];
+        for v in &cases {
+            let (_, w) = from_json_value(v).unwrap();
+            let inactive: Vec<_> = w
+                .iter()
+                .filter(|w| matches!(w.kind, StyleWarningKind::KnownButInactive { .. }))
+                .collect();
+            assert!(
+                inactive.is_empty(),
+                "sub-spec #7 key in {:?} should not emit KnownButInactive; got: {:?}",
+                v,
+                inactive,
+            );
+        }
     }
 
     #[test]
@@ -530,40 +701,61 @@ mod tests {
     }
 
     #[test]
-    fn sub_spec_6_7_keys_still_emit_known_but_inactive() {
-        // Keys wired in sub-specs #6 and #7 remain inactive.
+    fn sub_spec_6_keys_no_longer_emit_known_but_inactive() {
+        // Phase 3 of sub-spec #6: HR keys are now wired. They must not emit
+        // KnownButInactive.
         let cases = [
-            ("style.hr.color", json!({"hr": {"color": "red-500"}}), 6),
-            (
-                "style.hr.bg-color",
-                json!({"hr": {"bg-color": "blue-200"}}),
-                6,
-            ),
-            (
-                "style.hyperlinks.local-style.color",
-                json!({"hyperlinks": {"local-style": {"color": "red-500"}}}),
-                7,
-            ),
+            json!({"hr": {"color": "red-500"}}),
+            json!({"hr": {"bg-color": "blue-200"}}),
+            json!({"hr": {"kind": "waves"}}),
+            json!({"hr": {"weight": "thick"}}),
+            json!({"hr": {"width": "50%"}}),
+            json!({"hr": {"max-width": "20ch"}}),
+            json!({"hr": {"alignment": "center"}}),
         ];
-        for (path, v, expected_sub_spec) in &cases {
+        for v in &cases {
             let (_, w) = from_json_value(v).unwrap();
             let inactive: Vec<_> = w
                 .iter()
                 .filter(|w| matches!(w.kind, StyleWarningKind::KnownButInactive { .. }))
                 .collect();
-            assert_eq!(inactive.len(), 1, "expected 1 inactive for {}", path);
-            assert_eq!(inactive[0].path, *path);
             assert!(
-                matches!(
-                    inactive[0].kind,
-                    StyleWarningKind::KnownButInactive { sub_spec }
-                    if sub_spec == *expected_sub_spec
-                ),
-                "expected sub_spec {}, got {:?}",
-                expected_sub_spec,
-                inactive[0].kind
+                inactive.is_empty(),
+                "sub-spec #6 key in {:?} should not emit KnownButInactive; got: {:?}",
+                v,
+                inactive,
             );
         }
+    }
+
+    #[test]
+    fn no_known_but_inactive_for_any_valid_v1_key() {
+        // After sub-spec #7, every valid v1 schema key is wired.
+        let v = json!({
+            "page": {
+                "left-margin": "2ch", "right-margin": "4ch",
+                "top-margin": 1, "bottom-margin": 0,
+                "max-width": "80%", "alignment": "center",
+                "background": "subtle",
+                "stylesheet": "https://example.com/style.css",
+                "meta": { "description": "Test" },
+                "code": { "theme": "dracula" }
+            },
+            "table": { "alignment": "right", "max-width": "50%", "color": "red-500" },
+            "images": { "width": "40ch", "alignment": "center", "local-style": { "color": "blue-500" } },
+            "block-quote": { "max-width": "60ch", "alignment": "left" },
+            "ul": { "alignment": "left", "left-margin": "4ch", "max-width": "40" },
+            "ol": { "alignment": "right" },
+            "li": { "alignment": "center" },
+            "hr": { "kind": "waves", "weight": "thick", "alignment": "center", "color": "slate-400" },
+            "hyperlinks": { "color": "cyan-400", "local-style": { "color": "blue-300" } }
+        });
+        let (_, w) = from_json_value(&v).unwrap();
+        let inactive: Vec<_> = w
+            .iter()
+            .filter(|w| matches!(w.kind, StyleWarningKind::KnownButInactive { .. }))
+            .collect();
+        assert!(inactive.is_empty(), "expected zero KnownButInactive warnings; got: {:?}", inactive);
     }
 
     #[test]
@@ -677,6 +869,59 @@ mod tests {
     }
 
     #[test]
+    fn from_frontmatter_top_level_hr_merges_into_style_hr() {
+        let mut fm = Frontmatter::new();
+        fm.insert("hr", json!({"style": "waves", "color": "red-500"}))
+            .unwrap();
+        let (s, w) = from_frontmatter(&fm).unwrap();
+        let hr = s.hr.expect("hr should be populated from top-level alias");
+        assert_eq!(hr.kind, Some(crate::style::schema::hr::HrKind::Waves));
+        assert!(hr.color.is_some());
+
+        let deprecated: Vec<_> = w
+            .iter()
+            .filter(|w| matches!(w.kind, StyleWarningKind::Deprecated { .. }))
+            .collect();
+        assert_eq!(deprecated.len(), 2, "expected 2 deprecated warnings: {:?}", w);
+        assert!(deprecated.iter().any(|w| w.path == "hr.style"));
+        assert!(deprecated.iter().any(|w| w.path == "hr.color"));
+    }
+
+    #[test]
+    fn from_frontmatter_style_hr_beats_top_level_hr() {
+        let mut fm = Frontmatter::new();
+        fm.insert("style", json!({"hr": {"kind": "dots"}})).unwrap();
+        fm.insert("hr", json!({"style": "waves"})).unwrap();
+        let (s, w) = from_frontmatter(&fm).unwrap();
+        let hr = s.hr.expect("hr should exist");
+        assert_eq!(hr.kind, Some(crate::style::schema::hr::HrKind::Dots));
+
+        // Top-level `hr.style` is still deprecated even when overridden.
+        assert!(w.iter().any(|w| w.path == "hr.style"));
+    }
+
+    #[test]
+    fn from_frontmatter_top_level_hr_only_fills_missing_fields() {
+        let mut fm = Frontmatter::new();
+        fm.insert("style", json!({"hr": {"kind": "waves", "weight": "thick"}}))
+            .unwrap();
+        fm.insert("hr", json!({"style": "dots", "weight": "thin", "color": "red"}))
+            .unwrap();
+        let (s, w) = from_frontmatter(&fm).unwrap();
+        let hr = s.hr.expect("hr should exist");
+        // style.hr values win.
+        assert_eq!(hr.kind, Some(crate::style::schema::hr::HrKind::Waves));
+        assert_eq!(hr.weight, Some(crate::style::schema::hr::HrWeight::Thick));
+        // Missing in style.hr, filled from top-level.
+        assert!(hr.color.is_some());
+
+        // Every key present in the deprecated top-level block emits a warning.
+        assert!(w.iter().any(|w| w.path == "hr.color"));
+        assert!(w.iter().any(|w| w.path == "hr.style"));
+        assert!(w.iter().any(|w| w.path == "hr.weight"));
+    }
+
+    #[test]
     fn into_strict_passes_clean_parse() {
         let parsed = from_json_value(&json!({"page": {"left-margin": "2ch"}})).unwrap();
         let s = into_strict(parsed).unwrap();
@@ -711,6 +956,166 @@ mod tests {
         }))
         .unwrap();
         assert!(into_strict(parsed).is_ok());
+    }
+
+    #[test]
+    fn into_strict_fails_on_top_level_hr_alias() {
+        let mut fm = Frontmatter::new();
+        fm.insert("hr", json!({"style": "waves"})).unwrap();
+        let parsed = from_frontmatter(&fm).unwrap();
+        assert!(matches!(
+            into_strict(parsed),
+            Err(StyleParseError::Strict { .. })
+        ));
+    }
+
+    #[test]
+    fn into_strict_fails_on_top_level_hr_alias_with_invalid_typed_field() {
+        // `alignment: true` cannot deserialize as `HrAlignment`. Before the
+        // fix, this silently slipped past strict mode because the typed
+        // `HrStyle` deserialization failed and no deprecation warning was
+        // ever emitted. The alias presence — not typed-success — is what
+        // strict mode must reject.
+        let mut fm = Frontmatter::new();
+        fm.insert("hr", json!({"style": "waves", "alignment": true}))
+            .unwrap();
+        let parsed = from_frontmatter(&fm).unwrap();
+        match into_strict(parsed) {
+            Err(StyleParseError::Strict { warnings }) => {
+                assert!(
+                    warnings.iter().any(|w| w.path == "hr.style"),
+                    "expected hr.style deprecation, got {:?}",
+                    warnings
+                );
+                assert!(
+                    warnings.iter().any(|w| w.path == "hr.alignment"),
+                    "expected hr.alignment deprecation, got {:?}",
+                    warnings
+                );
+            }
+            other => panic!("expected Strict error, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn into_strict_fails_on_non_mapping_top_level_hr() {
+        // A scalar top-level `hr: dashes` is still alias usage and must
+        // trip strict mode even though it can't deserialize as `HrStyle`.
+        let mut fm = Frontmatter::new();
+        fm.insert("hr", json!("dashes")).unwrap();
+        let parsed = from_frontmatter(&fm).unwrap();
+        match into_strict(parsed) {
+            Err(StyleParseError::Strict { warnings }) => {
+                assert!(
+                    warnings.iter().any(|w| w.path == "hr"
+                        && matches!(w.kind, StyleWarningKind::Deprecated { .. })),
+                    "expected hr deprecation, got {:?}",
+                    warnings
+                );
+            }
+            other => panic!("expected Strict error, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn into_strict_fails_on_empty_top_level_hr_mapping() {
+        // Even an empty `hr: {}` block names the deprecated alias; strict
+        // mode should still reject the document.
+        let mut fm = Frontmatter::new();
+        fm.insert("hr", json!({})).unwrap();
+        let parsed = from_frontmatter(&fm).unwrap();
+        match into_strict(parsed) {
+            Err(StyleParseError::Strict { warnings }) => {
+                assert!(
+                    warnings.iter().any(|w| w.path == "hr"
+                        && matches!(w.kind, StyleWarningKind::Deprecated { .. })),
+                    "expected hr deprecation, got {:?}",
+                    warnings
+                );
+            }
+            other => panic!("expected Strict error, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn top_level_hr_with_invalid_typed_field_still_emits_warnings() {
+        // Non-strict callers also see the deprecation warnings, even when
+        // the typed migration drops the field.
+        let mut fm = Frontmatter::new();
+        fm.insert("hr", json!({"style": "waves", "alignment": true}))
+            .unwrap();
+        let (_, w) = from_frontmatter(&fm).unwrap();
+        assert!(w.iter().any(|w| w.path == "hr.style"));
+        assert!(w.iter().any(|w| w.path == "hr.alignment"));
+    }
+
+    #[test]
+    fn hr_alignment_centered_emits_deprecated_warning() {
+        // `style.hr.alignment: centered` is accepted as an alias for
+        // `center` (serde alias). The typed value must still parse to
+        // `HrAlignment::Center`, but a `Deprecated` warning must be
+        // emitted so `--strict-style` rejects the legacy spelling.
+        let (s, w) = from_json_value(&json!({"hr": {"alignment": "centered"}})).unwrap();
+        let hr = s.hr.expect("hr should be populated");
+        assert_eq!(
+            hr.alignment,
+            Some(crate::style::schema::hr::HrAlignment::Center)
+        );
+
+        let deprecated: Vec<_> = w
+            .iter()
+            .filter(|w| matches!(w.kind, StyleWarningKind::Deprecated { .. }))
+            .collect();
+        assert_eq!(
+            deprecated.len(),
+            1,
+            "expected exactly one Deprecated warning, got {:?}",
+            w
+        );
+        assert_eq!(deprecated[0].path, "style.hr.alignment");
+        match &deprecated[0].kind {
+            StyleWarningKind::Deprecated { replacement } => {
+                assert_eq!(replacement, "center");
+            }
+            other => panic!("expected Deprecated, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn hr_alignment_center_emits_no_warning() {
+        // The canonical spelling must produce zero warnings.
+        let (s, w) = from_json_value(&json!({"hr": {"alignment": "center"}})).unwrap();
+        let hr = s.hr.expect("hr should be populated");
+        assert_eq!(
+            hr.alignment,
+            Some(crate::style::schema::hr::HrAlignment::Center)
+        );
+        assert!(
+            w.is_empty(),
+            "canonical `center` must not produce warnings, got {:?}",
+            w
+        );
+    }
+
+    #[test]
+    fn into_strict_fails_on_hr_alignment_centered_alias() {
+        let parsed = from_json_value(&json!({"hr": {"alignment": "centered"}})).unwrap();
+        match into_strict(parsed) {
+            Err(StyleParseError::Strict { warnings }) => {
+                assert!(
+                    warnings
+                        .iter()
+                        .any(|w| w.path == "style.hr.alignment"
+                            && matches!(
+                                &w.kind,
+                                StyleWarningKind::Deprecated { replacement } if replacement == "center"
+                            )),
+                    "expected style.hr.alignment deprecation with replacement=center, got {:?}",
+                    warnings
+                );
+            }
+            other => panic!("expected Strict error, got {:?}", other),
+        }
     }
 
     #[test]

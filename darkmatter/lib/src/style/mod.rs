@@ -37,6 +37,7 @@
 
 pub mod alignment;
 pub mod apply;
+pub mod bespoke;
 pub mod color;
 pub mod descriptor;
 pub mod error;
@@ -50,9 +51,14 @@ pub mod warning;
 mod coverage_tests;
 
 pub use apply::{
-    apply_color_style, apply_component_style, apply_list_style, apply_page_style,
-    ComponentStyleOverrides, ListStyleOverrides, PageStyleOverrides, StyleApplyError,
+    apply_color_style, apply_component_style, apply_hr_style, apply_list_style, apply_page_style,
+    ComponentStyleOverrides, HrStyleOverrides, ListStyleOverrides, PageStyleOverrides,
+    StyleApplyError,
 };
+pub use bespoke::{
+    apply_bespoke_style, BespokeStyleOverrides, MetaTag, PageMeta, PageStylesheet,
+};
+pub use apply::{map_hr_alignment, map_hr_kind, map_hr_weight};
 pub use color::{lower_to_css, lower_to_sgr, wrap_with_color, StyleColor};
 pub use error::StyleParseError;
 pub use parse::{from_frontmatter, from_json_value, into_strict};

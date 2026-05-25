@@ -288,6 +288,12 @@ The page-level wiring is exposed through two public items in `darkmatter::style`
 /// shorthand expansion rules as `apply_cli_layout_flags`. This type
 /// lives in the darkmatter library so the style applicator does not
 /// depend on CLI argument structs.
+///
+/// The component-specific alignment fields (`align_images`, `align_lists`,
+/// `align_ul`, `align_ol`, `align_li`, `align_block_quotes`, `align_tables`,
+/// `align_code_blocks`) record CLI claims made by the corresponding
+/// `--align-*` flags. When set, the `style.page.alignment` broadcast skips
+/// that component so component-specific CLI alignment is preserved.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct PageStyleOverrides {
     pub margin_top: bool,
@@ -301,6 +307,14 @@ pub struct PageStyleOverrides {
     pub max_width: bool,
     pub background: bool,
     pub alignment: bool,
+    pub align_images: bool,
+    pub align_lists: bool,
+    pub align_ul: bool,
+    pub align_ol: bool,
+    pub align_li: bool,
+    pub align_block_quotes: bool,
+    pub align_tables: bool,
+    pub align_code_blocks: bool,
 }
 
 /// Apply parsed page-level style onto a DarkmatterPage builder.

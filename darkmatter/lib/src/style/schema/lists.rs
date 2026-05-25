@@ -11,8 +11,10 @@ use crate::style::length::deserialize_optional_length;
 pub struct UlStyle {
     #[serde(flatten)]
     pub common: CommonStyle,
-    /// Indent applied to ul content. Wired in sub-spec #4 as
-    /// `PageFill::Indent` on `PageComponent::Ul`.
+    /// Left margin applied to ul content. Lowers to
+    /// `DarkmatterPage::list_left_margins` keyed on `PageComponent::Ul` (an
+    /// independent indent channel — not a `PageFill::Indent`); only the `ul`
+    /// bucket is accepted.
     #[serde(
         deserialize_with = "deserialize_optional_length",
         alias = "left_margin"

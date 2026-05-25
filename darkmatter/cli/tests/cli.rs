@@ -3481,6 +3481,81 @@ fn style_strict_style_fails_on_deprecated_key() {
 }
 
 #[test]
+fn style_strict_style_fails_on_top_level_hr_alias() {
+    // Sub-spec #6: `--strict-style` must reject the deprecated top-level
+    // `hr:` block, even when its contents would type-check as `HrStyle`.
+    let tmp = md_file(
+        "---\n\
+        hr:\n\
+        \x20   style: waves\n\
+        ---\n\n# Doc\n\n---\n",
+    );
+
+    let output = md_cmd()
+        .arg(tmp.path())
+        .arg("--output")
+        .arg("html")
+        .arg("--strict-style")
+        .env("MD_DRY_RUN", "1")
+        .output()
+        .unwrap();
+    assert!(
+        !output.status.success(),
+        "--strict-style must fail on top-level `hr:` alias"
+    );
+}
+
+#[test]
+fn style_strict_style_fails_on_top_level_hr_alias_with_invalid_field() {
+    // `alignment: true` cannot deserialize as `HrAlignment`. The alias
+    // presence — not typed migration success — is what must be rejected.
+    let tmp = md_file(
+        "---\n\
+        hr:\n\
+        \x20   style: waves\n\
+        \x20   alignment: true\n\
+        ---\n\n# Doc\n\n---\n",
+    );
+
+    let output = md_cmd()
+        .arg(tmp.path())
+        .arg("--output")
+        .arg("html")
+        .arg("--strict-style")
+        .env("MD_DRY_RUN", "1")
+        .output()
+        .unwrap();
+    assert!(
+        !output.status.success(),
+        "--strict-style must fail on top-level `hr:` alias even when the \
+         typed migration would drop fields"
+    );
+}
+
+#[test]
+fn style_strict_style_fails_on_non_mapping_top_level_hr() {
+    // A scalar `hr: dashes` is still alias usage and must trip strict mode.
+    let tmp = md_file(
+        "---\n\
+        hr: dashes\n\
+        ---\n\n# Doc\n\n---\n",
+    );
+
+    let output = md_cmd()
+        .arg(tmp.path())
+        .arg("--output")
+        .arg("html")
+        .arg("--strict-style")
+        .env("MD_DRY_RUN", "1")
+        .output()
+        .unwrap();
+    assert!(
+        !output.status.success(),
+        "--strict-style must fail on non-mapping top-level `hr:`"
+    );
+}
+
+#[test]
 fn style_non_strict_renders_with_unknown_key() {
     // Without `--strict-style`, an unknown key must NOT fail the render; it
     // becomes an informational warning. Route through `--output html` to
@@ -3560,7 +3635,7 @@ fn apply_style_for(raw: &str, args: &[&str]) -> DarkmatterPage {
     let md = Markdown::try_from_content(raw).unwrap();
     let term = Terminal::new_optimistic(80);
     let page = apply_cli_layout_flags(DarkmatterPage::new(&term), &cli);
-    apply_style_frontmatter(page, &md, &cli).expect("style apply")
+    apply_style_frontmatter(page, &md, &cli, None).expect("style apply")
 }
 
 #[test]
@@ -3923,7 +3998,7 @@ fn no_style_frontmatter_leaves_cli_layout_state_intact() {
     let term = Terminal::new_optimistic(120);
     let cli_only = apply_cli_layout_flags(DarkmatterPage::new(&term), &cli);
     let after_style =
-        apply_style_frontmatter(cli_only.clone(), &md, &cli).expect("style apply");
+        apply_style_frontmatter(cli_only.clone(), &md, &cli, None).expect("style apply");
 
     assert_eq!(
         after_style.margin(),
@@ -4015,7 +4090,7 @@ terminal is reasonably wide.\n";
     let term = Terminal::new_optimistic(100);
     let page = DarkmatterPage::new(&term);
     let page = apply_cli_layout_flags(page, &cli);
-    let page = apply_style_frontmatter(page, &md, &cli).expect("style apply");
+    let page = apply_style_frontmatter(page, &md, &cli, None).expect("style apply");
 
     // Structural guard: the apply pipeline put the fill where the renderer
     // will look for it.

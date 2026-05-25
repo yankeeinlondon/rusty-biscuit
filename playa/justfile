@@ -55,15 +55,68 @@ install *args="":
     @just build --release
     @just _install "./cli" "Playa CLI" {{args}}
 
+# --- Canonical lifecycle recipe set (testing-best-practices Phase 3) -------
+
+# Fast confidence subset (≤15s, lib + bin, !slow). Doctests live in `doctest`.
+sanity:
+    @just _sanity playa
+    @just _sanity playa-cli
+
 # Test both library and CLI.
 test *args="":
     @just _test playa {{args}}
     @just _test playa-cli {{args}}
 
+# not applicable: playa has no real-terminal (Level-2) tests
+test-l2:
+    @echo "test-l2: not applicable for playa"
+
+# not applicable: playa has no OS-keyboard-injection (Level-3) tests
+test-l3:
+    @echo "test-l3: not applicable for playa"
+
+# not applicable: playa emits audio, not HTML
+test-browser:
+    @echo "test-browser: not applicable for playa"
+
+# Real-device/audio-output tests. Skip-clean without audio sink.
+test-real *args="":
+    @just _test_real playa {{args}}
+    @just _test_real playa-cli {{args}}
+
 # Lint both the library and CLI
 lint:
     @just _lint playa
     @just _lint playa-cli
+
+# not applicable: no criterion benches yet
+bench:
+    @echo "bench: not applicable for playa"
+
+# Per-package LCOV coverage.
+coverage *args="":
+    @just _coverage playa {{args}}
+    @just _coverage playa-cli {{args}}
+
+# Doctests.
+doctest *args="":
+    @just _doctest playa {{args}}
+    @just _doctest playa-cli {{args}}
+
+# not applicable: no cargo-fuzz targets
+fuzz:
+    @echo "fuzz: not applicable for playa"
+
+# Canonical PR-gate runner: sanity → lint → doctest → test → test-l2 → test-browser.
+all:
+    @just sanity
+    @just lint
+    @just doctest
+    @just test
+    @just test-l2
+    @just test-browser
+
+# ----------------------------------------------------------------------------
 
 # Lint (and fix) both the library and CLI
 lint-fix:

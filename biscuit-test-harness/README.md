@@ -105,6 +105,22 @@ Every backend implements one **shell-model-first** contract:
 
 Assert styling/links on `raw`; assert visible text on `plain`.
 
+## Default L2 backend: prefer `TmuxHarness`
+
+**Pick `TmuxHarness` first.** It is fully headless, requires only `tmux`
+on `$PATH`, and runs on any CI runner without a GUI. It covers the
+common Level-2 capability surface (plain text, SGR, OSC8) and is the
+only backend immune to the "which terminal am I running inside" gotcha
+described below.
+
+Reach for `WezTermHarness` or `KittyHarness` **only** when you need a
+capability tmux cannot deliver: graphics protocols, inline images,
+truecolor display nuances, Kitty keyboard-protocol bytes, or a
+`pane_size()`/`pane_cols()` geometry query against a real emulator.
+Tests that require those capabilities should document the dependency
+inline. Use `AppleTerminalHarness` exclusively for graceful-degradation
+checks on a deliberately low-capability terminal.
+
 ## Harness variants — when to use which
 
 All four implement `TerminalHarness`. Choose by the capability you need
@@ -152,6 +168,32 @@ let harness = WezTermHarness::new().with_spawn_visibility(SpawnVisibility::Foreg
 visibility is irrelevant. `AppleTerminalHarness` always spawns behind
 the developer's frontmost app (it snapshots and restores focus around
 the `do script` call).
+
+## Sharing a harness across tests — `SharedHarness<T>`
+
+Spawning a real terminal costs 2–3 s. Test binaries that hold many
+`#[serial]` tests against the same backend should share a single
+harness via [`shared::SharedHarness`]. The helper wraps the
+`Mutex<Option<T>>` + `libc::atexit` cleanup pattern so the harness's
+`Drop` impl runs at process exit (Rust does not run `Drop` on `static`
+values, which would otherwise leak the pane).
+
+```rust,ignore
+use biscuit_test_harness::shared::SharedHarness;
+use biscuit_test_harness::wezterm::WezTermHarness;
+
+static SHARED: SharedHarness<WezTermHarness> = SharedHarness::new();
+
+fn run_in_pane() {
+    let mut guard = SHARED.get_or_init(|| {
+        let mut h = WezTermHarness::new();
+        h.spawn_shell().expect("spawn_shell");
+        h
+    });
+    let harness = guard.as_mut().expect("harness present");
+    // ... drive the harness ...
+}
+```
 
 ## Defensive cleanup
 

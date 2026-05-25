@@ -31,10 +31,17 @@ pub enum LeafType {
     /// `PageBackground` enum (`"transparent" | "subtle" | "pronounced"`).
     /// Validated by serde — no pre-validator emitted.
     BackgroundEnum,
-    /// Free-form string (e.g. `stylesheet`, `hr.kind`, `code.theme`).
+    /// Free-form string (e.g. `stylesheet`, `code.theme`).
     StringValue,
     /// Opaque `serde_json::Value` (e.g. `page.meta`). Accepts anything.
     OpaqueValue,
+    /// `HrKind` enum (`"dashes" | "dots" | "waves" | "line-star" |
+    /// "line-circle" | "inset-line" | "curtain-rod"`).
+    HrKind,
+    /// `HrWeight` enum (`"thin" | "medium" | "thick"`).
+    HrWeight,
+    /// `HrAlignment` enum (`"full" | "left" | "center" | "right"`).
+    HrAlignment,
 }
 
 /// A single schema leaf: its canonical kebab-case path, any documented
@@ -138,10 +145,11 @@ pub const SCHEMA: &[SchemaLeaf] = &[
     // ── hr ──────────────────────────────────────────────────────────────
     SchemaLeaf { canonical: "hr.width",     alias: None,                 sub_spec: 6, leaf_type: LeafType::HorizontalLength },
     SchemaLeaf { canonical: "hr.max-width", alias: Some("hr.max_width"), sub_spec: 6, leaf_type: LeafType::HorizontalLength },
-    SchemaLeaf { canonical: "hr.alignment", alias: None,                 sub_spec: 6, leaf_type: LeafType::Alignment },
+    SchemaLeaf { canonical: "hr.alignment", alias: None,                 sub_spec: 6, leaf_type: LeafType::HrAlignment },
     SchemaLeaf { canonical: "hr.color",     alias: None,                 sub_spec: 6, leaf_type: LeafType::Color },
     SchemaLeaf { canonical: "hr.bg-color",  alias: Some("hr.bg_color"),  sub_spec: 6, leaf_type: LeafType::Color },
-    SchemaLeaf { canonical: "hr.kind",      alias: None,                 sub_spec: 6, leaf_type: LeafType::StringValue },
+    SchemaLeaf { canonical: "hr.kind",      alias: None,                 sub_spec: 6, leaf_type: LeafType::HrKind },
+    SchemaLeaf { canonical: "hr.weight",    alias: None,                 sub_spec: 6, leaf_type: LeafType::HrWeight },
 ];
 
 /// Return the canonical schema leaf for `raw_path` if it matches either a

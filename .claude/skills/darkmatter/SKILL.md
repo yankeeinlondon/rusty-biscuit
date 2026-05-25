@@ -1,6 +1,7 @@
 ---
 name: darkmatter
 description: Expert knowledge for the darkmatter Rust library - Markdown parsing, composition, frontmatter, terminal/HTML rendering, style frontmatter, syntax highlighting, and document comparison. Use when parsing or composing Markdown, rendering Markdown to terminal/HTML/Markdown, working with DarkmatterPage, `style:` frontmatter, frontmatter hashing, or comparing documents.
+hash: f2684be908858a21
 ---
 
 # darkmatter
@@ -34,7 +35,7 @@ terminal components, images, Mermaid, and graph rendering are delegated to
 ## `style:` Frontmatter Status
 
 The active style-frontmatter wiring phase is
-`darkmatter::style::parse::ACTIVE_STYLE_WIRING_SUB_SPEC = 5`.
+`darkmatter::style::parse::ACTIVE_STYLE_WIRING_SUB_SPEC = 7`.
 
 Implemented:
 
@@ -46,12 +47,14 @@ Implemented:
 - page and component `color` / `bg-color` wiring
 - `md --strict-style`, which fails on unknown/deprecated schema keys but not
   on valid future-phase keys
+- sub-spec #6 HR migration: top-level `hr:` merges into `style.hr.*` with
+  `Deprecated` warnings; inline `{ style: ... }` is parsed as a deprecated alias
+  for `{ kind: ... }`; `apply_hr_style` wires `style.hr.*` onto `DarkmatterPage`
+- sub-spec #7 bespoke knobs: `page.stylesheet`, `page.meta`, `page.code.theme`,
+  hyperlink/image local-style behavior; `apply_bespoke_style` wired into the
+  CLI render pipeline; `ACTIVE_STYLE_WIRING_SUB_SPEC` advanced to `7`
 
-Still planned:
-
-- sub-spec #6 HR migration from top-level `hr:` to `style.hr.*`
-- sub-spec #7 bespoke knobs: `page.stylesheet`, `page.meta`,
-  `page.code.theme`, hyperlink/image local-style behavior
+No valid v1 schema keys remain unwired.
 
 CLI flags win over frontmatter field-by-field. For implementation details, read
 `darkmatter/lib/src/style/{parse.rs,apply.rs}` and
@@ -82,6 +85,35 @@ let output = DarkmatterPage::new(&term)
     .render(&md)?;
 ```
 
+## Compose Pipeline
+
+The compose pipeline runs in three phases:
+
+**Inline Pre** (serial):
+
+1. **Schema Validation** - Validate frontmatter against `$schema` or `ComposeOptions::baseline_schema`. Runs after `--set` / `--state` overrides but before interpolation or shell expansion.
+2. **Frontmatter Interpolation** - Resolve `{{ variable }}` in frontmatter values.
+3. **Frontmatter Shell Expansion** - Execute top-level `$(cmd)` frontmatter values.
+4. **Text Replacement** - Replace literal strings from `replace:` map.
+5. **Page Blocks** - Evaluate `::block`/`::end-block` conditional regions.
+6. **Interpolation** - Expand `{{ variable }}` in body content.
+7. **Shell Expansion** - Execute `::shell` directives.
+8. **Link Resolve** - Resolve local links to absolute paths.
+
+**Transclusion** (concurrent):
+
+- `::file`, `::code`, `::toc-linking`, `prologue`/`epilogue`
+
+**Inline Post** (serial):
+
+- Cleanup and normalization.
+
+**Finalization** (root-only):
+
+- Link normalization (absolute → portable paths).
+
+See `compose.md` for the full API, interpolation syntax, and transclusion details.
+
 ## Progressive Disclosure
 
 Open only the topic file needed for the task:
@@ -109,5 +141,5 @@ the `biscuit-terminal` skill for terminal tree rendering.
   for terminal and browser syntax highlighting.
 - Code-block themes resolve against the inverted page color mode for contrast;
   ordinary prose follows the real mode.
-- Horizontal rules still use the legacy top-level `hr:` defaults and inline
-  `{ style: ... }` attributes until style-property sub-spec #6 lands.
+- Horizontal rules: canonical styling is `style.hr.*` with `apply_hr_style`;
+  top-level `hr:` and inline `{ style: ... }` remain deprecated aliases.

@@ -456,9 +456,9 @@ pub fn fold_markdown_spanned_with_frontmatter(
                     }),
                 };
                 let hr_ns = renderable::tree::HintNamespace("darkmatter.hr");
-                if let Some(style) = attrs.style {
+                if let Some(kind) = attrs.kind.as_ref().or(attrs.legacy_style.as_ref()) {
                     node.attrs
-                        .set_hint(hr_ns, "style", serde_json::json!(style));
+                        .set_hint(hr_ns, "kind", serde_json::json!(kind));
                 }
                 if let Some(alignment) = attrs.alignment {
                     node.attrs
@@ -1266,7 +1266,7 @@ mod tests {
         let hr = find_hr(&doc.root).expect("ThematicBreak must exist");
         let ns = renderable::tree::HintNamespace("darkmatter.hr");
         assert_eq!(
-            hr.attrs.get_hint(ns, "style"),
+            hr.attrs.get_hint(ns, "kind"),
             Some(&serde_json::json!("waves"))
         );
         assert_eq!(

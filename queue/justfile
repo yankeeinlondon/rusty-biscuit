@@ -30,14 +30,66 @@ build *args="":
     @cargo build -p queue-cli {{args}}
     @echo
 
+# --- Canonical lifecycle recipe set (testing-best-practices Phase 3) -------
+
+# Fast confidence subset (≤15s, lib + bin, !slow). Doctests live in `doctest`.
+sanity:
+    @just _sanity queue
+    @just _sanity queue-cli
+
 # test library and CLI
 test *args="":
     @just _test queue {{ args }}
     @just _test queue-cli {{ args }}
 
+# not applicable: queue has no real-terminal (Level-2) tests
+test-l2:
+    @echo "test-l2: not applicable for queue"
+
+# not applicable: queue has no OS-keyboard-injection (Level-3) tests
+test-l3:
+    @echo "test-l3: not applicable for queue"
+
+# not applicable: queue emits queue data, not HTML
+test-browser:
+    @echo "test-browser: not applicable for queue"
+
+# not applicable: queue has no real-resource tier
+test-real:
+    @echo "test-real: not applicable for queue"
+
 # lint with clippy
 lint *args="":
     @cargo clippy -p queue -p queue-cli {{args}}
+
+# not applicable: no criterion benches yet
+bench:
+    @echo "bench: not applicable for queue"
+
+# Per-package LCOV coverage.
+coverage *args="":
+    @just _coverage queue {{ args }}
+    @just _coverage queue-cli {{ args }}
+
+# Doctests.
+doctest *args="":
+    @just _doctest queue {{ args }}
+    @just _doctest queue-cli {{ args }}
+
+# not applicable: no cargo-fuzz targets
+fuzz:
+    @echo "fuzz: not applicable for queue"
+
+# Canonical PR-gate runner: sanity → lint → doctest → test → test-l2 → test-browser.
+all:
+    @just sanity
+    @just lint
+    @just doctest
+    @just test
+    @just test-l2
+    @just test-browser
+
+# ----------------------------------------------------------------------------
 
 # install latest release version of CLI
 install *args="":

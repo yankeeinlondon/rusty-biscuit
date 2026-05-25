@@ -13,6 +13,7 @@ use super::types::{
 };
 use crate::markdown::highlighting::ColorMode;
 use crate::style::StyleColor;
+use crate::style::schema::CommonStyle;
 
 /// Resolved layout state used during terminal rendering.
 ///
@@ -70,6 +71,12 @@ pub(crate) struct LayoutContext {
     /// Per-component background colors.
     #[allow(dead_code)]
     pub component_bg_colors: std::collections::HashMap<PageComponent, StyleColor>,
+    /// Global hyperlink style from `style.hyperlinks.*`.
+    pub hyperlink_style: Option<CommonStyle>,
+    /// Local hyperlink override from `style.hyperlinks.local-style`.
+    pub local_hyperlink_style: Option<CommonStyle>,
+    /// Local image override from `style.images.local-style`.
+    pub local_image_style: Option<CommonStyle>,
 }
 
 /// Concrete RGB background color resolved from [`PageBackground`] and the
@@ -147,6 +154,9 @@ impl LayoutContext {
         page_bg_color: Option<StyleColor>,
         component_colors: std::collections::HashMap<PageComponent, StyleColor>,
         component_bg_colors: std::collections::HashMap<PageComponent, StyleColor>,
+        hyperlink_style: Option<CommonStyle>,
+        local_hyperlink_style: Option<CommonStyle>,
+        local_image_style: Option<CommonStyle>,
     ) -> Result<Self, PageRenderError> {
         let margin_x = margin.horizontal();
         let padding_x = padding.horizontal();
@@ -228,6 +238,9 @@ impl LayoutContext {
             page_bg_color,
             component_colors,
             component_bg_colors,
+            hyperlink_style,
+            local_hyperlink_style,
+            local_image_style,
         })
     }
 
@@ -265,6 +278,89 @@ impl LayoutContext {
         self.component_bg_colors
             .get(&component)
             .or(self.page_bg_color.as_ref())
+    }
+
+    /// Resolve effective hyperlink foreground/background colors.
+    ///
+    /// For local links (`is_local == true`), merges `local_hyperlink_style`
+    /// over `hyperlink_style` and uses the resulting color fields. For remote
+    /// links, uses the global `hyperlinks` component color.
+    pub fn hyperlink_color(&self, is_local: bool) -> (Option<StyleColor>, Option<StyleColor>) {
+        let merged = if is_local {
+            self.local_hyperlink_style.as_ref().map(|local| {
+                if let Some(base) = self.hyperlink_style.as_ref() {
+                    crate::style::bespoke::merge_common_style(base, local)
+                } else {
+                    local.clone()
+                }
+            })
+        } else {
+            self.hyperlink_style.clone()
+        };
+
+        let fg = merged
+            .as_ref()
+            .and_then(|s| s.color.clone())
+            .or_else(|| self.component_colors.get(&PageComponent::Hyperlinks).cloned())
+            .or_else(|| self.page_color.clone());
+        let bg = merged
+            .as_ref()
+            .and_then(|s| s.bg_color.clone())
+            .or_else(|| self.component_bg_colors.get(&PageComponent::Hyperlinks).cloned())
+            .or_else(|| self.page_bg_color.clone());
+
+        (fg, bg)
+    }
+
+    /// Resolve the effective hyperlink [`CommonStyle`] for a link.
+    ///
+    /// For local links (`is_local == true`), merges `local_hyperlink_style`
+    /// over `hyperlink_style`. For remote links, returns `hyperlink_style`.
+    pub fn effective_hyperlink_style(&self, is_local: bool) -> Option<CommonStyle> {
+        if is_local {
+            self.local_hyperlink_style.as_ref().map(|local| {
+                if let Some(base) = self.hyperlink_style.as_ref() {
+                    crate::style::bespoke::merge_common_style(base, local)
+                } else {
+                    local.clone()
+                }
+            }).or_else(|| self.hyperlink_style.clone())
+        } else {
+            self.hyperlink_style.clone()
+        }
+    }
+
+    /// Resolve effective image foreground/background colors for fallback text.
+    ///
+    /// For local images (`is_local == true`), merges `local_image_style`
+    /// over the global `style.images.*` colors. For remote images, uses the
+    /// global `images` component color.
+    pub fn image_color(&self, is_local: bool) -> (Option<StyleColor>, Option<StyleColor>) {
+        let merged = if is_local {
+            self.local_image_style.as_ref().map(|local| {
+                let base = CommonStyle {
+                    color: self.component_colors.get(&PageComponent::Images).cloned(),
+                    bg_color: self.component_bg_colors.get(&PageComponent::Images).cloned(),
+                    ..CommonStyle::default()
+                };
+                crate::style::bespoke::merge_common_style(&base, local)
+            })
+        } else {
+            None
+        };
+
+        let fg = merged
+            .as_ref()
+            .and_then(|s| s.color.clone())
+            .or_else(|| self.component_colors.get(&PageComponent::Images).cloned())
+            .or_else(|| self.page_color.clone());
+        let bg = merged
+            .as_ref()
+            .and_then(|s| s.bg_color.clone())
+            .or_else(|| self.component_bg_colors.get(&PageComponent::Images).cloned())
+            .or_else(|| self.page_bg_color.clone());
+
+        (fg, bg)
     }
 
     /// Get the list left margin for a component, if any.
@@ -439,6 +535,9 @@ mod tests {
             page_bg_color: None,
             component_colors: HashMap::new(),
             component_bg_colors: HashMap::new(),
+            hyperlink_style: None,
+            local_hyperlink_style: None,
+            local_image_style: None,
         }
     }
 

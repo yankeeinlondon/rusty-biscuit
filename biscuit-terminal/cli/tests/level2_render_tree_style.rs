@@ -17,8 +17,9 @@
 //! terminal is absent the test prints `skipping: requires <X>` to stderr and
 //! returns immediately. No `#[ignore]` markers are used.
 
-use biscuit_test_harness::{CapturedFrame, TerminalHarness, skip_with_reason};
+use biscuit_test_harness::{CapturedFrame, TerminalHarness};
 use serial_test::serial;
+use test_toolkit::{Level, require_level};
 
 /// Unique words in the quoted text so the rendered output row can be
 /// isolated from the shell prompt and the command echo.
@@ -102,10 +103,11 @@ fn assert_styled_border<H: TerminalHarness>(harness: &mut H) {
 fn level2_block_quote_style_border_in_wezterm() {
     use biscuit_test_harness::wezterm::WezTermHarness;
 
-    if !WezTermHarness::available() {
-        skip_with_reason("WezTerm CLI (set WEZTERM_UNIX_SOCKET)");
-        return;
-    }
+    require_level!(
+        Level::L2,
+        WezTermHarness::available(),
+        "WezTerm CLI (set WEZTERM_UNIX_SOCKET)",
+    );
 
     let mut harness = WezTermHarness::new();
     harness.spawn_shell().expect("spawn_shell failed");
@@ -117,10 +119,11 @@ fn level2_block_quote_style_border_in_wezterm() {
 fn level2_block_quote_style_border_in_kitty() {
     use biscuit_test_harness::kitty::KittyHarness;
 
-    if !KittyHarness::available() {
-        skip_with_reason("Kitty remote control (set KITTY_LISTEN_ON)");
-        return;
-    }
+    require_level!(
+        Level::L2,
+        KittyHarness::available(),
+        "Kitty remote control (set KITTY_LISTEN_ON)",
+    );
 
     let mut harness = KittyHarness::new();
     harness.spawn_shell().expect("spawn_shell failed");
@@ -132,10 +135,7 @@ fn level2_block_quote_style_border_in_kitty() {
 fn level2_block_quote_style_border_in_tmux() {
     use biscuit_test_harness::tmux::TmuxHarness;
 
-    if !TmuxHarness::available() {
-        skip_with_reason("tmux");
-        return;
-    }
+    require_level!(Level::L2, TmuxHarness::available(), "tmux");
 
     let mut harness = TmuxHarness::new();
     harness.spawn_shell().expect("spawn_shell failed");
@@ -235,10 +235,11 @@ fn assert_styled_inline_content<H: TerminalHarness>(harness: &mut H) {
 fn level2_block_quote_styled_inline_content_in_wezterm() {
     use biscuit_test_harness::wezterm::WezTermHarness;
 
-    if !WezTermHarness::available() {
-        skip_with_reason("WezTerm CLI (set WEZTERM_UNIX_SOCKET)");
-        return;
-    }
+    require_level!(
+        Level::L2,
+        WezTermHarness::available(),
+        "WezTerm CLI (set WEZTERM_UNIX_SOCKET)",
+    );
 
     let mut harness = WezTermHarness::new();
     harness.spawn_shell().expect("spawn_shell failed");
@@ -250,10 +251,11 @@ fn level2_block_quote_styled_inline_content_in_wezterm() {
 fn level2_block_quote_styled_inline_content_in_kitty() {
     use biscuit_test_harness::kitty::KittyHarness;
 
-    if !KittyHarness::available() {
-        skip_with_reason("Kitty remote control (set KITTY_LISTEN_ON)");
-        return;
-    }
+    require_level!(
+        Level::L2,
+        KittyHarness::available(),
+        "Kitty remote control (set KITTY_LISTEN_ON)",
+    );
 
     let mut harness = KittyHarness::new();
     harness.spawn_shell().expect("spawn_shell failed");
@@ -613,10 +615,11 @@ fn assert_table_styled<H: TerminalHarness>(harness: &mut H) {
 fn level2_render_tree_style_in_wezterm() {
     use biscuit_test_harness::wezterm::WezTermHarness;
 
-    if !WezTermHarness::available() {
-        skip_with_reason("WezTerm CLI (set WEZTERM_UNIX_SOCKET)");
-        return;
-    }
+    require_level!(
+        Level::L2,
+        WezTermHarness::available(),
+        "WezTerm CLI (set WEZTERM_UNIX_SOCKET)",
+    );
 
     let mut harness = WezTermHarness::new();
     harness.spawn_shell().expect("spawn_shell failed");
@@ -637,10 +640,11 @@ fn level2_render_tree_style_in_wezterm() {
 fn level2_render_tree_style_in_kitty() {
     use biscuit_test_harness::kitty::KittyHarness;
 
-    if !KittyHarness::available() {
-        skip_with_reason("Kitty remote control (set KITTY_LISTEN_ON)");
-        return;
-    }
+    require_level!(
+        Level::L2,
+        KittyHarness::available(),
+        "Kitty remote control (set KITTY_LISTEN_ON)",
+    );
 
     let mut harness = KittyHarness::new();
     harness.spawn_shell().expect("spawn_shell failed");
@@ -661,10 +665,7 @@ fn level2_render_tree_style_in_kitty() {
 fn level2_render_tree_style_in_tmux() {
     use biscuit_test_harness::tmux::TmuxHarness;
 
-    if !TmuxHarness::available() {
-        skip_with_reason("tmux");
-        return;
-    }
+    require_level!(Level::L2, TmuxHarness::available(), "tmux");
 
     let mut harness = TmuxHarness::new();
     harness.spawn_shell().expect("spawn_shell failed");

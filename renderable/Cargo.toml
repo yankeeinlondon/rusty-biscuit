@@ -7,6 +7,8 @@ license = "AGPL-3.0-only"
 [lib]
 name = "renderable"
 path = "src/lib.rs"
+# Disable the default bench harness so `cargo bench` only runs Criterion targets.
+bench = false
 
 [features]
 clap = ["dep:clap"]
@@ -23,3 +25,8 @@ clap = { version = "4", features = ["derive"], optional = true }
 
 [dev-dependencies]
 proptest = "1.5"
+criterion = { version = "0.5", features = ["html_reports"] }
+
+[[bench]]
+name = "render"
+harness = false

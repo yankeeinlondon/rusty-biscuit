@@ -40,7 +40,7 @@ use crate::markdown::{
     highlighting::{
         CodeHighlighter, ColorMode, ThemePair, prose::ProseHighlighter, scope_cache::ScopeCache,
     },
-    inline::{InlineEvent, InlineStyleProcessor, InlineTag},
+    inline::{HorizontalRuleAttrs, InlineEvent, InlineStyleProcessor, InlineTag},
     output::code_block,
 };
 use biscuit_terminal::components::horizontal_rule::HorizontalRule;
@@ -779,6 +779,11 @@ pub struct TerminalOptions {
     /// - `Always`: Always emit OSC 8 escape codes (for pre-rendering)
     /// - `Never`: Never emit OSC 8 codes; use fallback format `text [url]`
     pub hyperlink_mode: HyperlinkMode,
+    /// Resolved HR defaults from `style.hr` frontmatter (or `DarkmatterPage`
+    /// builder calls). When present, terminal rendering uses these as the
+    /// default horizontal-rule style instead of reading the deprecated top-level
+    /// `hr:` frontmatter block.
+    pub hr_defaults: Option<crate::markdown::inline::HorizontalRuleAttrs>,
 }
 
 static DETECTED_COLOR_MODE: std::sync::OnceLock<ColorMode> = std::sync::OnceLock::new();
@@ -806,6 +811,7 @@ impl Default for TerminalOptions {
             max_width: None,
             mermaid_mode: MermaidMode::default(),
             hyperlink_mode: HyperlinkMode::default(),
+            hr_defaults: None,
         }
     }
 }
@@ -926,7 +932,11 @@ pub(crate) fn write_terminal_with_layout<W: std::io::Write>(
             .background
             .unwrap_or(Color::BLACK),
     );
-    let hr_defaults = hr_defaults_from_frontmatter(md);
+    let hr_fallback = hr_defaults_from_frontmatter(md);
+    let hr_defaults: Option<&HorizontalRuleAttrs> = options
+        .hr_defaults
+        .as_ref()
+        .or(hr_fallback.as_ref());
 
     // Load prose theme for ProseHighlighter
     let prose_syntect_theme =
@@ -1057,8 +1067,15 @@ pub(crate) fn write_terminal_with_layout<W: std::io::Write>(
             InlineEvent::HorizontalRule(attrs) => {
                 // Build the rule from attributes via the shared helper so the
                 // terminal and HTML code paths stay consistent (Phase 5).
-                let rule = build_rule_with_defaults(hr_defaults.as_ref(), &attrs);
-                write_horizontal_rule(&mut wrapper, &rule, &render_terminal, terminal_width);
+                let rule = build_rule_with_defaults(hr_defaults, &attrs);
+                write_horizontal_rule(
+                    &mut wrapper,
+                    &rule,
+                    &render_terminal,
+                    terminal_width,
+                    color_depth,
+                    layout_ctx,
+                );
             }
             // Phase 5 (B4): bare `---` / `***` / `___` lines surface as
             // pulldown-cmark `Event::Rule`. Handle them explicitly so the
@@ -1066,10 +1083,17 @@ pub(crate) fn write_terminal_with_layout<W: std::io::Write>(
             // through the catch-all arm.
             InlineEvent::Standard(Event::Rule) => {
                 let rule = build_rule_with_defaults(
-                    hr_defaults.as_ref(),
+                    hr_defaults,
                     &crate::markdown::inline::HorizontalRuleAttrs::default(),
                 );
-                write_horizontal_rule(&mut wrapper, &rule, &render_terminal, terminal_width);
+                write_horizontal_rule(
+                    &mut wrapper,
+                    &rule,
+                    &render_terminal,
+                    terminal_width,
+                    color_depth,
+                    layout_ctx,
+                );
             }
 
             // Standard pulldown-cmark events
@@ -1289,8 +1313,8 @@ pub(crate) fn write_terminal_with_layout<W: std::io::Write>(
                 }
                 // Push hyperlink color scope
                 if let Some(ctx) = layout_ctx {
-                    let fg = ctx.component_color(PageComponent::Hyperlinks).cloned();
-                    let bg = ctx.component_bg_color(PageComponent::Hyperlinks).cloned();
+                    let is_local = crate::style::bespoke::is_local_hyperlink(dest_url);
+                    let (fg, bg) = ctx.hyperlink_color(is_local);
                     wrapper.push_component_color(fg, bg);
                 }
             }
@@ -1303,26 +1327,33 @@ pub(crate) fn write_terminal_with_layout<W: std::io::Write>(
                     // table color, then the page color. Links in regular prose
                     // use the wrapper's nested color stack; table cells render
                     // outside that stack, so the lookup happens directly here.
+                    let is_local = crate::style::bespoke::is_local_hyperlink(&current_link_url);
                     let (hyper_fg, hyper_bg) = layout_ctx
                         .map(|ctx| {
-                            let fg = ctx
-                                .component_colors
-                                .get(&PageComponent::Hyperlinks)
-                                .or_else(|| ctx.component_colors.get(&PageComponent::Tables))
-                                .or(ctx.page_color.as_ref())
-                                .cloned();
-                            let bg = ctx
-                                .component_bg_colors
-                                .get(&PageComponent::Hyperlinks)
-                                .or_else(|| ctx.component_bg_colors.get(&PageComponent::Tables))
-                                .or(ctx.page_bg_color.as_ref())
-                                .cloned();
+                            let (fg, bg) = ctx.hyperlink_color(is_local);
+                            let fg = fg
+                                .or_else(|| ctx.component_colors.get(&PageComponent::Tables).cloned())
+                                .or_else(|| ctx.page_color.clone());
+                            let bg = bg
+                                .or_else(|| ctx.component_bg_colors.get(&PageComponent::Tables).cloned())
+                                .or_else(|| ctx.page_bg_color.clone());
                             (fg, bg)
                         })
                         .unwrap_or((None, None));
+                    let display_text = layout_ctx
+                        .and_then(|ctx| {
+                            ctx.effective_hyperlink_style(is_local).map(|common| {
+                                crate::style::bespoke::apply_inline_text_layout(
+                                    &current_link_text,
+                                    Some(&common),
+                                    ctx.effective_width,
+                                )
+                            })
+                        })
+                        .unwrap_or_else(|| current_link_text.clone());
                     push_table_link(
                         &mut current_cell,
-                        &current_link_text,
+                        &display_text,
                         &current_link_url,
                         style,
                         emit_italic,
@@ -1360,12 +1391,30 @@ pub(crate) fn write_terminal_with_layout<W: std::io::Write>(
                         style.font_style |= syntect::highlighting::FontStyle::UNDERLINE;
                     }
 
+                    // Apply per-link width/max-width/alignment before OSC 8
+                    // wrapping so the visible label sits inside the requested
+                    // text box. The merged style (local-style over base) is
+                    // resolved by `effective_hyperlink_style`.
+                    let display_text = layout_ctx
+                        .and_then(|ctx| {
+                            let is_local =
+                                crate::style::bespoke::is_local_hyperlink(&current_link_url);
+                            ctx.effective_hyperlink_style(is_local).map(|common| {
+                                crate::style::bespoke::apply_inline_text_layout(
+                                    &current_link_text,
+                                    Some(&common),
+                                    ctx.effective_width,
+                                )
+                            })
+                        })
+                        .unwrap_or_else(|| current_link_text.clone());
+
                     // Emit styled hyperlink with OSC8 escape sequences
                     // IMPORTANT: Styling must be applied INSIDE the OSC8 sequence, not outside.
                     // OSC8 format: ESC]8;;URL BEL <styled_text> ESC]8;; BEL
                     // The styled text appears between the OSC8 open and close sequences.
                     wrapper.emit_styled_hyperlink(
-                        &current_link_text,
+                        &display_text,
                         &current_link_url,
                         style,
                         emit_italic,
@@ -1746,6 +1795,31 @@ pub(crate) fn write_terminal_with_layout<W: std::io::Write>(
                     continue;
                 }
 
+                let is_local = crate::style::bespoke::is_local_image(&current_image_path);
+                let (image_fg, image_bg) = layout_ctx
+                    .map(|ctx| ctx.image_color(is_local))
+                    .unwrap_or((None, None));
+                // Effective local image style applies width/max-width/alignment
+                // to the rendered fallback alt text (per sub-spec #7). It does
+                // NOT alter raster decoding or protocol output.
+                let local_image_common = if is_local {
+                    layout_ctx.and_then(|ctx| ctx.local_image_style.clone())
+                } else {
+                    None
+                };
+                let layout_alt = |alt: &str| -> String {
+                    match (&local_image_common, layout_ctx) {
+                        (Some(common), Some(ctx)) => {
+                            crate::style::bespoke::apply_inline_text_layout(
+                                alt,
+                                Some(common),
+                                ctx.effective_width,
+                            )
+                        }
+                        _ => alt.to_string(),
+                    }
+                };
+
                 if let Some(ref renderer) = image_renderer {
                     // Flush accumulated output before viuer prints to stdout
                     if renderer.graphics_supported() {
@@ -1755,13 +1829,13 @@ pub(crate) fn write_terminal_with_layout<W: std::io::Write>(
                         wrapper = LineWrapper::new(terminal_width as usize, emit_hyperlinks, color_depth);
                         // render_image returns protocol output on success,
                         // fallback text on failure
-                        let result =
+                        let mut result =
                             renderer.render_image(&current_image_path, &parsed_alt, parsed_width);
-                        let result = if let Some(ctx) = layout_ctx {
-                            apply_component_layout(&result, PageComponent::Images, ctx)
-                        } else {
-                            result
-                        };
+                        result = layout_alt(&result);
+                        if let Some(ctx) = layout_ctx {
+                            result = apply_component_layout(&result, PageComponent::Images, ctx);
+                        }
+                        let result = wrap_with_color(&result, image_fg.as_ref(), image_bg.as_ref(), color_depth);
                         if !result.is_empty() {
                             // Print rendered output (or fallback text on failure)
                             write!(writer, "{}", result).ok();
@@ -1771,29 +1845,21 @@ pub(crate) fn write_terminal_with_layout<W: std::io::Write>(
                     } else {
                         let mut result =
                             renderer.render_image(&current_image_path, &parsed_alt, parsed_width);
+                        result = layout_alt(&result);
                         if let Some(ctx) = layout_ctx {
                             result = apply_component_layout(&result, PageComponent::Images, ctx);
                         }
-                        let result = wrap_with_color(
-                            &result,
-                            layout_ctx.and_then(|ctx| ctx.component_color(PageComponent::Images)),
-                            layout_ctx.and_then(|ctx| ctx.component_bg_color(PageComponent::Images)),
-                            color_depth,
-                        );
+                        let result = wrap_with_color(&result, image_fg.as_ref(), image_bg.as_ref(), color_depth);
                         wrapper.push_with_newlines(&result);
                         just_rendered_image = true;
                     }
                 } else {
                     let mut result = format!("▉ IMAGE[{}]\n", parsed_alt);
+                    result = layout_alt(&result);
                     if let Some(ctx) = layout_ctx {
                         result = apply_component_layout(&result, PageComponent::Images, ctx);
                     }
-                    let result = wrap_with_color(
-                        &result,
-                        layout_ctx.and_then(|ctx| ctx.component_color(PageComponent::Images)),
-                        layout_ctx.and_then(|ctx| ctx.component_bg_color(PageComponent::Images)),
-                        color_depth,
-                    );
+                    let result = wrap_with_color(&result, image_fg.as_ref(), image_bg.as_ref(), color_depth);
                     wrapper.push_with_newlines(&result);
                     just_rendered_image = true;
                 }
@@ -2178,6 +2244,12 @@ fn push_table_link(
     // Render the styled link text into a temporary buffer first, then wrap
     // with the hyperlink color so the SGR sits between the OSC8 open/close
     // sequences and does not break the hyperlink target.
+    // Pass `hyper_fg`/`hyper_bg` as the inner component color so the
+    // user's `style.hyperlinks.color` wins over the theme fallback blue
+    // emitted from `table_link_style` — the inner SGR appears AFTER the
+    // theme foreground and therefore overrides it. The outer
+    // `wrap_with_color` is kept as the reset boundary so attribute leaks
+    // can't bleed into the next cell.
     let mut link_buf = String::new();
     if emit_hyperlinks {
         let _ = write!(link_buf, "\x1b]8;;{}\x07", url);
@@ -2192,8 +2264,8 @@ fn push_table_link(
             None,
             false,
             true,
-            None,
-            None,
+            hyper_fg.cloned(),
+            hyper_bg.cloned(),
             color_depth,
         );
         let styled = crate::style::wrap_with_color(&styled, hyper_fg, hyper_bg, color_depth);
@@ -2211,8 +2283,8 @@ fn push_table_link(
             None,
             false,
             true,
-            None,
-            None,
+            hyper_fg.cloned(),
+            hyper_bg.cloned(),
             color_depth,
         );
         let styled = crate::style::wrap_with_color(&styled, hyper_fg, hyper_bg, color_depth);
@@ -3076,6 +3148,8 @@ fn write_horizontal_rule(
     rule: &HorizontalRule,
     term: &Terminal,
     terminal_width: u16,
+    color_depth: ColorDepth,
+    layout_ctx: Option<&crate::layout::LayoutContext>,
 ) {
     use biscuit_terminal::components::renderable::TerminalRenderable;
     use biscuit_terminal::utils::layout::{Length, TargetValue};
@@ -3094,7 +3168,16 @@ fn write_horizontal_rule(
     // `render` returns the rule content without a trailing newline; use
     // `push_with_newlines` + an explicit `\n` so wrapper column tracking
     // resets correctly.
-    wrapper.push_with_newlines(&rule.render(term));
+    let mut rendered = rule.render(term);
+    if let Some(ctx) = layout_ctx {
+        rendered = wrap_with_color(
+            &rendered,
+            ctx.component_color(PageComponent::Hr),
+            ctx.component_bg_color(PageComponent::Hr),
+            color_depth,
+        );
+    }
+    wrapper.push_with_newlines(&rendered);
     wrapper.push_with_newlines("\n");
 
     let bottom_is_default = layout.margin.bottom == TargetValue::universal(Length::Zero);
@@ -3371,6 +3454,7 @@ mod tests {
             max_width: Some(80),
             mermaid_mode: MermaidMode::Off,
             hyperlink_mode: HyperlinkMode::Always,
+            hr_defaults: None,
         }
     }
 

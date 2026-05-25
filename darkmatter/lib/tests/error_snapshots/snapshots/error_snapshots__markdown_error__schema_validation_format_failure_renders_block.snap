@@ -1,0 +1,9 @@
+---
+source: darkmatter/lib/tests/error_snapshots/markdown_error.rs
+expression: out
+---
+⤫ MarkdownError: schema validation failed
+┃ /tmp/test/doc.md
+┃ Design document
+┃ invalid cover: "" is not a valid "darkmatter-file" format at 5:7
+Correct the frontmatter so it satisfies the declared $schema (or baseline schema).
