@@ -4694,5 +4694,119 @@ Rounded: {{ round(pi) }}"#;
                 other => panic!("Expected SchemaValidationFailed, got {other:?}"),
             }
         }
+
+        /// Different baseline schemas must not share cache entries for the same
+        /// transcluded child. Compose the same parent+child three times against
+        /// a shared persistent cache:
+        ///
+        /// 1. baseline A → cold cache, child is computed and written to the
+        ///    persistent store (`persistent_hits == 0`, `persistent_writes >= 1`).
+        /// 2. baseline A again → cache is warm and the child compose entry is
+        ///    reused (`persistent_hits >= 1`).
+        /// 3. baseline B → baseline differs, so the persistent cache key
+        ///    differs; the child must be recomputed rather than reuse the
+        ///    baseline-A entry (`persistent_hits == 0` again).
+        ///
+        /// This proves `options_hash` includes `baseline_schema` in a way that
+        /// actually invalidates the persistent cache — guarding against the
+        /// "stale success keyed without baseline" regression.
+        #[test]
+        fn baseline_cache_does_not_reuse_across_distinct_baselines() {
+            use crate::markdown::compose::CacheAccessMode;
+            use crate::markdown::schemas::{
+                Constraint, PropertyAtom, PropertyDef, SchemaShape, SimplifiedSchema,
+                SimplifiedType,
+            };
+            use indexmap::IndexMap;
+
+            fn baseline_required(prop: &str) -> SimplifiedSchema {
+                let mut properties = IndexMap::new();
+                properties.insert(
+                    prop.into(),
+                    PropertyDef::Single(PropertyAtom {
+                        ty: SimplifiedType::String,
+                        is_array: false,
+                        constraints: vec![Constraint::Required],
+                        array_constraints: vec![],
+                        description: None,
+                    }),
+                );
+                SimplifiedSchema::Single(SchemaShape { properties })
+            }
+
+            let dir = tempfile::tempdir().unwrap();
+            let cache_root = dir.path().join("cache");
+            let root = dir.path().join("root.md");
+            let child = dir.path().join("child.md");
+
+            // Parent supplies both `alpha` and `beta` so it (and its effective
+            // state inherited by the child) satisfies either baseline under
+            // test. Cache invalidation is the contract we care about here, not
+            // the validation outcome.
+            std::fs::write(&child, "---\nalpha: ok\nbeta: ok\n---\nChild body\n").unwrap();
+            std::fs::write(
+                &root,
+                "---\nalpha: ok\nbeta: ok\n---\n# Parent\n\n::file ./child.md\n",
+            )
+            .unwrap();
+
+            let mk_options = |baseline_prop: &str| {
+                ComposeOptions::new()
+                    .with_source_file(&root)
+                    .with_baseline_schema(baseline_required(baseline_prop))
+                    .with_cache_access_mode(CacheAccessMode::ReadWrite)
+                    .with_cache_root(&cache_root)
+                    .with_cache_namespace("baseline_cache_regression")
+                    .with_fail_fast(true)
+            };
+
+            // ── Run 1: cold cache under baseline A ─────────────────────
+            let md1 = Markdown::try_from(root.as_path()).unwrap();
+            let (_, report1) = md1
+                .compose_with(mk_options("alpha"))
+                .expect("run 1 (baseline alpha, cold cache) should succeed");
+            let stats1 = report1
+                .cache_stats
+                .expect("expected cache stats with cache enabled");
+            assert_eq!(
+                stats1.persistent_hits, 0,
+                "run 1 should have a cold persistent cache, got {stats1:?}"
+            );
+            assert!(
+                stats1.persistent_writes >= 1,
+                "run 1 must write the child compose to the persistent cache, got {stats1:?}"
+            );
+
+            // ── Run 2: same baseline A → cache should be warm ──────────
+            let md2 = Markdown::try_from(root.as_path()).unwrap();
+            let (_, report2) = md2
+                .compose_with(mk_options("alpha"))
+                .expect("run 2 (baseline alpha, warm cache) should succeed");
+            let stats2 = report2
+                .cache_stats
+                .expect("expected cache stats with cache enabled");
+            assert!(
+                stats2.persistent_hits >= 1,
+                "run 2 must reuse the warmed persistent entry, got {stats2:?}",
+            );
+
+            // ── Run 3: baseline B → distinct key, must not reuse run 1 ─
+            let md3 = Markdown::try_from(root.as_path()).unwrap();
+            let (_, report3) = md3
+                .compose_with(mk_options("beta"))
+                .expect("run 3 (baseline beta) should succeed");
+            let stats3 = report3
+                .cache_stats
+                .expect("expected cache stats with cache enabled");
+            assert_eq!(
+                stats3.persistent_hits, 0,
+                "run 3 must NOT reuse the baseline-A entry — options_hash must include \
+                 baseline_schema. got {stats3:?}",
+            );
+            assert!(
+                stats3.persistent_writes >= 1,
+                "run 3 must compute and write a fresh entry under the new baseline, got {stats3:?}"
+            );
+        }
     }
 }
