@@ -1,0 +1,406 @@
+syntax = "proto3";
+
+package remote_signal;
+
+// Control-plane gRPC service exposed by the remote-signal daemon over a
+// Unix Domain Socket. Phase 1 covers liveness (`Ping`) and a minimal
+// `Status` snapshot used by the test client to verify IPC end-to-end.
+// Phase 2 adds the session-log append/read surface backed by Loro
+// documents persisted in redb plus a DuckDB analytical projection.
+service RemoteSignal {
+    rpc Ping(PingRequest) returns (PingResponse);
+    rpc Status(StatusRequest) returns (StatusResponse);
+
+    // Append a single entry to the session log identified by
+    // (`owner_node_id`, `session_id`). The daemon picks the active chunk
+    // (rotating to a new one when the chunk threshold is exceeded),
+    // assigns a monotonic `sequence`, persists the resulting Loro snapshot
+    // to redb, and queues the entry for DuckDB projection.
+    rpc AppendEntry(AppendEntryRequest) returns (AppendEntryResponse);
+
+    // List entries currently materialised in the in-memory Loro doc for a
+    // specific chunk. This is the source-of-truth read path that bypasses
+    // the (potentially lagging) DuckDB projection.
+    rpc ListChunkEntries(ListChunkEntriesRequest) returns (ListChunkEntriesResponse);
+
+    // Enumerate all chunk IDs known for a (`owner_node_id`, `session_id`)
+    // pair, in ascending chunk-index order.
+    rpc ListSessionChunks(ListSessionChunksRequest) returns (ListSessionChunksResponse);
+
+    // Query the DuckDB analytical projection for entries matching a
+    // session. The projection lags redb (it is fed by a micro-batching
+    // pipeline) and must not be treated as authoritative.
+    rpc QueryProjection(QueryProjectionRequest) returns (QueryProjectionResponse);
+
+    // Encode the local daemon's connection info (advertised QUIC
+    // address plus node public key) into a self-contained bech32
+    // invitation string suitable for sharing with another node.
+    rpc CreateInvitation(CreateInvitationRequest) returns (CreateInvitationResponse);
+
+    // Decode an invitation string and initiate a QUIC connection to
+    // the peer it describes. The handshake completes asynchronously;
+    // the response reports the locally observed peer info on success.
+    rpc ConnectToPeer(ConnectToPeerRequest) returns (ConnectToPeerResponse);
+
+    // Enumerate peers currently known to the daemon (discovered via
+    // mDNS, supplied via invitations, or actively connected).
+    rpc ListPeers(ListPeersRequest) returns (ListPeersResponse);
+
+    // Mark a peer as approved for direct sync. Pairing is persisted in
+    // redb so it survives daemon restarts. The peer is identified by
+    // its hex-encoded `node_id` (the wire-level public key).
+    rpc ApprovePeer(ApprovePeerRequest) returns (ApprovePeerResponse);
+
+    // Revoke a previously approved pairing. Subsequent sync attempts
+    // from this peer will be rejected.
+    rpc RevokePeer(RevokePeerRequest) returns (RevokePeerResponse);
+
+    // Enumerate all currently approved pairings.
+    rpc ListPairings(ListPairingsRequest) returns (ListPairingsResponse);
+
+    // Run the direct-sync protocol against a paired peer: exchange
+    // state vectors and push missing deltas in both directions. The
+    // RPC completes only after the protocol terminates (or fails).
+    rpc SyncWithPeer(SyncWithPeerRequest) returns (SyncWithPeerResponse);
+}
+
+message PingRequest {
+    // Opaque token echoed back unchanged so callers can correlate responses.
+    string nonce = 1;
+}
+
+message PingResponse {
+    // The same nonce sent in the request, for round-trip correlation.
+    string nonce = 1;
+    // Semver string of the daemon (Cargo package version).
+    string daemon_version = 2;
+    // Server wall-clock at the moment the response was constructed, in
+    // milliseconds since the Unix epoch.
+    int64 timestamp_unix_ms = 3;
+}
+
+message StatusRequest {}
+
+message StatusResponse {
+    // Semver string of the daemon (Cargo package version).
+    string daemon_version = 1;
+    // Daemon uptime in whole seconds since process start.
+    int64 uptime_seconds = 2;
+    // Daemon start time in milliseconds since the Unix epoch.
+    int64 started_at_unix_ms = 3;
+}
+
+// Generic session-log entry. Mirrors `remote_signal_core::session_log::Entry`.
+message SessionEntry {
+    // Per-session monotonic counter assigned by the daemon when the entry
+    // is appended. Stable across restarts.
+    uint64 sequence = 1;
+    // Wall-clock at append time, in milliseconds since the Unix epoch.
+    int64 created_at_unix_ms = 2;
+    // Free-form source identifier (e.g., "claude", "test-client").
+    string source = 3;
+    // Severity / log level (e.g., "info", "warn", "error").
+    string level = 4;
+    // Human-readable message body.
+    string message = 5;
+    // Optional structured metadata encoded as a JSON object string. Empty
+    // when no metadata is attached.
+    string metadata_json = 6;
+}
+
+message AppendEntryRequest {
+    // Owner node identifier. Phase 2 has no node identity yet; callers may
+    // pass a stable test-only string ("local-node" by convention).
+    string owner_node_id = 1;
+    // Session identifier (free-form).
+    string session_id = 2;
+    // Free-form source identifier.
+    string source = 3;
+    // Severity / log level.
+    string level = 4;
+    // Human-readable message body.
+    string message = 5;
+    // Optional structured metadata encoded as a JSON object string. Empty
+    // when no metadata is attached.
+    string metadata_json = 6;
+}
+
+message AppendEntryResponse {
+    // Deterministic chunk ID the entry was appended to, in
+    // `session/{owner_node_id}/{session_id}/part/{chunk_index}` form.
+    string chunk_id = 1;
+    // Zero-based chunk index inside the session.
+    uint64 chunk_index = 2;
+    // Sequence number assigned to this entry within its session.
+    uint64 sequence = 3;
+    // Wall-clock at append time, in milliseconds since the Unix epoch.
+    int64 created_at_unix_ms = 4;
+    // `true` if appending this entry caused a chunk rotation (i.e., the
+    // entry went into a freshly created chunk).
+    bool rotated_chunk = 5;
+}
+
+message ListChunkEntriesRequest {
+    // Deterministic chunk ID, as returned by `AppendEntry`.
+    string chunk_id = 1;
+}
+
+message ListChunkEntriesResponse {
+    string chunk_id = 1;
+    repeated SessionEntry entries = 2;
+}
+
+message ListSessionChunksRequest {
+    string owner_node_id = 1;
+    string session_id = 2;
+}
+
+message ListSessionChunksResponse {
+    repeated string chunk_ids = 1;
+}
+
+message QueryProjectionRequest {
+    string owner_node_id = 1;
+    string session_id = 2;
+}
+
+message ProjectionRow {
+    string chunk_id = 1;
+    uint64 chunk_index = 2;
+    uint64 sequence = 3;
+    int64 created_at_unix_ms = 4;
+    string source = 5;
+    string level = 6;
+    string message = 7;
+}
+
+message QueryProjectionResponse {
+    repeated ProjectionRow rows = 1;
+}
+
+// How the daemon learned about a peer.
+enum PeerSource {
+    PEER_SOURCE_UNSPECIFIED = 0;
+    // Discovered via mDNS service browsing.
+    PEER_SOURCE_MDNS = 1;
+    // Supplied manually via a decoded invitation.
+    PEER_SOURCE_MANUAL = 2;
+    // Connected inbound (the remote initiated the QUIC handshake).
+    PEER_SOURCE_INBOUND = 3;
+}
+
+// Current connection state for a peer.
+enum PeerConnectionState {
+    PEER_CONNECTION_STATE_UNSPECIFIED = 0;
+    // Discovered but no active QUIC connection has been attempted.
+    PEER_CONNECTION_STATE_DISCOVERED = 1;
+    // An outbound connection attempt is in progress.
+    PEER_CONNECTION_STATE_CONNECTING = 2;
+    // A QUIC connection is currently open with the peer.
+    PEER_CONNECTION_STATE_CONNECTED = 3;
+    // A previously open connection has dropped.
+    PEER_CONNECTION_STATE_DISCONNECTED = 4;
+    // The most recent attempt failed; the daemon will retry later.
+    PEER_CONNECTION_STATE_FAILED = 5;
+}
+
+message PeerInfo {
+    // Hex-encoded public key (the wire-level `node_id`). Empty for
+    // peers discovered via mDNS whose TXT record could not be parsed.
+    string node_id = 1;
+    // Socket address (`ip:port`) the peer advertises for QUIC traffic.
+    string socket_addr = 2;
+    // How the daemon learned about this peer.
+    PeerSource source = 3;
+    // Current connection state.
+    PeerConnectionState state = 4;
+    // Last observation timestamp, in milliseconds since the Unix epoch.
+    int64 last_seen_unix_ms = 5;
+    // If the most recent connection attempt failed, this carries a
+    // short human-readable description of the failure.
+    string last_error = 6;
+}
+
+message CreateInvitationRequest {
+    // Optional override of the public address the invitation should
+    // advertise. When empty, the daemon advertises the address its
+    // QUIC endpoint is bound to (substituting `127.0.0.1` for the
+    // wildcard `0.0.0.0` / `[::]`).
+    string advertise_addr = 1;
+}
+
+message CreateInvitationResponse {
+    // Bech32-encoded invitation string.
+    string invitation = 1;
+    // Hex-encoded public key embedded in the invitation.
+    string node_id = 2;
+    // Socket address (`ip:port`) embedded in the invitation.
+    string socket_addr = 3;
+}
+
+message ConnectToPeerRequest {
+    // Bech32-encoded invitation string produced by `CreateInvitation`.
+    string invitation = 1;
+}
+
+message ConnectToPeerResponse {
+    // Peer info recorded for the invitation. The connection state
+    // reflects the outcome of the QUIC handshake (CONNECTED on
+    // success, FAILED with `last_error` populated otherwise).
+    PeerInfo peer = 1;
+}
+
+message ListPeersRequest {}
+
+message ListPeersResponse {
+    repeated PeerInfo peers = 1;
+}
+
+// A peer the daemon has explicitly approved for direct sync.
+message PairingInfo {
+    // Hex-encoded `node_id` of the paired peer.
+    string node_id = 1;
+    // Wall-clock at which the pairing was recorded, in milliseconds
+    // since the Unix epoch.
+    int64 paired_at_unix_ms = 2;
+    // Optional human-readable note (e.g., a device label) attached at
+    // approval time.
+    string note = 3;
+}
+
+message ApprovePeerRequest {
+    // Hex-encoded `node_id` to approve. Must be 64 lowercase hex
+    // characters (32-byte public key).
+    string node_id = 1;
+    // Optional free-form note saved alongside the pairing.
+    string note = 2;
+}
+
+message ApprovePeerResponse {
+    PairingInfo pairing = 1;
+}
+
+message RevokePeerRequest {
+    string node_id = 1;
+}
+
+message RevokePeerResponse {
+    // `true` if a pairing existed and was removed, `false` if the peer
+    // was not previously paired.
+    bool removed = 1;
+}
+
+message ListPairingsRequest {}
+
+message ListPairingsResponse {
+    repeated PairingInfo pairings = 1;
+}
+
+// Per-chunk outcome of a direct-sync session.
+message SyncChunkOutcome {
+    // Path of the chunk that was synced.
+    string chunk_id = 1;
+    // Number of bytes received from the remote (delta + snapshot).
+    uint64 received_bytes = 2;
+    // Number of bytes transmitted to the remote (delta + snapshot).
+    uint64 sent_bytes = 3;
+    // `true` if the local snapshot for this chunk advanced as a
+    // result of applying remote updates.
+    bool advanced = 4;
+}
+
+message SyncWithPeerRequest {
+    // Hex-encoded `node_id` of the peer to sync with. The peer must
+    // be present in the registry with an active connection and
+    // approved for pairing on both sides.
+    string node_id = 1;
+}
+
+message SyncWithPeerResponse {
+    // Hex-encoded `node_id` of the peer that was synced with.
+    string node_id = 1;
+    // Total bytes received during this sync session.
+    uint64 received_bytes = 2;
+    // Total bytes transmitted during this sync session.
+    uint64 sent_bytes = 3;
+    // Per-chunk outcome breakdown.
+    repeated SyncChunkOutcome chunks = 4;
+}
+
+// ---------------------------------------------------------------------
+// Direct-sync wire protocol (transported over QUIC bidirectional streams,
+// length-prefixed with a big-endian u32 per frame).
+// ---------------------------------------------------------------------
+
+// Wire-level analogue of `remote_signal_core::SignedEnvelope`. Serialised
+// as protobuf so receivers can verify the Ed25519 signature without
+// trusting transport metadata.
+message SignedEnvelopeWire {
+    // 32-byte compressed Ed25519 public key of the sender.
+    bytes sender = 1;
+    // 32-byte BLAKE3 message identifier.
+    bytes message_id = 2;
+    // 32-byte BLAKE3 content hash of the payload.
+    bytes content_hash = 3;
+    // 64-byte Ed25519 signature.
+    bytes signature = 4;
+    // Opaque payload bytes.
+    bytes payload = 5;
+}
+
+// Initial frame sent by both sides of a sync session. The receiver
+// uses `node_id` to look the sender up in its pairing registry.
+message SyncHello {
+    // 32-byte compressed Ed25519 public key of the sender.
+    bytes node_id = 1;
+    // Protocol version. Currently `1`.
+    uint32 version = 2;
+}
+
+// One advertisement of the local state for a session-log chunk.
+message SyncChunkAdvertise {
+    // Path of the chunk, in `session/{node}/{session}/part/{idx}` form.
+    string chunk_id = 1;
+    // Loro version vector encoded via `VersionVector::encode()`. Empty
+    // when the sender has no copy of the chunk and wants the full
+    // snapshot.
+    bytes version_vector = 2;
+}
+
+// Closing frame in the advertise phase. Tells the peer no more
+// advertisements are coming.
+message SyncAdvertiseEnd {}
+
+// A signed delta carrying new Loro updates the peer is missing.
+message SyncDelta {
+    // Path of the chunk the delta applies to.
+    string chunk_id = 1;
+    // Signed envelope wrapping the encoded Loro updates.
+    SignedEnvelopeWire envelope = 2;
+    // `true` if `envelope.payload` is a full Loro snapshot (peer had
+    // no prior state); `false` if it is an incremental update bundle.
+    bool is_snapshot = 3;
+}
+
+// Closing frame in the sync phase. Tells the peer no more deltas are
+// coming for this direction.
+message SyncEnd {}
+
+// Fatal error report. The sender closes its stream half immediately
+// after writing this frame.
+message SyncError {
+    uint32 code = 1;
+    string message = 2;
+}
+
+// Single frame on the sync stream. Exactly one variant is populated.
+message SyncFrame {
+    oneof kind {
+        SyncHello hello = 1;
+        SyncChunkAdvertise advertise = 2;
+        SyncAdvertiseEnd advertise_end = 3;
+        SyncDelta delta = 4;
+        SyncEnd end = 5;
+        SyncError error = 6;
+    }
+}
