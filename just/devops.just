@@ -242,7 +242,7 @@ _test_l2 pkg *args="":
     echo
     echo -e "🖥  Level-2 tests for {{ bold }}{{ pkg }}{{ reset }}"
     echo
-    cargo nextest run -p {{ pkg }} -E 'test(/level2_/)' {{ args }}
+    cargo nextest run -p {{ pkg }} -E 'test(/level2_/)' --no-tests=pass {{ args }}
 
 # Level 3 tier: OS keyboard/mouse injection tests. Always opt-in via
 # RUN_LEVEL3=1; the recipe sets the variable so the gate trips cleanly.
@@ -252,7 +252,7 @@ _test_l3 pkg *args="":
     echo
     echo -e "🎹 Level-3 tests for {{ bold }}{{ pkg }}{{ reset }} {{ dim }}(RUN_LEVEL3=1){{ reset }}"
     echo
-    RUN_LEVEL3=1 cargo nextest run -p {{ pkg }} -E 'test(/level3_/)' {{ args }}
+    RUN_LEVEL3=1 cargo nextest run -p {{ pkg }} -E 'test(/level3_/)' --no-tests=pass {{ args }}
 
 # Browser tier: headless browser tests. Skip-clean if Chrome absent unless
 # BISCUIT_BROWSER_REQUIRED=1 is set in the environment.
@@ -262,7 +262,7 @@ _test_browser pkg *args="":
     echo
     echo -e "🌐 Browser tests for {{ bold }}{{ pkg }}{{ reset }}"
     echo
-    cargo nextest run -p {{ pkg }} -E 'test(/browser_/)' {{ args }}
+    cargo nextest run -p {{ pkg }} -E 'test(/browser_/)' --no-tests=pass {{ args }}
 
 # Real-resource tier: external services/devices. Selecting the set is harmless;
 # tests themselves are responsible for skipping when the resource is absent.
@@ -272,7 +272,7 @@ _test_real pkg *args="":
     echo
     echo -e "🔌 Real-resource tests for {{ bold }}{{ pkg }}{{ reset }}"
     echo
-    cargo nextest run -p {{ pkg }} -E 'test(/real_/)' {{ args }}
+    cargo nextest run -p {{ pkg }} -E 'test(/real_/)' --no-tests=pass {{ args }}
 
 # Doctests. Nextest does not run doctests, so this recipe shells out to
 # `cargo test --doc`. Skips packages that have no lib target (bin-only
