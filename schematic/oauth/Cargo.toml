@@ -24,3 +24,4 @@ tempfile = "3"
 # Opt-out of benchmarking: this crate has no algorithmic hot paths.
 [package.metadata.benchmarks]
 required = false
+reason = "OAuth flow helper dominated by HTTP round-trips; no measurable in-process hot paths."

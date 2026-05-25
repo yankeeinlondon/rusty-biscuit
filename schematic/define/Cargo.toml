@@ -31,3 +31,4 @@ tokio = { version = "1.48", features = ["full"] }
 # Opt-out of benchmarking: this crate has no algorithmic hot paths.
 [package.metadata.benchmarks]
 required = false
+reason = "API definition DSL; build-time schema authoring with no runtime hot paths."
