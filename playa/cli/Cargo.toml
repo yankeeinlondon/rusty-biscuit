@@ -44,3 +44,8 @@ playa = { path = "../lib", features = ["sfx-native-linux"] }
 
 [target.'cfg(target_os = "windows")'.dependencies]
 playa = { path = "../lib", features = ["sfx-native-windows"] }
+
+# Opt-out of benchmarking: thin CLI wrapper around the playa library.
+[package.metadata.benchmarks]
+required = false
+reason = "Thin CLI wrapper around playa; no measurable hot paths."
