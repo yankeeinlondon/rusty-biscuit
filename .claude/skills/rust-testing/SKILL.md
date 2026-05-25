@@ -4,7 +4,7 @@ description: |
   Monorepo testing guide: L1/L2/L3 taxonomy, canonical just recipes,
   `require_level!` gating, nextest filtersets, and fuzzing. Load this
   before writing or reviewing tests in the rusty-biscuit workspace.
-hash: ccc3b799a5c1d6af-9720a912f567666e
+hash: 2ef5d4ffebffee30
 ---
 
 # Rust Testing — Rusty Biscuit Monorepo
@@ -165,6 +165,26 @@ Fuzz is **not** part of `sanity`, `test`, or PR gates. It runs nightly in CI.
 | `serial_test` | Serialize env/stateful tests |
 | `pretty_assertions` | Better diffs |
 | `insta` | Snapshot testing |
+
+## Topic Pages
+
+Open the topic file when the task matches:
+
+| Topic | File |
+|-------|------|
+| L2 WezTerm capture gotchas (SGR collapsing, semicolon vs colon form) | `wezterm-harness-pitfalls.md` |
+| CLI output (channels, color modes, completions, snapshots) | `cli-output-testing.md` |
+| TUI rendering and event/reducer tests | `tui-testing.md` |
+| Browser tests (computed-style assertions) | `browser-testing.md` |
+| Integration tests | `integration-tests.md` |
+| Unit tests | `unit-tests.md` |
+| Snapshots and redaction | `snapshots.md`, `snapshot-redaction.md` |
+| Doc tests | `doc-tests.md` |
+| Mocking | `mocking.md` |
+| Property testing | `property-testing.md` |
+| Fuzzing | `fuzzing.md` |
+| Benchmarking | `benchmarking.md` |
+| Nextest details | `nextest.md` |
 
 ## Resources
 
