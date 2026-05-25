@@ -12,11 +12,22 @@
 
 mod common;
 
+use biscuit_test_harness::kitty::KittyHarness;
+use biscuit_test_harness::shared::SharedHarness;
+use biscuit_test_harness::wezterm::WezTermHarness;
 use biscuit_test_harness::{CapturedFrame, TerminalHarness};
 use common::send_bt_command;
 use serial_test::serial;
 use test_toolkit::{Level, require_level};
 use unicode_width::UnicodeWidthStr;
+
+/// Process-shared WezTerm pane reused across the WezTerm prose tests.
+/// A `clear` is sent before each test's first interaction so prior
+/// renders cannot leak into the capture window.
+static SHARED_WEZTERM: SharedHarness<WezTermHarness> = SharedHarness::new();
+
+/// Process-shared Kitty window reused across the Kitty prose tests.
+static SHARED_KITTY: SharedHarness<KittyHarness> = SharedHarness::new();
 
 // ------------------------------------------------------------------
 // WezTerm — SGR, OSC8, NO_COLOR
@@ -25,8 +36,6 @@ use unicode_width::UnicodeWidthStr;
 #[test]
 #[serial(level2_terminal)]
 fn level2_prose_emits_sgr_in_real_terminal() {
-    use biscuit_test_harness::wezterm::WezTermHarness;
-
     require_level!(
         Level::L2,
         WezTermHarness::available(),
@@ -35,8 +44,14 @@ fn level2_prose_emits_sgr_in_real_terminal() {
 
     // `WezTermHarness::new()` spawns into a dedicated background
     // workspace, so the pane never grabs focus or steals the desktop.
-    let mut harness = WezTermHarness::new();
-    harness.spawn_shell().expect("spawn_shell failed");
+    let mut guard = SHARED_WEZTERM.get_or_init(|| {
+        let mut h = WezTermHarness::new();
+        h.spawn_shell().expect("spawn_shell failed");
+        h
+    });
+    let harness = guard.as_mut().expect("shared WezTerm harness present");
+    harness.send_text(b"clear\n").expect("send_text failed");
+    harness.settle();
 
     // Scope FORCE_COLOR=1 to the spawned `bt` and use the CLI
     // `--force-color` flag so styling is decoupled from both the
@@ -49,7 +64,7 @@ fn level2_prose_emits_sgr_in_real_terminal() {
         .expect("send_command_with_env failed");
     // Wait for the shell prompt to return so the bt output has been
     // committed to cells before we capture.
-    let _ = biscuit_test_harness::wait_for_prompt(&mut harness);
+    let _ = biscuit_test_harness::wait_for_prompt(harness);
 
     let frame_a = harness.capture().expect("capture A failed");
     // Capture again 200 ms later to defend against the rare WezTerm
@@ -75,19 +90,23 @@ fn level2_prose_emits_sgr_in_real_terminal() {
 #[test]
 #[serial(level2_terminal)]
 fn level2_prose_osc8_link_renders() {
-    use biscuit_test_harness::wezterm::WezTermHarness;
-
     require_level!(
         Level::L2,
         WezTermHarness::available(),
         "WezTerm CLI (set WEZTERM_UNIX_SOCKET)",
     );
 
-    let mut harness = WezTermHarness::new();
-    harness.spawn_shell().expect("spawn_shell failed");
+    let mut guard = SHARED_WEZTERM.get_or_init(|| {
+        let mut h = WezTermHarness::new();
+        h.spawn_shell().expect("spawn_shell failed");
+        h
+    });
+    let harness = guard.as_mut().expect("shared WezTerm harness present");
+    harness.send_text(b"clear\n").expect("send_text failed");
+    harness.settle();
 
     send_bt_command(
-        &mut harness,
+        harness,
         "prose \"<a href=https://example.com>link</a>\"",
     );
 
@@ -98,16 +117,20 @@ fn level2_prose_osc8_link_renders() {
 #[test]
 #[serial(level2_terminal)]
 fn level2_no_color_strips_sgr_in_real_terminal() {
-    use biscuit_test_harness::wezterm::WezTermHarness;
-
     require_level!(
         Level::L2,
         WezTermHarness::available(),
         "WezTerm CLI (set WEZTERM_UNIX_SOCKET)",
     );
 
-    let mut harness = WezTermHarness::new();
-    harness.spawn_shell().expect("spawn_shell failed");
+    let mut guard = SHARED_WEZTERM.get_or_init(|| {
+        let mut h = WezTermHarness::new();
+        h.spawn_shell().expect("spawn_shell failed");
+        h
+    });
+    let harness = guard.as_mut().expect("shared WezTerm harness present");
+    harness.send_text(b"clear\n").expect("send_text failed");
+    harness.settle();
 
     // Scope NO_COLOR=1 to a single command via the harness helper
     // (portable inline-env syntax; works regardless of the developer's
@@ -127,8 +150,6 @@ fn level2_no_color_strips_sgr_in_real_terminal() {
 #[test]
 #[serial(level2_terminal)]
 fn level2_prose_emits_sgr_in_kitty() {
-    use biscuit_test_harness::kitty::KittyHarness;
-
     require_level!(
         Level::L2,
         KittyHarness::available(),
@@ -137,8 +158,14 @@ fn level2_prose_emits_sgr_in_kitty() {
 
     // `KittyHarness::new()` passes `--keep-focus` so the spawned OS
     // window never steals focus from the developer's session.
-    let mut harness = KittyHarness::new();
-    harness.spawn_shell().expect("spawn_shell failed");
+    let mut guard = SHARED_KITTY.get_or_init(|| {
+        let mut h = KittyHarness::new();
+        h.spawn_shell().expect("spawn_shell failed");
+        h
+    });
+    let harness = guard.as_mut().expect("shared Kitty harness present");
+    harness.send_text(b"clear\n").expect("send_text failed");
+    harness.settle();
 
     // Scope FORCE_COLOR=1 and use the CLI `--force-color` flag for
     // symmetry with the WezTerm test.
@@ -148,7 +175,7 @@ fn level2_prose_emits_sgr_in_kitty() {
             &[("FORCE_COLOR", "1")],
         )
         .expect("send_command_with_env failed");
-    let _ = biscuit_test_harness::wait_for_prompt(&mut harness);
+    let _ = biscuit_test_harness::wait_for_prompt(harness);
     let frame_a = harness.capture().expect("capture A failed");
     std::thread::sleep(std::time::Duration::from_millis(200));
     let frame_b = harness.capture().expect("capture B failed");
@@ -168,19 +195,23 @@ fn level2_prose_emits_sgr_in_kitty() {
 #[test]
 #[serial(level2_terminal)]
 fn level2_prose_osc8_link_renders_in_kitty() {
-    use biscuit_test_harness::kitty::KittyHarness;
-
     require_level!(
         Level::L2,
         KittyHarness::available(),
         "Kitty remote control (set KITTY_LISTEN_ON)",
     );
 
-    let mut harness = KittyHarness::new();
-    harness.spawn_shell().expect("spawn_shell failed");
+    let mut guard = SHARED_KITTY.get_or_init(|| {
+        let mut h = KittyHarness::new();
+        h.spawn_shell().expect("spawn_shell failed");
+        h
+    });
+    let harness = guard.as_mut().expect("shared Kitty harness present");
+    harness.send_text(b"clear\n").expect("send_text failed");
+    harness.settle();
 
     send_bt_command(
-        &mut harness,
+        harness,
         "prose \"<a href=https://example.com>link</a>\"",
     );
 
@@ -195,18 +226,22 @@ fn level2_prose_osc8_link_renders_in_kitty() {
 #[test]
 #[serial(level2_terminal)]
 fn level2_pad_columns_respect_actual_pane_width() {
-    use biscuit_test_harness::wezterm::WezTermHarness;
-
     require_level!(
         Level::L2,
         WezTermHarness::available(),
         "WezTerm CLI (set WEZTERM_UNIX_SOCKET)",
     );
 
-    let mut harness = WezTermHarness::new();
-    harness.spawn_shell().expect("spawn_shell failed");
+    let mut guard = SHARED_WEZTERM.get_or_init(|| {
+        let mut h = WezTermHarness::new();
+        h.spawn_shell().expect("spawn_shell failed");
+        h
+    });
+    let harness = guard.as_mut().expect("shared WezTerm harness present");
+    harness.send_text(b"clear\n").expect("send_text failed");
+    harness.settle();
 
-    send_bt_command(&mut harness, "padleft 30 \"x\"");
+    send_bt_command(harness, "padleft 30 \"x\"");
 
     let frame = harness.capture().expect("capture failed");
     let plain = &frame.plain;
@@ -245,16 +280,20 @@ fn level2_pad_columns_respect_actual_pane_width() {
 #[test]
 #[serial(level2_terminal)]
 fn level2_columns_word_wrap_in_pane() {
-    use biscuit_test_harness::wezterm::WezTermHarness;
-
     require_level!(
         Level::L2,
         WezTermHarness::available(),
         "WezTerm CLI (set WEZTERM_UNIX_SOCKET)",
     );
 
-    let mut harness = WezTermHarness::new();
-    harness.spawn_shell().expect("spawn_shell failed");
+    let mut guard = SHARED_WEZTERM.get_or_init(|| {
+        let mut h = WezTermHarness::new();
+        h.spawn_shell().expect("spawn_shell failed");
+        h
+    });
+    let harness = guard.as_mut().expect("shared WezTerm harness present");
+    harness.send_text(b"clear\n").expect("send_text failed");
+    harness.settle();
 
     // Read the actual pane geometry so the wrap-row math is portable
     // across host font configurations.
@@ -270,7 +309,7 @@ fn level2_columns_word_wrap_in_pane() {
     // char and makes the boundary math exact.
     let word_len = cols + 5;
     let long_word: String = std::iter::repeat_n('a', word_len).collect();
-    send_bt_command(&mut harness, &format!("prose \"{long_word}\""));
+    send_bt_command(harness, &format!("prose \"{long_word}\""));
 
     let frame = harness.capture().expect("capture failed");
     let plain = &frame.plain;
@@ -428,33 +467,41 @@ fn assert_rich_prose_sgr<H: TerminalHarness>(harness: &mut H) {
 #[test]
 #[serial(level2_terminal)]
 fn level2_prose_rich_styling_emits_sgr_in_wezterm() {
-    use biscuit_test_harness::wezterm::WezTermHarness;
-
     require_level!(
         Level::L2,
         WezTermHarness::available(),
         "WezTerm CLI (set WEZTERM_UNIX_SOCKET)",
     );
 
-    let mut harness = WezTermHarness::new();
-    harness.spawn_shell().expect("spawn_shell failed");
-    assert_rich_prose_sgr(&mut harness);
+    let mut guard = SHARED_WEZTERM.get_or_init(|| {
+        let mut h = WezTermHarness::new();
+        h.spawn_shell().expect("spawn_shell failed");
+        h
+    });
+    let harness = guard.as_mut().expect("shared WezTerm harness present");
+    harness.send_text(b"clear\n").expect("send_text failed");
+    harness.settle();
+    assert_rich_prose_sgr(harness);
 }
 
 #[test]
 #[serial(level2_terminal)]
 fn level2_prose_rich_styling_emits_sgr_in_kitty() {
-    use biscuit_test_harness::kitty::KittyHarness;
-
     require_level!(
         Level::L2,
         KittyHarness::available(),
         "Kitty remote control (set KITTY_LISTEN_ON)",
     );
 
-    let mut harness = KittyHarness::new();
-    harness.spawn_shell().expect("spawn_shell failed");
-    assert_rich_prose_sgr(&mut harness);
+    let mut guard = SHARED_KITTY.get_or_init(|| {
+        let mut h = KittyHarness::new();
+        h.spawn_shell().expect("spawn_shell failed");
+        h
+    });
+    let harness = guard.as_mut().expect("shared Kitty harness present");
+    harness.send_text(b"clear\n").expect("send_text failed");
+    harness.settle();
+    assert_rich_prose_sgr(harness);
 }
 
 // ------------------------------------------------------------------
@@ -542,51 +589,63 @@ fn segment_selects_red(segment: &str) -> bool {
 #[test]
 #[serial(level2_terminal)]
 fn level2_prose_code_block_restores_parent_style_in_wezterm() {
-    use biscuit_test_harness::wezterm::WezTermHarness;
-
     require_level!(
         Level::L2,
         WezTermHarness::available(),
         "WezTerm CLI (set WEZTERM_UNIX_SOCKET)",
     );
 
-    let mut harness = WezTermHarness::new();
-    harness.spawn_shell().expect("spawn_shell failed");
-    assert_code_block_restores_parent_style(&mut harness);
+    let mut guard = SHARED_WEZTERM.get_or_init(|| {
+        let mut h = WezTermHarness::new();
+        h.spawn_shell().expect("spawn_shell failed");
+        h
+    });
+    let harness = guard.as_mut().expect("shared WezTerm harness present");
+    harness.send_text(b"clear\n").expect("send_text failed");
+    harness.settle();
+    assert_code_block_restores_parent_style(harness);
 }
 
 #[test]
 #[serial(level2_terminal)]
 fn level2_prose_code_block_restores_parent_style_in_kitty() {
-    use biscuit_test_harness::kitty::KittyHarness;
-
     require_level!(
         Level::L2,
         KittyHarness::available(),
         "Kitty remote control (set KITTY_LISTEN_ON)",
     );
 
-    let mut harness = KittyHarness::new();
-    harness.spawn_shell().expect("spawn_shell failed");
-    assert_code_block_restores_parent_style(&mut harness);
+    let mut guard = SHARED_KITTY.get_or_init(|| {
+        let mut h = KittyHarness::new();
+        h.spawn_shell().expect("spawn_shell failed");
+        h
+    });
+    let harness = guard.as_mut().expect("shared Kitty harness present");
+    harness.send_text(b"clear\n").expect("send_text failed");
+    harness.settle();
+    assert_code_block_restores_parent_style(harness);
 }
 
 #[test]
 #[serial(level2_terminal)]
 fn level2_prose_nested_emphasis_visible_text_in_wezterm() {
-    use biscuit_test_harness::wezterm::WezTermHarness;
-
     require_level!(
         Level::L2,
         WezTermHarness::available(),
         "WezTerm CLI (set WEZTERM_UNIX_SOCKET)",
     );
 
-    let mut harness = WezTermHarness::new();
-    harness.spawn_shell().expect("spawn_shell failed");
+    let mut guard = SHARED_WEZTERM.get_or_init(|| {
+        let mut h = WezTermHarness::new();
+        h.spawn_shell().expect("spawn_shell failed");
+        h
+    });
+    let harness = guard.as_mut().expect("shared WezTerm harness present");
+    harness.send_text(b"clear\n").expect("send_text failed");
+    harness.settle();
 
-    send_bt_command(&mut harness, "prose \"<b><i>nested</i></b> tail\"");
-    let _ = biscuit_test_harness::wait_for_prompt(&mut harness);
+    send_bt_command(harness, "prose \"<b><i>nested</i></b> tail\"");
+    let _ = biscuit_test_harness::wait_for_prompt(harness);
 
     let frame = harness.capture().expect("capture failed");
     // The styled and trailing text must remain visible with no escape

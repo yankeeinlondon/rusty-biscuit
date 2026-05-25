@@ -14,6 +14,8 @@
 mod common;
 
 use biscuit_test_harness::TerminalHarness;
+use biscuit_test_harness::shared::SharedHarness;
+use biscuit_test_harness::wezterm::WezTermHarness;
 use common::pane_geometry::{find_row_of, parse_debug_cursor_before, parse_debug_cursor_rows};
 use common::send_bt_command;
 use serial_test::serial;
@@ -24,6 +26,13 @@ use unicode_width::UnicodeWidthStr;
 /// Extra settle time after spawning a WezTerm shell to avoid racing
 /// shell initialization (custom prompts, completions, etc.).
 const SHELL_READY_MS: u64 = 1500;
+
+/// Process-shared WezTerm pane reused across the cursor / hygiene tests
+/// that drive a single pane sequentially. The "no orphan save/restore"
+/// test intentionally allocates its own three independent panes to
+/// exercise save/restore on three distinct command flavours, so it
+/// does NOT use this shared harness.
+static SHARED_WEZTERM: SharedHarness<WezTermHarness> = SharedHarness::new();
 
 /// Returns the absolute path to a fixture file.
 fn fixture_path(name: &str) -> String {
@@ -46,17 +55,19 @@ fn position_cursor(harness: &mut impl TerminalHarness, row: u32) {
 #[test]
 #[serial(level2_terminal)]
 fn level2_cursor_lands_below_rendered_image() {
-    use biscuit_test_harness::wezterm::WezTermHarness;
-
     require_level!(
         Level::L2,
         WezTermHarness::available(),
         "WezTerm CLI (set WEZTERM_UNIX_SOCKET)",
     );
 
-    let mut harness = WezTermHarness::new();
-    harness.spawn_shell().expect("spawn_shell failed");
-    std::thread::sleep(Duration::from_millis(SHELL_READY_MS));
+    let mut guard = SHARED_WEZTERM.get_or_init(|| {
+        let mut h = WezTermHarness::new();
+        h.spawn_shell().expect("spawn_shell failed");
+        std::thread::sleep(Duration::from_millis(SHELL_READY_MS));
+        h
+    });
+    let harness = guard.as_mut().expect("shared WezTerm harness present");
 
     // Clear the screen and position the cursor high in the pane so the
     // image renders without triggering scroll-margin compensation. The
@@ -64,14 +75,14 @@ fn level2_cursor_lands_below_rendered_image() {
     // `level2_image_scroll_compensation_at_bottom_margin`.
     harness.send_text(b"clear\n").expect("send_text failed");
     harness.settle();
-    position_cursor(&mut harness, 5);
+    position_cursor(harness, 5);
 
     // Force a tiny render width so the image occupies only ~1 row —
     // this keeps the entire bt invocation + image + debug block inside
     // a single pane height and prevents post-image scrolling from
     // shifting absolute row indices.
     let path = fixture_path("tiny.png");
-    send_bt_command(&mut harness, &format!("image --debug --width 2 {path}"));
+    send_bt_command(harness, &format!("image --debug --width 2 {path}"));
 
     // Append a sentinel that must land *below* the rendered image area.
     harness
@@ -207,20 +218,26 @@ fn level2_no_orphan_save_restore_sequences() {
 #[test]
 #[serial(level2_terminal)]
 fn level2_dir_command_unicode_widths_in_capture() {
-    use biscuit_test_harness::wezterm::WezTermHarness;
-
     require_level!(
         Level::L2,
         WezTermHarness::available(),
         "WezTerm CLI (set WEZTERM_UNIX_SOCKET)",
     );
 
-    let mut harness = WezTermHarness::new();
-    harness.spawn_shell().expect("spawn_shell failed");
-    std::thread::sleep(Duration::from_millis(SHELL_READY_MS));
+    let mut guard = SHARED_WEZTERM.get_or_init(|| {
+        let mut h = WezTermHarness::new();
+        h.spawn_shell().expect("spawn_shell failed");
+        std::thread::sleep(Duration::from_millis(SHELL_READY_MS));
+        h
+    });
+    let harness = guard.as_mut().expect("shared WezTerm harness present");
+    // Reset the pane so prior tests' rendered output cannot leak into
+    // this run's capture window.
+    harness.send_text(b"clear\n").expect("send_text failed");
+    harness.settle();
 
     let dir_path = fixture_path("unicode_dir");
-    send_bt_command(&mut harness, &format!("dir {dir_path}"));
+    send_bt_command(harness, &format!("dir {dir_path}"));
 
     let frame = harness.capture().expect("capture failed");
     let plain = &frame.plain;

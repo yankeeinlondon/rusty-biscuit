@@ -36,6 +36,7 @@ mod common;
 
 use biscuit_test_harness::TerminalHarness;
 use biscuit_test_harness::apple_terminal::AppleTerminalHarness;
+use biscuit_test_harness::shared::SharedHarness;
 use serial_test::serial;
 use std::process::{Command, Stdio};
 use std::time::Duration;
@@ -48,6 +49,13 @@ use test_toolkit::{Level, require_level};
 /// custom prompts), so we wait substantially longer than the WezTerm /
 /// Kitty defaults.
 const SHELL_READY_MS: u64 = 2500;
+
+/// Process-shared Apple Terminal window reused across the prose tests in
+/// this file. Initialized with `preserve_capabilities(true)` so `bt`
+/// runs through its real capability-detection path (no forced color
+/// overrides). The lifecycle test does NOT use this shared harness — it
+/// intentionally owns its own instance to exercise Drop cleanup.
+static SHARED_APPLE: SharedHarness<AppleTerminalHarness> = SharedHarness::new();
 
 // ------------------------------------------------------------------
 // AC-1 — OSC8 link fallback is visible in Apple Terminal
@@ -67,9 +75,17 @@ fn level2_apple_terminal_link_fallback_visible() {
         "Terminal.app",
     );
 
-    let mut harness = AppleTerminalHarness::new().preserve_capabilities(true);
-    harness.spawn_shell().expect("spawn_shell failed");
-    std::thread::sleep(Duration::from_millis(SHELL_READY_MS));
+    let mut guard = SHARED_APPLE.get_or_init(|| {
+        let mut h = AppleTerminalHarness::new().preserve_capabilities(true);
+        h.spawn_shell().expect("spawn_shell failed");
+        std::thread::sleep(Duration::from_millis(SHELL_READY_MS));
+        h
+    });
+    let harness = guard.as_mut().expect("shared Apple Terminal harness present");
+    // Reset the window so prior tests' rendered output cannot leak into
+    // this run's capture window.
+    harness.send_text(b"clear\n").expect("send_text failed");
+    harness.settle();
 
     // Wrap the rendered output between sentinels so the assertion
     // window excludes shell prompts, command echoes, and other chrome
@@ -147,9 +163,17 @@ fn level2_apple_terminal_double_underline_plain_text_visible() {
         "Terminal.app",
     );
 
-    let mut harness = AppleTerminalHarness::new().preserve_capabilities(true);
-    harness.spawn_shell().expect("spawn_shell failed");
-    std::thread::sleep(Duration::from_millis(SHELL_READY_MS));
+    let mut guard = SHARED_APPLE.get_or_init(|| {
+        let mut h = AppleTerminalHarness::new().preserve_capabilities(true);
+        h.spawn_shell().expect("spawn_shell failed");
+        std::thread::sleep(Duration::from_millis(SHELL_READY_MS));
+        h
+    });
+    let harness = guard.as_mut().expect("shared Apple Terminal harness present");
+    // Reset the window so prior tests' rendered output cannot leak into
+    // this run's capture window.
+    harness.send_text(b"clear\n").expect("send_text failed");
+    harness.settle();
 
     // Wrap the rendered output between sentinels so the assertion
     // window excludes shell prompts, command echoes, and other chrome

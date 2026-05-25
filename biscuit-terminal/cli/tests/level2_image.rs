@@ -27,6 +27,9 @@
 mod common;
 
 use biscuit_test_harness::TerminalHarness;
+use biscuit_test_harness::kitty::KittyHarness;
+use biscuit_test_harness::shared::SharedHarness;
+use biscuit_test_harness::wezterm::WezTermHarness;
 use common::pane_geometry::{
     find_row_of, parse_debug_cursor_before, parse_debug_cursor_rows, parse_debug_image_height,
 };
@@ -38,6 +41,14 @@ use test_toolkit::{Level, require_level};
 /// Extra settle time after spawning a WezTerm shell to avoid racing
 /// shell initialization (custom prompts, completions, etc.).
 const SHELL_READY_MS: u64 = 1500;
+
+/// Process-shared WezTerm pane reused across the WezTerm image tests.
+/// A `clear` is sent before each test's first interaction so prior
+/// renders cannot leak into the capture window.
+static SHARED_WEZTERM: SharedHarness<WezTermHarness> = SharedHarness::new();
+
+/// Process-shared Kitty window reused across the Kitty image tests.
+static SHARED_KITTY: SharedHarness<KittyHarness> = SharedHarness::new();
 
 /// Returns the absolute path to a fixture file.
 fn fixture_path(name: &str) -> String {
@@ -82,28 +93,30 @@ fn has_image_protocol_bytes(raw: &str) -> bool {
 #[test]
 #[serial(level2_terminal)]
 fn level2_image_renders_in_wezterm() {
-    use biscuit_test_harness::wezterm::WezTermHarness;
-
     require_level!(
         Level::L2,
         WezTermHarness::available(),
         "WezTerm CLI (set WEZTERM_UNIX_SOCKET)",
     );
 
-    let mut harness = WezTermHarness::new();
-    harness.spawn_shell().expect("spawn_shell failed");
-    std::thread::sleep(Duration::from_millis(SHELL_READY_MS));
+    let mut guard = SHARED_WEZTERM.get_or_init(|| {
+        let mut h = WezTermHarness::new();
+        h.spawn_shell().expect("spawn_shell failed");
+        std::thread::sleep(Duration::from_millis(SHELL_READY_MS));
+        h
+    });
+    let harness = guard.as_mut().expect("shared WezTerm harness present");
 
     // Clear screen and position cursor high so image doesn't scroll.
     harness.send_text(b"clear\n").expect("send_text failed");
     harness.settle();
-    position_cursor(&mut harness, 5);
+    position_cursor(harness, 5);
 
     let pre = harness.capture().expect("pre-capture failed");
     let pre_rows = occupied_row_count(&pre.plain);
 
     let path = fixture_path("tiny.png");
-    send_bt_command(&mut harness, &format!("image --debug {path}"));
+    send_bt_command(harness, &format!("image --debug {path}"));
 
     let frame = harness.capture().expect("capture failed");
 
@@ -135,19 +148,23 @@ fn level2_image_renders_in_wezterm() {
 #[test]
 #[serial(level2_terminal)]
 fn level2_image_renders_in_kitty() {
-    use biscuit_test_harness::kitty::KittyHarness;
-
     require_level!(
         Level::L2,
         KittyHarness::available(),
         "Kitty remote control (set KITTY_LISTEN_ON)",
     );
 
-    let mut harness = KittyHarness::new();
-    harness.spawn_shell().expect("spawn_shell failed");
+    let mut guard = SHARED_KITTY.get_or_init(|| {
+        let mut h = KittyHarness::new();
+        h.spawn_shell().expect("spawn_shell failed");
+        h
+    });
+    let harness = guard.as_mut().expect("shared Kitty harness present");
+    harness.send_text(b"clear\n").expect("send_text failed");
+    harness.settle();
 
     let path = fixture_path("tiny.png");
-    send_bt_command(&mut harness, &format!("image {path}"));
+    send_bt_command(harness, &format!("image {path}"));
 
     let frame = harness.capture().expect("capture failed");
     assert!(
@@ -164,17 +181,19 @@ fn level2_image_renders_in_kitty() {
 #[test]
 #[serial(level2_terminal)]
 fn level2_image_scroll_compensation_at_bottom_margin() {
-    use biscuit_test_harness::wezterm::WezTermHarness;
-
     require_level!(
         Level::L2,
         WezTermHarness::available(),
         "WezTerm CLI (set WEZTERM_UNIX_SOCKET)",
     );
 
-    let mut harness = WezTermHarness::new();
-    harness.spawn_shell().expect("spawn_shell failed");
-    std::thread::sleep(Duration::from_millis(SHELL_READY_MS));
+    let mut guard = SHARED_WEZTERM.get_or_init(|| {
+        let mut h = WezTermHarness::new();
+        h.spawn_shell().expect("spawn_shell failed");
+        std::thread::sleep(Duration::from_millis(SHELL_READY_MS));
+        h
+    });
+    let harness = guard.as_mut().expect("shared WezTerm harness present");
 
     let pane_size = harness.pane_size().expect("pane_size failed");
     // Position the cursor near the bottom margin so the image render
@@ -184,10 +203,10 @@ fn level2_image_scroll_compensation_at_bottom_margin() {
 
     harness.send_text(b"clear\n").expect("send_text failed");
     harness.settle();
-    position_cursor(&mut harness, target_row);
+    position_cursor(harness, target_row);
 
     let path = fixture_path("tiny.png");
-    send_bt_command(&mut harness, &format!("image --debug {path}"));
+    send_bt_command(harness, &format!("image --debug {path}"));
 
     // Append a sentinel printf so we can locate the next user-visible
     // line *after* the image renders.
@@ -253,21 +272,23 @@ fn level2_image_scroll_compensation_at_bottom_margin() {
 #[test]
 #[serial(level2_terminal)]
 fn level2_warp_uses_floor_rounding() {
-    use biscuit_test_harness::wezterm::WezTermHarness;
-
     require_level!(
         Level::L2,
         WezTermHarness::available(),
         "WezTerm CLI (set WEZTERM_UNIX_SOCKET)",
     );
 
-    let mut harness = WezTermHarness::new();
-    harness.spawn_shell().expect("spawn_shell failed");
-    std::thread::sleep(Duration::from_millis(SHELL_READY_MS));
+    let mut guard = SHARED_WEZTERM.get_or_init(|| {
+        let mut h = WezTermHarness::new();
+        h.spawn_shell().expect("spawn_shell failed");
+        std::thread::sleep(Duration::from_millis(SHELL_READY_MS));
+        h
+    });
+    let harness = guard.as_mut().expect("shared WezTerm harness present");
 
     harness.send_text(b"clear\n").expect("send_text failed");
     harness.settle();
-    position_cursor(&mut harness, 5);
+    position_cursor(harness, 5);
 
     // Spoof Warp detection so bt uses floor rounding. Scoping the env
     // var to a single command via send_command_with_env avoids POSIX
@@ -322,21 +343,23 @@ fn level2_warp_uses_floor_rounding() {
 #[test]
 #[serial(level2_terminal)]
 fn level2_image_default_uses_ceil_rounding() {
-    use biscuit_test_harness::wezterm::WezTermHarness;
-
     require_level!(
         Level::L2,
         WezTermHarness::available(),
         "WezTerm CLI (set WEZTERM_UNIX_SOCKET)",
     );
 
-    let mut harness = WezTermHarness::new();
-    harness.spawn_shell().expect("spawn_shell failed");
-    std::thread::sleep(Duration::from_millis(SHELL_READY_MS));
+    let mut guard = SHARED_WEZTERM.get_or_init(|| {
+        let mut h = WezTermHarness::new();
+        h.spawn_shell().expect("spawn_shell failed");
+        std::thread::sleep(Duration::from_millis(SHELL_READY_MS));
+        h
+    });
+    let harness = guard.as_mut().expect("shared WezTerm harness present");
 
     harness.send_text(b"clear\n").expect("send_text failed");
     harness.settle();
-    position_cursor(&mut harness, 5);
+    position_cursor(harness, 5);
 
     // Default WezTerm path → ceil rounding. We invoke via
     // send_command_with_env with an empty env list so no Warp-spoofing
@@ -377,20 +400,24 @@ fn level2_image_default_uses_ceil_rounding() {
 #[test]
 #[serial(level2_terminal)]
 fn level2_image_meta_to_stderr() {
-    use biscuit_test_harness::wezterm::WezTermHarness;
-
     require_level!(
         Level::L2,
         WezTermHarness::available(),
         "WezTerm CLI (set WEZTERM_UNIX_SOCKET)",
     );
 
-    let mut harness = WezTermHarness::new();
-    harness.spawn_shell().expect("spawn_shell failed");
-    std::thread::sleep(Duration::from_millis(SHELL_READY_MS));
+    let mut guard = SHARED_WEZTERM.get_or_init(|| {
+        let mut h = WezTermHarness::new();
+        h.spawn_shell().expect("spawn_shell failed");
+        std::thread::sleep(Duration::from_millis(SHELL_READY_MS));
+        h
+    });
+    let harness = guard.as_mut().expect("shared WezTerm harness present");
+    harness.send_text(b"clear\n").expect("send_text failed");
+    harness.settle();
 
     let path = fixture_path("tiny.png");
-    send_bt_command(&mut harness, &format!("image --meta {path}"));
+    send_bt_command(harness, &format!("image --meta {path}"));
 
     let frame = harness.capture().expect("capture failed");
     let joined: String = frame.plain.lines().collect();
@@ -422,19 +449,23 @@ fn level2_image_meta_to_stderr() {
 #[test]
 #[serial(level2_terminal)]
 fn level2_image_kitty_row_advance() {
-    use biscuit_test_harness::kitty::KittyHarness;
-
     require_level!(
         Level::L2,
         KittyHarness::available(),
         "Kitty remote control (set KITTY_LISTEN_ON)",
     );
 
-    let mut harness = KittyHarness::new();
-    harness.spawn_shell().expect("spawn_shell failed");
+    let mut guard = SHARED_KITTY.get_or_init(|| {
+        let mut h = KittyHarness::new();
+        h.spawn_shell().expect("spawn_shell failed");
+        h
+    });
+    let harness = guard.as_mut().expect("shared Kitty harness present");
+    harness.send_text(b"clear\n").expect("send_text failed");
+    harness.settle();
 
     let path = fixture_path("tiny.png");
-    send_bt_command(&mut harness, &format!("image --debug {path}"));
+    send_bt_command(harness, &format!("image --debug {path}"));
 
     // Append a sentinel that should land directly below the rendered
     // image (one row below, accounting for the renderer's row advance).
