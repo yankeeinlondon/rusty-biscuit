@@ -1,0 +1,6 @@
+# Per D10 (testing-best-practices spec): only `corpus-seed/` is committed.
+# Ephemeral fuzz corpora and build/run artifacts are not tracked. Only
+# minimized crash inputs under `crashes/<target>/` are committed back.
+target/
+corpus/
+artifacts/

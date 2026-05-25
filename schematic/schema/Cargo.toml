@@ -24,3 +24,7 @@ urlencoding = "2.1"
 
 [dev-dependencies]
 wiremock = "0.6"
+
+# Opt-out of benchmarking: this crate has no algorithmic hot paths.
+[package.metadata.benchmarks]
+required = false

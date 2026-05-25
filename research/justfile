@@ -61,15 +61,68 @@ build *args="":
     @echo -e "✅ {{BOLD}}{{CLI_NAME}}{{RESET}} built successfully"
     @echo
 
+# --- Canonical lifecycle recipe set (testing-best-practices Phase 3) -------
+
+# Fast confidence subset (≤15s, lib + bin, !slow). Doctests live in `doctest`.
+sanity:
+    @just _sanity research
+    @just _sanity research-cli
+
 # Test both library and CLI
-test:
-   @just _test research
-   @just _test research-cli
+test *args="":
+    @just _test research {{args}}
+    @just _test research-cli {{args}}
+
+# not applicable: research has no real-terminal (Level-2) tests
+test-l2:
+    @echo "test-l2: not applicable for research"
+
+# not applicable: research has no OS-keyboard-injection (Level-3) tests
+test-l3:
+    @echo "test-l3: not applicable for research"
+
+# not applicable: research emits markdown/skill artifacts, not HTML
+test-browser:
+    @echo "test-browser: not applicable for research"
+
+# Real-resource tests (live provider/LLM lookups). Skip-clean when credentials absent.
+test-real *args="":
+    @just _test_real research {{args}}
+    @just _test_real research-cli {{args}}
 
 # Lint both the library and CLI
 lint:
-    _lint research
-    _lint research-cli
+    @just _lint research
+    @just _lint research-cli
+
+# not applicable: no criterion benches (work is provider-bound I/O)
+bench:
+    @echo "bench: not applicable for research"
+
+# Per-package LCOV coverage.
+coverage *args="":
+    @just _coverage research {{args}}
+    @just _coverage research-cli {{args}}
+
+# Doctests.
+doctest *args="":
+    @just _doctest research {{args}}
+    @just _doctest research-cli {{args}}
+
+# not applicable: no cargo-fuzz targets
+fuzz:
+    @echo "fuzz: not applicable for research"
+
+# Canonical PR-gate runner: sanity → lint → doctest → test → test-l2 → test-browser.
+all:
+    @just sanity
+    @just lint
+    @just doctest
+    @just test
+    @just test-l2
+    @just test-browser
+
+# ----------------------------------------------------------------------------
 
 # Lint (and fix) both the library and CLI
 lint-fix:

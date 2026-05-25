@@ -48,11 +48,72 @@ build *args="":
     @just _build unchained-ai-cli "unchained-ai Library" {{ args }}
     @just _build unchained-ai-gen "unchained-ai Library" {{ args }}
 
+# --- Canonical lifecycle recipe set (testing-best-practices Phase 3) -------
+
+# Fast confidence subset (≤15s, lib + bin, !slow). Doctests live in `doctest`.
+sanity:
+    @just _sanity unchained-ai
+    @just _sanity unchained-ai-cli
+    @just _sanity unchained-ai-gen
+    @just _sanity model_id
+
 # Test both library and CLI.
 test *args="":
     @just _test unchained-ai {{ args }}
     @just _test unchained-ai-cli {{ args }}
     @just _test unchained-ai-gen {{ args }}
+    @just _test model_id {{ args }}
+
+# not applicable: unchained-ai has no real-terminal (Level-2) tests
+test-l2:
+    @echo "test-l2: not applicable for unchained-ai"
+
+# not applicable: unchained-ai has no OS-keyboard-injection (Level-3) tests
+test-l3:
+    @echo "test-l3: not applicable for unchained-ai"
+
+# not applicable: unchained-ai does not emit HTML
+test-browser:
+    @echo "test-browser: not applicable for unchained-ai"
+
+# Live provider-API tests. Skip-clean without credentials.
+test-real *args="":
+    @just _test_real unchained-ai {{ args }}
+    @just _test_real unchained-ai-cli {{ args }}
+    @just _test_real unchained-ai-gen {{ args }}
+
+# not applicable: no criterion benches (work is provider-bound I/O)
+bench:
+    @echo "bench: not applicable for unchained-ai"
+
+# Per-package LCOV coverage.
+coverage *args="":
+    @just _coverage unchained-ai {{ args }}
+    @just _coverage unchained-ai-cli {{ args }}
+    @just _coverage unchained-ai-gen {{ args }}
+    @just _coverage model_id {{ args }}
+
+# Doctests.
+doctest *args="":
+    @just _doctest unchained-ai {{ args }}
+    @just _doctest unchained-ai-cli {{ args }}
+    @just _doctest unchained-ai-gen {{ args }}
+    @just _doctest model_id {{ args }}
+
+# not applicable: no cargo-fuzz targets
+fuzz:
+    @echo "fuzz: not applicable for unchained-ai"
+
+# Canonical PR-gate runner: sanity → lint → doctest → test → test-l2 → test-browser.
+all:
+    @just sanity
+    @just lint
+    @just doctest
+    @just test
+    @just test-l2
+    @just test-browser
+
+# ----------------------------------------------------------------------------
 
 # run clippy on unchained-ai packages
 lint *args="":

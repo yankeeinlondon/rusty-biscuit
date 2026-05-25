@@ -46,13 +46,62 @@ default:
 build *args="":
     @just _build renderable "Renderable Library" {{ args }}
 
+# --- Canonical lifecycle recipe set (testing-best-practices Phase 2) -------
+
+# Fast confidence subset (≤15s, lib + bin, !slow). Doctests live in `doctest`.
+sanity:
+    @just _sanity renderable
+
 # Test Library
 test *args="":
     @just _test renderable {{ args }}
 
+# not applicable: renderable has no real-terminal (Level-2) tests
+test-l2:
+    @echo "test-l2: not applicable for renderable"
+
+# not applicable: renderable has no OS-keyboard-injection (Level-3) tests
+test-l3:
+    @echo "test-l3: not applicable for renderable"
+
+# not applicable: renderable emits structured data, not HTML
+test-browser:
+    @echo "test-browser: not applicable for renderable"
+
+# not applicable: renderable has no real-resource tier
+test-real:
+    @echo "test-real: not applicable for renderable"
+
 # Lint Library
 lint:
     @just _lint renderable
+
+# Criterion benches for renderable tree rendering.
+bench *args="":
+    @just _bench renderable {{ args }}
+
+# Per-package LCOV coverage.
+coverage *args="":
+    @just _coverage renderable {{ args }}
+
+# Doctests.
+doctest *args="":
+    @just _doctest renderable {{ args }}
+
+# not applicable: renderable has no cargo-fuzz targets
+fuzz:
+    @echo "fuzz: not applicable for renderable"
+
+# Canonical PR-gate runner: sanity → lint → doctest → test → test-l2 → test-browser.
+all:
+    @just sanity
+    @just lint
+    @just doctest
+    @just test
+    @just test-l2
+    @just test-browser
+
+# ----------------------------------------------------------------------------
 
 # Lint library (and fix)
 lint-fix:

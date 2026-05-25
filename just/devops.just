@@ -193,6 +193,176 @@ _test pkg *args="":
     echo -e "✅ {{ green }} all tests passing in {{ bold }}{{ pkg }}{{ reset }}{{ green }} package{{ reset }}"
     echo
 
+# ---------------------------------------------------------------------------
+# Canonical lifecycle recipes (testing-best-practices spec, Phase 2).
+#
+# Each package-area justfile exposes the canonical 12-recipe set
+# (sanity, test, test-l2, test-l3, test-browser, test-real, lint, bench,
+# coverage, doctest, fuzz, all) and delegates the per-package boilerplate to
+# the shared `_*` recipes below. Tier filter expressions are documented in
+# `.config/nextest.toml`. Recipes that don't apply to a package are explicit
+# no-ops with an explanatory comment in the package's own justfile.
+# ---------------------------------------------------------------------------
+
+# Sanity tier: fast-confidence subset (≤15s). Lib + bin tests only, with every
+# non-default tier excluded via the `slow` filter expression. Doctests live in
+# `_doctest`; lint lives in `_lint`. Auto-detects which of `--lib` / `--bins`
+# applies so the recipe works for lib-only crates, bin-only crates, and the
+# common lib+CLI combo without per-package customization.
+_sanity pkg *args="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo
+    echo -e "🩺 Sanity check {{ bold }}{{ pkg }}{{ reset }} {{ dim }}(lib + bins, !slow){{ reset }}"
+    echo
+    meta="$(cargo metadata --no-deps --format-version 1)"
+    has_lib="$(jq -r --arg p '{{ pkg }}' \
+        '.packages[] | select(.name==$p) | .targets[] | select(.kind[]=="lib") | .name' \
+        <<< "$meta" | head -n 1)"
+    has_bin="$(jq -r --arg p '{{ pkg }}' \
+        '.packages[] | select(.name==$p) | .targets[] | select(.kind[]=="bin") | .name' \
+        <<< "$meta" | head -n 1)"
+    targets=()
+    [[ -n "$has_lib" ]] && targets+=("--lib")
+    [[ -n "$has_bin" ]] && targets+=("--bins")
+    if (( ${#targets[@]} == 0 )); then
+        echo -e "{{ yellow }}skipping sanity for {{ pkg }}: no lib or bin targets{{ reset }}"
+        exit 0
+    fi
+    cargo nextest run -p {{ pkg }} "${targets[@]}" \
+        -E '!(test(/level2_/) + test(/level3_/) + test(/browser_/) + test(/real_/) + test(/slow_/))' \
+        --no-tests=pass {{ args }}
+
+# Level 2 tier: real terminal / PTY / harness tests.
+# Skip-clean by default; pass BISCUIT_TEST_LEVEL_REQUIRED=2 to make missing
+# harnesses hard-fail.
+_test_l2 pkg *args="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo
+    echo -e "🖥  Level-2 tests for {{ bold }}{{ pkg }}{{ reset }}"
+    echo
+    cargo nextest run -p {{ pkg }} -E 'test(/level2_/)' --no-tests=pass {{ args }}
+
+# Level 3 tier: OS keyboard/mouse injection tests. Always opt-in via
+# RUN_LEVEL3=1; the recipe sets the variable so the gate trips cleanly.
+_test_l3 pkg *args="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo
+    echo -e "🎹 Level-3 tests for {{ bold }}{{ pkg }}{{ reset }} {{ dim }}(RUN_LEVEL3=1){{ reset }}"
+    echo
+    RUN_LEVEL3=1 cargo nextest run -p {{ pkg }} -E 'test(/level3_/)' --no-tests=pass {{ args }}
+
+# Browser tier: headless browser tests. Skip-clean if Chrome absent unless
+# BISCUIT_BROWSER_REQUIRED=1 is set in the environment.
+_test_browser pkg *args="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo
+    echo -e "🌐 Browser tests for {{ bold }}{{ pkg }}{{ reset }}"
+    echo
+    cargo nextest run -p {{ pkg }} -E 'test(/browser_/)' --no-tests=pass {{ args }}
+
+# Real-resource tier: external services/devices. Selecting the set is harmless;
+# tests themselves are responsible for skipping when the resource is absent.
+_test_real pkg *args="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo
+    echo -e "🔌 Real-resource tests for {{ bold }}{{ pkg }}{{ reset }}"
+    echo
+    cargo nextest run -p {{ pkg }} -E 'test(/real_/)' --no-tests=pass {{ args }}
+
+# Doctests. Nextest does not run doctests, so this recipe shells out to
+# `cargo test --doc`. Skips packages that have no lib target (bin-only
+# crates have no doctests).
+_doctest pkg *args="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo
+    echo -e "📚 Doctests for {{ bold }}{{ pkg }}{{ reset }}"
+    echo
+    meta="$(cargo metadata --no-deps --format-version 1)"
+    has_lib="$(jq -r --arg p '{{ pkg }}' \
+        '.packages[] | select(.name==$p) | .targets[] | select(.kind[]=="lib") | .name' \
+        <<< "$meta" | head -n 1)"
+    if [[ -z "$has_lib" ]]; then
+        echo -e "{{ yellow }}skipping doctests for {{ pkg }}: no lib target{{ reset }}"
+        exit 0
+    fi
+    cargo test --doc -p {{ pkg }} {{ args }}
+
+# Criterion benches. Packages that opt out via
+# `[package.metadata.benchmarks] required = false` should make their
+# package-level `bench` recipe a documented no-op rather than calling this.
+_bench pkg *args="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo
+    echo -e "⚙️  Benches for {{ bold }}{{ pkg }}{{ reset }}"
+    echo
+    cargo bench -p {{ pkg }} {{ args }}
+
+# Per-package LCOV coverage. Writes a `lcov-<pkg>.info` artifact next to the
+# package's own working directory.
+_coverage pkg *args="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo
+    echo -e "📊 Coverage for {{ bold }}{{ pkg }}{{ reset }}"
+    echo
+    cargo llvm-cov -p {{ pkg }} --lcov --output-path "lcov-{{ pkg }}.info" {{ args }}
+
+# Run a cargo-fuzz target. Requires nightly toolchain pinned in the
+# package's `fuzz/rust-toolchain.toml`.
+#
+# Usage: `just _fuzz <pkg-fuzz-dir> <target> [-- libfuzzer-args]`
+_fuzz fuzz_dir target *args="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo
+    echo -e "🦠 Fuzzing {{ bold }}{{ target }}{{ reset }} {{ dim }}({{ fuzz_dir }}){{ reset }}"
+    echo
+    cd "{{ fuzz_dir }}"
+    cargo +nightly fuzz run "{{ target }}" {{ args }}
+
+# Composite "everything that is part of the PR gate" runner.
+# Order: sanity → lint → doctest → test → test-l2 → test-browser (D7).
+# Tiers that skip cleanly when their resource is absent do not fail `_all`.
+_all pkg:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo
+    echo -e "🚦 Running {{ bold }}all{{ reset }} canonical tiers for {{ bold }}{{ pkg }}{{ reset }}"
+    echo
+    just _sanity      "{{ pkg }}"
+    just _lint        "{{ pkg }}"
+    just _doctest     "{{ pkg }}"
+    just _test        "{{ pkg }}"
+    just _test_l2     "{{ pkg }}"
+    just _test_browser "{{ pkg }}"
+
+# Validate that the *current* package-area justfile exposes the canonical
+# recipe set (D6). Run from inside a package area:  `just _check_canonical`.
+_check_canonical:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    required=(sanity test test-l2 test-l3 test-browser test-real lint bench coverage doctest fuzz all)
+    summary="$(just --summary 2>/dev/null | tr ' ' '\n')"
+    missing=()
+    for r in "${required[@]}"; do
+        if ! grep -qx "$r" <<< "$summary"; then
+            missing+=("$r")
+        fi
+    done
+    if (( ${#missing[@]} > 0 )); then
+        echo -e "{{ red }}❌ Missing canonical recipes:{{ reset }} ${missing[*]}"
+        echo -e "   {{ dim }}see just/devops.just for the shared `_*` templates{{ reset }}"
+        exit 1
+    fi
+    echo -e "{{ green }}✅ Justfile defines all {{ bold }}${#required[@]}{{ reset }}{{ green }} canonical recipes{{ reset }}"
+
 # Show all README.md files in the package
 _readme_files:
     @sniff docs --readme --json "$(sniff repo package-area)"

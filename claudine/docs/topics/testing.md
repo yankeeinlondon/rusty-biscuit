@@ -17,7 +17,7 @@ Additional expectations for the Claudine test suite:
 - Tests that mutate process-global state, especially environment variables, should stack `#[serial_test::serial]` directly on the test.
 - Environment setup/teardown should use `test_toolkit::EnvGuard` instead of local guard types. `EnvGuard::set` and `EnvGuard::remove` are unsafe and require the test to serialize environment access.
 - Use `test_toolkit::trace_phase!` only for meaningful setup, body, or teardown boundaries where a tracing span helps diagnose hangs or fixture failures.
-- PTY coverage stays manual-only: `cargo test -p claudine-cli --test pty_tests -- --ignored`
+- PTY coverage stays manual-only and lives under the L2 filter set: `cargo test -p claudine-cli --test level2_pty_tests -- --ignored` (or `just test-l2`)
 - Snapshot updates should be reviewed with `cargo insta review` and accepted with `cargo insta accept`
 - Benchmarks are opt-in and non-gating: `cargo bench -p claudine --bench runtime_hot_paths`
 - CLI integration helpers live under `claudine/cli/tests/common/mod.rs`

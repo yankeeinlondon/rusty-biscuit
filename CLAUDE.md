@@ -45,6 +45,7 @@ Update alongside code changes:
 
 - run `sniff repo` for the up to date list of package areas and packages
 - Local skill catalog under `.claude/skills/` is the authoritative skill list.
+- `.claude/skills/rust-testing/SKILL.md` — testing tier taxonomy, canonical `just` recipes, and `require_level!` usage.
 
 ## Rules
 
