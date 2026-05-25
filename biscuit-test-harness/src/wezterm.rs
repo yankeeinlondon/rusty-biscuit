@@ -85,6 +85,21 @@ impl WezTermHarness {
         }
     }
 
+    /// Convenience constructor used by `SharedHarness::get_or_init`
+    /// closures: builds a fresh harness and spawns a login shell pane
+    /// in one step, so callers can write
+    /// `WezTermHarness::shared_or_spawn().expect(...)`.
+    ///
+    /// ## Errors
+    ///
+    /// Returns an error when WezTerm is unavailable (no socket /
+    /// missing binary) or when `spawn_shell` fails.
+    pub fn shared_or_spawn() -> io::Result<Self> {
+        let mut harness = Self::new();
+        harness.spawn_shell()?;
+        Ok(harness)
+    }
+
     /// Builder-style override of the default
     /// [`SpawnVisibility::Background`]. Use
     /// [`SpawnVisibility::Foreground`] for tests that intend to call
