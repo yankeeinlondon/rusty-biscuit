@@ -313,11 +313,19 @@ all *args="":
     @just _orchestrate all {{ args }}
 
 # validate that every curated package area defines the canonical 12-recipe set
+#
+# Parses each area's `justfile` directly with grep rather than spawning a
+# nested `just --summary` per area. The nested form is prone to hangs on
+# large workspaces (observed timing out at `homelab` under cold caches),
+# and even when it does not hang it spawns 17+ `just` parser processes
+# that each re-walk shared imports. Direct parsing keeps this gate fast
+# (~50 ms) and deterministic in CI.
 check-canonical *args="":
     #!/usr/bin/env bash
     set -euo pipefail
     failed_areas=()
     passed_areas=()
+    required=(sanity test test-l2 test-l3 test-browser test-real lint bench coverage doctest fuzz all)
 
     if [[ -z "{{ args }}" ]]; then
         target_areas=({{ areas }})
@@ -337,10 +345,21 @@ check-canonical *args="":
             continue
         fi
         echo "Checking $area..."
-        if (cd "./$area" && just _check_canonical); then
-            passed_areas+=("$area")
-        else
+        missing=()
+        for r in "${required[@]}"; do
+            # A recipe definition in just starts at column 0 with the recipe
+            # name followed by optional `*args=""` / parameters and a `:`.
+            # We deliberately do not invoke `just` here — see recipe header.
+            if ! grep -Eq "^${r}( |:|\$)" "$area/justfile"; then
+                missing+=("$r")
+            fi
+        done
+        if (( ${#missing[@]} > 0 )); then
+            echo -e "  {{ RED }}❌ Missing canonical recipes:{{ RESET }} ${missing[*]}"
             failed_areas+=("$area")
+        else
+            echo -e "  {{ GREEN }}✅ Justfile defines all ${#required[@]} canonical recipes{{ RESET }}"
+            passed_areas+=("$area")
         fi
     done
 
