@@ -59,6 +59,18 @@ sanity:
     @just _sanity claudine
     @just _sanity claudine-cli
 
+# test just the CLI in Claudine
+test-cli *args="":
+    @just _test claudine-cli {{ args }}
+
+# test just the Claudine Library
+test-library *args="":
+    @just _test claudine {{ args }}
+    
+# test just the remote-signal daemon 
+test-remote-signal *args: 
+    @just _test remote-signal {{args}}
+    
 # Test both library and CLI.
 test *args="":
     @just _test claudine {{ args }}
