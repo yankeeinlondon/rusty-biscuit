@@ -27,21 +27,68 @@ use super::{
 const SESSION_PREFIX: &str = "biscuit_test_";
 static CLEANUP_ONCE: Once = Once::new();
 
+/// Environment variable read by [`TmuxHarness::shared_or_spawn`] to
+/// attach to a tmux session that was pre-spawned by an outer process
+/// (e.g. the `_test_l2` recipe via `biscuit-harness-broker`).
+pub const SHARED_SESSION_ENV: &str = "BISCUIT_SHARED_TMUX_SESSION";
+
 /// Harness that runs each spawned binary inside a fresh detached tmux
 /// session.
 pub struct TmuxHarness {
     session: Option<String>,
+    /// When `true`, [`Drop`] kills the tmux session. When `false`
+    /// (set by [`TmuxHarness::attach`]) the session is left alone.
+    owned: bool,
 }
 
 impl TmuxHarness {
     pub fn new() -> Self {
-        Self { session: None }
+        Self {
+            session: None,
+            owned: true,
+        }
+    }
+
+    /// Returns a harness that references an existing tmux session by
+    /// name without taking ownership of its lifecycle. [`Drop`] is a
+    /// no-op.
+    pub fn attach(session: impl Into<String>) -> Self {
+        Self {
+            session: Some(session.into()),
+            owned: false,
+        }
+    }
+
+    /// If [`SHARED_SESSION_ENV`] is set, returns an
+    /// [`attach`](Self::attach)-style harness pointing at the
+    /// pre-spawned session. Otherwise spawns a fresh session (owned).
+    ///
+    /// ## Errors
+    ///
+    /// Propagates whatever [`spawn_shell`](TerminalHarness::spawn_shell)
+    /// returns when no shared session is available.
+    pub fn shared_or_spawn() -> io::Result<Self> {
+        if let Ok(name) = std::env::var(SHARED_SESSION_ENV) {
+            let trimmed = name.trim();
+            if !trimmed.is_empty() {
+                return Ok(Self::attach(trimmed));
+            }
+        }
+        let mut h = Self::new();
+        h.spawn_shell()?;
+        Ok(h)
     }
 
     /// Returns `true` when the `tmux` binary is on `$PATH`. tmux is
     /// fully self-contained — no parent terminal required.
     pub fn available() -> bool {
         which("tmux")
+    }
+
+    /// Returns the active session name (panicking if the harness has
+    /// not spawned or attached yet).
+    pub fn session_name(&self) -> &str {
+        self.session()
     }
 
     fn session(&self) -> &str {
@@ -125,8 +172,22 @@ impl Default for TmuxHarness {
 
 impl Drop for TmuxHarness {
     fn drop(&mut self) {
-        self.kill_session();
+        if self.owned {
+            self.kill_session();
+        }
     }
+}
+
+/// Kills the tmux session with the given name by shelling out to
+/// `tmux kill-session`. Used by `biscuit-harness-broker kill` to tear
+/// down shared sessions whose `TmuxHarness` was leaked in a different
+/// process. Best-effort: any error is swallowed.
+pub fn kill_session_by_name(session: &str) {
+    let mut cmd = Command::new("tmux");
+    cmd.args(["kill-session", "-t", session])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    let _ = run_with_timeout(&mut cmd, CLEANUP_TIMEOUT);
 }
 
 impl TerminalHarness for TmuxHarness {
