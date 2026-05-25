@@ -34,6 +34,11 @@ fn run() -> Result<(), worktree::WorktreeError> {
         Commands::List => commands::list(width, verbose),
         Commands::Create { branch, stay } => commands::create(&branch, stay),
         Commands::Go { name, .. } => commands::go(&name),
+        Commands::Remove {
+            name,
+            force,
+            branch,
+        } => commands::remove(&name, force, branch),
     }
 }
 
