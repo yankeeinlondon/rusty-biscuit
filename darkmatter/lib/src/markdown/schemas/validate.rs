@@ -431,6 +431,52 @@ mod tests {
     }
 
     #[test]
+    fn classify_kind_maps_required_to_missing() {
+        let schema = json!({
+            "type": "object",
+            "properties": { "title": { "type": "string" } },
+            "required": ["title"]
+        });
+        let validator = build_validator(&schema).unwrap();
+        let problems = collect_problems(&validator, &json!({}), &PositionMap::new());
+        assert_eq!(problems.len(), 1, "expected one Required error: {problems:?}");
+        assert_eq!(problems[0].kind, ValidationProblemKind::Missing);
+        assert_eq!(problems[0].property.as_deref(), Some("title"));
+    }
+
+    #[test]
+    fn classify_kind_maps_type_to_type() {
+        let schema = json!({
+            "type": "object",
+            "properties": { "count": { "type": "number" } }
+        });
+        let validator = build_validator(&schema).unwrap();
+        let problems = collect_problems(
+            &validator,
+            &json!({ "count": "not-a-number" }),
+            &PositionMap::new(),
+        );
+        assert_eq!(problems.len(), 1, "expected one Type error: {problems:?}");
+        assert_eq!(problems[0].kind, ValidationProblemKind::Type);
+    }
+
+    #[test]
+    fn classify_kind_maps_other_constraints_to_invalid() {
+        let schema = json!({
+            "type": "object",
+            "properties": { "name": { "type": "string", "minLength": 5 } }
+        });
+        let validator = build_validator(&schema).unwrap();
+        let problems = collect_problems(
+            &validator,
+            &json!({ "name": "no" }),
+            &PositionMap::new(),
+        );
+        assert_eq!(problems.len(), 1, "expected one MinLength error: {problems:?}");
+        assert_eq!(problems[0].kind, ValidationProblemKind::Invalid);
+    }
+
+    #[test]
     fn build_validator_accepts_simplified_output() {
         let schema = json!({
             "$schema": "https://json-schema.org/draft/2020-12/schema",

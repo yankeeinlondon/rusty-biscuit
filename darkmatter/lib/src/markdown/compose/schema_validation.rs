@@ -81,18 +81,32 @@ pub(crate) fn run(markdown: &Markdown, options: &ComposeOptions) -> MarkdownResu
 ///
 /// Prefers the document's own source, falling back to the compose options
 /// source. Returns `<stdin>` when no source is known.
+///
+/// ## Notes
+///
+/// The error variant carries a [`PathBuf`] because file sources dominate the
+/// real-world usage. For non-file sources (`Url`, `Unknown`) the returned
+/// `PathBuf` is constructed from the source's [`ComposeSource::display()`]
+/// form and is semantically a *display carrier*, not a filesystem path —
+/// renderers use [`Path::to_string_lossy`] to surface it, which is correct
+/// for both file paths and the URL/`<stdin>` strings.
 fn source_path(markdown: &Markdown, options: &ComposeOptions) -> PathBuf {
-    let from_doc = markdown.source().as_ref().and_then(|s| match s {
-        ComposeSource::File(p) => Some(p.clone()),
-        ComposeSource::Url(u) => Some(PathBuf::from(u.as_str())),
-        ComposeSource::Unknown => None,
-    });
+    fn carrier(source: &ComposeSource) -> Option<PathBuf> {
+        match source {
+            ComposeSource::Unknown => None,
+            ComposeSource::File(p) => Some(p.clone()),
+            // URL is wrapped in a PathBuf as a display carrier — the
+            // rendered block reads it back via `to_string_lossy()`.
+            ComposeSource::Url(_) => Some(PathBuf::from(source.display().as_ref())),
+        }
+    }
 
-    from_doc.unwrap_or_else(|| match &options.source {
-        ComposeSource::File(p) => p.clone(),
-        ComposeSource::Url(u) => PathBuf::from(u.as_str()),
-        ComposeSource::Unknown => PathBuf::from("<stdin>"),
-    })
+    markdown
+        .source()
+        .as_ref()
+        .and_then(carrier)
+        .or_else(|| carrier(&options.source))
+        .unwrap_or_else(|| PathBuf::from(ComposeSource::Unknown.display().as_ref()))
 }
 
 #[cfg(test)]

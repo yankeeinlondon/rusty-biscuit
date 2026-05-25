@@ -1090,6 +1090,22 @@ impl ComposeSource {
     pub fn infer_from_path(path: impl AsRef<Path>) -> Self {
         Self::File(path.as_ref().to_path_buf())
     }
+
+    /// Returns a human-readable form of the source.
+    ///
+    /// - `File` → the path's lossy string form.
+    /// - `Url`  → the URL's string form.
+    /// - `Unknown` → `<stdin>`.
+    ///
+    /// Use this when surfacing the source in diagnostics or logs so callers
+    /// don't have to special-case the URL/Unknown arms.
+    pub fn display(&self) -> std::borrow::Cow<'_, str> {
+        match self {
+            Self::File(path) => path.to_string_lossy(),
+            Self::Url(url) => std::borrow::Cow::Borrowed(url.as_str()),
+            Self::Unknown => std::borrow::Cow::Borrowed("<stdin>"),
+        }
+    }
 }
 
 /// Transclusion-specific options (internal convenience type).
@@ -1848,6 +1864,20 @@ impl ComposeWarning {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn compose_source_display_covers_all_variants() {
+        assert_eq!(ComposeSource::Unknown.display(), "<stdin>");
+        assert_eq!(
+            ComposeSource::File(PathBuf::from("/tmp/doc.md")).display(),
+            "/tmp/doc.md"
+        );
+        let url = url::Url::parse("https://example.com/doc.md").unwrap();
+        assert_eq!(
+            ComposeSource::Url(url).display(),
+            "https://example.com/doc.md"
+        );
+    }
 
     #[test]
     fn test_compose_options_new_captures_context() {
